@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "agent"
+version = "0.1.0"
+description = "Agentic workflow project. Consumes rag as an embedded tool."
+authors = ["Minervamuses"]
+packages = [{ include = "agent" }]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+
+rag = { path = "../rag", develop = true }
+
+langchain-core = "^1.2.0"
+langchain-openai = "^1.1.12"
+langchain-ollama = "^1.1.0"
+langchain-mcp-adapters = "^0.2.2"
+langgraph = "^1.1.4"
+mcp = "^1.27.0"
+pydantic = "^2.0"
+python-dotenv = "^1.0.0"
+prompt-toolkit = "^3.0.52"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

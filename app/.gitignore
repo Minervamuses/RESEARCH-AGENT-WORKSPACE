@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+*.sqlite3
+
+# Agent / AI tool configs
+CLAUDE.md
+AGENTS.md
+.claude/
+.opencode/
+.cursor/
+.cursorrules
+.github/copilot-instructions.md
+
+# Plan-mode markdown logs (kept on disk for the user; never indexed by RAG)
+plan_logs/
+
+# Windows zone identifier
+*:Zone.Identifier
