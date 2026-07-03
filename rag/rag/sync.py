@@ -17,8 +17,7 @@ from pathlib import Path
 
 from rag.collect import collect_folders
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
-from rag.store.chroma_store import ChromaStore
-from rag.store.json_store import JSONStore
+from rag.store.cache import get_chroma_store, get_json_store
 
 
 def _stored_file_paths(config: RAGConfig) -> set[str]:
@@ -28,7 +27,7 @@ def _stored_file_paths(config: RAGConfig) -> set[str]:
     Chroma round-trip. Pids without a `file_path` (single-file ingests)
     are skipped — they aren't part of any tracked tree.
     """
-    json_store = JSONStore(config.raw_json_path())
+    json_store = get_json_store(config)
     paths: set[str] = set()
     for doc in json_store.get():
         file_path = doc.metadata.get("file_path")
@@ -103,8 +102,8 @@ def prune_orphans(
     if not orphans:
         return []
 
-    chroma = ChromaStore(KNOWLEDGE_COLLECTION, cfg)
-    json_store = JSONStore(cfg.raw_json_path())
+    chroma = get_chroma_store(KNOWLEDGE_COLLECTION, cfg)
+    json_store = get_json_store(cfg)
     for pid in orphans:
         chroma.delete(pid)
         json_store.delete(pid)

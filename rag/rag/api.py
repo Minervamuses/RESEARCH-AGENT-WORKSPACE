@@ -8,10 +8,8 @@ from typing import TYPE_CHECKING
 
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.filters import build_where, date_to_int
-from rag.retriever.vector import VectorRetriever
-from rag.store.cache import get_chroma_store
+from rag.store.cache import get_chroma_store, get_json_store, get_vector_retriever
 from rag.store.chroma_store import ChromaStore
-from rag.store.json_store import JSONStore
 from rag.types import ContextChunk, ContextWindow, FolderSummary, Hit, Inventory
 from rag.utils.paths import extract_date
 
@@ -100,8 +98,7 @@ def search(
         date_from=date_from,
         date_to=date_to,
     )
-    store = _get_store(cfg)
-    retriever = VectorRetriever(store)
+    retriever = get_vector_retriever(KNOWLEDGE_COLLECTION, cfg)
     retrieval_k = k * 3 if folder_prefix else k
     docs = retriever.retrieve(query, k=retrieval_k, where=where)
     hits = [_doc_to_hit(doc) for doc in docs]
@@ -227,7 +224,7 @@ def list_chunks(
         ```
     """
     cfg = config or RAGConfig()
-    json_store = JSONStore(cfg.raw_json_path())
+    json_store = get_json_store(cfg)
     docs = json_store.get(pid=pid)
     hits = [_doc_to_hit(doc) for doc in docs]
     if folder_prefix is not None:
@@ -280,7 +277,7 @@ def get_context(
         ```
     """
     cfg = config or RAGConfig()
-    json_store = JSONStore(cfg.raw_json_path())
+    json_store = get_json_store(cfg)
     bounded_window = min(max(window, 0), 3)
     all_docs = json_store.get(pid=pid)
     if not all_docs:

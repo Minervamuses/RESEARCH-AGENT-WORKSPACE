@@ -25,9 +25,8 @@ from rag.collect import (
     has_do_not_index_sentinel,
 )
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
-from rag.store.chroma_store import ChromaStore
+from rag.store.cache import get_chroma_store, get_json_store
 from rag.store.document_store import DocumentStore
-from rag.store.json_store import JSONStore
 from rag.tagger.llm_tagger import LLMTagger
 from rag.utils.paths import extract_date
 
@@ -112,51 +111,55 @@ def ingest_repo(
 
     # Phase 2: Chunk + write to single collection
     chunker = TokenChunker(config)
+    json_store = get_json_store(config)
     store = DocumentStore(
-        ChromaStore(KNOWLEDGE_COLLECTION, config),
-        JSONStore(config.raw_json_path()),
+        get_chroma_store(KNOWLEDGE_COLLECTION, config),
+        json_store,
     )
 
     files_ingested = 0
     total_chunks = 0
 
     print(f"\nIngesting files...")
-    for folder_rel, files in sorted(folders.items()):
-        meta = folder_meta.get(folder_rel, {"tags": [], "summary": ""})
-        tags = meta.get("tags", [])
-        category = tags[0] if tags else "unknown"
+    # One atomic raw.json write for the whole run instead of a full-file
+    # rewrite per document (the old O(n^2) ingest).
+    with json_store.deferred_save():
+        for folder_rel, files in sorted(folders.items()):
+            meta = folder_meta.get(folder_rel, {"tags": [], "summary": ""})
+            tags = meta.get("tags", [])
+            category = tags[0] if tags else "unknown"
 
-        for file_path in files:
-            try:
-                text = file_path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, PermissionError):
-                continue
+            for file_path in files:
+                try:
+                    text = file_path.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, PermissionError):
+                    continue
 
-            if not text.strip():
-                continue
+                if not text.strip():
+                    continue
 
-            rel_path = str(file_path.relative_to(root))
-            date = extract_date(rel_path)
+                rel_path = str(file_path.relative_to(root))
+                date = extract_date(rel_path)
 
-            docs = chunker.chunk(text, rel_path)
+                docs = chunker.chunk(text, rel_path)
 
-            for doc in docs:
-                doc.metadata["file_path"] = rel_path
-                doc.metadata["file_type"] = file_path.suffix.lower()
-                doc.metadata["folder"] = folder_rel
-                doc.metadata["date"] = date
-                doc.metadata["category"] = category
-                doc.metadata["tags"] = json.dumps(tags)
+                for doc in docs:
+                    doc.metadata["file_path"] = rel_path
+                    doc.metadata["file_type"] = file_path.suffix.lower()
+                    doc.metadata["folder"] = folder_rel
+                    doc.metadata["date"] = date
+                    doc.metadata["category"] = category
+                    doc.metadata["tags"] = json.dumps(tags)
 
-            if docs:
-                # Upsert: delete prior chunks for this pid before re-adding so
-                # repeated ingest of the same path doesn't accumulate stale
-                # chunks. pid == rel_path is stable across runs.
-                store.delete(rel_path)
-                store.add(docs)
-                files_ingested += 1
-                total_chunks += len(docs)
-                print(f"  [{category}] {rel_path} ({len(docs)} chunks)")
+                if docs:
+                    # Upsert: delete prior chunks for this pid before re-adding so
+                    # repeated ingest of the same path doesn't accumulate stale
+                    # chunks. pid == rel_path is stable across runs.
+                    store.delete(rel_path)
+                    store.add(docs)
+                    files_ingested += 1
+                    total_chunks += len(docs)
+                    print(f"  [{category}] {rel_path} ({len(docs)} chunks)")
 
     return files_ingested, total_chunks
 
@@ -189,9 +192,10 @@ def ingest_single(
     pid_val = pid or path.stem.lower().replace(" ", "-").replace("_", "-")
 
     chunker = TokenChunker(config)
-    chroma = ChromaStore(KNOWLEDGE_COLLECTION, config)
-    json_store = JSONStore(config.raw_json_path())
-    store = DocumentStore(chroma, json_store)
+    store = DocumentStore(
+        get_chroma_store(KNOWLEDGE_COLLECTION, config),
+        get_json_store(config),
+    )
 
     try:
         text = path.read_text(encoding="utf-8")
