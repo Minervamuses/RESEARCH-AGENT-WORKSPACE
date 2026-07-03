@@ -497,24 +497,33 @@ async def _run_search_agent(
         tool_calls = getattr(ai, "tool_calls", None) or []
         if not tool_calls:
             break
-        for tc in tool_calls:
+        # Partition this round's calls in order: runnable calls consume budget
+        # per call, unavailable tools don't, and calls past the budget get the
+        # exhausted note — the same accounting as the old serial loop.
+        placeholders: dict[int, ToolMessage] = {}
+        runnable: list[tuple[int, dict, object]] = []
+        for idx, tc in enumerate(tool_calls):
             tc_id = tc.get("id")
             name = tc.get("name", "")
-            args = tc.get("args", {}) or {}
             if calls >= max_tool_calls:
-                messages.append(ToolMessage(
+                placeholders[idx] = ToolMessage(
                     content="(search budget exhausted; stop calling tools)",
                     tool_call_id=tc_id, name=name,
-                ))
+                )
                 continue
             tool = runtime.web_tools.get(name)
             if tool is None:
-                messages.append(ToolMessage(
+                placeholders[idx] = ToolMessage(
                     content=f"(tool {name!r} is not available)",
                     tool_call_id=tc_id, name=name,
-                ))
+                )
                 continue
             calls += 1
+            runnable.append((idx, tc, tool))
+
+        async def _run_tool_call(tc: dict, tool) -> str:
+            name = tc.get("name", "")
+            args = tc.get("args", {}) or {}
             query = args.get("query")
             if query:
                 _emit(progress_cb, f"discovery: running {name} query={str(query)!r}")
@@ -533,6 +542,24 @@ async def _run_search_agent(
                 _emit(progress_cb, f"discovery: {name} failed after {time.perf_counter() - started:.1f}s")
             else:
                 _emit(progress_cb, f"discovery: {name} returned in {time.perf_counter() - started:.1f}s")
+            return text
+
+        # Calls within one round are independent (results only feed the NEXT
+        # round), so run them concurrently; gather preserves input order.
+        texts = await asyncio.gather(*[
+            _run_tool_call(tc, tool) for _idx, tc, tool in runnable
+        ])
+        texts_by_idx = {idx: text for (idx, _tc, _tool), text in zip(runnable, texts)}
+
+        for idx, tc in enumerate(tool_calls):
+            placeholder = placeholders.get(idx)
+            if placeholder is not None:
+                messages.append(placeholder)
+                continue
+            tc_id = tc.get("id")
+            name = tc.get("name", "")
+            args = tc.get("args", {}) or {}
+            text = texts_by_idx[idx]
             messages.append(ToolMessage(
                 content=text[:8000], tool_call_id=tc_id, name=name,
             ))
