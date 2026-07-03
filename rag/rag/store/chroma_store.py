@@ -46,6 +46,14 @@ class ChromaStore(BaseStore):
         if results["ids"]:
             self._store.delete(ids=results["ids"])
 
+    def delete_many(self, pids: list[str]) -> None:
+        """Delete all documents matching any of the pids in one query."""
+        if not pids:
+            return
+        results = self._store.get(where={"pid": {"$in": list(pids)}})
+        if results["ids"]:
+            self._store.delete(ids=results["ids"])
+
     def as_retriever(
         self,
         k: int,

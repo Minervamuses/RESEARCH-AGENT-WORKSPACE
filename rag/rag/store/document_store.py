@@ -27,3 +27,9 @@ class DocumentStore(BaseStore):
         """Delete from both stores."""
         self.json.delete(pid)
         self.chroma.delete(pid)
+
+    def delete_many(self, pids: list[str]) -> None:
+        """Delete all documents matching any pid from both stores."""
+        for pid in pids:
+            self.json.delete(pid)
+        self.chroma.delete_many(pids)

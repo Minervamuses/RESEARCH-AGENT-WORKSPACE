@@ -30,6 +30,11 @@ from rag.store.document_store import DocumentStore
 from rag.tagger.llm_tagger import LLMTagger
 from rag.utils.paths import extract_date
 
+# Chroma add() batch size for repo ingest; folder-level delete+add batching
+# keeps reruns upsert-correct after an interruption.
+_ADD_BATCH_SIZE = 256
+
+
 def _tag_folders(folders: dict[str, list[Path]], root: Path, config: RAGConfig) -> dict[str, dict]:
     """Use LLM to tag and summarize each folder.
 
@@ -129,6 +134,8 @@ def ingest_repo(
             tags = meta.get("tags", [])
             category = tags[0] if tags else "unknown"
 
+            folder_pids: list[str] = []
+            folder_docs: list[Document] = []
             for file_path in files:
                 try:
                     text = file_path.read_text(encoding="utf-8")
@@ -152,14 +159,20 @@ def ingest_repo(
                     doc.metadata["tags"] = json.dumps(tags)
 
                 if docs:
-                    # Upsert: delete prior chunks for this pid before re-adding so
-                    # repeated ingest of the same path doesn't accumulate stale
-                    # chunks. pid == rel_path is stable across runs.
-                    store.delete(rel_path)
-                    store.add(docs)
+                    folder_pids.append(rel_path)
+                    folder_docs.extend(docs)
                     files_ingested += 1
                     total_chunks += len(docs)
                     print(f"  [{category}] {rel_path} ({len(docs)} chunks)")
+
+            if not folder_pids:
+                continue
+            # Folder-level upsert: one batched delete for the folder's pids,
+            # then adds in slices. Rerunning after an interruption re-deletes
+            # and re-adds the whole folder, so upserts stay correct.
+            store.delete_many(folder_pids)
+            for start in range(0, len(folder_docs), _ADD_BATCH_SIZE):
+                store.add(folder_docs[start:start + _ADD_BATCH_SIZE])
 
     return files_ingested, total_chunks
 
