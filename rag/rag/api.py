@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.filters import build_where, date_to_int
 from rag.retriever.vector import VectorRetriever
+from rag.store.cache import get_chroma_store
 from rag.store.chroma_store import ChromaStore
 from rag.store.json_store import JSONStore
 from rag.types import ContextChunk, ContextWindow, FolderSummary, Hit, Inventory
@@ -19,25 +19,9 @@ if TYPE_CHECKING:
     from langchain_core.documents import Document
 
 
-_store_cache: dict[tuple[str, str], ChromaStore] = {}
-_store_cache_lock = threading.Lock()
-
-
 def _get_store(cfg: RAGConfig) -> ChromaStore:
-    """Return a process-wide ChromaStore, one per (persist_dir, collection).
-
-    Why: chromadb's SharedSystemClient caches a System per persist_dir and
-    pops it on client release. Instantiating a new Chroma client per search
-    race-conditions against that cache under LangGraph's ToolNode
-    ThreadPoolExecutor (KeyError on `_identifier_to_system[identifier]`).
-    """
-    key = (cfg.persist_dir, KNOWLEDGE_COLLECTION)
-    with _store_cache_lock:
-        store = _store_cache.get(key)
-        if store is None:
-            store = ChromaStore(KNOWLEDGE_COLLECTION, cfg)
-            _store_cache[key] = store
-        return store
+    """Return the process-cached knowledge-collection ChromaStore."""
+    return get_chroma_store(KNOWLEDGE_COLLECTION, cfg)
 
 
 def _doc_to_hit(doc: "Document") -> Hit:

@@ -11,7 +11,7 @@ from langchain_core.documents import Document
 
 @pytest.fixture
 def fake_chroma(monkeypatch):
-    """Replace ChromaStore + VectorRetriever and reset the module cache."""
+    """Replace ChromaStore inside the shared rag cache + VectorRetriever."""
     captured: dict = {"add_calls": [], "retrieve_calls": []}
 
     class FakeChromaStore:
@@ -30,10 +30,10 @@ def fake_chroma(monkeypatch):
             captured["retrieve_calls"].append({"query": query, "k": k, "where": where})
             return []
 
-    monkeypatch.setattr("agent.history_rag.store.ChromaStore", FakeChromaStore)
+    from rag.store import cache as cache_mod
+    monkeypatch.setattr(cache_mod, "ChromaStore", FakeChromaStore)
+    monkeypatch.setattr(cache_mod, "_store_cache", {})
     monkeypatch.setattr("agent.history_rag.store.VectorRetriever", FakeVectorRetriever)
-    from agent.history_rag import store as store_mod
-    monkeypatch.setattr(store_mod, "_chat_store_cache", {})
 
     return captured
 
@@ -135,7 +135,7 @@ def test_collection_name_and_persist_dir(tmp_path, fake_chroma):
     assert fake_chroma["persist_dir"].startswith(str(tmp_path))
 
 
-def test_get_chat_history_store_caches_per_persist_dir(tmp_path, fake_chroma):
+def test_chat_history_stores_share_one_chroma_client_per_dir(tmp_path, fake_chroma):
     from agent.config import AgentConfig
     from agent.history_rag.store import get_chat_history_store
 
@@ -146,8 +146,10 @@ def test_get_chat_history_store_caches_per_persist_dir(tmp_path, fake_chroma):
     a2 = get_chat_history_store(cfg_a)
     b1 = get_chat_history_store(cfg_b)
 
-    assert a1 is a2
-    assert a1 is not b1
+    # The underlying Chroma client is deduped process-wide by rag's shared
+    # cache (SharedSystemClient race guard); the wrapper itself is cheap.
+    assert a1._store is a2._store
+    assert a1._store is not b1._store
 
 
 def test_search_returns_documents_from_retriever(tmp_path, monkeypatch):
@@ -168,10 +170,10 @@ def test_search_returns_documents_from_retriever(tmp_path, monkeypatch):
         def retrieve(self, query, k, pid_filter=None, where=None):
             return sentinel
 
-    monkeypatch.setattr("agent.history_rag.store.ChromaStore", FakeChromaStore)
+    from rag.store import cache as cache_mod
+    monkeypatch.setattr(cache_mod, "ChromaStore", FakeChromaStore)
+    monkeypatch.setattr(cache_mod, "_store_cache", {})
     monkeypatch.setattr("agent.history_rag.store.VectorRetriever", FakeVectorRetriever)
-    from agent.history_rag import store as store_mod
-    monkeypatch.setattr(store_mod, "_chat_store_cache", {})
 
     from agent.config import AgentConfig
     from agent.history_rag.store import ChatHistoryStore

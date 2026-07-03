@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import threading
 from pathlib import Path
 
 from langchain_core.documents import Document
 
-from rag.retriever.vector import VectorRetriever
-from rag.store.chroma_store import ChromaStore
+from rag import VectorRetriever, get_chroma_store
 
 from agent.config import AgentConfig
 from agent.memory import TurnRecord
@@ -37,12 +35,14 @@ def _chat_config(config: AgentConfig) -> AgentConfig:
 
 
 class ChatHistoryStore:
-    """Wraps rag.ChromaStore at a chat-history-specific persist dir."""
+    """Wraps the shared rag ChromaStore at a chat-history-specific persist dir."""
 
     def __init__(self, config: AgentConfig):
         chat_config = _chat_config(config)
         os.makedirs(chat_config.persist_dir, exist_ok=True)
-        self._store = ChromaStore(CHAT_HISTORY_COLLECTION, chat_config)
+        # Keyed on the resolved chat_history subdir, so every ChatHistoryStore
+        # for the same dir shares one process-wide Chroma client.
+        self._store = get_chroma_store(CHAT_HISTORY_COLLECTION, chat_config)
         self._retriever = VectorRetriever(self._store)
 
     def add_turn(
@@ -83,21 +83,12 @@ class ChatHistoryStore:
         return self._retriever.retrieve(query, k=k, where=where)
 
 
-_chat_store_cache: dict[str, ChatHistoryStore] = {}
-_chat_store_lock = threading.Lock()
-
-
 def get_chat_history_store(config: AgentConfig) -> ChatHistoryStore:
-    """Return a process-wide ChatHistoryStore, one per chat-history persist dir.
+    """Return a ChatHistoryStore for the config's chat-history dir.
 
-    Mirrors rag.api._get_store: chromadb's SharedSystemClient caches a
-    System per persist_dir and races under LangGraph's ToolNode
-    ThreadPoolExecutor when distinct Chroma instances target the same dir.
+    The SharedSystemClient race that the old module-local mirror cache
+    guarded against is now handled centrally: rag.get_chroma_store dedupes the
+    underlying Chroma client per (persist_dir, collection), so the wrapper
+    itself can be constructed freely.
     """
-    key = _resolve_chat_persist_dir(config)
-    with _chat_store_lock:
-        store = _chat_store_cache.get(key)
-        if store is None:
-            store = ChatHistoryStore(config)
-            _chat_store_cache[key] = store
-        return store
+    return ChatHistoryStore(config)

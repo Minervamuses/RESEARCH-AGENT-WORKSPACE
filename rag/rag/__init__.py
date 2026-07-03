@@ -34,10 +34,23 @@ def __getattr__(name: str):
         }
         return exports[name]
 
+    if name in {"ChromaStore", "VectorRetriever", "get_chroma_store"}:
+        from rag.retriever.vector import VectorRetriever
+        from rag.store.cache import get_chroma_store
+        from rag.store.chroma_store import ChromaStore
+
+        exports = {
+            "ChromaStore": ChromaStore,
+            "VectorRetriever": VectorRetriever,
+            "get_chroma_store": get_chroma_store,
+        }
+        return exports[name]
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "OPENROUTER_BASE_URL",
+    "ChromaStore",
     "ContextChunk",
     "ContextWindow",
     "FolderSummary",
@@ -45,8 +58,10 @@ __all__ = [
     "Inventory",
     "RAGConfig",
     "TOOL_SCHEMAS",
+    "VectorRetriever",
     "dispatch",
     "explore",
+    "get_chroma_store",
     "get_context",
     "get_openrouter_api_key",
     "ingest_repo",
