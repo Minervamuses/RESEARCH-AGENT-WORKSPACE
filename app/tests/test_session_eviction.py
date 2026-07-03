@@ -18,7 +18,6 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.config import AgentConfig
-from agent.history import prepare_messages_for_agent
 from agent.memory import TurnRecord
 from agent.session import ChatSession
 
@@ -47,21 +46,17 @@ class _FakeHistoryStore:
         )
 
 
-class _PreparingGraph:
-    def __init__(self, config: AgentConfig, history_store: _FakeHistoryStore):
-        self.config = config
+class _SnapshotGraph:
+    """Records what the agent would see: prompt messages and prior evictions."""
+
+    def __init__(self, history_store: _FakeHistoryStore):
         self.history_store = history_store
         self.snapshots: list[dict] = []
 
     async def astream(self, state, config=None, stream_mode="updates"):
-        prepared = prepare_messages_for_agent(
-            state["messages"],
-            max_messages=self.config.agent_max_messages,
-            max_tool_interactions=self.config.agent_max_tool_interactions,
-        )
         self.snapshots.append({
             "persisted_before_agent": [item["user_input"] for item in self.history_store.adds],
-            "contents": [msg.content for msg in prepared],
+            "contents": [msg.content for msg in state["messages"]],
         })
         yield {"agent": {"messages": [AIMessage(content="ok")]}}
 
@@ -146,9 +141,9 @@ def test_hard_cap_drops_oldest_after_persistent_failure(make_session, caplog):
     assert any("hard cap" in rec.message for rec in caplog.records)
 
 
-def test_turn_leaving_message_cap_stays_visible_until_evicted(make_session):
+def test_turn_stays_prompt_visible_until_evicted(make_session):
     session, store = make_session(window=10)
-    graph = _PreparingGraph(session.config, store)
+    graph = _SnapshotGraph(store)
     session.graph = graph
 
     for i in range(1, 12):
@@ -163,8 +158,7 @@ def test_turn_leaving_message_cap_stays_visible_until_evicted(make_session):
 def test_failed_eviction_turn_stays_prompt_visible(make_session):
     failing_store = _FakeHistoryStore(raise_on_add=True)
     session, _ = make_session(window=2, history_store=failing_store)
-    session.config.agent_max_messages = 4
-    graph = _PreparingGraph(session.config, failing_store)
+    graph = _SnapshotGraph(failing_store)
     session.graph = graph
 
     for i in range(4):

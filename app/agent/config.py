@@ -49,8 +49,6 @@ class AgentConfig(RAGConfig):
     thinking_fusion_quorum: int = 2
     thinking_fusion_allow_side_effect_tools: bool = False
 
-    # Agent context controls (same-turn bounds)
-    agent_max_messages: int = 20
     # Per-turn hard cap on tool interactions (enforced in graph.agent_node and
     # graph._cap_tool_calls). Default 4 is data-backed: in the C1 dev routing
     # run, every normal eligible case fit within 0-4 tool calls, while the only

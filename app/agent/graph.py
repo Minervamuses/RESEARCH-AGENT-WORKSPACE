@@ -6,7 +6,6 @@ from langgraph.graph import END, START, StateGraph
 from agent.config import AgentConfig
 
 from agent.llm.openrouter import get_chat_model
-from agent.history import prepare_messages_for_agent
 from agent.policy_tool_node import PolicyToolNode
 from agent.skills.validator import validate_skill_output
 from agent.state import AgentState, skill_runtime_to_agent_state
@@ -128,13 +127,8 @@ def build_graph(
         tool_count = _tool_interaction_count(messages)
         tool_limit = max(int(config.agent_max_tool_interactions), 0)
         tool_budget_exhausted = tool_count >= tool_limit
-        prompt_messages = prepare_messages_for_agent(
-            messages,
-            max_messages=config.agent_max_messages,
-            max_tool_interactions=config.agent_max_tool_interactions,
-        )
         prompt_messages = [
-            *prompt_messages,
+            *messages,
             _tool_budget_note(
                 used=tool_count,
                 limit=tool_limit,
