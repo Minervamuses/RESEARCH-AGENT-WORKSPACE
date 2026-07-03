@@ -219,8 +219,10 @@ def test_rewrite_messages_do_not_embed_stale_tool_names():
         visible_context="",
         skill_context="",
     )
-    source = (Path(__file__).resolve().parents[1] / "agent" / "thinking.py").read_text(
-        encoding="utf-8"
+    package_dir = Path(__file__).resolve().parents[1] / "agent" / "thinking"
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(package_dir.rglob("*.py"))
     )
 
     for name in (
