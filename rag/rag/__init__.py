@@ -25,9 +25,19 @@ def __getattr__(name: str):
         }
         return exports[name]
 
+    if name in {"OPENROUTER_BASE_URL", "get_openrouter_api_key"}:
+        from rag.llm.openrouter import OPENROUTER_BASE_URL, get_openrouter_api_key
+
+        exports = {
+            "OPENROUTER_BASE_URL": OPENROUTER_BASE_URL,
+            "get_openrouter_api_key": get_openrouter_api_key,
+        }
+        return exports[name]
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
+    "OPENROUTER_BASE_URL",
     "ContextChunk",
     "ContextWindow",
     "FolderSummary",
@@ -38,6 +48,7 @@ __all__ = [
     "dispatch",
     "explore",
     "get_context",
+    "get_openrouter_api_key",
     "ingest_repo",
     "ingest_single",
     "list_chunks",

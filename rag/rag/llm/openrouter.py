@@ -9,6 +9,16 @@ from openai import OpenAI, RateLimitError
 from rag.config import RAGConfig
 from rag.llm.base import BaseLLM
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def get_openrouter_api_key() -> str:
+    """Return the OpenRouter API key, failing fast when it is missing."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+    return api_key
+
 
 class OpenRouterLLM(BaseLLM):
     """LLM provider via OpenRouter API. Used by LLMTagger for simple prompt→text calls."""
@@ -17,12 +27,9 @@ class OpenRouterLLM(BaseLLM):
     INITIAL_DELAY = 10.0
 
     def __init__(self, model_name: str | None = None, config: RAGConfig | None = None):
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
         self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
+            base_url=OPENROUTER_BASE_URL,
+            api_key=get_openrouter_api_key(),
         )
         config = config or RAGConfig()
         self.model = model_name or config.tagger_model

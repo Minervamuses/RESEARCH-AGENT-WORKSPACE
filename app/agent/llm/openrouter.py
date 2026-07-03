@@ -1,9 +1,9 @@
 """OpenRouter chat-model factories for the agent layer."""
 
-import os
 from typing import Any
 
 from langchain_openai import ChatOpenAI
+from rag import OPENROUTER_BASE_URL, get_openrouter_api_key
 
 from agent.config import AgentConfig
 
@@ -37,13 +37,10 @@ def get_openrouter_chat_model(
     Core runtime, evaluation, and one-off prompt-to-text helpers all share this
     factory so the agent has one model access contract.
     """
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set")
     config = config or AgentConfig()
     kwargs: dict[str, Any] = {
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key": api_key,
+        "base_url": OPENROUTER_BASE_URL,
+        "api_key": get_openrouter_api_key(),
         "model": model_name or config.llm_model,
         "max_retries": config.llm_max_retries,
     }
