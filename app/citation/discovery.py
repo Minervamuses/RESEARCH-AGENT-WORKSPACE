@@ -276,51 +276,54 @@ def _strip_code_fence(text: str) -> str:
     return text.strip()
 
 
-async def _enrich_with_llm(
-    llm,
-    topic: str,
+def _candidate_payload(
     candidates: list[PaperCandidate],
-    progress_cb: ProgressCallback | None = None,
-) -> None:
-    """Best-effort: ask the LLM to fill authors/year and a relevance reason.
-
-    Mutates ``candidates`` in place. Any failure leaves the deterministic
-    fields untouched — the LLM never invents a citation, only annotates.
-    """
-    if llm is None or not candidates:
-        return
-    payload = [
+    *,
+    snippet_chars: int | None = None,
+) -> list[dict]:
+    return [
         {
             "index": i,
             "title": c.title,
             "url": c.url,
-            "snippet": c.snippet,
+            "snippet": c.snippet if snippet_chars is None else c.snippet[:snippet_chars],
         }
         for i, c in enumerate(candidates)
     ]
-    system = (
-        "You annotate web search results about an academic topic. "
-        "For each result, extract author surnames and publication year ONLY if "
-        "they are clearly present in the title/snippet; otherwise leave them "
-        "empty/null. Never guess. Also give a one-sentence reason why the result "
-        "matches the topic. Reply with a JSON array of objects: "
-        '{"index": int, "authors": [str], "year": int|null, "reason": str}.'
-    )
-    human = f"Topic: {topic}\n\nResults:\n{json.dumps(payload, ensure_ascii=False)}"
-    _emit(progress_cb, f"enrichment: asking model to annotate {len(candidates)} candidate(s)")
+
+
+async def _llm_annotate(
+    llm,
+    *,
+    system: str,
+    human: str,
+    candidates: list[PaperCandidate],
+    stage: str,
+    ask: str,
+    failure_log: str,
+    failure_note: str,
+    progress_cb: ProgressCallback | None,
+) -> dict | None:
+    """Run one annotation LLM call and apply authors/year/reason in place.
+
+    Returns the parsed items keyed by index so callers can read stage-specific
+    fields (e.g. relevance), or None when the call fails — deterministic
+    fields are never touched on failure.
+    """
+    _emit(progress_cb, f"{stage}: asking model to {ask} {len(candidates)} candidate(s)")
     started = time.perf_counter()
     try:
         resp = await asyncio.wait_for(
             llm.ainvoke([("system", system), ("human", human)]),
             timeout=_LLM_RANK_TIMEOUT_SECONDS,
         )
-        content = _strip_code_fence(getattr(resp, "content", "") or "")
-        data = json.loads(content)
-    except Exception as exc:  # noqa: BLE001 - enrichment is optional
-        logger.warning("LLM enrichment failed (%s); using parsed fields only", exc)
-        _emit(progress_cb, f"enrichment: failed/timed out after {time.perf_counter() - started:.1f}s; using parsed fields")
-        return
-    _emit(progress_cb, f"enrichment: model returned in {time.perf_counter() - started:.1f}s")
+        data = json.loads(_strip_code_fence(getattr(resp, "content", "") or ""))
+    except Exception as exc:  # noqa: BLE001 - annotation is best-effort
+        logger.warning(failure_log, exc)
+        _emit(progress_cb, f"{stage}: failed/timed out after {time.perf_counter() - started:.1f}s; {failure_note}")
+        return None
+    _emit(progress_cb, f"{stage}: model returned in {time.perf_counter() - started:.1f}s")
+
     by_index = {item.get("index"): item for item in data if isinstance(item, dict)}
     for i, cand in enumerate(candidates):
         item = by_index.get(i)
@@ -335,6 +338,43 @@ async def _enrich_with_llm(
         reason = item.get("reason")
         if isinstance(reason, str) and reason.strip():
             cand.reason = reason.strip()
+    return by_index
+
+
+async def _enrich_with_llm(
+    llm,
+    topic: str,
+    candidates: list[PaperCandidate],
+    progress_cb: ProgressCallback | None = None,
+) -> None:
+    """Best-effort: ask the LLM to fill authors/year and a relevance reason.
+
+    Mutates ``candidates`` in place. Any failure leaves the deterministic
+    fields untouched — the LLM never invents a citation, only annotates.
+    """
+    if llm is None or not candidates:
+        return
+    system = (
+        "You annotate web search results about an academic topic. "
+        "For each result, extract author surnames and publication year ONLY if "
+        "they are clearly present in the title/snippet; otherwise leave them "
+        "empty/null. Never guess. Also give a one-sentence reason why the result "
+        "matches the topic. Reply with a JSON array of objects: "
+        '{"index": int, "authors": [str], "year": int|null, "reason": str}.'
+    )
+    payload = _candidate_payload(candidates)
+    human = f"Topic: {topic}\n\nResults:\n{json.dumps(payload, ensure_ascii=False)}"
+    await _llm_annotate(
+        llm,
+        system=system,
+        human=human,
+        candidates=candidates,
+        stage="enrichment",
+        ask="annotate",
+        failure_log="LLM enrichment failed (%s); using parsed fields only",
+        failure_note="using parsed fields",
+        progress_cb=progress_cb,
+    )
 
 
 async def discover_candidates(
@@ -522,10 +562,6 @@ async def _annotate_and_rank(
     """
     if not candidates:
         return []
-    payload = [
-        {"index": i, "title": c.title, "url": c.url, "snippet": c.snippet[:200]}
-        for i, c in enumerate(candidates)
-    ]
     system = (
         "You are ranking web search results against a user's paper request. "
         "For each result extract author surnames and year ONLY if clearly present "
@@ -534,36 +570,27 @@ async def _annotate_and_rank(
         '{"index": int, "authors": [str], "year": int|null, "reason": str, '
         '"relevance": float}.'
     )
+    payload = _candidate_payload(candidates, snippet_chars=200)
     human = f"Request: {user_request}\n\nResults:\n{json.dumps(payload, ensure_ascii=False)}"
-    _emit(progress_cb, f"ranking: asking model to rank {len(candidates)} candidate(s)")
-    started = time.perf_counter()
-    try:
-        resp = await asyncio.wait_for(
-            llm.ainvoke([("system", system), ("human", human)]),
-            timeout=_LLM_RANK_TIMEOUT_SECONDS,
-        )
-        data = json.loads(_strip_code_fence(getattr(resp, "content", "") or ""))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("annotate/rank failed (%s); using discovery order", exc)
-        _emit(progress_cb, f"ranking: failed/timed out after {time.perf_counter() - started:.1f}s; using discovery order")
+    by_index = await _llm_annotate(
+        llm,
+        system=system,
+        human=human,
+        candidates=candidates,
+        stage="ranking",
+        ask="rank",
+        failure_log="annotate/rank failed (%s); using discovery order",
+        failure_note="using discovery order",
+        progress_cb=progress_cb,
+    )
+    if by_index is None:
         return candidates[:limit]
-    _emit(progress_cb, f"ranking: model returned in {time.perf_counter() - started:.1f}s")
 
     scored: list[tuple[float, PaperCandidate]] = []
-    by_index = {item.get("index"): item for item in data if isinstance(item, dict)}
     for i, cand in enumerate(candidates):
         item = by_index.get(i)
         relevance = 0.0
         if item:
-            authors = item.get("authors") or []
-            if isinstance(authors, list):
-                cand.authors = [str(a).strip() for a in authors if str(a).strip()]
-            year = item.get("year")
-            if isinstance(year, int) and 1950 <= year <= 2035:
-                cand.year = year
-            reason = item.get("reason")
-            if isinstance(reason, str) and reason.strip():
-                cand.reason = reason.strip()
             try:
                 relevance = float(item.get("relevance", 0.0))
             except (TypeError, ValueError):
