@@ -56,10 +56,20 @@ def discover_skills(config: AgentConfig | None = None) -> list[SkillMetadata]:
     return skills
 
 
+def load_skill_file(path: Path) -> tuple[Mapping[str, Any] | None, str]:
+    """Read a SKILL.md once and parse its YAML frontmatter.
+
+    Returns (frontmatter, text). frontmatter is None when the file has no
+    valid frontmatter block; text is the full file content — runtime
+    instructions deliberately keep the frontmatter block visible.
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return _parse_frontmatter(text), text
+
+
 def _read_skill_metadata(skill_file: Path) -> SkillMetadata | None:
     """Extract name and description from a skill's YAML frontmatter."""
-    text = skill_file.read_text(encoding="utf-8")
-    frontmatter = _parse_frontmatter(text)
+    frontmatter, _text = load_skill_file(skill_file)
     if frontmatter is None:
         return None
 

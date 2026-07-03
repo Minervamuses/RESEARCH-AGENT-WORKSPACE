@@ -15,7 +15,7 @@ from agent.skills.broker import (
     resolve_capabilities,
 )
 from agent.skills.manifest_schema import validate_skill_manifest
-from agent.skills.metadata import SkillMetadata, discover_skills
+from agent.skills.metadata import SkillMetadata, discover_skills, load_skill_file
 from agent.tool_policy import evaluate_policy
 from agent.tools import inventory as tool_inventory
 
@@ -198,7 +198,7 @@ def load_skill_runtime(
     manifest = load_skill_manifest(root)
     _validate_task_mode(task_mode, manifest)
 
-    instructions = metadata.path.read_text(encoding="utf-8", errors="replace")
+    _frontmatter, instructions = load_skill_file(metadata.path)
     cap_map = capability_map or load_capability_map(
         getattr(config, "skill_capability_map_path", None)
     )
