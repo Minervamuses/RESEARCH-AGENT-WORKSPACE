@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import shlex
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Sequence
 
 import yaml
 
@@ -233,28 +233,68 @@ _THINKING_MODE_DESCRIPTIONS = {
     "extended": "prompt rewrite + reviewer/reviser loop",
 }
 
+_MENU_CANCEL_TOKENS = frozenset({"", "q", "cancel"})
+
+
+def _render_numbered_menu(
+    *,
+    header: list[str],
+    options: Sequence[tuple[str, str | None]],
+    zero_option: str | None = None,
+    footer: str = "Select (number or name; Enter to cancel): ",
+) -> str:
+    """Render a numbered selection menu shared by every interactive prompt."""
+    lines = list(header)
+    if zero_option is not None:
+        lines.append(zero_option)
+    for idx, (name, description) in enumerate(options, start=1):
+        if description:
+            lines.append(f"  [{idx}] {name}  - {description}")
+        else:
+            lines.append(f"  [{idx}] {name}")
+    lines.append(footer)
+    return "\n".join(lines)
+
+
+def _resolve_numbered_choice(
+    raw: str,
+    option_names: Sequence[str],
+    *,
+    cancel_tokens: frozenset[str],
+    zero_tokens: frozenset[str] = frozenset(),
+    zero_value: str | None = None,
+) -> str | None:
+    """Map raw menu input to an option name.
+
+    Cancel tokens return None; zero tokens return zero_value; a digit selects
+    the 1-based option (out-of-range raises); anything else is returned
+    cleaned for the caller to validate.
+    """
+    cleaned = raw.strip().lower()
+    if cleaned in cancel_tokens:
+        return None
+    if cleaned in zero_tokens:
+        return zero_value
+    if cleaned.isdigit():
+        idx = int(cleaned) - 1
+        if 0 <= idx < len(option_names):
+            return option_names[idx]
+        raise SlashCommandError(f"invalid choice: {cleaned}")
+    return cleaned
+
 
 def _render_thinking_prompt(current: str) -> str:
-    lines = [f"Current thinking mode: {current}", "Available thinking modes:"]
-    for idx, mode in enumerate(_THINKING_MODES, start=1):
-        lines.append(
-            f"  [{idx}] {mode}  - {_THINKING_MODE_DESCRIPTIONS[mode]}"
-        )
-    lines.append("Select (number or name; Enter to cancel): ")
-    return "\n".join(lines)
+    return _render_numbered_menu(
+        header=[f"Current thinking mode: {current}", "Available thinking modes:"],
+        options=[(mode, _THINKING_MODE_DESCRIPTIONS[mode]) for mode in _THINKING_MODES],
+    )
 
 
 def _resolve_thinking_choice(raw: str) -> str | None:
     """Map raw user input to a thinking mode, or None for cancel."""
-    cleaned = raw.strip().lower()
-    if not cleaned or cleaned in {"q", "cancel"}:
-        return None
-    if cleaned.isdigit():
-        idx = int(cleaned) - 1
-        if 0 <= idx < len(_THINKING_MODES):
-            return _THINKING_MODES[idx]
-        raise SlashCommandError(f"invalid choice: {cleaned}")
-    return cleaned
+    return _resolve_numbered_choice(
+        raw, _THINKING_MODES, cancel_tokens=_MENU_CANCEL_TOKENS,
+    )
 
 
 async def _handle_thinking(
@@ -344,12 +384,10 @@ def _current_mode_name(session: object) -> str:
 
 
 def _render_mode_prompt(current: str) -> str:
-    lines = [f"Current mode: {current}", "Available modes:"]
-    modes = list(_MODE_REGISTRY.values())
-    for idx, spec in enumerate(modes, start=1):
-        lines.append(f"  [{idx}] {spec.name}  - {spec.description}")
-    lines.append("Select (number or name; Enter to cancel): ")
-    return "\n".join(lines)
+    return _render_numbered_menu(
+        header=[f"Current mode: {current}", "Available modes:"],
+        options=[(spec.name, spec.description) for spec in _MODE_REGISTRY.values()],
+    )
 
 
 def _resolve_mode_choice(raw: str) -> str | None:
@@ -358,16 +396,11 @@ def _resolve_mode_choice(raw: str) -> str | None:
     Numeric input maps to registry order; name input is returned as-is for
     later validation by the handler. Cancel tokens: empty, ``q``, ``cancel``.
     """
-    cleaned = raw.strip().lower()
-    if not cleaned or cleaned in {"q", "cancel"}:
-        return None
-    if cleaned.isdigit():
-        idx = int(cleaned) - 1
-        modes = list(_MODE_REGISTRY.values())
-        if 0 <= idx < len(modes):
-            return modes[idx].name
-        raise SlashCommandError(f"invalid choice: {cleaned}")
-    return cleaned
+    return _resolve_numbered_choice(
+        raw,
+        [spec.name for spec in _MODE_REGISTRY.values()],
+        cancel_tokens=_MENU_CANCEL_TOKENS,
+    )
 
 
 async def _handle_mode(
@@ -413,27 +446,21 @@ def _session_skills(session: object) -> list[SkillMetadata]:
 
 def _render_skill_prompt(session: object) -> str:
     current = getattr(getattr(session, "active_skill_runtime", None), "name", "")
-    current_display = current or "none"
-    lines = [f"Current skill: {current_display}", "Available skills:"]
-    lines.append("  [0] none")
-    for idx, skill in enumerate(_session_skills(session), start=1):
-        lines.append(f"  [{idx}] {skill.name}")
-    lines.append("Select (number or name; Enter to cancel): ")
-    return "\n".join(lines)
+    return _render_numbered_menu(
+        header=[f"Current skill: {current or 'none'}", "Available skills:"],
+        zero_option="  [0] none",
+        options=[(skill.name, None) for skill in _session_skills(session)],
+    )
 
 
 def _resolve_skill_choice(raw: str, skills: list[SkillMetadata]) -> str | None:
-    cleaned = raw.strip().lower()
-    if not cleaned or cleaned in {"q", "cancel"}:
-        return None
-    if cleaned in {"0", "none", "off", "deactivate"}:
-        return "none"
-    if cleaned.isdigit():
-        idx = int(cleaned) - 1
-        if 0 <= idx < len(skills):
-            return skills[idx].name
-        raise SlashCommandError(f"invalid choice: {cleaned}")
-    return cleaned
+    return _resolve_numbered_choice(
+        raw,
+        [skill.name for skill in skills],
+        cancel_tokens=_MENU_CANCEL_TOKENS,
+        zero_tokens=frozenset({"0", "none", "off", "deactivate"}),
+        zero_value="none",
+    )
 
 
 def _find_skill(skills: list[SkillMetadata], name: str) -> SkillMetadata | None:
@@ -457,27 +484,22 @@ def _skill_command_error(exc: Exception) -> SlashCommandError:
 
 
 def _render_skill_mode_prompt(skill_name: str, modes: list[str]) -> str:
-    lines = [f"Task mode for {skill_name}:", "Available modes:"]
-    lines.append("  [0] none  - no task mode")
-    for idx, mode in enumerate(modes, start=1):
-        lines.append(f"  [{idx}] {mode}")
-    lines.append("Select (number or name; Enter for none): ")
-    return "\n".join(lines)
+    return _render_numbered_menu(
+        header=[f"Task mode for {skill_name}:", "Available modes:"],
+        zero_option="  [0] none  - no task mode",
+        options=[(mode, None) for mode in modes],
+        footer="Select (number or name; Enter for none): ",
+    )
 
 
 def _resolve_skill_mode_choice(raw: str, modes: list[str]) -> str | None:
-    cleaned = raw.strip().lower()
-    if not cleaned or cleaned in {"0", "none"}:
-        return None
-    if cleaned.isdigit():
-        idx = int(cleaned) - 1
-        if 0 <= idx < len(modes):
-            return modes[idx]
-        raise SlashCommandError(f"invalid choice: {cleaned}")
-    if cleaned not in modes:
+    choice = _resolve_numbered_choice(
+        raw, modes, cancel_tokens=frozenset({"", "0", "none"}),
+    )
+    if choice is not None and choice not in modes:
         valid = ", ".join(modes)
-        raise SlashCommandError(f"unknown task mode: {cleaned} (available: {valid})")
-    return cleaned
+        raise SlashCommandError(f"unknown task mode: {choice} (available: {valid})")
+    return choice
 
 
 async def _handle_skill(
