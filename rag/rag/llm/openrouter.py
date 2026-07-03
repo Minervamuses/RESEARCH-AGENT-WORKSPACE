@@ -1,10 +1,9 @@
 """OpenRouter LLM provider used internally by rag (tagger)."""
 
 import os
-import time
 from typing import Any
 
-from openai import OpenAI, RateLimitError
+from openai import OpenAI
 
 from rag.config import RAGConfig
 from rag.llm.base import BaseLLM
@@ -24,30 +23,18 @@ class OpenRouterLLM(BaseLLM):
     """LLM provider via OpenRouter API. Used by LLMTagger for simple prompt→text calls."""
 
     MAX_RETRIES = 10
-    INITIAL_DELAY = 10.0
 
     def __init__(self, model_name: str | None = None, config: RAGConfig | None = None):
+        # Retries are delegated to the SDK: besides 429 it also retries
+        # connection errors and 5xx, with a shorter backoff than the old
+        # hand-rolled 10s-doubling loop.
         self.client = OpenAI(
             base_url=OPENROUTER_BASE_URL,
             api_key=get_openrouter_api_key(),
+            max_retries=self.MAX_RETRIES,
         )
         config = config or RAGConfig()
         self.model = model_name or config.tagger_model
-
-    def _call_with_retry(self, **kwargs):
-        """Call the OpenAI API with exponential backoff on rate limits."""
-        delay = self.INITIAL_DELAY
-        last_err: Exception | None = None
-
-        for _attempt in range(self.MAX_RETRIES):
-            try:
-                return self.client.chat.completions.create(**kwargs)
-            except RateLimitError as e:
-                last_err = e
-                time.sleep(delay)
-                delay *= 2
-
-        raise RuntimeError(f"Failed after {self.MAX_RETRIES} retries") from last_err
 
     def invoke(
         self,
@@ -70,6 +57,6 @@ class OpenRouterLLM(BaseLLM):
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
 
-        resp = self._call_with_retry(**kwargs)
+        resp = self.client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content
         return content.strip() if content else ""
