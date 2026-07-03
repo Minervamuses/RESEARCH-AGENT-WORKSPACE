@@ -134,7 +134,6 @@ class FusionTurnMetadata:
     omitted_successful_ids: list[str] = field(default_factory=list)
     reliability_tier: str = ""
     aggregator_error: str = ""
-    side_effect_policy: bool = False
     quorum: int = 0
     resolved_proposer_models: list[str] = field(default_factory=list)
     resolved_aggregator_model: str = ""

@@ -622,35 +622,6 @@ def test_active_skill_deny_only_intersects_read_only(monkeypatch, tmp_path):
     assert "read_file" not in state["allowed_tools"]
 
 
-def test_side_effect_true_uses_session_policy_graph(monkeypatch, tmp_path):
-    factory = _Factory(scripts={"p1": [_answer("a1")], "p2": [_answer("a2")]})
-    models = _default_models(aggregator=_QueuedModel([
-        _aggregate_json(draft="fused", selected=["candidate-1", "candidate-2"]),
-    ]))
-    session = _make_session(
-        monkeypatch, tmp_path, factory,
-        models=models,
-        cfg=_cfg(
-            tmp_path,
-            proposer_models=["p1", "p2"],
-            thinking_fusion_allow_side_effect_tools=True,
-        ),
-    )
-    session.extra_tools = [SimpleNamespace(name="extratool")]
-
-    asyncio.run(session.turn("question"))
-
-    proposer_builds = [b for b in factory.built if b["model_id"] in {"p1", "p2"}]
-    assert proposer_builds
-    for build in proposer_builds:
-        assert build["getter_is_none"] is False
-        assert "extratool" in build["extra_tool_names"]
-    # Session policy means no injected read-only tool policy on the proposer state.
-    state = _state_for(factory, "p1")
-    assert not state.get("tool_policy_active")
-    assert "allowed_tools" not in state
-
-
 def test_extended_records_configuration_error(monkeypatch, tmp_path):
     factory = _Factory()
     session = _make_session(

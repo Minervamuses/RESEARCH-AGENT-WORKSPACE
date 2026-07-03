@@ -174,7 +174,7 @@ class ChatSession:
         )
         self._thinking_role_models: dict[str, object] = {}
         self._fusion_aggregator_model: object | None = None
-        self._proposer_graphs: dict[tuple[str, bool], object] = {}
+        self._proposer_graphs: dict[str, object] = {}
         self._prompt_master_skill_text_cache: str | None = None
 
         self.turn_logs: list[dict] = []
@@ -513,8 +513,6 @@ class ChatSession:
 
     def _proposer_tool_availability_block(self) -> str:
         """Availability the proposers actually see (matches their bound tools)."""
-        if self.config.thinking_fusion_allow_side_effect_tools:
-            return self._tool_availability_block()
         return self._read_only_tool_availability_block()
 
     def _reviewer_tool_availability_block(self) -> str:
@@ -563,9 +561,8 @@ class ChatSession:
         cap = max(int(self.config.thinking_fusion_proposer_tool_interactions), 0)
         return max(8, 2 * (cap + 1) + 6)
 
-    def _proposer_graph(self, model_id: str, *, side_effect: bool):
-        key = (model_id, side_effect)
-        cached = self._proposer_graphs.get(key)
+    def _proposer_graph(self, model_id: str):
+        cached = self._proposer_graphs.get(model_id)
         if cached is not None:
             return cached
         cloned = dataclasses.replace(
@@ -574,21 +571,13 @@ class ChatSession:
             agent_max_tool_interactions=self.config.thinking_fusion_proposer_tool_interactions,
             skill_validation_enabled=False,
         )
-        if side_effect:
-            graph = build_graph(
-                cloned,
-                extra_tools=self.extra_tools,
-                history_store=self.history_store,
-                skill_runtime_getter=lambda: self.active_skill_runtime,
-            )
-        else:
-            graph = build_graph(
-                cloned,
-                extra_tools=None,
-                history_store=self.history_store,
-                skill_runtime_getter=None,
-            )
-        self._proposer_graphs[key] = graph
+        graph = build_graph(
+            cloned,
+            extra_tools=None,
+            history_store=self.history_store,
+            skill_runtime_getter=None,
+        )
+        self._proposer_graphs[model_id] = graph
         return graph
 
     async def _run_proposer_candidate(
@@ -598,22 +587,17 @@ class ChatSession:
         *,
         rewritten_prompt: str,
         rewrite_hints: list[SystemMessage],
-        side_effect: bool,
     ) -> tuple[FusionCandidate, FusionCandidateTrace]:
         """Run one proposer graph and return its candidate + segmented trace.
 
         The candidate id is known here, so the trace is built directly rather
         than reconstructed later from a flat list by tool_call_id or order.
         """
-        graph = self._proposer_graph(model_id, side_effect=side_effect)
-        if side_effect:
-            prompt_history = self._prompt_history()
-            skill_state = skill_runtime_to_agent_state(self.active_skill_runtime)
-        else:
-            prompt_history = self._proposer_prompt_history(
-                self._read_only_tool_availability_block()
-            )
-            skill_state = self._proposer_read_only_state()
+        graph = self._proposer_graph(model_id)
+        prompt_history = self._proposer_prompt_history(
+            self._read_only_tool_availability_block()
+        )
+        skill_state = self._proposer_read_only_state()
         start = time.monotonic()
         try:
             result = await asyncio.wait_for(
@@ -703,33 +687,17 @@ class ChatSession:
         rewritten_prompt: str,
         rewrite_hints: list[SystemMessage],
     ) -> tuple[list[FusionCandidate], list[FusionCandidateTrace]]:
-        """Run all proposer candidates; parallel when side effects are disabled,
-        strictly serial when they are enabled."""
-        side_effect = self.config.thinking_fusion_allow_side_effect_tools
+        """Run all proposer candidates in parallel (read-only tools only)."""
         numbered = list(enumerate(proposer_models, start=1))
-        if side_effect:
-            results = []
-            for index, model_id in numbered:
-                results.append(
-                    await self._run_proposer_candidate(
-                        f"candidate-{index}",
-                        model_id,
-                        rewritten_prompt=rewritten_prompt,
-                        rewrite_hints=rewrite_hints,
-                        side_effect=True,
-                    )
-                )
-        else:
-            results = await asyncio.gather(*[
-                self._run_proposer_candidate(
-                    f"candidate-{index}",
-                    model_id,
-                    rewritten_prompt=rewritten_prompt,
-                    rewrite_hints=rewrite_hints,
-                    side_effect=False,
-                )
-                for index, model_id in numbered
-            ])
+        results = await asyncio.gather(*[
+            self._run_proposer_candidate(
+                f"candidate-{index}",
+                model_id,
+                rewritten_prompt=rewritten_prompt,
+                rewrite_hints=rewrite_hints,
+            )
+            for index, model_id in numbered
+        ])
         candidates = [candidate for candidate, _trace in results]
         traces = [trace for _candidate, trace in results]
         return candidates, traces
@@ -1137,7 +1105,6 @@ class ChatSession:
             omitted_successful_ids=omitted,
             reliability_tier=aggregate.reliability_tier or "",
             aggregator_error=aggregate.aggregator_error or "",
-            side_effect_policy=bool(self.config.thinking_fusion_allow_side_effect_tools),
             quorum=int(self.config.thinking_fusion_quorum),
             resolved_proposer_models=list(proposer_models),
             resolved_aggregator_model=aggregator_model,

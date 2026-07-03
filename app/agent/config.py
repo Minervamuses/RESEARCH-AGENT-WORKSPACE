@@ -47,7 +47,6 @@ class AgentConfig(RAGConfig):
     thinking_fusion_proposer_tool_interactions: int = 2
     thinking_fusion_candidate_timeout_seconds: float = 180.0
     thinking_fusion_quorum: int = 2
-    thinking_fusion_allow_side_effect_tools: bool = False
 
     # Per-turn hard cap on tool interactions (enforced in graph.agent_node and
     # graph._cap_tool_calls). Default 4 is data-backed: in the C1 dev routing
