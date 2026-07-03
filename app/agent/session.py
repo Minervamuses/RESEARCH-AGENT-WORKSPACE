@@ -2,7 +2,6 @@
 
 import asyncio
 import dataclasses
-import json
 import logging
 import time
 import uuid
@@ -18,7 +17,6 @@ from agent.graph import build_graph
 from agent.history import (
     extract_tool_calls,
     format_tool_counts,
-    group_tool_messages_by_call_id,
 )
 from agent.history_rag import ChatHistoryStore, get_chat_history_store
 from agent.llm.thinking import (
@@ -65,6 +63,7 @@ from agent.memory import (
     assemble_prompt_history,
 )
 from agent.paths import find_app_root
+from agent.plan_log import PlanLog
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +167,13 @@ class ChatSession:
         self.session_id = uuid.uuid4().hex
         self._turn_counter = 0
         self.history_store = history_store or get_chat_history_store(config)
+        # find_app_root resolves here (not at import), so a monkeypatch of
+        # agent.session.find_app_root before construction stays effective.
+        self._plan_log = PlanLog(
+            config,
+            session_id=self.session_id,
+            app_root_resolver=lambda: find_app_root(),
+        )
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
@@ -259,32 +265,13 @@ class ChatSession:
             timestamp=turn.timestamp,
         )
 
-    def _new_plan_log_file(self) -> Path:
-        created = datetime.now(timezone.utc)
-        created_at = created.isoformat()
-        safe_ts = created.strftime("%Y%m%dT%H%M%SZ")
-        log_dir = find_app_root() / self.config.plan_logs_dir
-        log_dir.mkdir(parents=True, exist_ok=True)
-        path = log_dir / f"plan-{self.session_id}-{safe_ts}.md"
-        header = (
-            "---\n"
-            "do_not_index: true\n"
-            "generated_by: agent.plan_mode\n"
-            f"session_id: {self.session_id}\n"
-            f"created_at: {created_at}\n"
-            "---\n\n"
-            "# Plan log\n\n"
-        )
-        path.write_text(header, encoding="utf-8")
-        return path
-
     async def enter_plan_mode(self) -> Path:
         """Enable plan mode for newly created turns."""
         if self.plan_mode:
             if self.plan_log_path is None:
-                self.plan_log_path = self._new_plan_log_file()
+                self.plan_log_path = self._plan_log.new_log_file()
             return self.plan_log_path
-        self.plan_log_path = self._new_plan_log_file()
+        self.plan_log_path = self._plan_log.new_log_file()
         self.plan_mode = True
         return self.plan_log_path
 
@@ -322,108 +309,10 @@ class ChatSession:
             for name in tool_inventory.base_tool_names(extra_tools=self.extra_tools)
         ]
 
-    def _render_plan_block(
-        self,
-        *,
-        turn_id: int,
-        timestamp: str,
-        user_input: str,
-        answer: str,
-        new_messages: list,
-        tool_calls: list[dict],
-        candidate_traces: list[FusionCandidateTrace] | None = None,
-    ) -> str:
-        lines = [
-            f"## Turn {turn_id} - {timestamp}",
-            "",
-            "**User:**",
-            "",
-            user_input,
-            "",
-        ]
-        if candidate_traces:
-            lines.extend(self._render_candidate_segments(candidate_traces))
-            # Candidate tool calls are rendered per-segment above; never re-render
-            # them flat (their tool_call_ids collide across candidates). Only the
-            # reviser / final-validation tool calls (no candidate_id) remain.
-            non_candidate_calls = [
-                call for call in tool_calls if not call.get("candidate_id")
-            ]
-            lines.extend(self._render_tool_blocks(new_messages, non_candidate_calls))
-        else:
-            lines.extend(self._render_tool_blocks(new_messages, tool_calls))
-        lines.extend([
-            "**Assistant:**",
-            "",
-            answer,
-            "",
-            "---",
-            "",
-        ])
-        return "\n".join(lines)
-
-    def _render_candidate_segments(
-        self,
-        candidate_traces: list[FusionCandidateTrace],
-    ) -> list[str]:
-        """Render one segment per fusion candidate, pairing tool_call_ids inside
-        the segment so candidate A's result never lands under candidate B."""
-        lines: list[str] = []
-        for trace in candidate_traces:
-            lines.extend([
-                f"### Fusion candidate {trace.candidate_id} "
-                f"(model: {trace.model_id}, status: {trace.status})",
-                "",
-            ])
-            lines.extend(self._render_tool_blocks(trace.new_messages, trace.tool_calls))
-            if trace.answer_excerpt:
-                lines.extend([
-                    "**Candidate answer excerpt:**",
-                    "",
-                    trace.answer_excerpt,
-                    "",
-                ])
-        return lines
-
-    def _render_tool_blocks(self, new_messages: list, tool_calls: list[dict]) -> list[str]:
-        if not tool_calls:
-            return []
-
-        tool_messages = group_tool_messages_by_call_id(new_messages)
-
-        lines: list[str] = []
-        for call in tool_calls:
-            call_id = call.get("id")
-            results = tool_messages.get(str(call_id), []) if call_id else []
-            lines.extend([
-                f"### Tool: {call.get('name', 'unknown')}",
-                "",
-                "```json",
-                json.dumps(call.get("args", {}), ensure_ascii=False, indent=2),
-                "```",
-                "",
-                "**Result:**",
-                "",
-            ])
-            if not results:
-                lines.extend(["(no ToolMessage matched this tool_call_id)", ""])
-            else:
-                for result in results:
-                    content = getattr(result, "content", "") or ""
-                    capped = self._cap_tool_result(str(content))
-                    lines.extend(["```", capped, "```", ""])
-        return lines
-
-    def _cap_tool_result(self, content: str) -> str:
-        cap = self.config.plan_log_max_tool_chars
-        if len(content) <= cap:
-            return content
-        head = content[:cap]
-        return f"{head}\n\n[truncated; original {len(content)} chars]"
-
     def _append_block_to_md(self, log_path: str, block: str) -> None:
-        with Path(log_path).open("a", encoding="utf-8") as f:
-            f.write(block)
+        # Kept as a facade method: the turn flow (and tests patching this on
+        # the instance) must see every plan-log write pass through here.
+        self._plan_log.append_block(log_path, block)
 
     def _visible_context_text(self) -> str:
         lines: list[str] = []
@@ -883,7 +772,7 @@ class ChatSession:
             target = "plan_log"
             log_path = str(self.plan_log_path)
             try:
-                block = self._render_plan_block(
+                block = self._plan_log.render_block(
                     turn_id=turn_id,
                     timestamp=timestamp,
                     user_input=user_input,
