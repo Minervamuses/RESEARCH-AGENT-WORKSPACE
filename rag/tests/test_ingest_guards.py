@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+from rag import collect as collect_mod
 from rag.cli import ingest as ingest_mod
 
 
@@ -15,7 +16,7 @@ def test_collect_folders_skips_plan_logs(tmp_path):
     plan.write_text("secret plan turn", encoding="utf-8")
     note.write_text("regular note", encoding="utf-8")
 
-    folders = ingest_mod._collect_folders(tmp_path)
+    folders = collect_mod.collect_folders(tmp_path)
     files = {path.relative_to(tmp_path).as_posix() for paths in folders.values() for path in paths}
 
     assert files == {"notes/bar.md"}
@@ -28,7 +29,7 @@ def test_collect_folders_skips_do_not_index_sentinel(tmp_path):
     leaked.write_text("---\ndo_not_index: true\n---\nprivate", encoding="utf-8")
     regular.write_text("public", encoding="utf-8")
 
-    folders = ingest_mod._collect_folders(tmp_path)
+    folders = collect_mod.collect_folders(tmp_path)
     files = {path.relative_to(tmp_path).as_posix() for paths in folders.values() for path in paths}
 
     assert files == {"notes/regular.md"}

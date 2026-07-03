@@ -17,7 +17,7 @@ import logging
 import re
 
 from citation.crossref import extract_doi
-from citation.discovery import _coerce_text
+from citation.discovery import coerce_text
 from citation.models import PaperCandidate
 from citation.runtime import PAGE_CONTENT_TOOL, SUMMARIES_TOOL, CitationRuntime
 
@@ -42,7 +42,7 @@ async def _fetch_page(runtime: CitationRuntime, url: str, *, notes: list[str]) -
     except Exception as exc:  # noqa: BLE001 - reported to caller
         notes.append(f"page fetch failed for {url}: {type(exc).__name__}: {exc}")
         return ""
-    return _coerce_text(result)
+    return coerce_text(result)
 
 
 def _looks_blocked(text: str) -> bool:
@@ -110,7 +110,7 @@ async def try_scholar_doi(
         notes.append(f"Scholar DOI lookup failed: {type(exc).__name__}: {exc}")
         return None, notes
 
-    text = _coerce_text(result)
+    text = coerce_text(result)
     if _looks_blocked(text):
         notes.append("Google Scholar appears CAPTCHA-guarded / returned nothing usable")
         return None, notes

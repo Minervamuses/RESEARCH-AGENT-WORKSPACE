@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rag.cli.ingest import _collect_folders
+from rag.collect import collect_folders
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.store.chroma_store import ChromaStore
 from rag.store.json_store import JSONStore
@@ -61,7 +61,7 @@ def list_diff(
     if not root.is_dir():
         raise FileNotFoundError(f"Repo root not found: {root}")
 
-    folders = _collect_folders(root, extra_skip=extra_skip)
+    folders = collect_folders(root, extra_skip=extra_skip)
     on_disk: set[str] = set()
     for files in folders.values():
         for file_path in files:

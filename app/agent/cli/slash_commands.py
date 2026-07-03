@@ -8,10 +8,15 @@ from typing import Awaitable, Callable, Sequence
 
 import yaml
 
+from agent.ingest import (
+    diff_folder,
+    ingest_file,
+    ingest_folder,
+    init_workspace,
+    prune_folder,
+)
 from agent.llm.thinking import ExtendedModeNotConfigured, require_thinking_models
-from agent.paths import find_app_root
 from agent.skills import SkillMetadata, discover_skills, load_skill_manifest
-from rag import ingest_repo, ingest_single, list_diff, prune_orphans
 
 
 class SlashCommandError(ValueError):
@@ -586,19 +591,7 @@ async def _handle_init(
     if parsed.args:
         raise SlashCommandError("/init takes no arguments")
 
-    app_root = find_app_root()
-    host_root = app_root.parent
-    skip = {app_root.name}
-    rag_root = host_root / "rag"
-    if rag_root.is_dir():
-        skip.add(rag_root.name)
-
-    files, chunks = await asyncio.to_thread(
-        ingest_repo,
-        str(host_root),
-        config=context.session.config,
-        skip_rel_paths=skip,
-    )
+    files, chunks, host_root, skip = await init_workspace(context.session.config)
     return SlashCommandResult(
         message=(
             f"initialized: {files} files, {chunks} chunks "
@@ -624,17 +617,13 @@ async def _handle_ingest(
 
     try:
         if target.is_file():
-            pid, count = await asyncio.to_thread(
-                ingest_single, str(target), config=config
-            )
+            pid, count = await ingest_file(target, config)
             return SlashCommandResult(
                 message=f"ingested {pid} ({count} chunks)"
             )
 
         if target.is_dir():
-            files, chunks = await asyncio.to_thread(
-                ingest_repo, str(target), config=config
-            )
+            files, chunks = await ingest_folder(target, config)
             return SlashCommandResult(
                 message=f"ingested {files} files ({chunks} chunks) under {target}"
             )
@@ -656,9 +645,7 @@ async def _handle_sync(
         raise SlashCommandError(f"not a directory: {target}")
 
     try:
-        diff = await asyncio.to_thread(
-            list_diff, str(target), context.session.config
-        )
+        diff = await diff_folder(target, context.session.config)
     except ValueError as exc:
         raise SlashCommandError(str(exc)) from exc
 
@@ -701,7 +688,7 @@ async def _handle_prune(
 
     if not apply:
         try:
-            diff = await asyncio.to_thread(list_diff, str(target), config)
+            diff = await diff_folder(target, config)
         except ValueError as exc:
             raise SlashCommandError(str(exc)) from exc
         orphans = diff["missing_from_disk"]
@@ -714,9 +701,7 @@ async def _handle_prune(
         return SlashCommandResult(message="\n".join(lines))
 
     try:
-        removed = await asyncio.to_thread(
-            prune_orphans, str(target), config
-        )
+        removed = await prune_folder(target, config)
     except ValueError as exc:
         raise SlashCommandError(str(exc)) from exc
     return SlashCommandResult(

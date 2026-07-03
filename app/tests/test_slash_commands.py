@@ -557,7 +557,7 @@ def test_handle_ingest_translates_value_error(monkeypatch, tmp_path):
 
     target = tmp_path / "blocked.md"
     target.write_text("blocked", encoding="utf-8")
-    monkeypatch.setattr("agent.cli.slash_commands.ingest_single", fail_ingest_single)
+    monkeypatch.setattr("agent.ingest.ingest_single", fail_ingest_single)
 
     with pytest.raises(SlashCommandError, match="refusing to ingest"):
         asyncio.run(

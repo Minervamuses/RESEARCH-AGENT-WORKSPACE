@@ -176,7 +176,7 @@ def unwrap_redirect_url(url: str | None) -> str | None:
     return url
 
 
-def _coerce_text(result) -> str:
+def coerce_text(result) -> str:
     """Coerce a LangChain MCP tool result into plain text."""
     if isinstance(result, str):
         return result
@@ -397,7 +397,7 @@ async def discover_candidates(
     started = time.perf_counter()
     result = await tool.ainvoke({"query": query, "limit": limit})
     _emit(progress_cb, f"discovery: fallback web search returned in {time.perf_counter() - started:.1f}s")
-    text = _coerce_text(result)
+    text = coerce_text(result)
     candidates = parse_summaries(text)
     _emit(progress_cb, f"discovery: parsed {len(candidates)} candidate(s)")
     await _enrich_with_llm(runtime.llm, topic, candidates, progress_cb=progress_cb)
@@ -522,7 +522,7 @@ async def _run_search_agent(
                 _emit(progress_cb, f"discovery: running {name}")
             started = time.perf_counter()
             try:
-                text = _coerce_text(
+                text = coerce_text(
                     await asyncio.wait_for(
                         tool.ainvoke(args),
                         timeout=_TOOL_TIMEOUT_SECONDS,
