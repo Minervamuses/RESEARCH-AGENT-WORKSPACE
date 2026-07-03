@@ -8,6 +8,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.prebuilt import ToolNode
 
+from agent.tool_policy import evaluate_policy
+
 
 class PolicyToolNode(ToolNode):
     """Delegate to ToolNode, denying calls outside the active skill policy."""
@@ -59,19 +61,15 @@ class PolicyToolNode(ToolNode):
             name = call.get("name", "")
             call_id = call.get("id", "")
             call_order.append(call_id)
-            if (
-                name in denied
-                or (allowed and name not in allowed)
-                or (not allowed and not denied)
-            ):
+            if evaluate_policy([name], active=True, allowed=allowed, denied=denied):
+                allowed_calls.append(call)
+            else:
                 denied_messages.append(ToolMessage(
                     content=f"Tool error: denied by active skill policy: {name}",
                     tool_call_id=call_id,
                     name=name,
                     status="error",
                 ))
-            else:
-                allowed_calls.append(call)
 
         if not denied_messages:
             return None

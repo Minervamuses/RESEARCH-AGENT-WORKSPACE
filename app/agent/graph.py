@@ -9,6 +9,7 @@ from agent.llm.openrouter import get_chat_model
 from agent.policy_tool_node import PolicyToolNode
 from agent.skills.validator import validate_skill_output
 from agent.state import AgentState, skill_runtime_to_agent_state
+from agent.tool_policy import evaluate_policy
 from agent.tools import inventory as tool_inventory
 
 
@@ -90,21 +91,12 @@ def build_graph(
     }
 
     def _select_tools(state: AgentState) -> list:
-        policy_active = bool(state.get("tool_policy_active"))
-        allowed = set(state.get("allowed_tools") or [])
-        denied = set(state.get("denied_tools") or [])
-        if not policy_active:
-            return tools
-        if allowed:
-            selected_names = [
-                name
-                for name in tool_order
-                if name in allowed and name not in denied
-            ]
-        elif denied:
-            selected_names = [name for name in tool_order if name not in denied]
-        else:
-            selected_names = []
+        selected_names = evaluate_policy(
+            tool_order,
+            active=bool(state.get("tool_policy_active")),
+            allowed=state.get("allowed_tools") or (),
+            denied=state.get("denied_tools") or (),
+        )
         return [tools_by_name[name] for name in selected_names]
 
     def _model_for_state(state: AgentState):

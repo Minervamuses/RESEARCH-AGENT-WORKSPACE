@@ -16,6 +16,7 @@ from agent.skills.broker import (
 )
 from agent.skills.manifest_schema import validate_skill_manifest
 from agent.skills.metadata import SkillMetadata, discover_skills
+from agent.tool_policy import evaluate_policy
 from agent.tools import inventory as tool_inventory
 
 
@@ -104,22 +105,20 @@ def render_tool_availability_block(
         else False
     )
 
-    if policy_active:
-        if allowed_names:
-            available_names = [
-                name for name in base_names if name in allowed_names and name not in denied_names
-            ]
-            available_names.extend(
-                name
-                for name in sorted(allowed_names - denied_names)
-                if name not in set(available_names)
-            )
-        elif denied_names:
-            available_names = [name for name in base_names if name not in denied_names]
-        else:
-            available_names = []
-    else:
-        available_names = list(base_names)
+    available_names = evaluate_policy(
+        base_names,
+        active=policy_active,
+        allowed=allowed_names,
+        denied=denied_names,
+    )
+    if policy_active and allowed_names:
+        # Render-only extension: allowed names outside the base universe are
+        # appended (sorted) so the prompt shows the skill's full allowlist.
+        available_names.extend(
+            name
+            for name in sorted(allowed_names - denied_names)
+            if name not in set(available_names)
+        )
 
     unavailable_base_names = [
         name

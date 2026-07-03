@@ -38,6 +38,7 @@ from agent.skills import (
 from agent.skills.runtime import render_tool_availability_block
 from agent.skills.validator import validate_skill_output
 from agent.state import skill_runtime_to_agent_state
+from agent.tool_policy import evaluate_policy
 from agent.tools import inventory as tool_inventory
 from agent.thinking import (
     Clarify,
@@ -469,19 +470,12 @@ class ChatSession:
         runtime = self.active_skill_runtime
         if runtime is None:
             return present
-        active_allowed = set(runtime.allowed_tools or ())
-        active_denied = set(runtime.denied_tools or ())
-        if not runtime.tool_policy_active:
-            return present
-        if active_allowed:
-            return [
-                name
-                for name in present
-                if name in active_allowed and name not in active_denied
-            ]
-        if active_denied:
-            return [name for name in present if name not in active_denied]
-        return []
+        return evaluate_policy(
+            present,
+            active=bool(runtime.tool_policy_active),
+            allowed=runtime.allowed_tools or (),
+            denied=runtime.denied_tools or (),
+        )
 
     def _proposer_read_only_denied(self) -> list[str]:
         """Tools explicitly excluded from read-only proposers (for transparency)."""
