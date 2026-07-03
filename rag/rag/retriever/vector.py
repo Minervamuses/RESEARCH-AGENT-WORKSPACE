@@ -2,11 +2,10 @@
 
 from langchain_core.documents import Document
 
-from rag.retriever.base import BaseRetriever
 from rag.store.chroma_store import ChromaStore
 
 
-class VectorRetriever(BaseRetriever):
+class VectorRetriever:
     """Retrieve documents using vector similarity search."""
 
     def __init__(self, chroma_store: ChromaStore):

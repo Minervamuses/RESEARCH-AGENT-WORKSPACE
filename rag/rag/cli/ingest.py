@@ -112,8 +112,10 @@ def ingest_repo(
 
     # Phase 2: Chunk + write to single collection
     chunker = TokenChunker(config)
-    json_store = JSONStore(config.raw_json_path())
-    chroma = ChromaStore(KNOWLEDGE_COLLECTION, config)
+    store = DocumentStore(
+        ChromaStore(KNOWLEDGE_COLLECTION, config),
+        JSONStore(config.raw_json_path()),
+    )
 
     files_ingested = 0
     total_chunks = 0
@@ -150,10 +152,8 @@ def ingest_repo(
                 # Upsert: delete prior chunks for this pid before re-adding so
                 # repeated ingest of the same path doesn't accumulate stale
                 # chunks. pid == rel_path is stable across runs.
-                chroma.delete(rel_path)
-                json_store.delete(rel_path)
-                chroma.add(docs)
-                json_store.add(docs)
+                store.delete(rel_path)
+                store.add(docs)
                 files_ingested += 1
                 total_chunks += len(docs)
                 print(f"  [{category}] {rel_path} ({len(docs)} chunks)")

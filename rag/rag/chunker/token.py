@@ -3,11 +3,10 @@
 import tiktoken
 from langchain_core.documents import Document
 
-from rag.chunker.base import BaseChunker
 from rag.config import RAGConfig
 
 
-class TokenChunker(BaseChunker):
+class TokenChunker:
     """Split text using a token-based sliding window.
 
     Encodes text into tokens using tiktoken, then creates chunks

@@ -4,7 +4,15 @@ import json
 
 from rag.config import RAGConfig
 from rag.llm.openrouter import OpenRouterLLM
-from rag.tagger.base import BaseTagger, FolderMeta
+from dataclasses import dataclass
+
+@dataclass
+class FolderMeta:
+    """Tags and summary for a folder."""
+
+    tags: list[str]
+    summary: str
+
 
 PROMPT_TEMPLATE = """You are a research project classifier. Given a folder path and its contents, return a JSON object with:
 1. "tags": 2-4 hierarchical tags from broad to specific (lowercase kebab-case)
@@ -29,7 +37,7 @@ Previews:
 JSON:"""
 
 
-class LLMTagger(BaseTagger):
+class LLMTagger:
     """Assign tags and generate summaries for folders using an LLM."""
 
     def __init__(self, config: RAGConfig | None = None):

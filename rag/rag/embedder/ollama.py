@@ -4,10 +4,9 @@ from langchain_core.embeddings import Embeddings
 from langchain_ollama import OllamaEmbeddings
 
 from rag.config import RAGConfig
-from rag.embedder.base import BaseEmbedder
 
 
-class OllamaEmbedder(BaseEmbedder, Embeddings):
+class OllamaEmbedder(Embeddings):
     """Embed text using a local Ollama model (e.g., bge-m3).
 
     Also implements langchain's `Embeddings` protocol (via `embed_documents`
