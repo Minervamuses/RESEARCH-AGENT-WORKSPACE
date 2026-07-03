@@ -123,13 +123,3 @@ async def try_scholar_doi(
     notes.append("Scholar DOI lookup produced no DOI")
     return None, notes
 
-
-async def try_scholar_bibtex(
-    runtime: CitationRuntime,
-    candidate: PaperCandidate,
-) -> tuple[str | None, list[str]]:
-    """Backward-compatible wrapper; BibTeX is no longer returned from Scholar."""
-    _doi, notes = await try_scholar_doi(runtime, candidate)
-    if _doi:
-        notes.append("Scholar BibTeX fallback disabled; use DOI/Crossref route instead")
-    return None, notes
