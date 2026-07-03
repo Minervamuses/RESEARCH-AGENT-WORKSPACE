@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -27,7 +28,7 @@ from rag.collect import (
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.store.cache import get_chroma_store, get_json_store
 from rag.store.document_store import DocumentStore
-from rag.tagger.llm_tagger import LLMTagger
+from rag.tagger.llm_tagger import FolderMeta, LLMTagger
 from rag.utils.paths import extract_date
 
 # Chroma add() batch size for repo ingest; folder-level delete+add batching
@@ -36,25 +37,46 @@ _ADD_BATCH_SIZE = 256
 
 
 def _tag_folders(folders: dict[str, list[Path]], root: Path, config: RAGConfig) -> dict[str, dict]:
-    """Use LLM to tag and summarize each folder.
+    """Use LLM to tag and summarize each folder, four folders at a time.
 
     Returns dict mapping folder_rel -> {"tags": [...], "summary": "..."}.
+
+    Failure policy: LLMTagger.tag only swallows parse errors; a hard error
+    (retries exhausted, auth, connection) propagates. All futures are
+    collected first, then any failure aborts the whole run before
+    folder_meta is persisted — same fail-fast outcome as the old serial
+    loop, which stopped at the first hard error.
     """
     tagger = LLMTagger(config)
-    folder_meta: dict[str, dict] = {}
 
     print(f"Tagging {len(folders)} folders...")
-    for folder_rel, files in sorted(folders.items()):
+    ordered = sorted(folders.items())
+
+    def _tag_one(folder_rel: str, files: list[Path]) -> FolderMeta:
         file_names = [f.name for f in files]
         file_previews = {f.name: get_file_preview(f) for f in files[:10]}
+        return tagger.tag(folder_rel or "(project root)", file_names, file_previews)
 
-        folder_display = folder_rel or "(root)"
-        meta = tagger.tag(folder_rel or "(project root)", file_names, file_previews)
+    # The OpenAI client is thread-safe; 4 workers keeps 429 pressure low and
+    # the SDK-side retry (max_retries) absorbs transient rate limits.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            folder_rel: executor.submit(_tag_one, folder_rel, files)
+            for folder_rel, files in ordered
+        }
+        results = {
+            folder_rel: future.result()
+            for folder_rel, future in futures.items()
+        }
+
+    folder_meta: dict[str, dict] = {}
+    for folder_rel, _files in ordered:
+        meta = results[folder_rel]
         folder_meta[folder_rel] = {
             "tags": meta.tags,
             "summary": meta.summary,
         }
-        print(f"  {folder_display} -> {meta.tags}")
+        print(f"  {folder_rel or '(root)'} -> {meta.tags}")
         print(f"    summary: {meta.summary}")
 
     return folder_meta
