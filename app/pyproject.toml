@@ -3,7 +3,7 @@ name = "agent"
 version = "0.1.0"
 description = "Agentic workflow project. Consumes rag as an embedded tool."
 authors = ["Minervamuses"]
-packages = [{ include = "agent" }]
+packages = [{ include = "agent" }, { include = "citation" }]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.14"
