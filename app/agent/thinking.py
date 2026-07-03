@@ -11,6 +11,9 @@ from typing import Any, Literal, Sequence, TypeVar
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field, ValidationError
 
+from agent.history import group_tool_messages_by_call_id
+from agent.llm.text import invoke_text_messages as invoke_text
+from agent.llm.text import normalize_content
 from agent.skills.runtime import render_tool_availability_block
 
 
@@ -472,15 +475,6 @@ def review_messages(
     ]
 
 
-def invoke_text(model, messages: list) -> str:
-    """Invoke a LangChain chat model and normalize text content."""
-    response = model.invoke(messages)
-    content = getattr(response, "content", response)
-    if isinstance(content, list):
-        return "\n".join(_content_part_to_text(part) for part in content)
-    return str(content or "").strip()
-
-
 def rewrite_prompt(
     model,
     *,
@@ -754,7 +748,7 @@ def summarize_tool_trace(
         lines.append("Tool calls: none")
         return "\n".join(lines)
 
-    tool_messages = _tool_messages_by_call_id(new_messages)
+    tool_messages = group_tool_messages_by_call_id(new_messages)
     seen: set[tuple[str, str, str]] = set()
     for call in tool_calls:
         name = str(call.get("name", "unknown"))
@@ -922,36 +916,11 @@ def _heuristic_strip_tail(text: str) -> RevisedDraft | None:
     return RevisedDraft(draft=draft, rebuttal=rebuttal)
 
 
-def _tool_messages_by_call_id(new_messages: list) -> dict[str, list[ToolMessage]]:
-    tool_messages: dict[str, list[ToolMessage]] = {}
-    for message in new_messages:
-        if not isinstance(message, ToolMessage):
-            continue
-        call_id = getattr(message, "tool_call_id", None)
-        if call_id:
-            tool_messages.setdefault(str(call_id), []).append(message)
-    return tool_messages
-
-
 def _tool_result_text(messages: list[ToolMessage]) -> str:
     return "\n".join(
-        _message_content_to_text(getattr(message, "content", ""))
+        normalize_content(getattr(message, "content", ""), drop_unknown_parts=False)
         for message in messages
     ).strip()
-
-
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, list):
-        return "\n".join(_content_part_to_text(part) for part in content)
-    return str(content or "")
-
-
-def _content_part_to_text(part: Any) -> str:
-    if isinstance(part, dict):
-        text = part.get("text")
-        if text is not None:
-            return str(text)
-    return str(part)
 
 
 def _indent_block(text: str, prefix: str) -> list[str]:

@@ -2,7 +2,7 @@
 
 from collections import Counter
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 
 def extract_tool_calls(messages: list[BaseMessage]) -> list[dict]:
@@ -34,3 +34,15 @@ def format_tool_counts(tool_calls: list[dict]) -> str:
     if not counts:
         return ""
     return ", ".join(f"{name} x{counts[name]}" for name in sorted(counts))
+
+
+def group_tool_messages_by_call_id(messages: list[BaseMessage]) -> dict[str, list[ToolMessage]]:
+    """Group ToolMessages by tool_call_id, preserving arrival order."""
+    tool_messages: dict[str, list[ToolMessage]] = {}
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        call_id = getattr(message, "tool_call_id", None)
+        if call_id:
+            tool_messages.setdefault(str(call_id), []).append(message)
+    return tool_messages

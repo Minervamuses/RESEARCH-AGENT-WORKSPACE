@@ -18,6 +18,7 @@ from agent.graph import build_graph
 from agent.history import (
     extract_tool_calls,
     format_tool_counts,
+    group_tool_messages_by_call_id,
 )
 from agent.history_rag import ChatHistoryStore, get_chat_history_store
 from agent.llm.thinking import (
@@ -387,18 +388,12 @@ class ChatSession:
         if not tool_calls:
             return []
 
-        tool_messages: dict[str, list[ToolMessage]] = {}
-        for message in new_messages:
-            if not isinstance(message, ToolMessage):
-                continue
-            call_id = getattr(message, "tool_call_id", None)
-            if call_id:
-                tool_messages.setdefault(call_id, []).append(message)
+        tool_messages = group_tool_messages_by_call_id(new_messages)
 
         lines: list[str] = []
         for call in tool_calls:
             call_id = call.get("id")
-            results = tool_messages.get(call_id, []) if call_id else []
+            results = tool_messages.get(str(call_id), []) if call_id else []
             lines.extend([
                 f"### Tool: {call.get('name', 'unknown')}",
                 "",
