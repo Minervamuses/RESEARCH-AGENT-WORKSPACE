@@ -64,6 +64,7 @@ from agent.memory import (
 )
 from agent.paths import find_app_root
 from agent.plan_log import PlanLog
+from agent.turn_store import TurnStore
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,14 @@ class ChatSession:
             session_id=self.session_id,
             app_root_resolver=lambda: find_app_root(),
         )
+        # Shares the recent_turns list by reference: prompt assembly reads it
+        # on the facade while TurnStore owns spilling it into the store.
+        self._turn_store = TurnStore(
+            self.history_store,
+            config=config,
+            session_id=self.session_id,
+            recent_turns=self.recent_turns,
+        )
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
@@ -249,21 +258,7 @@ class ChatSession:
         ))
 
     async def _store_turn(self, turn: TurnRecord) -> None:
-        if turn.persist_target == "plan_log":
-            return
-        if turn.persist_target == "none":
-            return
-        if turn.persist_target != "chroma":
-            raise ValueError(
-                f"unknown persist_target={turn.persist_target!r} on turn {turn.turn_id}"
-            )
-        await asyncio.to_thread(
-            self.history_store.add_turn,
-            turn,
-            session_id=self.session_id,
-            turn_id=turn.turn_id,
-            timestamp=turn.timestamp,
-        )
+        await self._turn_store.store_turn(turn)
 
     async def enter_plan_mode(self) -> Path:
         """Enable plan mode for newly created turns."""
@@ -627,41 +622,9 @@ class ChatSession:
             f"- {exc}"
         )
 
-    async def _evict_overflow(self) -> None:
-        """Spill turns past the window into the long-term store. Log + keep on failure."""
-        window = self.config.agent_recent_turns_window
-        hard_cap = window * 3
-        while len(self.recent_turns) > window:
-            oldest = self.recent_turns[0]
-            try:
-                await self._store_turn(oldest)
-            except Exception as exc:
-                logger.warning(
-                    "history_rag: eviction failed for turn %s (kept in recent_turns): %s",
-                    oldest.turn_id, exc,
-                )
-                if len(self.recent_turns) > hard_cap:
-                    logger.error(
-                        "history_rag: hard cap %d reached; dropping oldest turn %s unrecorded",
-                        hard_cap, oldest.turn_id,
-                    )
-                    self.recent_turns.pop(0)
-                break  # don't retry within the same turn
-            self.recent_turns.pop(0)
-
     async def flush_recent_turns(self) -> None:
         """Persist all prompt-visible turns before the session is discarded."""
-        while self.recent_turns:
-            oldest = self.recent_turns[0]
-            try:
-                await self._store_turn(oldest)
-            except Exception as exc:
-                logger.warning(
-                    "history_rag: shutdown flush failed for turn %s (left in recent_turns): %s",
-                    oldest.turn_id, exc,
-                )
-                break
-            self.recent_turns.pop(0)
+        await self._turn_store.flush()
 
     async def _execute_graph(
         self,
@@ -809,7 +772,7 @@ class ChatSession:
             "tool_counts": format_tool_counts(tool_calls),
             "fusion": fusion,
         })
-        await self._evict_overflow()
+        await self._turn_store.evict_overflow()
 
     async def _run_normal_turn(self, user_input: str) -> tuple[str, list[dict]]:
         result = await self._run_graph_turn(user_input)
