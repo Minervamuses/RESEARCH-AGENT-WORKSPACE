@@ -5,7 +5,6 @@ agent.llm to keep the tool boundary clean.
 """
 
 from rag.llm.base import BaseLLM
-from rag.llm.ollama import OllamaLLM
 from rag.llm.openrouter import OpenRouterLLM
 
-__all__ = ["BaseLLM", "OllamaLLM", "OpenRouterLLM"]
+__all__ = ["BaseLLM", "OpenRouterLLM"]
