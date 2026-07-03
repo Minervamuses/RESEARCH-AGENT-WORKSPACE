@@ -1,8 +1,7 @@
 """Tests for LangChain LLM model factories."""
 
 from agent.config import AgentConfig
-from agent.llm import ollama, openrouter
-from agent.llm.ollama import get_ollama_chat_model
+from agent.llm import openrouter
 from agent.llm.openrouter import get_chat_model, get_openrouter_chat_model
 from agent.llm.text import invoke_text
 
@@ -68,23 +67,6 @@ def test_get_openrouter_chat_model_applies_eval_overrides(monkeypatch, tmp_path)
     assert calls[0]["temperature"] == 0.0
     assert calls[0]["max_retries"] == 7
     assert calls[0]["extra_body"] == {"reasoning": {"enabled": False}}
-
-
-def test_get_ollama_chat_model_applies_filter_overrides(monkeypatch, tmp_path):
-    calls: list[dict] = []
-
-    class FakeChatOllama:
-        def __init__(self, **kwargs):
-            calls.append(kwargs)
-
-    monkeypatch.setattr(ollama, "ChatOllama", FakeChatOllama)
-    cfg = AgentConfig(persist_dir=str(tmp_path), filter_llm_model="llama3.1:8b")
-
-    get_ollama_chat_model(cfg, max_tokens=8, temperature=0.0)
-
-    assert calls[0]["model"] == "llama3.1:8b"
-    assert calls[0]["num_predict"] == 8
-    assert calls[0]["temperature"] == 0.0
 
 
 def test_invoke_text_invokes_chat_model_with_human_message():

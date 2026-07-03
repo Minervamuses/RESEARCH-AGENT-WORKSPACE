@@ -24,7 +24,6 @@ class AgentConfig(RAGConfig):
     # Evaluation LLMs
     gen_llm_model: str = "google/gemini-3.1-pro-preview"
     judge_llm_model: str = "openai/gpt-5.2"
-    filter_llm_model: str = "llama3.1:8b"
 
     # Extended thinking role models.
     thinking_reviewer_model: str = "anthropic/claude-haiku-4.5"

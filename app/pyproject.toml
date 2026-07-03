@@ -12,7 +12,6 @@ rag = { path = "../rag", develop = true }
 
 langchain-core = "^1.2.0"
 langchain-openai = "^1.1.12"
-langchain-ollama = "^1.1.0"
 langchain-mcp-adapters = "^0.2.2"
 langgraph = "^1.1.4"
 pydantic = "^2.0"
