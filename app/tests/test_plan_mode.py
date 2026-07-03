@@ -3,59 +3,33 @@
 import asyncio
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+
+from conftest import FakeHistoryStore, make_astream_graph, tool_then_answer_updates
 
 from agent.config import AgentConfig
 from agent.memory import TurnRecord
 from agent.session import ChatSession
 
 
-class _FakeHistoryStore:
-    def __init__(self):
-        self.adds: list[TurnRecord] = []
-
-    def add_turn(self, turn: TurnRecord, *, session_id: str, turn_id: int, timestamp: str) -> None:
-        self.adds.append(turn)
-
-
-class _AnswerGraph:
-    def __init__(self, answer: str = "ok"):
-        self.answer = answer
-
-    async def astream(self, state, config=None, stream_mode="updates"):
-        yield {"agent": {"messages": [AIMessage(content=self.answer)]}}
+def _web_search_updates():
+    return tool_then_answer_updates(
+        "tavily_search",
+        {"query": "plan mode"},
+        "call-1",
+        "search result payload",
+        "final answer",
+    )
 
 
-class _WebSearchGraph:
-    async def astream(self, state, config=None, stream_mode="updates"):
-        yield {
-            "agent": {
-                "messages": [
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "name": "tavily_search",
-                                "args": {"query": "plan mode"},
-                                "id": "call-1",
-                            }
-                        ],
-                    )
-                ]
-            }
-        }
-        yield {
-            "tools": {
-                "messages": [
-                    ToolMessage(
-                        content="search result payload",
-                        name="tavily_search",
-                        tool_call_id="call-1",
-                    )
-                ]
-            }
-        }
-        yield {"agent": {"messages": [AIMessage(content="final answer")]}}
+def _large_tool_updates(payload: str):
+    """A single rag_search call whose result payload is very large."""
+    return tool_then_answer_updates(
+        "rag_search",
+        {"query": "big"},
+        "call-big",
+        payload,
+        "answer",
+    )
 
 
 @pytest.fixture
@@ -63,13 +37,13 @@ def make_session(monkeypatch, tmp_path):
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: _AnswerGraph(),
+        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
     )
 
     def _make(window: int = 2, graph=None, web_search_tool_names=None):
         cfg = AgentConfig(persist_dir=str(tmp_path / "persist"))
         cfg.agent_recent_turns_window = window
-        store = _FakeHistoryStore()
+        store = FakeHistoryStore()
         session = ChatSession(
             cfg,
             history_store=store,
@@ -124,7 +98,7 @@ def test_no_chroma_leak_after_exit(make_session):
         asyncio.run(session.turn(f"normal {index}"))
     asyncio.run(session.flush_recent_turns())
 
-    assert [turn.user_input for turn in store.adds] == [f"normal {index}" for index in range(5)]
+    assert [item["user_input"] for item in store.adds] == [f"normal {index}" for index in range(5)]
 
 
 def test_md_write_failure_aborts_turn(make_session, monkeypatch):
@@ -147,7 +121,7 @@ def test_md_write_failure_aborts_turn(make_session, monkeypatch):
 def test_render_plan_block_includes_all_tools(make_session):
     session, _store, _log_dir = make_session(
         window=2,
-        graph=_WebSearchGraph(),
+        graph=make_astream_graph(_web_search_updates()),
     )
     asyncio.run(session.enter_plan_mode())
     asyncio.run(session.turn("search for plan mode"))
@@ -159,46 +133,11 @@ def test_render_plan_block_includes_all_tools(make_session):
     assert "search result payload" in content
 
 
-class _LargeToolGraph:
-    """Graph that returns a single tool result whose payload is very large."""
-
-    def __init__(self, payload: str):
-        self._payload = payload
-
-    async def astream(self, state, config=None, stream_mode="updates"):
-        yield {
-            "agent": {
-                "messages": [
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "name": "rag_search",
-                                "args": {"query": "big"},
-                                "id": "call-big",
-                            }
-                        ],
-                    )
-                ]
-            }
-        }
-        yield {
-            "tools": {
-                "messages": [
-                    ToolMessage(
-                        content=self._payload,
-                        name="rag_search",
-                        tool_call_id="call-big",
-                    )
-                ]
-            }
-        }
-        yield {"agent": {"messages": [AIMessage(content="answer")]}}
-
-
 def test_plan_log_truncates_oversize_tool_result(make_session):
     payload = "x" * 100_000
-    session, _store, _log_dir = make_session(window=2, graph=_LargeToolGraph(payload))
+    session, _store, _log_dir = make_session(
+        window=2, graph=make_astream_graph(_large_tool_updates(payload)),
+    )
     session.config.plan_log_max_tool_chars = 1024
     asyncio.run(session.enter_plan_mode())
     asyncio.run(session.turn("ask for big result"))
@@ -214,13 +153,13 @@ def test_plan_log_truncation_does_not_affect_llm_context(make_session, monkeypat
     payload = "y" * 50_000
     captured: dict[str, list] = {"messages": []}
 
-    class _CaptureGraph(_LargeToolGraph):
-        async def astream(self, state, config=None, stream_mode="updates"):
-            captured["messages"] = list(state["messages"])
-            async for update in super().astream(state, config=config, stream_mode=stream_mode):
-                yield update
+    def _capture_state(state):
+        captured["messages"] = list(state["messages"])
 
-    session, _store, _log_dir = make_session(window=2, graph=_CaptureGraph(payload))
+    session, _store, _log_dir = make_session(
+        window=2,
+        graph=make_astream_graph(_large_tool_updates(payload), on_state=_capture_state),
+    )
     session.config.plan_log_max_tool_chars = 1024
     asyncio.run(session.enter_plan_mode())
     asyncio.run(session.turn("trigger big tool"))

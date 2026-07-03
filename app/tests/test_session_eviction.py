@@ -15,50 +15,22 @@ import asyncio
 import logging
 
 import pytest
-from langchain_core.messages import AIMessage
+
+from conftest import FakeHistoryStore, make_astream_graph
 
 from agent.config import AgentConfig
-from agent.memory import TurnRecord
 from agent.session import ChatSession
 
 
-class _FakeGraph:
-    async def astream(self, state, config=None, stream_mode="updates"):
-        yield {"agent": {"messages": [AIMessage(content="ok")]}}
-
-
-class _FakeHistoryStore:
-    def __init__(self, raise_on_add: bool = False):
-        self.adds: list[dict] = []
-        self.raise_on_add = raise_on_add
-
-    def add_turn(self, turn: TurnRecord, *, session_id: str, turn_id: int, timestamp: str) -> None:
-        if self.raise_on_add:
-            raise RuntimeError("ollama unavailable")
-        self.adds.append(
-            {
-                "user_input": turn.user_input,
-                "assistant_output": turn.assistant_output,
-                "session_id": session_id,
-                "turn_id": turn_id,
-                "timestamp": timestamp,
-            }
-        )
-
-
-class _SnapshotGraph:
+def _snapshot_graph(store: FakeHistoryStore):
     """Records what the agent would see: prompt messages and prior evictions."""
-
-    def __init__(self, history_store: _FakeHistoryStore):
-        self.history_store = history_store
-        self.snapshots: list[dict] = []
-
-    async def astream(self, state, config=None, stream_mode="updates"):
-        self.snapshots.append({
-            "persisted_before_agent": [item["user_input"] for item in self.history_store.adds],
-            "contents": [msg.content for msg in state["messages"]],
-        })
-        yield {"agent": {"messages": [AIMessage(content="ok")]}}
+    graph = make_astream_graph()
+    graph.snapshots = []
+    graph.on_state = lambda state: graph.snapshots.append({
+        "persisted_before_agent": [item["user_input"] for item in store.adds],
+        "contents": [msg.content for msg in state["messages"]],
+    })
+    return graph
 
 
 @pytest.fixture
@@ -66,13 +38,13 @@ def make_session(monkeypatch, tmp_path):
     """Factory: build a ChatSession with a fake graph and fake history store."""
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: _FakeGraph(),
+        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
     )
 
-    def _make(window: int, history_store: _FakeHistoryStore | None = None):
+    def _make(window: int, history_store: FakeHistoryStore | None = None):
         cfg = AgentConfig(persist_dir=str(tmp_path))
         cfg.agent_recent_turns_window = window
-        store = history_store or _FakeHistoryStore()
+        store = history_store or FakeHistoryStore()
         session = ChatSession(cfg, history_store=store)
         return session, store
 
@@ -116,7 +88,7 @@ def test_window_stays_bounded_across_many_turns(make_session):
 
 
 def test_eviction_failure_logs_and_keeps_turn(make_session, caplog):
-    failing_store = _FakeHistoryStore(raise_on_add=True)
+    failing_store = FakeHistoryStore(raise_on_add=True)
     session, _ = make_session(window=2, history_store=failing_store)
 
     with caplog.at_level(logging.WARNING, logger="agent.session"):
@@ -128,7 +100,7 @@ def test_eviction_failure_logs_and_keeps_turn(make_session, caplog):
 
 
 def test_hard_cap_drops_oldest_after_persistent_failure(make_session, caplog):
-    failing_store = _FakeHistoryStore(raise_on_add=True)
+    failing_store = FakeHistoryStore(raise_on_add=True)
     session, _ = make_session(window=2, history_store=failing_store)
 
     with caplog.at_level(logging.ERROR, logger="agent.session"):
@@ -143,7 +115,7 @@ def test_hard_cap_drops_oldest_after_persistent_failure(make_session, caplog):
 
 def test_turn_stays_prompt_visible_until_evicted(make_session):
     session, store = make_session(window=10)
-    graph = _SnapshotGraph(store)
+    graph = _snapshot_graph(store)
     session.graph = graph
 
     for i in range(1, 12):
@@ -156,9 +128,9 @@ def test_turn_stays_prompt_visible_until_evicted(make_session):
 
 
 def test_failed_eviction_turn_stays_prompt_visible(make_session):
-    failing_store = _FakeHistoryStore(raise_on_add=True)
+    failing_store = FakeHistoryStore(raise_on_add=True)
     session, _ = make_session(window=2, history_store=failing_store)
-    graph = _SnapshotGraph(failing_store)
+    graph = _snapshot_graph(failing_store)
     session.graph = graph
 
     for i in range(4):
@@ -192,7 +164,7 @@ def test_flush_recent_turns_is_idempotent(make_session):
 
 
 def test_flush_recent_turns_logs_and_keeps_turn_on_failure(make_session, caplog):
-    failing_store = _FakeHistoryStore(raise_on_add=True)
+    failing_store = FakeHistoryStore(raise_on_add=True)
     session, _ = make_session(window=10, history_store=failing_store)
     asyncio.run(session.turn("q0"))
 

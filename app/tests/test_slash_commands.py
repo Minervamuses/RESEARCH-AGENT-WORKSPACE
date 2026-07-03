@@ -5,6 +5,8 @@ import asyncio
 import pytest
 from prompt_toolkit.document import Document
 
+from conftest import FakeChatSession
+
 from agent.config import AgentConfig
 from agent.skills import SkillMetadata
 from agent.cli.prompting import SlashCommandCompleter
@@ -550,9 +552,6 @@ def test_handle_skill_unknown_name_raises(tmp_path):
 
 
 def test_handle_ingest_translates_value_error(monkeypatch, tmp_path):
-    class FakeSession:
-        config = object()
-
     def fail_ingest_single(*args, **kwargs):
         raise ValueError("refusing to ingest")
 
@@ -565,7 +564,7 @@ def test_handle_ingest_translates_value_error(monkeypatch, tmp_path):
             execute_slash_command(
                 parse_slash_command(f"/ingest {target}"),
                 SlashCommandContext(
-                    session=FakeSession(),
+                    session=FakeChatSession(config=object()),
                     registry=build_default_registry(),
                 ),
             )

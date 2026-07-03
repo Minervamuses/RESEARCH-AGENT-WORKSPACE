@@ -4,31 +4,17 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
+
+from conftest import FakeHistoryStore, QueuedModel
+from conftest import answer_updates as _answer
+from conftest import tool_then_answer_updates as _tool_then_answer
 
 from agent.config import AgentConfig
-from agent.memory import TurnRecord
 from agent.session import ChatSession
 
 
 # --- Fake graph factory + scripted graphs ---------------------------------
-
-
-def _answer(text):
-    return [{"agent": {"messages": [AIMessage(content=text)]}}]
-
-
-def _tool_then_answer(name, args, call_id, result, text):
-    return [
-        {"agent": {"messages": [AIMessage(
-            content="",
-            tool_calls=[{"name": name, "args": args, "id": call_id}],
-        )]}},
-        {"tools": {"messages": [ToolMessage(
-            content=result, name=name, tool_call_id=call_id,
-        )]}},
-        {"agent": {"messages": [AIMessage(content=text)]}},
-    ]
 
 
 class _QueueGraph:
@@ -62,27 +48,6 @@ class _Factory:
             "extra_tool_names": [getattr(t, "name", str(t)) for t in (extra_tools or [])],
         })
         return _QueueGraph(self, cfg.llm_model)
-
-
-class _FakeHistoryStore:
-    def __init__(self):
-        self.adds: list[dict] = []
-
-    def add_turn(self, turn: TurnRecord, *, session_id: str, turn_id: int, timestamp: str):
-        self.adds.append({
-            "user_input": turn.user_input,
-            "assistant_output": turn.assistant_output,
-        })
-
-
-class _QueuedModel:
-    def __init__(self, outputs):
-        self.outputs = list(outputs)
-        self.calls: list[list] = []
-
-    def invoke(self, messages):
-        self.calls.append(messages)
-        return AIMessage(content=self.outputs.pop(0))
 
 
 def _review_json(decision="pass", findings=None, summary="ok"):
@@ -140,7 +105,7 @@ def _make_session(monkeypatch, tmp_path, factory, *, models, cfg):
         lambda _cfg: models["aggregator"],
     )
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
-    session = ChatSession(cfg, history_store=_FakeHistoryStore())
+    session = ChatSession(cfg, history_store=FakeHistoryStore())
     session._prompt_master_skill_text_cache = "prompt-master skill"
     session.set_thinking_mode("extended")
     return session
@@ -148,10 +113,10 @@ def _make_session(monkeypatch, tmp_path, factory, *, models, cfg):
 
 def _default_models(**overrides):
     models = {
-        "rewrite": _QueuedModel(["rewritten prompt"]),
-        "reviewer": _QueuedModel([_review_json("pass")]),
-        "repair": _QueuedModel([]),
-        "aggregator": _QueuedModel([_aggregate_json(
+        "rewrite": QueuedModel(["rewritten prompt"]),
+        "reviewer": QueuedModel([_review_json("pass")]),
+        "repair": QueuedModel([]),
+        "aggregator": QueuedModel([_aggregate_json(
             draft="fused", selected=["candidate-1", "candidate-2", "candidate-3"],
         )]),
     }
@@ -229,7 +194,7 @@ def test_two_of_three_success_runs_partial_panel(monkeypatch, tmp_path):
     factory = _Factory(scripts={
         "p1": [_answer("a1")], "p2": [_answer("")], "p3": [_answer("a3")],
     })
-    models = _default_models(aggregator=_QueuedModel([
+    models = _default_models(aggregator=QueuedModel([
         _aggregate_json(draft="fused", selected=["candidate-1", "candidate-3"]),
     ]))
     session = _make_session(
@@ -290,7 +255,7 @@ def test_zero_success_runs_base_fallback_into_reviewer(monkeypatch, tmp_path):
 
 def test_aggregator_invalid_json_falls_back_then_reviews(monkeypatch, tmp_path):
     factory = _Factory(scripts={"p1": [_answer("a1")], "p2": [_answer("a2")]})
-    models = _default_models(aggregator=_QueuedModel(["not json at all"]))
+    models = _default_models(aggregator=QueuedModel(["not json at all"]))
     session = _make_session(
         monkeypatch, tmp_path, factory,
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2"]),
@@ -307,7 +272,7 @@ def test_aggregator_invalid_json_falls_back_then_reviews(monkeypatch, tmp_path):
 
 def test_aggregator_schema_invalid_falls_back_then_reviews(monkeypatch, tmp_path):
     factory = _Factory(scripts={"p1": [_answer("a1")], "p2": [_answer("a2")]})
-    models = _default_models(aggregator=_QueuedModel([
+    models = _default_models(aggregator=QueuedModel([
         _aggregate_json(draft="fused", selected=["candidate-99"]),
     ]))
     session = _make_session(
@@ -366,7 +331,7 @@ def test_reviewer_revise_path_still_works(monkeypatch, tmp_path):
         "p1": [_answer("draft answer")],
         "session-writer": [_answer("DRAFT:\nrevised answer\n\nREBUTTAL:\n(none)")],
     })
-    models = _default_models(reviewer=_QueuedModel([
+    models = _default_models(reviewer=QueuedModel([
         _review_json("revise", [_finding()], "needs revision"),
         _review_json("pass"),
     ]))
@@ -417,7 +382,7 @@ def test_final_skill_validation_still_applies(monkeypatch, tmp_path):
 
 def test_extended_clarification_skips_candidate_panel(monkeypatch, tmp_path):
     factory = _Factory(scripts={"p1": [_answer("should not run")]})
-    models = _default_models(rewrite=_QueuedModel(["<<CLARIFY>>\n- Which journal?"]))
+    models = _default_models(rewrite=QueuedModel(["<<CLARIFY>>\n- Which journal?"]))
     session = _make_session(
         monkeypatch, tmp_path, factory,
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1"]),
@@ -438,7 +403,7 @@ def _two_tool_candidate_session(monkeypatch, tmp_path):
         "p1": [_tool_then_answer("rag_search", {"q": "x"}, "call-1", "RES1", "a1")],
         "p2": [_tool_then_answer("rag_search", {"q": "y"}, "call-1", "RES2", "a2")],
     })
-    models = _default_models(aggregator=_QueuedModel([
+    models = _default_models(aggregator=QueuedModel([
         _aggregate_json(draft="fused", selected=["candidate-1", "candidate-2"]),
     ]))
     session = _make_session(

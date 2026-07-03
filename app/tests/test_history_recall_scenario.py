@@ -18,8 +18,9 @@ from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from conftest import FakeHistoryStore, QueuedModel
+
 from agent.config import AgentConfig
-from agent.memory import TurnRecord
 from agent.session import ChatSession
 
 
@@ -42,24 +43,6 @@ class _ScriptedGraph:
         else:  # pragma: no cover - guards against unexpected extra graph turns
             script = [AIMessage(content="(unscripted graph call)")]
         yield {"agent": {"messages": list(script)}}
-
-
-class _QueuedModel:
-    def __init__(self, outputs):
-        self.outputs = list(outputs)
-        self.calls: list[list] = []
-
-    def invoke(self, messages):
-        self.calls.append(messages)
-        return AIMessage(content=self.outputs.pop(0))
-
-
-class _FakeHistoryStore:
-    def __init__(self):
-        self.adds: list[dict] = []
-
-    def add_turn(self, turn: TurnRecord, *, session_id, turn_id, timestamp):
-        self.adds.append({"turn_id": turn_id})
 
 
 def _config(tmp_path, **overrides):
@@ -102,7 +85,7 @@ def _make_session(monkeypatch, tmp_path, graph, models, runtime, cfg=None):
         "agent.session.get_chat_model_for_role",
         lambda _cfg, *, role: models[role],
     )
-    session = ChatSession(cfg or _config(tmp_path), history_store=_FakeHistoryStore())
+    session = ChatSession(cfg or _config(tmp_path), history_store=FakeHistoryStore())
     session._prompt_master_skill_text_cache = "prompt-master skill"
     session.active_skill_runtime = runtime
     session.set_thinking_mode("extended")
@@ -144,8 +127,8 @@ def test_case_a_retrieval_not_attempted_routes_to_reviser_with_recall_history(
         ],
     ])
     models = {
-        "rewrite": _QueuedModel(["請依據既有對話紀錄整理一月上半成果的 abstract 重點。"]),
-        "reviewer": _QueuedModel([
+        "rewrite": QueuedModel(["請依據既有對話紀錄整理一月上半成果的 abstract 重點。"]),
+        "reviewer": QueuedModel([
             _review_json("revise", [{
                 "severity": "major",
                 "dimension": "instruction following",
@@ -158,7 +141,7 @@ def test_case_a_retrieval_not_attempted_routes_to_reviser_with_recall_history(
             }]),
             _review_json("pass", []),
         ]),
-        "repair": _QueuedModel([]),
+        "repair": QueuedModel([]),
     }
     runtime = _academic_runtime(
         tmp_path,
@@ -202,8 +185,8 @@ def test_case_b_empty_history_yields_honest_answer_mentioning_plan_logs(
         ],
     ])
     models = {
-        "rewrite": _QueuedModel(["依據既有對話紀錄回答一月上半的研究成果。"]),
-        "reviewer": _QueuedModel([
+        "rewrite": QueuedModel(["依據既有對話紀錄回答一月上半的研究成果。"]),
+        "reviewer": QueuedModel([
             _review_json("revise", [{
                 "severity": "minor",
                 "dimension": "claim-evidence alignment",
@@ -215,7 +198,7 @@ def test_case_b_empty_history_yields_honest_answer_mentioning_plan_logs(
                 "failure_mode": "retrieval_empty",
             }]),
         ]),
-        "repair": _QueuedModel([]),
+        "repair": QueuedModel([]),
     }
     runtime = _academic_runtime(
         tmp_path,
@@ -251,8 +234,8 @@ def test_case_c_denied_history_tool_explains_policy_without_intake_checklist(
         [AIMessage(content="請先提供研究資料。")],
     ])
     models = {
-        "rewrite": _QueuedModel(["依據既有對話紀錄回答一月上半的研究成果。"]),
-        "reviewer": _QueuedModel([
+        "rewrite": QueuedModel(["依據既有對話紀錄回答一月上半的研究成果。"]),
+        "reviewer": QueuedModel([
             _review_json("block", [{
                 "severity": "blocker",
                 "dimension": "instruction following",
@@ -265,7 +248,7 @@ def test_case_c_denied_history_tool_explains_policy_without_intake_checklist(
                 "failure_mode": "tool_unavailable",
             }]),
         ]),
-        "repair": _QueuedModel([]),
+        "repair": QueuedModel([]),
     }
     runtime = _academic_runtime(
         tmp_path,
