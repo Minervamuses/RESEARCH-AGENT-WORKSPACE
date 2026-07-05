@@ -8,7 +8,6 @@ build/
 .pytest_cache/
 /store/*
 *.sqlite3
-poetry.lock
 
 # Agent / AI tool configs
 CLAUDE.md
