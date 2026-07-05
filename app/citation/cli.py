@@ -22,7 +22,7 @@ import sys
 import time
 
 from citation.capture import capture_citation
-from citation.discovery import agentic_discover
+from citation.discovery import OpenRouterDiscoveryError, agentic_discover
 from citation.models import CrossrefMatch, PaperCandidate
 from citation.runtime import (
     OpenRouterUnavailable,
@@ -165,12 +165,22 @@ async def _run(args: argparse.Namespace) -> int:
     except WebSearchUnavailable as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+    except OpenRouterDiscoveryError as exc:
+        print(
+            f"ERROR: OpenRouter discovery call failed: {exc}\n"
+            "  This is an OpenRouter/API problem, not an empty search result.\n"
+            "  Check OPENROUTER_API_KEY, the configured model name, and your\n"
+            "  OpenRouter account's access, then retry.",
+            file=sys.stderr,
+        )
+        return 2
     progress(f"discovery: finished with {len(candidates)} candidate(s)")
 
     if not candidates:
         print(
-            "No candidate papers found. The agent's searches returned no "
-            "parseable results — try rephrasing or broadening the request.",
+            "No candidate papers found. The agentic search completed but its "
+            "results contained no parseable papers — try rephrasing or "
+            "broadening the request.",
             file=sys.stderr,
         )
         return 3

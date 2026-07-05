@@ -1,19 +1,21 @@
 """Google Scholar-oriented discovery via the Web Search MCP.
 
-Two discovery modes, both grounded in real tool output (never hallucinated):
+One discovery mode, grounded in real tool output (never hallucinated):
+:func:`agentic_discover` — the model is given the web-search tools and
+*decides the queries itself*. A natural language request like
+"找關於檢索效率的文章" leads the model to search terms it judges relevant
+(e.g. ``BM25``, ``learned sparse retrieval``, ``reranking latency``), possibly
+across several searches, then we extract candidates from everything it
+actually retrieved.
 
-  * :func:`agentic_discover` (default when an LLM is available) — the model is
-    given the web-search tools and *decides the queries itself*. A natural
-    language request like "找關於檢索效率的文章" leads the model to search terms
-    it judges relevant (e.g. ``BM25``, ``learned sparse retrieval``,
-    ``reranking latency``), possibly across several searches, then we extract
-    candidates from everything it actually retrieved.
-  * :func:`discover_candidates` (fallback) — a single deterministic
-    scholar-oriented query, used when no LLM is configured.
+There is no deterministic fallback: a working OpenRouter model is a hard
+requirement (enforced by the runtime), an LLM/API failure during discovery
+raises :class:`OpenRouterDiscoveryError`, and an empty result strictly means
+the agentic search ran to completion without parseable candidates.
 
-Either way the LLM never writes BibTeX. We also do NOT scrape Google Scholar's
-result pages directly (CAPTCHA-guarded, not a stable API); we bias normal web
-search toward scholarly sources and surface what it returns.
+The LLM never writes BibTeX. We also do NOT scrape Google Scholar's result
+pages directly (CAPTCHA-guarded, not a stable API); we bias normal web search
+toward scholarly sources and surface what it returns.
 """
 
 from __future__ import annotations
@@ -50,23 +52,22 @@ _URL_LINE = re.compile(r"^URL:\s*(.+?)\s*$")
 _DESC_LINE = re.compile(r"^Description:\s*(.*?)\s*$")
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
-# Scholarly hint appended to the user's topic. Bias the engines (Bing/Brave/
-# DuckDuckGo) toward academic sources without pretending Scholar is an API.
-_SCHOLAR_HINT = "research paper (site:scholar.google.com/scholar_lookup OR arxiv OR doi)"
 _LLM_DISCOVERY_TIMEOUT_SECONDS = 60.0
 _LLM_RANK_TIMEOUT_SECONDS = 30.0
 _TOOL_TIMEOUT_SECONDS = 30.0
 
 
+class OpenRouterDiscoveryError(RuntimeError):
+    """Raised when a discovery LLM call fails or times out.
+
+    Distinguishes an OpenRouter/API problem (CLI exit code 2) from a search
+    that completed but found no parseable candidates (CLI exit code 3).
+    """
+
+
 def _emit(progress_cb: ProgressCallback | None, message: str) -> None:
     if progress_cb is not None:
         progress_cb(message)
-
-
-def build_scholar_query(topic: str) -> str:
-    """Compose a scholar-oriented query from the user's free-text topic."""
-    topic = topic.strip()
-    return f"{topic} {_SCHOLAR_HINT}"
 
 
 def clean_search_title(raw_title: str) -> str:
@@ -341,69 +342,6 @@ async def _llm_annotate(
     return by_index
 
 
-async def _enrich_with_llm(
-    llm,
-    topic: str,
-    candidates: list[PaperCandidate],
-    progress_cb: ProgressCallback | None = None,
-) -> None:
-    """Best-effort: ask the LLM to fill authors/year and a relevance reason.
-
-    Mutates ``candidates`` in place. Any failure leaves the deterministic
-    fields untouched — the LLM never invents a citation, only annotates.
-    """
-    if llm is None or not candidates:
-        return
-    system = (
-        "You annotate web search results about an academic topic. "
-        "For each result, extract author surnames and publication year ONLY if "
-        "they are clearly present in the title/snippet; otherwise leave them "
-        "empty/null. Never guess. Also give a one-sentence reason why the result "
-        "matches the topic. Reply with a JSON array of objects: "
-        '{"index": int, "authors": [str], "year": int|null, "reason": str}.'
-    )
-    payload = _candidate_payload(candidates)
-    human = f"Topic: {topic}\n\nResults:\n{json.dumps(payload, ensure_ascii=False)}"
-    await _llm_annotate(
-        llm,
-        system=system,
-        human=human,
-        candidates=candidates,
-        stage="enrichment",
-        ask="annotate",
-        failure_log="LLM enrichment failed (%s); using parsed fields only",
-        failure_note="using parsed fields",
-        progress_cb=progress_cb,
-    )
-
-
-async def discover_candidates(
-    runtime: CitationRuntime,
-    topic: str,
-    *,
-    limit: int = 6,
-    progress_cb: ProgressCallback | None = None,
-) -> list[PaperCandidate]:
-    """Run one scholar-oriented search and return parsed, enriched candidates.
-
-    Raises:
-        WebSearchUnavailable: if the summaries tool is not loaded.
-    """
-    tool = runtime.require_web_tool(SUMMARIES_TOOL)
-    query = build_scholar_query(topic)
-    limit = max(1, min(int(limit), 10))
-    logger.info("discovery query: %s (limit=%d)", query, limit)
-    _emit(progress_cb, f"discovery: running fallback web search query={query!r}")
-    started = time.perf_counter()
-    result = await tool.ainvoke({"query": query, "limit": limit})
-    _emit(progress_cb, f"discovery: fallback web search returned in {time.perf_counter() - started:.1f}s")
-    text = coerce_text(result)
-    candidates = parse_summaries(text)
-    _emit(progress_cb, f"discovery: parsed {len(candidates)} candidate(s)")
-    await _enrich_with_llm(runtime.llm, topic, candidates, progress_cb=progress_cb)
-    return candidates
-
-
 # --- Agentic discovery: the LLM decides what to search ---------------------
 
 _SEARCH_SYSTEM_PROMPT = """You are a research librarian finding ACADEMIC PAPERS.
@@ -488,10 +426,12 @@ async def _run_search_agent(
                 llm_with_tools.ainvoke(messages),
                 timeout=_LLM_DISCOVERY_TIMEOUT_SECONDS,
             )
-        except Exception as exc:  # noqa: BLE001 - fall back to collected results
+        except Exception as exc:
             logger.warning("search-agent LLM call failed/timed out: %s", exc)
             _emit(progress_cb, f"discovery: model search step failed/timed out after {time.perf_counter() - started:.1f}s")
-            break
+            raise OpenRouterDiscoveryError(
+                f"discovery LLM call failed/timed out: {type(exc).__name__}: {exc}"
+            ) from exc
         _emit(progress_cb, f"discovery: model search step returned in {time.perf_counter() - started:.1f}s")
         messages.append(ai)
         tool_calls = getattr(ai, "tool_calls", None) or []
@@ -642,19 +582,14 @@ async def agentic_discover(
 ) -> list[PaperCandidate]:
     """LLM-driven discovery: the model chooses the queries, we ground the result.
 
-    Falls back to the single-query :func:`discover_candidates` when no LLM is
-    configured or the model issued no usable searches.
+    An empty return strictly means the agentic search ran to completion but
+    produced no parseable candidates — there is no deterministic fallback.
 
     Raises:
         WebSearchUnavailable: if the web-search summaries tool is not loaded.
+        OpenRouterDiscoveryError: if a discovery LLM call fails or times out.
     """
     runtime.require_web_tool(SUMMARIES_TOOL)
-    if runtime.llm is None:
-        logger.info("no LLM configured; using single-query discovery")
-        _emit(progress_cb, "discovery: no LLM configured; using fallback search")
-        return await discover_candidates(
-            runtime, user_request, limit=limit, progress_cb=progress_cb
-        )
 
     result_texts, _queries = await _run_search_agent(
         runtime,
@@ -671,11 +606,9 @@ async def agentic_discover(
     _emit(progress_cb, f"discovery: collected {len(pool)} unique candidate(s)")
 
     if not pool:
-        logger.info("agent issued no usable searches; falling back to single query")
-        _emit(progress_cb, "discovery: agent search produced no parseable candidates; using fallback search")
-        return await discover_candidates(
-            runtime, user_request, limit=limit, progress_cb=progress_cb
-        )
+        logger.info("agentic search completed with no parseable candidates")
+        _emit(progress_cb, "discovery: agent search produced no parseable candidates")
+        return []
 
     return await _annotate_and_rank(
         runtime.llm, user_request, pool, limit, progress_cb=progress_cb

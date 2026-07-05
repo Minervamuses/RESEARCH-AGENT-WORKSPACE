@@ -3,9 +3,11 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import ToolMessage
 
 from citation import discovery
+from citation.discovery import OpenRouterDiscoveryError
 from citation.runtime import SUMMARIES_TOOL
 
 
@@ -94,6 +96,45 @@ def test_tool_messages_keep_call_order_across_placeholders():
     assert contents == ["(tool 'missing_tool' is not available)", "real result"]
     assert result_texts == ["real result"]
     assert queries == ["q2"]
+
+
+def _agentic_runtime(tools, llm):
+    """Runtime stub with the require_web_tool hook agentic_discover needs."""
+    runtime = _runtime(tools, llm)
+    runtime.require_web_tool = lambda name: tools[name]
+    return runtime
+
+
+def test_agentic_discover_returns_empty_without_deterministic_fallback():
+    tool = _RecordingTool(["no papers in this blob of text"])
+    llm = _ScriptedToolLLM([
+        [_tc(SUMMARIES_TOOL, "q1", "c1")],
+        [],
+    ])
+    runtime = _agentic_runtime({SUMMARIES_TOOL: tool}, llm)
+
+    candidates = asyncio.run(discovery.agentic_discover(runtime, "find papers"))
+
+    # no parseable candidates -> empty list, and no extra fallback query ran
+    assert candidates == []
+    assert [c["query"] for c in tool.calls] == ["q1"]
+    assert not hasattr(discovery, "discover_candidates")
+
+
+def test_llm_discovery_failure_raises_openrouter_discovery_error():
+    class _ExplodingLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            raise RuntimeError("OpenRouter is down")
+
+    tool = _RecordingTool([])
+    runtime = _agentic_runtime({SUMMARIES_TOOL: tool}, _ExplodingLLM())
+
+    with pytest.raises(OpenRouterDiscoveryError, match="OpenRouter is down"):
+        asyncio.run(discovery.agentic_discover(runtime, "find papers"))
+    assert tool.calls == []
 
 
 def test_same_round_calls_run_concurrently(monkeypatch):

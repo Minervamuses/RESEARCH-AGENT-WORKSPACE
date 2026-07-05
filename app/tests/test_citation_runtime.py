@@ -98,3 +98,43 @@ def test_cli_exits_2_when_web_search_mcp_is_missing(monkeypatch, capsys):
     assert rc == 2
     assert "Web Search MCP" in captured.err
     assert "OPENROUTER_API_KEY" not in captured.err
+
+
+def _patch_ready_runtime(monkeypatch):
+    async def build_ready_runtime(*, load_mcp=True):
+        return SimpleNamespace(llm=_ProbeOkLLM(), web_tools={"summaries": object()})
+
+    monkeypatch.setattr(cli, "build_runtime", build_ready_runtime)
+
+
+def test_cli_exits_3_only_when_search_completed_with_no_candidates(monkeypatch, capsys):
+    _patch_ready_runtime(monkeypatch)
+
+    async def empty_discover(runtime, request, *, limit, progress_cb=None):
+        return []
+
+    monkeypatch.setattr(cli, "agentic_discover", empty_discover)
+
+    rc = asyncio.run(cli._run(_cli_args()))
+
+    captured = capsys.readouterr()
+    assert rc == 3
+    assert "No candidate papers found" in captured.err
+
+
+def test_cli_exits_2_when_discovery_llm_call_fails(monkeypatch, capsys):
+    from citation.discovery import OpenRouterDiscoveryError
+
+    _patch_ready_runtime(monkeypatch)
+
+    async def failing_discover(runtime, request, *, limit, progress_cb=None):
+        raise OpenRouterDiscoveryError("discovery LLM call failed/timed out")
+
+    monkeypatch.setattr(cli, "agentic_discover", failing_discover)
+
+    rc = asyncio.run(cli._run(_cli_args()))
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "OpenRouter discovery call failed" in captured.err
+    assert "No candidate papers found" not in captured.err
