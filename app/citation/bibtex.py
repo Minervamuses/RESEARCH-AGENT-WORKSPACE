@@ -72,23 +72,43 @@ def looks_like_bibtex(text: str | None) -> bool:
     return stripped.startswith("@") and "{" in stripped and "}" in stripped
 
 
-_BIBTEX_TITLE_START = re.compile(r"\btitle\s*=\s*", re.IGNORECASE)
+def _extract_bibtex_field(bibtex: str, field: str) -> str | None:
+    """Return a BibTeX field's value as flattened plain text, if present."""
+    m = re.search(rf"\b{field}\s*=\s*", bibtex or "", re.IGNORECASE)
+    if not m:
+        return None
+    raw_value = _read_bibtex_field_value(bibtex, m.end())
+    if raw_value is None:
+        return None
+    value = re.sub(r"[{}]", "", raw_value).strip().rstrip(",").strip()
+    return value or None
 
 
 def extract_bibtex_title(bibtex: str) -> str | None:
     """Return the ``title`` field of a BibTeX entry, if present.
 
     Used to name the output file from the *authoritative* title rather than a
-    messy search-result label. Brace groups are flattened to plain text.
+    messy search-result label, and to verify a DOI against the selected
+    candidate before writing. Brace groups are flattened to plain text.
     """
-    m = _BIBTEX_TITLE_START.search(bibtex or "")
-    if not m:
+    return _extract_bibtex_field(bibtex, "title")
+
+
+def extract_bibtex_year(bibtex: str) -> int | None:
+    """Return the ``year`` field of a BibTeX entry as an int, if present."""
+    value = _extract_bibtex_field(bibtex, "year")
+    if not value:
         return None
-    raw_title = _read_bibtex_field_value(bibtex, m.end())
-    if raw_title is None:
-        return None
-    title = re.sub(r"[{}]", "", raw_title).strip().rstrip(",").strip()
-    return title or None
+    m = re.search(r"\b(?:19|20)\d{2}\b", value)
+    return int(m.group(0)) if m else None
+
+
+def extract_bibtex_authors(bibtex: str) -> list[str]:
+    """Return the ``author`` field split into individual author names."""
+    value = _extract_bibtex_field(bibtex, "author")
+    if not value:
+        return []
+    return [a.strip() for a in re.split(r"\s+and\s+", value, flags=re.IGNORECASE) if a.strip()]
 
 
 def _read_bibtex_field_value(text: str, start: int) -> str | None:

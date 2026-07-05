@@ -3,9 +3,10 @@
 Route order (faithful to the spec, never fabricating):
   1. Resolve a DOI — from the discovery snippet/URL, then the source page,
      then a verified Crossref bibliographic search.
-  2. With a trusted DOI, retrieve BibTeX via the Crossref/DOI route.
-  3. If that fails, try to resolve an alternate DOI and retry the same
-     Crossref/DOI route.
+  2. With a trusted DOI, retrieve BibTeX via the Crossref/DOI route and
+     verify it against the selected candidate before writing.
+  3. If retrieval or verification fails, try to resolve an alternate DOI and
+     retry the same Crossref/DOI route.
   4. If every DOI/Crossref route fails, write nothing and return the failure
      trace.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Callable
 from typing import Awaitable
@@ -25,6 +27,7 @@ from citation.crossref import (
     fetch_bibtex_for_doi,
     rank_matches,
     search_crossref,
+    title_similarity,
 )
 from citation.models import CaptureResult, CrossrefMatch, PaperCandidate
 from citation.scholar_fallback import inspect_source_page, try_scholar_doi
@@ -32,6 +35,15 @@ from citation.runtime import CitationRuntime
 
 logger = logging.getLogger("citation.capture")
 ProgressCallback = Callable[[str], None]
+
+# DOI verification thresholds (v1, conservative — documented in the README).
+# Every DOI source (discovery snippet/URL, source page, Scholar lookup,
+# Crossref search, alternate DOI) funnels through the same pre-write check:
+# title similarity carries the decision, an author surname overlap lowers the
+# bar, an explicit author mismatch or a year gap larger than 1 always fails.
+_VERIFY_TITLE_SIM = 0.70
+_VERIFY_TITLE_SIM_WITH_AUTHOR = 0.55
+_VERIFY_MAX_YEAR_GAP = 1
 
 # Async callback used to resolve an ambiguous Crossref result interactively.
 # Receives the candidate + ranked matches; returns the chosen DOI or None.
@@ -146,6 +158,84 @@ def _doi_key(doi: str | None) -> str:
     return (doi or "").strip().lower()
 
 
+def _author_surnames(authors: list[str]) -> set[str]:
+    """Normalized surnames from either 'Given Family' or 'Family, Given' names."""
+    out: set[str] = set()
+    for author in authors:
+        author = author.strip()
+        if not author:
+            continue
+        surname = author.split(",", 1)[0] if "," in author else author.split()[-1]
+        token = re.sub(r"[^a-z0-9]+", "", surname.lower())
+        if len(token) >= 2:
+            out.add(token)
+    return out
+
+
+def _verify_doi_bibtex(
+    candidate: PaperCandidate,
+    doi: str,
+    bib: str,
+    *,
+    result: CaptureResult,
+) -> bool:
+    """Pre-write DOI verification: the retrieved BibTeX must match the candidate.
+
+    Compares the BibTeX title (and year/authors when both sides know them)
+    against the selected candidate. Returns False — and explains why in the
+    trace — when the DOI looks like a different paper; the caller then treats
+    the DOI as failed and moves on to an alternate.
+    """
+    bib_title = bibtex.extract_bibtex_title(bib)
+    if not bib_title:
+        result.notes.append(
+            f"DOI verification failed for {doi}: retrieved BibTeX has no title"
+        )
+        return False
+    if not candidate.title.strip():
+        result.notes.append(
+            f"DOI verification failed for {doi}: candidate has no title to compare"
+        )
+        return False
+
+    bib_year = bibtex.extract_bibtex_year(bib)
+    year_gap = abs(candidate.year - bib_year) if candidate.year and bib_year else None
+    if year_gap is not None and year_gap > _VERIFY_MAX_YEAR_GAP:
+        result.notes.append(
+            f"DOI verification failed for {doi}: year gap {year_gap} > "
+            f"{_VERIFY_MAX_YEAR_GAP} (candidate {candidate.year} vs BibTeX {bib_year})"
+        )
+        return False
+
+    cand_surnames = _author_surnames(candidate.authors)
+    bib_surnames = _author_surnames(bibtex.extract_bibtex_authors(bib))
+    author_overlap: bool | None = None
+    if cand_surnames and bib_surnames:
+        author_overlap = bool(cand_surnames & bib_surnames)
+    if author_overlap is False:
+        result.notes.append(
+            f"DOI verification failed for {doi}: no author surname overlap "
+            f"(candidate {sorted(cand_surnames)} vs BibTeX {sorted(bib_surnames)})"
+        )
+        return False
+
+    sim = title_similarity(candidate.title, bib_title)
+    threshold = _VERIFY_TITLE_SIM_WITH_AUTHOR if author_overlap else _VERIFY_TITLE_SIM
+    if sim < threshold:
+        result.notes.append(
+            f"DOI verification failed for {doi}: title similarity {sim:.2f} < "
+            f"{threshold:.2f} (candidate {candidate.title!r} vs BibTeX {bib_title!r})"
+        )
+        return False
+
+    result.notes.append(
+        f"DOI verified for {doi}: title similarity {sim:.2f}, year gap "
+        f"{'n/a' if year_gap is None else year_gap}, author overlap "
+        f"{'n/a' if author_overlap is None else 'yes'}"
+    )
+    return True
+
+
 async def _resolve_doi_from_scholar(
     runtime: CitationRuntime,
     candidate: PaperCandidate,
@@ -180,6 +270,8 @@ async def _try_crossref_bibtex(
     _emit(progress_cb, f"bibtex: DOI retrieval finished in {time.perf_counter() - started:.1f}s")
     result.notes.extend(notes)
     if bib and bibtex.looks_like_bibtex(bib):
+        if not _verify_doi_bibtex(candidate, doi, bib, result=result):
+            return None
         return _finalize(runtime, candidate, bib, doi=doi, route="crossref", result=result)
     result.notes.append("DOI/Crossref BibTeX route did not yield valid BibTeX")
     return None

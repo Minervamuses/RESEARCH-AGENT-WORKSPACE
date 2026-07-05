@@ -4,7 +4,16 @@ from pathlib import Path
 from citation import bibtex
 from citation import capture
 from citation.discovery import parse_summaries
-from citation.models import PaperCandidate
+from citation.models import CaptureResult, PaperCandidate
+
+
+def _bib(title: str, *, year: int | None = None, authors: str | None = None) -> str:
+    fields = [f"  title = {{{title}}},"]
+    if year is not None:
+        fields.append(f"  year = {{{year}}},")
+    if authors is not None:
+        fields.append(f"  author = {{{authors}}},")
+    return "@article{key,\n" + "\n".join(fields) + "\n}\n"
 
 
 def test_parse_summaries_cleans_search_labels_and_extracts_doi():
@@ -102,6 +111,173 @@ def test_capture_retries_alternate_doi_through_crossref(monkeypatch, tmp_path):
     ]
     assert "bad DOI failed" in result.notes
     assert "good DOI retrieved" in result.notes
+
+
+def test_verify_doi_rejects_title_mismatch():
+    result = CaptureResult(ok=False)
+
+    ok = capture._verify_doi_bibtex(
+        PaperCandidate("Attention is all you need"),
+        "10.1/x",
+        _bib("BERT: Pre-training of Deep Bidirectional Transformers"),
+        result=result,
+    )
+
+    assert ok is False
+    assert any("title similarity" in note for note in result.notes)
+
+
+def test_verify_doi_rejects_year_gap_greater_than_one():
+    result = CaptureResult(ok=False)
+
+    ok = capture._verify_doi_bibtex(
+        PaperCandidate("Attention is all you need", year=2017),
+        "10.1/x",
+        _bib("Attention is all you need", year=2005),
+        result=result,
+    )
+
+    assert ok is False
+    assert any("year gap" in note for note in result.notes)
+
+
+def test_verify_doi_rejects_explicit_author_mismatch():
+    result = CaptureResult(ok=False)
+
+    ok = capture._verify_doi_bibtex(
+        PaperCandidate("Attention is all you need", authors=["A. Vaswani"]),
+        "10.1/x",
+        _bib(
+            "Attention is all you need",
+            authors="Devlin, Jacob and Chang, Ming-Wei",
+        ),
+        result=result,
+    )
+
+    assert ok is False
+    assert any("author surname overlap" in note for note in result.notes)
+
+
+def test_verify_doi_author_overlap_lowers_title_threshold():
+    # Title similarity here is ~0.66: below the solo threshold (0.70) but
+    # above the author-assisted one (0.55).
+    bib = _bib(
+        "Efficient dense passage retrieval for search",
+        authors="Karpukhin, Vladimir and Oguz, Barlas",
+    )
+
+    with_overlap = capture._verify_doi_bibtex(
+        PaperCandidate(
+            "Retrieval efficiency in dense passage search",
+            authors=["V. Karpukhin"],
+        ),
+        "10.1/x",
+        bib,
+        result=CaptureResult(ok=False),
+    )
+    without_authors = capture._verify_doi_bibtex(
+        PaperCandidate("Retrieval efficiency in dense passage search"),
+        "10.1/x",
+        bib,
+        result=CaptureResult(ok=False),
+    )
+
+    assert with_overlap is True
+    assert without_authors is False
+
+
+def test_verify_doi_passes_on_strong_title_with_unknown_year_and_authors():
+    result = CaptureResult(ok=False)
+
+    ok = capture._verify_doi_bibtex(
+        PaperCandidate("Attention is all you need"),
+        "10.1/x",
+        _bib("Attention is all you need"),
+        result=result,
+    )
+
+    assert ok is True
+    assert any("DOI verified" in note for note in result.notes)
+
+
+def test_capture_excludes_verification_failed_doi_and_uses_alternate(monkeypatch, tmp_path):
+    class Runtime:
+        @property
+        def cite_dir(self) -> Path:
+            return tmp_path
+
+    resolve_calls = []
+
+    async def fake_resolve_doi(
+        runtime,
+        candidate,
+        *,
+        confirm_cb,
+        result,
+        allow_direct=True,
+        exclude=None,
+        progress_cb=None,
+    ):
+        resolve_calls.append((allow_direct, set(exclude or set())))
+        return "10.bad/mismatch" if allow_direct else "10.good/verified"
+
+    def fake_fetch_bibtex_for_doi(doi):
+        if doi == "10.bad/mismatch":
+            return _bib("A Totally Unrelated Compendium of Rocks"), ["mismatch retrieved"]
+        return _bib("Good Paper"), ["good retrieved"]
+
+    monkeypatch.setattr(capture, "_resolve_doi", fake_resolve_doi)
+    monkeypatch.setattr(capture, "fetch_bibtex_for_doi", fake_fetch_bibtex_for_doi)
+
+    result = asyncio.run(
+        capture.capture_citation(Runtime(), PaperCandidate("Good Paper"))
+    )
+
+    assert result.ok is True
+    assert result.doi == "10.good/verified"
+    assert resolve_calls == [
+        (True, set()),
+        (False, {"10.bad/mismatch"}),
+    ]
+    assert any(
+        "DOI verification failed for 10.bad/mismatch" in note for note in result.notes
+    )
+    # only the verified BibTeX reached disk
+    assert [p.name for p in tmp_path.iterdir()] == ["good_paper.bib"]
+
+
+def test_capture_writes_nothing_when_no_doi_verifies(monkeypatch, tmp_path):
+    class Runtime:
+        @property
+        def cite_dir(self) -> Path:
+            return tmp_path
+
+    async def fake_resolve_doi(
+        runtime,
+        candidate,
+        *,
+        confirm_cb,
+        result,
+        allow_direct=True,
+        exclude=None,
+        progress_cb=None,
+    ):
+        return "10.bad/mismatch" if allow_direct else None
+
+    monkeypatch.setattr(capture, "_resolve_doi", fake_resolve_doi)
+    monkeypatch.setattr(
+        capture,
+        "fetch_bibtex_for_doi",
+        lambda doi: (_bib("A Totally Unrelated Compendium of Rocks"), ["retrieved"]),
+    )
+
+    result = asyncio.run(
+        capture.capture_citation(Runtime(), PaperCandidate("Good Paper"))
+    )
+
+    assert result.ok is False
+    assert list(tmp_path.iterdir()) == []
+    assert any("DOI verification failed" in note for note in result.notes)
 
 
 def test_bibtex_title_extraction_handles_single_line_crossref_bibtex():

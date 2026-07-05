@@ -68,7 +68,8 @@ def _norm(text: str) -> str:
     return _NON_ALNUM.sub(" ", (text or "").lower()).strip()
 
 
-def _title_similarity(a: str, b: str) -> float:
+def title_similarity(a: str, b: str) -> float:
+    """Normalized 0..1 title similarity, shared by match scoring and DOI verification."""
     return SequenceMatcher(None, _norm(a), _norm(b)).ratio()
 
 
@@ -128,7 +129,7 @@ def _item_to_match(candidate: PaperCandidate, item: dict) -> CrossrefMatch:
         except (TypeError, ValueError):
             year = None
 
-    title_sim = _title_similarity(candidate.title, cr_title)
+    title_sim = title_similarity(candidate.title, cr_title)
 
     year_matches: bool | None = None
     if candidate.year and year:
