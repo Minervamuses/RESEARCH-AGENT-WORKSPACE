@@ -4,9 +4,13 @@
 
 ## Install
 
-From this repository root:
+From this repository root, activate the `rag` conda environment before running
+Poetry. Poetry is configured with `virtualenvs.create = false`, so it installs
+packages into the active conda environment.
 
 ```bash
+conda env create -f env/env-rag.yml
+conda activate rag
 poetry install
 ```
 
@@ -26,13 +30,13 @@ ollama pull bge-m3
 Ingest one file:
 
 ```bash
-poetry run python -m rag.cli.ingest README.md
+python -m rag.cli.ingest README.md
 ```
 
 Search the store and print hit text:
 
 ```bash
-poetry run python - <<'PY'
+python - <<'PY'
 from rag import search
 
 for hit in search("What is this project?", k=3):
@@ -44,7 +48,7 @@ PY
 For repo ingest instead of a single file:
 
 ```bash
-poetry run python -m rag.cli.ingest -r /path/to/project
+python -m rag.cli.ingest -r /path/to/project
 ```
 
 ## API Reference

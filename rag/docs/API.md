@@ -8,9 +8,12 @@ The public API is intentionally small: four functions, five return dataclasses, 
 
 ## Install & Prerequisites
 
-Install the package and dependencies from the repository root:
+Install the package and dependencies from the repository root inside the `rag`
+conda environment. Poetry is configured with `virtualenvs.create = false`, so it
+installs packages into the active conda environment.
 
 ```bash
+conda activate rag
 poetry install
 ```
 
