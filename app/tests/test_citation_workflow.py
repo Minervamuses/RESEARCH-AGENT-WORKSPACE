@@ -1,10 +1,13 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 from citation import bibtex
 from citation import capture
+from citation import scholar_fallback
 from citation.discovery import parse_summaries
 from citation.models import CaptureResult, PaperCandidate
+from citation.runtime import PAGE_CONTENT_TOOL, SUMMARIES_TOOL
 
 
 def _bib(title: str, *, year: int | None = None, authors: str | None = None) -> str:
@@ -278,6 +281,86 @@ def test_capture_writes_nothing_when_no_doi_verifies(monkeypatch, tmp_path):
     assert result.ok is False
     assert list(tmp_path.iterdir()) == []
     assert any("DOI verification failed" in note for note in result.notes)
+
+
+class _SlowTool:
+    async def ainvoke(self, args):
+        await asyncio.sleep(5)
+
+
+def test_inspect_source_page_reports_missing_page_tool_instead_of_raising():
+    runtime = SimpleNamespace(web_tools={})
+
+    doi, inline_bibtex, notes = asyncio.run(
+        scholar_fallback.inspect_source_page(
+            runtime, PaperCandidate("Good Paper", url="https://example.org/p")
+        )
+    )
+
+    assert doi is None
+    assert inline_bibtex is None
+    assert any(PAGE_CONTENT_TOOL in note and "not available" in note for note in notes)
+
+
+def test_source_page_fetch_timeout_is_reported_in_notes(monkeypatch):
+    monkeypatch.setattr(scholar_fallback, "_TOOL_TIMEOUT_SECONDS", 0.01)
+    runtime = SimpleNamespace(web_tools={PAGE_CONTENT_TOOL: _SlowTool()})
+
+    doi, inline_bibtex, notes = asyncio.run(
+        scholar_fallback.inspect_source_page(
+            runtime, PaperCandidate("Good Paper", url="https://example.org/p")
+        )
+    )
+
+    assert doi is None
+    assert inline_bibtex is None
+    assert any("page fetch failed" in note and "TimeoutError" in note for note in notes)
+
+
+def test_scholar_doi_lookup_timeout_is_reported_in_notes(monkeypatch):
+    monkeypatch.setattr(scholar_fallback, "_TOOL_TIMEOUT_SECONDS", 0.01)
+    runtime = SimpleNamespace(web_tools={SUMMARIES_TOOL: _SlowTool()})
+
+    doi, notes = asyncio.run(
+        scholar_fallback.try_scholar_doi(runtime, PaperCandidate("Good Paper"))
+    )
+
+    assert doi is None
+    assert any(
+        "Scholar DOI lookup failed" in note and "TimeoutError" in note for note in notes
+    )
+
+
+def test_capture_without_page_tool_continues_via_crossref(monkeypatch, tmp_path):
+    class Runtime:
+        web_tools: dict = {}
+
+        @property
+        def cite_dir(self) -> Path:
+            return tmp_path
+
+    monkeypatch.setattr(
+        capture,
+        "search_crossref",
+        lambda title, rows=5: [
+            {"DOI": "10.1/good", "title": ["Good Paper"], "author": [], "issued": {}, "score": 9.0},
+        ],
+    )
+    monkeypatch.setattr(
+        capture, "fetch_bibtex_for_doi", lambda doi: (_bib("Good Paper"), ["retrieved"])
+    )
+
+    result = asyncio.run(
+        capture.capture_citation(
+            Runtime(), PaperCandidate("Good Paper", url="https://example.org/p")
+        )
+    )
+
+    assert result.ok is True
+    assert result.doi == "10.1/good"
+    assert any(
+        PAGE_CONTENT_TOOL in note and "not available" in note for note in result.notes
+    )
 
 
 def test_bibtex_title_extraction_handles_single_line_crossref_bibtex():

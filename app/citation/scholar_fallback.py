@@ -13,6 +13,7 @@ These routes are intentionally best-effort and honest about their limits:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -22,6 +23,10 @@ from citation.models import PaperCandidate
 from citation.runtime import PAGE_CONTENT_TOOL, SUMMARIES_TOOL, CitationRuntime
 
 logger = logging.getLogger("citation.scholar")
+
+# Per-call cap on MCP tool invocations: a hung page fetch or Scholar lookup
+# must surface as a trace note, never stall or crash the capture flow.
+_TOOL_TIMEOUT_SECONDS = 30.0
 
 # A BibTeX entry embedded in page text: @type{key, ... }
 _INLINE_BIBTEX = re.compile(r"@\w+\s*\{[^@]*?title\s*=.*?\n\s*\}", re.IGNORECASE | re.DOTALL)
@@ -36,9 +41,18 @@ _CAPTCHA_HINTS = (
 
 
 async def _fetch_page(runtime: CitationRuntime, url: str, *, notes: list[str]) -> str:
-    tool = runtime.require_web_tool(PAGE_CONTENT_TOOL)
+    tool = runtime.web_tools.get(PAGE_CONTENT_TOOL)
+    if tool is None:
+        notes.append(
+            f"source page not inspected: Web Search MCP tool "
+            f"{PAGE_CONTENT_TOOL!r} is not available"
+        )
+        return ""
     try:
-        result = await tool.ainvoke({"url": url})
+        result = await asyncio.wait_for(
+            tool.ainvoke({"url": url}),
+            timeout=_TOOL_TIMEOUT_SECONDS,
+        )
     except Exception as exc:  # noqa: BLE001 - reported to caller
         notes.append(f"page fetch failed for {url}: {type(exc).__name__}: {exc}")
         return ""
@@ -105,7 +119,10 @@ async def try_scholar_doi(
 
     query = f'{candidate.title} DOI site:scholar.google.com'
     try:
-        result = await tool.ainvoke({"query": query, "limit": 3})
+        result = await asyncio.wait_for(
+            tool.ainvoke({"query": query, "limit": 3}),
+            timeout=_TOOL_TIMEOUT_SECONDS,
+        )
     except Exception as exc:  # noqa: BLE001
         notes.append(f"Scholar DOI lookup failed: {type(exc).__name__}: {exc}")
         return None, notes
