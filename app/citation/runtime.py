@@ -8,6 +8,7 @@ here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,9 +23,23 @@ FULL_SEARCH_TOOL = "full-web-search"
 PAGE_CONTENT_TOOL = "get-single-web-page-content"
 WEB_SEARCH_FAMILY = "web_search"
 
+# One cheap round-trip that proves the key/model/API actually work before any
+# discovery starts; a broken OpenRouter setup must fail here, not masquerade
+# as "no candidates found" later.
+_PROBE_PROMPT = "Reply with the single word: OK"
+_PROBE_TIMEOUT_SECONDS = 30.0
+
 
 class WebSearchUnavailable(RuntimeError):
     """Raised when the Web Search MCP family is not loaded/enabled."""
+
+
+class OpenRouterUnavailable(RuntimeError):
+    """Raised when the OpenRouter chat model cannot be built or probed.
+
+    Covers a missing/invalid ``OPENROUTER_API_KEY``, an invalid model name,
+    and OpenRouter rejecting or failing the probe call.
+    """
 
 
 @dataclass
@@ -32,7 +47,7 @@ class CitationRuntime:
     """Resolved, reusable handles for one prototype run."""
 
     config: object  # agent.config.AgentConfig
-    llm: object | None  # langchain chat model, or None if no API key
+    llm: object  # langchain chat model (required; probed at build time)
     web_tools: dict[str, object]  # tool name -> LangChain tool
     app_root: Path
 
@@ -62,18 +77,33 @@ def _load_env() -> None:
 
 
 def _build_llm(config):
-    """Return the host project's chat model, or None if it cannot be built.
+    """Return the host project's chat model; the citation CLI requires one.
 
-    The prototype only uses the LLM to *enrich/parse* discovery results, never
-    to generate BibTeX, so a missing key degrades gracefully.
+    The LLM drives search decisions and candidate ranking/annotation (never
+    BibTeX generation), so a setup that cannot build a model is a hard
+    configuration error, not something to degrade around.
     """
-    try:
-        from agent.llm import get_chat_model
+    from agent.llm import get_chat_model
 
+    try:
         return get_chat_model(config)
-    except Exception as exc:  # noqa: BLE001 - missing key etc. must not abort discovery
-        logger.warning("chat model unavailable (%s); continuing without LLM enrichment", exc)
-        return None
+    except Exception as exc:
+        raise OpenRouterUnavailable(
+            f"could not build the OpenRouter chat model: {exc}"
+        ) from exc
+
+
+async def _probe_llm(llm) -> None:
+    """Run one lightweight OpenRouter call to prove the model is usable."""
+    try:
+        await asyncio.wait_for(
+            llm.ainvoke([("human", _PROBE_PROMPT)]),
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        raise OpenRouterUnavailable(
+            f"OpenRouter probe call failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 async def build_runtime(*, load_mcp: bool = True) -> CitationRuntime:
@@ -81,6 +111,10 @@ async def build_runtime(*, load_mcp: bool = True) -> CitationRuntime:
 
     Args:
         load_mcp: When False, skip MCP loading entirely (offline/unit use).
+
+    Raises:
+        OpenRouterUnavailable: when the chat model cannot be built or the
+            probe call fails — citation requires a working OpenRouter setup.
     """
     _load_env()
 
@@ -89,6 +123,7 @@ async def build_runtime(*, load_mcp: bool = True) -> CitationRuntime:
 
     config = AgentConfig()
     llm = _build_llm(config)
+    await _probe_llm(llm)
 
     web_tools: dict[str, object] = {}
     if load_mcp:

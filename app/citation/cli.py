@@ -24,7 +24,11 @@ import time
 from citation.capture import capture_citation
 from citation.discovery import agentic_discover
 from citation.models import CrossrefMatch, PaperCandidate
-from citation.runtime import WebSearchUnavailable, build_runtime
+from citation.runtime import (
+    OpenRouterUnavailable,
+    WebSearchUnavailable,
+    build_runtime,
+)
 
 
 async def _ask(prompt: str) -> str:
@@ -124,7 +128,18 @@ async def _auto_capture(runtime, candidates, *, max_attempts, progress_cb=None):
 async def _run(args: argparse.Namespace) -> int:
     progress = _make_progress_printer()
     progress("runtime: loading config, model, and Web Search MCP")
-    runtime = await build_runtime(load_mcp=True)
+    try:
+        runtime = await build_runtime(load_mcp=True)
+    except OpenRouterUnavailable as exc:
+        print(
+            f"ERROR: OpenRouter chat model is not usable: {exc}\n"
+            "  The citation CLI requires a working OpenRouter setup. Check that\n"
+            "  OPENROUTER_API_KEY is set and valid in app/.env (or the shell),\n"
+            "  that the configured model name exists, and that your OpenRouter\n"
+            "  account is allowed to call it.",
+            file=sys.stderr,
+        )
+        return 2
     progress(f"runtime: ready with {len(runtime.web_tools)} web-search tool(s)")
 
     if not runtime.web_tools:
@@ -143,8 +158,6 @@ async def _run(args: argparse.Namespace) -> int:
         return 2
 
     print(f"\nLetting the agent decide how to search for: {request!r} ...")
-    if runtime.llm is None:
-        print("  (no LLM configured — falling back to a single literal query)")
     try:
         candidates = await agentic_discover(
             runtime, request, limit=args.limit, progress_cb=progress
