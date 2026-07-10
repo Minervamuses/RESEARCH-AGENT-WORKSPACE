@@ -39,6 +39,15 @@ Skill 採用**漸進式揭露（progressive disclosure）**：
 
 如果使用者手動執行 `/skill _prompt-master`，它仍會走一般 skill runtime，並套用自己的 `manifest.yaml` tool policy。這個資料夾名稱前面的 `_` 是內部 helper 例外；一般新增給使用者選用的 skill 仍應使用 kebab-case。
 
+### Built-in skill：`citation`
+
+`skills/citation/` 是內建的驗證式引用 skill，同一個資料夾**既是 skill bundle 也是可 import 的 `skills.citation` package**（Coordinator、providers、gate、renderer、tool adapter 都住在裡面）。它有兩個一般 skill 沒有的特性：
+
+1. **skill 專屬工具**：manifest 只要求 `citation.workflow` capability，對應 session-scoped 的 `citation_workflow` 工具。這類 skill-only 工具不屬於 default 工具，普通模式與其他 skills 綁不到也呼叫不了（執行層 PolicyToolNode 會拒絕偽造呼叫）；只有 manifest allowlist 明確授權的 skill 才綁得到。
+2. **session 隔離副作用**：啟用時強制切回 normal thinking（citation active 期間 `/thinking extended` 被拒絕）；停用或切換 skill 時清除 in-memory workflow 與來源 registry。
+
+`/citation` 是它的專屬啟用入口（等價於 `/skill citation` 加上提示訊息與自然語言 followup）。新增一般 skill 不需要、也不應該仿照這種 host 深度整合；請以 `academic-paper-writing` 為範本。
+
 ---
 
 ## 二、標準格式
@@ -146,6 +155,7 @@ Capability 命名要精確：
 
 - `rag.search` 只授權 indexed KB 工具（知識庫文件、研究筆記、已 ingest 的資料）。
 - `history.search` 只授權 persisted chat history 工具（舊對話、較早 session、被 recent window eviction 的 turn）。
+- `citation.workflow` 只授權 skill 專屬的 `citation_workflow` 工具；它保留給內建 citation skill，一般 skill 不應宣告。
 - 如果 skill 可能需要使用者過去對話脈絡，例如「你自行看我一月上半做了什麼」這類請求，manifest 必須宣告 `history.search`。只宣告 `rag.search` 不會讓 active skill 下的 writer 看到 history retrieval schema。
 - Plan mode logs 不進 Chroma `chat_history`，所以即使宣告 `history.search`，也不能承諾能搜尋 plan-mode-only 的紀錄；需要時應請 agent 讀 `plan_logs/` 檔案或請使用者指出位置。
 
