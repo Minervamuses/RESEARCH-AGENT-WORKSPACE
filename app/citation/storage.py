@@ -23,9 +23,9 @@ LLM responses, API keys, or URLs embedding keys; storage only adds the
 artifact hash and schema/DOI stamps it needs for validation.
 
 Output directory precedence: ``AgentConfig.citation_output_dir`` ->
-``CITATION_OUTPUT_DIR`` env -> ``citation/cite`` next to this package in a
-source checkout -> the platform user-data directory for wheel installs.
-There is no upward pyproject.toml search.
+``CITATION_OUTPUT_DIR`` env -> the platform user-data directory. Bundles are
+user data and never live inside the source/package/skill tree; point the env
+var at an old location to keep using it.
 """
 
 from __future__ import annotations
@@ -87,11 +87,6 @@ def resolve_output_dir(
     from_env = env.get("CITATION_OUTPUT_DIR", "").strip()
     if from_env:
         return Path(from_env).expanduser()
-    package_dir = Path(__file__).resolve().parent
-    # Source checkout: the app project file sits directly above the package —
-    # a bounded check, not an upward search.
-    if (package_dir.parent / "pyproject.toml").exists():
-        return package_dir / "cite"
     return _platform_user_data_dir(env) / "research-agent" / "citation"
 
 

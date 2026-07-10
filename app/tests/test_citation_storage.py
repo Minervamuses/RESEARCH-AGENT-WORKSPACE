@@ -25,15 +25,24 @@ BIB = "@article{k,\n  title = {T},\n  year = {2020},\n}\n"
 SIDECAR = {"run_id": "r1", "source_ref": {"source_id": "s1"}}
 
 
-def test_output_dir_precedence_config_env_checkout():
+def test_output_dir_precedence_config_env_user_data():
     config = SimpleNamespace(citation_output_dir="/custom/place")
     assert resolve_output_dir(config, env={}) == Path("/custom/place")
     assert resolve_output_dir(None, env={"CITATION_OUTPUT_DIR": "/from/env"}) == Path(
         "/from/env"
     )
-    # Source checkout: pyproject.toml sits right above the citation package.
+    # Default: platform user-data dir — never inside the source/package tree.
     default = resolve_output_dir(None, env={})
-    assert default == Path(storage.__file__).resolve().parent / "cite"
+    assert default.name == "citation"
+    assert default.parent.name == "research-agent"
+    package_root = Path(storage.__file__).resolve().parent
+    assert not default.is_relative_to(package_root)
+
+
+def test_output_dir_default_honors_xdg_data_home(monkeypatch):
+    monkeypatch.setattr(storage.sys, "platform", "linux")
+    default = resolve_output_dir(None, env={"XDG_DATA_HOME": "/xdg/data"})
+    assert default == Path("/xdg/data/research-agent/citation")
 
 
 def test_bundle_dir_name_caps_utf8_bytes_and_keeps_hash():
