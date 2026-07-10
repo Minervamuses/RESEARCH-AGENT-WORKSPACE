@@ -1,23 +1,26 @@
-[tool.poetry]
-name = "rag"
+[project]
+# Distribution name is research-agent-rag (PyPI already has an unrelated
+# rag==0.1.0); the import package stays `rag`.
+name = "research-agent-rag"
 version = "0.1.0"
 description = "Framework-neutral RAG library for indexing, storing, and retrieving text chunks from a project directory."
-authors = ["Minervamuses"]
+authors = [{ name = "Minervamuses" }]
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "tiktoken (>=0.12.0,<0.13.0)",
+    "chromadb (>=1.5.0,<2.0.0)",
+    "langchain-core (>=1.2.0,<2.0.0)",
+    "langchain-chroma (>=1.1.0,<2.0.0)",
+    "langchain-ollama (>=1.0.0,<2.0.0)",
+    "openai (>=2.30.0,<3.0.0)",
+]
+
+[tool.poetry]
 packages = [{ include = "rag" }]
-
-[tool.poetry.dependencies]
-python = ">=3.12,<3.14"
-
-tiktoken = "^0.12.0"
-chromadb = "^1.5.0"
-langchain-core = "^1.2.0"
-langchain-chroma = "^1.1.0"
-langchain-ollama = "^1.0.0"
-openai = "^2.30.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.0"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2,<3"]
 build-backend = "poetry.core.masonry.api"

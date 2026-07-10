@@ -2813,28 +2813,6 @@ files = [
 ]
 
 [[package]]
-name = "rag"
-version = "0.1.0"
-description = "Framework-neutral RAG library for indexing, storing, and retrieving text chunks from a project directory."
-optional = false
-python-versions = ">=3.12,<3.14"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-chromadb = "^1.5.0"
-langchain-chroma = "^1.1.0"
-langchain-core = "^1.2.0"
-langchain-ollama = "^1.0.0"
-openai = "^2.30.0"
-tiktoken = "^0.12.0"
-
-[package.source]
-type = "directory"
-url = "../rag"
-
-[[package]]
 name = "referencing"
 version = "0.37.0"
 description = "JSON Referencing + Python"
@@ -3030,6 +3008,28 @@ files = [
 
 [package.dependencies]
 requests = ">=2.0.1,<3.0.0"
+
+[[package]]
+name = "research-agent-rag"
+version = "0.1.0"
+description = "Framework-neutral RAG library for indexing, storing, and retrieving text chunks from a project directory."
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+chromadb = ">=1.5.0,<2.0.0"
+langchain-chroma = ">=1.1.0,<2.0.0"
+langchain-core = ">=1.2.0,<2.0.0"
+langchain-ollama = ">=1.0.0,<2.0.0"
+openai = ">=2.30.0,<3.0.0"
+tiktoken = ">=0.12.0,<0.13.0"
+
+[package.source]
+type = "directory"
+url = "../rag"
 
 [[package]]
 name = "rich"
@@ -4117,4 +4117,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "721bf8b0d802f3ff4fb805c82c9186aee7e25549c6b434e24df4037b4c07dc15"
+content-hash = "1072868218ebccc025e38b700650ee809bd8438b80b8982d40edbaec5cc64362"

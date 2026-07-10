@@ -1,25 +1,33 @@
-[tool.poetry]
+[project]
 name = "agent"
 version = "0.1.0"
 description = "Agentic workflow project. Consumes rag as an embedded tool."
-authors = ["Minervamuses"]
+authors = [{ name = "Minervamuses" }]
+requires-python = ">=3.12,<3.14"
+# Published dependency metadata: everything a wheel install needs, with the
+# rag library pinned by its distribution name.
+dependencies = [
+    "research-agent-rag (==0.1.0)",
+    "langchain-core (>=1.2.0,<2.0.0)",
+    "langchain-openai (>=1.1.12,<2.0.0)",
+    "langchain-mcp-adapters (>=0.2.2,<0.3.0)",
+    "langgraph (>=1.1.4,<2.0.0)",
+    "pybtex (>=0.26.1,<0.27)",
+    "pydantic (>=2.0,<3.0)",
+    "python-dotenv (>=1.0.0,<2.0.0)",
+    "prompt-toolkit (>=3.0.52,<4.0.0)",
+    "pyyaml (>=6.0,<7.0)",
+    "typing-extensions (>=4.0,<5.0)",
+]
+
+[tool.poetry]
 packages = [{ include = "agent" }, { include = "citation" }]
 
 [tool.poetry.dependencies]
-python = ">=3.12,<3.14"
-
-rag = { path = "../rag", develop = true }
-
-langchain-core = "^1.2.0"
-langchain-openai = "^1.1.12"
-langchain-mcp-adapters = "^0.2.2"
-langgraph = "^1.1.4"
-pybtex = ">=0.26.1,<0.27"
-pydantic = "^2.0"
-python-dotenv = "^1.0.0"
-prompt-toolkit = "^3.0.52"
-pyyaml = "^6.0"
-typing-extensions = "^4.0"
+# Local development enrichment only: resolve research-agent-rag from the
+# sibling checkout as an editable install. Published wheel metadata comes
+# solely from [project.dependencies] and never embeds this path.
+research-agent-rag = { path = "../rag", develop = true }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.0"
@@ -28,5 +36,5 @@ pytest = "^9.0.0"
 testpaths = ["tests"]
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2,<3"]
 build-backend = "poetry.core.masonry.api"
