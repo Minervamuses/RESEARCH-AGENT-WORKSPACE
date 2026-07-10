@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -272,31 +271,9 @@ class ChatSession:
             "[[citation-needed]] when a claim lacks a source.",
         ]
         for ref in sources:
-            marker = (
-                "cite"
-                if ref.verification_level == "identity_verified"
-                else "user-cite"
-            )
             label = ref.title or ref.doi or ref.url or "(unknown)"
-            lines.append(f"- [[{marker}:{ref.source_id}]] {label}")
+            lines.append(f"- [[cite:{ref.source_id}]] {label}")
         return SystemMessage(content="\n".join(lines))
-
-    def _register_user_sources(self, user_input: str) -> None:
-        """Register recognizable user-provided DOIs/URLs as citable
-        user_supplied_unverified sources before the turn runs."""
-        from skills.citation.doi import extract_doi_candidates
-
-        dois = extract_doi_candidates(user_input)
-        urls = re.findall(r"https?://[^\s)>\]]+", user_input or "")
-        if not dois and not urls:
-            return
-        registry = self.citation_coordinator.registry
-        for doi in dois:
-            registry.register_user_source(doi)
-        for url in urls:
-            if extract_doi_candidates(url):
-                continue  # DOI-bearing URLs already registered canonically
-            registry.register_user_source(url)
 
     def _finalize_answer(
         self, answer: str, *, user_input: str
@@ -314,15 +291,9 @@ class ChatSession:
             for ref in refs
             if ref.verification_level == "identity_verified"
         )
-        user_ids = frozenset(
-            ref.source_id
-            for ref in refs
-            if ref.verification_level == "user_supplied_unverified"
-        )
         violations = check_citations(
             answer,
             verified_source_ids=verified_ids,
-            user_source_ids=user_ids,
             user_input=user_input,
         )
         if violations:
@@ -333,11 +304,7 @@ class ChatSession:
             return build_safe_message(violations), [], errors
         resolve = registry.get if registry is not None else (lambda _sid: None)
         rendered = render_citations(answer, resolve=resolve)
-        return (
-            rendered.text,
-            [*rendered.cited_sources, *rendered.user_sources],
-            [],
-        )
+        return rendered.text, list(rendered.cited_sources), []
 
     async def finalize_and_record(
         self,
@@ -717,7 +684,6 @@ class ChatSession:
 
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
         """Core entry point: one finalized turn with sources and errors."""
-        self._register_user_sources(user_input)
         return await self._run_turn(user_input)
 
     async def turn(self, user_input: str) -> str:

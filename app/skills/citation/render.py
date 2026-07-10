@@ -2,10 +2,9 @@
 
 Runs only after the citation gate has passed. Verified ``[[cite:<id>]]``
 markers become ``[1]``, ``[2]``, ... in order of first appearance (the same
-source always keeps its number); user-supplied ``[[user-cite:<id>]]``
-markers use a separate ``[U1]`` sequence so the two can never collide.
-``[[citation-needed]]`` renders as a plain placeholder and never enters the
-bibliography. Ordinary web links pass through untouched and unnumbered.
+source always keeps its number). ``[[citation-needed]]`` renders as a plain
+placeholder and never enters the bibliography. Ordinary web links pass
+through untouched and unnumbered.
 
 The bibliography format is neutral and fixed: up to six authors then
 ``et al.``, year, full title, venue, DOI, verification level — any missing
@@ -22,7 +21,6 @@ from skills.citation.gate import (
     CITATION_NEEDED,
     CITE_MARKER_RE,
     MARKER_RE,
-    USER_CITE_MARKER_RE,
 )
 from skills.citation.types import SourceRef
 
@@ -36,7 +34,6 @@ class RenderedTurn:
 
     text: str
     cited_sources: list[SourceRef] = field(default_factory=list)
-    user_sources: list[SourceRef] = field(default_factory=list)
 
 
 def format_bibliography_entry(ref: SourceRef) -> str:
@@ -76,8 +73,6 @@ def render_citations(
 
     cited_order: list[SourceRef] = []
     cited_numbers: dict[str, int] = {}
-    user_order: list[SourceRef] = []
-    user_numbers: dict[str, int] = {}
 
     def _replace(match: re.Match) -> str:
         if _in_code(match.start()):
@@ -96,31 +91,17 @@ def render_citations(
                 cited_order.append(ref)
                 number = cited_numbers[source_id] = len(cited_order)
             return f"[{number}]"
-        user_cite = USER_CITE_MARKER_RE.match(body)
-        if user_cite:
-            source_id = user_cite.group(1)
-            ref = resolve(source_id)
-            if ref is None:
-                return match.group(0)
-            number = user_numbers.get(source_id)
-            if number is None:
-                user_order.append(ref)
-                number = user_numbers[source_id] = len(user_order)
-            return f"[U{number}]"
         return match.group(0)
 
     rendered = MARKER_RE.sub(_replace, text)
 
-    if cited_order or user_order:
+    if cited_order:
         lines = ["", "Sources:"]
         for i, ref in enumerate(cited_order, start=1):
             lines.append(f"[{i}] {format_bibliography_entry(ref)}")
-        for i, ref in enumerate(user_order, start=1):
-            lines.append(f"[U{i}] {format_bibliography_entry(ref)}")
         rendered = rendered.rstrip() + "\n" + "\n".join(lines) + "\n"
 
     return RenderedTurn(
         text=rendered,
         cited_sources=cited_order,
-        user_sources=user_order,
     )

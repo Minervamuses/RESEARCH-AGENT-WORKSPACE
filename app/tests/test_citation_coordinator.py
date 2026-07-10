@@ -328,26 +328,22 @@ def test_sessions_are_isolated_but_share_hub(tmp_path):
     assert b.status()["workflow_id"] == "none"
 
 
-def test_user_source_registration_rules(tmp_path):
+def test_registry_has_no_user_supplied_registration_surface(tmp_path):
     coordinator, _ = _coordinator(tmp_path)
-    ref = coordinator.registry.register_user_source("doi:10.1234/user-given")
-    assert ref is not None
-    assert ref.verification_level == "user_supplied_unverified"
-    assert ref.doi == "10.1234/user-given"
-
-    url_ref = coordinator.registry.register_user_source("https://example.org/x")
-    assert url_ref is not None and url_ref.doi is None
-
-    assert coordinator.registry.register_user_source("just words") is None
-    # Idempotent for the same input.
-    again = coordinator.registry.register_user_source("doi:10.1234/user-given")
-    assert again.source_id == ref.source_id
+    assert not hasattr(coordinator.registry, "register_user_source")
 
 
 def test_prompt_registry_caps_at_20_most_recent(tmp_path):
+    from skills.citation.types import SourceRef
+
     coordinator, _ = _coordinator(tmp_path)
     for i in range(25):
-        coordinator.registry.register_user_source(f"10.1234/source-{i:02d}")
+        coordinator.registry.register(SourceRef(
+            source_id=f"src-{i:02d}",
+            doi=f"10.1234/source-{i:02d}",
+            title=f"Paper {i:02d}",
+            verification_level="identity_verified",
+        ))
     prompt = coordinator.registry.prompt_sources()
     assert len(prompt) == 20
     assert prompt[0].doi == "10.1234/source-24"

@@ -8,33 +8,32 @@ from skills.citation.gate import (
 )
 
 VERIFIED = frozenset({"src-abc123"})
-USER = frozenset({"usr-def456"})
 
 
 def _codes(violations: list[GateViolation]) -> set[str]:
     return {v.code for v in violations}
 
 
-def _check(text, *, user_input="", verified=VERIFIED, user=USER):
+def _check(text, *, user_input="", verified=VERIFIED):
     return check_citations(
         text,
         verified_source_ids=verified,
-        user_source_ids=user,
         user_input=user_input,
     )
 
 
 def test_clean_text_with_known_markers_passes():
     text = (
-        "Transformers changed NLP [[cite:src-abc123]], as you noted "
-        "[[user-cite:usr-def456]]. More work is needed [[citation-needed]]."
+        "Transformers changed NLP [[cite:src-abc123]]. "
+        "More work is needed [[citation-needed]]."
     )
     assert _check(text) == []
 
 
 def test_dangling_and_unknown_markers_block():
     assert _codes(_check("x [[cite:src-nope]]")) == {"dangling_cite"}
-    assert _codes(_check("x [[user-cite:usr-nope]]")) == {"dangling_user_cite"}
+    # The retired user-cite marker form is now just an unknown marker.
+    assert _codes(_check("x [[user-cite:usr-nope]]")) == {"unknown_marker"}
     assert _codes(_check("x [[made-up:thing]]")) == {"unknown_marker"}
 
 

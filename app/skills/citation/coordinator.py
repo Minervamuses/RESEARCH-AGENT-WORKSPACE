@@ -119,34 +119,6 @@ class SourceRegistry:
     def prompt_sources(self, limit: int = PROMPT_REGISTRY_LIMIT) -> list[SourceRef]:
         return self.list()[: max(0, limit)]
 
-    def register_user_source(self, raw: str) -> SourceRef | None:
-        """Create a user_supplied_unverified SourceRef for a recognizable
-        DOI or URL; None when the text is neither."""
-        text = (raw or "").strip()
-        doi = canonicalize_doi(text)
-        url = None
-        if doi is None:
-            if text.startswith(("http://", "https://")):
-                url = text
-            else:
-                return None
-        key = doi or url or ""
-        source_id = f"usr-{doi_hash(key)}"
-        existing = self._sources.get(source_id)
-        if existing is not None:
-            self._touch(source_id)
-            return existing
-        ref = SourceRef(
-            source_id=source_id,
-            doi=doi,
-            title="",
-            url=url or (f"https://doi.org/{doi}" if doi else None),
-            verification_level="user_supplied_unverified",
-            provenance="user-input",
-        )
-        self.register(ref)
-        return ref
-
 
 def _candidate_from_structured(
     record: StructuredRecord, *, workflow_id: str

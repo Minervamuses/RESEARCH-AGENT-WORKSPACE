@@ -82,7 +82,12 @@ def test_deactivation_tears_down_workflow_and_registry(make_session, tmp_path):
     session = make_session()
     session.activate_skill("citation")
     coordinator = session.citation_coordinator  # lazily built
-    coordinator.registry.register_user_source("10.1234/x")
+    from skills.citation.types import SourceRef
+
+    coordinator.registry.register(SourceRef(
+        source_id="src-x", doi="10.1234/x", title="X",
+        verification_level="identity_verified",
+    ))
     assert session._citation_coordinator is not None
 
     session.deactivate_skill()

@@ -113,24 +113,21 @@ def test_blocked_draft_in_plan_mode_writes_safe_message_only(make_session):
     assert "raw_numeric_citation" in content
 
 
-def test_user_doi_in_input_registers_user_source_and_renders_u1(make_session, tmp_path):
-    session, _ = make_session(answer="placeholder")
-    _seed_verified_source(session, tmp_path)
-    asyncio.run(session.turn_outcome("請看 https://doi.org/10.1234/user-paper"))
-    registry = session.citation_coordinator.registry
-    user_refs = [
-        ref for ref in registry.list()
-        if ref.verification_level == "user_supplied_unverified"
-    ]
-    assert len(user_refs) == 1
-    user_id = user_refs[0].source_id
-
-    session.graph = make_astream_graph(
-        answer=f"Your paper [[user-cite:{user_id}]] is interesting."
+def test_user_doi_in_input_is_never_auto_registered(make_session, tmp_path):
+    """A DOI/URL in ordinary user input creates no Coordinator and no source."""
+    session, _ = make_session(answer="plain answer")
+    outcome = asyncio.run(
+        session.turn_outcome("請看 https://doi.org/10.1234/user-paper")
     )
-    outcome = asyncio.run(session.turn_outcome("continue"))
-    assert "[U1]" in outcome.text
-    assert "[user_supplied_unverified]" in outcome.text
+    assert outcome.text == "plain answer"
+    assert session._citation_coordinator is None  # noqa: SLF001
+
+    # user-cite markers are no longer a citable form at all.
+    session.graph = make_astream_graph(
+        answer="Your paper [[user-cite:usr-anything]] is interesting."
+    )
+    blocked = asyncio.run(session.turn_outcome("continue"))
+    assert any("unknown_marker" in err for err in blocked.validation_errors)
 
 
 def test_dangling_cite_marker_blocks(make_session, tmp_path):

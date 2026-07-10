@@ -1,8 +1,7 @@
 """Final citation gate for assistant drafts.
 
 Strict by default: the model may only cite verified sources through
-``[[cite:<source-id>]]`` markers (or ``[[user-cite:<source-id>]]`` for
-recognizable user-supplied DOIs/URLs, ``[[citation-needed]]`` as the one
+``[[cite:<source-id>]]`` markers (with ``[[citation-needed]]`` as the one
 placeholder). After Markdown-aware masking — code fences, inline code, and
 block quotes provably taken from the user's input are not scanned — any
 unknown marker, dangling source ID, raw DOI, raw numeric citation, raw
@@ -23,7 +22,6 @@ from skills.citation.doi import extract_doi_candidates
 
 MARKER_RE = re.compile(r"\[\[([^\[\]]*)\]\]")
 CITE_MARKER_RE = re.compile(r"^cite:(\S+)$")
-USER_CITE_MARKER_RE = re.compile(r"^user-cite:(\S+)$")
 CITATION_NEEDED = "citation-needed"
 
 _FENCE_RE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
@@ -115,7 +113,6 @@ def check_citations(
     text: str,
     *,
     verified_source_ids: frozenset[str] | set[str],
-    user_source_ids: frozenset[str] | set[str] = frozenset(),
     user_input: str = "",
 ) -> list[GateViolation]:
     """Return every blocking violation in ``text`` (empty list = pass)."""
@@ -133,14 +130,6 @@ def check_citations(
                 violations.append(GateViolation(
                     "dangling_cite",
                     f"[[cite:{cite.group(1)}]] does not match any verified source",
-                ))
-            continue
-        user_cite = USER_CITE_MARKER_RE.match(body)
-        if user_cite:
-            if user_cite.group(1) not in user_source_ids:
-                violations.append(GateViolation(
-                    "dangling_user_cite",
-                    f"[[user-cite:{user_cite.group(1)}]] does not match any user source",
                 ))
             continue
         violations.append(GateViolation(

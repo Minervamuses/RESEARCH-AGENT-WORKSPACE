@@ -1,4 +1,4 @@
-"""Renderer: first-appearance numbering, [U1] user sources, neutral bib."""
+"""Renderer: first-appearance numbering and the neutral bibliography."""
 
 from skills.citation.render import format_bibliography_entry, render_citations
 from skills.citation.types import SourceRef
@@ -20,11 +20,6 @@ def _ref(source_id, **kwargs):
 REGISTRY = {
     "src-a": _ref("src-a"),
     "src-b": _ref("src-b", year=2020),
-    "usr-x": _ref(
-        "usr-x", doi=None, title="", authors=[], year=None, venue="",
-        url="https://example.org/x",
-        verification_level="user_supplied_unverified",
-    ),
 }
 
 
@@ -40,11 +35,13 @@ def test_numbers_assigned_by_first_appearance_and_reused():
     assert [r.source_id for r in result.cited_sources] == ["src-b", "src-a"]
 
 
-def test_user_sources_use_separate_u_sequence():
+def test_retired_user_cite_marker_is_left_verbatim_not_numbered():
+    # The gate blocks this form upstream; the renderer must not invent a
+    # number for it even if it ever slipped through.
     result = _render("Per your link [[user-cite:usr-x]] and [[cite:src-a]].")
-    assert "Per your link [U1] and [1]." in result.text
-    assert [r.source_id for r in result.user_sources] == ["usr-x"]
-    assert "[U1] https://example.org/x. [user_supplied_unverified]" in result.text
+    assert "[[user-cite:usr-x]]" in result.text
+    assert "[U1]" not in result.text
+    assert [r.source_id for r in result.cited_sources] == ["src-a"]
 
 
 def test_citation_needed_renders_placeholder_without_bibliography():
