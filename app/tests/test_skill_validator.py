@@ -40,7 +40,7 @@ def _patch_graph_tools(monkeypatch, model):
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
+        lambda _cfg, store=None, registry_getter=None: _recall_history,
     )
 
 

@@ -72,7 +72,7 @@ def test_graph_passes_history_store_to_recall_tool(monkeypatch, tmp_path):
     monkeypatch.setattr("agent.graph.get_chat_model", lambda _config: DummyModel())
     monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [fake_explore])
 
-    def capture_history_tool(_config, store=None):
+    def capture_history_tool(_config, store=None, registry_getter=None):
         seen["store"] = store
         return fake_recall
 

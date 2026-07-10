@@ -75,12 +75,14 @@ def test_recall_history_renders_documents_as_json(tmp_path):
             "text": "How does X work?",
             "turn_id": 4,
             "timestamp": "2026-04-25T10:00",
+            "sources": [],
         },
         {
             "role": "assistant",
             "text": "X works by ...",
             "turn_id": 4,
             "timestamp": "2026-04-25T10:00",
+            "sources": [],
         },
     ]
 
