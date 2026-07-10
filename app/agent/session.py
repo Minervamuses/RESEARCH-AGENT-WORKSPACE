@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
+from skills.citation.tool import create_citation_workflow_tool
 from agent.turn_outcome import TurnOutcome
 
 from agent.config import AgentConfig
@@ -127,12 +128,20 @@ class ChatSession:
             session_id=self.session_id,
             recent_turns=self.recent_turns,
         )
+        # Skill-only tool: bound into the graph universe but callable only
+        # while the citation skill's allowlist grants it. Creation is cheap —
+        # the Coordinator behind it is built lazily on first use.
+        self.citation_workflow_tool = create_citation_workflow_tool(
+            coordinator_getter=lambda: self.citation_coordinator,
+            turn_getter=lambda: self._turn_counter,
+        )
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
             history_store=self.history_store,
             skill_runtime_getter=lambda: self.active_skill_runtime,
             citation_registry_getter=lambda: self.citation_coordinator.registry,
+            skill_tools=[self.citation_workflow_tool],
         )
         # The graph builder and model getters resolve here (not at import), so
         # monkeypatches of the agent.session module attributes before
@@ -156,11 +165,10 @@ class ChatSession:
     def citation_coordinator(self):
         """Session-scoped citation Coordinator over the process provider hub.
 
-        Built lazily on first /citation use: reuses the session's already
-        loaded web MCP tool handles (never restarts MCP) and a lazy chat
-        model factory for query expansion (no startup probe). Only the
-        /citation slash handler may call its mutating methods — the
-        Coordinator is never bound into the model tool graph.
+        Built lazily on first use: reuses the session's already loaded web
+        MCP tool handles (never restarts MCP) and a lazy chat model factory
+        for query expansion (no startup probe). Its mutating methods are
+        reachable only through the skill-only citation_workflow tool.
         """
         if self._citation_coordinator is None:
             from skills.citation.coordinator import CitationCoordinator

@@ -29,3 +29,6 @@ capabilities:
   github.repo.read:
     mcp_families:
       - github
+  citation.workflow:
+    local_tools:
+      - citation_workflow
