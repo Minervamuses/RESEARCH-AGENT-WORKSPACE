@@ -71,6 +71,12 @@ class AgentConfig(RAGConfig):
     # Optional local skills directory. When unset, defaults to `<repo>/skills`.
     skills_dir: str | None = None
 
+    # Citation bundle output directory. Highest-precedence override; when
+    # unset the CITATION_OUTPUT_DIR env var, then the source-checkout
+    # citation/cite dir, then the platform user-data dir apply (see
+    # citation.storage.resolve_output_dir).
+    citation_output_dir: str | None = None
+
     # Skill runtime controls.
     skill_validation_enabled: bool = True
     skill_max_validation_retries: int = 1
