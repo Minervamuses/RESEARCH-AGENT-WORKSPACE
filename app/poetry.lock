@@ -1407,6 +1407,18 @@ sandbox = ["websockets (>=15.0)"]
 vcr = ["vcrpy (>=7.0.0)"]
 
 [[package]]
+name = "latexcodec"
+version = "3.0.1"
+description = "A lexer and codec to work with LaTeX code in Python."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "latexcodec-3.0.1-py3-none-any.whl", hash = "sha256:a9eb8200bff693f0437a69581f7579eb6bca25c4193515c09900ce76451e452e"},
+    {file = "latexcodec-3.0.1.tar.gz", hash = "sha256:e78a6911cd72f9dec35031c6ec23584de6842bfbc4610a9678868d14cdfb0357"},
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 description = "Python port of markdown-it. Markdown parsing, done right!"
@@ -2353,6 +2365,22 @@ files = [
     {file = "pybase64-1.4.3-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:5de708043de95a3d2d621f5d51dc8e774bbdf969aa39021eee3ba5209d35dbea"},
     {file = "pybase64-1.4.3.tar.gz", hash = "sha256:c2ed274c9e0ba9c8f9c4083cfe265e66dd679126cd9c2027965d807352f3f053"},
 ]
+
+[[package]]
+name = "pybtex"
+version = "0.26.1"
+description = "A BibTeX-compatible bibliography processor in Python"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "pybtex-0.26.1-py3-none-any.whl", hash = "sha256:e26c0412cc54f5f21b2a6d9d175762a2d2af9ccf3a8f651cdb89ec035db77aa1"},
+    {file = "pybtex-0.26.1.tar.gz", hash = "sha256:2e5543bea424e60e9e42eef70bff597be48649d8f68ba061a7a092b2477d5464"},
+]
+
+[package.dependencies]
+latexcodec = ">=1.0.4"
+pyyaml = ">=3.1"
 
 [[package]]
 name = "pycparser"
@@ -4089,4 +4117,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9db52fcc510dc93eb0a835d1bd07d93d7e85bc284e2f68a85816964090d88dee"
+content-hash = "721bf8b0d802f3ff4fb805c82c9186aee7e25549c6b434e24df4037b4c07dc15"
