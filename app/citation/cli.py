@@ -139,7 +139,12 @@ async def _amain(args: argparse.Namespace) -> int:
 
     from agent.paths import find_app_root
 
-    load_dotenv(dotenv_path=find_app_root() / ".env", override=False)
+    try:
+        load_dotenv(dotenv_path=find_app_root() / ".env", override=False)
+    except RuntimeError:
+        # Wheel install: no source checkout above the package, so no .env to
+        # load — shell environment variables still apply.
+        pass
 
     from agent.config import AgentConfig
     from citation.hub import get_provider_hub
