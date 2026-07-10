@@ -5,14 +5,14 @@ import json
 
 import pytest
 
-from citation.providers.doi_org import (
+from skills.citation.providers.doi_org import (
     CSL_ACCEPT,
     BIBTEX_ACCEPT,
     DoiNotFound,
     DoiOrgClient,
     parse_csl,
 )
-from citation.providers.net import (
+from skills.citation.providers.net import (
     AsyncRateLimiter,
     FetchResponse,
     ProviderError,

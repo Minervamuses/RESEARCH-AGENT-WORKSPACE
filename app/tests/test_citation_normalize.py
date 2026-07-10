@@ -1,6 +1,6 @@
 """Title normalization contracts: NFKC, casefold, HTML, LaTeX, empty-title."""
 
-from citation.normalize import normalize_title, strip_latex, titles_match
+from skills.citation.normalize import normalize_title, strip_latex, titles_match
 
 
 def test_latex_accents_and_glyphs_flatten_to_unicode():

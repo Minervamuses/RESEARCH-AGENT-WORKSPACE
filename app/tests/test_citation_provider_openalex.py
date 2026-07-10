@@ -5,14 +5,14 @@ import json
 
 import pytest
 
-from citation.providers.net import (
+from skills.citation.providers.net import (
     AsyncRateLimiter,
     FetchResponse,
     ProviderError,
     ProviderHTTPError,
     TTLCache,
 )
-from citation.providers.openalex import OpenAlexClient, parse_work
+from skills.citation.providers.openalex import OpenAlexClient, parse_work
 
 FIXTURE_RESULTS = [
     {

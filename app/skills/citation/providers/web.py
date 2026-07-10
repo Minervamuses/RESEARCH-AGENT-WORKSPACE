@@ -20,9 +20,9 @@ import html
 import re
 import urllib.parse
 
-from citation.doi import extract_doi_candidates
-from citation.providers.base import MAX_RECORDS_PER_QUERY, ProviderRecord
-from citation.providers.net import ProviderError, ProviderTimeout
+from skills.citation.doi import extract_doi_candidates
+from skills.citation.providers.base import MAX_RECORDS_PER_QUERY, ProviderRecord
+from skills.citation.providers.net import ProviderError, ProviderTimeout
 
 PROVIDER_NAME = "web"
 

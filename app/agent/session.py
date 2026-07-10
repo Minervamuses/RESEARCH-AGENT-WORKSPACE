@@ -10,8 +10,8 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.citation_gate import build_safe_message, check_citations
-from agent.citation_render import render_citations
+from skills.citation.gate import build_safe_message, check_citations
+from skills.citation.render import render_citations
 from agent.turn_outcome import TurnOutcome
 
 from agent.config import AgentConfig
@@ -163,8 +163,8 @@ class ChatSession:
         Coordinator is never bound into the model tool graph.
         """
         if self._citation_coordinator is None:
-            from citation.coordinator import CitationCoordinator
-            from citation.hub import get_provider_hub
+            from skills.citation.coordinator import CitationCoordinator
+            from skills.citation.hub import get_provider_hub
 
             web_tools = {
                 tool.name: tool
@@ -275,7 +275,7 @@ class ChatSession:
     def _register_user_sources(self, user_input: str) -> None:
         """Register recognizable user-provided DOIs/URLs as citable
         user_supplied_unverified sources before the turn runs."""
-        from citation.doi import extract_doi_candidates
+        from skills.citation.doi import extract_doi_candidates
 
         dois = extract_doi_candidates(user_input)
         urls = re.findall(r"https?://[^\s)>\]]+", user_input or "")

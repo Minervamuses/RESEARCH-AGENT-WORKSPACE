@@ -12,9 +12,9 @@ from agent.cli.slash_commands import (
     execute_slash_command,
     parse_slash_command,
 )
-from citation.coordinator import CitationCoordinator
-from citation.hub import CitationProviderHub
-from citation.providers.net import FetchResponse
+from skills.citation.coordinator import CitationCoordinator
+from skills.citation.hub import CitationProviderHub
+from skills.citation.providers.net import FetchResponse
 
 from tests.test_citation_coordinator import CROSSREF_ITEMS, DOI_A, RoutingFetcher
 

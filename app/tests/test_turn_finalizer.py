@@ -9,9 +9,9 @@ from conftest import FakeHistoryStore, make_astream_graph
 from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.turn_outcome import TurnOutcome
-from citation.coordinator import CitationCoordinator
-from citation.hub import CitationProviderHub
-from citation.types import SourceRef
+from skills.citation.coordinator import CitationCoordinator
+from skills.citation.hub import CitationProviderHub
+from skills.citation.types import SourceRef
 
 
 @pytest.fixture

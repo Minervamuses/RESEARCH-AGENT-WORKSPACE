@@ -16,9 +16,9 @@ import json
 import urllib.parse
 from pathlib import Path
 
-from citation.coordinator import CitationCoordinator
-from citation.hub import CitationProviderHub
-from citation.providers.net import FetchResponse
+from skills.citation.coordinator import CitationCoordinator
+from skills.citation.hub import CitationProviderHub
+from skills.citation.providers.net import FetchResponse
 
 BASELINE_PATH = Path(__file__).parent / "fixtures" / "ranking_baseline.json"
 

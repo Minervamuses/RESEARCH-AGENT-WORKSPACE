@@ -16,10 +16,10 @@ import asyncio
 import os
 import threading
 
-from citation.providers.crossref import CrossrefClient
-from citation.providers.doi_org import DoiOrgClient
-from citation.providers.net import AsyncRateLimiter, FetchResponse, TTLCache
-from citation.providers.openalex import OpenAlexClient
+from skills.citation.providers.crossref import CrossrefClient
+from skills.citation.providers.doi_org import DoiOrgClient
+from skills.citation.providers.net import AsyncRateLimiter, FetchResponse, TTLCache
+from skills.citation.providers.openalex import OpenAlexClient
 
 _HTTP_TIMEOUT_SECONDS = 25.0
 

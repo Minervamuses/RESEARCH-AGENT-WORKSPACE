@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from citation import storage
-from citation.storage import (
+from skills.citation import storage
+from skills.citation.storage import (
     BIB_FILENAME,
     MAX_BUNDLE_DIR_BYTES,
     SIDECAR_FILENAME,

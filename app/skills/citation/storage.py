@@ -39,7 +39,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from citation.types import PERSIST_SCHEMA_VERSION
+from skills.citation.types import PERSIST_SCHEMA_VERSION
 
 BIB_FILENAME = "reference.bib"
 SIDECAR_FILENAME = "citation.json"

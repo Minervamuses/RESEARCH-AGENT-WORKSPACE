@@ -18,13 +18,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from agent.citation_gate import (
+from skills.citation.gate import (
     CITATION_NEEDED,
     CITE_MARKER_RE,
     MARKER_RE,
     USER_CITE_MARKER_RE,
 )
-from citation.types import SourceRef
+from skills.citation.types import SourceRef
 
 _MAX_BIB_AUTHORS = 6
 _FENCE_OR_CODE_RE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.DOTALL)

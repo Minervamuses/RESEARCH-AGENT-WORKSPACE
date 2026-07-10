@@ -17,7 +17,7 @@ import logging
 import re
 from typing import Awaitable, Callable
 
-logger = logging.getLogger("citation.expansion")
+logger = logging.getLogger(__name__)
 
 MAX_EXPANSIONS = 2
 _EXPAND_TIMEOUT_SECONDS = 20.0

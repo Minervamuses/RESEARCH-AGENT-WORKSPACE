@@ -12,8 +12,8 @@ from agent.history_rag.store import (
 )
 from agent.history_rag.tool import create_history_tool
 from agent.memory import TurnRecord
-from citation.coordinator import SourceRegistry
-from citation.types import SourceRef
+from skills.citation.coordinator import SourceRegistry
+from skills.citation.types import SourceRef
 
 
 def _ref(source_id="src-x"):

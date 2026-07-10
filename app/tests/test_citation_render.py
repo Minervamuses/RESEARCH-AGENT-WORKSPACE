@@ -1,7 +1,7 @@
 """Renderer: first-appearance numbering, [U1] user sources, neutral bib."""
 
-from agent.citation_render import format_bibliography_entry, render_citations
-from citation.types import SourceRef
+from skills.citation.render import format_bibliography_entry, render_citations
+from skills.citation.types import SourceRef
 
 
 def _ref(source_id, **kwargs):

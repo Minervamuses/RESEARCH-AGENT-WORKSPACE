@@ -2,7 +2,7 @@
 
 import asyncio
 
-from citation.expansion import MAX_EXPANSIONS, QueryExpander, parse_expansions
+from skills.citation.expansion import MAX_EXPANSIONS, QueryExpander, parse_expansions
 
 
 class _StubLLM:

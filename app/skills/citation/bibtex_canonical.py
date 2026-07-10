@@ -20,7 +20,7 @@ from dataclasses import dataclass, field, replace
 import pybtex.errors
 from pybtex.database import parse_string
 
-from citation.normalize import strip_latex
+from skills.citation.normalize import strip_latex
 
 MAX_BIBTEX_BYTES = 1 * 1024 * 1024
 

@@ -3,9 +3,9 @@
 import asyncio
 import json
 
-from citation.coordinator import CitationCoordinator
-from citation.hub import CitationProviderHub
-from citation.providers.net import FetchResponse
+from skills.citation.coordinator import CitationCoordinator
+from skills.citation.hub import CitationProviderHub
+from skills.citation.providers.net import FetchResponse
 
 DOI_A = "10.1234/paper-a"
 DOI_B = "10.1234/paper-b"

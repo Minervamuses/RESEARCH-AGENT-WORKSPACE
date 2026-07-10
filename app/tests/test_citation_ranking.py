@@ -1,7 +1,7 @@
 """Deterministic RRF fusion, identity-only merge, and related groups."""
 
-from citation.providers.base import ProviderRecord
-from citation.ranking import RRF_K, fuse_ranked_lists
+from skills.citation.providers.base import ProviderRecord
+from skills.citation.ranking import RRF_K, fuse_ranked_lists
 
 
 def _rec(provider, rank, *, doi=None, title="", pid=None, year=None,

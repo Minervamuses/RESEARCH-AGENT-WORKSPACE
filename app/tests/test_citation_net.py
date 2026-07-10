@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from citation.providers.net import (
+from skills.citation.providers.net import (
     AsyncRateLimiter,
     FetchResponse,
     ProviderHTTPError,

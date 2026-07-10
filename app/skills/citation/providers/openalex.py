@@ -12,9 +12,9 @@ import json
 import urllib.parse
 from typing import Awaitable, Callable
 
-from citation.doi import canonicalize_doi
-from citation.providers.base import MAX_RECORDS_PER_QUERY, ProviderRecord
-from citation.providers.net import (
+from skills.citation.doi import canonicalize_doi
+from skills.citation.providers.base import MAX_RECORDS_PER_QUERY, ProviderRecord
+from skills.citation.providers.net import (
     SEARCH_TTL_SECONDS,
     AsyncRateLimiter,
     FetchResponse,

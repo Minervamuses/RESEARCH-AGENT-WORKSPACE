@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from citation.providers.crossref import CrossrefClient, parse_work_item
-from citation.providers.net import (
+from skills.citation.providers.crossref import CrossrefClient, parse_work_item
+from skills.citation.providers.net import (
     AsyncRateLimiter,
     FetchResponse,
     ProviderError,

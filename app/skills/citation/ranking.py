@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from citation.normalize import normalize_title
-from citation.providers.base import ProviderRecord
-from citation.types import CitationCandidate
+from skills.citation.normalize import normalize_title
+from skills.citation.providers.base import ProviderRecord
+from skills.citation.types import CitationCandidate
 
 RRF_K = 60
 

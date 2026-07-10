@@ -1,6 +1,6 @@
 """DOI canonicalizer contracts: prefix stripping, single decode, no NFKC."""
 
-from citation.doi import (
+from skills.citation.doi import (
     ascii_casefold,
     canonicalize_doi,
     doi_equal,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from citation.bibtex_canonical import (
+from skills.citation.bibtex_canonical import (
     MAX_BIBTEX_BYTES,
     BibtexValidationError,
     inject_doi,

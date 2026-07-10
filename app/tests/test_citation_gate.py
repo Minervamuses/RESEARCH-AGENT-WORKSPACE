@@ -1,6 +1,6 @@
 """Citation gate: masking, marker validation, and strict blocking."""
 
-from agent.citation_gate import (
+from skills.citation.gate import (
     GateViolation,
     build_safe_message,
     check_citations,

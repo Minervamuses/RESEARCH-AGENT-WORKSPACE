@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from citation.types import SourceRef
+from skills.citation.types import SourceRef
 
 
 @dataclass

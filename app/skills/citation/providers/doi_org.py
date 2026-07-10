@@ -16,8 +16,8 @@ import urllib.parse
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from citation.doi import canonicalize_doi
-from citation.providers.net import (
+from skills.citation.doi import canonicalize_doi
+from skills.citation.providers.net import (
     DOI_TTL_SECONDS,
     AsyncRateLimiter,
     FetchResponse,

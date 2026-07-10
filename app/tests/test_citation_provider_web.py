@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from citation.providers.net import ProviderError, ProviderTimeout
-from citation.providers.web import (
+from skills.citation.providers.net import ProviderError, ProviderTimeout
+from skills.citation.providers.web import (
     WebSearchProvider,
     normalize_url,
     parse_search_text,

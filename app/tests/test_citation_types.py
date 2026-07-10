@@ -2,7 +2,7 @@
 
 import pytest
 
-from citation.types import (
+from skills.citation.types import (
     PERSIST_SCHEMA_VERSION,
     CitationCandidate,
     CitationResult,

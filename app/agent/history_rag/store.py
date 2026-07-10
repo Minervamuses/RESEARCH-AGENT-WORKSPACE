@@ -19,7 +19,7 @@ from rag import VectorRetriever, get_chroma_store
 
 from agent.config import AgentConfig
 from agent.memory import TurnRecord
-from citation.types import PERSIST_SCHEMA_VERSION, SourceRef
+from skills.citation.types import PERSIST_SCHEMA_VERSION, SourceRef
 
 CHAT_HISTORY_COLLECTION = "chat_history"
 CHAT_HISTORY_SUBDIR = "chat_history"

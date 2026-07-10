@@ -20,31 +20,31 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
-from citation.doi import canonicalize_doi, doi_equal, extract_doi_candidates
-from citation.expansion import QueryExpander
-from citation.hub import CitationProviderHub
-from citation.normalize import titles_match
-from citation.providers.base import ProviderRecord
-from citation.providers.doi_org import DoiNotFound, StructuredRecord
-from citation.providers.net import (
+from skills.citation.doi import canonicalize_doi, doi_equal, extract_doi_candidates
+from skills.citation.expansion import QueryExpander
+from skills.citation.hub import CitationProviderHub
+from skills.citation.normalize import titles_match
+from skills.citation.providers.base import ProviderRecord
+from skills.citation.providers.doi_org import DoiNotFound, StructuredRecord
+from skills.citation.providers.net import (
     ProviderError,
     ProviderRateLimited,
     ProviderTimeout,
 )
-from citation.providers.web import WebSearchProvider
-from citation.ranking import MAX_WORKFLOW_CANDIDATES, fuse_ranked_lists
-from citation.bibtex_canonical import (
+from skills.citation.providers.web import WebSearchProvider
+from skills.citation.ranking import MAX_WORKFLOW_CANDIDATES, fuse_ranked_lists
+from skills.citation.bibtex_canonical import (
     BibtexValidationError,
     inject_doi,
     parse_canonical_bibtex,
 )
-from citation.storage import (
+from skills.citation.storage import (
     StorageError,
     doi_hash,
     resolve_output_dir,
     write_bundle,
 )
-from citation.types import (
+from skills.citation.types import (
     CitationCandidate,
     CitationMatch,
     CitationResult,
@@ -54,7 +54,7 @@ from citation.types import (
     VerificationReport,
 )
 
-logger = logging.getLogger("citation.coordinator")
+logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 10
 PROMPT_REGISTRY_LIMIT = 20

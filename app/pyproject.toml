@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [tool.poetry]
-packages = [{ include = "agent" }, { include = "citation" }]
+packages = [{ include = "agent" }, { include = "skills" }]
 
 [tool.poetry.dependencies]
 # Local development enrichment only: resolve research-agent-rag from the

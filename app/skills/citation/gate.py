@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from citation.doi import extract_doi_candidates
+from skills.citation.doi import extract_doi_candidates
 
 MARKER_RE = re.compile(r"\[\[([^\[\]]*)\]\]")
 CITE_MARKER_RE = re.compile(r"^cite:(\S+)$")

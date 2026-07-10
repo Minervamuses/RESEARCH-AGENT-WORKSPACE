@@ -7,12 +7,12 @@ into the model tool graph, and there is deliberately no /cite alias.
 
 from __future__ import annotations
 
-from citation.coordinator import (
+from skills.citation.coordinator import (
     CitationCoordinator,
     SearchOutcome,
     SelectOutcome,
 )
-from citation.types import CitationCandidate, CitationMatch, CitationResult, SourceRef
+from skills.citation.types import CitationCandidate, CitationMatch, CitationResult, SourceRef
 
 USAGE = (
     "usage: /citation <query> | search <query> | list [page] | show <candidate-id> | "
