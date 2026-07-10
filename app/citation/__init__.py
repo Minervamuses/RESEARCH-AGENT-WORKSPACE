@@ -1,21 +1,23 @@
-"""Isolated citation-capture prototype.
+"""Citation workflow package.
 
-This package is a *standalone experiment*. It reuses the host project's
-configuration, chat model, and Web Search MCP loader (read-only imports from
-``agent.*``) but is intentionally NOT wired into the LangGraph agent, the skill
-system, the capability map, or any slash command.
+Session-scoped :class:`citation.coordinator.CitationCoordinator` (driven by
+chat's ``/citation`` slash command and the interactive ``python -m citation``
+CLI) over a process-scoped :class:`citation.hub.CitationProviderHub` that owns
+the shared provider clients, cache, and rate limiters.
 
-Flow:
-    topic -> Google Scholar-oriented discovery (Web Search MCP)
-          -> user picks a candidate
-          -> DOI / Crossref metadata route for BibTeX (with title/author/year
-             verification)
-          -> write to ``citation/cite/<normalized_title>.bib``
+Discovery runs structured providers (Crossref, and OpenAlex when
+``OPENALEX_API_KEY`` is set) fused by deterministic reciprocal-rank fusion,
+with the web MCP only as an explicit or empty-result fallback. Confirmation
+re-verifies the selected DOI via doi.org (CSL JSON + BibTeX for the same
+canonical DOI, validated through pybtex) and persists an atomic bundle
+(``reference.bib`` + ``citation.json`` sidecar). Verification is strictly
+identity-level: ``identity_verified`` means the DOI and bibliographic
+pipeline agree on the record, never that the source supports a claim.
 
-Nothing here fabricates BibTeX: if no DOI/Crossref route returns real BibTeX,
-the run reports the failure and writes nothing.
+Nothing here fabricates bibliographic data: failed lookups, DOI mismatches,
+and storage conflicts fail closed and write nothing.
 """
 
 __all__ = ["__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

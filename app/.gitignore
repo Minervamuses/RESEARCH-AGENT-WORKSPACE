@@ -22,3 +22,8 @@ plan_logs/
 
 # Windows zone identifier
 *:Zone.Identifier
+
+# Default citation output: atomic bundle dirs and hidden staging under
+# citation/cite/ (scoped here on purpose — no global *.bib ignore).
+citation/cite/*
+!citation/cite/.gitkeep
