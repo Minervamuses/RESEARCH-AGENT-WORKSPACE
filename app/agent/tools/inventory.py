@@ -203,16 +203,20 @@ def build_base_tools(
     config: AgentConfig,
     history_store=None,
     extra_tools: list | None = None,
+    citation_registry_getter=None,
 ) -> list:
     """Instantiate the local base tools, then append de-duplicated extra tools.
 
     The returned tool list is ordered to match :func:`base_tool_names`. Local
     base tools win on name collisions, so a same-named extra tool is ignored
-    rather than bound twice.
+    rather than bound twice. ``citation_registry_getter`` lets recall_history
+    rehydrate cited sources into the session registry.
     """
     tools = [
         *create_rag_tools(config),
-        create_history_tool(config, store=history_store),
+        create_history_tool(
+            config, store=history_store, registry_getter=citation_registry_getter
+        ),
         create_read_file_tool(config),
         create_bash_tool(config),
     ]

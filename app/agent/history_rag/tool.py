@@ -13,7 +13,11 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.config import AgentConfig
-from agent.history_rag.store import ChatHistoryStore, get_chat_history_store
+from agent.history_rag.store import (
+    ChatHistoryStore,
+    get_chat_history_store,
+    sources_from_metadata,
+)
 
 TOOL_NAME = "recall_history"
 TOOL_DESCRIPTION = (
@@ -42,12 +46,14 @@ def _format_results(documents) -> str:
     payload = []
     for doc in documents:
         meta = doc.metadata or {}
+        sources = sources_from_metadata(meta)
         payload.append(
             {
                 "role": meta.get("role"),
                 "text": doc.page_content,
                 "turn_id": meta.get("turn_id"),
                 "timestamp": meta.get("timestamp"),
+                "sources": [ref.to_dict() for ref in sources],
             }
         )
     return json.dumps(payload, ensure_ascii=False)
@@ -56,13 +62,29 @@ def _format_results(documents) -> str:
 def create_history_tool(
     config: AgentConfig,
     store: ChatHistoryStore | None = None,
+    registry_getter=None,
 ) -> StructuredTool:
-    """Build the recall_history tool. `store` is injectable for tests."""
+    """Build the recall_history tool. `store` is injectable for tests.
+
+    ``registry_getter`` (optional) returns the session SourceRegistry; when
+    recalled assistant turns carry cited sources, they are re-registered so
+    the current turn can cite them again via [[cite:<source-id>]].
+    """
     if store is None:
         store = get_chat_history_store(config)
 
     def _run(query: str, k: int = 5, role: str | None = None) -> str:
         documents = store.search(query, k=k, role=role)
+        if registry_getter is not None:
+            recalled = [
+                ref
+                for doc in documents
+                for ref in sources_from_metadata(doc.metadata)
+            ]
+            if recalled:
+                registry = registry_getter()
+                for ref in recalled:
+                    registry.register(ref)
         return _format_results(documents)
 
     _run.__name__ = TOOL_NAME

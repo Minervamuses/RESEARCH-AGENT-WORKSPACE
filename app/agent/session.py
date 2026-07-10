@@ -132,6 +132,7 @@ class ChatSession:
             extra_tools=extra_tools,
             history_store=self.history_store,
             skill_runtime_getter=lambda: self.active_skill_runtime,
+            citation_registry_getter=lambda: self.citation_coordinator.registry,
         )
         # The graph builder and model getters resolve here (not at import), so
         # monkeypatches of the agent.session module attributes before
