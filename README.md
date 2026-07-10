@@ -4,7 +4,7 @@
 
 ```text
 research-agent-workspace/
-├── app/  # LangGraph chat agent、CLI、slash commands、skills、對話記憶、citation prototype
+├── app/  # LangGraph chat agent、CLI、slash commands、skills、對話記憶、citation workflow
 └── rag/  # 獨立 RAG library:ingest、Chroma/JSON store、語意搜尋、context window
 ```
 
@@ -24,12 +24,14 @@ research-agent-workspace/
 
 Poetry 不會另建 `.venv`,`poetry install` 直接裝進目前啟用的 conda env——務必先 `conda activate app` / `conda activate rag` 再執行,否則套件會裝錯地方。
 
+rag 的 distribution 名稱是 **`research-agent-rag`**(PyPI 上已有不相干的 `rag==0.1.0`),Python import 仍是 `import rag`;app 在 `[project.dependencies]` 宣告 `research-agent-rag==0.1.0`,本機開發由 `[tool.poetry.dependencies]` 的 editable path(`../rag`)提供,不會進 wheel metadata。
+
 ### 外部服務
 
 - **Ollama + `bge-m3`**:ingest 與語意搜尋必要(`ollama pull bge-m3`)。
-- **OpenRouter**(`OPENROUTER_API_KEY` + 可連外網路):chat agent、extended thinking、repo/folder ingest 的 folder tagging、citation prototype 必要。
+- **OpenRouter**(`OPENROUTER_API_KEY` + 可連外網路):chat agent、extended thinking、repo/folder ingest 的 folder tagging 必要;citation workflow 只在 query expansion 時 lazy 使用,缺 key 仍可運作。
 - **MCP servers**(選配):Web Search 與 GitHub,由 `app/.env` 啟用。GitHub MCP 沒 token 可能仍可啟動,但實際呼叫多半會被拒。
-- citation prototype 的 Crossref/DOI 查詢需要網路。
+- citation workflow 的 Crossref/OpenAlex/doi.org 查詢需要網路;OpenAlex 需另設 `OPENALEX_API_KEY`(缺 key 顯示 disabled,不影響其他 provider)。
 
 ### 各功能入口需求對照
 
@@ -41,7 +43,7 @@ Poetry 不會另建 `.venv`,`poetry install` 直接裝進目前啟用的 conda e
 | `/ingest <file>` | Ollama + `bge-m3` |
 | `rag.search(...)` / `rag_search` | 已有資料 + Ollama + `bge-m3` |
 | `rag.explore` / `list_chunks` / `get_context` | 已有 store;不需 OpenRouter,通常也不需 Ollama |
-| `python -m citation.cli ...` | `app` env + Web Search MCP + `OPENROUTER_API_KEY`(缺少或無效會直接以 exit code 2 失敗,沒有 fallback) |
+| `/citation ...` 與 `python -m citation` | `app` env + 網路(Crossref/doi.org);OpenAlex 需 `OPENALEX_API_KEY`;Web Search MCP 與 OpenRouter 皆為選配(fallback / query expansion) |
 
 ### 可寫入路徑
 
@@ -49,7 +51,7 @@ Poetry 不會另建 `.venv`,`poetry install` 直接裝進目前啟用的 conda e
 
 - `rag/store/`(或 `KMS_STORE_DIR` 指向的位置):Chroma、`raw.json`、`folder_meta.json`、chat history。
 - `app/plan_logs/`:plan mode markdown logs。
-- `app/citation/cite/`:citation prototype 輸出的 `.bib`。
+- `app/citation/cite/`(或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置):citation bundle 輸出(`<title>--<doi-hash>/reference.bib` + `citation.json`)。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
 
 ## 2. 安裝
@@ -95,12 +97,12 @@ cp app/.env.example app/.env
 
 讀取規則:
 
-- `python -m agent.cli.chat` 與 `python -m citation.cli` 會自動讀 `app/.env`,且 `override=False`——shell 已有的同名環境變數不會被 `.env` 覆蓋。
+- `python -m agent.cli.chat` 與 `python -m citation` 會自動讀 `app/.env`,且 `override=False`——shell 已有的同名環境變數不會被 `.env` 覆蓋。
 - `python -m rag.cli.ingest` 與直接 import `rag` **不會**讀 `app/.env`,只認 shell 環境變數;需要時先在 shell `export OPENROUTER_API_KEY=...`、`export KMS_STORE_DIR=...`。
 
 | 變數 | 必要性 | 用途 |
 |---|---|---|
-| `OPENROUTER_API_KEY` | chat、extended thinking、repo/folder ingest、citation 必要 | OpenRouter chat model 與 RAG folder tagging |
+| `OPENROUTER_API_KEY` | chat、extended thinking、repo/folder ingest 必要;citation 選配 | OpenRouter chat model、RAG folder tagging、citation query expansion(lazy) |
 | `KMS_STORE_DIR` | 選用 | 改 RAG store 位置;app 與 rag 要共用資料必須設同一值 |
 | `AGENT_ENABLE_MCP_WEB_SEARCH` | 選用 | 設 `1`/`true`/`yes`/`on` 啟用 Web Search MCP |
 | `AGENT_MCP_WEB_SEARCH_COMMAND` | 啟用該 MCP 時必要 | Web Search MCP 啟動命令(如 `npx` 或本機 server path) |
@@ -110,7 +112,9 @@ cp app/.env.example app/.env
 | `AGENT_MCP_GITHUB_ARGS` | 視 server 而定 | GitHub MCP server 啟動參數 |
 | `AGENT_MCP_GITHUB_TOOLSETS` | 選用 | GitHub MCP toolsets;預設 `repos,pull_requests,issues,actions,context` |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | 實際使用 GitHub MCP 時需要 | GitHub MCP 認證 |
-| `CROSSREF_MAILTO` | 選用 | citation 呼叫 Crossref 時加進 User-Agent |
+| `CROSSREF_MAILTO` | 選用 | citation 呼叫 Crossref 時加進 User-Agent(polite pool) |
+| `OPENALEX_API_KEY` | 選用 | 啟用 OpenAlex discovery provider;key 只作 query parameter 且 log/trace 會 redact |
+| `CITATION_OUTPUT_DIR` | 選用 | 改 citation bundle 輸出位置(優先序:`AgentConfig.citation_output_dir` → 此變數 → source checkout 的 `app/citation/cite/` → 平台 user-data 目錄) |
 | `XDG_CACHE_HOME` | 選用 | 改 MCP stderr log/cache 位置(預設 `~/.cache/agent-mcp/`) |
 
 ## 4. 啟動聊天 Agent
@@ -223,8 +227,8 @@ MCP 工具(選配):Web Search MCP 做即時網路搜尋;GitHub MCP 存取遠端 
 ```dotenv
 # Web Search MCP
 AGENT_ENABLE_MCP_WEB_SEARCH=1
-AGENT_MCP_WEB_SEARCH_COMMAND=/path/to/web-search-mcp
-AGENT_MCP_WEB_SEARCH_ARGS=
+AGENT_MCP_WEB_SEARCH_COMMAND=node
+AGENT_MCP_WEB_SEARCH_ARGS=/absolute/path/to/web-search-mcp/dist/index.js
 
 # GitHub MCP
 AGENT_ENABLE_MCP_GITHUB=1
@@ -234,7 +238,9 @@ GITHUB_PERSONAL_ACCESS_TOKEN=...
 AGENT_MCP_GITHUB_TOOLSETS=repos,pull_requests,issues,actions,context
 ```
 
-MCP server 啟動失敗時 agent 仍會啟動,只是少那組外部工具;stderr log 在 `~/.cache/agent-mcp/`。
+Web Search MCP 使用 [mrkrsl/web-search-mcp](https://github.com/mrkrsl/web-search-mcp) v0.3.2(commit `e694d8d5da11d1509b9bf0976d380035f648d6f9`,已驗證版本;上游沒有可用的 npm pin):在外部 clone 該 commit、`npm install && npm run build` 之後,以 `node /absolute/path/dist/index.js` 啟動(如上例)。
+
+MCP server 啟動失敗時 agent 仍會啟動,只是少那組外部工具;stderr log 在 `~/.cache/agent-mcp/`(啟動前以 0600 建立,每次 run 寫入 timestamp/run-ID header,達 5 MiB 輪替並保留 3 份)。
 
 ## 9. Skills
 
@@ -359,21 +365,37 @@ chunks = list_chunks()         # 從 raw.json 列 chunks,不跑 embedding
 
 完整參數與 dataclass 欄位見 `rag/docs/API.md`。
 
-## 11. Citation Prototype
+## 11. Citation Workflow
 
-`citation/` 是獨立的 citation capture prototype,不是 slash command,也不是 skill system 的一部分。用途:用自然語言描述要找的 paper,由 LLM 決定搜尋策略、透過 Web Search MCP 找候選,選一篇後由 DOI/Crossref 產生 BibTeX。
+citation workflow 是「搜尋 → 選擇 → 驗證 → 保存」的引用管線,chat 內唯一入口是 `/citation` slash command(沒有 `/cite` alias),standalone 入口是 `python -m citation`(互動式 REPL,共用同一個 Coordinator;沒有 `--auto`,任何保存都必須互動確認)。普通 chat 仍可用 web 搜尋並附一般連結,但**不能**把 web 結果升格為正式 citation:模型只能用 `[[cite:<source-id>]]` 引用已驗證來源、`[[user-cite:<source-id>]]` 引用使用者提供的 DOI/URL、`[[citation-needed]]` 標記缺來源,renderer 依首次出現順序編號 `[1]`/`[U1]` 並產生固定格式 bibliography;草稿中出現 raw DOI、`[1]`、作者年份或手寫 References 會被 citation gate 直接封鎖(原草稿不進 history/plan log)。
+
+```text
+/citation <query>              # 搜尋(DOI-shaped query 直接走 doi.org,不啟動 LLM/web)
+/citation search <query>       #(同上,明確子命令)
+/citation list [page]          # 每頁 10 筆候選
+/citation show <candidate-id>  # 候選細節(provider provenance、衝突、related-version group)
+/citation more [query]         # 明確引入 web 搜尋結果(保留既有候選編號)
+/citation select <candidate-id># 解析所有可確認 match(不寫檔)
+/citation confirm <match-id>   # 唯一會驗證+寫 bundle 的操作
+/citation status | cancel
+/citation sources [page]       # 列出本 session 已驗證來源
+/citation source <source-id>   # 重新啟用既有來源供引用
+```
+
+流程與保證:
+
+- **Discovery**:Crossref 與(有 `OPENALEX_API_KEY` 時)OpenAlex 並行查詢,LLM 最多 lazy 產生 2 個 query expansion(LLM 不可用時照常運作);排名用固定 `k=60` 的 reciprocal-rank fusion,只在 canonical DOI 或同 provider ID 相同時合併;web MCP 只在 structured providers 全失敗/零候選時自動 fallback,否則需 `/citation more`。
+- **驗證**:confirm 會重新以 doi.org 取 CSL JSON structured record,再以同一 canonical DOI 取 BibTeX(pybtex 驗證、恰一 entry、canonical 重序列化);match/structured/BibTeX 三方 DOI 必須相等(BibTeX 缺 DOI 時由已驗證 record 注入並記 `doi_injected_from_verified_lookup`);title/year 等衝突只警告。驗證等級只稱 `identity_verified`——證明 DOI 與書目管線一致,不代表來源支持特定主張。
+- **保存**:atomic bundle 寫入 `app/citation/cite/<utf8-byte-capped-title>--<doi-hash>/`(`reference.bib` + `citation.json` sidecar);staging + rename,成功 bundle 不會半套;同 DOI 重複 confirm 驗證後重用;schema/DOI/hash 不符 fail closed 不覆寫。無 DOI 候選可展示但不可保存。
+- **History**:每 turn 實際引用的 SourceRef snapshot 會存進 turn record 與 Chroma assistant document(versioned JSON);`recall_history` 會回傳並 rehydrate 這些來源,prompt 只注入最近 20 筆。
 
 ```bash
 conda activate app
 cd app
 
-python -m citation.cli "幫我找關於檢索效率的文章"
-python -m citation.cli "papers about RAG citation hallucination evaluation"
-python -m citation.cli "Attention is all you need" --auto
-python -m citation.cli "<request>" --limit 8 --verbose
+python -m citation "attention is all you need"   # 初始查詢後進入互動 REPL
+python -m citation --no-mcp                      # 不載入 Web Search MCP
 ```
-
-需要 Web Search MCP(設定見上節)**與可用的 OpenRouter 設定**:啟動時會先跑一次輕量 probe,`OPENROUTER_API_KEY` 缺少/無效、模型名稱錯誤或 OpenRouter 拒絕呼叫都會直接以 exit code 2 失敗,不會退回較簡單的搜尋流程,也不會偽裝成「找不到候選」。agentic search 完成但沒有可解析候選時 exit code 3。`--auto` 會依排名嘗試前 `--auto-attempts` 個候選(預設 4)。所有 DOI 在寫檔前都會用取回的 BibTeX title/year/author 與所選候選比對驗證(規則見 `app/citation/README.md`);輸出寫到 `app/citation/cite/<normalized_title>.bib`,同名檔案不覆蓋,會加數字 suffix。
 
 ## 12. 疑難排解
 
