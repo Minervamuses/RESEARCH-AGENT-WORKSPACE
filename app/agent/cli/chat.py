@@ -137,7 +137,11 @@ async def _run(
                     _print_cli_message(result.message)
                 if result.should_exit:
                     break
-                continue
+                if not result.followup_input:
+                    continue
+                # e.g. /citation <text>: the trailing text becomes a normal
+                # agent turn (recorded in history/trace like any user turn).
+                user_input = result.followup_input
 
             try:
                 response = await session.turn(user_input)

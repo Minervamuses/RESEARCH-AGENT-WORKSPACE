@@ -37,11 +37,17 @@ class ParsedSlashCommand:
 
 @dataclass(frozen=True)
 class SlashCommandResult:
-    """Outcome from executing a slash command locally."""
+    """Outcome from executing a slash command locally.
+
+    ``followup_input`` asks the chat loop to feed the given text through a
+    normal agent turn (history, trace, and error handling included) right
+    after the local command completes — used by ``/citation <text>``.
+    """
 
     message: str = ""
     should_exit: bool = False
     clear_screen: bool = False
+    followup_input: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,8 +111,10 @@ def parse_slash_command(raw_input: str) -> ParsedSlashCommand | None:
 
     try:
         parts = shlex.split(text[1:])
-    except ValueError as exc:
-        raise SlashCommandError(f"invalid slash command: {exc}") from exc
+    except ValueError:
+        # Natural-language arguments (e.g. an apostrophe after /citation)
+        # must not kill the command; fall back to whitespace splitting.
+        parts = text[1:].split()
 
     if not parts:
         raise SlashCommandError("slash command cannot be empty")
@@ -181,8 +189,9 @@ def build_default_registry() -> SlashCommandRegistry:
             SlashCommand(
                 name="citation",
                 description=(
-                    "Search, verify, and save academic citations "
-                    "(search/list/show/more/select/confirm/status/cancel/sources/source)."
+                    "Activate the citation skill (persists until /citation "
+                    "off). Optional trailing text is sent to the agent as a "
+                    "normal message."
                 ),
                 handler=_handle_citation,
             ),
@@ -574,22 +583,55 @@ async def _handle_skill(
     return SlashCommandResult(message=f"skill -> {runtime.name}{suffix}")
 
 
+_CITATION_SKILL = "citation"
+_CITATION_OFF_TOKENS = frozenset({"off", "none", "deactivate"})
+
+
+def _citation_skill_active(session: object) -> bool:
+    runtime = getattr(session, "active_skill_runtime", None)
+    return runtime is not None and getattr(runtime, "name", "") == _CITATION_SKILL
+
+
 async def _handle_citation(
     context: SlashCommandContext,
     parsed: ParsedSlashCommand,
 ) -> SlashCommandResult:
-    from agent.cli.citation_command import run_citation_command
+    """Persistent citation mode.
 
-    coordinator = getattr(context.session, "citation_coordinator", None)
-    if coordinator is None:
-        raise SlashCommandError(
-            "citation workflow is not available in this session"
+    ``/citation`` activates the citation skill (no network is touched);
+    ``/citation <natural language>`` activates it and then feeds the text
+    through a normal agent turn; ``/citation off|none|deactivate`` ends the
+    mode. Activation replaces any currently active skill; deactivation only
+    ever touches the citation skill.
+    """
+    session = context.session
+
+    if len(parsed.args) == 1 and parsed.args[0].strip().lower() in _CITATION_OFF_TOKENS:
+        if not _citation_skill_active(session):
+            raise SlashCommandError(
+                "citation skill is not active; nothing to deactivate"
+            )
+        session.deactivate_skill()
+        return SlashCommandResult(message="citation skill deactivated")
+
+    if _citation_skill_active(session):
+        message = "citation skill already active"
+    else:
+        try:
+            session.activate_skill(_CITATION_SKILL)
+        except _SKILL_USER_ERRORS as exc:
+            raise _skill_command_error(exc) from exc
+        message = (
+            "citation skill activated (thinking -> normal). Describe what "
+            "you want to cite in natural language; /citation off to end."
         )
-    try:
-        message = await run_citation_command(coordinator, parsed.args)
-    except ValueError as exc:
-        raise SlashCommandError(str(exc)) from exc
-    return SlashCommandResult(message=message)
+
+    followup = ""
+    if parsed.args:
+        # Recover the raw text after the command name: natural language must
+        # reach the agent verbatim, not shlex-mangled.
+        followup = parsed.raw_text[1 + len(parsed.name):].strip()
+    return SlashCommandResult(message=message, followup_input=followup or None)
 
 
 async def _handle_clear(
