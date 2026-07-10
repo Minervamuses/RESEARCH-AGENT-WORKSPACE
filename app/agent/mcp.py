@@ -14,9 +14,17 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# Per-server stderr log policy: files are created 0600 before the server
+# starts, rotate at 5 MiB keeping 3 rotated copies, and every run appends a
+# timestamp/run-ID header so interleaved runs stay attributable.
+MCP_LOG_MAX_BYTES = 5 * 1024 * 1024
+MCP_LOG_KEEP_ROTATED = 3
 
 
 @dataclass(frozen=True)
@@ -107,6 +115,47 @@ def _mcp_log_dir() -> str:
     return path
 
 
+def _rotate_log(log_path: str) -> None:
+    """Shift log -> log.1 -> ... -> log.N, dropping the oldest."""
+    oldest = f"{log_path}.{MCP_LOG_KEEP_ROTATED}"
+    if os.path.exists(oldest):
+        os.unlink(oldest)
+    for index in range(MCP_LOG_KEEP_ROTATED - 1, 0, -1):
+        source = f"{log_path}.{index}"
+        if os.path.exists(source):
+            os.rename(source, f"{log_path}.{index + 1}")
+    if os.path.exists(log_path):
+        os.rename(log_path, f"{log_path}.1")
+
+
+def prepare_stderr_log(log_path: str, *, run_id: str | None = None) -> str:
+    """Create/rotate one server's stderr log before the server starts.
+
+    The file exists with mode 0600 before any subprocess writes to it,
+    rotates at 5 MiB (keeping 3 rotated copies), and starts each run with a
+    timestamp/run-ID header. Returns the run ID for logging.
+    """
+    run_id = run_id or uuid.uuid4().hex[:12]
+    try:
+        if (
+            os.path.exists(log_path)
+            and os.path.getsize(log_path) >= MCP_LOG_MAX_BYTES
+        ):
+            _rotate_log(log_path)
+        fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            header = (
+                f"=== mcp run {run_id} started "
+                f"{datetime.now(timezone.utc).isoformat()} ===\n"
+            )
+            os.write(fd, header.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        logger.warning("could not prepare MCP stderr log %s: %s", log_path, exc)
+    return run_id
+
+
 def _spec_to_connection(spec: MCPServerSpec) -> dict:
     # Some MCP servers (notably mrkrsl/web-search-mcp) are careless about
     # what they write to stdout: startup banners, shutdown notices, etc.
@@ -120,6 +169,7 @@ def _spec_to_connection(spec: MCPServerSpec) -> dict:
     #      is a safe filter that drops every free-form stdout print.
     inner = shlex.join([spec.command, *spec.args])
     log_path = os.path.join(_mcp_log_dir(), f"{spec.name}.stderr.log")
+    prepare_stderr_log(log_path)
     pipeline = (
         f"{inner} 2>>{shlex.quote(log_path)} "
         f"| grep --line-buffered '^{{'"
