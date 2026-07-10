@@ -50,7 +50,7 @@ def _patch_graph_tools(monkeypatch):
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
 
 
@@ -124,7 +124,7 @@ def test_agent_node_binds_filtered_tools_for_active_skill(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg)
@@ -175,7 +175,7 @@ def test_agent_node_binds_all_except_denied_for_disallow_only_policy(
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg)
@@ -218,7 +218,7 @@ def test_agent_node_binds_no_tools_for_active_empty_policy(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg)
@@ -261,7 +261,7 @@ def test_skill_tools_bound_only_under_granting_allowlist(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg, skill_tools=[_citation_workflow])
@@ -343,7 +343,7 @@ def test_agent_node_forces_answer_after_tool_budget(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), agent_max_tool_interactions=1)
     graph = build_graph(cfg)
@@ -400,7 +400,7 @@ def test_agent_node_caps_parallel_tool_calls_to_budget(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), agent_max_tool_interactions=1)
     graph = build_graph(cfg)
@@ -454,7 +454,7 @@ def test_agent_node_never_exceeds_cap_across_multiple_rounds(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), agent_max_tool_interactions=3)
     graph = build_graph(cfg)
@@ -511,7 +511,7 @@ def test_agent_node_strips_tool_calls_from_exhausted_raw_model(monkeypatch, tmp_
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), agent_max_tool_interactions=1)
     graph = build_graph(cfg)

@@ -137,7 +137,7 @@ def test_academic_skill_writer_binding_includes_recall_history_schema(
     )
     monkeypatch.setattr(
         "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None, registry_getter=None: _recall_history,
+        lambda _cfg, store=None: _recall_history,
     )
     monkeypatch.setattr("agent.tools.inventory.create_read_file_tool", lambda _cfg: _read_file)
     monkeypatch.setattr("agent.tools.inventory.create_bash_tool", lambda _cfg: _bash)
