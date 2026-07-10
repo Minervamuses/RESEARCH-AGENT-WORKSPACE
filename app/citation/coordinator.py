@@ -3,7 +3,7 @@
 The only object allowed to search for papers, mint verified SourceRefs, and
 write citation bundles. Chat reaches it exclusively through the ``/citation``
 slash handler (its mutating methods are never bound into the model tool
-graph); the standalone ``python -m citation`` CLI drives the same class.
+graph).
 
 Workflow generations: every ``search`` or ``cancel`` starts a new generation
 and invalidates all previous candidate/match IDs. ``more`` keeps candidate

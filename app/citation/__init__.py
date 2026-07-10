@@ -1,9 +1,9 @@
 """Citation workflow package.
 
 Session-scoped :class:`citation.coordinator.CitationCoordinator` (driven by
-chat's ``/citation`` slash command and the interactive ``python -m citation``
-CLI) over a process-scoped :class:`citation.hub.CitationProviderHub` that owns
-the shared provider clients, cache, and rate limiters.
+chat's ``/citation`` slash command) over a process-scoped
+:class:`citation.hub.CitationProviderHub` that owns the shared provider
+clients, cache, and rate limiters.
 
 Discovery runs structured providers (Crossref, and OpenAlex when
 ``OPENALEX_API_KEY`` is set) fused by deterministic reciprocal-rank fusion,
