@@ -29,9 +29,18 @@ def _tool_call(name: str, call_id: str, args: dict) -> dict:
     }
 
 
-def _invoke_policy_node(state: dict):
+@tool("citation_workflow")
+def _citation_workflow(action: str) -> str:
+    """Skill-only workflow tool."""
+    return f"did {action}"
+
+
+def _invoke_policy_node(state: dict, *, skill_only_names=frozenset()):
     graph = StateGraph(AgentState)
-    graph.add_node("tools", PolicyToolNode([_echo, _bash]))
+    graph.add_node("tools", PolicyToolNode(
+        [_echo, _bash, _citation_workflow],
+        skill_only_names=skill_only_names,
+    ))
     graph.add_edge(START, "tools")
     return graph.compile().invoke(state)
 
@@ -129,3 +138,70 @@ def test_policy_tool_node_active_empty_policy_denies_all_tools():
     assert message.tool_call_id == "call-1"
     assert message.content == "Tool error: denied by active skill policy: echo"
     assert message.status == "error"
+
+
+SKILL_ONLY = frozenset({"citation_workflow"})
+
+
+def test_forged_skill_only_call_is_denied_without_active_policy():
+    """Execution-layer defense: even with no policy state at all, a fabricated
+    citation_workflow tool call is rejected, and sibling default calls run."""
+    ai_message = AIMessage(
+        content="",
+        tool_calls=[
+            _tool_call("citation_workflow", "call-1", {"action": "search"}),
+            _tool_call("echo", "call-2", {"text": "ok"}),
+        ],
+    )
+
+    result = _invoke_policy_node(
+        {"messages": [ai_message]}, skill_only_names=SKILL_ONLY,
+    )
+
+    messages = result["messages"][-2:]
+    assert [m.tool_call_id for m in messages] == ["call-1", "call-2"]
+    assert messages[0].status == "error"
+    assert "skill-only tool not granted" in messages[0].content
+    assert messages[1].content == "ok"
+
+
+def test_skill_only_call_denied_under_foreign_skill_policy():
+    ai_message = AIMessage(
+        content="",
+        tool_calls=[_tool_call("citation_workflow", "call-1", {"action": "search"})],
+    )
+
+    result = _invoke_policy_node(
+        {
+            "messages": [ai_message],
+            "allowed_tools": ["echo"],
+            "denied_tools": [],
+            "tool_policy_active": True,
+        },
+        skill_only_names=SKILL_ONLY,
+    )
+
+    message = result["messages"][-1]
+    assert message.status == "error"
+    assert "skill-only tool not granted" in message.content
+
+
+def test_skill_only_call_runs_when_active_allowlist_grants_it():
+    ai_message = AIMessage(
+        content="",
+        tool_calls=[_tool_call("citation_workflow", "call-1", {"action": "search"})],
+    )
+
+    result = _invoke_policy_node(
+        {
+            "messages": [ai_message],
+            "allowed_tools": ["citation_workflow"],
+            "denied_tools": [],
+            "tool_policy_active": True,
+        },
+        skill_only_names=SKILL_ONLY,
+    )
+
+    message = result["messages"][-1]
+    assert isinstance(message, ToolMessage)
+    assert message.content == "did search"

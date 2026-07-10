@@ -42,3 +42,45 @@ def test_preserves_candidate_order_not_allowlist_order():
     assert evaluate_policy(
         UNIVERSE, active=True, allowed=["bash", "rag_search"],
     ) == ["rag_search", "bash"]
+
+
+SKILL_UNIVERSE = [*UNIVERSE, "citation_workflow"]
+
+
+def test_skill_only_tool_never_survives_inactive_policy():
+    assert evaluate_policy(
+        SKILL_UNIVERSE, active=False, skill_only=["citation_workflow"],
+    ) == UNIVERSE
+    # Even an (ignored) allowlist naming it does not resurrect it.
+    assert evaluate_policy(
+        SKILL_UNIVERSE,
+        active=False,
+        allowed=["citation_workflow"],
+        skill_only=["citation_workflow"],
+    ) == UNIVERSE
+
+
+def test_skill_only_tool_requires_explicit_allowlist_grant():
+    assert evaluate_policy(
+        SKILL_UNIVERSE,
+        active=True,
+        allowed=["citation_workflow"],
+        skill_only=["citation_workflow"],
+    ) == ["citation_workflow"]
+    # A deny-only policy admits defaults but never the skill-only tool.
+    assert evaluate_policy(
+        SKILL_UNIVERSE,
+        active=True,
+        denied=["bash"],
+        skill_only=["citation_workflow"],
+    ) == ["rag_search", "rag_get_context", "read_file"]
+
+
+def test_skill_only_tool_still_subject_to_denylist():
+    assert evaluate_policy(
+        SKILL_UNIVERSE,
+        active=True,
+        allowed=["citation_workflow"],
+        denied=["citation_workflow"],
+        skill_only=["citation_workflow"],
+    ) == []

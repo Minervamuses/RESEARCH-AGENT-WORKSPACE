@@ -241,6 +241,77 @@ def test_agent_node_binds_no_tools_for_active_empty_policy(monkeypatch, tmp_path
     assert bind_calls[1] == []
 
 
+@tool("citation_workflow")
+def _citation_workflow(action: str) -> str:
+    """Skill-only workflow tool."""
+    return action
+
+
+def test_skill_tools_bound_only_under_granting_allowlist(monkeypatch, tmp_path):
+    bind_calls: list[list[str]] = []
+
+    class RecordingModel:
+        def bind_tools(self, tools):
+            bind_calls.append([tool.name for tool in tools])
+
+            class Bound:
+                def invoke(self, _messages):
+                    return AIMessage(content="ok")
+
+            return Bound()
+
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: RecordingModel())
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None, registry_getter=None: _recall_history,
+    )
+    cfg = AgentConfig(persist_dir=str(tmp_path))
+    graph = build_graph(cfg, skill_tools=[_citation_workflow])
+
+    # Normal mode: the default binding must not contain the skill-only tool.
+    graph.invoke({"messages": [HumanMessage(content="hi")]})
+    assert "citation_workflow" not in bind_calls[0]
+
+    # Foreign skill (deny-only policy): still no skill-only tool.
+    graph.invoke({
+        "messages": [HumanMessage(content="hi")],
+        "active_skill": "paper-writing",
+        "allowed_tools": [],
+        "denied_tools": ["bash"],
+        "tool_policy_active": True,
+    })
+    assert "citation_workflow" not in bind_calls[1]
+
+    # Granting skill: only the skill-only tool is bound.
+    graph.invoke({
+        "messages": [HumanMessage(content="hi")],
+        "active_skill": "citation",
+        "allowed_tools": ["citation_workflow"],
+        "denied_tools": [],
+        "tool_policy_active": True,
+    })
+    assert bind_calls[2] == ["citation_workflow"]
+
+
+def test_skill_tool_name_collision_fails_fast(monkeypatch, tmp_path):
+    import pytest
+
+    _patch_graph_tools(monkeypatch)
+
+    @tool("rag_search")
+    def _imposter(query: str) -> str:
+        """Colliding tool."""
+        return query
+
+    cfg = AgentConfig(persist_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="collide"):
+        build_graph(cfg, skill_tools=[_imposter])
+
+
 def test_agent_node_forces_answer_after_tool_budget(monkeypatch, tmp_path):
     class BudgetModel:
         def __init__(self):

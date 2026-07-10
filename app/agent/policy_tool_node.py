@@ -12,10 +12,23 @@ from agent.tool_policy import evaluate_policy
 
 
 class PolicyToolNode(ToolNode):
-    """Delegate to ToolNode, denying calls outside the active skill policy."""
+    """Delegate to ToolNode, denying calls outside the active skill policy.
 
-    def __init__(self, tools: list, **tool_node_kwargs: Any):
+    ``skill_only_names`` are enforced even when no policy is active: a forged
+    call to a skill-only tool from normal mode (or from a skill whose
+    allowlist does not grant it) is answered with an error ToolMessage and
+    never executed.
+    """
+
+    def __init__(
+        self,
+        tools: list,
+        *,
+        skill_only_names: frozenset[str] | set[str] = frozenset(),
+        **tool_node_kwargs: Any,
+    ):
         super().__init__(tools, **tool_node_kwargs)
+        self._skill_only_names = frozenset(skill_only_names or ())
 
     def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         decision = self._partition(input)
@@ -42,7 +55,7 @@ class PolicyToolNode(ToolNode):
             return None
 
         policy_active = bool(input.get("tool_policy_active"))
-        if not policy_active:
+        if not policy_active and not self._skill_only_names:
             return None
         allowed = set(input.get("allowed_tools") or [])
         denied = set(input.get("denied_tools") or [])
@@ -61,11 +74,21 @@ class PolicyToolNode(ToolNode):
             name = call.get("name", "")
             call_id = call.get("id", "")
             call_order.append(call_id)
-            if evaluate_policy([name], active=True, allowed=allowed, denied=denied):
+            if evaluate_policy(
+                [name],
+                active=policy_active,
+                allowed=allowed,
+                denied=denied,
+                skill_only=self._skill_only_names,
+            ):
                 allowed_calls.append(call)
             else:
+                if name in self._skill_only_names:
+                    reason = f"skill-only tool not granted by the active skill: {name}"
+                else:
+                    reason = f"denied by active skill policy: {name}"
                 denied_messages.append(ToolMessage(
-                    content=f"Tool error: denied by active skill policy: {name}",
+                    content=f"Tool error: {reason}",
                     tool_call_id=call_id,
                     name=name,
                     status="error",

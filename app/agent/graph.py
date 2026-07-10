@@ -65,6 +65,7 @@ def build_graph(
     history_store=None,
     skill_runtime_getter=None,
     citation_registry_getter=None,
+    skill_tools: list | None = None,
 ):
     """Build and compile the conversational RAG agent graph.
 
@@ -76,22 +77,39 @@ def build_graph(
         skill_runtime_getter: Optional callable returning the active SkillRuntime.
         citation_registry_getter: Optional callable returning the session
             SourceRegistry so recall_history can rehydrate cited sources.
+        skill_tools: Optional skill-only tools. They join the executable tool
+            universe but are bound/callable only while an active skill's
+            allowlist grants them — never in normal mode, never via a deny-only
+            policy. A name collision with a default tool fails fast.
 
     Returns:
         A compiled LangGraph that accepts AgentState and manages
         the bounded agent ↔ tools loop for a single turn.
     """
     model = get_chat_model(config)
-    tools = tool_inventory.build_base_tools(
+    default_tools = tool_inventory.build_base_tools(
         config,
         history_store=history_store,
         extra_tools=extra_tools,
         citation_registry_getter=citation_registry_getter,
     )
+    skill_tools = list(skill_tools or [])
+    default_names = [getattr(tool, "name", str(tool)) for tool in default_tools]
+    skill_only_names = frozenset(
+        getattr(tool, "name", str(tool)) for tool in skill_tools
+    )
+    conflicts = skill_only_names.intersection(default_names)
+    if conflicts:
+        raise ValueError(
+            "skill-only tool names collide with default tools: "
+            + ", ".join(sorted(conflicts))
+        )
+    tools = [*default_tools, *skill_tools]
     tools_by_name = {getattr(tool, "name", str(tool)): tool for tool in tools}
     tool_order = [getattr(tool, "name", str(tool)) for tool in tools]
+    # The no-skill default binding never includes skill-only tools.
     bound_model_cache = {
-        (None, None, False, (), ()): model.bind_tools(tools),
+        (None, None, False, (), ()): model.bind_tools(default_tools),
     }
 
     def _select_tools(state: AgentState) -> list:
@@ -100,6 +118,7 @@ def build_graph(
             active=bool(state.get("tool_policy_active")),
             allowed=state.get("allowed_tools") or (),
             denied=state.get("denied_tools") or (),
+            skill_only=skill_only_names,
         )
         return [tools_by_name[name] for name in selected_names]
 
@@ -189,7 +208,11 @@ def build_graph(
     graph = StateGraph(AgentState)
     graph.add_node("skill_loader", skill_loader_node)
     graph.add_node("agent", agent_node)
-    graph.add_node("tools", PolicyToolNode(tools, handle_tool_errors=_tool_error_to_message))
+    graph.add_node("tools", PolicyToolNode(
+        tools,
+        skill_only_names=skill_only_names,
+        handle_tool_errors=_tool_error_to_message,
+    ))
     graph.add_node("skill_validator", skill_validator_node)
 
     graph.add_edge(START, "skill_loader")

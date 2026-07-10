@@ -17,24 +17,34 @@ def evaluate_policy(
     active: bool,
     allowed: Iterable[str] = (),
     denied: Iterable[str] = (),
+    skill_only: Iterable[str] = (),
 ) -> list[str]:
     """Return the candidates that survive the policy, preserving input order.
 
     Invariants shared by every consumer: exact name matching (no base-name
-    normalization); an inactive policy admits everything; a non-empty
-    allowlist is intersected then reduced by the denylist; a denylist alone
-    subtracts; an active policy with both lists empty denies all.
+    normalization); an inactive policy admits every *default* tool; a
+    non-empty allowlist is intersected then reduced by the denylist; a
+    denylist alone subtracts; an active policy with both lists empty denies
+    all.
+
+    ``skill_only`` names are never default tools: they survive only under an
+    active policy whose allowlist grants them explicitly. An inactive policy
+    or a deny-only policy always drops them, so a skill-only tool can never
+    leak into normal mode or into a skill that did not request it.
     """
+    skill_only_set = set(skill_only or ())
     if not active:
-        return list(candidate_names)
+        return [name for name in candidate_names if name not in skill_only_set]
     allowed_set = set(allowed or ())
     denied_set = set(denied or ())
-    if allowed_set:
-        return [
-            name
-            for name in candidate_names
-            if name in allowed_set and name not in denied_set
-        ]
-    if denied_set:
-        return [name for name in candidate_names if name not in denied_set]
-    return []
+
+    def _admitted(name: str) -> bool:
+        if name in denied_set:
+            return False
+        if name in skill_only_set:
+            return name in allowed_set
+        if allowed_set:
+            return name in allowed_set
+        return bool(denied_set)
+
+    return [name for name in candidate_names if _admitted(name)]
