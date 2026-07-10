@@ -14,7 +14,6 @@ from agent.thinking import (
     Rewrite,
     ThinkingOutputError,
     append_tool_trace,
-    extract_draft_for_user,
     parse_reviser_output,
     parse_structured_output,
     render_review_stop_message,
@@ -533,8 +532,6 @@ def test_parse_reviser_output_final_fallback_warns_when_unsafe_to_strip():
     assert parsed.format_warning == REVISER_FORMAT_WARNING
 
 
-def test_extract_draft_for_user_uses_marker_when_present():
-    assert extract_draft_for_user("DRAFT:\nVisible\n\nREBUTTAL:\nHidden") == "Visible"
 
 
 # --- Fusion aggregator + evidence -----------------------------------------

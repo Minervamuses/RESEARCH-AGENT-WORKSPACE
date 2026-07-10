@@ -122,14 +122,12 @@ def test_agent_state_skill_fields_are_optional():
     assert "active_skill" in AgentState.__optional_keys__
     assert "loaded_references" in AgentState.__optional_keys__
     assert "tool_policy_active" in AgentState.__optional_keys__
-    assert "validation_retry_requested" in AgentState.__optional_keys__
+    assert "tool_policy_active" in AgentState.__optional_keys__
 
 
 def test_agent_config_exposes_skill_runtime_toggles(tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
 
-    assert cfg.skill_validation_enabled is True
-    assert cfg.skill_max_validation_retries == 1
     assert cfg.skill_capability_map_path is None
     assert cfg.skill_max_pinned_reference_chars == 65536
     assert cfg.skill_max_total_skill_context_chars == 200000

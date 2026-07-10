@@ -13,7 +13,6 @@ from agent.cli.slash_commands import (
 )
 from agent.config import AgentConfig
 from agent.session import ChatSession
-from agent.skills.validator import validate_skill_output
 from agent.tools.read_file import _read_file
 
 
@@ -99,7 +98,7 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
 
     assert answer == "ok"
     # The session initial state carries the same serialized active-skill slice
-    # (and fresh validation defaults) as the graph loader.
+    # as the graph loader.
     serialized_keys = {
         "active_skill",
         "skill_root",
@@ -109,9 +108,6 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
         "allowed_tools",
         "denied_tools",
         "tool_policy_active",
-        "validation_errors",
-        "validation_attempts",
-        "validation_retry_requested",
     }
     assert serialized_keys <= set(state)
     assert state["active_skill"] == "academic-paper-writing"
@@ -121,9 +117,6 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
         "references/section-playbooks.md": "section reference"
     }
     assert state["tool_policy_active"] is True
-    assert state["validation_errors"] == []
-    assert state["validation_attempts"] == 0
-    assert state["validation_retry_requested"] is False
     assert "# Academic Paper Writing" in prompt_text
 
 
@@ -153,15 +146,6 @@ def test_active_skill_policy_disallows_bash(tmp_path, monkeypatch):
     assert "read_file" in runtime.allowed_tools
     assert "bash" in runtime.denied_tools
     assert runtime.tool_policy_active is True
-
-
-def test_validator_catches_uncited_quantitative_claim_for_academic_skill():
-    violations = validate_skill_output(
-        active_skill="academic-paper-writing",
-        text="The intervention improved retention by 42%.",
-    )
-
-    assert violations
 
 
 def test_no_skill_turn_keeps_skill_state_empty(tmp_path, monkeypatch):

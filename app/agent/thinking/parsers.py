@@ -148,13 +148,6 @@ def parse_reviser_output(text: str, *, repair_model=None) -> RevisedDraft:
     )
 
 
-def extract_draft_for_user(text: str) -> str:
-    """Return the DRAFT section when markers exist, otherwise the whole text."""
-    parsed = _parse_marked_reviser_output(text)
-    if parsed is None:
-        return text.strip()
-    return parsed.draft
-
 
 def _parse_marked_reviser_output(text: str) -> RevisedDraft | None:
     matches = list(_SECTION_MARKER_RE.finditer(text))

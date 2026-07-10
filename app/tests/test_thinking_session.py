@@ -45,7 +45,6 @@ class _Factory:
         self.built.append({
             "model_id": cfg.llm_model,
             "max_tool_interactions": cfg.agent_max_tool_interactions,
-            "skill_validation_enabled": cfg.skill_validation_enabled,
             "getter_is_none": skill_runtime_getter is None,
             "extra_tool_names": [getattr(t, "name", str(t)) for t in (extra_tools or [])],
         })
@@ -153,7 +152,6 @@ def test_extended_builds_independent_proposer_graphs(monkeypatch, tmp_path):
     for build in proposer_builds:
         # Proposers switch model via a cloned config, not just AgentState.
         assert build["max_tool_interactions"] == cfg.thinking_fusion_proposer_tool_interactions
-        assert build["skill_validation_enabled"] is False
         assert build["getter_is_none"] is True
     assert len(models["rewrite"].calls) == 1
 
@@ -351,37 +349,6 @@ def test_reviewer_revise_path_still_works(monkeypatch, tmp_path):
     assert len(models["aggregator"].calls) == 0
 
 
-def test_final_skill_validation_still_applies(monkeypatch, tmp_path):
-    factory = _Factory(scripts={
-        "session-writer": [_answer("DRAFT:\nvalidated [Smith, 2020]\n\nREBUTTAL:\n(none)")],
-    })
-    session = _make_session(
-        monkeypatch, tmp_path, factory,
-        models=_default_models(), cfg=_cfg(tmp_path, proposer_models=["p1"]),
-    )
-    session.active_skill_runtime = SimpleNamespace(
-        name="academic-paper-writing",
-        root=tmp_path,
-        instructions="Do not invent scholarly content.",
-        pinned_references={},
-        task_mode=None,
-        allowed_tools=frozenset(),
-        denied_tools=frozenset(),
-        tool_policy_active=False,
-        context_block=lambda: "[Active skill]\nname: academic-paper-writing",
-    )
-
-    result = asyncio.run(session._apply_final_skill_validation(
-        user_input="revise this",
-        answer="This improved outcomes by 50%",
-        new_messages=[],
-        tool_calls=[],
-        trace_events=[],
-    ))
-
-    assert result.answer == "validated [Smith, 2020]"
-
-
 def test_extended_clarification_skips_candidate_panel(monkeypatch, tmp_path):
     factory = _Factory(scripts={"p1": [_answer("should not run")]})
     models = _default_models(rewrite=QueuedModel(["<<CLARIFY>>\n- Which journal?"]))
@@ -537,7 +504,7 @@ def test_active_skill_proposer_keeps_instructions_with_read_only_policy(monkeypa
     session = _make_session(
         monkeypatch, tmp_path, factory,
         models=_default_models(),
-        cfg=_cfg(tmp_path, proposer_models=["p1"], skill_validation_enabled=False),
+        cfg=_cfg(tmp_path, proposer_models=["p1"]),
     )
     session.active_skill_runtime = SimpleNamespace(
         name="paper",
@@ -566,7 +533,7 @@ def test_active_skill_deny_only_intersects_read_only(monkeypatch, tmp_path):
     session = _make_session(
         monkeypatch, tmp_path, factory,
         models=_default_models(),
-        cfg=_cfg(tmp_path, proposer_models=["p1"], skill_validation_enabled=False),
+        cfg=_cfg(tmp_path, proposer_models=["p1"]),
     )
     session.active_skill_runtime = SimpleNamespace(
         name="paper",

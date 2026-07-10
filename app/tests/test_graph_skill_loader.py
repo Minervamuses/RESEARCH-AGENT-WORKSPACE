@@ -92,9 +92,6 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
         "allowed_tools",
         "denied_tools",
         "tool_policy_active",
-        "validation_errors",
-        "validation_attempts",
-        "validation_retry_requested",
     }
     assert serialized_keys <= set(result)
     assert result["active_skill"] == "paper-writing"
@@ -105,9 +102,6 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
     assert result["allowed_tools"] == ["read_file"]
     assert result["denied_tools"] == ["bash"]
     assert result["tool_policy_active"] is True
-    assert result["validation_errors"] == []
-    assert result["validation_attempts"] == 0
-    assert result["validation_retry_requested"] is False
 
 
 def test_agent_node_binds_filtered_tools_for_active_skill(monkeypatch, tmp_path):

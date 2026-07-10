@@ -14,9 +14,6 @@ _EXPECTED_KEYS = {
     "allowed_tools",
     "denied_tools",
     "tool_policy_active",
-    "validation_errors",
-    "validation_attempts",
-    "validation_retry_requested",
 }
 
 
@@ -49,8 +46,6 @@ def test_active_runtime_returns_exact_key_set_without_messages():
     assert state["skill_instructions"] == "# Skill"
     assert state["task_mode"] == "revision"
     assert state["tool_policy_active"] is True
-    assert state["validation_attempts"] == 0
-    assert state["validation_retry_requested"] is False
 
 
 def test_allowed_and_denied_tools_are_sorted():
@@ -69,13 +64,3 @@ def test_loaded_references_is_a_copy():
     assert state["loaded_references"] == refs
     assert state["loaded_references"] is not refs
 
-
-def test_validation_errors_is_a_fresh_list_per_call():
-    runtime = _runtime()
-
-    first = skill_runtime_to_agent_state(runtime)
-    second = skill_runtime_to_agent_state(runtime)
-
-    assert first["validation_errors"] == []
-    assert second["validation_errors"] == []
-    assert first["validation_errors"] is not second["validation_errors"]

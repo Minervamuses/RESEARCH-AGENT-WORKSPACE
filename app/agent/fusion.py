@@ -2,8 +2,8 @@
 
 FusionOrchestrator is a ChatSession collaborator holding a back-reference to
 the facade: shared turn plumbing (_execute_graph, _run_graph_turn,
-_record_turn, _apply_final_skill_validation, prompt/context helpers) stays on
-the session, while everything fusion-specific lives here. The graph builder
+_record_turn, prompt/context helpers) stays on the session, while everything
+fusion-specific lives here. The graph builder
 and thinking-model getters are injected at construction so monkeypatches of
 the corresponding agent.session module attributes keep working.
 """
@@ -185,7 +185,7 @@ class FusionOrchestrator:
         return self._read_only_tool_availability_block()
 
     def _reviewer_tool_availability_block(self) -> str:
-        """Reviewer / reviser / final validation use the session availability."""
+        """Reviewer / reviser use the session availability."""
         return self._session._tool_availability_block()
 
     def _proposer_read_only_state(self) -> dict:
@@ -206,9 +206,6 @@ class FusionOrchestrator:
             "allowed_tools": sorted(self._proposer_read_only_allowed()),
             "denied_tools": self._proposer_read_only_denied(),
             "tool_policy_active": True,
-            "validation_errors": [],
-            "validation_attempts": 0,
-            "validation_retry_requested": False,
         }
 
     def _proposer_prompt_history(self, availability_block: str) -> list:
@@ -243,7 +240,6 @@ class FusionOrchestrator:
             agent_max_tool_interactions=(
                 self._session.config.thinking_fusion_proposer_tool_interactions
             ),
-            skill_validation_enabled=False,
         )
         graph = self._graph_builder(
             cloned,
@@ -629,16 +625,16 @@ class FusionOrchestrator:
         fusion_dict = metadata.to_dict()
 
         # Flat real tool calls: every candidate's calls (carrying candidate_id),
-        # plus any base-fallback / reviser / final-validation calls (no id).
+        # plus any base-fallback / reviser calls (no id).
         flat_tool_calls = [
             call for trace in candidate_traces for call in trace.tool_calls
         ]
         flat_trace_events: list[dict] = [{"type": "fusion", **fusion_dict}]
         for trace in candidate_traces:
             flat_trace_events.extend(trace.trace_events)
-        # Non-candidate graph messages (base fallback / reviser / final validation)
-        # stay out of the candidate segments so plan rendering never cross-pairs
-        # colliding tool_call_ids.
+        # Non-candidate graph messages (base fallback / reviser) stay out of
+        # the candidate segments so plan rendering never cross-pairs colliding
+        # tool_call_ids.
         non_candidate_messages: list = []
 
         if draft is None:
@@ -747,14 +743,6 @@ class FusionOrchestrator:
             tool_calls=flat_tool_calls,
             trace_events=flat_trace_events,
         )
-        if final_route in {"pass", "stop"}:
-            current = await session._apply_final_skill_validation(
-                user_input=user_input,
-                answer=current.answer,
-                new_messages=current.new_messages,
-                tool_calls=current.tool_calls,
-                trace_events=current.trace_events,
-            )
         return await session.finalize_and_record(
             user_input=user_input,
             answer=current.answer,

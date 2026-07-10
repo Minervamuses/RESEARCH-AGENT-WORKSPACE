@@ -48,7 +48,6 @@ class _ScriptedGraph:
 def _config(tmp_path, **overrides):
     data = {
         "persist_dir": str(tmp_path),
-        "skill_validation_enabled": False,
         "thinking_rewrite_model": "anthropic/claude-haiku-5",
         "thinking_reviewer_model": "openai/gpt-5.2",
         "thinking_repair_model": "meta-llama/llama-3.1-8b-instruct",

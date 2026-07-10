@@ -7,7 +7,6 @@ re-exports the former flat module's names so importers are unchanged.
 from agent.llm.text import invoke_text_messages as invoke_text
 from agent.thinking.parsers import (
     REVISER_FORMAT_WARNING,
-    extract_draft_for_user,
     parse_aggregate_result,
     parse_reviser_output,
     parse_structured_output,
@@ -77,7 +76,6 @@ __all__ = [
     "aggregate_messages",
     "append_tool_trace",
     "build_fusion_evidence_summary",
-    "extract_draft_for_user",
     "invoke_text",
     "parse_aggregate_result",
     "parse_reviser_output",

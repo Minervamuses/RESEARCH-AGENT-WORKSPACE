@@ -24,9 +24,6 @@ class AgentState(TypedDict, total=False):
     allowed_tools: list[str]
     denied_tools: list[str]
     tool_policy_active: bool
-    validation_errors: list[str]
-    validation_attempts: int
-    validation_retry_requested: bool
 
 
 def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
@@ -34,7 +31,7 @@ def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
 
     Returns an empty mapping when no skill is active, so callers inject no
     skill-state keys. The serialized slice never includes ``messages``; it
-    carries only skill identity, tool policy, and fresh validation defaults.
+    carries only skill identity and tool policy.
     """
     if runtime is None:
         return {}
@@ -47,7 +44,4 @@ def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
         "allowed_tools": sorted(runtime.allowed_tools),
         "denied_tools": sorted(runtime.denied_tools),
         "tool_policy_active": runtime.tool_policy_active,
-        "validation_errors": [],
-        "validation_attempts": 0,
-        "validation_retry_requested": False,
     }

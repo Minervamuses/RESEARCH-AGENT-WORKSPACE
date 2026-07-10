@@ -33,13 +33,9 @@ from agent.skills import (
     load_skill_runtime,
 )
 from agent.skills.runtime import render_tool_availability_block
-from agent.skills.validator import validate_skill_output
 from agent.state import skill_runtime_to_agent_state
 from agent.tools import inventory as tool_inventory
-from agent.thinking import (
-    FusionCandidateTrace,
-    extract_draft_for_user,
-)
+from agent.thinking import FusionCandidateTrace
 from agent.memory import (
     TurnRecord,
     assemble_prompt_history,
@@ -637,47 +633,6 @@ class ChatSession:
             new_messages=result.new_messages,
             tool_calls=result.tool_calls,
             trace_events=result.trace_events,
-        )
-
-    async def _apply_final_skill_validation(
-        self,
-        *,
-        user_input: str,
-        answer: str,
-        new_messages: list,
-        tool_calls: list[dict],
-        trace_events: list[dict],
-    ) -> GraphTurnResult:
-        if not self.active_skill_runtime or not self.config.skill_validation_enabled:
-            return GraphTurnResult(answer, new_messages, tool_calls, trace_events)
-
-        violations = validate_skill_output(
-            active_skill=self.active_skill_runtime.name,
-            text=answer,
-        )
-        if not violations:
-            return GraphTurnResult(answer, new_messages, tool_calls, trace_events)
-
-        validation_hint = SystemMessage(content=(
-            "[Extended thinking final validation errors]\n"
-            + "\n".join(f"- {violation}" for violation in violations)
-            + "\nRevise the supplied draft once to satisfy the active skill policy."
-        ))
-        revision_input = (
-            "Revise the draft below to satisfy the active skill policy while "
-            "preserving the original user request.\n\n"
-            f"Original user request:\n{user_input}\n\n"
-            f"Draft:\n{answer}"
-        )
-        validation_result = await self._run_graph_turn(
-            revision_input,
-            extra_system_messages=[validation_hint],
-        )
-        return GraphTurnResult(
-            answer=extract_draft_for_user(validation_result.answer),
-            new_messages=[*new_messages, *validation_result.new_messages],
-            tool_calls=[*tool_calls, *validation_result.tool_calls],
-            trace_events=[*trace_events, *validation_result.trace_events],
         )
 
     async def _run_extended_turn(self, user_input: str) -> TurnOutcome:
