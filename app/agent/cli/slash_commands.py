@@ -342,10 +342,14 @@ async def _handle_thinking(
             raise SlashCommandError(str(exc)) from exc
 
     setter = getattr(context.session, "set_thinking_mode", None)
-    if setter is not None:
-        setter(target)
-    else:
-        setattr(context.session, "thinking_mode", target)
+    try:
+        if setter is not None:
+            setter(target)
+        else:
+            setattr(context.session, "thinking_mode", target)
+    except ValueError as exc:
+        # e.g. extended thinking refused while the citation skill is active.
+        raise SlashCommandError(str(exc)) from exc
     return SlashCommandResult(message=f"thinking -> {target}")
 
 

@@ -1,0 +1,3 @@
+capabilities:
+  required:
+    - citation.workflow

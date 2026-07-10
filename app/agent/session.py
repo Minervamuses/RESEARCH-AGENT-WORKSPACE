@@ -10,6 +10,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
 from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
@@ -399,28 +400,75 @@ class ChatSession:
         normalized = mode.strip().lower()
         if normalized not in {"normal", "extended"}:
             raise ValueError(f"unknown thinking mode: {mode}")
+        if normalized == "extended" and self.citation_skill_active:
+            raise ValueError(
+                "extended thinking is unavailable while the citation skill "
+                "is active; deactivate it first (/citation off)"
+            )
         self.thinking_mode = normalized
 
+    @property
+    def citation_skill_active(self) -> bool:
+        """Whether the built-in citation skill is the active skill."""
+        runtime = self.active_skill_runtime
+        return runtime is not None and runtime.name == CITATION_SKILL_NAME
+
+    def _teardown_citation_session_state(self) -> None:
+        """Drop the in-memory workflow and source registry on deactivation.
+
+        The Coordinator (and any half-finished workflow, resolved matches,
+        and registered SourceRefs) is discarded; bundles already written to
+        disk are untouched. The next activation lazily builds a fresh one.
+        """
+        self._citation_coordinator = None
+
     def activate_skill(self, name: str, task_mode: str | None = None) -> SkillRuntime:
-        """Activate a local skill for subsequent turns."""
+        """Activate a local skill for subsequent turns.
+
+        Activating the citation skill forces normal thinking (its stateful
+        Coordinator must never be shared by parallel fusion candidates).
+        Leaving the citation skill — for another skill or none — tears down
+        its session state. A failed load leaves the previous skill active.
+        """
         runtime = load_skill_runtime(
             name,
             config=self.config,
-            all_tools=self._all_tool_refs(),
+            all_tools=self._capability_tool_refs(),
             mcp_families=self.mcp_families,
             task_mode=task_mode,
         )
+        previous = self.active_skill_runtime
         self.active_skill_runtime = runtime
+        if runtime.name == CITATION_SKILL_NAME:
+            self.thinking_mode = "normal"
+        elif previous is not None and previous.name == CITATION_SKILL_NAME:
+            self._teardown_citation_session_state()
         return runtime
 
     def deactivate_skill(self) -> None:
         """Deactivate the current local skill, if any."""
+        was_citation = self.citation_skill_active
         self.active_skill_runtime = None
+        if was_citation:
+            self._teardown_citation_session_state()
 
     def _all_tool_refs(self) -> list[_ToolRef]:
         return [
             _ToolRef(name)
             for name in tool_inventory.base_tool_names(extra_tools=self.extra_tools)
+        ]
+
+    def _capability_tool_refs(self) -> list[_ToolRef]:
+        """Tool universe for skill capability resolution.
+
+        Includes the skill-only tools so a manifest requiring
+        ``citation.workflow`` can resolve; prompt availability keeps using
+        :meth:`_all_tool_refs` (skill-only tools are surfaced there only via
+        an active skill's allowlist).
+        """
+        return [
+            *self._all_tool_refs(),
+            _ToolRef(self.citation_workflow_tool.name),
         ]
 
     def _append_block_to_md(self, log_path: str, block: str) -> None:
