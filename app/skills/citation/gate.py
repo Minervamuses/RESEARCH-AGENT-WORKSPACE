@@ -1,16 +1,23 @@
-"""Final citation gate for assistant drafts.
+"""Final citation gate for assistant drafts — two explicit policies.
 
-Strict by default: the model may only cite verified sources through
+Citation skill ACTIVE: the model may cite verified sources through
 ``[[cite:<source-id>]]`` markers (with ``[[citation-needed]]`` as the one
-placeholder). After Markdown-aware masking — code fences, inline code, and
-block quotes provably taken from the user's input are not scanned — any
-unknown marker, dangling source ID, raw DOI, raw numeric citation, raw
-author-year citation, or handwritten bibliography blocks the draft outright.
-No model call is made to repair a violating draft; the caller replaces it
-with a safe message and the draft never reaches history or the plan log.
+placeholder); dangling IDs and unknown marker forms block.
 
-Ordinary Markdown web links (without DOIs) are allowed to remain: they are
-never numbered, never become SourceRefs, and never enter the bibliography.
+Citation skill INACTIVE: formal citations are forbidden outright — every
+``[[...]]`` marker (including ``citation-needed``) blocks, alongside the
+always-forbidden raw forms.
+
+Both policies, after Markdown-aware masking (code fences, inline code, and
+block quotes provably taken from the user's input are not scanned), block
+raw DOIs, raw numeric citations, raw author-year citations, and handwritten
+bibliographies. No model call is made to repair a violating draft; the
+caller replaces it with a safe message and the draft never reaches history
+or the plan log.
+
+Ordinary Markdown web links (without DOIs) are allowed in both policies:
+they are never numbered, never become SourceRefs, and never enter the
+bibliography.
 """
 
 from __future__ import annotations
@@ -113,15 +120,27 @@ def check_citations(
     text: str,
     *,
     verified_source_ids: frozenset[str] | set[str],
+    citation_active: bool,
     user_input: str = "",
 ) -> list[GateViolation]:
-    """Return every blocking violation in ``text`` (empty list = pass)."""
+    """Return every blocking violation in ``text`` (empty list = pass).
+
+    ``citation_active`` selects the policy: active validates markers against
+    ``verified_source_ids``; inactive forbids every marker form.
+    """
     violations: list[GateViolation] = []
     scannable = mask_unscanned_regions(text or "", user_input=user_input)
 
-    # 1. Markers: known forms only, and every ID must resolve.
+    # 1. Markers. Active: known forms only, every ID must resolve.
+    #    Inactive: no marker of any form may appear.
     for match in MARKER_RE.finditer(scannable):
         body = match.group(1).strip()
+        if not citation_active:
+            violations.append(GateViolation(
+                "citation_inactive_marker",
+                f"citation marker [[{body}]] outside the citation skill",
+            ))
+            continue
         if body == CITATION_NEEDED:
             continue
         cite = CITE_MARKER_RE.match(body)
@@ -141,7 +160,8 @@ def check_citations(
     for doi in extract_doi_candidates(marker_free):
         violations.append(GateViolation(
             "raw_doi",
-            f"raw DOI {doi!r} in prose; cite a verified source via /citation instead",
+            f"raw DOI {doi!r} in prose; only verified [[cite:...]] markers "
+            "may reference sources",
         ))
         break  # one finding is enough to block; details stay short
 
@@ -175,14 +195,23 @@ def check_citations(
     return violations
 
 
-def build_safe_message(violations: list[GateViolation]) -> str:
+def build_safe_message(
+    violations: list[GateViolation], *, citation_active: bool
+) -> str:
     """The user-facing replacement for a blocked draft."""
     lines = [
         "（回應未通過 citation 檢查，已被封鎖。原草稿不會被保存。）",
         "Validation errors:",
     ]
     lines.extend(f"- {v.code}: {v.detail}" for v in violations)
-    lines.append(
-        "請改用 /citation 建立 verified source 後以 [[cite:<source-id>]] 引用。"
-    )
+    if citation_active:
+        lines.append(
+            "請先在 citation workflow 中完成驗證（搜尋→選擇→確認），"
+            "再以 [[cite:<source-id>]] 引用；缺來源的主張用 [[citation-needed]]。"
+        )
+    else:
+        lines.append(
+            "正式引用僅在 citation skill 啟用時可用（/citation）；"
+            "一般非 DOI 網址連結不受此限制。"
+        )
     return "\n".join(lines)

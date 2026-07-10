@@ -257,7 +257,13 @@ class ChatSession:
         return coordinator.registry if coordinator is not None else None
 
     def _build_sources_hint(self) -> SystemMessage | None:
-        """Inject the visible/recently-activated sources (at most 20)."""
+        """Inject the visible/recently-activated sources (at most 20).
+
+        Citation-mode only: outside the citation skill there are no citable
+        sources, so no hint is rendered and no registry is consulted.
+        """
+        if not self.citation_skill_active:
+            return None
         registry = self._citation_registry()
         if registry is None:
             return None
@@ -278,22 +284,26 @@ class ChatSession:
     def _finalize_answer(
         self, answer: str, *, user_input: str
     ) -> tuple[str, list, list[str]]:
-        """Run the citation gate, then render markers into numbered citations.
+        """Apply the mode's citation policy, then render when applicable.
 
-        Returns ``(final_text, cited_sources, validation_errors)``. On a gate
-        violation the draft is replaced by the safe message and never
-        returned; only the safe message and the error codes survive.
+        Citation skill active: markers are checked against the registry's
+        identity-verified IDs and the renderer numbers them and appends the
+        bibliography. Inactive: verified IDs are empty, every citation form
+        blocks, and the renderer never runs. Returns ``(final_text,
+        cited_sources, validation_errors)``; a violating draft is replaced
+        by the safe message and never returned.
         """
-        registry = self._citation_registry()
-        refs = registry.list() if registry is not None else []
+        citation_active = self.citation_skill_active
+        registry = self._citation_registry() if citation_active else None
         verified_ids = frozenset(
             ref.source_id
-            for ref in refs
+            for ref in (registry.list() if registry is not None else [])
             if ref.verification_level == "identity_verified"
         )
         violations = check_citations(
             answer,
             verified_source_ids=verified_ids,
+            citation_active=citation_active,
             user_input=user_input,
         )
         if violations:
@@ -301,7 +311,10 @@ class ChatSession:
             logger.warning(
                 "citation gate blocked a draft: %s", [v.code for v in violations]
             )
-            return build_safe_message(violations), [], errors
+            safe = build_safe_message(violations, citation_active=citation_active)
+            return safe, [], errors
+        if not citation_active:
+            return answer, [], []
         resolve = registry.get if registry is not None else (lambda _sid: None)
         rendered = render_citations(answer, resolve=resolve)
         return rendered.text, list(rendered.cited_sources), []

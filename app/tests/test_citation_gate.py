@@ -14,10 +14,11 @@ def _codes(violations: list[GateViolation]) -> set[str]:
     return {v.code for v in violations}
 
 
-def _check(text, *, user_input="", verified=VERIFIED):
+def _check(text, *, user_input="", verified=VERIFIED, active=True):
     return check_citations(
         text,
         verified_source_ids=verified,
+        citation_active=active,
         user_input=user_input,
     )
 
@@ -112,9 +113,39 @@ def test_multiple_violations_all_reported():
     }
 
 
-def test_safe_message_lists_validation_errors():
+def test_inactive_policy_blocks_every_marker_form():
+    for text in (
+        "ok [[cite:src-abc123]]",          # even a would-be verified id
+        "todo [[citation-needed]]",
+        "legacy [[user-cite:usr-x]]",
+        "odd [[made-up]]",
+    ):
+        assert _codes(_check(text, active=False)) == {"citation_inactive_marker"}
+
+
+def test_inactive_policy_keeps_raw_form_blocks_and_allows_plain_links():
+    assert "raw_doi" in _codes(_check("see 10.1234/abc", active=False))
+    assert "raw_numeric_citation" in _codes(_check("as [1] shows", active=False))
+    assert "raw_author_year" in _codes(
+        _check("per (Smith, 2020)", active=False)
+    )
+    assert "handwritten_bibliography" in _codes(
+        _check("x\n\n## References\n- y", active=False)
+    )
+    # Ordinary non-DOI links stay allowed outside the skill.
+    assert _check("see [docs](https://example.org/guide)", active=False) == []
+    assert _check("docs at https://example.org/guide", active=False) == []
+
+
+def test_safe_message_lists_validation_errors_per_mode():
     violations = _check("bad [1]")
-    message = build_safe_message(violations)
+    message = build_safe_message(violations, citation_active=True)
     assert "raw_numeric_citation" in message
     assert "封鎖" in message
-    assert "/citation" in message
+    assert "[[cite:" in message
+
+    inactive = build_safe_message(
+        _check("bad [[citation-needed]]", active=False), citation_active=False,
+    )
+    assert "citation_inactive_marker" in inactive
+    assert "/citation" in inactive

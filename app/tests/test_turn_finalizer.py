@@ -76,6 +76,7 @@ def test_cited_answer_is_rendered_and_sources_snapshotted(make_session, tmp_path
     session, _ = make_session(
         answer="Transformers work [[cite:src-known]]. Really [[cite:src-known]]."
     )
+    session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("tell me"))
 
@@ -127,19 +128,60 @@ def test_user_doi_in_input_is_never_auto_registered(make_session, tmp_path):
         answer="Your paper [[user-cite:usr-anything]] is interesting."
     )
     blocked = asyncio.run(session.turn_outcome("continue"))
-    assert any("unknown_marker" in err for err in blocked.validation_errors)
+    assert any(
+        "citation_inactive_marker" in err for err in blocked.validation_errors
+    )
 
 
-def test_dangling_cite_marker_blocks(make_session, tmp_path):
+def test_dangling_cite_marker_blocks_in_citation_mode(make_session, tmp_path):
     session, _ = make_session(answer="Bogus [[cite:src-ghost]].")
+    session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
     assert any("dangling_cite" in err for err in outcome.validation_errors)
 
 
+def test_verified_marker_blocks_outside_citation_mode(make_session, tmp_path):
+    """Even a resolvable [[cite:...]] is formal citation — skill-only."""
+    session, _ = make_session(answer="Known [[cite:src-known]].")
+    _seed_verified_source(session, tmp_path)  # registry exists, skill inactive
+    outcome = asyncio.run(session.turn_outcome("q"))
+    assert any(
+        "citation_inactive_marker" in err for err in outcome.validation_errors
+    )
+
+
+def test_plain_web_link_passes_and_renderer_skipped_outside_citation_mode(
+    make_session, tmp_path
+):
+    session, _ = make_session(
+        answer="See [docs](https://example.org/guide) and https://example.org/x"
+    )
+    _seed_verified_source(session, tmp_path)
+    outcome = asyncio.run(session.turn_outcome("q"))
+    assert outcome.validation_errors == []
+    # Renderer untouched: no numbering, no bibliography appended.
+    assert outcome.text == (
+        "See [docs](https://example.org/guide) and https://example.org/x"
+    )
+    assert "Sources:" not in outcome.text
+
+
+def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path):
+    session, _ = make_session(answer="plain")
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+    assert session._build_sources_hint() is not None
+    session.deactivate_skill()
+    assert session._build_sources_hint() is None
+    assert session._citation_coordinator is None
+
+
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):
     session, _ = make_session()
     assert session._build_sources_hint() is None
+    session.activate_skill("citation")
+    assert session._build_sources_hint() is None  # active but empty registry
     _seed_verified_source(session, tmp_path)
     hint = session._build_sources_hint()
     assert hint is not None
