@@ -125,7 +125,7 @@ def test_unparseable_body_raises_provider_error():
 def test_parse_work_item_tolerates_format_drift():
     # Provider drift: issued missing, title as empty list, score as string.
     record = parse_work_item(
-        {"DOI": "10.1/x", "title": [], "score": "not-a-number"}, rank=0
+        {"DOI": "10.1234/x", "title": [], "score": "not-a-number"}, rank=0
     )
     assert record.title == ""
     assert record.year is None
