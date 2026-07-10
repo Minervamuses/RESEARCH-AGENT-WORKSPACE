@@ -1,6 +1,6 @@
 ---
 name: citation
-description: Interactive verified-citation workflow — search academic papers, let the user pick and confirm, save verified BibTeX bundles, and cite them with [[cite:<source-id>]] markers.
+description: Interactive verified-citation workflow — search academic papers, let the user pick and confirm, save verified BibTeX bundles, and cite them with [[cite:...]] markers.
 ---
 
 # Citation Skill
