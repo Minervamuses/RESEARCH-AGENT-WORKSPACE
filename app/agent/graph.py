@@ -64,7 +64,6 @@ def build_graph(
     extra_tools: list | None = None,
     history_store=None,
     skill_runtime_getter=None,
-    citation_registry_getter=None,
     skill_tools: list | None = None,
 ):
     """Build and compile the conversational RAG agent graph.
@@ -75,8 +74,6 @@ def build_graph(
             tools loaded at startup) appended after the local agent tools.
         history_store: Optional store injected into the recall_history tool.
         skill_runtime_getter: Optional callable returning the active SkillRuntime.
-        citation_registry_getter: Optional callable returning the session
-            SourceRegistry so recall_history can rehydrate cited sources.
         skill_tools: Optional skill-only tools. They join the executable tool
             universe but are bound/callable only while an active skill's
             allowlist grants them — never in normal mode, never via a deny-only
@@ -91,7 +88,6 @@ def build_graph(
         config,
         history_store=history_store,
         extra_tools=extra_tools,
-        citation_registry_getter=citation_registry_getter,
     )
     skill_tools = list(skill_tools or [])
     default_names = [getattr(tool, "name", str(tool)) for tool in default_tools]

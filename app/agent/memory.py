@@ -11,19 +11,14 @@ is no LLM-driven compaction; spillover is preserved verbatim and
 searchable via the ``recall_history`` tool.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 
 @dataclass
 class TurnRecord:
-    """One completed turn, reduced to user input + final assistant answer.
-
-    ``sources`` holds snapshots of the SourceRefs the answer actually cited
-    (empty for turns without citations); they persist alongside the turn so
-    citations can be rehydrated after eviction/restart.
-    """
+    """One completed turn, reduced to user input + final assistant answer."""
 
     user_input: str
     assistant_output: str
@@ -31,7 +26,6 @@ class TurnRecord:
     timestamp: str = ""
     persist_target: str = "chroma"
     log_path: str | None = None
-    sources: list = field(default_factory=list)
 
     def to_messages(self) -> list[BaseMessage]:
         msgs: list[BaseMessage] = [HumanMessage(content=self.user_input)]

@@ -140,7 +140,6 @@ class ChatSession:
             extra_tools=extra_tools,
             history_store=self.history_store,
             skill_runtime_getter=lambda: self.active_skill_runtime,
-            citation_registry_getter=lambda: self.citation_coordinator.registry,
             skill_tools=[self.citation_workflow_tool],
         )
         # The graph builder and model getters resolve here (not at import), so
@@ -283,15 +282,15 @@ class ChatSession:
 
     def _finalize_answer(
         self, answer: str, *, user_input: str
-    ) -> tuple[str, list, list[str]]:
+    ) -> tuple[str, list[str]]:
         """Apply the mode's citation policy, then render when applicable.
 
         Citation skill active: markers are checked against the registry's
         identity-verified IDs and the renderer numbers them and appends the
         bibliography. Inactive: verified IDs are empty, every citation form
         blocks, and the renderer never runs. Returns ``(final_text,
-        cited_sources, validation_errors)``; a violating draft is replaced
-        by the safe message and never returned.
+        validation_errors)``; a violating draft is replaced by the safe
+        message and never returned.
         """
         citation_active = self.citation_skill_active
         registry = self._citation_registry() if citation_active else None
@@ -312,12 +311,11 @@ class ChatSession:
                 "citation gate blocked a draft: %s", [v.code for v in violations]
             )
             safe = build_safe_message(violations, citation_active=citation_active)
-            return safe, [], errors
+            return safe, errors
         if not citation_active:
-            return answer, [], []
+            return answer, []
         resolve = registry.get if registry is not None else (lambda _sid: None)
-        rendered = render_citations(answer, resolve=resolve)
-        return rendered.text, list(rendered.cited_sources), []
+        return render_citations(answer, resolve=resolve).text, []
 
     async def finalize_and_record(
         self,
@@ -336,7 +334,7 @@ class ChatSession:
         turns, and Chroma history see any text — a blocked draft never
         reaches persistence in any form.
         """
-        final_text, sources, errors = self._finalize_answer(
+        final_text, errors = self._finalize_answer(
             answer, user_input=user_input
         )
         await self._record_turn(
@@ -347,12 +345,10 @@ class ChatSession:
             trace_events=trace_events,
             fusion=fusion,
             candidate_traces=candidate_traces,
-            sources=sources,
             validation_errors=errors,
         )
         return TurnOutcome(
             text=final_text,
-            sources=sources,
             validation_errors=errors,
             tool_calls=tool_calls,
         )
@@ -574,7 +570,6 @@ class ChatSession:
         trace_events: list[dict],
         fusion: dict | None = None,
         candidate_traces: list[FusionCandidateTrace] | None = None,
-        sources: list | None = None,
         validation_errors: list[str] | None = None,
     ) -> None:
         """Persist/log the final answer for one user-visible turn.
@@ -620,7 +615,6 @@ class ChatSession:
                 timestamp=timestamp,
                 persist_target=target,
                 log_path=log_path,
-                sources=list(sources or []),
             )
         )
         self.last_tool_calls = tool_calls
@@ -696,7 +690,7 @@ class ChatSession:
         return await self._run_normal_turn(user_input)
 
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
-        """Core entry point: one finalized turn with sources and errors."""
+        """Core entry point: one finalized turn with text, errors, and trace."""
         return await self._run_turn(user_input)
 
     async def turn(self, user_input: str) -> str:

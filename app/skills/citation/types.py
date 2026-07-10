@@ -23,8 +23,9 @@ from typing import Literal
 # Version stamped into every persisted artifact (SourceRef JSON, sidecar).
 PERSIST_SCHEMA_VERSION = 1
 
-# The only verification levels a SourceRef can carry.
-VerificationLevel = Literal["identity_verified", "user_supplied_unverified"]
+# The only verification level a SourceRef can carry: the DOI and the
+# bibliographic pipeline agree on the identity of the record.
+VerificationLevel = Literal["identity_verified"]
 
 # Terminal states of one confirm attempt (or the workflow as a whole).
 CitationStatus = Literal[
@@ -247,10 +248,9 @@ class SourceRef:
     """A stable, citable reference to one verified (or user-supplied) source.
 
     The only object the chat layer may cite via ``[[cite:<source-id>]]``.
-    Persisted (in bundle sidecars and turn records), so it carries
-    ``schema_version``. ``verification_level`` is strictly identity-level:
-    ``identity_verified`` proves the DOI and bibliographic pipeline agree,
-    nothing more.
+    Persisted (in bundle sidecars), so it carries ``schema_version``.
+    ``verification_level`` is strictly identity-level: ``identity_verified``
+    proves the DOI and bibliographic pipeline agree, nothing more.
     """
 
     source_id: str
@@ -282,27 +282,6 @@ class SourceRef:
             "bundle_path": self.bundle_path,
         }
 
-    @classmethod
-    def from_dict(cls, data: dict) -> "SourceRef":
-        """Rehydrate from persisted JSON; missing fields are treated as empty."""
-        level = data.get("verification_level")
-        if level not in ("identity_verified", "user_supplied_unverified"):
-            level = "user_supplied_unverified"
-        year = data.get("year")
-        return cls(
-            source_id=str(data.get("source_id", "")),
-            doi=data.get("doi") or None,
-            title=str(data.get("title", "")),
-            authors=[str(a) for a in data.get("authors", []) or []],
-            year=int(year) if isinstance(year, int) else None,
-            venue=str(data.get("venue", "") or ""),
-            work_type=str(data.get("work_type", "") or ""),
-            url=data.get("url") or None,
-            verification_level=level,
-            provenance=str(data.get("provenance", "") or ""),
-            bundle_path=data.get("bundle_path") or None,
-            schema_version=int(data.get("schema_version", PERSIST_SCHEMA_VERSION)),
-        )
 
 
 @dataclass

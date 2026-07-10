@@ -35,7 +35,7 @@ def test_confirmed_result_requires_accepted_doi():
     assert result.accepted_doi == "10.1/x"
 
 
-def test_source_ref_round_trips_through_dict():
+def test_source_ref_serializes_for_the_sidecar():
     ref = SourceRef(
         source_id="src-1",
         doi="10.1234/abc",
@@ -50,26 +50,11 @@ def test_source_ref_round_trips_through_dict():
     )
     data = ref.to_dict()
     assert data["schema_version"] == PERSIST_SCHEMA_VERSION
-    restored = SourceRef.from_dict(data)
-    assert restored == ref
-
-
-def test_source_ref_from_dict_treats_missing_fields_as_empty():
-    restored = SourceRef.from_dict({"source_id": "src-2", "title": "T"})
-    assert restored.doi is None
-    assert restored.authors == []
-    assert restored.year is None
-    assert restored.venue == ""
-    assert restored.bundle_path is None
-    # Unknown/absent verification level never silently upgrades.
-    assert restored.verification_level == "user_supplied_unverified"
-
-
-def test_source_ref_rejects_unknown_verification_level_on_rehydrate():
-    restored = SourceRef.from_dict(
-        {"source_id": "s", "title": "t", "verification_level": "totally_verified"}
-    )
-    assert restored.verification_level == "user_supplied_unverified"
+    assert data["source_id"] == "src-1"
+    assert data["verification_level"] == "identity_verified"
+    # SourceRefs are serialized (bundle sidecars) but never rehydrated:
+    # sources re-enter a session only through the verified workflow.
+    assert not hasattr(SourceRef, "from_dict")
 
 
 def test_verification_report_round_trip_and_passed():

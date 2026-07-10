@@ -9,7 +9,6 @@ pair through turn_id.
 from __future__ import annotations
 
 import dataclasses
-import json
 import os
 from pathlib import Path
 
@@ -19,46 +18,9 @@ from rag import VectorRetriever, get_chroma_store
 
 from agent.config import AgentConfig
 from agent.memory import TurnRecord
-from skills.citation.types import PERSIST_SCHEMA_VERSION, SourceRef
 
 CHAT_HISTORY_COLLECTION = "chat_history"
 CHAT_HISTORY_SUBDIR = "chat_history"
-
-# Metadata key on assistant documents holding the cited-source mapping as a
-# versioned JSON string (Chroma metadata values must be scalars).
-SOURCES_METADATA_KEY = "sources_json"
-
-
-def render_sources_metadata(sources: list[SourceRef]) -> str:
-    """Serialize cited SourceRefs into the versioned assistant-doc string."""
-    return json.dumps(
-        {
-            "schema_version": PERSIST_SCHEMA_VERSION,
-            "sources": [ref.to_dict() for ref in sources],
-        },
-        ensure_ascii=False,
-    )
-
-
-def sources_from_metadata(metadata: dict | None) -> list[SourceRef]:
-    """Rehydrate SourceRefs from document metadata.
-
-    Old records without the field — and unparseable payloads — are treated
-    as having no sources, never upgraded or guessed.
-    """
-    raw = (metadata or {}).get(SOURCES_METADATA_KEY)
-    if not raw:
-        return []
-    try:
-        payload = json.loads(raw)
-        entries = payload.get("sources", [])
-    except (json.JSONDecodeError, AttributeError):
-        return []
-    out: list[SourceRef] = []
-    for entry in entries:
-        if isinstance(entry, dict) and entry.get("source_id"):
-            out.append(SourceRef.from_dict(entry))
-    return out
 
 
 def _resolve_chat_persist_dir(config: AgentConfig) -> str:
@@ -102,9 +64,6 @@ class ChatHistoryStore:
                 "session_id": session_id,
                 "timestamp": timestamp,
             }
-            sources = getattr(turn, "sources", None) or []
-            if role == "assistant" and sources:
-                metadata[SOURCES_METADATA_KEY] = render_sources_metadata(sources)
             documents.append(Document(page_content=text, metadata=metadata))
         if documents:
             self._store.add(documents)

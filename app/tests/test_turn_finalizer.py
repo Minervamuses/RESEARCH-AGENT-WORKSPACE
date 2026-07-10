@@ -58,7 +58,6 @@ def test_clean_turn_returns_outcome_and_records(make_session):
     outcome = asyncio.run(session.turn_outcome("hello"))
     assert isinstance(outcome, TurnOutcome)
     assert outcome.text == "plain answer"
-    assert outcome.sources == []
     assert outcome.validation_errors == []
     assert session.recent_turns[-1].assistant_output == "plain answer"
     assert session.turn_logs[-1]["validation_errors"] == []
@@ -72,7 +71,7 @@ def test_turn_and_trace_wrappers_return_finalized_text(make_session):
     assert calls == []
 
 
-def test_cited_answer_is_rendered_and_sources_snapshotted(make_session, tmp_path):
+def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):
     session, _ = make_session(
         answer="Transformers work [[cite:src-known]]. Really [[cite:src-known]]."
     )
@@ -83,9 +82,8 @@ def test_cited_answer_is_rendered_and_sources_snapshotted(make_session, tmp_path
     assert "Transformers work [1]. Really [1]." in outcome.text
     assert "Sources:" in outcome.text
     assert "[identity_verified]" in outcome.text
-    assert [s.source_id for s in outcome.sources] == ["src-known"]
-    # TurnRecord carries the snapshot.
-    assert session.recent_turns[-1].sources[0].source_id == "src-known"
+    # The rendered text (bibliography included) is what history records.
+    assert session.recent_turns[-1].assistant_output == outcome.text
 
 
 def test_blocked_draft_never_reaches_history_or_plan_log(make_session, tmp_path):
