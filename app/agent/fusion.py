@@ -546,7 +546,7 @@ class FusionOrchestrator:
 
     # --- Extended turn ---------------------------------------------------------
 
-    async def run_extended_turn(self, user_input: str) -> tuple[str, list[dict]]:
+    async def run_extended_turn(self, user_input: str):
         session = self._session
         config = session.config
         try:
@@ -558,15 +558,13 @@ class FusionOrchestrator:
             proposer_models = resolve_fusion_proposer_models(config)
             aggregator_model = resolve_fusion_aggregator_model(config)
         except (ExtendedModeNotConfigured, RuntimeError, OSError) as exc:
-            answer = self._extended_error_message(exc)
-            await session._record_turn(
+            return await session.finalize_and_record(
                 user_input=user_input,
-                answer=answer,
+                answer=self._extended_error_message(exc),
                 new_messages=[],
                 tool_calls=[],
                 trace_events=[],
             )
-            return answer, []
 
         skill_context = session._active_skill_context_block()
         proposer_availability = self._proposer_tool_availability_block()
@@ -587,26 +585,22 @@ class FusionOrchestrator:
                 tool_availability=proposer_availability,
             )
         except Exception as exc:
-            answer = self._extended_error_message(exc)
-            await session._record_turn(
+            return await session.finalize_and_record(
                 user_input=user_input,
-                answer=answer,
+                answer=self._extended_error_message(exc),
                 new_messages=[],
                 tool_calls=[],
                 trace_events=[],
             )
-            return answer, []
 
         if isinstance(rewrite_result, Clarify):
-            answer = rewrite_result.text or "需要補充資訊才能安全完成這個任務。"
-            await session._record_turn(
+            return await session.finalize_and_record(
                 user_input=user_input,
-                answer=answer,
+                answer=rewrite_result.text or "需要補充資訊才能安全完成這個任務。",
                 new_messages=[],
                 tool_calls=[],
                 trace_events=[],
             )
-            return answer, []
 
         rewritten_prompt = rewrite_result.prompt
         rewrite_hints = self._rewrite_hints(
@@ -655,7 +649,7 @@ class FusionOrchestrator:
                 non_candidate_messages.extend(base_fallback.new_messages)
                 flat_tool_calls.extend(base_fallback.tool_calls)
                 flat_trace_events.extend(base_fallback.trace_events)
-            await session._record_turn(
+            return await session.finalize_and_record(
                 user_input=user_input,
                 answer=answer,
                 new_messages=non_candidate_messages,
@@ -664,7 +658,6 @@ class FusionOrchestrator:
                 fusion=fusion_dict,
                 candidate_traces=candidate_traces,
             )
-            return answer, flat_tool_calls
 
         evidence_trace_summary = build_fusion_evidence_summary(
             candidates=candidates,
@@ -762,7 +755,7 @@ class FusionOrchestrator:
                 tool_calls=current.tool_calls,
                 trace_events=current.trace_events,
             )
-        await session._record_turn(
+        return await session.finalize_and_record(
             user_input=user_input,
             answer=current.answer,
             new_messages=current.new_messages,
@@ -771,4 +764,3 @@ class FusionOrchestrator:
             fusion=fusion_dict,
             candidate_traces=candidate_traces,
         )
-        return current.answer, current.tool_calls

@@ -2,12 +2,17 @@
 
 import asyncio
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
+
+from agent.citation_gate import build_safe_message, check_citations
+from agent.citation_render import render_citations
+from agent.turn_outcome import TurnOutcome
 
 from agent.config import AgentConfig
 from agent.fusion import FusionOrchestrator, GraphTurnResult
@@ -190,6 +195,7 @@ class ChatSession:
                 self._build_active_skill_hint(),
                 self._build_tool_availability_hint(),
                 self._build_plan_mode_hint(),
+                self._build_sources_hint(),
             )
             if hint is not None
         ]
@@ -235,6 +241,131 @@ class ChatSession:
             "visible to you in this prompt - do NOT call recall_history to "
             "look for them."
         ))
+
+    def _citation_registry(self):
+        """The session source registry, or None before first citation use."""
+        coordinator = self._citation_coordinator
+        return coordinator.registry if coordinator is not None else None
+
+    def _build_sources_hint(self) -> SystemMessage | None:
+        """Inject the visible/recently-activated sources (at most 20)."""
+        registry = self._citation_registry()
+        if registry is None:
+            return None
+        sources = registry.prompt_sources()
+        if not sources:
+            return None
+        lines = [
+            "[Citable sources] Cite ONLY via these markers; never write raw "
+            "DOIs, [1]-style numbers, author-year citations, or a References "
+            "section yourself — the renderer numbers sources. Use "
+            "[[citation-needed]] when a claim lacks a source.",
+        ]
+        for ref in sources:
+            marker = (
+                "cite"
+                if ref.verification_level == "identity_verified"
+                else "user-cite"
+            )
+            label = ref.title or ref.doi or ref.url or "(unknown)"
+            lines.append(f"- [[{marker}:{ref.source_id}]] {label}")
+        return SystemMessage(content="\n".join(lines))
+
+    def _register_user_sources(self, user_input: str) -> None:
+        """Register recognizable user-provided DOIs/URLs as citable
+        user_supplied_unverified sources before the turn runs."""
+        from citation.doi import extract_doi_candidates
+
+        dois = extract_doi_candidates(user_input)
+        urls = re.findall(r"https?://[^\s)>\]]+", user_input or "")
+        if not dois and not urls:
+            return
+        registry = self.citation_coordinator.registry
+        for doi in dois:
+            registry.register_user_source(doi)
+        for url in urls:
+            if extract_doi_candidates(url):
+                continue  # DOI-bearing URLs already registered canonically
+            registry.register_user_source(url)
+
+    def _finalize_answer(
+        self, answer: str, *, user_input: str
+    ) -> tuple[str, list, list[str]]:
+        """Run the citation gate, then render markers into numbered citations.
+
+        Returns ``(final_text, cited_sources, validation_errors)``. On a gate
+        violation the draft is replaced by the safe message and never
+        returned; only the safe message and the error codes survive.
+        """
+        registry = self._citation_registry()
+        refs = registry.list() if registry is not None else []
+        verified_ids = frozenset(
+            ref.source_id
+            for ref in refs
+            if ref.verification_level == "identity_verified"
+        )
+        user_ids = frozenset(
+            ref.source_id
+            for ref in refs
+            if ref.verification_level == "user_supplied_unverified"
+        )
+        violations = check_citations(
+            answer,
+            verified_source_ids=verified_ids,
+            user_source_ids=user_ids,
+            user_input=user_input,
+        )
+        if violations:
+            errors = [f"{v.code}: {v.detail}" for v in violations]
+            logger.warning(
+                "citation gate blocked a draft: %s", [v.code for v in violations]
+            )
+            return build_safe_message(violations), [], errors
+        resolve = registry.get if registry is not None else (lambda _sid: None)
+        rendered = render_citations(answer, resolve=resolve)
+        return (
+            rendered.text,
+            [*rendered.cited_sources, *rendered.user_sources],
+            [],
+        )
+
+    async def finalize_and_record(
+        self,
+        *,
+        user_input: str,
+        answer: str,
+        new_messages: list,
+        tool_calls: list[dict],
+        trace_events: list[dict],
+        fusion: dict | None = None,
+        candidate_traces=None,
+    ) -> TurnOutcome:
+        """Single finalization chokepoint for every turn branch.
+
+        Gate + render happen here, strictly *before* the plan log, recent
+        turns, and Chroma history see any text — a blocked draft never
+        reaches persistence in any form.
+        """
+        final_text, sources, errors = self._finalize_answer(
+            answer, user_input=user_input
+        )
+        await self._record_turn(
+            user_input=user_input,
+            answer=final_text,
+            new_messages=new_messages,
+            tool_calls=tool_calls,
+            trace_events=trace_events,
+            fusion=fusion,
+            candidate_traces=candidate_traces,
+            sources=sources,
+            validation_errors=errors,
+        )
+        return TurnOutcome(
+            text=final_text,
+            sources=sources,
+            validation_errors=errors,
+            tool_calls=tool_calls,
+        )
 
     async def _store_turn(self, turn: TurnRecord) -> None:
         await self._turn_store.store_turn(turn)
@@ -406,13 +537,17 @@ class ChatSession:
         trace_events: list[dict],
         fusion: dict | None = None,
         candidate_traces: list[FusionCandidateTrace] | None = None,
+        sources: list | None = None,
+        validation_errors: list[str] | None = None,
     ) -> None:
         """Persist/log the final answer for one user-visible turn.
 
-        ``fusion``/``candidate_traces`` are only supplied by the fusion extended
-        turn; normal turns, reviser, and final validation omit them. Compact
-        fusion metadata reaches ``turn_logs[-1]["fusion"]`` only through this
-        ``fusion`` argument, never reverse-engineered from rendered text.
+        Only ever called through :meth:`finalize_and_record`, so ``answer``
+        is already gated/rendered. ``fusion``/``candidate_traces`` are only
+        supplied by the fusion extended turn; normal turns, reviser, and
+        final validation omit them. Compact fusion metadata reaches
+        ``turn_logs[-1]["fusion"]`` only through this ``fusion`` argument,
+        never reverse-engineered from rendered text.
         """
         turn_id = self._turn_counter + 1
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -448,6 +583,7 @@ class ChatSession:
                 timestamp=timestamp,
                 persist_target=target,
                 log_path=log_path,
+                sources=list(sources or []),
             )
         )
         self.last_tool_calls = tool_calls
@@ -458,19 +594,19 @@ class ChatSession:
             "trace_events": trace_events,
             "tool_counts": format_tool_counts(tool_calls),
             "fusion": fusion,
+            "validation_errors": list(validation_errors or []),
         })
         await self._turn_store.evict_overflow()
 
-    async def _run_normal_turn(self, user_input: str) -> tuple[str, list[dict]]:
+    async def _run_normal_turn(self, user_input: str) -> TurnOutcome:
         result = await self._run_graph_turn(user_input)
-        await self._record_turn(
+        return await self.finalize_and_record(
             user_input=user_input,
             answer=result.answer,
             new_messages=result.new_messages,
             tool_calls=result.tool_calls,
             trace_events=result.trace_events,
         )
-        return result.answer, result.tool_calls
 
     async def _apply_final_skill_validation(
         self,
@@ -513,19 +649,24 @@ class ChatSession:
             trace_events=[*trace_events, *validation_result.trace_events],
         )
 
-    async def _run_extended_turn(self, user_input: str) -> tuple[str, list[dict]]:
+    async def _run_extended_turn(self, user_input: str) -> TurnOutcome:
         return await self._fusion.run_extended_turn(user_input)
 
-    async def _run_turn(self, user_input: str) -> tuple[str, list[dict]]:
-        """Process one turn and return the final answer plus tool-call trace."""
+    async def _run_turn(self, user_input: str) -> TurnOutcome:
+        """Process one turn through the single finalization chokepoint."""
         if self.thinking_mode == "extended":
             return await self._run_extended_turn(user_input)
         return await self._run_normal_turn(user_input)
 
+    async def turn_outcome(self, user_input: str) -> TurnOutcome:
+        """Core entry point: one finalized turn with sources and errors."""
+        self._register_user_sources(user_input)
+        return await self._run_turn(user_input)
+
     async def turn(self, user_input: str) -> str:
         """Process one conversation turn. Returns the final text response."""
-        answer, _tool_calls = await self._run_turn(user_input)
-        return answer
+        outcome = await self.turn_outcome(user_input)
+        return outcome.text
 
     def status_snapshot(self) -> dict[str, str | int]:
         """Expose lightweight session state for local CLI commands."""
@@ -551,8 +692,9 @@ class ChatSession:
         }
 
     async def turn_with_trace(self, user_input: str) -> tuple[str, list[dict]]:
-        """Process one turn and return the answer plus normalized tool trace."""
-        return await self._run_turn(user_input)
+        """Compatibility wrapper over :meth:`turn_outcome`."""
+        outcome = await self.turn_outcome(user_input)
+        return outcome.text, outcome.tool_calls
 
     @classmethod
     async def create(
