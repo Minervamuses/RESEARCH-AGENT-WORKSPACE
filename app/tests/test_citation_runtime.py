@@ -1,17 +1,14 @@
-"""Tests for the citation runtime's mandatory OpenRouter chat model.
+"""Tests for the legacy citation runtime's OpenRouter probe.
 
-The citation CLI must fail fast (exit code 2) when the OpenRouter setup is
-broken — missing/invalid key, invalid model, or a failing probe call — instead
-of degrading into a fallback or pretending nothing was found.
+The interactive CLI no longer requires a working LLM (expansion is lazy and
+optional); these cover the legacy build_runtime helper until it is removed.
 """
 
-import argparse
 import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-from citation import cli
 from citation import runtime as citation_runtime
 from citation.runtime import OpenRouterUnavailable
 
@@ -64,77 +61,3 @@ def test_build_runtime_probes_once_and_keeps_the_model(monkeypatch):
 
     assert runtime.llm is llm
     assert len(llm.probe_messages) == 1
-
-
-def _cli_args(**overrides) -> argparse.Namespace:
-    defaults = dict(request="find papers", limit=6, auto=False, auto_attempts=4)
-    defaults.update(overrides)
-    return argparse.Namespace(**defaults)
-
-
-def test_cli_exits_2_when_openrouter_is_unavailable(monkeypatch, capsys):
-    async def failing_build_runtime(*, load_mcp=True):
-        raise OpenRouterUnavailable("could not build the OpenRouter chat model")
-
-    monkeypatch.setattr(cli, "build_runtime", failing_build_runtime)
-
-    rc = asyncio.run(cli._run(_cli_args()))
-
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "OPENROUTER_API_KEY" in captured.err
-    assert "no LLM configured" not in captured.out
-
-
-def test_cli_exits_2_when_web_search_mcp_is_missing(monkeypatch, capsys):
-    async def build_runtime_without_mcp(*, load_mcp=True):
-        return SimpleNamespace(llm=_ProbeOkLLM(), web_tools={})
-
-    monkeypatch.setattr(cli, "build_runtime", build_runtime_without_mcp)
-
-    rc = asyncio.run(cli._run(_cli_args()))
-
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "Web Search MCP" in captured.err
-    assert "OPENROUTER_API_KEY" not in captured.err
-
-
-def _patch_ready_runtime(monkeypatch):
-    async def build_ready_runtime(*, load_mcp=True):
-        return SimpleNamespace(llm=_ProbeOkLLM(), web_tools={"summaries": object()})
-
-    monkeypatch.setattr(cli, "build_runtime", build_ready_runtime)
-
-
-def test_cli_exits_3_only_when_search_completed_with_no_candidates(monkeypatch, capsys):
-    _patch_ready_runtime(monkeypatch)
-
-    async def empty_discover(runtime, request, *, limit, progress_cb=None):
-        return []
-
-    monkeypatch.setattr(cli, "agentic_discover", empty_discover)
-
-    rc = asyncio.run(cli._run(_cli_args()))
-
-    captured = capsys.readouterr()
-    assert rc == 3
-    assert "No candidate papers found" in captured.err
-
-
-def test_cli_exits_2_when_discovery_llm_call_fails(monkeypatch, capsys):
-    from citation.discovery import OpenRouterDiscoveryError
-
-    _patch_ready_runtime(monkeypatch)
-
-    async def failing_discover(runtime, request, *, limit, progress_cb=None):
-        raise OpenRouterDiscoveryError("discovery LLM call failed/timed out")
-
-    monkeypatch.setattr(cli, "agentic_discover", failing_discover)
-
-    rc = asyncio.run(cli._run(_cli_args()))
-
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "OpenRouter discovery call failed" in captured.err
-    assert "No candidate papers found" not in captured.err
