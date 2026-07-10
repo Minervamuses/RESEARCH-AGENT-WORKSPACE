@@ -49,6 +49,7 @@ from skills.citation.types import (
     CitationMatch,
     CitationResult,
     ProviderState,
+    PublishedDateFilter,
     SourceRef,
     VerificationCheck,
     VerificationReport,
@@ -62,13 +63,18 @@ PROMPT_REGISTRY_LIMIT = 20
 
 @dataclass
 class SearchOutcome:
-    """What one search/more call produced."""
+    """What one search/more call produced.
+
+    ``date_filtered_out`` counts fused candidates dropped by the fail-closed
+    published-date filter (unknown year, or year outside the window).
+    """
 
     candidates: list[CitationCandidate] = field(default_factory=list)
     provider_states: list[ProviderState] = field(default_factory=list)
     used_web_fallback: bool = False
     queries: list[str] = field(default_factory=list)
     error: str = ""
+    date_filtered_out: int = 0
 
 
 @dataclass
@@ -195,6 +201,7 @@ class CitationCoordinator:
         self._last_states: list[ProviderState] = []
         self._attempts = 0
         self._previous_failure_codes: list[str] = []
+        self._date_filter: PublishedDateFilter | None = None
 
     # --- workflow generation management ----------------------------------
 
@@ -207,6 +214,7 @@ class CitationCoordinator:
         self._match_counter = 0
         self._attempts = 0
         self._previous_failure_codes = []
+        self._date_filter = None
 
     def _clear_resolution(self) -> None:
         self._selected_id = None
@@ -218,7 +226,9 @@ class CitationCoordinator:
 
     # --- discovery ---------------------------------------------------------
 
-    async def search(self, query: str) -> SearchOutcome:
+    async def search(
+        self, query: str, *, date_filter: PublishedDateFilter | None = None
+    ) -> SearchOutcome:
         """Start a new workflow generation for ``query``.
 
         A DOI-shaped query resolves directly through the doi.org singleton —
@@ -226,9 +236,15 @@ class CitationCoordinator:
         in parallel over the query plus at most two lazy LLM expansions; the
         web MCP runs automatically only when every enabled structured
         provider failed or produced zero candidates.
+
+        ``date_filter`` (optional) is pushed down to the structured providers'
+        native date filters and then re-applied fail-closed over the fused
+        candidates: unknown or out-of-window years never qualify. The filter
+        sticks to the workflow generation, so ``more`` respects it too.
         """
         self._new_generation()
         self._last_query = query.strip()
+        self._date_filter = date_filter
 
         canonical = canonicalize_doi(query)
         if canonical is not None:
@@ -254,18 +270,31 @@ class CitationCoordinator:
                 ranked_lists.append(web_list)
                 used_web = True
 
-        self._candidates = fuse_ranked_lists(
+        fused = fuse_ranked_lists(
             [lst for lst in ranked_lists if lst],
             query=self._last_query,
             workflow_id=self._workflow_id,
         ) if any(ranked_lists) else []
+        self._candidates, filtered_out = self._apply_date_filter(fused)
         self._last_states = states
         return SearchOutcome(
             candidates=list(self._candidates),
             provider_states=states,
             used_web_fallback=used_web,
             queries=queries,
+            date_filtered_out=filtered_out,
         )
+
+    def _apply_date_filter(
+        self, candidates: list[CitationCandidate]
+    ) -> tuple[list[CitationCandidate], int]:
+        """Fail-closed post-filter; survivors are renumbered c1..cN."""
+        if self._date_filter is None:
+            return candidates, 0
+        kept = [c for c in candidates if self._date_filter.admits_year(c.year)]
+        for index, candidate in enumerate(kept):
+            candidate.candidate_id = f"c{index + 1}"
+        return kept, len(candidates) - len(kept)
 
     async def _search_by_doi(self, canonical: str) -> SearchOutcome:
         try:
@@ -287,11 +316,14 @@ class CitationCoordinator:
             self._last_states = states
             return SearchOutcome(provider_states=states, queries=[canonical])
         candidate = _candidate_from_structured(record, workflow_id=self._workflow_id)
-        self._candidates = [candidate]
+        self._candidates, filtered_out = self._apply_date_filter([candidate])
         states = [ProviderState("doi.org", "ok")]
         self._last_states = states
         return SearchOutcome(
-            candidates=[candidate], provider_states=states, queries=[canonical]
+            candidates=list(self._candidates),
+            provider_states=states,
+            queries=[canonical],
+            date_filtered_out=filtered_out,
         )
 
     async def _run_structured_search(
@@ -303,7 +335,7 @@ class CitationCoordinator:
 
         async def _one(name: str, client, query: str):
             try:
-                records = await client.search(query)
+                records = await client.search(query, date_filter=self._date_filter)
             except ProviderRateLimited as exc:
                 return [], ProviderState(name, "rate_limited", exc.detail)
             except ProviderTimeout as exc:
@@ -365,12 +397,19 @@ class CitationCoordinator:
             and record.provider_id not in known_pids
         ]
         appended: list[CitationCandidate] = []
+        filtered_out = 0
         if fresh:
             room = MAX_WORKFLOW_CANDIDATES - len(self._candidates)
             fused = fuse_ranked_lists(
                 [fresh], query=effective_query, workflow_id=self._workflow_id,
                 limit=max(room, 1),
             )
+            if self._date_filter is not None:
+                admitted = [
+                    c for c in fused if self._date_filter.admits_year(c.year)
+                ]
+                filtered_out = len(fused) - len(admitted)
+                fused = admitted
             offset = len(self._candidates)
             for i, candidate in enumerate(fused[:room] if room > 0 else []):
                 candidate.candidate_id = f"c{offset + i + 1}"
@@ -382,6 +421,7 @@ class CitationCoordinator:
             provider_states=states,
             used_web_fallback=True,
             queries=[effective_query],
+            date_filtered_out=filtered_out,
         )
 
     # --- inspection ---------------------------------------------------------
@@ -403,6 +443,9 @@ class CitationCoordinator:
         return {
             "workflow_id": self._workflow_id or "none",
             "query": self._last_query,
+            "date_filter": (
+                self._date_filter.describe() if self._date_filter else "none"
+            ),
             "candidates": len(self._candidates),
             "selected": self._selected_id or "none",
             "matches": len(self._matches),

@@ -365,3 +365,53 @@ def test_expansion_queries_hit_providers(tmp_path):
     assert outcome.queries == ["original", "alternative phrasing"]
     crossref_calls = [url for url, _accept in fetcher.calls if "api.crossref.org" in url]
     assert len(crossref_calls) == 2
+
+
+def test_date_filter_native_params_and_fail_closed_post_filter(tmp_path):
+    from skills.citation.types import PublishedDateFilter
+
+    fetcher = RoutingFetcher()
+    # Paper A (2021) is in-window; Paper B (2020) is out; the third item has
+    # no year and must be dropped fail-closed despite matching otherwise.
+    fetcher.crossref_response = FetchResponse(
+        status=200,
+        body=json.dumps({"message": {"items": [
+            CROSSREF_ITEMS[0],
+            CROSSREF_ITEMS[1],
+            {"DOI": "10.1234/paper-undated", "title": ["Paper Undated"], "score": 5.0},
+        ]}}).encode(),
+    )
+    coordinator, fetcher = _coordinator(tmp_path, fetcher=fetcher)
+    date_filter = PublishedDateFilter.from_year_range(2021, 2026)
+    outcome = asyncio.run(coordinator.search("papers", date_filter=date_filter))
+
+    crossref_url = next(url for url, _a in fetcher.calls if "api.crossref.org" in url)
+    assert "filter=from-pub-date%3A2021-01-01%2Cuntil-pub-date%3A2026-12-31" in crossref_url
+    assert [c.title for c in outcome.candidates] == ["Paper A"]
+    assert outcome.candidates[0].candidate_id == "c1"  # renumbered after filtering
+    assert outcome.date_filtered_out == 2
+    assert coordinator.status()["date_filter"] == "2021-01-01 .. 2026-12-31"
+
+
+def test_date_filter_applies_to_doi_query_and_more(tmp_path):
+    from skills.citation.types import PublishedDateFilter
+
+    web = StubWebTool(WEB_TEXT)
+    coordinator, _ = _coordinator(
+        tmp_path, web_tools={"get-web-search-summaries": web}
+    )
+    # DOI-shaped query: Paper A is 2021, window excludes it -> zero candidates.
+    outcome = asyncio.run(coordinator.search(
+        DOI_A, date_filter=PublishedDateFilter.from_year_range(2022, None)
+    ))
+    assert outcome.candidates == []
+    assert outcome.date_filtered_out == 1
+
+    # `more` inherits the workflow's filter: the undated web hit is dropped.
+    coordinator2, _ = _coordinator(tmp_path, web_tools={"get-web-search-summaries": web})
+    asyncio.run(coordinator2.search(
+        "papers", date_filter=PublishedDateFilter.from_year_range(2021, None)
+    ))
+    more_outcome = asyncio.run(coordinator2.more("papers"))
+    assert more_outcome.candidates == []
+    assert more_outcome.date_filtered_out == 1

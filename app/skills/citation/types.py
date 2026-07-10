@@ -17,6 +17,7 @@ Invariants enforced here:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from typing import Literal
 
 # Version stamped into every persisted artifact (SourceRef JSON, sidecar).
@@ -58,6 +59,70 @@ class ProviderState:
             status=data.get("status", "error"),
             detail=str(data.get("detail", "")),
         )
+
+
+@dataclass(frozen=True)
+class PublishedDateFilter:
+    """Inclusive publication-date window applied to discovery.
+
+    ``date_from``/``date_to`` (ISO ``YYYY-MM-DD``) feed the providers' native
+    date filters; ``year_from``/``year_to`` bound the fail-closed post-filter
+    run over the fused candidates. Fail-closed means a candidate whose year is
+    unknown, or outside the window, never pretends to satisfy the filter.
+    """
+
+    date_from: str | None = None
+    date_to: str | None = None
+    year_from: int | None = None
+    year_to: int | None = None
+
+    @classmethod
+    def within_years(
+        cls, years: int, *, today: date | None = None
+    ) -> "PublishedDateFilter":
+        """Window ending today (UTC) and starting ``years`` years earlier."""
+        if years < 1:
+            raise ValueError("published_within_years must be >= 1")
+        today = today or datetime.now(timezone.utc).date()
+        try:
+            start = today.replace(year=today.year - years)
+        except ValueError:  # Feb 29 minus N years
+            start = today.replace(year=today.year - years, day=today.day - 1)
+        return cls(
+            date_from=start.isoformat(),
+            date_to=today.isoformat(),
+            year_from=start.year,
+            year_to=today.year,
+        )
+
+    @classmethod
+    def from_year_range(
+        cls, year_from: int | None, year_to: int | None
+    ) -> "PublishedDateFilter":
+        """Whole-year window; either bound may be open."""
+        if year_from is None and year_to is None:
+            raise ValueError("year range requires year_from and/or year_to")
+        if year_from is not None and year_to is not None and year_from > year_to:
+            raise ValueError("year_from must not exceed year_to")
+        return cls(
+            date_from=f"{year_from:04d}-01-01" if year_from is not None else None,
+            date_to=f"{year_to:04d}-12-31" if year_to is not None else None,
+            year_from=year_from,
+            year_to=year_to,
+        )
+
+    def admits_year(self, year: int | None) -> bool:
+        """Fail-closed: an unknown year never satisfies an active filter."""
+        if year is None:
+            return False
+        if self.year_from is not None and year < self.year_from:
+            return False
+        if self.year_to is not None and year > self.year_to:
+            return False
+        return True
+
+    def describe(self) -> str:
+        return f"{self.date_from or '...'} .. {self.date_to or '...'}"
 
 
 @dataclass

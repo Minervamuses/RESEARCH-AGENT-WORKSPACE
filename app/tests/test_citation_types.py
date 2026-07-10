@@ -103,3 +103,39 @@ def test_candidate_label_formats_authors_and_year():
     assert cand.short_label() == "A Paper (First Author et al., 2020)"
     untitled = CitationCandidate(candidate_id="c2", workflow_id="w1")
     assert untitled.short_label() == "(untitled)"
+
+
+def test_published_date_filter_within_years_uses_utc_today():
+    from datetime import date
+
+    from skills.citation.types import PublishedDateFilter
+
+    filt = PublishedDateFilter.within_years(5, today=date(2026, 7, 10))
+    assert (filt.date_from, filt.date_to) == ("2021-07-10", "2026-07-10")
+    assert (filt.year_from, filt.year_to) == (2021, 2026)
+    # Feb 29 minus N years lands on Feb 28, never raises.
+    leap = PublishedDateFilter.within_years(1, today=date(2024, 2, 29))
+    assert leap.date_from == "2023-02-28"
+
+
+def test_published_date_filter_year_range_and_fail_closed_admission():
+    import pytest
+
+    from skills.citation.types import PublishedDateFilter
+
+    filt = PublishedDateFilter.from_year_range(2020, 2022)
+    assert (filt.date_from, filt.date_to) == ("2020-01-01", "2022-12-31")
+    assert filt.admits_year(2020) and filt.admits_year(2022)
+    assert not filt.admits_year(2019) and not filt.admits_year(2023)
+    assert not filt.admits_year(None)  # unknown year never qualifies
+
+    open_ended = PublishedDateFilter.from_year_range(2021, None)
+    assert open_ended.admits_year(2030)
+    assert not open_ended.admits_year(2020)
+
+    with pytest.raises(ValueError):
+        PublishedDateFilter.from_year_range(None, None)
+    with pytest.raises(ValueError):
+        PublishedDateFilter.from_year_range(2022, 2020)
+    with pytest.raises(ValueError):
+        PublishedDateFilter.within_years(0)

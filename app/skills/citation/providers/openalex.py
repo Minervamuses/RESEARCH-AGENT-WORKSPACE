@@ -14,6 +14,7 @@ from typing import Awaitable, Callable
 
 from skills.citation.doi import canonicalize_doi
 from skills.citation.providers.base import MAX_RECORDS_PER_QUERY, ProviderRecord
+from skills.citation.types import PublishedDateFilter
 from skills.citation.providers.net import (
     SEARCH_TTL_SECONDS,
     AsyncRateLimiter,
@@ -95,19 +96,36 @@ class OpenAlexClient:
     def _redact(self, text: str) -> str:
         return redact(text, self._api_key)
 
-    async def search(self, query: str, *, rows: int = MAX_RECORDS_PER_QUERY) -> list[ProviderRecord]:
+    async def search(
+        self,
+        query: str,
+        *,
+        rows: int = MAX_RECORDS_PER_QUERY,
+        date_filter: PublishedDateFilter | None = None,
+    ) -> list[ProviderRecord]:
         rows = max(1, min(rows, MAX_RECORDS_PER_QUERY))
         # Cache key must never embed the secret.
-        cache_key = (PROVIDER_NAME, "search", query, rows)
+        date_key = (
+            (date_filter.date_from, date_filter.date_to) if date_filter else None
+        )
+        cache_key = (PROVIDER_NAME, "search", query, rows, date_key)
         cached = self._cache.get(cache_key)
         if cached is not None:
             return list(cached)
 
-        params = urllib.parse.urlencode({
+        query_params: dict[str, str] = {
             "search": query,
             "per-page": str(rows),
             "api_key": self._api_key,
-        })
+        }
+        native_filters = []
+        if date_filter is not None and date_filter.date_from:
+            native_filters.append(f"from_publication_date:{date_filter.date_from}")
+        if date_filter is not None and date_filter.date_to:
+            native_filters.append(f"to_publication_date:{date_filter.date_to}")
+        if native_filters:
+            query_params["filter"] = ",".join(native_filters)
+        params = urllib.parse.urlencode(query_params)
         url = f"{SEARCH_URL}?{params}"
         headers = {"Accept": "application/json"}
 

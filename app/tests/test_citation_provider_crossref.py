@@ -130,3 +130,22 @@ def test_parse_work_item_tolerates_format_drift():
     assert record.title == ""
     assert record.year is None
     assert record.raw_score is None
+
+
+def test_search_date_filter_adds_native_filter_and_cache_key():
+    import asyncio as _asyncio
+
+    from skills.citation.types import PublishedDateFilter
+
+    cache = TTLCache()
+    client, calls = _client(
+        [_search_body([]), _search_body([])], cache=cache
+    )
+    filt = PublishedDateFilter.from_year_range(2021, 2026)
+    _asyncio.run(client.search("q", date_filter=filt))
+    assert "filter=from-pub-date%3A2021-01-01%2Cuntil-pub-date%3A2026-12-31" in calls[0][0]
+    # A different window is a different cache entry.
+    _asyncio.run(client.search("q"))
+    assert len(calls) == 2 and "filter=" not in calls[1][0]
+    _asyncio.run(client.search("q", date_filter=filt))
+    assert len(calls) == 2  # filtered result served from cache

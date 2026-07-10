@@ -131,3 +131,19 @@ def test_parse_work_tolerates_missing_everything():
     assert record.doi is None
     assert record.title == ""
     assert record.authors == []
+
+
+def test_search_date_filter_adds_native_filter_and_cache_key():
+    import asyncio as _asyncio
+
+    from skills.citation.types import PublishedDateFilter
+
+    cache = TTLCache()
+    client, calls = _client([_body([]), _body([])], cache=cache)
+    filt = PublishedDateFilter.from_year_range(2021, None)
+    _asyncio.run(client.search("q", date_filter=filt))
+    assert "filter=from_publication_date%3A2021-01-01" in calls[0][0]
+    _asyncio.run(client.search("q"))
+    assert len(calls) == 2 and "filter=" not in calls[1][0]
+    _asyncio.run(client.search("q", date_filter=filt))
+    assert len(calls) == 2
