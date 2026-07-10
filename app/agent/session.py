@@ -144,6 +144,40 @@ class ChatSession:
         self.last_trace_events: list[dict] = []
 
         self._progress_cb = progress_cb
+        self._citation_coordinator = None
+
+    @property
+    def citation_coordinator(self):
+        """Session-scoped citation Coordinator over the process provider hub.
+
+        Built lazily on first /citation use: reuses the session's already
+        loaded web MCP tool handles (never restarts MCP) and a lazy chat
+        model factory for query expansion (no startup probe). Only the
+        /citation slash handler may call its mutating methods — the
+        Coordinator is never bound into the model tool graph.
+        """
+        if self._citation_coordinator is None:
+            from citation.coordinator import CitationCoordinator
+            from citation.hub import get_provider_hub
+
+            web_tools = {
+                tool.name: tool
+                for tool in self.extra_tools
+                if getattr(tool, "name", None) in self.web_search_tool_names
+            }
+
+            def _llm_factory(config=self.config):
+                from agent.llm import get_chat_model
+
+                return get_chat_model(config)
+
+            self._citation_coordinator = CitationCoordinator(
+                get_provider_hub(),
+                web_tools=web_tools,
+                llm_factory=_llm_factory,
+                config=self.config,
+            )
+        return self._citation_coordinator
 
     def _prompt_history(self) -> list:
         base = assemble_prompt_history(

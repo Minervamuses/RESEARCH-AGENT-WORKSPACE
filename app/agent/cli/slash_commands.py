@@ -179,6 +179,14 @@ def build_default_registry() -> SlashCommandRegistry:
                 handler=_handle_prune,
             ),
             SlashCommand(
+                name="citation",
+                description=(
+                    "Search, verify, and save academic citations "
+                    "(search/list/show/more/select/confirm/status/cancel/sources/source)."
+                ),
+                handler=_handle_citation,
+            ),
+            SlashCommand(
                 name="clear",
                 description="Clear the terminal screen.",
                 handler=_handle_clear,
@@ -560,6 +568,24 @@ async def _handle_skill(
         raise _skill_command_error(exc) from exc
     suffix = f" {runtime.task_mode}" if runtime.task_mode else ""
     return SlashCommandResult(message=f"skill -> {runtime.name}{suffix}")
+
+
+async def _handle_citation(
+    context: SlashCommandContext,
+    parsed: ParsedSlashCommand,
+) -> SlashCommandResult:
+    from agent.cli.citation_command import run_citation_command
+
+    coordinator = getattr(context.session, "citation_coordinator", None)
+    if coordinator is None:
+        raise SlashCommandError(
+            "citation workflow is not available in this session"
+        )
+    try:
+        message = await run_citation_command(coordinator, parsed.args)
+    except ValueError as exc:
+        raise SlashCommandError(str(exc)) from exc
+    return SlashCommandResult(message=message)
 
 
 async def _handle_clear(
