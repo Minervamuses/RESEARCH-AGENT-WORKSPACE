@@ -1,9 +1,8 @@
 """Session-scoped citation workflow coordinator.
 
 The only object allowed to search for papers, mint verified SourceRefs, and
-write citation bundles. Chat reaches it exclusively through the ``/citation``
-slash handler (its mutating methods are never bound into the model tool
-graph).
+write citation bundles. Chat reaches it exclusively through the skill-only
+``citation_workflow`` tool, bound while the citation skill is active.
 
 Workflow generations: every ``search`` or ``cancel`` starts a new generation
 and invalidates all previous candidate/match IDs. ``more`` keeps candidate
@@ -79,7 +78,7 @@ class SearchOutcome:
 
 @dataclass
 class SelectOutcome:
-    """Matches produced by /citation select (or the failure that stopped it)."""
+    """Matches produced by the select action (or the failure that stopped it)."""
 
     matches: list[CitationMatch] = field(default_factory=list)
     result: CitationResult | None = None
@@ -350,11 +349,11 @@ class CitationCoordinator:
         identity-new candidates, and respects the 50-candidate cap.
         """
         if not self._workflow_id:
-            return SearchOutcome(error="no active workflow; run /citation <query> first")
+            return SearchOutcome(error="no active workflow; run a search first")
         self._clear_resolution()
         effective_query = (query or self._last_query).strip()
         if not effective_query:
-            return SearchOutcome(error="no query available for /citation more")
+            return SearchOutcome(error="no query available for more")
 
         web_list, web_state = await self._run_web_search(effective_query)
         states = [web_state]

@@ -1,9 +1,9 @@
 """RA-independent DOI lookups via doi.org content negotiation.
 
-This is the *verification* provider: ``/citation confirm`` re-fetches the
+This is the *verification* provider: the ``confirm`` action re-fetches the
 structured CSL JSON record for the selected DOI here (never trusting the
 discovery provider's copy), then fetches BibTeX for the same canonical DOI.
-A plain DOI query in ``/citation`` also resolves through this singleton
+A plain DOI-shaped search query also resolves through this singleton
 without starting any LLM or web search.
 
 DOI lookups are cached 24 h; errors never.

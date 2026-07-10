@@ -173,8 +173,8 @@ class CitationCandidate:
 class CitationMatch:
     """A confirmable resolution of one candidate to a canonical DOI.
 
-    Produced by ``/citation select``; invalidated by any later select, search,
-    or cancel. Bibliographic fields are nullable — a missing value means the
+    Produced by the ``select`` action; invalidated by any later select,
+    search, or cancel. Bibliographic fields are nullable — a missing value means the
     lookup did not report it, never a guess.
     """
 
@@ -286,7 +286,7 @@ class SourceRef:
 
 @dataclass
 class CitationResult:
-    """Outcome of one ``/citation confirm`` (or terminal workflow event).
+    """Outcome of one ``confirm`` action (or terminal workflow event).
 
     ``accepted_doi`` is only ever set on ``confirmed`` — enforced at
     construction so no failure path can report a half-accepted DOI.

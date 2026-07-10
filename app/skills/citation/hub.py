@@ -1,9 +1,9 @@
 """Process-scoped provider hub for citation workflows.
 
 One hub per process owns the shared TTL cache, per-provider rate limiters,
-the HTTP transport, and the provider clients. Session-scoped Coordinators
-(chat ``/citation`` and the standalone CLI alike) all talk to the same hub,
-so Crossref/OpenAlex rate limits and caches are respected process-wide.
+the HTTP transport, and the provider clients. Every session-scoped
+Coordinator talks to the same hub, so Crossref/OpenAlex rate limits and
+caches are respected process-wide.
 
 OpenAlex is *disabled* (a distinct state, not a failure) when
 ``OPENALEX_API_KEY`` is absent; the key is only ever sent as a query

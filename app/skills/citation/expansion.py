@@ -6,7 +6,7 @@ relevance, and is never required — when the model cannot be built or the
 call fails/times out, discovery proceeds with the original query alone.
 
 The chat model is built lazily on first use (no startup probe) via the
-injected factory, so ``/citation`` sessions that never search pay nothing.
+injected factory, so citation sessions that never search pay nothing.
 """
 
 from __future__ import annotations

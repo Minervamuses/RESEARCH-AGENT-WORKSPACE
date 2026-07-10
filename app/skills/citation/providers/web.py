@@ -3,7 +3,7 @@
 Wraps the chat session's already-loaded Web Search MCP tool handles (the
 Coordinator injects them; this module never starts an MCP server). Policy —
 web runs automatically only when every enabled structured provider failed or
-returned zero candidates, otherwise only via ``/citation more`` — lives in
+returned zero candidates, otherwise only via the ``more`` action — lives in
 the Coordinator; this adapter just searches and parses.
 
 URL handling (per plan): normalization lowercases scheme/host only, sorts
