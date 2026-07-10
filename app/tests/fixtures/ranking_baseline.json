@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-07-10",
+  "note": "Frozen pre-fusion baseline: single-provider discovery order reached 4 of 6 relevant works in the top 10 (recall 0.667). The RRF pipeline (first search + one /citation more) must stay strictly above this.",
+  "topic_recall_at_10": 0.667
+}
