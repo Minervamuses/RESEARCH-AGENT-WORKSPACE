@@ -3,9 +3,14 @@
 import asyncio
 import json
 
-from skills.citation.coordinator import CitationCoordinator
+from skills.citation.coordinator import CitationCoordinator, SearchOutcome
 from skills.citation.hub import CitationProviderHub
-from skills.citation.tool import TOOL_NAME, create_citation_workflow_tool
+from skills.citation.tool import (
+    TOOL_NAME,
+    create_citation_workflow_tool,
+    format_search_outcome,
+)
+from skills.citation.types import CitationCandidate
 
 from tests.test_citation_coordinator import DOI_A, RoutingFetcher
 
@@ -46,6 +51,29 @@ def test_search_formats_candidates_and_provider_states(tmp_path):
     assert "[c1]" in message
     assert "provider crossref: ok" in message
     assert "provider openalex: disabled" in message
+
+
+def test_search_presents_only_first_ten_candidates():
+    outcome = SearchOutcome(
+        candidates=[
+            CitationCandidate(
+                candidate_id=f"c{index}",
+                workflow_id="wf-1",
+                title=f"Paper {index}",
+            )
+            for index in range(1, 13)
+        ]
+    )
+
+    message = format_search_outcome(outcome)
+
+    assert "found 12 candidate(s)" in message
+    assert "Candidates (page 1/2):" in message
+    assert "[c1]" in message
+    assert "[c10]" in message
+    assert "[c11]" not in message
+    assert "action=list" in message
+    assert len(outcome.candidates) == 12
 
 
 def test_search_requires_query_and_rejects_dual_date_modes(tmp_path):

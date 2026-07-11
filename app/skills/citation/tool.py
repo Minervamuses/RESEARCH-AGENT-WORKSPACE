@@ -25,6 +25,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from skills.citation.coordinator import (
+    PAGE_SIZE,
     CitationCoordinator,
     SearchOutcome,
     SelectOutcome,
@@ -138,6 +139,10 @@ def format_candidates(
     lines = [f"Candidates (page {page}/{total_pages}):"]
     for candidate in candidates:
         lines.extend(_candidate_lines(candidate))
+    if total_pages > 1:
+        lines.append(
+            "Use action=list with a page number to inspect additional candidates."
+        )
     lines.append(
         "Present these to the user and wait for their choice; then use "
         "action=show for details or action=select with the chosen candidate id."
@@ -189,8 +194,15 @@ def format_search_outcome(outcome: SearchOutcome, *, appended: bool = False) -> 
         detail = f" — {state.detail}" if state.detail else ""
         lines.append(f"  provider {state.provider}: {state.status}{detail}")
     if outcome.candidates:
+        candidates = outcome.candidates
+        total_pages = 1
+        if not appended:
+            total_pages = max(1, -(-len(candidates) // PAGE_SIZE))
+            candidates = candidates[:PAGE_SIZE]
         lines.append("")
-        lines.append(format_candidates(outcome.candidates))
+        lines.append(
+            format_candidates(candidates, page=1, total_pages=total_pages)
+        )
     return "\n".join(lines)
 
 
