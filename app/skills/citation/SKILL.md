@@ -13,13 +13,19 @@ actions and keep them in control of every decision.
 
 1. **Search** — `action="search"` with the user's topic as `query`. When the
    user constrains recency ("近5年", "2020–2023"), pass
-   `published_within_years` OR `year_from`/`year_to` (never both).
+   `published_within_years` OR `year_from`/`year_to` (never both). The tool
+   returns the exact applied date filter; repeat that value verbatim in the
+   answer and never replace it with a self-computed year heading.
 2. **Present** — show the returned shortlist to the user and WAIT for their
-   choice. Never pick a candidate yourself. When the user changes or narrows
-   conditions, use `action="refine"` with structured keyword/year/venue/work
-   type filters over the existing pool. Do not scan candidate pages to infer
-   a refinement. Use `action="list"` only when the user explicitly asks to
-   browse more, and `action="show"` to inspect a specific candidate.
+   choice. Never pick a candidate yourself. One visible item may represent a
+   non-destructive version group; every listed `cX` remains a distinct,
+   selectable version. When the user changes or narrows conditions, use
+   `action="refine"` with structured keyword/year/venue/work type filters over
+   the existing pool. Use `venue_tiers` only when the user explicitly asks for
+   a catalog tier such as top venues; unknown venues fail closed for that
+   filter. Do not scan candidate pages to infer a refinement. Use
+   `action="list"` only when the user explicitly asks to browse more, and
+   `action="show"` to inspect a specific candidate or its grouped versions.
 3. **Resolve** — after the user picks, `action="select"` with that candidate
    id. Show the confirmable matches and WAIT again.
 4. **Confirm** — only after the user explicitly approves a match in a later
@@ -51,6 +57,9 @@ actions and keep them in control of every decision.
   re-activates one for citing.
 - When a search fails or a candidate has no DOI, say so plainly; never
   substitute unverified data.
+- Venue catalog labels are finite project-curated annotations, not universal
+  quality judgments. Never invent a tier for an unclassified venue, and never
+  claim grouped versions are identical or interchangeable.
 - When you mention tool actions in prose, write bare names like
   `action="explain"` or `confirm`; never write a call-style expression
   (the tool name followed by parenthesized arguments) — the safety layer

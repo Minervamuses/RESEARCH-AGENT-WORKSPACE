@@ -54,7 +54,7 @@ def test_tool_name_and_schema_fields():
     fields = set(tool.args_schema.model_fields)
     assert fields == {
         "action", "query", "identifier", "page",
-        "keywords", "venues", "work_types",
+        "keywords", "venues", "work_types", "venue_tiers",
         "published_within_years", "year_from", "year_to",
     }
 
@@ -129,6 +129,7 @@ def test_year_range_search_builds_filter_and_filters_candidates(tmp_path):
     message = harness.run(action="search", query="paper", year_from=2021)
     # Paper B (2020) is dropped fail-closed; Paper A (2021) survives.
     assert "found 1 candidate(s)" in message
+    assert "applied date filter: 2021-01-01 .. ..." in message
     assert "dropped by the date filter" in message
     status = harness.run(action="status")
     assert "date_filter: 2021-01-01 .. ..." in status
@@ -245,6 +246,28 @@ def test_refine_fields_are_rejected_for_other_actions(tmp_path):
     harness = ToolHarness(tmp_path)
     message = harness.run(action="search", query="paper", keywords=["x"])
     assert "only apply to action='refine'" in message
+
+
+def test_venue_tier_refine_is_explicit_and_fail_closed(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+
+    # Fixture venues are not in the catalog; unknowns never pretend to match.
+    refined = harness.run(action="refine", venue_tiers=["top"])
+    assert "0 match(es)" in refined
+    assert "refinement_venue_tiers: ['top']" in harness.run(action="status")
+
+
+def test_search_and_refine_report_distinct_date_windows(tmp_path):
+    harness = ToolHarness(tmp_path)
+    searched = harness.run(action="search", query="paper", year_from=2020)
+    assert "applied date filter: 2020-01-01 .. ..." in searched
+
+    refined = harness.run(
+        action="refine", year_from=2021, year_to=2021,
+    )
+    assert "search date filter: 2020-01-01 .. ..." in refined
+    assert "refinement date filter: 2021-01-01 .. 2021-12-31" in refined
 
 
 def test_identifier_actions_require_identifier(tmp_path):

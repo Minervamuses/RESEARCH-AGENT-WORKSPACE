@@ -3,9 +3,15 @@
 import asyncio
 import json
 
+import pytest
+
 from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
+from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import FetchResponse
+from skills.citation.types import ProviderState
+from skills.citation.venue import annotate_venue
+from agent.config import AgentConfig
 
 DOI_A = "10.1234/paper-a"
 DOI_B = "10.1234/paper-b"
@@ -126,6 +132,23 @@ def _coordinator(tmp_path, *, fetcher=None, web_tools=None, llm_factory=None):
     return coordinator, fetcher
 
 
+def test_ranking_mode_defaults_to_lexical_and_env_can_roll_back(monkeypatch):
+    monkeypatch.delenv("CITATION_RANKING_MODE", raising=False)
+    assert AgentConfig().citation_ranking_mode == "lexical"
+    monkeypatch.setenv("CITATION_RANKING_MODE", "rrf")
+    assert AgentConfig().citation_ranking_mode == "rrf"
+
+
+def test_invalid_ranking_mode_fails_fast(tmp_path):
+    hub = CitationProviderHub(env={}, fetcher=RoutingFetcher())
+    with pytest.raises(ValueError, match="citation_ranking_mode"):
+        CitationCoordinator(
+            hub,
+            config=type("Config", (), {"citation_ranking_mode": "semantic"})(),
+            output_dir=tmp_path / "cite",
+        )
+
+
 def test_doi_query_uses_singleton_lookup_only(tmp_path):
     coordinator, fetcher = _coordinator(tmp_path)
     outcome = asyncio.run(coordinator.search(f"https://doi.org/{DOI_A}"))
@@ -206,6 +229,7 @@ def test_more_appends_web_results_keeps_ids_clears_matches(tmp_path):
     assert current_ids[: len(ids_before)] == ids_before
     assert len(current_ids) == len(ids_before) + 1
     assert outcome.used_web_fallback is True
+    assert outcome.updated_groups == 0
     # Selection and matches were cleared: old match id is stale now.
     stale = asyncio.run(coordinator.confirm(select.matches[0].match_id))
     assert stale.status == "invalid_state"
@@ -273,6 +297,57 @@ def test_more_reapplies_active_refinement_to_new_candidates(tmp_path):
     listed, _ = coordinator.list_candidates()
     assert [candidate.title for candidate in listed] == ["Paper C landing page"]
     assert listed[0].candidate_id == "c3"
+
+
+def test_more_groups_distinct_version_without_reidentifying_existing_candidates(
+    tmp_path,
+):
+    coordinator, _ = _coordinator(tmp_path)
+    asyncio.run(coordinator.search("paper"))
+
+    async def version_result(query):
+        return [ProviderRecord(
+            provider="web",
+            provider_id="web:paper-a-preprint",
+            rank=0,
+            title="Paper A",
+            authors=["Ada Lovelace"],
+            year=2022,
+            venue="arXiv",
+            doi="10.1234/paper-a-preprint",
+            work_type="preprint",
+        )], ProviderState("web", "ok", f"query={query!r}")
+
+    coordinator._run_web_search = version_result  # noqa: SLF001
+    outcome = asyncio.run(coordinator.more())
+
+    assert outcome.versions_added == 1
+    assert outcome.updated_groups == 1
+    assert coordinator.get_candidate("c1").doi == DOI_A
+    assert coordinator.get_candidate("c3").doi == "10.1234/paper-a-preprint"
+    assert coordinator.get_candidate("c1").related_candidate_ids == ["c3"]
+    assert [candidate.candidate_id for candidate in coordinator.list_candidates()[0]] == [
+        "c1", "c2",
+    ]
+
+    # A group-aware refinement can expose the alternate without changing IDs.
+    refined = coordinator.refine(venues=["arxiv"])
+    assert [candidate.candidate_id for candidate in refined.candidates] == ["c3"]
+    reset = coordinator.refine()
+    assert [candidate.candidate_id for candidate in reset.candidates] == ["c1", "c2"]
+
+
+def test_venue_tier_refine_matches_only_catalogued_candidates(tmp_path):
+    coordinator, _ = _coordinator(tmp_path)
+    asyncio.run(coordinator.search("paper"))
+    coordinator._candidates[0].venue = "FPGA"  # noqa: SLF001
+    coordinator._candidates[0].venue_annotation = annotate_venue("FPGA")  # noqa: SLF001
+    coordinator._refresh_candidate_view()  # noqa: SLF001
+
+    refined = coordinator.refine(venue_tiers=["TOP"])
+
+    assert [candidate.candidate_id for candidate in refined.candidates] == ["c1"]
+    assert refined.candidates[0].venue_annotation.tier == "top"
 
 
 def test_refine_without_constraints_resets_full_view(tmp_path):

@@ -115,6 +115,7 @@ cp app/.env.example app/.env
 | `CROSSREF_MAILTO` | 選用 | citation 呼叫 Crossref 時加進 User-Agent(polite pool) |
 | `OPENALEX_API_KEY` | 選用 | 啟用 OpenAlex discovery provider;key 只作 query parameter 且 log/trace 會 redact |
 | `CITATION_OUTPUT_DIR` | 選用 | 改 citation bundle 輸出位置(優先序:`AgentConfig.citation_output_dir` → 此變數 → 平台 user-data 目錄;要沿用舊位置請明確設定此變數) |
+| `CITATION_RANKING_MODE` | 選用 | citation discovery 排序模式:`lexical`(預設,RRF 加 bounded title relevance)或 `rrf`(回退到原始 RRF 排序) |
 | `XDG_CACHE_HOME` | 選用 | 改 MCP stderr log/cache 位置(預設 `~/.cache/agent-mcp/`) |
 
 ## 4. 啟動聊天 Agent
@@ -378,7 +379,7 @@ citation 是內建 skill(engine 就住在 `app/skills/citation/`,同一目錄既
 - 同 session 同時只能有一個 workflow call(並行呼叫回 busy);`confirm` 必須發生在 `select` 之後的較晚使用者 turn——同 turn confirm 一律拒絕。
 - 自然語言確認採保守規則:唯一 pending match 可用「儲存／保存／確認／可以／要這篇／就這篇／OK／yes／save」批准;多個 pending matches 必須明指一個 `mX`;否定、問句、條件句或 tool argument 與使用者指定的 `mX` 不一致時一律拒絕寫入。
 
-工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider)、`list`、`show`、`select`、`confirm`、`status`、`explain`(唯讀;回傳 workflow 驗證/儲存流程的公開契約與 citation 輸出目錄)、`cancel`、`sources`、`source`。
+工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除,並回傳實際日期窗)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider;可帶 keyword/year/venue/work type,只有使用者明確要求 venue 等級時才使用 fail-closed `venue_tiers`)、`list`、`show`、`select`、`confirm`、`status`、`explain`(唯讀;回傳 workflow 驗證/儲存流程的公開契約與 citation 輸出目錄)、`cancel`、`sources`、`source`。
 
 引用政策(單一 finalization chokepoint、兩種明確政策):
 
@@ -388,7 +389,7 @@ citation 是內建 skill(engine 就住在 `app/skills/citation/`,同一目錄既
 
 流程與保證:
 
-- **Discovery**:Crossref 與(有 `OPENALEX_API_KEY` 時)OpenAlex 並行查詢,LLM 最多 lazy 產生 2 個 query expansion(LLM 不可用時照常運作);排名用固定 `k=60` 的 reciprocal-rank fusion,只在 canonical DOI 或同 provider ID 相同時合併;web MCP 只在 structured providers 全失敗/零候選時自動 fallback,否則由 agent 依使用者要求以 `more` 引入。
+- **Discovery**:Crossref 與(有 `OPENALEX_API_KEY` 時)OpenAlex 並行查詢,LLM 最多 lazy 產生 2 個 query expansion(LLM 不可用時照常運作);先以固定 `k=60` 做 reciprocal-rank fusion,再以 bounded deterministic title relevance rerank(可用 `CITATION_RANKING_MODE=rrf` 回退),只在 canonical DOI 或同 provider ID 相同時合併。不同 DOI 的 preprint/正式版/reprint 只會非破壞式分組,每個版本保留自己的 `cX` 與選擇權;shortlist 每組顯示一個代表版本。venue catalog 是有版本、有限的 project-curated allowlist,平時只標示,不參與一般排序。web MCP 只在 structured providers 全失敗/零候選時自動 fallback,否則由 agent 依使用者要求以 `more` 引入。
 - **驗證**:confirm 會重新以 doi.org 取 CSL JSON structured record,再以同一 canonical DOI 取 BibTeX(pybtex 驗證、恰一 entry、canonical 重序列化);match/structured/BibTeX 三方 DOI 必須相等(BibTeX 缺 DOI 時由已驗證 record 注入並記 `doi_injected_from_verified_lookup`);title/year 等衝突只警告。驗證等級只有 `identity_verified`——證明 DOI 與書目管線一致,不代表來源支持特定主張。
 - **保存**:atomic bundle 寫入 citation 輸出目錄(見第 1 節「可寫入路徑」)之 `<utf8-byte-capped-title>--<doi-hash>/`(`reference.bib` + `citation.json` sidecar,schema v1);staging + rename,成功 bundle 不會半套;同 DOI 重複 confirm 驗證後重用;schema/DOI/hash 不符 fail closed 不覆寫。無 DOI 候選可展示但不可保存。
 - **Confirm 收據**:成功 confirm 的最終文字固定包含 source ID、以 code literal 呈現的 DOI、bundle 絕對路徑、驗證等級與 cite marker；這段文字會像一般 assistant output 一樣進 recent history/plan log，淘汰後可由 history recall 找回。模型草稿文字不會被解析成收據，artifact 版本或內容與 live registry 不符時亦不採信。

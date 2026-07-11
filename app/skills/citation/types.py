@@ -34,6 +34,38 @@ CONFIRM_RECEIPT_KIND = "citation_confirm_receipt"
 # bibliographic pipeline agree on the identity of the record.
 VerificationLevel = Literal["identity_verified"]
 
+
+@dataclass(frozen=True)
+class VenueAnnotation:
+    """Deterministic classification from the bundled venue catalog.
+
+    This is discovery-only evidence. It is never persisted into a verified
+    source and an unclassified venue deliberately carries no inferred tier.
+    """
+
+    canonical_name: str
+    kind: str = "unclassified"
+    tier: str | None = None
+    source: str = ""
+    catalog_version: str = ""
+
+    @property
+    def classified(self) -> bool:
+        return self.kind != "unclassified"
+
+
+@dataclass(frozen=True)
+class RankingEvidence:
+    """Explainable, ephemeral evidence used to order discovery candidates."""
+
+    rrf_score: float
+    title_relevance: float
+    matched_query: str
+    provider_count: int
+    final_score: float
+    mode: str
+
+
 # Terminal states of one confirm attempt (or the workflow as a whole).
 CitationStatus = Literal[
     "confirmed",
@@ -142,9 +174,9 @@ class CitationCandidate:
     ``"openalex:W..."``) so IDs from different providers can never collide.
     ``field_provenance`` maps a metadata field name to the provider that
     supplied its current value; ``conflicts`` keeps every conflicting value
-    (never destructively resolved). ``related_group`` links candidates that
-    look like versions of the same work (e.g. preprint vs published) without
-    merging them.
+    (never destructively resolved). ``related_group`` and
+    ``related_candidate_ids`` link independently selectable versions of the
+    same work without merging them. Venue/ranking annotations are ephemeral.
     """
 
     candidate_id: str
@@ -163,6 +195,10 @@ class CitationCandidate:
     field_provenance: dict[str, str] = field(default_factory=dict)
     conflicts: dict[str, list] = field(default_factory=dict)
     related_group: str | None = None
+    related_candidate_ids: list[str] = field(default_factory=list)
+    is_group_representative: bool = True
+    venue_annotation: VenueAnnotation | None = None
+    ranking_evidence: RankingEvidence | None = None
 
     def short_label(self) -> str:
         bits = [self.title or "(untitled)"]

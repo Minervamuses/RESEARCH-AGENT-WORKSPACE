@@ -1,7 +1,11 @@
 """Deterministic RRF fusion, identity-only merge, and related groups."""
 
 from skills.citation.providers.base import ProviderRecord
-from skills.citation.ranking import RRF_K, fuse_ranked_lists
+from skills.citation.ranking import (
+    RRF_K,
+    fuse_ranked_lists,
+    representative_candidates,
+)
 
 
 def _rec(provider, rank, *, doi=None, title="", pid=None, year=None,
@@ -81,6 +85,142 @@ def test_doi_less_lookalike_joins_related_group_not_merged():
     assert len(groups) == 1 and None not in groups
 
 
+def test_distinct_doi_versions_fold_but_remain_independently_addressable():
+    candidates = fuse_ranked_lists(
+        [
+            [_rec(
+                "openalex", 0, doi="10.1234/preprint", title="Same Work",
+                year=2024, authors=["Ada Lovelace"], venue="arXiv",
+                work_type="preprint",
+            )],
+            [_rec(
+                "crossref", 0, doi="10.1234/published", title="Same Work",
+                year=2025, authors=["Ada Lovelace"], venue="FPGA",
+                work_type="proceedings-article",
+            )],
+        ],
+        query="same work",
+        workflow_id="w",
+    )
+
+    assert {candidate.doi for candidate in candidates} == {
+        "10.1234/preprint", "10.1234/published",
+    }
+    assert len({candidate.related_group for candidate in candidates}) == 1
+    [visible] = representative_candidates(candidates)
+    assert visible.doi == "10.1234/published"
+    assert visible.related_candidate_ids
+
+
+def test_similar_title_with_different_authors_does_not_group():
+    candidates = fuse_ranked_lists(
+        [
+            [_rec(
+                "crossref", 0, doi="10.1234/a", title="Fast AI Inference",
+                year=2025, authors=["Ada Lovelace"],
+            )],
+            [_rec(
+                "openalex", 0, doi="10.1234/b", title="Fast AI Inference",
+                year=2025, authors=["Grace Hopper"],
+            )],
+        ],
+        query="AI inference",
+        workflow_id="w",
+    )
+
+    assert all(candidate.related_group is None for candidate in candidates)
+    assert len(representative_candidates(candidates)) == 2
+
+
+def test_lexical_mode_downranks_query_title_parody_without_hard_filtering():
+    ranked = [[
+        _rec(
+            "crossref", 0, doi="10.1234/noise",
+            title="Inference in Partially Observable Decision Processes",
+        ),
+        _rec(
+            "crossref", 1, doi="10.1234/relevant",
+            title="Hardware Acceleration for Efficient AI Inference",
+        ),
+    ]]
+
+    rrf = fuse_ranked_lists(
+        ranked, query="AI inference acceleration", workflow_id="w", ranking_mode="rrf"
+    )
+    lexical = fuse_ranked_lists(
+        ranked,
+        query="AI inference acceleration",
+        query_variants=["hardware acceleration for AI inference"],
+        workflow_id="w",
+        ranking_mode="lexical",
+    )
+
+    assert rrf[0].doi == "10.1234/noise"
+    assert lexical[0].doi == "10.1234/relevant"
+    assert {candidate.doi for candidate in lexical} == {
+        "10.1234/noise", "10.1234/relevant",
+    }
+    assert lexical[0].ranking_evidence.mode == "lexical"
+
+
+def test_lexical_exact_title_bonus_remains_bounded_by_rrf_evidence():
+    ranked = [
+        [_rec(
+            "crossref", 0, doi="10.1234/consensus",
+            title="Strong Provider Consensus",
+        )],
+        [_rec(
+            "openalex", 0, doi="10.1234/consensus",
+            title="Strong Provider Consensus",
+        )],
+        [
+            *[
+                _rec(
+                    "web", rank, doi=f"10.1234/filler-{rank}",
+                    title=f"Filler {rank}",
+                )
+                for rank in range(19)
+            ],
+            _rec(
+                "web", 19, doi="10.1234/exact",
+                title="AI inference acceleration",
+            ),
+        ],
+    ]
+
+    lexical = fuse_ranked_lists(
+        ranked,
+        query="AI inference acceleration",
+        workflow_id="w",
+        ranking_mode="lexical",
+    )
+
+    assert lexical[0].doi == "10.1234/consensus"
+    exact = next(candidate for candidate in lexical if candidate.doi == "10.1234/exact")
+    consensus = next(
+        candidate for candidate in lexical if candidate.doi == "10.1234/consensus"
+    )
+    assert exact.ranking_evidence.title_relevance == 1.0
+    assert exact.ranking_evidence.final_score < consensus.ranking_evidence.final_score
+
+
+def test_venue_tier_never_changes_general_ranking():
+    lists = [[
+        _rec("crossref", 0, doi="10.1234/journal", title="Paper A", venue="IEEE Access"),
+        _rec("crossref", 1, doi="10.1234/top", title="Paper B", venue="FPGA"),
+    ]]
+
+    candidates = fuse_ranked_lists(
+        lists, query="paper", workflow_id="w", ranking_mode="rrf"
+    )
+
+    assert [candidate.doi for candidate in candidates] == [
+        "10.1234/journal", "10.1234/top",
+    ]
+    assert candidates[0].venue_annotation.tier is None
+    assert candidates[1].venue_annotation.tier == "top"
+
+
 def test_metadata_precedence_fills_gaps_and_keeps_conflicts():
     lists = [
         [_rec("openalex", 0, doi="10.1234/x", title="OpenAlex Title",
@@ -150,6 +290,31 @@ def test_workflow_merge_cap_50():
     candidates = fuse_ranked_lists([ranked], query="q", workflow_id="w")
     assert len(candidates) == 50
     assert candidates[0].doi == "10.1234/p000"
+
+
+def test_workflow_cap_reserves_one_version_slot_for_each_visible_work():
+    dense_versions = [
+        _rec(
+            "crossref", rank, doi=f"10.1234/dense-{rank}",
+            title="Dense Work", year=2025, authors=["Ada Lovelace"],
+        )
+        for rank in range(60)
+    ]
+    unique_works = [
+        _rec(
+            "crossref", rank + 60, doi=f"10.1234/unique-{rank}",
+            title=f"Unique Work {rank}", year=2025,
+            authors=[f"Author {rank}"],
+        )
+        for rank in range(55)
+    ]
+
+    candidates = fuse_ranked_lists(
+        [dense_versions + unique_works], query="work", workflow_id="w"
+    )
+
+    assert len(candidates) == 100
+    assert len(representative_candidates(candidates)) == 50
 
 
 def test_fusion_is_deterministic():

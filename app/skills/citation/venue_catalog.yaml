@@ -1,0 +1,58 @@
+schema_version: 1
+catalog_version: "2026.07-v1"
+source: "project-curated citation discovery allowlist"
+venues:
+  - canonical_name: "ACM/SIGDA International Symposium on Field-Programmable Gate Arrays"
+    aliases:
+      - "FPGA"
+      - "ACM FPGA"
+      - "ACM/SIGDA International Symposium on Field-Programmable Gate Arrays"
+      - "Proceedings of the ACM/SIGDA International Symposium on Field-Programmable Gate Arrays"
+    kind: conference
+    tier: top
+  - canonical_name: "International Symposium on Computer Architecture"
+    aliases:
+      - "ISCA"
+      - "ACM/IEEE International Symposium on Computer Architecture"
+      - "International Symposium on Computer Architecture"
+    kind: conference
+    tier: top
+  - canonical_name: "IEEE/ACM International Symposium on Microarchitecture"
+    aliases:
+      - "MICRO"
+      - "IEEE/ACM International Symposium on Microarchitecture"
+      - "International Symposium on Microarchitecture"
+    kind: conference
+    tier: top
+  - canonical_name: "ACM International Conference on Architectural Support for Programming Languages and Operating Systems"
+    aliases:
+      - "ASPLOS"
+      - "ACM International Conference on Architectural Support for Programming Languages and Operating Systems"
+      - "Architectural Support for Programming Languages and Operating Systems"
+    kind: conference
+    tier: top
+  - canonical_name: "Design Automation Conference"
+    aliases:
+      - "DAC"
+      - "Design Automation Conference"
+      - "ACM/IEEE Design Automation Conference"
+    kind: conference
+    tier: top
+  - canonical_name: "SSRN"
+    aliases:
+      - "SSRN"
+      - "Social Science Research Network"
+      - "SSRN Electronic Journal"
+    kind: repository
+    tier:
+  - canonical_name: "IEEE Access"
+    aliases:
+      - "IEEE Access"
+    kind: journal
+    tier:
+  - canonical_name: "arXiv"
+    aliases:
+      - "arXiv"
+      - "arXiv.org"
+    kind: repository
+    tier:

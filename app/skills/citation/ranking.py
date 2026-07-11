@@ -1,39 +1,46 @@
-"""Deterministic cross-provider fusion of discovery results.
+"""Deterministic cross-provider fusion, relevance scoring, and work grouping.
 
-Ranking is reciprocal-rank fusion with fixed ``k=60`` over each provider's
-own result order. Raw provider scores are carried on the records as evidence
-but never compared across providers. Ties break deterministically by: DOI
-presence, exact-title match against the query, provider name, then merge key
-(which fixes the eventual candidate ID order).
-
-Merging is identity-based only: records fuse when they share a canonical DOI
-or the same namespaced provider ID. A DOI-less record whose title/author/year
-looks like an existing candidate joins a *related-version group* (preprint vs
-published stay listed separately, never destructively merged).
-
-Metadata precedence on merge: identifier-derived structured record ->
-Crossref -> OpenAlex -> web. Lower-precedence sources only fill empty
-fields; every conflicting value is preserved in ``conflicts``.
+Identity fusion remains deliberately strict: only a canonical DOI or the same
+namespaced provider ID merges records.  Distinct versions of a work retain
+their own candidate IDs and are grouped non-destructively for presentation.
 """
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
+from typing import Literal
 
 from skills.citation.normalize import normalize_title
 from skills.citation.providers.base import ProviderRecord
-from skills.citation.types import CitationCandidate
+from skills.citation.types import CitationCandidate, RankingEvidence
+from skills.citation.venue import annotate_venue
 
 RRF_K = 60
+RankingMode = Literal["rrf", "lexical"]
 
-# Metadata precedence, best first. "structured" is an identifier-derived
-# record (e.g. a doi.org CSL lookup shown as a candidate).
 PROVIDER_PRECEDENCE = ("structured", "crossref", "openalex", "web")
 
-# Hard cap on merged candidates one workflow may hold.
-MAX_WORKFLOW_CANDIDATES = 50
+# The workflow exposes at most 50 canonical works while retaining bounded,
+# independently selectable versions behind those works.
+MAX_WORKFLOW_WORKS = 50
+MAX_WORKFLOW_VERSIONS = 100
+# Backward-compatible name used by callers/tests that mean visible works.
+MAX_WORKFLOW_CANDIDATES = MAX_WORKFLOW_WORKS
 
 _MERGEABLE_FIELDS = ("title", "year", "venue", "url", "work_type", "snippet")
+_WORD_OR_CJK_RE = re.compile(r"[a-z0-9]+|[\u3400-\u4dbf\u4e00-\u9fff]+")
+_EN_STOPWORDS = frozenset({
+    "a", "an", "and", "for", "in", "of", "on", "the", "to", "with",
+    "paper", "papers", "study", "studies",
+})
+
+
+def normalize_ranking_mode(value: str | None) -> RankingMode:
+    mode = (value or "rrf").strip().casefold()
+    if mode not in {"rrf", "lexical"}:
+        raise ValueError("citation_ranking_mode must be 'rrf' or 'lexical'")
+    return mode  # type: ignore[return-value]
 
 
 def _precedence(provider: str) -> int:
@@ -56,6 +63,54 @@ def _record_value(record: ProviderRecord, field_name: str):
     return value
 
 
+def _text_tokens(raw: str | None) -> set[str]:
+    normalized = normalize_title(raw)
+    tokens: set[str] = set()
+    for piece in _WORD_OR_CJK_RE.findall(normalized):
+        if piece.isascii():
+            if piece not in _EN_STOPWORDS:
+                tokens.add(piece)
+            continue
+        chars = [ch for ch in piece if ch.strip()]
+        if len(chars) == 1:
+            tokens.add(chars[0])
+        else:
+            tokens.update("".join(chars[i:i + 2]) for i in range(len(chars) - 1))
+    return tokens
+
+
+def _token_f1(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    overlap = len(left & right)
+    return 2.0 * overlap / (len(left) + len(right))
+
+
+def _title_relevance(
+    candidate: CitationCandidate, queries: tuple[str, ...]
+) -> tuple[float, str]:
+    title_tokens = _text_tokens(candidate.title)
+    snippet_tokens = _text_tokens(candidate.snippet)
+    best_score = 0.0
+    best_query = queries[0] if queries else ""
+    for index, query in enumerate(queries):
+        if normalize_title(query) and normalize_title(query) == normalize_title(candidate.title):
+            score = 1.0
+        else:
+            query_tokens = _text_tokens(query)
+            title_score = _token_f1(query_tokens, title_tokens)
+            snippet_score = 0.25 * _token_f1(query_tokens, snippet_tokens)
+            score = max(title_score, snippet_score)
+        # Expansion queries are useful translations, but cannot outweigh an
+        # equally strong match to the user's original wording.
+        if index > 0:
+            score *= 0.9
+        if score > best_score:
+            best_score = score
+            best_query = query
+    return best_score, best_query
+
+
 class _Bucket:
     def __init__(self, key: str):
         self.key = key
@@ -76,11 +131,9 @@ class _Bucket:
         return min((r.provider for r in self.records), key=_precedence)
 
 
-def _build_candidate(
-    bucket: _Bucket, *, candidate_id: str, workflow_id: str
-) -> CitationCandidate:
+def _build_candidate(bucket: _Bucket, *, workflow_id: str) -> CitationCandidate:
     ordered = bucket.ordered_records()
-    candidate = CitationCandidate(candidate_id=candidate_id, workflow_id=workflow_id)
+    candidate = CitationCandidate(candidate_id="", workflow_id=workflow_id)
 
     for record in ordered:
         if record.provider not in candidate.provider_ids:
@@ -101,8 +154,7 @@ def _build_candidate(
             if value is None:
                 continue
             existing = getattr(candidate, field_name)
-            is_empty = existing in ("", None, [])
-            if is_empty:
+            if existing in ("", None, []):
                 setattr(candidate, field_name, value)
                 candidate.field_provenance[field_name] = record.provider
             elif value != existing:
@@ -110,54 +162,184 @@ def _build_candidate(
                 entry = {"provider": record.provider, "value": value}
                 if entry not in conflicts:
                     conflicts.append(entry)
+    candidate.venue_annotation = annotate_venue(candidate.venue)
     return candidate
 
 
-def _assign_related_groups(candidates: list[CitationCandidate]) -> None:
-    """Group DOI-less candidates with look-alike candidates, non-destructively.
+def _candidate_number(candidate: CitationCandidate) -> int:
+    try:
+        return int(candidate.candidate_id.removeprefix("c"))
+    except ValueError:
+        return 10**9
 
-    Same normalized (non-empty) title plus a matching year or an author
-    surname overlap forms one related-version group.
-    """
-    by_title: dict[str, list[CitationCandidate]] = defaultdict(list)
+
+def _author_surnames(candidate: CitationCandidate) -> set[str]:
+    return {
+        author.strip().split()[-1].casefold()
+        for author in candidate.authors
+        if author.strip()
+    }
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _years_compatible(left: CitationCandidate, right: CitationCandidate) -> bool:
+    return left.year is None or right.year is None or abs(left.year - right.year) <= 2
+
+
+def _should_group(left: CitationCandidate, right: CitationCandidate) -> bool:
+    title_left = normalize_title(left.title)
+    title_right = normalize_title(right.title)
+    if not title_left or not title_right or not _years_compatible(left, right):
+        return False
+
+    authors_left = _author_surnames(left)
+    authors_right = _author_surnames(right)
+    author_overlap = _jaccard(authors_left, authors_right)
+    if title_left == title_right:
+        if authors_left and authors_right:
+            return author_overlap >= 0.5
+        return (
+            (left.doi is None or right.doi is None)
+            and left.year is not None
+            and left.year == right.year
+        )
+    return (
+        _jaccard(_text_tokens(left.title), _text_tokens(right.title)) >= 0.9
+        and author_overlap >= 0.7
+    )
+
+
+def _is_preprint_or_repository(candidate: CitationCandidate) -> bool:
+    kind = candidate.venue_annotation.kind if candidate.venue_annotation else ""
+    work_type = candidate.work_type.casefold()
+    venue = candidate.venue.casefold()
+    return (
+        kind == "repository"
+        or any(token in work_type for token in ("preprint", "posted-content", "repository"))
+        or venue in {"arxiv", "ssrn"}
+    )
+
+
+def choose_version_representative(
+    candidates: list[CitationCandidate],
+) -> CitationCandidate:
+    """Choose a display representative without merging or invalidating IDs."""
+    return min(
+        candidates,
+        key=lambda candidate: (
+            1 if _is_preprint_or_repository(candidate) else 0,
+            0 if candidate.doi else 1,
+            -len(candidate.provider_ids),
+            _candidate_number(candidate),
+            -(candidate.year or 0),
+            candidate.doi or normalize_title(candidate.title),
+        ),
+    )
+
+
+def assign_version_groups(candidates: list[CitationCandidate]) -> int:
+    """Recompute non-destructive version groups over stable candidate IDs."""
     for candidate in candidates:
-        title_key = normalize_title(candidate.title)
-        if title_key:
-            by_title[title_key].append(candidate)
+        candidate.related_group = None
+        candidate.related_candidate_ids = []
+        candidate.is_group_representative = True
+        if candidate.venue_annotation is None:
+            candidate.venue_annotation = annotate_venue(candidate.venue)
 
-    group_counter = 0
-    for title_key, members in by_title.items():
+    parent = list(range(len(candidates)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[max(root_left, root_right)] = min(root_left, root_right)
+
+    for left in range(len(candidates)):
+        for right in range(left + 1, len(candidates)):
+            if _should_group(candidates[left], candidates[right]):
+                union(left, right)
+
+    groups: dict[int, list[CitationCandidate]] = defaultdict(list)
+    for index, candidate in enumerate(candidates):
+        groups[find(index)].append(candidate)
+
+    grouped = 0
+    for members in groups.values():
         if len(members) < 2:
             continue
-        if all(m.doi for m in members):
-            continue  # distinct DOIs are distinct works; nothing to relate
-        for base in members:
-            related = [base]
-            for other in members:
-                if other is base:
-                    continue
-                year_match = (
-                    base.year is not None
-                    and other.year is not None
-                    and base.year == other.year
-                )
-                surnames_a = {a.split()[-1].casefold() for a in base.authors if a.strip()}
-                surnames_b = {a.split()[-1].casefold() for a in other.authors if a.strip()}
-                author_match = bool(surnames_a & surnames_b)
-                no_signal = (
-                    base.year is None or other.year is None
-                ) and not (surnames_a and surnames_b)
-                if year_match or author_match or no_signal:
-                    related.append(other)
-            if len(related) > 1:
-                existing = next(
-                    (m.related_group for m in related if m.related_group), None
-                )
-                if existing is None:
-                    group_counter += 1
-                    existing = f"related-{group_counter}"
-                for member in related:
-                    member.related_group = existing
+        grouped += 1
+        members.sort(key=_candidate_number)
+        group_id = f"related-{_candidate_number(members[0])}"
+        representative = choose_version_representative(members)
+        member_ids = [member.candidate_id for member in members]
+        for member in members:
+            member.related_group = group_id
+            member.related_candidate_ids = [cid for cid in member_ids if cid != member.candidate_id]
+            member.is_group_representative = member is representative
+    return grouped
+
+
+def representative_candidates(candidates: list[CitationCandidate]) -> list[CitationCandidate]:
+    """Return one representative per group, ordered by the group's first hit."""
+    groups: dict[str, list[CitationCandidate]] = {}
+    order: list[str] = []
+    for candidate in candidates:
+        key = candidate.related_group or f"candidate:{candidate.candidate_id}"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(candidate)
+    return [choose_version_representative(groups[key]) for key in order]
+
+
+def limit_to_canonical_works(
+    candidates: list[CitationCandidate],
+    *,
+    work_limit: int = MAX_WORKFLOW_WORKS,
+    version_limit: int = MAX_WORKFLOW_VERSIONS,
+) -> list[CitationCandidate]:
+    """Keep representatives for the first works, then bounded extra versions.
+
+    Reserving one slot per work before retaining alternatives prevents a dense
+    version group near the top of the ranking from consuming the entire
+    version budget and hiding otherwise eligible works.
+    """
+    ranked = list(candidates)
+    assign_version_groups(ranked)
+    work_cap = max(1, work_limit)
+    version_cap = max(1, version_limit)
+    visible_cap = min(work_cap, version_cap)
+    allowed: list[str] = []
+    groups: dict[str, list[CitationCandidate]] = defaultdict(list)
+    for candidate in ranked:
+        key = candidate.related_group or f"candidate:{candidate.candidate_id}"
+        groups[key].append(candidate)
+        if key not in allowed and len(allowed) < visible_cap:
+            allowed.append(key)
+
+    allowed_set = set(allowed)
+    required = {id(choose_version_representative(groups[key])) for key in allowed}
+    selected = set(required)
+    for candidate in ranked:
+        if len(selected) >= version_cap:
+            break
+        key = candidate.related_group or f"candidate:{candidate.candidate_id}"
+        if key in allowed_set:
+            selected.add(id(candidate))
+
+    kept = [candidate for candidate in ranked if id(candidate) in selected]
+    assign_version_groups(kept)
+    return kept
 
 
 def fuse_ranked_lists(
@@ -165,50 +347,68 @@ def fuse_ranked_lists(
     *,
     query: str,
     workflow_id: str,
-    limit: int = MAX_WORKFLOW_CANDIDATES,
+    query_variants: list[str] | tuple[str, ...] = (),
+    ranking_mode: str = "rrf",
+    limit: int = MAX_WORKFLOW_WORKS,
+    version_limit: int = MAX_WORKFLOW_VERSIONS,
 ) -> list[CitationCandidate]:
-    """Fuse per-provider ranked lists into ordered workflow candidates.
-
-    ``ranked_lists`` holds one list per (provider, query) call in that
-    provider's own order. Deterministic: same input, same output.
-    """
+    """Fuse provider lists, score them, and retain bounded canonical works."""
+    mode = normalize_ranking_mode(ranking_mode)
     buckets: dict[str, _Bucket] = {}
     for ranked in ranked_lists:
         seen_in_list: set[str] = set()
         for position, record in enumerate(ranked):
             key = _merge_key(record)
-            bucket = buckets.get(key)
-            if bucket is None:
-                bucket = buckets[key] = _Bucket(key)
-            # A duplicate of the same work inside one ranked list contributes
-            # only its best position to that list's RRF share.
+            bucket = buckets.setdefault(key, _Bucket(key))
             contribution = 0.0 if key in seen_in_list else 1.0 / (RRF_K + position + 1)
             seen_in_list.add(key)
             bucket.add(record, rrf_contribution=contribution)
 
+    queries = tuple(dict.fromkeys([query, *query_variants]))
     query_title = normalize_title(query)
-
-    def sort_key(bucket: _Bucket):
-        has_doi = any(r.doi for r in bucket.records)
-        exact_title = query_title != "" and any(
-            normalize_title(r.title) == query_title for r in bucket.records
+    built: list[tuple[_Bucket, CitationCandidate, bool]] = []
+    for bucket in buckets.values():
+        candidate = _build_candidate(bucket, workflow_id=workflow_id)
+        relevance, matched_query = _title_relevance(candidate, queries)
+        final_score = bucket.rrf * (0.75 + 0.25 * relevance) if mode == "lexical" else bucket.rrf
+        candidate.ranking_evidence = RankingEvidence(
+            rrf_score=bucket.rrf,
+            title_relevance=relevance,
+            matched_query=matched_query,
+            provider_count=len(candidate.provider_ids),
+            final_score=final_score,
+            mode=mode,
         )
+        exact = bool(query_title) and normalize_title(candidate.title) == query_title
+        built.append((bucket, candidate, exact))
+
+    def sort_key(item: tuple[_Bucket, CitationCandidate, bool]):
+        bucket, candidate, exact = item
+        evidence = candidate.ranking_evidence
+        assert evidence is not None
+        if mode == "lexical":
+            return (
+                -evidence.final_score,
+                0 if candidate.doi else 1,
+                0 if exact else 1,
+                bucket.best_provider(),
+                bucket.key,
+            )
         return (
             -bucket.rrf,
-            0 if has_doi else 1,
-            0 if exact_title else 1,
+            0 if candidate.doi else 1,
+            0 if exact else 1,
             bucket.best_provider(),
             bucket.key,
         )
 
-    ordered_buckets = sorted(buckets.values(), key=sort_key)[: max(1, limit)]
-    candidates = [
-        _build_candidate(
-            bucket,
-            candidate_id=f"c{i + 1}",
-            workflow_id=workflow_id,
-        )
-        for i, bucket in enumerate(ordered_buckets)
-    ]
-    _assign_related_groups(candidates)
-    return candidates
+    ordered = [item[1] for item in sorted(built, key=sort_key)]
+    for index, candidate in enumerate(ordered):
+        candidate.candidate_id = f"c{index + 1}"
+    kept = limit_to_canonical_works(
+        ordered, work_limit=limit, version_limit=version_limit
+    )
+    for index, candidate in enumerate(kept):
+        candidate.candidate_id = f"c{index + 1}"
+    assign_version_groups(kept)
+    return kept

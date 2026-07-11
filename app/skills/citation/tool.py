@@ -52,7 +52,8 @@ TOOL_DESCRIPTION = (
     "bundles. Actions: 'search' (requires query; optionally EITHER "
     "published_within_years OR year_from/year_to), 'more' (append web "
     "results to the current search), 'refine' (filter the current candidate "
-    "pool without new provider calls), 'list' (page through the active view), "
+    "pool without new provider calls, including explicit catalog venue tiers), "
+    "'list' (page through the active view), "
     "'show' (identifier = candidate id), 'select' (identifier = candidate "
     "id; resolves confirmable matches), 'confirm' (identifier = match id; "
     "call ONLY after the user explicitly approved in a later message using "
@@ -117,6 +118,13 @@ class CitationWorkflowInput(BaseModel):
         None,
         description="refine only: match any normalized work type exactly.",
     )
+    venue_tiers: list[str] | None = Field(
+        None,
+        description=(
+            "refine only: fail-closed match against explicit tiers in the "
+            "versioned venue catalog; unclassified venues never match."
+        ),
+    )
     published_within_years: int | None = Field(
         None,
         description=(
@@ -148,11 +156,24 @@ def _candidate_lines(candidate: CitationCandidate) -> list[str]:
     lines = [f"[{candidate.candidate_id}] {_redact_dois(candidate.short_label())}"]
     if candidate.venue:
         lines.append(f"      venue: {candidate.venue}")
+        annotation = candidate.venue_annotation
+        if annotation is not None:
+            classification = annotation.kind
+            if annotation.tier:
+                classification += f", tier={annotation.tier}"
+            lines.append(
+                "      venue catalog: "
+                f"{classification} ({annotation.catalog_version})"
+            )
     providers = ", ".join(sorted(candidate.provider_ids))
     if providers:
         lines.append(f"      providers: {providers}")
     if candidate.related_group:
-        lines.append(f"      related-version group: {candidate.related_group}")
+        alternatives = ", ".join(candidate.related_candidate_ids)
+        lines.append(
+            f"      versions: visible {candidate.candidate_id}; "
+            f"alternatives {alternatives}"
+        )
     return lines
 
 
@@ -195,7 +216,11 @@ def format_shortlist(
     return _redact_dois("\n".join(lines))
 
 
-def format_candidate_detail(candidate: CitationCandidate) -> str:
+def format_candidate_detail(
+    candidate: CitationCandidate,
+    *,
+    group: list[CitationCandidate] | None = None,
+) -> str:
     lines = [f"Candidate {candidate.candidate_id} (workflow {candidate.workflow_id}):"]
     lines.append(f"  title: {candidate.title or '(unknown)'}")
     if candidate.authors:
@@ -209,6 +234,37 @@ def format_candidate_detail(candidate: CitationCandidate) -> str:
             lines.append(f"  {label}: {value}")
     if candidate.snippet:
         lines.append(f"  snippet: {candidate.snippet[:200]}")
+    annotation = candidate.venue_annotation
+    if annotation is not None:
+        tier = annotation.tier or "none"
+        lines.append(
+            "  venue classification: "
+            f"{annotation.kind}; tier={tier}; source={annotation.source}; "
+            f"catalog={annotation.catalog_version}"
+        )
+    evidence = candidate.ranking_evidence
+    if evidence is not None:
+        lines.append(
+            "  ranking evidence: "
+            f"mode={evidence.mode}; rrf={evidence.rrf_score:.6f}; "
+            f"title_relevance={evidence.title_relevance:.3f}; "
+            f"providers={evidence.provider_count}; "
+            f"matched_query={evidence.matched_query!r}"
+        )
+    members = group or [candidate]
+    if len(members) > 1:
+        lines.append("  selectable versions (distinct identities; never auto-merged):")
+        for member in members:
+            meta = [str(member.year) if member.year else "year unknown"]
+            if member.venue:
+                meta.append(member.venue)
+            if member.work_type:
+                meta.append(member.work_type)
+            marker = "representative" if member.is_group_representative else "alternative"
+            lines.append(
+                f"    {member.candidate_id}: {member.title or '(unknown)'} "
+                f"| {' | '.join(meta)} | {marker}"
+            )
     for provider in sorted(candidate.provider_ids):
         rank = candidate.provider_ranks.get(provider)
         lines.append(f"  provider {provider}: available (rank {rank})")
@@ -232,8 +288,27 @@ def format_search_outcome(outcome: SearchOutcome, *, appended: bool = False) -> 
     if outcome.error:
         return f"error: {outcome.error}"
     lines = []
-    verb = "appended" if appended else "found"
-    lines.append(f"{verb} {len(outcome.candidates)} candidate(s)")
+    visible_works = outcome.visible_works or len(outcome.candidates)
+    version_candidates = outcome.version_candidates or len(outcome.candidates)
+    if appended:
+        lines.append(
+            f"added {outcome.versions_added} version candidate(s); "
+            f"{visible_works} canonical work(s) now visible"
+        )
+    else:
+        lines.append(
+            f"found {visible_works} candidate(s) representing "
+            f"{visible_works} canonical work(s) from {version_candidates} "
+            "version candidate(s)"
+        )
+    lines.append(f"applied date filter: {outcome.applied_date_filter}")
+    if outcome.grouped_versions:
+        lines.append(
+            f"({outcome.grouped_versions} version candidate(s) folded into "
+            "canonical-work groups; every cX remains selectable)"
+        )
+    if outcome.updated_groups:
+        lines.append(f"({outcome.updated_groups} existing version group(s) updated)")
     if outcome.date_filtered_out:
         lines.append(
             f"({outcome.date_filtered_out} candidate(s) dropped by the date "
@@ -250,7 +325,7 @@ def format_search_outcome(outcome: SearchOutcome, *, appended: bool = False) -> 
             lines.append(format_shortlist(
                 outcome.candidates,
                 total_matches=len(outcome.candidates),
-                label="Appended candidates",
+                label="Affected canonical works",
             ))
         else:
             lines.append(format_shortlist(
@@ -264,9 +339,12 @@ def format_refine_outcome(outcome: RefineOutcome) -> str:
     if outcome.error:
         return f"error: {outcome.error}"
     verb = "refinement reset" if outcome.reset else "refined candidate view"
+    visible_works = outcome.visible_works or len(outcome.candidates)
     lines = [
-        f"{verb}: {len(outcome.candidates)} match(es) from pool of "
-        f"{outcome.pool_size}"
+        f"{verb}: {visible_works} match(es) from pool of {outcome.pool_size} "
+        f"version candidate(s) ({visible_works} canonical work(s))",
+        f"search date filter: {outcome.applied_search_date_filter}",
+        f"refinement date filter: {outcome.applied_refinement_date_filter}",
     ]
     lines.append(format_shortlist(
         outcome.candidates,
@@ -364,9 +442,9 @@ def format_source_detail(ref: SourceRef) -> str:
 def format_status(status: dict) -> str:
     lines = ["Citation workflow status:"]
     for key in (
-        "workflow_id", "query", "date_filter", "candidates",
-        "view_candidates", "refinement", "selected", "matches", "attempts",
-        "sources",
+        "workflow_id", "query", "date_filter", "refinement_date_filter",
+        "ranking_mode", "candidates", "view_candidates", "refinement",
+        "refinement_venue_tiers", "selected", "matches", "attempts", "sources",
     ):
         lines.append(f"  {key}: {status.get(key)}")
     for state in status.get("provider_states", []):
@@ -502,6 +580,7 @@ def create_citation_workflow_tool(
         keywords: list[str] | None,
         venues: list[str] | None,
         work_types: list[str] | None,
+        venue_tiers: list[str] | None,
         published_within_years: int | None,
         year_from: int | None,
         year_to: int | None,
@@ -519,11 +598,12 @@ def create_citation_workflow_tool(
                 "date filters only apply to action='search' or action='refine'"
             )
         has_refine_args = any(value is not None for value in (
-            keywords, venues, work_types,
+            keywords, venues, work_types, venue_tiers,
         ))
         if has_refine_args and action != "refine":
             return _validation_error(
-                "keywords/venues/work_types only apply to action='refine'"
+                "keywords/venues/work_types/venue_tiers only apply to "
+                "action='refine'"
             )
         if action in _IDENTIFIER_ACTIONS and not (identifier or "").strip():
             return _validation_error(f"action '{action}' requires identifier")
@@ -566,6 +646,7 @@ def create_citation_workflow_tool(
                 keywords=keywords,
                 venues=venues,
                 work_types=work_types,
+                venue_tiers=venue_tiers,
                 date_filter=date_filter,
             )
             return format_refine_outcome(outcome)
@@ -582,7 +663,10 @@ def create_citation_workflow_tool(
             candidate = coordinator.get_candidate(identifier)
             if candidate is None:
                 return f"unknown or stale candidate id: {identifier}"
-            return format_candidate_detail(candidate)
+            return format_candidate_detail(
+                candidate,
+                group=coordinator.get_candidate_group(identifier),
+            )
 
         if action == "select":
             outcome: SelectOutcome = await coordinator.select(identifier)
@@ -649,6 +733,7 @@ def create_citation_workflow_tool(
         keywords: list[str] | None = None,
         venues: list[str] | None = None,
         work_types: list[str] | None = None,
+        venue_tiers: list[str] | None = None,
         published_within_years: int | None = None,
         year_from: int | None = None,
         year_to: int | None = None,
@@ -661,7 +746,7 @@ def create_citation_workflow_tool(
         async with busy_lock:
             result = await _dispatch(
                 action, query, identifier, page,
-                keywords, venues, work_types,
+                keywords, venues, work_types, venue_tiers,
                 published_within_years, year_from, year_to,
             )
             if isinstance(result, tuple):

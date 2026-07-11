@@ -34,7 +34,15 @@ from skills.citation.providers.net import (
     ProviderTimeout,
 )
 from skills.citation.providers.web import WebSearchProvider
-from skills.citation.ranking import MAX_WORKFLOW_CANDIDATES, fuse_ranked_lists
+from skills.citation.ranking import (
+    MAX_WORKFLOW_VERSIONS,
+    MAX_WORKFLOW_WORKS,
+    assign_version_groups,
+    choose_version_representative,
+    fuse_ranked_lists,
+    limit_to_canonical_works,
+    normalize_ranking_mode,
+)
 from skills.citation.bibtex_canonical import (
     BibtexValidationError,
     inject_doi,
@@ -52,6 +60,7 @@ from skills.citation.types import (
     CitationResult,
     ProviderState,
     PublishedDateFilter,
+    RankingEvidence,
     SourceRef,
     VerificationCheck,
     VerificationReport,
@@ -67,8 +76,9 @@ PROMPT_REGISTRY_LIMIT = 20
 class SearchOutcome:
     """What one search/more call produced.
 
-    ``date_filtered_out`` counts fused candidates dropped by the fail-closed
-    published-date filter (unknown year, or year outside the window).
+    ``date_filtered_out`` counts fused versions dropped by the fail-closed
+    published-date filter. ``candidates`` contains visible canonical-work
+    representatives; version/group counters explain the underlying pool.
     """
 
     candidates: list[CitationCandidate] = field(default_factory=list)
@@ -77,6 +87,12 @@ class SearchOutcome:
     queries: list[str] = field(default_factory=list)
     error: str = ""
     date_filtered_out: int = 0
+    applied_date_filter: str = "none"
+    version_candidates: int = 0
+    versions_added: int = 0
+    visible_works: int = 0
+    grouped_versions: int = 0
+    updated_groups: int = 0
 
 
 @dataclass(frozen=True)
@@ -86,12 +102,17 @@ class CandidateRefinement:
     keywords: tuple[str, ...] = ()
     venues: tuple[str, ...] = ()
     work_types: tuple[str, ...] = ()
+    venue_tiers: tuple[str, ...] = ()
     date_filter: PublishedDateFilter | None = None
 
     @property
     def active(self) -> bool:
         return bool(
-            self.keywords or self.venues or self.work_types or self.date_filter
+            self.keywords
+            or self.venues
+            or self.work_types
+            or self.venue_tiers
+            or self.date_filter
         )
 
 
@@ -101,6 +122,9 @@ class RefineOutcome:
 
     candidates: list[CitationCandidate] = field(default_factory=list)
     pool_size: int = 0
+    visible_works: int = 0
+    applied_search_date_filter: str = "none"
+    applied_refinement_date_filter: str = "none"
     reset: bool = False
     error: str = ""
 
@@ -151,7 +175,7 @@ class SourceRegistry:
 def _candidate_from_structured(
     record: StructuredRecord, *, workflow_id: str
 ) -> CitationCandidate:
-    return CitationCandidate(
+    candidate = CitationCandidate(
         candidate_id="c1",
         workflow_id=workflow_id,
         title=record.title,
@@ -168,6 +192,16 @@ def _candidate_from_structured(
             for name in ("title", "authors", "year", "venue", "doi")
         },
     )
+    candidate.ranking_evidence = RankingEvidence(
+        rrf_score=1.0,
+        title_relevance=1.0,
+        matched_query=record.doi,
+        provider_count=1,
+        final_score=1.0,
+        mode="direct",
+    )
+    assign_version_groups([candidate])
+    return candidate
 
 
 class CitationCoordinator:
@@ -189,6 +223,9 @@ class CitationCoordinator:
         )
         self._output_dir = (
             output_dir if output_dir is not None else resolve_output_dir(config)
+        )
+        self._ranking_mode = normalize_ranking_mode(
+            getattr(config, "citation_ranking_mode", "lexical")
         )
         self.registry = SourceRegistry()
 
@@ -284,17 +321,41 @@ class CitationCoordinator:
             [lst for lst in ranked_lists if lst],
             query=self._last_query,
             workflow_id=self._workflow_id,
+            query_variants=queries[1:],
+            ranking_mode=self._ranking_mode,
         ) if any(ranked_lists) else []
         self._candidates, filtered_out = self._apply_date_filter(fused)
         self._refresh_candidate_view()
         self._last_states = states
         return SearchOutcome(
-            candidates=list(self._candidates),
+            candidates=self._view_candidates(),
             provider_states=states,
             used_web_fallback=used_web,
             queries=queries,
             date_filtered_out=filtered_out,
+            **self._search_metadata(),
         )
+
+    def _date_filter_description(self) -> str:
+        return self._date_filter.describe() if self._date_filter else "none"
+
+    def _search_metadata(
+        self, *, updated_groups: int = 0, versions_added: int = 0
+    ) -> dict:
+        visible = len(self._view_candidate_ids)
+        versions = len(self._candidates)
+        canonical_works = len({
+            candidate.related_group or f"candidate:{candidate.candidate_id}"
+            for candidate in self._candidates
+        })
+        return {
+            "applied_date_filter": self._date_filter_description(),
+            "version_candidates": versions,
+            "versions_added": versions_added,
+            "visible_works": visible,
+            "grouped_versions": max(0, versions - canonical_works),
+            "updated_groups": updated_groups,
+        }
 
     def _apply_date_filter(
         self, candidates: list[CitationCandidate]
@@ -305,6 +366,7 @@ class CitationCoordinator:
         kept = [c for c in candidates if self._date_filter.admits_year(c.year)]
         for index, candidate in enumerate(kept):
             candidate.candidate_id = f"c{index + 1}"
+        assign_version_groups(kept)
         return kept, len(candidates) - len(kept)
 
     async def _search_by_doi(self, canonical: str) -> SearchOutcome:
@@ -313,29 +375,46 @@ class CitationCoordinator:
         except DoiNotFound:
             states = [ProviderState("doi.org", "empty", "DOI does not resolve")]
             self._last_states = states
-            return SearchOutcome(provider_states=states, queries=[canonical])
+            return SearchOutcome(
+                provider_states=states,
+                queries=[canonical],
+                applied_date_filter=self._date_filter_description(),
+            )
         except ProviderRateLimited as exc:
             states = [ProviderState("doi.org", "rate_limited", exc.detail)]
             self._last_states = states
-            return SearchOutcome(provider_states=states, queries=[canonical])
+            return SearchOutcome(
+                provider_states=states,
+                queries=[canonical],
+                applied_date_filter=self._date_filter_description(),
+            )
         except ProviderTimeout as exc:
             states = [ProviderState("doi.org", "timeout", exc.detail)]
             self._last_states = states
-            return SearchOutcome(provider_states=states, queries=[canonical])
+            return SearchOutcome(
+                provider_states=states,
+                queries=[canonical],
+                applied_date_filter=self._date_filter_description(),
+            )
         except ProviderError as exc:
             states = [ProviderState("doi.org", "error", exc.detail)]
             self._last_states = states
-            return SearchOutcome(provider_states=states, queries=[canonical])
+            return SearchOutcome(
+                provider_states=states,
+                queries=[canonical],
+                applied_date_filter=self._date_filter_description(),
+            )
         candidate = _candidate_from_structured(record, workflow_id=self._workflow_id)
         self._candidates, filtered_out = self._apply_date_filter([candidate])
         self._refresh_candidate_view()
         states = [ProviderState("doi.org", "ok")]
         self._last_states = states
         return SearchOutcome(
-            candidates=list(self._candidates),
+            candidates=self._view_candidates(),
             provider_states=states,
             queries=[canonical],
             date_filtered_out=filtered_out,
+            **self._search_metadata(),
         )
 
     async def _run_structured_search(
@@ -387,7 +466,8 @@ class CitationCoordinator:
         """Explicitly pull web results into the current workflow.
 
         Keeps existing candidate IDs, clears selection/matches, appends only
-        identity-new candidates, and respects the 50-candidate cap.
+        identity-new versions, recomputes non-destructive work groups, and
+        respects the 50-visible-work / 100-version caps.
         """
         if not self._workflow_id:
             return SearchOutcome(error="no active workflow; run a search first")
@@ -408,13 +488,16 @@ class CitationCoordinator:
             if not (record.doi and record.doi in known_dois)
             and record.provider_id not in known_pids
         ]
+        existing_ids = {candidate.candidate_id for candidate in self._candidates}
         appended: list[CitationCandidate] = []
         filtered_out = 0
         if fresh:
-            room = MAX_WORKFLOW_CANDIDATES - len(self._candidates)
+            room = MAX_WORKFLOW_VERSIONS - len(self._candidates)
             fused = fuse_ranked_lists(
                 [fresh], query=effective_query, workflow_id=self._workflow_id,
-                limit=max(room, 1),
+                ranking_mode=self._ranking_mode,
+                limit=MAX_WORKFLOW_WORKS,
+                version_limit=max(room, 1),
             )
             if self._date_filter is not None:
                 admitted = [
@@ -427,14 +510,45 @@ class CitationCoordinator:
                 candidate.candidate_id = f"c{offset + i + 1}"
                 appended.append(candidate)
             self._candidates.extend(appended)
+            self._candidates = limit_to_canonical_works(
+                self._candidates,
+                work_limit=MAX_WORKFLOW_WORKS,
+                version_limit=MAX_WORKFLOW_VERSIONS,
+            )
+        retained_ids = {candidate.candidate_id for candidate in self._candidates}
+        appended_ids = {
+            candidate.candidate_id
+            for candidate in appended
+            if candidate.candidate_id in retained_ids
+        }
         self._refresh_candidate_view()
         self._last_states = states
+        affected = [
+            candidate
+            for candidate in self._view_candidates()
+            if candidate.candidate_id in appended_ids
+            or bool(set(candidate.related_candidate_ids) & appended_ids)
+        ]
+        updated_groups = sum(
+            1
+            for candidate in affected
+            if candidate.related_group is not None
+            and bool(set(candidate.related_candidate_ids) & appended_ids)
+            and bool(
+                ({candidate.candidate_id, *candidate.related_candidate_ids})
+                & existing_ids
+            )
+        )
         return SearchOutcome(
-            candidates=appended,
+            candidates=affected,
             provider_states=states,
             used_web_fallback=True,
             queries=[effective_query],
             date_filtered_out=filtered_out,
+            **self._search_metadata(
+                updated_groups=updated_groups,
+                versions_added=len(appended_ids),
+            ),
         )
 
     # --- inspection ---------------------------------------------------------
@@ -467,6 +581,14 @@ class CitationCoordinator:
         if refinement.work_types and work_type not in refinement.work_types:
             return False
 
+        venue_tier = (
+            candidate.venue_annotation.tier
+            if candidate.venue_annotation is not None
+            else None
+        )
+        if refinement.venue_tiers and venue_tier not in refinement.venue_tiers:
+            return False
+
         if (
             refinement.date_filter is not None
             and not refinement.date_filter.admits_year(candidate.year)
@@ -475,10 +597,19 @@ class CitationCoordinator:
         return True
 
     def _refresh_candidate_view(self) -> None:
+        groups: dict[str, list[CitationCandidate]] = {}
+        order: list[str] = []
+        for candidate in self._candidates:
+            key = candidate.related_group or f"candidate:{candidate.candidate_id}"
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            if self._candidate_matches_refinement(candidate, self._refinement):
+                groups[key].append(candidate)
         self._view_candidate_ids = [
-            candidate.candidate_id
-            for candidate in self._candidates
-            if self._candidate_matches_refinement(candidate, self._refinement)
+            choose_version_representative(groups[key]).candidate_id
+            for key in order
+            if groups[key]
         ]
 
     def _view_candidates(self) -> list[CitationCandidate]:
@@ -495,6 +626,7 @@ class CitationCoordinator:
         keywords: list[str] | None = None,
         venues: list[str] | None = None,
         work_types: list[str] | None = None,
+        venue_tiers: list[str] | None = None,
         date_filter: PublishedDateFilter | None = None,
     ) -> RefineOutcome:
         """Filter the current pool without provider calls or candidate re-ID."""
@@ -513,6 +645,9 @@ class CitationCoordinator:
             work_types=tuple(filter(None, (
                 self._normalize_filter_text(value) for value in (work_types or [])
             ))),
+            venue_tiers=tuple(filter(None, (
+                self._normalize_filter_text(value) for value in (venue_tiers or [])
+            ))),
             date_filter=date_filter,
         )
         self._clear_resolution()
@@ -521,11 +656,16 @@ class CitationCoordinator:
         return RefineOutcome(
             candidates=self._view_candidates(),
             pool_size=len(self._candidates),
+            visible_works=len(self._view_candidate_ids),
+            applied_search_date_filter=self._date_filter_description(),
+            applied_refinement_date_filter=(
+                date_filter.describe() if date_filter else "none"
+            ),
             reset=not normalized.active,
         )
 
     def list_candidates(self, page: int = 1) -> tuple[list[CitationCandidate], int]:
-        """Return one page from the active candidate view."""
+        """Return one page of canonical-work representatives from the view."""
         candidates = self._view_candidates()
         total_pages = max(1, -(-len(candidates) // PAGE_SIZE))
         page = max(1, min(page, total_pages))
@@ -538,6 +678,17 @@ class CitationCoordinator:
                 return candidate
         return None
 
+    def get_candidate_group(self, candidate_id: str) -> list[CitationCandidate]:
+        candidate = self.get_candidate(candidate_id)
+        if candidate is None:
+            return []
+        if candidate.related_group is None:
+            return [candidate]
+        return [
+            item for item in self._candidates
+            if item.related_group == candidate.related_group
+        ]
+
     def status(self) -> dict:
         return {
             "workflow_id": self._workflow_id or "none",
@@ -545,9 +696,15 @@ class CitationCoordinator:
             "date_filter": (
                 self._date_filter.describe() if self._date_filter else "none"
             ),
+            "refinement_date_filter": (
+                self._refinement.date_filter.describe()
+                if self._refinement.date_filter else "none"
+            ),
+            "ranking_mode": self._ranking_mode,
             "candidates": len(self._candidates),
             "view_candidates": len(self._view_candidate_ids),
             "refinement": "active" if self._refinement.active else "none",
+            "refinement_venue_tiers": list(self._refinement.venue_tiers),
             "selected": self._selected_id or "none",
             "matches": len(self._matches),
             "attempts": self._attempts,

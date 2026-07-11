@@ -13,12 +13,15 @@ fixture, and the fixed RRF tie-break.
 
 import asyncio
 import json
+import math
 import urllib.parse
 from pathlib import Path
 
 from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
+from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import FetchResponse
+from skills.citation.ranking import fuse_ranked_lists, representative_candidates
 
 BASELINE_PATH = Path(__file__).parent / "fixtures" / "ranking_baseline.json"
 
@@ -183,6 +186,22 @@ def _top10_dois(coordinator):
     return [c.doi for c in page]
 
 
+def _precision_at(grades, k):
+    visible = grades[:k]
+    return sum(grade > 0 for grade in visible) / k
+
+
+def _ndcg_at(grades, k):
+    def dcg(values):
+        return sum(
+            (2**grade - 1) / math.log2(index + 2)
+            for index, grade in enumerate(values[:k])
+        )
+
+    ideal = dcg(sorted(grades, reverse=True))
+    return dcg(grades) / ideal if ideal else 0.0
+
+
 def test_doi_and_exact_title_cases_hit_top10_on_first_search(tmp_path):
     coordinator = _coordinator(tmp_path)
     for doi in DOI_CASES:
@@ -215,6 +234,86 @@ def test_topic_recall_at_10_beats_frozen_baseline(tmp_path):
     # Deterministic on the fixed fixtures: 5 of 6 relevant works examined.
     assert recall == len(examined & set(RELEVANT)) / 6
     assert len(examined & set(RELEVANT)) == 5
+
+
+def test_lexical_mode_improves_ambiguous_precision_and_ndcg():
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    records = [[
+        ProviderRecord(
+            provider="crossref", provider_id="crossref:noise-pomdp", rank=0,
+            doi="10.9999/pomdp", title="Inference in Partially Observable Decision Processes",
+        ),
+        ProviderRecord(
+            provider="crossref", provider_id="crossref:relevant-hardware", rank=1,
+            doi="10.1234/hardware", title="Hardware Acceleration for Efficient AI Inference",
+            venue="FPGA",
+        ),
+        ProviderRecord(
+            provider="crossref", provider_id="crossref:noise-stochastic", rank=2,
+            doi="10.9999/stochastic", title="Stochastic Computation for Bayesian Inference",
+            venue="SSRN",
+        ),
+        ProviderRecord(
+            provider="crossref", provider_id="crossref:relevant-fpga", rank=3,
+            doi="10.1234/fpga", title="FPGA Acceleration of Neural Network Inference",
+            venue="IEEE Access",
+        ),
+    ]]
+    grades = {
+        "10.1234/hardware": 3,
+        "10.1234/fpga": 2,
+        "10.9999/pomdp": 0,
+        "10.9999/stochastic": 0,
+    }
+
+    rrf = fuse_ranked_lists(
+        records,
+        query="AI inference acceleration",
+        workflow_id="rrf",
+        ranking_mode="rrf",
+    )
+    lexical = fuse_ranked_lists(
+        records,
+        query="AI inference acceleration",
+        query_variants=["hardware acceleration for AI inference"],
+        workflow_id="lexical",
+        ranking_mode="lexical",
+    )
+    rrf_grades = [grades[candidate.doi] for candidate in rrf]
+    lexical_grades = [grades[candidate.doi] for candidate in lexical]
+
+    assert _precision_at(rrf_grades, 3) == baseline["ambiguous_precision_at_3_rrf"]
+    assert round(_ndcg_at(rrf_grades, 3), 6) == baseline["ambiguous_ndcg_at_3_rrf"]
+    assert _precision_at(lexical_grades, 3) > _precision_at(rrf_grades, 3)
+    assert _ndcg_at(lexical_grades, 3) > _ndcg_at(rrf_grades, 3)
+
+
+def test_benchmark_folds_preprint_and_published_versions():
+    records = [
+        [ProviderRecord(
+            provider="openalex", provider_id="openalex:preprint", rank=0,
+            doi="10.1234/preprint", title="Accelerating AI Inference",
+            authors=["Ada Lovelace"], year=2024, venue="arXiv",
+            work_type="preprint",
+        )],
+        [ProviderRecord(
+            provider="crossref", provider_id="crossref:published", rank=0,
+            doi="10.1234/published", title="Accelerating AI Inference",
+            authors=["Ada Lovelace"], year=2025, venue="FPGA",
+            work_type="proceedings-article",
+        )],
+    ]
+
+    candidates = fuse_ranked_lists(
+        records, query="AI inference acceleration", workflow_id="w",
+        ranking_mode="lexical",
+    )
+    visible = representative_candidates(candidates)
+
+    assert len(candidates) == 2
+    assert len(visible) == 1
+    assert visible[0].doi == "10.1234/published"
+    assert visible[0].venue_annotation.tier == "top"
 
 
 def test_gold_corpus_produces_zero_false_saves(tmp_path):

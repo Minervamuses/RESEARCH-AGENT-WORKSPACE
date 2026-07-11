@@ -23,6 +23,9 @@ dependencies = [
 
 [tool.poetry]
 packages = [{ include = "agent" }, { include = "skills" }]
+include = [
+    { path = "skills/citation/venue_catalog.yaml", format = ["sdist", "wheel"] },
+]
 
 [tool.poetry.dependencies]
 # Local development enrichment only: resolve research-agent-rag from the
