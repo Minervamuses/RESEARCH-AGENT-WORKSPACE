@@ -5,7 +5,7 @@ from skills.citation.ranking import RRF_K, fuse_ranked_lists
 
 
 def _rec(provider, rank, *, doi=None, title="", pid=None, year=None,
-         authors=None, venue="", score=None, identifiers=None):
+         authors=None, venue="", work_type="", score=None, identifiers=None):
     return ProviderRecord(
         provider=provider,
         provider_id=pid or f"{provider}:{doi or title or rank}",
@@ -15,6 +15,7 @@ def _rec(provider, rank, *, doi=None, title="", pid=None, year=None,
         year=year,
         venue=venue,
         doi=doi,
+        work_type=work_type,
         raw_score=score,
         identifiers=dict(identifiers or {}),
     )
@@ -104,6 +105,23 @@ def test_metadata_precedence_fills_gaps_and_keeps_conflicts():
     assert year_conflicts == {2020}
     venue_conflicts = {c["value"] for c in candidate.conflicts["venue"]}
     assert venue_conflicts == {"Web Venue"}
+
+
+def test_work_type_uses_provider_precedence_and_keeps_conflicts():
+    lists = [
+        [_rec("openalex", 0, doi="10.1234/x", title="Paper",
+              work_type="article")],
+        [_rec("crossref", 0, doi="10.1234/x", title="Paper",
+              work_type="journal-article")],
+    ]
+
+    [candidate] = fuse_ranked_lists(lists, query="paper", workflow_id="w")
+
+    assert candidate.work_type == "journal-article"
+    assert candidate.field_provenance["work_type"] == "crossref"
+    assert candidate.conflicts["work_type"] == [
+        {"provider": "openalex", "value": "article"}
+    ]
 
 
 def test_tie_break_order_doi_then_exact_title_then_provider_then_key():
