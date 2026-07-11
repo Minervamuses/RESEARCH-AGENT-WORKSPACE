@@ -54,10 +54,13 @@ SYSTEM_PROMPT = f"""You are a research assistant with access to several tool fam
 
 {tool_inventory.render_base_tool_prompt()}
 
-Web Search MCP tools (available only when configured):
+Web Search MCP tools (global once loaded):
+- When the Web Search MCP server is configured AND loaded successfully, its tools are available in normal mode and under every skill.
+- Being configured does not guarantee availability: trust only the tools actually bound for this session and the [Tool availability] block. If no web tools are bound, treat Web Search as unavailable and fall back to what you have.
 - Use for current external information, general web discovery, or topics unlikely to exist in the local KB.
 
-GitHub MCP tools (available only when configured):
+GitHub MCP tools (skill-scoped):
+- Available only while an active skill explicitly requests the github MCP family and the server is loaded; never in normal mode.
 - Use for remote GitHub state: repository content not in the local KB, pull requests, issues, Actions runs, code search across GitHub.
 - Do NOT use GitHub MCP as a substitute for local git shell operations (clone, pull, rebase, commit). Those belong to the user's terminal, not to you.
 
@@ -230,7 +233,7 @@ class ChatSession:
             return runtime.tool_access
         return resolve_tool_access(
             None,
-            self._capability_tool_refs(),
+            self._tool_universe_refs(),
             mcp_families=self.mcp_families,
         )
 
@@ -240,7 +243,7 @@ class ChatSession:
             resolution=self.tool_access_resolution(),
             active_skill=runtime.name if runtime is not None else None,
             task_mode=runtime.task_mode if runtime is not None else None,
-            all_tool_names=[tool.name for tool in self._capability_tool_refs()],
+            all_tool_names=[tool.name for tool in self._tool_universe_refs()],
             mcp_families=self.mcp_families,
         )
 
@@ -425,7 +428,7 @@ class ChatSession:
         runtime = load_skill_runtime(
             name,
             config=self.config,
-            all_tools=self._capability_tool_refs(),
+            all_tools=self._tool_universe_refs(),
             mcp_families=self.mcp_families,
             task_mode=task_mode,
         )
@@ -450,12 +453,13 @@ class ChatSession:
             for name in tool_inventory.base_tool_names(extra_tools=self.extra_tools)
         ]
 
-    def _capability_tool_refs(self) -> list[_ToolRef]:
-        """Full session tool universe for tool access resolution.
+    def _tool_universe_refs(self) -> list[_ToolRef]:
+        """Every tool that actually exists in this session, global or skill.
 
-        Includes the skill-scoped tools so a manifest requiring
-        ``citation_workflow`` can resolve; the resolver keeps them out of the
-        effective set unless the active skill requests them.
+        This is the universe ``resolve_tool_access`` narrows into effective
+        tools: local base tools, loaded MCP tools, and the skill-scoped tools
+        (e.g. ``citation_workflow``) that only an active skill manifest can
+        surface.
         """
         return [
             *self._all_tool_refs(),

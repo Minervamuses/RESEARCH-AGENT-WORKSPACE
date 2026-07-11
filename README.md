@@ -292,38 +292,30 @@ Follow the user's inclusion and exclusion criteria...
 
 ### `manifest.yaml`
 
-最小範例:
+工具模型是兩級的:**全域工具**(local base tools:`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`,加上已載入的 Web Search MCP family)在普通模式與所有 skill 下永遠可用;其他工具(如 GitHub MCP family、`citation_workflow`)只有在 active skill 的 manifest `tools` 區段明確要求時才存在。
+
+最小範例(沒有專屬工具的 skill 可完全省略 `tools`):
 
 ```yaml
-capabilities:
+tools:
   required:
-    - file.read
-    - rag.search
+    local:
+      - citation_workflow
+  optional:
+    mcp_families:
+      - github
 resources: []
 task_modes:
   - screening
-tool_policy:
-  disallow:
-    - bash
 ```
 
-- `capabilities.required`:必要 capability,解析不到對應工具時 skill 啟用失敗;`capabilities.optional` 解析不到不阻止啟用。
+- `tools.required`:必要的 skill 工具(`local` 為工具名、`mcp_families` 為 MCP family 名);解析不到時 skill 啟用失敗。
+- `tools.optional`:解析不到不阻止啟用。
 - `resources`:skill 內補充檔案,可標 `pinned: true`。
 - `task_modes`:`/skill <name> <mode>` 可用的模式。
-- `tool_policy.disallow`:禁用工具或 MCP family pattern。
-- schema 是嚴格的:未知欄位、錯誤型別、空的 `capabilities: {}` 都會在啟用時報錯。
+- schema 是嚴格的:未知欄位、錯誤型別、空的 `tools: {}` 都會在啟用時報錯;舊欄位 `capabilities` / `tool_policy` 會被直接拒絕。
 
-Capability 對應工具:
-
-| Capability | 對應工具 |
-|---|---|
-| `file.read` | `read_file` |
-| `rag.search` | `rag_explore`、`rag_search`、`rag_get_context` |
-| `history.search` | `recall_history` |
-| `shell.execute` | `bash` |
-| `web.search` | Web Search MCP family |
-| `github.repo.read` | GitHub MCP family |
-| `citation.workflow` | `citation_workflow`(skill 專屬:只有 manifest 明確要求的 skill 綁得到;普通模式與其他 skill 的偽造呼叫會被執行層拒絕) |
+`citation_workflow` 是 skill 專屬工具:只有 manifest 明確要求的 skill 綁得到;普通模式與其他 skill 的偽造呼叫會被執行層(PolicyToolNode)拒絕。它保留給內建 citation skill,一般 skill 不應宣告。
 
 Skill 的 `references/`、`assets/`、`scripts/` 用 `read_file` 讀相對路徑時,路徑被限制在 skill root、不 fallback 到工作目錄(防路徑穿越與同名檔混淆)。只有非常小且每次必要的 reference 才建議 `pinned: true`——pinned content 每回合都進 context,過大會浪費 token,也可能超過 `skill_max_pinned_reference_chars` 或 `skill_max_total_skill_context_chars` 上限。
 

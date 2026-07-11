@@ -37,13 +37,13 @@ Skill 採用**漸進式揭露（progressive disclosure）**：
 
 `skills/_prompt-master/` 是 `/thinking extended` controller 使用的內部 helper。它一次性 vendor 自 `nidhinjs/prompt-master`，controller 只直接讀取 `SKILL.md` 作為 prompt rewrite 的 system context，不透過 skill loader 自動啟用，也不會改變使用者當前 active skill。
 
-如果使用者手動執行 `/skill _prompt-master`，它仍會走一般 skill runtime，並套用自己的 `manifest.yaml` tool policy。這個資料夾名稱前面的 `_` 是內部 helper 例外；一般新增給使用者選用的 skill 仍應使用 kebab-case。
+如果使用者手動執行 `/skill _prompt-master`，它仍會走一般 skill runtime；它沒有 `tools` 區段，所以工具集合與普通模式完全相同。這個資料夾名稱前面的 `_` 是內部 helper 例外；一般新增給使用者選用的 skill 仍應使用 kebab-case。
 
 ### Built-in skill：`citation`
 
 `skills/citation/` 是內建的驗證式引用 skill，同一個資料夾**既是 skill bundle 也是可 import 的 `skills.citation` package**（Coordinator、providers、gate、renderer、tool adapter 都住在裡面）。它有兩個一般 skill 沒有的特性：
 
-1. **skill 專屬工具**：manifest 只要求 `citation.workflow` capability，對應 session-scoped 的 `citation_workflow` 工具。這類 skill-only 工具不屬於 default 工具，普通模式與其他 skills 綁不到也呼叫不了（執行層 PolicyToolNode 會拒絕偽造呼叫）；只有 manifest allowlist 明確授權的 skill 才綁得到。
+1. **skill 專屬工具**：manifest 在 `tools.required.local` 要求 session-scoped 的 `citation_workflow` 工具。這類 skill 工具不屬於全域工具，普通模式與其他 skills 綁不到也呼叫不了（執行層 PolicyToolNode 會拒絕偽造呼叫）；只有 manifest 明確要求它的 skill 才綁得到。全域工具（local base tools + Web Search MCP）在 citation skill 下照常可用。
 2. **session 隔離副作用**：啟用時強制切回 normal thinking（citation active 期間 `/thinking extended` 被拒絕）；停用或切換 skill 時清除 in-memory workflow 與來源 registry。
 
 `/citation` 是它的專屬啟用入口（等價於 `/skill citation` 加上提示訊息與自然語言 followup）。新增一般 skill 不需要、也不應該仿照這種 host 深度整合；請以 `academic-paper-writing` 為範本。
@@ -113,27 +113,31 @@ description: Use when the user wants to ... [具體適用情境]
 
 ### manifest.yaml 欄位（本專案擴充）
 
-`manifest.yaml` 是本專案 runtime 使用的嚴格 schema。未知 top-level key、型別錯誤、空的 `capabilities: {}` 都會在 skill 啟用時 raise `ValueError`，讓問題早點暴露。
+`manifest.yaml` 是本專案 runtime 使用的嚴格 schema。未知 top-level key、型別錯誤、空的 `tools: {}` 都會在 skill 啟用時 raise `ValueError`，讓問題早點暴露。舊欄位 `capabilities` / `tool_policy` 已移除，出現時會被直接拒絕（錯誤訊息會指向 `tools` 區段）。
+
+工具模型是兩級的，manifest 只宣告「額外」需要什麼：
+
+- **全域工具**：local base tools（`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`）加上已載入的 Web Search MCP family。所有模式、所有 skill 都有，manifest 不需要（也無法）宣告或移除它們。
+- **skill 工具**：其他所有工具（GitHub MCP family、`citation_workflow`、未來的 stateful tools）。只有 active skill 的 manifest `tools` 區段明確要求時才存在。
 
 | 欄位 | 型別 | 說明 |
 |------|------|------|
-| `capabilities.required` | string list | 必要 capability。必須存在於 `agent/skills/capability_map.yaml`，且能解析到目前可用 tool；否則啟用失敗。 |
-| `capabilities.optional` | string list 或 `{id, use_when}` list | 選用 capability。不存在或目前不可用時不阻止啟用，但仍視為 active policy，不會退回全工具開放。 |
+| `tools.required.local` | string list | 必要的本地工具名（如 `citation_workflow`）。解析不到時啟用失敗。 |
+| `tools.required.mcp_families` | string list | 必要的 MCP family 名（如 `github`）。該 family 沒有任何已載入工具時啟用失敗。 |
+| `tools.optional.local` / `tools.optional.mcp_families` | string list | 選用工具；不存在時不阻止啟用。 |
 | `resources` | list | 每項需有 `path: string`，可選 `use_when: string`、`pinned: bool`。`pinned: "yes"` 這類字串不是 bool，會被拒絕。 |
 | `task_modes` | string list | `/skill <name> <mode>` 可選模式。非法 mode 會回 slash command error，不會炸掉 CLI loop。 |
-| `tool_policy.disallow` | string list | 明確禁止 tool。deny rules 優先於 capability grants。 |
 
-範例：
+範例（大多數 skill 不需要 `tools`，省略即可——工具集合與普通模式相同）：
 
 ```yaml
-capabilities:
+tools:
   required:
-    - file.read
-    - rag.search
-    - history.search
+    local:
+      - citation_workflow
   optional:
-    - id: web.search
-      use_when: target journal guidelines or current venue information is needed
+    mcp_families:
+      - github
 
 resources:
   - path: references/checklist.md
@@ -143,21 +147,15 @@ resources:
 task_modes:
   - revision
   - drafting
-
-tool_policy:
-  disallow:
-    - bash
 ```
 
 Pinned resources 會在啟用 skill 時直接放進每回合 context，受 `skill_max_pinned_reference_chars` 與 `skill_max_total_skill_context_chars` 限制。只 pin 每次都必要、且很小的檔案；其他 reference 讓 agent 在 active skill 下按需讀取。
 
-Capability 命名要精確：
+工具語義要精確：
 
-- `rag.search` 只授權 indexed KB 工具（知識庫文件、研究筆記、已 ingest 的資料）。
-- `history.search` 只授權 persisted chat history 工具（舊對話、較早 session、被 recent window eviction 的 turn）。
-- `citation.workflow` 只授權 skill 專屬的 `citation_workflow` 工具；它保留給內建 citation skill，一般 skill 不應宣告。
-- 如果 skill 可能需要使用者過去對話脈絡，例如「你自行看我一月上半做了什麼」這類請求，manifest 必須宣告 `history.search`。只宣告 `rag.search` 不會讓 active skill 下的 writer 看到 history retrieval schema。
-- Plan mode logs 不進 Chroma `chat_history`，所以即使宣告 `history.search`，也不能承諾能搜尋 plan-mode-only 的紀錄；需要時應請 agent 讀 `plan_logs/` 檔案或請使用者指出位置。
+- `rag_explore` / `rag_search` / `rag_get_context` 查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料）；`recall_history` 查 persisted chat history（舊對話、較早 session、被 recent window eviction 的 turn）。兩者都是全域工具，skill 內文引導模型用對工具即可，不需要 manifest 宣告。
+- `citation_workflow` 是 skill 專屬工具，保留給內建 citation skill，一般 skill 不應宣告。
+- Plan mode logs 不進 Chroma `chat_history`，所以不能承諾 `recall_history` 能搜尋 plan-mode-only 的紀錄；需要時應請 agent 讀 `plan_logs/` 檔案或請使用者指出位置。
 
 ## 三、Description 寫作指引
 
@@ -249,9 +247,9 @@ description: ...
 
 ### Extended Thinking 與 Skills
 
-`/thinking extended` 不會自動啟用任何使用者 skill。它保留目前 active skill 的 context 與 tool policy，另外用 `_prompt-master` helper 把使用者輸入重寫成較清楚的 agent prompt。
+`/thinking extended` 不會自動啟用任何使用者 skill。它保留目前 active skill 的 context 與工具集合，另外用 `_prompt-master` helper 把使用者輸入重寫成較清楚的 agent prompt。
 
-Extended mode 的 rewriter、writer、reviewer 都會收到同一份 runtime tool availability block。`SYSTEM_PROMPT` 中的「always available」是 base session 描述；active skill 啟用後，實際工具集合一律以 `tool_policy_active`、`allowed_tools`、`denied_tools` 為準，不要在 skill 內文或測試裡假設 base 工具一定可用。
+Extended mode 的 rewriter、writer、reviewer 都會收到同一份 runtime `[Tool availability]` block（來自共用的 tool access resolution）。fusion proposer 是 read-only 的：只綁固定 read-only allowlist 與當前 effective tools 的交集，`bash`、extra tools 與 MCP tools 一律排除。skill 內文或測試不要自行假設工具集合，一律以 `available_tools` / `unavailable_tools` 為準。
 
 啟用 `/thinking extended` 前，必須直接在 `agent/config.py` 的 `AgentConfig` 填入三個角色 model 欄位：
 
@@ -453,11 +451,11 @@ Group findings by severity:
    - `description`：套用第三節的公式
 
 4. **視需要撰寫 manifest.yaml**
-   - 需要限制 tool 或宣告 capability 時，使用 `capabilities` / `tool_policy.disallow`
-   - 需要使用者過去對話脈絡時，加 `history.search`；需要 indexed KB 時才加 `rag.search`
+   - 全域工具（local base tools + Web Search MCP）不需宣告，永遠可用
+   - 需要 skill 專屬工具或非 web 的 MCP family 時，才使用 `tools.required` / `tools.optional`
    - 需要 task mode 時，使用 `task_modes`
    - 需要 reference routing 時，使用 `resources`
-   - 不要寫空的 `capabilities: {}`；沒有 policy 就省略 `capabilities` / `tool_policy`
+   - 不要寫空的 `tools: {}`；沒有專屬工具就省略 `tools`
 
 5. **撰寫內文**
    - 祈使句、結構化、舉例
@@ -484,8 +482,8 @@ Group findings by severity:
 - [ ] `description` 同時說明 What 和 When
 - [ ] `description` 用英文撰寫
 - [ ] 若有 `manifest.yaml`，欄位符合本文件列出的 schema，沒有未知 top-level key
-- [ ] required capability 都存在於 `agent/skills/capability_map.yaml`
-- [ ] 需要舊對話脈絡的 skill 已宣告 `history.search`，沒有把 `rag.search` 當成 chat history
+- [ ] `tools.required` 中的工具名 / MCP family 名確實存在（拼錯會直接讓啟用失敗）
+- [ ] 沒有把全域工具（base tools、Web Search）寫進 `tools`；也沒有宣告保留給 citation skill 的 `citation_workflow`
 - [ ] `resources[].pinned` 使用真正 bool，不使用 `"yes"` / `"no"` 字串
 - [ ] `references/`、`assets/`、`scripts/` 內的檔案只依賴 skill bundle 內路徑，不假設會 fallback 到 cwd
 - [ ] 文件或 prompt 沒承諾 `recall_history` 能查到 plan mode logs
