@@ -1,6 +1,7 @@
 """The built-in citation skill bundle and its session activation contract."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from conftest import FakeHistoryStore, make_astream_graph
 from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.skills import discover_skills
+from agent.turn_safety import find_tool_protocol_artifact
 
 
 @pytest.fixture
@@ -34,6 +36,22 @@ def test_citation_bundle_is_discovered_with_lean_layout():
     # Lean bundle: no README, no .skill archive inside the bundle.
     assert not (bundle_root / "README.md").exists()
     assert not list(bundle_root.glob("*.skill"))
+
+
+def test_citation_skill_text_is_free_of_protocol_artifacts():
+    skill_path = Path(__file__).parents[1] / "skills" / "citation" / "SKILL.md"
+    text = skill_path.read_text(encoding="utf-8")
+    tool_names = [
+        "citation_workflow",
+        "bash",
+        "read_file",
+        "rag_explore",
+        "rag_search",
+        "rag_get_context",
+        "recall_history",
+    ]
+
+    assert find_tool_protocol_artifact(text, tool_names=tool_names) is None
 
 
 def test_activation_adds_only_the_workflow_tool(make_session):

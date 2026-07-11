@@ -51,3 +51,33 @@ actions and keep them in control of every decision.
   re-activates one for citing.
 - When a search fails or a candidate has no DOI, say so plainly; never
   substitute unverified data.
+- When you mention tool actions in prose, write bare names like
+  `action="explain"` or `confirm`; never write a call-style expression
+  (the tool name followed by parenthesized arguments) — the safety layer
+  replaces any reply that contains one.
+
+## Grounding for paper descriptions
+
+- `show` returns bibliographic metadata plus at most a short snippet —
+  never the paper's abstract or full text; discovery providers do not
+  supply full text.
+- Only text evidence you actually fetched (web search, RAG, `read_file`)
+  grounds a summary of a paper's content. Metadata alone does not.
+- With metadata only, either fetch evidence first or label the
+  description explicitly as an inference from the title/metadata
+  (e.g. 「根據標題與 metadata 推測」). Never present a guess as the
+  paper's abstract.
+
+## Storage and internals questions
+
+- Confirmed bundles (`reference.bib` + `citation.json`) are written
+  atomically under the citation output directory — user data, never
+  inside the project source tree.
+- When the user asks where a citation is saved or which sources exist,
+  use `action="sources"` to list them and `action="source"` with the
+  source id for its bundle path. Never scan directories with bash and
+  never guess paths from the source tree.
+- When the user asks how the workflow works (search, verification, where
+  BibTeX comes from, storage), call the read-only `action="explain"` and
+  relay its steps; do not describe internals from memory. The model never
+  writes BibTeX — doi.org supplies it.
