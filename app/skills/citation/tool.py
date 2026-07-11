@@ -219,6 +219,11 @@ def format_candidate_detail(candidate: CitationCandidate) -> str:
             continue
         rendered = "; ".join(f"{v['provider']}={v['value']!r}" for v in values)
         lines.append(f"  conflict {field_name}: {rendered}")
+    lines.append(
+        "  Grounding: metadata and snippet only — not the paper's abstract"
+        " or full text. Label any summary from this alone as inferred from"
+        " metadata, or fetch real text first."
+    )
     lines.append("  DOI is withheld until a match is explicitly confirmed.")
     return _redact_dois("\n".join(lines))
 

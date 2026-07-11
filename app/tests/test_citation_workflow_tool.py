@@ -355,6 +355,17 @@ def test_preconfirm_formatters_do_not_expose_raw_doi(tmp_path):
     assert "use mX ids" in selected
 
 
+def test_show_detail_is_marked_metadata_only(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+
+    detail = harness.run(action="show", identifier="c1")
+
+    assert "Grounding: metadata and snippet only" in detail
+    assert "DOI is withheld" in detail
+    assert DOI_A not in detail
+
+
 def test_new_search_resets_the_select_turn_rule(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
