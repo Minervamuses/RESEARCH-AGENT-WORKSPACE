@@ -1,12 +1,11 @@
 """Tests for active skill runtime loading."""
 
-from types import SimpleNamespace
-
 import pytest
 from langchain_core.tools import tool
 
 from agent.config import AgentConfig
 from agent.skills.runtime import load_skill_runtime, render_tool_availability_block
+from agent.tool_access import ToolAccessResolution, resolve_tool_access
 
 
 @tool("read_file")
@@ -27,6 +26,12 @@ def _bash(command: str) -> str:
     return command
 
 
+@tool("paper_helper")
+def _paper_helper(action: str) -> str:
+    """Skill-scoped helper tool."""
+    return action
+
+
 def _write_skill(tmp_path):
     skills_dir = tmp_path / "skills"
     root = skills_dir / "paper"
@@ -45,19 +50,15 @@ description: Use when writing a paper.
     (refs / "guide.md").write_text("guide text", encoding="utf-8")
     (root / "manifest.yaml").write_text(
         """
-capabilities:
+tools:
   required:
-    - file.read
-  optional:
-    - id: shell.execute
+    local:
+      - paper_helper
 resources:
   - path: references/guide.md
     pinned: true
 task_modes:
   - revision
-tool_policy:
-  disallow:
-    - bash
 """,
         encoding="utf-8",
     )
@@ -67,87 +68,110 @@ tool_policy:
 def test_load_skill_runtime_reads_skill_and_pinned_references(tmp_path):
     skills_dir, root = _write_skill(tmp_path)
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
-    capability_map = {
-        "capabilities": {
-            "file.read": {"local_tools": ["read_file"]},
-            "shell.execute": {"local_tools": ["bash"]},
-        }
-    }
 
     runtime = load_skill_runtime(
         "paper",
         config=cfg,
-        all_tools=[_read_file, _rag_search, _bash],
+        all_tools=[_read_file, _rag_search, _bash, _paper_helper],
         task_mode="revision",
-        capability_map=capability_map,
     )
 
     assert runtime.name == "paper"
     assert runtime.root == root.resolve()
     assert "# Paper" in runtime.instructions
     assert runtime.pinned_references == {"references/guide.md": "guide text"}
-    assert runtime.allowed_tools == frozenset({"read_file"})
-    assert runtime.denied_tools == frozenset({"bash"})
-    assert runtime.tool_policy_active is True
-    assert runtime.capability_resolution.requested_required == frozenset({"file.read"})
-    assert runtime.capability_resolution.requested_optional == frozenset({"shell.execute"})
-    assert runtime.capability_resolution.unresolved_optional == frozenset({"shell.execute"})
+    assert runtime.tool_access.skill_tools == ("paper_helper",)
+    assert runtime.tool_access.effective_tools == (
+        "read_file",
+        "rag_search",
+        "bash",
+        "paper_helper",
+    )
     assert runtime.task_mode == "revision"
 
 
-def test_load_skill_runtime_rejects_unknown_required_capability(tmp_path):
+def test_load_skill_runtime_blocks_on_missing_required_tool(tmp_path):
+    skills_dir, _root = _write_skill(tmp_path)
+    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
+
+    with pytest.raises(
+        ValueError,
+        match="required skill tools are unavailable: paper_helper",
+    ):
+        load_skill_runtime(
+            "paper",
+            config=cfg,
+            all_tools=[_read_file, _rag_search, _bash],
+        )
+
+
+def test_load_skill_runtime_rejects_legacy_capabilities_field(tmp_path):
     skills_dir, root = _write_skill(tmp_path)
     (root / "manifest.yaml").write_text(
         """
 capabilities:
   required:
-    - shell.exec
+    - file.read
 """,
         encoding="utf-8",
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
 
-    with pytest.raises(ValueError, match="shell.exec"):
-        load_skill_runtime(
-            "paper",
-            config=cfg,
-            all_tools=[_read_file, _bash],
-            capability_map={
-                "capabilities": {"shell.execute": {"local_tools": ["bash"]}}
-            },
-        )
+    with pytest.raises(ValueError, match="no longer supported"):
+        load_skill_runtime("paper", config=cfg, all_tools=[_read_file])
+
+
+def test_load_skill_runtime_rejects_legacy_tool_policy_field(tmp_path):
+    skills_dir, root = _write_skill(tmp_path)
+    (root / "manifest.yaml").write_text(
+        """
+tool_policy:
+  disallow:
+    - bash
+""",
+        encoding="utf-8",
+    )
+    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
+
+    with pytest.raises(ValueError, match="no longer supported"):
+        load_skill_runtime("paper", config=cfg, all_tools=[_read_file, _bash])
 
 
 def test_load_skill_runtime_rejects_manifest_typo_key(tmp_path):
     skills_dir, root = _write_skill(tmp_path)
     (root / "manifest.yaml").write_text(
         """
-capabilites:
+toolz:
   required:
-    - file.read
+    local:
+      - paper_helper
 """,
         encoding="utf-8",
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
 
-    with pytest.raises(ValueError, match="capabilites"):
-        load_skill_runtime(
-            "paper",
-            config=cfg,
-            all_tools=[_read_file],
-            capability_map={
-                "capabilities": {"file.read": {"local_tools": ["read_file"]}}
-            },
-        )
+    with pytest.raises(ValueError, match="toolz"):
+        load_skill_runtime("paper", config=cfg, all_tools=[_read_file])
+
+
+def test_load_skill_runtime_rejects_empty_tools_section(tmp_path):
+    skills_dir, root = _write_skill(tmp_path)
+    (root / "manifest.yaml").write_text(
+        """
+tools: {}
+""",
+        encoding="utf-8",
+    )
+    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
+
+    with pytest.raises(ValueError, match="tools section must request"):
+        load_skill_runtime("paper", config=cfg, all_tools=[_read_file])
 
 
 def test_load_skill_runtime_rejects_non_bool_pinned(tmp_path):
     skills_dir, root = _write_skill(tmp_path)
     (root / "manifest.yaml").write_text(
         """
-capabilities:
-  required:
-    - file.read
 resources:
   - path: references/guide.md
     pinned: "yes"
@@ -157,64 +181,26 @@ resources:
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
 
     with pytest.raises(ValueError, match="pinned"):
-        load_skill_runtime(
-            "paper",
-            config=cfg,
-            all_tools=[_read_file],
-            capability_map={
-                "capabilities": {"file.read": {"local_tools": ["read_file"]}}
-            },
-        )
+        load_skill_runtime("paper", config=cfg, all_tools=[_read_file])
 
 
-def test_load_skill_runtime_rejects_empty_capabilities_without_policy(tmp_path):
+def test_load_skill_runtime_allows_missing_optional_tool(tmp_path):
     skills_dir, root = _write_skill(tmp_path)
     (root / "manifest.yaml").write_text(
         """
-capabilities: {}
-""",
-        encoding="utf-8",
-    )
-    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
-
-    with pytest.raises(ValueError, match="capabilities must not be empty"):
-        load_skill_runtime(
-            "paper",
-            config=cfg,
-            all_tools=[_read_file],
-            capability_map={"capabilities": {}},
-        )
-
-
-def test_load_skill_runtime_allows_unavailable_optional_capability(tmp_path):
-    skills_dir, root = _write_skill(tmp_path)
-    (root / "manifest.yaml").write_text(
-        """
-capabilities:
-  required:
-    - file.read
+tools:
   optional:
-    - id: web.search
-      use_when: current venue information is needed
+    mcp_families:
+      - github
 """,
         encoding="utf-8",
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
 
-    runtime = load_skill_runtime(
-        "paper",
-        config=cfg,
-        all_tools=[_read_file],
-        capability_map={
-            "capabilities": {
-                "file.read": {"local_tools": ["read_file"]},
-                "web.search": {"mcp_families": ["web_search"]},
-            }
-        },
-    )
+    runtime = load_skill_runtime("paper", config=cfg, all_tools=[_read_file])
 
-    assert runtime.allowed_tools == frozenset({"read_file"})
-    assert runtime.capability_resolution.unresolved_optional == frozenset({"web.search"})
+    assert runtime.tool_access.missing_optional == ("github",)
+    assert runtime.tool_access.effective_tools == ("read_file",)
 
 
 def test_load_skill_runtime_rejects_oversized_pinned_reference(tmp_path):
@@ -230,10 +216,7 @@ def test_load_skill_runtime_rejects_oversized_pinned_reference(tmp_path):
         load_skill_runtime(
             "paper",
             config=cfg,
-            all_tools=[_read_file],
-            capability_map={
-                "capabilities": {"file.read": {"local_tools": ["read_file"]}}
-            },
+            all_tools=[_read_file, _paper_helper],
         )
 
 
@@ -250,10 +233,7 @@ def test_load_skill_runtime_rejects_oversized_total_skill_context(tmp_path):
         load_skill_runtime(
             "paper",
             config=cfg,
-            all_tools=[_read_file],
-            capability_map={
-                "capabilities": {"file.read": {"local_tools": ["read_file"]}}
-            },
+            all_tools=[_read_file, _paper_helper],
         )
 
 
@@ -263,8 +243,7 @@ def test_read_skill_resource_resolves_relative_to_skill_root(tmp_path):
     runtime = load_skill_runtime(
         "paper",
         config=cfg,
-        all_tools=[_read_file],
-        capability_map={"capabilities": {"file.read": {"local_tools": ["read_file"]}}},
+        all_tools=[_read_file, _paper_helper],
     )
 
     assert runtime.read_skill_resource("references/guide.md") == "guide text"
@@ -276,8 +255,7 @@ def test_read_skill_resource_blocks_path_escape(tmp_path):
     runtime = load_skill_runtime(
         "paper",
         config=cfg,
-        all_tools=[_read_file],
-        capability_map={"capabilities": {"file.read": {"local_tools": ["read_file"]}}},
+        all_tools=[_read_file, _paper_helper],
     )
 
     with pytest.raises(PermissionError, match="escapes skill root"):
@@ -290,8 +268,7 @@ def test_read_skill_resource_missing_file_has_clear_error(tmp_path):
     runtime = load_skill_runtime(
         "paper",
         config=cfg,
-        all_tools=[_read_file],
-        capability_map={"capabilities": {"file.read": {"local_tools": ["read_file"]}}},
+        all_tools=[_read_file, _paper_helper],
     )
 
     with pytest.raises(FileNotFoundError, match="does not exist"):
@@ -306,41 +283,50 @@ def test_load_skill_runtime_rejects_unknown_task_mode(tmp_path):
         load_skill_runtime(
             "paper",
             config=cfg,
-            all_tools=[_read_file],
+            all_tools=[_read_file, _paper_helper],
             task_mode="drafting",
-            capability_map={
-                "capabilities": {"file.read": {"local_tools": ["read_file"]}}
-            },
         )
 
 
 def test_render_tool_availability_block_for_active_skill():
-    runtime = SimpleNamespace(
-        name="paper",
-        task_mode="revision",
-        allowed_tools=frozenset({"read_file", "rag_search"}),
-        denied_tools=frozenset({"bash"}),
-        tool_policy_active=True,
+    resolution = ToolAccessResolution(
+        global_tools=("rag_search", "read_file", "bash"),
+        skill_tools=("paper_helper",),
+        effective_tools=("rag_search", "read_file", "bash", "paper_helper"),
+        missing_required=(),
+        missing_optional=(),
     )
 
     block = render_tool_availability_block(
-        skill_runtime=runtime,
-        base_tool_names=["rag_search", "read_file", "bash", "github_search"],
+        resolution=resolution,
+        active_skill="paper",
+        task_mode="revision",
+        all_tool_names=["rag_search", "read_file", "bash", "github_search", "paper_helper"],
         mcp_families={"github_search": "github"},
     )
 
     assert "active_skill: paper" in block
     assert "task_mode: revision" in block
-    assert "tool_policy_active: true" in block
-    assert "available_tools: rag_search, read_file" in block
-    assert "denied_tools: bash" in block
-    assert "unavailable_base_tools: bash, github_search" in block
-    assert 'Active skill policy overrides the base "always available" wording' in block
+    assert "available_tools: rag_search, read_file, bash, paper_helper" in block
+    assert "skill_tools: paper_helper" in block
+    assert "unavailable_tools: MCP family: github" in block
+    assert "skill_tools are added by the active skill" in block
 
 
 def test_render_tool_availability_block_without_active_skill_collapses_mcp_families():
+    resolution = resolve_tool_access(
+        None,
+        ["rag_search", "web_search_one", "web_search_two", "github_issue"],
+        mcp_families={
+            "web_search_one": "web_search",
+            "web_search_two": "web_search",
+            "github_issue": "github",
+        },
+    )
+
     block = render_tool_availability_block(
-        base_tool_names=[
+        resolution=resolution,
+        all_tool_names=[
             "rag_search",
             "web_search_one",
             "web_search_two",
@@ -354,32 +340,10 @@ def test_render_tool_availability_block_without_active_skill_collapses_mcp_famil
     )
 
     assert "active_skill: (none)" in block
-    assert "tool_policy_active: false" in block
-    assert "available_tools: rag_search, MCP family: web_search, MCP family: github" in block
+    assert "available_tools: rag_search, MCP family: web_search" in block
     assert "web_search_two" not in block
-    assert "denied_tools: (none)" in block
-
-
-def test_render_tool_availability_block_for_disallow_only_policy():
-    runtime = SimpleNamespace(
-        name="read-only",
-        task_mode=None,
-        allowed_tools=frozenset(),
-        denied_tools=frozenset({"bash"}),
-        tool_policy_active=True,
-    )
-
-    block = render_tool_availability_block(
-        skill_runtime=runtime,
-        base_tool_names=["read_file", "bash"],
-    )
-
-    assert "active_skill: read-only" in block
-    assert "task_mode: (none)" in block
-    assert "tool_policy_active: true" in block
-    assert "available_tools: read_file" in block
-    assert "denied_tools: bash" in block
-    assert "unavailable_base_tools: bash" in block
+    assert "unavailable_tools: MCP family: github" in block
+    assert "No active skill; only global tools are bound" in block
 
 
 def test_render_tool_availability_block_defaults_to_base_inventory():
@@ -388,13 +352,20 @@ def test_render_tool_availability_block_defaults_to_base_inventory():
     block = render_tool_availability_block()
 
     assert "active_skill: (none)" in block
-    assert "tool_policy_active: false" in block
     for name in base_tool_names():
         assert name in block
 
 
-def test_render_tool_availability_block_keeps_empty_list_semantics():
-    block = render_tool_availability_block(base_tool_names=[])
+def test_render_tool_availability_block_keeps_empty_resolution_semantics():
+    empty = ToolAccessResolution(
+        global_tools=(),
+        skill_tools=(),
+        effective_tools=(),
+        missing_required=(),
+        missing_optional=(),
+    )
+
+    block = render_tool_availability_block(resolution=empty)
 
     assert "available_tools: (none)" in block
-    assert "unavailable_base_tools: (none)" in block
+    assert "unavailable_tools: (none)" in block

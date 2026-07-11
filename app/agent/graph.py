@@ -8,7 +8,7 @@ from agent.config import AgentConfig
 from agent.llm.openrouter import get_chat_model
 from agent.policy_tool_node import PolicyToolNode
 from agent.state import AgentState, skill_runtime_to_agent_state
-from agent.tool_policy import evaluate_policy
+from agent.tool_access import resolve_tool_access
 from agent.tools import inventory as tool_inventory
 
 
@@ -64,6 +64,7 @@ def build_graph(
     history_store=None,
     skill_runtime_getter=None,
     skill_tools: list | None = None,
+    mcp_families: dict[str, str] | None = None,
 ):
     """Build and compile the conversational RAG agent graph.
 
@@ -73,63 +74,60 @@ def build_graph(
             tools loaded at startup) appended after the local agent tools.
         history_store: Optional store injected into the recall_history tool.
         skill_runtime_getter: Optional callable returning the active SkillRuntime.
-        skill_tools: Optional skill-only tools. They join the executable tool
-            universe but are bound/callable only while an active skill's
-            allowlist grants them — never in normal mode, never via a deny-only
-            policy. A name collision with a default tool fails fast.
+        skill_tools: Optional skill-scoped tools. They join the executable tool
+            universe but are bound/callable only while the active skill's
+            manifest requests them — never in normal mode. A name collision
+            with a base tool fails fast.
+        mcp_families: MCP tool-name to family map. Tools in the ``web_search``
+            family are global; other families are skill-scoped.
 
     Returns:
         A compiled LangGraph that accepts AgentState and manages
         the bounded agent ↔ tools loop for a single turn.
     """
     model = get_chat_model(config)
-    default_tools = tool_inventory.build_base_tools(
+    base_tools = tool_inventory.build_base_tools(
         config,
         history_store=history_store,
         extra_tools=extra_tools,
     )
     skill_tools = list(skill_tools or [])
-    default_names = [getattr(tool, "name", str(tool)) for tool in default_tools]
-    skill_only_names = frozenset(
+    base_names = [getattr(tool, "name", str(tool)) for tool in base_tools]
+    skill_tool_names = frozenset(
         getattr(tool, "name", str(tool)) for tool in skill_tools
     )
-    conflicts = skill_only_names.intersection(default_names)
+    conflicts = skill_tool_names.intersection(base_names)
     if conflicts:
         raise ValueError(
-            "skill-only tool names collide with default tools: "
+            "skill tool names collide with default tools: "
             + ", ".join(sorted(conflicts))
         )
-    tools = [*default_tools, *skill_tools]
+    tools = [*base_tools, *skill_tools]
     tools_by_name = {getattr(tool, "name", str(tool)): tool for tool in tools}
     tool_order = [getattr(tool, "name", str(tool)) for tool in tools]
-    # The no-skill default binding never includes skill-only tools.
-    bound_model_cache = {
-        (None, None, False, (), ()): model.bind_tools(default_tools),
-    }
+    # The normal-mode default binding: global tools only (local base tools
+    # plus web_search-family MCP tools) — never skill-scoped tools.
+    default_names = resolve_tool_access(
+        None,
+        tools,
+        mcp_families=mcp_families or {},
+    ).effective_tools
+    default_tools = [tools_by_name[name] for name in default_names]
+    bound_model_cache = {default_names: model.bind_tools(default_tools)}
 
-    def _select_tools(state: AgentState) -> list:
-        selected_names = evaluate_policy(
-            tool_order,
-            active=bool(state.get("tool_policy_active")),
-            allowed=state.get("allowed_tools") or (),
-            denied=state.get("denied_tools") or (),
-            skill_only=skill_only_names,
-        )
-        return [tools_by_name[name] for name in selected_names]
+    def _effective_names(state: AgentState) -> tuple[str, ...]:
+        effective = state.get("effective_tools")
+        if effective is None:
+            return default_names
+        selected = set(effective)
+        return tuple(name for name in tool_order if name in selected)
 
     def _model_for_state(state: AgentState):
-        policy_active = bool(state.get("tool_policy_active"))
-        allowed = tuple(sorted(state.get("allowed_tools") or []))
-        denied = tuple(sorted(state.get("denied_tools") or []))
-        key = (
-            state.get("active_skill"),
-            state.get("task_mode"),
-            policy_active,
-            allowed,
-            denied,
-        )
+        key = _effective_names(state)
         if key not in bound_model_cache:
-            bound_model_cache[key] = model.bind_tools(_select_tools(state))
+            bound_model_cache[key] = model.bind_tools(
+                [tools_by_name[name] for name in key]
+            )
         return bound_model_cache[key]
 
     def agent_node(state: AgentState):
@@ -172,7 +170,7 @@ def build_graph(
     graph.add_node("agent", agent_node)
     graph.add_node("tools", PolicyToolNode(
         tools,
-        skill_only_names=skill_only_names,
+        default_tool_names=default_names,
         handle_tool_errors=_tool_error_to_message,
     ))
 

@@ -136,7 +136,7 @@ def test_forged_workflow_call_outside_skill_is_denied_end_to_end(
         if isinstance(m, ToolMessage) and m.status == "error"
     ]
     assert len(denials) == 1
-    assert "skill-only tool not granted" in denials[0].content
+    assert "tool not available" in denials[0].content
     assert result.answer == "fallback answer"
     assert session._citation_coordinator is None  # noqa: SLF001
 
@@ -158,7 +158,7 @@ def test_workflow_call_under_other_skill_is_denied_end_to_end(
         if isinstance(m, ToolMessage) and m.status == "error"
     ]
     assert len(denials) == 1
-    assert "skill-only tool not granted" in denials[0].content
+    assert "tool not available" in denials[0].content
     assert session._citation_coordinator is None  # noqa: SLF001
 
 

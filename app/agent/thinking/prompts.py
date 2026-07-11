@@ -28,8 +28,8 @@ Finding routing contract, highest priority:
   do not ask the user to restate all research content. Use severity=minor or
   severity=note with needs_user_input=false, and allow an honest draft that says
   the search found insufficient records. A narrow follow-up question is allowed.
-- If the relevant history-retrieval tool appears under denied_tools or
-  unavailable_base_tools, emit severity=blocker with needs_user_input=true and
+- If the relevant history-retrieval tool appears under unavailable_tools,
+  emit severity=blocker with needs_user_input=true and
   decision=block; the revision_instruction must be user-readable and explain
   that this is a tool policy/settings problem.
 - If the user truly has not provided necessary information and the available
@@ -61,8 +61,8 @@ def rewrite_messages(
 {availability}
 
 請把使用者的 prompt 改寫成給該 agent 看的自然語言指令。
-若某工具或工具 family 不在 available_tools 內，或出現在 denied_tools /
-unavailable_base_tools 內，不要假設 target agent 可以使用它。
+若某工具或工具 family 不在 available_tools 內，或出現在 unavailable_tools 內，
+不要假設 target agent 可以使用它。
 
 硬性禁令：你不得新增以下「原始輸入、visible context 與 active skill context」
 三者都未提供的內容：

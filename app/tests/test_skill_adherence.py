@@ -34,17 +34,11 @@ description: Use when writing academic papers.
     (refs / "section-playbooks.md").write_text("section reference", encoding="utf-8")
     (root / "manifest.yaml").write_text(
         """
-capabilities:
-  required:
-    - file.read
 resources:
   - path: references/section-playbooks.md
     pinned: true
 task_modes:
   - revision
-tool_policy:
-  disallow:
-    - bash
 """,
         encoding="utf-8",
     )
@@ -105,9 +99,7 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
         "skill_instructions",
         "loaded_references",
         "task_mode",
-        "allowed_tools",
-        "denied_tools",
-        "tool_policy_active",
+        "effective_tools",
     }
     assert serialized_keys <= set(state)
     assert state["active_skill"] == "academic-paper-writing"
@@ -116,7 +108,6 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
     assert state["loaded_references"] == {
         "references/section-playbooks.md": "section reference"
     }
-    assert state["tool_policy_active"] is True
     assert "# Academic Paper Writing" in prompt_text
 
 
@@ -138,14 +129,14 @@ def test_active_skill_relative_reference_resolves_to_skill_bundle(tmp_path, monk
     assert payload["content"] == "section reference"
 
 
-def test_active_skill_policy_disallows_bash(tmp_path, monkeypatch):
+def test_active_skill_keeps_global_tools(tmp_path, monkeypatch):
     captured = {}
     session = _make_session(tmp_path, monkeypatch, captured)
     runtime = session.activate_skill("academic-paper-writing", "revision")
 
-    assert "read_file" in runtime.allowed_tools
-    assert "bash" in runtime.denied_tools
-    assert runtime.tool_policy_active is True
+    assert "read_file" in runtime.tool_access.effective_tools
+    assert "bash" in runtime.tool_access.effective_tools
+    assert runtime.tool_access.skill_tools == ()
 
 
 def test_no_skill_turn_keeps_skill_state_empty(tmp_path, monkeypatch):

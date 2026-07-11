@@ -214,7 +214,7 @@ def test_page_validation(tmp_path):
     assert "page only applies" in harness.run(action="status", page=2)
 
 
-def test_session_binds_citation_tool_as_skill_only(monkeypatch, tmp_path):
+def test_session_binds_citation_tool_as_skill_tool(monkeypatch, tmp_path):
     """ChatSession creates the tool and hands it to build_graph(skill_tools=…)."""
     from agent.config import AgentConfig
     from agent.session import ChatSession

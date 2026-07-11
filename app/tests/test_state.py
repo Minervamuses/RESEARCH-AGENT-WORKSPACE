@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agent.state import skill_runtime_to_agent_state
+from agent.tool_access import ToolAccessResolution
 
 _EXPECTED_KEYS = {
     "active_skill",
@@ -11,10 +12,18 @@ _EXPECTED_KEYS = {
     "skill_instructions",
     "loaded_references",
     "task_mode",
-    "allowed_tools",
-    "denied_tools",
-    "tool_policy_active",
+    "effective_tools",
 }
+
+
+def _resolution():
+    return ToolAccessResolution(
+        global_tools=("rag_search", "read_file", "bash"),
+        skill_tools=("citation_workflow",),
+        effective_tools=("rag_search", "read_file", "bash", "citation_workflow"),
+        missing_required=(),
+        missing_optional=(),
+    )
 
 
 def _runtime(**overrides):
@@ -24,9 +33,7 @@ def _runtime(**overrides):
         instructions="# Skill",
         pinned_references={"references/guide.md": "guide"},
         task_mode="revision",
-        allowed_tools=frozenset({"read_file", "bash"}),
-        denied_tools=frozenset({"rag_search", "recall_history"}),
-        tool_policy_active=True,
+        tool_access=_resolution(),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -45,14 +52,17 @@ def test_active_runtime_returns_exact_key_set_without_messages():
     assert state["skill_root"] == str(Path("/tmp/skills/paper-writing"))
     assert state["skill_instructions"] == "# Skill"
     assert state["task_mode"] == "revision"
-    assert state["tool_policy_active"] is True
 
 
-def test_allowed_and_denied_tools_are_sorted():
+def test_effective_tools_preserve_resolution_order():
     state = skill_runtime_to_agent_state(_runtime())
 
-    assert state["allowed_tools"] == ["bash", "read_file"]
-    assert state["denied_tools"] == ["rag_search", "recall_history"]
+    assert state["effective_tools"] == [
+        "rag_search",
+        "read_file",
+        "bash",
+        "citation_workflow",
+    ]
 
 
 def test_loaded_references_is_a_copy():
@@ -63,4 +73,3 @@ def test_loaded_references_is_a_copy():
 
     assert state["loaded_references"] == refs
     assert state["loaded_references"] is not refs
-

@@ -8,23 +8,40 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
-
-class OptionalCapability(BaseModel):
-    """Structured optional capability declaration."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    id: str
-    use_when: str | None = None
+_LEGACY_FIELDS = ("capabilities", "tool_policy")
+_LEGACY_FIELDS_ERROR = (
+    "Legacy manifest fields `capabilities` and `tool_policy` are no longer "
+    "supported. Use the `tools` section."
+)
 
 
-class Capabilities(BaseModel):
-    """Capability requirements declared by a skill."""
+class SkillToolSelector(BaseModel):
+    """One required/optional block of skill tool requests."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    required: list[str] = Field(default_factory=list)
-    optional: list[str | OptionalCapability] = Field(default_factory=list)
+    local: list[str] = Field(default_factory=list)
+    mcp_families: list[str] = Field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not self.local and not self.mcp_families
+
+
+class SkillTools(BaseModel):
+    """Skill-scoped tool requests declared by a manifest."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    required: SkillToolSelector = Field(default_factory=SkillToolSelector)
+    optional: SkillToolSelector = Field(default_factory=SkillToolSelector)
+
+    @model_validator(mode="after")
+    def reject_empty_tools_section(self) -> "SkillTools":
+        if self.required.is_empty() and self.optional.is_empty():
+            raise ValueError(
+                "tools section must request at least one local tool or MCP family"
+            )
+        return self
 
 
 class SkillResource(BaseModel):
@@ -37,37 +54,14 @@ class SkillResource(BaseModel):
     pinned: StrictBool = False
 
 
-class ToolPolicy(BaseModel):
-    """Tool policy declaration in a skill manifest."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    disallow: list[str] = Field(default_factory=list)
-
-
 class SkillManifest(BaseModel):
     """Validated skill manifest schema."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    capabilities: Capabilities | None = None
+    tools: SkillTools | None = None
     resources: list[SkillResource] = Field(default_factory=list)
     task_modes: list[str] = Field(default_factory=list)
-    tool_policy: ToolPolicy | None = None
-
-    @model_validator(mode="after")
-    def reject_empty_capabilities_without_policy(self) -> "SkillManifest":
-        has_empty_capabilities = (
-            self.capabilities is not None
-            and not self.capabilities.required
-            and not self.capabilities.optional
-        )
-        has_disallow_policy = bool(self.tool_policy and self.tool_policy.disallow)
-        if has_empty_capabilities and not has_disallow_policy:
-            raise ValueError(
-                "capabilities must not be empty unless tool_policy.disallow is set"
-            )
-        return self
 
 
 def validate_skill_manifest(
@@ -76,6 +70,9 @@ def validate_skill_manifest(
     source: str | Path = "manifest.yaml",
 ) -> dict[str, Any]:
     """Validate a manifest mapping and return a normalized plain dict."""
+    legacy = [field for field in _LEGACY_FIELDS if field in data]
+    if legacy:
+        raise ValueError(f"invalid skill manifest: {source}: {_LEGACY_FIELDS_ERROR}")
     try:
         manifest = SkillManifest.model_validate(data)
     except ValidationError as exc:

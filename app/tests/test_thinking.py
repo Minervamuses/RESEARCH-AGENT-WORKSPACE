@@ -158,9 +158,8 @@ def test_rewrite_prompt_includes_runtime_tool_availability():
     tool_block = (
         "[Tool availability]\n"
         "active_skill: paper\n"
-        "tool_policy_active: true\n"
         "available_tools: alpha_search\n"
-        "denied_tools: shell_runner"
+        "unavailable_tools: shell_runner"
     )
 
     rewrite_prompt(
@@ -249,7 +248,6 @@ def test_review_draft_invokes_model_with_evidence_and_rebuttal():
     model = _QueuedModel([_report_json("pass")])
     tool_block = (
         "[Tool availability]\n"
-        "tool_policy_active: true\n"
         "available_tools: alpha_search"
     )
 
@@ -284,9 +282,8 @@ def test_review_prompt_includes_retrieval_failure_routing_contract():
         evidence_trace_summary="=== [Writer] ===\nTool calls: none",
         tool_availability=(
             "[Tool availability]\n"
-            "tool_policy_active: true\n"
-            "available_tools: recall_history\n"
-            "denied_tools: (none)"
+                "available_tools: recall_history\n"
+            "unavailable_tools: (none)"
         ),
     )
 
@@ -324,9 +321,8 @@ def test_history_retrieval_gap_routes_to_revise_not_ask_user():
         evidence_trace_summary="=== [Writer] ===\nTool calls: none",
         tool_availability=(
             "[Tool availability]\n"
-            "tool_policy_active: true\n"
-            "available_tools: recall_history\n"
-            "denied_tools: (none)"
+                "available_tools: recall_history\n"
+            "unavailable_tools: (none)"
         ),
     )
 

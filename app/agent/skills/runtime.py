@@ -9,14 +9,10 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from agent.config import AgentConfig
-from agent.skills.broker import (
-    CapabilityResolution,
-    load_capability_map,
-    resolve_capabilities,
-)
+from agent.skills.broker import resolve_skill_tool_access
 from agent.skills.manifest_schema import validate_skill_manifest
 from agent.skills.metadata import SkillMetadata, discover_skills, load_skill_file
-from agent.tool_policy import evaluate_policy
+from agent.tool_access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 
 
@@ -32,15 +28,8 @@ class SkillRuntime:
     instructions: str
     manifest: Mapping[str, Any]
     pinned_references: dict[str, str]
-    allowed_tools: frozenset[str]
-    denied_tools: frozenset[str]
-    capability_resolution: CapabilityResolution
+    tool_access: ToolAccessResolution
     task_mode: str | None = None
-
-    @property
-    def tool_policy_active(self) -> bool:
-        """Whether this skill has an active tool policy."""
-        return self.capability_resolution.policy_active
 
     def read_skill_resource(self, rel_path: str) -> str:
         """Read a resource path relative to this skill root."""
@@ -80,70 +69,54 @@ class SkillRuntime:
 
 def render_tool_availability_block(
     *,
-    skill_runtime: SkillRuntime | None = None,
-    base_tool_names: Sequence[str] | None = None,
+    resolution: ToolAccessResolution | None = None,
+    active_skill: str | None = None,
+    task_mode: str | None = None,
+    all_tool_names: Sequence[str] | None = None,
     mcp_families: Mapping[str, str] | None = None,
 ) -> str:
-    """Render prompt-visible tool availability from runtime state.
+    """Render prompt-visible tool availability from a shared resolution.
 
-    The active graph remains the source of truth for actual tool binding. This
-    helper renders the same state for prompts so rewriter, writer, and reviewer
-    do not carry their own stale tool lists.
+    The graph binds exactly ``resolution.effective_tools``; this helper renders
+    the same resolution for prompts so rewriter, writer, and reviewer never
+    carry their own stale tool lists. ``all_tool_names`` is the full tool
+    universe; names outside ``effective_tools`` are listed as unavailable.
 
-    ``base_tool_names=None`` falls back to the shared base tool inventory so a
-    caller that omits the list still renders the real base tools. A caller that
-    passes ``[]`` explicitly keeps the empty-list semantics.
+    ``resolution=None`` falls back to the normal-mode resolution over the
+    shared base tool inventory, so a caller that omits everything still
+    renders the real global tools.
     """
-    if base_tool_names is None:
-        base_tool_names = tool_inventory.base_tool_names()
-    base_names = _dedupe_strings(base_tool_names)
-    denied_names = set(getattr(skill_runtime, "denied_tools", frozenset()) or ())
-    allowed_names = set(getattr(skill_runtime, "allowed_tools", frozenset()) or ())
-    policy_active = bool(
-        getattr(skill_runtime, "tool_policy_active", False)
-        if skill_runtime is not None
-        else False
-    )
-
-    available_names = evaluate_policy(
-        base_names,
-        active=policy_active,
-        allowed=allowed_names,
-        denied=denied_names,
-    )
-    if policy_active and allowed_names:
-        # Render-only extension: allowed names outside the base universe are
-        # appended (sorted) so the prompt shows the skill's full allowlist.
-        available_names.extend(
-            name
-            for name in sorted(allowed_names - denied_names)
-            if name not in set(available_names)
+    if resolution is None:
+        resolution = resolve_tool_access(
+            None,
+            all_tool_names
+            if all_tool_names is not None
+            else tool_inventory.base_tool_names(),
+            mcp_families=mcp_families or {},
         )
-
-    unavailable_base_names = [
+    effective = _dedupe_strings(resolution.effective_tools)
+    skill_tools = _dedupe_strings(resolution.skill_tools)
+    unavailable = [
         name
-        for name in base_names
-        if name not in set(available_names) and (policy_active or name in denied_names)
+        for name in _dedupe_strings(all_tool_names or ())
+        if name not in set(effective)
     ]
-
-    active_skill = getattr(skill_runtime, "name", None) if skill_runtime else None
-    task_mode = getattr(skill_runtime, "task_mode", None) if skill_runtime else None
 
     lines = [
         "[Tool availability]",
         f"active_skill: {active_skill or _NONE}",
         f"task_mode: {task_mode or _NONE}",
-        f"tool_policy_active: {str(policy_active).lower()}",
-        f"available_tools: {_format_tool_names(available_names, mcp_families if not policy_active else None)}",
-        f"denied_tools: {_format_tool_names(sorted(denied_names), None)}",
-        f"unavailable_base_tools: {_format_tool_names(unavailable_base_names, mcp_families if not policy_active else None)}",
+        f"available_tools: {_format_tool_names(effective, mcp_families)}",
+        f"skill_tools: {_format_tool_names(skill_tools, mcp_families)}",
+        f"unavailable_tools: {_format_tool_names(unavailable, mcp_families)}",
     ]
-    if policy_active:
+    if active_skill:
         lines.append(
-            'note: Active skill policy overrides the base "always available" wording.'
+            "note: Global tools stay available; skill_tools are added by the "
+            "active skill."
         )
     else:
-        lines.append("note: No active skill policy; use graph-bound base tools.")
+        lines.append("note: No active skill; only global tools are bound.")
     return "\n".join(lines)
 
 
@@ -187,9 +160,8 @@ def load_skill_runtime(
     all_tools: Sequence[Any],
     mcp_families: Mapping[str, str] | None = None,
     task_mode: str | None = None,
-    capability_map: Mapping[str, Any] | None = None,
 ) -> SkillRuntime:
-    """Load a skill and resolve its runtime tool policy."""
+    """Load a skill and resolve its runtime tool access."""
     metadata = find_skill_metadata(name, config=config)
     if metadata is None:
         raise KeyError(f"unknown skill: {name}")
@@ -199,14 +171,10 @@ def load_skill_runtime(
     _validate_task_mode(task_mode, manifest)
 
     _frontmatter, instructions = load_skill_file(metadata.path)
-    cap_map = capability_map or load_capability_map(
-        getattr(config, "skill_capability_map_path", None)
-    )
-    capability_resolution = resolve_capabilities(
+    tool_access = resolve_skill_tool_access(
         manifest,
         all_tools,
-        mcp_families or {},
-        cap_map,
+        mcp_families=mcp_families or {},
     )
     runtime = SkillRuntime(
         name=metadata.name,
@@ -214,9 +182,7 @@ def load_skill_runtime(
         instructions=instructions,
         manifest=manifest,
         pinned_references={},
-        allowed_tools=capability_resolution.allowed,
-        denied_tools=capability_resolution.denied,
-        capability_resolution=capability_resolution,
+        tool_access=tool_access,
         task_mode=task_mode,
     )
     pinned_references = _load_pinned_references(runtime, manifest, config)
@@ -231,9 +197,7 @@ def load_skill_runtime(
         instructions=runtime.instructions,
         manifest=runtime.manifest,
         pinned_references=pinned_references,
-        allowed_tools=runtime.allowed_tools,
-        denied_tools=runtime.denied_tools,
-        capability_resolution=runtime.capability_resolution,
+        tool_access=runtime.tool_access,
         task_mode=runtime.task_mode,
     )
 

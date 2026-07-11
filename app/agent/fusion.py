@@ -15,7 +15,6 @@ import dataclasses
 import logging
 import time
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import SystemMessage
@@ -47,7 +46,7 @@ from agent.thinking import (
     trim_head,
     trim_tail,
 )
-from agent.tool_policy import evaluate_policy
+from agent.tool_access import ToolAccessResolution
 from agent.tools import inventory as tool_inventory
 from agent.memory import assemble_prompt_history
 
@@ -132,51 +131,36 @@ class FusionOrchestrator:
 
     # --- Fusion proposer tool policy ---------------------------------------
 
-    def _extra_tool_names(self) -> list[str]:
-        return [getattr(tool, "name", str(tool)) for tool in self._session.extra_tools]
+    def _proposer_read_only_names(self) -> list[str]:
+        """Read-only allowlist intersected with the session's effective tools.
 
-    def _mcp_tool_names(self) -> list[str]:
-        return list(self._session.mcp_families.keys())
-
-    def _proposer_read_only_allowed(self) -> list[str]:
-        """Read-only allowlist intersected with the active skill policy.
-
-        With no active skill the proposer is still policy-active and limited to
-        the read-only allowlist; it never falls back to all tools. With an active
-        skill, the allowlist is intersected with the skill's own tool policy.
+        Proposers never fall back to the session's full tool set: the fixed
+        read-only allowlist is intersected with the shared tool access
+        resolution (the active skill's, or normal mode's), so bash, extra
+        tools, and MCP tools are excluded regardless of the active skill.
         """
-        base_names = set(tool_inventory.base_tool_names())
-        present = [name for name in FUSION_READ_ONLY_ALLOWLIST if name in base_names]
-        runtime = self._session.active_skill_runtime
-        if runtime is None:
-            return present
-        return evaluate_policy(
-            present,
-            active=bool(runtime.tool_policy_active),
-            allowed=runtime.allowed_tools or (),
-            denied=runtime.denied_tools or (),
-        )
+        effective = set(self._session.tool_access_resolution().effective_tools)
+        return [name for name in FUSION_READ_ONLY_ALLOWLIST if name in effective]
 
-    def _proposer_read_only_denied(self) -> list[str]:
-        """Tools explicitly excluded from read-only proposers (for transparency)."""
-        denied = {"bash", *self._extra_tool_names(), *self._mcp_tool_names()}
-        runtime = self._session.active_skill_runtime
-        if runtime is not None:
-            denied.update(runtime.denied_tools or ())
-        return sorted(denied)
+    def _proposer_resolution(self) -> ToolAccessResolution:
+        names = tuple(self._proposer_read_only_names())
+        return ToolAccessResolution(
+            global_tools=names,
+            skill_tools=(),
+            effective_tools=names,
+            missing_required=(),
+            missing_optional=(),
+        )
 
     def _read_only_tool_availability_block(self) -> str:
         runtime = self._session.active_skill_runtime
-        policy = SimpleNamespace(
-            name=getattr(runtime, "name", None) if runtime else None,
-            task_mode=getattr(runtime, "task_mode", None) if runtime else None,
-            allowed_tools=frozenset(self._proposer_read_only_allowed()),
-            denied_tools=frozenset(self._proposer_read_only_denied()),
-            tool_policy_active=True,
-        )
         return render_tool_availability_block(
-            skill_runtime=policy,
-            base_tool_names=tool_inventory.base_tool_names(),
+            resolution=self._proposer_resolution(),
+            active_skill=getattr(runtime, "name", None) if runtime else None,
+            task_mode=getattr(runtime, "task_mode", None) if runtime else None,
+            all_tool_names=tool_inventory.base_tool_names(
+                extra_tools=self._session.extra_tools
+            ),
             mcp_families=None,
         )
 
@@ -203,9 +187,7 @@ class FusionOrchestrator:
             "skill_instructions": runtime.instructions if runtime else None,
             "loaded_references": dict(runtime.pinned_references) if runtime else {},
             "task_mode": runtime.task_mode if runtime else None,
-            "allowed_tools": sorted(self._proposer_read_only_allowed()),
-            "denied_tools": self._proposer_read_only_denied(),
-            "tool_policy_active": True,
+            "effective_tools": self._proposer_read_only_names(),
         }
 
     def _proposer_prompt_history(self, availability_block: str) -> list:

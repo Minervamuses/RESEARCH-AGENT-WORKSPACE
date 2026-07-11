@@ -1,34 +1,33 @@
-"""ToolNode wrapper that enforces active skill tool policy."""
+"""ToolNode wrapper that enforces the shared tool access resolution."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.prebuilt import ToolNode
 
-from agent.tool_policy import evaluate_policy
-
 
 class PolicyToolNode(ToolNode):
-    """Delegate to ToolNode, denying calls outside the active skill policy.
+    """Delegate to ToolNode, denying calls outside the effective tool set.
 
-    ``skill_only_names`` are enforced even when no policy is active: a forged
-    call to a skill-only tool from normal mode (or from a skill whose
-    allowlist does not grant it) is answered with an error ToolMessage and
-    never executed.
+    The effective set comes from the same ToolAccessResolution the graph
+    bound: ``state["effective_tools"]`` when present (active skill or
+    proposer state), otherwise the graph's default global tool names. A
+    forged call to a tool outside that set — e.g. a skill-scoped tool from
+    normal mode — is answered with an error ToolMessage and never executed.
     """
 
     def __init__(
         self,
         tools: list,
         *,
-        skill_only_names: frozenset[str] | set[str] = frozenset(),
+        default_tool_names: Iterable[str],
         **tool_node_kwargs: Any,
     ):
         super().__init__(tools, **tool_node_kwargs)
-        self._skill_only_names = frozenset(skill_only_names or ())
+        self._default_tool_names = frozenset(default_tool_names)
 
     def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         decision = self._partition(input)
@@ -50,15 +49,15 @@ class PolicyToolNode(ToolNode):
         allowed_result = await super().ainvoke(allowed_input, config=config, **kwargs)
         return {"messages": _merge_tool_messages(call_order, denied_messages, allowed_result)}
 
+    def _effective_names(self, input: Mapping) -> frozenset[str]:
+        effective = input.get("effective_tools")
+        if effective is None:
+            return self._default_tool_names
+        return frozenset(effective)
+
     def _partition(self, input: Any):
         if not isinstance(input, Mapping):
             return None
-
-        policy_active = bool(input.get("tool_policy_active"))
-        if not policy_active and not self._skill_only_names:
-            return None
-        allowed = set(input.get("allowed_tools") or [])
-        denied = set(input.get("denied_tools") or [])
 
         messages = input.get("messages") or []
         if not messages:
@@ -67,6 +66,7 @@ class PolicyToolNode(ToolNode):
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return None
 
+        effective_names = self._effective_names(input)
         allowed_calls: list[dict] = []
         denied_messages: list[ToolMessage] = []
         call_order: list[str] = []
@@ -74,21 +74,11 @@ class PolicyToolNode(ToolNode):
             name = call.get("name", "")
             call_id = call.get("id", "")
             call_order.append(call_id)
-            if evaluate_policy(
-                [name],
-                active=policy_active,
-                allowed=allowed,
-                denied=denied,
-                skill_only=self._skill_only_names,
-            ):
+            if name in effective_names:
                 allowed_calls.append(call)
             else:
-                if name in self._skill_only_names:
-                    reason = f"skill-only tool not granted by the active skill: {name}"
-                else:
-                    reason = f"denied by active skill policy: {name}"
                 denied_messages.append(ToolMessage(
-                    content=f"Tool error: {reason}",
+                    content=f"Tool error: tool not available in the current mode: {name}",
                     tool_call_id=call_id,
                     name=name,
                     status="error",

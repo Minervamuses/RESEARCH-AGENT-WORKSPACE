@@ -1,12 +1,3 @@
-capabilities:
-  required:
-    - file.read
-    - rag.search
-    - history.search
-  optional:
-    - id: web.search
-      use_when: target journal guidelines or current venue information is needed
-
 resources:
   - path: references/section-playbooks.md
     use_when: abstract, title, keywords, empirical paper sections, or paragraph-level revision
@@ -29,7 +20,3 @@ task_modes:
   - literature-review
   - drafting
   - submission-support
-
-tool_policy:
-  disallow:
-    - bash

@@ -40,7 +40,7 @@ class _Factory:
         self.calls: list[dict] = []
 
     def __call__(self, cfg, extra_tools=None, history_store=None,
-                 skill_runtime_getter=None, skill_tools=None):
+                 skill_runtime_getter=None, skill_tools=None, mcp_families=None):
         self.built.append({
             "model_id": cfg.llm_model,
             "max_tool_interactions": cfg.agent_max_tool_interactions,
@@ -444,7 +444,7 @@ def test_plan_log_uses_candidate_scoped_trace_without_collision(monkeypatch, tmp
     assert "RES1" not in assistant_block and "RES2" not in assistant_block
 
 
-def test_no_active_skill_proposer_is_policy_active_read_only(monkeypatch, tmp_path):
+def test_no_active_skill_proposer_is_read_only(monkeypatch, tmp_path):
     factory = _Factory(scripts={"p1": [_answer("a1")]})
     session = _make_session(
         monkeypatch, tmp_path, factory,
@@ -454,12 +454,10 @@ def test_no_active_skill_proposer_is_policy_active_read_only(monkeypatch, tmp_pa
     asyncio.run(session.turn("question"))
 
     state = _state_for(factory, "p1")
-    assert state["tool_policy_active"] is True
-    assert state["allowed_tools"] == sorted([
+    assert state["effective_tools"] == [
         "rag_explore", "rag_search", "rag_get_context", "recall_history", "read_file",
-    ])
-    assert "bash" not in state["allowed_tools"]
-    assert "bash" in state["denied_tools"]
+    ]
+    assert "bash" not in state["effective_tools"]
     assert state["active_skill"] is None
     assert state["skill_instructions"] is None
 
@@ -471,14 +469,13 @@ def test_default_proposer_state_excludes_bash_extra_mcp(monkeypatch, tmp_path):
         models=_default_models(), cfg=_cfg(tmp_path, proposer_models=["p1"]),
     )
     session.extra_tools = [SimpleNamespace(name="extratool")]
-    session.mcp_families = {"mcp_tool": "web_search"}
+    session.mcp_families = {"extratool": "web_search"}
 
     asyncio.run(session.turn("question"))
 
     state = _state_for(factory, "p1")
-    assert "extratool" not in state["allowed_tools"]
-    assert "mcp_tool" not in state["allowed_tools"]
-    assert {"bash", "extratool", "mcp_tool"} <= set(state["denied_tools"])
+    assert "extratool" not in state["effective_tools"]
+    assert "bash" not in state["effective_tools"]
 
 
 def test_proposer_prompt_availability_matches_bound_tools(monkeypatch, tmp_path):
@@ -493,12 +490,26 @@ def test_proposer_prompt_availability_matches_bound_tools(monkeypatch, tmp_path)
     state = _state_for(factory, "p1")
     prompt_text = "\n".join(str(m.content) for m in state["messages"])
     assert "[Tool availability]" in prompt_text
-    assert "tool_policy_active: true" in prompt_text
     assert "available_tools: rag_explore" in prompt_text
-    assert "denied_tools: bash" in prompt_text
+    assert "unavailable_tools: bash" in prompt_text
 
 
-def test_active_skill_proposer_keeps_instructions_with_read_only_policy(monkeypatch, tmp_path):
+def _skill_resolution(effective):
+    from agent.tool_access import ToolAccessResolution
+
+    effective = tuple(effective)
+    return ToolAccessResolution(
+        global_tools=effective,
+        skill_tools=(),
+        effective_tools=effective,
+        missing_required=(),
+        missing_optional=(),
+    )
+
+
+def test_active_skill_proposer_keeps_instructions_with_read_only_intersection(
+    monkeypatch, tmp_path,
+):
     factory = _Factory(scripts={"p1": [_answer("a1")]})
     session = _make_session(
         monkeypatch, tmp_path, factory,
@@ -511,9 +522,7 @@ def test_active_skill_proposer_keeps_instructions_with_read_only_policy(monkeypa
         instructions="# Paper instructions",
         pinned_references={},
         task_mode="revision",
-        allowed_tools=frozenset({"read_file"}),
-        denied_tools=frozenset({"bash"}),
-        tool_policy_active=True,
+        tool_access=_skill_resolution(["read_file", "bash"]),
         context_block=lambda: "[Active skill]\nname: paper",
     )
 
@@ -522,12 +531,11 @@ def test_active_skill_proposer_keeps_instructions_with_read_only_policy(monkeypa
     state = _state_for(factory, "p1")
     assert state["active_skill"] == "paper"
     assert state["skill_instructions"] == "# Paper instructions"
-    # read-only allowlist intersected with the skill's own allowed tools.
-    assert state["allowed_tools"] == ["read_file"]
-    assert state["tool_policy_active"] is True
+    # read-only allowlist intersected with the skill's effective tools.
+    assert state["effective_tools"] == ["read_file"]
 
 
-def test_active_skill_deny_only_intersects_read_only(monkeypatch, tmp_path):
+def test_active_skill_effective_tools_intersect_read_only(monkeypatch, tmp_path):
     factory = _Factory(scripts={"p1": [_answer("a1")]})
     session = _make_session(
         monkeypatch, tmp_path, factory,
@@ -540,19 +548,20 @@ def test_active_skill_deny_only_intersects_read_only(monkeypatch, tmp_path):
         instructions="# Paper",
         pinned_references={},
         task_mode=None,
-        allowed_tools=frozenset(),
-        denied_tools=frozenset({"read_file"}),
-        tool_policy_active=True,
+        tool_access=_skill_resolution([
+            "rag_explore", "rag_search", "rag_get_context", "recall_history", "bash",
+        ]),
         context_block=lambda: "[Active skill]\nname: paper",
     )
 
     asyncio.run(session.turn("question"))
 
     state = _state_for(factory, "p1")
-    assert state["allowed_tools"] == sorted([
+    assert state["effective_tools"] == [
         "rag_explore", "rag_search", "rag_get_context", "recall_history",
-    ])
-    assert "read_file" not in state["allowed_tools"]
+    ]
+    assert "read_file" not in state["effective_tools"]
+    assert "bash" not in state["effective_tools"]
 
 
 def test_extended_records_configuration_error(monkeypatch, tmp_path):

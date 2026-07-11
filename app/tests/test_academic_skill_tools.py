@@ -1,14 +1,14 @@
-"""Regression tests for academic-paper-writing tool policy."""
+"""Regression tests for the academic-paper-writing skill's tool access."""
 
 from pathlib import Path
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from agent.config import AgentConfig
 from agent.graph import build_graph
 from agent.skills.runtime import load_skill_runtime
+from agent.tool_access import resolve_tool_access
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +50,15 @@ def _bash(command: str) -> str:
     return command
 
 
+@tool("full-web-search")
+def _full_web_search(query: str) -> str:
+    """Search the web."""
+    return query
+
+
+MCP_FAMILIES = {"full-web-search": "web_search"}
+
+
 def _cfg(tmp_path) -> AgentConfig:
     return AgentConfig(
         persist_dir=str(tmp_path / "persist"),
@@ -57,7 +66,7 @@ def _cfg(tmp_path) -> AgentConfig:
     )
 
 
-def _all_local_tools() -> list:
+def _all_tools() -> list:
     return [
         _rag_explore,
         _rag_search,
@@ -65,50 +74,46 @@ def _all_local_tools() -> list:
         _recall_history,
         _read_file,
         _bash,
+        _full_web_search,
     ]
 
 
-def test_academic_skill_resolves_history_capability_and_denies_shell(tmp_path):
+def test_writing_keeps_same_tools_as_normal_mode(tmp_path):
+    normal = resolve_tool_access(None, _all_tools(), mcp_families=MCP_FAMILIES)
+
     runtime = load_skill_runtime(
         "academic-paper-writing",
         config=_cfg(tmp_path),
-        all_tools=_all_local_tools(),
+        all_tools=_all_tools(),
+        mcp_families=MCP_FAMILIES,
     )
 
-    assert runtime.tool_policy_active is True
-    assert runtime.capability_resolution.requested_required == frozenset({
-        "file.read",
-        "rag.search",
-        "history.search",
-    })
-    assert runtime.capability_resolution.unresolved_required == frozenset()
-    assert {
-        "read_file",
-        "rag_explore",
-        "rag_search",
-        "rag_get_context",
-        "recall_history",
-    }.issubset(runtime.allowed_tools)
-    assert "bash" in runtime.denied_tools
-    assert "bash" not in runtime.allowed_tools
+    assert runtime.tool_access.effective_tools == normal.effective_tools
+    assert runtime.tool_access.skill_tools == ()
+    assert "bash" in runtime.tool_access.effective_tools
+    assert "full-web-search" in runtime.tool_access.effective_tools
 
 
-def test_academic_skill_fails_fast_when_history_capability_cannot_resolve(tmp_path):
-    with pytest.raises(ValueError, match="history.search"):
-        load_skill_runtime(
-            "academic-paper-writing",
-            config=_cfg(tmp_path),
-            all_tools=[
-                _rag_explore,
-                _rag_search,
-                _rag_get_context,
-                _read_file,
-                _bash,
-            ],
-        )
+def test_writing_activation_does_not_require_web_search(tmp_path):
+    runtime = load_skill_runtime(
+        "academic-paper-writing",
+        config=_cfg(tmp_path),
+        all_tools=[
+            _rag_explore,
+            _rag_search,
+            _rag_get_context,
+            _recall_history,
+            _read_file,
+            _bash,
+        ],
+        mcp_families={},
+    )
+
+    assert runtime.tool_access.missing_required == ()
+    assert "full-web-search" not in runtime.tool_access.effective_tools
 
 
-def test_academic_skill_writer_binding_includes_recall_history_schema(
+def test_academic_skill_writer_binding_matches_normal_mode(
     monkeypatch,
     tmp_path,
 ):
@@ -127,7 +132,7 @@ def test_academic_skill_writer_binding_includes_recall_history_schema(
     runtime = load_skill_runtime(
         "academic-paper-writing",
         config=_cfg(tmp_path),
-        all_tools=_all_local_tools(),
+        all_tools=_all_tools()[:-1],  # local base tools only
     )
 
     monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: RecordingModel())
@@ -154,13 +159,15 @@ def test_academic_skill_writer_binding_includes_recall_history_schema(
         ],
     })
 
-    active_skill_bindings = bind_calls[1:]
-    assert active_skill_bindings
-    assert active_skill_bindings[-1] == [
+    expected = [
         "rag_explore",
         "rag_search",
         "rag_get_context",
         "recall_history",
         "read_file",
+        "bash",
     ]
-    assert "bash" not in active_skill_bindings[-1]
+    # The default binding and the active-skill binding are identical: the
+    # writing skill adds no tools and removes none.
+    assert bind_calls[0] == expected
+    assert all(call == expected for call in bind_calls)

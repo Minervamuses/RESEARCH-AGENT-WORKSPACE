@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 
 from agent.config import AgentConfig
 from agent.graph import build_graph
+from agent.tool_access import ToolAccessResolution
 
 
 class _DummyModel:
@@ -54,6 +55,18 @@ def _patch_graph_tools(monkeypatch):
     )
 
 
+def _resolution(effective, skill=()):
+    effective = tuple(effective)
+    skill = tuple(skill)
+    return ToolAccessResolution(
+        global_tools=tuple(name for name in effective if name not in set(skill)),
+        skill_tools=skill,
+        effective_tools=effective,
+        missing_required=(),
+        missing_optional=(),
+    )
+
+
 def test_skill_loader_no_skill_is_noop(monkeypatch, tmp_path):
     _patch_graph_tools(monkeypatch)
     cfg = AgentConfig(persist_dir=str(tmp_path))
@@ -73,9 +86,7 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
         instructions="# Skill",
         pinned_references={"references/guide.md": "guide"},
         task_mode="revision",
-        allowed_tools=frozenset({"read_file"}),
-        denied_tools=frozenset({"bash"}),
-        tool_policy_active=True,
+        tool_access=_resolution(["read_file"]),
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg, skill_runtime_getter=lambda: runtime)
@@ -89,9 +100,7 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
         "skill_instructions",
         "loaded_references",
         "task_mode",
-        "allowed_tools",
-        "denied_tools",
-        "tool_policy_active",
+        "effective_tools",
     }
     assert serialized_keys <= set(result)
     assert result["active_skill"] == "paper-writing"
@@ -99,12 +108,10 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
     assert result["skill_instructions"] == "# Skill"
     assert result["loaded_references"] == {"references/guide.md": "guide"}
     assert result["task_mode"] == "revision"
-    assert result["allowed_tools"] == ["read_file"]
-    assert result["denied_tools"] == ["bash"]
-    assert result["tool_policy_active"] is True
+    assert result["effective_tools"] == ["read_file"]
 
 
-def test_agent_node_binds_filtered_tools_for_active_skill(monkeypatch, tmp_path):
+def test_agent_node_binds_effective_tools_for_active_skill(monkeypatch, tmp_path):
     bind_calls: list[list[str]] = []
 
     class RecordingModel:
@@ -132,9 +139,7 @@ def test_agent_node_binds_filtered_tools_for_active_skill(monkeypatch, tmp_path)
         "messages": [HumanMessage(content="hi")],
         "active_skill": "paper-writing",
         "task_mode": "revision",
-        "allowed_tools": ["read_file"],
-        "denied_tools": ["bash"],
-        "tool_policy_active": True,
+        "effective_tools": ["read_file"],
     }
 
     graph.invoke(state)
@@ -152,7 +157,60 @@ def test_agent_node_binds_filtered_tools_for_active_skill(monkeypatch, tmp_path)
     assert len(bind_calls) == 2
 
 
-def test_agent_node_binds_all_except_denied_for_disallow_only_policy(
+def test_agent_node_binding_preserves_universe_order(monkeypatch, tmp_path):
+    bind_calls: list[list[str]] = []
+
+    class RecordingModel:
+        def bind_tools(self, tools):
+            bind_calls.append([tool.name for tool in tools])
+
+            class Bound:
+                def invoke(self, _messages):
+                    return AIMessage(content="ok")
+
+            return Bound()
+
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: RecordingModel())
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    cfg = AgentConfig(persist_dir=str(tmp_path))
+    graph = build_graph(cfg)
+
+    graph.invoke({
+        "messages": [HumanMessage(content="hi")],
+        "active_skill": "paper-writing",
+        "effective_tools": ["read_file", "rag_explore", "recall_history"],
+    })
+
+    # The binding follows the tool-universe order, not the state list order.
+    assert bind_calls[1] == ["rag_explore", "recall_history", "read_file"]
+
+
+@tool("citation_workflow")
+def _citation_workflow(action: str) -> str:
+    """Skill-scoped workflow tool."""
+    return action
+
+
+@tool("github_search")
+def _github_search(query: str) -> str:
+    """GitHub MCP tool."""
+    return query
+
+
+@tool("full-web-search")
+def _full_web_search(query: str) -> str:
+    """Web search MCP tool."""
+    return query
+
+
+def test_default_binding_includes_web_mcp_but_not_other_families(
     monkeypatch,
     tmp_path,
 ):
@@ -178,70 +236,24 @@ def test_agent_node_binds_all_except_denied_for_disallow_only_policy(
         lambda _cfg, store=None: _recall_history,
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
-    graph = build_graph(cfg)
-
-    graph.invoke({
-        "messages": [HumanMessage(content="hi")],
-        "active_skill": "paper-writing",
-        "task_mode": "revision",
-        "allowed_tools": [],
-        "denied_tools": ["bash"],
-        "tool_policy_active": True,
-    })
-
-    assert bind_calls[1] == [
-        "rag_explore",
-        "rag_search",
-        "rag_get_context",
-        "recall_history",
-        "read_file",
-    ]
-
-
-def test_agent_node_binds_no_tools_for_active_empty_policy(monkeypatch, tmp_path):
-    bind_calls: list[list[str]] = []
-
-    class RecordingModel:
-        def bind_tools(self, tools):
-            bind_calls.append([tool.name for tool in tools])
-
-            class Bound:
-                def invoke(self, _messages):
-                    return AIMessage(content="ok")
-
-            return Bound()
-
-    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: RecordingModel())
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_rag_tools",
-        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    graph = build_graph(
+        cfg,
+        extra_tools=[_full_web_search, _github_search],
+        skill_tools=[_citation_workflow],
+        mcp_families={"full-web-search": "web_search", "github_search": "github"},
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
-    cfg = AgentConfig(persist_dir=str(tmp_path))
-    graph = build_graph(cfg)
 
-    graph.invoke({
-        "messages": [HumanMessage(content="hi")],
-        "active_skill": "paper-writing",
-        "task_mode": "revision",
-        "allowed_tools": [],
-        "denied_tools": [],
-        "tool_policy_active": True,
-    })
+    graph.invoke({"messages": [HumanMessage(content="hi")]})
 
-    assert bind_calls[1] == []
+    assert "full-web-search" in bind_calls[0]
+    assert "github_search" not in bind_calls[0]
+    assert "citation_workflow" not in bind_calls[0]
 
 
-@tool("citation_workflow")
-def _citation_workflow(action: str) -> str:
-    """Skill-only workflow tool."""
-    return action
-
-
-def test_skill_tools_bound_only_under_granting_allowlist(monkeypatch, tmp_path):
+def test_skill_tools_bound_only_when_effective_tools_grant_them(
+    monkeypatch,
+    tmp_path,
+):
     bind_calls: list[list[str]] = []
 
     class RecordingModel:
@@ -266,29 +278,41 @@ def test_skill_tools_bound_only_under_granting_allowlist(monkeypatch, tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg, skill_tools=[_citation_workflow])
 
-    # Normal mode: the default binding must not contain the skill-only tool.
+    # Normal mode: the default binding must not contain the skill tool.
     graph.invoke({"messages": [HumanMessage(content="hi")]})
     assert "citation_workflow" not in bind_calls[0]
 
-    # Foreign skill (deny-only policy): still no skill-only tool.
+    # Foreign skill: effective tools without the skill tool keep it out.
     graph.invoke({
         "messages": [HumanMessage(content="hi")],
         "active_skill": "paper-writing",
-        "allowed_tools": [],
-        "denied_tools": ["bash"],
-        "tool_policy_active": True,
+        "effective_tools": ["rag_search", "read_file"],
     })
     assert "citation_workflow" not in bind_calls[1]
 
-    # Granting skill: only the skill-only tool is bound.
+    # Granting skill: the skill tool joins the global tools.
     graph.invoke({
         "messages": [HumanMessage(content="hi")],
         "active_skill": "citation",
-        "allowed_tools": ["citation_workflow"],
-        "denied_tools": [],
-        "tool_policy_active": True,
+        "effective_tools": [
+            "rag_explore",
+            "rag_search",
+            "rag_get_context",
+            "recall_history",
+            "read_file",
+            "bash",
+            "citation_workflow",
+        ],
     })
-    assert bind_calls[2] == ["citation_workflow"]
+    assert bind_calls[2] == [
+        "rag_explore",
+        "rag_search",
+        "rag_get_context",
+        "recall_history",
+        "read_file",
+        "bash",
+        "citation_workflow",
+    ]
 
 
 def test_skill_tool_name_collision_fails_fast(monkeypatch, tmp_path):

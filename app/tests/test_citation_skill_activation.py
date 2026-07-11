@@ -36,14 +36,23 @@ def test_citation_bundle_is_discovered_with_lean_layout():
     assert not list(bundle_root.glob("*.skill"))
 
 
-def test_activation_grants_only_the_workflow_tool(make_session):
+def test_activation_adds_only_the_workflow_tool(make_session):
     session = make_session()
+    normal_effective = session.tool_access_resolution().effective_tools
+
     runtime = session.activate_skill("citation")
+
     assert runtime.name == "citation"
-    assert runtime.tool_policy_active is True
-    assert runtime.allowed_tools == frozenset({"citation_workflow"})
-    assert runtime.denied_tools == frozenset()
-    assert "citation_workflow" in session._tool_availability_block()
+    assert runtime.tool_access.skill_tools == ("citation_workflow",)
+    assert runtime.tool_access.effective_tools == (
+        *normal_effective,
+        "citation_workflow",
+    )
+    availability = session._tool_availability_block()
+    assert "citation_workflow" in availability
+    # Global base tools stay available while the citation skill is active.
+    assert "read_file" in availability
+    assert "bash" in availability
 
 
 def test_activation_forces_normal_thinking(make_session):

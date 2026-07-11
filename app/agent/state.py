@@ -21,9 +21,9 @@ class AgentState(TypedDict, total=False):
     skill_instructions: str | None
     loaded_references: dict[str, str]
     task_mode: str | None
-    allowed_tools: list[str]
-    denied_tools: list[str]
-    tool_policy_active: bool
+    # The shared tool access resolution's effective tool names for this turn.
+    # Absent/None means normal mode: the graph binds its default global tools.
+    effective_tools: list[str] | None
 
 
 def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
@@ -31,7 +31,7 @@ def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
 
     Returns an empty mapping when no skill is active, so callers inject no
     skill-state keys. The serialized slice never includes ``messages``; it
-    carries only skill identity and tool policy.
+    carries only skill identity and the resolved effective tool set.
     """
     if runtime is None:
         return {}
@@ -41,7 +41,5 @@ def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
         "skill_instructions": runtime.instructions,
         "loaded_references": dict(runtime.pinned_references),
         "task_mode": runtime.task_mode,
-        "allowed_tools": sorted(runtime.allowed_tools),
-        "denied_tools": sorted(runtime.denied_tools),
-        "tool_policy_active": runtime.tool_policy_active,
+        "effective_tools": list(runtime.tool_access.effective_tools),
     }

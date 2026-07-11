@@ -61,16 +61,23 @@ def _config(tmp_path, **overrides):
     return AgentConfig(**data)
 
 
-def _academic_runtime(tmp_path, *, allowed, denied):
+def _academic_runtime(tmp_path, *, effective):
+    from agent.tool_access import ToolAccessResolution
+
+    effective = tuple(effective)
     return SimpleNamespace(
         name="academic-paper-writing",
         root=tmp_path,
         instructions="# Academic paper writing",
         pinned_references={},
         task_mode=None,
-        allowed_tools=frozenset(allowed),
-        denied_tools=frozenset(denied),
-        tool_policy_active=True,
+        tool_access=ToolAccessResolution(
+            global_tools=effective,
+            skill_tools=(),
+            effective_tools=effective,
+            missing_required=(),
+            missing_optional=(),
+        ),
         context_block=lambda: "[Active skill]\nname: academic-paper-writing",
     )
 
@@ -144,8 +151,10 @@ def test_case_a_retrieval_not_attempted_routes_to_reviser_with_recall_history(
     }
     runtime = _academic_runtime(
         tmp_path,
-        allowed={"read_file", "rag_explore", "rag_search", "rag_get_context", "recall_history"},
-        denied={"bash"},
+        effective=(
+            "rag_explore", "rag_search", "rag_get_context",
+            "recall_history", "read_file", "bash",
+        ),
     )
     session = _make_session(monkeypatch, tmp_path, graph, models, runtime)
 
@@ -201,8 +210,10 @@ def test_case_b_empty_history_yields_honest_answer_mentioning_plan_logs(
     }
     runtime = _academic_runtime(
         tmp_path,
-        allowed={"read_file", "rag_explore", "rag_search", "rag_get_context", "recall_history"},
-        denied={"bash"},
+        effective=(
+            "rag_explore", "rag_search", "rag_get_context",
+            "recall_history", "read_file", "bash",
+        ),
     )
     session = _make_session(monkeypatch, tmp_path, graph, models, runtime)
 
@@ -251,8 +262,9 @@ def test_case_c_denied_history_tool_explains_policy_without_intake_checklist(
     }
     runtime = _academic_runtime(
         tmp_path,
-        allowed={"read_file", "rag_explore", "rag_search", "rag_get_context"},
-        denied={"bash", "recall_history"},
+        effective=(
+            "rag_explore", "rag_search", "rag_get_context", "read_file", "bash",
+        ),
     )
     session = _make_session(monkeypatch, tmp_path, graph, models, runtime)
 

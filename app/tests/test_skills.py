@@ -121,14 +121,12 @@ def test_agent_state_skill_fields_are_optional():
     assert "messages" in AgentState.__optional_keys__
     assert "active_skill" in AgentState.__optional_keys__
     assert "loaded_references" in AgentState.__optional_keys__
-    assert "tool_policy_active" in AgentState.__optional_keys__
-    assert "tool_policy_active" in AgentState.__optional_keys__
+    assert "effective_tools" in AgentState.__optional_keys__
 
 
 def test_agent_config_exposes_skill_runtime_toggles(tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
 
-    assert cfg.skill_capability_map_path is None
     assert cfg.skill_max_pinned_reference_chars == 65536
     assert cfg.skill_max_total_skill_context_chars == 200000
 
@@ -152,17 +150,11 @@ description: Use when the user wants help with academic writing.
     (refs / "guide.md").write_text("reference guide", encoding="utf-8")
     (target / "manifest.yaml").write_text(
         """
-capabilities:
-  required:
-    - file.read
 resources:
   - path: references/guide.md
     pinned: true
 task_modes:
   - revision
-tool_policy:
-  disallow:
-    - bash
 """,
         encoding="utf-8",
     )

@@ -1,3 +1,4 @@
-capabilities:
+tools:
   required:
-    - citation.workflow
+    local:
+      - citation_workflow

@@ -78,6 +78,5 @@ class AgentConfig(RAGConfig):
     citation_output_dir: str | None = None
 
     # Skill runtime controls.
-    skill_capability_map_path: str | None = None
     skill_max_pinned_reference_chars: int = 65536
     skill_max_total_skill_context_chars: int = 200000

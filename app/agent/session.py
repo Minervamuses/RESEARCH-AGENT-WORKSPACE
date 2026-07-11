@@ -34,6 +34,7 @@ from agent.skills import (
 )
 from agent.skills.runtime import render_tool_availability_block
 from agent.state import skill_runtime_to_agent_state
+from agent.tool_access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
 from agent.memory import (
@@ -62,7 +63,7 @@ GitHub MCP tools (available only when configured):
 
 Local skills (user-activated):
 - Skill bundles live under `skills/<name>/`. The user activates one via the `/skill` slash command; you cannot self-activate.
-- When a skill is active, its instructions and tool policy arrive as an ephemeral system message — follow them.
+- When a skill is active, its instructions and tool availability arrive as an ephemeral system message — follow them.
 - If the user asks what skills are available, discover the bundle names by listing `skills/` via `bash`.
 
 Language policy:
@@ -124,8 +125,8 @@ class ChatSession:
             session_id=self.session_id,
             recent_turns=self.recent_turns,
         )
-        # Skill-only tool: bound into the graph universe but callable only
-        # while the citation skill's allowlist grants it. Creation is cheap —
+        # Skill-scoped tool: bound into the graph universe but callable only
+        # while the citation skill's manifest requests it. Creation is cheap —
         # the Coordinator behind it is built lazily on first use.
         self.citation_workflow_tool = create_citation_workflow_tool(
             coordinator_getter=lambda: self.citation_coordinator,
@@ -137,6 +138,7 @@ class ChatSession:
             history_store=self.history_store,
             skill_runtime_getter=lambda: self.active_skill_runtime,
             skill_tools=[self.citation_workflow_tool],
+            mcp_families=self.mcp_families,
         )
         # The graph builder and model getters resolve here (not at import), so
         # monkeypatches of the agent.session module attributes before
@@ -217,10 +219,28 @@ class ChatSession:
             return ""
         return self.active_skill_runtime.context_block()
 
+    def tool_access_resolution(self) -> ToolAccessResolution:
+        """The shared tool access resolution for the current mode.
+
+        The active skill's resolution when one is active; otherwise the
+        normal-mode resolution over the session tool universe.
+        """
+        runtime = self.active_skill_runtime
+        if runtime is not None:
+            return runtime.tool_access
+        return resolve_tool_access(
+            None,
+            self._capability_tool_refs(),
+            mcp_families=self.mcp_families,
+        )
+
     def _tool_availability_block(self) -> str:
+        runtime = self.active_skill_runtime
         return render_tool_availability_block(
-            skill_runtime=self.active_skill_runtime,
-            base_tool_names=[tool.name for tool in self._all_tool_refs()],
+            resolution=self.tool_access_resolution(),
+            active_skill=runtime.name if runtime is not None else None,
+            task_mode=runtime.task_mode if runtime is not None else None,
+            all_tool_names=[tool.name for tool in self._capability_tool_refs()],
             mcp_families=self.mcp_families,
         )
 
@@ -431,12 +451,11 @@ class ChatSession:
         ]
 
     def _capability_tool_refs(self) -> list[_ToolRef]:
-        """Tool universe for skill capability resolution.
+        """Full session tool universe for tool access resolution.
 
-        Includes the skill-only tools so a manifest requiring
-        ``citation.workflow`` can resolve; prompt availability keeps using
-        :meth:`_all_tool_refs` (skill-only tools are surfaced there only via
-        an active skill's allowlist).
+        Includes the skill-scoped tools so a manifest requiring
+        ``citation_workflow`` can resolve; the resolver keeps them out of the
+        effective set unless the active skill requests them.
         """
         return [
             *self._all_tool_refs(),
