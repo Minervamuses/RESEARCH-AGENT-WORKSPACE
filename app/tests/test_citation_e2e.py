@@ -185,9 +185,21 @@ def test_select_then_confirm_across_user_turns_end_to_end(monkeypatch, tmp_path)
     asyncio.run(session.turn("選 c1"))
     # Same-turn confirm was refused: nothing on disk yet.
     assert not list((tmp_path / "cite").glob("*/reference.bib"))
+    hint = session._build_citation_confirmation_hint("儲存")  # noqa: SLF001
+    assert hint is not None and "identifier=m1" in hint.content
 
-    asyncio.run(session.turn("確認 m1"))
+    receipt = asyncio.run(session.turn("儲存"))
     bundles = list((tmp_path / "cite").glob("*/reference.bib"))
     assert len(bundles) == 1
+    assert "引用已確認並保存" in receipt
+    assert "source ID" in receipt
+    assert str(bundles[0].parent) in receipt
     refs = session.citation_coordinator.registry.list()
     assert [r.verification_level for r in refs] == ["identity_verified"]
+    # The deterministic receipt, not the model's generic sentence, is the
+    # prompt-visible fact on the next turn.
+    assert session.recent_turns[-1].assistant_output == receipt
+    assert any(
+        "Citation confirmation intent" in str(message.content)
+        for message in session._prompt_history()  # noqa: SLF001
+    ) is False

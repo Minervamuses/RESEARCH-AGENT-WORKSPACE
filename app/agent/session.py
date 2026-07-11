@@ -2,17 +2,21 @@
 
 import asyncio
 import logging
+import re
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
+from skills.citation.confirmation import classify_confirmation
 from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
+from skills.citation.types import ConfirmReceipt
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
     build_recovery_message,
@@ -118,6 +122,9 @@ class ChatSession:
 
         self.session_id = uuid.uuid4().hex
         self._turn_counter = 0
+        self._current_user_input: ContextVar[str] = ContextVar(
+            f"citation_user_input_{self.session_id}", default=""
+        )
         self.history_store = history_store or get_chat_history_store(config)
         # find_app_root resolves here (not at import), so a monkeypatch of
         # agent.session.find_app_root before construction stays effective.
@@ -140,6 +147,7 @@ class ChatSession:
         self.citation_workflow_tool = create_citation_workflow_tool(
             coordinator_getter=lambda: self.citation_coordinator,
             turn_getter=lambda: self._turn_counter,
+            user_input_getter=self._current_user_input.get,
         )
         self.graph = build_graph(
             config,
@@ -305,6 +313,122 @@ class ChatSession:
             lines.append(f"- [[cite:{ref.source_id}]] {label}")
         return SystemMessage(content="\n".join(lines))
 
+    def _build_citation_confirmation_hint(
+        self, user_input: str
+    ) -> SystemMessage | None:
+        """Map conservative approval language to an ephemeral model hint."""
+        if not self.citation_skill_active or self._citation_coordinator is None:
+            return None
+        matches = self._citation_coordinator.pending_matches()
+        if not matches:
+            return None
+        decision = classify_confirmation(user_input, matches)
+        if decision.approved:
+            return SystemMessage(content=(
+                "[Citation confirmation intent]\n"
+                "The current user message is an explicit, unambiguous approval "
+                f"of match {decision.match_id}. Call citation_workflow now with "
+                f"action=confirm and identifier={decision.match_id}. Do not expose "
+                "or paraphrase a DOI; the finalizer will produce the receipt."
+            ))
+        if decision.status in {"ambiguous", "rejected"}:
+            live_ids = ", ".join(match.match_id for match in matches)
+            return SystemMessage(content=(
+                "[Citation confirmation intent]\n"
+                "Do NOT call confirm: the current message is ambiguous, negative, "
+                f"or does not safely identify one live match ({live_ids}). Ask the "
+                "user to provide an unambiguous approval and, when needed, one mX id."
+            ))
+        return None
+
+    def _trusted_confirm_receipts(self, new_messages: list) -> list[ConfirmReceipt]:
+        """Validate receipt artifacts against the live session registry."""
+        registry = self._citation_registry() if self.citation_skill_active else None
+        if registry is None:
+            return []
+        receipts: list[ConfirmReceipt] = []
+        seen: set[str] = set()
+        for message in new_messages:
+            if not isinstance(message, ToolMessage):
+                continue
+            if getattr(message, "name", None) != "citation_workflow":
+                continue
+            if getattr(message, "status", "success") != "success":
+                continue
+            artifact = getattr(message, "artifact", None)
+            if artifact is None:
+                continue
+            try:
+                receipt = ConfirmReceipt.from_artifact(artifact)
+            except ValueError as exc:
+                logger.warning("ignored invalid citation confirm receipt: %s", exc)
+                continue
+            ref = registry.get(receipt.source_id)
+            if (
+                ref is None
+                or ref.verification_level != receipt.verification_level
+                or ref.doi != receipt.accepted_doi
+                or ref.bundle_path != receipt.bundle_path
+            ):
+                logger.warning(
+                    "ignored citation confirm receipt that does not match registry: %s",
+                    receipt.source_id,
+                )
+                continue
+            if receipt.source_id not in seen:
+                receipts.append(receipt)
+                seen.add(receipt.source_id)
+        return receipts
+
+    @staticmethod
+    def _markdown_code_span(value: object) -> str:
+        """Render arbitrary one-line trusted data as a Markdown code span."""
+        text = str(value).replace("\n", " ")
+        longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+        fence = "`" * (longest + 1)
+        if text.startswith(("`", " ")) or text.endswith(("`", " ")):
+            text = f" {text} "
+        return f"{fence}{text}{fence}"
+
+    def _render_confirm_receipts(
+        self,
+        receipts: list[ConfirmReceipt],
+        *,
+        validation_errors: list[str],
+    ) -> str:
+        blocked = bool(validation_errors)
+        lines = [
+            (
+                "（本輪模型草稿未通過 citation 檢查，但 confirm 已成功完成。）"
+                if blocked
+                else "（引用已確認並保存。）"
+            )
+        ]
+        for receipt in receipts:
+            if len(receipts) > 1:
+                lines.append(f"- 收據：{self._markdown_code_span(receipt.source_id)}")
+                prefix = "  "
+            else:
+                prefix = "- "
+            lines.extend([
+                f"{prefix}source ID：{self._markdown_code_span(receipt.source_id)}",
+                f"{prefix}DOI：{self._markdown_code_span(receipt.accepted_doi)}",
+                f"{prefix}bundle：{self._markdown_code_span(receipt.bundle_path)}",
+                f"{prefix}引用標記：{self._markdown_code_span(receipt.cite_marker)}",
+                f"{prefix}驗證等級：{self._markdown_code_span(receipt.verification_level)}",
+            ])
+            for warning in receipt.warnings:
+                lines.append(
+                    f"{prefix}驗證警告：{self._markdown_code_span(warning)}"
+                )
+        if blocked:
+            lines.append("- 被攔截草稿的檢查結果：")
+            lines.extend(
+                f"  - {self._markdown_code_span(error)}"
+                for error in validation_errors
+            )
+        return "\n".join(lines)
+
     def _finalize_answer(
         self, answer: str, *, user_input: str
     ) -> tuple[str, list[str]]:
@@ -370,7 +494,13 @@ class ChatSession:
                 had_tool_results=has_tool_results(new_messages),
             )
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
+        receipts = self._trusted_confirm_receipts(new_messages)
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
+        if receipts:
+            final_text = self._render_confirm_receipts(
+                receipts,
+                validation_errors=errors,
+            )
         await self._record_turn(
             user_input=user_input,
             answer=final_text,
@@ -595,13 +725,18 @@ class ChatSession:
         extra_system_messages: list[SystemMessage] | None = None,
     ) -> GraphTurnResult:
         """Run the session graph once with session policy (no candidate scope)."""
+        confirmation_hint = self._build_citation_confirmation_hint(user_input)
+        merged_system_messages = [
+            *([confirmation_hint] if confirmation_hint is not None else []),
+            *(extra_system_messages or []),
+        ]
         return await self._execute_graph(
             graph=self.graph,
             user_input=user_input,
             prompt_history=self._prompt_history(),
             skill_state=skill_runtime_to_agent_state(self.active_skill_runtime),
             recursion_limit=self.recursion_limit,
-            extra_system_messages=extra_system_messages,
+            extra_system_messages=merged_system_messages,
             trace_label="writer",
             candidate_id=None,
         )
@@ -693,9 +828,13 @@ class ChatSession:
 
     async def _run_turn(self, user_input: str) -> TurnOutcome:
         """Process one turn through the single finalization chokepoint."""
-        if self.thinking_mode == "extended":
-            return await self._run_extended_turn(user_input)
-        return await self._run_normal_turn(user_input)
+        token = self._current_user_input.set(user_input)
+        try:
+            if self.thinking_mode == "extended":
+                return await self._run_extended_turn(user_input)
+            return await self._run_normal_turn(user_input)
+        finally:
+            self._current_user_input.reset(token)
 
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""

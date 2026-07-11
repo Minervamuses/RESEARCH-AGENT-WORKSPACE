@@ -3,9 +3,12 @@
 import pytest
 
 from skills.citation.types import (
+    CONFIRM_RECEIPT_KIND,
+    CONFIRM_RECEIPT_SCHEMA_VERSION,
     PERSIST_SCHEMA_VERSION,
     CitationCandidate,
     CitationResult,
+    ConfirmReceipt,
     ProviderState,
     SourceRef,
     VerificationCheck,
@@ -33,6 +36,39 @@ def test_confirmed_result_requires_accepted_doi():
         CitationResult(status="confirmed")
     result = CitationResult(status="confirmed", accepted_doi="10.1/x")
     assert result.accepted_doi == "10.1/x"
+
+
+def test_confirm_receipt_round_trip_is_versioned_and_strict():
+    receipt = ConfirmReceipt(
+        source_id="src-1",
+        accepted_doi="10.1/x",
+        bundle_path="/tmp/bundle",
+        verification_level="identity_verified",
+        cite_marker="[[cite:src-1]]",
+        warnings=("title conflict",),
+    )
+    artifact = receipt.to_artifact()
+    assert artifact["kind"] == CONFIRM_RECEIPT_KIND
+    assert artifact["schema_version"] == CONFIRM_RECEIPT_SCHEMA_VERSION
+    assert ConfirmReceipt.from_artifact(artifact) == receipt
+
+    artifact["schema_version"] = 99
+    with pytest.raises(ValueError, match="schema version"):
+        ConfirmReceipt.from_artifact(artifact)
+
+
+def test_confirm_receipt_rejects_mismatched_cite_marker():
+    with pytest.raises(ValueError, match="cite marker"):
+        ConfirmReceipt.from_artifact({
+            "kind": CONFIRM_RECEIPT_KIND,
+            "schema_version": CONFIRM_RECEIPT_SCHEMA_VERSION,
+            "source_id": "src-1",
+            "accepted_doi": "10.1/x",
+            "bundle_path": "/tmp/bundle",
+            "verification_level": "identity_verified",
+            "cite_marker": "[[cite:src-other]]",
+            "warnings": [],
+        })
 
 
 def test_source_ref_serializes_for_the_sidecar():

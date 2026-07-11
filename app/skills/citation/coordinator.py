@@ -549,6 +549,10 @@ class CitationCoordinator:
             "provider_states": [state.to_dict() for state in self._last_states],
         }
 
+    def pending_matches(self) -> tuple[CitationMatch, ...]:
+        """Return a read-only snapshot of the currently confirmable matches."""
+        return tuple(self._matches.values())
+
     def cancel(self) -> CitationResult:
         """Abort the current workflow; candidate/match IDs become stale."""
         had_workflow = bool(self._workflow_id)

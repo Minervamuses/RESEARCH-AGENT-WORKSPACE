@@ -376,21 +376,23 @@ citation 是內建 skill(engine 就住在 `app/skills/citation/`,同一目錄既
 - 停用/切換 skill 立即清除 in-memory workflow 與 session 來源 registry(已寫入磁碟的 bundle 保留);citation hint、renderer 與工具同時消失。
 - `citation_workflow` 是 skill 專屬工具:普通模式與其他 skills 完全綁不到,偽造的 tool call 也會被執行層(PolicyToolNode)拒絕。
 - 同 session 同時只能有一個 workflow call(並行呼叫回 busy);`confirm` 必須發生在 `select` 之後的較晚使用者 turn——同 turn confirm 一律拒絕。
+- 自然語言確認採保守規則:唯一 pending match 可用「儲存／保存／確認／可以／要這篇／就這篇／OK／yes／save」批准;多個 pending matches 必須明指一個 `mX`;否定、問句、條件句或 tool argument 與使用者指定的 `mX` 不一致時一律拒絕寫入。
 
-工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除)、`more`、`list`、`show`、`select`、`confirm`、`status`、`cancel`、`sources`、`source`。
+工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider)、`list`、`show`、`select`、`confirm`、`status`、`cancel`、`sources`、`source`。
 
 引用政策(單一 finalization chokepoint、兩種明確政策):
 
 - **citation inactive**:禁止一切 citation markers(含 `[[citation-needed]]`)、raw DOI、`[1]` 數字引用、作者年份引用與手寫 References;一般非 DOI 網址連結不受影響;renderer 不執行。
 - **citation active**:只接受目前 registry 中 `identity_verified` 的 `[[cite:<source-id>]]` 與 `[[citation-needed]]`;通過 gate 後 renderer 依首次出現順序編號 `[1]`、`[2]`... 並產生固定格式 bibliography。
-- 任一 gate 失敗都以安全訊息取代草稿,原草稿不進 recent history、Chroma 或 plan log。
+- 任一 gate 失敗都不保存原草稿；一般回合以安全訊息取代。若同輪 `confirm` 已成功，finalizer 會改以經 live registry 驗證的結構化 artifact 產生 deterministic receipt，明示草稿被攔截但寫入已完成，避免成功副作用被誤述為失敗。
 
 流程與保證:
 
 - **Discovery**:Crossref 與(有 `OPENALEX_API_KEY` 時)OpenAlex 並行查詢,LLM 最多 lazy 產生 2 個 query expansion(LLM 不可用時照常運作);排名用固定 `k=60` 的 reciprocal-rank fusion,只在 canonical DOI 或同 provider ID 相同時合併;web MCP 只在 structured providers 全失敗/零候選時自動 fallback,否則由 agent 依使用者要求以 `more` 引入。
 - **驗證**:confirm 會重新以 doi.org 取 CSL JSON structured record,再以同一 canonical DOI 取 BibTeX(pybtex 驗證、恰一 entry、canonical 重序列化);match/structured/BibTeX 三方 DOI 必須相等(BibTeX 缺 DOI 時由已驗證 record 注入並記 `doi_injected_from_verified_lookup`);title/year 等衝突只警告。驗證等級只有 `identity_verified`——證明 DOI 與書目管線一致,不代表來源支持特定主張。
 - **保存**:atomic bundle 寫入 citation 輸出目錄(見第 1 節「可寫入路徑」)之 `<utf8-byte-capped-title>--<doi-hash>/`(`reference.bib` + `citation.json` sidecar,schema v1);staging + rename,成功 bundle 不會半套;同 DOI 重複 confirm 驗證後重用;schema/DOI/hash 不符 fail closed 不覆寫。無 DOI 候選可展示但不可保存。
-- **範圍**:來源 registry 是 session 內、citation 模式內的狀態;turn record 與 Chroma history 不再夾帶 SourceRef snapshot(舊資料中的 `sources_json` metadata 會被忽略,不影響一般 history 查詢)。
+- **Confirm 收據**:成功 confirm 的最終文字固定包含 source ID、以 code literal 呈現的 DOI、bundle 絕對路徑、驗證等級與 cite marker；這段文字會像一般 assistant output 一樣進 recent history/plan log，淘汰後可由 history recall 找回。模型草稿文字不會被解析成收據，artifact 版本或內容與 live registry 不符時亦不採信。
+- **範圍**:來源 registry 是 session 內、citation 模式內的狀態;turn record 與 Chroma history 不再夾帶 SourceRef snapshot或額外 receipt metadata(收據只存在於 finalized assistant text;舊資料中的 `sources_json` metadata 會被忽略,不影響一般 history 查詢)。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
 
 ## 12. 疑難排解
 

@@ -3,8 +3,9 @@
 Session-scoped workflow objects (:class:`CitationCandidate`,
 :class:`CitationMatch`) are opaque-ID, in-memory records owned by the
 Coordinator; they carry no schema version because they are never persisted.
-Only persisted formats (:class:`SourceRef` and the bundle sidecar built from
-it) carry ``schema_version`` — currently :data:`PERSIST_SCHEMA_VERSION`.
+Persisted formats (:class:`SourceRef` and the bundle sidecar built from it)
+carry :data:`PERSIST_SCHEMA_VERSION`; the ephemeral tool-to-finalizer
+:class:`ConfirmReceipt` has an independent version contract.
 
 Invariants enforced here:
   * A :class:`CitationResult` whose status is not ``confirmed`` always has
@@ -16,12 +17,18 @@ Invariants enforced here:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Literal
 
 # Version stamped into every persisted artifact (SourceRef JSON, sidecar).
 PERSIST_SCHEMA_VERSION = 1
+
+# Version for the ephemeral, tool-to-finalizer confirm receipt. This is not a
+# persisted bundle schema and deliberately evolves independently.
+CONFIRM_RECEIPT_SCHEMA_VERSION = 1
+CONFIRM_RECEIPT_KIND = "citation_confirm_receipt"
 
 # The only verification level a SourceRef can carry: the DOI and the
 # bibliographic pipeline agree on the identity of the record.
@@ -310,3 +317,71 @@ class CitationResult:
             )
         if self.status == "confirmed" and not self.accepted_doi:
             raise ValueError("confirmed CitationResult requires accepted_doi")
+
+
+@dataclass(frozen=True)
+class ConfirmReceipt:
+    """Trusted facts emitted by a successful ``confirm`` tool call.
+
+    The LangChain tool places the JSON-safe representation in a ToolMessage
+    artifact. Chat finalization validates it against the live SourceRegistry
+    before rendering it; model-facing prose is never parsed as a receipt.
+    """
+
+    source_id: str
+    accepted_doi: str
+    bundle_path: str
+    verification_level: VerificationLevel
+    cite_marker: str
+    warnings: tuple[str, ...] = ()
+    schema_version: int = field(default=CONFIRM_RECEIPT_SCHEMA_VERSION, init=False)
+    kind: str = field(default=CONFIRM_RECEIPT_KIND, init=False)
+
+    def to_artifact(self) -> dict:
+        return {
+            "kind": self.kind,
+            "schema_version": self.schema_version,
+            "source_id": self.source_id,
+            "accepted_doi": self.accepted_doi,
+            "bundle_path": self.bundle_path,
+            "verification_level": self.verification_level,
+            "cite_marker": self.cite_marker,
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_artifact(cls, artifact: object) -> "ConfirmReceipt":
+        """Strictly decode one supported receipt artifact."""
+        if not isinstance(artifact, Mapping):
+            raise ValueError("confirm receipt artifact must be a mapping")
+        if artifact.get("kind") != CONFIRM_RECEIPT_KIND:
+            raise ValueError("unknown confirm receipt kind")
+        if artifact.get("schema_version") != CONFIRM_RECEIPT_SCHEMA_VERSION:
+            raise ValueError("unsupported confirm receipt schema version")
+
+        def required_text(key: str) -> str:
+            value = artifact.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"confirm receipt requires non-empty {key}")
+            return value
+
+        source_id = required_text("source_id")
+        verification_level = required_text("verification_level")
+        if verification_level != "identity_verified":
+            raise ValueError("unsupported confirm receipt verification level")
+        cite_marker = required_text("cite_marker")
+        if cite_marker != f"[[cite:{source_id}]]":
+            raise ValueError("confirm receipt cite marker does not match source id")
+        raw_warnings = artifact.get("warnings", [])
+        if not isinstance(raw_warnings, (list, tuple)) or not all(
+            isinstance(warning, str) for warning in raw_warnings
+        ):
+            raise ValueError("confirm receipt warnings must be strings")
+        return cls(
+            source_id=source_id,
+            accepted_doi=required_text("accepted_doi"),
+            bundle_path=required_text("bundle_path"),
+            verification_level="identity_verified",
+            cite_marker=cite_marker,
+            warnings=tuple(raw_warnings),
+        )

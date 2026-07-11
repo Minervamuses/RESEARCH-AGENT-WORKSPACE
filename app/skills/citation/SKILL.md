@@ -23,8 +23,13 @@ actions and keep them in control of every decision.
 3. **Resolve** — after the user picks, `action="select"` with that candidate
    id. Show the confirmable matches and WAIT again.
 4. **Confirm** — only after the user explicitly approves a match in a later
-   message, `action="confirm"` with the match id. Success saves a verified
-   bundle and returns the source's `[[cite:<source-id>]]` marker.
+   message, `action="confirm"` with the match id. Clear approvals include
+   `儲存`, `保存`, `確認`, `可以`, `要這篇`, `就這篇`, `OK`/`okay`, `yes`,
+   `confirm`, and `save`/`save it`. With one pending match, a generic approval
+   refers to that match; with multiple pending matches, require one explicit
+   `mX` id and ask when it is missing. Success saves a verified bundle and the
+   finalizer returns a deterministic receipt with source id, DOI, bundle path,
+   verification level, and the source's `[[cite:<source-id>]]` marker.
 5. **Cite** — cite saved sources only via their `[[cite:<source-id>]]`
    markers; write `[[citation-needed]]` where a claim has no saved source.
    The renderer assigns numbers and builds the bibliography after the
@@ -33,6 +38,10 @@ actions and keep them in control of every decision.
 ## Hard rules
 
 - Never call `confirm` in the same turn as `select`; the tool refuses it.
+- Never call `confirm` for negated, conditional, or questioning language such
+  as `不要儲存`, `先別確認`, `取消`, `可以嗎?`, `no`, or `don't save`.
+- Before confirm succeeds, present candidates and matches by `cX`/`mX` plus
+  bibliographic metadata only. Do not expose or paraphrase a DOI literal.
 - Never invent or hand-write DOIs, BibTeX entries, bibliographies,
   reference numbers, or author-year citations.
 - Only `[[cite:<source-id>]]` for saved verified sources and

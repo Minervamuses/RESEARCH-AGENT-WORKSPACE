@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from langchain_core.messages import ToolMessage
 
 from conftest import FakeHistoryStore, make_astream_graph
 
@@ -12,7 +13,7 @@ from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import find_content_tool_protocol_artifact
 from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
-from skills.citation.types import SourceRef
+from skills.citation.types import ConfirmReceipt, SourceRef
 
 
 @pytest.fixture
@@ -49,9 +50,29 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         year=2021,
         venue="Journal",
         verification_level="identity_verified",
+        bundle_path=str(tmp_path / "cite" / source_id),
     ))
     session._citation_coordinator = coordinator
     return coordinator
+
+
+def _confirm_tool_message(session, source_id="src-known", **overrides):
+    ref = session.citation_coordinator.registry.get(source_id)
+    receipt = ConfirmReceipt(
+        source_id=ref.source_id,
+        accepted_doi=ref.doi,
+        bundle_path=ref.bundle_path,
+        verification_level=ref.verification_level,
+        cite_marker=f"[[cite:{ref.source_id}]]",
+        warnings=("title conflict",),
+    ).to_artifact()
+    receipt.update(overrides)
+    return ToolMessage(
+        content="citation confirmed",
+        tool_call_id="confirm-1",
+        name="citation_workflow",
+        artifact=receipt,
+    )
 
 
 def test_clean_turn_returns_outcome_and_records(make_session):
@@ -162,6 +183,133 @@ def test_blocked_draft_never_reaches_history_or_plan_log(make_session, tmp_path)
     errors = session.turn_logs[-1]["validation_errors"]
     assert any("raw_numeric_citation" in err for err in errors)
     assert any("raw_author_year" in err for err in errors)
+
+
+def test_confirm_receipt_replaces_clean_model_draft(make_session, tmp_path):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="儲存",
+        answer="已儲存。",
+        new_messages=[_confirm_tool_message(session)],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert "引用已確認並保存" in outcome.text
+    assert "`src-known`" in outcome.text
+    assert "`10.1234/known`" in outcome.text
+    assert str(tmp_path / "cite" / "src-known") in outcome.text
+    assert session.recent_turns[-1].assistant_output == outcome.text
+
+
+def test_confirm_receipt_survives_raw_doi_gate_block(make_session, tmp_path):
+    draft = "已儲存 DOI 10.1234/known。"
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="儲存",
+        answer=draft,
+        new_messages=[_confirm_tool_message(session)],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert any("raw_doi" in error for error in outcome.validation_errors)
+    assert "草稿未通過 citation 檢查，但 confirm 已成功" in outcome.text
+    assert "`10.1234/known`" in outcome.text
+    assert draft not in outcome.text
+    assert "請先在 citation workflow 中完成驗證" not in outcome.text
+    assert session.recent_turns[-1].assistant_output == outcome.text
+
+
+@pytest.mark.parametrize("draft", ["", 'citation_workflow(action="status")'])
+def test_confirm_receipt_survives_final_response_recovery(
+    make_session, tmp_path, draft
+):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="確認",
+        answer=draft,
+        new_messages=[_confirm_tool_message(session)],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert "引用已確認並保存" in outcome.text
+    assert "`src-known`" in outcome.text
+    assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
+
+
+def test_receipt_requires_artifact_and_live_registry_match(make_session, tmp_path):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+
+    text_only = ToolMessage(
+        content="citation confirmed: source src-known",
+        tool_call_id="confirm-text",
+        name="citation_workflow",
+    )
+    forged = _confirm_tool_message(session, bundle_path="/tmp/not-the-live-bundle")
+    for message in (text_only, forged):
+        outcome = asyncio.run(session.finalize_and_record(
+            user_input="儲存",
+            answer="bad DOI 10.1234/known",
+            new_messages=[message],
+            tool_calls=[],
+            trace_events=[],
+        ))
+        assert "confirm 已成功" not in outcome.text
+        assert "回應未通過 citation 檢查" in outcome.text
+
+
+def test_plan_log_persists_receipt_but_not_blocked_draft(make_session, tmp_path):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+    asyncio.run(session.enter_plan_mode())
+    draft = "bad DOI 10.1234/known"
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="儲存",
+        answer=draft,
+        new_messages=[_confirm_tool_message(session)],
+        tool_calls=[],
+        trace_events=[],
+    ))
+    content = session.plan_log_path.read_text(encoding="utf-8")
+
+    assert outcome.text in content
+    assert "`src-known`" in content
+    assert draft not in content
+
+
+def test_eviction_persists_receipt_as_plain_assistant_text(make_session, tmp_path):
+    session, store = make_session(window=1)
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+    receipt = asyncio.run(session.finalize_and_record(
+        user_input="儲存",
+        answer="saved",
+        new_messages=[_confirm_tool_message(session)],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    asyncio.run(session.turn("下一步"))
+
+    assert len(store.adds) == 1
+    assert store.adds[0]["assistant_output"] == receipt.text
+    assert "`src-known`" in store.adds[0]["assistant_output"]
+    assert not hasattr(store.adds[0]["turn"], "sources")
 
 
 def test_blocked_draft_in_plan_mode_writes_safe_message_only(make_session):

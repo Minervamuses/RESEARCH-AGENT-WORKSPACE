@@ -20,6 +20,7 @@ Safety rails owned by this layer:
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Callable, Literal
 
 from langchain_core.tools import StructuredTool
@@ -32,10 +33,13 @@ from skills.citation.coordinator import (
     SearchOutcome,
     SelectOutcome,
 )
+from skills.citation.confirmation import classify_confirmation
+from skills.citation.doi import extract_doi_candidates
 from skills.citation.types import (
     CitationCandidate,
     CitationMatch,
     CitationResult,
+    ConfirmReceipt,
     PublishedDateFilter,
     SourceRef,
 )
@@ -51,8 +55,9 @@ TOOL_DESCRIPTION = (
     "pool without new provider calls), 'list' (page through the active view), "
     "'show' (identifier = candidate id), 'select' (identifier = candidate "
     "id; resolves confirmable matches), 'confirm' (identifier = match id; "
-    "call ONLY after the user explicitly confirmed the match in a later "
-    "message — never in the same turn as select), 'status', 'cancel', "
+    "call ONLY after the user explicitly approved in a later message using "
+    "a clear phrase such as 儲存/確認/OK/就這篇 — never in the same turn as "
+    "select; ambiguous multiple matches require an explicit mX), 'status', 'cancel', "
     "'sources' (list saved sources), 'source' (identifier = source id; "
     "re-activate a saved source for citing). Present candidates and matches "
     "to the user and wait for their choice; the tool refuses same-turn "
@@ -137,9 +142,7 @@ class CitationWorkflowInput(BaseModel):
 
 
 def _candidate_lines(candidate: CitationCandidate) -> list[str]:
-    lines = [f"[{candidate.candidate_id}] {candidate.short_label()}"]
-    if candidate.doi:
-        lines.append(f"      DOI: {candidate.doi}")
+    lines = [f"[{candidate.candidate_id}] {_redact_dois(candidate.short_label())}"]
     if candidate.venue:
         lines.append(f"      venue: {candidate.venue}")
     providers = ", ".join(sorted(candidate.provider_ids))
@@ -167,7 +170,7 @@ def format_candidates(
         "Present these to the user and wait for their choice; then use "
         "action=show for details or action=select with the chosen candidate id."
     )
-    return "\n".join(lines)
+    return _redact_dois("\n".join(lines))
 
 
 def format_shortlist(
@@ -186,7 +189,7 @@ def format_shortlist(
         "Present this shortlist to the user. If their conditions change, use "
         "action=refine instead of scanning every candidate page."
     )
-    return "\n".join(lines)
+    return _redact_dois("\n".join(lines))
 
 
 def format_candidate_detail(candidate: CitationCandidate) -> str:
@@ -197,23 +200,24 @@ def format_candidate_detail(candidate: CitationCandidate) -> str:
     for label, value in (
         ("year", candidate.year),
         ("venue", candidate.venue),
-        ("DOI", candidate.doi),
-        ("URL", candidate.url),
         ("related-version group", candidate.related_group),
     ):
         if value:
             lines.append(f"  {label}: {value}")
     if candidate.snippet:
         lines.append(f"  snippet: {candidate.snippet[:200]}")
-    for provider, pid in sorted(candidate.provider_ids.items()):
+    for provider in sorted(candidate.provider_ids):
         rank = candidate.provider_ranks.get(provider)
-        lines.append(f"  provider {provider}: {pid} (rank {rank})")
+        lines.append(f"  provider {provider}: available (rank {rank})")
     for field_name, provider in sorted(candidate.field_provenance.items()):
         lines.append(f"  provenance {field_name}: {provider}")
     for field_name, values in sorted(candidate.conflicts.items()):
+        if field_name.casefold() in {"doi", "url"}:
+            continue
         rendered = "; ".join(f"{v['provider']}={v['value']!r}" for v in values)
         lines.append(f"  conflict {field_name}: {rendered}")
-    return "\n".join(lines)
+    lines.append("  DOI is withheld until a match is explicitly confirmed.")
+    return _redact_dois("\n".join(lines))
 
 
 def format_search_outcome(outcome: SearchOutcome, *, appended: bool = False) -> str:
@@ -266,7 +270,7 @@ def format_refine_outcome(outcome: RefineOutcome) -> str:
 def format_matches(matches: list[CitationMatch]) -> str:
     lines = ["Confirmable matches:"]
     for match in matches:
-        lines.append(f"[{match.match_id}] DOI {match.canonical_doi}")
+        lines.append(f"[{match.match_id}] confirmable match")
         if match.title:
             lines.append(f"      title: {match.title}")
         meta = []
@@ -282,7 +286,8 @@ def format_matches(matches: list[CitationMatch]) -> str:
         "Show these matches to the user. Only after the user explicitly "
         "confirms in a later message, call action=confirm with the match id."
     )
-    return "\n".join(lines)
+    lines.append("Do not expose a DOI literal before confirm succeeds; use mX ids.")
+    return _redact_dois("\n".join(lines))
 
 
 def format_result(result: CitationResult) -> str:
@@ -294,9 +299,9 @@ def format_result(result: CitationResult) -> str:
         )
         lines.append(f"  cite with [[cite:{result.source.source_id}]]")
     if result.accepted_doi:
-        lines.append(f"  DOI: {result.accepted_doi}")
+        lines.append(f"  DOI: {_code_span(result.accepted_doi)}")
     if result.bundle_path:
-        lines.append(f"  bundle: {result.bundle_path}")
+        lines.append(f"  bundle: {_code_span(result.bundle_path)}")
     if result.verification is not None:
         for warning in result.verification.warnings:
             lines.append(f"  warning: {warning}")
@@ -305,7 +310,8 @@ def format_result(result: CitationResult) -> str:
         for check in result.verification.checks:
             if not check.passed:
                 lines.append(f"  failed check: {check.name} ({check.detail})")
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    return text if result.status == "confirmed" else _redact_dois(text)
 
 
 def format_sources(sources: list[SourceRef], *, page: int, total_pages: int) -> str:
@@ -313,11 +319,11 @@ def format_sources(sources: list[SourceRef], *, page: int, total_pages: int) -> 
         return "no saved sources in this session"
     lines = [f"Sources (page {page}/{total_pages}):"]
     for ref in sources:
-        label = ref.title or ref.doi or ref.url or "(unknown)"
-        lines.append(f"[{ref.source_id}] {label}")
+        label = ref.title or "(untitled verified source)"
+        lines.append(f"[{ref.source_id}] {_redact_dois(label)}")
         meta = [ref.verification_level]
         if ref.doi:
-            meta.append(f"DOI {ref.doi}")
+            meta.append(f"DOI {_code_span(ref.doi)}")
         if ref.year:
             meta.append(str(ref.year))
         lines.append(f"      {' | '.join(meta)}")
@@ -332,12 +338,16 @@ def format_source_detail(ref: SourceRef) -> str:
     lines.append(f"  title: {ref.title or '(unknown)'}")
     if ref.authors:
         lines.append(f"  authors: {', '.join(ref.authors)}")
-    for label, value in (
-        ("year", ref.year), ("venue", ref.venue), ("DOI", ref.doi),
-        ("URL", ref.url), ("bundle", ref.bundle_path),
-    ):
+    for label, value in (("year", ref.year), ("venue", ref.venue)):
         if value:
             lines.append(f"  {label}: {value}")
+    if ref.doi:
+        lines.append(f"  DOI: {_code_span(ref.doi)}")
+    if ref.url:
+        rendered_url = _code_span(ref.url) if extract_doi_candidates(ref.url) else ref.url
+        lines.append(f"  URL: {rendered_url}")
+    if ref.bundle_path:
+        lines.append(f"  bundle: {_code_span(ref.bundle_path)}")
     lines.append(f"  verification: {ref.verification_level}")
     lines.append(f"  cite with [[cite:{ref.source_id}]]")
     return "\n".join(lines)
@@ -366,6 +376,44 @@ def _validation_error(detail: str) -> str:
     return f"error: {detail}"
 
 
+def _code_span(value: object) -> str:
+    """Render arbitrary one-line data as a valid Markdown code span."""
+    text = str(value).replace("\n", " ")
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    if text.startswith(("`", " ")) or text.endswith(("`", " ")):
+        text = f" {text} "
+    return f"{fence}{text}{fence}"
+
+
+def _redact_dois(text: str) -> str:
+    """Remove DOI literals from pre-confirm model-facing content."""
+    out = text
+    for doi in extract_doi_candidates(text):
+        out = re.sub(re.escape(doi), "[DOI withheld until confirm]", out, flags=re.I)
+    return out
+
+
+def _confirm_receipt(result: CitationResult) -> ConfirmReceipt:
+    if (
+        result.status != "confirmed"
+        or result.source is None
+        or not result.accepted_doi
+        or not result.bundle_path
+    ):
+        raise ValueError("a complete confirmed result is required for a receipt")
+    return ConfirmReceipt(
+        source_id=result.source.source_id,
+        accepted_doi=result.accepted_doi,
+        bundle_path=result.bundle_path,
+        verification_level=result.source.verification_level,
+        cite_marker=f"[[cite:{result.source.source_id}]]",
+        warnings=tuple(
+            result.verification.warnings if result.verification is not None else ()
+        ),
+    )
+
+
 def _build_date_filter(
     *,
     published_within_years: int | None,
@@ -392,13 +440,15 @@ def create_citation_workflow_tool(
     *,
     coordinator_getter: Callable[[], CitationCoordinator],
     turn_getter: Callable[[], int],
+    user_input_getter: Callable[[], str],
 ) -> StructuredTool:
     """Build the session-scoped citation_workflow StructuredTool.
 
     ``coordinator_getter`` returns the session Coordinator lazily (so merely
     creating the tool never touches providers); ``turn_getter`` returns the
     session's completed-turn counter, used to enforce that confirm happens in
-    a later user turn than select.
+    a later user turn than select. ``user_input_getter`` supplies the current
+    raw user message for a conservative, deterministic approval check.
     """
     busy_lock = asyncio.Lock()
     # Turn (as reported by turn_getter) in which the current matches were
@@ -416,7 +466,7 @@ def create_citation_workflow_tool(
         published_within_years: int | None,
         year_from: int | None,
         year_to: int | None,
-    ) -> str:
+    ) -> str | tuple[str, dict]:
         nonlocal select_turn
         coordinator = coordinator_getter()
 
@@ -459,6 +509,7 @@ def create_citation_workflow_tool(
             return format_search_outcome(outcome)
 
         if action == "more":
+            select_turn = None
             outcome = await coordinator.more(query)
             return format_search_outcome(outcome, appended=True)
 
@@ -508,9 +559,21 @@ def create_citation_workflow_tool(
                     "in a later message. Present the matches and wait for an "
                     "explicit user confirmation before calling confirm."
                 )
-            result = await coordinator.confirm(identifier)
+            decision = classify_confirmation(
+                user_input_getter(),
+                coordinator.pending_matches(),
+                requested_match_id=identifier,
+            )
+            if not decision.approved:
+                return _validation_error(
+                    "confirm refused: the current user message is not an "
+                    f"unambiguous explicit approval ({decision.reason})."
+                )
+            result = await coordinator.confirm(decision.match_id)
             if result.status == "confirmed":
                 select_turn = None
+                receipt = _confirm_receipt(result)
+                return format_result(result), receipt.to_artifact()
             return format_result(result)
 
         if action == "status":
@@ -547,18 +610,21 @@ def create_citation_workflow_tool(
         published_within_years: int | None = None,
         year_from: int | None = None,
         year_to: int | None = None,
-    ) -> str:
+    ) -> tuple[str, dict | None]:
         if busy_lock.locked():
             return _validation_error(
                 "citation workflow busy: another workflow call is still "
                 "running in this session; wait for it to finish"
-            )
+            ), None
         async with busy_lock:
-            return await _dispatch(
+            result = await _dispatch(
                 action, query, identifier, page,
                 keywords, venues, work_types,
                 published_within_years, year_from, year_to,
             )
+            if isinstance(result, tuple):
+                return result
+            return result, None
 
     _run.__name__ = TOOL_NAME
 
@@ -568,4 +634,5 @@ def create_citation_workflow_tool(
         description=TOOL_DESCRIPTION,
         args_schema=CitationWorkflowInput,
         infer_schema=False,
+        response_format="content_and_artifact",
     )
