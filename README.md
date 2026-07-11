@@ -378,7 +378,7 @@ citation 是內建 skill(engine 就住在 `app/skills/citation/`,同一目錄既
 - 同 session 同時只能有一個 workflow call(並行呼叫回 busy);`confirm` 必須發生在 `select` 之後的較晚使用者 turn——同 turn confirm 一律拒絕。
 - 自然語言確認採保守規則:唯一 pending match 可用「儲存／保存／確認／可以／要這篇／就這篇／OK／yes／save」批准;多個 pending matches 必須明指一個 `mX`;否定、問句、條件句或 tool argument 與使用者指定的 `mX` 不一致時一律拒絕寫入。
 
-工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider)、`list`、`show`、`select`、`confirm`、`status`、`cancel`、`sources`、`source`。
+工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider)、`list`、`show`、`select`、`confirm`、`status`、`explain`(唯讀;回傳 workflow 驗證/儲存流程的公開契約與 citation 輸出目錄)、`cancel`、`sources`、`source`。
 
 引用政策(單一 finalization chokepoint、兩種明確政策):
 
