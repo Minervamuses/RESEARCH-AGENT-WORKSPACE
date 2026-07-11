@@ -84,8 +84,10 @@ def test_candidate_label_formats_authors_and_year():
         title="A Paper",
         authors=["First Author", "Second Author"],
         year=2020,
+        work_type="journal-article",
     )
     assert cand.short_label() == "A Paper (First Author et al., 2020)"
+    assert cand.work_type == "journal-article"
     untitled = CitationCandidate(candidate_id="c2", workflow_id="w1")
     assert untitled.short_label() == "(untitled)"
 

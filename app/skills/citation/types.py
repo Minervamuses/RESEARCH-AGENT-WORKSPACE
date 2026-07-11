@@ -148,6 +148,7 @@ class CitationCandidate:
     venue: str = ""
     doi: str | None = None
     url: str | None = None
+    work_type: str = ""
     snippet: str = ""
     provider_ids: dict[str, str] = field(default_factory=dict)
     identifiers: dict[str, str] = field(default_factory=dict)
