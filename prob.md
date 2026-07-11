@@ -1,26 +1,8 @@
 # 目前問題紀錄
 
-本文件整理 citation workflow 與 skill runtime 實測至今確認的問題、已完成修正，以及仍待處理的設計缺口。
+本文件只整理 citation workflow 與 skill runtime 實測後仍待處理的問題與設計缺口。已完成項目不列入本文件。
 
-## 已修正
-
-### 1. `CitationCandidate` 缺少 `work_type`
-
-- 症狀：一般論文搜尋在 Crossref/OpenAlex 回傳非空 `work_type` 時失敗：
-  `AttributeError: 'CitationCandidate' object has no attribute 'work_type'`。
-- 原因：ranking 將 `work_type` 列為可合併欄位，但 `CitationCandidate` 沒有該欄位；既有測試只使用空字串，因此未觸發。
-- 修正：補上 candidate 欄位、structured DOI 路徑傳遞，以及 ranking/coordinator 回歸測試。
-- Commits：`acafcc8`、`e7186d8`、`6cee989`、`2a7c38f`。
-
-### 2. Search 一次呈現過多候選
-
-- 症狀：Coordinator 內部上限 50 筆，初次 search 會把全部候選交給模型呈現，造成輸出過長與後續重篩困難。
-- 修正：內部仍保留最多 50 筆，但初次 search 只呈現前 10 筆，顯示正確頁數；後續可用 `list(page=N)` 查看。
-- Commit：`a37db32`。
-
-## 尚未修正
-
-### 3. 工具額度耗盡後洩漏 DSML/tool-call 標記
+## 1. 工具額度耗盡後洩漏 DSML/tool-call 標記
 
 - 每個使用者 turn 的全域工具互動上限為 4。
 - 額度耗盡後 graph 改用未綁工具的模型要求直接總結。
@@ -34,7 +16,7 @@
 - 若偵測到工具標記，回傳確定性的額度耗盡訊息，或執行一次禁止工具的 repair。
 - 加入 DeepSeek/DSML 形式的回歸測試。
 
-### 4. 候選池、分頁與工具額度不匹配
+## 2. 候選池、分頁與工具額度不匹配
 
 - 內部候選上限 50、每頁 10，但每 turn 只有 4 次工具互動。
 - 若模型逐頁掃描全部候選，五頁天然超過額度。
@@ -48,7 +30,7 @@
 - Skill 指令明定條件改變時優先 refined search，不逐頁掃描。
 - 不建議只提高全域工具上限；若仍有需求，應考慮 citation-specific budget。
 
-### 5. 論文概略介紹缺乏 grounding
+## 3. 論文概略介紹缺乏 grounding
 
 - `show` 通常只提供 title、authors、year、venue、DOI、URL，以及可能存在的短 snippet。
 - Crossref/OpenAlex 候選不保證有 abstract 或全文。
@@ -62,7 +44,7 @@
 - 可讓 citation skill 使用 Web Search，或在 workflow 增加 `inspect`/`abstract` action。
 - Web evidence 可支援介紹，但保存 verified citation 仍只能走 citation workflow。
 
-### 6. 模型錯誤解釋 citation verification 流程
+## 4. 模型錯誤解釋 citation verification 流程
 
 實測中模型曾宣稱：
 
@@ -87,7 +69,7 @@
 - 明定不得推測工具內部實作；資訊不足時只能描述公開契約。
 - 或新增唯讀 `explain`/`receipt` action 回傳確定性說明。
 
-### 7. Confirm receipt 跨 turn 遺失，導致路徑誤判
+## 5. Confirm receipt 跨 turn 遺失，導致路徑誤判
 
 - `confirm` 的 ToolMessage 本來包含 source ID、DOI、bundle path 與驗證結果。
 - 模型可能在最終自然語言回答中省略 bundle path。
@@ -101,7 +83,7 @@
 - 在後續 prompt 注入 compact verified-source receipt（path、DOI、provenance）。
 - 使用者詢問已儲存來源時，skill 應要求呼叫 `source`，不得直接宣稱無法存取。
 
-### 8. Skill tool policy 與「base tools 常駐」語義衝突
+## 6. Skill tool policy 與「base tools 常駐」語義衝突
 
 基礎工具文件將下列工具描述為 always available：
 
@@ -121,7 +103,7 @@ Web Search MCP 在成功載入時也是普通模式可用工具。但目前 acti
 3. 不論採哪一方案，`bash` 維持每次呼叫使用者批准。
 4. Web/RAG 得到的內容只能作為閱讀證據，不能繞過 citation confirm 成為 verified source。
 
-### 9. Citation discovery 品質與重複候選
+## 7. Citation discovery 品質與重複候選
 
 - 搜尋結果可能包含與主題關聯薄弱、只借用知名標題的論文。
 - 同一作品的 reprint/版本可能佔據多個 candidate ID。
