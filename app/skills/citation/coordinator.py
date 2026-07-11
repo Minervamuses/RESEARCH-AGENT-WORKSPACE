@@ -20,6 +20,7 @@ import re
 import unicodedata
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from skills.citation.doi import canonicalize_doi, doi_equal, extract_doi_candidates
 from skills.citation.expansion import QueryExpander
@@ -227,6 +228,11 @@ class CitationCoordinator:
     @property
     def workflow_id(self) -> str:
         return self._workflow_id
+
+    @property
+    def output_dir(self) -> Path:
+        """Resolved bundle output directory (user data, never the source tree)."""
+        return self._output_dir
 
     # --- discovery ---------------------------------------------------------
 

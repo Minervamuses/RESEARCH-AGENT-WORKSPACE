@@ -57,7 +57,9 @@ TOOL_DESCRIPTION = (
     "id; resolves confirmable matches), 'confirm' (identifier = match id; "
     "call ONLY after the user explicitly approved in a later message using "
     "a clear phrase such as 儲存/確認/OK/就這篇 — never in the same turn as "
-    "select; ambiguous multiple matches require an explicit mX), 'status', 'cancel', "
+    "select; ambiguous multiple matches require an explicit mX), 'status', "
+    "'explain' (read-only: how the workflow verifies citations and where "
+    "bundles are stored), 'cancel', "
     "'sources' (list saved sources), 'source' (identifier = source id; "
     "re-activate a saved source for citing). Present candidates and matches "
     "to the user and wait for their choice; the tool refuses same-turn "
@@ -73,6 +75,7 @@ CitationAction = Literal[
     "select",
     "confirm",
     "status",
+    "explain",
     "cancel",
     "sources",
     "source",
@@ -369,6 +372,37 @@ def format_status(status: dict) -> str:
     return "\n".join(lines)
 
 
+def format_explain(output_dir: object) -> str:
+    """Deterministic public contract of the workflow; the model must not
+    invent internals beyond this text."""
+    lines = [
+        "Citation workflow — public contract:",
+        "  1. search: discovery providers (Crossref, plus OpenAlex when",
+        "     enabled) build the candidate pool; candidates usually already",
+        "     carry a DOI. Web results are a fallback, never a verifier.",
+        "  2. select: DOI candidates are extracted from the chosen",
+        "     candidate's stored DOI/URL/snippet/title fields.",
+        "  3. Each extracted DOI is resolved at doi.org into a structured",
+        "     CSL record, and its registration agency is looked up.",
+        "  4. confirm runs only after the user explicitly approves in a",
+        "     later message. It re-fetches the CSL record from doi.org and",
+        "     never trusts the discovery copy.",
+        "  5. BibTeX is retrieved from doi.org via content negotiation for",
+        "     the same DOI; it is never written by the model.",
+        "  6. The system parses that BibTeX and verifies the selected match,",
+        "     the CSL record, and the BibTeX agree on one canonical DOI.",
+        "  7. On success the bundle — reference.bib plus a citation.json",
+        "     sidecar — is written atomically under the citation output",
+        "     directory: user data, never inside the project source tree.",
+        f"  Current citation output directory: {_code_span(output_dir)}",
+        "  Each bundle is one <title>--<doi-hash> directory; re-confirming",
+        "  the same DOI validates and reuses the existing bundle.",
+        "For saved sources and their exact bundle paths, use action=sources",
+        "or action=source with a source id; never guess or scan directories.",
+    ]
+    return "\n".join(lines)
+
+
 # --- parameter validation ----------------------------------------------------
 
 
@@ -578,6 +612,9 @@ def create_citation_workflow_tool(
 
         if action == "status":
             return format_status(coordinator.status())
+
+        if action == "explain":
+            return format_explain(coordinator.output_dir)
 
         if action == "cancel":
             select_turn = None

@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from agent.config import AgentConfig
-from agent.graph import build_graph
+from agent.graph import _budget_class, build_graph
 from agent.tool_access import ToolAccessResolution
 
 
@@ -65,6 +65,18 @@ def _resolution(effective, skill=()):
         missing_required=(),
         missing_optional=(),
     )
+
+
+def test_budget_class_treats_read_only_citation_actions_as_local():
+    for action in (
+        "list", "show", "status", "explain", "sources", "source", "refine",
+        "cancel",
+    ):
+        assert _budget_class("citation_workflow", {"action": action}) == "local"
+
+    assert _budget_class("citation_workflow", {"action": "search"}) == "primary"
+    assert _budget_class("citation_workflow", {}) == "primary"
+    assert _budget_class("bash", {"action": "explain"}) == "primary"
 
 
 def test_skill_loader_no_skill_is_noop(monkeypatch, tmp_path):

@@ -6,11 +6,14 @@ from dataclasses import replace
 
 from langchain_core.messages import ToolMessage
 
+from agent.turn_safety import find_tool_protocol_artifact, final_response_problem
 from skills.citation.coordinator import (
     CitationCoordinator,
     RefineOutcome,
     SearchOutcome,
 )
+from skills.citation.doi import extract_doi_candidates
+from skills.citation.gate import check_citations
 from skills.citation.hub import CitationProviderHub
 from skills.citation.tool import (
     TOOL_NAME,
@@ -129,6 +132,67 @@ def test_year_range_search_builds_filter_and_filters_candidates(tmp_path):
     assert "dropped by the date filter" in message
     status = harness.run(action="status")
     assert "date_filter: 2021-01-01 .. ..." in status
+
+
+def test_explain_returns_public_contract_without_provider_calls(tmp_path):
+    harness = ToolHarness(tmp_path)
+
+    message = harness.run(action="explain")
+
+    assert "doi.org" in message
+    assert "content negotiation" in message
+    assert "never written by the model" in message
+    assert "reference.bib" in message
+    assert "citation.json" in message
+    assert "never inside the project source tree" in message
+    assert str(tmp_path / "cite") in message
+    assert "action=sources" in message
+    assert harness.fetcher.calls == []
+
+
+def test_explain_output_is_leak_safe_and_doi_free(tmp_path):
+    harness = ToolHarness(tmp_path)
+    message = harness.run(action="explain")
+    tool_names = [
+        "citation_workflow",
+        "bash",
+        "read_file",
+        "rag_explore",
+        "rag_search",
+        "rag_get_context",
+        "recall_history",
+    ]
+
+    assert find_tool_protocol_artifact(message, tool_names=tool_names) is None
+    assert final_response_problem(message, tool_names=tool_names) is None
+    assert extract_doi_candidates(message) == []
+    assert check_citations(
+        message,
+        verified_source_ids=frozenset(),
+        citation_active=True,
+        user_input="workflow 怎麼運作?",
+    ) == []
+    assert check_citations(
+        message,
+        verified_source_ids=frozenset(),
+        citation_active=False,
+        user_input="workflow 怎麼運作?",
+    ) == []
+
+
+def test_explain_carries_no_artifact_and_rejects_page(tmp_path):
+    harness = ToolHarness(tmp_path)
+    assert "page only applies" in harness.run(action="explain", page=2)
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "explain"},
+        "id": "explain-1",
+        "type": "tool_call",
+    }))
+
+    assert isinstance(message, ToolMessage)
+    assert message.artifact is None
 
 
 def test_published_within_years_computes_window_from_today(tmp_path):

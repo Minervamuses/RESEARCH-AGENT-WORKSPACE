@@ -25,7 +25,8 @@ from agent.turn_safety import (
 
 
 _LOCAL_CITATION_ACTIONS = frozenset({
-    "list", "show", "status", "sources", "source", "refine", "cancel",
+    "list", "show", "status", "explain", "sources", "source", "refine",
+    "cancel",
 })
 
 
