@@ -47,12 +47,14 @@ CROSSREF_ITEMS = [
         "author": [{"given": "Ada", "family": "Lovelace"}],
         "issued": {"date-parts": [[2021]]},
         "container-title": ["Journal A"],
+        "type": "journal-article",
         "score": 10.0,
     },
     {
         "DOI": DOI_B,
         "title": ["Paper B"],
         "issued": {"date-parts": [[2020]]},
+        "type": "journal-article",
         "score": 8.0,
     },
 ]
@@ -151,6 +153,13 @@ def test_general_query_runs_structured_providers_and_reports_disabled_openalex(t
     outcome = asyncio.run(coordinator.search("paper"))
 
     assert [c.doi for c in outcome.candidates] == [DOI_A, DOI_B]
+    assert [c.work_type for c in outcome.candidates] == [
+        "journal-article", "journal-article"
+    ]
+    assert all(
+        c.field_provenance["work_type"] == "crossref"
+        for c in outcome.candidates
+    )
     providers = {state.provider: state.status for state in outcome.provider_states}
     assert providers["crossref"] == "ok"
     assert providers["openalex"] == "disabled"
