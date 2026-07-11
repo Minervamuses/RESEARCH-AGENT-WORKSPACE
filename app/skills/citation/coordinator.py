@@ -131,6 +131,7 @@ def _candidate_from_structured(
         venue=record.venue,
         doi=record.doi,
         url=record.url,
+        work_type=record.work_type,
         provider_ids={"structured": f"structured:{record.doi}"},
         provider_ranks={"structured": 0},
         field_provenance={

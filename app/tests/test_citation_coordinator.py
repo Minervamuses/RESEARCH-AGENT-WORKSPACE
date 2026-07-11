@@ -132,6 +132,7 @@ def test_doi_query_uses_singleton_lookup_only(tmp_path):
     candidate = outcome.candidates[0]
     assert candidate.doi == DOI_A
     assert candidate.title == "Paper A"
+    assert candidate.work_type == "journal-article"
     assert candidate.provider_ids == {"structured": f"structured:{DOI_A}"}
     # No crossref/web call for a DOI-shaped query.
     assert all("api.crossref.org" not in url for url, _ in fetcher.calls)
