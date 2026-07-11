@@ -34,11 +34,9 @@ class ToolHarness:
         hub = CitationProviderHub(env={}, fetcher=self.fetcher)
         self.coordinator = CitationCoordinator(hub, output_dir=tmp_path / "cite")
         self.turn = 0
-        self.user_input = ""
         self.tool = create_citation_workflow_tool(
             coordinator_getter=lambda: self.coordinator,
             turn_getter=lambda: self.turn,
-            user_input_getter=lambda: self.user_input,
         )
 
     def run(self, **kwargs) -> str:
@@ -48,7 +46,6 @@ class ToolHarness:
 def test_tool_name_and_schema_fields():
     tool = create_citation_workflow_tool(
         coordinator_getter=lambda: None, turn_getter=lambda: 0,
-        user_input_getter=lambda: "",
     )
     assert tool.name == TOOL_NAME
     fields = set(tool.args_schema.model_fields)
@@ -294,7 +291,6 @@ def test_confirm_in_later_user_turn_writes_bundle(tmp_path):
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
     harness.turn += 1  # the user replied in a new turn
-    harness.user_input = "確認 m1"
 
     confirmed = harness.run(action="confirm", identifier="m1")
     assert "citation confirmed" in confirmed
@@ -319,7 +315,6 @@ def test_confirm_tool_call_carries_structured_receipt_artifact(tmp_path):
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
     harness.turn += 1
-    harness.user_input = "儲存"
 
     message = asyncio.run(harness.tool.ainvoke({
         "name": TOOL_NAME,
@@ -335,20 +330,19 @@ def test_confirm_tool_call_carries_structured_receipt_artifact(tmp_path):
     assert receipt.bundle_path.endswith(message.artifact["bundle_path"].split("/")[-1])
 
 
-def test_confirm_requires_current_user_approval_and_matching_identifier(tmp_path):
+def test_confirm_does_not_reclassify_natural_language(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
     harness.turn += 1
 
-    harness.user_input = "這篇在說什麼"
-    assert "confirm refused" in harness.run(action="confirm", identifier="m1")
-    harness.user_input = "不要儲存"
-    assert "confirm refused" in harness.run(action="confirm", identifier="m1")
-    assert not list((tmp_path / "cite").glob("*/reference.bib"))
+    confirmed = harness.run(action="confirm", identifier="m1")
+
+    assert "citation confirmed" in confirmed
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
 
 
-def test_multiple_matches_require_explicit_matching_m_id(tmp_path):
+def test_confirm_uses_the_model_selected_live_match_id(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
@@ -356,14 +350,6 @@ def test_multiple_matches_require_explicit_matching_m_id(tmp_path):
     harness.coordinator._matches["m2"] = replace(first, match_id="m2")  # noqa: SLF001
     harness.turn += 1
 
-    harness.user_input = "就這篇"
-    assert "multiple live matches" in harness.run(
-        action="confirm", identifier="m1"
-    )
-    harness.user_input = "確認 m2"
-    assert "tool match id differs" in harness.run(
-        action="confirm", identifier="m1"
-    )
     confirmed = harness.run(action="confirm", identifier="m2")
     assert "citation confirmed" in confirmed
     assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
@@ -394,11 +380,11 @@ def test_new_search_resets_the_select_turn_rule(tmp_path):
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
     harness.turn += 1
-    # A fresh search invalidates the old matches; the approval guard refuses
-    # before the writer can see a stale id.
+    # A fresh search invalidates the old matches; the coordinator rejects the
+    # stale id without interpreting any user language.
     harness.run(action="search", query="paper")
     stale = harness.run(action="confirm", identifier="m1")
-    assert "confirm refused" in stale
+    assert "invalid_state" in stale
 
 
 def test_cancel_and_stale_candidate_pass_through_coordinator_errors(tmp_path):
@@ -423,7 +409,6 @@ def test_concurrent_workflow_calls_get_busy_error(tmp_path):
     harness_tool = tool_module.create_citation_workflow_tool(
         coordinator_getter=lambda: SlowCoordinator(),
         turn_getter=lambda: 0,
-        user_input_getter=lambda: "",
     )
 
     async def _race():

@@ -4,7 +4,6 @@ import asyncio
 import logging
 import re
 import uuid
-from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +11,6 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
-from skills.citation.confirmation import classify_confirmation
 from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
@@ -122,9 +120,6 @@ class ChatSession:
 
         self.session_id = uuid.uuid4().hex
         self._turn_counter = 0
-        self._current_user_input: ContextVar[str] = ContextVar(
-            f"citation_user_input_{self.session_id}", default=""
-        )
         self.history_store = history_store or get_chat_history_store(config)
         # find_app_root resolves here (not at import), so a monkeypatch of
         # agent.session.find_app_root before construction stays effective.
@@ -147,7 +142,6 @@ class ChatSession:
         self.citation_workflow_tool = create_citation_workflow_tool(
             coordinator_getter=lambda: self.citation_coordinator,
             turn_getter=lambda: self._turn_counter,
-            user_input_getter=self._current_user_input.get,
         )
         self.graph = build_graph(
             config,
@@ -312,34 +306,6 @@ class ChatSession:
             label = ref.title or ref.doi or ref.url or "(unknown)"
             lines.append(f"- [[cite:{ref.source_id}]] {label}")
         return SystemMessage(content="\n".join(lines))
-
-    def _build_citation_confirmation_hint(
-        self, user_input: str
-    ) -> SystemMessage | None:
-        """Map conservative approval language to an ephemeral model hint."""
-        if not self.citation_skill_active or self._citation_coordinator is None:
-            return None
-        matches = self._citation_coordinator.pending_matches()
-        if not matches:
-            return None
-        decision = classify_confirmation(user_input, matches)
-        if decision.approved:
-            return SystemMessage(content=(
-                "[Citation confirmation intent]\n"
-                "The current user message is an explicit, unambiguous approval "
-                f"of match {decision.match_id}. Call citation_workflow now with "
-                f"action=confirm and identifier={decision.match_id}. Do not expose "
-                "or paraphrase a DOI; the finalizer will produce the receipt."
-            ))
-        if decision.status in {"ambiguous", "rejected"}:
-            live_ids = ", ".join(match.match_id for match in matches)
-            return SystemMessage(content=(
-                "[Citation confirmation intent]\n"
-                "Do NOT call confirm: the current message is ambiguous, negative, "
-                f"or does not safely identify one live match ({live_ids}). Ask the "
-                "user to provide an unambiguous approval and, when needed, one mX id."
-            ))
-        return None
 
     def _trusted_confirm_receipts(self, new_messages: list) -> list[ConfirmReceipt]:
         """Validate receipt artifacts against the live session registry."""
@@ -725,18 +691,13 @@ class ChatSession:
         extra_system_messages: list[SystemMessage] | None = None,
     ) -> GraphTurnResult:
         """Run the session graph once with session policy (no candidate scope)."""
-        confirmation_hint = self._build_citation_confirmation_hint(user_input)
-        merged_system_messages = [
-            *([confirmation_hint] if confirmation_hint is not None else []),
-            *(extra_system_messages or []),
-        ]
         return await self._execute_graph(
             graph=self.graph,
             user_input=user_input,
             prompt_history=self._prompt_history(),
             skill_state=skill_runtime_to_agent_state(self.active_skill_runtime),
             recursion_limit=self.recursion_limit,
-            extra_system_messages=merged_system_messages,
+            extra_system_messages=extra_system_messages,
             trace_label="writer",
             candidate_id=None,
         )
@@ -828,13 +789,9 @@ class ChatSession:
 
     async def _run_turn(self, user_input: str) -> TurnOutcome:
         """Process one turn through the single finalization chokepoint."""
-        token = self._current_user_input.set(user_input)
-        try:
-            if self.thinking_mode == "extended":
-                return await self._run_extended_turn(user_input)
-            return await self._run_normal_turn(user_input)
-        finally:
-            self._current_user_input.reset(token)
+        if self.thinking_mode == "extended":
+            return await self._run_extended_turn(user_input)
+        return await self._run_normal_turn(user_input)
 
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""

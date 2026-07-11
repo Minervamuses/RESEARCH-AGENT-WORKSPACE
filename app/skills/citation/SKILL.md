@@ -36,6 +36,8 @@ actions and keep them in control of every decision.
    `mX` id and ask when it is missing. Success saves a verified bundle and the
    finalizer returns a deterministic receipt with source id, DOI, bundle path,
    verification level, and the source's `[[cite:<source-id>]]` marker.
+   You interpret the user's natural-language intent directly; there is no
+   host-side phrase classifier or approval-word allowlist behind this tool.
 5. **Cite** — cite saved sources only via their `[[cite:<source-id>]]`
    markers; write `[[citation-needed]]` where a claim has no saved source.
    The renderer assigns numbers and builds the bibliography after the
@@ -44,6 +46,9 @@ actions and keep them in control of every decision.
 ## Hard rules
 
 - Never call `confirm` in the same turn as `select`; the tool refuses it.
+- Your decision to call `confirm` is the authorization decision. Read the
+  user's current message and conversational context carefully: the host will
+  validate workflow state but will not second-guess your language judgment.
 - Never call `confirm` for negated, conditional, or questioning language such
   as `不要儲存`, `先別確認`, `取消`, `可以嗎?`, `no`, or `don't save`.
 - Before confirm succeeds, present candidates and matches by `cX`/`mX` plus

@@ -377,7 +377,7 @@ citation 是內建 skill(engine 就住在 `app/skills/citation/`,同一目錄既
 - 停用/切換 skill 立即清除 in-memory workflow 與 session 來源 registry(已寫入磁碟的 bundle 保留);citation hint、renderer 與工具同時消失。
 - `citation_workflow` 是 skill 專屬工具:普通模式與其他 skills 完全綁不到,偽造的 tool call 也會被執行層(PolicyToolNode)拒絕。
 - 同 session 同時只能有一個 workflow call(並行呼叫回 busy);`confirm` 必須發生在 `select` 之後的較晚使用者 turn——同 turn confirm 一律拒絕。
-- 自然語言確認採保守規則:唯一 pending match 可用「儲存／保存／確認／可以／要這篇／就這篇／OK／yes／save」批准;多個 pending matches 必須明指一個 `mX`;否定、問句、條件句或 tool argument 與使用者指定的 `mX` 不一致時一律拒絕寫入。
+- 自然語言確認完全由模型依目前對話與 citation skill 指引判斷；host/tool 不維護確認詞白名單，也不重新分類原始使用者文字。確定性執行層只保留 workflow 狀態限制：`confirm` 必須跨 turn、identifier 必須是仍有效的 `mX`，同 turn confirm 與 stale match 一律拒絕。此設計刻意信任模型的語意判斷，因此模型若誤判使用者意圖，host 不會以第二套文字規則攔截，但成功後的 DOI/BibTeX 驗證、atomic storage 與 receipt 驗證仍照常執行。
 
 工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除,並回傳實際日期窗)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider;可帶 keyword/year/venue/work type,只有使用者明確要求 venue 等級時才使用 fail-closed `venue_tiers`)、`list`、`show`、`select`、`confirm`、`status`、`explain`(唯讀;回傳 workflow 驗證/儲存流程的公開契約與 citation 輸出目錄)、`cancel`、`sources`、`source`。
 

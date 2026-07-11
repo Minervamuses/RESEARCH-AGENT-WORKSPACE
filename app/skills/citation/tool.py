@@ -10,8 +10,8 @@ Safety rails owned by this layer:
   * one workflow call at a time per session — a concurrent call returns a
     busy error instead of interleaving with the stateful Coordinator;
   * ``confirm`` must arrive in a *later user turn* than the ``select`` that
-    produced the match, so at least one explicit user confirmation separates
-    resolving a match from writing the bundle;
+    produced the match, so resolving a match and writing the bundle remain
+    separate interaction steps;
   * date filtering is either ``published_within_years`` or
     ``year_from``/``year_to`` — never both — and applies only to ``search``
     and the provider-free ``refine`` view.
@@ -33,7 +33,6 @@ from skills.citation.coordinator import (
     SearchOutcome,
     SelectOutcome,
 )
-from skills.citation.confirmation import classify_confirmation
 from skills.citation.doi import extract_doi_candidates
 from skills.citation.types import (
     CitationCandidate,
@@ -557,15 +556,14 @@ def create_citation_workflow_tool(
     *,
     coordinator_getter: Callable[[], CitationCoordinator],
     turn_getter: Callable[[], int],
-    user_input_getter: Callable[[], str],
 ) -> StructuredTool:
     """Build the session-scoped citation_workflow StructuredTool.
 
     ``coordinator_getter`` returns the session Coordinator lazily (so merely
     creating the tool never touches providers); ``turn_getter`` returns the
     session's completed-turn counter, used to enforce that confirm happens in
-    a later user turn than select. ``user_input_getter`` supplies the current
-    raw user message for a conservative, deterministic approval check.
+    a later user turn than select. The model owns natural-language intent
+    interpretation; this tool validates workflow state, not user phrasing.
     """
     busy_lock = asyncio.Lock()
     # Turn (as reported by turn_getter) in which the current matches were
@@ -678,21 +676,11 @@ def create_citation_workflow_tool(
         if action == "confirm":
             if select_turn is not None and turn_getter() <= select_turn:
                 return _validation_error(
-                    "confirm refused: the user has not confirmed this match "
-                    "in a later message. Present the matches and wait for an "
-                    "explicit user confirmation before calling confirm."
+                    "confirm refused: confirm must occur in a later user turn "
+                    "than select. Present the matches and wait for the next "
+                    "user message before calling confirm."
                 )
-            decision = classify_confirmation(
-                user_input_getter(),
-                coordinator.pending_matches(),
-                requested_match_id=identifier,
-            )
-            if not decision.approved:
-                return _validation_error(
-                    "confirm refused: the current user message is not an "
-                    f"unambiguous explicit approval ({decision.reason})."
-                )
-            result = await coordinator.confirm(decision.match_id)
+            result = await coordinator.confirm(identifier)
             if result.status == "confirmed":
                 select_turn = None
                 receipt = _confirm_receipt(result)
