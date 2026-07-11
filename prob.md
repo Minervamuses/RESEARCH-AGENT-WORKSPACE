@@ -34,14 +34,14 @@
 
 - `show` 通常只提供 title、authors、year、venue、DOI、URL，以及可能存在的短 snippet。
 - Crossref/OpenAlex 候選不保證有 abstract 或全文。
-- Citation skill 啟用後，模型目前只有 `citation_workflow`，無法使用一般 Web Search、RAG 或 `read_file` 補足資訊。
+- 全域工具重構後，citation skill 已可使用 Web Search、RAG 與 `read_file` 補查，但 skill 指令尚未規範何時必須補查、何時必須標示推測。
 - 模型可能依標題、參數知識或推測產生論文介紹，卻未標示資料來源，無法判斷是可靠記憶還是幻覺。
 
 建議：
 
 - 特定論文摘要只有在取得 abstract/full text 時才可作為 grounded summary。
 - 只有 metadata 時必須明示「根據標題/metadata 推測」，或先查外部來源。
-- 可讓 citation skill 使用 Web Search，或在 workflow 增加 `inspect`/`abstract` action。
+- 可在 workflow 增加 `inspect`/`abstract` action，減少對外部補查的依賴。
 - Web evidence 可支援介紹，但保存 verified citation 仍只能走 citation workflow。
 
 ## 4. 模型錯誤解釋 citation verification 流程
@@ -83,27 +83,7 @@
 - 在後續 prompt 注入 compact verified-source receipt（path、DOI、provenance）。
 - 使用者詢問已儲存來源時，skill 應要求呼叫 `source`，不得直接宣稱無法存取。
 
-## 6. Skill tool policy 與「base tools 常駐」語義衝突
-
-基礎工具文件將下列工具描述為 always available：
-
-- RAG search
-- history search
-- `read_file`
-- `bash`（每次執行需使用者批准）
-
-Web Search MCP 在成功載入時也是普通模式可用工具。但目前 active skill policy 使用封閉 allowlist；citation manifest 只要求 `citation.workflow`，因此啟用後實際只剩 `citation_workflow`，其他 base/MCP tools 全部被移除，包括 Web Search 與 `read_file`。`bash` 不是等待批准，而是根本沒有綁給模型。
-
-這與「安全 base tools 常駐、危險工具逐次批准、skill 增量加入能力」的預期不一致，也直接造成論文介紹無法補查與 workflow 實作無法查證。
-
-建議優先決策：
-
-1. 全域方案：安全 base tools 預設繼承，skill capability 採增量授權；只有 explicit deny 才移除。
-2. 局部方案：citation manifest 保留 `citation.workflow` required，加入 `file.read` required、`web.search` optional。
-3. 不論採哪一方案，`bash` 維持每次呼叫使用者批准。
-4. Web/RAG 得到的內容只能作為閱讀證據，不能繞過 citation confirm 成為 verified source。
-
-## 7. Citation discovery 品質與重複候選
+## 6. Citation discovery 品質與重複候選
 
 - 搜尋結果可能包含與主題關聯薄弱、只借用知名標題的論文。
 - 同一作品的 reprint/版本可能佔據多個 candidate ID。
@@ -120,4 +100,4 @@ Web Search MCP 在成功載入時也是普通模式可用工具。但目前 acti
 
 - `SKILL.md` 是行動指引；citation engine 是由 skill 授權的本地 stateful tool，兩者不應混為同一個黑箱概念。
 - 搜尋、介紹與閱讀可以使用 Web/RAG 證據；verified citation 的選擇、確認與寫入仍必須由 deterministic workflow 控制。
-- 封裝本身不是問題；缺少透明契約、grounding fallback、compact receipt 與清楚的能力繼承語義，才是目前模型開始腦補的主要原因。
+- 封裝本身不是問題；缺少透明契約、grounding fallback 與 compact receipt，才是目前模型開始腦補的主要原因。（能力繼承語義已由全域工具／skill 工具兩級模型解決：base tools 與 Web Search 常駐，skill manifest 只增量宣告專屬工具。）
