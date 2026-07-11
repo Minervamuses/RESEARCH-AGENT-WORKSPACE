@@ -7,13 +7,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
 from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
 from agent.turn_outcome import TurnOutcome
+from agent.turn_safety import (
+    build_recovery_message,
+    content_text,
+    final_response_problem,
+    has_tool_results,
+)
 
 from agent.config import AgentConfig
 from agent.fusion import FusionOrchestrator, GraphTurnResult
@@ -344,6 +350,7 @@ class ChatSession:
         new_messages: list,
         tool_calls: list[dict],
         trace_events: list[dict],
+        recovery_reason: str | None = None,
         fusion: dict | None = None,
         candidate_traces=None,
     ) -> TurnOutcome:
@@ -353,9 +360,17 @@ class ChatSession:
         turns, and Chroma history see any text — a blocked draft never
         reaches persistence in any form.
         """
-        final_text, errors = self._finalize_answer(
-            answer, user_input=user_input
+        safety_issue = final_response_problem(
+            str(answer),
+            tool_names=(ref.name for ref in self._tool_universe_refs()),
         )
+        if safety_issue is not None:
+            answer = build_recovery_message(
+                user_input=user_input,
+                had_tool_results=has_tool_results(new_messages),
+            )
+            recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
+        final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
         await self._record_turn(
             user_input=user_input,
             answer=final_text,
@@ -365,6 +380,7 @@ class ChatSession:
             fusion=fusion,
             candidate_traces=candidate_traces,
             validation_errors=errors,
+            recovery_reason=recovery_reason,
         )
         return TurnOutcome(
             text=final_text,
@@ -551,14 +567,25 @@ class ChatSession:
             }
             for call in tool_calls
         ]
-        answer = messages[-1].content if messages else ""
-        answer = answer or ""
+        answer = content_text(messages[-1].content) if messages else ""
+        last_ai = next(
+            (
+                message
+                for message in reversed(new_messages)
+                if isinstance(message, AIMessage)
+            ),
+            None,
+        )
+        recovery_reason = None
+        if last_ai is not None:
+            recovery_reason = (last_ai.response_metadata or {}).get("turn_recovery")
 
         return GraphTurnResult(
-            answer=str(answer),
+            answer=answer,
             new_messages=new_messages,
             tool_calls=tool_calls,
             trace_events=trace_events,
+            recovery_reason=recovery_reason,
         )
 
     async def _run_graph_turn(
@@ -590,6 +617,7 @@ class ChatSession:
         fusion: dict | None = None,
         candidate_traces: list[FusionCandidateTrace] | None = None,
         validation_errors: list[str] | None = None,
+        recovery_reason: str | None = None,
     ) -> None:
         """Persist/log the final answer for one user-visible turn.
 
@@ -645,6 +673,7 @@ class ChatSession:
             "tool_counts": format_tool_counts(tool_calls),
             "fusion": fusion,
             "validation_errors": list(validation_errors or []),
+            "recovery": recovery_reason,
         })
         await self._turn_store.evict_overflow()
 
@@ -656,6 +685,7 @@ class ChatSession:
             new_messages=result.new_messages,
             tool_calls=result.tool_calls,
             trace_events=result.trace_events,
+            recovery_reason=result.recovery_reason,
         )
 
     async def _run_extended_turn(self, user_input: str) -> TurnOutcome:

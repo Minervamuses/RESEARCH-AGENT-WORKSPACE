@@ -89,6 +89,7 @@ class GraphTurnResult:
     new_messages: list
     tool_calls: list[dict]
     trace_events: list[dict]
+    recovery_reason: str | None = None
     fusion: dict | None = None
     candidate_traces: list[FusionCandidateTrace] = field(default_factory=list)
 

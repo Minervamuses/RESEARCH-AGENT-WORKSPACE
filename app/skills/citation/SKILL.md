@@ -14,9 +14,12 @@ actions and keep them in control of every decision.
 1. **Search** — `action="search"` with the user's topic as `query`. When the
    user constrains recency ("近5年", "2020–2023"), pass
    `published_within_years` OR `year_from`/`year_to` (never both).
-2. **Present** — show the returned candidates to the user and WAIT for their
-   choice. Never pick a candidate yourself. Use `action="more"` / `"list"` /
-   `"show"` to refine or inspect on request.
+2. **Present** — show the returned shortlist to the user and WAIT for their
+   choice. Never pick a candidate yourself. When the user changes or narrows
+   conditions, use `action="refine"` with structured keyword/year/venue/work
+   type filters over the existing pool. Do not scan candidate pages to infer
+   a refinement. Use `action="list"` only when the user explicitly asks to
+   browse more, and `action="show"` to inspect a specific candidate.
 3. **Resolve** — after the user picks, `action="select"` with that candidate
    id. Show the confirmable matches and WAIT again.
 4. **Confirm** — only after the user explicitly approves a match in a later

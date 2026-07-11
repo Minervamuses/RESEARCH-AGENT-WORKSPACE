@@ -212,6 +212,80 @@ def test_more_appends_web_results_keeps_ids_clears_matches(tmp_path):
     assert stale.accepted_doi is None
 
 
+def test_refine_is_non_destructive_stable_and_clears_selection(tmp_path):
+    coordinator, fetcher = _coordinator(tmp_path)
+    outcome = asyncio.run(coordinator.search("paper"))
+    ids_before = [candidate.candidate_id for candidate in outcome.candidates]
+    selected = asyncio.run(coordinator.select("c1"))
+    assert selected.matches
+    calls_before = list(fetcher.calls)
+
+    refined = coordinator.refine(
+        keywords=["paper", "a"],
+        venues=["journal a", "other"],
+        work_types=["journal-article"],
+        date_filter=None,
+    )
+
+    assert [candidate.candidate_id for candidate in refined.candidates] == ["c1"]
+    assert [candidate.candidate_id for candidate in coordinator._candidates] == ids_before
+    assert fetcher.calls == calls_before
+    listed, pages = coordinator.list_candidates()
+    assert [candidate.candidate_id for candidate in listed] == ["c1"]
+    assert pages == 1
+    assert coordinator.status()["selected"] == "none"
+    assert coordinator.status()["matches"] == 0
+    assert coordinator.get_candidate("c1") is not None
+
+
+def test_refine_date_filter_is_fail_closed_for_unknown_year(tmp_path):
+    coordinator, _ = _coordinator(tmp_path)
+    asyncio.run(coordinator.search("paper"))
+    coordinator._candidates.append(type(coordinator._candidates[0])(
+        candidate_id="c3",
+        workflow_id=coordinator.workflow_id,
+        title="Paper without year",
+        year=None,
+    ))
+    coordinator._refresh_candidate_view()
+
+    from skills.citation.types import PublishedDateFilter
+
+    refined = coordinator.refine(
+        date_filter=PublishedDateFilter.from_year_range(2020, 2021)
+    )
+
+    assert [candidate.candidate_id for candidate in refined.candidates] == ["c1", "c2"]
+    assert "c3" not in [candidate.candidate_id for candidate in refined.candidates]
+
+
+def test_more_reapplies_active_refinement_to_new_candidates(tmp_path):
+    web_tool = StubWebTool(WEB_TEXT)
+    coordinator, _ = _coordinator(
+        tmp_path, web_tools={"get-web-search-summaries": web_tool}
+    )
+    asyncio.run(coordinator.search("paper"))
+    empty = coordinator.refine(keywords=["landing"])
+    assert empty.candidates == []
+
+    asyncio.run(coordinator.more())
+
+    listed, _ = coordinator.list_candidates()
+    assert [candidate.title for candidate in listed] == ["Paper C landing page"]
+    assert listed[0].candidate_id == "c3"
+
+
+def test_refine_without_constraints_resets_full_view(tmp_path):
+    coordinator, _ = _coordinator(tmp_path)
+    asyncio.run(coordinator.search("paper"))
+    coordinator.refine(venues=["journal a"])
+
+    reset = coordinator.refine()
+
+    assert reset.reset is True
+    assert [candidate.candidate_id for candidate in reset.candidates] == ["c1", "c2"]
+
+
 def test_select_no_doi_candidate_returns_no_doi(tmp_path):
     fetcher = RoutingFetcher()
     fetcher.crossref_response = FetchResponse(

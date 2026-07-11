@@ -9,6 +9,7 @@ from conftest import FakeHistoryStore, make_astream_graph
 from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.turn_outcome import TurnOutcome
+from agent.turn_safety import find_content_tool_protocol_artifact
 from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
 from skills.citation.types import SourceRef
@@ -61,6 +62,66 @@ def test_clean_turn_returns_outcome_and_records(make_session):
     assert outcome.validation_errors == []
     assert session.recent_turns[-1].assistant_output == "plain answer"
     assert session.turn_logs[-1]["validation_errors"] == []
+    assert session.turn_logs[-1]["recovery"] is None
+
+
+@pytest.mark.parametrize("draft", ["", "   \n\t"])
+def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, draft):
+    session, _ = make_session(answer=draft)
+
+    outcome = asyncio.run(session.turn_outcome("請整理結果"))
+
+    assert "未能產生可顯示" in outcome.text
+    assert session.recent_turns[-1].assistant_output == outcome.text
+    assert session.turn_logs[-1]["recovery"] == "finalizer:empty_final_answer"
+
+
+@pytest.mark.parametrize("draft", [
+    'citation_workflow(action="list", page=5)',
+    'citation_workflow({"action":"list","page":5})',
+    '<｜tool▁calls▁begin｜>citation_workflow',
+    '{"name":"citation_workflow","args":{"action":"list"}}',
+    '{"arguments":{"action":"list"},"name":"citation_workflow"}',
+    '{"type":"tool_use","name":"citation_workflow",'
+    '"input":{"action":"list"}}',
+])
+def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
+    session, _ = make_session(answer=draft)
+
+    outcome = asyncio.run(session.turn_outcome("繼續"))
+
+    assert "citation_workflow" not in outcome.text
+    assert draft not in session.recent_turns[-1].assistant_output
+    recovery = session.turn_logs[-1]["recovery"]
+    assert recovery.startswith("finalizer:")
+    assert "tool" in recovery
+
+
+@pytest.mark.parametrize("draft", [
+    "The citation_workflow tool is available for verified citations.",
+    "Tool calls begin after the model chooses a function.",
+    "The tool call begins only after approval.",
+])
+def test_plain_tool_prose_is_not_a_protocol_artifact(make_session, draft):
+    session, _ = make_session(answer=draft)
+
+    outcome = asyncio.run(session.turn_outcome("explain"))
+
+    assert outcome.text == draft
+    assert session.turn_logs[-1]["recovery"] is None
+
+
+def test_structured_tool_content_is_detected_before_flattening():
+    content = [{
+        "type": "tool_use",
+        "name": "citation_workflow",
+        "input": {"action": "list"},
+    }]
+
+    assert find_content_tool_protocol_artifact(
+        content,
+        tool_names=["citation_workflow"],
+    ) == "structured_tool_content"
 
 
 def test_turn_and_trace_wrappers_return_finalized_text(make_session):

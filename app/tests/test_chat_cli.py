@@ -74,6 +74,16 @@ def test_chat_cli_flushes_recent_turns_on_turn_error(monkeypatch):
     assert session.calls == ["turn:hello", "flush"]
 
 
+def test_chat_cli_never_prints_a_silent_blank_response(monkeypatch, capsys):
+    session = FakeChatSession(turn_result="   ")
+
+    _run_cli(monkeypatch, session, ["請回答", "q"])
+
+    output = capsys.readouterr().out
+    assert "未能產生可顯示" in output
+    assert session.calls == ["turn:請回答", "flush"]
+
+
 def test_chat_cli_slash_help_stays_local(monkeypatch, capsys):
     session = FakeChatSession(status={
         "session_id": "session-1",

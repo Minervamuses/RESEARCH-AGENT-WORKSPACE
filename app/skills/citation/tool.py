@@ -13,7 +13,8 @@ Safety rails owned by this layer:
     produced the match, so at least one explicit user confirmation separates
     resolving a match from writing the bundle;
   * date filtering is either ``published_within_years`` or
-    ``year_from``/``year_to`` — never both — and only applies to ``search``.
+    ``year_from``/``year_to`` — never both — and applies only to ``search``
+    and the provider-free ``refine`` view.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from pydantic import BaseModel, Field
 from skills.citation.coordinator import (
     PAGE_SIZE,
     CitationCoordinator,
+    RefineOutcome,
     SearchOutcome,
     SelectOutcome,
 )
@@ -45,7 +47,8 @@ TOOL_DESCRIPTION = (
     "inspect candidates, resolve DOI matches, and save verified citation "
     "bundles. Actions: 'search' (requires query; optionally EITHER "
     "published_within_years OR year_from/year_to), 'more' (append web "
-    "results to the current search), 'list' (page through candidates), "
+    "results to the current search), 'refine' (filter the current candidate "
+    "pool without new provider calls), 'list' (page through the active view), "
     "'show' (identifier = candidate id), 'select' (identifier = candidate "
     "id; resolves confirmable matches), 'confirm' (identifier = match id; "
     "call ONLY after the user explicitly confirmed the match in a later "
@@ -59,6 +62,7 @@ TOOL_DESCRIPTION = (
 CitationAction = Literal[
     "search",
     "more",
+    "refine",
     "list",
     "show",
     "select",
@@ -90,10 +94,25 @@ class CitationWorkflowInput(BaseModel):
     page: int | None = Field(
         None, description="1-based page for list/sources (default 1)."
     )
+    keywords: list[str] | None = Field(
+        None,
+        description=(
+            "refine only: every normalized keyword must occur in candidate "
+            "metadata; omit all refine fields to reset the active view."
+        ),
+    )
+    venues: list[str] | None = Field(
+        None,
+        description="refine only: match any normalized venue substring.",
+    )
+    work_types: list[str] | None = Field(
+        None,
+        description="refine only: match any normalized work type exactly.",
+    )
     published_within_years: int | None = Field(
         None,
         description=(
-            "search only: keep works published within the last N years "
+            "search/refine only: keep works published within the last N years "
             "(window computed from today, UTC). Mutually exclusive with "
             "year_from/year_to."
         ),
@@ -101,14 +120,14 @@ class CitationWorkflowInput(BaseModel):
     year_from: int | None = Field(
         None,
         description=(
-            "search only: earliest publication year (inclusive). Mutually "
+            "search/refine only: earliest publication year (inclusive). Mutually "
             "exclusive with published_within_years."
         ),
     )
     year_to: int | None = Field(
         None,
         description=(
-            "search only: latest publication year (inclusive). Mutually "
+            "search/refine only: latest publication year (inclusive). Mutually "
             "exclusive with published_within_years."
         ),
     )
@@ -141,11 +160,31 @@ def format_candidates(
         lines.extend(_candidate_lines(candidate))
     if total_pages > 1:
         lines.append(
-            "Use action=list with a page number to inspect additional candidates."
+            "Prefer action=refine when conditions change; use action=list with "
+            "a page number only when the user explicitly asks to browse more."
         )
     lines.append(
         "Present these to the user and wait for their choice; then use "
         "action=show for details or action=select with the chosen candidate id."
+    )
+    return "\n".join(lines)
+
+
+def format_shortlist(
+    candidates: list[CitationCandidate],
+    *,
+    total_matches: int,
+    label: str = "Shortlist",
+) -> str:
+    visible = candidates[:PAGE_SIZE]
+    if not visible:
+        return f"{label}: 0 of {total_matches} candidate(s)"
+    lines = [f"{label}: {len(visible)} of {total_matches} candidate(s)"]
+    for candidate in visible:
+        lines.extend(_candidate_lines(candidate))
+    lines.append(
+        "Present this shortlist to the user. If their conditions change, use "
+        "action=refine instead of scanning every candidate page."
     )
     return "\n".join(lines)
 
@@ -194,15 +233,33 @@ def format_search_outcome(outcome: SearchOutcome, *, appended: bool = False) -> 
         detail = f" — {state.detail}" if state.detail else ""
         lines.append(f"  provider {state.provider}: {state.status}{detail}")
     if outcome.candidates:
-        candidates = outcome.candidates
-        total_pages = 1
-        if not appended:
-            total_pages = max(1, -(-len(candidates) // PAGE_SIZE))
-            candidates = candidates[:PAGE_SIZE]
         lines.append("")
-        lines.append(
-            format_candidates(candidates, page=1, total_pages=total_pages)
-        )
+        if appended:
+            lines.append(format_shortlist(
+                outcome.candidates,
+                total_matches=len(outcome.candidates),
+                label="Appended candidates",
+            ))
+        else:
+            lines.append(format_shortlist(
+                outcome.candidates,
+                total_matches=len(outcome.candidates),
+            ))
+    return "\n".join(lines)
+
+
+def format_refine_outcome(outcome: RefineOutcome) -> str:
+    if outcome.error:
+        return f"error: {outcome.error}"
+    verb = "refinement reset" if outcome.reset else "refined candidate view"
+    lines = [
+        f"{verb}: {len(outcome.candidates)} match(es) from pool of "
+        f"{outcome.pool_size}"
+    ]
+    lines.append(format_shortlist(
+        outcome.candidates,
+        total_matches=len(outcome.candidates),
+    ))
     return "\n".join(lines)
 
 
@@ -288,8 +345,11 @@ def format_source_detail(ref: SourceRef) -> str:
 
 def format_status(status: dict) -> str:
     lines = ["Citation workflow status:"]
-    for key in ("workflow_id", "query", "date_filter", "candidates", "selected",
-                "matches", "attempts", "sources"):
+    for key in (
+        "workflow_id", "query", "date_filter", "candidates",
+        "view_candidates", "refinement", "selected", "matches", "attempts",
+        "sources",
+    ):
         lines.append(f"  {key}: {status.get(key)}")
     for state in status.get("provider_states", []):
         detail = f" — {state.get('detail')}" if state.get("detail") else ""
@@ -350,6 +410,9 @@ def create_citation_workflow_tool(
         query: str | None,
         identifier: str | None,
         page: int | None,
+        keywords: list[str] | None,
+        venues: list[str] | None,
+        work_types: list[str] | None,
         published_within_years: int | None,
         year_from: int | None,
         year_to: int | None,
@@ -362,9 +425,16 @@ def create_citation_workflow_tool(
             or year_from is not None
             or year_to is not None
         )
-        if has_date_args and action != "search":
+        if has_date_args and action not in {"search", "refine"}:
             return _validation_error(
-                "date filters only apply to action='search'"
+                "date filters only apply to action='search' or action='refine'"
+            )
+        has_refine_args = any(value is not None for value in (
+            keywords, venues, work_types,
+        ))
+        if has_refine_args and action != "refine":
+            return _validation_error(
+                "keywords/venues/work_types only apply to action='refine'"
             )
         if action in _IDENTIFIER_ACTIONS and not (identifier or "").strip():
             return _validation_error(f"action '{action}' requires identifier")
@@ -391,6 +461,24 @@ def create_citation_workflow_tool(
         if action == "more":
             outcome = await coordinator.more(query)
             return format_search_outcome(outcome, appended=True)
+
+        if action == "refine":
+            try:
+                date_filter = _build_date_filter(
+                    published_within_years=published_within_years,
+                    year_from=year_from,
+                    year_to=year_to,
+                )
+            except ValueError as exc:
+                return _validation_error(str(exc))
+            select_turn = None
+            outcome = coordinator.refine(
+                keywords=keywords,
+                venues=venues,
+                work_types=work_types,
+                date_filter=date_filter,
+            )
+            return format_refine_outcome(outcome)
 
         if action == "list":
             candidates, total_pages = coordinator.list_candidates(page or 1)
@@ -453,6 +541,9 @@ def create_citation_workflow_tool(
         query: str | None = None,
         identifier: str | None = None,
         page: int | None = None,
+        keywords: list[str] | None = None,
+        venues: list[str] | None = None,
+        work_types: list[str] | None = None,
         published_within_years: int | None = None,
         year_from: int | None = None,
         year_to: int | None = None,
@@ -465,6 +556,7 @@ def create_citation_workflow_tool(
         async with busy_lock:
             return await _dispatch(
                 action, query, identifier, page,
+                keywords, venues, work_types,
                 published_within_years, year_from, year_to,
             )
 

@@ -3,11 +3,16 @@
 import asyncio
 import json
 
-from skills.citation.coordinator import CitationCoordinator, SearchOutcome
+from skills.citation.coordinator import (
+    CitationCoordinator,
+    RefineOutcome,
+    SearchOutcome,
+)
 from skills.citation.hub import CitationProviderHub
 from skills.citation.tool import (
     TOOL_NAME,
     create_citation_workflow_tool,
+    format_refine_outcome,
     format_search_outcome,
 )
 from skills.citation.types import CitationCandidate
@@ -40,6 +45,7 @@ def test_tool_name_and_schema_fields():
     fields = set(tool.args_schema.model_fields)
     assert fields == {
         "action", "query", "identifier", "page",
+        "keywords", "venues", "work_types",
         "published_within_years", "year_from", "year_to",
     }
 
@@ -68,12 +74,34 @@ def test_search_presents_only_first_ten_candidates():
     message = format_search_outcome(outcome)
 
     assert "found 12 candidate(s)" in message
-    assert "Candidates (page 1/2):" in message
+    assert "Shortlist: 10 of 12 candidate(s)" in message
     assert "[c1]" in message
     assert "[c10]" in message
     assert "[c11]" not in message
-    assert "action=list" in message
+    assert "action=refine" in message
+    assert "action=list" not in message
     assert len(outcome.candidates) == 12
+
+
+def test_refine_presents_only_first_ten_candidates():
+    candidates = [
+        CitationCandidate(
+            candidate_id=f"c{index}",
+            workflow_id="wf-1",
+            title=f"Paper {index}",
+        )
+        for index in range(1, 13)
+    ]
+
+    message = format_refine_outcome(RefineOutcome(
+        candidates=candidates,
+        pool_size=20,
+    ))
+
+    assert "12 match(es) from pool of 20" in message
+    assert "Shortlist: 10 of 12 candidate(s)" in message
+    assert "[c10]" in message
+    assert "[c11]" not in message
 
 
 def test_search_requires_query_and_rejects_dual_date_modes(tmp_path):
@@ -109,11 +137,44 @@ def test_published_within_years_computes_window_from_today(tmp_path):
     assert filt.year_from == today.year - 5
 
 
-def test_date_args_rejected_outside_search(tmp_path):
+def test_date_args_rejected_outside_search_or_refine(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     message = harness.run(action="more", published_within_years=3)
     assert "date filters only apply" in message
+
+
+def test_refine_filters_existing_pool_and_resets_without_provider_calls(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    calls_before = list(harness.fetcher.calls)
+
+    refined = harness.run(
+        action="refine",
+        keywords=["paper", "a"],
+        venues=["journal a", "unused"],
+        work_types=["journal-article"],
+        year_from=2021,
+        year_to=2021,
+    )
+    assert "1 match(es) from pool of 2" in refined
+    assert "[c1]" in refined
+    assert "[c2]" not in refined
+    assert harness.fetcher.calls == calls_before
+
+    listed = harness.run(action="list")
+    assert "[c1]" in listed
+    assert "[c2]" not in listed
+
+    reset = harness.run(action="refine")
+    assert "refinement reset" in reset
+    assert "[c1]" in reset and "[c2]" in reset
+
+
+def test_refine_fields_are_rejected_for_other_actions(tmp_path):
+    harness = ToolHarness(tmp_path)
+    message = harness.run(action="search", query="paper", keywords=["x"])
+    assert "only apply to action='refine'" in message
 
 
 def test_identifier_actions_require_identifier(tmp_path):

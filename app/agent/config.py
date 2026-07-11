@@ -56,6 +56,12 @@ class AgentConfig(RAGConfig):
     # cap. Scope is per turn, not per conversation.
     agent_max_tool_interactions: int = 4
 
+    # Separate bounded allowance for citation_workflow operations that only
+    # navigate or deterministically refine session-local state. Keeping these
+    # out of the primary budget prevents status/list/show calls from crowding
+    # out retrieval, while the independent cap still prevents runaway loops.
+    agent_max_local_tool_interactions: int = 4
+
     # Long-term memory: keep this many most-recent turns in the prompt;
     # evicted turns spill into the chat_history vector store.
     agent_recent_turns_window: int = 10

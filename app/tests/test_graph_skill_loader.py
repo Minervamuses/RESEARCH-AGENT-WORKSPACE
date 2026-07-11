@@ -381,7 +381,7 @@ def test_agent_node_forces_answer_after_tool_budget(monkeypatch, tmp_path):
     assert len(model.bound_calls) == 1
     assert len(model.raw_calls) == 1
     assert any(
-        "Tool budget exhausted" in message.content
+        "Both budgets are exhausted" in message.content
         for message in model.raw_calls[0]
     )
 
@@ -548,6 +548,202 @@ def test_agent_node_strips_tool_calls_from_exhausted_raw_model(monkeypatch, tmp_
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert len(tool_messages) == 1
     assert len(model.bound_calls) == 1
-    assert len(model.raw_calls) == 1
-    assert result["messages"][-1].content == "raw tried tool"
+    # The first raw response is invalid because its structured call was
+    # dropped. One raw repair is attempted, then deterministic fallback wins.
+    assert len(model.raw_calls) == 2
+    assert "could not produce a final summary" in result["messages"][-1].content
     assert not result["messages"][-1].tool_calls
+
+
+def test_agent_node_repairs_dsml_after_budget_exhaustion(monkeypatch, tmp_path):
+    class DsmlModel:
+        def __init__(self):
+            self.raw_calls = 0
+
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, _messages):
+                    return AIMessage(
+                        content="",
+                        tool_calls=[{
+                            "name": "rag_search",
+                            "args": {"query": "x"},
+                            "id": "search-1",
+                        }],
+                    )
+            return Bound()
+
+        def invoke(self, _messages):
+            self.raw_calls += 1
+            if self.raw_calls == 1:
+                return AIMessage(
+                    content='citation_workflow(action="list", page=5)'
+                )
+            return AIMessage(content="I found one relevant result.")
+
+    model = DsmlModel()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    graph = build_graph(
+        AgentConfig(
+            persist_dir=str(tmp_path),
+            agent_max_tool_interactions=1,
+            agent_max_local_tool_interactions=0,
+        ),
+        skill_tools=[_citation_workflow],
+    )
+
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="find it")],
+            "active_skill": "citation",
+            "skill_instructions": "use citation",
+            "effective_tools": ["rag_search", "citation_workflow"],
+        },
+        config={"recursion_limit": 8},
+    )
+
+    final = result["messages"][-1]
+    assert final.content == "I found one relevant result."
+    assert final.response_metadata["turn_recovery"].startswith("repaired:")
+    assert model.raw_calls == 2
+
+
+def test_agent_node_repairs_non_exhausted_blank_answer(monkeypatch, tmp_path):
+    class BlankThenRepairModel:
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, _messages):
+                    return AIMessage(content="   ")
+            return Bound()
+
+        def invoke(self, _messages):
+            return AIMessage(content="Recovered answer")
+
+    monkeypatch.setattr(
+        "agent.graph.get_chat_model", lambda _cfg: BlankThenRepairModel()
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+
+    result = graph.invoke({"messages": [HumanMessage(content="hello")]})
+
+    assert result["messages"][-1].content == "Recovered answer"
+    assert result["messages"][-1].response_metadata["turn_recovery"] == (
+        "repaired:empty_final_answer"
+    )
+
+
+def test_agent_node_repairs_structured_tool_content(monkeypatch, tmp_path):
+    class StructuredContentModel:
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, _messages):
+                    return AIMessage(content=[{
+                        "type": "tool_use",
+                        "name": "citation_workflow",
+                        "input": {"action": "list"},
+                    }])
+
+            return Bound()
+
+        def invoke(self, _messages):
+            return AIMessage(content="Recovered answer")
+
+    monkeypatch.setattr(
+        "agent.graph.get_chat_model", lambda _cfg: StructuredContentModel()
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    graph = build_graph(
+        AgentConfig(persist_dir=str(tmp_path)),
+        skill_tools=[_citation_workflow],
+    )
+
+    result = graph.invoke({
+        "messages": [HumanMessage(content="continue")],
+        "active_skill": "citation",
+        "skill_instructions": "use citation",
+        "effective_tools": ["citation_workflow"],
+    })
+
+    final = result["messages"][-1]
+    assert final.content == "Recovered answer"
+    assert final.response_metadata["turn_recovery"] == (
+        "repaired:structured_tool_content"
+    )
+
+
+def test_primary_and_local_tool_budgets_are_independent(monkeypatch, tmp_path):
+    class MixedBudgetModel:
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, messages):
+                    completed = sum(isinstance(m, ToolMessage) for m in messages)
+                    suffix = str(completed)
+                    return AIMessage(content="", tool_calls=[
+                        {
+                            "name": "rag_search",
+                            "args": {"query": suffix},
+                            "id": f"primary-{suffix}",
+                        },
+                        {
+                            "name": "citation_workflow",
+                            "args": {"action": "list"},
+                            "id": f"local-{suffix}",
+                        },
+                    ])
+            return Bound()
+
+        def invoke(self, _messages):
+            return AIMessage(content="done")
+
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: MixedBudgetModel())
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    graph = build_graph(
+        AgentConfig(
+            persist_dir=str(tmp_path),
+            agent_max_tool_interactions=1,
+            agent_max_local_tool_interactions=2,
+        ),
+        skill_tools=[_citation_workflow],
+    )
+
+    result = graph.invoke({
+        "messages": [HumanMessage(content="browse")],
+        "active_skill": "citation",
+        "skill_instructions": "use citation",
+        "effective_tools": ["rag_search", "citation_workflow"],
+    }, config={"recursion_limit": 12})
+
+    completed = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert [m.name for m in completed].count("rag_search") == 1
+    assert [m.name for m in completed].count("citation_workflow") == 2
+    assert result["messages"][-1].content == "done"

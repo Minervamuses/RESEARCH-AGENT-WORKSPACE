@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 
@@ -74,6 +76,32 @@ class SearchOutcome:
     queries: list[str] = field(default_factory=list)
     error: str = ""
     date_filtered_out: int = 0
+
+
+@dataclass(frozen=True)
+class CandidateRefinement:
+    """Deterministic filters over the existing candidate pool."""
+
+    keywords: tuple[str, ...] = ()
+    venues: tuple[str, ...] = ()
+    work_types: tuple[str, ...] = ()
+    date_filter: PublishedDateFilter | None = None
+
+    @property
+    def active(self) -> bool:
+        return bool(
+            self.keywords or self.venues or self.work_types or self.date_filter
+        )
+
+
+@dataclass
+class RefineOutcome:
+    """The active non-destructive view over a workflow's candidate pool."""
+
+    candidates: list[CitationCandidate] = field(default_factory=list)
+    pool_size: int = 0
+    reset: bool = False
+    error: str = ""
 
 
 @dataclass
@@ -166,6 +194,8 @@ class CitationCoordinator:
         self._generation = 0
         self._workflow_id = ""
         self._candidates: list[CitationCandidate] = []
+        self._view_candidate_ids: list[str] = []
+        self._refinement = CandidateRefinement()
         self._selected_id: str | None = None
         self._matches: dict[str, CitationMatch] = {}
         self._match_counter = 0
@@ -181,6 +211,8 @@ class CitationCoordinator:
         self._generation += 1
         self._workflow_id = f"wf-{self._generation}"
         self._candidates = []
+        self._view_candidate_ids = []
+        self._refinement = CandidateRefinement()
         self._selected_id = None
         self._matches = {}
         self._match_counter = 0
@@ -248,6 +280,7 @@ class CitationCoordinator:
             workflow_id=self._workflow_id,
         ) if any(ranked_lists) else []
         self._candidates, filtered_out = self._apply_date_filter(fused)
+        self._refresh_candidate_view()
         self._last_states = states
         return SearchOutcome(
             candidates=list(self._candidates),
@@ -289,6 +322,7 @@ class CitationCoordinator:
             return SearchOutcome(provider_states=states, queries=[canonical])
         candidate = _candidate_from_structured(record, workflow_id=self._workflow_id)
         self._candidates, filtered_out = self._apply_date_filter([candidate])
+        self._refresh_candidate_view()
         states = [ProviderState("doi.org", "ok")]
         self._last_states = states
         return SearchOutcome(
@@ -387,6 +421,7 @@ class CitationCoordinator:
                 candidate.candidate_id = f"c{offset + i + 1}"
                 appended.append(candidate)
             self._candidates.extend(appended)
+        self._refresh_candidate_view()
         self._last_states = states
         return SearchOutcome(
             candidates=appended,
@@ -398,12 +433,98 @@ class CitationCoordinator:
 
     # --- inspection ---------------------------------------------------------
 
+    @staticmethod
+    def _normalize_filter_text(value: str | None) -> str:
+        normalized = unicodedata.normalize("NFKC", value or "").casefold()
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _candidate_matches_refinement(
+        self, candidate: CitationCandidate, refinement: CandidateRefinement
+    ) -> bool:
+        searchable = self._normalize_filter_text(" ".join([
+            candidate.title or "",
+            " ".join(candidate.authors),
+            candidate.venue or "",
+            candidate.work_type or "",
+            candidate.snippet or "",
+        ]))
+        if any(keyword not in searchable for keyword in refinement.keywords):
+            return False
+
+        venue = self._normalize_filter_text(candidate.venue)
+        if refinement.venues and not any(
+            value in venue for value in refinement.venues
+        ):
+            return False
+
+        work_type = self._normalize_filter_text(candidate.work_type)
+        if refinement.work_types and work_type not in refinement.work_types:
+            return False
+
+        if (
+            refinement.date_filter is not None
+            and not refinement.date_filter.admits_year(candidate.year)
+        ):
+            return False
+        return True
+
+    def _refresh_candidate_view(self) -> None:
+        self._view_candidate_ids = [
+            candidate.candidate_id
+            for candidate in self._candidates
+            if self._candidate_matches_refinement(candidate, self._refinement)
+        ]
+
+    def _view_candidates(self) -> list[CitationCandidate]:
+        by_id = {candidate.candidate_id: candidate for candidate in self._candidates}
+        return [
+            by_id[candidate_id]
+            for candidate_id in self._view_candidate_ids
+            if candidate_id in by_id
+        ]
+
+    def refine(
+        self,
+        *,
+        keywords: list[str] | None = None,
+        venues: list[str] | None = None,
+        work_types: list[str] | None = None,
+        date_filter: PublishedDateFilter | None = None,
+    ) -> RefineOutcome:
+        """Filter the current pool without provider calls or candidate re-ID."""
+        if not self._workflow_id:
+            return RefineOutcome(
+                error="no active workflow; run a search first",
+                pool_size=len(self._candidates),
+            )
+        normalized = CandidateRefinement(
+            keywords=tuple(filter(None, (
+                self._normalize_filter_text(value) for value in (keywords or [])
+            ))),
+            venues=tuple(filter(None, (
+                self._normalize_filter_text(value) for value in (venues or [])
+            ))),
+            work_types=tuple(filter(None, (
+                self._normalize_filter_text(value) for value in (work_types or [])
+            ))),
+            date_filter=date_filter,
+        )
+        self._clear_resolution()
+        self._refinement = normalized
+        self._refresh_candidate_view()
+        return RefineOutcome(
+            candidates=self._view_candidates(),
+            pool_size=len(self._candidates),
+            reset=not normalized.active,
+        )
+
     def list_candidates(self, page: int = 1) -> tuple[list[CitationCandidate], int]:
-        """Return (page of 10 candidates, total page count)."""
-        total_pages = max(1, -(-len(self._candidates) // PAGE_SIZE))
+        """Return one page from the active candidate view."""
+        candidates = self._view_candidates()
+        total_pages = max(1, -(-len(candidates) // PAGE_SIZE))
         page = max(1, min(page, total_pages))
         start = (page - 1) * PAGE_SIZE
-        return self._candidates[start:start + PAGE_SIZE], total_pages
+        return candidates[start:start + PAGE_SIZE], total_pages
 
     def get_candidate(self, candidate_id: str) -> CitationCandidate | None:
         for candidate in self._candidates:
@@ -419,6 +540,8 @@ class CitationCoordinator:
                 self._date_filter.describe() if self._date_filter else "none"
             ),
             "candidates": len(self._candidates),
+            "view_candidates": len(self._view_candidate_ids),
+            "refinement": "active" if self._refinement.active else "none",
             "selected": self._selected_id or "none",
             "matches": len(self._matches),
             "attempts": self._attempts,
