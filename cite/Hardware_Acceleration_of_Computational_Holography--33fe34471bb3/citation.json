@@ -1,0 +1,78 @@
+{
+  "artifact_hashes": {
+    "reference.bib": "cbbd4b23556301a68c794415e41ff037ae6b2803bca8126d082120b734af7e60"
+  },
+  "candidate_snapshot": {
+    "authors": [],
+    "candidate_id": "c3",
+    "conflicts": {},
+    "doi": "10.1007/978-981-99-1938-3",
+    "field_provenance": {
+      "title": "crossref",
+      "url": "crossref",
+      "work_type": "crossref",
+      "year": "crossref"
+    },
+    "provider_ids": {
+      "crossref": "crossref:10.1007/978-981-99-1938-3"
+    },
+    "title": "Hardware Acceleration of Computational Holography",
+    "url": "https://doi.org/10.1007/978-981-99-1938-3",
+    "venue": "",
+    "workflow_id": "wf-2",
+    "year": 2023
+  },
+  "doi": "10.1007/978-981-99-1938-3",
+  "match_snapshot": {
+    "candidate_id": "c3",
+    "canonical_doi": "10.1007/978-981-99-1938-3",
+    "lookup_provenance": "doi.org-csl",
+    "match_id": "m1",
+    "registration_agency": "Crossref"
+  },
+  "previous_attempt_failure_codes": [],
+  "provider_states": [
+    {
+      "detail": "structured record fetched",
+      "provider": "doi.org",
+      "status": "ok"
+    }
+  ],
+  "run_id": "340156506d2241ff83c93122a100ee6c",
+  "schema_version": 1,
+  "source_ref": {
+    "authors": [],
+    "bundle_path": null,
+    "doi": "10.1007/978-981-99-1938-3",
+    "provenance": "doi.org-csl+bibtex",
+    "schema_version": 1,
+    "source_id": "src-33fe34471bb3",
+    "title": "Hardware Acceleration of Computational Holography",
+    "url": "http://dx.doi.org/10.1007/978-981-99-1938-3",
+    "venue": "",
+    "verification_level": "identity_verified",
+    "work_type": "book",
+    "year": 2023
+  },
+  "verification": {
+    "checks": [
+      {
+        "detail": "match=10.1007/978-981-99-1938-3 structured=10.1007/978-981-99-1938-3",
+        "name": "match_doi_equals_structured_doi",
+        "passed": true
+      },
+      {
+        "detail": "",
+        "name": "bibtex_canonical",
+        "passed": true
+      },
+      {
+        "detail": "bibtex=10.1007/978-981-99-1938-3 structured=10.1007/978-981-99-1938-3",
+        "name": "bibtex_doi_equals_structured_doi",
+        "passed": true
+      }
+    ],
+    "codes": [],
+    "warnings": []
+  }
+}
