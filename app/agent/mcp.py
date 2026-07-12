@@ -1,12 +1,13 @@
 """MCP client loader for the agent.
 
-Reads MCP server config from environment variables (keeping secrets and
-machine-specific command paths out of tracked files) and asks
-``langchain_mcp_adapters`` to load the merged tool list asynchronously.
+Resolves MCP server launch specs and asks ``langchain_mcp_adapters`` to load
+the merged tool list asynchronously. Web Search is a default capability when
+its standard local installation is present; environment variables are only
+optional runtime overrides (or an explicit disable), not an activation
+requirement.
 
-Server enablement is opt-in per server; if an MCP server is disabled or
-mis-configured, the rest of the agent still works with the local KB
-tools only.
+If an MCP server is disabled, missing, or misconfigured, the rest of the agent
+still works with the local KB tools only.
 """
 
 from __future__ import annotations
@@ -14,9 +15,11 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -43,31 +46,57 @@ def _parse_args(raw: str | None) -> list[str]:
     return shlex.split(raw)
 
 
-def _env_truthy(name: str) -> bool:
-    val = os.environ.get(name, "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+def _env_flag(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _default_web_search_entrypoint() -> Path:
+    data_home = os.environ.get("XDG_DATA_HOME")
+    root = Path(data_home).expanduser() if data_home else Path.home() / ".local/share"
+    return root / "mcp-servers/web-search-mcp/dist/index.js"
 
 
 def _web_search_spec() -> MCPServerSpec | None:
-    if not _env_truthy("AGENT_ENABLE_MCP_WEB_SEARCH"):
+    if not _env_flag("AGENT_ENABLE_MCP_WEB_SEARCH", default=True):
         return None
-    command = os.environ.get("AGENT_MCP_WEB_SEARCH_COMMAND")
-    if not command:
+
+    command = os.environ.get("AGENT_MCP_WEB_SEARCH_COMMAND", "").strip()
+    if command:
+        return MCPServerSpec(
+            name="web_search",
+            command=command,
+            args=_parse_args(os.environ.get("AGENT_MCP_WEB_SEARCH_ARGS")),
+            env={},
+        )
+
+    entrypoint = _default_web_search_entrypoint()
+    node = shutil.which("node")
+    if not entrypoint.is_file() or node is None:
+        missing = []
+        if not entrypoint.is_file():
+            missing.append(f"entrypoint {entrypoint}")
+        if node is None:
+            missing.append("node executable on PATH")
         logger.warning(
-            "AGENT_ENABLE_MCP_WEB_SEARCH is set but AGENT_MCP_WEB_SEARCH_COMMAND is empty; "
-            "skipping Web Search MCP."
+            "Web Search MCP is enabled by default but %s is missing; "
+            "skipping it. Set AGENT_ENABLE_MCP_WEB_SEARCH=0 to disable it "
+            "explicitly, or install the server in the standard user-data path.",
+            " and ".join(missing),
         )
         return None
     return MCPServerSpec(
         name="web_search",
-        command=command,
-        args=_parse_args(os.environ.get("AGENT_MCP_WEB_SEARCH_ARGS")),
+        command=node,
+        args=[str(entrypoint)],
         env={},
     )
 
 
 def _github_spec() -> MCPServerSpec | None:
-    if not _env_truthy("AGENT_ENABLE_MCP_GITHUB"):
+    if not _env_flag("AGENT_ENABLE_MCP_GITHUB", default=False):
         return None
     command = os.environ.get("AGENT_MCP_GITHUB_COMMAND")
     if not command:
@@ -99,7 +128,7 @@ def _github_spec() -> MCPServerSpec | None:
 
 
 def resolve_mcp_specs() -> list[MCPServerSpec]:
-    """Collect enabled MCP server specs from environment. Empty list = MCP off."""
+    """Collect default and explicitly configured MCP server launch specs."""
     specs = []
     for resolver in (_web_search_spec, _github_spec):
         spec = resolver()

@@ -22,16 +22,54 @@ def _clear_mcp_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_resolve_mcp_specs_empty_when_nothing_enabled(monkeypatch):
-    _clear_mcp_env(monkeypatch)
-    assert mcp_module.resolve_mcp_specs() == []
+def _install_default_web_search(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    entrypoint = tmp_path / "mcp-servers/web-search-mcp/dist/index.js"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("// test server", encoding="utf-8")
+    monkeypatch.setattr(mcp_module.shutil, "which", lambda name: "/usr/bin/node")
+    return entrypoint
 
 
-def test_resolve_mcp_specs_skips_enabled_but_missing_command(monkeypatch, caplog):
+def test_resolve_mcp_specs_defaults_to_installed_web_search(
+    monkeypatch, tmp_path
+):
     _clear_mcp_env(monkeypatch)
-    monkeypatch.setenv("AGENT_ENABLE_MCP_WEB_SEARCH", "1")
+    entrypoint = _install_default_web_search(tmp_path, monkeypatch)
+
     specs = mcp_module.resolve_mcp_specs()
+
+    assert specs == [
+        mcp_module.MCPServerSpec(
+            name="web_search",
+            command="/usr/bin/node",
+            args=[str(entrypoint)],
+            env={},
+        )
+    ]
+
+
+def test_resolve_mcp_specs_skips_missing_default_web_search(
+    monkeypatch, tmp_path, caplog
+):
+    _clear_mcp_env(monkeypatch)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(mcp_module.shutil, "which", lambda name: "/usr/bin/node")
+
+    specs = mcp_module.resolve_mcp_specs()
+
     assert specs == []
+    assert "enabled by default" in caplog.text
+
+
+def test_resolve_mcp_specs_allows_explicit_web_search_disable(
+    monkeypatch, tmp_path
+):
+    _clear_mcp_env(monkeypatch)
+    _install_default_web_search(tmp_path, monkeypatch)
+    monkeypatch.setenv("AGENT_ENABLE_MCP_WEB_SEARCH", "0")
+
+    assert mcp_module.resolve_mcp_specs() == []
 
 
 def test_resolve_mcp_specs_web_search(monkeypatch):
@@ -50,6 +88,7 @@ def test_resolve_mcp_specs_web_search(monkeypatch):
 
 def test_resolve_mcp_specs_github_carries_token_and_toolsets(monkeypatch):
     _clear_mcp_env(monkeypatch)
+    monkeypatch.setenv("AGENT_ENABLE_MCP_WEB_SEARCH", "0")
     monkeypatch.setenv("AGENT_ENABLE_MCP_GITHUB", "yes")
     monkeypatch.setenv("AGENT_MCP_GITHUB_COMMAND", "/opt/github-mcp-server")
     monkeypatch.setenv("AGENT_MCP_GITHUB_ARGS", "stdio")
