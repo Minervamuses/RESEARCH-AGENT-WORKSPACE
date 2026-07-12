@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from agent.config import AgentConfig
 
 from agent.llm.openrouter import get_chat_model
+from agent.observability import log_model_response, log_recovery_fallback
 from agent.policy_tool_node import PolicyToolNode
 from agent.state import AgentState, skill_runtime_to_agent_state
 from agent.tool_access import resolve_tool_access
@@ -271,12 +272,23 @@ def build_graph(
             response = model.invoke(prompt_messages)
         else:
             response = _model_for_state(state).invoke(prompt_messages)
+        primary_remaining = primary_limit - usage.primary
+        local_remaining = local_limit - usage.local
         capped, dropped = _cap_tool_calls(
             response,
-            primary_remaining=primary_limit - usage.primary,
-            local_remaining=local_limit - usage.local,
+            primary_remaining=primary_remaining,
+            local_remaining=local_remaining,
         )
         if capped.tool_calls:
+            log_model_response(
+                capped,
+                stage="initial",
+                issue=None,
+                dropped_tool_calls=dropped,
+                primary_remaining=primary_remaining,
+                local_remaining=local_remaining,
+                messages=messages,
+            )
             return {"messages": [capped]}
 
         issue = find_content_tool_protocol_artifact(
@@ -286,6 +298,15 @@ def build_graph(
             content_text(capped.content),
             tool_names=tool_names,
             dropped_tool_calls=dropped > 0,
+        )
+        log_model_response(
+            capped,
+            stage="initial",
+            issue=issue,
+            dropped_tool_calls=dropped,
+            primary_remaining=primary_remaining,
+            local_remaining=local_remaining,
+            messages=messages,
         )
         if issue is None:
             return {"messages": [capped]}
@@ -304,11 +325,27 @@ def build_graph(
             tool_names=tool_names,
             dropped_tool_calls=repair_dropped > 0,
         )
+        log_model_response(
+            repaired,
+            stage="repair",
+            issue=repair_issue,
+            dropped_tool_calls=repair_dropped,
+            primary_remaining=primary_remaining,
+            local_remaining=local_remaining,
+            messages=messages,
+        )
         if repair_issue is None and not repaired.tool_calls:
             return {"messages": [
                 _with_recovery_metadata(repaired, f"repaired:{issue}")
             ]}
 
+        log_recovery_fallback(
+            issue=issue,
+            repair_issue=repair_issue,
+            primary_remaining=primary_remaining,
+            local_remaining=local_remaining,
+            messages=messages,
+        )
         fallback = build_recovery_message(
             user_input=last_user_text(messages),
             had_tool_results=has_tool_results(messages),
