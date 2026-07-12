@@ -5,11 +5,13 @@ write citation bundles. Chat reaches it exclusively through the skill-only
 ``citation_workflow`` tool, bound while the citation skill is active.
 
 Workflow generations: every ``search`` or ``cancel`` starts a new generation
-and invalidates all previous candidate/match IDs. ``more`` keeps candidate
-IDs but clears the selection and matches. Every ``select`` invalidates prior
-match IDs. A failed ``confirm`` keeps the resolved state so another match
-can be confirmed; a successful one completes the workflow but the SourceRef
-registry survives for citing and re-activation.
+and invalidates all previous candidate/match IDs. ``more`` and ``refine`` keep
+candidate IDs but invalidate every match because the active pool changed.
+``select`` refreshes only that candidate's matches, so matches from other
+candidates can accumulate for a batch confirm. Confirm attempts are tracked
+per match; success consumes only that match. The workflow ends only through
+``search`` or ``cancel`` while the SourceRef registry survives for citing and
+re-activation.
 """
 
 from __future__ import annotations
@@ -234,13 +236,13 @@ class CitationCoordinator:
         self._candidates: list[CitationCandidate] = []
         self._view_candidate_ids: list[str] = []
         self._refinement = CandidateRefinement()
-        self._selected_id: str | None = None
         self._matches: dict[str, CitationMatch] = {}
         self._match_counter = 0
         self._last_query = ""
         self._last_states: list[ProviderState] = []
+        # Total confirm attempts in the current workflow generation.
         self._attempts = 0
-        self._previous_failure_codes: list[str] = []
+        self._previous_failure_codes: dict[str, list[str]] = {}
         self._date_filter: PublishedDateFilter | None = None
 
     # --- workflow generation management ----------------------------------
@@ -251,16 +253,15 @@ class CitationCoordinator:
         self._candidates = []
         self._view_candidate_ids = []
         self._refinement = CandidateRefinement()
-        self._selected_id = None
         self._matches = {}
         self._match_counter = 0
         self._attempts = 0
-        self._previous_failure_codes = []
+        self._previous_failure_codes = {}
         self._date_filter = None
 
     def _clear_resolution(self) -> None:
-        self._selected_id = None
         self._matches = {}
+        self._previous_failure_codes = {}
 
     @property
     def workflow_id(self) -> str:
@@ -268,7 +269,7 @@ class CitationCoordinator:
 
     @property
     def output_dir(self) -> Path:
-        """Resolved bundle output directory (user data, never the source tree)."""
+        """Resolved bundle output directory (workspace ``cite/`` by default)."""
         return self._output_dir
 
     # --- discovery ---------------------------------------------------------
@@ -705,7 +706,9 @@ class CitationCoordinator:
             "view_candidates": len(self._view_candidate_ids),
             "refinement": "active" if self._refinement.active else "none",
             "refinement_venue_tiers": list(self._refinement.venue_tiers),
-            "selected": self._selected_id or "none",
+            "selected": list(dict.fromkeys(
+                match.candidate_id for match in self._matches.values()
+            )),
             "matches": len(self._matches),
             "attempts": self._attempts,
             "sources": len(self.registry.list()),
@@ -736,8 +739,16 @@ class CitationCoordinator:
                 status="invalid_state",
                 message=f"unknown or stale candidate id: {candidate_id}",
             ))
-        self._clear_resolution()
-        self._selected_id = candidate_id
+        # Re-selecting one candidate refreshes only its resolution. Pending
+        # matches for other candidates remain available for the same batch.
+        stale_match_ids = [
+            match_id
+            for match_id, match in self._matches.items()
+            if match.candidate_id == candidate_id
+        ]
+        for match_id in stale_match_ids:
+            del self._matches[match_id]
+            self._previous_failure_codes.pop(match_id, None)
 
         doi_candidates = extract_doi_candidates(
             candidate.doi, candidate.url, candidate.snippet, candidate.title
@@ -814,7 +825,7 @@ class CitationCoordinator:
                 ),
                 provider_states=states,
             )
-        self._matches = {match.match_id: match for match in matches}
+        self._matches.update({match.match_id: match for match in matches})
         return SelectOutcome(matches=matches, provider_states=states)
 
     # --- confirm: the only writer ---------------------------------------------
@@ -825,6 +836,7 @@ class CitationCoordinator:
         if match is None:
             return CitationResult(
                 status="invalid_state",
+                reason_code="stale_match",
                 message=f"unknown or stale match id: {match_id}",
             )
         self._attempts += 1
@@ -837,8 +849,10 @@ class CitationCoordinator:
             record = await self._hub.doi_org.fetch_structured(match.canonical_doi)
         except ProviderError as exc:
             states.append(ProviderState("doi.org", "error", exc.detail))
-            return self._fail("provider_failed", states, report,
-                              f"structured lookup failed: {exc.detail}")
+            return self._fail(
+                match_id, "provider_failed", "structured_lookup_failed",
+                states, report, f"structured lookup failed: {exc.detail}",
+            )
         states.append(ProviderState("doi.org", "ok", "structured record fetched"))
 
         doi_ok = doi_equal(match.canonical_doi, record.doi)
@@ -848,24 +862,30 @@ class CitationCoordinator:
             detail=f"match={match.canonical_doi} structured={record.doi}",
         ))
         if not doi_ok:
-            return self._fail("verification_failed", states, report,
-                              "structured record DOI differs from selected match")
+            return self._fail(
+                match_id, "verification_failed", "doi_mismatch", states,
+                report, "structured record DOI differs from selected match",
+            )
 
         # 2. BibTeX for the same canonical DOI.
         try:
             raw_bibtex = await self._hub.doi_org.fetch_bibtex(record.doi)
         except ProviderError as exc:
             states.append(ProviderState("doi.org", "error", exc.detail))
-            return self._fail("provider_failed", states, report,
-                              f"BibTeX retrieval failed: {exc.detail}")
+            return self._fail(
+                match_id, "provider_failed", "bibtex_lookup_failed", states,
+                report, f"BibTeX retrieval failed: {exc.detail}",
+            )
         try:
             canonical_bib = parse_canonical_bibtex(raw_bibtex)
         except BibtexValidationError as exc:
             report.checks.append(VerificationCheck(
                 name="bibtex_canonical", passed=False, detail=f"{exc.code}: {exc}",
             ))
-            return self._fail("verification_failed", states, report,
-                              f"BibTeX validation failed ({exc.code})")
+            return self._fail(
+                match_id, "verification_failed", exc.code, states, report,
+                f"BibTeX validation failed ({exc.code})",
+            )
         report.checks.append(VerificationCheck(name="bibtex_canonical", passed=True))
 
         if canonical_bib.doi is not None:
@@ -876,8 +896,11 @@ class CitationCoordinator:
                 detail=f"bibtex={canonical_bib.doi} structured={record.doi}",
             ))
             if not bib_doi_ok:
-                return self._fail("verification_failed", states, report,
-                                  "BibTeX DOI differs from verified structured DOI")
+                return self._fail(
+                    match_id, "verification_failed", "bibtex_doi_mismatch",
+                    states, report,
+                    "BibTeX DOI differs from verified structured DOI",
+                )
         else:
             canonical_bib = inject_doi(canonical_bib, record.doi)
             report.codes.append("doi_injected_from_verified_lookup")
@@ -915,7 +938,9 @@ class CitationCoordinator:
                 "lookup_provenance": match.lookup_provenance,
             },
             "verification": report.to_dict(),
-            "previous_attempt_failure_codes": list(self._previous_failure_codes),
+            "previous_attempt_failure_codes": list(
+                self._previous_failure_codes.get(match_id, [])
+            ),
         }
         try:
             bundle = write_bundle(
@@ -929,14 +954,17 @@ class CitationCoordinator:
             report.checks.append(VerificationCheck(
                 name="bundle_write", passed=False, detail=f"{exc.code}: {exc}",
             ))
-            return self._fail("storage_failed", states, report,
-                              f"bundle write failed ({exc.code})")
+            return self._fail(
+                match_id, "storage_failed", exc.code, states, report,
+                f"bundle write failed ({exc.code})",
+            )
 
         source_ref.bundle_path = str(bundle.bundle_dir)
         self.registry.register(source_ref)
-        # Success completes the workflow; the registry survives.
-        self._candidates = []
-        self._clear_resolution()
+        # Success consumes only this match. Other candidates and matches stay
+        # live so a batch can continue even after an earlier item succeeds.
+        del self._matches[match_id]
+        self._previous_failure_codes.pop(match_id, None)
         return CitationResult(
             status="confirmed",
             accepted_doi=record.doi,
@@ -951,16 +979,19 @@ class CitationCoordinator:
 
     def _fail(
         self,
+        match_id: str,
         status: str,
+        reason_code: str,
         states: list[ProviderState],
         report: VerificationReport,
         message: str,
     ) -> CitationResult:
-        # Failed confirms keep the resolved state so the user can pick a
-        # different match; codes accumulate for the eventual sidecar.
-        self._previous_failure_codes.append(status)
+        # Failed confirms keep the resolved state. History is isolated per
+        # match so retries cannot contaminate another bundle's sidecar.
+        self._previous_failure_codes.setdefault(match_id, []).append(status)
         return CitationResult(
             status=status,
+            reason_code=reason_code,
             attempts=self._attempts,
             provider_states=states,
             verification=report,

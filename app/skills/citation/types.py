@@ -5,7 +5,7 @@ Session-scoped workflow objects (:class:`CitationCandidate`,
 Coordinator; they carry no schema version because they are never persisted.
 Persisted formats (:class:`SourceRef` and the bundle sidecar built from it)
 carry :data:`PERSIST_SCHEMA_VERSION`; the ephemeral tool-to-finalizer
-:class:`ConfirmReceipt` has an independent version contract.
+:class:`ConfirmBatchOutcome` has an independent version contract.
 
 Invariants enforced here:
   * A :class:`CitationResult` whose status is not ``confirmed`` always has
@@ -29,6 +29,8 @@ PERSIST_SCHEMA_VERSION = 1
 # persisted bundle schema and deliberately evolves independently.
 CONFIRM_RECEIPT_SCHEMA_VERSION = 1
 CONFIRM_RECEIPT_KIND = "citation_confirm_receipt"
+CONFIRM_BATCH_SCHEMA_VERSION = 1
+CONFIRM_BATCH_KIND = "citation_confirm_receipt_batch"
 
 # The only verification level a SourceRef can carry: the DOI and the
 # bibliographic pipeline agree on the identity of the record.
@@ -76,6 +78,27 @@ CitationStatus = Literal[
     "storage_failed",
     "invalid_state",
 ]
+
+ConfirmFailureStatus = Literal[
+    "invalid_state",
+    "provider_failed",
+    "verification_failed",
+    "storage_failed",
+]
+
+CONFIRM_FAILURE_REASON_CODES = frozenset({
+    "stale_match",
+    "structured_lookup_failed",
+    "bibtex_lookup_failed",
+    "doi_mismatch",
+    "bibtex_doi_mismatch",
+    "parse_failed",
+    "payload_too_large",
+    "not_exactly_one_entry",
+    "nonempty_preamble",
+    "bundle_conflict",
+    "write_failed",
+})
 
 # Distinct provider outcomes; empty and failed must never be conflated.
 ProviderStatus = Literal["ok", "empty", "error", "rate_limited", "timeout", "disabled"]
@@ -343,6 +366,7 @@ class CitationResult:
     verification: VerificationReport | None = None
     source: SourceRef | None = None
     bundle_path: str | None = None
+    reason_code: str = ""
     message: str = ""
 
     def __post_init__(self) -> None:
@@ -394,6 +418,18 @@ class ConfirmReceipt:
             raise ValueError("unknown confirm receipt kind")
         if artifact.get("schema_version") != CONFIRM_RECEIPT_SCHEMA_VERSION:
             raise ValueError("unsupported confirm receipt schema version")
+        expected_fields = {
+            "kind",
+            "schema_version",
+            "source_id",
+            "accepted_doi",
+            "bundle_path",
+            "verification_level",
+            "cite_marker",
+            "warnings",
+        }
+        if set(artifact) != expected_fields:
+            raise ValueError("confirm receipt artifact has unsupported fields")
 
         def required_text(key: str) -> str:
             value = artifact.get(key)
@@ -420,4 +456,102 @@ class ConfirmReceipt:
             verification_level="identity_verified",
             cite_marker=cite_marker,
             warnings=tuple(raw_warnings),
+        )
+
+
+@dataclass(frozen=True)
+class ConfirmFailure:
+    """Fail-closed facts for one unsuccessful confirm attempt.
+
+    Only stable system codes cross the trusted artifact boundary. Provider
+    messages and other arbitrary prose deliberately have no field here.
+    """
+
+    match_id: str
+    status: ConfirmFailureStatus
+    reason_code: str
+
+    def __post_init__(self) -> None:
+        if not self.match_id.strip():
+            raise ValueError("confirm failure requires non-empty match_id")
+        if self.status not in {
+            "invalid_state",
+            "provider_failed",
+            "verification_failed",
+            "storage_failed",
+        }:
+            raise ValueError("unsupported confirm failure status")
+        if self.reason_code not in CONFIRM_FAILURE_REASON_CODES:
+            raise ValueError("unsupported confirm failure reason code")
+
+    def to_artifact(self) -> dict:
+        return {
+            "match_id": self.match_id,
+            "status": self.status,
+            "reason_code": self.reason_code,
+        }
+
+    @classmethod
+    def from_artifact(cls, artifact: object) -> "ConfirmFailure":
+        if not isinstance(artifact, Mapping):
+            raise ValueError("confirm failure must be a mapping")
+        if set(artifact) != {"match_id", "status", "reason_code"}:
+            raise ValueError("confirm failure has unsupported fields")
+
+        def required_text(key: str) -> str:
+            value = artifact.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"confirm failure requires non-empty {key}")
+            return value
+
+        status = required_text("status")
+        reason_code = required_text("reason_code")
+        return cls(
+            match_id=required_text("match_id"),
+            status=status,
+            reason_code=reason_code,
+        )
+
+
+@dataclass(frozen=True)
+class ConfirmBatchOutcome:
+    """One tool call's trusted batch receipts and sanitized failures."""
+
+    receipts: tuple[ConfirmReceipt, ...] = ()
+    failures: tuple[ConfirmFailure, ...] = ()
+    schema_version: int = field(default=CONFIRM_BATCH_SCHEMA_VERSION, init=False)
+    kind: str = field(default=CONFIRM_BATCH_KIND, init=False)
+
+    def to_artifact(self) -> dict:
+        return {
+            "kind": self.kind,
+            "schema_version": self.schema_version,
+            "receipts": [receipt.to_artifact() for receipt in self.receipts],
+            "failures": [failure.to_artifact() for failure in self.failures],
+        }
+
+    @classmethod
+    def from_artifact(cls, artifact: object) -> "ConfirmBatchOutcome":
+        """Strictly decode a complete batch; one invalid item rejects all."""
+        if not isinstance(artifact, Mapping):
+            raise ValueError("confirm batch artifact must be a mapping")
+        if artifact.get("kind") != CONFIRM_BATCH_KIND:
+            raise ValueError("unknown confirm batch kind")
+        if artifact.get("schema_version") != CONFIRM_BATCH_SCHEMA_VERSION:
+            raise ValueError("unsupported confirm batch schema version")
+        if set(artifact) != {
+            "kind", "schema_version", "receipts", "failures"
+        }:
+            raise ValueError("confirm batch artifact has unsupported fields")
+        raw_receipts = artifact.get("receipts")
+        raw_failures = artifact.get("failures")
+        if not isinstance(raw_receipts, list) or not isinstance(raw_failures, list):
+            raise ValueError("confirm batch receipts and failures must be lists")
+        return cls(
+            receipts=tuple(
+                ConfirmReceipt.from_artifact(item) for item in raw_receipts
+            ),
+            failures=tuple(
+                ConfirmFailure.from_artifact(item) for item in raw_failures
+            ),
         )

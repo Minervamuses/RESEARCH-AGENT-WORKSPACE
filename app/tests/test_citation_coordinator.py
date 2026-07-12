@@ -257,7 +257,7 @@ def test_refine_is_non_destructive_stable_and_clears_selection(tmp_path):
     listed, pages = coordinator.list_candidates()
     assert [candidate.candidate_id for candidate in listed] == ["c1"]
     assert pages == 1
-    assert coordinator.status()["selected"] == "none"
+    assert coordinator.status()["selected"] == []
     assert coordinator.status()["matches"] == 0
     assert coordinator.get_candidate("c1") is not None
 
@@ -409,9 +409,57 @@ def test_confirm_happy_path_writes_bundle_and_registers_source(tmp_path):
     sidecar = json.loads((dirs[0] / "citation.json").read_text(encoding="utf-8"))
     assert sidecar["doi"] == DOI_A
     assert sidecar["source_ref"]["source_id"] == result.source.source_id
-    # workflow completed, registry survives
-    assert coordinator.list_candidates()[0] == []
+    # The workflow remains active; only the confirmed match was consumed.
+    assert coordinator.list_candidates()[0]
+    assert match.match_id not in {
+        pending.match_id for pending in coordinator.pending_matches()
+    }
     assert coordinator.registry.get(result.source.source_id) is not None
+
+
+def test_select_accumulates_across_candidates_and_confirm_consumes_one(tmp_path):
+    coordinator, _ = _coordinator(tmp_path)
+    asyncio.run(coordinator.search("paper"))
+
+    first = asyncio.run(coordinator.select("c1")).matches[0]
+    second = asyncio.run(coordinator.select("c2")).matches[0]
+
+    assert [match.candidate_id for match in coordinator.pending_matches()] == [
+        "c1", "c2"
+    ]
+    assert coordinator.status()["selected"] == ["c1", "c2"]
+    assert asyncio.run(coordinator.confirm(first.match_id)).status == "confirmed"
+    assert [match.match_id for match in coordinator.pending_matches()] == [
+        second.match_id
+    ]
+    assert asyncio.run(coordinator.confirm(second.match_id)).status == "confirmed"
+
+
+def test_reselect_refreshes_only_that_candidate_and_failure_histories_are_isolated(
+    tmp_path,
+):
+    fetcher = RoutingFetcher()
+    coordinator, _ = _coordinator(tmp_path, fetcher=fetcher)
+    asyncio.run(coordinator.search("paper"))
+    first = asyncio.run(coordinator.select("c1")).matches[0]
+    second = asyncio.run(coordinator.select("c2")).matches[0]
+
+    fetcher.fail_bibtex = True
+    assert asyncio.run(coordinator.confirm(first.match_id)).status == "provider_failed"
+    fetcher.fail_bibtex = False
+    assert asyncio.run(coordinator.confirm(second.match_id)).status == "confirmed"
+    sidecars = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "cite").rglob("citation.json")
+    ]
+    second_sidecar = next(item for item in sidecars if item["doi"] == DOI_B)
+    assert second_sidecar["previous_attempt_failure_codes"] == []
+
+    refreshed = asyncio.run(coordinator.select("c1")).matches[0]
+    assert refreshed.match_id != first.match_id
+    assert first.match_id not in coordinator._previous_failure_codes  # noqa: SLF001
+    assert asyncio.run(coordinator.confirm(first.match_id)).reason_code == "stale_match"
+    assert asyncio.run(coordinator.confirm(refreshed.match_id)).status == "confirmed"
 
 
 def test_confirm_injects_missing_bibtex_doi_with_code(tmp_path):

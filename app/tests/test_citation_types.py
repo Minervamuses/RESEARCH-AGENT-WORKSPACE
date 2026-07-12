@@ -3,11 +3,15 @@
 import pytest
 
 from skills.citation.types import (
+    CONFIRM_BATCH_KIND,
+    CONFIRM_BATCH_SCHEMA_VERSION,
     CONFIRM_RECEIPT_KIND,
     CONFIRM_RECEIPT_SCHEMA_VERSION,
     PERSIST_SCHEMA_VERSION,
     CitationCandidate,
     CitationResult,
+    ConfirmBatchOutcome,
+    ConfirmFailure,
     ConfirmReceipt,
     ProviderState,
     SourceRef,
@@ -69,6 +73,43 @@ def test_confirm_receipt_rejects_mismatched_cite_marker():
             "cite_marker": "[[cite:src-other]]",
             "warnings": [],
         })
+
+
+def test_confirm_batch_round_trip_and_rejects_arbitrary_failure_content():
+    receipt = ConfirmReceipt(
+        source_id="src-1",
+        accepted_doi="10.1/x",
+        bundle_path="/tmp/bundle",
+        verification_level="identity_verified",
+        cite_marker="[[cite:src-1]]",
+    )
+    batch = ConfirmBatchOutcome(
+        receipts=(receipt,),
+        failures=(ConfirmFailure(
+            match_id="m2",
+            status="invalid_state",
+            reason_code="stale_match",
+        ),),
+    )
+    artifact = batch.to_artifact()
+    assert artifact["kind"] == CONFIRM_BATCH_KIND
+    assert artifact["schema_version"] == CONFIRM_BATCH_SCHEMA_VERSION
+    assert ConfirmBatchOutcome.from_artifact(artifact) == batch
+
+    artifact["failures"][0]["message"] = "provider supplied markdown"
+    with pytest.raises(ValueError, match="unsupported fields"):
+        ConfirmBatchOutcome.from_artifact(artifact)
+
+
+def test_confirm_batch_rejects_unknown_reason_code_as_a_whole():
+    artifact = ConfirmBatchOutcome(failures=(ConfirmFailure(
+        match_id="m1",
+        status="provider_failed",
+        reason_code="structured_lookup_failed",
+    ),)).to_artifact()
+    artifact["failures"][0]["reason_code"] = "provider said 10.1/leak"
+    with pytest.raises(ValueError, match="reason code"):
+        ConfirmBatchOutcome.from_artifact(artifact)
 
 
 def test_source_ref_serializes_for_the_sidecar():
