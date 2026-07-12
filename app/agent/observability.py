@@ -124,10 +124,12 @@ def log_model_response(
     local_remaining: int,
     messages: Iterable[object],
 ) -> None:
-    """Log one model response summary at INFO level.
+    """Log one model response summary at a severity useful in the default CLI.
 
     ``messages`` is the pre-response history used solely to derive the last
-    completed citation action; nothing from it is logged verbatim.
+    completed citation action; nothing from it is logged verbatim. Invalid
+    responses are warnings so an incident is visible without logging setup;
+    normal responses stay at debug to avoid noisy interactive output.
     """
     record = summarize_model_response(
         message,
@@ -138,7 +140,8 @@ def log_model_response(
         local_remaining=local_remaining,
         last_citation_action=last_completed_citation_action(messages),
     )
-    logger.info("model_response %s", _format_record(record))
+    log = logger.warning if issue is not None else logger.debug
+    log("model_response %s", _format_record(record))
 
 
 def log_recovery_fallback(
@@ -158,4 +161,4 @@ def log_recovery_fallback(
         "primary_budget_remaining": primary_remaining,
         "local_budget_remaining": local_remaining,
     }
-    logger.info("model_response %s", _format_record(record))
+    logger.warning("model_response %s", _format_record(record))

@@ -112,7 +112,7 @@ def test_last_completed_citation_action_ignores_other_tools():
     assert last_completed_citation_action([bash_call, result]) is None
 
 
-def test_log_line_never_contains_content_args_or_dois(caplog):
+def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
     doi = "10.1234/secret-doi"
     select_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
@@ -131,11 +131,11 @@ def test_log_line_never_contains_content_args_or_dois(caplog):
         }],
     )
 
-    with caplog.at_level(logging.INFO, logger="agent.observability"):
+    with caplog.at_level(logging.WARNING, logger="agent.observability"):
         log_model_response(
             message,
             stage="initial",
-            issue=None,
+            issue="invalid_tool_calls",
             dropped_tool_calls=0,
             primary_remaining=3,
             local_remaining=4,
@@ -150,6 +150,23 @@ def test_log_line_never_contains_content_args_or_dois(caplog):
     assert "last_citation_action=select" in line
     assert "invalid_tool_calls=1" in line
     assert "content_chars=" in line
+    assert caplog.records[0].levelno == logging.WARNING
+
+
+def test_valid_response_is_debug_only(caplog):
+    with caplog.at_level(logging.DEBUG, logger="agent.observability"):
+        log_model_response(
+            AIMessage(content="done"),
+            stage="initial",
+            issue=None,
+            dropped_tool_calls=0,
+            primary_remaining=4,
+            local_remaining=4,
+            messages=[],
+        )
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.DEBUG
 
 
 class _StubTools:
@@ -191,7 +208,7 @@ def test_graph_logs_initial_repair_and_fallback_stages(
     _StubTools.apply(monkeypatch, AlwaysBlankModel())
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
 
-    with caplog.at_level(logging.INFO, logger="agent.observability"):
+    with caplog.at_level(logging.DEBUG, logger="agent.observability"):
         graph.invoke({"messages": [HumanMessage(content="hi")]})
 
     lines = [record.getMessage() for record in caplog.records]
@@ -226,7 +243,7 @@ def test_graph_logs_invalid_tool_calls_on_initial_stage(
     _StubTools.apply(monkeypatch, MalformedToolCallModel())
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
 
-    with caplog.at_level(logging.INFO, logger="agent.observability"):
+    with caplog.at_level(logging.DEBUG, logger="agent.observability"):
         result = graph.invoke({"messages": [HumanMessage(content="hi")]})
 
     assert result["messages"][-1].content == "repaired answer"
@@ -264,7 +281,7 @@ def test_graph_logs_tool_call_round_with_budget(monkeypatch, tmp_path, caplog):
     _StubTools.apply(monkeypatch, OneToolModel())
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
 
-    with caplog.at_level(logging.INFO, logger="agent.observability"):
+    with caplog.at_level(logging.DEBUG, logger="agent.observability"):
         graph.invoke(
             {"messages": [HumanMessage(content="hi")]},
             config={"recursion_limit": 8},
