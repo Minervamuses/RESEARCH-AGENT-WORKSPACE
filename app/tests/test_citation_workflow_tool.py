@@ -530,3 +530,157 @@ def test_session_binds_citation_tool_as_skill_tool(monkeypatch, tmp_path):
     assert skill_tools is not None and len(skill_tools) == 1
     assert skill_tools[0] is session.citation_workflow_tool
     assert session.citation_workflow_tool.name == TOOL_NAME
+
+
+# --- the atomic save action ---------------------------------------------------
+
+
+def test_save_writes_single_match_candidates_atomically(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifiers": ["c1", "c2"]},
+        "id": "save-1",
+        "type": "tool_call",
+    }))
+
+    assert "Saved 2 citation(s):" in message.content
+    assert "[c1 -> m1]" in message.content
+    assert "[c2 -> m2]" in message.content
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 2
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert len(batch.receipts) == 2
+    assert not batch.failures
+    # Saved matches are consumed; nothing dangles for a later confirm.
+    assert harness.coordinator.pending_matches() == ()
+
+
+def test_save_multi_match_candidate_needs_disambiguation_and_writes_nothing(
+    tmp_path,
+):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    candidate = harness.coordinator.get_candidate("c1")
+    candidate.snippet = f"also published as {DOI_A} and 10.1234/paper-b"
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifier": "c1"},
+        "id": "save-ambiguous",
+        "type": "tool_call",
+    }))
+
+    assert "Needs disambiguation" in message.content
+    assert "nothing was written" in message.content
+    assert DOI_A not in message.content
+    assert list((tmp_path / "cite").glob("*/reference.bib")) == []
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert not batch.receipts and not batch.failures
+    # The resolved matches stay pending so an explicit mX can proceed.
+    pending = harness.coordinator.pending_matches()
+    assert len(pending) == 2
+
+    confirmed = harness.run(action="confirm", identifier=pending[0].match_id)
+    assert "citation confirmed" in confirmed
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
+
+
+def test_save_maps_selection_failures_to_stable_reason_codes(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.coordinator.get_candidate("c2").doi = "10.9999/does-not-resolve"
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifiers": ["c99", "c2", "c1"]},
+        "id": "save-failures",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert [
+        (failure.match_id, failure.status, failure.reason_code)
+        for failure in batch.failures
+    ] == [
+        ("c99", "invalid_state", "unknown_candidate"),
+        ("c2", "no_doi", "no_doi"),
+    ]
+    # The batch keeps going: c1 is still saved after two failures.
+    assert len(batch.receipts) == 1
+    assert "Failed to save 2 item(s):" in message.content
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
+
+
+def test_save_maps_provider_outage_to_doi_lookup_failed(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.fetcher.fail_csl = True
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifier": "c1"},
+        "id": "save-outage",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert [
+        (failure.match_id, failure.status, failure.reason_code)
+        for failure in batch.failures
+    ] == [("c1", "provider_failed", "doi_lookup_failed")]
+    assert list((tmp_path / "cite").glob("*/reference.bib")) == []
+
+
+def test_save_confirm_failure_keeps_match_id_and_reason(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.fetcher.fail_bibtex = True
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifier": "c1"},
+        "id": "save-bibtex-fail",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert [
+        (failure.match_id, failure.status, failure.reason_code)
+        for failure in batch.failures
+    ] == [("m1", "provider_failed", "bibtex_lookup_failed")]
+    assert list((tmp_path / "cite").glob("*/reference.bib")) == []
+
+
+def test_save_never_touches_pending_matches_of_other_candidates(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.run(action="select", identifier="c1")
+    pending_before = harness.coordinator.pending_matches()
+    assert len(pending_before) == 1
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifier": "c2"},
+        "id": "save-scoped",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert len(batch.receipts) == 1
+    # Only c2 was written; c1's earlier pending match is untouched.
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
+    assert harness.coordinator.pending_matches() == pending_before
+
+
+def test_save_requires_identifier_and_respects_batch_limits(tmp_path):
+    harness = ToolHarness(tmp_path)
+    assert "requires identifier" in harness.run(action="save")
+    assert "mutually exclusive" in harness.run(
+        action="save", identifier="c1", identifiers=["c2"],
+    )
+    assert "at most 10" in harness.run(
+        action="save", identifiers=[f"c{i}" for i in range(11)],
+    )
+    assert harness.fetcher.calls == []

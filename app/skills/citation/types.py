@@ -81,6 +81,7 @@ CitationStatus = Literal[
 
 ConfirmFailureStatus = Literal[
     "invalid_state",
+    "no_doi",
     "provider_failed",
     "verification_failed",
     "storage_failed",
@@ -98,6 +99,10 @@ CONFIRM_FAILURE_REASON_CODES = frozenset({
     "nonempty_preamble",
     "bundle_conflict",
     "write_failed",
+    # save-time selection failures (keyed by candidate id, not match id)
+    "unknown_candidate",
+    "no_doi",
+    "doi_lookup_failed",
 })
 
 # Distinct provider outcomes; empty and failed must never be conflated.
@@ -461,10 +466,12 @@ class ConfirmReceipt:
 
 @dataclass(frozen=True)
 class ConfirmFailure:
-    """Fail-closed facts for one unsuccessful confirm attempt.
+    """Fail-closed facts for one unsuccessful confirm or save attempt.
 
-    Only stable system codes cross the trusted artifact boundary. Provider
-    messages and other arbitrary prose deliberately have no field here.
+    ``match_id`` is the failing identifier: a match id for confirm failures,
+    or a candidate id for save-time selection failures. Only stable system
+    codes cross the trusted artifact boundary. Provider messages and other
+    arbitrary prose deliberately have no field here.
     """
 
     match_id: str
@@ -476,6 +483,7 @@ class ConfirmFailure:
             raise ValueError("confirm failure requires non-empty match_id")
         if self.status not in {
             "invalid_state",
+            "no_doi",
             "provider_failed",
             "verification_failed",
             "storage_failed",

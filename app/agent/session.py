@@ -417,6 +417,9 @@ class ChatSession:
             "nonempty_preamble": "BibTeX 含不允許的 preamble",
             "bundle_conflict": "既有 bundle 驗證衝突，未覆寫",
             "write_failed": "bundle 寫入失敗",
+            "unknown_candidate": "候選編號不存在或已失效",
+            "no_doi": "候選沒有可解析的 DOI，無法保存為驗證引用",
+            "doi_lookup_failed": "DOI 解析查詢失敗，請稍後重試",
         }
         if failures:
             lines.append("- 保存失敗：")

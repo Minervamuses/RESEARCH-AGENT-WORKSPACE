@@ -9,8 +9,10 @@ the tool exposes no raw web search.
 Safety rails owned by this layer:
   * one workflow call at a time per session — a concurrent call returns a
     busy error instead of interleaving with the stateful Coordinator;
-  * select/confirm accept a bounded ordered batch and execute it serially
-    inside that lock;
+  * save/select/confirm accept a bounded ordered batch and execute it
+    serially inside that lock; save composes the Coordinator's select and
+    confirm per candidate (0 matches → failure, 1 → confirm, several →
+    needs-disambiguation, nothing written);
   * date filtering is either ``published_within_years`` or
     ``year_from``/``year_to`` — never both — and applies only to ``search``
     and the provider-free ``refine`` view.
@@ -55,14 +57,21 @@ TOOL_DESCRIPTION = (
     "results to the current search), 'refine' (filter the current candidate "
     "pool without new provider calls, including explicit catalog venue tiers), "
     "'list' (page through the active view), "
-    "'show' (identifier = candidate id), 'select' (identifier OR identifiers "
-    "= candidate ids; resolves confirmable matches), 'confirm' (identifier "
-    "OR identifiers = match ids). Confirm when the user's current request "
-    "semantically authorizes saving, regardless of wording or item count; it "
-    "may follow select in the same turn. Never confirm negated, conditional, "
-    "questioning, or unclear intent. A candidate with multiple matches needs "
-    "an explicit mX choice unless the user explicitly requests all versions. "
-    "Actions also include 'status', "
+    "'show' (identifier = candidate id), 'save' (identifier OR identifiers "
+    "= candidate ids; one atomic step that resolves each candidate and saves "
+    "it when exactly one DOI match exists — multiple matches come back "
+    "needs-disambiguation with nothing written, failures are reported per "
+    "candidate), 'select' (identifier OR identifiers = candidate ids; "
+    "resolves confirmable matches without saving), 'confirm' (identifier OR "
+    "identifiers = match ids). When the user's current request semantically "
+    "authorizes saving, regardless of wording or item count, prefer one "
+    "'save' call with the candidate ids; calling save is itself your "
+    "authorization judgment. Use select+confirm only to inspect matches "
+    "without saving or to confirm a specific mX after disambiguation; "
+    "confirm may follow select in the same turn. Never save or confirm "
+    "negated, conditional, questioning, or unclear intent. A candidate with "
+    "multiple matches needs an explicit mX choice unless the user "
+    "explicitly requests all versions. Actions also include 'status', "
     "'explain' (read-only: how the workflow verifies citations and where "
     "bundles are stored), 'cancel', "
     "'sources' (list saved sources), 'source' (identifier = source id; "
@@ -77,6 +86,7 @@ CitationAction = Literal[
     "refine",
     "list",
     "show",
+    "save",
     "select",
     "confirm",
     "status",
@@ -85,6 +95,8 @@ CitationAction = Literal[
     "sources",
     "source",
 ]
+
+_BATCH_ACTIONS = {"save", "select", "confirm"}
 
 _PAGE_ACTIONS = {"list", "sources"}
 
@@ -99,15 +111,16 @@ class CitationWorkflowInput(BaseModel):
     identifier: str | None = Field(
         None,
         description=(
-            "Candidate id (show/select), match id (confirm), or source id "
-            "(source)."
+            "Candidate id (show/save/select), match id (confirm), or source "
+            "id (source)."
         ),
     )
     identifiers: list[str] | None = Field(
         None,
         description=(
-            "select/confirm only: ordered candidate or match ids; mutually "
-            "exclusive with identifier; at most 10 after normalization."
+            "save/select/confirm only: ordered candidate or match ids; "
+            "mutually exclusive with identifier; at most 10 after "
+            "normalization."
         ),
     )
     page: int | None = Field(
@@ -446,6 +459,43 @@ def format_select_outcomes(
     return _redact_dois("\n".join(lines))
 
 
+def format_save_outcomes(
+    *,
+    saved: list[tuple[str, str, CitationResult]],
+    ambiguous: list[tuple[str, list[CitationMatch]]],
+    failures: list[ConfirmFailure],
+) -> str:
+    """Render one atomic save call: written, needs-disambiguation, failed."""
+    lines: list[str] = []
+    if saved:
+        lines.append(f"Saved {len(saved)} citation(s):")
+        for candidate_id, match_id, result in saved:
+            lines.append(f"[{candidate_id} -> {match_id}]")
+            lines.extend(
+                f"  {line}" for line in format_result(result).splitlines()
+            )
+    if ambiguous:
+        lines.append(
+            "Needs disambiguation — nothing was written for these candidates:"
+        )
+        for candidate_id, matches in ambiguous:
+            lines.append(
+                f"[{candidate_id}] resolved {len(matches)} distinct DOI "
+                "version(s); present the mX options and ask the user to pick "
+                "one (action=confirm), unless they explicitly requested all "
+                "versions"
+            )
+            lines.extend(_format_match_lines(matches, indent="  "))
+    if failures:
+        lines.append(f"Failed to save {len(failures)} item(s):")
+        for failure in failures:
+            lines.append(
+                f"[{failure.match_id}] {failure.status} ({failure.reason_code})"
+            )
+    text = "\n".join(lines)
+    return text if saved else _redact_dois(text)
+
+
 def format_confirm_batch(
     results: list[tuple[str, CitationResult]],
 ) -> str:
@@ -568,6 +618,9 @@ def format_explain(output_dir: object) -> str:
         "  4. confirm runs when the user's current request semantically",
         "     authorizes saving; it may follow select in the same turn. It",
         "     re-fetches the CSL record and never trusts the discovery copy.",
+        "     save performs select and confirm as one atomic step per",
+        "     candidate: exactly one resolved DOI match is saved, several",
+        "     matches come back needs-disambiguation with nothing written.",
         "  5. BibTeX is retrieved from doi.org via content negotiation for",
         "     the same DOI; it is never written by the model.",
         "  6. The system parses that BibTeX and verifies the selected match,",
@@ -627,6 +680,22 @@ def _confirm_receipt(result: CitationResult) -> ConfirmReceipt:
         warnings=tuple(
             result.verification.warnings if result.verification is not None else ()
         ),
+    )
+
+
+_SELECT_FAILURE_REASON_CODES = {
+    "invalid_state": "unknown_candidate",
+    "no_doi": "no_doi",
+    "provider_failed": "doi_lookup_failed",
+}
+
+
+def _select_failure(candidate_id: str, result: CitationResult) -> ConfirmFailure:
+    """Map one save-time selection failure onto the fail-closed artifact."""
+    return ConfirmFailure(
+        match_id=candidate_id,
+        status=result.status,
+        reason_code=_SELECT_FAILURE_REASON_CODES[result.status],
     )
 
 
@@ -706,9 +775,9 @@ def create_citation_workflow_tool(
             )
         batch_identifiers: list[str] = []
         if identifiers is not None:
-            if action not in {"select", "confirm"}:
+            if action not in _BATCH_ACTIONS:
                 return _validation_error(
-                    "identifiers only applies to select/confirm"
+                    "identifiers only applies to save/select/confirm"
                 )
             batch_identifiers = list(dict.fromkeys(
                 value.strip()
@@ -721,7 +790,7 @@ def create_citation_workflow_tool(
                 return _validation_error(
                     f"identifiers accepts at most {MAX_BATCH_IDENTIFIERS} ids"
                 )
-        elif action in {"select", "confirm"}:
+        elif action in _BATCH_ACTIONS:
             normalized = (identifier or "").strip()
             if not normalized:
                 return _validation_error(
@@ -805,6 +874,44 @@ def create_citation_workflow_tool(
                 outcomes,
                 existing_pending=existing_pending,
             )
+
+        if action == "save":
+            saved: list[tuple[str, str, CitationResult]] = []
+            ambiguous: list[tuple[str, list[CitationMatch]]] = []
+            save_receipts: list[ConfirmReceipt] = []
+            save_failures: list[ConfirmFailure] = []
+            for candidate_id in batch_identifiers:
+                outcome = await coordinator.select(candidate_id)
+                if outcome.result is not None:
+                    save_failures.append(
+                        _select_failure(candidate_id, outcome.result)
+                    )
+                    continue
+                if len(outcome.matches) > 1:
+                    # The matches stay pending; only an explicit mX (or an
+                    # explicit all-versions request) may confirm them later.
+                    ambiguous.append((candidate_id, outcome.matches))
+                    continue
+                match = outcome.matches[0]
+                result = await coordinator.confirm(match.match_id)
+                if result.status == "confirmed":
+                    save_receipts.append(_confirm_receipt(result))
+                    saved.append((candidate_id, match.match_id, result))
+                else:
+                    save_failures.append(ConfirmFailure(
+                        match_id=match.match_id,
+                        status=result.status,
+                        reason_code=result.reason_code or result.status,
+                    ))
+            artifact = ConfirmBatchOutcome(
+                receipts=tuple(save_receipts),
+                failures=tuple(save_failures),
+            ).to_artifact()
+            return format_save_outcomes(
+                saved=saved,
+                ambiguous=ambiguous,
+                failures=save_failures,
+            ), artifact
 
         if action == "confirm":
             results: list[tuple[str, CitationResult]] = []

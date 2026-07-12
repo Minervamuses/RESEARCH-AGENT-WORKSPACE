@@ -26,21 +26,21 @@ actions and keep them in control of every decision.
    filter. Do not scan candidate pages to infer a refinement. Use
    `action="list"` only when the user explicitly asks to browse more, and
    `action="show"` to inspect a specific candidate or its grouped versions.
-3. **Resolve** — after the user picks one or more candidates, call
-   `action="select"` once with all chosen `cX` ids in `identifiers` (a single
-   id may use `identifier`). The result separates matches produced by this
-   request from older pending matches. Per candidate: zero matches is a
-   resolution failure; exactly one match is unambiguous; multiple matches
-   (for example, preprint and published versions) are
-   `needs-disambiguation` and must be presented as `mX` options.
-4. **Confirm** — the user's current request is the saving authorization when
-   its meaning says to save, regardless of exact wording or item count. For
-   each candidate with exactly one match, select may therefore be followed by
-   confirm in the same turn. Make one `action="confirm"` call containing all
-   authorized `mX` ids in `identifiers`. For a multi-match candidate, ask the
-   user to choose one `mX`; confirm all versions only when the user explicitly
-   requested all versions. If the request did not authorize saving or intent
-   is unclear, show the matches and ask. Success saves a verified bundle; the
+3. **Save** — the user's current request is the saving authorization when
+   its meaning says to save, regardless of exact wording or item count. When
+   it does, make ONE `action="save"` call with all chosen `cX` ids in
+   `identifiers` (a single id may use `identifier`). Calling save is itself
+   your authorization judgment; the tool resolves and writes atomically. Per
+   candidate: zero matches is reported as a failure; exactly one match is
+   saved immediately; multiple matches (for example, preprint and published
+   versions) come back `needs-disambiguation` with nothing written — present
+   the `mX` options and ask.
+4. **Select / Confirm** — when the request does NOT authorize saving (the
+   user only wants to inspect what would be saved) use `action="select"`,
+   present the matches, and wait. After the user picks a specific `mX` for a
+   multi-match candidate — or explicitly requests all versions — call
+   `action="confirm"` with the authorized `mX` ids in `identifiers`; it may
+   follow select in the same turn. Success saves a verified bundle; the
    finalizer deterministically reports every success and failure. You
    interpret natural-language intent directly; there is no host-side phrase
    classifier or approval-word allowlist.
@@ -51,11 +51,13 @@ actions and keep them in control of every decision.
 
 ## Hard rules
 
-- Your decision to call `confirm` is the authorization decision. Read the
-  user's current message and conversational context carefully: the host will
-  validate workflow state but will not second-guess your language judgment.
-- Never call `confirm` for negated, conditional, or questioning language such
-  as `不要儲存`, `先別確認`, `取消`, `可以嗎?`, `no`, or `don't save`.
+- Your decision to call `save` (or `confirm`) is the authorization decision.
+  Read the user's current message and conversational context carefully: the
+  host will validate workflow state but will not second-guess your language
+  judgment.
+- Never call `save` or `confirm` for negated, conditional, or questioning
+  language such as `不要儲存`, `先別確認`, `取消`, `可以嗎?`, `no`, or
+  `don't save`.
 - Confirm only matches produced by the current authorized select request.
   Never auto-confirm any item under the tool's "Existing pending" section.
 - A candidate with multiple matches is never implicitly authorization to save
