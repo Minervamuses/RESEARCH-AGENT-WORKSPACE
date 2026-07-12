@@ -7,6 +7,7 @@ import unicodedata
 from langgraph.errors import GraphRecursionError
 
 from agent.cli.prompting import LineReader, build_line_reader
+from agent.cli.runtime import CondaRuntimeError, require_conda_runtime
 from agent.cli.slash_commands import (
     SlashCommandContext,
     SlashCommandError,
@@ -172,6 +173,10 @@ def main():
         help="Disable MCP tool loading even if configured via environment.",
     )
     args = parser.parse_args()
+    try:
+        require_conda_runtime("app")
+    except CondaRuntimeError as exc:
+        parser.error(str(exc))
     asyncio.run(_run(args))
 
 
