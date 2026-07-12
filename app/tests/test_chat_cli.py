@@ -34,6 +34,18 @@ def test_chat_cli_flushes_recent_turns_on_quit(monkeypatch):
     assert session.calls == ["turn:hello", "flush"]
 
 
+def test_chat_cli_banner_reports_loaded_mcp_families(monkeypatch, capsys):
+    session = FakeChatSession()
+    session.mcp_families = {
+        "full-web-search": "web_search",
+        "get-web-search-summaries": "web_search",
+    }
+
+    _run_cli(monkeypatch, session, ["q"])
+
+    assert "MCP: web_search" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "quit_input",
     [
@@ -109,6 +121,7 @@ def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
         "recursion_limit": 32,
         "last_tool_counts": "rag_search x1",
         "thinking_mode": "extended",
+        "mcp_families": "web_search",
     })
 
     _run_cli(monkeypatch, session, ["/status", "q"])
@@ -118,6 +131,7 @@ def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
     assert "session_id: session-42" in output
     assert "last_tool_calls: rag_search x1" in output
     assert "thinking_mode: extended" in output
+    assert "mcp_families: web_search" in output
     assert session.calls == ["flush"]
 
 

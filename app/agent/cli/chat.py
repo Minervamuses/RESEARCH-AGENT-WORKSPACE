@@ -64,7 +64,13 @@ def _print_progress(node_name: str, new_msgs: list) -> None:
 
 def _print_banner(session=None) -> None:
     mode = "plan" if getattr(session, "plan_mode", False) else "default"
-    print(f"Agent Chat (LangGraph mode). Type 'q' to quit.\nMode: {mode}\n")
+    mcp_families = sorted(set(getattr(session, "mcp_families", {}).values()))
+    mcp_status = ", ".join(mcp_families) or "none"
+    print(
+        "Agent Chat (LangGraph mode). Type 'q' to quit.\n"
+        f"Mode: {mode}\n"
+        f"MCP: {mcp_status}\n"
+    )
 
 
 def _print_cli_message(message: str) -> None:
@@ -170,7 +176,7 @@ def main():
     )
     parser.add_argument(
         "--no-mcp", action="store_true",
-        help="Disable MCP tool loading even if configured via environment.",
+        help="Disable all MCP tool loading for this run.",
     )
     args = parser.parse_args()
     try:

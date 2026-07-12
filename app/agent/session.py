@@ -938,6 +938,9 @@ class ChatSession:
             "plan_mode": self.plan_mode,
             "plan_log_path": str(self.plan_log_path) if self.plan_log_path else "",
             "thinking_mode": self.thinking_mode,
+            "mcp_families": (
+                ", ".join(sorted(set(self.mcp_families.values()))) or "none"
+            ),
             "active_skill": (
                 self.active_skill_runtime.name
                 if self.active_skill_runtime is not None

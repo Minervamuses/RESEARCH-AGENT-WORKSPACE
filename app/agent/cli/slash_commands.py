@@ -243,6 +243,7 @@ async def _handle_status(
         f"plan_mode: {status.get('plan_mode', False)}",
         f"plan_log_path: {status.get('plan_log_path', '') or 'none'}",
         f"thinking_mode: {status.get('thinking_mode', 'normal')}",
+        f"mcp_families: {status.get('mcp_families', 'none')}",
         f"active_skill: {status.get('active_skill', '') or 'none'}",
         f"task_mode: {status.get('task_mode', '') or 'none'}",
     ]
