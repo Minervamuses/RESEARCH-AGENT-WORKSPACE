@@ -3,9 +3,7 @@
 import argparse
 import asyncio
 import unicodedata
-from pathlib import Path
 
-from dotenv import load_dotenv
 from langgraph.errors import GraphRecursionError
 
 from agent.cli.prompting import LineReader, build_line_reader
@@ -19,9 +17,6 @@ from agent.cli.slash_commands import (
 from agent.config import AgentConfig
 from agent.session import ChatSession, DEFAULT_RECURSION_LIMIT
 from agent.turn_safety import build_recovery_message
-
-_ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(dotenv_path=_ENV_PATH, override=False)
 
 _EXIT_COMMANDS = {"q", "quit", "exit"}
 
