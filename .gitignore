@@ -8,3 +8,4 @@ dist/
 build/
 *.sqlite3
 *:Zone.Identifier
+cite/.staging-*

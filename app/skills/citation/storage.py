@@ -23,9 +23,10 @@ LLM responses, API keys, or URLs embedding keys; storage only adds the
 artifact hash and schema/DOI stamps it needs for validation.
 
 Output directory precedence: ``AgentConfig.citation_output_dir`` ->
-``CITATION_OUTPUT_DIR`` env -> the platform user-data directory. Bundles are
-user data and never live inside the source/package/skill tree; point the env
-var at an old location to keep using it.
+``CITATION_OUTPUT_DIR`` env -> ``<workspace>/cite`` -> the platform user-data
+directory. A workspace is the nearest ancestor containing a ``.git``
+directory or worktree file. The platform path remains a fail-safe for an
+installed package launched outside any repository.
 """
 
 from __future__ import annotations
@@ -87,7 +88,41 @@ def resolve_output_dir(
     from_env = env.get("CITATION_OUTPUT_DIR", "").strip()
     if from_env:
         return Path(from_env).expanduser()
+    workspace = _workspace_root()
+    if workspace is not None:
+        return workspace / "cite"
     return _platform_user_data_dir(env) / "research-agent" / "citation"
+
+
+def _workspace_root(
+    cwd: Path | None = None,
+    package_start: Path | None = None,
+) -> Path | None:
+    """Find the nearest git workspace, preferring the caller's cwd.
+
+    ``.git`` may be a directory or a file (linked worktrees). The package
+    walk is only a source-tree fallback; wheel installs outside a repository
+    deliberately return ``None`` so platform user data remains available.
+    """
+
+    def nearest(start: Path) -> Path | None:
+        resolved = start.expanduser().resolve()
+        if resolved.is_file():
+            resolved = resolved.parent
+        for candidate in (resolved, *resolved.parents):
+            if (candidate / ".git").exists():
+                return candidate
+        return None
+
+    cwd_root = nearest(Path.cwd() if cwd is None else Path(cwd))
+    if cwd_root is not None:
+        return cwd_root
+    package_origin = (
+        Path(__file__).resolve().parent
+        if package_start is None
+        else Path(package_start)
+    )
+    return nearest(package_origin)
 
 
 def _platform_user_data_dir(env: dict[str, str]) -> Path:

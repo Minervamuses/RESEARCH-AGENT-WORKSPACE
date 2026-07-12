@@ -79,9 +79,9 @@ class AgentConfig(RAGConfig):
     skills_dir: str | None = None
 
     # Citation bundle output directory. Highest-precedence override; when
-    # unset the CITATION_OUTPUT_DIR env var, then the platform user-data dir
-    # apply (see citation.storage.resolve_output_dir). Bundles never live in
-    # the source/package tree.
+    # unset the CITATION_OUTPUT_DIR env var, then workspace cite/, then the
+    # platform user-data fail-safe apply (see citation.storage.resolve_output_dir).
+    # The default never writes inside app/rag/skills package trees.
     citation_output_dir: str | None = None
 
     # Discovery ranking rollout switch. ``rrf`` preserves the original
