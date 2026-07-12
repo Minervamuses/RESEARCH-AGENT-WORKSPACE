@@ -26,18 +26,24 @@ actions and keep them in control of every decision.
    filter. Do not scan candidate pages to infer a refinement. Use
    `action="list"` only when the user explicitly asks to browse more, and
    `action="show"` to inspect a specific candidate or its grouped versions.
-3. **Resolve** — after the user picks, `action="select"` with that candidate
-   id. Show the confirmable matches and WAIT again.
-4. **Confirm** — only after the user explicitly approves a match in a later
-   message, `action="confirm"` with the match id. Clear approvals include
-   `儲存`, `保存`, `確認`, `可以`, `要這篇`, `就這篇`, `OK`/`okay`, `yes`,
-   `confirm`, and `save`/`save it`. With one pending match, a generic approval
-   refers to that match; with multiple pending matches, require one explicit
-   `mX` id and ask when it is missing. Success saves a verified bundle and the
-   finalizer returns a deterministic receipt with source id, DOI, bundle path,
-   verification level, and the source's `[[cite:<source-id>]]` marker.
-   You interpret the user's natural-language intent directly; there is no
-   host-side phrase classifier or approval-word allowlist behind this tool.
+3. **Resolve** — after the user picks one or more candidates, call
+   `action="select"` once with all chosen `cX` ids in `identifiers` (a single
+   id may use `identifier`). The result separates matches produced by this
+   request from older pending matches. Per candidate: zero matches is a
+   resolution failure; exactly one match is unambiguous; multiple matches
+   (for example, preprint and published versions) are
+   `needs-disambiguation` and must be presented as `mX` options.
+4. **Confirm** — the user's current request is the saving authorization when
+   its meaning says to save, regardless of exact wording or item count. For
+   each candidate with exactly one match, select may therefore be followed by
+   confirm in the same turn. Make one `action="confirm"` call containing all
+   authorized `mX` ids in `identifiers`. For a multi-match candidate, ask the
+   user to choose one `mX`; confirm all versions only when the user explicitly
+   requested all versions. If the request did not authorize saving or intent
+   is unclear, show the matches and ask. Success saves a verified bundle; the
+   finalizer deterministically reports every success and failure. You
+   interpret natural-language intent directly; there is no host-side phrase
+   classifier or approval-word allowlist.
 5. **Cite** — cite saved sources only via their `[[cite:<source-id>]]`
    markers; write `[[citation-needed]]` where a claim has no saved source.
    The renderer assigns numbers and builds the bibliography after the
@@ -45,12 +51,18 @@ actions and keep them in control of every decision.
 
 ## Hard rules
 
-- Never call `confirm` in the same turn as `select`; the tool refuses it.
 - Your decision to call `confirm` is the authorization decision. Read the
   user's current message and conversational context carefully: the host will
   validate workflow state but will not second-guess your language judgment.
 - Never call `confirm` for negated, conditional, or questioning language such
   as `不要儲存`, `先別確認`, `取消`, `可以嗎?`, `no`, or `don't save`.
+- Confirm only matches produced by the current authorized select request.
+  Never auto-confirm any item under the tool's "Existing pending" section.
+- A candidate with multiple matches is never implicitly authorization to save
+  them all. Require an explicit `mX` or an explicit request for every version.
+- Put every authorized candidate/match id into one bounded batch call. Never
+  issue parallel `citation_workflow` calls; the coordinator is session-stateful
+  and permits only one call at a time.
 - Before confirm succeeds, present candidates and matches by `cX`/`mX` plus
   bibliographic metadata only. Do not expose or paraphrase a DOI literal.
 - Never invent or hand-write DOIs, BibTeX entries, bibliographies,
@@ -85,12 +97,15 @@ actions and keep them in control of every decision.
 ## Storage and internals questions
 
 - Confirmed bundles (`reference.bib` + `citation.json`) are written
-  atomically under the citation output directory — user data, never
-  inside the project source tree.
+  atomically under the citation output directory. By default this is `cite/`
+  at the workspace root (and is version-controlled), never inside the
+  `app/`, `rag/`, or skill package trees. Config and environment overrides
+  still take precedence; an installed package outside a git workspace falls
+  back to the platform user-data directory.
 - When the user asks where a citation is saved or which sources exist,
   use `action="sources"` to list them and `action="source"` with the
   source id for its bundle path. Never scan directories with bash and
-  never guess paths from the source tree.
+  never guess paths.
 - When the user asks how the workflow works (search, verification, where
   BibTeX comes from, storage), call the read-only `action="explain"` and
   relay its steps; do not describe internals from memory. The model never

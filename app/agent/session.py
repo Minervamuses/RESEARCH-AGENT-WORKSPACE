@@ -14,7 +14,11 @@ from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
 from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
-from skills.citation.types import ConfirmReceipt
+from skills.citation.types import (
+    ConfirmBatchOutcome,
+    ConfirmFailure,
+    ConfirmReceipt,
+)
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
     build_recovery_message,
@@ -141,7 +145,6 @@ class ChatSession:
         # the Coordinator behind it is built lazily on first use.
         self.citation_workflow_tool = create_citation_workflow_tool(
             coordinator_getter=lambda: self.citation_coordinator,
-            turn_getter=lambda: self._turn_counter,
         )
         self.graph = build_graph(
             config,
@@ -307,12 +310,13 @@ class ChatSession:
             lines.append(f"- [[cite:{ref.source_id}]] {label}")
         return SystemMessage(content="\n".join(lines))
 
-    def _trusted_confirm_receipts(self, new_messages: list) -> list[ConfirmReceipt]:
-        """Validate receipt artifacts against the live session registry."""
+    def _trusted_confirm_receipts(self, new_messages: list) -> ConfirmBatchOutcome:
+        """Validate batch artifacts and receipts against the live registry."""
         registry = self._citation_registry() if self.citation_skill_active else None
         if registry is None:
-            return []
+            return ConfirmBatchOutcome()
         receipts: list[ConfirmReceipt] = []
+        failures: list[ConfirmFailure] = []
         seen: set[str] = set()
         for message in new_messages:
             if not isinstance(message, ToolMessage):
@@ -325,26 +329,32 @@ class ChatSession:
             if artifact is None:
                 continue
             try:
-                receipt = ConfirmReceipt.from_artifact(artifact)
+                batch = ConfirmBatchOutcome.from_artifact(artifact)
             except ValueError as exc:
-                logger.warning("ignored invalid citation confirm receipt: %s", exc)
+                logger.warning("ignored invalid citation confirm batch: %s", exc)
                 continue
-            ref = registry.get(receipt.source_id)
-            if (
-                ref is None
-                or ref.verification_level != receipt.verification_level
-                or ref.doi != receipt.accepted_doi
-                or ref.bundle_path != receipt.bundle_path
-            ):
-                logger.warning(
-                    "ignored citation confirm receipt that does not match registry: %s",
-                    receipt.source_id,
-                )
-                continue
-            if receipt.source_id not in seen:
-                receipts.append(receipt)
-                seen.add(receipt.source_id)
-        return receipts
+            failures.extend(batch.failures)
+            for receipt in batch.receipts:
+                ref = registry.get(receipt.source_id)
+                if (
+                    ref is None
+                    or ref.verification_level != receipt.verification_level
+                    or ref.doi != receipt.accepted_doi
+                    or ref.bundle_path != receipt.bundle_path
+                ):
+                    logger.warning(
+                        "ignored citation confirm receipt that does not match "
+                        "registry: %s",
+                        receipt.source_id,
+                    )
+                    continue
+                if receipt.source_id not in seen:
+                    receipts.append(receipt)
+                    seen.add(receipt.source_id)
+        return ConfirmBatchOutcome(
+            receipts=tuple(receipts),
+            failures=tuple(failures),
+        )
 
     @staticmethod
     def _markdown_code_span(value: object) -> str:
@@ -358,18 +368,26 @@ class ChatSession:
 
     def _render_confirm_receipts(
         self,
-        receipts: list[ConfirmReceipt],
+        outcome: ConfirmBatchOutcome,
         *,
         validation_errors: list[str],
     ) -> str:
         blocked = bool(validation_errors)
-        lines = [
-            (
+        receipts = outcome.receipts
+        failures = outcome.failures
+        if receipts:
+            heading = (
                 "（本輪模型草稿未通過 citation 檢查，但 confirm 已成功完成。）"
                 if blocked
                 else "（引用已確認並保存。）"
             )
-        ]
+        else:
+            heading = (
+                "（本輪模型草稿未通過 citation 檢查；引用保存亦未成功。）"
+                if blocked
+                else "（引用保存未成功。）"
+            )
+        lines = [heading]
         for receipt in receipts:
             if len(receipts) > 1:
                 lines.append(f"- 收據：{self._markdown_code_span(receipt.source_id)}")
@@ -386,6 +404,28 @@ class ChatSession:
             for warning in receipt.warnings:
                 lines.append(
                     f"{prefix}驗證警告：{self._markdown_code_span(warning)}"
+                )
+        reason_messages = {
+            "stale_match": "配對已失效，請重新選取候選項目",
+            "structured_lookup_failed": "無法重新取得結構化書目資料",
+            "bibtex_lookup_failed": "無法從 doi.org 取得 BibTeX",
+            "doi_mismatch": "配對 DOI 與重新查證的 DOI 不一致",
+            "bibtex_doi_mismatch": "BibTeX DOI 與查證結果不一致",
+            "parse_failed": "BibTeX 無法安全解析",
+            "payload_too_large": "BibTeX 資料超過安全大小限制",
+            "not_exactly_one_entry": "BibTeX 並非恰好一筆書目",
+            "nonempty_preamble": "BibTeX 含不允許的 preamble",
+            "bundle_conflict": "既有 bundle 驗證衝突，未覆寫",
+            "write_failed": "bundle 寫入失敗",
+        }
+        if failures:
+            lines.append("- 保存失敗：")
+            for failure in failures:
+                message = reason_messages[failure.reason_code]
+                lines.append(
+                    "  - "
+                    f"{self._markdown_code_span(failure.match_id)}：{message} "
+                    f"({self._markdown_code_span(failure.reason_code)})"
                 )
         if blocked:
             lines.append("- 被攔截草稿的檢查結果：")
@@ -460,11 +500,11 @@ class ChatSession:
                 had_tool_results=has_tool_results(new_messages),
             )
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
-        receipts = self._trusted_confirm_receipts(new_messages)
+        confirm_outcome = self._trusted_confirm_receipts(new_messages)
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
-        if receipts:
+        if confirm_outcome.receipts or confirm_outcome.failures:
             final_text = self._render_confirm_receipts(
-                receipts,
+                confirm_outcome,
                 validation_errors=errors,
             )
         await self._record_turn(

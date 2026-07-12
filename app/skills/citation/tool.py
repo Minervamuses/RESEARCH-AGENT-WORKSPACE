@@ -9,9 +9,8 @@ the tool exposes no raw web search.
 Safety rails owned by this layer:
   * one workflow call at a time per session — a concurrent call returns a
     busy error instead of interleaving with the stateful Coordinator;
-  * ``confirm`` must arrive in a *later user turn* than the ``select`` that
-    produced the match, so resolving a match and writing the bundle remain
-    separate interaction steps;
+  * select/confirm accept a bounded ordered batch and execute it serially
+    inside that lock;
   * date filtering is either ``published_within_years`` or
     ``year_from``/``year_to`` — never both — and applies only to ``search``
     and the provider-free ``refine`` view.
@@ -38,12 +37,15 @@ from skills.citation.types import (
     CitationCandidate,
     CitationMatch,
     CitationResult,
+    ConfirmBatchOutcome,
+    ConfirmFailure,
     ConfirmReceipt,
     PublishedDateFilter,
     SourceRef,
 )
 
 TOOL_NAME = "citation_workflow"
+MAX_BATCH_IDENTIFIERS = PAGE_SIZE
 
 TOOL_DESCRIPTION = (
     "Drive the interactive citation workflow: search for academic papers, "
@@ -53,17 +55,20 @@ TOOL_DESCRIPTION = (
     "results to the current search), 'refine' (filter the current candidate "
     "pool without new provider calls, including explicit catalog venue tiers), "
     "'list' (page through the active view), "
-    "'show' (identifier = candidate id), 'select' (identifier = candidate "
-    "id; resolves confirmable matches), 'confirm' (identifier = match id; "
-    "call ONLY after the user explicitly approved in a later message using "
-    "a clear phrase such as 儲存/確認/OK/就這篇 — never in the same turn as "
-    "select; ambiguous multiple matches require an explicit mX), 'status', "
+    "'show' (identifier = candidate id), 'select' (identifier OR identifiers "
+    "= candidate ids; resolves confirmable matches), 'confirm' (identifier "
+    "OR identifiers = match ids). Confirm when the user's current request "
+    "semantically authorizes saving, regardless of wording or item count; it "
+    "may follow select in the same turn. Never confirm negated, conditional, "
+    "questioning, or unclear intent. A candidate with multiple matches needs "
+    "an explicit mX choice unless the user explicitly requests all versions. "
+    "Actions also include 'status', "
     "'explain' (read-only: how the workflow verifies citations and where "
     "bundles are stored), 'cancel', "
     "'sources' (list saved sources), 'source' (identifier = source id; "
     "re-activate a saved source for citing). Present candidates and matches "
-    "to the user and wait for their choice; the tool refuses same-turn "
-    "confirms and concurrent calls."
+    "to the user when intent is unclear. Never confirm matches shown as "
+    "existing pending from an earlier request. Concurrent calls are refused."
 )
 
 CitationAction = Literal[
@@ -81,7 +86,6 @@ CitationAction = Literal[
     "source",
 ]
 
-_IDENTIFIER_ACTIONS = {"show", "select", "confirm", "source"}
 _PAGE_ACTIONS = {"list", "sources"}
 
 
@@ -97,6 +101,13 @@ class CitationWorkflowInput(BaseModel):
         description=(
             "Candidate id (show/select), match id (confirm), or source id "
             "(source)."
+        ),
+    )
+    identifiers: list[str] | None = Field(
+        None,
+        description=(
+            "select/confirm only: ordered candidate or match ids; mutually "
+            "exclusive with identifier; at most 10 after normalization."
         ),
     )
     page: int | None = Field(
@@ -352,12 +363,14 @@ def format_refine_outcome(outcome: RefineOutcome) -> str:
     return "\n".join(lines)
 
 
-def format_matches(matches: list[CitationMatch]) -> str:
-    lines = ["Confirmable matches:"]
+def _format_match_lines(
+    matches: list[CitationMatch], *, indent: str = ""
+) -> list[str]:
+    lines: list[str] = []
     for match in matches:
-        lines.append(f"[{match.match_id}] confirmable match")
+        lines.append(f"{indent}[{match.match_id}] confirmable match")
         if match.title:
-            lines.append(f"      title: {match.title}")
+            lines.append(f"{indent}      title: {match.title}")
         meta = []
         if match.year is not None:
             meta.append(str(match.year))
@@ -366,13 +379,99 @@ def format_matches(matches: list[CitationMatch]) -> str:
         if match.registration_agency:
             meta.append(f"RA: {match.registration_agency}")
         if meta:
-            lines.append(f"      {' | '.join(meta)}")
+            lines.append(f"{indent}      {' | '.join(meta)}")
+    return lines
+
+
+def format_matches(matches: list[CitationMatch]) -> str:
+    """Render matches grouped by candidate with explicit ambiguity labels."""
+    lines = ["Confirmable matches from this request:"]
+    grouped: dict[str, list[CitationMatch]] = {}
+    for match in matches:
+        grouped.setdefault(match.candidate_id, []).append(match)
+    for candidate_id, candidate_matches in grouped.items():
+        lines.append(f"[{candidate_id}] {len(candidate_matches)} match(es)")
+        if len(candidate_matches) > 1:
+            lines.append(
+                "  needs-disambiguation: choose one mX, unless the user "
+                "explicitly requested all versions"
+            )
+        lines.extend(_format_match_lines(candidate_matches, indent="  "))
     lines.append(
-        "Show these matches to the user. Only after the user explicitly "
-        "confirms in a later message, call action=confirm with the match id."
+        "If the current user request already authorizes saving, a candidate "
+        "with exactly one match may be confirmed now. Otherwise present the "
+        "matches and ask. Negated, conditional, questioning, or unclear "
+        "intent never authorizes confirm."
     )
     lines.append("Do not expose a DOI literal before confirm succeeds; use mX ids.")
     return _redact_dois("\n".join(lines))
+
+
+def format_select_outcomes(
+    outcomes: list[tuple[str, SelectOutcome]],
+    *,
+    existing_pending: list[CitationMatch],
+) -> str:
+    """Summarize only this call's resolutions, isolating older pending state."""
+    current_matches = [
+        match
+        for _candidate_id, outcome in outcomes
+        for match in outcome.matches
+    ]
+    lines = [format_matches(current_matches)] if current_matches else [
+        "Confirmable matches from this request: none"
+    ]
+    failures = [
+        (candidate_id, outcome.result)
+        for candidate_id, outcome in outcomes
+        if outcome.result is not None
+    ]
+    if failures:
+        lines.append("Selection failures from this request:")
+        for candidate_id, result in failures:
+            lines.append(
+                f"- [{candidate_id}] {result.status}: {result.message}"
+            )
+    if existing_pending:
+        lines.append(
+            "Existing pending matches (not requested in this call; not "
+            "authorized by this request; do not auto-confirm):"
+        )
+        grouped: dict[str, list[CitationMatch]] = {}
+        for match in existing_pending:
+            grouped.setdefault(match.candidate_id, []).append(match)
+        for candidate_id, matches in grouped.items():
+            lines.append(f"[{candidate_id}] existing pending")
+            lines.extend(_format_match_lines(matches, indent="  "))
+    return _redact_dois("\n".join(lines))
+
+
+def format_confirm_batch(
+    results: list[tuple[str, CitationResult]],
+) -> str:
+    successes = [
+        (match_id, result)
+        for match_id, result in results
+        if result.status == "confirmed"
+    ]
+    failures = [
+        (match_id, result)
+        for match_id, result in results
+        if result.status != "confirmed"
+    ]
+    lines: list[str] = []
+    if successes:
+        lines.append(f"Confirmed {len(successes)} citation(s):")
+        for match_id, result in successes:
+            lines.append(f"[{match_id}]")
+            lines.extend(f"  {line}" for line in format_result(result).splitlines())
+    if failures:
+        lines.append(f"Failed to confirm {len(failures)} citation(s):")
+        for match_id, result in failures:
+            lines.append(
+                f"[{match_id}] {result.status} ({result.reason_code or result.status})"
+            )
+    return _redact_dois("\n".join(lines)) if not successes else "\n".join(lines)
 
 
 def format_result(result: CitationResult) -> str:
@@ -466,16 +565,17 @@ def format_explain(output_dir: object) -> str:
         "     candidate's stored DOI/URL/snippet/title fields.",
         "  3. Each extracted DOI is resolved at doi.org into a structured",
         "     CSL record, and its registration agency is looked up.",
-        "  4. confirm runs only after the user explicitly approves in a",
-        "     later message. It re-fetches the CSL record from doi.org and",
-        "     never trusts the discovery copy.",
+        "  4. confirm runs when the user's current request semantically",
+        "     authorizes saving; it may follow select in the same turn. It",
+        "     re-fetches the CSL record and never trusts the discovery copy.",
         "  5. BibTeX is retrieved from doi.org via content negotiation for",
         "     the same DOI; it is never written by the model.",
         "  6. The system parses that BibTeX and verifies the selected match,",
         "     the CSL record, and the BibTeX agree on one canonical DOI.",
         "  7. On success the bundle — reference.bib plus a citation.json",
         "     sidecar — is written atomically under the citation output",
-        "     directory: user data, never inside the project source tree.",
+        "     directory (the workspace cite/ directory by default, never",
+        "     inside app/rag/skills package trees).",
         f"  Current citation output directory: {_code_span(output_dir)}",
         "  Each bundle is one <title>--<doi-hash> directory; re-confirming",
         "  the same DOI validates and reuses the existing bundle.",
@@ -555,25 +655,21 @@ def _build_date_filter(
 def create_citation_workflow_tool(
     *,
     coordinator_getter: Callable[[], CitationCoordinator],
-    turn_getter: Callable[[], int],
 ) -> StructuredTool:
     """Build the session-scoped citation_workflow StructuredTool.
 
     ``coordinator_getter`` returns the session Coordinator lazily (so merely
-    creating the tool never touches providers); ``turn_getter`` returns the
-    session's completed-turn counter, used to enforce that confirm happens in
-    a later user turn than select. The model owns natural-language intent
-    interpretation; this tool validates workflow state, not user phrasing.
+    creating the tool never touches providers). The model owns natural-
+    language authorization judgment; this tool validates identifiers and
+    workflow state, not user phrasing.
     """
     busy_lock = asyncio.Lock()
-    # Turn (as reported by turn_getter) in which the current matches were
-    # resolved; None when there is no live selection.
-    select_turn: int | None = None
 
     async def _dispatch(
         action: CitationAction,
         query: str | None,
         identifier: str | None,
+        identifiers: list[str] | None,
         page: int | None,
         keywords: list[str] | None,
         venues: list[str] | None,
@@ -583,8 +679,9 @@ def create_citation_workflow_tool(
         year_from: int | None,
         year_to: int | None,
     ) -> str | tuple[str, dict]:
-        nonlocal select_turn
         coordinator = coordinator_getter()
+        if identifier is not None:
+            identifier = identifier.strip()
 
         has_date_args = (
             published_within_years is not None
@@ -603,7 +700,35 @@ def create_citation_workflow_tool(
                 "keywords/venues/work_types/venue_tiers only apply to "
                 "action='refine'"
             )
-        if action in _IDENTIFIER_ACTIONS and not (identifier or "").strip():
+        if identifier is not None and identifiers is not None:
+            return _validation_error(
+                "identifier and identifiers are mutually exclusive"
+            )
+        batch_identifiers: list[str] = []
+        if identifiers is not None:
+            if action not in {"select", "confirm"}:
+                return _validation_error(
+                    "identifiers only applies to select/confirm"
+                )
+            batch_identifiers = list(dict.fromkeys(
+                value.strip()
+                for value in identifiers
+                if isinstance(value, str) and value.strip()
+            ))
+            if not batch_identifiers:
+                return _validation_error("identifiers must not be empty")
+            if len(batch_identifiers) > MAX_BATCH_IDENTIFIERS:
+                return _validation_error(
+                    f"identifiers accepts at most {MAX_BATCH_IDENTIFIERS} ids"
+                )
+        elif action in {"select", "confirm"}:
+            normalized = (identifier or "").strip()
+            if not normalized:
+                return _validation_error(
+                    f"action '{action}' requires identifier or identifiers"
+                )
+            batch_identifiers = [normalized]
+        elif action in {"show", "source"} and not (identifier or "").strip():
             return _validation_error(f"action '{action}' requires identifier")
         if page is not None and action not in _PAGE_ACTIONS:
             return _validation_error("page only applies to list/sources")
@@ -621,12 +746,10 @@ def create_citation_workflow_tool(
                 )
             except ValueError as exc:
                 return _validation_error(str(exc))
-            select_turn = None
             outcome = await coordinator.search(query, date_filter=date_filter)
             return format_search_outcome(outcome)
 
         if action == "more":
-            select_turn = None
             outcome = await coordinator.more(query)
             return format_search_outcome(outcome, appended=True)
 
@@ -639,7 +762,6 @@ def create_citation_workflow_tool(
                 )
             except ValueError as exc:
                 return _validation_error(str(exc))
-            select_turn = None
             outcome = coordinator.refine(
                 keywords=keywords,
                 venues=venues,
@@ -667,25 +789,43 @@ def create_citation_workflow_tool(
             )
 
         if action == "select":
-            outcome: SelectOutcome = await coordinator.select(identifier)
-            if outcome.result is not None:
-                return format_result(outcome.result)
-            select_turn = turn_getter()
-            return format_matches(outcome.matches)
+            outcomes: list[tuple[str, SelectOutcome]] = []
+            current_match_ids: set[str] = set()
+            for candidate_id in batch_identifiers:
+                outcome = await coordinator.select(candidate_id)
+                outcomes.append((candidate_id, outcome))
+                current_match_ids.update(
+                    match.match_id for match in outcome.matches
+                )
+            existing_pending = [
+                match for match in coordinator.pending_matches()
+                if match.match_id not in current_match_ids
+            ]
+            return format_select_outcomes(
+                outcomes,
+                existing_pending=existing_pending,
+            )
 
         if action == "confirm":
-            if select_turn is not None and turn_getter() <= select_turn:
-                return _validation_error(
-                    "confirm refused: confirm must occur in a later user turn "
-                    "than select. Present the matches and wait for the next "
-                    "user message before calling confirm."
-                )
-            result = await coordinator.confirm(identifier)
-            if result.status == "confirmed":
-                select_turn = None
-                receipt = _confirm_receipt(result)
-                return format_result(result), receipt.to_artifact()
-            return format_result(result)
+            results: list[tuple[str, CitationResult]] = []
+            receipts: list[ConfirmReceipt] = []
+            failures: list[ConfirmFailure] = []
+            for match_id in batch_identifiers:
+                result = await coordinator.confirm(match_id)
+                results.append((match_id, result))
+                if result.status == "confirmed":
+                    receipts.append(_confirm_receipt(result))
+                else:
+                    failures.append(ConfirmFailure(
+                        match_id=match_id,
+                        status=result.status,
+                        reason_code=result.reason_code or result.status,
+                    ))
+            artifact = ConfirmBatchOutcome(
+                receipts=tuple(receipts),
+                failures=tuple(failures),
+            ).to_artifact()
+            return format_confirm_batch(results), artifact
 
         if action == "status":
             return format_status(coordinator.status())
@@ -694,7 +834,6 @@ def create_citation_workflow_tool(
             return format_explain(coordinator.output_dir)
 
         if action == "cancel":
-            select_turn = None
             return format_result(coordinator.cancel())
 
         if action == "sources":
@@ -717,6 +856,7 @@ def create_citation_workflow_tool(
         action: CitationAction,
         query: str | None = None,
         identifier: str | None = None,
+        identifiers: list[str] | None = None,
         page: int | None = None,
         keywords: list[str] | None = None,
         venues: list[str] | None = None,
@@ -733,7 +873,7 @@ def create_citation_workflow_tool(
             ), None
         async with busy_lock:
             result = await _dispatch(
-                action, query, identifier, page,
+                action, query, identifier, identifiers, page,
                 keywords, venues, work_types, venue_tiers,
                 published_within_years, year_from, year_to,
             )

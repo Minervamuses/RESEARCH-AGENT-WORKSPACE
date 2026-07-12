@@ -13,7 +13,12 @@ from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import find_content_tool_protocol_artifact
 from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
-from skills.citation.types import ConfirmReceipt, SourceRef
+from skills.citation.types import (
+    ConfirmBatchOutcome,
+    ConfirmFailure,
+    ConfirmReceipt,
+    SourceRef,
+)
 
 
 @pytest.fixture
@@ -71,7 +76,29 @@ def _confirm_tool_message(session, source_id="src-known", **overrides):
         content="citation confirmed",
         tool_call_id="confirm-1",
         name="citation_workflow",
-        artifact=receipt,
+        artifact={
+            "kind": "citation_confirm_receipt_batch",
+            "schema_version": 1,
+            "receipts": [receipt],
+            "failures": [],
+        },
+    )
+
+
+def _failure_tool_message(*failures, content="confirm failed"):
+    artifact = ConfirmBatchOutcome(failures=tuple(
+        ConfirmFailure(
+            match_id=match_id,
+            status=status,
+            reason_code=reason_code,
+        )
+        for match_id, status, reason_code in failures
+    )).to_artifact()
+    return ToolMessage(
+        content=content,
+        tool_call_id="confirm-failed",
+        name="citation_workflow",
+        artifact=artifact,
     )
 
 
@@ -269,6 +296,69 @@ def test_receipt_requires_artifact_and_live_registry_match(make_session, tmp_pat
         ))
         assert "confirm 已成功" not in outcome.text
         assert "回應未通過 citation 檢查" in outcome.text
+
+
+def test_all_confirm_failures_still_replace_model_draft_deterministically(
+    make_session, tmp_path,
+):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+    provider_detail = "provider leaked 10.9999/private **markdown**"
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="全部存下來",
+        answer="看起來都成功了",
+        new_messages=[_failure_tool_message(
+            ("m1", "invalid_state", "stale_match"),
+            ("m2", "provider_failed", "bibtex_lookup_failed"),
+            content=provider_detail,
+        )],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert "引用保存未成功" in outcome.text
+    assert "`m1`" in outcome.text and "`m2`" in outcome.text
+    assert "配對已失效" in outcome.text
+    assert "無法從 doi.org 取得 BibTeX" in outcome.text
+    assert provider_detail not in outcome.text
+    assert "看起來都成功了" not in outcome.text
+
+
+def test_partial_confirm_failure_renders_receipt_and_fixed_failure(make_session, tmp_path):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+    success = _confirm_tool_message(session).artifact["receipts"][0]
+    artifact = ConfirmBatchOutcome.from_artifact({
+        "kind": "citation_confirm_receipt_batch",
+        "schema_version": 1,
+        "receipts": [success],
+        "failures": [{
+            "match_id": "m2",
+            "status": "storage_failed",
+            "reason_code": "write_failed",
+        }],
+    }).to_artifact()
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="存兩篇",
+        answer="saved",
+        new_messages=[ToolMessage(
+            content="partial",
+            tool_call_id="partial",
+            name="citation_workflow",
+            artifact=artifact,
+        )],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert "引用已確認並保存" in outcome.text
+    assert "`src-known`" in outcome.text
+    assert "`m2`" in outcome.text
+    assert "bundle 寫入失敗" in outcome.text
 
 
 def test_plan_log_persists_receipt_but_not_blocked_draft(make_session, tmp_path):

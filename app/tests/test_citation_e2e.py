@@ -162,31 +162,19 @@ def test_workflow_call_under_other_skill_is_denied_end_to_end(
     assert session._citation_coordinator is None  # noqa: SLF001
 
 
-def test_select_then_confirm_across_user_turns_end_to_end(monkeypatch, tmp_path):
-    """Cross-turn confirm through the real session turn counter: same-turn
-    confirm is refused; the next user turn's confirm writes the bundle."""
+def test_search_select_confirm_in_one_user_turn_end_to_end(monkeypatch, tmp_path):
+    """An authorized request may search, select, and confirm in one turn."""
     responses = [
-        # turn 1: search then present
         _workflow_call({"action": "search", "query": "paper"}),
-        AIMessage(content="請選擇候選。"),
-        # turn 2: select, then an over-eager same-turn confirm, then present
         _workflow_call({"action": "select", "identifier": "c1"}),
         _workflow_call({"action": "confirm", "identifier": "m1"}, "call-2"),
-        AIMessage(content="請確認 m1。"),
-        # turn 3: the user confirmed -> confirm succeeds
-        _workflow_call({"action": "confirm", "identifier": "m1"}, "call-3"),
         AIMessage(content="已保存來源。"),
     ]
     session = _make_session(monkeypatch, tmp_path, responses)
     session.activate_skill("citation")
     _seed_fixture_coordinator(session, tmp_path)
 
-    asyncio.run(session.turn("幫我找 paper"))
-    asyncio.run(session.turn("選 c1"))
-    # Same-turn confirm was refused: nothing on disk yet.
-    assert not list((tmp_path / "cite").glob("*/reference.bib"))
-
-    receipt = asyncio.run(session.turn("確認儲存 m1"))
+    receipt = asyncio.run(session.turn("幫我找 paper 並把第一篇存下來"))
     bundles = list((tmp_path / "cite").glob("*/reference.bib"))
     assert len(bundles) == 1
     assert "引用已確認並保存" in receipt

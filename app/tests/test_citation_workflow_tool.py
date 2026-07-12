@@ -1,4 +1,4 @@
-"""The citation_workflow tool: validation, delegation, busy guard, turn rule."""
+"""The citation_workflow tool: batch validation, delegation, and busy guard."""
 
 import asyncio
 import json
@@ -21,22 +21,23 @@ from skills.citation.tool import (
     format_refine_outcome,
     format_search_outcome,
 )
-from skills.citation.types import CitationCandidate, ConfirmReceipt
+from skills.citation.types import (
+    CitationCandidate,
+    ConfirmBatchOutcome,
+)
 
 from tests.test_citation_coordinator import DOI_A, RoutingFetcher
 
 
 class ToolHarness:
-    """One session-shaped fixture: coordinator + settable turn counter."""
+    """One session-shaped fixture with its own coordinator and tool."""
 
     def __init__(self, tmp_path, fetcher=None):
         self.fetcher = fetcher or RoutingFetcher()
         hub = CitationProviderHub(env={}, fetcher=self.fetcher)
         self.coordinator = CitationCoordinator(hub, output_dir=tmp_path / "cite")
-        self.turn = 0
         self.tool = create_citation_workflow_tool(
             coordinator_getter=lambda: self.coordinator,
-            turn_getter=lambda: self.turn,
         )
 
     def run(self, **kwargs) -> str:
@@ -45,12 +46,12 @@ class ToolHarness:
 
 def test_tool_name_and_schema_fields():
     tool = create_citation_workflow_tool(
-        coordinator_getter=lambda: None, turn_getter=lambda: 0,
+        coordinator_getter=lambda: None,
     )
     assert tool.name == TOOL_NAME
     fields = set(tool.args_schema.model_fields)
     assert fields == {
-        "action", "query", "identifier", "page",
+        "action", "query", "identifier", "identifiers", "page",
         "keywords", "venues", "work_types", "venue_tiers",
         "published_within_years", "year_from", "year_to",
     }
@@ -142,7 +143,8 @@ def test_explain_returns_public_contract_without_provider_calls(tmp_path):
     assert "never written by the model" in message
     assert "reference.bib" in message
     assert "citation.json" in message
-    assert "never inside the project source tree" in message
+    assert "workspace cite/ directory by default" in message
+    assert "inside app/rag/skills package trees" in message
     assert str(tmp_path / "cite") in message
     assert "action=sources" in message
     assert harness.fetcher.calls == []
@@ -273,25 +275,22 @@ def test_identifier_actions_require_identifier(tmp_path):
         assert "requires identifier" in harness.run(action=action)
 
 
-def test_select_then_same_turn_confirm_is_refused(tmp_path):
+def test_select_then_same_turn_confirm_writes_bundle(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     selected = harness.run(action="select", identifier="c1")
     assert "Confirmable matches" in selected
     assert "[m1]" in selected
 
-    refused = harness.run(action="confirm", identifier="m1")
-    assert "confirm refused" in refused
-    # Nothing was written.
-    assert not list((tmp_path / "cite").glob("*/reference.bib"))
+    confirmed = harness.run(action="confirm", identifier="m1")
+    assert "citation confirmed" in confirmed
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
 
 
-def test_confirm_in_later_user_turn_writes_bundle(tmp_path):
+def test_single_confirm_writes_bundle(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
-    harness.turn += 1  # the user replied in a new turn
-
     confirmed = harness.run(action="confirm", identifier="m1")
     assert "citation confirmed" in confirmed
     assert f"DOI: `{DOI_A}`" in confirmed
@@ -314,8 +313,6 @@ def test_confirm_tool_call_carries_structured_receipt_artifact(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
-    harness.turn += 1
-
     message = asyncio.run(harness.tool.ainvoke({
         "name": TOOL_NAME,
         "args": {"action": "confirm", "identifier": "m1"},
@@ -324,18 +321,103 @@ def test_confirm_tool_call_carries_structured_receipt_artifact(tmp_path):
     }))
 
     assert isinstance(message, ToolMessage)
-    receipt = ConfirmReceipt.from_artifact(message.artifact)
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert not batch.failures
+    assert len(batch.receipts) == 1
+    receipt = batch.receipts[0]
     assert receipt.source_id.startswith("src-")
     assert receipt.accepted_doi == DOI_A
-    assert receipt.bundle_path.endswith(message.artifact["bundle_path"].split("/")[-1])
+    assert receipt.bundle_path.endswith(
+        message.artifact["receipts"][0]["bundle_path"].split("/")[-1]
+    )
+
+
+def test_batch_select_and_confirm_preserve_order_and_write_all(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+
+    selected = harness.run(
+        action="select", identifiers=[" c2 ", "c1", "c2", ""],
+    )
+
+    assert selected.index("[c2]") < selected.index("[c1]")
+    assert "[m1]" in selected and "[m2]" in selected
+    confirmed = harness.run(action="confirm", identifiers=["m1", "m2"])
+    assert "Confirmed 2 citation(s)" in confirmed
+    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 2
+
+
+def test_batch_identifier_validation_boundaries(tmp_path):
+    harness = ToolHarness(tmp_path)
+    assert "mutually exclusive" in harness.run(
+        action="select", identifier="c1", identifiers=["c2"],
+    )
+    assert "must not be empty" in harness.run(action="select", identifiers=[])
+    assert "must not be empty" in harness.run(
+        action="select", identifiers=[" ", ""],
+    )
+    assert "at most 10" in harness.run(
+        action="select", identifiers=[f"c{i}" for i in range(11)],
+    )
+    for action in ("search", "show", "source", "status"):
+        assert "identifiers only applies" in harness.run(
+            action=action, identifiers=["c1"], query="q" if action == "search" else None,
+        )
+
+
+def test_batch_select_isolates_existing_pending_matches(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.run(action="select", identifier="c1")
+
+    selected = harness.run(action="select", identifiers=["c2", "c99"])
+
+    current, existing = selected.split("Existing pending matches", maxsplit=1)
+    assert "[c2]" in current
+    assert "[c99] invalid_state" in current
+    assert "[c1] existing pending" in existing
+
+
+def test_batch_confirm_artifact_reports_partial_failure_without_provider_detail(
+    tmp_path,
+):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.run(action="select", identifiers=["c1", "c2"])
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "confirm", "identifiers": ["m1", "stale", "m2"]},
+        "id": "confirm-batch",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert len(batch.receipts) == 2
+    assert [(failure.match_id, failure.reason_code) for failure in batch.failures] == [
+        ("stale", "stale_match")
+    ]
+    assert set(message.artifact["failures"][0]) == {
+        "match_id", "status", "reason_code"
+    }
+
+
+def test_multiple_matches_for_one_candidate_are_marked_for_disambiguation(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    candidate = harness.coordinator.get_candidate("c1")
+    candidate.snippet = f"also published as {DOI_A} and 10.1234/paper-b"
+
+    selected = harness.run(action="select", identifier="c1")
+
+    assert "needs-disambiguation" in selected
+    assert "explicitly requested all versions" in selected
 
 
 def test_confirm_does_not_reclassify_natural_language(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
-    harness.turn += 1
-
     confirmed = harness.run(action="confirm", identifier="m1")
 
     assert "citation confirmed" in confirmed
@@ -348,8 +430,6 @@ def test_confirm_uses_the_model_selected_live_match_id(tmp_path):
     harness.run(action="select", identifier="c1")
     first = harness.coordinator.pending_matches()[0]
     harness.coordinator._matches["m2"] = replace(first, match_id="m2")  # noqa: SLF001
-    harness.turn += 1
-
     confirmed = harness.run(action="confirm", identifier="m2")
     assert "citation confirmed" in confirmed
     assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 1
@@ -375,11 +455,10 @@ def test_show_detail_is_marked_metadata_only(tmp_path):
     assert DOI_A not in detail
 
 
-def test_new_search_resets_the_select_turn_rule(tmp_path):
+def test_new_search_invalidates_old_matches(tmp_path):
     harness = ToolHarness(tmp_path)
     harness.run(action="search", query="paper")
     harness.run(action="select", identifier="c1")
-    harness.turn += 1
     # A fresh search invalidates the old matches; the coordinator rejects the
     # stale id without interpreting any user language.
     harness.run(action="search", query="paper")
@@ -408,7 +487,6 @@ def test_concurrent_workflow_calls_get_busy_error(tmp_path):
 
     harness_tool = tool_module.create_citation_workflow_tool(
         coordinator_getter=lambda: SlowCoordinator(),
-        turn_getter=lambda: 0,
     )
 
     async def _race():
