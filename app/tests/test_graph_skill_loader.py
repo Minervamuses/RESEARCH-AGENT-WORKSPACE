@@ -628,20 +628,29 @@ def test_agent_node_repairs_dsml_after_budget_exhaustion(monkeypatch, tmp_path):
     assert model.raw_calls == 2
 
 
-def test_agent_node_repairs_non_exhausted_blank_answer(monkeypatch, tmp_path):
-    class BlankThenRepairModel:
+def test_agent_node_reports_persistent_blank_answers_honestly(
+    monkeypatch, tmp_path
+):
+    class AlwaysBlankModel:
+        def __init__(self):
+            self.bound_invokes = 0
+            self.raw_invokes = 0
+
         def bind_tools(self, _tools):
+            model = self
+
             class Bound:
                 def invoke(_self, _messages):
+                    model.bound_invokes += 1
                     return AIMessage(content="   ")
             return Bound()
 
         def invoke(self, _messages):
-            return AIMessage(content="Recovered answer")
+            self.raw_invokes += 1
+            return AIMessage(content="repair must not run")
 
-    monkeypatch.setattr(
-        "agent.graph.get_chat_model", lambda _cfg: BlankThenRepairModel()
-    )
+    model = AlwaysBlankModel()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
     monkeypatch.setattr(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
@@ -654,10 +663,15 @@ def test_agent_node_repairs_non_exhausted_blank_answer(monkeypatch, tmp_path):
 
     result = graph.invoke({"messages": [HumanMessage(content="hello")]})
 
-    assert result["messages"][-1].content == "Recovered answer"
-    assert result["messages"][-1].response_metadata["turn_recovery"] == (
-        "repaired:empty_final_answer"
+    final = result["messages"][-1]
+    # Truly empty replies are retried identically, then reported honestly;
+    # the no-tool repair (which could invent an answer) never runs.
+    assert final.response_metadata["turn_recovery"] == (
+        "fallback:empty_model_response"
     )
+    assert "empty responses" in final.content
+    assert model.bound_invokes == 3
+    assert model.raw_invokes == 0
 
 
 def test_agent_node_repairs_structured_tool_content(monkeypatch, tmp_path):

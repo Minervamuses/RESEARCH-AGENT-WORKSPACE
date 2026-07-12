@@ -1,11 +1,14 @@
-"""Regression tests for the bounded tool-capable continuation retry.
+"""Regression tests for empty-response retries and the recovery ladder.
 
-Live incidents showed the citation workflow being cut between select and
-confirm: select succeeded, the next model response was blank (or carried a
-malformed tool call), and the old repair path — which forbids tools — could
-never finish the confirm. These tests pin the recovery ladder:
+Live incidents showed two failure shapes. First, the citation workflow being
+cut between select and confirm by a malformed tool call, which the no-tool
+repair path could never finish. Second, truly empty upstream replies (a lone
+EOS token) whose no-tool repair invited the model to invent tool results.
+These tests pin the current handling:
 
-    continuation (tools allowed, once) -> no-tool repair -> fallback
+    truly empty reply -> identical retry (twice) -> honest empty-upstream
+    fallback; other issues -> continuation (tools allowed, once) -> no-tool
+    repair -> fallback
 """
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -135,7 +138,7 @@ def _invoke(graph, user_input: str = "把 c3 的 bibtex 存起來"):
     }, config={"recursion_limit": 16})
 
 
-def test_blank_after_select_gets_one_tool_capable_retry_that_confirms(
+def test_blank_after_select_is_healed_by_an_identical_retry_that_confirms(
     monkeypatch, tmp_path
 ):
     model = ScriptedModel(
@@ -154,17 +157,14 @@ def test_blank_after_select_gets_one_tool_capable_retry_that_confirms(
     assert [call["action"] for call in calls] == ["select", "confirm"]
     assert result["messages"][-1].content == "Saved m1."
     assert model.raw_calls == []
-    continuation = next(
-        message for message in result["messages"]
+    # The empty reply was retried with the identical request — no recovery
+    # marker, no continuation instruction — and the retry finished the save.
+    assert not any(
+        (message.response_metadata or {}).get("turn_recovery")
+        for message in result["messages"]
         if isinstance(message, AIMessage)
-        and (message.response_metadata or {}).get("turn_recovery")
     )
-    assert continuation.response_metadata["turn_recovery"] == (
-        "continuation:empty_final_answer"
-    )
-    assert continuation.tool_calls[0]["args"]["action"] == "confirm"
-    # The retry prompt asked the model to continue, not to start over.
-    assert any(
+    assert not any(
         "[Continuation]" in getattr(message, "content", "")
         for message in model.bound_calls[2]
     )
@@ -179,7 +179,7 @@ def test_consecutive_blanks_never_fake_success_and_keep_pending_matches(
             AIMessage(content=""),
             AIMessage(content="   "),
         ],
-        raw_response=AIMessage(content=""),
+        raw_response=AIMessage(content="repair must not run"),
     )
     graph, calls = _build(monkeypatch, tmp_path, model)
 
@@ -189,14 +189,15 @@ def test_consecutive_blanks_never_fake_success_and_keep_pending_matches(
     # pending match survives for the next turn.
     assert [call["action"] for call in calls] == ["select"]
     final = result["messages"][-1]
-    assert final.response_metadata["turn_recovery"].startswith(
-        "fallback:empty_final_answer"
+    assert final.response_metadata["turn_recovery"] == (
+        "fallback:empty_model_response"
     )
-    assert "could not produce a final summary" in final.content
+    assert "empty responses" in final.content
     assert "Saved" not in final.content
-    # Ladder: initial + continuation on the bound model, then one raw repair.
-    assert len(model.bound_calls) == 3
-    assert len(model.raw_calls) == 1
+    # Initial + two identical retries on the bound model; the no-tool repair
+    # (which could invent a save report) never runs.
+    assert len(model.bound_calls) == 4
+    assert model.raw_calls == []
 
 
 def test_invalid_tool_calls_after_select_trigger_the_continuation(
@@ -238,10 +239,23 @@ def test_invalid_tool_calls_after_select_trigger_the_continuation(
 
 
 def test_no_continuation_without_remaining_primary_budget(monkeypatch, tmp_path):
+    # A malformed-call husk (not a truly empty reply) keeps the ladder in
+    # charge: with the primary budget spent, continuation is skipped and the
+    # no-tool repair runs.
+    husk = AIMessage(
+        content="",
+        invalid_tool_calls=[{
+            "name": "citation_workflow",
+            "args": '{"action": "confirm", "identifier": "m1"',
+            "id": "bad-1",
+            "error": "unparsable arguments",
+            "type": "invalid_tool_call",
+        }],
+    )
     model = ScriptedModel(
         bound_script=[
             _select_call(),
-            AIMessage(content=""),
+            husk,
         ],
         raw_response=AIMessage(content="repaired text"),
     )
@@ -263,25 +277,83 @@ def test_no_continuation_without_remaining_primary_budget(monkeypatch, tmp_path)
     )
 
 
-def test_existing_confirm_artifact_blocks_the_continuation(monkeypatch, tmp_path):
+def test_blanks_after_receipts_never_rerun_tools_and_report_honestly(
+    monkeypatch, tmp_path
+):
     model = ScriptedModel(
         bound_script=[
             _select_call(),
             _confirm_call(),
             AIMessage(content=""),
         ],
-        raw_response=AIMessage(content="summary after receipts"),
+        raw_response=AIMessage(content="repair must not run"),
     )
     graph, calls = _build(monkeypatch, tmp_path, model)
 
     result = _invoke(graph)
 
-    # The bundle write ran exactly once; the blank draft never re-triggered
-    # a tool-capable retry because trusted receipts already exist.
+    # The bundle write ran exactly once; the blank summaries were retried
+    # identically and then reported honestly — no model call may invent a
+    # summary on top of the trusted receipts.
     assert [call["action"] for call in calls] == ["select", "confirm"]
+    assert len(model.bound_calls) == 5
+    assert model.raw_calls == []
+    final = result["messages"][-1]
+    assert final.response_metadata["turn_recovery"] == (
+        "fallback:empty_model_response"
+    )
+    # Default _invoke user input is Chinese, so the honest notice is too.
+    assert "空回應" in final.content
+
+
+def test_empty_reply_is_retried_identically_before_any_recovery(
+    monkeypatch, tmp_path
+):
+    model = ScriptedModel(
+        bound_script=[
+            AIMessage(content=""),
+            AIMessage(content="Here you go."),
+        ],
+        raw_response=AIMessage(content="repair must not run"),
+    )
+    graph, calls = _build(monkeypatch, tmp_path, model)
+
+    result = _invoke(graph, user_input="just answer")
+
+    final = result["messages"][-1]
+    assert final.content == "Here you go."
+    assert not (final.response_metadata or {}).get("turn_recovery")
+    assert calls == []
+    assert model.raw_calls == []
+    assert len(model.bound_calls) == 2
+    # The retry re-sent the identical request, without extra instructions.
+    assert [
+        getattr(message, "content", "") for message in model.bound_calls[0]
+    ] == [
+        getattr(message, "content", "") for message in model.bound_calls[1]
+    ]
+
+
+def test_exhausted_empty_retries_report_the_empty_upstream_in_chinese(
+    monkeypatch, tmp_path
+):
+    model = ScriptedModel(
+        bound_script=[AIMessage(content="")],
+        raw_response=AIMessage(content="repair must not run"),
+    )
+    graph, calls = _build(monkeypatch, tmp_path, model)
+
+    result = _invoke(graph, user_input="幫我引用 aiayn 的原始論文")
+
+    final = result["messages"][-1]
+    assert final.response_metadata["turn_recovery"] == (
+        "fallback:empty_model_response"
+    )
+    assert "空回應" in final.content
+    assert calls == []
+    assert model.raw_calls == []
+    # Initial call plus exactly two identical retries.
     assert len(model.bound_calls) == 3
-    assert len(model.raw_calls) == 1
-    assert result["messages"][-1].content == "summary after receipts"
 
 
 def test_prose_with_invalid_tool_calls_outside_citation_window_is_kept(

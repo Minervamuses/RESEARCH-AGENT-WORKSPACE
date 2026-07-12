@@ -158,3 +158,36 @@ def build_recovery_message(*, user_input: str, had_tool_results: bool) -> str:
         "This turn could not produce a displayable final answer. Incomplete "
         "tool operations were stopped. Please retry or narrow the request."
     )
+
+
+def build_empty_upstream_message(*, user_input: str, had_tool_results: bool) -> str:
+    """Honest notice that the upstream model kept returning empty responses.
+
+    Shown only after the in-turn retries are exhausted. It must state what
+    actually happened — empty upstream replies, nothing new executed — and
+    must never be produced by another model call, which could invent results.
+    """
+    is_chinese = bool(re.search(r"[\u3400-\u9fff]", user_input))
+    if is_chinese:
+        if had_tool_results:
+            return (
+                "上游模型連續回傳空回應（重試後仍為空），本回合無法產生總結。"
+                "先前已完成的工具結果不受影響，但沒有執行任何新的操作。"
+                "這通常是模型服務暫時不穩定，請稍後重試。"
+            )
+        return (
+            "上游模型連續回傳空回應（重試後仍為空），本回合沒有產生任何回答，"
+            "也沒有執行任何工具操作。這通常是模型服務暫時不穩定，請稍後重試。"
+        )
+    if had_tool_results:
+        return (
+            "The upstream model returned empty responses repeatedly (still empty "
+            "after retries), so this turn has no summary. Tool results already "
+            "completed are unaffected, but no new operation was performed. This "
+            "is usually transient provider instability; please retry."
+        )
+    return (
+        "The upstream model returned empty responses repeatedly (still empty "
+        "after retries), so this turn produced no answer and performed no tool "
+        "operation. This is usually transient provider instability; please retry."
+    )

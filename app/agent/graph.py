@@ -23,6 +23,7 @@ from agent.state import AgentState, skill_runtime_to_agent_state
 from agent.tool_access import resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.turn_safety import (
+    build_empty_upstream_message,
     build_recovery_message,
     content_text,
     find_content_tool_protocol_artifact,
@@ -36,6 +37,24 @@ _LOCAL_CITATION_ACTIONS = frozenset({
     "list", "show", "status", "explain", "sources", "source", "refine",
     "cancel",
 })
+
+# Immediate same-request retries after a truly empty upstream reply, before
+# the recovery ladder is even considered.
+_EMPTY_RESPONSE_RETRY_LIMIT = 2
+
+
+def _is_empty_model_response(message: AIMessage) -> bool:
+    """A reply with no text, no tool calls, and no malformed tool calls.
+
+    This is upstream flakiness (typically a lone EOS token), not a reasoning
+    failure: budget-capped or malformed responses are excluded so they keep
+    flowing through the recovery ladder.
+    """
+    return (
+        not (getattr(message, "tool_calls", None) or [])
+        and not (getattr(message, "invalid_tool_calls", None) or [])
+        and not content_text(message.content).strip()
+    )
 
 
 @dataclass(frozen=True)
@@ -326,11 +345,60 @@ def build_graph(
             ),
         ]
         if primary_exhausted and local_exhausted:
-            response = model.invoke(prompt_messages)
+            invoke_model = model
         else:
-            response = _model_for_state(state).invoke(prompt_messages)
+            invoke_model = _model_for_state(state)
         primary_remaining = primary_limit - usage.primary
         local_remaining = local_limit - usage.local
+        response = invoke_model.invoke(prompt_messages)
+        # A truly empty reply is upstream flakiness: retry the identical
+        # request instead of entering the recovery ladder, whose no-tool
+        # repair stage cannot finish tool work and must never invent it.
+        empty_attempts = 0
+        while (
+            _is_empty_model_response(response)
+            and empty_attempts < _EMPTY_RESPONSE_RETRY_LIMIT
+        ):
+            empty_attempts += 1
+            log_model_response(
+                response,
+                stage=(
+                    "initial" if empty_attempts == 1
+                    else f"empty_retry_{empty_attempts - 1}"
+                ),
+                issue="empty_model_response",
+                dropped_tool_calls=0,
+                primary_remaining=primary_remaining,
+                local_remaining=local_remaining,
+                messages=messages,
+            )
+            response = invoke_model.invoke(prompt_messages)
+        if _is_empty_model_response(response):
+            log_model_response(
+                response,
+                stage=f"empty_retry_{empty_attempts}",
+                issue="empty_model_response",
+                dropped_tool_calls=0,
+                primary_remaining=primary_remaining,
+                local_remaining=local_remaining,
+                messages=messages,
+            )
+            log_recovery_fallback(
+                issue="empty_model_response",
+                repair_issue="empty_retries_exhausted",
+                primary_remaining=primary_remaining,
+                local_remaining=local_remaining,
+                messages=messages,
+            )
+            return {"messages": [AIMessage(
+                content=build_empty_upstream_message(
+                    user_input=last_user_text(messages),
+                    had_tool_results=has_tool_results(messages),
+                ),
+                response_metadata={
+                    "turn_recovery": "fallback:empty_model_response",
+                },
+            )]}
         capped, dropped = _cap_tool_calls(
             response,
             primary_remaining=primary_remaining,

@@ -195,6 +195,34 @@ class _StubTools:
 def test_graph_logs_initial_repair_and_fallback_stages(
     monkeypatch, tmp_path, caplog
 ):
+    class ArtifactThenBlankModel:
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, _messages):
+                    return AIMessage(content='rag_search(query="x")')
+            return Bound()
+
+        def invoke(self, _messages):
+            return AIMessage(content="   ")
+
+    _StubTools.apply(monkeypatch, ArtifactThenBlankModel())
+    graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+
+    with caplog.at_level(logging.DEBUG, logger="agent.observability"):
+        graph.invoke({"messages": [HumanMessage(content="hi")]})
+
+    lines = [record.getMessage() for record in caplog.records]
+    assert any(
+        "stage=initial" in line and "issue=call_like_tool_protocol" in line
+        for line in lines
+    )
+    assert any("stage=repair" in line for line in lines)
+    assert any("stage=fallback" in line for line in lines)
+
+
+def test_graph_logs_empty_retry_stages_and_honest_fallback(
+    monkeypatch, tmp_path, caplog
+):
     class AlwaysBlankModel:
         def bind_tools(self, _tools):
             class Bound:
@@ -203,7 +231,7 @@ def test_graph_logs_initial_repair_and_fallback_stages(
             return Bound()
 
         def invoke(self, _messages):
-            return AIMessage(content="   ")
+            return AIMessage(content="repair must not run")
 
     _StubTools.apply(monkeypatch, AlwaysBlankModel())
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
@@ -212,10 +240,18 @@ def test_graph_logs_initial_repair_and_fallback_stages(
         graph.invoke({"messages": [HumanMessage(content="hi")]})
 
     lines = [record.getMessage() for record in caplog.records]
-    assert any("stage=initial" in line and "issue=empty_final_answer" in line
-               for line in lines)
-    assert any("stage=repair" in line for line in lines)
-    assert any("stage=fallback" in line for line in lines)
+    assert any(
+        "stage=initial" in line and "issue=empty_model_response" in line
+        for line in lines
+    )
+    assert any("stage=empty_retry_1" in line for line in lines)
+    assert any("stage=empty_retry_2" in line for line in lines)
+    assert any(
+        "stage=fallback" in line
+        and "repair_issue=empty_retries_exhausted" in line
+        for line in lines
+    )
+    assert not any("stage=repair " in line for line in lines)
 
 
 def test_graph_logs_invalid_tool_calls_on_initial_stage(
