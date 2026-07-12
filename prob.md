@@ -1,6 +1,20 @@
 # 目前問題紀錄
 
-本文件只整理 citation workflow 與 skill runtime 實測後仍待處理的問題與設計缺口。已完成項目不列入本文件。（最近一次更新：2026-07-11，依據全域工具重構後的 citation skill CLI 實測。）
+本文件整理 citation workflow 與 skill runtime 實測後仍待處理的問題，並保留最近一次阻斷級回歸的修復紀錄。（最近一次更新：2026-07-12。）
+
+## 2026-07-12 批次保存回歸（已修復）
+
+CLI 實測要求一次保存三篇論文時發現：舊 `select` 會讓其他 candidate 的 match 靜默失效、`confirm` 成功即清空整個候選池，加上強制跨 turn，導致批次保存從狀態機層面不可完成；三篇實際只保存一篇。舊 finalizer 又只在有成功 receipt 時取代模型草稿，因此部分或全數失敗可能完全被遮蔽。
+
+本次修復：
+
+- `select`/`confirm` 支援最多 10 個 ordered identifiers，單次呼叫在 session busy lock 內序列執行；match 可跨 candidate 累積，成功 confirm 只消耗該 match，失敗史亦隔離到單一 match。
+- 當前請求本身可構成保存授權，模型可在同 turn 完成 select→confirm，不再硬性多問一輪；否定、條件、疑問與不明確語氣仍禁止 confirm。
+- 每個 candidate 依 0/1/多 match 分流；多 DOI 版本必須明確消歧，且舊 pending 與本次授權結果分區，不能被順帶 confirm。
+- confirm 改傳單一 batch artifact，內含逐筆嚴格 receipt 與只允許 status/reason code 的 failure；finalizer 在有任一 success 或 failure 時皆確定性渲染，全數失敗不再退回模型草稿，provider 自由文字不進可信通道。
+- 預設輸出移至 workspace 根目錄 `cite/` 並納入版控；只有 `.staging-*` 被忽略。config/env override 優先序保留，非 workspace 的安裝環境仍有平台 user-data fail-safe。
+
+並行呼叫造成的 busy 抖動現以「單呼叫 batch identifiers」與 skill 明定不得平行呼叫緩解；仍保留為 live model 行為觀察項，若模型持續拆成多個並行呼叫，再考慮 graph/tool-call 正規化。
 
 ## 1. 工具額度耗盡後洩漏 DSML/tool-call 標記
 
@@ -19,6 +33,8 @@
 ## 2. Turn 可能以空回應結束，CLI 顯示為「中斷」
 
 2026-07-11 實測中一個 session 內出現三次：工具成功返回後，assistant 完全沒有文字輸出，turn 直接結束。
+
+2026-07-12 citation 批次升級的 live smoke 仍重現一次：替代措辭「第3篇跟第7篇的 bibtex 存起來」已取得工具結果，但模型未完成後續流程，finalizer 正確顯示確定性空總結 fallback。批次狀態機的單元／E2E 測試均通過；此項仍屬 live model 遵循度問題。
 
 - 一次發生在只用了 1 次工具的搜尋 turn（非額度耗盡），使用者追問「剛剛中斷了?」。
 - 兩次發生在工具用滿 4 次之後（1 次 citation + 3 次 bash），疑似 `_cap_tool_calls()` 剝掉 tool_calls 後留下 `content=""` 的 AIMessage，graph 路由到 END。
@@ -64,7 +80,7 @@
 
 早前實測中模型曾宣稱 `select` 用標題對 Crossref 做 fuzzy search、`confirm` 由模型生成 BibTeX。2026-07-11 實測再次重現，且更嚴重：
 
-- 使用者問「你存在哪裡?」，模型先用三次 bash 在 **source tree**（`skills/citation/`、`find . -path "*/citation*"`）撈儲存檔案——方向錯誤（bundle 寫入 `citation_output_dir` → `~/.local/share/research-agent/citation/`，明確不在 source tree），白白燒掉三次使用者批准。
+- 使用者問「你存在哪裡?」，模型先用三次 bash 在 **package tree**（`skills/citation/`、`find . -path "*/citation*"`）撈儲存檔案——方向錯誤（當時 bundle 預設寫入平台 user-data；現已改為 workspace 根目錄 `cite/`，仍不在 `app/skills/citation/`），白白燒掉三次使用者批准。
 - 全程沒有呼叫 `action="source"` 取得 bundle path。
 - 最後斷言引用「存在 citation workflow 的 session 狀態中（記憶體內），不是磁碟上的檔案」——與事實相反（confirm 成功即原子寫入 `reference.bib` + `citation.json`），也和它前一輪自己說的「BibTeX 已儲存」矛盾。
 
@@ -73,10 +89,10 @@
 1. Discovery provider（Crossref/OpenAlex 等）建立候選並通常已攜帶 DOI。
 2. `select` 從 candidate DOI/URL/snippet/title 抽取 DOI candidate。
 3. 以 DOI 向 doi.org 取得 CSL JSON，並查詢 registration agency。
-4. 使用者跨 turn 明確確認後，`confirm` 重新取得 CSL JSON，不信任 discovery copy。
+4. 當前請求已構成保存授權時（可與 select 同 turn），`confirm` 重新取得 CSL JSON，不信任 discovery copy。
 5. 透過 doi.org content negotiation 取得 `application/x-bibtex`；不是由模型生成 BibTeX。
 6. 系統解析、正規化並驗證 CSL/BibTeX/selected DOI 的一致性。
-7. 成功後原子寫入 `reference.bib` 與 `citation.json` bundle（位於 citation output dir，不在 source tree）。
+7. 成功後原子寫入 `reference.bib` 與 `citation.json` bundle（預設位於 workspace `cite/`，不在 app/rag/skill package tree）。
 
 原因：模型看得到完整 `SKILL.md` 與工具 schema，但 `SKILL.md` 沒描述上述實作與儲存位置；模型看不到 coordinator/provider/storage 程式碼，又沒有 `explain` action，因此以常見系統模式自行補完。
 
