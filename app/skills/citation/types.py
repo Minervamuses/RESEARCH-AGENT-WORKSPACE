@@ -29,7 +29,10 @@ PERSIST_SCHEMA_VERSION = 1
 # persisted bundle schema and deliberately evolves independently.
 CONFIRM_RECEIPT_SCHEMA_VERSION = 1
 CONFIRM_RECEIPT_KIND = "citation_confirm_receipt"
-CONFIRM_BATCH_SCHEMA_VERSION = 1
+# v2 adds "pending": matches resolved by this call but not saved by it, so
+# the finalizer can deterministically report an interrupted save. The batch
+# artifact is consumed within the session; no persisted data migrates.
+CONFIRM_BATCH_SCHEMA_VERSION = 2
 CONFIRM_BATCH_KIND = "citation_confirm_receipt_batch"
 
 # The only verification level a SourceRef can carry: the DOI and the
@@ -522,11 +525,63 @@ class ConfirmFailure:
 
 
 @dataclass(frozen=True)
+class PendingMatchNote:
+    """One match resolved by this tool call but not saved by it.
+
+    Carries opaque workflow ids only — never a DOI or provider text. The
+    finalizer validates each note against the live workflow state before
+    rendering, so a stale note can never be shown as continuable.
+    """
+
+    candidate_id: str
+    match_id: str
+    needs_disambiguation: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.candidate_id.strip():
+            raise ValueError("pending match note requires non-empty candidate_id")
+        if not self.match_id.strip():
+            raise ValueError("pending match note requires non-empty match_id")
+
+    def to_artifact(self) -> dict:
+        return {
+            "candidate_id": self.candidate_id,
+            "match_id": self.match_id,
+            "needs_disambiguation": self.needs_disambiguation,
+        }
+
+    @classmethod
+    def from_artifact(cls, artifact: object) -> "PendingMatchNote":
+        if not isinstance(artifact, Mapping):
+            raise ValueError("pending match note must be a mapping")
+        if set(artifact) != {"candidate_id", "match_id", "needs_disambiguation"}:
+            raise ValueError("pending match note has unsupported fields")
+
+        def required_text(key: str) -> str:
+            value = artifact.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"pending match note requires non-empty {key}")
+            return value
+
+        needs_disambiguation = artifact.get("needs_disambiguation")
+        if not isinstance(needs_disambiguation, bool):
+            raise ValueError(
+                "pending match note needs_disambiguation must be a bool"
+            )
+        return cls(
+            candidate_id=required_text("candidate_id"),
+            match_id=required_text("match_id"),
+            needs_disambiguation=needs_disambiguation,
+        )
+
+
+@dataclass(frozen=True)
 class ConfirmBatchOutcome:
-    """One tool call's trusted batch receipts and sanitized failures."""
+    """One tool call's trusted receipts, sanitized failures, and pending notes."""
 
     receipts: tuple[ConfirmReceipt, ...] = ()
     failures: tuple[ConfirmFailure, ...] = ()
+    pending: tuple[PendingMatchNote, ...] = ()
     schema_version: int = field(default=CONFIRM_BATCH_SCHEMA_VERSION, init=False)
     kind: str = field(default=CONFIRM_BATCH_KIND, init=False)
 
@@ -536,6 +591,7 @@ class ConfirmBatchOutcome:
             "schema_version": self.schema_version,
             "receipts": [receipt.to_artifact() for receipt in self.receipts],
             "failures": [failure.to_artifact() for failure in self.failures],
+            "pending": [note.to_artifact() for note in self.pending],
         }
 
     @classmethod
@@ -548,18 +604,28 @@ class ConfirmBatchOutcome:
         if artifact.get("schema_version") != CONFIRM_BATCH_SCHEMA_VERSION:
             raise ValueError("unsupported confirm batch schema version")
         if set(artifact) != {
-            "kind", "schema_version", "receipts", "failures"
+            "kind", "schema_version", "receipts", "failures", "pending"
         }:
             raise ValueError("confirm batch artifact has unsupported fields")
         raw_receipts = artifact.get("receipts")
         raw_failures = artifact.get("failures")
-        if not isinstance(raw_receipts, list) or not isinstance(raw_failures, list):
-            raise ValueError("confirm batch receipts and failures must be lists")
+        raw_pending = artifact.get("pending")
+        if (
+            not isinstance(raw_receipts, list)
+            or not isinstance(raw_failures, list)
+            or not isinstance(raw_pending, list)
+        ):
+            raise ValueError(
+                "confirm batch receipts, failures, and pending must be lists"
+            )
         return cls(
             receipts=tuple(
                 ConfirmReceipt.from_artifact(item) for item in raw_receipts
             ),
             failures=tuple(
                 ConfirmFailure.from_artifact(item) for item in raw_failures
+            ),
+            pending=tuple(
+                PendingMatchNote.from_artifact(item) for item in raw_pending
             ),
         )

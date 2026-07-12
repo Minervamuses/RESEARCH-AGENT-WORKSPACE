@@ -13,7 +13,11 @@ from langchain_core.tools import StructuredTool, tool
 
 from agent.config import AgentConfig
 from agent.graph import build_graph
-from skills.citation.types import ConfirmBatchOutcome, ConfirmReceipt
+from skills.citation.types import (
+    ConfirmBatchOutcome,
+    ConfirmReceipt,
+    PendingMatchNote,
+)
 
 
 @tool("rag_search")
@@ -36,7 +40,11 @@ def _make_citation_tool(calls: list[dict]) -> StructuredTool:
             "identifiers": identifiers,
         })
         if action == "select":
-            return "Confirmable matches from this request: [c3] -> [m1]", None
+            artifact = ConfirmBatchOutcome(pending=(PendingMatchNote(
+                candidate_id="c3",
+                match_id="m1",
+            ),)).to_artifact()
+            return "Confirmable matches from this request: [c3] -> [m1]", artifact
         if action == "confirm":
             artifact = ConfirmBatchOutcome(receipts=(ConfirmReceipt(
                 source_id="src-1",

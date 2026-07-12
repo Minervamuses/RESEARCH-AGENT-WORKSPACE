@@ -203,3 +203,45 @@ def test_published_date_filter_year_range_and_fail_closed_admission():
         PublishedDateFilter.from_year_range(2022, 2020)
     with pytest.raises(ValueError):
         PublishedDateFilter.within_years(0)
+
+
+def test_pending_match_note_round_trip_and_strict_decode():
+    from skills.citation.types import PendingMatchNote
+
+    note = PendingMatchNote(
+        candidate_id="c3", match_id="m4", needs_disambiguation=True,
+    )
+    assert PendingMatchNote.from_artifact(note.to_artifact()) == note
+
+    tampered = note.to_artifact()
+    tampered["title"] = "provider text"
+    with pytest.raises(ValueError, match="unsupported fields"):
+        PendingMatchNote.from_artifact(tampered)
+
+    non_bool = note.to_artifact()
+    non_bool["needs_disambiguation"] = "yes"
+    with pytest.raises(ValueError, match="must be a bool"):
+        PendingMatchNote.from_artifact(non_bool)
+
+
+def test_confirm_batch_carries_pending_and_rejects_legacy_schema():
+    from skills.citation.types import PendingMatchNote
+
+    batch = ConfirmBatchOutcome(pending=(
+        PendingMatchNote(candidate_id="c3", match_id="m4"),
+        PendingMatchNote(
+            candidate_id="c7", match_id="m5", needs_disambiguation=True,
+        ),
+    ))
+    artifact = batch.to_artifact()
+    assert artifact["schema_version"] == CONFIRM_BATCH_SCHEMA_VERSION
+    assert ConfirmBatchOutcome.from_artifact(artifact) == batch
+
+    legacy = {
+        "kind": CONFIRM_BATCH_KIND,
+        "schema_version": 1,
+        "receipts": [],
+        "failures": [],
+    }
+    with pytest.raises(ValueError, match="schema version"):
+        ConfirmBatchOutcome.from_artifact(legacy)

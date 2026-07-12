@@ -18,6 +18,7 @@ from skills.citation.types import (
     ConfirmBatchOutcome,
     ConfirmFailure,
     ConfirmReceipt,
+    PendingMatchNote,
 )
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
@@ -311,12 +312,25 @@ class ChatSession:
         return SystemMessage(content="\n".join(lines))
 
     def _trusted_confirm_receipts(self, new_messages: list) -> ConfirmBatchOutcome:
-        """Validate batch artifacts and receipts against the live registry."""
+        """Validate batch artifacts and receipts against the live registry.
+
+        Receipts must match the registry; pending notes must match the live
+        workflow's still-confirmable matches. Anything stale is dropped, so
+        the finalizer can never advertise a match that no longer exists.
+        """
         registry = self._citation_registry() if self.citation_skill_active else None
         if registry is None:
             return ConfirmBatchOutcome()
+        coordinator = self._citation_coordinator
+        live_pending = {
+            match.match_id: match.candidate_id
+            for match in (
+                coordinator.pending_matches() if coordinator is not None else ()
+            )
+        }
         receipts: list[ConfirmReceipt] = []
         failures: list[ConfirmFailure] = []
+        pending: dict[str, PendingMatchNote] = {}
         seen: set[str] = set()
         for message in new_messages:
             if not isinstance(message, ToolMessage):
@@ -351,9 +365,19 @@ class ChatSession:
                 if receipt.source_id not in seen:
                     receipts.append(receipt)
                     seen.add(receipt.source_id)
+            for note in batch.pending:
+                if live_pending.get(note.match_id) != note.candidate_id:
+                    logger.warning(
+                        "ignored citation pending note that is no longer "
+                        "live: %s",
+                        note.match_id,
+                    )
+                    continue
+                pending[note.match_id] = note
         return ConfirmBatchOutcome(
             receipts=tuple(receipts),
             failures=tuple(failures),
+            pending=tuple(pending.values()),
         )
 
     @staticmethod
@@ -430,6 +454,51 @@ class ChatSession:
                     f"{self._markdown_code_span(failure.match_id)}：{message} "
                     f"({self._markdown_code_span(failure.reason_code)})"
                 )
+        if outcome.pending:
+            lines.append("- 已解析但尚未保存的配對（可指定 mX 繼續）：")
+            lines.extend(self._pending_note_lines(outcome.pending))
+        if blocked:
+            lines.append("- 被攔截草稿的檢查結果：")
+            lines.extend(
+                f"  - {self._markdown_code_span(error)}"
+                for error in validation_errors
+            )
+        return "\n".join(lines)
+
+    def _pending_note_lines(self, pending: tuple[PendingMatchNote, ...]) -> list[str]:
+        lines = []
+        for note in pending:
+            suffix = "（多版本，需指定其一）" if note.needs_disambiguation else ""
+            lines.append(
+                "  - "
+                f"{self._markdown_code_span(note.candidate_id)} → "
+                f"{self._markdown_code_span(note.match_id)}{suffix}"
+            )
+        return lines
+
+    def _render_pending_recovery(
+        self,
+        pending: tuple[PendingMatchNote, ...],
+        *,
+        validation_errors: list[str],
+    ) -> str:
+        """Deterministic report for a save flow interrupted after select.
+
+        Rendered only when the turn's final answer failed (blank draft,
+        blocked draft, repair, or fallback) and no confirm/save outcome
+        exists: the resolved matches are still live, nothing was written,
+        and the user can continue by authorizing a save or naming an mX.
+        """
+        blocked = bool(validation_errors)
+        heading = (
+            "（本輪模型草稿未通過 citation 檢查；保存流程停在 select 之後，"
+            "尚未寫入任何 bundle。）"
+            if blocked
+            else "（本輪未能完成保存流程；已解析的配對如下，尚未寫入任何 bundle。）"
+        )
+        lines = [heading]
+        lines.extend(self._pending_note_lines(pending))
+        lines.append("- 這些配對仍然有效：可再次要求儲存，或指定 mX 繼續。")
         if blocked:
             lines.append("- 被攔截草稿的檢查結果：")
             lines.extend(
@@ -505,9 +574,22 @@ class ChatSession:
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
         confirm_outcome = self._trusted_confirm_receipts(new_messages)
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
+        # Trusted-artifact priority: confirm/save outcome > pending select
+        # recovery > model text or the generic fallback. Pending recovery
+        # only replaces a failed answer ("continued:" marks the successful
+        # tool-capable retry, whose text stands like any normal answer).
+        answer_failed = bool(errors) or (
+            recovery_reason is not None
+            and not recovery_reason.startswith("continued:")
+        )
         if confirm_outcome.receipts or confirm_outcome.failures:
             final_text = self._render_confirm_receipts(
                 confirm_outcome,
+                validation_errors=errors,
+            )
+        elif confirm_outcome.pending and answer_failed:
+            final_text = self._render_pending_recovery(
+                confirm_outcome.pending,
                 validation_errors=errors,
             )
         await self._record_turn(

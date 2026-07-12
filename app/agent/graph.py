@@ -182,14 +182,22 @@ _REPAIR_INSTRUCTION = SystemMessage(content=(
 
 
 def _has_confirm_batch_artifact(messages: list) -> bool:
-    """Whether any citation confirm receipts already exist in this turn."""
+    """Whether any confirm/save outcome already exists in this turn.
+
+    Only receipts or failures count: a pending-only batch artifact (a select
+    that resolved matches without saving) must not block the continuation.
+    """
     for message in messages:
         if not isinstance(message, ToolMessage):
             continue
         if getattr(message, "name", None) != "citation_workflow":
             continue
         artifact = getattr(message, "artifact", None)
-        if isinstance(artifact, Mapping) and artifact.get("kind") == CONFIRM_BATCH_KIND:
+        if (
+            isinstance(artifact, Mapping)
+            and artifact.get("kind") == CONFIRM_BATCH_KIND
+            and (artifact.get("receipts") or artifact.get("failures"))
+        ):
             return True
     return False
 

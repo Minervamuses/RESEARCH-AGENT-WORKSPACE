@@ -42,6 +42,7 @@ from skills.citation.types import (
     ConfirmBatchOutcome,
     ConfirmFailure,
     ConfirmReceipt,
+    PendingMatchNote,
     PublishedDateFilter,
     SourceRef,
 )
@@ -870,10 +871,22 @@ def create_citation_workflow_tool(
                 match for match in coordinator.pending_matches()
                 if match.match_id not in current_match_ids
             ]
+            # Resolved-but-unsaved matches travel as a trusted artifact so
+            # the finalizer can still report them if the model goes silent
+            # before the save completes.
+            artifact = ConfirmBatchOutcome(pending=tuple(
+                PendingMatchNote(
+                    candidate_id=match.candidate_id,
+                    match_id=match.match_id,
+                    needs_disambiguation=len(outcome.matches) > 1,
+                )
+                for _candidate_id, outcome in outcomes
+                for match in outcome.matches
+            )).to_artifact()
             return format_select_outcomes(
                 outcomes,
                 existing_pending=existing_pending,
-            )
+            ), artifact
 
         if action == "save":
             saved: list[tuple[str, str, CitationResult]] = []
@@ -906,6 +919,15 @@ def create_citation_workflow_tool(
             artifact = ConfirmBatchOutcome(
                 receipts=tuple(save_receipts),
                 failures=tuple(save_failures),
+                pending=tuple(
+                    PendingMatchNote(
+                        candidate_id=candidate_id,
+                        match_id=match.match_id,
+                        needs_disambiguation=True,
+                    )
+                    for candidate_id, matches in ambiguous
+                    for match in matches
+                ),
             ).to_artifact()
             return format_save_outcomes(
                 saved=saved,

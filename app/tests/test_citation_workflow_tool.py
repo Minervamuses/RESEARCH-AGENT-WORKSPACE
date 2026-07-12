@@ -684,3 +684,78 @@ def test_save_requires_identifier_and_respects_batch_limits(tmp_path):
         action="save", identifiers=[f"c{i}" for i in range(11)],
     )
     assert harness.fetcher.calls == []
+
+
+def test_select_artifact_reports_pending_matches(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "select", "identifiers": ["c1", "c2"]},
+        "id": "select-artifact",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert not batch.receipts and not batch.failures
+    assert [
+        (note.candidate_id, note.match_id, note.needs_disambiguation)
+        for note in batch.pending
+    ] == [("c1", "m1", False), ("c2", "m2", False)]
+
+
+def test_select_artifact_flags_multi_match_disambiguation(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    candidate = harness.coordinator.get_candidate("c1")
+    candidate.snippet = f"also published as {DOI_A} and 10.1234/paper-b"
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "select", "identifier": "c1"},
+        "id": "select-multi",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert len(batch.pending) == 2
+    assert all(note.needs_disambiguation for note in batch.pending)
+
+
+def test_save_artifact_reports_ambiguous_candidates_as_pending(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    candidate = harness.coordinator.get_candidate("c1")
+    candidate.snippet = f"also published as {DOI_A} and 10.1234/paper-b"
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "save", "identifiers": ["c1", "c2"]},
+        "id": "save-pending",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    # c2 saved; c1's two versions ride along as disambiguation-needed pending.
+    assert len(batch.receipts) == 1
+    assert not batch.failures
+    assert {note.candidate_id for note in batch.pending} == {"c1"}
+    assert all(note.needs_disambiguation for note in batch.pending)
+
+
+def test_confirm_artifact_has_no_pending_entries(tmp_path):
+    harness = ToolHarness(tmp_path)
+    harness.run(action="search", query="paper")
+    harness.run(action="select", identifiers=["c1", "c2"])
+
+    message = asyncio.run(harness.tool.ainvoke({
+        "name": TOOL_NAME,
+        "args": {"action": "confirm", "identifier": "m1"},
+        "id": "confirm-no-pending",
+        "type": "tool_call",
+    }))
+
+    batch = ConfirmBatchOutcome.from_artifact(message.artifact)
+    assert len(batch.receipts) == 1
+    assert batch.pending == ()
