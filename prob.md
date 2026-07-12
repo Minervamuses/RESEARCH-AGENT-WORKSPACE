@@ -30,22 +30,25 @@ CLI 實測要求一次保存三篇論文時發現：舊 `select` 會讓其他 ca
 - 若偵測到工具標記，回傳確定性的額度耗盡訊息，或執行一次禁止工具的 repair。
 - 加入 DeepSeek/DSML 形式的回歸測試。
 
-## 2. Turn 可能以空回應結束，CLI 顯示為「中斷」
+## 2. Turn 可能以空回應結束，CLI 顯示為「中斷」（已修復並加強診斷）
 
 2026-07-11 實測中一個 session 內出現三次：工具成功返回後，assistant 完全沒有文字輸出，turn 直接結束。
 
-2026-07-12 citation 批次升級的 live smoke 仍重現一次：替代措辭「第3篇跟第7篇的 bibtex 存起來」已取得工具結果，但模型未完成後續流程，finalizer 正確顯示確定性空總結 fallback。批次狀態機的單元／E2E 測試均通過；此項仍屬 live model 遵循度問題。
+2026-07-12 citation 批次升級的 live smoke 仍重現一次：替代措辭「第3篇跟第7篇的 bibtex 存起來」已取得 select 結果，但模型未完成 confirm。追查後確認舊 graph 一遇空白/malformed response 就切到禁止工具的 repair，因此結構上不可能補完仍需 confirm 的保存流程。
 
 - 一次發生在只用了 1 次工具的搜尋 turn（非額度耗盡），使用者追問「剛剛中斷了?」。
 - 兩次發生在工具用滿 4 次之後（1 次 citation + 3 次 bash），疑似 `_cap_tool_calls()` 剝掉 tool_calls 後留下 `content=""` 的 AIMessage，graph 路由到 END。
 - `finalize_and_record` 與 CLI 都接受空字串答案：空 turn 照樣寫入 TurnRecord，畫面上什麼都沒有。
 - 連鎖 UX 失效：使用者以為 CLI 卡在 bash 批准提示，連續輸入 `y`，這些 `y` 被當成新的 user turn 消耗掉。
 
-建議：
+本次修復：
 
-- 在 graph 結束路徑或 finalization 加空答案 guard：偵測到空/純空白最終回答時，改走一次禁止工具的總結重試，或回傳確定性訊息（例如「工具結果已取得但總結失敗，請再問一次」）。
-- CLI 對空回應至少顯示明確占位訊息，不得靜默。
-- 回歸測試：工具返回後模型輸出空 content、以及 tool_calls 被剝除後留下空 content 兩種路徑。
+- 模型 adapter 由 OpenAI-compatible `ChatOpenAI` 改為 pinned `ChatOpenRouter`，保留 OpenRouter tool/reasoning/metadata 契約。
+- 每次 initial/continuation/repair/fallback 記錄 redaction-safe telemetry，可區分零 content、`invalid_tool_calls`、被 budget cap 丟棄與 provider finish reason。
+- select 與 confirm 之間若仍有 primary budget，允許恰一次 tool-capable continuation；連續失敗才進既有 no-tool repair，且不重複已完成操作。
+- 明確保存請求改走單一原子 `save` action，唯一 match 在同一工具呼叫內 resolve+confirm；0/multi match 分別固定失敗或保持 pending。
+- select/pending 產生版本化、DOI-free artifact；若模型仍失敗，finalizer 驗證 live state 後顯示「已解析但尚未保存」，不再只給 generic fallback。
+- 補齊空白、malformed tool call、budget exhausted、confirm receipt、partial/all-failure、stale pending 與 artifact 優先序回歸。
 
 ## 3. 候選池、分頁與工具額度不匹配
 

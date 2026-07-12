@@ -376,24 +376,25 @@ citation 是內建 skill(engine 就住在 `app/skills/citation/`,同一目錄既
 - 啟用會取代目前 active skill(無 restoration stack);啟用失敗保留原 skill。citation active 期間 `/thinking extended` 會被拒絕。
 - 停用/切換 skill 立即清除 in-memory workflow 與 session 來源 registry(已寫入磁碟的 bundle 保留);citation hint、renderer 與工具同時消失。
 - `citation_workflow` 是 skill 專屬工具:普通模式與其他 skills 完全綁不到,偽造的 tool call 也會被執行層(PolicyToolNode)拒絕。
-- 同 session 同時只能有一個 workflow call(並行呼叫回 busy);`select`/`confirm` 可用 `identifiers` 一次帶最多 10 個 id,工具在同一 busy lock 內依輸入順序序列執行。
-- 自然語言保存意圖完全由模型依目前請求與 citation skill 指引判斷；host/tool 不維護確認詞白名單，也不要求額外一輪確認。當前請求本身已授權保存時,`select` 後可在同 turn 直接 `confirm`;否定、條件、疑問或不明確語氣不得 confirm。確定性執行層仍要求 live `mX`、DOI/BibTeX 一致、atomic storage 與可信 receipt。
-- DOI 解析以 candidate 為單位採三分規則:0 個 match 回報失敗;恰 1 個可依當前授權直接 confirm;多個 match 標示 `needs-disambiguation`,除非使用者明確指定 `mX` 或要求全部版本,否則不得全存。批次 select 會把既有 pending 另列,本次授權不得延伸到該區。
+- 同 session 同時只能有一個 workflow call(並行呼叫回 busy);`save`/`select`/`confirm` 可用 `identifiers` 一次帶最多 10 個 id,工具在同一 busy lock 內依輸入順序序列執行。
+- 自然語言保存意圖完全由模型依目前請求與 citation skill 指引判斷；host/tool 不維護確認詞白名單，也不要求額外一輪確認。當前請求已授權保存時,模型以單一 `save` action 帶 candidate ids；工具內原子地 resolve 並 confirm 唯一 match。`select`→`confirm` 保留給只檢視與多版本消歧。否定、條件、疑問或不明確語氣不得 save/confirm。
+- DOI 解析以 candidate 為單位採三分規則:0 個 match 回報固定失敗;恰 1 個由 `save` 立即驗證保存;多個 match 標示 `needs-disambiguation` 並保持 pending,不得自動全存。既有 pending 另列,本次授權不得延伸到該區。
+- Chat agent 使用 pinned `ChatOpenRouter` adapter。若模型在 `select` 後回空或產生 malformed tool call,graph 在剩餘 budget 內允許一次 tool-capable continuation；再失敗才進 no-tool repair。每階段只記錄 response id、finish reason、token/count/budget 等 redaction-safe telemetry,不記錄工具參數、DOI 或 provider 文字。
 
-工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除,並回傳實際日期窗)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider;可帶 keyword/year/venue/work type,只有使用者明確要求 venue 等級時才使用 fail-closed `venue_tiers`)、`list`、`show`、`select`(單一 `identifier` 或批次 `identifiers`)、`confirm`(同)、`status`、`explain`(唯讀;回傳 workflow 驗證/儲存流程的公開契約與 citation 輸出目錄)、`cancel`、`sources`、`source`。
+工具 actions(由 agent 依使用者的自然語言呼叫):`search`(可帶 `published_within_years` 或 `year_from`/`year_to`,兩者互斥;`published_within_years` 依當日 UTC 計算日期範圍,Crossref/OpenAlex 用原生日期 filter,回傳後再做 fail-closed 年份篩選——年份未知或超出範圍的候選一律剔除,並回傳實際日期窗)、`more`、`refine`(只篩選既有 candidate pool,不呼叫 provider;可帶 keyword/year/venue/work type,只有使用者明確要求 venue 等級時才使用 fail-closed `venue_tiers`)、`list`、`show`、`save`(已獲授權的 candidate ids,原子 resolve+confirm)、`select`(只解析)、`confirm`(已消歧的 match ids)、`status`、`explain`(唯讀;回傳 workflow 驗證/儲存流程的公開契約與 citation 輸出目錄)、`cancel`、`sources`、`source`。
 
 引用政策(單一 finalization chokepoint、兩種明確政策):
 
 - **citation inactive**:禁止一切 citation markers(含 `[[citation-needed]]`)、raw DOI、`[1]` 數字引用、作者年份引用與手寫 References;一般非 DOI 網址連結不受影響;renderer 不執行。
 - **citation active**:只接受目前 registry 中 `identity_verified` 的 `[[cite:<source-id>]]` 與 `[[citation-needed]]`;通過 gate 後 renderer 依首次出現順序編號 `[1]`、`[2]`... 並產生固定格式 bibliography。
-- 任一 gate 失敗都不保存原草稿；一般回合以安全訊息取代。只要同輪 batch artifact 含成功或失敗項,finalizer 都改用確定性結果取代模型草稿；成功收據逐筆對 live registry 驗證,失敗只依 status/reason code 映射固定文案,不採用 provider 自由文字。
+- 任一 gate 失敗都不保存原草稿；一般回合以安全訊息取代。可信 artifact 的固定優先序是 confirm/save outcome → live pending select recovery → 模型文字/fallback。成功收據逐筆對 live registry 驗證,失敗只依 status/reason code 映射固定文案；pending note 亦須仍與 coordinator state 相符,否則 fail closed 忽略。
 
 流程與保證:
 
 - **Discovery**:Crossref 與(有 `OPENALEX_API_KEY` 時)OpenAlex 並行查詢,LLM 最多 lazy 產生 2 個 query expansion(LLM 不可用時照常運作);先以固定 `k=60` 做 reciprocal-rank fusion,再以 bounded deterministic title relevance rerank(可用 `CITATION_RANKING_MODE=rrf` 回退),只在 canonical DOI 或同 provider ID 相同時合併。不同 DOI 的 preprint/正式版/reprint 只會非破壞式分組,每個版本保留自己的 `cX` 與選擇權;shortlist 每組顯示一個代表版本。venue catalog 是有版本、有限的 project-curated allowlist,平時只標示,不參與一般排序。web MCP 只在 structured providers 全失敗/零候選時自動 fallback,否則由 agent 依使用者要求以 `more` 引入。
 - **驗證**:confirm 會重新以 doi.org 取 CSL JSON structured record,再以同一 canonical DOI 取 BibTeX(pybtex 驗證、恰一 entry、canonical 重序列化);match/structured/BibTeX 三方 DOI 必須相等(BibTeX 缺 DOI 時由已驗證 record 注入並記 `doi_injected_from_verified_lookup`);title/year 等衝突只警告。驗證等級只有 `identity_verified`——證明 DOI 與書目管線一致,不代表來源支持特定主張。
 - **保存**:atomic bundle 寫入 citation 輸出目錄(見第 1 節「可寫入路徑」)之 `<utf8-byte-capped-title>--<doi-hash>/`(`reference.bib` + `citation.json` sidecar,schema v1);staging + rename,成功 bundle 不會半套;同 DOI 重複 confirm 驗證後重用;schema/DOI/hash 不符 fail closed 不覆寫。無 DOI 候選可展示但不可保存。
-- **Confirm 批次收據**:最終文字逐筆列出成功項的 source ID、以 code literal 呈現的 DOI、bundle 絕對路徑、驗證等級與 cite marker,並列出所有失敗 `mX` 與固定原因；全數失敗也不退回模型草稿。這段文字會像一般 assistant output 一樣進 recent history/plan log。artifact 版本/內容不合法時整包不採信,成功項與 live registry 不符時亦不渲染為成功。
+- **Citation 批次 artifact**:最終文字逐筆列出成功項的 source ID、DOI、bundle、驗證等級與 cite marker,並列出固定碼失敗；全數失敗也不退回模型草稿。若流程在 select 後仍中斷,DOI-free pending artifact 會確定性顯示 `cX → mX` 與「尚未保存」,而非誤導性的 generic fallback。artifact 版本/內容或 live state 不符時不採信。
 - **範圍**:來源 registry 是 session 內、citation 模式內的狀態;turn record 與 Chroma history 不再夾帶 SourceRef snapshot或額外 receipt metadata(收據只存在於 finalized assistant text;舊資料中的 `sources_json` metadata 會被忽略,不影響一般 history 查詢)。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
 
 ## 12. 疑難排解
