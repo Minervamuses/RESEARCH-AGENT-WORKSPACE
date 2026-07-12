@@ -260,7 +260,7 @@ thinking_rewrite_model: str = "openai/gpt-5-mini"
 thinking_repair_model: str = "openai/gpt-5-mini"
 ```
 
-這些欄位直接由 `AgentConfig` 決定；任一被設為空字串時，`/thinking extended` 會拒絕切換，避免 Extended mode 靜默退回 `llm_model` 造成同 model 自審。第一版不從 `.env` 或 CLI 參數讀取這三個欄位；`.env` 只保留 `OPENROUTER_API_KEY` 這類 secret。
+這些欄位直接由 `AgentConfig` 決定；任一被設為空字串時，`/thinking extended` 會拒絕切換，避免 Extended mode 靜默退回 `llm_model` 造成同 model 自審。它們不從環境變數或 CLI 參數讀取；`OPENROUTER_API_KEY` 等 secret 則由啟動程序的 Conda／shell 環境提供。
 
 ### 漸進式揭露（檔案拆分）
 

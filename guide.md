@@ -20,9 +20,9 @@
 | Python | `>=3.12,<3.14`；env 檔目前 pin `python=3.13` |
 | conda env | `app` 與 `rag` 兩個獨立環境 |
 | Poetry | env 檔要求 `poetry>=2.3,<3` |
-| Poetry venv | `app/poetry.toml` 與 `rag/poetry.toml` 都是 `virtualenvs.create = false` |
+| Poetry venv | 兩邊都設 `virtualenvs.create = false`、`in-project = false`，不建立也不採用 `.venv` |
 
-重點：一定要先 `conda activate app` 或 `conda activate rag`，再跑 `poetry install`。如果在 base env 或錯的 env 裡跑，套件會裝到錯地方。
+重點：一定要先 `conda activate app` 或 `conda activate rag`，再跑 `poetry install`。Chat CLI 會檢查 Python runtime 必須等於 `CONDA_PREFIX`，因此 system Python、Poetry `.venv`、巢狀 venv 與錯誤的 Conda env 都會被拒絕。
 
 ### 必備：依使用入口
 
@@ -34,19 +34,22 @@
 | `/ingest <file>` | Ollama server、`bge-m3` |
 | `rag.search(...)` / `rag_search` | 已有資料 + Ollama server、`bge-m3` |
 | `rag.explore(...)` / `list_chunks(...)` / `get_context(...)` | 已有 store；不需要 OpenRouter，通常也不需要 Ollama |
-| `/citation`（citation skill） | `app` env + 網路（Crossref/doi.org）；OpenAlex 需 `OPENALEX_API_KEY`；Web Search MCP 與 OpenRouter 皆為選配（fallback / query expansion） |
+| `/citation`（citation skill） | `app` env + 網路（Crossref/doi.org）；OpenAlex 需 `OPENALEX_API_KEY`；Web Search 預設可用於 fallback / `more`，OpenRouter query expansion 為選配 |
 
 ### API keys 與環境變數
 
-`app` CLI 會讀 `app/.env`。讀取規則是 `override=False`：如果真實 shell 已經有同名環境變數，`.env` 不會覆蓋它。
-
-直接跑 `rag` CLI 不會自動讀 `app/.env`。如果你用 `python -m rag.cli.ingest -r ...` 做 repo/folder ingest，請在 shell 裡先 `export OPENROUTER_API_KEY=...`；如果要共用自訂 store，也要先 `export KMS_STORE_DIR=...`。
-
-建議從範本開始：
+程式不讀取 `.env`。持久設定交給 Conda env，臨時測試才使用 shell `export`。例如：
 
 ```bash
-cp app/.env.example app/.env
+conda env config vars set -n app OPENROUTER_API_KEY=...
+conda env config vars set -n rag OPENROUTER_API_KEY=...
+
+# 自訂 store 時兩邊必須一致
+conda env config vars set -n app KMS_STORE_DIR=/path/to/store
+conda env config vars set -n rag KMS_STORE_DIR=/path/to/store
 ```
+
+設定後重新 activate 對應環境。Chat CLI、RAG CLI 與直接 import 都只讀取啟動程序收到的真實環境變數。
 
 目前程式會用到的環境變數：
 
@@ -54,9 +57,9 @@ cp app/.env.example app/.env
 |---|---|---|
 | `OPENROUTER_API_KEY` | chat agent、extended thinking、repo/folder ingest 必要；citation 選配 | OpenRouter chat model、RAG folder tagging、citation query expansion（lazy） |
 | `KMS_STORE_DIR` | 選用 | 改 RAG store 位置；app 與 rag 若要共用資料必須設成同一個值 |
-| `AGENT_ENABLE_MCP_WEB_SEARCH` | 選用 | 設 `1`/`true`/`yes`/`on` 啟用 Web Search MCP |
-| `AGENT_MCP_WEB_SEARCH_COMMAND` | 啟用 Web Search MCP 時必要 | Web Search MCP 啟動命令，例如 `npx` 或本機 server path |
-| `AGENT_MCP_WEB_SEARCH_ARGS` | 啟用 Web Search MCP 時視 server 而定 | Web Search MCP 啟動參數 |
+| `AGENT_ENABLE_MCP_WEB_SEARCH` | 選用 | 未設定時預設啟用；只在要持久關閉時設 `0`/`false`/`no`/`off` |
+| `AGENT_MCP_WEB_SEARCH_COMMAND` | 選用 | 覆蓋預設的 Conda `node` 啟動命令 |
+| `AGENT_MCP_WEB_SEARCH_ARGS` | 選用 | 與自訂 command 搭配的啟動參數 |
 | `AGENT_ENABLE_MCP_GITHUB` | 選用 | 設 `1`/`true`/`yes`/`on` 啟用 GitHub MCP |
 | `AGENT_MCP_GITHUB_COMMAND` | 啟用 GitHub MCP 時必要 | GitHub MCP server 啟動命令 |
 | `AGENT_MCP_GITHUB_ARGS` | 啟用 GitHub MCP 時視 server 而定 | GitHub MCP server 啟動參數 |
@@ -65,13 +68,7 @@ cp app/.env.example app/.env
 | `CROSSREF_MAILTO` | 選用 | citation skill 呼叫 Crossref 時加到 User-Agent（polite pool） |
 | `XDG_CACHE_HOME` | 選用 | 改 MCP stderr log/cache base；預設 `~/.cache/agent-mcp/` |
 
-誰會讀 `.env`：
-
-| 入口 | 是否自動讀 `app/.env` |
-|---|---|
-| `python -m agent.cli.chat` | 會 |
-| `python -m rag.cli.ingest ...` | 不會；只讀真實 shell 環境變數 |
-| `python - <<'PY'` 直接 import `rag` | 不會；除非你的程式自己先載入 `.env` |
+所有入口都遵守同一規則：只讀 Conda／程序環境，不搜尋或載入專案內的 `.env` 檔。
 
 ### 外部服務與網路
 
@@ -98,7 +95,7 @@ cp app/.env.example app/.env
 
 ## 2. 安裝與環境
 
-本專案刻意使用 conda 管 Python 環境、Poetry 管 Python 套件，而且 Poetry 設定為 `virtualenvs.create = false`。意思是：`poetry install` 會把套件安裝到目前啟用的 conda env，不會另外建 `.venv`。
+本專案刻意使用 Conda 管 Python 環境、Poetry 管 Python 套件，而且 Poetry 同時設定 `virtualenvs.create = false` 與 `in-project = false`。`poetry install` 只會裝進目前啟用的 Conda env，既不建立也不採用 `.venv`。
 
 第一次安裝：
 
@@ -127,17 +124,18 @@ conda env update -n app -f app/env/env-app.yml --prune
 ```bash
 conda run -n app python --version
 conda run -n app poetry --version
+conda run -n app node --version
 conda run -n rag python --version
 conda run -n rag poetry --version
 ```
 
-目前本機驗收時看到的是 Python 3.13.14、Poetry 2.4.1。
+目前本機驗收時看到的是 Python 3.13.14、Poetry 2.4.1、Node 24。
 
 常用外部服務：
 
 - Ollama + `bge-m3`: ingest 與語意搜尋需要。
 - `OPENROUTER_API_KEY`: chat agent、extended thinking、repo ingest 的 folder tagging 需要。
-- MCP servers: web search / GitHub 是選配，透過 `app/.env` 開啟。
+- MCP servers:Web Search 預設啟用；GitHub 透過 `app` Conda env vars 選擇性開啟。
 
 建議先安裝 embedding model：
 
@@ -165,7 +163,7 @@ python -m agent.cli.chat --no-mcp
 ```
 
 - `--max-turns`: 每回合 LangGraph 最多跑幾輪工具/模型循環。
-- `--no-mcp`: 即使 `.env` 有設定，也不載入 MCP 工具。
+- `--no-mcp`: 只對這次執行停用所有 MCP 工具。
 
 離開 CLI：
 
@@ -297,7 +295,7 @@ python -m rag.cli.ingest /path/to/file.md --pid my-note
 python -m rag.cli.ingest -r /path/to/project --skip node_modules --skip external
 ```
 
-直接 RAG CLI 與 chat CLI 用的是同一套 store 設定，但 direct RAG CLI 不會自動讀 `app/.env`。若你設定了 `KMS_STORE_DIR`，兩邊要用同一個環境變數，否則會看起來像資料不見了。
+直接 RAG CLI 與 chat CLI 用的是同一套 store 設定，且都只讀 Conda／程序環境。若你設定了 `KMS_STORE_DIR`，兩個 Conda env 必須使用同一個值，否則會看起來像資料不見了。
 
 repo/folder ingest 需要 `OPENROUTER_API_KEY` 做 folder tagging。直接跑 RAG CLI 時請先在 shell export：
 
@@ -437,9 +435,9 @@ Agent 在一般模式下可用的本地工具：
 - `read_file`: 讀本機文字檔，單檔上限 1 MB，會阻擋 `.env`、SSH key、secret/token/credential 類檔名。
 - `bash`: 執行 shell command。互動環境會要求使用者批准；非互動環境自動拒絕。
 
-MCP 工具是選配：
+MCP 工具：
 
-- Web Search MCP: 用於即時網路搜尋。
+- Web Search MCP:預設載入，用於即時網路搜尋。
 - GitHub MCP: 用於遠端 GitHub repo、PR、issue、Actions 等。
 
 工具選擇原則：
@@ -452,24 +450,21 @@ MCP 工具是選配：
 
 ## 11. MCP 設定
 
-MCP 由 `app/.env` 控制，預設不開。CLI 啟動時會讀 `app/.env`。
+Web Search MCP 預設啟用，不需要 activation 變數。程式使用 `app` Conda env 內的 `node`，並從 `$XDG_DATA_HOME/mcp-servers/web-search-mcp/dist/index.js` 或 `~/.local/share/mcp-servers/web-search-mcp/dist/index.js` 啟動已 build 的 server。`--no-mcp` 只對單次 CLI 執行停用；持久關閉可執行：
 
-Web Search MCP 範例：
-
-```dotenv
-AGENT_ENABLE_MCP_WEB_SEARCH=1
-AGENT_MCP_WEB_SEARCH_COMMAND=/path/to/web-search-mcp
-AGENT_MCP_WEB_SEARCH_ARGS=
+```bash
+conda env config vars set -n app AGENT_ENABLE_MCP_WEB_SEARCH=0
 ```
 
-GitHub MCP 範例：
+GitHub MCP 仍需在 Conda env 明確設定：
 
-```dotenv
-AGENT_ENABLE_MCP_GITHUB=1
-AGENT_MCP_GITHUB_COMMAND=/path/to/github-mcp-server
-AGENT_MCP_GITHUB_ARGS=
-GITHUB_PERSONAL_ACCESS_TOKEN=...
-AGENT_MCP_GITHUB_TOOLSETS=repos,pull_requests,issues,actions,context
+```bash
+conda env config vars set -n app \
+  AGENT_ENABLE_MCP_GITHUB=1 \
+  AGENT_MCP_GITHUB_COMMAND=/path/to/github-mcp-server \
+  AGENT_MCP_GITHUB_ARGS=stdio \
+  GITHUB_PERSONAL_ACCESS_TOKEN=... \
+  AGENT_MCP_GITHUB_TOOLSETS=repos,pull_requests,issues,actions,context
 ```
 
 MCP server 如果啟動失敗，agent 仍會啟動，只是少掉那組外部工具。stderr log 會放在：
@@ -742,7 +737,7 @@ Chat agent、extended thinking、repo ingest 的 folder tagging 都需要 `OPENR
 export OPENROUTER_API_KEY=...
 ```
 
-或放到 `app/.env`。
+若要持久保存，使用 `conda env config vars set -n app OPENROUTER_API_KEY=...`，再重新 activate `app`。
 
 ### Ingest 或 search 失敗，提到 Ollama / embeddings
 
@@ -764,15 +759,9 @@ Extended thinking 需要 OpenRouter API key，而且 config 裡設定的 reviewe
 
 Plan mode 內容寫在 `app/plan_logs/`，不寫入 Chroma，也不會被 `recall_history` 搜到。需要時直接讀該 markdown 檔。
 
-### Web search 或 GitHub tools 沒出現
+### Web Search 或 GitHub tools 沒出現
 
-確認 `.env` 是否開啟對應 MCP，且 command 可執行。也可以先用：
-
-```bash
-python -m agent.cli.chat --no-mcp
-```
-
-排除本地 agent 啟動問題，再回頭查 MCP log：
+Web Search 請先確認標準路徑內有 built `dist/index.js`，且 `conda run -n app node --version` 成功。GitHub 則檢查 `app` Conda env vars、command 與 token。再查看 MCP log：
 
 ```text
 ~/.cache/agent-mcp/
