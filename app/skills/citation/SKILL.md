@@ -1,114 +1,53 @@
 ---
 name: citation
-description: Interactive verified-citation workflow — search academic papers, let the user pick and confirm, save verified BibTeX bundles, and cite them with [[cite:...]] markers.
+description: Stateless work-identity citation resolution, verified bundle saving, and [[cite:...]] rendering.
 ---
 
 # Citation Skill
 
-You drive a verified citation workflow through the `citation_workflow` tool.
-The user speaks in natural language; you translate their intent into tool
-actions and keep them in control of every decision.
+Use only `citation_workflow` for citation discovery and saving. Its actions are
+`search`, `save`, `sources`, `source`, and `explain`.
 
-## Workflow (strict order)
+## Search and present
 
-1. **Search** — `action="search"` with the user's topic as `query`. When the
-   user constrains recency ("近5年", "2020–2023"), pass
-   `published_within_years` OR `year_from`/`year_to` (never both). The tool
-   returns the exact applied date filter; repeat that value verbatim in the
-   answer and never replace it with a self-computed year heading.
-2. **Present** — show the returned shortlist to the user and WAIT for their
-   choice. Never pick a candidate yourself. One visible item may represent a
-   non-destructive version group; every listed `cX` remains a distinct,
-   selectable version. When the user changes or narrows conditions, use
-   `action="refine"` with structured keyword/year/venue/work type filters over
-   the existing pool. Use `venue_tiers` only when the user explicitly asks for
-   a catalog tier such as top venues; unknown venues fail closed for that
-   filter. Do not scan candidate pages to infer a refinement. Use
-   `action="list"` only when the user explicitly asks to browse more, and
-   `action="show"` to inspect a specific candidate or its grouped versions.
-3. **Save** — the user's current request is the saving authorization when
-   its meaning says to save, regardless of exact wording or item count. When
-   it does, make ONE `action="save"` call with all chosen `cX` ids in
-   `identifiers` (a single id may use `identifier`). Calling save is itself
-   your authorization judgment; the tool resolves and writes atomically. Per
-   candidate: zero matches is reported as a failure; exactly one match is
-   saved immediately; multiple matches (for example, preprint and published
-   versions) come back `needs-disambiguation` with nothing written — present
-   the `mX` options and ask.
-4. **Select / Confirm** — when the request does NOT authorize saving (the
-   user only wants to inspect what would be saved) use `action="select"`,
-   present the matches, and wait. After the user picks a specific `mX` for a
-   multi-match candidate — or explicitly requests all versions — call
-   `action="confirm"` with the authorized `mX` ids in `identifiers`; it may
-   follow select in the same turn. Success saves a verified bundle; the
-   finalizer deterministically reports every success and failure. You
-   interpret natural-language intent directly; there is no host-side phrase
-   classifier or approval-word allowlist.
-5. **Cite** — cite saved sources only via their `[[cite:<source-id>]]`
-   markers; write `[[citation-needed]]` where a claim has no saved source.
-   The renderer assigns numbers and builds the bibliography after the
-   response passes the citation gate.
+- `search` is stateless. Pass `query` and optional `year_from`/`year_to`.
+- Present each result with full title, authors, year, venue, work type, and
+  version label. Search order is never a save identifier; there are no cX/mX
+  identifiers or persistent candidate pools.
+- Metadata does not ground a content summary. Fetch actual text or explicitly
+  label any title-based description as inference.
 
-## Hard rules
+## Save
 
-- Your decision to call `save` (or `confirm`) is the authorization decision.
-  Read the user's current message and conversational context carefully: the
-  host will validate workflow state but will not second-guess your language
-  judgment.
-- Never call `save` or `confirm` for negated, conditional, or questioning
-  language such as `不要儲存`, `先別確認`, `取消`, `可以嗎?`, `no`, or
-  `don't save`.
-- Confirm only matches produced by the current authorized select request.
-  Never auto-confirm any item under the tool's "Existing pending" section.
-- A candidate with multiple matches is never implicitly authorization to save
-  them all. Require an explicit `mX` or an explicit request for every version.
-- Put every authorized candidate/match id into one bounded batch call. Never
-  issue parallel `citation_workflow` calls; the coordinator is session-stateful
-  and permits only one call at a time.
-- Before confirm succeeds, present candidates and matches by `cX`/`mX` plus
-  bibliographic metadata only. Do not expose or paraphrase a DOI literal.
-- Never invent or hand-write DOIs, BibTeX entries, bibliographies,
-  reference numbers, or author-year citations.
-- Only `[[cite:<source-id>]]` for saved verified sources and
-  `[[citation-needed]]` may appear in your answers; nothing else that looks
-  like a citation.
-- `action="sources"` lists this session's saved sources; `action="source"`
-  re-activates one for citing.
-- When a search fails or a candidate has no DOI, say so plainly; never
-  substitute unverified data.
-- Venue catalog labels are finite project-curated annotations, not universal
-  quality judgments. Never invent a tier for an unclassified venue, and never
-  claim grouped versions are identical or interchangeable.
-- When you mention tool actions in prose, write bare names like
-  `action="explain"` or `confirm`; never write a call-style expression
-  (the tool name followed by parenthesized arguments) — the safety layer
-  replaces any reply that contains one.
+- A save call contains one `works` array (1–10 self-contained WorkIntent
+  objects). Include `requested_label` plus every known title/author/year/venue/
+  type/DOI/arXiv/version fact. Never pass a result position or legacy ID.
+- Make at most one valid `save` call in a user turn. Put every authorized work
+  in that one batch. After any attempted outcome—success, ambiguity, not found,
+  provider failure, or insufficient intent—do not silently change the query or
+  try a second mutation.
+- Save only when the current request authorizes it. Negated, conditional,
+  questioning, or unclear intent is not authorization.
+- Generic references such as 「這篇」 do not choose published/VoR, preprint,
+  repository, or another manifestation. If the visible metadata does not make
+  the requested version explicit, ask the user which version they mean.
+- `original` never defaults to either original work or earliest manifestation.
+  Ask the user to distinguish those meanings, then encode `work_kind` or the
+  version request explicitly.
+- A hard user constraint or target identifier is a veto when it contradicts a
+  provider record. Never trade identity precision for recall and never replace
+  an unsupported published/no-DOI record with a similar preprint DOI.
 
-## Grounding for paper descriptions
+## Cite and inspect
 
-- `show` returns bibliographic metadata plus at most a short snippet —
-  never the paper's abstract or full text; discovery providers do not
-  supply full text.
-- Only text evidence you actually fetched (web search, RAG, `read_file`)
-  grounds a summary of a paper's content. Metadata alone does not.
-- With metadata only, either fetch evidence first or label the
-  description explicitly as an inference from the title/metadata
-  (e.g. 「根據標題與 metadata 推測」). Never present a guess as the
-  paper's abstract.
+- Cite saved sources only with `[[cite:<source-id>]]`; use
+  `[[citation-needed]]` when no saved source supports a claim. Never hand-write
+  DOI citations, reference numbers, author-year citations, BibTeX, or a
+  bibliography.
+- `sources` lists session sources and `source` accepts only a stable
+  `source_id`. `explain` gives the public verification/storage contract.
+- Trusted save artifacts, not model prose, determine the final receipt. Report
+  every batch item and preserve ambiguity/failure honestly.
 
-## Storage and internals questions
-
-- Confirmed bundles (`reference.bib` + `citation.json`) are written
-  atomically under the citation output directory. By default this is `cite/`
-  at the workspace root (and is version-controlled), never inside the
-  `app/`, `rag/`, or skill package trees. Config and environment overrides
-  still take precedence; an installed package outside a git workspace falls
-  back to the platform user-data directory.
-- When the user asks where a citation is saved or which sources exist,
-  use `action="sources"` to list them and `action="source"` with the
-  source id for its bundle path. Never scan directories with bash and
-  never guess paths.
-- When the user asks how the workflow works (search, verification, where
-  BibTeX comes from, storage), call the read-only `action="explain"` and
-  relay its steps; do not describe internals from memory. The model never
-  writes BibTeX — doi.org supplies it.
+Bundles are staged, fsynced, and atomically renamed. DOI identities keep their
+stable `src-*`; schema-v1 bundles are validated and reused without rewriting.

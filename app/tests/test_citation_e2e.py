@@ -1,8 +1,6 @@
 """Full-stack citation turns: real session, real graph, fixture providers."""
 
 import asyncio
-from datetime import datetime, timezone
-
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
@@ -11,8 +9,8 @@ from conftest import FakeHistoryStore
 
 from agent.config import AgentConfig
 from agent.session import ChatSession
-from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
+from skills.citation.service import CitationService
 
 from tests.test_citation_coordinator import CROSSREF_ITEMS, RoutingFetcher
 
@@ -78,44 +76,30 @@ def _make_session(monkeypatch, tmp_path, responses):
 
 def _seed_fixture_coordinator(session, tmp_path):
     hub = CitationProviderHub(env={}, fetcher=RoutingFetcher())
-    session._citation_coordinator = CitationCoordinator(
-        hub, output_dir=tmp_path / "cite"
-    )
+    session._citation_coordinator = CitationService(hub, output_dir=tmp_path / "cite")
     return session._citation_coordinator
 
 
-def test_citation_turn_runs_workflow_tool_with_five_year_filter(
+def test_citation_turn_runs_stateless_search_with_year_filter(
     monkeypatch, tmp_path
 ):
-    """'近5年' natural-language turn: the model calls the tool with
-    published_within_years=5, the tool executes through the policy node,
-    and the workflow ends with a structured five-year filter applied."""
     responses = [
         _workflow_call({
             "action": "search",
             "query": "HPC",
-            "published_within_years": 5,
+            "year_from": 2021,
         }),
-        AIMessage(content="這裡是近5年的候選論文清單，請選擇。"),
+        AIMessage(content="Paper A — Ada Lovelace — 2021 — Journal A — journal-article。"),
     ]
     session = _make_session(monkeypatch, tmp_path, responses)
     session.activate_skill("citation")
-    coordinator = _seed_fixture_coordinator(session, tmp_path)
+    _seed_fixture_coordinator(session, tmp_path)
 
     answer = asyncio.run(session.turn("幫我尋找近5年內關於HPC的論文"))
 
-    assert answer == "這裡是近5年的候選論文清單，請選擇。"
+    assert "Paper A" in answer and "Ada Lovelace" in answer and "2021" in answer
     assert [c["name"] for c in session.last_tool_calls] == ["citation_workflow"]
-    filt = coordinator._date_filter  # noqa: SLF001
-    assert filt is not None
-    today = datetime.now(timezone.utc).date()
-    assert filt.year_to == today.year
-    assert filt.year_from == today.year - 5
-    assert filt.date_to == today.isoformat()
-    # Fail-closed filtering applied to the fixture candidates (2021 / 2020).
-    expected = [c for c in CROSSREF_ITEMS
-                if c["issued"]["date-parts"][0][0] >= filt.year_from]
-    assert len(coordinator.list_candidates()[0]) == len(expected)
+    assert "c1" not in answer and "m1" not in answer
 
 
 def test_forged_workflow_call_outside_skill_is_denied_end_to_end(
@@ -162,26 +146,34 @@ def test_workflow_call_under_other_skill_is_denied_end_to_end(
     assert session._citation_coordinator is None  # noqa: SLF001
 
 
-def test_search_select_confirm_in_one_user_turn_end_to_end(monkeypatch, tmp_path):
-    """An authorized request may search, select, and confirm in one turn."""
+def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch, tmp_path):
     responses = [
         _workflow_call({"action": "search", "query": "paper"}),
-        _workflow_call({"action": "select", "identifier": "c1"}),
-        _workflow_call({"action": "confirm", "identifier": "m1"}, "call-2"),
+        _workflow_call({
+            "action": "save",
+            "works": [{
+                "requested_label": "Paper A",
+                "title": "Paper A",
+                "authors": ["Ada Lovelace"],
+                "year": 2021,
+                "venue": "Journal A",
+                "work_type": "journal-article"
+            }]
+        }, "call-2"),
         AIMessage(content="已保存來源。"),
     ]
     session = _make_session(monkeypatch, tmp_path, responses)
     session.activate_skill("citation")
     _seed_fixture_coordinator(session, tmp_path)
 
-    receipt = asyncio.run(session.turn("幫我找 paper 並把第一篇存下來"))
+    receipt = asyncio.run(session.turn("幫我找出並保存 2021 年 Ada Lovelace 的 Paper A"))
     bundles = list((tmp_path / "cite").glob("*/reference.bib"))
     assert len(bundles) == 1
-    assert "引用已確認並保存" in receipt
+    assert "引用保存結果" in receipt
     assert "source ID" in receipt
     assert str(bundles[0].parent) in receipt
     refs = session.citation_coordinator.registry.list()
-    assert [r.verification_level for r in refs] == ["identity_verified"]
+    assert [r.verification_level for r in refs] == ["doi_identity_verified"]
     # The deterministic receipt, not the model's generic sentence, is the
     # prompt-visible fact on the next turn.
     assert session.recent_turns[-1].assistant_output == receipt

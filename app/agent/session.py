@@ -25,6 +25,8 @@ from skills.citation.types import (
     is_citable_source,
     source_identity,
 )
+from skills.citation.resolution import HostIntentClaim
+from skills.citation.service import CitationTurnContext, MutationGuard
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
     build_recovery_message,
@@ -150,7 +152,8 @@ class ChatSession:
         # while the citation skill's manifest requests it. Creation is cheap —
         # the Coordinator behind it is built lazily on first use.
         self.citation_workflow_tool = create_citation_workflow_tool(
-            coordinator_getter=lambda: self.citation_coordinator,
+            service_getter=lambda: self.citation_coordinator,
+            context_getter=lambda: self._citation_turn_context,
         )
         self.graph = build_graph(
             config,
@@ -177,6 +180,8 @@ class ChatSession:
 
         self._progress_cb = progress_cb
         self._citation_coordinator = None
+        self._turn_execution_lock = asyncio.Lock()
+        self._citation_turn_context: CitationTurnContext | None = None
 
     @property
     def citation_coordinator(self):
@@ -188,26 +193,9 @@ class ChatSession:
         reachable only through the skill-only citation_workflow tool.
         """
         if self._citation_coordinator is None:
-            from skills.citation.coordinator import CitationCoordinator
+            from skills.citation.service import CitationService
             from skills.citation.hub import get_provider_hub
-
-            web_tools = {
-                tool.name: tool
-                for tool in self.extra_tools
-                if getattr(tool, "name", None) in self.web_search_tool_names
-            }
-
-            def _llm_factory(config=self.config):
-                from agent.llm import get_chat_model
-
-                return get_chat_model(config)
-
-            self._citation_coordinator = CitationCoordinator(
-                get_provider_hub(),
-                web_tools=web_tools,
-                llm_factory=_llm_factory,
-                config=self.config,
-            )
+            self._citation_coordinator = CitationService(get_provider_hub(), config=self.config)
         return self._citation_coordinator
 
     def _prompt_history(self) -> list:
@@ -331,7 +319,9 @@ class ChatSession:
         live_pending = {
             match.match_id: match.candidate_id
             for match in (
-                coordinator.pending_matches() if coordinator is not None else ()
+                coordinator.pending_matches()
+                if coordinator is not None and hasattr(coordinator, "pending_matches")
+                else ()
             )
         }
         receipts: list[ConfirmReceipt] = []
@@ -1038,7 +1028,42 @@ class ChatSession:
 
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""
-        return await self._run_turn(user_input)
+        async with self._turn_execution_lock:
+            context = CitationTurnContext(
+                uuid.uuid4().hex,
+                tuple(self._extract_citation_claims(user_input)),
+                MutationGuard(),
+            )
+            self._citation_turn_context = context
+            try:
+                return await self._run_turn(user_input)
+            finally:
+                if self._citation_turn_context is context:
+                    self._citation_turn_context = None
+
+    @staticmethod
+    def _extract_citation_claims(text: str) -> list[HostIntentClaim]:
+        """Extract only explicit current-turn anchors; never infer a version."""
+        from skills.citation.doi import extract_doi_candidates
+
+        claims = [HostIntentClaim("doi", doi) for doi in extract_doi_candidates(text)]
+        for match in re.finditer(r"(?:arxiv\s*[:：]?\s*)?(\d{4}\.\d{4,5})(?:v\d+)?", text, re.I):
+            claims.append(HostIntentClaim("arxiv", match.group(1), span=match.span()))
+        lowered = text.casefold()
+        if re.search(r"(?:original research|原創研究|原始研究)", lowered):
+            claims.append(HostIntentClaim("work_kind", "original_research"))
+        elif re.search(r"(?:\boriginal\b|原始|原版)", lowered):
+            claims.append(HostIntentClaim("original", "original"))
+        if re.search(r"(?:正式版|出版版|published|version of record|\bvor\b)", lowered):
+            claims.append(HostIntentClaim("version_kind", "published"))
+        if re.search(r"(?:預印本|preprint|arxiv\s*版)", lowered):
+            claims.append(HostIntentClaim("version_kind", "preprint"))
+        if re.search(r"(?:最早版本|earliest manifestation|first manifestation)", lowered):
+            claims.append(HostIntentClaim("version_kind", "earliest"))
+        years = re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", text)
+        if len(set(years)) == 1:
+            claims.append(HostIntentClaim("year", years[0]))
+        return claims
 
     async def turn(self, user_input: str) -> str:
         """Process one conversation turn. Returns the final text response."""

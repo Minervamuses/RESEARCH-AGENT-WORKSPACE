@@ -1,1022 +1,219 @@
-"""The session-scoped ``citation_workflow`` tool.
-
-The only model-facing surface of the :class:`CitationCoordinator`. The tool
-validates parameters, serializes outcomes as plain text, and delegates every
-state transition to the Coordinator — the search/verify state machine is
-never reimplemented here. Web fallback stays an internal Coordinator concern;
-the tool exposes no raw web search.
-
-Safety rails owned by this layer:
-  * one workflow call at a time per session — a concurrent call returns a
-    busy error instead of interleaving with the stateful Coordinator;
-  * save/select/confirm accept a bounded ordered batch and execute it
-    serially inside that lock; save composes the Coordinator's select and
-    confirm per candidate (0 matches → failure, 1 → confirm, several →
-    needs-disambiguation, nothing written);
-  * date filtering is either ``published_within_years`` or
-    ``year_from``/``year_to`` — never both — and applies only to ``search``
-    and the provider-free ``refine`` view.
-"""
+"""Model-facing stateless citation_workflow tool."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import Callable, Literal
 
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from skills.citation.coordinator import (
-    PAGE_SIZE,
-    CitationCoordinator,
-    RefineOutcome,
-    SearchOutcome,
-    SelectOutcome,
+from skills.citation.resolution import (
+    HostIntentBinder,
+    WorkConstraint,
+    WorkIdentifier,
+    WorkIntent,
 )
-from skills.citation.doi import extract_doi_candidates
-from skills.citation.types import (
-    CitationCandidate,
-    CitationMatch,
-    CitationResult,
-    ConfirmBatchOutcome,
-    ConfirmFailure,
-    ConfirmReceipt,
-    PendingMatchNote,
-    PublishedDateFilter,
-    SourceRef,
-)
+from skills.citation.service import CitationTurnContext
+from skills.citation.types import SaveBatchOutcome, SourceRef
 
 TOOL_NAME = "citation_workflow"
-MAX_BATCH_IDENTIFIERS = PAGE_SIZE
-
 TOOL_DESCRIPTION = (
-    "Drive the interactive citation workflow: search for academic papers, "
-    "inspect candidates, resolve DOI matches, and save verified citation "
-    "bundles. Actions: 'search' (requires query; optionally EITHER "
-    "published_within_years OR year_from/year_to), 'more' (append web "
-    "results to the current search), 'refine' (filter the current candidate "
-    "pool without new provider calls, including explicit catalog venue tiers), "
-    "'list' (page through the active view), "
-    "'show' (identifier = candidate id), 'save' (identifier OR identifiers "
-    "= candidate ids; one atomic step that resolves each candidate and saves "
-    "it when exactly one DOI match exists — multiple matches come back "
-    "needs-disambiguation with nothing written, failures are reported per "
-    "candidate), 'select' (identifier OR identifiers = candidate ids; "
-    "resolves confirmable matches without saving), 'confirm' (identifier OR "
-    "identifiers = match ids). When the user's current request semantically "
-    "authorizes saving, regardless of wording or item count, prefer one "
-    "'save' call with the candidate ids; calling save is itself your "
-    "authorization judgment. Use select+confirm only to inspect matches "
-    "without saving or to confirm a specific mX after disambiguation; "
-    "confirm may follow select in the same turn. Never save or confirm "
-    "negated, conditional, questioning, or unclear intent. A candidate with "
-    "multiple matches needs an explicit mX choice unless the user "
-    "explicitly requests all versions. Actions also include 'status', "
-    "'explain' (read-only: how the workflow verifies citations and where "
-    "bundles are stored), 'cancel', "
-    "'sources' (list saved sources), 'source' (identifier = source id; "
-    "re-activate a saved source for citing). Present candidates and matches "
-    "to the user when intent is unclear. Never confirm matches shown as "
-    "existing pending from an earlier request. Concurrent calls are refused."
+    "Stateless academic citation workflow. Actions: search(query), "
+    "save(works=[self-contained WorkIntent...]), sources(page), "
+    "source(source_id), explain(). Search results have no candidate IDs. "
+    "Each user turn permits at most one valid save batch. Generic references "
+    "such as 'this paper' never choose a version; unqualified 'original' must "
+    "be clarified as original work versus earliest manifestation."
 )
 
-CitationAction = Literal[
-    "search",
-    "more",
-    "refine",
-    "list",
-    "show",
-    "save",
-    "select",
-    "confirm",
-    "status",
-    "explain",
-    "cancel",
-    "sources",
-    "source",
-]
+CitationAction = Literal["search", "save", "sources", "source", "explain"]
 
-_BATCH_ACTIONS = {"save", "select", "confirm"}
 
-_PAGE_ACTIONS = {"list", "sources"}
+class IdentifierInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["doi", "arxiv"]
+    value: str = Field(min_length=1, max_length=2048)
+    provenance: Literal["explicit_current_user", "visible_context"]
+
+
+class ConstraintInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    field: Literal["year", "venue", "work_kind", "version_kind"]
+    value: str = Field(min_length=1, max_length=256)
+    provenance: Literal["explicit_current_user", "visible_context"]
+    requested_strength: Literal["hard", "preference"]
+
+
+class WorkIntentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    requested_label: str = Field(min_length=1, max_length=160)
+    title: str = Field(default="", max_length=512)
+    authors: list[str] = Field(default_factory=list, max_length=32)
+    year: int | None = Field(default=None, ge=1000, le=2999)
+    venue: str = Field(default="", max_length=256)
+    work_type: str = Field(default="", max_length=256)
+    identifiers: list[IdentifierInput] = Field(default_factory=list, max_length=8)
+    constraints: list[ConstraintInput] = Field(default_factory=list, max_length=8)
+
+    def to_domain(self) -> WorkIntent:
+        return WorkIntent(
+            self.requested_label,
+            title=self.title,
+            authors=tuple(self.authors),
+            year=self.year,
+            venue=self.venue,
+            work_type=self.work_type,
+            identifiers=tuple(WorkIdentifier(i.kind, i.value, i.provenance) for i in self.identifiers),
+            # Tool claims are untrusted hints until HostIntentBinder upgrades them.
+            constraints=tuple(WorkConstraint(
+                c.field, c.value, c.provenance, c.requested_strength,
+                "visible_context", "preference", False,
+            ) for c in self.constraints),
+        )
 
 
 class CitationWorkflowInput(BaseModel):
-    """Input schema for the citation_workflow tool."""
-
-    action: CitationAction = Field(description="Workflow step to perform.")
-    query: str | None = Field(
-        None, description="Search text (search; optional refinement for more)."
-    )
-    identifier: str | None = Field(
-        None,
-        description=(
-            "Candidate id (show/save/select), match id (confirm), or source "
-            "id (source)."
-        ),
-    )
-    identifiers: list[str] | None = Field(
-        None,
-        description=(
-            "save/select/confirm only: ordered candidate or match ids; "
-            "mutually exclusive with identifier; at most 10 after "
-            "normalization."
-        ),
-    )
-    page: int | None = Field(
-        None, description="1-based page for list/sources (default 1)."
-    )
-    keywords: list[str] | None = Field(
-        None,
-        description=(
-            "refine only: every normalized keyword must occur in candidate "
-            "metadata; omit all refine fields to reset the active view."
-        ),
-    )
-    venues: list[str] | None = Field(
-        None,
-        description="refine only: match any normalized venue substring.",
-    )
-    work_types: list[str] | None = Field(
-        None,
-        description="refine only: match any normalized work type exactly.",
-    )
-    venue_tiers: list[str] | None = Field(
-        None,
-        description=(
-            "refine only: fail-closed match against explicit tiers in the "
-            "versioned venue catalog; unclassified venues never match."
-        ),
-    )
-    published_within_years: int | None = Field(
-        None,
-        description=(
-            "search/refine only: keep works published within the last N years "
-            "(window computed from today, UTC). Mutually exclusive with "
-            "year_from/year_to."
-        ),
-    )
-    year_from: int | None = Field(
-        None,
-        description=(
-            "search/refine only: earliest publication year (inclusive). Mutually "
-            "exclusive with published_within_years."
-        ),
-    )
-    year_to: int | None = Field(
-        None,
-        description=(
-            "search/refine only: latest publication year (inclusive). Mutually "
-            "exclusive with published_within_years."
-        ),
-    )
+    model_config = ConfigDict(extra="forbid", strict=True)
+    action: CitationAction
+    query: str | None = Field(default=None, min_length=1, max_length=2048)
+    works: list[WorkIntentInput] | None = Field(default=None, min_length=1, max_length=10)
+    source_id: str | None = Field(default=None, min_length=1, max_length=128)
+    page: int | None = Field(default=None, ge=1)
+    year_from: int | None = Field(default=None, ge=1000, le=2999)
+    year_to: int | None = Field(default=None, ge=1000, le=2999)
 
 
-# --- formatting -------------------------------------------------------------
-
-
-def _candidate_lines(candidate: CitationCandidate) -> list[str]:
-    lines = [f"[{candidate.candidate_id}] {_redact_dois(candidate.short_label())}"]
-    if candidate.venue:
-        lines.append(f"      venue: {candidate.venue}")
-        annotation = candidate.venue_annotation
-        if annotation is not None:
-            classification = annotation.kind
-            if annotation.tier:
-                classification += f", tier={annotation.tier}"
-            lines.append(
-                "      venue catalog: "
-                f"{classification} ({annotation.catalog_version})"
-            )
-    providers = ", ".join(sorted(candidate.provider_ids))
-    if providers:
-        lines.append(f"      providers: {providers}")
-    if candidate.related_group:
-        alternatives = ", ".join(candidate.related_candidate_ids)
-        lines.append(
-            f"      versions: visible {candidate.candidate_id}; "
-            f"alternatives {alternatives}"
-        )
-    return lines
-
-
-def format_candidates(
-    candidates: list[CitationCandidate], *, page: int = 1, total_pages: int = 1
-) -> str:
-    if not candidates:
-        return "no candidates"
-    lines = [f"Candidates (page {page}/{total_pages}):"]
-    for candidate in candidates:
-        lines.extend(_candidate_lines(candidate))
-    if total_pages > 1:
-        lines.append(
-            "Prefer action=refine when conditions change; use action=list with "
-            "a page number only when the user explicitly asks to browse more."
-        )
-    lines.append(
-        "Present these to the user and wait for their choice; then use "
-        "action=show for details or action=select with the chosen candidate id."
-    )
-    return _redact_dois("\n".join(lines))
-
-
-def format_shortlist(
-    candidates: list[CitationCandidate],
-    *,
-    total_matches: int,
-    label: str = "Shortlist",
-) -> str:
-    visible = candidates[:PAGE_SIZE]
-    if not visible:
-        return f"{label}: 0 of {total_matches} candidate(s)"
-    lines = [f"{label}: {len(visible)} of {total_matches} candidate(s)"]
-    for candidate in visible:
-        lines.extend(_candidate_lines(candidate))
-    lines.append(
-        "Present this shortlist to the user. If their conditions change, use "
-        "action=refine instead of scanning every candidate page."
-    )
-    return _redact_dois("\n".join(lines))
-
-
-def format_candidate_detail(
-    candidate: CitationCandidate,
-    *,
-    group: list[CitationCandidate] | None = None,
-) -> str:
-    lines = [f"Candidate {candidate.candidate_id} (workflow {candidate.workflow_id}):"]
-    lines.append(f"  title: {candidate.title or '(unknown)'}")
-    if candidate.authors:
-        lines.append(f"  authors: {', '.join(candidate.authors)}")
-    for label, value in (
-        ("year", candidate.year),
-        ("venue", candidate.venue),
-        ("related-version group", candidate.related_group),
-    ):
-        if value:
-            lines.append(f"  {label}: {value}")
-    if candidate.snippet:
-        lines.append(f"  snippet: {candidate.snippet[:200]}")
-    annotation = candidate.venue_annotation
-    if annotation is not None:
-        tier = annotation.tier or "none"
-        lines.append(
-            "  venue classification: "
-            f"{annotation.kind}; tier={tier}; source={annotation.source}; "
-            f"catalog={annotation.catalog_version}"
-        )
-    evidence = candidate.ranking_evidence
-    if evidence is not None:
-        lines.append(
-            "  ranking evidence: "
-            f"mode={evidence.mode}; rrf={evidence.rrf_score:.6f}; "
-            f"title_relevance={evidence.title_relevance:.3f}; "
-            f"providers={evidence.provider_count}; "
-            f"matched_query={evidence.matched_query!r}"
-        )
-    members = group or [candidate]
-    if len(members) > 1:
-        lines.append("  selectable versions (distinct identities; never auto-merged):")
-        for member in members:
-            meta = [str(member.year) if member.year else "year unknown"]
-            if member.venue:
-                meta.append(member.venue)
-            if member.work_type:
-                meta.append(member.work_type)
-            marker = "representative" if member.is_group_representative else "alternative"
-            lines.append(
-                f"    {member.candidate_id}: {member.title or '(unknown)'} "
-                f"| {' | '.join(meta)} | {marker}"
-            )
-    for provider in sorted(candidate.provider_ids):
-        rank = candidate.provider_ranks.get(provider)
-        lines.append(f"  provider {provider}: available (rank {rank})")
-    for field_name, provider in sorted(candidate.field_provenance.items()):
-        lines.append(f"  provenance {field_name}: {provider}")
-    for field_name, values in sorted(candidate.conflicts.items()):
-        if field_name.casefold() in {"doi", "url"}:
-            continue
-        rendered = "; ".join(f"{v['provider']}={v['value']!r}" for v in values)
-        lines.append(f"  conflict {field_name}: {rendered}")
-    lines.append(
-        "  Grounding: metadata and snippet only — not the paper's abstract"
-        " or full text. Label any summary from this alone as inferred from"
-        " metadata, or fetch real text first."
-    )
-    lines.append("  DOI is withheld until a match is explicitly confirmed.")
-    return _redact_dois("\n".join(lines))
-
-
-def format_search_outcome(outcome: SearchOutcome, *, appended: bool = False) -> str:
-    if outcome.error:
-        return f"error: {outcome.error}"
-    lines = []
-    visible_works = outcome.visible_works or len(outcome.candidates)
-    version_candidates = outcome.version_candidates or len(outcome.candidates)
-    if appended:
-        lines.append(
-            f"added {outcome.versions_added} version candidate(s); "
-            f"{visible_works} canonical work(s) now visible"
-        )
-    else:
-        lines.append(
-            f"found {visible_works} candidate(s) representing "
-            f"{visible_works} canonical work(s) from {version_candidates} "
-            "version candidate(s)"
-        )
-    lines.append(f"applied date filter: {outcome.applied_date_filter}")
-    if outcome.grouped_versions:
-        lines.append(
-            f"({outcome.grouped_versions} version candidate(s) folded into "
-            "canonical-work groups; every cX remains selectable)"
-        )
-    if outcome.updated_groups:
-        lines.append(f"({outcome.updated_groups} existing version group(s) updated)")
-    if outcome.date_filtered_out:
-        lines.append(
-            f"({outcome.date_filtered_out} candidate(s) dropped by the date "
-            "filter: unknown or out-of-window publication year)"
-        )
-    if outcome.used_web_fallback:
-        lines.append("(web search results included)")
-    for state in outcome.provider_states:
-        detail = f" — {state.detail}" if state.detail else ""
-        lines.append(f"  provider {state.provider}: {state.status}{detail}")
-    if outcome.candidates:
-        lines.append("")
-        if appended:
-            lines.append(format_shortlist(
-                outcome.candidates,
-                total_matches=len(outcome.candidates),
-                label="Affected canonical works",
-            ))
-        else:
-            lines.append(format_shortlist(
-                outcome.candidates,
-                total_matches=len(outcome.candidates),
-            ))
-    return "\n".join(lines)
-
-
-def format_refine_outcome(outcome: RefineOutcome) -> str:
-    if outcome.error:
-        return f"error: {outcome.error}"
-    verb = "refinement reset" if outcome.reset else "refined candidate view"
-    visible_works = outcome.visible_works or len(outcome.candidates)
-    lines = [
-        f"{verb}: {visible_works} match(es) from pool of {outcome.pool_size} "
-        f"version candidate(s) ({visible_works} canonical work(s))",
-        f"search date filter: {outcome.applied_search_date_filter}",
-        f"refinement date filter: {outcome.applied_refinement_date_filter}",
-    ]
-    lines.append(format_shortlist(
-        outcome.candidates,
-        total_matches=len(outcome.candidates),
-    ))
-    return "\n".join(lines)
-
-
-def _format_match_lines(
-    matches: list[CitationMatch], *, indent: str = ""
-) -> list[str]:
-    lines: list[str] = []
-    for match in matches:
-        lines.append(f"{indent}[{match.match_id}] confirmable match")
-        if match.title:
-            lines.append(f"{indent}      title: {match.title}")
-        meta = []
-        if match.year is not None:
-            meta.append(str(match.year))
-        if match.venue:
-            meta.append(match.venue)
-        if match.registration_agency:
-            meta.append(f"RA: {match.registration_agency}")
-        if meta:
-            lines.append(f"{indent}      {' | '.join(meta)}")
-    return lines
-
-
-def format_matches(matches: list[CitationMatch]) -> str:
-    """Render matches grouped by candidate with explicit ambiguity labels."""
-    lines = ["Confirmable matches from this request:"]
-    grouped: dict[str, list[CitationMatch]] = {}
-    for match in matches:
-        grouped.setdefault(match.candidate_id, []).append(match)
-    for candidate_id, candidate_matches in grouped.items():
-        lines.append(f"[{candidate_id}] {len(candidate_matches)} match(es)")
-        if len(candidate_matches) > 1:
-            lines.append(
-                "  needs-disambiguation: choose one mX, unless the user "
-                "explicitly requested all versions"
-            )
-        lines.extend(_format_match_lines(candidate_matches, indent="  "))
-    lines.append(
-        "If the current user request already authorizes saving, a candidate "
-        "with exactly one match may be confirmed now. Otherwise present the "
-        "matches and ask. Negated, conditional, questioning, or unclear "
-        "intent never authorizes confirm."
-    )
-    lines.append("Do not expose a DOI literal before confirm succeeds; use mX ids.")
-    return _redact_dois("\n".join(lines))
-
-
-def format_select_outcomes(
-    outcomes: list[tuple[str, SelectOutcome]],
-    *,
-    existing_pending: list[CitationMatch],
-) -> str:
-    """Summarize only this call's resolutions, isolating older pending state."""
-    current_matches = [
-        match
-        for _candidate_id, outcome in outcomes
-        for match in outcome.matches
-    ]
-    lines = [format_matches(current_matches)] if current_matches else [
-        "Confirmable matches from this request: none"
-    ]
-    failures = [
-        (candidate_id, outcome.result)
-        for candidate_id, outcome in outcomes
-        if outcome.result is not None
-    ]
-    if failures:
-        lines.append("Selection failures from this request:")
-        for candidate_id, result in failures:
-            lines.append(
-                f"- [{candidate_id}] {result.status}: {result.message}"
-            )
-    if existing_pending:
-        lines.append(
-            "Existing pending matches (not requested in this call; not "
-            "authorized by this request; do not auto-confirm):"
-        )
-        grouped: dict[str, list[CitationMatch]] = {}
-        for match in existing_pending:
-            grouped.setdefault(match.candidate_id, []).append(match)
-        for candidate_id, matches in grouped.items():
-            lines.append(f"[{candidate_id}] existing pending")
-            lines.extend(_format_match_lines(matches, indent="  "))
-    return _redact_dois("\n".join(lines))
-
-
-def format_save_outcomes(
-    *,
-    saved: list[tuple[str, str, CitationResult]],
-    ambiguous: list[tuple[str, list[CitationMatch]]],
-    failures: list[ConfirmFailure],
-) -> str:
-    """Render one atomic save call: written, needs-disambiguation, failed."""
-    lines: list[str] = []
-    if saved:
-        lines.append(f"Saved {len(saved)} citation(s):")
-        for candidate_id, match_id, result in saved:
-            lines.append(f"[{candidate_id} -> {match_id}]")
-            lines.extend(
-                f"  {line}" for line in format_result(result).splitlines()
-            )
-    if ambiguous:
-        lines.append(
-            "Needs disambiguation — nothing was written for these candidates:"
-        )
-        for candidate_id, matches in ambiguous:
-            lines.append(
-                f"[{candidate_id}] resolved {len(matches)} distinct DOI "
-                "version(s); present the mX options and ask the user to pick "
-                "one (action=confirm), unless they explicitly requested all "
-                "versions"
-            )
-            lines.extend(_format_match_lines(matches, indent="  "))
-    if failures:
-        lines.append(f"Failed to save {len(failures)} item(s):")
-        for failure in failures:
-            lines.append(
-                f"[{failure.match_id}] {failure.status} ({failure.reason_code})"
-            )
-    text = "\n".join(lines)
-    return text if saved else _redact_dois(text)
-
-
-def format_confirm_batch(
-    results: list[tuple[str, CitationResult]],
-) -> str:
-    successes = [
-        (match_id, result)
-        for match_id, result in results
-        if result.status == "confirmed"
-    ]
-    failures = [
-        (match_id, result)
-        for match_id, result in results
-        if result.status != "confirmed"
-    ]
-    lines: list[str] = []
-    if successes:
-        lines.append(f"Confirmed {len(successes)} citation(s):")
-        for match_id, result in successes:
-            lines.append(f"[{match_id}]")
-            lines.extend(f"  {line}" for line in format_result(result).splitlines())
-    if failures:
-        lines.append(f"Failed to confirm {len(failures)} citation(s):")
-        for match_id, result in failures:
-            lines.append(
-                f"[{match_id}] {result.status} ({result.reason_code or result.status})"
-            )
-    return _redact_dois("\n".join(lines)) if not successes else "\n".join(lines)
-
-
-def format_result(result: CitationResult) -> str:
-    lines = [f"citation {result.status}: {result.message}".rstrip(": ")]
-    if result.source is not None:
-        lines.append(
-            f"  source: {result.source.source_id} "
-            f"({result.source.verification_level})"
-        )
-        lines.append(f"  cite with [[cite:{result.source.source_id}]]")
-    if result.accepted_doi:
-        lines.append(f"  DOI: {_code_span(result.accepted_doi)}")
-    if result.bundle_path:
-        lines.append(f"  bundle: {_code_span(result.bundle_path)}")
-    if result.verification is not None:
-        for warning in result.verification.warnings:
-            lines.append(f"  warning: {warning}")
-        for code in result.verification.codes:
-            lines.append(f"  code: {code}")
-        for check in result.verification.checks:
-            if not check.passed:
-                lines.append(f"  failed check: {check.name} ({check.detail})")
-    text = "\n".join(lines)
-    return text if result.status == "confirmed" else _redact_dois(text)
-
-
-def format_sources(sources: list[SourceRef], *, page: int, total_pages: int) -> str:
-    if not sources:
-        return "no saved sources in this session"
-    lines = [f"Sources (page {page}/{total_pages}):"]
-    for ref in sources:
-        label = ref.title or "(untitled verified source)"
-        lines.append(f"[{ref.source_id}] {_redact_dois(label)}")
-        meta = [ref.verification_level]
-        if ref.doi:
-            meta.append(f"DOI {_code_span(ref.doi)}")
-        if ref.year:
-            meta.append(str(ref.year))
-        lines.append(f"      {' | '.join(meta)}")
-    lines.append(
-        "Use action=source with a source id to re-activate one for citing."
-    )
-    return "\n".join(lines)
-
-
-def format_source_detail(ref: SourceRef) -> str:
-    lines = [f"Source {ref.source_id} re-activated:"]
-    lines.append(f"  title: {ref.title or '(unknown)'}")
-    if ref.authors:
-        lines.append(f"  authors: {', '.join(ref.authors)}")
-    for label, value in (("year", ref.year), ("venue", ref.venue)):
-        if value:
-            lines.append(f"  {label}: {value}")
-    if ref.doi:
-        lines.append(f"  DOI: {_code_span(ref.doi)}")
-    if ref.url:
-        rendered_url = _code_span(ref.url) if extract_doi_candidates(ref.url) else ref.url
-        lines.append(f"  URL: {rendered_url}")
-    if ref.bundle_path:
-        lines.append(f"  bundle: {_code_span(ref.bundle_path)}")
-    lines.append(f"  verification: {ref.verification_level}")
-    lines.append(f"  cite with [[cite:{ref.source_id}]]")
-    return "\n".join(lines)
-
-
-def format_status(status: dict) -> str:
-    lines = ["Citation workflow status:"]
-    for key in (
-        "workflow_id", "query", "date_filter", "refinement_date_filter",
-        "ranking_mode", "candidates", "view_candidates", "refinement",
-        "refinement_venue_tiers", "selected", "matches", "attempts", "sources",
-    ):
-        lines.append(f"  {key}: {status.get(key)}")
-    for state in status.get("provider_states", []):
-        detail = f" — {state.get('detail')}" if state.get("detail") else ""
-        lines.append(
-            f"  provider {state.get('provider')}: {state.get('status')}{detail}"
-        )
-    return "\n".join(lines)
-
-
-def format_explain(output_dir: object) -> str:
-    """Deterministic public contract of the workflow; the model must not
-    invent internals beyond this text."""
-    lines = [
-        "Citation workflow — public contract:",
-        "  1. search: discovery providers (Crossref, plus OpenAlex when",
-        "     enabled) build the candidate pool; candidates usually already",
-        "     carry a DOI. Web results are a fallback, never a verifier.",
-        "  2. select: DOI candidates are extracted from the chosen",
-        "     candidate's stored DOI/URL/snippet/title fields.",
-        "  3. Each extracted DOI is resolved at doi.org into a structured",
-        "     CSL record, and its registration agency is looked up.",
-        "  4. confirm runs when the user's current request semantically",
-        "     authorizes saving; it may follow select in the same turn. It",
-        "     re-fetches the CSL record and never trusts the discovery copy.",
-        "     save performs select and confirm as one atomic step per",
-        "     candidate: exactly one resolved DOI match is saved, several",
-        "     matches come back needs-disambiguation with nothing written.",
-        "  5. BibTeX is retrieved from doi.org via content negotiation for",
-        "     the same DOI; it is never written by the model.",
-        "  6. The system parses that BibTeX and verifies the selected match,",
-        "     the CSL record, and the BibTeX agree on one canonical DOI.",
-        "  7. On success the bundle — reference.bib plus a citation.json",
-        "     sidecar — is written atomically under the citation output",
-        "     directory (the workspace cite/ directory by default, never",
-        "     inside app/rag/skills package trees).",
-        f"  Current citation output directory: {_code_span(output_dir)}",
-        "  Each bundle is one <title>--<doi-hash> directory; re-confirming",
-        "  the same DOI validates and reuses the existing bundle.",
-        "For saved sources and their exact bundle paths, use action=sources",
-        "or action=source with a source id; never guess or scan directories.",
-    ]
-    return "\n".join(lines)
-
-
-# --- parameter validation ----------------------------------------------------
-
-
-def _validation_error(detail: str) -> str:
-    return f"error: {detail}"
-
-
-def _code_span(value: object) -> str:
-    """Render arbitrary one-line data as a valid Markdown code span."""
-    text = str(value).replace("\n", " ")
-    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
-    fence = "`" * (longest + 1)
-    if text.startswith(("`", " ")) or text.endswith(("`", " ")):
-        text = f" {text} "
-    return f"{fence}{text}{fence}"
+def _error(message: str) -> str:
+    return f"validation error: {message}"
 
 
 def _redact_dois(text: str) -> str:
-    """Remove DOI literals from pre-confirm model-facing content."""
-    out = text
-    for doi in extract_doi_candidates(text):
-        out = re.sub(re.escape(doi), "[DOI withheld until confirm]", out, flags=re.I)
-    return out
+    return re.sub(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", "[DOI withheld]", text, flags=re.I)
 
 
-def _confirm_receipt(result: CitationResult) -> ConfirmReceipt:
-    if (
-        result.status != "confirmed"
-        or result.source is None
-        or not result.accepted_doi
-        or not result.bundle_path
-    ):
-        raise ValueError("a complete confirmed result is required for a receipt")
-    return ConfirmReceipt(
-        source_id=result.source.source_id,
-        accepted_doi=result.accepted_doi,
-        bundle_path=result.bundle_path,
-        verification_level=result.source.verification_level,
-        cite_marker=f"[[cite:{result.source.source_id}]]",
-        warnings=tuple(
-            result.verification.warnings if result.verification is not None else ()
-        ),
+def _format_records(records, states) -> str:
+    if not records:
+        return "No bibliographic records found. " + "; ".join(states)
+    lines = [f"Found {len(records)} bibliographic record(s):"]
+    for record in records:
+        authors = ", ".join(record.authors) or "authors unknown"
+        metadata = " | ".join(str(value) for value in (
+            record.title or "untitled", authors, record.year or "year unknown",
+            record.venue or "venue unknown", record.work_type or "type unknown",
+            record.version_kind or "version unknown",
+        ))
+        lines.append(f"- {metadata}")
+    lines.append("Provider states: " + "; ".join(states))
+    lines.append("No result number is a save identifier; build a complete WorkIntent from the metadata.")
+    return _redact_dois("\n".join(lines))
+
+
+def _format_sources(sources: list[SourceRef], page: int, total_pages: int) -> str:
+    if not sources:
+        return "No saved sources in this session."
+    lines = [f"Saved sources (page {page}/{total_pages}):"]
+    for ref in sources:
+        lines.append(f"- {ref.source_id}: {ref.title} ({ref.year or 'year unknown'})")
+    return "\n".join(lines)
+
+
+def _format_source(ref: SourceRef) -> str:
+    return "\n".join([
+        f"Source {ref.source_id}", f"title: {ref.title}",
+        f"authors: {', '.join(ref.authors) or 'unknown'}",
+        f"year: {ref.year or 'unknown'}", f"venue: {ref.venue or 'unknown'}",
+        f"type: {ref.work_type or 'unknown'}", f"marker: [[cite:{ref.source_id}]]",
+    ])
+
+
+def format_explain(output_dir) -> str:
+    return (
+        "search is stateless and returns full metadata without cX/mX IDs. "
+        "save accepts 1–10 self-contained WorkIntent objects, resolves each "
+        "fresh across bounded providers, applies blocking work/version checks, "
+        "and permits one attempted mutation batch per user turn. Generic "
+        "'this paper' with an unknown version and unqualified 'original' require "
+        "clarification. Bundles are written atomically under " + str(output_dir)
     )
-
-
-_SELECT_FAILURE_REASON_CODES = {
-    "invalid_state": "unknown_candidate",
-    "no_doi": "no_doi",
-    "provider_failed": "doi_lookup_failed",
-}
-
-
-def _select_failure(candidate_id: str, result: CitationResult) -> ConfirmFailure:
-    """Map one save-time selection failure onto the fail-closed artifact."""
-    return ConfirmFailure(
-        match_id=candidate_id,
-        status=result.status,
-        reason_code=_SELECT_FAILURE_REASON_CODES[result.status],
-    )
-
-
-def _build_date_filter(
-    *,
-    published_within_years: int | None,
-    year_from: int | None,
-    year_to: int | None,
-) -> PublishedDateFilter | None:
-    has_range = year_from is not None or year_to is not None
-    if published_within_years is not None and has_range:
-        raise ValueError(
-            "published_within_years and year_from/year_to are mutually "
-            "exclusive; use one date mode"
-        )
-    if published_within_years is not None:
-        return PublishedDateFilter.within_years(published_within_years)
-    if has_range:
-        return PublishedDateFilter.from_year_range(year_from, year_to)
-    return None
-
-
-# --- the tool ----------------------------------------------------------------
 
 
 def create_citation_workflow_tool(
     *,
-    coordinator_getter: Callable[[], CitationCoordinator],
+    service_getter: Callable | None = None,
+    coordinator_getter: Callable | None = None,
+    context_getter: Callable[[], CitationTurnContext | None] | None = None,
 ) -> StructuredTool:
-    """Build the session-scoped citation_workflow StructuredTool.
-
-    ``coordinator_getter`` returns the session Coordinator lazily (so merely
-    creating the tool never touches providers). The model owns natural-
-    language authorization judgment; this tool validates identifiers and
-    workflow state, not user phrasing.
-    """
+    getter = service_getter or coordinator_getter
+    if getter is None:
+        raise ValueError("service_getter is required")
+    context_getter = context_getter or (lambda: None)
     busy_lock = asyncio.Lock()
-
-    async def _dispatch(
-        action: CitationAction,
-        query: str | None,
-        identifier: str | None,
-        identifiers: list[str] | None,
-        page: int | None,
-        keywords: list[str] | None,
-        venues: list[str] | None,
-        work_types: list[str] | None,
-        venue_tiers: list[str] | None,
-        published_within_years: int | None,
-        year_from: int | None,
-        year_to: int | None,
-    ) -> str | tuple[str, dict]:
-        coordinator = coordinator_getter()
-        if identifier is not None:
-            identifier = identifier.strip()
-
-        has_date_args = (
-            published_within_years is not None
-            or year_from is not None
-            or year_to is not None
-        )
-        if has_date_args and action not in {"search", "refine"}:
-            return _validation_error(
-                "date filters only apply to action='search' or action='refine'"
-            )
-        has_refine_args = any(value is not None for value in (
-            keywords, venues, work_types, venue_tiers,
-        ))
-        if has_refine_args and action != "refine":
-            return _validation_error(
-                "keywords/venues/work_types/venue_tiers only apply to "
-                "action='refine'"
-            )
-        if identifier is not None and identifiers is not None:
-            return _validation_error(
-                "identifier and identifiers are mutually exclusive"
-            )
-        batch_identifiers: list[str] = []
-        if identifiers is not None:
-            if action not in _BATCH_ACTIONS:
-                return _validation_error(
-                    "identifiers only applies to save/select/confirm"
-                )
-            batch_identifiers = list(dict.fromkeys(
-                value.strip()
-                for value in identifiers
-                if isinstance(value, str) and value.strip()
-            ))
-            if not batch_identifiers:
-                return _validation_error("identifiers must not be empty")
-            if len(batch_identifiers) > MAX_BATCH_IDENTIFIERS:
-                return _validation_error(
-                    f"identifiers accepts at most {MAX_BATCH_IDENTIFIERS} ids"
-                )
-        elif action in _BATCH_ACTIONS:
-            normalized = (identifier or "").strip()
-            if not normalized:
-                return _validation_error(
-                    f"action '{action}' requires identifier or identifiers"
-                )
-            batch_identifiers = [normalized]
-        elif action in {"show", "source"} and not (identifier or "").strip():
-            return _validation_error(f"action '{action}' requires identifier")
-        if page is not None and action not in _PAGE_ACTIONS:
-            return _validation_error("page only applies to list/sources")
-        if page is not None and page < 1:
-            return _validation_error("page must be >= 1")
-
-        if action == "search":
-            if not (query or "").strip():
-                return _validation_error("action 'search' requires query")
-            try:
-                date_filter = _build_date_filter(
-                    published_within_years=published_within_years,
-                    year_from=year_from,
-                    year_to=year_to,
-                )
-            except ValueError as exc:
-                return _validation_error(str(exc))
-            outcome = await coordinator.search(query, date_filter=date_filter)
-            return format_search_outcome(outcome)
-
-        if action == "more":
-            outcome = await coordinator.more(query)
-            return format_search_outcome(outcome, appended=True)
-
-        if action == "refine":
-            try:
-                date_filter = _build_date_filter(
-                    published_within_years=published_within_years,
-                    year_from=year_from,
-                    year_to=year_to,
-                )
-            except ValueError as exc:
-                return _validation_error(str(exc))
-            outcome = coordinator.refine(
-                keywords=keywords,
-                venues=venues,
-                work_types=work_types,
-                venue_tiers=venue_tiers,
-                date_filter=date_filter,
-            )
-            return format_refine_outcome(outcome)
-
-        if action == "list":
-            candidates, total_pages = coordinator.list_candidates(page or 1)
-            return format_candidates(
-                candidates,
-                page=min(page or 1, total_pages),
-                total_pages=total_pages,
-            )
-
-        if action == "show":
-            candidate = coordinator.get_candidate(identifier)
-            if candidate is None:
-                return f"unknown or stale candidate id: {identifier}"
-            return format_candidate_detail(
-                candidate,
-                group=coordinator.get_candidate_group(identifier),
-            )
-
-        if action == "select":
-            outcomes: list[tuple[str, SelectOutcome]] = []
-            current_match_ids: set[str] = set()
-            for candidate_id in batch_identifiers:
-                outcome = await coordinator.select(candidate_id)
-                outcomes.append((candidate_id, outcome))
-                current_match_ids.update(
-                    match.match_id for match in outcome.matches
-                )
-            existing_pending = [
-                match for match in coordinator.pending_matches()
-                if match.match_id not in current_match_ids
-            ]
-            # Resolved-but-unsaved matches travel as a trusted artifact so
-            # the finalizer can still report them if the model goes silent
-            # before the save completes.
-            artifact = ConfirmBatchOutcome(pending=tuple(
-                PendingMatchNote(
-                    candidate_id=match.candidate_id,
-                    match_id=match.match_id,
-                    needs_disambiguation=len(outcome.matches) > 1,
-                )
-                for _candidate_id, outcome in outcomes
-                for match in outcome.matches
-            )).to_artifact()
-            return format_select_outcomes(
-                outcomes,
-                existing_pending=existing_pending,
-            ), artifact
-
-        if action == "save":
-            saved: list[tuple[str, str, CitationResult]] = []
-            ambiguous: list[tuple[str, list[CitationMatch]]] = []
-            save_receipts: list[ConfirmReceipt] = []
-            save_failures: list[ConfirmFailure] = []
-            for candidate_id in batch_identifiers:
-                outcome = await coordinator.select(candidate_id)
-                if outcome.result is not None:
-                    save_failures.append(
-                        _select_failure(candidate_id, outcome.result)
-                    )
-                    continue
-                if len(outcome.matches) > 1:
-                    # The matches stay pending; only an explicit mX (or an
-                    # explicit all-versions request) may confirm them later.
-                    ambiguous.append((candidate_id, outcome.matches))
-                    continue
-                match = outcome.matches[0]
-                result = await coordinator.confirm(match.match_id)
-                if result.status == "confirmed":
-                    save_receipts.append(_confirm_receipt(result))
-                    saved.append((candidate_id, match.match_id, result))
-                else:
-                    save_failures.append(ConfirmFailure(
-                        match_id=match.match_id,
-                        status=result.status,
-                        reason_code=result.reason_code or result.status,
-                    ))
-            artifact = ConfirmBatchOutcome(
-                receipts=tuple(save_receipts),
-                failures=tuple(save_failures),
-                pending=tuple(
-                    PendingMatchNote(
-                        candidate_id=candidate_id,
-                        match_id=match.match_id,
-                        needs_disambiguation=True,
-                    )
-                    for candidate_id, matches in ambiguous
-                    for match in matches
-                ),
-            ).to_artifact()
-            return format_save_outcomes(
-                saved=saved,
-                ambiguous=ambiguous,
-                failures=save_failures,
-            ), artifact
-
-        if action == "confirm":
-            results: list[tuple[str, CitationResult]] = []
-            receipts: list[ConfirmReceipt] = []
-            failures: list[ConfirmFailure] = []
-            for match_id in batch_identifiers:
-                result = await coordinator.confirm(match_id)
-                results.append((match_id, result))
-                if result.status == "confirmed":
-                    receipts.append(_confirm_receipt(result))
-                else:
-                    failures.append(ConfirmFailure(
-                        match_id=match_id,
-                        status=result.status,
-                        reason_code=result.reason_code or result.status,
-                    ))
-            artifact = ConfirmBatchOutcome(
-                receipts=tuple(receipts),
-                failures=tuple(failures),
-            ).to_artifact()
-            return format_confirm_batch(results), artifact
-
-        if action == "status":
-            return format_status(coordinator.status())
-
-        if action == "explain":
-            return format_explain(coordinator.output_dir)
-
-        if action == "cancel":
-            return format_result(coordinator.cancel())
-
-        if action == "sources":
-            sources, total_pages = coordinator.list_sources(page or 1)
-            return format_sources(
-                sources,
-                page=min(page or 1, total_pages),
-                total_pages=total_pages,
-            )
-
-        if action == "source":
-            ref = coordinator.activate_source(identifier)
-            if ref is None:
-                return f"unknown source id: {identifier}"
-            return format_source_detail(ref)
-
-        return _validation_error(f"unknown action: {action}")
 
     async def _run(
         action: CitationAction,
         query: str | None = None,
-        identifier: str | None = None,
-        identifiers: list[str] | None = None,
+        works: list[WorkIntentInput] | None = None,
+        source_id: str | None = None,
         page: int | None = None,
-        keywords: list[str] | None = None,
-        venues: list[str] | None = None,
-        work_types: list[str] | None = None,
-        venue_tiers: list[str] | None = None,
-        published_within_years: int | None = None,
         year_from: int | None = None,
         year_to: int | None = None,
     ) -> tuple[str, dict | None]:
-        if busy_lock.locked():
-            return _validation_error(
-                "citation workflow busy: another workflow call is still "
-                "running in this session; wait for it to finish"
-            ), None
-        async with busy_lock:
-            result = await _dispatch(
-                action, query, identifier, identifiers, page,
-                keywords, venues, work_types, venue_tiers,
-                published_within_years, year_from, year_to,
-            )
-            if isinstance(result, tuple):
-                return result
-            return result, None
+        payload_size = len(json.dumps({
+            "action": action, "query": query,
+            "works": [w.model_dump() for w in works] if works else None,
+            "source_id": source_id, "page": page,
+            "year_from": year_from, "year_to": year_to,
+        }, ensure_ascii=False, sort_keys=True).encode())
+        if payload_size > 64 * 1024:
+            return _error("canonical request exceeds 64 KiB"), None
+        service = getter()
+        if action == "search":
+            if not query or works is not None or source_id is not None or page is not None:
+                return _error("search requires only query and optional year filters"), None
+            if year_from is not None and year_to is not None and year_from > year_to:
+                return _error("year_from must not exceed year_to"), None
+            records, states = await service.search(query)
+            records = [r for r in records if (year_from is None or (r.year is not None and r.year >= year_from)) and (year_to is None or (r.year is not None and r.year <= year_to))]
+            return _format_records(records, states), None
+        if action == "save":
+            if not works or any(value is not None for value in (query, source_id, page, year_from, year_to)):
+                return _error("save requires only works (1..10)"), None
+            context = context_getter()
+            if context is None:
+                return "turn_context_missing", None
+            intents = tuple(work.to_domain() for work in works)
+            binding = HostIntentBinder().bind(intents, context.claims)
+            if busy_lock.locked():
+                rejected = SaveBatchOutcome(context.token, "rejected", "workflow_busy")
+                return "save rejected: workflow_busy", rejected.to_artifact()
+            async with busy_lock:
+                if not await context.guard.claim():
+                    rejected = SaveBatchOutcome(context.token, "rejected", "mutation_already_attempted")
+                    return "save rejected: mutation_already_attempted", rejected.to_artifact()
+                outcome = await service.save(binding.intents)
+                return "save batch attempted; trusted artifact contains per-item results", outcome.to_artifact()
+        if action == "sources":
+            if any(value is not None for value in (query, works, source_id, year_from, year_to)):
+                return _error("sources accepts only page"), None
+            sources, total = service.list_sources(page or 1)
+            return _format_sources(sources, min(page or 1, total), total), None
+        if action == "source":
+            if not source_id or any(value is not None for value in (query, works, page, year_from, year_to)):
+                return _error("source requires only source_id"), None
+            ref = service.activate_source(source_id)
+            return (_format_source(ref) if ref else f"unknown source id: {source_id}"), None
+        if action == "explain":
+            if any(value is not None for value in (query, works, source_id, page, year_from, year_to)):
+                return _error("explain accepts no additional fields"), None
+            return format_explain(service.output_dir), None
+        return _error("unknown action"), None
 
     _run.__name__ = TOOL_NAME
-
     return StructuredTool.from_function(
-        coroutine=_run,
-        name=TOOL_NAME,
-        description=TOOL_DESCRIPTION,
-        args_schema=CitationWorkflowInput,
-        infer_schema=False,
+        coroutine=_run, name=TOOL_NAME, description=TOOL_DESCRIPTION,
+        args_schema=CitationWorkflowInput, infer_schema=False,
         response_format="content_and_artifact",
     )

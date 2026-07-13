@@ -83,6 +83,8 @@ class RoutingFetcher:
         self.calls.append((url, accept))
         if "api.crossref.org" in url:
             return self.crossref_response
+        if "api.datacite.org" in url:
+            return FetchResponse(status=200, body=b'{"data": []}')
         if url.startswith("https://doi.org/ra/"):
             return FetchResponse(status=200, body=b'[{"RA": "Crossref"}]')
         if url.startswith("https://doi.org/"):

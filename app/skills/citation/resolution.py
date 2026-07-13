@@ -386,6 +386,8 @@ def evaluate_record(
         elif constraint.field == "venue":
             if normalize_title(constraint.value) not in normalize_title(record.venue):
                 reasons.append("hard_venue_mismatch")
+        elif constraint.field == "version_kind" and constraint.value == "earliest":
+            pass  # compared across surviving manifestations in decide_resolution
         elif constraint.field == "version_kind" and constraint.value != version:
             reasons.append("hard_version_mismatch")
         elif constraint.field == "work_kind" and constraint.value == "original_research":
@@ -455,6 +457,19 @@ def decide_resolution(
         return eligible[0]
 
     versions = {infer_version_kind(d.record) for d in eligible if d.record is not None}
+    earliest = next((
+        c for c in intent.constraints
+        if c.field == "version_kind" and c.value == "earliest" and c.is_hard
+    ), None)
+    if earliest is not None:
+        dated = [d for d in eligible if d.record is not None and d.record.year is not None]
+        if not dated:
+            return ResolutionDecision("ambiguous", "earliest_manifestation_unknown", alternatives=tuple(d.record for d in eligible if d.record is not None))
+        first_year = min(d.record.year for d in dated)
+        first = [d for d in dated if d.record.year == first_year]
+        if len(first) == 1:
+            return first[0]
+        return ResolutionDecision("ambiguous", "multiple_earliest_manifestations", alternatives=tuple(d.record for d in first if d.record is not None))
     has_explicit_version = any(
         c.field == "version_kind" and c.host_verified for c in intent.constraints
     )

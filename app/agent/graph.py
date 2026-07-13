@@ -34,8 +34,7 @@ from agent.turn_safety import (
 
 
 _LOCAL_CITATION_ACTIONS = frozenset({
-    "list", "show", "status", "explain", "sources", "source", "refine",
-    "cancel",
+    "explain", "sources", "source",
 })
 
 # Immediate same-request retries after a truly empty upstream reply, before

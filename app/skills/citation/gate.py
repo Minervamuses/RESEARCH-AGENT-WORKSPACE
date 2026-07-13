@@ -206,7 +206,7 @@ def build_safe_message(
     lines.extend(f"- {v.code}: {v.detail}" for v in violations)
     if citation_active:
         lines.append(
-            "請先在 citation workflow 中完成驗證（搜尋→選擇→確認），"
+            "請先在 citation workflow 中完成 stateless 搜尋與 WorkIntent 保存驗證，"
             "再以 [[cite:<source-id>]] 引用；缺來源的主張用 [[citation-needed]]。"
         )
     else:

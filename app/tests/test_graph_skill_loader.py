@@ -68,10 +68,7 @@ def _resolution(effective, skill=()):
 
 
 def test_budget_class_treats_read_only_citation_actions_as_local():
-    for action in (
-        "list", "show", "status", "explain", "sources", "source", "refine",
-        "cancel",
-    ):
+    for action in ("explain", "sources", "source"):
         assert _budget_class("citation_workflow", {"action": action}) == "local"
 
     assert _budget_class("citation_workflow", {"action": "search"}) == "primary"
@@ -735,7 +732,7 @@ def test_primary_and_local_tool_budgets_are_independent(monkeypatch, tmp_path):
                         },
                         {
                             "name": "citation_workflow",
-                            "args": {"action": "list"},
+                            "args": {"action": "sources"},
                             "id": f"local-{suffix}",
                         },
                     ])
