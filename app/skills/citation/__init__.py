@@ -25,4 +25,4 @@ __all__ = ["SKILL_NAME", "__version__"]
 # behavior (thinking isolation, teardown, gate policy) on this.
 SKILL_NAME = "citation"
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
