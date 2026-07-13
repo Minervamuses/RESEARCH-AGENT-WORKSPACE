@@ -8,15 +8,23 @@ but it can never undo a blocking contradiction recorded here.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 
 from skills.citation.doi import canonicalize_doi
 from skills.citation.normalize import normalize_title
 from skills.citation.providers.base import ProviderRecord
+from skills.citation.providers.net import (
+    ProviderDisabled,
+    ProviderError,
+    ProviderRateLimited,
+    ProviderTimeout,
+)
+from skills.citation.types import ProviderState
 
 IdentifierKind = Literal["doi", "arxiv"]
 ClaimProvenance = Literal[
@@ -273,6 +281,13 @@ class ResolutionDecision:
     evidence: ResolutionEvidence = field(default_factory=ResolutionEvidence)
 
 
+@dataclass(frozen=True)
+class WorkResolution:
+    decision: ResolutionDecision
+    provider_states: tuple[ProviderState, ...]
+    queries: tuple[str, ...]
+
+
 class ResolutionPolicy:
     """Versioned, conservative identity policy.
 
@@ -310,7 +325,7 @@ def _author_overlap(expected: Sequence[str], actual: Sequence[str]) -> bool:
 
 def infer_version_kind(record: ProviderRecord) -> VersionKind:
     explicit = getattr(record, "version_kind", "")
-    if explicit in {"published", "preprint", "repository", "repost", "unknown"}:
+    if explicit in {"published", "preprint", "repository", "repost"}:
         return explicit
     text = f"{record.work_type} {record.venue} {record.url or ''}".casefold()
     if "posted-content" in text or "repost" in text:
@@ -454,3 +469,153 @@ def decide_resolution(
             alternatives=tuple(d.record for d in eligible if d.record is not None),
         )
     return eligible[0]
+
+
+class WorkResolver:
+    """Bounded, deterministic multi-provider resolver.
+
+    Discovery providers run concurrently and are treated symmetrically.  A
+    DOI winner is always re-fetched through doi.org and evaluated again; a
+    discovery ranking score can therefore never authorize persistence.
+    """
+
+    def __init__(
+        self,
+        *,
+        crossref,
+        datacite,
+        doi_org,
+        openalex=None,
+        rows_per_query: int = 10,
+        metrics: Callable[[str, dict], None] | None = None,
+    ):
+        self._providers = [
+            ("crossref", crossref),
+            ("datacite", datacite),
+        ]
+        if openalex is not None:
+            self._providers.append(("openalex", openalex))
+        self._doi_org = doi_org
+        self._rows = max(1, min(rows_per_query, 20))
+        self._metrics = metrics or (lambda _event, _values: None)
+
+    @staticmethod
+    def queries_for(intent: WorkIntent) -> tuple[str, ...]:
+        exact = [i.value for i in intent.identifiers]
+        title = intent.title.strip()
+        author = intent.authors[0].strip() if intent.authors else ""
+        qualifiers = " ".join(
+            value for value in (title, author, str(intent.year or ""), intent.venue) if value
+        ).strip()
+        queries: list[str] = []
+        if exact:
+            queries.append(exact[0])
+        if qualifiers and qualifiers not in queries:
+            queries.append(qualifiers)
+        if title and author and len(queries) < 2:
+            fallback = f"{title} {author}".strip()
+            if fallback not in queries:
+                queries.append(fallback)
+        return tuple(queries[:2])
+
+    async def resolve(self, intent: WorkIntent) -> WorkResolution:
+        if intent.binding_reason or intent.negative_target:
+            decision = ResolutionDecision(
+                "insufficient_intent",
+                intent.binding_reason or "negative_target",
+            )
+            return WorkResolution(decision, (), ())
+        queries = self.queries_for(intent)
+        if not queries:
+            return WorkResolution(
+                ResolutionDecision("insufficient_intent", "insufficient_identity_anchor"),
+                (),
+                (),
+            )
+
+        async def call(name: str, provider, query: str):
+            try:
+                records = await provider.search(query, rows=self._rows)
+                return records, ProviderState(name, "ok" if records else "empty")
+            except ProviderDisabled:
+                return [], ProviderState(name, "disabled")
+            except ProviderRateLimited:
+                return [], ProviderState(name, "rate_limited")
+            except ProviderTimeout:
+                return [], ProviderState(name, "timeout")
+            except ProviderError:
+                return [], ProviderState(name, "error")
+
+        tasks = [call(name, provider, query) for query in queries for name, provider in self._providers]
+        results = await asyncio.gather(*tasks)
+        states = tuple(state for _records, state in results)
+        records = [record for provider_records, _state in results for record in provider_records]
+        self._metrics("resolver_provider_phase", {
+            "queries": len(queries), "records": len(records), "states": [s.status for s in states]
+        })
+        if not records and states and all(s.status in {"error", "timeout", "rate_limited"} for s in states):
+            return WorkResolution(
+                ResolutionDecision("provider_failed", "all_providers_failed"), states, queries
+            )
+
+        decision = decide_resolution(intent, records)
+        if decision.status != "eligible" or decision.record is None:
+            return WorkResolution(decision, states, queries)
+        winner = decision.record
+        if not winner.doi:
+            return WorkResolution(
+                ResolutionDecision(
+                    "unsupported", "unsupported_no_doi", record=winner,
+                    evidence=decision.evidence,
+                ),
+                states,
+                queries,
+            )
+        try:
+            csl = await self._doi_org.fetch_structured(winner.doi)
+        except ProviderRateLimited:
+            return WorkResolution(
+                ResolutionDecision("provider_failed", "doi_refetch_rate_limited"),
+                states + (ProviderState("doi.org", "rate_limited"),), queries,
+            )
+        except ProviderTimeout:
+            return WorkResolution(
+                ResolutionDecision("provider_failed", "doi_refetch_timeout"),
+                states + (ProviderState("doi.org", "timeout"),), queries,
+            )
+        except ProviderError:
+            return WorkResolution(
+                ResolutionDecision("verification_failed", "doi_refetch_failed"),
+                states + (ProviderState("doi.org", "error"),), queries,
+            )
+        verified = ProviderRecord(
+            provider="doi.org",
+            provider_id=f"doi.org:{csl.doi}",
+            rank=0,
+            title=csl.title,
+            authors=list(csl.authors),
+            year=csl.year,
+            venue=csl.venue,
+            doi=csl.doi,
+            url=csl.url,
+            work_type=csl.work_type,
+            version_kind=winner.version_kind,
+            relations=dict(winner.relations),
+            field_provenance={
+                "doi": "doi.org", "title": "doi.org", "authors": "doi.org",
+                "year": "doi.org", "venue": "doi.org", "work_type": "doi.org",
+            },
+        )
+        verified_decision = evaluate_record(intent, verified)
+        if verified_decision.status != "eligible":
+            verified_decision = ResolutionDecision(
+                "verification_failed",
+                "refetch_identity_conflict",
+                record=verified,
+                evidence=verified_decision.evidence,
+            )
+        return WorkResolution(
+            verified_decision,
+            states + (ProviderState("doi.org", "ok"),),
+            queries,
+        )
