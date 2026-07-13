@@ -1,6 +1,6 @@
 import pytest
 
-from skills.citation.coordinator import SourceRegistry
+from skills.citation.registry import SourceRegistry
 from skills.citation.types import (
     CanonicalIdentity,
     SaveAlternative,

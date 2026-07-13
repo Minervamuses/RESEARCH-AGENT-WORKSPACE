@@ -11,7 +11,7 @@ from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import find_content_tool_protocol_artifact
-from skills.citation.coordinator import CitationCoordinator
+from skills.citation.service import CitationService
 from skills.citation.hub import CitationProviderHub
 from skills.citation.types import (
     CitationMatch,
@@ -52,7 +52,7 @@ async def _noop_fetcher(url, headers):
 
 def _seed_verified_source(session, tmp_path, source_id="src-known"):
     hub = CitationProviderHub(env={}, fetcher=_noop_fetcher)
-    coordinator = CitationCoordinator(hub, output_dir=tmp_path / "cite")
+    coordinator = CitationService(hub, output_dir=tmp_path / "cite")
     coordinator.registry.register(SourceRef(
         source_id=source_id,
         doi="10.1234/known",
@@ -142,7 +142,7 @@ def _pending_tool_message(
     live=True,
     needs_disambiguation=False,
 ):
-    if live:
+    if live and hasattr(session.citation_coordinator, "_matches"):
         session.citation_coordinator._matches[match_id] = CitationMatch(  # noqa: SLF001
             match_id=match_id,
             candidate_id=candidate_id,
@@ -460,7 +460,7 @@ def test_partial_confirm_failure_renders_receipt_and_fixed_failure(make_session,
     assert "bundle 寫入失敗" in outcome.text
 
 
-def test_failed_answer_uses_live_pending_artifact_instead_of_generic_fallback(
+def test_legacy_pending_only_artifact_is_ignored_after_stateless_switch(
     make_session, tmp_path,
 ):
     session, _ = make_session()
@@ -477,11 +477,8 @@ def test_failed_answer_uses_live_pending_artifact_instead_of_generic_fallback(
         recovery_reason="fallback:empty_final_answer;repair:empty_final_answer",
     ))
 
-    assert "未能完成保存流程" in outcome.text
-    assert "尚未寫入任何 bundle" in outcome.text
-    assert "`c3` → `m4`" in outcome.text
-    assert "多版本，需指定其一" in outcome.text
-    assert "引用已確認並保存" not in outcome.text
+    assert outcome.text == "工具結果已取得，但本回合未能完成總結。"
+    assert "c3" not in outcome.text and "m4" not in outcome.text
 
 
 def test_stale_pending_artifact_is_ignored_fail_closed(make_session, tmp_path):
@@ -504,7 +501,7 @@ def test_stale_pending_artifact_is_ignored_fail_closed(make_session, tmp_path):
     assert "`m4`" not in outcome.text
 
 
-def test_confirm_receipt_precedes_pending_recovery_and_renders_live_ambiguity(
+def test_legacy_confirm_receipt_ignores_retired_pending_notes(
     make_session, tmp_path,
 ):
     session, _ = make_session()
@@ -537,8 +534,8 @@ def test_confirm_receipt_precedes_pending_recovery_and_renders_live_ambiguity(
 
     assert "引用已確認並保存" in outcome.text
     assert "`src-known`" in outcome.text
-    assert "已解析但尚未保存" in outcome.text
-    assert "`c3` → `m4`" in outcome.text
+    assert "已解析但尚未保存" not in outcome.text
+    assert "c3" not in outcome.text and "m4" not in outcome.text
 
 
 def test_successful_continuation_prose_is_not_replaced_by_pending_artifact(

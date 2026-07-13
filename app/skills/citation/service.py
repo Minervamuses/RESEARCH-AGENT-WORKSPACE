@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
-from skills.citation.coordinator import PROMPT_REGISTRY_LIMIT, SourceRegistry
+from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
 from skills.citation.doi import doi_equal
 from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import ProviderError

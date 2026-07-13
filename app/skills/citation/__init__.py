@@ -2,18 +2,17 @@
 
 This directory is simultaneously the ``citation`` skill bundle (``SKILL.md``
 + ``manifest.yaml``) and the ``skills.citation`` package holding its engine:
-a session-scoped :class:`skills.citation.coordinator.CitationCoordinator`
+a session-scoped :class:`skills.citation.service.CitationService`
 (driven by the skill-only ``citation_workflow`` tool) over a process-scoped
 :class:`skills.citation.hub.CitationProviderHub` that owns the shared
 provider clients, cache, and rate limiters.
 
-Discovery runs structured providers (Crossref, and OpenAlex when
-``OPENALEX_API_KEY`` is set) fused by deterministic reciprocal-rank fusion,
-with the web MCP only as an explicit or empty-result fallback. Confirmation
-re-verifies the selected DOI via doi.org (CSL JSON + BibTeX for the same
+Search is stateless across Crossref, DataCite, and optional OpenAlex. Saving
+freshly resolves a self-contained WorkIntent and re-verifies its DOI via
+doi.org (CSL JSON + BibTeX for the same
 canonical DOI, validated through pybtex) and persists an atomic bundle
 (``reference.bib`` + ``citation.json`` sidecar). Verification is strictly
-identity-level: ``identity_verified`` means the DOI and bibliographic
+identity-level: a citable verification level means the canonical identity and bibliographic
 pipeline agree on the record, never that the source supports a claim.
 
 Nothing here fabricates bibliographic data: failed lookups, DOI mismatches,

@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from skills.citation.types import CONFIRM_BATCH_KIND
-
 from agent.config import AgentConfig
 
 from agent.llm.openrouter import get_chat_model
@@ -180,16 +178,6 @@ def _tool_budget_note(
     return SystemMessage(content=content)
 
 
-_CONTINUATION_INSTRUCTION = SystemMessage(content=(
-    "[Continuation]\nYour previous response was empty or contained a "
-    "malformed tool call while the citation workflow sits between select "
-    "and confirm. Continue from the most recent tool result; do not repeat "
-    "operations that already completed (no new search or re-select). If the "
-    "user's current request authorizes saving, call citation_workflow with "
-    "action='confirm' and the pending match id(s) now; otherwise present "
-    "the pending matches and ask. Remaining tool budgets still apply."
-))
-
 _REPAIR_INSTRUCTION = SystemMessage(content=(
     "[Response repair]\nYour previous response could not be shown because it "
     "was empty or contained an unexecuted tool-call protocol. Using only the "
@@ -197,46 +185,6 @@ _REPAIR_INSTRUCTION = SystemMessage(content=(
     "answer now. Do not call or describe a tool invocation. If evidence is "
     "insufficient, state that plainly. Return only the answer."
 ))
-
-
-def _has_confirm_batch_artifact(messages: list) -> bool:
-    """Whether any confirm/save outcome already exists in this turn.
-
-    Only receipts or failures count: a pending-only batch artifact (a select
-    that resolved matches without saving) must not block the continuation.
-    """
-    for message in messages:
-        if not isinstance(message, ToolMessage):
-            continue
-        if getattr(message, "name", None) != "citation_workflow":
-            continue
-        artifact = getattr(message, "artifact", None)
-        if (
-            isinstance(artifact, Mapping)
-            and artifact.get("kind") == CONFIRM_BATCH_KIND
-            and (artifact.get("receipts") or artifact.get("failures"))
-        ):
-            return True
-    return False
-
-
-def _between_select_and_confirm(messages: list) -> bool:
-    """A select completed, and no confirm receipts exist yet, in this turn."""
-    return (
-        last_completed_citation_action(messages) == "select"
-        and not _has_confirm_batch_artifact(messages)
-    )
-
-
-def _continuation_attempted(messages: list) -> bool:
-    """Whether this turn already spent its single tool-capable continuation."""
-    return any(
-        isinstance(message, AIMessage)
-        and str(
-            (message.response_metadata or {}).get("turn_recovery", "")
-        ).startswith("continuation:")
-        for message in messages
-    )
 
 
 def _with_recovery_metadata(message: AIMessage, reason: str) -> AIMessage:
@@ -415,7 +363,6 @@ def build_graph(
             )
             return {"messages": [capped]}
 
-        continuation_window = _between_select_and_confirm(messages)
         issue = find_content_tool_protocol_artifact(
             capped.content,
             tool_names=tool_names,
@@ -424,14 +371,6 @@ def build_graph(
             tool_names=tool_names,
             dropped_tool_calls=dropped > 0,
         )
-        if (
-            issue is None
-            and continuation_window
-            and getattr(capped, "invalid_tool_calls", None)
-        ):
-            # A malformed call between select and confirm never completes the
-            # save; treat it as a recoverable problem instead of prose.
-            issue = "invalid_tool_calls"
         log_model_response(
             capped,
             stage="initial",
@@ -443,61 +382,6 @@ def build_graph(
         )
         if issue is None:
             return {"messages": [capped]}
-
-        if (
-            continuation_window
-            and primary_remaining > 0
-            and not _continuation_attempted(messages)
-        ):
-            # One tool-capable retry: unlike the no-tool repair below, the
-            # bound model may still finish the pending confirm within the
-            # remaining budgets. Only a second failure forfeits tool access.
-            continued = _model_for_state(state).invoke(
-                [*prompt_messages, _CONTINUATION_INSTRUCTION]
-            )
-            continued, continued_dropped = _cap_tool_calls(
-                continued,
-                primary_remaining=primary_remaining,
-                local_remaining=local_remaining,
-            )
-            if continued.tool_calls:
-                log_model_response(
-                    continued,
-                    stage="continuation",
-                    issue=None,
-                    dropped_tool_calls=continued_dropped,
-                    primary_remaining=primary_remaining,
-                    local_remaining=local_remaining,
-                    messages=messages,
-                )
-                return {"messages": [
-                    _with_recovery_metadata(continued, f"continuation:{issue}")
-                ]}
-            continued_issue = find_content_tool_protocol_artifact(
-                continued.content,
-                tool_names=tool_names,
-            ) or final_response_problem(
-                content_text(continued.content),
-                tool_names=tool_names,
-                dropped_tool_calls=continued_dropped > 0,
-            )
-            if continued_issue is None and getattr(
-                continued, "invalid_tool_calls", None
-            ):
-                continued_issue = "invalid_tool_calls"
-            log_model_response(
-                continued,
-                stage="continuation",
-                issue=continued_issue,
-                dropped_tool_calls=continued_dropped,
-                primary_remaining=primary_remaining,
-                local_remaining=local_remaining,
-                messages=messages,
-            )
-            if continued_issue is None:
-                return {"messages": [
-                    _with_recovery_metadata(continued, f"continued:{issue}")
-                ]}
 
         repaired = model.invoke([*prompt_messages, _REPAIR_INSTRUCTION])
         repaired, repair_dropped = _cap_tool_calls(

@@ -12,7 +12,7 @@ from agent.session import ChatSession
 from skills.citation.hub import CitationProviderHub
 from skills.citation.service import CitationService
 
-from tests.test_citation_coordinator import CROSSREF_ITEMS, RoutingFetcher
+from tests.citation_fixtures import RoutingFetcher
 
 
 @tool("rag_search")
