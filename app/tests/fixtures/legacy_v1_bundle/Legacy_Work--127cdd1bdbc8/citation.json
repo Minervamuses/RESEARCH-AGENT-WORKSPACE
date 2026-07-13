@@ -1,0 +1,21 @@
+{
+  "artifact_hashes": {
+    "reference.bib": "3103e9f577d5228b3052e656c7d6f09d399ed90787eb4862e781a5123097be4d"
+  },
+  "doi": "10.1234/legacy",
+  "schema_version": 1,
+  "source_ref": {
+    "authors": ["Legacy Author"],
+    "bundle_path": null,
+    "doi": "10.1234/legacy",
+    "provenance": "doi.org-csl+bibtex",
+    "schema_version": 1,
+    "source_id": "src-127cdd1bdbc8",
+    "title": "Legacy Work",
+    "url": "https://doi.org/10.1234/legacy",
+    "verification_level": "identity_verified",
+    "venue": "Legacy Venue",
+    "work_type": "journal-article",
+    "year": 2020
+  }
+}

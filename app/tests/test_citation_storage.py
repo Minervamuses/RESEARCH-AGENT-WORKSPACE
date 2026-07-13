@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,11 +19,22 @@ from skills.citation.storage import (
     resolve_output_dir,
     validate_bundle,
     write_bundle,
+    write_identity_bundle,
+    validate_identity_bundle,
 )
+from skills.citation.types import CanonicalIdentity, SourceRef, is_citable_source
 
 DOI = "10.1234/example"
 BIB = "@article{k,\n  title = {T},\n  year = {2020},\n}\n"
-SIDECAR = {"run_id": "r1", "source_ref": {"source_id": "s1"}}
+def make_sidecar(doi=DOI):
+    return {
+        "run_id": "r1",
+        "source_ref": {
+            "source_id": f"src-{storage.doi_hash(doi)}",
+            "doi": doi,
+            "verification_level": "identity_verified",
+        },
+    }
 
 
 def test_output_dir_precedence_config_env_workspace(monkeypatch, tmp_path):
@@ -102,7 +114,7 @@ def test_bundle_dir_name_caps_utf8_bytes_and_keeps_hash():
 def test_write_bundle_creates_both_files_atomically(tmp_path):
     result = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     assert result.reused is False
     assert result.bib_path.read_text(encoding="utf-8") == BIB
@@ -120,11 +132,11 @@ def test_write_bundle_creates_both_files_atomically(tmp_path):
 def test_same_doi_reconfirm_reuses_validated_bundle(tmp_path):
     first = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     second = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     assert second.reused is True
     assert second.bundle_dir == first.bundle_dir
@@ -133,14 +145,14 @@ def test_same_doi_reconfirm_reuses_validated_bundle(tmp_path):
 def test_corrupt_existing_bundle_fails_closed_never_overwrites(tmp_path):
     first = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     # Tamper with the artifact: hash no longer matches the sidecar.
     first.bib_path.write_text("@tampered{}", encoding="utf-8")
     with pytest.raises(StorageError) as exc:
         write_bundle(
             tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-            sidecar=dict(SIDECAR),
+            sidecar=make_sidecar(),
         )
     assert exc.value.code == "bundle_conflict"
     assert first.bib_path.read_text(encoding="utf-8") == "@tampered{}"
@@ -149,20 +161,20 @@ def test_corrupt_existing_bundle_fails_closed_never_overwrites(tmp_path):
 def test_unreadable_sidecar_fails_closed(tmp_path):
     first = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     first.sidecar_path.write_text("{not json", encoding="utf-8")
     with pytest.raises(StorageError):
         write_bundle(
             tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-            sidecar=dict(SIDECAR),
+            sidecar=make_sidecar(),
         )
 
 
 def test_schema_mismatch_fails_closed(tmp_path):
     first = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     sidecar = json.loads(first.sidecar_path.read_text(encoding="utf-8"))
     sidecar["schema_version"] = 99
@@ -170,12 +182,12 @@ def test_schema_mismatch_fails_closed(tmp_path):
     with pytest.raises(StorageError) as exc:
         write_bundle(
             tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-            sidecar=dict(SIDECAR),
+            sidecar=make_sidecar(),
         )
     assert exc.value.code == "bundle_conflict"
 
 
-def test_different_doi_name_collision_extends_hash(tmp_path, monkeypatch):
+def test_different_doi_source_id_collision_fails_closed(tmp_path, monkeypatch):
     # Force every DOI to the same 12-hex prefix so the names collide.
     real_doi_hash = storage.doi_hash
 
@@ -187,21 +199,15 @@ def test_different_doi_name_collision_extends_hash(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "doi_hash", fake_hash)
     first = write_bundle(
         tmp_path, canonical_doi="10.1111/one", title="Same Title",
-        bibtex_text=BIB, sidecar=dict(SIDECAR),
+        bibtex_text=BIB, sidecar=make_sidecar("10.1111/one"),
     )
-    second = write_bundle(
-        tmp_path, canonical_doi="10.2222/two", title="Same Title",
-        bibtex_text=BIB, sidecar=dict(SIDECAR),
-    )
-    assert first.bundle_dir != second.bundle_dir
-    stem, _, digest = second.bundle_dir.name.rpartition("--")
-    assert len(digest) == 20  # extended, not overwritten
-    # Both visible bundles carry both artifacts with consistent hashes.
-    for result in (first, second):
-        validated = validate_bundle(result.bundle_dir, json.loads(
-            result.sidecar_path.read_text(encoding="utf-8")
-        )["doi"])
-        assert validated.reused is True
+    with pytest.raises(StorageError) as exc:
+        write_bundle(
+            tmp_path, canonical_doi="10.2222/two", title="Same Title",
+            bibtex_text=BIB, sidecar=make_sidecar("10.2222/two"),
+        )
+    assert exc.value.code == "source_id_collision"
+    assert [p for p in tmp_path.iterdir() if p.is_dir() and not p.name.startswith(".")] == [first.bundle_dir]
 
 
 def test_stale_staging_cleanup_only_after_24h(tmp_path):
@@ -230,7 +236,7 @@ def test_write_failure_surfaces_as_storage_error(tmp_path):
         with pytest.raises(StorageError) as exc:
             write_bundle(
                 blocked, canonical_doi=DOI, title="T", bibtex_text=BIB,
-                sidecar=dict(SIDECAR),
+                sidecar=make_sidecar(),
             )
         assert exc.value.code == "write_failed"
     finally:
@@ -240,9 +246,59 @@ def test_write_failure_surfaces_as_storage_error(tmp_path):
 def test_visible_bundle_always_has_both_artifacts(tmp_path):
     result = write_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
-        sidecar=dict(SIDECAR),
+        sidecar=make_sidecar(),
     )
     entries = sorted(p.name for p in result.bundle_dir.iterdir())
     assert entries == [SIDECAR_FILENAME, BIB_FILENAME] or entries == sorted(
         [BIB_FILENAME, SIDECAR_FILENAME]
     )
+
+
+def test_frozen_v1_fixture_validates_and_is_reused_without_rewrite(tmp_path):
+    fixture = Path(__file__).parent / "fixtures/legacy_v1_bundle/Legacy_Work--127cdd1bdbc8"
+    target = tmp_path / fixture.name
+    shutil.copytree(fixture, target)
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in target.iterdir()}
+    result = write_bundle(
+        tmp_path,
+        canonical_doi="10.1234/legacy",
+        title="A changed provider title",
+        bibtex_text="ignored on reuse",
+        sidecar=make_sidecar("10.1234/legacy"),
+    )
+    assert result.reused and result.bundle_dir == target
+    after = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in target.iterdir()}
+    assert after == before
+
+
+def test_v2_doi_keeps_legacy_source_id_and_reuses_across_title_drift(tmp_path):
+    identity = CanonicalIdentity("doi", DOI)
+    payload = {"source_ref": {"source_id": f"src-{storage.doi_hash(DOI)}"}, "creation_evidence": {"batch_id": "b1"}}
+    first = write_identity_bundle(tmp_path, identity=identity, title="First title", bibtex_text=BIB, sidecar=payload)
+    before = first.sidecar_path.read_bytes(), first.sidecar_path.stat().st_mtime_ns
+    second = write_identity_bundle(tmp_path, identity=identity, title="Changed title", bibtex_text="different", sidecar={"creation_evidence": {"batch_id": "b2"}})
+    assert second.reused and second.bundle_dir == first.bundle_dir
+    assert (second.sidecar_path.read_bytes(), second.sidecar_path.stat().st_mtime_ns) == before
+    data = json.loads(first.sidecar_path.read_text())
+    assert data["schema_version"] == 2
+    assert data["identity"] == {"kind": "doi", "value": DOI}
+
+
+def test_v2_authoritative_non_doi_identity_is_stable(tmp_path):
+    identity = CanonicalIdentity("venue", "neurips:2017:attention-is-all-you-need")
+    result = write_identity_bundle(tmp_path, identity=identity, title="Attention Is All You Need", bibtex_text=BIB, sidecar={"source_ref": {"source_id": storage.source_id_for(identity)}})
+    assert validate_identity_bundle(result.bundle_dir, identity).reused
+    data = json.loads(result.sidecar_path.read_text())
+    assert data["doi"] is None
+    assert str(tmp_path) not in result.sidecar_path.read_text()
+
+
+def test_verification_level_identity_shapes_fail_closed():
+    legacy = SourceRef("src-x", "10.1234/x", "X")
+    assert is_citable_source(legacy)
+    doi_v2 = SourceRef("src-x", "10.1234/x", "X", schema_version=2, verification_level="doi_identity_verified", canonical_identity=CanonicalIdentity("doi", "10.1234/x"))
+    assert is_citable_source(doi_v2)
+    authority = SourceRef("src-y", None, "Y", schema_version=2, verification_level="authority_metadata_verified", canonical_identity=CanonicalIdentity("venue", "adapter:y"))
+    assert is_citable_source(authority)
+    contradictory = SourceRef("src-z", "10.1234/z", "Z", schema_version=2, verification_level="doi_identity_verified", canonical_identity=CanonicalIdentity("doi", "10.1234/other"))
+    assert not is_citable_source(contradictory)

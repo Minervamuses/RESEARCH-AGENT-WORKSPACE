@@ -19,6 +19,7 @@ from skills.citation.types import (
     ConfirmFailure,
     ConfirmReceipt,
     PendingMatchNote,
+    is_citable_source,
 )
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
@@ -298,6 +299,7 @@ class ChatSession:
         if registry is None:
             return None
         sources = registry.prompt_sources()
+        sources = [ref for ref in sources if is_citable_source(ref)]
         if not sources:
             return None
         lines = [
@@ -524,7 +526,7 @@ class ChatSession:
         verified_ids = frozenset(
             ref.source_id
             for ref in (registry.list() if registry is not None else [])
-            if ref.verification_level == "identity_verified"
+            if is_citable_source(ref)
         )
         violations = check_citations(
             answer,

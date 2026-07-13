@@ -24,6 +24,8 @@ from typing import Literal
 
 # Version stamped into every persisted artifact (SourceRef JSON, sidecar).
 PERSIST_SCHEMA_VERSION = 1
+BUNDLE_SCHEMA_V2 = 2
+SUPPORTED_PERSIST_SCHEMA_VERSIONS = frozenset({PERSIST_SCHEMA_VERSION, BUNDLE_SCHEMA_V2})
 
 # Version for the ephemeral, tool-to-finalizer confirm receipt. This is not a
 # persisted bundle schema and deliberately evolves independently.
@@ -37,7 +39,35 @@ CONFIRM_BATCH_KIND = "citation_confirm_receipt_batch"
 
 # The only verification level a SourceRef can carry: the DOI and the
 # bibliographic pipeline agree on the identity of the record.
-VerificationLevel = Literal["identity_verified"]
+VerificationLevel = Literal[
+    "identity_verified", "doi_identity_verified", "authority_metadata_verified"
+]
+
+
+@dataclass(frozen=True)
+class CanonicalIdentity:
+    """Namespaced, authoritative identity for a citable manifestation."""
+
+    kind: Literal["doi", "arxiv", "url", "venue"]
+    value: str
+
+    def __post_init__(self) -> None:
+        from skills.citation.doi import canonicalize_doi
+
+        value = self.value.strip()
+        if self.kind == "doi":
+            value = canonicalize_doi(value) or ""
+        if not value:
+            raise ValueError("canonical identity requires a valid value")
+        object.__setattr__(self, "value", value)
+
+    @property
+    def key(self) -> str:
+        # Preserve historical DOI hashes/source IDs.
+        return self.value if self.kind == "doi" else f"{self.kind}:{self.value}"
+
+    def to_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "value": self.value}
 
 
 @dataclass(frozen=True)
@@ -340,6 +370,7 @@ class SourceRef:
     provenance: str = ""
     bundle_path: str | None = None
     schema_version: int = PERSIST_SCHEMA_VERSION
+    canonical_identity: CanonicalIdentity | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -355,7 +386,40 @@ class SourceRef:
             "verification_level": self.verification_level,
             "provenance": self.provenance,
             "bundle_path": self.bundle_path,
+            "canonical_identity": (
+                self.canonical_identity.to_dict() if self.canonical_identity else None
+            ),
         }
+
+
+def source_identity(ref: SourceRef) -> CanonicalIdentity | None:
+    """Return a validated live identity, deriving it only for legacy DOI refs."""
+    from skills.citation.doi import canonicalize_doi
+
+    if ref.canonical_identity is not None:
+        return ref.canonical_identity
+    if ref.schema_version == PERSIST_SCHEMA_VERSION:
+        doi = canonicalize_doi(ref.doi)
+        if doi:
+            return CanonicalIdentity("doi", doi)
+    return None
+
+
+def is_citable_source(ref: SourceRef) -> bool:
+    """Central fail-closed verification-level/identity shape policy."""
+    from skills.citation.doi import canonicalize_doi
+
+    identity = source_identity(ref)
+    if identity is None:
+        return False
+    doi = canonicalize_doi(ref.doi)
+    if ref.verification_level == "identity_verified":
+        return ref.schema_version == 1 and identity.kind == "doi" and doi == identity.value
+    if ref.verification_level == "doi_identity_verified":
+        return ref.schema_version == 2 and identity.kind == "doi" and doi == identity.value
+    if ref.verification_level == "authority_metadata_verified":
+        return ref.schema_version == 2 and identity.kind != "doi" and ref.doi is None
+    return False
 
 
 

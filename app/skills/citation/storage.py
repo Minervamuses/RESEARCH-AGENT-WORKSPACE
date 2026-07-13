@@ -37,10 +37,16 @@ import os
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from skills.citation.types import PERSIST_SCHEMA_VERSION
+from skills.citation.types import (
+    BUNDLE_SCHEMA_V2,
+    PERSIST_SCHEMA_VERSION,
+    SUPPORTED_PERSIST_SCHEMA_VERSIONS,
+    CanonicalIdentity,
+)
 
 BIB_FILENAME = "reference.bib"
 SIDECAR_FILENAME = "citation.json"
@@ -48,6 +54,8 @@ MAX_BUNDLE_DIR_BYTES = 180
 HASH_LENGTHS = (12, 20, 64)
 STAGING_PREFIX = ".staging-"
 STALE_STAGING_SECONDS = 24 * 60 * 60
+LOCKS_DIRNAME = ".locks"
+DEFAULT_LOCK_TIMEOUT_SECONDS = 5.0
 
 _UNSAFE_CHARS = set('<>:"/\\|?*') | {chr(i) for i in range(0x20)}
 
@@ -139,6 +147,16 @@ def doi_hash(canonical_doi: str, *, length: int = HASH_LENGTHS[0]) -> str:
     return hashlib.sha256(canonical_doi.encode("utf-8")).hexdigest()[:length]
 
 
+def identity_hash(identity: CanonicalIdentity, *, length: int = HASH_LENGTHS[0]) -> str:
+    if identity.kind == "doi":
+        return doi_hash(identity.value, length=length)
+    return hashlib.sha256(identity.key.encode("utf-8")).hexdigest()[:length]
+
+
+def source_id_for(identity: CanonicalIdentity) -> str:
+    return f"src-{identity_hash(identity)}"
+
+
 def _sanitize_title(title: str) -> str:
     cleaned = []
     for ch in (title or "").strip():
@@ -171,6 +189,14 @@ def bundle_dir_name(
     return f"{stem}{suffix}"
 
 
+def identity_bundle_dir_name(
+    title: str, identity: CanonicalIdentity, *, hash_length: int = HASH_LENGTHS[0]
+) -> str:
+    suffix = f"--{identity_hash(identity, length=hash_length)}"
+    budget = MAX_BUNDLE_DIR_BYTES - len(suffix.encode("utf-8"))
+    return f"{_truncate_utf8(_sanitize_title(title), budget)}{suffix}"
+
+
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -195,6 +221,78 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _sidecar_identity(sidecar: dict) -> CanonicalIdentity:
+    schema = sidecar.get("schema_version")
+    if schema == PERSIST_SCHEMA_VERSION:
+        return CanonicalIdentity("doi", str(sidecar.get("doi", "") or ""))
+    if schema == BUNDLE_SCHEMA_V2:
+        raw = sidecar.get("identity")
+        if not isinstance(raw, dict) or set(raw) != {"kind", "value"}:
+            raise StorageError("bundle_conflict", "v2 bundle has invalid identity")
+        try:
+            return CanonicalIdentity(str(raw["kind"]), str(raw["value"]))
+        except (TypeError, ValueError) as exc:
+            raise StorageError("bundle_conflict", "v2 bundle has invalid identity") from exc
+    raise StorageError("bundle_conflict", f"unsupported bundle schema_version={schema!r}")
+
+
+def _read_sidecar(bundle_dir: Path) -> dict:
+    try:
+        return json.loads((bundle_dir / SIDECAR_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise StorageError(
+            "bundle_conflict",
+            f"existing bundle {bundle_dir.name!r} has an unreadable sidecar; refusing to overwrite",
+        ) from exc
+
+
+def validate_identity_bundle(bundle_dir: Path, identity: CanonicalIdentity) -> BundleResult:
+    """Validate schema, canonical identity, directory hash and artifact hash."""
+    bundle_dir = Path(bundle_dir)
+    sidecar = _read_sidecar(bundle_dir)
+    schema = sidecar.get("schema_version")
+    if schema not in SUPPORTED_PERSIST_SCHEMA_VERSIONS:
+        raise StorageError("bundle_conflict", "unsupported bundle schema")
+    existing = _sidecar_identity(sidecar)
+    if existing != identity:
+        raise StorageError("source_id_collision", "source slot belongs to another identity")
+    suffix = bundle_dir.name.rpartition("--")[2]
+    if len(suffix) not in HASH_LENGTHS or suffix != identity_hash(identity, length=len(suffix)):
+        raise StorageError("bundle_conflict", "bundle path hash does not match sidecar identity")
+    if schema == BUNDLE_SCHEMA_V2:
+        top_doi = sidecar.get("doi")
+        if identity.kind == "doi" and top_doi != identity.value:
+            raise StorageError("bundle_conflict", "v2 DOI and identity disagree")
+        if identity.kind != "doi" and top_doi is not None:
+            raise StorageError("bundle_conflict", "non-DOI v2 bundle carries a DOI")
+    elif sidecar.get("doi") != identity.value:
+        raise StorageError("bundle_conflict", "legacy DOI mismatch")
+    source_ref = sidecar.get("source_ref")
+    if isinstance(source_ref, dict) and source_ref.get("source_id"):
+        if source_ref.get("source_id") != source_id_for(identity):
+            raise StorageError("bundle_conflict", "source_ref source_id mismatch")
+        if schema == 1:
+            if source_ref.get("doi") not in {None, identity.value}:
+                raise StorageError("bundle_conflict", "legacy source_ref DOI mismatch")
+            if source_ref.get("verification_level") not in {None, "identity_verified"}:
+                raise StorageError("bundle_conflict", "legacy verification level mismatch")
+    bib_path = bundle_dir / BIB_FILENAME
+    expected_hash = str((sidecar.get("artifact_hashes") or {}).get(BIB_FILENAME, ""))
+    try:
+        actual_hash = _sha256_bytes(bib_path.read_bytes())
+    except OSError as exc:
+        raise StorageError("bundle_conflict", f"bundle is missing {BIB_FILENAME}") from exc
+    if not expected_hash or actual_hash != expected_hash:
+        raise StorageError("bundle_conflict", "bundle artifact hash mismatch")
+    return BundleResult(
+        bundle_dir=bundle_dir,
+        bib_path=bib_path,
+        sidecar_path=bundle_dir / SIDECAR_FILENAME,
+        bib_sha256=actual_hash,
+        reused=True,
+    )
+
+
 def validate_bundle(bundle_dir: Path, canonical_doi: str) -> BundleResult:
     """Validate an existing bundle for reuse; raise fail-closed on mismatch.
 
@@ -202,51 +300,123 @@ def validate_bundle(bundle_dir: Path, canonical_doi: str) -> BundleResult:
     corrupt sidecar, and ValueError when the bundle belongs to a *different*
     DOI (a directory-name collision the caller resolves with a longer hash).
     """
-    bib_path = bundle_dir / BIB_FILENAME
-    sidecar_path = bundle_dir / SIDECAR_FILENAME
     try:
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise StorageError(
-            "bundle_conflict",
-            f"existing bundle {bundle_dir.name!r} has an unreadable sidecar; "
-            f"refusing to overwrite ({exc})",
-        ) from exc
+        return validate_identity_bundle(bundle_dir, CanonicalIdentity("doi", canonical_doi))
+    except StorageError as exc:
+        if exc.code == "source_id_collision":
+            raise ValueError("bundle belongs to a different DOI") from exc
+        raise
 
-    existing_doi = str(sidecar.get("doi", "") or "")
-    if existing_doi != canonical_doi:
-        raise ValueError("bundle belongs to a different DOI")
 
-    if int(sidecar.get("schema_version", -1)) != PERSIST_SCHEMA_VERSION:
-        raise StorageError(
-            "bundle_conflict",
-            f"existing bundle {bundle_dir.name!r} has schema_version="
-            f"{sidecar.get('schema_version')!r}; refusing to overwrite",
-        )
-    expected_hash = str(
-        (sidecar.get("artifact_hashes") or {}).get(BIB_FILENAME, "")
-    )
+@contextmanager
+def _source_slot_lock(
+    output_dir: Path, source_id: str, *, timeout_seconds: float
+):
+    if os.name != "posix":
+        raise StorageError("write_failed", "cross-process storage lock unsupported")
+    import fcntl
+
+    locks = output_dir / LOCKS_DIRNAME
     try:
-        actual_hash = _sha256_bytes(bib_path.read_bytes())
+        locks.mkdir(mode=0o700, exist_ok=True)
     except OSError as exc:
-        raise StorageError(
-            "bundle_conflict",
-            f"existing bundle {bundle_dir.name!r} is missing {BIB_FILENAME}; "
-            "refusing to overwrite",
-        ) from exc
-    if not expected_hash or actual_hash != expected_hash:
-        raise StorageError(
-            "bundle_conflict",
-            f"existing bundle {bundle_dir.name!r} artifact hash mismatch; "
-            "refusing to overwrite",
+        raise StorageError("write_failed", f"cannot create lock directory: {exc}") from exc
+    lock_name = hashlib.sha256(
+        f"citation-source-slot:{source_id}".encode("utf-8")
+    ).hexdigest()
+    path = locks / lock_name
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise StorageError("write_failed", "source-slot lock timeout")
+                time.sleep(0.01)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _find_existing(output_dir: Path, identity: CanonicalIdentity) -> BundleResult | None:
+    target_short = identity_hash(identity)
+    for entry in output_dir.iterdir():
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        suffix = entry.name.rpartition("--")[2]
+        if suffix not in {
+            identity_hash(identity, length=length) for length in HASH_LENGTHS
+        } and suffix != target_short:
+            continue
+        sidecar = _read_sidecar(entry)
+        existing = _sidecar_identity(sidecar)
+        if existing != identity:
+            if len(suffix) == HASH_LENGTHS[0] and suffix == target_short:
+                raise StorageError("source_id_collision", "source ID collision")
+            continue
+        return validate_identity_bundle(entry, identity)
+    return None
+
+
+def _write_identity_bundle(
+    output_dir: Path,
+    *,
+    identity: CanonicalIdentity,
+    title: str,
+    bibtex_text: str,
+    sidecar: dict,
+    schema_version: int,
+    lock_timeout_seconds: float,
+) -> BundleResult:
+    output_dir = Path(output_dir)
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise StorageError("write_failed", f"cannot create output dir {output_dir}: {exc}") from exc
+    source_id = source_id_for(identity)
+    with _source_slot_lock(output_dir, source_id, timeout_seconds=lock_timeout_seconds):
+        existing = _find_existing(output_dir, identity)
+        if existing is not None:
+            return existing
+        final_dir = output_dir / identity_bundle_dir_name(title, identity)
+        if final_dir.exists():
+            # Same 12-hex slot is never lengthened for a new write.
+            raise StorageError("source_id_collision", "source ID collision")
+        bib_bytes = bibtex_text.encode("utf-8")
+        bib_sha = _sha256_bytes(bib_bytes)
+        payload = dict(sidecar)
+        payload["schema_version"] = schema_version
+        payload["doi"] = identity.value if identity.kind == "doi" else None
+        if schema_version == BUNDLE_SCHEMA_V2:
+            payload["identity"] = identity.to_dict()
+        payload["artifact_hashes"] = {BIB_FILENAME: bib_sha}
+        sidecar_bytes = json.dumps(
+            payload, ensure_ascii=False, indent=2, sort_keys=True
+        ).encode("utf-8")
+        staging = output_dir / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
+        try:
+            staging.mkdir(mode=0o700)
+            _write_file_0600(staging / BIB_FILENAME, bib_bytes)
+            _write_file_0600(staging / SIDECAR_FILENAME, sidecar_bytes)
+            _fsync_dir(staging)
+            os.rename(staging, final_dir)
+            _fsync_dir(output_dir)
+        except OSError as exc:
+            _remove_tree(staging)
+            raise StorageError("write_failed", f"bundle write failed: {exc}") from exc
+        return BundleResult(
+            bundle_dir=final_dir,
+            bib_path=final_dir / BIB_FILENAME,
+            sidecar_path=final_dir / SIDECAR_FILENAME,
+            bib_sha256=bib_sha,
+            reused=False,
         )
-    return BundleResult(
-        bundle_dir=bundle_dir,
-        bib_path=bib_path,
-        sidecar_path=sidecar_path,
-        bib_sha256=actual_hash,
-        reused=True,
-    )
 
 
 def write_bundle(
@@ -262,67 +432,35 @@ def write_bundle(
     ``sidecar`` is the Coordinator-built payload; storage stamps
     ``schema_version``, ``doi``, and ``artifact_hashes`` into it.
     """
-    output_dir = Path(output_dir)
-    try:
-        output_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise StorageError(
-            "write_failed", f"cannot create output dir {output_dir}: {exc}"
-        ) from exc
+    return _write_identity_bundle(
+        output_dir,
+        identity=CanonicalIdentity("doi", canonical_doi),
+        title=title,
+        bibtex_text=bibtex_text,
+        sidecar=sidecar,
+        schema_version=PERSIST_SCHEMA_VERSION,
+        lock_timeout_seconds=DEFAULT_LOCK_TIMEOUT_SECONDS,
+    )
 
-    bib_bytes = bibtex_text.encode("utf-8")
-    bib_sha = _sha256_bytes(bib_bytes)
-    payload = dict(sidecar)
-    payload["schema_version"] = PERSIST_SCHEMA_VERSION
-    payload["doi"] = canonical_doi
-    payload["artifact_hashes"] = {BIB_FILENAME: bib_sha}
-    sidecar_bytes = json.dumps(
-        payload, ensure_ascii=False, indent=2, sort_keys=True
-    ).encode("utf-8")
 
-    for hash_length in HASH_LENGTHS:
-        final_dir = output_dir / bundle_dir_name(
-            title, canonical_doi, hash_length=hash_length
-        )
-        if final_dir.exists():
-            try:
-                return validate_bundle(final_dir, canonical_doi)
-            except ValueError:
-                continue  # true collision: different DOI, lengthen the hash
-
-        staging = output_dir / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
-        try:
-            staging.mkdir(mode=0o700)
-            _write_file_0600(staging / BIB_FILENAME, bib_bytes)
-            _write_file_0600(staging / SIDECAR_FILENAME, sidecar_bytes)
-            _fsync_dir(staging)
-        except OSError as exc:
-            raise StorageError(
-                "write_failed", f"staging write failed under {output_dir}: {exc}"
-            ) from exc
-
-        try:
-            os.rename(staging, final_dir)
-        except OSError:
-            # Lost a race: someone made final_dir first. Validate theirs.
-            _remove_tree(staging)
-            try:
-                return validate_bundle(final_dir, canonical_doi)
-            except ValueError:
-                continue
-        _fsync_dir(output_dir)
-        return BundleResult(
-            bundle_dir=final_dir,
-            bib_path=final_dir / BIB_FILENAME,
-            sidecar_path=final_dir / SIDECAR_FILENAME,
-            bib_sha256=bib_sha,
-            reused=False,
-        )
-
-    raise StorageError(
-        "bundle_conflict",
-        f"could not place bundle for {canonical_doi!r}: name collisions "
-        "persist even at full hash length",
+def write_identity_bundle(
+    output_dir: Path,
+    *,
+    identity: CanonicalIdentity,
+    title: str,
+    bibtex_text: str,
+    sidecar: dict,
+    lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+) -> BundleResult:
+    """Write/reuse a schema-v2 canonical-identity bundle."""
+    return _write_identity_bundle(
+        output_dir,
+        identity=identity,
+        title=title,
+        bibtex_text=bibtex_text,
+        sidecar=sidecar,
+        schema_version=BUNDLE_SCHEMA_V2,
+        lock_timeout_seconds=lock_timeout_seconds,
     )
 
 
