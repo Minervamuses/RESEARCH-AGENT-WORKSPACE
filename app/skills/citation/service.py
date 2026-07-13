@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
+from skills.citation.authority import AuthorityRecord, AuthorityRegistry, export_bibtex
 from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
 from skills.citation.doi import doi_equal
 from skills.citation.providers.base import ProviderRecord
@@ -55,6 +56,7 @@ class CitationService:
             openalex=hub.openalex,
             doi_org=hub.doi_org,
         )
+        self.authorities = AuthorityRegistry(fetcher=hub._fetch)
 
     async def search(self, query: str, *, rows: int = 10) -> tuple[list[ProviderRecord], list[str]]:
         providers = [("crossref", self.hub.crossref), ("datacite", self.hub.datacite)]
@@ -90,6 +92,11 @@ class CitationService:
                 eligible.append((index, intent, decision.record))
                 outcomes.append(None)  # type: ignore[arg-type]
                 continue
+            authority = await self.authorities.resolve(intent)
+            if authority is not None:
+                eligible.append((index, intent, authority))
+                outcomes.append(None)  # type: ignore[arg-type]
+                continue
             status_map = {"unsupported": "unsupported_no_doi"}
             status = status_map.get(decision.status, decision.status)
             alternatives = tuple(
@@ -106,6 +113,32 @@ class CitationService:
 
         # All resolution/provider verification completes before the first write.
         for index, intent, record in eligible:
+            if isinstance(record, AuthorityRecord):
+                canonical = export_bibtex(record)
+                identity = record.identity
+                sid = source_id_for(identity)
+                ref = SourceRef(
+                    sid, None, record.title, authors=list(record.authors), year=record.year,
+                    venue=record.venue, work_type=record.work_type, url=record.url,
+                    verification_level="authority_metadata_verified",
+                    provenance=f"authoritative:{record.provider}", schema_version=2,
+                    canonical_identity=identity,
+                )
+                sidecar = {
+                    "source_ref": ref.to_dict(),
+                    "creation_evidence": {"batch_id": batch_id, "request_index": index, "normalized_hints": {"title": intent.title, "year": intent.year, "venue": intent.venue}, "verified_constraint_reason_codes": [f"{c.field}_constraint" for c in intent.constraints if c.is_hard]},
+                    "resolution": {"record_source": record.provider, "provider_record_ids": [identity.key], "version_kind": "preprint" if record.provider == "arxiv" else "published", "decision_reason_codes": ["authoritative_exact_record"]},
+                }
+                try:
+                    bundle = await asyncio.to_thread(write_identity_bundle, self.output_dir, identity=identity, title=ref.title, bibtex_text=canonical.text, sidecar=sidecar)
+                    ref.bundle_path = str(bundle.bundle_dir)
+                    self.registry.register(ref)
+                except (StorageError, ValueError) as exc:
+                    outcomes[index] = SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
+                    continue
+                receipt = SaveReceipt(sid, identity, None, ref.title, ref.year, ref.work_type, ref.bundle_path, ref.verification_level, f"[[cite:{sid}]]")
+                outcomes[index] = SaveItemOutcome(index, intent.requested_label, "reused" if bundle.reused else "saved", "reused_existing" if bundle.reused else "saved_new", receipt)
+                continue
             try:
                 raw = await self.hub.doi_org.fetch_bibtex(record.doi)
                 canonical = parse_canonical_bibtex(raw)
