@@ -32,3 +32,9 @@ class ProviderRecord:
     snippet: str = ""
     raw_score: float | None = None
     identifiers: dict[str, str] = field(default_factory=dict)
+    publisher: str = ""
+    resource_type: str = ""
+    version_kind: str = "unknown"
+    landing_url: str | None = None
+    relations: dict[str, list[str]] = field(default_factory=dict)
+    field_provenance: dict[str, str] = field(default_factory=dict)

@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "id": "10.48550/arXiv.1706.03762",
+      "attributes": {
+        "doi": "10.48550/arXiv.1706.03762",
+        "titles": [{"title": "Attention Is All You Need"}],
+        "creators": [{"name": "Vaswani, Ashish"}],
+        "publicationYear": 2017,
+        "publisher": "arXiv",
+        "types": {"resourceTypeGeneral": "Preprint"},
+        "url": "https://arxiv.org/abs/1706.03762",
+        "alternateIdentifiers": [{"alternateIdentifierType": "arXiv", "alternateIdentifier": "1706.03762"}]
+      }
+    },
+    {
+      "id": "10.48550/arXiv.1312.6114",
+      "attributes": {
+        "doi": "10.48550/arXiv.1312.6114",
+        "titles": [{"title": "Auto-Encoding Variational Bayes"}],
+        "creators": [{"name": "Kingma, Diederik P."}, {"name": "Welling, Max"}],
+        "publicationYear": 2013,
+        "publisher": "arXiv",
+        "types": {"resourceTypeGeneral": "Preprint"},
+        "url": "https://arxiv.org/abs/1312.6114"
+      }
+    }
+  ]
+}
