@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,7 +19,11 @@ from skills.citation.types import (
     ConfirmFailure,
     ConfirmReceipt,
     PendingMatchNote,
+    SaveBatchOutcome,
+    SaveItemOutcome,
+    SaveReceipt,
     is_citable_source,
+    source_identity,
 )
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
@@ -467,6 +471,113 @@ class ChatSession:
             )
         return "\n".join(lines)
 
+    def _trusted_save_outcomes(
+        self, new_messages: list
+    ) -> tuple[SaveBatchOutcome | None, tuple[SaveBatchOutcome, ...]]:
+        registry = self._citation_registry() if self.citation_skill_active else None
+        if registry is None:
+            return None, ()
+        attempted: list[SaveBatchOutcome] = []
+        rejected: list[SaveBatchOutcome] = []
+        for message in new_messages:
+            if not isinstance(message, ToolMessage) or getattr(message, "name", None) != "citation_workflow":
+                continue
+            artifact = getattr(message, "artifact", None)
+            if not isinstance(artifact, dict) or artifact.get("kind") != "citation_save_batch":
+                continue
+            try:
+                batch = SaveBatchOutcome.from_artifact(artifact)
+            except ValueError as exc:
+                logger.warning("ignored invalid citation save batch: %s", exc)
+                continue
+            if batch.batch_status == "rejected":
+                rejected.append(batch)
+                continue
+            checked: list[SaveItemOutcome] = []
+            for item in batch.items:
+                receipt = item.receipt
+                if receipt is None:
+                    checked.append(item)
+                    continue
+                ref = registry.get(receipt.source_id)
+                if (
+                    ref is None
+                    or source_identity(ref) != receipt.canonical_identity
+                    or ref.doi != receipt.doi
+                    or ref.bundle_path != receipt.bundle_path
+                    or ref.verification_level != receipt.verification_level
+                    or not is_citable_source(ref)
+                ):
+                    logger.warning("save receipt/registry mismatch: %s", receipt.source_id)
+                    checked.append(SaveItemOutcome(
+                        item.request_index, item.requested_label,
+                        "verification_failed", "registry_mismatch",
+                        alternatives=item.alternatives,
+                    ))
+                else:
+                    checked.append(item)
+            attempted.append(replace(batch, items=tuple(checked)))
+        if len(attempted) > 1:
+            logger.error("citation invariant breach: multiple attempted save batches")
+            first = attempted[0]
+            failed = tuple(
+                SaveItemOutcome(item.request_index, item.requested_label, "verification_failed", "multiple_attempted_batches")
+                for item in first.items
+            )
+            return replace(first, items=failed), tuple(rejected)
+        return (attempted[0] if attempted else None), tuple(rejected)
+
+    def _render_save_outcome(
+        self,
+        attempted: SaveBatchOutcome | None,
+        rejected: tuple[SaveBatchOutcome, ...],
+        *,
+        validation_errors: list[str],
+    ) -> str:
+        reason_messages = {
+            "insufficient_identity_anchor": "資訊不足，需補充可辨識的作品資料",
+            "intent_binding_ambiguous": "條件無法唯一綁定到批次中的作品",
+            "negative_target": "目前語意並未授權保存此作品",
+            "version_clarification_required": "版本不明，請分辨要保存的版本",
+            "multiple_plausible_records": "找到多筆同樣合理的作品，請補充條件",
+            "not_original_research": "結果不是所要求的 original research",
+            "no_provider_records": "找不到足夠強的書目結果",
+            "unsupported_no_doi": "目前版本尚不能保存此無 DOI 來源",
+            "all_providers_failed": "書目供應者本次皆失敗",
+            "registry_mismatch": "保存收據未通過 live registry 驗證",
+            "multiple_attempted_batches": "偵測到同輪多個 attempted batch，已 fail closed",
+        }
+        lines = ["（引用保存結果。）"]
+        if attempted is not None:
+            for item in sorted(attempted.items, key=lambda value: value.request_index):
+                label = self._markdown_code_span(item.requested_label[:160])
+                if item.receipt is not None:
+                    receipt = item.receipt
+                    state = "已保存" if item.status == "saved" else "已重用"
+                    lines.extend([
+                        f"- {label}：{state}",
+                        f"  - source ID：{self._markdown_code_span(receipt.source_id)}",
+                        f"  - title：{self._markdown_code_span(receipt.title[:512])}",
+                        f"  - year：{self._markdown_code_span(receipt.year or 'unknown')}",
+                        f"  - type：{self._markdown_code_span(receipt.work_type[:256])}",
+                        f"  - bundle：{self._markdown_code_span(receipt.bundle_path)}",
+                        f"  - 引用標記：{self._markdown_code_span(receipt.cite_marker)}",
+                    ])
+                else:
+                    message = reason_messages.get(item.reason_code, item.status.replace("_", " "))
+                    lines.append(f"- {label}：{message} ({self._markdown_code_span(item.reason_code)})")
+                    for alt in item.alternatives[:5]:
+                        facts = " / ".join(str(value) for value in (alt.title[:512], alt.year or "year unknown", alt.venue[:256], alt.version_kind) if value)
+                        lines.append(f"  - 可分辨項：{self._markdown_code_span(facts)}")
+        if rejected:
+            for batch in rejected:
+                message = "workflow 正忙，保存嘗試已拒絕" if batch.batch_reason_code == "workflow_busy" else "本輪已嘗試過保存，後續嘗試已拒絕"
+                lines.append(f"- {message} ({self._markdown_code_span(batch.batch_reason_code)})")
+        if validation_errors:
+            lines.append("- 被攔截草稿的檢查結果：")
+            lines.extend(f"  - {self._markdown_code_span(error)}" for error in validation_errors)
+        return "\n".join(lines)
+
     def _pending_note_lines(self, pending: tuple[PendingMatchNote, ...]) -> list[str]:
         lines = []
         for note in pending:
@@ -575,6 +686,7 @@ class ChatSession:
             )
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
         confirm_outcome = self._trusted_confirm_receipts(new_messages)
+        save_attempted, save_rejected = self._trusted_save_outcomes(new_messages)
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
         # Trusted-artifact priority: confirm/save outcome > pending select
         # recovery > model text or the generic fallback. Pending recovery
@@ -584,7 +696,11 @@ class ChatSession:
             recovery_reason is not None
             and not recovery_reason.startswith("continued:")
         )
-        if confirm_outcome.receipts or confirm_outcome.failures:
+        if save_attempted is not None or save_rejected:
+            final_text = self._render_save_outcome(
+                save_attempted, save_rejected, validation_errors=errors
+            )
+        elif confirm_outcome.receipts or confirm_outcome.failures:
             final_text = self._render_confirm_receipts(
                 confirm_outcome,
                 validation_errors=errors,

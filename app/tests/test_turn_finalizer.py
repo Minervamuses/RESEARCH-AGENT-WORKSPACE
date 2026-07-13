@@ -15,11 +15,15 @@ from skills.citation.coordinator import CitationCoordinator
 from skills.citation.hub import CitationProviderHub
 from skills.citation.types import (
     CitationMatch,
+    CanonicalIdentity,
     ConfirmBatchOutcome,
     ConfirmFailure,
     ConfirmReceipt,
     PendingMatchNote,
     SourceRef,
+    SaveBatchOutcome,
+    SaveItemOutcome,
+    SaveReceipt,
 )
 
 
@@ -85,6 +89,31 @@ def _confirm_tool_message(session, source_id="src-known", **overrides):
             "failures": [],
             "pending": [],
         },
+    )
+
+
+def _save_tool_message(session, source_id="src-v2"):
+    ref = session.citation_coordinator.registry.get(source_id)
+    receipt = SaveReceipt(
+        source_id=ref.source_id,
+        canonical_identity=ref.canonical_identity,
+        doi=ref.doi,
+        title=ref.title,
+        year=ref.year,
+        work_type=ref.work_type,
+        bundle_path=ref.bundle_path,
+        verification_level=ref.verification_level,
+        cite_marker=f"[[cite:{ref.source_id}]]",
+    )
+    return ToolMessage(
+        content="save attempted", tool_call_id="save-1", name="citation_workflow",
+        artifact=SaveBatchOutcome(
+            "b1", "attempted", "none",
+            (
+                SaveItemOutcome(1, "missing", "not_found", "no_provider_records"),
+                SaveItemOutcome(0, "wanted", "saved", "saved_new", receipt),
+            ),
+        ).to_artifact(),
     )
 
 
@@ -260,6 +289,45 @@ def test_confirm_receipt_replaces_clean_model_draft(make_session, tmp_path):
     assert "`10.1234/known`" in outcome.text
     assert str(tmp_path / "cite" / "src-known") in outcome.text
     assert session.recent_turns[-1].assistant_output == outcome.text
+
+
+def test_save_batch_has_priority_and_renders_all_items_in_request_order(make_session, tmp_path):
+    session, _ = make_session(answer="model prose")
+    session.activate_skill("citation")
+    coordinator = _seed_verified_source(session, tmp_path)
+    coordinator.registry.register(SourceRef(
+        "src-v2", "10.1234/v2", "V2 Work", year=2022,
+        work_type="journal-article", bundle_path=str(tmp_path / "cite/v2"),
+        schema_version=2, verification_level="doi_identity_verified",
+        canonical_identity=CanonicalIdentity("doi", "10.1234/v2"),
+    ))
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="save", answer="model prose",
+        new_messages=[_save_tool_message(session)], tool_calls=[], trace_events=[],
+    ))
+    assert "`wanted`：已保存" in outcome.text
+    assert "`missing`：找不到" in outcome.text
+    assert outcome.text.index("wanted") < outcome.text.index("missing")
+    assert "model prose" not in outcome.text
+
+
+def test_save_registry_mismatch_never_renders_success(make_session, tmp_path):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    coordinator = _seed_verified_source(session, tmp_path)
+    ref = SourceRef(
+        "src-v2", "10.1234/v2", "V2 Work", bundle_path=str(tmp_path / "cite/v2"),
+        schema_version=2, verification_level="doi_identity_verified",
+        canonical_identity=CanonicalIdentity("doi", "10.1234/v2"),
+    )
+    coordinator.registry.register(ref)
+    message = _save_tool_message(session)
+    message.artifact["items"][1]["receipt"]["bundle_path"] = "/forged"
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="save", answer="ok", new_messages=[message], tool_calls=[], trace_events=[]
+    ))
+    assert "已保存" not in outcome.text
+    assert "registry" in outcome.text
 
 
 def test_confirm_receipt_survives_raw_doi_gate_block(make_session, tmp_path):

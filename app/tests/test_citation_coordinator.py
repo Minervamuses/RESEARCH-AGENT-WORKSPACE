@@ -403,7 +403,7 @@ def test_confirm_happy_path_writes_bundle_and_registers_source(tmp_path):
     assert result.verification.passed
 
     bundle = tmp_path / "cite"
-    dirs = [p for p in bundle.iterdir() if p.is_dir()]
+    dirs = [p for p in bundle.iterdir() if p.is_dir() and not p.name.startswith(".")]
     assert len(dirs) == 1
     assert (dirs[0] / "reference.bib").exists()
     sidecar = json.loads((dirs[0] / "citation.json").read_text(encoding="utf-8"))
@@ -509,7 +509,7 @@ def test_same_doi_reconfirm_is_idempotent(tmp_path):
         match = next(m for m in select.matches if m.canonical_doi == DOI_A)
         result = asyncio.run(coordinator.confirm(match.match_id))
         assert result.status == "confirmed"
-    bundles = [p for p in (tmp_path / "cite").iterdir() if p.is_dir()]
+    bundles = [p for p in (tmp_path / "cite").iterdir() if p.is_dir() and not p.name.startswith(".")]
     assert len(bundles) == 1
     assert "reused" in result.message
 

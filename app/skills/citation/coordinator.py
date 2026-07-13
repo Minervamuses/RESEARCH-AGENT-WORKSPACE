@@ -64,6 +64,7 @@ from skills.citation.types import (
     PublishedDateFilter,
     RankingEvidence,
     SourceRef,
+    source_identity,
     VerificationCheck,
     VerificationReport,
 )
@@ -149,6 +150,10 @@ class SourceRegistry:
 
     def register(self, ref: SourceRef) -> SourceRef:
         existing = self._sources.get(ref.source_id)
+        if existing is not None and source_identity(existing) != source_identity(ref):
+            raise ValueError(
+                f"source_id {ref.source_id!r} is already registered to another identity"
+            )
         self._sources[ref.source_id] = ref
         self._touch(ref.source_id)
         return existing or ref
