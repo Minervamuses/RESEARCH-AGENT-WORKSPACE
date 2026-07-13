@@ -1,0 +1,23 @@
+[
+  {
+    "name": "aiayn_repost_is_not_original_research",
+    "intent": {"title": "Attention Is All You Need", "authors": ["Ashish Vaswani"], "year": 2017, "work_kind": "original_research"},
+    "record": {"title": "Attention Is All You Need", "authors": ["Ashish Vaswani"], "year": 2025, "work_type": "posted-content", "doi": "10.48550/arXiv.1706.03762"},
+    "status": "identity_conflict",
+    "reason": "not_original_research"
+  },
+  {
+    "name": "vae_monograph_is_not_original_research",
+    "intent": {"title": "Auto-Encoding Variational Bayes", "authors": ["Diederik Kingma", "Max Welling"], "year": 2013, "work_kind": "original_research"},
+    "record": {"title": "An Introduction to Variational Autoencoders", "authors": ["Diederik Kingma", "Max Welling"], "year": 2019, "work_type": "monograph", "doi": "10.1561/2200000056"},
+    "status": "identity_conflict",
+    "reason": "not_original_research"
+  },
+  {
+    "name": "exact_doi_matching_metadata",
+    "intent": {"title": "Attention Is All You Need", "authors": ["Ashish Vaswani"], "year": 2017, "doi": "10.48550/arXiv.1706.03762"},
+    "record": {"title": "Attention Is All You Need", "authors": ["Ashish Vaswani"], "year": 2017, "work_type": "preprint", "doi": "10.48550/arXiv.1706.03762"},
+    "status": "eligible",
+    "reason": "unique_strong_match"
+  }
+]
