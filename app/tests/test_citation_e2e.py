@@ -1,6 +1,7 @@
 """Full-stack citation turns: real session, real graph, fixture providers."""
 
 import asyncio
+import json
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
@@ -172,6 +173,8 @@ def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch
     assert "引用保存結果" in receipt
     assert "source ID" in receipt
     assert str(bundles[0].parent) in receipt
+    sidecar = json.loads((bundles[0].parent / "citation.json").read_text())
+    assert "bundle_path" not in sidecar["source_ref"]
     refs = session.citation_service.registry.list()
     assert [r.verification_level for r in refs] == ["doi_identity_verified"]
     # The deterministic receipt, not the model's generic sentence, is the

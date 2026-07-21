@@ -35,3 +35,20 @@ def test_source_identity_and_verification_shapes():
     assert is_citable_source(current)
     bad = SourceRef("src-b", "10.1234/b", "B", schema_version=2, verification_level="doi_identity_verified", canonical_identity=CanonicalIdentity("doi", "10.1234/other"))
     assert not is_citable_source(bad)
+
+
+def test_source_ref_model_and_persistence_have_no_bundle_path():
+    ref = SourceRef(
+        "src-b",
+        "10.1234/b",
+        "B",
+        schema_version=2,
+        verification_level="doi_identity_verified",
+        canonical_identity=CanonicalIdentity("doi", "10.1234/b"),
+    )
+
+    persisted = ref.to_persisted_dict()
+
+    assert not hasattr(ref, "bundle_path")
+    assert "bundle_path" not in persisted
+    assert persisted["canonical_identity"] == {"kind": "doi", "value": "10.1234/b"}

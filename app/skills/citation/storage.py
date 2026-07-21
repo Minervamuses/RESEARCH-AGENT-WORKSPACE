@@ -258,14 +258,23 @@ def validate_identity_bundle(bundle_dir: Path, identity: CanonicalIdentity) -> B
     elif sidecar.get("doi") != identity.value:
         raise StorageError("bundle_conflict", "legacy DOI mismatch")
     source_ref = sidecar.get("source_ref")
-    if isinstance(source_ref, dict) and source_ref.get("source_id"):
-        if source_ref.get("source_id") != source_id_for(identity):
-            raise StorageError("bundle_conflict", "source_ref source_id mismatch")
-        if schema == 1:
-            if source_ref.get("doi") not in {None, identity.value}:
-                raise StorageError("bundle_conflict", "legacy source_ref DOI mismatch")
-            if source_ref.get("verification_level") not in {None, "identity_verified"}:
-                raise StorageError("bundle_conflict", "legacy verification level mismatch")
+    if isinstance(source_ref, dict):
+        # Historical v1 and early v2 writers emitted a runtime-only key with
+        # a null value. Accept that shape read-only, but never accept a path.
+        if source_ref.get("bundle_path") is not None:
+            raise StorageError(
+                "bundle_conflict",
+                "source_ref must not persist a bundle path",
+            )
+        source_id = source_ref.get("source_id")
+        if source_id:
+            if source_id != source_id_for(identity):
+                raise StorageError("bundle_conflict", "source_ref source_id mismatch")
+            if schema != BUNDLE_SCHEMA_V2:
+                if source_ref.get("doi") not in {None, identity.value}:
+                    raise StorageError("bundle_conflict", "legacy source_ref DOI mismatch")
+                if source_ref.get("verification_level") not in {None, "identity_verified"}:
+                    raise StorageError("bundle_conflict", "legacy verification level mismatch")
     bib_path = bundle_dir / BIB_FILENAME
     expected_hash = str((sidecar.get("artifact_hashes") or {}).get(BIB_FILENAME, ""))
     try:
@@ -339,6 +348,22 @@ def _find_existing(output_dir: Path, identity: CanonicalIdentity) -> BundleResul
     return None
 
 
+def _portable_sidecar_payload(sidecar: dict) -> dict:
+    """Copy caller metadata while removing the retired runtime path field."""
+    payload = dict(sidecar)
+    source_ref = payload.get("source_ref")
+    if not isinstance(source_ref, dict):
+        return payload
+    source_ref = dict(source_ref)
+    if source_ref.pop("bundle_path", None) is not None:
+        raise StorageError(
+            "bundle_conflict",
+            "source_ref must not persist a bundle path",
+        )
+    payload["source_ref"] = source_ref
+    return payload
+
+
 def write_identity_bundle(
     output_dir: Path,
     *,
@@ -349,6 +374,7 @@ def write_identity_bundle(
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
 ) -> BundleResult:
     """Write or reuse a schema-v2 canonical-identity bundle atomically."""
+    payload = _portable_sidecar_payload(sidecar)
     output_dir = Path(output_dir)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -365,7 +391,6 @@ def write_identity_bundle(
             raise StorageError("source_id_collision", "source ID collision")
         bib_bytes = bibtex_text.encode("utf-8")
         bib_sha = _sha256_bytes(bib_bytes)
-        payload = dict(sidecar)
         payload["schema_version"] = BUNDLE_SCHEMA_V2
         payload["doi"] = identity.value if identity.kind == "doi" else None
         payload["identity"] = identity.to_dict()

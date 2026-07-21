@@ -301,6 +301,96 @@ def test_v2_doi_keeps_legacy_source_id_and_reuses_across_title_drift(tmp_path):
     assert data["identity"] == {"kind": "doi", "value": DOI}
 
 
+def test_v2_reader_accepts_only_null_legacy_source_ref_bundle_path(tmp_path):
+    identity = CanonicalIdentity("doi", DOI)
+    result = write_identity_bundle(
+        tmp_path,
+        identity=identity,
+        title="A Paper",
+        bibtex_text=BIB,
+        sidecar=make_sidecar(),
+    )
+    sidecar = json.loads(result.sidecar_path.read_text())
+    sidecar["source_ref"]["bundle_path"] = None
+    result.sidecar_path.write_text(json.dumps(sidecar))
+
+    assert validate_identity_bundle(result.bundle_dir, identity).reused
+
+    sidecar["source_ref"]["bundle_path"] = "/machine-specific/cite/a"
+    result.sidecar_path.write_text(json.dumps(sidecar))
+    with pytest.raises(StorageError) as exc:
+        validate_identity_bundle(result.bundle_dir, identity)
+    assert exc.value.code == "bundle_conflict"
+
+
+def test_writer_strips_null_legacy_bundle_path_without_mutating_caller(tmp_path):
+    identity = CanonicalIdentity("doi", DOI)
+    sidecar = make_sidecar()
+    sidecar["source_ref"]["bundle_path"] = None
+
+    result = write_identity_bundle(
+        tmp_path,
+        identity=identity,
+        title="A Paper",
+        bibtex_text=BIB,
+        sidecar=sidecar,
+    )
+
+    persisted = json.loads(result.sidecar_path.read_text())
+    assert "bundle_path" not in persisted["source_ref"]
+    assert sidecar["source_ref"]["bundle_path"] is None
+
+
+def test_writer_rejects_non_null_source_ref_bundle_path(tmp_path):
+    sidecar = make_sidecar()
+    sidecar["source_ref"]["bundle_path"] = "/machine-specific/cite/a"
+
+    with pytest.raises(StorageError) as exc:
+        write_identity_bundle(
+            tmp_path,
+            identity=CanonicalIdentity("doi", DOI),
+            title="A Paper",
+            bibtex_text=BIB,
+            sidecar=sidecar,
+        )
+    assert exc.value.code == "bundle_conflict"
+
+
+def test_v2_bundle_path_cannot_bypass_validation_without_source_id(tmp_path):
+    identity = CanonicalIdentity("doi", DOI)
+    result = write_identity_bundle(
+        tmp_path,
+        identity=identity,
+        title="A Paper",
+        bibtex_text=BIB,
+        sidecar=make_sidecar(),
+    )
+    sidecar = json.loads(result.sidecar_path.read_text())
+    sidecar["source_ref"].pop("source_id")
+    sidecar["source_ref"]["bundle_path"] = "/machine-specific/cite/a"
+    result.sidecar_path.write_text(json.dumps(sidecar))
+
+    with pytest.raises(StorageError) as exc:
+        validate_identity_bundle(result.bundle_dir, identity)
+    assert exc.value.code == "bundle_conflict"
+
+
+def test_v1_reader_rejects_non_null_legacy_source_ref_bundle_path(tmp_path):
+    fixture = Path(__file__).parent / "fixtures/legacy_v1_bundle/Legacy_Work--127cdd1bdbc8"
+    target = tmp_path / fixture.name
+    shutil.copytree(fixture, target)
+    sidecar_path = target / SIDECAR_FILENAME
+    sidecar = json.loads(sidecar_path.read_text())
+    sidecar["source_ref"]["bundle_path"] = "/machine-specific/cite/a"
+    sidecar_path.write_text(json.dumps(sidecar))
+
+    with pytest.raises(StorageError) as exc:
+        validate_identity_bundle(
+            target, CanonicalIdentity("doi", "10.1234/legacy")
+        )
+    assert exc.value.code == "bundle_conflict"
+
+
 def test_v2_authoritative_non_doi_identity_is_stable(tmp_path):
     identity = CanonicalIdentity("venue", "neurips:2017:attention-is-all-you-need")
     result = write_identity_bundle(tmp_path, identity=identity, title="Attention Is All You Need", bibtex_text=BIB, sidecar={"source_ref": {"source_id": storage.source_id_for(identity)}})

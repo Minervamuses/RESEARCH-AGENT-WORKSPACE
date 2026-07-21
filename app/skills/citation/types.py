@@ -116,17 +116,17 @@ class SourceRef:
     url: str | None = None
     verification_level: VerificationLevel = "identity_verified"
     provenance: str = ""
-    bundle_path: str | None = None
     schema_version: int = 1
     canonical_identity: CanonicalIdentity | None = None
 
-    def to_dict(self):
+    def to_persisted_dict(self):
+        """Serialize portable source metadata, excluding runtime-only state."""
         return {
             "schema_version": self.schema_version, "source_id": self.source_id,
             "doi": self.doi, "title": self.title, "authors": list(self.authors),
             "year": self.year, "venue": self.venue, "work_type": self.work_type,
             "url": self.url, "verification_level": self.verification_level,
-            "provenance": self.provenance, "bundle_path": self.bundle_path,
+            "provenance": self.provenance,
             "canonical_identity": self.canonical_identity.to_dict() if self.canonical_identity else None,
         }
 

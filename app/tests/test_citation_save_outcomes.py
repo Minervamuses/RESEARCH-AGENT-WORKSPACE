@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from skills.citation.registry import SourceRegistry
@@ -63,3 +65,41 @@ def test_registry_collision_preserves_original_source():
     with pytest.raises(ValueError):
         registry.register(SourceRef("src-same", "10.1234/two", "Two"))
     assert registry.get("src-same") is first
+
+
+def test_registry_binds_and_revalidates_trusted_save_receipt():
+    registry = SourceRegistry()
+    ref = SourceRef(
+        "src-abc", "10.1234/work", "A Work", year=2020,
+        work_type="journal-article", schema_version=2,
+        verification_level="doi_identity_verified",
+        canonical_identity=CanonicalIdentity("doi", "10.1234/work"),
+    )
+    trusted = receipt()
+
+    registry.register(ref, receipt=trusted)
+
+    assert registry.trusted_receipt(ref.source_id) == trusted
+    assert registry.receipt_is_trusted(trusted)
+
+    ref.title = "Mutated title"
+    assert not registry.receipt_is_trusted(trusted)
+
+
+def test_registry_rejects_mismatched_receipt_and_clears_stale_trust():
+    registry = SourceRegistry()
+    ref = SourceRef(
+        "src-abc", "10.1234/work", "A Work", year=2020,
+        work_type="journal-article", schema_version=2,
+        verification_level="doi_identity_verified",
+        canonical_identity=CanonicalIdentity("doi", "10.1234/work"),
+    )
+    mismatched = replace(receipt(), title="Another Work")
+
+    with pytest.raises(ValueError, match="does not match source"):
+        registry.register(ref, receipt=mismatched)
+    assert registry.get(ref.source_id) is None
+
+    registry.register(ref, receipt=receipt())
+    registry.register(ref)
+    assert registry.trusted_receipt(ref.source_id) is None

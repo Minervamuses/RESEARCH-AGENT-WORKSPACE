@@ -219,7 +219,7 @@ canonical_identity: {kind, value}
 - 新 DOI ref 同時帶 `canonical_identity=doi:<canonical>` 與 `doi=<canonical>`，兩者不一致即 invalid。
 - 新 no-DOI ref 帶 non-DOI authoritative identity，`doi=None`。
 - Schema v2把 `canonical_identity`設為 required；schema v1 constructors/decoder仍允許欄位 absent，但只可由已驗證 canonical DOI確定性派生 live identity，不能從 title或 bundle path猜。不能把 dataclass欄位直接改成無條件 required而一次弄壞所有 legacy constructors/tests。
-- `SourceRegistry.register()` 若遇同 `source_id`、不同 canonical identity，必須 fail closed，不能沿用目前直接 overwrite；同 identity 才能 idempotent re-activate/update live bundle path。
+- `SourceRegistry.register()` 若遇同 `source_id`、不同 canonical identity，必須 fail closed，不能直接 overwrite；同 identity 才能 idempotent re-activate/update live source。保存成功時另綁定完整的 trusted `SaveReceipt`；沒有 receipt 的一般 register 必須清掉同 ID 的舊 receipt，避免 stale trust。
 - 新 service在 write前先以 registry檢查預計的 12-hex `source_id`，storage則在 source-ID-slot lock內做 identity-first scan；若同 ID已屬不同 identity，回 `identity_conflict/source_id_collision` 且零 write，明確選擇 fail closed而不是在本次重構發明可變長 cite-marker ID。Registry仍在 register時重驗，避免 TOCTOU/程式誤用。
 - v1 bundle reuse 仍由 fresh resolver + verified existing BibTeX 建 live SourceRef，不新增把 sidecar任意反序列化成 SourceRef 的捷徑。
 
@@ -406,7 +406,7 @@ venue:<adapter-name>:<adapter-stable-record-id>
 }
 ```
 
-Sidecar 不存 absolute bundle path；其目錄本身就是位置。`creation_evidence` 只記首次建立時經 bounds/normalization/redaction的書目 hints與 verified constraint reason codes，不存 `requested_label`、raw user text、ordinal phrase或完整 provider payload。現行 v1 sidecar 在 `bundle_path` 回填前建立，因此 `source_ref.bundle_path` 本來可能是 null；v2 明確把這件事定義成 schema，而不是嘗試補寫絕對路徑。
+Sidecar 的 `source_ref` 不定義 `bundle_path`；其目錄本身就是位置，runtime 路徑只存在 trusted save receipt 與 live registry。`creation_evidence` 只記首次建立時經 bounds/normalization/redaction的書目 hints與 verified constraint reason codes，不存 `requested_label`、raw user text、ordinal phrase或完整 provider payload。現行 v1 與早期 v2 sidecar 可能帶有 `bundle_path: null`，reader 只為既有 bundle 接受該 null shape，不寫入、不使用，也不接受非 null 路徑。
 
 Sidecar 是 **creation evidence**，不是每次 reuse的操作日誌。後續不同 batch重用同一 identity時只在該 turn的 trusted SaveBatch artifact/metrics留下結果，不回寫 bundle；bytes、mtime與原 creation evidence全部不變。
 
@@ -481,7 +481,7 @@ Session/gate 不再用 `== "identity_verified"` 硬編碼，而透過 `is_citabl
 
 新路徑：
 
-- receipt 對 live registry 比對 source ID、canonical identity、bundle path、verification level。
+- receipt 必須與 live registry 中 session-only 的 trusted `SaveReceipt` 完全相等；registry 另以 live `SourceRef` 重驗 source ID、canonical identity、DOI、title、year、work type 與 verification level，且該 source 仍須可引用。
 - ambiguity/not-found/failure 只渲染 stable reason code + sanitized bibliographic facts。
 - 移除 live pending match lookup。
 - finalizer priority：`save outcome（任何 item） > model text/generic recovery`。

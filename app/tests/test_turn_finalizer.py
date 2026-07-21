@@ -48,7 +48,7 @@ async def _noop_fetcher(url, headers):
 def _seed_verified_source(session, tmp_path, source_id="src-known"):
     hub = CitationProviderHub(env={}, fetcher=_noop_fetcher)
     service = CitationService(hub, output_dir=tmp_path / "cite")
-    service.registry.register(SourceRef(
+    ref = SourceRef(
         source_id=source_id,
         doi="10.1234/known",
         title="Known Paper",
@@ -56,16 +56,9 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         year=2021,
         venue="Journal",
         verification_level="doi_identity_verified",
-        bundle_path=str(tmp_path / "cite" / source_id),
         schema_version=2,
         canonical_identity=CanonicalIdentity("doi", "10.1234/known"),
-    ))
-    session._citation_service = service
-    return service
-
-
-def _save_tool_message(session, source_id="src-known", *, status="success"):
-    ref = session.citation_service.registry.get(source_id)
+    )
     receipt = SaveReceipt(
         source_id=ref.source_id,
         canonical_identity=ref.canonical_identity,
@@ -73,10 +66,18 @@ def _save_tool_message(session, source_id="src-known", *, status="success"):
         title=ref.title,
         year=ref.year,
         work_type=ref.work_type,
-        bundle_path=ref.bundle_path,
+        bundle_path=str(tmp_path / "cite" / source_id),
         verification_level=ref.verification_level,
         cite_marker=f"[[cite:{ref.source_id}]]",
     )
+    service.registry.register(ref, receipt=receipt)
+    session._citation_service = service
+    return service
+
+
+def _save_tool_message(session, source_id="src-known", *, status="success"):
+    receipt = session.citation_service.registry.trusted_receipt(source_id)
+    assert receipt is not None
     return ToolMessage(
         content="save attempted", tool_call_id="save-1", name="citation_workflow",
         status=status,
@@ -256,12 +257,20 @@ def test_save_batch_has_priority_and_renders_all_items_in_request_order(make_ses
     assert "model prose" not in outcome.text
 
 
-def test_save_registry_mismatch_never_renders_success(make_session, tmp_path):
+@pytest.mark.parametrize(("field", "forged_value"), [
+    ("bundle_path", "/forged"),
+    ("title", "Forged title"),
+    ("year", 1900),
+    ("work_type", "forged-type"),
+])
+def test_save_registry_mismatch_never_renders_success(
+    make_session, tmp_path, field, forged_value,
+):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
-    message.artifact["items"][1]["receipt"]["bundle_path"] = "/forged"
+    message.artifact["items"][1]["receipt"][field] = forged_value
     outcome = asyncio.run(session.finalize_and_record(
         user_input="save", answer="ok", new_messages=[message], tool_calls=[], trace_events=[]
     ))

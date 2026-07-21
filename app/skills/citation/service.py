@@ -171,18 +171,21 @@ class CitationService:
                     canonical_identity=identity,
                 )
                 sidecar = {
-                    "source_ref": ref.to_dict(),
+                    "source_ref": ref.to_persisted_dict(),
                     "creation_evidence": {"batch_id": batch_id, "request_index": index, "normalized_hints": {"title": intent.title, "year": intent.year, "venue": intent.venue}, "verified_constraint_reason_codes": [f"{c.field}_constraint" for c in intent.constraints if c.is_hard]},
                     "resolution": {"record_source": record.provider, "provider_record_ids": [identity.key], "version_kind": "preprint" if record.provider == "arxiv" else "published", "decision_reason_codes": ["authoritative_exact_record"]},
                 }
                 try:
                     bundle = await asyncio.to_thread(write_identity_bundle, self.output_dir, identity=identity, title=ref.title, bibtex_text=canonical.text, sidecar=sidecar)
-                    ref.bundle_path = str(bundle.bundle_dir)
-                    self.registry.register(ref)
+                    receipt = SaveReceipt(
+                        sid, identity, None, ref.title, ref.year, ref.work_type,
+                        str(bundle.bundle_dir), ref.verification_level,
+                        f"[[cite:{sid}]]",
+                    )
+                    self.registry.register(ref, receipt=receipt)
                 except (StorageError, ValueError) as exc:
                     outcomes[index] = SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
                     continue
-                receipt = SaveReceipt(sid, identity, None, ref.title, ref.year, ref.work_type, ref.bundle_path, ref.verification_level, f"[[cite:{sid}]]")
                 outcomes[index] = SaveItemOutcome(index, intent.requested_label, "reused" if bundle.reused else "saved", "reused_existing" if bundle.reused else "saved_new", receipt)
                 continue
             try:
@@ -211,7 +214,7 @@ class CitationService:
                 canonical_identity=identity,
             )
             sidecar = {
-                "source_ref": ref.to_dict(),
+                "source_ref": ref.to_persisted_dict(),
                 "creation_evidence": {
                     "batch_id": batch_id,
                     "request_index": index,
@@ -239,15 +242,15 @@ class CitationService:
                     bibtex_text=canonical.text,
                     sidecar=sidecar,
                 )
-                ref.bundle_path = str(bundle.bundle_dir)
-                self.registry.register(ref)
+                receipt = SaveReceipt(
+                    sid, identity, identity.value, ref.title, ref.year,
+                    ref.work_type, str(bundle.bundle_dir), ref.verification_level,
+                    f"[[cite:{sid}]]",
+                )
+                self.registry.register(ref, receipt=receipt)
             except (StorageError, ValueError) as exc:
                 outcomes[index] = SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
                 continue
-            receipt = SaveReceipt(
-                sid, identity, identity.value, ref.title, ref.year, ref.work_type,
-                ref.bundle_path, ref.verification_level, f"[[cite:{sid}]]",
-            )
             outcomes[index] = SaveItemOutcome(
                 index, intent.requested_label, "reused" if bundle.reused else "saved",
                 "reused_existing" if bundle.reused else "saved_new", receipt,

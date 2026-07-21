@@ -19,7 +19,6 @@ from skills.citation.types import (
     SaveItemOutcome,
     SaveReceipt,
     is_citable_source,
-    source_identity,
 )
 from skills.citation.resolution import HostIntentClaim
 from skills.citation.service import CitationTurnContext, MutationGuard
@@ -342,10 +341,7 @@ class ChatSession:
                 ref = registry.get(receipt.source_id)
                 if (
                     ref is None
-                    or source_identity(ref) != receipt.canonical_identity
-                    or ref.doi != receipt.doi
-                    or ref.bundle_path != receipt.bundle_path
-                    or ref.verification_level != receipt.verification_level
+                    or not registry.receipt_is_trusted(receipt)
                     or not is_citable_source(ref)
                 ):
                     logger.warning("save receipt/registry mismatch: %s", receipt.source_id)
