@@ -13,7 +13,13 @@ from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
 from skills.citation.doi import doi_equal
 from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import ProviderError
-from skills.citation.resolution import HostIntentClaim, WorkIntent, WorkResolver, infer_version_kind
+from skills.citation.resolution import (
+    HostIntentClaim,
+    WorkIntent,
+    WorkResolver,
+    evaluate_record,
+    infer_version_kind,
+)
 from skills.citation.storage import StorageError, resolve_output_dir, source_id_for, write_identity_bundle
 from skills.citation.types import (
     CanonicalIdentity,
@@ -94,9 +100,38 @@ class CitationService:
                 continue
             authority = await self.authorities.resolve(intent)
             if authority is not None:
-                eligible.append((index, intent, authority))
-                outcomes.append(None)  # type: ignore[arg-type]
-                continue
+                authority_record = ProviderRecord(
+                    provider=authority.provider,
+                    provider_id=f"{authority.provider}:{authority.identity.key}",
+                    rank=0,
+                    title=authority.title,
+                    authors=list(authority.authors),
+                    year=authority.year,
+                    venue=authority.venue,
+                    work_type=authority.work_type,
+                    url=authority.url,
+                    identifiers={authority.identity.kind: authority.identity.value},
+                    version_kind=(
+                        "preprint" if authority.provider == "arxiv" else "published"
+                    ),
+                    field_provenance={
+                        field: f"authoritative:{authority.provider}"
+                        for field in (
+                            "title",
+                            "authors",
+                            "year",
+                            "venue",
+                            "work_type",
+                            "url",
+                        )
+                    },
+                )
+                authority_decision = evaluate_record(intent, authority_record)
+                if authority_decision.status == "eligible":
+                    eligible.append((index, intent, authority))
+                    outcomes.append(None)  # type: ignore[arg-type]
+                    continue
+                decision = authority_decision
             status_map = {"unsupported": "unsupported_no_doi"}
             status = status_map.get(decision.status, decision.status)
             alternatives = tuple(

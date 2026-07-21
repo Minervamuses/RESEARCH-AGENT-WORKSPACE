@@ -17,7 +17,8 @@ from typing import Callable, Literal, Sequence
 
 from skills.citation.doi import canonicalize_doi
 from skills.citation.normalize import normalize_title
-from skills.citation.providers.base import ProviderRecord
+from skills.citation.providers.base import BibliographicQuery, ProviderRecord
+from skills.citation.providers.doi_org import DoiNotFound
 from skills.citation.providers.net import (
     ProviderDisabled,
     ProviderError,
@@ -285,7 +286,6 @@ class ResolutionDecision:
 class WorkResolution:
     decision: ResolutionDecision
     provider_states: tuple[ProviderState, ...]
-    queries: tuple[str, ...]
 
 
 class ResolutionPolicy:
@@ -354,9 +354,32 @@ def evaluate_record(
 
     exact_identifier = False
     for identifier in intent.identifiers:
-        if identifier.kind == "doi" and record.doi:
-            exact_identifier = canonicalize_doi(record.doi) == identifier.value
-            if not exact_identifier:
+        if identifier.kind == "doi":
+            accepted_dois = (
+                {
+                    value
+                    for value in (
+                        canonicalize_doi(record.doi),
+                        *(canonicalize_doi(alias) for alias in record.aliases),
+                    )
+                    if value
+                }
+                if record.doi
+                else set()
+            )
+            matches = bool(accepted_dois) and identifier.value in accepted_dois
+            exact_identifier = exact_identifier or matches
+            if not matches:
+                reasons.append("identifier_mismatch")
+        elif identifier.kind == "arxiv":
+            raw_arxiv = record.identifiers.get("arxiv", "")
+            try:
+                actual_arxiv = normalize_arxiv(raw_arxiv) if raw_arxiv else ""
+            except ValueError:
+                actual_arxiv = ""
+            matches = bool(actual_arxiv) and actual_arxiv == identifier.value
+            exact_identifier = exact_identifier or matches
+            if not matches:
                 reasons.append("identifier_mismatch")
     similarity = _title_similarity(intent.title, record.title) if intent.title else 1.0
     comparisons.append(f"title_similarity:{similarity:.3f}")
@@ -515,23 +538,86 @@ class WorkResolver:
         self._metrics = metrics or (lambda _event, _values: None)
 
     @staticmethod
-    def queries_for(intent: WorkIntent) -> tuple[str, ...]:
-        exact = [i.value for i in intent.identifiers]
-        title = intent.title.strip()
-        author = intent.authors[0].strip() if intent.authors else ""
-        qualifiers = " ".join(
-            value for value in (title, author, str(intent.year or ""), intent.venue) if value
-        ).strip()
-        queries: list[str] = []
-        if exact:
-            queries.append(exact[0])
-        if qualifiers and qualifiers not in queries:
-            queries.append(qualifiers)
-        if title and author and len(queries) < 2:
-            fallback = f"{title} {author}".strip()
-            if fallback not in queries:
-                queries.append(fallback)
-        return tuple(queries[:2])
+    def bibliographic_query_for(intent: WorkIntent) -> BibliographicQuery:
+        """Project user-independent identity hints into the provider DTO."""
+        return BibliographicQuery(
+            title=intent.title,
+            authors=intent.authors,
+            year=intent.year,
+            venue=intent.venue,
+            work_type=intent.work_type,
+        )
+
+    @staticmethod
+    def _exact_identifiers(
+        intent: WorkIntent,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        dois = tuple(dict.fromkeys(
+            item.value for item in intent.identifiers if item.kind == "doi"
+        ))
+        arxiv = tuple(dict.fromkeys(
+            item.value for item in intent.identifiers if item.kind == "arxiv"
+        ))
+        return dois, arxiv
+
+    async def _resolve_exact_doi(
+        self, intent: WorkIntent, doi: str
+    ) -> WorkResolution:
+        try:
+            csl = await self._doi_org.fetch_structured(doi)
+        except DoiNotFound:
+            return WorkResolution(
+                ResolutionDecision("not_found", "exact_doi_not_found"),
+                (ProviderState("doi.org", "empty"),),
+            )
+        except ProviderRateLimited:
+            return WorkResolution(
+                ResolutionDecision("provider_failed", "doi_refetch_rate_limited"),
+                (ProviderState("doi.org", "rate_limited"),),
+            )
+        except ProviderTimeout:
+            return WorkResolution(
+                ResolutionDecision("provider_failed", "doi_refetch_timeout"),
+                (ProviderState("doi.org", "timeout"),),
+            )
+        except ProviderError:
+            return WorkResolution(
+                ResolutionDecision("verification_failed", "doi_refetch_failed"),
+                (ProviderState("doi.org", "error"),),
+            )
+        identifiers = {"doi": csl.doi}
+        arxiv_match = re.fullmatch(r"10\.48550/arxiv\.(.+)", doi, re.IGNORECASE)
+        if arxiv_match:
+            try:
+                identifiers["arxiv"] = normalize_arxiv(arxiv_match.group(1))
+            except ValueError:
+                pass
+        record = ProviderRecord(
+            provider="doi.org",
+            provider_id=f"doi.org:{csl.doi}",
+            rank=0,
+            title=csl.title,
+            authors=list(csl.authors),
+            year=csl.year,
+            venue=csl.venue,
+            doi=csl.doi,
+            url=csl.url,
+            work_type=csl.work_type,
+            identifiers=identifiers,
+            aliases=(doi,) if csl.doi != doi else (),
+            field_provenance={
+                "doi": "doi.org",
+                "title": "doi.org",
+                "authors": "doi.org",
+                "year": "doi.org",
+                "venue": "doi.org",
+                "work_type": "doi.org",
+            },
+        )
+        return WorkResolution(
+            evaluate_record(intent, record),
+            (ProviderState("doi.org", "ok"),),
+        )
 
     async def resolve(self, intent: WorkIntent) -> WorkResolution:
         if intent.binding_reason or intent.negative_target:
@@ -539,18 +625,38 @@ class WorkResolver:
                 "insufficient_intent",
                 intent.binding_reason or "negative_target",
             )
-            return WorkResolution(decision, (), ())
-        queries = self.queries_for(intent)
-        if not queries:
+            return WorkResolution(decision, ())
+        exact_dois, exact_arxiv = self._exact_identifiers(intent)
+        if len(exact_dois) > 1 or len(exact_arxiv) > 1:
+            return WorkResolution(
+                ResolutionDecision("identity_conflict", "multiple_exact_identifiers"),
+                (),
+            )
+        if exact_dois and exact_arxiv:
+            paired = f"10.48550/arxiv.{exact_arxiv[0]}".casefold()
+            if exact_dois[0].casefold() != paired:
+                return WorkResolution(
+                    ResolutionDecision("ambiguous", "multiple_exact_identifiers"),
+                    (),
+                )
+        if exact_dois:
+            return await self._resolve_exact_doi(intent, exact_dois[0])
+        if exact_arxiv:
+            # CitationService owns the allowlisted arXiv authority adapter.
+            return WorkResolution(
+                ResolutionDecision("unsupported", "exact_arxiv_requires_authority"),
+                (),
+            )
+        query = self.bibliographic_query_for(intent)
+        if not query.title:
             return WorkResolution(
                 ResolutionDecision("insufficient_intent", "insufficient_identity_anchor"),
                 (),
-                (),
             )
 
-        async def call(name: str, provider, query: str):
+        async def call(name: str, provider):
             try:
-                records = await provider.search(query, rows=self._rows)
+                records = await provider.search_work(query, rows=self._rows)
                 return records, ProviderState(name, "ok" if records else "empty")
             except ProviderDisabled:
                 return [], ProviderState(name, "disabled")
@@ -561,21 +667,23 @@ class WorkResolver:
             except ProviderError:
                 return [], ProviderState(name, "error")
 
-        tasks = [call(name, provider, query) for query in queries for name, provider in self._providers]
+        tasks = [call(name, provider) for name, provider in self._providers]
         results = await asyncio.gather(*tasks)
         states = tuple(state for _records, state in results)
         records = [record for provider_records, _state in results for record in provider_records]
         self._metrics("resolver_provider_phase", {
-            "queries": len(queries), "records": len(records), "states": [s.status for s in states]
+            "providers": len(self._providers),
+            "records": len(records),
+            "states": [s.status for s in states],
         })
         if not records and states and all(s.status in {"error", "timeout", "rate_limited"} for s in states):
             return WorkResolution(
-                ResolutionDecision("provider_failed", "all_providers_failed"), states, queries
+                ResolutionDecision("provider_failed", "all_providers_failed"), states
             )
 
         decision = decide_resolution(intent, records)
         if decision.status != "eligible" or decision.record is None:
-            return WorkResolution(decision, states, queries)
+            return WorkResolution(decision, states)
         winner = decision.record
         if not winner.doi:
             return WorkResolution(
@@ -584,24 +692,23 @@ class WorkResolver:
                     evidence=decision.evidence,
                 ),
                 states,
-                queries,
             )
         try:
             csl = await self._doi_org.fetch_structured(winner.doi)
         except ProviderRateLimited:
             return WorkResolution(
                 ResolutionDecision("provider_failed", "doi_refetch_rate_limited"),
-                states + (ProviderState("doi.org", "rate_limited"),), queries,
+                states + (ProviderState("doi.org", "rate_limited"),),
             )
         except ProviderTimeout:
             return WorkResolution(
                 ResolutionDecision("provider_failed", "doi_refetch_timeout"),
-                states + (ProviderState("doi.org", "timeout"),), queries,
+                states + (ProviderState("doi.org", "timeout"),),
             )
         except ProviderError:
             return WorkResolution(
                 ResolutionDecision("verification_failed", "doi_refetch_failed"),
-                states + (ProviderState("doi.org", "error"),), queries,
+                states + (ProviderState("doi.org", "error"),),
             )
         verified = ProviderRecord(
             provider="doi.org",
@@ -632,5 +739,4 @@ class WorkResolver:
         return WorkResolution(
             verified_decision,
             states + (ProviderState("doi.org", "ok"),),
-            queries,
         )
