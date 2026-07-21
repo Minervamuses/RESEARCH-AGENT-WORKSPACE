@@ -307,11 +307,9 @@ def format_explain(output_dir) -> str:
 def create_citation_workflow_tool(
     *,
     service_getter: Callable | None = None,
-    coordinator_getter: Callable | None = None,
     context_getter: Callable[[], CitationTurnContext | None] | None = None,
 ) -> StructuredTool:
-    getter = service_getter or coordinator_getter
-    if getter is None:
+    if service_getter is None:
         raise ValueError("service_getter is required")
     context_getter = context_getter or (lambda: None)
     busy_lock = asyncio.Lock()
@@ -333,7 +331,7 @@ def create_citation_workflow_tool(
         }, ensure_ascii=False, sort_keys=True).encode())
         if payload_size > 64 * 1024:
             return _error("canonical request exceeds 64 KiB"), None
-        service = getter()
+        service = service_getter()
         if action == "search":
             if not query or works is not None or source_id is not None or page is not None:
                 return _error("search requires only query and optional year filters"), None

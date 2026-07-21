@@ -14,11 +14,9 @@ from skills.citation.storage import (
     MAX_BUNDLE_DIR_BYTES,
     SIDECAR_FILENAME,
     StorageError,
-    bundle_dir_name,
     cleanup_stale_staging,
+    identity_bundle_dir_name,
     resolve_output_dir,
-    validate_bundle,
-    write_bundle,
     write_identity_bundle,
     validate_identity_bundle,
 )
@@ -32,9 +30,26 @@ def make_sidecar(doi=DOI):
         "source_ref": {
             "source_id": f"src-{storage.doi_hash(doi)}",
             "doi": doi,
-            "verification_level": "identity_verified",
+            "verification_level": "doi_identity_verified",
         },
     }
+
+
+def _write_doi_bundle(
+    output_dir,
+    *,
+    canonical_doi,
+    title,
+    bibtex_text,
+    sidecar,
+):
+    return write_identity_bundle(
+        output_dir,
+        identity=CanonicalIdentity("doi", canonical_doi),
+        title=title,
+        bibtex_text=bibtex_text,
+        sidecar=sidecar,
+    )
 
 
 def test_output_dir_precedence_config_env_workspace(monkeypatch, tmp_path):
@@ -102,25 +117,27 @@ def test_workspace_root_returns_none_when_both_walks_lack_git(tmp_path):
 
 def test_bundle_dir_name_caps_utf8_bytes_and_keeps_hash():
     long_chinese = "極長的中文標題" * 40
-    name = bundle_dir_name(long_chinese, DOI)
+    identity = CanonicalIdentity("doi", DOI)
+    name = identity_bundle_dir_name(long_chinese, identity)
     assert len(name.encode("utf-8")) <= MAX_BUNDLE_DIR_BYTES
     stem, _, digest = name.rpartition("--")
     assert len(digest) == 12
     assert stem  # never empty
     # Deterministic for the same inputs.
-    assert name == bundle_dir_name(long_chinese, DOI)
+    assert name == identity_bundle_dir_name(long_chinese, identity)
 
 
-def test_write_bundle_creates_both_files_atomically(tmp_path):
-    result = write_bundle(
+def test_write_identity_bundle_creates_both_files_atomically(tmp_path):
+    result = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
     assert result.reused is False
     assert result.bib_path.read_text(encoding="utf-8") == BIB
     sidecar = json.loads(result.sidecar_path.read_text(encoding="utf-8"))
-    assert sidecar["schema_version"] == 1
+    assert sidecar["schema_version"] == 2
     assert sidecar["doi"] == DOI
+    assert sidecar["identity"] == {"kind": "doi", "value": DOI}
     assert sidecar["artifact_hashes"][BIB_FILENAME] == result.bib_sha256
     assert sidecar["run_id"] == "r1"
     # No staging leftovers.
@@ -129,12 +146,12 @@ def test_write_bundle_creates_both_files_atomically(tmp_path):
     assert oct(result.bib_path.stat().st_mode & 0o777) == "0o600"
 
 
-def test_same_doi_reconfirm_reuses_validated_bundle(tmp_path):
-    first = write_bundle(
+def test_same_doi_save_reuses_validated_bundle(tmp_path):
+    first = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
-    second = write_bundle(
+    second = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
@@ -143,14 +160,14 @@ def test_same_doi_reconfirm_reuses_validated_bundle(tmp_path):
 
 
 def test_corrupt_existing_bundle_fails_closed_never_overwrites(tmp_path):
-    first = write_bundle(
+    first = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
     # Tamper with the artifact: hash no longer matches the sidecar.
     first.bib_path.write_text("@tampered{}", encoding="utf-8")
     with pytest.raises(StorageError) as exc:
-        write_bundle(
+        _write_doi_bundle(
             tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
             sidecar=make_sidecar(),
         )
@@ -159,20 +176,20 @@ def test_corrupt_existing_bundle_fails_closed_never_overwrites(tmp_path):
 
 
 def test_unreadable_sidecar_fails_closed(tmp_path):
-    first = write_bundle(
+    first = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
     first.sidecar_path.write_text("{not json", encoding="utf-8")
     with pytest.raises(StorageError):
-        write_bundle(
+        _write_doi_bundle(
             tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
             sidecar=make_sidecar(),
         )
 
 
 def test_schema_mismatch_fails_closed(tmp_path):
-    first = write_bundle(
+    first = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
@@ -180,7 +197,7 @@ def test_schema_mismatch_fails_closed(tmp_path):
     sidecar["schema_version"] = 99
     first.sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
     with pytest.raises(StorageError) as exc:
-        write_bundle(
+        _write_doi_bundle(
             tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
             sidecar=make_sidecar(),
         )
@@ -197,12 +214,12 @@ def test_different_doi_source_id_collision_fails_closed(tmp_path, monkeypatch):
         return real_doi_hash(doi, length=length)
 
     monkeypatch.setattr(storage, "doi_hash", fake_hash)
-    first = write_bundle(
+    first = _write_doi_bundle(
         tmp_path, canonical_doi="10.1111/one", title="Same Title",
         bibtex_text=BIB, sidecar=make_sidecar("10.1111/one"),
     )
     with pytest.raises(StorageError) as exc:
-        write_bundle(
+        _write_doi_bundle(
             tmp_path, canonical_doi="10.2222/two", title="Same Title",
             bibtex_text=BIB, sidecar=make_sidecar("10.2222/two"),
         )
@@ -234,7 +251,7 @@ def test_write_failure_surfaces_as_storage_error(tmp_path):
     blocked.chmod(0o500)
     try:
         with pytest.raises(StorageError) as exc:
-            write_bundle(
+            _write_doi_bundle(
                 blocked, canonical_doi=DOI, title="T", bibtex_text=BIB,
                 sidecar=make_sidecar(),
             )
@@ -244,7 +261,7 @@ def test_write_failure_surfaces_as_storage_error(tmp_path):
 
 
 def test_visible_bundle_always_has_both_artifacts(tmp_path):
-    result = write_bundle(
+    result = _write_doi_bundle(
         tmp_path, canonical_doi=DOI, title="A Paper", bibtex_text=BIB,
         sidecar=make_sidecar(),
     )
@@ -259,7 +276,7 @@ def test_frozen_v1_fixture_validates_and_is_reused_without_rewrite(tmp_path):
     target = tmp_path / fixture.name
     shutil.copytree(fixture, target)
     before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in target.iterdir()}
-    result = write_bundle(
+    result = _write_doi_bundle(
         tmp_path,
         canonical_doi="10.1234/legacy",
         title="A changed provider title",

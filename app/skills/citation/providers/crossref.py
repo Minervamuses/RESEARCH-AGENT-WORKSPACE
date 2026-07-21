@@ -1,7 +1,7 @@
 """Crossref works search client.
 
 Crossref is a *discovery* provider here: it proposes candidates and ranks
-them, but confirm-time verification always re-fetches the structured record
+them, but save-time verification always re-fetches the structured record
 via doi.org content negotiation (RA-independent), so Crossref is never the
 sole verification authority for a DOI.
 

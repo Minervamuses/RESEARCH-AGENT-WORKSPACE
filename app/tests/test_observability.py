@@ -41,7 +41,7 @@ def test_summary_captures_provider_metadata_and_counts():
         invalid_tool_calls=[
             {
                 "name": "citation_workflow",
-                "args": '{"action": "confirm"',
+                "args": '{"action": "save"',
                 "id": "bad-1",
                 "error": "unparsable",
                 "type": "invalid_tool_call",
@@ -83,22 +83,22 @@ def test_summary_falls_back_to_openai_token_usage():
 
 
 def test_last_completed_citation_action_requires_a_tool_result():
-    select_call = AIMessage(content="", tool_calls=[{
+    search_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
-        "args": {"action": "select", "identifier": "c3"},
+        "args": {"action": "search", "query": "paper"},
         "id": "call-1",
     }])
     completed = ToolMessage(content="ok", tool_call_id="call-1")
-    dangling_confirm = AIMessage(content="", tool_calls=[{
+    dangling_save = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
-        "args": {"action": "confirm", "identifier": "m1"},
+        "args": {"action": "save", "works": [{"requested_label": "paper"}]},
         "id": "call-2",
     }])
 
-    assert last_completed_citation_action([select_call]) is None
+    assert last_completed_citation_action([search_call]) is None
     assert last_completed_citation_action(
-        [select_call, completed, dangling_confirm]
-    ) == "select"
+        [search_call, completed, dangling_save]
+    ) == "search"
 
 
 def test_last_completed_citation_action_ignores_other_tools():
@@ -114,9 +114,9 @@ def test_last_completed_citation_action_ignores_other_tools():
 
 def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
     doi = "10.1234/secret-doi"
-    select_call = AIMessage(content="", tool_calls=[{
+    search_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
-        "args": {"action": "select", "identifier": doi},
+        "args": {"action": "search", "query": doi},
         "id": "call-1",
     }])
     completed = ToolMessage(content=f"resolved {doi}", tool_call_id="call-1")
@@ -124,7 +124,7 @@ def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
         content=f"the DOI is {doi} and provider said something",
         invalid_tool_calls=[{
             "name": "citation_workflow",
-            "args": f'{{"action": "confirm", "identifier": "{doi}"',
+            "args": f'{{"action": "save", "identifier": "{doi}"',
             "id": "bad-1",
             "error": f"provider free text mentioning {doi}",
             "type": "invalid_tool_call",
@@ -139,7 +139,7 @@ def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
             dropped_tool_calls=0,
             primary_remaining=3,
             local_remaining=4,
-            messages=[select_call, completed],
+            messages=[search_call, completed],
         )
 
     assert len(caplog.records) == 1
@@ -147,7 +147,7 @@ def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
     assert doi not in line
     assert "provider said" not in line
     assert "identifier" not in line
-    assert "last_citation_action=select" in line
+    assert "last_citation_action=search" in line
     assert "invalid_tool_calls=1" in line
     assert "content_chars=" in line
     assert caplog.records[0].levelno == logging.WARNING
@@ -265,7 +265,7 @@ def test_graph_logs_invalid_tool_calls_on_initial_stage(
                         content="",
                         invalid_tool_calls=[{
                             "name": "citation_workflow",
-                            "args": '{"action": "confirm"',
+                            "args": '{"action": "save"',
                             "id": "bad-1",
                             "error": "unparsable",
                             "type": "invalid_tool_call",

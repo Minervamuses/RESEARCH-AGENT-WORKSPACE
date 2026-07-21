@@ -146,9 +146,9 @@ class ChatSession:
         )
         # Skill-scoped tool: bound into the graph universe but callable only
         # while the citation skill's manifest requests it. Creation is cheap —
-        # the Coordinator behind it is built lazily on first use.
+        # the session-scoped service behind it is built lazily on first use.
         self.citation_workflow_tool = create_citation_workflow_tool(
-            service_getter=lambda: self.citation_coordinator,
+            service_getter=lambda: self.citation_service,
             context_getter=lambda: self._citation_turn_context,
         )
         self.graph = build_graph(
@@ -175,22 +175,22 @@ class ChatSession:
         self.last_trace_events: list[dict] = []
 
         self._progress_cb = progress_cb
-        self._citation_coordinator = None
+        self._citation_service = None
         self._turn_execution_lock = asyncio.Lock()
         self._citation_turn_context: CitationTurnContext | None = None
 
     @property
-    def citation_coordinator(self):
-        """Session-scoped citation Coordinator over the process provider hub.
+    def citation_service(self):
+        """Session-scoped CitationService over the process provider hub.
 
         Built lazily on first use. Its mutating methods are reachable only
         through the skill-only citation_workflow tool.
         """
-        if self._citation_coordinator is None:
+        if self._citation_service is None:
             from skills.citation.service import CitationService
             from skills.citation.hub import get_provider_hub
-            self._citation_coordinator = CitationService(get_provider_hub(), config=self.config)
-        return self._citation_coordinator
+            self._citation_service = CitationService(get_provider_hub(), config=self.config)
+        return self._citation_service
 
     def _prompt_history(self) -> list:
         base = assemble_prompt_history(
@@ -270,8 +270,8 @@ class ChatSession:
 
     def _citation_registry(self):
         """The session source registry, or None before first citation use."""
-        coordinator = self._citation_coordinator
-        return coordinator.registry if coordinator is not None else None
+        service = self._citation_service
+        return service.registry if service is not None else None
 
     def _build_sources_hint(self) -> SystemMessage | None:
         """Inject the visible/recently-activated sources (at most 20).
@@ -571,17 +571,17 @@ class ChatSession:
     def _teardown_citation_session_state(self) -> None:
         """Drop the in-memory workflow and source registry on deactivation.
 
-        The Coordinator (and any half-finished workflow, resolved matches,
-        and registered SourceRefs) is discarded; bundles already written to
-        disk are untouched. The next activation lazily builds a fresh one.
+        The service and its registered SourceRefs are discarded; bundles
+        already written to disk are untouched. The next activation lazily
+        builds a fresh service.
         """
-        self._citation_coordinator = None
+        self._citation_service = None
 
     def activate_skill(self, name: str, task_mode: str | None = None) -> SkillRuntime:
         """Activate a local skill for subsequent turns.
 
-        Activating the citation skill forces normal thinking (its stateful
-        Coordinator must never be shared by parallel fusion candidates).
+        Activating the citation skill forces normal thinking (its session
+        registry must never be shared by parallel fusion candidates).
         Leaving the citation skill — for another skill or none — tears down
         its session state. A failed load leaves the previous skill active.
         """

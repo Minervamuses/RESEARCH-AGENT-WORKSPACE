@@ -74,10 +74,10 @@ def _make_session(monkeypatch, tmp_path, responses):
     return ChatSession(cfg, history_store=FakeHistoryStore())
 
 
-def _seed_fixture_coordinator(session, tmp_path):
+def _seed_fixture_service(session, tmp_path):
     hub = CitationProviderHub(env={}, fetcher=RoutingFetcher())
-    session._citation_coordinator = CitationService(hub, output_dir=tmp_path / "cite")
-    return session._citation_coordinator
+    session._citation_service = CitationService(hub, output_dir=tmp_path / "cite")
+    return session._citation_service
 
 
 def test_citation_turn_runs_stateless_search_with_year_filter(
@@ -93,7 +93,7 @@ def test_citation_turn_runs_stateless_search_with_year_filter(
     ]
     session = _make_session(monkeypatch, tmp_path, responses)
     session.activate_skill("citation")
-    _seed_fixture_coordinator(session, tmp_path)
+    _seed_fixture_service(session, tmp_path)
 
     answer = asyncio.run(session.turn("幫我尋找近5年內關於HPC的論文"))
 
@@ -106,7 +106,7 @@ def test_forged_workflow_call_outside_skill_is_denied_end_to_end(
     monkeypatch, tmp_path
 ):
     """No active skill: the graph must answer the forged call with a policy
-    error ToolMessage and never build the Coordinator."""
+    error ToolMessage and never build the citation service."""
     responses = [
         _workflow_call({"action": "search", "query": "HPC"}),
         AIMessage(content="fallback answer"),
@@ -122,7 +122,7 @@ def test_forged_workflow_call_outside_skill_is_denied_end_to_end(
     assert len(denials) == 1
     assert "tool not available" in denials[0].content
     assert result.answer == "fallback answer"
-    assert session._citation_coordinator is None  # noqa: SLF001
+    assert session._citation_service is None  # noqa: SLF001
 
 
 def test_workflow_call_under_other_skill_is_denied_end_to_end(
@@ -143,7 +143,7 @@ def test_workflow_call_under_other_skill_is_denied_end_to_end(
     ]
     assert len(denials) == 1
     assert "tool not available" in denials[0].content
-    assert session._citation_coordinator is None  # noqa: SLF001
+    assert session._citation_service is None  # noqa: SLF001
 
 
 def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch, tmp_path):
@@ -164,7 +164,7 @@ def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch
     ]
     session = _make_session(monkeypatch, tmp_path, responses)
     session.activate_skill("citation")
-    _seed_fixture_coordinator(session, tmp_path)
+    _seed_fixture_service(session, tmp_path)
 
     receipt = asyncio.run(session.turn("幫我找出並保存 2021 年 Ada Lovelace 的 Paper A"))
     bundles = list((tmp_path / "cite").glob("*/reference.bib"))
@@ -172,7 +172,7 @@ def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch
     assert "引用保存結果" in receipt
     assert "source ID" in receipt
     assert str(bundles[0].parent) in receipt
-    refs = session.citation_coordinator.registry.list()
+    refs = session.citation_service.registry.list()
     assert [r.verification_level for r in refs] == ["doi_identity_verified"]
     # The deterministic receipt, not the model's generic sentence, is the
     # prompt-visible fact on the next turn.

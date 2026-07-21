@@ -1,9 +1,9 @@
 """Atomic citation bundle storage.
 
-Every confirmed citation persists as one bundle directory::
+Every saved citation persists as one bundle directory::
 
-    <output>/<utf8-byte-capped-title>--<doi-hash>/reference.bib
-    <output>/<utf8-byte-capped-title>--<doi-hash>/citation.json
+    <output>/<utf8-byte-capped-title>--<identity-hash>/reference.bib
+    <output>/<utf8-byte-capped-title>--<identity-hash>/citation.json
 
 Atomicity: both files are written into a hidden staging directory on the
 same filesystem (0600, flushed and fsynced), then a single ``rename`` makes
@@ -11,16 +11,16 @@ the bundle visible — a visible bundle is never half-written. Stale staging
 directories are only reclaimed after 24 hours.
 
 Idempotency and fail-closed rules:
-  * re-confirming the same DOI validates the existing sidecar (schema, DOI,
-    artifact hash) and reuses the bundle;
-  * an existing bundle whose schema/DOI/hash does not validate fails closed —
-    it is never overwritten;
-  * a *different* DOI colliding on the same directory name lengthens the DOI
-    hash from 12 to 20 to 64 hex chars.
+  * saving the same canonical identity validates the existing sidecar and
+    artifact hash, then reuses the bundle without rewriting it;
+  * an existing bundle whose schema, identity, or hash does not validate fails
+    closed and is never overwritten;
+  * a different identity colliding on the 12-hex source slot fails closed.
+    Historical 20/64-hex directories remain discoverable and reusable.
 
-The sidecar is built by the Coordinator and must never contain raw pages,
+The sidecar is built by CitationService and must never contain raw pages,
 LLM responses, API keys, or URLs embedding keys; storage only adds the
-artifact hash and schema/DOI stamps it needs for validation.
+artifact hash and schema/identity stamps it needs for validation.
 
 Output directory precedence: ``AgentConfig.citation_output_dir`` ->
 ``CITATION_OUTPUT_DIR`` env -> ``<workspace>/cite`` -> the platform user-data
@@ -63,9 +63,9 @@ _UNSAFE_CHARS = set('<>:"/\\|?*') | {chr(i) for i in range(0x20)}
 class StorageError(RuntimeError):
     """Raised when a bundle cannot be written or validated.
 
-    ``code``: ``bundle_conflict`` (existing bundle fails validation; never
-    overwritten) or ``write_failed`` (I/O failure, staging left for later
-    inspection/cleanup).
+    ``code`` is ``bundle_conflict`` (existing bundle fails validation),
+    ``source_id_collision`` (the stable slot belongs to another identity), or
+    ``write_failed`` (I/O failure, staging left for later inspection/cleanup).
     """
 
     def __init__(self, code: str, message: str):
@@ -179,16 +179,6 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return truncated.decode("utf-8", errors="ignore").rstrip("_.") or "untitled"
 
 
-def bundle_dir_name(
-    title: str, canonical_doi: str, *, hash_length: int = HASH_LENGTHS[0]
-) -> str:
-    """``<utf8-byte-capped-title>--<doi-hash>``, at most 180 UTF-8 bytes."""
-    suffix = f"--{doi_hash(canonical_doi, length=hash_length)}"
-    budget = MAX_BUNDLE_DIR_BYTES - len(suffix.encode("utf-8"))
-    stem = _truncate_utf8(_sanitize_title(title), budget)
-    return f"{stem}{suffix}"
-
-
 def identity_bundle_dir_name(
     title: str, identity: CanonicalIdentity, *, hash_length: int = HASH_LENGTHS[0]
 ) -> str:
@@ -293,21 +283,6 @@ def validate_identity_bundle(bundle_dir: Path, identity: CanonicalIdentity) -> B
     )
 
 
-def validate_bundle(bundle_dir: Path, canonical_doi: str) -> BundleResult:
-    """Validate an existing bundle for reuse; raise fail-closed on mismatch.
-
-    Raises StorageError('bundle_conflict') for schema/hash mismatches or a
-    corrupt sidecar, and ValueError when the bundle belongs to a *different*
-    DOI (a directory-name collision the caller resolves with a longer hash).
-    """
-    try:
-        return validate_identity_bundle(bundle_dir, CanonicalIdentity("doi", canonical_doi))
-    except StorageError as exc:
-        if exc.code == "source_id_collision":
-            raise ValueError("bundle belongs to a different DOI") from exc
-        raise
-
-
 @contextmanager
 def _source_slot_lock(
     output_dir: Path, source_id: str, *, timeout_seconds: float
@@ -364,16 +339,16 @@ def _find_existing(output_dir: Path, identity: CanonicalIdentity) -> BundleResul
     return None
 
 
-def _write_identity_bundle(
+def write_identity_bundle(
     output_dir: Path,
     *,
     identity: CanonicalIdentity,
     title: str,
     bibtex_text: str,
     sidecar: dict,
-    schema_version: int,
-    lock_timeout_seconds: float,
+    lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
 ) -> BundleResult:
+    """Write or reuse a schema-v2 canonical-identity bundle atomically."""
     output_dir = Path(output_dir)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -391,10 +366,9 @@ def _write_identity_bundle(
         bib_bytes = bibtex_text.encode("utf-8")
         bib_sha = _sha256_bytes(bib_bytes)
         payload = dict(sidecar)
-        payload["schema_version"] = schema_version
+        payload["schema_version"] = BUNDLE_SCHEMA_V2
         payload["doi"] = identity.value if identity.kind == "doi" else None
-        if schema_version == BUNDLE_SCHEMA_V2:
-            payload["identity"] = identity.to_dict()
+        payload["identity"] = identity.to_dict()
         payload["artifact_hashes"] = {BIB_FILENAME: bib_sha}
         sidecar_bytes = json.dumps(
             payload, ensure_ascii=False, indent=2, sort_keys=True
@@ -417,53 +391,6 @@ def _write_identity_bundle(
             bib_sha256=bib_sha,
             reused=False,
         )
-
-
-def write_bundle(
-    output_dir: Path,
-    *,
-    canonical_doi: str,
-    title: str,
-    bibtex_text: str,
-    sidecar: dict,
-) -> BundleResult:
-    """Atomically persist one bundle; idempotent for the same DOI.
-
-    ``sidecar`` is the Coordinator-built payload; storage stamps
-    ``schema_version``, ``doi``, and ``artifact_hashes`` into it.
-    """
-    return _write_identity_bundle(
-        output_dir,
-        identity=CanonicalIdentity("doi", canonical_doi),
-        title=title,
-        bibtex_text=bibtex_text,
-        sidecar=sidecar,
-        schema_version=PERSIST_SCHEMA_VERSION,
-        lock_timeout_seconds=DEFAULT_LOCK_TIMEOUT_SECONDS,
-    )
-
-
-def write_identity_bundle(
-    output_dir: Path,
-    *,
-    identity: CanonicalIdentity,
-    title: str,
-    bibtex_text: str,
-    sidecar: dict,
-    lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
-) -> BundleResult:
-    """Write/reuse a schema-v2 canonical-identity bundle."""
-    return _write_identity_bundle(
-        output_dir,
-        identity=identity,
-        title=title,
-        bibtex_text=bibtex_text,
-        sidecar=sidecar,
-        schema_version=BUNDLE_SCHEMA_V2,
-        lock_timeout_seconds=lock_timeout_seconds,
-    )
-
-
 def _remove_tree(path: Path) -> None:
     try:
         for child in path.iterdir():

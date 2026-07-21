@@ -2,7 +2,7 @@
 
 One hub per process owns the shared TTL cache, per-provider rate limiters,
 the HTTP transport, and the provider clients. Every session-scoped
-Coordinator talks to the same hub, so Crossref/OpenAlex rate limits and
+CitationService talks to the same hub, so Crossref/OpenAlex rate limits and
 caches are respected process-wide.
 
 OpenAlex is *disabled* (a distinct state, not a failure) when
@@ -26,7 +26,7 @@ _HTTP_TIMEOUT_SECONDS = 25.0
 
 
 class CitationProviderHub:
-    """Shared clients + cache + limiters for every citation Coordinator."""
+    """Shared clients, caches, and limiters for every CitationService."""
 
     def __init__(
         self,

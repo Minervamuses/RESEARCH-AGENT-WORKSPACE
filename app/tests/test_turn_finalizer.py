@@ -60,12 +60,12 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         schema_version=2,
         canonical_identity=CanonicalIdentity("doi", "10.1234/known"),
     ))
-    session._citation_coordinator = service
+    session._citation_service = service
     return service
 
 
 def _save_tool_message(session, source_id="src-known", *, status="success"):
-    ref = session.citation_coordinator.registry.get(source_id)
+    ref = session.citation_service.registry.get(source_id)
     receipt = SaveReceipt(
         source_id=ref.source_id,
         canonical_identity=ref.canonical_identity,
@@ -445,13 +445,13 @@ def test_blocked_draft_in_plan_mode_writes_safe_message_only(make_session):
 
 
 def test_user_doi_in_input_is_never_auto_registered(make_session, tmp_path):
-    """A DOI/URL in ordinary user input creates no Coordinator and no source."""
+    """A DOI/URL in ordinary user input creates no citation service or source."""
     session, _ = make_session(answer="plain answer")
     outcome = asyncio.run(
         session.turn_outcome("請看 https://doi.org/10.1234/user-paper")
     )
     assert outcome.text == "plain answer"
-    assert session._citation_coordinator is None  # noqa: SLF001
+    assert session._citation_service is None  # noqa: SLF001
 
     # user-cite markers are no longer a citable form at all.
     session.graph = make_astream_graph(
@@ -504,7 +504,7 @@ def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path
     assert session._build_sources_hint() is not None
     session.deactivate_skill()
     assert session._build_sources_hint() is None
-    assert session._citation_coordinator is None
+    assert session._citation_service is None
 
 
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):

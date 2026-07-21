@@ -108,29 +108,29 @@ def test_extended_thinking_refused_while_citation_active(make_session):
 def test_deactivation_tears_down_workflow_and_registry(make_session, tmp_path):
     session = make_session()
     session.activate_skill("citation")
-    coordinator = session.citation_coordinator  # lazily built
+    service = session.citation_service  # lazily built
     from skills.citation.types import SourceRef
 
-    coordinator.registry.register(SourceRef(
+    service.registry.register(SourceRef(
         source_id="src-x", doi="10.1234/x", title="X",
         verification_level="identity_verified",
     ))
-    assert session._citation_coordinator is not None
+    assert session._citation_service is not None
 
     session.deactivate_skill()
     assert session.active_skill_runtime is None
-    assert session._citation_coordinator is None
+    assert session._citation_service is None
     # A later activation starts from a fresh registry.
     session.activate_skill("citation")
-    assert session.citation_coordinator.registry.list() == []
+    assert session.citation_service.registry.list() == []
 
 
 def test_switching_to_another_skill_tears_down_citation_state(make_session):
     session = make_session()
     session.activate_skill("citation")
-    _ = session.citation_coordinator
+    _ = session.citation_service
     session.activate_skill("academic-paper-writing")
-    assert session._citation_coordinator is None
+    assert session._citation_service is None
     assert session.active_skill_runtime.name == "academic-paper-writing"
     assert session.citation_skill_active is False
 
@@ -138,12 +138,12 @@ def test_switching_to_another_skill_tears_down_citation_state(make_session):
 def test_failed_activation_keeps_previous_skill_and_state(make_session, monkeypatch):
     session = make_session()
     session.activate_skill("citation")
-    marker = session.citation_coordinator
+    marker = session.citation_service
 
     with pytest.raises(KeyError):
         session.activate_skill("no-such-skill")
     assert session.citation_skill_active is True
-    assert session._citation_coordinator is marker
+    assert session._citation_service is marker
 
 
 def test_non_citation_skills_unaffected_by_teardown_logic(make_session):
