@@ -97,7 +97,7 @@ def test_search_normalizes_records_and_drops_doi_less_items():
 
 def test_search_caps_rows_at_20():
     client, calls = _client([_search_body([])])
-    asyncio.run(client.search("q", rows=500))
+    asyncio.run(client.search_text("q", rows=500))
     assert "rows=20" in calls[0][0]
 
 
@@ -108,25 +108,25 @@ def test_search_results_are_cached_but_errors_are_not():
         cache=cache,
     )
     with pytest.raises(ProviderHTTPError):
-        asyncio.run(client.search("q"))
+        asyncio.run(client.search_text("q"))
     assert len(cache) == 0  # error not cached
 
-    records = asyncio.run(client.search("q"))
+    records = asyncio.run(client.search_text("q"))
     assert len(records) == 1
-    again = asyncio.run(client.search("q"))
+    again = asyncio.run(client.search_text("q"))
     assert [r.provider_id for r in again] == [r.provider_id for r in records]
     assert len(calls) == 2  # second success served from cache
 
 
 def test_empty_result_is_a_success_distinct_from_failure():
     client, _ = _client([_search_body([])])
-    assert asyncio.run(client.search("no hits")) == []
+    assert asyncio.run(client.search_text("no hits")) == []
 
 
 def test_unparseable_body_raises_provider_error():
     client, _ = _client([FetchResponse(status=200, body=b"<html>oops</html>")])
     with pytest.raises(ProviderError):
-        asyncio.run(client.search("q"))
+        asyncio.run(client.search_text("q"))
 
 
 def test_parse_work_item_tolerates_format_drift():
@@ -149,19 +149,19 @@ def test_search_date_filter_adds_native_filter_and_cache_key():
         [_search_body([]), _search_body([])], cache=cache
     )
     filt = PublishedDateFilter.from_year_range(2021, 2026)
-    _asyncio.run(client.search("q", date_filter=filt))
+    _asyncio.run(client.search_text("q", date_filter=filt))
     assert "filter=from-pub-date%3A2021-01-01%2Cuntil-pub-date%3A2026-12-31" in calls[0][0]
     # A different window is a different cache entry.
-    _asyncio.run(client.search("q"))
+    _asyncio.run(client.search_text("q"))
     assert len(calls) == 2 and "filter=" not in calls[1][0]
-    _asyncio.run(client.search("q", date_filter=filt))
+    _asyncio.run(client.search_text("q", date_filter=filt))
     assert len(calls) == 2  # filtered result served from cache
 
 
-def test_search_wrapper_delegates_to_search_text_cache():
+def test_search_text_reuses_cached_result():
     client, calls = _client([_search_body(FIXTURE_ITEMS[:1])])
     expected = asyncio.run(client.search_text("protein structure"))
-    actual = asyncio.run(client.search("protein structure"))
+    actual = asyncio.run(client.search_text("protein structure"))
 
     assert [record.provider_id for record in actual] == [
         record.provider_id for record in expected

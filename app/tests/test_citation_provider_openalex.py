@@ -229,7 +229,7 @@ def test_generic_search_uses_search_text_official_per_page_and_native_dates():
     client, calls = _client([_body([NORMAL_WORK])])
     date_filter = PublishedDateFilter.from_year_range(2020, 2021)
     records = asyncio.run(
-        client.search("structured work", rows=100, date_filter=date_filter)
+        client.search_text("structured work", rows=100, date_filter=date_filter)
     )
 
     assert records[0].doi == "10.1234/example"

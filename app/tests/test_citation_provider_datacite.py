@@ -288,12 +288,12 @@ def test_search_work_uses_at_most_three_requests_when_every_pass_misses():
     assert "publicationYear" not in queries[2]
 
 
-def test_search_text_encodes_once_caps_rows_and_wrapper_uses_same_cache():
+def test_search_text_encodes_once_caps_rows_and_uses_cache():
     client, calls = _client([_body()])
     query = 'attention & "transformers" \\ notes'
 
     first = asyncio.run(client.search_text(query, rows=100))
-    second = asyncio.run(client.search(query, rows=100))
+    second = asyncio.run(client.search_text(query, rows=100))
 
     assert len(first) == len(second) == 2
     assert len(calls) == 1

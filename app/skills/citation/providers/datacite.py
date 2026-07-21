@@ -426,16 +426,6 @@ class DataCiteClient:
         self._cache.put(cache_key, list(records), SEARCH_TTL_SECONDS)
         return records
 
-    async def search(
-        self,
-        query: str,
-        *,
-        rows: int = MAX_RECORDS_PER_QUERY,
-        date_filter: PublishedDateFilter | None = None,
-    ) -> list[ProviderRecord]:
-        """Compatibility wrapper; new callers should use ``search_text``."""
-        return await self.search_text(query, rows=rows, date_filter=date_filter)
-
     async def search_work(
         self,
         query: BibliographicQuery,

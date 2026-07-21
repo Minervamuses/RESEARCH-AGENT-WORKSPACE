@@ -186,10 +186,8 @@ class ChatSession:
     def citation_coordinator(self):
         """Session-scoped citation Coordinator over the process provider hub.
 
-        Built lazily on first use: reuses the session's already loaded web
-        MCP tool handles (never restarts MCP) and a lazy chat model factory
-        for query expansion (no startup probe). Its mutating methods are
-        reachable only through the skill-only citation_workflow tool.
+        Built lazily on first use. Its mutating methods are reachable only
+        through the skill-only citation_workflow tool.
         """
         if self._citation_coordinator is None:
             from skills.citation.service import CitationService
