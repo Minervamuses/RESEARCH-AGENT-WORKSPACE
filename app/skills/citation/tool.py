@@ -8,7 +8,7 @@ import re
 from typing import Callable, Literal
 
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from skills.citation.resolution import (
     HostIntentBinder,
@@ -24,9 +24,11 @@ TOOL_DESCRIPTION = (
     "Academic citation workflow. search(query, optional year range) is "
     "stateless exploratory discovery. save(works=[self-contained WorkIntent...]) "
     "resolves each work through provider-specific bibliographic queries and "
-    "authoritative DOI verification. Pass title, authors, year, venue, type, "
-    "identifiers, and version as separate fields; never pass provider syntax "
-    "or a result position. Each user turn permits at most one valid save batch."
+    "authoritative DOI verification. Pass title, authors, year, venue, "
+    "work_type, work_kind, identifiers, and version_kind as separate fields, "
+    "using only user-stated facts or metadata visible in tool results. Never invent "
+    "bibliographic facts, pass provider syntax, or pass a result position. "
+    "Each user turn permits at most one valid save batch."
 )
 
 CitationAction = Literal["search", "save", "sources", "source", "explain"]
@@ -34,26 +36,60 @@ CitationAction = Literal["search", "save", "sources", "source", "explain"]
 
 class IdentifierInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["doi", "arxiv"]
+    kind: Literal["doi", "arxiv"] = Field(
+        description="The identifier namespace; use only DOI or arXiv."
+    )
     value: str = Field(
         min_length=1,
         max_length=2048,
         description="An explicit identifier from the user or visible metadata.",
     )
-    provenance: Literal["explicit_current_user", "visible_context"]
+    provenance: Literal["explicit_current_user", "visible_context"] = Field(
+        description=(
+            "Use explicit_current_user only when this exact value occurs in the "
+            "current user message; otherwise use visible_context. This claim "
+            "does not override the host's independent verification."
+        )
+    )
 
 
 class ConstraintInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    field: Literal["year", "venue", "work_kind", "version_kind"]
-    value: str = Field(min_length=1, max_length=256)
-    provenance: Literal["explicit_current_user", "visible_context"]
-    requested_strength: Literal["hard", "preference"]
+    field: Literal["year", "venue"] = Field(
+        description=(
+            "The constrained property. Put work-class and manifestation "
+            "requests in the top-level work_kind and version_kind fields."
+        )
+    )
+    value: str = Field(
+        min_length=1,
+        max_length=256,
+        description="The human-readable constraint value, never provider syntax.",
+    )
+    provenance: Literal["explicit_current_user", "visible_context"] = Field(
+        description=(
+            "Use explicit_current_user only when this exact value occurs in the "
+            "current user message; otherwise use visible_context. The host "
+            "independently decides whether it is trusted."
+        )
+    )
+    requested_strength: Literal["hard", "preference"] = Field(
+        description=(
+            "Requested treatment only; the host decides the effective strength."
+        )
+    )
 
 
 class WorkIntentInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    requested_label: str = Field(min_length=1, max_length=160)
+    requested_label: str = Field(
+        min_length=1,
+        max_length=160,
+        description=(
+            "A short user-facing label for this requested work. Keep an unresolved "
+            "acronym here; never expand it into a guessed title."
+        ),
+    )
     title: str = Field(
         default="", max_length=512, description="The work title only."
     )
@@ -74,12 +110,89 @@ class WorkIntentInput(BaseModel):
         description="A human-readable venue, not an API filter expression.",
     )
     work_type: str = Field(
-        default="", max_length=256, description="A human-readable work type."
+        default="",
+        max_length=256,
+        description=(
+            "The bibliographic work type, such as journal article or conference "
+            "paper; this is not the publication manifestation."
+        ),
     )
-    identifiers: list[IdentifierInput] = Field(default_factory=list, max_length=8)
-    constraints: list[ConstraintInput] = Field(default_factory=list, max_length=8)
+    work_kind: Literal["original_research"] | None = Field(
+        default=None,
+        description=(
+            "A requested semantic work class. Use original_research only when "
+            "the user explicitly distinguishes the original research work from "
+            "a review, tutorial, or derivative work."
+        ),
+    )
+    version_kind: Literal[
+        "published", "preprint", "repository", "repost", "earliest"
+    ] | None = Field(
+        default=None,
+        description=(
+            "The requested publication manifestation. Use only a user-stated or "
+            "visibly reported value; omit it when unknown. 'earliest' is a "
+            "selection request, not observed provider metadata."
+        ),
+    )
+    identifiers: list[IdentifierInput] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Explicit DOI or arXiv identifiers for this work.",
+    )
+    constraints: list[ConstraintInput] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Additional year or venue constraints. Use work_kind and "
+            "version_kind for semantic work-class and manifestation requests."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _limit_domain_constraints(self):
+        direct = int(self.work_kind is not None) + int(self.version_kind is not None)
+        if len(self.constraints) + direct > 8:
+            raise ValueError("combined constraints exceed 8 items")
+        return self
 
     def to_domain(self) -> WorkIntent:
+        constraints = tuple(
+            WorkConstraint(
+                c.field,
+                c.value,
+                c.provenance,
+                c.requested_strength,
+                "visible_context",
+                "preference",
+                False,
+            )
+            for c in self.constraints
+        )
+        if self.version_kind is not None:
+            constraints += (
+                WorkConstraint(
+                    "version_kind",
+                    self.version_kind,
+                    "visible_context",
+                    "preference",
+                    "visible_context",
+                    "preference",
+                    False,
+                ),
+            )
+        if self.work_kind is not None:
+            constraints += (
+                WorkConstraint(
+                    "work_kind",
+                    self.work_kind,
+                    "visible_context",
+                    "preference",
+                    "visible_context",
+                    "preference",
+                    False,
+                ),
+            )
         return WorkIntent(
             self.requested_label,
             title=self.title,
@@ -89,27 +202,48 @@ class WorkIntentInput(BaseModel):
             work_type=self.work_type,
             identifiers=tuple(WorkIdentifier(i.kind, i.value, i.provenance) for i in self.identifiers),
             # Tool claims are untrusted hints until HostIntentBinder upgrades them.
-            constraints=tuple(WorkConstraint(
-                c.field, c.value, c.provenance, c.requested_strength,
-                "visible_context", "preference", False,
-            ) for c in self.constraints),
+            constraints=constraints,
         )
 
 
 class CitationWorkflowInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    action: CitationAction
+    action: CitationAction = Field(description="The citation workflow operation.")
     query: str | None = Field(
         default=None,
         min_length=1,
         max_length=2048,
         description="A natural-language topic/title query, never provider syntax.",
     )
-    works: list[WorkIntentInput] | None = Field(default=None, min_length=1, max_length=10)
-    source_id: str | None = Field(default=None, min_length=1, max_length=128)
-    page: int | None = Field(default=None, ge=1)
-    year_from: int | None = Field(default=None, ge=1000, le=2999)
-    year_to: int | None = Field(default=None, ge=1000, le=2999)
+    works: list[WorkIntentInput] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=10,
+        description="Self-contained work intents; accepted only by save.",
+    )
+    source_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="A stable saved source ID; accepted only by source.",
+    )
+    page: int | None = Field(
+        default=None,
+        ge=1,
+        description="One-based page number; accepted only by sources.",
+    )
+    year_from: int | None = Field(
+        default=None,
+        ge=1000,
+        le=2999,
+        description="Inclusive publication-year lower bound for search.",
+    )
+    year_to: int | None = Field(
+        default=None,
+        ge=1000,
+        le=2999,
+        description="Inclusive publication-year upper bound for search.",
+    )
 
 
 def _error(message: str) -> str:

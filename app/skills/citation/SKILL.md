@@ -15,6 +15,11 @@ outside this workflow as an untrusted clue; never save it directly.
 - `search` is stateless. Pass a natural-language topic/title in `query` and
   optional `year_from`/`year_to`; never pass Crossref, DataCite, or OpenAlex
   query syntax.
+- Treat bibliographic facts as grounded only when they appear in explicit user
+  text or a visible `citation_workflow` result. Never complete, correct, or
+  expand a title, author list, year, venue, work type, version, or identifier
+  from model memory. If search does not expose enough identity evidence, say
+  that it was not found or ask the user for a title, author, or identifier.
 - Present each result with full title, authors, year, venue, work type, and
   version label. Search order is never a save identifier; there are no cX/mX
   identifiers or persistent candidate pools.
@@ -25,7 +30,8 @@ outside this workflow as an untrusted clue; never save it directly.
 
 - A save call contains one `works` array (1–10 self-contained WorkIntent
   objects). Include `requested_label` plus every known title/author/year/venue/
-  type/DOI/arXiv/version fact. Never pass a result position or legacy ID.
+  `work_type`/`work_kind`/DOI/arXiv/`version_kind` fact. Never pass a result
+  position or legacy ID. Omit unknown fields rather than guessing them.
 - Put each independently known fact in its own WorkIntent field. Never encode
   authors, years, venues, or provider syntax inside `title` or another field.
   The workflow owns provider-specific query construction and escaping.
@@ -39,8 +45,8 @@ outside this workflow as an untrusted clue; never save it directly.
   repository, or another manifestation. If the visible metadata does not make
   the requested version explicit, ask the user which version they mean.
 - `original` never defaults to either original work or earliest manifestation.
-  Ask the user to distinguish those meanings, then encode `work_kind` or the
-  version request explicitly.
+  Ask the user to distinguish those meanings, then put `original_research` in
+  `work_kind` or put the manifestation request in `version_kind`.
 - A hard user constraint or target identifier is a veto when it contradicts a
   provider record. Never trade identity precision for recall and never replace
   an unsupported published/no-DOI record with a similar preprint DOI.

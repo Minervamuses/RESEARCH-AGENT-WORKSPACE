@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from skills.citation.providers.base import ProviderRecord
+from skills.citation.resolution import HostIntentClaim
 from skills.citation.service import CitationTurnContext, MutationGuard
 from skills.citation.tool import CitationWorkflowInput, TOOL_NAME, create_citation_workflow_tool
 from skills.citation.types import SaveBatchOutcome, SaveItemOutcome
@@ -17,6 +18,7 @@ class FakeService:
 
     def __init__(self):
         self.save_calls = 0
+        self.saved_intents = []
         self.search_calls = []
 
     async def search(self, query, *, date_filter=None):
@@ -25,6 +27,7 @@ class FakeService:
 
     async def save(self, intents):
         self.save_calls += 1
+        self.saved_intents.append(intents)
         return SaveBatchOutcome("batch", "attempted", "none", tuple(
             SaveItemOutcome(i, intent.requested_label, "not_found", "no_provider_records")
             for i, intent in enumerate(intents)
@@ -57,6 +60,143 @@ def test_nested_unknown_and_legacy_candidate_fields_are_strictly_rejected():
         CitationWorkflowInput.model_validate({"action": "save", "works": [{"requested_label": "x", "candidate_id": "c1"}]})
     with pytest.raises(ValidationError):
         CitationWorkflowInput.model_validate({"action": "save", "identifier": "c1", "works": [{"requested_label": "x"}]})
+
+
+@pytest.mark.parametrize(
+    "version_kind",
+    ["published", "preprint", "repository", "repost", "earliest"],
+)
+def test_supported_version_kind_maps_to_one_domain_constraint(version_kind):
+    payload = CitationWorkflowInput.model_validate({
+        "action": "save",
+        "works": [{
+            "requested_label": "paper",
+            "title": "A Work",
+            "version_kind": version_kind,
+        }],
+    })
+
+    versions = [
+        c for c in payload.works[0].to_domain().constraints
+        if c.field == "version_kind"
+    ]
+    assert len(versions) == 1
+    version = versions[0]
+    assert version.value == version_kind
+    assert version.effective_strength == "preference"
+    assert not version.host_verified
+
+
+def test_version_kind_has_one_explicit_model_facing_shape():
+    with pytest.raises(ValidationError):
+        CitationWorkflowInput.model_validate({
+            "action": "save",
+            "works": [{"requested_label": "paper", "version": "preprint"}],
+        })
+    with pytest.raises(ValidationError):
+        CitationWorkflowInput.model_validate({
+            "action": "save",
+            "works": [{"requested_label": "paper", "version_kind": "unknown"}],
+        })
+    with pytest.raises(ValidationError):
+        CitationWorkflowInput.model_validate({
+            "action": "save",
+            "works": [{
+                "requested_label": "paper",
+                "constraints": [{
+                    "field": "version_kind",
+                    "value": "preprint",
+                    "provenance": "visible_context",
+                    "requested_strength": "preference",
+                }],
+            }],
+        })
+
+
+def test_direct_and_generic_constraints_share_domain_limit():
+    constraints = [
+        {
+            "field": "year",
+            "value": str(2000 + index),
+            "provenance": "visible_context",
+            "requested_strength": "preference",
+        }
+        for index in range(7)
+    ]
+    with pytest.raises(ValidationError):
+        CitationWorkflowInput.model_validate({
+            "action": "save",
+            "works": [{
+                "requested_label": "paper",
+                "work_kind": "original_research",
+                "version_kind": "published",
+                "constraints": constraints,
+            }],
+        })
+
+
+def test_work_kind_has_one_bounded_model_facing_shape():
+    payload = CitationWorkflowInput.model_validate({
+        "action": "save",
+        "works": [{
+            "requested_label": "paper",
+            "work_kind": "original_research",
+        }],
+    })
+
+    intent = payload.works[0].to_domain()
+    work_kind = next(c for c in intent.constraints if c.field == "work_kind")
+    assert work_kind.value == "original_research"
+    assert not work_kind.host_verified
+
+    with pytest.raises(ValidationError):
+        CitationWorkflowInput.model_validate({
+            "action": "save",
+            "works": [{"requested_label": "paper", "work_kind": "review"}],
+        })
+    with pytest.raises(ValidationError):
+        CitationWorkflowInput.model_validate({
+            "action": "save",
+            "works": [{
+                "requested_label": "paper",
+                "constraints": [{
+                    "field": "work_kind",
+                    "value": "original_research",
+                    "provenance": "visible_context",
+                    "requested_strength": "preference",
+                }],
+            }],
+        })
+
+
+def test_host_verified_version_replaces_model_version_hint():
+    service = FakeService()
+    context = CitationTurnContext(
+        "turn",
+        (HostIntentClaim("version_kind", "preprint"),),
+        MutationGuard(),
+    )
+    tool = create_citation_workflow_tool(
+        service_getter=lambda: service,
+        context_getter=lambda: context,
+    )
+
+    asyncio.run(tool.ainvoke({
+        "action": "save",
+        "works": [{
+            "requested_label": "paper",
+            "title": "A Work",
+            "version_kind": "published",
+        }],
+    }))
+
+    version_constraints = [
+        c for c in service.saved_intents[0][0].constraints
+        if c.field == "version_kind"
+    ]
+    assert len(version_constraints) == 1
+    assert version_constraints[0].value == "preprint"
+    assert version_constraints[0].is_hard
 
 
 def test_search_returns_complete_metadata_without_candidate_or_match_ids():
