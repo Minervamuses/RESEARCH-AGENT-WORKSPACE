@@ -2,19 +2,45 @@
   "data": [
     {
       "id": "10.48550/arXiv.1706.03762",
+      "type": "dois",
       "attributes": {
         "doi": "10.48550/arXiv.1706.03762",
         "titles": [{"title": "Attention Is All You Need"}],
-        "creators": [{"name": "Vaswani, Ashish"}],
+        "creators": [
+          {
+            "name": "Vaswani, Ashish",
+            "givenName": "Ashish",
+            "familyName": "Vaswani"
+          }
+        ],
         "publicationYear": 2017,
-        "publisher": "arXiv",
-        "types": {"resourceTypeGeneral": "Preprint"},
+        "published": "2017",
+        "publisher": {"name": "arXiv"},
+        "container": {},
+        "types": {
+          "resourceTypeGeneral": "Preprint",
+          "resourceType": "Article"
+        },
         "url": "https://arxiv.org/abs/1706.03762",
-        "alternateIdentifiers": [{"alternateIdentifierType": "arXiv", "alternateIdentifier": "1706.03762"}]
+        "identifiers": [
+          {"identifierType": "arXiv", "identifier": "1706.03762"}
+        ],
+        "relatedIdentifiers": [
+          {
+            "relationType": "IsVersionOf",
+            "relatedIdentifier": "10.5555/3295222.3295349",
+            "relatedIdentifierType": "DOI",
+            "resourceTypeGeneral": "JournalArticle",
+            "relationTypeInformation": "version of record"
+          }
+        ],
+        "version": "1",
+        "state": "findable"
       }
     },
     {
       "id": "10.48550/arXiv.1312.6114",
+      "type": "dois",
       "attributes": {
         "doi": "10.48550/arXiv.1312.6114",
         "titles": [{"title": "Auto-Encoding Variational Bayes"}],
@@ -22,7 +48,13 @@
         "publicationYear": 2013,
         "publisher": "arXiv",
         "types": {"resourceTypeGeneral": "Preprint"},
-        "url": "https://arxiv.org/abs/1312.6114"
+        "url": "https://arxiv.org/abs/1312.6114",
+        "alternateIdentifiers": [
+          {
+            "alternateIdentifierType": "arXiv",
+            "alternateIdentifier": "1312.6114"
+          }
+        ]
       }
     }
   ]
