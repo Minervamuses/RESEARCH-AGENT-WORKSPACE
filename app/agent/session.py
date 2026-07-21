@@ -873,6 +873,18 @@ class ChatSession:
             claims.append(HostIntentClaim("version_kind", "published"))
         if re.search(r"(?:預印本|preprint|arxiv\s*版)", lowered):
             claims.append(HostIntentClaim("version_kind", "preprint"))
+        if re.search(
+            r"(?:\brepository\b|"
+            r"accepted\s+manuscript|institutional\s+repository\s+version|"
+            r"接受稿|作者接受稿|機構典藏版|典藏版本)",
+            lowered,
+        ):
+            claims.append(HostIntentClaim("version_kind", "repository"))
+        if re.search(
+            r"(?:\brepost(?:ed)?\b|reposted\s+version|轉載版|重貼版|再發布版)",
+            lowered,
+        ):
+            claims.append(HostIntentClaim("version_kind", "repost"))
         if re.search(r"(?:最早版本|earliest manifestation|first manifestation)", lowered):
             claims.append(HostIntentClaim("version_kind", "earliest"))
         years = re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", text)

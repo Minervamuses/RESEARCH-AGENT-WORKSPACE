@@ -84,6 +84,31 @@ def test_only_host_verified_hard_constraint_can_veto():
     assert evaluate_record(WorkIntent("x", title="A Work", constraints=(_hard("year", "2017"),)), record).status == "identity_conflict"
 
 
+@pytest.mark.parametrize(
+    "version_kind", ["published", "preprint", "repository", "repost"]
+)
+def test_every_host_verified_version_kind_vetoes_other_manifestations(version_kind):
+    bound = HostIntentBinder().bind(
+        [WorkIntent("wanted", title="A Work")],
+        [HostIntentClaim("version_kind", version_kind)],
+    ).intents[0]
+    requested = ProviderRecord(
+        "x", f"x:{version_kind}", 0, title="A Work", version_kind=version_kind
+    )
+    other = ProviderRecord(
+        "x",
+        "x:other",
+        1,
+        title="A Work",
+        version_kind=("published" if version_kind != "published" else "preprint"),
+    )
+
+    assert evaluate_record(bound, requested).status == "eligible"
+    mismatch = evaluate_record(bound, other)
+    assert mismatch.status == "identity_conflict"
+    assert mismatch.reason_code == "hard_version_mismatch"
+
+
 def test_binder_injects_single_item_claim_and_rejects_unbound_multi_item_claim():
     binder = HostIntentBinder()
     one = binder.bind([WorkIntent("one", title="One")], [HostIntentClaim("year", "2020")])

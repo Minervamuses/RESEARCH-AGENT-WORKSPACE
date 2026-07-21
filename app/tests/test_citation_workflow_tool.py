@@ -55,6 +55,19 @@ def test_tool_name_and_five_action_schema():
     assert set(CitationWorkflowInput.model_fields["action"].annotation.__args__) == {"search", "save", "sources", "source", "explain"}
 
 
+def test_json_schema_exposes_one_bounded_shape_for_work_and_version_kind():
+    definitions = CitationWorkflowInput.model_json_schema()["$defs"]
+    work_fields = definitions["WorkIntentInput"]["properties"]
+    constraint_fields = definitions["ConstraintInput"]["properties"]
+
+    assert work_fields["version_kind"]["anyOf"][0]["enum"] == [
+        "published", "preprint", "repository", "repost", "earliest",
+    ]
+    assert work_fields["work_kind"]["anyOf"][0]["const"] == "original_research"
+    assert constraint_fields["field"]["enum"] == ["year", "venue"]
+    assert "version" not in work_fields
+
+
 def test_nested_unknown_and_legacy_candidate_fields_are_strictly_rejected():
     with pytest.raises(ValidationError):
         CitationWorkflowInput.model_validate({"action": "save", "works": [{"requested_label": "x", "candidate_id": "c1"}]})

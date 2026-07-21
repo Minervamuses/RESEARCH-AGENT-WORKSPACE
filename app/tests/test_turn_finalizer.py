@@ -124,6 +124,25 @@ def test_clean_turn_returns_outcome_and_records(make_session):
     assert session.turn_logs[-1]["recovery"] is None
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("請保存正式版", "published"),
+        ("請保存預印本", "preprint"),
+        ("請保存 repository version", "repository"),
+        ("請保存轉載版", "repost"),
+        ("請保存最早版本", "earliest"),
+    ],
+)
+def test_current_turn_extractor_covers_every_requested_version_kind(text, expected):
+    versions = [
+        claim.value
+        for claim in ChatSession._extract_citation_claims(text)
+        if claim.field == "version_kind"
+    ]
+    assert versions == [expected]
+
+
 @pytest.mark.parametrize("draft", ["", "   \n\t"])
 def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, draft):
     session, _ = make_session(answer=draft)
