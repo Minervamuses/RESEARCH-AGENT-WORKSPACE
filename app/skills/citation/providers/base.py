@@ -74,6 +74,31 @@ class QueryPass:
         return dict(self.params)
 
 
+@dataclass(frozen=True)
+class RelationEdge:
+    """One provider-supplied relation; absence is never negative evidence."""
+
+    relation_type: str
+    identifier: str
+    identifier_type: str = ""
+    resource_type: str = ""
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class Manifestation:
+    """One version/location exposed inside a provider work record."""
+
+    identifier: str
+    identifier_type: str = "doi"
+    url: str = ""
+    version_kind: str = "unknown"
+    venue: str = ""
+    is_primary: bool = False
+    is_accepted: bool = False
+    is_published: bool = False
+
+
 @dataclass
 class ProviderRecord:
     """One provider hit, normalized just enough for fusion and display.
@@ -104,6 +129,11 @@ class ProviderRecord:
     landing_url: str | None = None
     relations: dict[str, list[str]] = field(default_factory=dict)
     field_provenance: dict[str, str] = field(default_factory=dict)
+    aliases: tuple[str, ...] = ()
+    relation_edges: tuple[RelationEdge, ...] = ()
+    manifestations: tuple[Manifestation, ...] = ()
+    version: str = ""
+    record_state: str = ""
 
 
 def plausible_identity_hit(query: BibliographicQuery, record: ProviderRecord) -> bool:

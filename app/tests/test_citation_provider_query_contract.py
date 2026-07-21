@@ -2,8 +2,10 @@ import pytest
 
 from skills.citation.providers.base import (
     BibliographicQuery,
+    Manifestation,
     ProviderRecord,
     QueryPass,
+    RelationEdge,
     plausible_identity_hit,
 )
 
@@ -84,3 +86,31 @@ def test_missing_provider_year_does_not_force_a_fallback():
         "fixture", "fixture:1", 0, title="A Work", authors=["Ada Author"]
     )
     assert plausible_identity_hit(query, record)
+
+
+def test_provider_record_preserves_relation_and_manifestation_evidence():
+    relation = RelationEdge(
+        "IsVersionOf", "10.1000/published", "DOI", "JournalArticle"
+    )
+    manifestation = Manifestation(
+        "10.1000/preprint",
+        url="https://doi.org/10.1000/preprint",
+        version_kind="preprint",
+        is_primary=True,
+    )
+    record = ProviderRecord(
+        "fixture",
+        "fixture:1",
+        0,
+        aliases=("10.1000/old",),
+        relation_edges=(relation,),
+        manifestations=(manifestation,),
+        version="2",
+        record_state="findable",
+    )
+
+    assert record.aliases == ("10.1000/old",)
+    assert record.relation_edges == (relation,)
+    assert record.manifestations == (manifestation,)
+    assert record.version == "2"
+    assert record.record_state == "findable"
