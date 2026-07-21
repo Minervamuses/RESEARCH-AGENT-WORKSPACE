@@ -12,7 +12,6 @@ from agent.config import AgentConfig
 
 from agent.llm.openrouter import get_chat_model
 from agent.observability import (
-    last_completed_citation_action,
     log_model_response,
     log_recovery_fallback,
 )

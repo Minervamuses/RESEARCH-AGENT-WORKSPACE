@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agent.config import AgentConfig
 from agent.graph import build_graph
 from agent.observability import (
-    last_completed_citation_action,
+    last_completed_citation_call,
     log_model_response,
     summarize_model_response,
 )
@@ -21,6 +21,7 @@ def _summary(message: AIMessage, **overrides) -> dict:
         "primary_remaining": 4,
         "local_remaining": 4,
         "last_citation_action": None,
+        "last_citation_tool_status": None,
     }
     kwargs.update(overrides)
     return summarize_model_response(message, **kwargs)
@@ -82,26 +83,38 @@ def test_summary_falls_back_to_openai_token_usage():
     assert record["total_tokens"] == 12
 
 
-def test_last_completed_citation_action_requires_a_tool_result():
+def test_last_completed_citation_call_requires_result_and_reports_status():
     search_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
         "args": {"action": "search", "query": "paper"},
         "id": "call-1",
     }])
-    completed = ToolMessage(content="ok", tool_call_id="call-1")
+    completed = ToolMessage(
+        content="ok", tool_call_id="call-1", status="success"
+    )
     dangling_save = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
         "args": {"action": "save", "works": [{"requested_label": "paper"}]},
         "id": "call-2",
     }])
 
-    assert last_completed_citation_action([search_call]) is None
-    assert last_completed_citation_action(
+    assert last_completed_citation_call([search_call]) == (None, None)
+    assert last_completed_citation_call(
         [search_call, completed, dangling_save]
-    ) == "search"
+    ) == ("search", "success")
+    assert last_completed_citation_call(
+        iter([search_call, completed, dangling_save])
+    ) == ("search", "success")
+
+    failed = ToolMessage(
+        content="tool error", tool_call_id="call-2", status="error"
+    )
+    assert last_completed_citation_call(
+        [search_call, completed, dangling_save, failed]
+    ) == ("save", "error")
 
 
-def test_last_completed_citation_action_ignores_other_tools():
+def test_last_completed_citation_call_ignores_other_tools():
     bash_call = AIMessage(content="", tool_calls=[{
         "name": "bash",
         "args": {"command": "ls"},
@@ -109,7 +122,32 @@ def test_last_completed_citation_action_ignores_other_tools():
     }])
     result = ToolMessage(content="ok", tool_call_id="call-1")
 
-    assert last_completed_citation_action([bash_call, result]) is None
+    assert last_completed_citation_call([bash_call, result]) == (None, None)
+
+
+def test_completed_citation_call_redacts_unknown_action_and_name_collision():
+    secret = "10.1234/secret-provider-text"
+    call = AIMessage(content="", tool_calls=[{
+        "name": "citation_workflow",
+        "args": {"action": secret},
+        "id": "shared-id",
+    }])
+    wrong_tool = ToolMessage(
+        content="ok",
+        tool_call_id="shared-id",
+        name="another_tool",
+    )
+    citation_error = ToolMessage(
+        content="error",
+        tool_call_id="shared-id",
+        name="citation_workflow",
+        status="error",
+    )
+
+    assert last_completed_citation_call([call, wrong_tool]) == (None, None)
+    assert last_completed_citation_call(
+        [call, wrong_tool, citation_error]
+    ) == ("unknown", "error")
 
 
 def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
@@ -148,6 +186,7 @@ def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
     assert "provider said" not in line
     assert "identifier" not in line
     assert "last_citation_action=search" in line
+    assert "last_citation_tool_status=success" in line
     assert "invalid_tool_calls=1" in line
     assert "content_chars=" in line
     assert caplog.records[0].levelno == logging.WARNING

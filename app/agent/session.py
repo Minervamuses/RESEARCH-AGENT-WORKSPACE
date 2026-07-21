@@ -42,6 +42,11 @@ from agent.llm.thinking import (
     get_chat_model_for_role,
     get_fusion_aggregator_model,
 )
+from agent.observability import (
+    CitationSaveMetrics,
+    completed_citation_calls,
+    log_citation_save_metrics,
+)
 from agent.skills import (
     SkillRuntime,
     discover_skills,
@@ -344,7 +349,7 @@ class ChatSession:
                     or not registry.receipt_is_trusted(receipt)
                     or not is_citable_source(ref)
                 ):
-                    logger.warning("save receipt/registry mismatch: %s", receipt.source_id)
+                    logger.warning("save receipt/registry mismatch")
                     checked.append(SaveItemOutcome(
                         item.request_index, item.requested_label,
                         "verification_failed", "registry_mismatch",
@@ -362,6 +367,25 @@ class ChatSession:
             )
             return replace(first, items=failed), tuple(rejected)
         return (attempted[0] if attempted else None), tuple(rejected)
+
+    @staticmethod
+    def _citation_save_metrics(
+        attempted: SaveBatchOutcome | None,
+        rejected: tuple[SaveBatchOutcome, ...],
+    ) -> CitationSaveMetrics:
+        if attempted is None:
+            return CitationSaveMetrics(
+                batch_status="rejected" if rejected else None,
+            )
+        return CitationSaveMetrics(
+            batch_status="attempted",
+            new_saved_count=sum(item.status == "saved" for item in attempted.items),
+            reused_count=sum(item.status == "reused" for item in attempted.items),
+            failed_count=sum(
+                item.status not in {"saved", "reused"}
+                for item in attempted.items
+            ),
+        )
 
     def _render_save_outcome(
         self,
@@ -505,12 +529,21 @@ class ChatSession:
             )
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
         save_attempted, save_rejected = self._trusted_save_outcomes(new_messages)
+        save_metrics = self._citation_save_metrics(save_attempted, save_rejected)
+        save_call_observed = any(
+            action == "save"
+            for action, _status in completed_citation_calls(new_messages)
+        )
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
         # A trusted save artifact outranks model prose or a generic fallback.
         if save_attempted is not None or save_rejected:
             final_text = self._render_save_outcome(
                 save_attempted, save_rejected, validation_errors=errors
             )
+        log_citation_save_metrics(
+            save_metrics,
+            save_call_observed=save_call_observed,
+        )
         await self._record_turn(
             user_input=user_input,
             answer=final_text,
@@ -521,6 +554,7 @@ class ChatSession:
             candidate_traces=candidate_traces,
             validation_errors=errors,
             recovery_reason=recovery_reason,
+            citation_save_metrics=save_metrics,
         )
         return TurnOutcome(
             text=final_text,
@@ -758,6 +792,7 @@ class ChatSession:
         candidate_traces: list[FusionCandidateTrace] | None = None,
         validation_errors: list[str] | None = None,
         recovery_reason: str | None = None,
+        citation_save_metrics: CitationSaveMetrics,
     ) -> None:
         """Persist/log the final answer for one user-visible turn.
 
@@ -814,6 +849,7 @@ class ChatSession:
             "fusion": fusion,
             "validation_errors": list(validation_errors or []),
             "recovery": recovery_reason,
+            **citation_save_metrics.to_record(),
         })
         await self._turn_store.evict_overflow()
 

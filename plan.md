@@ -913,6 +913,8 @@ CITATION_OUTPUT_DIR="$tmpdir/cite" \
 - 不把 tool artifacts放進 TurnRecord/Chroma。
 - deterministic final save outcome進 final assistant answer，因此跨輪可見。
 - plan log仍可記 tool trace；sidecar只存 correlation/batch ID，不存 raw prose。
+- model-response observability分開記合法 citation action與`ToolMessage.status`；兩者只代表呼叫收到回覆及工具是否正常執行，不代表保存成功，未知 action固定redact為`unknown`。
+- finalizer只從通過 strict artifact parsing與live registry驗證的 batch記`attempted/rejected`及new saved/reused/failed counts；不記 DOI、title、provider文字或tool content。
 
 ### Config 與 dirty worktree
 
