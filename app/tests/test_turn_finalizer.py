@@ -14,12 +14,7 @@ from agent.turn_safety import find_content_tool_protocol_artifact
 from skills.citation.service import CitationService
 from skills.citation.hub import CitationProviderHub
 from skills.citation.types import (
-    CitationMatch,
     CanonicalIdentity,
-    ConfirmBatchOutcome,
-    ConfirmFailure,
-    ConfirmReceipt,
-    PendingMatchNote,
     SourceRef,
     SaveBatchOutcome,
     SaveItemOutcome,
@@ -52,47 +47,24 @@ async def _noop_fetcher(url, headers):
 
 def _seed_verified_source(session, tmp_path, source_id="src-known"):
     hub = CitationProviderHub(env={}, fetcher=_noop_fetcher)
-    coordinator = CitationService(hub, output_dir=tmp_path / "cite")
-    coordinator.registry.register(SourceRef(
+    service = CitationService(hub, output_dir=tmp_path / "cite")
+    service.registry.register(SourceRef(
         source_id=source_id,
         doi="10.1234/known",
         title="Known Paper",
         authors=["Ada Lovelace"],
         year=2021,
         venue="Journal",
-        verification_level="identity_verified",
+        verification_level="doi_identity_verified",
         bundle_path=str(tmp_path / "cite" / source_id),
+        schema_version=2,
+        canonical_identity=CanonicalIdentity("doi", "10.1234/known"),
     ))
-    session._citation_coordinator = coordinator
-    return coordinator
+    session._citation_coordinator = service
+    return service
 
 
-def _confirm_tool_message(session, source_id="src-known", **overrides):
-    ref = session.citation_coordinator.registry.get(source_id)
-    receipt = ConfirmReceipt(
-        source_id=ref.source_id,
-        accepted_doi=ref.doi,
-        bundle_path=ref.bundle_path,
-        verification_level=ref.verification_level,
-        cite_marker=f"[[cite:{ref.source_id}]]",
-        warnings=("title conflict",),
-    ).to_artifact()
-    receipt.update(overrides)
-    return ToolMessage(
-        content="citation confirmed",
-        tool_call_id="confirm-1",
-        name="citation_workflow",
-        artifact={
-            "kind": "citation_confirm_receipt_batch",
-            "schema_version": 2,
-            "receipts": [receipt],
-            "failures": [],
-            "pending": [],
-        },
-    )
-
-
-def _save_tool_message(session, source_id="src-v2"):
+def _save_tool_message(session, source_id="src-known", *, status="success"):
     ref = session.citation_coordinator.registry.get(source_id)
     receipt = SaveReceipt(
         source_id=ref.source_id,
@@ -107,6 +79,7 @@ def _save_tool_message(session, source_id="src-v2"):
     )
     return ToolMessage(
         content="save attempted", tool_call_id="save-1", name="citation_workflow",
+        status=status,
         artifact=SaveBatchOutcome(
             "b1", "attempted", "none",
             (
@@ -117,45 +90,24 @@ def _save_tool_message(session, source_id="src-v2"):
     )
 
 
-def _failure_tool_message(*failures, content="confirm failed"):
-    artifact = ConfirmBatchOutcome(failures=tuple(
-        ConfirmFailure(
-            match_id=match_id,
-            status=status,
-            reason_code=reason_code,
-        )
-        for match_id, status, reason_code in failures
-    )).to_artifact()
+def _save_failure_tool_message(*failures, content="save failed"):
+    artifact = SaveBatchOutcome(
+        "b-failed",
+        "attempted",
+        "none",
+        tuple(
+            SaveItemOutcome(
+                request_index=request_index,
+                requested_label=requested_label,
+                status=status,
+                reason_code=reason_code,
+            )
+            for request_index, requested_label, status, reason_code in failures
+        ),
+    ).to_artifact()
     return ToolMessage(
         content=content,
-        tool_call_id="confirm-failed",
-        name="citation_workflow",
-        artifact=artifact,
-    )
-
-
-def _pending_tool_message(
-    session,
-    *,
-    candidate_id="c3",
-    match_id="m4",
-    live=True,
-    needs_disambiguation=False,
-):
-    if live and hasattr(session.citation_coordinator, "_matches"):
-        session.citation_coordinator._matches[match_id] = CitationMatch(  # noqa: SLF001
-            match_id=match_id,
-            candidate_id=candidate_id,
-            canonical_doi="10.1234/pending",
-        )
-    artifact = ConfirmBatchOutcome(pending=(PendingMatchNote(
-        candidate_id=candidate_id,
-        match_id=match_id,
-        needs_disambiguation=needs_disambiguation,
-    ),)).to_artifact()
-    return ToolMessage(
-        content="matches resolved",
-        tool_call_id="select-pending",
+        tool_call_id="save-failed",
         name="citation_workflow",
         artifact=artifact,
     )
@@ -184,13 +136,13 @@ def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, dra
 
 
 @pytest.mark.parametrize("draft", [
-    'citation_workflow(action="list", page=5)',
-    'citation_workflow({"action":"list","page":5})',
+    'citation_workflow(action="sources", page=5)',
+    'citation_workflow({"action":"sources","page":5})',
     '<｜tool▁calls▁begin｜>citation_workflow',
-    '{"name":"citation_workflow","args":{"action":"list"}}',
-    '{"arguments":{"action":"list"},"name":"citation_workflow"}',
+    '{"name":"citation_workflow","args":{"action":"sources"}}',
+    '{"arguments":{"action":"sources"},"name":"citation_workflow"}',
     '{"type":"tool_use","name":"citation_workflow",'
-    '"input":{"action":"list"}}',
+    '"input":{"action":"sources"}}',
 ])
 def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
     session, _ = make_session(answer=draft)
@@ -222,7 +174,7 @@ def test_structured_tool_content_is_detected_before_flattening():
     content = [{
         "type": "tool_use",
         "name": "citation_workflow",
-        "input": {"action": "list"},
+        "input": {"action": "sources"},
     }]
 
     assert find_content_tool_protocol_artifact(
@@ -249,7 +201,7 @@ def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):
 
     assert "Transformers work [1]. Really [1]." in outcome.text
     assert "Sources:" in outcome.text
-    assert "[identity_verified]" in outcome.text
+    assert "[doi_identity_verified]" in outcome.text
     # The rendered text (bibliography included) is what history records.
     assert session.recent_turns[-1].assistant_output == outcome.text
 
@@ -271,36 +223,10 @@ def test_blocked_draft_never_reaches_history_or_plan_log(make_session, tmp_path)
     assert any("raw_author_year" in err for err in errors)
 
 
-def test_confirm_receipt_replaces_clean_model_draft(make_session, tmp_path):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="儲存",
-        answer="已儲存。",
-        new_messages=[_confirm_tool_message(session)],
-        tool_calls=[],
-        trace_events=[],
-    ))
-
-    assert "引用已確認並保存" in outcome.text
-    assert "`src-known`" in outcome.text
-    assert "`10.1234/known`" in outcome.text
-    assert str(tmp_path / "cite" / "src-known") in outcome.text
-    assert session.recent_turns[-1].assistant_output == outcome.text
-
-
 def test_save_batch_has_priority_and_renders_all_items_in_request_order(make_session, tmp_path):
     session, _ = make_session(answer="model prose")
     session.activate_skill("citation")
-    coordinator = _seed_verified_source(session, tmp_path)
-    coordinator.registry.register(SourceRef(
-        "src-v2", "10.1234/v2", "V2 Work", year=2022,
-        work_type="journal-article", bundle_path=str(tmp_path / "cite/v2"),
-        schema_version=2, verification_level="doi_identity_verified",
-        canonical_identity=CanonicalIdentity("doi", "10.1234/v2"),
-    ))
+    _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="save", answer="model prose",
         new_messages=[_save_tool_message(session)], tool_calls=[], trace_events=[],
@@ -314,13 +240,7 @@ def test_save_batch_has_priority_and_renders_all_items_in_request_order(make_ses
 def test_save_registry_mismatch_never_renders_success(make_session, tmp_path):
     session, _ = make_session()
     session.activate_skill("citation")
-    coordinator = _seed_verified_source(session, tmp_path)
-    ref = SourceRef(
-        "src-v2", "10.1234/v2", "V2 Work", bundle_path=str(tmp_path / "cite/v2"),
-        schema_version=2, verification_level="doi_identity_verified",
-        canonical_identity=CanonicalIdentity("doi", "10.1234/v2"),
-    )
-    coordinator.registry.register(ref)
+    _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
     message.artifact["items"][1]["receipt"]["bundle_path"] = "/forged"
     outcome = asyncio.run(session.finalize_and_record(
@@ -330,7 +250,24 @@ def test_save_registry_mismatch_never_renders_success(make_session, tmp_path):
     assert "registry" in outcome.text
 
 
-def test_confirm_receipt_survives_raw_doi_gate_block(make_session, tmp_path):
+def test_error_tool_message_cannot_render_save_success(make_session, tmp_path):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="save",
+        answer="工具呼叫失敗。",
+        new_messages=[_save_tool_message(session, status="error")],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert outcome.text == "工具呼叫失敗。"
+    assert "已保存" not in outcome.text
+
+
+def test_save_batch_survives_raw_doi_gate_block(make_session, tmp_path):
     draft = "已儲存 DOI 10.1234/known。"
     session, _ = make_session()
     session.activate_skill("citation")
@@ -339,21 +276,21 @@ def test_confirm_receipt_survives_raw_doi_gate_block(make_session, tmp_path):
     outcome = asyncio.run(session.finalize_and_record(
         user_input="儲存",
         answer=draft,
-        new_messages=[_confirm_tool_message(session)],
+        new_messages=[_save_tool_message(session)],
         tool_calls=[],
         trace_events=[],
     ))
 
     assert any("raw_doi" in error for error in outcome.validation_errors)
-    assert "草稿未通過 citation 檢查，但 confirm 已成功" in outcome.text
-    assert "`10.1234/known`" in outcome.text
+    assert "引用保存結果" in outcome.text
+    assert "`wanted`：已保存" in outcome.text
     assert draft not in outcome.text
     assert "請先在 citation workflow 中完成驗證" not in outcome.text
     assert session.recent_turns[-1].assistant_output == outcome.text
 
 
-@pytest.mark.parametrize("draft", ["", 'citation_workflow(action="status")'])
-def test_confirm_receipt_survives_final_response_recovery(
+@pytest.mark.parametrize("draft", ["", 'citation_workflow(action="sources")'])
+def test_save_batch_survives_final_response_recovery(
     make_session, tmp_path, draft
 ):
     session, _ = make_session()
@@ -363,40 +300,50 @@ def test_confirm_receipt_survives_final_response_recovery(
     outcome = asyncio.run(session.finalize_and_record(
         user_input="確認",
         answer=draft,
-        new_messages=[_confirm_tool_message(session)],
+        new_messages=[_save_tool_message(session)],
         tool_calls=[],
         trace_events=[],
     ))
 
-    assert "引用已確認並保存" in outcome.text
-    assert "`src-known`" in outcome.text
+    assert "引用保存結果" in outcome.text
+    assert "`wanted`：已保存" in outcome.text
     assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
 
 
-def test_receipt_requires_artifact_and_live_registry_match(make_session, tmp_path):
+def test_save_requires_artifact_and_live_registry_match(make_session, tmp_path):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
 
     text_only = ToolMessage(
-        content="citation confirmed: source src-known",
-        tool_call_id="confirm-text",
+        content="save attempted: source src-known",
+        tool_call_id="save-text",
         name="citation_workflow",
     )
-    forged = _confirm_tool_message(session, bundle_path="/tmp/not-the-live-bundle")
-    for message in (text_only, forged):
-        outcome = asyncio.run(session.finalize_and_record(
-            user_input="儲存",
-            answer="bad DOI 10.1234/known",
-            new_messages=[message],
-            tool_calls=[],
-            trace_events=[],
-        ))
-        assert "confirm 已成功" not in outcome.text
-        assert "回應未通過 citation 檢查" in outcome.text
+    text_only_outcome = asyncio.run(session.finalize_and_record(
+        user_input="儲存",
+        answer="bad DOI 10.1234/known",
+        new_messages=[text_only],
+        tool_calls=[],
+        trace_events=[],
+    ))
+    assert "已保存" not in text_only_outcome.text
+    assert "回應未通過 citation 檢查" in text_only_outcome.text
+
+    forged = _save_tool_message(session)
+    forged.artifact["items"][1]["receipt"]["bundle_path"] = "/tmp/not-live"
+    forged_outcome = asyncio.run(session.finalize_and_record(
+        user_input="儲存",
+        answer="bad DOI 10.1234/known",
+        new_messages=[forged],
+        tool_calls=[],
+        trace_events=[],
+    ))
+    assert "已保存" not in forged_outcome.text
+    assert "registry" in forged_outcome.text
 
 
-def test_all_confirm_failures_still_replace_model_draft_deterministically(
+def test_all_save_failures_replace_model_draft_deterministically(
     make_session, tmp_path,
 ):
     session, _ = make_session()
@@ -407,155 +354,44 @@ def test_all_confirm_failures_still_replace_model_draft_deterministically(
     outcome = asyncio.run(session.finalize_and_record(
         user_input="全部存下來",
         answer="看起來都成功了",
-        new_messages=[_failure_tool_message(
-            ("m1", "invalid_state", "stale_match"),
-            ("m2", "provider_failed", "bibtex_lookup_failed"),
+        new_messages=[_save_failure_tool_message(
+            (0, "VAE", "verification_failed", "bibtex_lookup_failed"),
+            (1, "missing", "not_found", "no_provider_records"),
             content=provider_detail,
         )],
         tool_calls=[],
         trace_events=[],
     ))
 
-    assert "引用保存未成功" in outcome.text
-    assert "`m1`" in outcome.text and "`m2`" in outcome.text
-    assert "配對已失效" in outcome.text
+    assert "引用保存結果" in outcome.text
+    assert "`VAE`" in outcome.text and "`missing`" in outcome.text
     assert "無法從 doi.org 取得 BibTeX" in outcome.text
+    assert "找不到足夠強的書目結果" in outcome.text
     assert provider_detail not in outcome.text
     assert "看起來都成功了" not in outcome.text
 
 
-def test_partial_confirm_failure_renders_receipt_and_fixed_failure(make_session, tmp_path):
+def test_partial_save_failure_renders_receipt_and_fixed_failure(make_session, tmp_path):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
-    success = _confirm_tool_message(session).artifact["receipts"][0]
-    artifact = ConfirmBatchOutcome.from_artifact({
-        "kind": "citation_confirm_receipt_batch",
-        "schema_version": 2,
-        "receipts": [success],
-        "failures": [{
-            "match_id": "m2",
-            "status": "storage_failed",
-            "reason_code": "write_failed",
-        }],
-        "pending": [],
-    }).to_artifact()
+    message = _save_tool_message(session)
+    message.artifact["items"][0] = SaveItemOutcome(
+        1, "second", "storage_failed", "write_failed"
+    ).to_artifact()
 
     outcome = asyncio.run(session.finalize_and_record(
         user_input="存兩篇",
         answer="saved",
-        new_messages=[ToolMessage(
-            content="partial",
-            tool_call_id="partial",
-            name="citation_workflow",
-            artifact=artifact,
-        )],
+        new_messages=[message],
         tool_calls=[],
         trace_events=[],
     ))
 
-    assert "引用已確認並保存" in outcome.text
+    assert "引用保存結果" in outcome.text
     assert "`src-known`" in outcome.text
-    assert "`m2`" in outcome.text
+    assert "`second`" in outcome.text
     assert "bundle 寫入失敗" in outcome.text
-
-
-def test_legacy_pending_only_artifact_is_ignored_after_stateless_switch(
-    make_session, tmp_path,
-):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-    pending = _pending_tool_message(session, needs_disambiguation=True)
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="把第3篇存起來",
-        answer="工具結果已取得，但本回合未能完成總結。",
-        new_messages=[pending],
-        tool_calls=[],
-        trace_events=[],
-        recovery_reason="fallback:empty_final_answer;repair:empty_final_answer",
-    ))
-
-    assert outcome.text == "工具結果已取得，但本回合未能完成總結。"
-    assert "c3" not in outcome.text and "m4" not in outcome.text
-
-
-def test_stale_pending_artifact_is_ignored_fail_closed(make_session, tmp_path):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-    stale = _pending_tool_message(session, live=False)
-    fallback = "工具結果已取得，但本回合未能完成總結；請重試。"
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="儲存",
-        answer=fallback,
-        new_messages=[stale],
-        tool_calls=[],
-        trace_events=[],
-        recovery_reason="fallback:empty_final_answer;repair:empty_final_answer",
-    ))
-
-    assert outcome.text == fallback
-    assert "`m4`" not in outcome.text
-
-
-def test_legacy_confirm_receipt_ignores_retired_pending_notes(
-    make_session, tmp_path,
-):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-    pending_message = _pending_tool_message(session, needs_disambiguation=True)
-    success = _confirm_tool_message(session).artifact["receipts"][0]
-    artifact = ConfirmBatchOutcome.from_artifact({
-        "kind": "citation_confirm_receipt_batch",
-        "schema_version": 2,
-        "receipts": [success],
-        "failures": [],
-        "pending": pending_message.artifact["pending"],
-    }).to_artifact()
-    combined = ToolMessage(
-        content="partial save",
-        tool_call_id="save-partial",
-        name="citation_workflow",
-        artifact=artifact,
-    )
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="儲存兩篇",
-        answer="",
-        new_messages=[combined],
-        tool_calls=[],
-        trace_events=[],
-        recovery_reason="fallback:empty_final_answer;repair:empty_final_answer",
-    ))
-
-    assert "引用已確認並保存" in outcome.text
-    assert "`src-known`" in outcome.text
-    assert "已解析但尚未保存" not in outcome.text
-    assert "c3" not in outcome.text and "m4" not in outcome.text
-
-
-def test_successful_continuation_prose_is_not_replaced_by_pending_artifact(
-    make_session, tmp_path,
-):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-    pending = _pending_tool_message(session)
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="選第3篇",
-        answer="已解析 m4，請確認是否儲存。",
-        new_messages=[pending],
-        tool_calls=[],
-        trace_events=[],
-        recovery_reason="continued:empty_final_answer",
-    ))
-
-    assert outcome.text == "已解析 m4，請確認是否儲存。"
 
 
 def test_plan_log_persists_receipt_but_not_blocked_draft(make_session, tmp_path):
@@ -568,7 +404,7 @@ def test_plan_log_persists_receipt_but_not_blocked_draft(make_session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="儲存",
         answer=draft,
-        new_messages=[_confirm_tool_message(session)],
+        new_messages=[_save_tool_message(session)],
         tool_calls=[],
         trace_events=[],
     ))
@@ -586,7 +422,7 @@ def test_eviction_persists_receipt_as_plain_assistant_text(make_session, tmp_pat
     receipt = asyncio.run(session.finalize_and_record(
         user_input="儲存",
         answer="saved",
-        new_messages=[_confirm_tool_message(session)],
+        new_messages=[_save_tool_message(session)],
         tool_calls=[],
         trace_events=[],
     ))

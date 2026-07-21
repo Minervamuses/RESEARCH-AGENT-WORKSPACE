@@ -15,9 +15,6 @@ from skills.citation.gate import build_safe_message, check_citations
 from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
 from skills.citation.types import (
-    ConfirmBatchOutcome,
-    ConfirmFailure,
-    ConfirmReceipt,
     SaveBatchOutcome,
     SaveItemOutcome,
     SaveReceipt,
@@ -302,57 +299,6 @@ class ChatSession:
             lines.append(f"- [[cite:{ref.source_id}]] {label}")
         return SystemMessage(content="\n".join(lines))
 
-    def _trusted_confirm_receipts(self, new_messages: list) -> ConfirmBatchOutcome:
-        """Validate batch artifacts and receipts against the live registry.
-
-        Receipts must match the registry; pending notes must match the live
-        workflow's still-confirmable matches. Anything stale is dropped, so
-        the finalizer can never advertise a match that no longer exists.
-        """
-        registry = self._citation_registry() if self.citation_skill_active else None
-        if registry is None:
-            return ConfirmBatchOutcome()
-        receipts: list[ConfirmReceipt] = []
-        failures: list[ConfirmFailure] = []
-        seen: set[str] = set()
-        for message in new_messages:
-            if not isinstance(message, ToolMessage):
-                continue
-            if getattr(message, "name", None) != "citation_workflow":
-                continue
-            if getattr(message, "status", "success") != "success":
-                continue
-            artifact = getattr(message, "artifact", None)
-            if artifact is None:
-                continue
-            try:
-                batch = ConfirmBatchOutcome.from_artifact(artifact)
-            except ValueError as exc:
-                logger.warning("ignored invalid citation confirm batch: %s", exc)
-                continue
-            failures.extend(batch.failures)
-            for receipt in batch.receipts:
-                ref = registry.get(receipt.source_id)
-                if (
-                    ref is None
-                    or ref.verification_level != receipt.verification_level
-                    or ref.doi != receipt.accepted_doi
-                    or ref.bundle_path != receipt.bundle_path
-                ):
-                    logger.warning(
-                        "ignored citation confirm receipt that does not match "
-                        "registry: %s",
-                        receipt.source_id,
-                    )
-                    continue
-                if receipt.source_id not in seen:
-                    receipts.append(receipt)
-                    seen.add(receipt.source_id)
-        return ConfirmBatchOutcome(
-            receipts=tuple(receipts),
-            failures=tuple(failures),
-        )
-
     @staticmethod
     def _markdown_code_span(value: object) -> str:
         """Render arbitrary one-line trusted data as a Markdown code span."""
@@ -362,78 +308,6 @@ class ChatSession:
         if text.startswith(("`", " ")) or text.endswith(("`", " ")):
             text = f" {text} "
         return f"{fence}{text}{fence}"
-
-    def _render_confirm_receipts(
-        self,
-        outcome: ConfirmBatchOutcome,
-        *,
-        validation_errors: list[str],
-    ) -> str:
-        blocked = bool(validation_errors)
-        receipts = outcome.receipts
-        failures = outcome.failures
-        if receipts:
-            heading = (
-                "（本輪模型草稿未通過 citation 檢查，但 confirm 已成功完成。）"
-                if blocked
-                else "（引用已確認並保存。）"
-            )
-        else:
-            heading = (
-                "（本輪模型草稿未通過 citation 檢查；引用保存亦未成功。）"
-                if blocked
-                else "（引用保存未成功。）"
-            )
-        lines = [heading]
-        for receipt in receipts:
-            if len(receipts) > 1:
-                lines.append(f"- 收據：{self._markdown_code_span(receipt.source_id)}")
-                prefix = "  "
-            else:
-                prefix = "- "
-            lines.extend([
-                f"{prefix}source ID：{self._markdown_code_span(receipt.source_id)}",
-                f"{prefix}DOI：{self._markdown_code_span(receipt.accepted_doi)}",
-                f"{prefix}bundle：{self._markdown_code_span(receipt.bundle_path)}",
-                f"{prefix}引用標記：{self._markdown_code_span(receipt.cite_marker)}",
-                f"{prefix}驗證等級：{self._markdown_code_span(receipt.verification_level)}",
-            ])
-            for warning in receipt.warnings:
-                lines.append(
-                    f"{prefix}驗證警告：{self._markdown_code_span(warning)}"
-                )
-        reason_messages = {
-            "stale_match": "配對已失效，請重新選取候選項目",
-            "structured_lookup_failed": "無法重新取得結構化書目資料",
-            "bibtex_lookup_failed": "無法從 doi.org 取得 BibTeX",
-            "doi_mismatch": "配對 DOI 與重新查證的 DOI 不一致",
-            "bibtex_doi_mismatch": "BibTeX DOI 與查證結果不一致",
-            "parse_failed": "BibTeX 無法安全解析",
-            "payload_too_large": "BibTeX 資料超過安全大小限制",
-            "not_exactly_one_entry": "BibTeX 並非恰好一筆書目",
-            "nonempty_preamble": "BibTeX 含不允許的 preamble",
-            "bundle_conflict": "既有 bundle 驗證衝突，未覆寫",
-            "write_failed": "bundle 寫入失敗",
-            "unknown_candidate": "候選編號不存在或已失效",
-            "no_doi": "候選沒有可解析的 DOI，無法保存為驗證引用",
-            "doi_lookup_failed": "DOI 解析查詢失敗，請稍後重試",
-        }
-        if failures:
-            lines.append("- 保存失敗：")
-            for failure in failures:
-                message = reason_messages[failure.reason_code]
-                lines.append(
-                    "  - "
-                    f"{self._markdown_code_span(failure.match_id)}：{message} "
-                    f"({self._markdown_code_span(failure.reason_code)})"
-                )
-        if blocked:
-            lines.append("- 被攔截草稿的檢查結果：")
-            lines.extend(
-                f"  - {self._markdown_code_span(error)}"
-                for error in validation_errors
-            )
-        return "\n".join(lines)
 
     def _trusted_save_outcomes(
         self, new_messages: list
@@ -445,6 +319,8 @@ class ChatSession:
         rejected: list[SaveBatchOutcome] = []
         for message in new_messages:
             if not isinstance(message, ToolMessage) or getattr(message, "name", None) != "citation_workflow":
+                continue
+            if getattr(message, "status", "success") != "success":
                 continue
             artifact = getattr(message, "artifact", None)
             if not isinstance(artifact, dict) or artifact.get("kind") != "citation_save_batch":
@@ -502,12 +378,37 @@ class ChatSession:
             "insufficient_identity_anchor": "資訊不足，需補充可辨識的作品資料",
             "intent_binding_ambiguous": "條件無法唯一綁定到批次中的作品",
             "negative_target": "目前語意並未授權保存此作品",
+            "identifier_mismatch": "指定識別碼與查得作品不符",
+            "multiple_exact_identifiers": "提供了互相衝突的精確識別碼",
+            "title_mismatch": "查得標題與指定作品不符",
+            "author_mismatch": "查得作者與指定作品不符",
+            "hard_year_mismatch": "查得年份違反使用者指定條件",
+            "hard_venue_mismatch": "查得 venue 違反使用者指定條件",
+            "hard_version_mismatch": "查得版本違反使用者指定條件",
             "version_clarification_required": "版本不明，請分辨要保存的版本",
             "multiple_plausible_records": "找到多筆同樣合理的作品，請補充條件",
+            "earliest_manifestation_unknown": "無法判定最早版本",
+            "multiple_earliest_manifestations": "找到多筆可能的最早版本，請補充條件",
             "not_original_research": "結果不是所要求的 original research",
             "no_provider_records": "找不到足夠強的書目結果",
+            "exact_doi_not_found": "指定 DOI 查無正式書目記錄",
+            "exact_arxiv_requires_authority": "指定 arXiv 記錄尚無可保存的權威身分",
             "unsupported_no_doi": "目前版本尚不能保存此無 DOI 來源",
             "all_providers_failed": "書目供應者本次皆失敗",
+            "doi_refetch_rate_limited": "DOI 權威查詢遭限流，請稍後重試",
+            "doi_refetch_timeout": "DOI 權威查詢逾時，請稍後重試",
+            "doi_refetch_failed": "DOI 權威查詢失敗，請稍後重試",
+            "refetch_identity_conflict": "DOI 權威資料與指定作品衝突",
+            "bibtex_lookup_failed": "無法從 doi.org 取得 BibTeX",
+            "bibtex_doi_mismatch": "BibTeX DOI 與查證結果不一致",
+            "parse_failed": "BibTeX 無法安全解析",
+            "payload_too_large": "BibTeX 資料超過安全大小限制",
+            "not_exactly_one_entry": "BibTeX 並非恰好一筆書目",
+            "nonempty_preamble": "BibTeX 含不允許的 preamble",
+            "bundle_conflict": "既有 bundle 驗證衝突，未覆寫",
+            "source_id_collision": "source ID 與既有來源衝突，未覆寫",
+            "write_failed": "bundle 寫入失敗",
+            "registry_conflict": "來源無法安全登錄至 live registry",
             "registry_mismatch": "保存收據未通過 live registry 驗證",
             "multiple_attempted_batches": "偵測到同輪多個 attempted batch，已 fail closed",
         }
@@ -607,21 +508,12 @@ class ChatSession:
                 had_tool_results=has_tool_results(new_messages),
             )
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
-        confirm_outcome = self._trusted_confirm_receipts(new_messages)
         save_attempted, save_rejected = self._trusted_save_outcomes(new_messages)
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
-        # Trusted-artifact priority: confirm/save outcome > pending select
-        # recovery > model text or the generic fallback. Pending recovery
-        # only replaces a failed answer ("continued:" marks the successful
-        # tool-capable retry, whose text stands like any normal answer).
+        # A trusted save artifact outranks model prose or a generic fallback.
         if save_attempted is not None or save_rejected:
             final_text = self._render_save_outcome(
                 save_attempted, save_rejected, validation_errors=errors
-            )
-        elif confirm_outcome.receipts or confirm_outcome.failures:
-            final_text = self._render_confirm_receipts(
-                confirm_outcome,
-                validation_errors=errors,
             )
         await self._record_turn(
             user_input=user_input,
