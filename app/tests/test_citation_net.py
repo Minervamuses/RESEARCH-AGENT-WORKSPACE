@@ -73,12 +73,21 @@ def test_limiter_spaces_request_starts():
 def test_limiter_update_from_crossref_headers():
     limiter = AsyncRateLimiter(max_concurrency=2, min_interval=0.0)
     limiter.update_from_headers(
-        {"X-Rate-Limit-Limit": "50", "X-Rate-Limit-Interval": "1s"}
+        {
+            "X-Rate-Limit-Limit": "50",
+            "X-Rate-Limit-Interval": "1s",
+            "X-Concurrency-Limit": "3",
+        }
     )
     assert limiter.min_interval == pytest.approx(0.02)
+    assert limiter.max_concurrency == 3
     # Garbage headers leave settings untouched.
-    limiter.update_from_headers({"X-Rate-Limit-Limit": "bogus"})
+    limiter.update_from_headers({
+        "X-Rate-Limit-Limit": "bogus",
+        "X-Concurrency-Limit": "bogus",
+    })
     assert limiter.min_interval == pytest.approx(0.02)
+    assert limiter.max_concurrency == 3
 
 
 def test_limiter_bounds_concurrency():

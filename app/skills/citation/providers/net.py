@@ -151,8 +151,11 @@ class AsyncRateLimiter:
             self._min_interval = max(0.0, float(min_interval))
 
     def update_from_headers(self, headers: Mapping[str, str]) -> None:
-        """Adapt spacing to Crossref-style rate-limit headers, if present."""
+        """Adapt concurrency and spacing to Crossref-style headers."""
         lowered = {k.lower(): v for k, v in headers.items()}
+        raw_concurrency = lowered.get("x-concurrency-limit", "").strip()
+        if raw_concurrency.isdigit() and int(raw_concurrency) > 0:
+            self.update(max_concurrency=int(raw_concurrency))
         raw_limit = lowered.get("x-rate-limit-limit", "")
         raw_interval = lowered.get("x-rate-limit-interval", "")
         match = re.fullmatch(r"(\d+)\s*s?", raw_interval.strip())

@@ -40,22 +40,33 @@ class CitationProviderHub:
         self._injected_fetcher = fetcher
         self._http_client = None
 
-        # Crossref starts conservatively; response headers adapt it at runtime.
-        self.crossref_limiter = AsyncRateLimiter(max_concurrency=2, min_interval=0.05)
+        crossref_mailto = env.get("CROSSREF_MAILTO", "").strip() or None
+        datacite_mailto = env.get("DATACITE_MAILTO", "").strip() or None
+
+        # Current public/polite pool limits are safe before the first response
+        # header arrives; Crossref headers can tighten or relax them at runtime.
+        self.crossref_limiter = AsyncRateLimiter(
+            max_concurrency=3 if crossref_mailto else 1,
+            min_interval=(1.0 / 3.0) if crossref_mailto else 1.0,
+        )
         self.openalex_limiter = AsyncRateLimiter(max_concurrency=2, min_interval=0.1)
-        self.datacite_limiter = AsyncRateLimiter(max_concurrency=2, min_interval=0.05)
+        self.datacite_limiter = AsyncRateLimiter(
+            max_concurrency=2,
+            min_interval=0.3 if datacite_mailto else 0.6,
+        )
         self.doi_org_limiter = AsyncRateLimiter(max_concurrency=4, min_interval=0.0)
 
         self.crossref = CrossrefClient(
             fetcher=self._fetch,
             cache=self.cache,
             limiter=self.crossref_limiter,
-            mailto=env.get("CROSSREF_MAILTO", "").strip() or None,
+            mailto=crossref_mailto,
         )
         self.datacite = DataCiteClient(
             fetcher=self._fetch_datacite,
             cache=self.cache,
             limiter=self.datacite_limiter,
+            mailto=datacite_mailto,
         )
         api_key = env.get("OPENALEX_API_KEY", "").strip()
         self.openalex = (
