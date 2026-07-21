@@ -1,55 +1,30 @@
 # 目前問題紀錄
 
-本文件只保留 citation workflow 與 skill runtime 仍待處理的問題。已修復項目（工具協定洩漏、空回應中斷、批次儲存回歸、grounding 與 explain 契約、收據跨輪遺失、自然語言確認映射等）的完整脈絡見 `RETROSPECTIVE.md`。（最近一次更新：2026-07-13。）
+本文件只保留 citation workflow 與 skill runtime 尚未消除的風險。已修復事故與設計演進見 `RETROSPECTIVE.md`。（最近一次更新：2026-07-21。）
 
-## 1. 儲存授權無錨點：存錯論文後靜默重搜再存（2026-07-13 實測，未修復）
+## 1. 上游 metadata 無法保證版本關係完整
 
-### 現象
+- Crossref/DataCite 的 relation 是 depositor 提供；存在的關係可當強證據，缺少關係不能證明兩個 DOI 無關。
+- OpenAlex 可能把 preprint、accepted manuscript、published version 與後來轉載合併成同一 Work；top-level DOI、year、primary location 都不一定是使用者要引用的 manifestation。
+- 現行 resolver 會保留 OpenAlex 的多個 DOI locations，遇到不同或不明版本時 abstain／要求澄清，不會把 top-level DOI 直接升格為答案；代價是 metadata 不完整時可能多問一次或回報 ambiguous。
+- publisher version 本來就可能沒有 DOI。系統不得為了產生 BibTeX 而拿相似 preprint DOI 代替；只有 allowlisted authority metadata 可走 trusted non-DOI 保存。
 
-2026-07-13 00:07 CLI 實測（緊接空回應重試修復之後）：
+## 2. Provider drift 與查詢成本需要持續監控
 
-- 使用者要求引用 AIAYN（Attention Is All You Need）與 VAE 原始論文。模型回報 VAE 原始論文（Kingma & Welling 2013/2014）搜不到，只找到 2019 年綜述與同名的無關文章。
-- 使用者明確指示「**先存 transformer 那篇**」——授權範圍是一篇。
-- 最終結果卻寫入了**兩個 bundle，而且兩個都有問題**：
-  1. `An_Introduction_to_Variational_Autoencoders--b5ee92e3333d`（DOI `10.1561/9781680836233`）——Kingma & Welling 2019 年的**綜述專書**。不是使用者要的原始論文，而且**完全未經授權**。
-  2. `Attention_Is_All_You_Need--69d47b977feb`（DOI `10.65215/r5bs2d54`，year 2025，work_type posted-content）——標題作者正確，但是 **2025 年的轉載版**，不是 2017 NeurIPS 原始出處，也不是 arXiv 1706.03762。
+- Crossref、DataCite、OpenAlex 的 searchable fields、回傳 shape、rate limit 與排序都可能改變。local contract tests 可鎖住我們的 parser/query builder，但無法取代定期 live probe。
+- OpenAlex 搜尋會消耗 credits；identity lookup 採 strict → conditional fallback，最多三次 search。年份漂移或 metadata 缺漏會提高 fallback 次數。
+- provider score 不是 identity confidence，也不能跨 provider 比較。現行程式只用它保留來源內排序，最終仍由 title/author/year/version checks 與 doi.org refetch 決定。
+- 大型 failure corpus 的 recall、wrong-DOI、wrong-version、abstention 與 latency 門檻仍需持續累積；目前 regression corpus集中保護已知的 AIAYN 多版本、VAE 錯作、DOI alias、特殊字元、空結果與 partial-provider failure。
 
-### 事發重建（sidecar 證據）
+## 3. DOI alias 與 authoritative lookup 仍依賴上游可用性
 
-兩個 bundle 的 `citation.json` 記錄了關鍵欄位：第一筆 `workflow_id: wf-4, candidate_id: c1`；第二筆 `wf-5, c2`。由此可完整還原：
-
-1. **第一輪**：模型做了四次搜尋（AIAYN 一次 = wf-1；VAE 三次 = wf-2～wf-4）。每次搜尋重建候選池並**從 c1 重新編號**。第一輪結束時存活的池子是 wf-4，其中 **c1 = An Introduction to Variational Autoencoders**。
-2. 模型的總結卻把**不同池子的編號混在同一段話**：「Transformer 是 c1」（wf-1 的過期編號）與「c1/c2 是 VAE 綜述」（wf-4 的現行編號）並列。
-3. **第二輪**：跨輪 context 只重播每輪的使用者文字＋最終回答文字（TurnRecord 精簡設計），四份候選清單原文與 live 池子狀態都不在 prompt 裡。模型只能相信自己上一輪那份已經出錯的總結。
-4. 模型呼叫 save c1——在存活的 wf-4 池子裡，c1 是 VAE 綜述。**錯的論文被存入**，收據明白顯示標題不符。
-5. 模型在輪內看到收據不符後，**沒有停下來回報，而是靜默自我補救**：未經要求重新搜尋 AIAYN（建出 wf-5），再 save c2——新池子從未呈現給使用者、使用者也從未從中挑選，存進來的是 2025 轉載版。
-6. finalizer 把兩張收據都確定性渲染出來（這部分運作正常，也是問題得以被發現的原因），但「先存錯、再自行補救」的過程沒有任何說明，錯誤的 bundle 也沒有撤銷通道。
-
-### 根源（三層）
-
-1. **候選編號跨搜尋靜默改指**：cX 是池子範圍的編號。傳入已不存在的編號會報 stale，但傳入「仍存在、只是換了主人」的編號會**直接命中錯的候選**，不會失敗。這是存錯論文的直接肇因。
-2. **Context 不對稱**：模型可能出錯的轉述（最終回答文字）跨輪保留，權威狀態（live 候選池）卻沒有任何投影進 prompt。錯誤總結成為下一輪唯一的候選資訊來源，且無從對照。
-3. **零額外確認的授權缺乏錨點與消耗語意**（07-12 升級的取捨代價）：「使用者的請求本身就是儲存授權」沒有綁定「使用者說話當下所見的池子」，也沒有一次性消耗——同一句話涵蓋了存錯、未授權重搜、再存第二篇的整串行為。SKILL.md 雖明文「present 之後 WAIT、never pick a candidate yourself、save 只做一次批次呼叫」，但這些只是 prompt 層規則，**工具與狀態機層面沒有任何東西擋第二次 save**。另注意：驗證鏈只保證 DOI↔記錄的身分一致，不保證「正典版本」——2025 轉載版三項檢查全數通過。
-
-### 修法方向（已討論、未實作）
-
-- **主修（授權消耗）**：每個使用者輪最多執行一個 save/confirm 批次，工具層強制。收據（成功或失敗）一旦存在，同輪後續 save 一律拒絕，模型只能回報結果。批次存多篇仍是一次呼叫，不影響正常 UX。
-- **契約明文（SKILL.md）**：指涉物不在現行池子 → 停下、重新呈現，不得重搜後代選；發現存錯 → 回報，不得靜默補救；純儲存指令下不得發起新搜尋。
-- **輔助**：citation workflow 存活期間每輪注入精簡 live 候選池 hint（比照既有 citable-sources hint）；候選編號帶世代（如 w4c1）讓過期引用大聲失敗；對「知名作品的 posted-content 轉載、年份明顯矛盾」的候選加正典性警示。
-- **殘餘缺口**：若模型在 save 前就先重搜、再從新池子存（本次是先存錯才重搜），授權消耗擋不住——它與合法的「找X並存起來」同輪流程在結構上無法區分，只差使用者語句有無探索意圖，而系統設計上不對語意做二次審查。此情境只能靠契約規則與池子 hint 降低機率。
-- **善後**：目前無移除已存 bundle 的 action，只能手動刪目錄＋git；可考慮補一個唯讀以外的管理 action。
-
-## 2. Citation discovery 品質與正典性（部分修復，持續觀察）
-
-版本群組、venue catalog 分層標註、年份 filter 回顯與照實轉述已於 07-12 落地。仍待處理：
-
-- **正典版本排序**：2026-07-13 實測中，AIAYN 檢索命中的是 2025 posted-content 轉載版（獨立 DOI），2017 原始出處未進入被選版本；VAE 原始論文（arXiv 1312.6114 / ICLR 2014）在 Crossref 關鍵詞搜尋中多次未命中，只回傳 2019 綜述與同名無關文章。知名作品的轉載/衍生記錄與原始出處之間，目前沒有排序偏好或警示。
-- query-title parody／低語意相關結果仍缺 reranking。
-- 若模型持續把批次操作拆成多個並行工具呼叫，再考慮 graph/tool-call 正規化（busy lock 目前可擋，列為觀察項）。
+- 明確 DOI 直接走 doi.org content negotiation；若回傳 canonical DOI 不同，系統保留原 DOI 為 alias，再用回傳 metadata 驗證作品身分。
+- doi.org timeout/rate-limit/invalid response 會 fail closed，不會退回模糊搜尋換一個 DOI。這提高 precision，但上游暫時故障時無法保存。
+- 明確 arXiv ID 同樣只走 export.arxiv.org authority；authority record 的 title/author/year 仍須通過本地 identity checks。
 
 ## 核心設計結論
 
-- `SKILL.md` 是行動指引；citation engine 是由 skill 授權的本地 stateful tool，兩者不應混為同一個黑箱概念。
-- 搜尋、介紹與閱讀可以使用 Web/RAG 證據；verified citation 的選擇、確認與寫入仍必須由 deterministic workflow 控制。
-- Gate 與 budget 這類安全機制需要「失敗出口」：封鎖或耗盡時要嘛 repair、要嘛給確定性訊息，靜默空輸出與丟棄成功收據都會製造新的失效模式。
-- 新增（07-13）：**信任模型語意判斷的授權，必須配上結構性的錨點與消耗語意**。prompt 層的行為規則（present→wait、一次批次）在模型判斷失誤時沒有後盾；授權要綁定使用者所見的狀態快照，且用過即失效。身分驗證（DOI 一致）不等於正典性驗證（是不是使用者要的那個出處）。
+- `search` 是探索；`save(WorkIntent)` 才是 verified identity resolution。Web/RAG 可讀內容或提供線索，但不能直接授權 citation identity。
+- 模型只需分欄提供 title、authors、year、venue、type 與 identifiers；Crossref、DataCite、OpenAlex 的語法、escaping 與 fallback 由各自 adapter 負責。
+- 找不到或版本不明時，可靠輸出是 `not_found`／`ambiguous`，不是猜一個看似合理的 DOI。
+- 身分驗證不等於正典性保證；只要 manifestation 仍有多種合理解讀，就必須保留歧義並讓使用者選擇。

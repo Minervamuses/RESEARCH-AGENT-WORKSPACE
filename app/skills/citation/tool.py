@@ -1,4 +1,4 @@
-"""Model-facing stateless citation_workflow tool."""
+"""Model-facing citation workflow with stateless search and one-shot saving."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ from skills.citation.types import PublishedDateFilter, SaveBatchOutcome, SourceR
 
 TOOL_NAME = "citation_workflow"
 TOOL_DESCRIPTION = (
-    "Stateless academic citation workflow. Actions: search(query), "
-    "save(works=[self-contained WorkIntent...]), sources(page), "
-    "source(source_id), explain(). Search results have no candidate IDs. "
-    "Each user turn permits at most one valid save batch. Generic references "
-    "such as 'this paper' never choose a version; unqualified 'original' must "
-    "be clarified as original work versus earliest manifestation."
+    "Academic citation workflow. search(query, optional year range) is "
+    "stateless exploratory discovery. save(works=[self-contained WorkIntent...]) "
+    "resolves each work through provider-specific bibliographic queries and "
+    "authoritative DOI verification. Pass title, authors, year, venue, type, "
+    "identifiers, and version as separate fields; never pass provider syntax "
+    "or a result position. Each user turn permits at most one valid save batch."
 )
 
 CitationAction = Literal["search", "save", "sources", "source", "explain"]
@@ -35,7 +35,11 @@ CitationAction = Literal["search", "save", "sources", "source", "explain"]
 class IdentifierInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     kind: Literal["doi", "arxiv"]
-    value: str = Field(min_length=1, max_length=2048)
+    value: str = Field(
+        min_length=1,
+        max_length=2048,
+        description="An explicit identifier from the user or visible metadata.",
+    )
     provenance: Literal["explicit_current_user", "visible_context"]
 
 
@@ -50,11 +54,28 @@ class ConstraintInput(BaseModel):
 class WorkIntentInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     requested_label: str = Field(min_length=1, max_length=160)
-    title: str = Field(default="", max_length=512)
-    authors: list[str] = Field(default_factory=list, max_length=32)
-    year: int | None = Field(default=None, ge=1000, le=2999)
-    venue: str = Field(default="", max_length=256)
-    work_type: str = Field(default="", max_length=256)
+    title: str = Field(
+        default="", max_length=512, description="The work title only."
+    )
+    authors: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Separate human author names; do not append them to title.",
+    )
+    year: int | None = Field(
+        default=None,
+        ge=1000,
+        le=2999,
+        description="A bibliographic year hint, not a provider query fragment.",
+    )
+    venue: str = Field(
+        default="",
+        max_length=256,
+        description="A human-readable venue, not an API filter expression.",
+    )
+    work_type: str = Field(
+        default="", max_length=256, description="A human-readable work type."
+    )
     identifiers: list[IdentifierInput] = Field(default_factory=list, max_length=8)
     constraints: list[ConstraintInput] = Field(default_factory=list, max_length=8)
 
@@ -78,7 +99,12 @@ class WorkIntentInput(BaseModel):
 class CitationWorkflowInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     action: CitationAction
-    query: str | None = Field(default=None, min_length=1, max_length=2048)
+    query: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="A natural-language topic/title query, never provider syntax.",
+    )
     works: list[WorkIntentInput] | None = Field(default=None, min_length=1, max_length=10)
     source_id: str | None = Field(default=None, min_length=1, max_length=128)
     page: int | None = Field(default=None, ge=1)
@@ -108,6 +134,7 @@ def _format_records(records, states) -> str:
         lines.append(f"- {metadata}")
     lines.append("Provider states: " + "; ".join(states))
     lines.append("No result number is a save identifier; build a complete WorkIntent from the metadata.")
+    lines.append("Provider order and scores are discovery evidence only; they do not choose a canonical version.")
     return _redact_dois("\n".join(lines))
 
 
@@ -133,8 +160,11 @@ def format_explain(output_dir) -> str:
     return (
         "search is stateless and returns full metadata without cX/mX IDs. "
         "save accepts 1–10 self-contained WorkIntent objects, resolves each "
-        "fresh across bounded providers, applies blocking work/version checks, "
-        "and permits one attempted mutation batch per user turn. Generic "
+        "through provider-specific Crossref, DataCite, and optional OpenAlex "
+        "queries, retains multiple candidate manifestations, verifies a "
+        "shortlisted DOI before persistence, applies blocking work/version "
+        "checks, and permits one attempted mutation batch per user turn. "
+        "Provider ranking alone never authorizes a save. Generic "
         "'this paper' with an unknown version and unqualified 'original' require "
         "clarification. Bundles are written atomically under " + str(output_dir)
     )

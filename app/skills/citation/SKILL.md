@@ -5,12 +5,16 @@ description: Stateless work-identity citation resolution, verified bundle saving
 
 # Citation Skill
 
-Use only `citation_workflow` for citation discovery and saving. Its actions are
-`search`, `save`, `sources`, `source`, and `explain`.
+Use only `citation_workflow` to discover or select a persistent citation
+identity. Its actions are `search`, `save`, `sources`, `source`, and `explain`.
+Use Web/RAG to read or summarize content when needed, but treat any DOI found
+outside this workflow as an untrusted clue; never save it directly.
 
 ## Search and present
 
-- `search` is stateless. Pass `query` and optional `year_from`/`year_to`.
+- `search` is stateless. Pass a natural-language topic/title in `query` and
+  optional `year_from`/`year_to`; never pass Crossref, DataCite, or OpenAlex
+  query syntax.
 - Present each result with full title, authors, year, venue, work type, and
   version label. Search order is never a save identifier; there are no cX/mX
   identifiers or persistent candidate pools.
@@ -22,6 +26,9 @@ Use only `citation_workflow` for citation discovery and saving. Its actions are
 - A save call contains one `works` array (1–10 self-contained WorkIntent
   objects). Include `requested_label` plus every known title/author/year/venue/
   type/DOI/arXiv/version fact. Never pass a result position or legacy ID.
+- Put each independently known fact in its own WorkIntent field. Never encode
+  authors, years, venues, or provider syntax inside `title` or another field.
+  The workflow owns provider-specific query construction and escaping.
 - Make at most one valid `save` call in a user turn. Put every authorized work
   in that one batch. After any attempted outcome—success, ambiguity, not found,
   provider failure, or insufficient intent—do not silently change the query or
@@ -37,6 +44,9 @@ Use only `citation_workflow` for citation discovery and saving. Its actions are
 - A hard user constraint or target identifier is a veto when it contradicts a
   provider record. Never trade identity precision for recall and never replace
   an unsupported published/no-DOI record with a similar preprint DOI.
+- A provider's first result, relevance score, top-level DOI, or primary
+  location is not an identity decision. Preserve ambiguity among aliases,
+  preprints, accepted manuscripts, published versions, and reposts.
 
 ## Cite and inspect
 
