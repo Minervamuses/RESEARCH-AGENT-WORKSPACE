@@ -17,8 +17,10 @@ class FakeService:
 
     def __init__(self):
         self.save_calls = 0
+        self.search_calls = []
 
-    async def search(self, query):
+    async def search(self, query, *, date_filter=None):
+        self.search_calls.append((query, date_filter))
         return [ProviderRecord("x", "x:1", 0, title="A Work", authors=["Ada Author"], year=2020, venue="Venue", work_type="article", doi="10.1234/hidden")], ["x:ok"]
 
     async def save(self, intents):
@@ -63,6 +65,26 @@ def test_search_returns_complete_metadata_without_candidate_or_match_ids():
     text = asyncio.run(tool.ainvoke({"action": "search", "query": "work"}))
     assert "A Work" in text and "Ada Author" in text and "2020" in text and "Venue" in text
     assert "c1" not in text and "m1" not in text and "10.1234" not in text
+
+
+def test_search_passes_year_range_to_provider_before_local_defense_filter():
+    service = FakeService()
+    tool = create_citation_workflow_tool(service_getter=lambda: service)
+
+    text = asyncio.run(tool.ainvoke({
+        "action": "search",
+        "query": "work",
+        "year_from": 2019,
+        "year_to": 2021,
+    }))
+
+    assert "A Work" in text
+    query, date_filter = service.search_calls[0]
+    assert query == "work"
+    assert date_filter.year_from == 2019
+    assert date_filter.year_to == 2021
+    assert date_filter.date_from == "2019-01-01"
+    assert date_filter.date_to == "2021-12-31"
 
 
 def test_save_without_active_turn_context_fails_before_service():

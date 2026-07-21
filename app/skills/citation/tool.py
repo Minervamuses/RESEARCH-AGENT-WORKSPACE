@@ -17,7 +17,7 @@ from skills.citation.resolution import (
     WorkIntent,
 )
 from skills.citation.service import CitationTurnContext
-from skills.citation.types import SaveBatchOutcome, SourceRef
+from skills.citation.types import PublishedDateFilter, SaveBatchOutcome, SourceRef
 
 TOOL_NAME = "citation_workflow"
 TOOL_DESCRIPTION = (
@@ -175,7 +175,12 @@ def create_citation_workflow_tool(
                 return _error("search requires only query and optional year filters"), None
             if year_from is not None and year_to is not None and year_from > year_to:
                 return _error("year_from must not exceed year_to"), None
-            records, states = await service.search(query)
+            date_filter = (
+                PublishedDateFilter.from_year_range(year_from, year_to)
+                if year_from is not None or year_to is not None
+                else None
+            )
+            records, states = await service.search(query, date_filter=date_filter)
             records = [r for r in records if (year_from is None or (r.year is not None and r.year >= year_from)) and (year_to is None or (r.year is not None and r.year <= year_to))]
             return _format_records(records, states), None
         if action == "save":

@@ -23,6 +23,7 @@ from skills.citation.resolution import (
 from skills.citation.storage import StorageError, resolve_output_dir, source_id_for, write_identity_bundle
 from skills.citation.types import (
     CanonicalIdentity,
+    PublishedDateFilter,
     SaveAlternative,
     SaveBatchOutcome,
     SaveItemOutcome,
@@ -64,14 +65,24 @@ class CitationService:
         )
         self.authorities = AuthorityRegistry(fetcher=hub._fetch)
 
-    async def search(self, query: str, *, rows: int = 10) -> tuple[list[ProviderRecord], list[str]]:
+    async def search(
+        self,
+        query: str,
+        *,
+        rows: int = 10,
+        date_filter: PublishedDateFilter | None = None,
+    ) -> tuple[list[ProviderRecord], list[str]]:
         providers = [("crossref", self.hub.crossref), ("datacite", self.hub.datacite)]
         if self.hub.openalex is not None:
             providers.append(("openalex", self.hub.openalex))
 
         async def call(name, provider):
             try:
-                return await provider.search(query, rows=min(rows, 20)), f"{name}:ok"
+                return await provider.search_text(
+                    query,
+                    rows=min(rows, 20),
+                    date_filter=date_filter,
+                ), f"{name}:ok"
             except ProviderError:
                 return [], f"{name}:error"
 
