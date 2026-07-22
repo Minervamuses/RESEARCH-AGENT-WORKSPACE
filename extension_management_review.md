@@ -307,7 +307,7 @@ CLI approval 文案必須直說：
 
 ## 3.7 generic stdout sanitizer 不應成為公開策略
 
-現行 `/bin/sh -c "... | grep '^{'”` 是為特定 Web Search server 的相容 workaround，不適合泛化：
+現行 `/bin/sh -c "... | grep '^{'"` 是為特定 Web Search server 的相容 workaround，不適合泛化：
 
 - 經 shell；
 - 可能吞掉協議錯誤；
