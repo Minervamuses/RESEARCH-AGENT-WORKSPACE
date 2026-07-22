@@ -1,345 +1,368 @@
-# Extension Management 可控熱插拔改造計畫（實證審查修訂版）
+# Extension Management 可控熱插拔實作計畫
 
 日期：2026-07-22
 
-狀態：待最終核准；本文件只規劃改動，尚未修改 production code
+實作分支：`repair_temp`
 
-修訂依據：
+狀態：**Milestone A 可依本計畫實作；Milestone B 在 MCP dependency spike 通過前維持 blocked。**
 
-- production 探查基準：`a8209a323350ad8af6f2d40d633d9eeb9b47fd6f`
-- 原計畫 commit：`8ca86e38cdb5caf7198c34c2fed503318a448ea9`
-- 本次修訂起點：`repair` HEAD `0092ca2e9061ca8c74400074a96283899433c5aa`
-- 原計畫與 production 基準之間只有文件新增，沒有 production code 差異
-- 本修訂納入 repository 實證審查、故障推演、官方 MCP／Python／LangGraph／packaging 資料與 build-vs-buy 結論
+本文件定義 implementation contract、commit 邊界與驗收 gate。production code 尚未因本文件而變更；實際 baseline、測試數與依賴 lock hash 必須由 Commit 0 在當時的 branch HEAD 重新記錄。
 
 ---
 
 ## 1. 決策摘要
 
-本計畫仍要達成「同一個 `ChatSession` 內，經使用者明確觸發後，新增／修改／刪除支援格式的 Skill 與 MCP，不需修改 host Python，也不需重啟 CLI」的核心目標。
+1. **正常 reconcile 完全 deterministic。**
+   - scan、schema validation、diff、approval lookup、snapshot、MCP probe、tool inventory、collision、graph build、durable commit、runtime swap、status 與 recovery 全由 host code 執行。
+   - 已有嚴格格式的 Skill／MCP 不依賴 LLM 才能管理。
 
-但第一版不再採用「LLM management agent 是每次 reconcile 的必要入口」與「disk current pointer 加 memory pointer 等於單一原子交易」這兩項假設。
-
-修訂後的核心方向如下：
-
-1. **正常管理路徑完全 deterministic。**
-   - scan、schema validation、diff、approval lookup、snapshot、MCP probe、tool inventory、collision、graph build、durable commit、runtime swap 與 status 全由 host code 執行。
-   - v1 不依賴 LLM 才能安裝或更新已有嚴格 descriptor 的 Skill／MCP。
-
-2. **狀態明分四層，不宣稱 disk 與 memory 可同時原子。**
-   - `desired`：使用者 drop-in tree 想要的內容。
-   - `applied`：durable registry 已批准、可重建的 generation。
+2. **狀態固定分為 `desired`、`applied`、`realized` 與 turn generation。**
+   - `desired`：完整掃描後觀察到的使用者來源狀態。
+   - `applied`：SQLite durable registry 已提交、可重建的 generation。
    - `realized`：目前 Python process 實際綁定的 generation。
-   - `turn generation`：一個 in-flight turn 所固定使用的 realized generation。
+   - turn generation：一個 in-flight turn 開始時固定取得的 realized snapshot。
+   - disk commit 與 memory pointer swap 是 crash-consistent protocol，不宣稱為單一原子交易。
 
-3. **durable metadata 使用 SQLite transaction。**
-   - 以 workspace-scoped SQLite database 保存 current generation、extension records、approval 與 audit metadata。
-   - 使用 `BEGIN IMMEDIATE`、expected-generation compare-and-swap 與短交易，處理多個 CLI process 共用同一 state root 的 lost update。
-   - content-addressed immutable snapshots 仍放 filesystem。
+3. **absence 只有在 authoritative complete scan 後才能變成 delete。**
+   - 每個 root 都輸出 `complete | partial | fatal`。
+   - root 不存在、權限錯誤、mount／磁碟離線、traversal 中斷、root identity 改變或 scanner error 一律是 zero-delete outcome。
+   - delete 還必須通過明確 deletion authorization；不能只因資料夾暫時看不到就移除 applied extension。
 
-4. **使用者 drop-in、shipped private resources 與 runtime state 物理分離。**
-   - shipped resources：read-only，透過 `importlib.resources` 取得。
-   - user drop-in root：writable，只放使用者 bundle。
-   - state root：writable，只放 SQLite、staging、immutable snapshots 與 bounded diagnostics。
-   - private management prompt 不得位於 user-writable drop-in tree。
+4. **workspace、global、shipped 與 state root 明確分離。**
+   - workspace drop-in：`<workspace>/.agent/extensions/`。
+   - optional global drop-in：`platformdirs.user_data_dir(...)/extensions/`。
+   - state：`platformdirs.user_state_dir(...)` 下依 workspace identity 分區。
+   - shipped resources 只透過 `importlib.resources` 讀取。
+   - 不以 source checkout 與 wheel 啟動方式改變 extension scope。
 
-5. **drop-in bundle 必須有明確 completeness contract。**
-   - v1 user drop-in bundle 必須包含 `.extension-lock.json`，列出所有其他 regular files 的 relative path、size 與 SHA-256。
-   - scanner 必須驗證「列出的檔案全部存在且相符，沒有未列出的 regular file」。
-   - 缺 lock、缺檔、額外檔、hash 不符、copy 中變動一律是 `unsealed`／`unstable`，不可 apply。
-   - content hash 是識別與 TOCTOU 防線，不是假裝成來源簽章或 publisher trust。
+5. **Skill 使用 sealed Agent Skills bundle；MCP 使用 MCPB safe subset。**
+   - Skill 由 `.extension-lock.json` 證明完整性。
+   - MCP 的 canonical external package 是 `.mcpb`；host wrapper 只提供 drop-in completeness 與 policy overlay。
+   - `extension.yaml` 只能作 internal normalized descriptor，不是唯一外部格式。
 
-6. **完整 tool identity 必須包含 owner。**
-   - 不能再只以 tool name 當 identity。
-   - 所有 local、MCP、host skill、management tools 在 build graph 前做全 universe collision fail-fast。
-   - 不允許 first-wins、last-wins 或 silent namespace rewrite。
+6. **active Skill 的行為內容變更不會未經重新啟用直接接管 session。**
+   - inactive valid update 更新 catalog，不自動 activate。
+   - active Skill 的 prompt、capability、task mode 或 runtime resource closure 變更時，提交新版並明確 deactivate；使用者必須重新啟用。
+   - invalid update 保留舊 applied snapshot 與舊 active runtime。
 
-7. **MCP process lifecycle 是獨立基礎設施。**
-   - drop-in MCP 不可沿用資料驅動的 `/bin/sh -c` 字串 pipeline。
-   - 使用 direct argv、minimal env、bounded stdout/stderr、分離 initialize／tool-call timeout、cancel、terminate、kill、wait/reap 與 process-tree cleanup。
-   - v1 只支援 strict declarative `stdio` MCP；不自動 build、install 或 fetch network dependencies。
+7. **tool identity 必須包含 owner，所有 collision fail-fast。**
+   - local、built-in Skill、MCP、management tools 在 graph build 前共用單一 catalog。
+   - raw name 與 casefold name 都不得重複。
+   - 不允許 first-wins、last-wins、silent drop 或自動 namespace rewrite。
 
-8. **第一個可交付 milestone 是 prompt-only Skill 同 session CRUD。**
-   - 先證明 roots、scanner、store、runtime pointer、active Skill transition、LKG 與 wheel packaging。
-   - 第二 milestone 才加入 strict declarative stdio MCP CRUD。
+8. **durable metadata 使用明確版本的 SQLite schema 與 CAS。**
+   - `BEGIN IMMEDIATE`、`busy_timeout=0`、expected generation compare-and-swap。
+   - descriptor object content-addressed 去重，不在每一代重複存整份 JSON。
+   - transaction 內不讀 raw source、不 copy、不 hash、不 probe、不 compile。
 
-9. **management agent 延後為 optional descriptor inference。**
-   - 只在使用者明確要求分析「沒有 descriptor 的 MCP bundle」時產生候選 descriptor。
-   - 只讀、無 mutation API、無 probe、無 apply。
-   - 候選仍須 deterministic validation、exact approval 與後續 host-only apply。
+9. **MCP 採兩階段批准。**
+   - 第一階段批准 exact execution closure，只允許 isolated probe。
+   - 第二階段批准 probe 得到的 exact tool surface 與 exposure。
+   - runtime realization 必須再次驗證相同 runtime fingerprint 與 surface hash，才可進 main graph。
 
-建議實作決策：**依本修訂版執行，不依原 10-commit 順序直接開工。**
+10. **MCP process lifecycle 優先重用官方 MCP Python SDK v1。**
+    - pin `mcp>=1.27,<2`。
+    - SDK 負責 stdio lifecycle、safe inherited environment、terminate／kill／wait、POSIX session 與 Windows process-tree cleanup。
+    - host 只補 SDK 缺少的 bounded stdout frame、bounded stderr、host timeout、sanitized diagnostics 與 policy classification。
+    - 不重寫完整跨平台 process supervisor。
 
----
+11. **LangChain adapter 只做 tool conversion。**
+    - host 建立並持有 explicit initialized `ClientSession`。
+    - production path 不把 connection dict 交給 adapter 讓它自行 spawn。
+    - adapter 不擁有 approval、process、surface verification 或 generation lifecycle。
 
-## 2. v1 目標與非目標
-
-### 2.1 v1 必做
-
-1. 支援 sealed prompt/resource-only Skill bundle：
-   - add、update、delete；
-   - reconcile 後同一 session picker與activation立即使用新 catalog；
-   - active Skill 更新、刪除、invalid update與 task-mode 變更有明確政策。
-
-2. 支援 sealed declarative stdio MCP bundle：
-   - add、update、delete；
-   - exact execution approval；
-   - probe、tool surface inventory、collision與same-session graph swap；
-   - failed update保留last-known-good。
-
-3. 保留既有語義：
-   - local base tools仍為global；
-   - Web Search仍為global MCP family；
-   - GitHub仍為skill-scoped MCP family；
-   - `--no-mcp` 不probe、不啟動、不綁定MCP；
-   - citation service與SourceRefs維持session isolation；
-   - 單一MCP無法realize不拖垮CLI。
-
-4. source checkout與built wheel都可用：
-   - shipped resources從package讀；
-   - user drop-ins落writable root；
-   - state不寫進site-packages或source bundle。
-
-5. 多process安全：
-   - 同一workspace/state root同時只有一個durable generation commit成功；
-   - stale process必須abort或重新prepare；
-   - committed snapshot在v1不自動GC。
-
-### 2.2 v1 明確不做
-
-- 不動態 import／reload任意Python Local Tool。
-- 不讓下載Skill直接註冊host tool factory。
-- 不做background filesystem watcher。
-- 不自動執行package manager、build script或network install。
-- 不保證任意GitHub MCP repository可自動適配。
-- 不支援HTTP／SSE／WebSocket MCP transport。
-- 不做persistent MCP session pool或跨generation handle reference counting。
-- 不做自動snapshot GC。
-- 不在v1搬移citation Python engine或其bundle assets。
-- 不引入pluggy、stevedore、resolvelib或watchfiles。
-- 不讓`--yes`建立首次executable/global-exposure approval。
-- 不讓LLM參與已有strict descriptor的正常CRUD。
-
-### 2.3 phase 2 候選
-
-- `/Extension-Management infer <mcp-id>` read-only descriptor inference agent。
-- MCPB importer。
-- explicit rollback command。
-- process lease與safe snapshot GC。
-- persistent MCP transports。
-- installed Python plugin／entry-point模式。
-- citation bundle asset migration。
-- watcher/debounce。
+12. **交付順序固定。**
+    - Milestone A：sealed prompt/resource-only Skill same-session CRUD。
+    - MCP dependency spike：先驗證 SDK hard bounds、MCPB importer、explicit session ownership 與 persistent session。
+    - Milestone B：只有 spike gate 全通過後才加入 MCP CRUD。
+    - 最後必須有強制 cleanup commit，刪除 shell pipeline、dual state 與所有 legacy live-authority path。
 
 ---
 
-## 3. 已確認的現行 repository 架構
+## 2. 已確認的 repository 現況
 
-下列為固定 production 基準可直接證實的現況，實作不得假設另一套架構。
+實作必須以 Commit 0 記錄的 branch HEAD 為唯一 baseline。以下介面目前已存在，改造不得假設另一套架構：
 
-```text
-CLI startup
-  └─ agent.cli.chat._run()
-       ├─ ChatSession.create(load_mcp=not args.no_mcp)
-       │    ├─ load_mcp_tools_with_families()
-       │    │    └─ resolve_mcp_specs()
-       │    │         ├─ _web_search_spec()
-       │    │         └─ _github_spec()
-       │    └─ ChatSession(...)
-       │         ├─ loaded_skills = discover_skills(config)
-       │         ├─ citation_workflow_tool = create_citation_workflow_tool(...)
-       │         ├─ graph = build_graph(...)
-       │         └─ FusionOrchestrator(...)
-       └─ build_default_registry()
-```
+### 2.1 Session 與 graph
 
-### 3.1 CLI與slash routing
+- `app/agent/session.py` constructor 直接保存 `extra_tools`、`mcp_families`、`web_search_tool_names`、`loaded_skills` 與 `self.graph`。
+- `loaded_skills` 由 constructor-time `discover_skills(config)` 取得。
+- static system prompt 仍硬編碼 Web Search、GitHub 與 `skills/<name>` 的 catalog／路徑語意。
+- `build_graph()` 在 compile 時固定 model bindings、tool node 與 tool lookup。
+- `_turn_execution_lock` 已存在，但 activation、deactivation、runtime mutation 尚未全部收斂到同一 mutation contract。
 
-- `SlashCommandRegistry`以`casefold()`做lookup。
-- slash handler先在本地執行。
-- 只有`SlashCommandResult.followup_input`非空時，CLI才把內容送入普通`session.turn()`。
-- `/Extension-Management`不得使用`followup_input`。
-- 現行`finally`只呼叫`flush_recent_turns()`；v1需新增idempotent `ChatSession.aclose()`。
+### 2.2 Skill
 
-### 3.2 Skill
+- `AgentConfig.skills_dir` 可指向任意目錄；未設定時使用 repo skills path。
+- `discover_skills()` 是單一目錄的一次性掃描。
+- malformed Skill 目前以 warning 跳過，沒有 authoritative desired/applied diagnostic。
+- `load_skill_file()` 與 metadata/runtime loader 必須統一改成 strict UTF-8 與 sealed snapshot source。
 
-- `discover_skills()`只掃單一`skills_dir/*/SKILL.md`。
-- malformed Skill在discovery被log後跳過，沒有authoritative diagnostics。
-- `ChatSession.loaded_skills`是constructor snapshot。
-- picker優先讀`loaded_skills`。
-- `load_skill_runtime()` activation時會重新discover並讀取Skill內容。
-- active `SkillRuntime`不會自行更新。
-- `_validate_task_mode()`目前在`task_modes: []`時仍可能接受任意傳入mode；必須先固定語義。
+### 2.3 MCP
 
-### 3.3 MCP
+- `app/agent/mcp.py` 目前只解析 Web Search 與 GitHub host specs。
+- `_spec_to_connection()` 使用 `/bin/sh -c` 與 `grep` 過濾 stdout。
+- `MultiServerMCPClient` connection mode 會由 adapter／SDK 自行建立 session。
+- family map 以 tool name 為 key，後寫可覆蓋先前 owner。
+- MCP 只在 `ChatSession.create()` 時載入一次，沒有 close handle 或 same-session replacement。
 
-- discovery只認Web Search與GitHub兩個host resolver。
-- `_spec_to_connection()`目前以`/bin/sh -c`與`grep`處理特定server的stdout noise。
-- `load_mcp_tools_with_families()`逐server取得tools，沒有通用descriptor trust、owner identity或close handle。
-- MCP只在`ChatSession.create()`載入一次。
+### 2.4 Storage 與 packaging
 
-### 3.4 Tool policy與graph
+- `app/skills/citation/storage.py` 已有 content hash、0600 staged write、file／directory fsync、atomic rename、stale staging 與 POSIX lock，可抽為共用 primitive。
+- `app/pyproject.toml` 尚未直接包含 `mcp`、`platformdirs`、`jsonschema`。
+- dependency change 必須同 commit 更新 `app/poetry.lock`，且不得帶 unrelated lock drift。
+- `.gitignore` 尚未涵蓋 `.agent/extensions/` 與 workspace extension metadata。
+- `app/agent/resources/__init__.py` 尚未建立；wheel resource test 不得假設 namespace package 自動包含新檔案。
 
-- `GLOBAL_MCP_FAMILY`目前固定為`web_search`。
-- `build_graph()`在compile前固定：
-  - tool objects；
-  - `tools_by_name`；
-  - model tool bindings；
-  - binding cache；
-  - `PolicyToolNode`。
-- 改動`extra_tools`或family map不會改變已compile graph。
-- 現行duplicate policy存在不一致：
-  - MCP family map可能對同名tool後寫覆蓋；
-  - base inventory又可能first-wins跳過同名extra tool；
-  - 可能形成「執行A tool，按B family授權」。
+---
 
-### 3.5 Fusion
+## 3. v1 範圍與 milestone gate
 
-- proposer graph只綁固定read-only local allowlist。
-- proposer建立時`extra_tools=None`，不含MCP或citation workflow。
-- v1 extension generation變更不應無條件清除所有Fusion graph cache。
-- 只有`GraphSignature`中的model、base local tool identity/schema或graph policy改變才invalidate。
+### 3.1 Milestone A 必做
 
-### 3.6 Citation
+- workspace 與 optional global scoped roots。
+- per-root authoritative scan 與 zero-delete gate。
+- sealed Skill bundle add、update、delete。
+- immutable snapshots、SQLite generations、CAS、quota 與 recovery。
+- owner-aware generation-0 tool catalog。
+- same-session picker refresh、explicit activation、active update deactivation。
+- legacy `skills_dir` 顯式 migration。
+- minimal deterministic status／apply／dry-run。
+- source checkout 與 installed wheel acceptance。
+- 不啟動任何第三方 MCP process。
 
-- `app/skills/citation`同時是Skill bundle與`skills.citation` Python package。
-- `ChatSession`直接import並建立`citation_workflow_tool`。
-- citation service為session-scoped，離開citation active state時必須走完整teardown。
-- failed runtime commit不得清除舊citation service或SourceRefs。
+### 3.2 MCP dependency spike gate
 
-### 3.7 Packaging
+Milestone B production code 開始前，必須由獨立 commit 證明：
 
-- 目前Poetry package包含`agent`與`skills`。
-- 新的user drop-in root、private management resource與state root尚不存在。
-- `find_app_root()`依實體`pyproject.toml`定位source checkout，不可作為installed wheel resource locator。
+- MCPB safe-subset importer 可安全拒絕 archive 攻擊與 unsupported runtime。
+- 官方 MCP SDK v1 可重用哪些 lifecycle；host 只補哪些 hard bounds。
+- bounded stdout frame 與 bounded stderr 可透過 public API、upstream hook 或最小 transport adapter 實現。
+- host-owned explicit `ClientSession` 可傳給 `langchain-mcp-adapters`，且 production path 不會由 adapter 另行 spawn。
+- generation-scoped persistent session 的 initialize、call、cancel、swap、shutdown 與 orphan 行為可控。
+- cold／warm P50、P95 latency、peak RSS 與連續 100 calls process churn 已量測。
+- POSIX process tree 與 Windows Job Object／SDK equivalent 都有真實測試。
+
+任何一項沒有可重現證據，Milestone B 保持 blocked。
+
+### 3.3 Milestone B 必做
+
+- MCPB safe-subset add、update、delete。
+- exact probe approval 與 exact surface approval。
+- runtime fingerprint 與 tool surface revalidation。
+- same-session MCP realization、LKG、dependency closure 與 graph swap。
+- generation-scoped session ownership、list-changed fail-closed、`aclose()`。
+- `--no-mcp` no-probe／no-start／no-bind。
+- approval list／approve／revoke／headless policy import／rollback UX。
+
+### 3.4 v1 明確不做
+
+- 任意 Python module 動態 import／reload。
+- downloaded Skill 註冊 host Python tool factory。
+- background filesystem watcher。
+- package manager、build script、UV、npx、uvx 或 network install。
+- HTTP／SSE／WebSocket MCP transport。
+- external mutable entrypoint。
+- 自動 committed snapshot GC。
+- 通用 dependency solver。
+- normal reconcile 內的 LLM inference。
+- 把 MCP Inspector 或 `skills-ref` 當 production dependency。
+
+### 3.5 v1 後候選
+
+- descriptor inference agent。
+- signed publisher／artifact provenance。
+- process lease 與 safe automatic GC。
+- remote MCP transport。
+- trusted installed Python entry-point plugins。
+- watcher／debounce。
 
 ---
 
 ## 4. 不可破壞的 invariants
 
-### 4.1 狀態與交易
+### 4.1 State 與 transaction
 
-1. **一個turn只使用一個realized generation。**
-2. **durable applied與process realized分開紀錄。**
-3. **candidate未完整建好前不得改current applied或session runtime pointer。**
-4. **durable commit失敗時memory完全不變。**
-5. **durable commit成功但process在memory swap前終止時，startup可從applied重建realized。**
-6. **同一state root的durable commit使用SQLite compare-and-swap。**
-7. **任何process不得在持有SQLite write transaction時等待LLM、input、copy、probe、graph build或另一把session lock。**
-8. **v1不刪除已committed snapshot。**
+1. 一個 turn 只使用一個 realized generation。
+2. candidate 未完整建好前不得改 current applied 或 session runtime pointer。
+3. durable commit 失敗時 memory、active Skill、citation service 與 SourceRefs 全部不變。
+4. durable commit 成功但 process 在 pointer swap 前終止時，startup 可從 applied 重建 realized。
+5. 同一 state root 的 durable commit 使用 SQLite compare-and-swap。
+6. SQLite transaction 與 session runtime lock 內不得 copy、hash raw source、probe、compile、等待 input、跑 LLM 或做 network I/O。
+7. transaction 只比較 prepare 階段已產生的 immutable candidate hashes、scan token、approval binding 與 expected generation。
+8. raw source 在 snapshot 最後驗證後再變動，只形成下一次 desired drift；不破壞已完成 snapshot。
 
-### 4.2 Source與trust
+### 4.2 Scan 與 delete
 
-9. **raw drop-in永遠不直接成為runtime source。**
-10. **unsealed／unstable／malformed bundle不得apply。**
-11. **private shipped resource不在user-writable root。**
-12. **content hash只代表內容identity，不代表publisher authenticity。**
-13. **下載內容不得未批准執行MCP command或升為global exposure。**
-14. **normal reconcile不執行LLM。**
+9. 每個 configured root 都有 expected root identity。
+10. 只有 `status == complete`、observed identity 等於 expected identity、沒有 fatal traversal error 且 deletion policy 授權時，absence 才能產生 delete。
+11. `partial` 或 `fatal` root 對該 root 的 applied members 一律 zero-delete。
+12. root missing、permission denied、I/O interruption、mount offline、identity changed、scanner exception 都不得刪除任何既有 member。
+13. root identity mismatch 未經 explicit `adopt-root` 前，不得套用該 root 的 add、update 或 delete。
+14. workspace/global 同 ID 或 casefold ID collision 不使用 precedence；candidate 必須 fail closed。
 
-### 4.3 Tool與權限
+### 4.3 Source 與 capability
 
-15. **tool identity包含owner，不能只靠name。**
-16. **extension ID、Skill ID、family ID與tool name的collision在graph build前拒絕。**
-17. **management mutation tools永遠不進public tool catalog或main graph。**
-18. **drop-in Skill只能要求catalog明確標為`public_skill_requestable`的host tool。**
-19. **`citation_workflow`只可由built-in citation Skill取得。**
-20. **global exposure由host policy＋approval決定，bundle自我宣告不會直接升權。**
-21. **model binding、prompt availability與`PolicyToolNode`必須來自同一realized snapshot。**
+15. raw user-writable drop-in 永遠不直接成為 runtime source。
+16. unsealed、unstable、malformed、oversize 或 quota-exceeding bundle 不得 apply。
+17. content hash 只代表 identity 與 integrity，不代表 publisher authenticity。
+18. Skill `allowed-tools`、host manifest、MCPB manifest 與 policy overlay 都是不受信任的 capability request，不是批准。
+19. Skill scripts 不會因 discovery 或 activation 被 host 自動執行；其內容仍可能影響模型，因此不能描述成 capability-free。
+20. drop-in Skill 不得要求 management tool、citation private tool 或未標記為 public requestable 的 host tool。
+21. normal reconcile 不執行 LLM。
 
-### 4.4 MCP lifecycle
+### 4.4 Active Skill
 
-22. **drop-in MCP禁止shell字串拼接。**
-23. **probe與tool call都必須有timeout、bounded streams與cleanup。**
-24. **timeout／cancel／delete／CLI shutdown後不得留下host已知orphan process。**
-25. **`--no-mcp` session不得probe、start或bind MCP。**
+22. inactive Skill valid update 只更新 catalog，不自動 activate。
+23. active Skill 的 prompt body、capability set、task modes 或 runtime resource closure 變更時，提交新版並 deactivate；必須 explicit reactivation。
+24. 只有 catalog-only metadata 變更且 runtime hash 完全相同時，active runtime 才可維持。
+25. invalid update 保留舊 applied snapshot 與舊 active runtime。
+26. intentional delete 可提交，但 active Skill 必須在同一 runtime transition 明確 deactivate。
+27. `--yes` 不會自動重新啟用被更新而 deactivated 的 Skill。
+28. citation teardown 只在 durable commit 與 runtime pointer swap 都成功後執行。
 
-### 4.5 Active Skill與citation
+### 4.5 Tool 與 graph
 
-26. **active Skill刪除或失去required family時不得懸空。**
-27. **invalid Skill update保留舊applied與舊active runtime。**
-28. **valid新版移除current task mode時套用新版並明確deactivate，不自動改選其他mode。**
-29. **只有committed deactivation才執行citation teardown。**
+29. tool identity 包含 owner；name 不是唯一 authority。
+30. raw name 與 casefold name 在完整 universe 中唯一。
+31. model binding、dynamic availability、prompt access 與 `PolicyToolNode` 來自同一 realized snapshot。
+32. management mutation tools 永遠不進 public catalog 或 main graph。
+33. graph signature 在 bind／compile 前計算；相同 signature 必須重用現有 graph。
+
+### 4.6 MCP
+
+34. drop-in MCP 禁止 shell 字串拼接。
+35. probe 與 runtime realization 都必須綁 exact executable/runtime closure。
+36. probe approval 與 surface approval 分開；surface 未批准前不得進 main graph。
+37. realization session 必須重新 initialize、list tools 並比對 exact surface hash。
+38. host 持有 explicit `ClientSession`；adapter 不得自行 spawn production process。
+39. timeout、cancel、delete、generation swap 與 CLI shutdown 後不得留下 host 已知 orphan process。
+40. stdout frame、stderr、tool count、schema、result 與 diagnostics 都有 hard bound。
+41. `tools/list_changed` 或 surface drift 立即使該 MCP fail closed；未重新批准前不得繼續 call 或 exposure。
+42. `--no-mcp` session 不 probe、不 start、不 bind MCP。
+
+### 4.7 Capacity 與 cleanup
+
+43. committed snapshots v1 不自動 GC，但 state、staging、snapshot、generation、event 與 diagnostics 都有 hard quota。
+44. copy／extract 前先做 capacity preflight；超限時不得留下半套 committed state。
+45. final cleanup commit 前不得宣告 v1 完成。
+46. cleanup gate 必須由 grep／AST assertion 驗證，不接受人工宣稱 legacy path 已不再使用。
 
 ---
 
-## 5. Physical roots與package resources
+## 5. Roots、scope、identity 與 migration
 
-### 5.1 三個物理trust domain
+### 5.1 Physical roots
 
 ```text
-A. shipped resource root（read-only）
+A. shipped package resources
    importlib.resources.files("agent.resources.extensions")
    importlib.resources.files("skills")
 
-B. user drop-in root（writable）
-   <extension_root>/skill/<id>/
-   <extension_root>/mcp/<id>/
+B. workspace drop-in root
+   <workspace>/.agent/extensions/
 
-C. state root（writable, local filesystem）
-   <extension_state_dir>/registry.sqlite3
-   <extension_state_dir>/staging/
-   <extension_state_dir>/snapshots/<sha256>/
-   <extension_state_dir>/diagnostics/
+C. optional global drop-in root
+   platformdirs.user_data_dir("research-agent", ...)/extensions/
+
+D. workspace-scoped state root
+   platformdirs.user_state_dir("research-agent", ...)/extensions/<workspace-id>/
+```
+
+state root 內容：
+
+```text
+registry.sqlite3
+staging/
+snapshots/<sha256>/
+diagnostics/
+backups/
 ```
 
 規則：
 
-- source checkout預設`extension_root = <app>/tool`。
-- installed wheel預設使用`platformdirs.user_data_dir(...)`下的`tool`。
-- `extension_state_dir`預設使用`platformdirs.user_state_dir(...)`並按workspace identity分區。
-- 明確config值永遠優先。
-- state root必須是local filesystem；network filesystem在v1回`unsupported_state_filesystem`。
-- shipped resource與user root不得解析成相同實體路徑。
-- state root不得位於user drop-in root或shipped package tree內。
+- source checkout 與 installed wheel 使用相同 workspace/global scope。
+- 明確 config override 優先於 default，但不能讓 shipped、drop-in、state roots alias。
+- state root 必須是 local filesystem；不支援的 network filesystem fail closed。
+- `.gitignore` 預設加入：
 
-### 5.2 Source checkout目錄
-
-```text
-app/tool/
-├── skill/
-│   └── <id>/
-│       ├── .extension-lock.json
-│       ├── SKILL.md
-│       ├── manifest.yaml          # optional
-│       ├── references/            # optional
-│       ├── assets/                # optional
-│       └── scripts/               # optional, inert
-└── mcp/
-    └── <id>/
-        ├── .extension-lock.json
-        ├── extension.yaml
-        └── runtime files
+```gitignore
+.agent/extensions/
+.agent/workspace-id
 ```
 
-不再在user root建立：
+- 使用者要 version-control extension 時，必須明確移除 ignore；runtime 不依 git tracking 判斷 trust。
+- shipped root 的 `read-only` 是 host trust label，不是同一 OS user 下的 security boundary。
 
-- `_internal/extension-management`；
-- `local/` placeholder；
-- registry、audit或snapshot資料夾。
-
-### 5.3 Shipped private／built-in resources
-
-- v1 normal path不需要private management Skill。
-- phase 2若加入inference agent，private prompt放在：
+### 5.2 Root identity
 
 ```text
-app/agent/resources/extensions/private/extension-management/SKILL.md
+RootIdentity
+  scope
+  canonical_realpath
+  filesystem_id
+  file_id_or_inode
+  workspace_id
 ```
 
-並透過`importlib.resources`exact-path load。
+- `extension_roots` table 保存 expected identity。
+- 第一次啟用 root 時由 interactive `adopt-root` 或 headless policy document 建立 expected identity。
+- canonical path 相同但 filesystem/file identity 改變時視為 identity mismatch。
+- workspace 搬移不自動猜測 state ownership；使用 `migrate-state` 顯式把舊 workspace state 綁到新 workspace identity。
+- optional global root 未設定時不列入 authoritative root set；已設定卻暫時不存在時為 `fatal`，不是 empty complete scan。
 
-- built-in Skill provider先指向現有`skills` package resources。
-- citation與academic-paper-writing在v1不搬實體路徑。
-- `_prompt-master`維持既有internal helper相容行為，與extension management private prompt分開。
+### 5.3 Scope collision
+
+- built-in IDs 為保留名，drop-in 不得覆蓋。
+- workspace 與 global root 可同時提供不同 IDs。
+- workspace/global 同 ID 或 casefold ID 是 configuration error；不使用 shadowing 或 precedence。
+- status 顯示每個 extension 的 `source_scope`、root identity 與 snapshot hash。
+
+### 5.4 Legacy `skills_dir` migration
+
+`AgentConfig.skills_dir` v1 改為 deprecated read-only import source：
+
+- 不再直接成為 runtime authority。
+- startup 偵測到 non-package legacy directory 時，status 顯示 `legacy_skills_pending_import`，不讓既有 Skills 無聲消失。
+- `/Extension-Management import-legacy-skills [<path>]`：
+  - dry-run 列出可匯入、collision、invalid UTF-8、unsupported metadata 與 capability request；
+  - explicit confirmation 後把內容複製到 workspace Skill root；
+  - 由 migration command 生成 `.extension-lock.json`；normal reconcile 永遠不替使用者重建 lock；
+  - 不修改原 legacy directory；
+  - 不自動 activate；
+  - import event 與 source hash 寫入 audit。
+- built-in `skills` package 直接由 package resource provider 載入，不走 legacy migration。
 
 ---
 
-## 6. Drop-in completeness與fingerprint contract
+## 6. Bundle contract、scan 與 immutable snapshot
 
-### 6.1 `.extension-lock.json`
+### 6.1 Workspace layout
 
-user drop-in bundle必須包含：
+Skill：
+
+```text
+.agent/extensions/skill/<id>/
+├── .extension-lock.json
+├── SKILL.md
+├── manifest.yaml          # optional host extension
+├── references/            # optional
+├── assets/                # optional
+└── scripts/               # optional; host不因發現而自動執行
+```
+
+MCP：
+
+```text
+.agent/extensions/mcp/<id>/
+├── .extension-lock.json
+├── <id>.mcpb
+└── policy.yaml
+```
+
+`policy.yaml` 是 host policy request overlay，包含 family、requested exposure、timeouts、result limits 與 secret binding names；它不是 execution approval。
+
+### 6.2 `.extension-lock.json`
 
 ```json
 {
@@ -351,106 +374,724 @@ user drop-in bundle必須包含：
       "path": "SKILL.md",
       "size": 1234,
       "sha256": "..."
-    },
-    {
-      "path": "references/checklist.md",
-      "size": 456,
-      "sha256": "..."
     }
   ]
 }
 ```
 
-MCP bundle的`kind`為`mcp`，且inventory必須包含`extension.yaml`及實際會執行的bundle內artifact。
+MCP wrapper 的 inventory 必須包含 `.mcpb` 與 `policy.yaml`。lock file 本身不列入 `files`。
 
-### 6.2 驗證規則
+### 6.3 Per-root scan model
 
-- lock file本身不可列入`files`。
-- paths必須是canonical POSIX-style relative path。
-- 拒絕absolute path、`..`、空segment、NUL、casefold duplicate。
-- 只允許regular files與directories。
-- 拒絕symlink、junction/reparse escape、device、FIFO、socket。
-- 在可偵測平台拒絕`st_nlink > 1`的regular file。
-- inventory列出的檔案必須全部存在、size與SHA-256相符。
-- bundle中不得有inventory未列出的regular file。
-- directory metadata、`.DS_Store`等是否允許必須由host固定規則決定，不由bundle自由排除。
-- scan前後重新驗證lock hash與root inventory；不一致為`unstable_copy`。
-- snapshot copy從已驗證的open file descriptor讀取，避免驗證後以path重新讀到另一個inode。
-- snapshot完成後再驗證snapshot inventory與source hash。
+```text
+RootScanResult
+  scope
+  configured_path
+  expected_root_identity
+  observed_root_identity
+  scan_token
+  status: complete | partial | fatal
+  items[]
+  diagnostics[]
 
-### 6.3 支援與不支援的handoff
+DesiredInventory
+  roots[]
+  items[]
+  aggregate_token
+  diagnostics[]
+```
 
-支援：
+`scan_token` 由 root identity、canonical sorted item paths、file sizes、content hashes 與 scanner policy version產生。
 
-- 已封裝、已有lock的bundle直接放入final目錄；
-- bundle producer先在root外完成，最後移入root；
-- 更新時以完整新版目錄替換舊目錄。
+### 6.4 Delete gate
 
-不支援：
+```text
+absence -> delete
+only if:
+  originating_root.status == complete
+  AND observed_root_identity == expected_root_identity
+  AND no fatal traversal error
+  AND exact deletion set is authorized
+  AND dependency closure permits the delete
+```
 
-- 沒有lock的資料夾；
-- 在final目錄中逐檔複製但尚未更新完整lock；
-- scanner自行猜哪些檔案「應該已複製完」。
+以下一律 zero-delete：
 
-normal reconcile不得自動寫入或重建使用者lock file。
+- configured root 不存在；
+- permission denied；
+- mount、disk 或 removable media 暫時離線；
+- traversal 中途失敗；
+- scanner internal error；
+- root identity 改變；
+- lock/inventory 尚未完整讀完；
+- delete set 未被 interactive confirmation 或 policy document exact 授權。
+
+complete root 的 add/update 可與其他 partial root 的 zero-delete 結果共同形成 candidate，但仍須通過 dependency closure；不得因 partial root 而推導依賴項不存在。
+
+### 6.5 Safe traversal
+
+- paths 必須是 canonical POSIX-style relative paths。
+- 拒絕 absolute path、`..`、空 segment、NUL、path length 超限、raw/casefold duplicate。
+- 只接受 regular files 與 directories。
+- 拒絕 symlink、junction/reparse escape、device、FIFO、socket。
+- 在可偵測平台拒絕 `st_nlink > 1` 的 regular file。
+- strict UTF-8 metadata；binary runtime artifacts 依 manifest 處理。
+- inventory 列出的 file 必須存在且 size/hash 完全相符。
+- bundle 不得有 lock 未列出的 regular file。
+- scan 前後重新驗證 lock hash、root identity 與 inventory。
+
+### 6.6 One-pass snapshot
+
+```text
+open no-follow FD
+  -> fstat
+  -> stream to staging
+  -> 同時計算 SHA-256 與 byte count
+  -> compare expected hash/size
+  -> fsync file
+  -> fsync staging directory
+  -> write snapshot.json last
+  -> fsync
+  -> same-filesystem atomic publish
+```
+
+- 不先 hash source、再 copy、再讀 snapshot 做第三次完整掃描。
+- source copy/hash 使用同一 pass。
+- startup 對 committed snapshot 做後續 corruption verification。
+- 相同 snapshot hash 已存在時先完整驗證再重用。
+- `.partial` staging 不得被 runtime 讀取。
+
+### 6.7 MCPB extraction safety
+
+- archive hash 納入 snapshot identity。
+- 使用 `jsonschema` 驗證 MCPB manifest safe subset。
+- 拒絕 zip-slip、absolute path、`..`、duplicate entry、casefold duplicate、encrypted entry、symlink entry、special file、path length 超限。
+- 限制 archive bytes、總解壓 bytes、單檔 bytes、檔案數與 compression ratio。
+- extraction 只進 operation staging；驗證完成前不 publish。
+- manifest entrypoint 必須落在 extracted snapshot。
+- executable mode 依 host 固定規則設定；不盲信 archive permission bits。
 
 ---
 
-## 7. Data models
+## 7. Schema 與 validation policy
 
-### 7.1 Extension identity
+### 7.1 Extension ID
 
-```text
-ExtensionKey
-  kind: skill | mcp
-  id: canonical kebab-case
+```regex
+^[a-z0-9]+(?:-[a-z0-9]+)*$
 ```
 
-ID規則：
+- ASCII 長度 1–64。
+- 不接受 leading/trailing hyphen 或連續 hyphen。
+- folder name、lock id、Skill frontmatter name、MCPB/package id 與 policy id 必須完全相同。
+- casefold 後跨 workspace/global scope 唯一。
+- built-in Skill、slash command、MCP family、management tool 與 host reserved names 不得使用。
 
-- regex：`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`
-- 長度1–64。
-- folder name、lock id與Skill frontmatter／MCP descriptor id必須完全相同。
-- casefold後全workspace唯一。
-- 保留：現有slash command、built-in Skill、MCP family、management tool與host保留名。
+### 7.2 Agent Skills
 
-### 7.2 Tool identity
+必要：
+
+- `SKILL.md`。
+- strict UTF-8。
+- YAML frontmatter `name`、`description`。
+- `name` 等於 parent directory／extension ID。
+
+`allowed-tools`：
+
+- 依 Agent Skills 欄位語法解析。
+- 只轉成 untrusted capability request。
+- v1 只接受能映射到已知 MCP family 或 `public_skill_requestable=true` host tool 的條目。
+- unknown syntax、private tool、management tool、`citation_workflow` 或無法唯一解析的項目直接 invalid。
+- bundle 宣告不會自行產生 exposure 或 approval。
+
+`manifest.yaml` host extension 可描述：
+
+- task modes；
+- required／optional MCP families；
+- requested host tools；
+- runtime references；
+- warning thresholds。
+
+`allowed-tools` 與 `manifest.yaml` capability request 取 canonical union；互相矛盾時 invalid。
+
+scripts policy：
+
+- discovery、apply、activation 都不自動執行 scripts。
+- scripts 仍是 untrusted prompt-visible resources，可能誘導模型使用 global base tools或要求 bash approval。
+- activation UI 必須顯示 scripts count、hash、requested capabilities 與 global base tool policy，不得標示為 capability-free。
+
+production validator 使用本 repo 的 strict typed model；`skills-ref` 只在 dev/CI 作 differential oracle，不作 runtime dependency。
+
+### 7.3 MCPB safe subset
+
+允許：
+
+- `stdio` transport。
+- bundled native binary。
+- bundled Node entrypoint與dependencies，使用 allowlisted host Node runtime。
+- bundled Python entrypoint與dependencies／bundled venv。
+- platform/runtime compatibility metadata。
+- sensitive user configuration 的 env-name binding。
+
+拒絕或保持 unsupported：
+
+- UV-managed dependencies。
+- npx、uvx 或任何 runtime fetch。
+- package manager install。
+- build scripts。
+- HTTP／SSE／WebSocket。
+- external mutable entrypoint。
+- literal secrets。
+- shell command string。
+- manifest 要求的 runtime 不在 allowlist或無法 fingerprint。
+
+MCPB manifest 中的 tools／prompts 只作 declared metadata；actual `tools/list` 才形成 surface candidate。
+
+### 7.4 Internal normalized descriptor
 
 ```text
-ToolIdentity
-  owner_kind: base | builtin_skill | mcp | management
-  owner_id: str
-  name: str
-  family: str | None
-  exposure: global | skill | private
-  requestable_by_public_skill: bool
-  description_hash: str
-  input_schema_hash: str
-  implementation_kind: local | mcp | management
+InternalNormalizedMCPDescriptor
+  extension_key
+  archive_hash
+  snapshot_hash
+  package_runtime
+  entrypoint
+  argv
+  cwd
+  env_bindings
+  compatibility
+  declared_surface
+
+HostPolicyOverlay
+  family
+  requested_exposure
+  init_timeout
+  tool_call_timeout
+  result_limit
+  secret_binding_names
+  approval_policy_version
+```
+
+internal descriptor 由 MCPB manifest 與 policy overlay deterministic 產生，不由 LLM 產生 authoritative command。
+
+---
+
+## 8. Durable store
+
+### 8.1 SQLite settings
+
+v1 固定：
+
+```text
+PRAGMA foreign_keys = ON
+PRAGMA journal_mode = DELETE
+PRAGMA synchronous = FULL
+PRAGMA busy_timeout = 0
+PRAGMA locking_mode = NORMAL
+PRAGMA trusted_schema = OFF
+PRAGMA application_id = 1163416653  -- 0x4558544D, "EXTM"
+PRAGMA user_version = 1
+```
+
+- v1 不使用 WAL；更換 journal mode 必須另有跨 OS／filesystem benchmark與 recovery ADR。
+- unknown newer `user_version` fail closed。
+- startup 執行 `PRAGMA quick_check`。
+- migration、explicit verify 或 quick-check failure 執行完整 `integrity_check`。
+- migration 前使用 SQLite backup API 建立 fsynced backup；migration 失敗時保留原 DB 與 backup，不部分升版。
+- DB permission 盡可能為 0600；Windows 記錄 ACL diagnostic。
+
+### 8.2 Schema v1
+
+```sql
+CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY,
+    checksum TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+);
+
+CREATE TABLE applied_generations (
+    generation INTEGER PRIMARY KEY,
+    parent_generation INTEGER NULL,
+    manifest_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (parent_generation)
+        REFERENCES applied_generations(generation)
+);
+
+CREATE TABLE registry_meta (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    workspace_id TEXT NOT NULL,
+    workspace_root_hash TEXT NOT NULL,
+    current_generation INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (current_generation)
+        REFERENCES applied_generations(generation)
+);
+
+CREATE TABLE extension_roots (
+    scope TEXT PRIMARY KEY
+        CHECK (scope IN ('workspace', 'global')),
+    configured_path_hash TEXT NOT NULL,
+    expected_root_identity TEXT NOT NULL,
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    adopted_at TEXT NOT NULL,
+    last_complete_scan_token TEXT NULL
+);
+
+CREATE TABLE extension_objects (
+    object_hash TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('skill', 'mcp')),
+    extension_id TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    normalized_descriptor_json TEXT NOT NULL,
+    prompt_hash TEXT NULL,
+    runtime_closure_hash TEXT NULL,
+    tool_surface_hash TEXT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE approvals (
+    binding_hash TEXT PRIMARY KEY,
+    approval_type TEXT NOT NULL CHECK (
+        approval_type IN (
+            'skill_capability',
+            'delete_set',
+            'mcp_probe',
+            'mcp_surface',
+            'global_exposure',
+            'root_adoption',
+            'state_migration'
+        )
+    ),
+    extension_kind TEXT NULL,
+    extension_id TEXT NULL,
+    scope TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    binding_json TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    source_document_hash TEXT NULL,
+    revoked_at TEXT NULL
+);
+
+CREATE TABLE generation_members (
+    generation INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('skill', 'mcp')),
+    extension_id TEXT NOT NULL,
+    object_hash TEXT NOT NULL,
+    source_scope TEXT NOT NULL CHECK (source_scope IN ('built-in', 'workspace', 'global')),
+    source_root_identity TEXT NOT NULL,
+    skill_capability_approval_hash TEXT NULL,
+    mcp_probe_approval_hash TEXT NULL,
+    mcp_surface_approval_hash TEXT NULL,
+    status TEXT NOT NULL,
+    PRIMARY KEY (generation, kind, extension_id),
+    FOREIGN KEY (generation)
+        REFERENCES applied_generations(generation) ON DELETE RESTRICT,
+    FOREIGN KEY (object_hash)
+        REFERENCES extension_objects(object_hash) ON DELETE RESTRICT,
+    FOREIGN KEY (skill_capability_approval_hash)
+        REFERENCES approvals(binding_hash),
+    FOREIGN KEY (mcp_probe_approval_hash)
+        REFERENCES approvals(binding_hash),
+    FOREIGN KEY (mcp_surface_approval_hash)
+        REFERENCES approvals(binding_hash)
+);
+
+CREATE TABLE extension_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    generation INTEGER NULL,
+    extension_kind TEXT NULL,
+    extension_id TEXT NULL,
+    sanitized_payload_json TEXT NOT NULL,
+    FOREIGN KEY (generation)
+        REFERENCES applied_generations(generation)
+);
+
+CREATE INDEX idx_generation_members_object
+    ON generation_members(object_hash);
+CREATE INDEX idx_generation_members_extension
+    ON generation_members(kind, extension_id, generation);
+CREATE INDEX idx_approvals_extension
+    ON approvals(extension_kind, extension_id, approval_type, revoked_at);
+CREATE INDEX idx_events_operation
+    ON extension_events(operation_id, seq);
+CREATE INDEX idx_events_extension
+    ON extension_events(extension_kind, extension_id, seq);
 ```
 
 規則：
 
-- raw`name`與casefold name都必須唯一。
-- 同family v1只能有一個MCP owner extension。
-- management tools使用`private` exposure，且不進main catalog。
-- `citation_workflow` owner為`builtin_skill:citation`，`requestable_by_public_skill=false`。
+- `extension_objects` content-addressed；大型 normalized descriptor 只存一次。
+- generation 只保存 membership 與 approval references。
+- revoked approval 保留 audit row，但不得再被新 generation 重用。
+- generation 0 由 migration 建立，承接當時可重現的 built-in／legacy compatibility catalog。
 
-### 7.3 Durable與realized狀態
+### 8.3 Cross-process CAS
+
+所有 process 使用相同鎖順序：
 
 ```text
-DesiredInventory
-  scan_token
-  root_identity
-  items[]
-  diagnostics[]
+process-local reconcile reservation
+  -> session runtime lock
+  -> SQLite BEGIN IMMEDIATE
+```
 
-AppliedGeneration
-  generation
-  parent_generation
-  manifest_hash
-  extensions[]
-  created_at
+transaction 內只檢查：
+
+- expected current generation；
+- expected session revision；
+- prepared candidate aggregate scan token；
+- prepared object/snapshot/manifest hashes；
+- exact unrevoked approval hashes；
+- candidate generation manifest hash。
+
+stale 或 busy：
+
+- rollback；
+- memory 不變；
+- 釋放 session lock；
+- 回 typed `stale`／`busy`；
+- 不在鎖內重跑昂貴 prepare。
+
+---
+
+## 9. Hard limits 與 capacity policy
+
+v1 initial defaults 必須進 `AgentConfig`、status 與 tests；調整預設值需獨立 benchmark／compatibility說明。
+
+| Limit | Default |
+|---|---:|
+| `max_bundle_archive_bytes` | 256 MiB |
+| `max_bundle_unpacked_bytes` | 1 GiB |
+| `max_single_file_bytes` | 128 MiB |
+| `max_files_per_bundle` | 20,000 |
+| `max_path_bytes` | 1,024 |
+| `max_archive_compression_ratio` | 100 |
+| `max_state_bytes` | 8 GiB |
+| `max_staging_bytes` | 2 GiB |
+| `max_snapshots` | 2,048 |
+| `max_generations` | 512 |
+| `max_events` | 100,000 |
+| `max_diagnostics_bytes` | 64 MiB |
+| `max_startup_fallback_generations` | 16 |
+| `max_mcp_stdout_frame_bytes` | 8 MiB |
+| `max_mcp_stderr_bytes_per_session` | 1 MiB |
+| `max_mcp_result_bytes` | 8 MiB |
+| `max_mcp_tools` | 256 |
+| `max_tool_description_bytes` | 16 KiB |
+| `max_tool_schema_bytes` | 1 MiB |
+| `max_tool_schema_depth` | 64 |
+
+capacity preflight：
+
+- 在 copy／extract 前計算 candidate worst-case bytes、file count、snapshot count、generation row 與 event row。
+- content-addressed snapshot 已存在時可扣除可驗證的重用 bytes。
+- 超限回 `state_quota_exceeded`／`staging_quota_exceeded`，不寫一半再失敗。
+- v1 不自動刪 committed snapshots、generations 或核心 audit events。
+- quota 滿時 fail closed；status 必須顯示可釋放空間所需的 explicit maintenance／rollback資訊。
+
+status 至少顯示：
+
+```text
+state bytes used / limit
+staging bytes used / limit
+snapshot count / limit
+generation count / limit
+event count / limit
+largest snapshots
+oldest retained generations
+```
+
+---
+
+## 10. Approval model
+
+### 10.1 Skill capability approval
+
+binding 包含：
+
+```text
+extension key
+source hash
+snapshot hash
+prompt hash
+normalized manifest hash
+allowed-tools/requested capability set
+scripts/resources closure hash
+host skill policy version
+```
+
+- prompt/resource-only且無 capability request 的 inactive Skill 可進 catalog，不自動 activate。
+- capability-bearing Skill 首次 apply 或 capability set 變更需要 exact approval。
+- `--yes` 只能重用完全相同且未 revoked 的 approval。
+
+### 10.2 Delete authorization
+
+binding 包含：
+
+```text
+expected applied generation
+root scope + expected root identity
+complete scan token
+sorted exact deletion set
+dependency transition summary
+delete policy version
+```
+
+- TTY apply 顯示 exact delete set 後取得一次性 authorization。
+- non-TTY 必須由 exact policy document 授權。
+- `--yes` 不建立首次 delete authorization。
+
+### 10.3 MCP probe execution approval
+
+probe 前 binding 至少包含：
+
+```text
+extension key
+MCPB archive hash
+snapshot hash
+normalized descriptor hash
+entrypoint/artifact hash
+resolved executable realpath
+resolved executable content hash or stable file identity
+runtime name + exact version
+OS + architecture
+argv + cwd
+env source names and source types
+non-secret runtime configuration value hashes
+host execution policy version
+transport limit policy version
+requested exposure
+```
+
+- secret values永不寫入 DB 或 approval hash；只保存 env name、required flag與 source type。
+- executable path、runtime version、platform、artifact、argv、cwd、env source set或非 secret config改變，舊 probe approval失效。
+- probe approval只允許 isolated initialize／list-tools probe，不批准 main graph exposure。
+
+### 10.4 MCP surface approval
+
+probe 後 binding 包含：
+
+```text
+probe binding hash
+tool names
+description hashes
+input schema hashes
+output schema hashes
+annotations hashes
+side-effect classifications
+family
+requested + approved exposure
+tool-surface policy version
+```
+
+- global exposure 使用獨立 approval scope。
+- actual surface 與 MCPB declared surface 不一致時，以 actual surface作 candidate並顯示 drift。
+- tool name、description、schema、annotation、classification、family 或 exposure任一改變，舊 surface approval失效。
+- surface approval存在但 realization fingerprint不同時仍不得 exposure。
+
+### 10.5 `approved_by` 與 headless provisioning
+
+interactive actor：
+
+```text
+interactive:<os-user>@<hostname>
+```
+
+headless actor：
+
+```text
+policy:<document-sha256>:<os-user>@<hostname>
+```
+
+`import-policy`：
+
+- 文件使用 strict schema，列出 exact binding hashes、scope、expiry/revocation policy與變更 ticket metadata。
+- import 前檢查 regular file、no symlink、ownership／permission policy、strict UTF-8 與 content hash。
+- import event 保存 document hash與 actor，不保存 secret。
+- policy 不得用 wildcard 批准未來任意 executable、surface 或 delete set。
+
+---
+
+## 11. Skill catalog 與 active transition
+
+### 11.1 Tool request policy
+
+- local base tools 維持 global；Skill bundle不能自行增刪。
+- drop-in Skill 只能 request：
+  - 已存在的 MCP family；
+  - `public_skill_requestable=true` 的 host tool。
+- `citation_workflow` 只屬於 built-in citation Skill。
+- management tools 永遠 private。
+- required capability 缺失：candidate Skill blocked。
+- optional capability 缺失：Skill 可進 catalog，但 availability 明確標示 unavailable。
+
+### 11.2 Active transition table
+
+| Candidate change | Commit policy |
+|---|---|
+| inactive Skill add | 更新 catalog；不自動 activate |
+| inactive Skill valid update | 更新 catalog；不自動 activate |
+| active Skill catalog-only metadata update，runtime hash不變 | 維持 active |
+| active Skill prompt/capability/task-mode/resource closure更新 | 提交新版並 deactivate；要求 explicit reactivation |
+| active Skill invalid update | 保留舊 applied snapshot與舊 active runtime |
+| active Skill intentional delete | 提交 delete並 deactivate |
+| 新版移除 current task mode | 提交新版並 deactivate；不自動選其他 mode |
+| required MCP intentional delete | delete dependency並 deactivate dependent Skill |
+| required MCP failed update | 保留舊 MCP與舊 dependent Skill closure |
+| optional MCP失效／刪除 | Skill可維持 active，但重算access與availability |
+| global MCP set改變 | 所有active access由同一candidate snapshot重算 |
+
+### 11.3 Prompt 與 availability
+
+- static system prompt 移除硬編碼 MCP catalog、`skills/<name>` path與「用 bash 列 skills」說明。
+- dynamic availability block 由 current `SessionRuntimeState` render。
+- picker、activation loader、model binding、tool policy與status都讀同一 public Skill catalog。
+- active Skill content 只從 committed snapshot讀取。
+
+---
+
+## 12. MCP runtime architecture
+
+### 12.1 SDK 與 host responsibility
+
+採官方 MCP Python SDK v1：
+
+- `StdioServerParameters`／`stdio_client`／`ClientSession`。
+- SDK safe inherited environment subset。
+- SDK stdin close、grace period、terminate、kill、wait/reap。
+- SDK POSIX `start_new_session=True` 與 Windows process-tree cleanup。
+
+host 只新增：
+
+```text
+bounded stdout JSON-RPC frame reader
+bounded stderr ring/quota
+host timeout and error classification
+sanitized diagnostics
+approval/runtime fingerprint verification
+surface hash verification
+session generation ownership
+```
+
+如果 SDK public API 無法加入 hard frame bound：
+
+1. 先提出 upstream hook或patch；
+2. 仍不可行時，實作最小 transport adapter；
+3. 不複製 SDK 已有的跨平台 lifecycle。
+
+### 12.2 Explicit session ownership
+
+production path：
+
+```text
+Host MCP runtime
+  -> resolve exact runtime fingerprint
+  -> create SDK stdio transport
+  -> create initialized ClientSession
+  -> list tools and verify exact surface
+  -> pass explicit ClientSession to langchain_mcp_adapters
+  -> retain session under realized generation
+```
+
+禁止：
+
+```text
+connection dict
+  -> adapter自行create_session/spawn
+```
+
+adapter 只負責 MCP tool 到 LangChain tool 的 conversion；host 不重寫 conversion。
+
+### 12.3 Probe、approval 與 realization
+
+```text
+1. validate MCPB + policy overlay
+2. create immutable snapshot
+3. compute exact probe binding
+4. require probe approval
+5. open isolated probe session
+6. initialize + tools/list
+7. validate limits/collision and compute surface binding
+8. close probe session
+9. require surface approval
+10. open generation-scoped runtime session
+11. initialize + tools/list again
+12. compare exact runtime fingerprint + surface hash
+13. only then expose tools and build graph
+```
+
+runtime session 與 probe session不是同一 process，因此步驟 10–12不可省略。
+
+### 12.4 Generation-scoped persistent session
+
+v1 target：
+
+- 每個 realized MCP owner最多一個 lazy generation-scoped persistent `ClientSession`。
+- graph exposure前已完成 exact surface revalidation。
+- turn lock保證 generation swap時本 process沒有 in-flight turn。
+- swap後新 turn只取得新 generation session。
+- 舊 generation sessions在 pointer swap後關閉；close failure記錄bounded diagnostic，不回滾已commit generation。
+- CLI `aclose()` idempotent關閉所有sessions。
+
+Commit 8 benchmark若證明 persistent session無法符合 hard bounds或cleanup contract，唯一允許的替代是 per-call session，且每次 invocation 都必須 initialize、`tools/list`、比對 exact surface hash後才call；不得直接沿用 probe結果。
+
+### 12.5 Surface change
+
+- 支援並監聽 `tools/list_changed` notification。
+- 收到 notification 立即把 owner標為 surface-drifted，拒絕後續call。
+- 下一個安全 mutation window移除其 realized exposure或保持舊 graph但由PolicyToolNode fail closed。
+- 重新probe與surface approval前不得曝光新／改變的tools。
+
+### 12.6 Legacy Web Search／GitHub
+
+- 兩者改為 host-owned normalized descriptors，與 drop-in 共用 tool catalog、session ownership、limits與close path。
+- Web Search維持 global exposure。
+- GitHub維持 skill-scoped exposure。
+- legacy env/config resolver可保留，但只輸出 normalized host descriptor。
+- `/bin/sh -c`、`grep` stdout pipeline與 one-shot live loader 必須在 cleanup commit刪除。
+
+### 12.7 Tool surface validation
+
+probe與realization都檢查：
+
+- tool count；
+- name格式、長度、raw/casefold collision；
+- description bytes、control characters；
+- input/output schema bytes與depth；
+- annotations；
+- side-effect classification；
+- result bytes；
+- owner/family/exposure一致；
+- local／MCP／built-in／management全universe collision。
+
+任一超限、collision或drift使 candidate fail closed；failed update保留LKG closure。
+
+---
+
+## 13. Runtime、graph 與 commit protocol
+
+### 13.1 Runtime models
+
+```text
+ToolIdentity
+  owner_kind: base | builtin_skill | mcp | management
+  owner_id
+  name
+  family
+  exposure: global | skill | private
+  requestable_by_public_skill
+  description_hash
+  input_schema_hash
+  output_schema_hash
+  annotations_hash
+  implementation_kind
 
 ExtensionRuntimeSnapshot
   realized_generation
@@ -460,1130 +1101,918 @@ ExtensionRuntimeSnapshot
   mcp_families
   global_mcp_families
   graph
-  availability_block
-  mcp_enabled
+  dynamic_availability
+  mcp_sessions
   realization_diagnostics
   graph_signature
 
 SessionRuntimeState
   revision
-  extensions: ExtensionRuntimeSnapshot
+  extensions
   active_skill_runtime
   active_skill_extension_generation
 ```
 
-`AppliedGeneration`不保存secret value，只保存env var name、binding hash與sanitized metadata。
+`AppliedGeneration`與runtime snapshot都不保存secret value。
 
----
+### 13.2 Unified mutation lock
 
-## 8. Durable store與immutable snapshots
-
-### 8.1 SQLite schema方向
-
-```text
-meta
-  schema_version
-  workspace_id
-  workspace_root_hash
-  current_generation
-
-applied_generations
-  generation
-  parent_generation
-  manifest_hash
-  status
-  created_at
-
-applied_extensions
-  generation
-  kind
-  extension_id
-  source_hash
-  snapshot_hash
-  normalized_descriptor_json
-  tool_surface_hash
-  approval_binding_hash
-  status
-
-approvals
-  binding_hash
-  scope
-  extension_key
-  approved_at
-  approved_by
-
-extension_events
-  seq
-  timestamp
-  operation_id
-  event_type
-  generation
-  extension_key
-  sanitized_payload_json
-```
-
-SQLite database設定：
-
-- schema migration必須explicit、transactional、可測。
-- 使用foreign keys。
-- 使用rollback journal或經測試確認的WAL策略；不得只依預設後假設跨平台行為。
-- `busy_timeout=0`或極短；commit lock忙時fail-fast回`busy`，不得在session runtime lock內長等待。
-- DB file permission盡可能為0600；Windows依ACL能力記錄diagnostic。
-
-### 8.2 Snapshot store
-
-- content-addressed path：`snapshots/<sha256>/`。
-- 先寫`staging/<operation-id>/<sha256>.partial/`。
-- fsync可fsync的files與parent directory。
-- 最後寫完整`snapshot.json`，再same-filesystem publish。
-- 若相同hash已存在，驗證後重用。
-- committed generation只引用immutable snapshot hash，不引用raw source path作runtime輸入。
-- v1不刪除任何committed snapshot。
-- 只可清理未被DB引用且帶明確`.partial`標記的staging殘留。
-
-### 8.3 Cross-process commit
-
-所有process使用相同順序：
-
-```text
-process-local reconcile reservation
-  -> session runtime lock
-  -> SQLite BEGIN IMMEDIATE
-```
-
-禁止任何路徑以反方向取得鎖。
-
-commit transaction內必須recheck：
-
-- expected current generation；
-- expected session revision；
-- desired scan token／source hashes；
-- approval binding hashes；
-- private inference prompt hash（只有phase 2 inference結果）；
-- candidate manifest hash。
-
-stale或DB busy時：
-
-- rollback SQLite；
-- 不改memory；
-- 釋放session lock；
-- 回`stale`／`busy`，由caller決定重新prepare，不在鎖內自動重跑昂貴操作。
-
----
-
-## 9. Skill bundle與catalog政策
-
-### 9.1 Skill schema
-
-沿用Agent Skills基本格式：
-
-- `SKILL.md`必要；
-- YAML frontmatter `name`、`description`必要於drop-in；
-- optional `manifest.yaml`為本host擴充；
-- references、assets、scripts是inert resources。
-
-更嚴格規則：
-
-- frontmatter name必須等於extension ID。
-- UTF-8 strict decode；不得以replacement默默接受invalid bytes。
-- `manifest.yaml`在discovery階段即驗證。
-- manifest所有resource都必須存在、列入lock且落在snapshot內。
-- scripts不自動執行。
-- unknown vendor fields只可形成compatibility diagnostic，不能被當成本runtime支援。
-
-### 9.2 Tool request policy
-
-- local base tools維持global，不由Skill manifest增刪。
-- drop-in Skill只能要求：
-  - MCP family；
-  - `requestable_by_public_skill=true`的host tool。
-- drop-in Skill要求`citation_workflow`、management tool或其他private host tool時直接拒絕。
-- required缺失：Skill不進candidate applied catalog。
-- optional缺失：Skill可進catalog，但availability記錄missing optional。
-
-### 9.3 Skill approval
-
-- prompt-only Skill，沒有scripts、沒有額外MCP/host tool request：
-  - reconcile可把它加入inert public catalog；
-  -實際啟用仍只能由使用者明確`/skill`或專屬command完成。
-- 新增／更新Skill若包含以下任一項，需顯示風險與exact hash：
-  - scripts；
-  - required/optional MCP family；
-  - requestable host skill tool；
-  - resources總量或prompt長度超過warning threshold。
-- capability-bearing Skill的首次apply或capability set變更需要approval。
-- approval綁定Skill source hash、normalized manifest hash與requested capability set。
-- `--yes`只能重用完全相同的既有approval。
-
-### 9.4 Active Skill transition
-
-| Candidate變更 | Commit政策 |
-|---|---|
-| inactive Skill add/update | 更新catalog；不自動activate |
-| active Skill內容更新且valid | 在同一runtime commit重新materialize |
-| active Skill invalid update | 保留舊applied snapshot與舊runtime |
-| active Skill被intentional delete | generation可commit，明確deactivate |
-| 新版移除current task mode | 套用新版，明確deactivate |
-| required MCP intentional delete | 套用delete並deactivate Skill |
-| required MCP failed update | 保留舊MCP與依賴它的舊Skill closure |
-| optional MCP失效／刪除 | Skill維持active，重算access與prompt |
-| global MCP set改變 | 所有active Skill重算tool access |
-| citation離開active | DB與memory commit成功後才teardown |
-
----
-
-## 10. MCP descriptor與process supervisor
-
-### 10.1 v1 normalized descriptor
-
-```yaml
-schema_version: 1
-kind: mcp
-id: github-example
-version: 1.0.0
-family: github-example
-requested_exposure: skill
-
-runtime:
-  transport: stdio
-  command: ./bin/server
-  args: [stdio]
-  cwd: .
-  init_timeout_seconds: 20
-  tool_call_timeout_seconds: 60
-
-compatibility:
-  platforms: [linux, windows]
-
-environment:
-  TOKEN:
-    from_env: EXAMPLE_TOKEN
-    required: true
-```
-
-### 10.2 Descriptor規則
-
-- v1只接受`transport: stdio`。
-- drop-in command必須是snapshot內relative executable，或allowlisted interpreter加snapshot內relative script/module。
-- `args`只能是string array，禁止shell fragment。
-- `cwd`必須落在snapshot內。
-- absolute executable只允許host-owned legacy compatibility descriptor，不開放給drop-in。
-- literal secret拒絕；secret只可`from_env`。
-- child env由host minimal platform baseline加explicit env references建立，不繼承完整`os.environ`。
-- `PYTHONPATH`、`LD_PRELOAD`、`NODE_OPTIONS`及同類runtime-control變數預設拒絕。
-- descriptor必須宣告platform；不相容時回`unsupported_platform`，不可probe。
-- v1不執行install/build/network fetch。
-
-### 10.3 Exact approval binding
-
-首次probe前必須有approval，binding至少包含：
-
-```text
-extension key
-source hash
-snapshot hash
-normalized descriptor hash
-artifact hash
-command + args
-cwd
-referenced env names
-requested exposure
-tool surface limits policy version
-```
-
-- descriptor、artifact、argv、cwd、env-name set或exposure任一變更使舊approval失效。
-- global exposure需要獨立scope。
-- `--yes`不能建立首次approval，只能重用exact existing approval。
-- `--no-mcp`下即使已有approval也不probe、不start、不bind。
-
-### 10.4 MCPProcessSupervisor
-
-建立host-owned supervisor，不把process ownership散落在scanner、reconciler或graph。
-
-責任：
-
-- direct `create_subprocess_exec`／官方MCP SDK stdio primitive；
-- platform-specific process containment；
-- bounded stdout/stderr reader；
-- initialize timeout；
-- list-tools timeout；
-- tool-call timeout；
-- cancellation；
-- terminate → bounded grace → kill → wait/reap；
-- POSIX process group；
-- Windows Job Object或等價kill-tree adapter；
-- sanitized bounded diagnostics；
-- idempotent close。
-
-v1 adapter策略：
-
-- probe建立短生命週期session，完成後一定close。
-- LangChain tool adapter預設每次tool invocation建立短session。
-- turn lock保證runtime swap只在沒有本process in-flight turn時發生。
-- 因此v1不建立per-generation persistent MCP handle reference count。
-
-### 10.5 Legacy Web Search／GitHub
-
-- 以host compatibility descriptors保留現有env與exposure語義。
-- Web Search：global。
-- GitHub：skill-scoped，token缺失維持現有warning/degraded語義。
-- 現有shell＋grep只可作為暫時、host-owned、Linux-only legacy adapter；drop-in descriptor永遠不可選用。
-- 優先以host-owned direct subprocess sanitizer替換，不把generic `stdout_policy`暴露給untrusted bundle。
-
-### 10.6 Tool surface validation
-
-probe後檢查：
-
-- tool數量上限；
-- name格式、長度與casefold collision；
-- description長度與terminal control characters；
-- serialized input schema大小／深度；
-- result大小限制；
-- owner/family/exposure一致；
-- MCP/local/builtin/management全universe collision。
-
-任何collision或超限使該MCP candidate失敗；failed update保留LKG。
-
----
-
-## 11. Runtime與LangGraph切換
-
-### 11.1 Unified session lock
-
-將現有`_turn_execution_lock`收斂為public行為明確、private實作的runtime execution lock。
-
-以下都必須走同一把lock：
+以下都必須取得同一 session runtime lock：
 
 - `turn_outcome()`完整turn；
 - `/skill` activate/deactivate；
 - `/citation` activate/deactivate；
 - extension runtime commit；
-- 其他會改active Skill或tool universe的session操作。
+- rollback realization；
+- 其他會改 active Skill 或 tool universe 的操作。
 
-準備工作全部在lock外：
+prepare 全在 lock 外：
 
 - scan；
-- snapshot copy；
+- snapshot copy／MCPB extract；
 - validation；
-- input／approval；
+- approval interaction；
 - MCP probe；
-- graph build；
-- active runtime candidate materialization。
+- runtime fingerprint；
+- tool surface；
+- candidate session；
+- dependency closure；
+- graph signature／graph build；
+- active transition candidate。
 
-commit window內不得有LLM、network、subprocess、長copy或互動input。
+### 13.3 Graph signature before compile
 
-### 11.2 Candidate graph
+```text
+normalize final ToolCatalog
+compute precompile GraphSignature
+if signature == current.graph_signature:
+    reuse graph and model bindings
+else:
+    bind tools
+    build PolicyToolNode
+    compile graph
+```
 
-以單一`ToolCatalog`建置：
+signature 包含真正影響 compile/binding 的內容：
 
-- base local tools；
-- realized MCP tools；
-- host-owned skill tools；
-- owner/family/exposure metadata；
-- public Skill catalog；
-- global family set。
+- model ID/config；
+- tool owner/name/description/schema/annotation hashes；
+- model binding policy；
+- `PolicyToolNode` policy version；
+- graph policy version。
 
-build順序：
+通常不需重建 graph：
 
-1. final tool identity/collision validation；
-2. resolve normal-mode access；
-3. resolve active Skill access；
-4. build model bindings；
-5. build `PolicyToolNode`；
-6. compile graph；
-7. renderdynamic availability block；
-8. compute graph signature。
+- inactive prompt-only Skill add/update；
+- Skill catalog description change；
+- diagnostics、approval metadata、quota status變更；
+- active Skill被deactivate且tool universe不變。
 
-任何步驟失敗時不進commit。
-
-### 11.3 Fusion cache
-
-- extension generation不是Fusion proposer graph cache key。
-- `GraphSignature`只包含真正被proposer graph捕獲的依賴：
-  - model ID/config；
-  - read-only base tool identity/schema；
-  - proposer allowlist；
-  - graph policy version。
-- Skill文字、MCP catalog與active Skill改變通常只改prompt/state，不重建proposer graph。
-
-### 11.4 Commit protocol
+### 13.4 Commit protocol
 
 ```text
 1. 取得process-local reconcile reservation。
-2. 讀desired inventory、applied generation、session revision。
-3. 建stable snapshots與authoritative diff。
-4. deterministic validate與dependency closure。
-5. 取得／重用exact approvals。
-6. probe MCP並建立candidate tool catalog。
-7. build candidate graph與active Skill candidate。
-8. 再驗證source lock/hash與candidate manifest。
-9. 取得session runtime lock；等待既有turn完成。
-10. 確認session revision／active Skill／task mode未變。
-11. SQLite BEGIN IMMEDIATE，fail-fast。
-12. recheck current applied generation與all hashes。
-13. insert complete generation、extension rows、audit event並更新current。
-14. COMMIT SQLite。
-15. 在無await、cancellation-shielded區段做單一SessionRuntimeState pointer assignment。
-16. commit成功後執行必要citation teardown。
-17. 釋放session lock與operation reservation。
-18. 回傳applied generation與realized generation。
+2. 讀expected applied generation、session revision、root identities。
+3. 執行per-root scan並產生complete/partial/fatal結果。
+4. 以one-pass copy/hash建立immutable snapshots。
+5. validate Skill／MCPB／policy與dependency closure。
+6. 取得或重用exact approvals。
+7. MCP項目完成probe、surface candidate與candidate runtime session。
+8. 建立final ToolCatalog、precompile signature、必要時compile graph。
+9. 建立active Skill transition candidate。
+10. 產生candidate aggregate scan token、object hashes與manifest hash。
+11. 取得session runtime lock；等待既有turn完成。
+12. 確認session revision、active Skill、task mode與expected root adoption未變。
+13. SQLite BEGIN IMMEDIATE；busy fail-fast。
+14. 只比較prepared hashes/token、current generation與unrevoked approvals；不重讀raw filesystem。
+15. insert extension_objects、generation、members、audit並更新current。
+16. COMMIT SQLite。
+17. 在無await且cancellation-shielded區段單一assign SessionRuntimeState pointer。
+18. 記錄process realized generation。
+19. 釋放session lock。
+20. 關閉舊generation sessions並執行必要citation teardown。
+21. 回傳applied/realized generation與typed report。
 ```
 
-如果process在步驟14與15之間終止：
+失敗處理：
 
-- durable applied已成功；
--該process尚未realize；
--下次startup從applied重建；
--其他process不假裝該process已切換。
-
-這是crash-consistent protocol，不稱為disk＋memory單一原子交易。
+- 步驟 1–10 失敗：current DB與memory不變；關閉candidate sessions；staging按規則保留或清理。
+- 步驟 13–16 失敗：rollback；memory不變；candidate sessions關閉。
+- 步驟 16後、17前process crash：durable applied已更新；該process尚未realize；startup重建。
+- 步驟 17後舊session close失敗：新runtime維持；記錄diagnostic並在`aclose()`重試，不回滾generation。
 
 ---
 
-## 12. Dependency closure與partial apply
+## 14. Dependency closure、startup 與 LKG
 
-不能只按單一extension item決定partial apply。
-
-建立candidate dependency graph：
+### 14.1 Dependency graph
 
 ```text
 Skill -> required MCP families
 Skill -> optional MCP families
 Built-in Skill -> private host tools
-MCP family -> one owner MCP extension
+MCP family -> exactly one owner
 ```
 
-規則：
+每個 connected required closure只能採其中一種結果：
 
-- 對每個connected required-dependency closure決定：
-  - all-new；
-  - all-old LKG；
-  - intentional delete＋dependent deactivate；
-  - blocked/quarantined。
-- failed MCP update不能讓依賴它的Skill切到只相容新版的bundle。
-- intentional MCP delete與failed update不同：
-  - delete可套用並deactivate dependent Skill；
-  - failed update保留舊MCP與舊dependent Skill closure。
-- optional edge不阻止Skill applied，但必須重算realized access與prompt。
+- all-new；
+- all-old LKG；
+- intentional delete + dependent deactivate；
+- blocked/quarantined。
 
----
+- failed MCP update不能讓dependent Skill切到只相容新版的bundle。
+- intentional delete與failed update不同：delete可提交並deactivate；failed update保留舊closure。
+- optional edge不阻止Skill applied，但必須重算realized access與availability。
 
-## 13. Startup realization與recovery
-
-### 13.1 Startup流程
+### 14.2 Startup realization
 
 ```text
-1. 開啟／migrate registry.sqlite3。
-2. 讀current applied generation。
-3. 驗證generation manifest與snapshot checksums。
-4. 若current artifact損壞，尋找最近可完整驗證的前代作realized fallback；不偷偷改current。
-5. 依session --no-mcp policy逐項realize MCP。
-6. 單一MCP因secret、runtime、platform或timeout失敗：
-   - 標applied_but_unavailable；
-   - 不進realized tool catalog；
-   - 其他MCP與local tools繼續。
-7. build realized graph。
-8. session從inactive Skill開始；不自動恢復active Skill。
+1. open registry and apply exact PRAGMAs
+2. quick_check; migrate with backup if needed
+3. read current applied generation
+4. verify manifest and referenced snapshots
+5. if current corrupt, search at most max_startup_fallback_generations valid ancestors
+6. do not silently change durable current when using realized fallback
+7. realize approved MCP items unless --no-mcp
+8. each runtime session revalidates fingerprint + exact surface
+9. unavailable MCP becomes applied_but_unavailable
+10. build/reuse graph
+11. start with inactive Skill
 ```
 
-status必須同時顯示：
-
-- desired scan token／drift；
-- current applied generation；
-- process realized generation；
-- applied但unavailable項目；
-- fallback reason；
-- pending approval／invalid update。
-
-### 13.2 Crash residue
-
-- `.partial` staging不進runtime。
-- SQLite transaction rollback處理未完成metadata commit。
-- startup可清理明確未被DB引用的staging partial。
-- 不自動刪除committed snapshots。
+- 單一MCP unavailable不拖垮CLI。
+- required dependent Skill不自動activate。
+- fallback chain有hard bound，避免 startup讀取無限歷史bytes。
+- explicit rollback建立一個新的 committed generation，membership指向選定舊objects；不改寫歷史generation。
 
 ---
 
-## 14. `/Extension-Management` CLI UX
+## 15. `/Extension-Management` UX
 
-### 14.1 v1 commands
+### 15.1 Commands
 
 ```text
 /Extension-Management
 /Extension-Management --dry-run
-/Extension-Management status
+/Extension-Management status [--verify]
 /Extension-Management apply
 /Extension-Management apply --yes
+/Extension-Management approvals
+/Extension-Management approve <binding-hash>
+/Extension-Management revoke <binding-hash>
+/Extension-Management import-policy <path>
+/Extension-Management import-legacy-skills [<path>]
+/Extension-Management adopt-root <workspace|global>
+/Extension-Management migrate-state <old-workspace-id>
+/Extension-Management rollback <generation>
 ```
 
 語義：
 
-- 無參數：scan、顯示diff；TTY下可互動取得新approval並apply；non-TTY不讀input。
-- `--dry-run`：scan、validate、dependency analysis，不建新approval、不probe、不commit。
-- `status`：host-only read path；不需private Skill、不跑LLM、不probe。
-- `apply`：套用可完整驗證的candidate；風險項無approval則pending。
-- `apply --yes`：只重用existing exact approvals；不能建立首次MCP execution、global exposure或capability-bearing Skill approval。
+- 無參數：scan、顯示diff；TTY可逐項批准並apply；non-TTY不讀input。
+- `--dry-run`：scan、validate、dependency analysis、quota preflight；不probe、不新增approval、不commit。
+- `status`：host-only read path；不跑LLM、不probe。
+- `status --verify`：執行DB full integrity check與committed snapshot verification；仍不啟動MCP。
+- `apply`：只提交可完整驗證且已取得必要approval的closure。
+- `apply --yes`：只重用existing exact approvals；不建立首次Skill capability、delete、MCP probe、surface或global exposure approval。
+- `approve`：只批准status/apply已產生且可完整顯示的exact binding。
+- `revoke`：保留audit，後續generation不得重用；若目前realized依賴該approval，下一安全mutation window fail closed並顯示需reconcile。
+- `import-policy`：headless exact provisioning，不接受wildcard future approval。
+- `rollback`：建立新generation，不直接移動historical pointer。
 
-### 14.2 Non-TTY
+### 15.2 Non-TTY
 
 - stdin非TTY時不得呼叫`input()`。
-- 未有exact approval的項目保留`pending_approval`。
-- approval cancel是正常零mutation outcome，不轉成CLI fatal error。
+- pending binding保持`pending_approval`。
+- approval cancel是零mutation outcome。
 - `--no-mcp`下：
-  - status/scan可見MCP desired/applied；
+  - status/scan仍顯示desired/applied MCP；
   - 不probe、不start、不bind；
-  - 新／更新MCP不能進applied generation，維持pending；
-  - Skill-only安全變更仍可commit。
+  - 新／更新MCP維持pending；
+  - independent Skill-only安全closure仍可commit。
 
-### 14.3 Result model
-
-預期失敗使用typed report，不以exception控制正常流程：
+### 15.3 Result model
 
 ```text
 ExtensionReconcileReport
   operation_id
+  root_scan_results[]
   desired_scan_token
   applied_before
   applied_after
   realized_before
   realized_after
   items[]
+  approval_bindings[]
   active_skill_transition
   runtime_swap_status
+  capacity_status
   diagnostics[]
 ```
 
-item outcome至少包含：
+item outcome 至少包含：
 
 - `applied`
 - `unchanged`
 - `pending_approval`
+- `incomplete_scan`
+- `zero_delete_guarded`
 - `unsealed`
 - `invalid`
+- `unsupported`
+- `quota_exceeded`
 - `quarantined`
 - `kept_last_known_good`
 - `removed`
+- `deactivated_for_update`
 - `deactivated_dependency`
-- `unsupported`
+- `applied_but_unavailable`
+- `surface_drift`
 - `busy`
 - `stale`
 
-只有parser bug、DB corruption無可fallback、programming invariant breach等非預期錯誤才轉`SlashCommandError`或internal error。
+只有 parser bug、unrecoverable DB corruption或programming invariant breach轉internal error；預期policy／validation結果使用typed report。
 
-### 14.4 Help與completion
+### 15.4 Routing
 
-- canonical command為`extension-management`。
-- registry既有casefold行為使`/Extension-Management`可命中。
+- canonical command為`extension-management`；既有casefold lookup使大小寫版本可命中。
+- command local執行，不使用`followup_input`。
+- 不寫入ordinary chat history，不呼叫`session.turn()`。
 - help/completion由同一registry產生。
-- command不寫入普通chat history、不呼叫`session.turn()`。
 
 ---
 
-## 15. Optional management inference agent（phase 2，非v1 gate）
+## 16. 模組與檔案邊界
 
-### 15.1 唯一用途
+### 16.1 先抽共用 storage
 
-處理沒有`extension.yaml`的MCP bundle，提出候選descriptor。
-
-不處理：
-
-- 已有strict descriptor的CRUD；
-- Skill CRUD；
-- status；
-- approval；
-- probe；
-- apply；
-- rollback。
-
-### 15.2 Isolation
-
-- private prompt從read-onlypackage resource exact-path讀取。
-- dedicated history-free graph。
-- 不帶main session history、active Skill、RAG、bash、read_file、citation或任何MCP。
-- 只綁bounded read-only tools：
-  - 取得authoritative untrusted metadata摘要；
-  - 讀取allowlisted小型text metadata；
-  - pure schema check。
-- apply API永遠不作model tool。
-
-### 15.3 Trust語義
-
-- private prompt hash只記錄「使用了哪份提示」，不是security authority。
-- security invariants全部在host validator。
-- hostile README、SKILL.md、package metadata一律標為untrusted data。
-- agent只可輸出有限typed candidate；不得新增authoritative operation。
-- candidate無法唯一決定entrypoint時回blocked，不猜command。
-
----
-
-## 16. 模組邊界與檔案改動面
-
-避免把v1拆成過多相互循環的小模組。建議dependency方向：
+新增：
 
 ```text
-models
-  ├─ paths
-  ├─ discovery
-  ├─ store
-  ├─ tool_catalog
-  └─ mcp_runtime
-          
-models + discovery + store + tool_catalog + mcp_runtime
-  └─ runtime_builder
-       └─ reconciler
-            └─ CLI
+app/agent/storage/__init__.py
+app/agent/storage/atomic.py
+app/agent/storage/paths.py
+app/agent/storage/content_store.py
+app/agent/storage/permissions.py
 ```
 
-任何底層模組不得import CLI或`ChatSession`。
+從 citation storage 抽出：
 
-### 16.1 新增
+- SHA-256 streaming；
+- 0600 staged write；
+- file／directory fsync；
+- same-filesystem atomic publish；
+- stale `.partial` handling；
+- safe path／permission helpers。
 
-| 檔案 | 責任 |
+citation 與 extensions 都依賴共用層；不得複製貼上近似實作。
+
+### 16.2 Extension modules
+
+```text
+app/agent/extensions/__init__.py
+app/agent/extensions/models.py
+app/agent/extensions/paths.py
+app/agent/extensions/discovery.py
+app/agent/extensions/mcpb.py
+app/agent/extensions/store.py
+app/agent/extensions/approvals.py
+app/agent/extensions/tool_catalog.py
+app/agent/extensions/runtime.py
+app/agent/extensions/mcp_runtime.py
+app/agent/extensions/reconciler.py
+app/agent/cli/extension_management.py
+app/agent/resources/__init__.py
+app/agent/resources/extensions/__init__.py
+```
+
+責任：
+
+- `models.py`：IDs、scan、diff、generation、report、typed outcomes。
+- `paths.py`：workspace/global/shipped/state roots、identity、migration。
+- `discovery.py`：complete/partial/fatal scan、lock validation、one-pass snapshot。
+- `mcpb.py`：MCPB safe subset、archive extraction、manifest validation。
+- `store.py`：exact SQLite schema、migration、CAS、quota references、audit。
+- `approvals.py`：binding canonicalization、approve/revoke/policy import。
+- `tool_catalog.py`：owner-aware identity、collision、family/exposure policy。
+- `runtime.py`：immutable state、graph signature、candidate transition。
+- `mcp_runtime.py`：SDK transport limits、probe、explicit session、surface verification。
+- `reconciler.py`：deterministic prepare、closure、commit、LKG。
+- CLI module：args、TTY policy、rendering；不放business logic。
+
+底層模組不得import CLI或`ChatSession`。
+
+### 16.3 修改
+
+| File | Change |
 |---|---|
-| `app/agent/extensions/models.py` | IDs、inventory、diff、generation、report、typed outcomes |
-| `app/agent/extensions/paths.py` | shipped/user/state roots、workspace identity、platform paths |
-| `app/agent/extensions/discovery.py` | lock validation、safe scan、snapshot copy、diagnostics |
-| `app/agent/extensions/store.py` | SQLite schema/migration/CAS、snapshot references、audit metadata |
-| `app/agent/extensions/tool_catalog.py` | owner-aware tool identity、collision、family/exposure policy |
-| `app/agent/extensions/runtime.py` | immutable realized snapshot、candidate graph builder、session state transition helpers |
-| `app/agent/extensions/reconciler.py` | deterministic prepare、dependency closure、approval、commit protocol |
-| `app/agent/extensions/mcp_runtime.py` | descriptor schema、approval binding、process supervisor、probe/tool adapter |
-| `app/agent/cli/extension_management.py` | slash args、TTY policy、approval UI、report rendering |
-| `app/agent/resources/extensions/__init__.py` | package resource root |
-| `app/tests/fake_mcp_server.py` | 真實stdio fixture：normal/hang/noise/flood/child/cancel |
-| `app/tests/test_extension_*.py` | discovery/store/runtime/MCP/security/CLI/E2E |
+| `app/agent/config.py` | roots、limits、timeouts、legacy `skills_dir` deprecation |
+| `app/agent/mcp.py` | host descriptor provider；移除live loader authority |
+| `app/agent/skills/metadata.py` | built-in/applied catalog provider、strict schema |
+| `app/agent/skills/runtime.py` | committed snapshot loader、task-mode semantics |
+| `app/agent/tool_access.py` | owner/family/exposure/requestable policy |
+| `app/agent/tools/inventory.py` | generation-0 catalog、移除silent duplicate |
+| `app/agent/graph.py` | 接受single ToolCatalog、precompile signature |
+| `app/agent/policy_tool_node.py` | same-generation identity enforcement |
+| `app/agent/session.py` | single runtime pointer、unified lock、`aclose()`、dynamic prompt |
+| `app/agent/fusion.py` | precise `GraphSignature` cache invalidation |
+| `app/agent/cli/slash_commands.py` | register/delegate async management commands |
+| `app/agent/cli/chat.py` | startup realization、finally `aclose()` |
+| `app/skills/citation/storage.py` | 改用shared storage primitives |
+| `app/pyproject.toml` | `mcp>=1.27,<2`、`platformdirs`、`jsonschema`、resources |
+| `app/poetry.lock` | 同dependency commit更新，no unrelated drift |
+| `.gitignore` | workspace extension root與workspace id |
 
-phase 2才新增：
+### 16.4 Tests／fixtures
 
-- `app/agent/extensions/manager_agent.py`
-- `app/agent/resources/extensions/private/extension-management/SKILL.md`
+```text
+app/tests/fake_mcp_server.py
+app/tests/fixtures/mcpb/
+app/tests/fixtures/skills/
+app/tests/test_storage_atomic.py
+app/tests/test_extension_models.py
+app/tests/test_extension_discovery.py
+app/tests/test_extension_mcpb.py
+app/tests/test_extension_store.py
+app/tests/test_extension_approvals.py
+app/tests/test_extension_tool_catalog.py
+app/tests/test_extension_runtime.py
+app/tests/test_extension_mcp_runtime.py
+app/tests/test_extension_reconciler.py
+app/tests/test_extension_cli.py
+app/tests/test_extension_e2e.py
+```
 
-### 16.2 修改
-
-| 檔案 | 變更 |
-|---|---|
-| `app/agent/config.py` | `extension_root`、`extension_state_dir`、limits、timeouts、platformdirs defaults |
-| `app/agent/mcp.py` | 收斂為legacy compatibility provider；新drop-in走`extensions.mcp_runtime` |
-| `app/agent/skills/metadata.py` | public catalog provider；保留簡單built-in reader，不再作authoritative manager scan |
-| `app/agent/skills/runtime.py` | 從applied snapshot載入；固定empty task-mode語義；public/private loader分離 |
-| `app/agent/tool_access.py` | 接受catalog global families與owner/requestable policy |
-| `app/agent/tools/inventory.py` | base tools不變；移除silent duplicate；behavior metadata接dynamic catalog |
-| `app/agent/graph.py` | 接收完整ToolCatalog；build前全collision fail-fast |
-| `app/agent/policy_tool_node.py` | 以同snapshot effective identities執行防線，保留name protocol compatibility |
-| `app/agent/session.py` | 單一runtime state pointer、unified async mutation API、`aclose()`、startup realization |
-| `app/agent/fusion.py` | `GraphSignature`精準cache invalidation，不以extension generation清全cache |
-| `app/agent/cli/slash_commands.py` | 註冊command、handler delegation、async Skill/citation mutation |
-| `app/agent/cli/chat.py` | 建manager依賴、finally呼叫`session.aclose()`、維持local routing |
-| `app/pyproject.toml` | 直接pin `mcp>=1.27,<2`；加入platformdirs；include package resources |
-| `README.md`、`guide.md`、`app/SKILLS_GUIDE.md` | sealed bundle、desired/applied/realized、approval、限制與recovery |
-
-### 16.3 v1不修改實體位置
-
-- `app/skills/citation` Python engine與bundle。
-- `app/skills/academic-paper-writing`。
-- `app/skills/_prompt-master`。
-
-由built-in provider使用`importlib.resources.files("skills")`取得。
+MCP Inspector CLI與`skills-ref`只放dev/CI differential jobs，不在runtime執行臨時`npx`或network fetch。
 
 ---
 
-## 17. 修訂後實作順序
+## 17. 時間、空間與 performance gates
 
-每個commit都必須保持完整現有suite全綠，不能只跑新增tests。
+設：
 
-### Commit 1 — `test/security: pin current runtime invariants and reject tool collisions`
+- `F`：root files；
+- `B`：root bytes；
+- `E`：extensions；
+- `T`：tools；
+- `A`：dependency edges；
+- `S`：serialized tool surface bytes；
+- `G`：retained generations。
+
+| Operation | Target | Requirement |
+|---|---:|---|
+| authoritative full scan | `Θ(F+B)` time, `Θ(F)` metadata | correctness不只信mtime |
+| snapshot changed bytes | `Θ(B_changed)` time/staging | copy與hash同一pass |
+| canonical manifest | `Θ(F log F)` worst case | producer/host canonical sort |
+| extension diff | `Θ(E)` | hash map，禁止pairwise |
+| tool collision | `Θ(T)` time/space | raw與casefold maps |
+| dependency closure | `Θ(E+A)` | adjacency list，不需resolvelib |
+| surface validation | `Θ(T+S)` | hard byte/depth limits |
+| graph bind/compile | 約`Θ(T+S)` | signature相同直接reuse |
+| generation commit | `Θ(E)` rows | descriptor objects去重 |
+| metadata space | `Θ(unique objects + G×membership)` | hard quota |
+| snapshot space | `Θ(retained bundle bytes)` | hard quota；v1不auto-GC |
+| startup fallback | bounded | 最多檢查16代 |
+
+performance-sensitive commit 必須記錄：
+
+- full/no-op scan bytes、files、elapsed time；
+- one-pass snapshot throughput與peak RSS；
+- graph signature hit/miss與compile time；
+- SQLite generation commit time；
+- MCP cold/warm P50、P95；
+- MCP peak RSS；
+- 連續100 calls process/session churn；
+- cancellation、orphan cleanup latency。
+
+---
+
+## 18. Failure-mode tests
+
+每項都要有可重現測試、typed outcome與zero unintended mutation assertion。
+
+### 18.1 Incomplete root
+
+- missing root、permission denied、I/O interruption、mount identity change、scanner exception。
+- outcome `partial|fatal`。
+- applied members zero delete。
+- complete independent root只可套用不依賴missing root的closure。
+
+### 18.2 Copy in progress
+
+- missing/extra/hash mismatch、lock前後變更。
+- outcome `unsealed|unstable_copy`。
+- 不publish snapshot，不改applied。
+
+### 18.3 Active Skill update
+
+- prompt body、allowed-tools、task mode、resource closure任一變更。
+- 新版可applied，但active明確deactivate。
+- 下一turn不使用新版prompt，直到使用者重新activate。
+- invalid update維持舊runtime。
+
+### 18.4 MCPB archive attack
+
+- zip-slip、duplicate/casefold duplicate、symlink、encrypted entry、zip bomb、oversize、unsupported runtime。
+- extraction不越界、不超quota、不publish。
+
+### 18.5 MCP approval drift
+
+- interpreter realpath/version、OS/arch、artifact、argv、cwd、env source、non-secret config變更。
+- probe approval失效。
+- tool description/schema/annotation/classification/exposure變更。
+- surface approval失效。
+
+### 18.6 Probe/runtime mismatch
+
+- probe surface A、runtime session surface B。
+- runtime session立即close，MCP不進graph，outcome `surface_drift`。
+
+### 18.7 MCP hang/noise/flood/cancel/orphan
+
+- no-newline stdout flood必須在frame limit終止。
+- stderr ring bounded。
+- initialize/list/call各自timeout。
+- ignore cancel/terminate、spawn child/grandchild。
+- terminate/kill/wait後PID消失。
+
+### 18.8 Tool collision
+
+- MCP/MCP、MCP/local、MCP/built-in、MCP/management、raw/casefold。
+- 整個candidate graph fail closed。
+- 不依load order選winner。
+
+### 18.9 CAS/crash
+
+- two-process concurrent apply只一方成功。
+- crash before/after SQLite commit、before/after pointer swap。
+- current/audit/member一致。
+- memory不出現半套state。
+
+### 18.10 Quota
+
+- state/staging/snapshot/generation/event/diagnostic每一limit邊界。
+- preflight超限不留下partial committed state。
+- status正確顯示used/limit。
+
+### 18.11 Legacy migration
+
+- configured legacy `skills_dir`不直接進runtime。
+- dry-run、collision、invalid、explicit import、source unchanged。
+- migrated Skill同session可見但不自動activate。
+
+### 18.12 Wheel
+
+- build wheel、temp venv install、移除source path。
+- `import agent`、`import skills.citation`。
+- package resources可讀。
+- workspace/global/state roots可用。
+- `/Extension-Management status --no-mcp`可用。
+
+---
+
+## 19. Test matrix
+
+### 19.1 Baseline/regression
+
+- exact Python／Poetry versions。
+- exact full pytest command與collected count。
+- no unexplained skip/xfail。
+- Web Search global、GitHub skill-scoped。
+- citation activation/off/teardown/SourceRefs isolation。
+- slash local routing。
+- `--no-mcp`。
+- normal/extended Fusion。
+
+### 19.2 Discovery/filesystem
+
+- empty configured root complete scan。
+- configured root missing fatal scan。
+- sealed add/update/delete/rename。
+- delete authorization。
+- symlink/junction/reparse/hardlink/special file。
+- path/raw/casefold collision。
+- Linux/Windows path behavior。
+- one-pass copy/hash failure injection。
+
+### 19.3 SQLite
+
+- schema create、migration backup、unknown newer version。
+- exact PRAGMAs。
+- quick_check/integrity_check。
+- `BEGIN IMMEDIATE` busy。
+- stale generation。
+- disk-full/permission failure。
+- concurrent apply。
+- descriptor object dedupe。
+- approval revoke。
+
+### 19.4 Skill
+
+- official valid/invalid name vectors，包括連續hyphen拒絕。
+- strict UTF-8。
+- `allowed-tools` mapping與private rejection。
+- same-session picker refresh。
+- active deactivation on behavior update。
+- invalid update LKG。
+- task mode removed。
+- required/optional dependency transitions。
+- scripts不自動執行且UI顯示risk。
+- `skills-ref` differential CI。
+
+### 19.5 Tool/graph
+
+- owner-aware uniqueness。
+- model binding／availability／PolicyToolNode一致。
+- forged old-generation call拒絕。
+- precompile signature reuse。
+- unrelated inactive Skill update不compile graph。
+
+### 19.6 MCPB/MCP
+
+- MCPB safe subset manifest vectors。
+- archive security矩陣。
+- exact runtime fingerprint。
+- two-stage approval。
+- explicit `ClientSession` adapter path。
+- production path assertion：adapter不得收到connection dict。
+- actual surface vs declared surface。
+- list-changed fail closed。
+- persistent session lifecycle。
+- MCP Inspector只在pinned dev environment作oracle comparison。
+
+### 19.7 CLI/recovery
+
+- TTY/non-TTY × yes/cancel/no-mcp。
+- approvals list/approve/revoke。
+- exact policy import。
+- root adopt/state migrate。
+- rollback建立新generation。
+- status不probe、不LLM。
+- command不進history。
+- applied/realized/fallback/capacity輸出。
+
+---
+
+## 20. Commit plan
+
+每個 commit 都必須完整現有suite全綠，並符合第21節共同要求。
+
+### Commit 0 — `test(runtime): record reproducible extension-management baseline`
 
 內容：
 
-- 記錄可重現baseline：Python版本、Poetry lock hash、完整pytest command、collected count與結果。
-- 新增MCP/MCP、MCP/local、MCP/builtin skill同名collision tests。
-- 移除現行silent first-wins／family last-wins行為，先fail-fast。
-- characterization：Web Search global、GitHub skill-scoped、citation isolation、`--no-mcp`、slash local routing。
-- 修正／固定`task_modes: []`語義。
-- `pyproject.toml`直接pin `mcp>=1.27,<2`。
+- 記錄branch HEAD、Python／Poetry版本、OS matrix、lockfile hash。
+- 記錄exact full-test command、collected count、pass/fail/skip/xfail。
+- characterization：Skill、MCP、tool collision、citation、slash、`--no-mcp`、wheel。
 
 Gate：
 
-- duplicate不可能進graph；
--所有現有行為測試全綠；
-- CI產出完整baseline artifact。
+- baseline artifact可在CI重現。
+- 不修改production behavior。
 
-### Commit 2 — `feat/extensions: add trust-separated roots and versioned models`
+### Commit 1 — `refactor(storage): extract shared atomic content-store primitives`
 
 內容：
 
-- 新增`models.py`、`paths.py`。
-- shipped/user/state roots分離。
-- `importlib.resources` provider。
-- platformdirs defaults與config overrides。
-- ID、lock file、Skill/MCP descriptor Pydantic models。
-- package resource與wheel最小smoke。
+- 新增`app/agent/storage/`。
+- 從citation抽hash、fsync、staging、atomic publish、permissions、path helpers。
+- citation改用共用層。
+
+必須刪除：
+
+- citation內已被shared layer取代的duplicate helper。
 
 Gate：
 
-- source checkout與built wheel可讀shipped resources；
-- user/state root可寫且不落site-packages；
-- roots不能alias。
+- citation regression全綠。
+- failure injection涵蓋write/fsync/rename。
+- 尚不加入extension behavior。
 
-### Commit 3 — `feat/extensions: add sealed deterministic discovery and immutable snapshots`
+### Commit 2 — `refactor(tools): introduce owner-aware catalog for generation zero`
 
 內容：
 
-- `.extension-lock.json` verification。
-- safe file traversal／no-follow／reparse/special-file checks。
-- sealed/unstable/unsealed/invalid diagnostics。
-- content-addressed staging與snapshot publish。
-- scanner完全不執行extension code。
+- 建立generation-0 compatibility `ToolCatalog`。
+- local、現有MCP、citation tool全部有owner identity。
+- prompt、model binding、PolicyToolNode讀同一catalog。
+- duplicate raw/casefold fail-fast。
+
+必須刪除：
+
+- silent first-wins／last-wins分支。
 
 Gate：
 
-- 語法有效的半完成copy仍因lock不完整被拒絕；
-- extra/missing/hash mismatch、symlink、hardlink、casefold與oversize測試全綠。
+- collision不可能進graph。
+- existing exposure semantics全綠。
 
-### Commit 4 — `feat/extensions: add SQLite applied generations and cross-process CAS`
+### Commit 3 — `feat(extensions): add scoped roots, strict schemas and hard limits`
 
 內容：
 
-- SQLite schema、migration、approval與event metadata。
-- expected-generation `BEGIN IMMEDIATE` commit。
-- snapshot references與startup current read。
-- crash residue recovery。
-- 不做committed snapshot GC。
+- workspace/global/state/shipped roots。
+- root identity models。
+- Agent Skills strict ID/frontmatter/allowed-tools。
+- MCPB safe-subset models與HostPolicyOverlay。
+- numeric limits。
+- `app/agent/resources/__init__.py`與resource package。
+- `.gitignore`。
+- `app/pyproject.toml`加入`mcp>=1.27,<2`、`platformdirs`、`jsonschema`。
+- 同commit更新`app/poetry.lock`，no unrelated drift。
 
 Gate：
 
-- 兩個subprocess同時commit只有一個成功；
-- stale process不覆蓋current；
-- transaction fault injection不留半套metadata。
+- source/wheel resource lookup。
+- workspace/global collision fail closed。
+- official schema vectors/differential tests。
 
-### Commit 5 — `refactor/session: introduce immutable realized runtime and unified mutation lock`
+### Commit 4 — `feat(extensions): add authoritative scans and immutable snapshots`
+
+內容：
+
+- `complete|partial|fatal` per-root scan。
+- zero-delete gate。
+- lock validation、safe traversal、one-pass copy/hash。
+- MCPB archive extraction safety。
+- capacity preflight與snapshot store。
+
+Gate：
+
+- root missing/permission/mount/traversal error全部zero-delete。
+- zip-slip/zip-bomb/symlink/oversize測試。
+- no-op/full scan與snapshot benchmark。
+- 不執行extension code。
+
+### Commit 5 — `feat(extensions): add versioned SQLite registry and CAS commits`
+
+內容：
+
+- exact schema v1、PRAGMAs、migration backup。
+- object dedupe、generations、members、roots、approvals、events。
+- quotas與minimal read-only status。
+- two-process CAS。
+
+Gate：
+
+- migration-from-previous-version test。
+- unknown newer schema fail closed。
+- concurrent commit只一方成功。
+- transaction failure不留半套metadata。
+
+### Commit 6 — `refactor(session): add immutable runtime state and unified mutation lock`
 
 內容：
 
 - `ExtensionRuntimeSnapshot`／`SessionRuntimeState`。
-- 將現有static tools/skills/MCP包入generation 0 compatibility snapshot。
-- turn、`/skill`、`/citation`走同一async mutation lock。
-- candidate graph build與no-await pointer assignment。
+- single pointer、unified lock、async mutation API。
+- dynamic prompt/availability。
+- precompile `GraphSignature` reuse。
 - `ChatSession.aclose()`。
-- Fusion改用`GraphSignature`。
+
+必須刪除或停止作authority：
+
+- `loaded_skills` picker authority。
+- parallel live `extra_tools`／`mcp_families`／`web_search_tool_names` state。
+- static skills/MCP catalog prompt。
 
 Gate：
 
-- 一個turn只見一個generation；
-- reconcile commit等待turn結束；
-- failed candidate build不改任何session field；
-- failed durable commit不teardown citation。
+- turn generation isolation。
+- failed candidate/durable commit不改session。
+- citation teardown只在commit後。
+- signature hit不compile。
 
-### Commit 6 — `feat(skills: reconcile sealed prompt-only skills in the same session`
-
-內容：
-
-- built-in＋applied drop-in public Skill catalog。
-- `/skill` picker改讀current runtime catalog。
-- prompt-only Skill add/update/delete。
-- active Skill transition與dependency-free LKG。
-- private roots不進public catalog。
-- 加入最小deterministic `/Extension-Management`與`--dry-run` Skill流程。
-
-Gate：第一個可交付milestone。
-
-- CLI啟動後加入sealed Skill；同session reconcile後picker可見。
-- active update下一turn使用新內容。
-- invalid update保留舊runtime。
-- delete active Skill明確deactivate。
-- built wheel同樣通過。
-
-### Commit 7 — `feat/mcp: add bounded stdio process supervisor`
+### Commit 7 — `feat(skills): reconcile sealed skills in the same session`
 
 內容：
 
-- direct argv／minimal env。
-- official MCP SDK client session adapter。
-- bounded stdout/stderr。
-- initialize/list-tools/tool-call timeout。
-- cancellation、terminate/kill/wait、POSIX group／Windows job adapter。
-- 真實fake server fixtures。
-- legacy Web/GitHub compatibility adapter isolation。
+- built-in＋applied public Skill catalog。
+- same-session add/update/delete。
+- active behavior update提交新版並deactivate。
+- invalid update LKG。
+- `allowed-tools` capability approval。
+- legacy `skills_dir` import command。
+- minimal apply/dry-run/status。
+
+Gate：Milestone A acceptance。
+
+- complete scan delete gate實際生效。
+- picker同session refresh。
+- active prompt update不直接接管下一turn。
+- explicit reactivation後使用新snapshot。
+- built wheel全綠。
+- 不啟動第三方process。
+
+### Commit 8 — `test(mcp): validate SDK transport limits and adapter ownership`
+
+本commit不加入production hot-plug。
+
+內容：
+
+- MCPB fixtures與safe-subset importer spike。
+- SDK lifecycle reuse matrix。
+- bounded no-newline stdout frame feasibility。
+- bounded stderr feasibility。
+- explicit `ClientSession`傳入adapter。
+- persistent vs per-call benchmark。
+- POSIX/Windows cleanup tests。
+- MCP Inspector pinned CI oracle。
+- architecture decision record。
 
 Gate：
 
-- hang、noise、flood、ignore-terminate、spawn-child、cancel、delete、shutdown全部無known orphan。
-- untrusted descriptor永不經shell。
+- 第3.2節全部有可重現證據。
+- 無production connection-dict ownership設計。
+- hard frame bound不可行時，Milestone B維持blocked。
 
-### Commit 8 — `feat/mcp: reconcile strict declarative MCP bundles and exact approvals`
-
-內容：
-
-- strict `extension.yaml` normalization。
-- exact approval bindings。
-- tool surface validation與owner-aware catalog。
-- Skill→MCP dependency closure。
-- startup applied-vs-realized degraded policy。
-- `--no-mcp` no-probe/no-bind。
-
-Gate：第二個可交付milestone。
-
-- strict fake MCP same-session add/update/delete。
-- failed update保留LKG與dependent Skill closure。
-- global exposure無獨立approval時拒絕。
-- collision與oversize fail-fast。
-
-### Commit 9 — `feat/cli: complete status, non-TTY approval and recovery UX`
+### Commit 9 — `feat(mcp): add exact-approved MCPB probing and surface validation`
 
 內容：
 
-- `status`、`apply`、`--yes`、完整report。
-- non-TTY不讀input。
-- cancel零mutation。
-- help/completion/casefold。
-- startup fallback與applied/realized drift輸出。
-- package/wheel/full CLI E2E。
+- MCPB normalization。
+- probe execution binding。
+- isolated probe。
+- surface binding與approval。
+- runtime fingerprint。
+- SDK-based bounded transport adapter。
+- explicit session conversion path。
 
 Gate：
 
-- TTY/non-TTY × yes/cancel/no-mcp矩陣全綠。
-- command不進ordinary turn/history。
-- status在任何private inference resource缺失時仍可用。
+- approval drift矩陣。
+- probe/runtime surface mismatch fail closed。
+- flood/hang/cancel/orphan測試。
+- surface未批准不進main graph。
 
-### Commit 10 — `docs/extensions: document sealed hot-plug, trust and crash recovery`
+### Commit 10 — `feat(mcp): reconcile approved MCP runtimes with LKG recovery`
 
 內容：
 
-- README/guide/SKILLS_GUIDE。
-- lock/Skill/MCP schema examples作parse tests。
-- 說清楚MCP等同第三方code execution。
-- 說清楚desired/applied/realized，不宣稱disk-memory原子。
-- 說清楚v1不build/install、不動態Python、不watch、不auto-GC。
-- 記錄phase 2 inference agent與MCPB importer為future work。
-
-Gate：
-
-- docs examples與runtime schema一致；
-- clean source checkout與clean wheel完整acceptance全綠。
-
----
-
-## 18. Failure-mode simulation要求
-
-實作不得只測happy path。以下每項都要有可重現測試與預期outcome。
-
-### 18.1 使用者正在複製bundle時reconcile
-
-- 缺檔、extra檔或hash mismatch → `unsealed`／`unstable_copy`。
-- 不建立snapshot，不改applied。
-- 若舊版已applied，realized維持舊版。
-
-### 18.2 新版損壞、舊版仍在使用
-
-- desired顯示新hash與invalid diagnostic。
-- applied/realized保持舊generation。
-- status顯示`kept_last_known_good`。
-
-### 18.3 turn途中reconcile
-
-- prepare可並行。
-- commit等待turn lock。
-- 當前turn全程使用舊generation。
-- 下一turn使用新generation。
-
-### 18.4 active Skill required MCP被刪或更新失敗
-
-- intentional delete：MCP刪除與Skill deactivate在同一commit。
-- failed update：舊MCP與舊Skill closure一起保留。
-
-### 18.5 MCP probe hang/noise/cancel/orphan
-
-- timeout後terminate/kill/wait。
-- bounded diagnostics。
-- process與child PID消失。
-- candidate不進applied。
-
-### 18.6 兩個tool同名但family/exposure不同
-
-- final catalog validation整代abort。
-- 不依載入順序選勝者。
--舊runtime不變。
-
-### 18.7 snapshot/metadata已prepare但candidate graph失敗
-
-- 未published staging可清理。
-- SQLite current不變。
-- memory不變。
-
-### 18.8 durable commit成功、memory swap前process crash
-
-- 其他process可看到新applied。
-- crash process重啟後從新applied realize。
-- 不宣稱舊process曾完成runtime swap。
-
-### 18.9 audit/report寫失敗
-
-- audit metadata應與current在同SQLite transaction；不可發生current成功、核心audit row失敗。
-- terminal rendering或post-commit額外log失敗不回滾已commit generation，但report必須誠實標示render/log warning。
-
-### 18.10 non-TTY、`--yes`、cancel與`--no-mcp`
-
-- 非TTY不input。
-- `--yes`不建立首次approval。
-- cancel零mutation。
-- no-mcp不probe/start/bind。
-
-### 18.11 source checkout可用、wheel找不到resource
-
-- build wheel、安裝temp venv、移除source path後執行smoke。
-- private/built-in resource仍可定位。
-- user/state roots仍可寫。
-
-### 18.12 private inference prompt或raw bundle被替換
-
-- v1 normal path不依private prompt。
-- phase 2 inference前後hash不同 → inference結果作廢。
-- raw bundlelock/source hash改變 → candidate作廢並重新scan。
-
-### 18.13 startup applied MCP無法realize
-
-- CLI仍啟動。
-- applied current不變。
-- realized diagnostics標`applied_but_unavailable`。
-- dependent required Skill不自動activate。
-
-### 18.14 兩個CLI process同時apply
-
-- 只有expected-generation相符者commit。
-- 另一方回`stale`或`busy`。
-- 無lost update、無重複generation ID、無交錯audit。
-
----
-
-## 19. 測試矩陣
-
-### 19.1 Baseline與regression
-
-- full suite exact command與collected count。
-- Web Search global／GitHub skill-scoped。
-- citation activation、off、service teardown、SourceRefs isolation。
+- generation-scoped persistent sessions。
+- same-session add/update/delete。
+- required dependency closure。
+- list-changed fail closed。
+- startup degraded realization。
 - `--no-mcp`。
-- slash local routing與followup behavior。
-- normal/extended Fusion行為。
+- legacy Web/GitHub normalized host descriptors。
 
-### 19.2 Discovery與filesystem
+Gate：Milestone B runtime acceptance。
 
-- empty roots、no-op rescan。
-- sealed add/update/delete/rename。
-- missing/extra/hash mismatch lock entries。
-- scan前後source變更。
-- symlink、junction/reparse、hardlink、special file。
-- casefold collision。
-- permission error。
-- file count、individual size、total size、path length限制。
-- Linux與Windows path tests。
+- exact-approved MCPB同session CRUD。
+- failed update保留LKG closure。
+- global exposure無獨立approval時拒絕。
+- shutdown/delete/swap無known orphan。
+- cold/warm/100-call benchmark達到Commit 8定義門檻。
 
-### 19.3 SQLite與cross-process
+### Commit 11 — `feat(cli): add approvals, rollback and recovery operations`
 
-- schema create/migration。
-- `BEGIN IMMEDIATE` busy。
-- stale expected generation。
-- crash before/aftercommit。
-- database disk-full／permission failure注入。
--兩process concurrent apply。
-- transaction內audit/current一致。
-- network filesystem config拒絕。
+內容：
 
-### 19.4 Skill
+- complete status/capacity。
+- approvals list/approve/revoke。
+- headless exact policy import。
+- root adopt/state migration。
+- rollback new-generation semantics。
+- TTY/non-TTY UX。
 
-- same-session picker refresh。
-- inactive update後activation讀新snapshot。
-- active valid update。
-- active invalid update LKG。
-- active delete。
-- task mode removed。
-- required/optional MCP family transitions。
-- drop-in要求private host tool拒絕。
-- capability approval hash change。
-- scripts warning與inert behavior。
-- prompt/control-character sanitization。
+Gate：
 
-### 19.5 Tool catalog與graph
+- `--yes`不建立任何首次高風險approval。
+- wildcard policy拒絕。
+- rollback不改寫歷史。
+- command不進ordinary turn/history。
 
-- MCP/MCP、MCP/local、MCP/builtin、MCP/management collision。
-- casefold collision。
-- family single owner。
-- requested exposure與approved exposure一致。
-- model binding／availability／PolicyToolNode一致。
-- forged old-generation call拒絕。
-- candidate graph build exception保持舊runtime。
-- Fusion graph signature不因無關MCP更新重建。
+### Commit 12 — `refactor(extensions): remove legacy runtime paths and dual state`
 
-### 19.6 MCP real subprocess
+必須刪除：
 
-- normal initialize/list-tools/call。
-- stdout noise。
-- stdout/stderr flood。
-- initialize hang。
-- tool-call hang。
-- ignore cancellation。
-- ignore terminate。
-- spawn child/grandchild。
-- oversized tool count、name、description、schema、result。
-- command injection字元不展開。
-- minimal env不含runtime-control vars。
-- delete/shutdown無orphan。
-- Windows job與POSIX process group。
+- `/bin/sh -c` MCP pipeline。
+- `grep` stdout sanitizer。
+- one-shot MCP loader作live runtime authority。
+- adapter connection-dict production path。
+- silent duplicate drop。
+- `ChatSession.loaded_skills`作picker authority。
+- parallel `mcp_families`／`web_search_tool_names`／`extra_tools` live truth。
+- static `skills/<name>` catalog說明。
+- 不走unified mutation lock的activate/deactivate API。
 
-### 19.7 Approval與CLI
+Legacy Web/GitHub只可保留normalized descriptor provider。
 
-- first MCP requiresinteractive approval。
-- exact approval reuse。
-- changed descriptor/artifact/argv/cwd/env/exposure使approval失效。
-- `--yes`不創建首次approval。
-- non-TTY不input。
-- cancel零mutation。
-- `status`不跑LLM/probe。
-- command不進history。
-- typed partial report準確。
+Gate：
 
-### 19.8 Startup與recovery
+- grep/AST assertions對上述symbol/path全部通過。
+- source＋wheel＋OS matrix全綠。
+- no compatibility field仍可改變live runtime。
 
-- clean startup current generation。
-- current snapshot壞，fallback前代作realized但不改applied。
-- 單一MCP unavailable，其他仍可用。
-- `--no-mcp` applied-vs-realized drift。
-- SQLite transaction residue。
-- staging partial cleanup。
+### Commit 13 — `docs(extensions): document sealed hot-plug and recovery`
 
-### 19.9 Packaging
+內容：
 
-- source checkout smoke。
-- Poetry wheel contents assertion。
-- temp venv install後：
-  - `import agent`；
-  - `import skills.citation`；
-  - shipped resource lookup；
-  - writable user/state roots；
-  - `python -m agent.cli.chat --no-mcp`；
-  - legacy Web/GitHub configuration smoke。
-- source tree不在`sys.path`時仍通過。
+- README、guide、SKILLS_GUIDE。
+- Skill/MCPB/policy/approval examples作parse tests。
+- desired/applied/realized、root scan、quota、two-stage approval、rollback、recovery。
+- MCP等同第三方code execution。
+- 將`extension_management_review.md`移除或明確標為historical，不讓兩份計畫並列成authority。
+
+Gate：
+
+- docs examples與runtime schema一致。
+- clean source checkout與clean wheel acceptance全綠。
 
 ---
 
-## 20. 現成工具與依賴決策
+## 21. 每個 commit 的共同硬性要求
 
-### 20.1 採用／沿用
-
-| 問題 | 決策 |
-|---|---|
-| schema與strict typed models | 沿用Pydantic v2 |
-| durable registry／CAS／audit metadata | 採stdlib `sqlite3` |
-| immutable content hash | 採`hashlib.sha256` |
-| package resources | 採`importlib.resources` |
-| user data/state roots | 新增direct `platformdirs` dependency |
-| MCP protocol | 採官方MCP Python SDK v1 |
-| LangChain tool conversion | 沿用`langchain-mcp-adapters`，但不把它當process supervisor |
-| subprocess | 採`asyncio.create_subprocess_exec`／SDK stdio primitive加host supervisor |
-| LangGraph | 沿用現有compiled graph；host自行持有realized graph pointer |
-
-### 20.2 版本策略
-
-- 新增direct constraint：`mcp>=1.27,<2`。
-- 維持目前`langchain-mcp-adapters>=0.2.2,<0.3`，升版另做相容性審查。
-- LangGraph不因本計畫強制升major/minor；先在現有lock版本完成。
-
-### 20.3 v1不採用
-
-- pluggy：適合受信任Python hooks，不解決drop-in安全、MCP或transaction。
-- stevedore：適合installed entry-point plugins，不適合本次user folder contract。
-- watchfiles：只提供變更通知，不能證明copy complete，v1又不做watcher。
-- resolvelib：v1只有exact dependency closure，不需通用version solver。
-- filelock作主要registry transaction：SQLite已提供較完整的CAS與crash recovery。
-- LangGraph checkpoint作extension registry：graph execution state與extension applied state責任不同。
-
-### 20.4 只作相容／參考
-
-- Agent Skills spec：採`SKILL.md`基本bundle格式，host lock/manifest是明確擴充。
-- MCPB：phase 2可作import format；不直接採其one-click build/install語義。
-- MCP Registry `server.json`：可映射publisher/package metadata；不能取代本地argv/cwd/env/approval contract。
+1. title符合Conventional Commits。
+2. 列出預期新增、修改、刪除的file與symbol。
+3. 記錄exact test command與collected count。
+4. collected count不得下降，除非commit明列刪除哪些tests及原因。
+5. 不得新增未說明skip/xfail。
+6. dependency commit必須同時更新`pyproject.toml`與`poetry.lock`，且無unrelated drift。
+7. DB commit必須含migration與backup/recovery test。
+8. filesystem commit必須含failure injection與zero-delete assertion。
+9. MCP commit必須含memory/output limit、orphan PID、cancel與shutdown test。
+10. performance-sensitive commit必須附scan、compile、cold/warm MCP benchmark。
+11. 每個commit都要有backout／compatibility說明。
+12. cleanup commit使用自動grep/AST assertion，不靠人工review。
+13. full suite失敗時不得以只跑新增tests取代。
+14. branch上的unrelated production變更不得被本計畫commit順手改寫。
 
 ---
 
-## 21. 完成驗收標準
+## 22. 完成驗收標準
 
-以下全部成立才算完成v1：
+以下全部成立才算v1完成：
 
-1. `repair` production baseline的完整測試有可重現CI紀錄，不再引用未說明的`63 passed`。
-2. source checkout與built wheel都能定位shipped resources，且user/state root可寫、彼此分離。
-3. user drop-in沒有valid `.extension-lock.json`時永遠不apply。
-4. CLI啟動後加入sealed prompt-only Skill，reconcile後同session picker可見並可activate。
-5. 修改active Skill後下一turn讀新內容；invalid update保留舊內容；delete明確deactivate。
-6. 新增strict sealed stdio MCP，exact approval後同session可用；update/delete不需restart。
-7. MCP hang、cancel、delete與CLI shutdown後沒有host已知orphan process。
-8. tools、families、prompt、model binding與`PolicyToolNode`在每個turn內來自同一realized generation。
-9. status明確區分desired、applied與realized。
-10. 兩個CLI process同時apply不會lost update；一方必須stale/busy。
-11. durable commit失敗時memory與citation state完全不變。
-12. durable commit成功後process crash可在startup從applied重建realized。
-13. all-universe同名/casefold collision一律fail-fast。
-14. drop-in Skill不能取得citation或management private tools。
-15. `--yes`不能建立首次MCP execution或global exposure approval。
-16. `--no-mcp`不probe、不start、不bind，但status與Skill-only reconcile仍可用。
-17. Web Search global、GitHub skill-scoped、citation isolation與existing tool policy regression全綠。
-18. normal reconcile不呼叫LLM；private inference resource缺失不影響status或strict apply。
-19. docs examples由tests解析，與runtime schema一致。
-20. v1沒有自動build/install、任意Python import、watcher、HTTP transport或committed snapshot GC的隱藏路徑。
+1. baseline可重現，Python／Poetry／OS／lock hash／collected count完整。
+2. source checkout與wheel使用相同workspace/global scope。
+3. package resources可讀，user/state roots可寫且不alias。
+4. incomplete root永遠zero-delete。
+5. delete只有complete scan＋exact authorization才發生。
+6. sealed Skill same-session add/update/delete可用。
+7. active behavior update提交新版後deactivate，不未批准接管下一turn。
+8. invalid Skill update保留舊applied與舊runtime。
+9. legacy `skills_dir`有清楚migration，不直接繞過sealed registry。
+10. Skill ID拒絕連續hyphen；strict UTF-8與`allowed-tools` policy全綠。
+11. scripts不被host自動執行，activation風險資訊完整。
+12. state/staging/snapshot/generation/event/diagnostic都有hard quota與preflight。
+13. SQLite exact schema/PRAGMA/migration/CAS全綠。
+14. descriptor object content-addressed去重。
+15. all-universe raw/casefold collision fail-fast。
+16. graph signature在compile前計算，相同signature重用graph。
+17. MCP canonical external format為MCPB safe subset。
+18. MCP SDK lifecycle被重用，host沒有重寫完整process supervisor。
+19. host持有explicit `ClientSession`，adapter production path不自行spawn。
+20. MCP probe與surface分兩階段approval。
+21. runtime session重新驗證runtime fingerprint與surface hash後才expose。
+22. list-changed／surface drift fail closed。
+23. MCP hang、flood、cancel、delete、swap、shutdown無host已知orphan。
+24. `--yes`不建立首次Skill capability、delete、MCP probe、surface或global exposure approval。
+25. headless policy import只接受exact binding。
+26. `--no-mcp`不probe、不start、不bind；status與Skill-only reconcile仍可用。
+27. desired、applied、realized、fallback與capacity status清楚。
+28. durable commit失敗時memory與citation state不變。
+29. commit後pointer swap前crash可在startup重建。
+30. Web Search global、GitHub skill-scoped、citation isolation regression全綠。
+31. shell MCP pipeline、silent duplicate、dual state與static catalog prompt已由cleanup gate刪除。
+32. docs examples由tests解析，review文件不再與正式計畫競爭authority。
 
 ---
 
-## 22. 最小可交付milestones
+## 23. Milestones 與停止點
 
 ### Milestone A — Skill hot refresh
 
-完成Commit 1–6後交付：
+完成 Commit 0–7：
 
-- sealed prompt-only Skill同session CRUD；
-- active Skill安全transition；
-- SQLite applied state；
-- built wheel支援；
-- desired/applied/realized status；
-- 不含第三方process執行。
+- authoritative roots與zero-delete gate；
+- sealed Skill same-session CRUD；
+- active update deactivation與explicit reactivation；
+- SQLite applied state、LKG、quota；
+- owner-aware catalog與graph reuse；
+- legacy migration；
+- source/wheel support；
+- 不包含第三方process執行。
 
-這是最早能提供實際使用價值、且風險可控的版本。
+Milestone A 完成後先做獨立驗收。
 
-### Milestone B — Strict stdio MCP hot refresh
+### MCP dependency spike
 
-完成Commit 7–9後交付：
+完成 Commit 8 並通過全部gate後，才解除Milestone B阻擋。scanner能看見`.mcpb`或能啟動fake server都不等於hot-plug完成。
 
-- exact-approved declarative stdio MCP同session CRUD；
-- bounded supervisor；
-- dependency closure；
-- startup degraded realization；
-- non-TTY approval policy。
+### Milestone B — Exact-approved MCPB hot refresh
 
-### Milestone C — Optional inference
+完成 Commit 9–11：
 
-v1驗收後另行決定是否需要：
+- two-stage exact approval；
+- SDK-based bounded transport；
+- explicit session ownership；
+- runtime surface revalidation；
+- same-session CRUD與LKG closure；
+- approvals/revoke/policy/rollback UX。
 
-- descriptor inference agent；
-- MCPB importer；
-- rollback UX；
-- safe GC與persistent transport。
+### v1 completion
 
----
-
-## 23. 實作停止點
-
-本文件核准後才可開始production implementation。
-
-開始寫code前必須確認以下決策沒有被重新模糊化：
-
-- normal reconcile是deterministic；
-- desired/applied/realized分層；
-- SQLite是durable metadata authority；
-- user/private/state roots分離；
-- sealed bundle是v1必要contract；
-- v1不build/install；
-- `--yes`不創建首次execution approval；
-- owner-aware collision在第一個commit先修；
-- MCP SDK pin `<2`；
-- committed snapshot v1不auto-GC；
-- citation實體搬遷與management inference都不阻擋v1。
-
-完成Milestone A後先進行一次獨立驗收，再決定是否推進Milestone B；不得因為scanner已能看到資料夾，就宣稱熱插拔完成。
+完成 Commit 12 cleanup與Commit 13 docs後，才可宣告v1完成。任何legacy live-authority path、unbounded state或未驗證surface仍存在時，停止release。
