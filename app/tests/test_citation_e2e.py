@@ -13,7 +13,7 @@ from agent.session import ChatSession
 from skills.citation.hub import CitationProviderHub
 from skills.citation.service import CitationService
 
-from tests.citation_fixtures import RoutingFetcher
+from tests.citation_fixtures import DOI_A, RoutingFetcher
 
 
 @tool("rag_search")
@@ -147,7 +147,7 @@ def test_workflow_call_under_other_skill_is_denied_end_to_end(
     assert session._citation_service is None  # noqa: SLF001
 
 
-def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch, tmp_path):
+def test_search_and_one_work_intent_save_keeps_model_final_prose(monkeypatch, tmp_path):
     responses = [
         _workflow_call({"action": "search", "query": "paper"}),
         _workflow_call({
@@ -167,16 +167,49 @@ def test_search_and_one_work_intent_save_in_one_user_turn_end_to_end(monkeypatch
     session.activate_skill("citation")
     _seed_fixture_service(session, tmp_path)
 
-    receipt = asyncio.run(session.turn("幫我找出並保存 2021 年 Ada Lovelace 的 Paper A"))
+    answer = asyncio.run(session.turn("幫我找出並保存 2021 年 Ada Lovelace 的 Paper A"))
     bundles = list((tmp_path / "cite").glob("*/reference.bib"))
     assert len(bundles) == 1
-    assert "引用保存結果" in receipt
-    assert "source ID" in receipt
-    assert str(bundles[0].parent) in receipt
+    assert answer == "已保存來源。"
+    assert "引用保存結果" not in answer
+    assert str(bundles[0].parent) not in answer
     sidecar = json.loads((bundles[0].parent / "citation.json").read_text())
     assert "bundle_path" not in sidecar["source_ref"]
     refs = session.citation_service.registry.list()
     assert [r.verification_level for r in refs] == ["doi_identity_verified"]
-    # The deterministic receipt, not the model's generic sentence, is the
-    # prompt-visible fact on the next turn.
-    assert session.recent_turns[-1].assistant_output == receipt
+    # The tool supplies the real receipt to the model; the finalizer does not
+    # replace the model's own wording with deterministic save prose.
+    assert session.recent_turns[-1].assistant_output == answer
+
+
+def test_numeric_followup_uses_the_model_resolved_prior_turn_selection(
+    monkeypatch, tmp_path,
+):
+    responses = [
+        _workflow_call({"action": "search", "query": "Paper A"}),
+        AIMessage(content="1. Paper A — 2021 published\n2. Paper B — 2020 published"),
+        _workflow_call({
+            "action": "save",
+            "works": [{
+                "requested_label": "Paper A published",
+                "title": "Paper A",
+                "version_kind": "published",
+                "identifiers": [{"kind": "doi", "value": DOI_A}],
+            }],
+        }, "save-followup"),
+        AIMessage(content="已保存你選的正式版。"),
+    ]
+    session = _make_session(monkeypatch, tmp_path, responses)
+    session.activate_skill("citation")
+    _seed_fixture_service(session, tmp_path)
+
+    choices = asyncio.run(session.turn("找 Paper A，讓我選版本"))
+    answer = asyncio.run(session.turn("1"))
+
+    assert choices.startswith("1. Paper A")
+    assert answer == "已保存你選的正式版。"
+    bundles = list((tmp_path / "cite").glob("*/citation.json"))
+    assert len(bundles) == 1
+    sidecar = json.loads(bundles[0].read_text())
+    assert sidecar["source_ref"]["doi"] == DOI_A
+    assert sidecar["creation_evidence"]["agent_intent"]["version_kind"] == "published"

@@ -11,8 +11,17 @@ from typing import Literal
 PERSIST_SCHEMA_VERSION = 1
 BUNDLE_SCHEMA_V2 = 2
 SUPPORTED_PERSIST_SCHEMA_VERSIONS = frozenset({1, 2})
-SAVE_BATCH_SCHEMA_VERSION = 1
+SAVE_BATCH_SCHEMA_VERSION = 2
 SAVE_BATCH_KIND = "citation_save_batch"
+SAVE_RESULT_VERSION_KINDS = frozenset({
+    "published", "preprint", "repository", "repost", "unknown",
+})
+CANONICAL_IDENTITY_KINDS = frozenset({"doi", "arxiv", "url", "venue"})
+VERIFICATION_LEVELS = frozenset({
+    "identity_verified",
+    "doi_identity_verified",
+    "authority_metadata_verified",
+})
 
 VerificationLevel = Literal["identity_verified", "doi_identity_verified", "authority_metadata_verified"]
 ProviderStatus = Literal["ok", "empty", "error", "rate_limited", "timeout", "disabled"]
@@ -25,6 +34,8 @@ class CanonicalIdentity:
 
     def __post_init__(self):
         from skills.citation.doi import canonicalize_doi
+        if self.kind not in CANONICAL_IDENTITY_KINDS or not isinstance(self.value, str):
+            raise ValueError("canonical identity requires a supported string value")
         value = self.value.strip()
         if self.kind == "doi":
             value = canonicalize_doi(value) or ""
@@ -171,9 +182,25 @@ class SaveReceipt:
     bundle_path: str
     verification_level: VerificationLevel
     cite_marker: str
+    version_kind: str = "unknown"
 
     def __post_init__(self):
         from skills.citation.doi import canonicalize_doi
+        text_fields = (
+            self.source_id,
+            self.title,
+            self.work_type,
+            self.bundle_path,
+            self.verification_level,
+            self.cite_marker,
+            self.version_kind,
+        )
+        if not all(isinstance(value, str) for value in text_fields):
+            raise ValueError("save receipt text fields must be strings")
+        if self.year is not None and type(self.year) is not int:
+            raise ValueError("invalid save receipt year")
+        if self.doi is not None and not isinstance(self.doi, str):
+            raise ValueError("invalid save receipt DOI")
         if not self.source_id or self.cite_marker != f"[[cite:{self.source_id}]]":
             raise ValueError("save receipt source/cite marker mismatch")
         if self.canonical_identity.kind == "doi":
@@ -181,23 +208,29 @@ class SaveReceipt:
                 raise ValueError("save receipt DOI identity mismatch")
         elif self.doi is not None:
             raise ValueError("non-DOI receipt carries DOI")
+        if self.verification_level not in VERIFICATION_LEVELS:
+            raise ValueError("invalid save receipt verification level")
+        if self.version_kind not in SAVE_RESULT_VERSION_KINDS:
+            raise ValueError("invalid save receipt version kind")
 
     def to_artifact(self):
-        return {"source_id": self.source_id, "canonical_identity": self.canonical_identity.to_dict(), "doi": self.doi, "title": self.title, "year": self.year, "work_type": self.work_type, "bundle_path": self.bundle_path, "verification_level": self.verification_level, "cite_marker": self.cite_marker}
+        return {"source_id": self.source_id, "canonical_identity": self.canonical_identity.to_dict(), "doi": self.doi, "title": self.title, "year": self.year, "work_type": self.work_type, "bundle_path": self.bundle_path, "verification_level": self.verification_level, "cite_marker": self.cite_marker, "version_kind": self.version_kind}
 
     @classmethod
     def from_artifact(cls, value):
-        fields = {"source_id", "canonical_identity", "doi", "title", "year", "work_type", "bundle_path", "verification_level", "cite_marker"}
+        fields = {"source_id", "canonical_identity", "doi", "title", "year", "work_type", "bundle_path", "verification_level", "cite_marker", "version_kind"}
         _strict_fields(value, fields, "save receipt")
         raw = value["canonical_identity"]
         _strict_fields(raw, {"kind", "value"}, "canonical identity")
-        if not all(isinstance(value[k], str) for k in ("source_id", "title", "work_type", "bundle_path", "verification_level", "cite_marker")):
+        if not all(isinstance(raw[key], str) for key in ("kind", "value")):
+            raise ValueError("invalid canonical identity")
+        if not all(isinstance(value[k], str) for k in ("source_id", "title", "work_type", "bundle_path", "verification_level", "cite_marker", "version_kind")):
             raise ValueError("invalid save receipt text")
         if value["doi"] is not None and not isinstance(value["doi"], str):
             raise ValueError("invalid DOI")
         if value["year"] is not None and (not isinstance(value["year"], int) or isinstance(value["year"], bool)):
             raise ValueError("invalid year")
-        return cls(value["source_id"], CanonicalIdentity(raw["kind"], raw["value"]), value["doi"], value["title"], value["year"], value["work_type"], value["bundle_path"], value["verification_level"], value["cite_marker"])
+        return cls(value["source_id"], CanonicalIdentity(raw["kind"], raw["value"]), value["doi"], value["title"], value["year"], value["work_type"], value["bundle_path"], value["verification_level"], value["cite_marker"], value["version_kind"])
 
 
 @dataclass(frozen=True)
@@ -207,16 +240,46 @@ class SaveAlternative:
     year: int | None = None
     venue: str = ""
     version_kind: str = "unknown"
+    doi: str | None = None
+    arxiv: str | None = None
+
+    def __post_init__(self):
+        if not all(isinstance(value, str) for value in (
+            self.title, self.venue, self.version_kind,
+        )):
+            raise ValueError("invalid alternative text")
+        if not isinstance(self.authors, tuple) or not all(
+            isinstance(author, str) for author in self.authors
+        ):
+            raise ValueError("invalid alternative authors")
+        if self.year is not None and type(self.year) is not int:
+            raise ValueError("invalid alternative year")
+        if self.doi is not None and not isinstance(self.doi, str):
+            raise ValueError("invalid alternative DOI")
+        if self.arxiv is not None and not isinstance(self.arxiv, str):
+            raise ValueError("invalid alternative arXiv identifier")
+        if self.version_kind not in SAVE_RESULT_VERSION_KINDS:
+            raise ValueError("invalid alternative version kind")
 
     def to_artifact(self):
-        return {"title": self.title, "authors": list(self.authors), "year": self.year, "venue": self.venue, "version_kind": self.version_kind}
+        return {"title": self.title, "authors": list(self.authors), "year": self.year, "venue": self.venue, "version_kind": self.version_kind, "doi": self.doi, "arxiv": self.arxiv}
 
     @classmethod
     def from_artifact(cls, value):
-        _strict_fields(value, {"title", "authors", "year", "venue", "version_kind"}, "alternative")
+        _strict_fields(value, {"title", "authors", "year", "venue", "version_kind", "doi", "arxiv"}, "alternative")
+        if not all(isinstance(value[key], str) for key in (
+            "title", "venue", "version_kind",
+        )):
+            raise ValueError("invalid alternative text")
         if not isinstance(value["authors"], list) or not all(isinstance(x, str) for x in value["authors"]):
             raise ValueError("invalid authors")
-        return cls(value["title"], tuple(value["authors"]), value["year"], value["venue"], value["version_kind"])
+        if value["year"] is not None and type(value["year"]) is not int:
+            raise ValueError("invalid alternative year")
+        if value["doi"] is not None and not isinstance(value["doi"], str):
+            raise ValueError("invalid alternative DOI")
+        if value["arxiv"] is not None and not isinstance(value["arxiv"], str):
+            raise ValueError("invalid alternative arXiv identifier")
+        return cls(value["title"], tuple(value["authors"]), value["year"], value["venue"], value["version_kind"], value["doi"], value["arxiv"])
 
 
 @dataclass(frozen=True)
@@ -229,8 +292,17 @@ class SaveItemOutcome:
     alternatives: tuple[SaveAlternative, ...] = ()
 
     def __post_init__(self):
-        if self.request_index < 0 or not self.requested_label or not re.fullmatch(r"[a-z0-9_]+", self.reason_code):
+        if (
+            type(self.request_index) is not int
+            or self.request_index < 0
+            or not isinstance(self.requested_label, str)
+            or not self.requested_label
+            or not isinstance(self.reason_code, str)
+            or not re.fullmatch(r"[a-z0-9_]+", self.reason_code)
+        ):
             raise ValueError("invalid save item")
+        if self.status not in SaveItemStatus.__args__:
+            raise ValueError("invalid save item status")
         if (self.status in {"saved", "reused"}) != (self.receipt is not None):
             raise ValueError("save receipt/status mismatch")
 
@@ -240,7 +312,14 @@ class SaveItemOutcome:
     @classmethod
     def from_artifact(cls, value):
         _strict_fields(value, {"request_index", "requested_label", "status", "reason_code", "receipt", "alternatives"}, "save item")
-        if value["status"] not in SaveItemStatus.__args__ or not isinstance(value["alternatives"], list):
+        if (
+            type(value["request_index"]) is not int
+            or not isinstance(value["requested_label"], str)
+            or not isinstance(value["status"], str)
+            or not isinstance(value["reason_code"], str)
+            or value["status"] not in SaveItemStatus.__args__
+            or not isinstance(value["alternatives"], list)
+        ):
             raise ValueError("invalid save item status")
         receipt = SaveReceipt.from_artifact(value["receipt"]) if value["receipt"] is not None else None
         return cls(value["request_index"], value["requested_label"], value["status"], value["reason_code"], receipt, tuple(SaveAlternative.from_artifact(x) for x in value["alternatives"]))
@@ -249,30 +328,28 @@ class SaveItemOutcome:
 @dataclass(frozen=True)
 class SaveBatchOutcome:
     batch_id: str
-    batch_status: Literal["attempted", "rejected"]
-    batch_reason_code: Literal["none", "workflow_busy", "mutation_already_attempted"]
-    items: tuple[SaveItemOutcome, ...] = ()
-    schema_version: int = field(default=1, init=False)
+    items: tuple[SaveItemOutcome, ...]
+    schema_version: int = field(default=SAVE_BATCH_SCHEMA_VERSION, init=False)
     kind: str = field(default=SAVE_BATCH_KIND, init=False)
 
     def __post_init__(self):
-        if not self.batch_id:
-            raise ValueError("save batch requires ID")
-        if self.batch_status == "attempted" and (self.batch_reason_code != "none" or not self.items):
-            raise ValueError("invalid attempted batch")
-        if self.batch_status == "rejected" and (self.items or self.batch_reason_code not in {"workflow_busy", "mutation_already_attempted"}):
-            raise ValueError("invalid rejected batch")
-        if self.batch_status not in {"attempted", "rejected"}:
-            raise ValueError("invalid batch status")
+        if not isinstance(self.batch_id, str) or not self.batch_id or not self.items:
+            raise ValueError("save batch requires a string ID and at least one item")
         if len({x.request_index for x in self.items}) != len(self.items):
             raise ValueError("duplicate request index")
 
     def to_artifact(self):
-        return {"kind": self.kind, "schema_version": self.schema_version, "batch_id": self.batch_id, "batch_status": self.batch_status, "batch_reason_code": self.batch_reason_code, "items": [x.to_artifact() for x in self.items]}
+        return {"kind": self.kind, "schema_version": self.schema_version, "batch_id": self.batch_id, "items": [x.to_artifact() for x in self.items]}
 
     @classmethod
     def from_artifact(cls, value):
-        _strict_fields(value, {"kind", "schema_version", "batch_id", "batch_status", "batch_reason_code", "items"}, "save batch")
-        if value["kind"] != SAVE_BATCH_KIND or value["schema_version"] != 1 or not isinstance(value["items"], list):
+        _strict_fields(value, {"kind", "schema_version", "batch_id", "items"}, "save batch")
+        if (
+            value["kind"] != SAVE_BATCH_KIND
+            or type(value["schema_version"]) is not int
+            or value["schema_version"] != SAVE_BATCH_SCHEMA_VERSION
+            or not isinstance(value["batch_id"], str)
+            or not isinstance(value["items"], list)
+        ):
             raise ValueError("unsupported save batch")
-        return cls(value["batch_id"], value["batch_status"], value["batch_reason_code"], tuple(SaveItemOutcome.from_artifact(x) for x in value["items"]))
+        return cls(value["batch_id"], tuple(SaveItemOutcome.from_artifact(x) for x in value["items"]))

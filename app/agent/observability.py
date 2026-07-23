@@ -1,11 +1,11 @@
-"""Structured, redaction-safe model and citation-finalizer observability.
+"""Structured, redaction-safe model and citation-save observability.
 
 One log line per model response at each recovery stage (initial, repair,
 fallback, and any future continuation stage) so a live incident can be
 diagnosed after the fact: was the response a true zero-content reply, a
 malformed tool call (``invalid_tool_calls``), or a budget-capped one?
-Finalizer-verified citation saves additionally emit only batch state and item
-counts, clearly separated from tool execution status.
+Artifact-derived citation saves additionally emit only aggregate item counts,
+clearly separated from tool execution status.
 
 Privacy contract: only counts, lengths, identifiers, and enum-like fields are
 ever logged. Message content, tool-call arguments, DOIs, and provider free
@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal
 
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -31,29 +30,28 @@ _CITATION_ACTIONS = frozenset({"search", "save", "sources", "source", "explain"}
 
 @dataclass(frozen=True)
 class CitationSaveMetrics:
-    """Redaction-safe result of finalizer-verified citation save artifacts."""
+    """Redaction-safe aggregate of attempted citation save artifacts."""
 
-    batch_status: Literal["attempted", "rejected"] | None = None
+    batch_count: int = 0
     new_saved_count: int = 0
     reused_count: int = 0
     failed_count: int = 0
 
     def __post_init__(self) -> None:
-        if self.batch_status not in {None, "attempted", "rejected"}:
-            raise ValueError("invalid citation save batch status")
         counts = (
+            self.batch_count,
             self.new_saved_count,
             self.reused_count,
             self.failed_count,
         )
         if any(type(value) is not int or value < 0 for value in counts):
             raise ValueError("citation save metrics require non-negative counts")
-        if self.batch_status != "attempted" and any(counts):
-            raise ValueError("only attempted batches can contain item counts")
+        if self.batch_count == 0 and any(counts[1:]):
+            raise ValueError("save item counts require a parsed batch")
 
     def to_record(self) -> dict[str, object]:
         return {
-            "citation_save_batch_status": self.batch_status,
+            "citation_save_batch_count": self.batch_count,
             "new_saved_count": self.new_saved_count,
             "reused_count": self.reused_count,
             "failed_count": self.failed_count,
@@ -228,14 +226,13 @@ def log_citation_save_metrics(
     *,
     save_call_observed: bool,
 ) -> None:
-    """Log trusted metrics, or fixed empty metrics when a save lacks them."""
-    if metrics.batch_status is None and not save_call_observed:
+    """Log aggregate metrics, or fixed empty metrics when a save lacks them."""
+    if metrics.batch_count == 0 and not save_call_observed:
         return
     log = (
         logger.warning
-        if metrics.batch_status == "rejected"
-        or metrics.failed_count > 0
-        or metrics.batch_status is None
+        if metrics.failed_count > 0
+        or metrics.batch_count == 0
         else logger.info
     )
     log(

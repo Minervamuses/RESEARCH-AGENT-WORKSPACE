@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -11,7 +12,12 @@ from pybtex.database import BibliographyData, Entry, Person
 
 from skills.citation.bibtex_canonical import parse_canonical_bibtex
 from skills.citation.normalize import normalize_title
-from skills.citation.resolution import WorkIntent
+from skills.citation.providers.net import (
+    ProviderError,
+    ProviderHTTPError,
+    ProviderTimeout,
+)
+from skills.citation.resolution import WorkIntent, normalize_arxiv
 from skills.citation.types import CanonicalIdentity
 
 MAX_AUTHORITY_BYTES = 1024 * 1024
@@ -51,14 +57,30 @@ class AuthorityRegistry:
         if arxiv:
             return await self._arxiv(arxiv)
         venue = normalize_title(intent.venue)
-        if intent.year and "neurips" in venue or "neural information processing systems" in venue:
+        if intent.year and (
+            "neurips" in venue
+            or "neural information processing systems" in venue
+        ):
             return _NEURIPS.get((intent.year, normalize_title(intent.title)))
         return None
 
     async def _arxiv(self, arxiv_id: str) -> AuthorityRecord | None:
         url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode({"id_list": arxiv_id})
-        response = await self._fetcher(url, {"Accept": "application/atom+xml"})
-        if response.status >= 400 or len(response.body) > MAX_AUTHORITY_BYTES:
+        try:
+            response = await self._fetcher(
+                url, {"Accept": "application/atom+xml"}
+            )
+        except ProviderError:
+            raise
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            raise ProviderTimeout("arxiv", "request timed out") from exc
+        if response.status >= 400:
+            if response.status == 404:
+                return None
+            raise ProviderHTTPError("arxiv", response.status)
+        if len(response.body) > MAX_AUTHORITY_BYTES:
+            raise ProviderError("arxiv", "response payload exceeds limit")
+        if not response.body:
             return None
         try:
             root = ET.fromstring(response.body)
@@ -67,6 +89,16 @@ class AuthorityRegistry:
         ns = {"a": "http://www.w3.org/2005/Atom"}
         entry = root.find("a:entry", ns)
         if entry is None:
+            return None
+        entry_id = entry.findtext("a:id", "", ns).strip()
+        parsed_path = urllib.parse.urlparse(entry_id).path
+        if "/abs/" not in parsed_path:
+            return None
+        try:
+            returned_arxiv = normalize_arxiv(parsed_path.split("/abs/", 1)[1])
+        except ValueError:
+            return None
+        if returned_arxiv != arxiv_id:
             return None
         title = " ".join((entry.findtext("a:title", "", ns)).split())
         authors = tuple(

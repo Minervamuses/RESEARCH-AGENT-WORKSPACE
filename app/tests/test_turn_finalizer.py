@@ -1,6 +1,7 @@
-"""Chat E2E: every turn branch funnels through finalize_and_record."""
+"""Chat E2E contracts for response safety, marker rendering, and save telemetry."""
 
 import asyncio
+import json
 import logging
 
 import pytest
@@ -12,14 +13,14 @@ from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import find_content_tool_protocol_artifact
-from skills.citation.service import CitationService
 from skills.citation.hub import CitationProviderHub
+from skills.citation.service import CitationService
 from skills.citation.types import (
     CanonicalIdentity,
-    SourceRef,
     SaveBatchOutcome,
     SaveItemOutcome,
     SaveReceipt,
+    SourceRef,
 )
 
 
@@ -56,6 +57,7 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         authors=["Ada Lovelace"],
         year=2021,
         venue="Journal",
+        work_type="journal-article",
         verification_level="doi_identity_verified",
         schema_version=2,
         canonical_identity=CanonicalIdentity("doi", "10.1234/known"),
@@ -70,33 +72,41 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         bundle_path=str(tmp_path / "cite" / source_id),
         verification_level=ref.verification_level,
         cite_marker=f"[[cite:{ref.source_id}]]",
+        version_kind="published",
     )
     service.registry.register(ref, receipt=receipt)
     session._citation_service = service
     return service
 
 
-def _save_tool_message(session, source_id="src-known", *, status="success"):
+def _save_tool_message(
+    session,
+    source_id="src-known",
+    *,
+    status="success",
+    call_id="save-1",
+):
     receipt = session.citation_service.registry.trusted_receipt(source_id)
     assert receipt is not None
+    artifact = SaveBatchOutcome(
+        f"batch-{call_id}",
+        (
+            SaveItemOutcome(1, "missing", "not_found", "no_provider_records"),
+            SaveItemOutcome(0, "wanted", "saved", "saved_new", receipt),
+        ),
+    ).to_artifact()
     return ToolMessage(
-        content="save attempted", tool_call_id="save-1", name="citation_workflow",
+        content="Actual citation save result:\n" + json.dumps(artifact),
+        tool_call_id=call_id,
+        name="citation_workflow",
         status=status,
-        artifact=SaveBatchOutcome(
-            "b1", "attempted", "none",
-            (
-                SaveItemOutcome(1, "missing", "not_found", "no_provider_records"),
-                SaveItemOutcome(0, "wanted", "saved", "saved_new", receipt),
-            ),
-        ).to_artifact(),
+        artifact=artifact,
     )
 
 
-def _save_failure_tool_message(*failures, content="save failed"):
+def _save_failure_tool_message(*failures, content="save failed", call_id="save-failed"):
     artifact = SaveBatchOutcome(
-        "b-failed",
-        "attempted",
-        "none",
+        f"batch-{call_id}",
         tuple(
             SaveItemOutcome(
                 request_index=request_index,
@@ -109,39 +119,23 @@ def _save_failure_tool_message(*failures, content="save failed"):
     ).to_artifact()
     return ToolMessage(
         content=content,
-        tool_call_id="save-failed",
+        tool_call_id=call_id,
         name="citation_workflow",
         artifact=artifact,
     )
 
 
-def _save_rejected_tool_message(reason_code="workflow_busy"):
-    return ToolMessage(
-        content="save rejected",
-        tool_call_id="save-rejected",
-        name="citation_workflow",
-        artifact=SaveBatchOutcome(
-            "b-rejected", "rejected", reason_code
-        ).to_artifact(),
-    )
-
-
 def _assert_save_metrics(
-    session,
-    *,
-    batch_status=None,
-    saved=0,
-    reused=0,
-    failed=0,
+    session, *, batches=0, saved=0, reused=0, failed=0,
 ):
     metrics = session.turn_logs[-1]
     assert {
-        "citation_save_batch_status": metrics["citation_save_batch_status"],
+        "citation_save_batch_count": metrics["citation_save_batch_count"],
         "new_saved_count": metrics["new_saved_count"],
         "reused_count": metrics["reused_count"],
         "failed_count": metrics["failed_count"],
     } == {
-        "citation_save_batch_status": batch_status,
+        "citation_save_batch_count": batches,
         "new_saved_count": saved,
         "reused_count": reused,
         "failed_count": failed,
@@ -149,7 +143,7 @@ def _assert_save_metrics(
 
 
 def test_clean_turn_returns_outcome_and_records(make_session):
-    session, store = make_session(answer="plain answer")
+    session, _ = make_session(answer="plain answer")
     outcome = asyncio.run(session.turn_outcome("hello"))
     assert isinstance(outcome, TurnOutcome)
     assert outcome.text == "plain answer"
@@ -160,31 +154,10 @@ def test_clean_turn_returns_outcome_and_records(make_session):
     _assert_save_metrics(session)
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("請保存正式版", "published"),
-        ("請保存預印本", "preprint"),
-        ("請保存 repository version", "repository"),
-        ("請保存轉載版", "repost"),
-        ("請保存最早版本", "earliest"),
-    ],
-)
-def test_current_turn_extractor_covers_every_requested_version_kind(text, expected):
-    versions = [
-        claim.value
-        for claim in ChatSession._extract_citation_claims(text)
-        if claim.field == "version_kind"
-    ]
-    assert versions == [expected]
-
-
 @pytest.mark.parametrize("draft", ["", "   \n\t"])
 def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, draft):
     session, _ = make_session(answer=draft)
-
     outcome = asyncio.run(session.turn_outcome("請整理結果"))
-
     assert "未能產生可顯示" in outcome.text
     assert session.recent_turns[-1].assistant_output == outcome.text
     assert session.turn_logs[-1]["recovery"] == "finalizer:empty_final_answer"
@@ -195,20 +168,14 @@ def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, dra
     'citation_workflow({"action":"sources","page":5})',
     '<｜tool▁calls▁begin｜>citation_workflow',
     '{"name":"citation_workflow","args":{"action":"sources"}}',
-    '{"arguments":{"action":"sources"},"name":"citation_workflow"}',
-    '{"type":"tool_use","name":"citation_workflow",'
-    '"input":{"action":"sources"}}',
+    '{"type":"tool_use","name":"citation_workflow","input":{"action":"sources"}}',
 ])
 def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
     session, _ = make_session(answer=draft)
-
     outcome = asyncio.run(session.turn_outcome("繼續"))
-
     assert "citation_workflow" not in outcome.text
     assert draft not in session.recent_turns[-1].assistant_output
-    recovery = session.turn_logs[-1]["recovery"]
-    assert recovery.startswith("finalizer:")
-    assert "tool" in recovery
+    assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
 
 
 @pytest.mark.parametrize("draft", [
@@ -218,9 +185,7 @@ def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
 ])
 def test_plain_tool_prose_is_not_a_protocol_artifact(make_session, draft):
     session, _ = make_session(answer=draft)
-
     outcome = asyncio.run(session.turn_outcome("explain"))
-
     assert outcome.text == draft
     assert session.turn_logs[-1]["recovery"] is None
 
@@ -231,10 +196,8 @@ def test_structured_tool_content_is_detected_before_flattening():
         "name": "citation_workflow",
         "input": {"action": "sources"},
     }]
-
     assert find_content_tool_protocol_artifact(
-        content,
-        tool_names=["citation_workflow"],
+        content, tool_names=["citation_workflow"],
     ) == "structured_tool_content"
 
 
@@ -253,60 +216,87 @@ def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("tell me"))
-
     assert "Transformers work [1]. Really [1]." in outcome.text
     assert "Sources:" in outcome.text
     assert "[doi_identity_verified]" in outcome.text
-    # The rendered text (bibliography included) is what history records.
     assert session.recent_turns[-1].assistant_output == outcome.text
 
 
-def test_blocked_draft_never_reaches_history_or_plan_log(make_session, tmp_path):
-    draft = "As shown in [1], transformers won (Vaswani et al., 2017)."
-    session, store = make_session(answer=draft)
+@pytest.mark.parametrize("active", [False, True])
+def test_raw_citation_styles_are_not_blocked_or_rewritten(
+    make_session, tmp_path, active,
+):
+    draft = (
+        "As shown in [1] and (Vaswani et al., 2017), see "
+        "https://doi.org/10.48550/arXiv.1706.03762.\n\n"
+        "## References\n- Vaswani et al. (2017)."
+    )
+    session, _ = make_session(answer=draft)
+    if active:
+        session.activate_skill("citation")
+        _seed_verified_source(session, tmp_path)
+
     outcome = asyncio.run(session.turn_outcome("tell me"))
 
-    assert outcome.validation_errors
-    assert "封鎖" in outcome.text
-    assert draft not in outcome.text
-    # The safe message — not the draft — is what history sees.
-    recorded = session.recent_turns[-1].assistant_output
-    assert draft not in recorded
-    assert "raw_numeric_citation" in recorded
-    errors = session.turn_logs[-1]["validation_errors"]
-    assert any("raw_numeric_citation" in err for err in errors)
-    assert any("raw_author_year" in err for err in errors)
+    assert outcome.text == draft
+    assert outcome.validation_errors == []
+    assert session.recent_turns[-1].assistant_output == draft
 
 
-def test_save_batch_has_priority_and_records_redacted_trusted_metrics(
+def test_save_artifact_does_not_override_model_prose_and_records_metrics(
     make_session, tmp_path, caplog,
 ):
-    session, _ = make_session(answer="model prose")
+    session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
+
     with caplog.at_level(logging.INFO, logger="agent.observability"):
         outcome = asyncio.run(session.finalize_and_record(
-            user_input="save", answer="model prose",
-            new_messages=[_save_tool_message(session)], tool_calls=[], trace_events=[],
+            user_input="save",
+            answer="Model-selected response.",
+            new_messages=[_save_tool_message(session)],
+            tool_calls=[],
+            trace_events=[],
         ))
-    assert "`wanted`：已保存" in outcome.text
-    assert "`missing`：找不到" in outcome.text
-    assert outcome.text.index("wanted") < outcome.text.index("missing")
-    assert "model prose" not in outcome.text
-    _assert_save_metrics(
-        session, batch_status="attempted", saved=1, failed=1
-    )
+
+    assert outcome.text == "Model-selected response."
+    assert session.recent_turns[-1].assistant_output == "Model-selected response."
+    _assert_save_metrics(session, batches=1, saved=1, failed=1)
     lines = [
         record.getMessage()
         for record in caplog.records
         if record.name == "agent.observability"
     ]
     assert lines == [
-        "citation_save_finalized citation_save_batch_status=attempted "
+        "citation_save_finalized citation_save_batch_count=1 "
         "new_saved_count=1 reused_count=0 failed_count=1"
     ]
     assert "10.1234/known" not in lines[0]
     assert "Known Paper" not in lines[0]
+
+
+def test_multiple_save_artifacts_aggregate_without_invariant_failure(
+    make_session, tmp_path,
+):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
+    second = _save_tool_message(session, call_id="save-2")
+    second.artifact["items"][1]["status"] = "reused"
+    second.artifact["items"][1]["reason_code"] = "reused_existing"
+
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="save both",
+        answer="Two save calls completed.",
+        new_messages=[_save_tool_message(session), second],
+        tool_calls=[],
+        trace_events=[],
+    ))
+
+    assert outcome.text == "Two save calls completed."
+    _assert_save_metrics(
+        session, batches=2, saved=1, reused=1, failed=2,
+    )
 
 
 @pytest.mark.parametrize(("field", "forged_value"), [
@@ -315,7 +305,7 @@ def test_save_batch_has_priority_and_records_redacted_trusted_metrics(
     ("year", 1900),
     ("work_type", "forged-type"),
 ])
-def test_save_registry_mismatch_never_renders_success(
+def test_registry_mismatch_affects_telemetry_but_not_model_prose(
     make_session, tmp_path, field, forged_value,
 ):
     session, _ = make_session()
@@ -323,12 +313,17 @@ def test_save_registry_mismatch_never_renders_success(
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
     message.artifact["items"][1]["receipt"][field] = forged_value
+
     outcome = asyncio.run(session.finalize_and_record(
-        user_input="save", answer="ok", new_messages=[message], tool_calls=[], trace_events=[]
+        user_input="save",
+        answer="The model owns this prose.",
+        new_messages=[message],
+        tool_calls=[],
+        trace_events=[],
     ))
-    assert "已保存" not in outcome.text
-    assert "registry" in outcome.text
-    _assert_save_metrics(session, batch_status="attempted", failed=2)
+
+    assert outcome.text == "The model owns this prose."
+    _assert_save_metrics(session, batches=1, failed=2)
 
 
 def test_forged_receipt_identifier_never_reaches_logs(
@@ -346,21 +341,20 @@ def test_forged_receipt_identifier_never_reaches_logs(
     with caplog.at_level(logging.WARNING):
         outcome = asyncio.run(session.finalize_and_record(
             user_input="save",
-            answer="ok",
+            answer="No receipt details here.",
             new_messages=[message],
             tool_calls=[],
             trace_events=[],
         ))
 
-    assert "已保存" not in outcome.text
+    assert outcome.text == "No receipt details here."
     assert secret not in "\n".join(record.getMessage() for record in caplog.records)
 
 
-def test_error_tool_message_cannot_render_save_success(make_session, tmp_path):
+def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
-
     outcome = asyncio.run(session.finalize_and_record(
         user_input="save",
         answer="工具呼叫失敗。",
@@ -368,15 +362,11 @@ def test_error_tool_message_cannot_render_save_success(make_session, tmp_path):
         tool_calls=[],
         trace_events=[],
     ))
-
     assert outcome.text == "工具呼叫失敗。"
-    assert "已保存" not in outcome.text
     _assert_save_metrics(session)
 
 
-def test_answered_save_without_trusted_artifact_logs_none_status(
-    make_session, caplog,
-):
+def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
     session, _ = make_session()
     session.activate_skill("citation")
     save_call = AIMessage(content="", tool_calls=[{
@@ -392,7 +382,7 @@ def test_answered_save_without_trusted_artifact_logs_none_status(
     )
 
     with caplog.at_level(logging.WARNING, logger="agent.observability"):
-        asyncio.run(session.finalize_and_record(
+        outcome = asyncio.run(session.finalize_and_record(
             user_input="save",
             answer="保存未完成。",
             new_messages=[save_call, result],
@@ -400,37 +390,19 @@ def test_answered_save_without_trusted_artifact_logs_none_status(
             trace_events=[],
         ))
 
+    assert outcome.text == "保存未完成。"
     lines = [
         record.getMessage()
         for record in caplog.records
         if record.name == "agent.observability"
     ]
     assert lines == [
-        "citation_save_finalized citation_save_batch_status=None "
+        "citation_save_finalized citation_save_batch_count=0 "
         "new_saved_count=0 reused_count=0 failed_count=0"
     ]
 
 
-def test_rejected_save_records_batch_status_without_item_success(
-    make_session, tmp_path,
-):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="save",
-        answer="model prose",
-        new_messages=[_save_rejected_tool_message()],
-        tool_calls=[],
-        trace_events=[],
-    ))
-
-    assert "workflow 正忙" in outcome.text
-    _assert_save_metrics(session, batch_status="rejected")
-
-
-def test_reused_save_is_counted_separately(make_session, tmp_path):
+def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_path):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
@@ -441,48 +413,44 @@ def test_reused_save_is_counted_separately(make_session, tmp_path):
 
     outcome = asyncio.run(session.finalize_and_record(
         user_input="save",
-        answer="model prose",
+        answer="Reused the existing bundle.",
         new_messages=[message],
         tool_calls=[],
         trace_events=[],
     ))
 
-    assert "已重用" in outcome.text
-    _assert_save_metrics(
-        session, batch_status="attempted", reused=1, failed=1
-    )
+    assert outcome.text == "Reused the existing bundle."
+    _assert_save_metrics(session, batches=1, reused=1, failed=1)
 
 
-def test_save_batch_survives_raw_doi_gate_block(make_session, tmp_path):
-    draft = "已儲存 DOI 10.1234/known。"
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="儲存",
-        answer=draft,
-        new_messages=[_save_tool_message(session)],
-        tool_calls=[],
-        trace_events=[],
-    ))
-
-    assert any("raw_doi" in error for error in outcome.validation_errors)
-    assert "引用保存結果" in outcome.text
-    assert "`wanted`：已保存" in outcome.text
-    assert draft not in outcome.text
-    assert "請先在 citation workflow 中完成驗證" not in outcome.text
-    assert session.recent_turns[-1].assistant_output == outcome.text
-
-
-@pytest.mark.parametrize("draft", ["", 'citation_workflow(action="sources")'])
-def test_save_batch_survives_final_response_recovery(
-    make_session, tmp_path, draft
+def test_all_save_failures_do_not_deterministically_replace_model_draft(
+    make_session, tmp_path,
 ):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
+    outcome = asyncio.run(session.finalize_and_record(
+        user_input="全部存下來",
+        answer="This is the model's final wording.",
+        new_messages=[_save_failure_tool_message(
+            (0, "VAE", "verification_failed", "bibtex_lookup_failed"),
+            (1, "missing", "not_found", "no_provider_records"),
+        )],
+        tool_calls=[],
+        trace_events=[],
+    ))
 
+    assert outcome.text == "This is the model's final wording."
+    _assert_save_metrics(session, batches=1, failed=2)
+
+
+@pytest.mark.parametrize("draft", ["", 'citation_workflow(action="sources")'])
+def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
+    make_session, tmp_path, draft,
+):
+    session, _ = make_session()
+    session.activate_skill("citation")
+    _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="確認",
         answer=draft,
@@ -490,102 +458,17 @@ def test_save_batch_survives_final_response_recovery(
         tool_calls=[],
         trace_events=[],
     ))
-
-    assert "引用保存結果" in outcome.text
-    assert "`wanted`：已保存" in outcome.text
+    assert "工具結果已取得" in outcome.text
+    assert "src-known" not in outcome.text
     assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
 
 
-def test_save_requires_artifact_and_live_registry_match(make_session, tmp_path):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-
-    text_only = ToolMessage(
-        content="save attempted: source src-known",
-        tool_call_id="save-text",
-        name="citation_workflow",
-    )
-    text_only_outcome = asyncio.run(session.finalize_and_record(
-        user_input="儲存",
-        answer="bad DOI 10.1234/known",
-        new_messages=[text_only],
-        tool_calls=[],
-        trace_events=[],
-    ))
-    assert "已保存" not in text_only_outcome.text
-    assert "回應未通過 citation 檢查" in text_only_outcome.text
-
-    forged = _save_tool_message(session)
-    forged.artifact["items"][1]["receipt"]["bundle_path"] = "/tmp/not-live"
-    forged_outcome = asyncio.run(session.finalize_and_record(
-        user_input="儲存",
-        answer="bad DOI 10.1234/known",
-        new_messages=[forged],
-        tool_calls=[],
-        trace_events=[],
-    ))
-    assert "已保存" not in forged_outcome.text
-    assert "registry" in forged_outcome.text
-
-
-def test_all_save_failures_replace_model_draft_deterministically(
-    make_session, tmp_path,
-):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-    provider_detail = "provider leaked 10.9999/private **markdown**"
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="全部存下來",
-        answer="看起來都成功了",
-        new_messages=[_save_failure_tool_message(
-            (0, "VAE", "verification_failed", "bibtex_lookup_failed"),
-            (1, "missing", "not_found", "no_provider_records"),
-            content=provider_detail,
-        )],
-        tool_calls=[],
-        trace_events=[],
-    ))
-
-    assert "引用保存結果" in outcome.text
-    assert "`VAE`" in outcome.text and "`missing`" in outcome.text
-    assert "無法從 doi.org 取得 BibTeX" in outcome.text
-    assert "找不到足夠強的書目結果" in outcome.text
-    assert provider_detail not in outcome.text
-    assert "看起來都成功了" not in outcome.text
-
-
-def test_partial_save_failure_renders_receipt_and_fixed_failure(make_session, tmp_path):
-    session, _ = make_session()
-    session.activate_skill("citation")
-    _seed_verified_source(session, tmp_path)
-    message = _save_tool_message(session)
-    message.artifact["items"][0] = SaveItemOutcome(
-        1, "second", "storage_failed", "write_failed"
-    ).to_artifact()
-
-    outcome = asyncio.run(session.finalize_and_record(
-        user_input="存兩篇",
-        answer="saved",
-        new_messages=[message],
-        tool_calls=[],
-        trace_events=[],
-    ))
-
-    assert "引用保存結果" in outcome.text
-    assert "`src-known`" in outcome.text
-    assert "`second`" in outcome.text
-    assert "bundle 寫入失敗" in outcome.text
-
-
-def test_plan_log_persists_receipt_but_not_blocked_draft(make_session, tmp_path):
+def test_plan_log_records_model_answer_without_injecting_receipt(make_session, tmp_path):
     session, _ = make_session()
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
     asyncio.run(session.enter_plan_mode())
-    draft = "bad DOI 10.1234/known"
+    draft = "Saved according to the tool."
 
     outcome = asyncio.run(session.finalize_and_record(
         user_input="儲存",
@@ -596,42 +479,31 @@ def test_plan_log_persists_receipt_but_not_blocked_draft(make_session, tmp_path)
     ))
     content = session.plan_log_path.read_text(encoding="utf-8")
 
-    assert outcome.text in content
-    assert "`src-known`" in content
-    assert draft not in content
+    assert outcome.text == draft
+    assert draft in content
+    assert "src-known" not in content
 
 
-def test_eviction_persists_receipt_as_plain_assistant_text(make_session, tmp_path):
+def test_eviction_persists_model_answer_as_plain_assistant_text(make_session, tmp_path):
     session, store = make_session(window=1)
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
-    receipt = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(session.finalize_and_record(
         user_input="儲存",
-        answer="saved",
+        answer="Saved according to the tool.",
         new_messages=[_save_tool_message(session)],
         tool_calls=[],
         trace_events=[],
     ))
-
     asyncio.run(session.turn("下一步"))
 
     assert len(store.adds) == 1
-    assert store.adds[0]["assistant_output"] == receipt.text
-    assert "`src-known`" in store.adds[0]["assistant_output"]
+    assert store.adds[0]["assistant_output"] == outcome.text
+    assert store.adds[0]["assistant_output"] == "Saved according to the tool."
     assert not hasattr(store.adds[0]["turn"], "sources")
 
 
-def test_blocked_draft_in_plan_mode_writes_safe_message_only(make_session):
-    session, _ = make_session(answer="bad citation [1]")
-    asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("plan question"))
-    content = session.plan_log_path.read_text(encoding="utf-8")
-    assert "bad citation [1]" not in content
-    assert "raw_numeric_citation" in content
-
-
-def test_user_doi_in_input_is_never_auto_registered(make_session, tmp_path):
-    """A DOI/URL in ordinary user input creates no citation service or source."""
+def test_user_doi_in_input_is_never_auto_registered(make_session):
     session, _ = make_session(answer="plain answer")
     outcome = asyncio.run(
         session.turn_outcome("請看 https://doi.org/10.1234/user-paper")
@@ -639,13 +511,12 @@ def test_user_doi_in_input_is_never_auto_registered(make_session, tmp_path):
     assert outcome.text == "plain answer"
     assert session._citation_service is None  # noqa: SLF001
 
-    # user-cite markers are no longer a citable form at all.
     session.graph = make_astream_graph(
         answer="Your paper [[user-cite:usr-anything]] is interesting."
     )
     blocked = asyncio.run(session.turn_outcome("continue"))
     assert any(
-        "citation_inactive_marker" in err for err in blocked.validation_errors
+        "citation_inactive_marker" in error for error in blocked.validation_errors
     )
 
 
@@ -654,32 +525,27 @@ def test_dangling_cite_marker_blocks_in_citation_mode(make_session, tmp_path):
     session.activate_skill("citation")
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
-    assert any("dangling_cite" in err for err in outcome.validation_errors)
+    assert any("dangling_cite" in error for error in outcome.validation_errors)
 
 
 def test_verified_marker_blocks_outside_citation_mode(make_session, tmp_path):
-    """Even a resolvable [[cite:...]] is formal citation — skill-only."""
     session, _ = make_session(answer="Known [[cite:src-known]].")
-    _seed_verified_source(session, tmp_path)  # registry exists, skill inactive
+    _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
     assert any(
-        "citation_inactive_marker" in err for err in outcome.validation_errors
+        "citation_inactive_marker" in error for error in outcome.validation_errors
     )
 
 
-def test_plain_web_link_passes_and_renderer_skipped_outside_citation_mode(
-    make_session, tmp_path
+def test_plain_web_link_passes_and_renderer_skips_outside_citation_mode(
+    make_session, tmp_path,
 ):
-    session, _ = make_session(
-        answer="See [docs](https://example.org/guide) and https://example.org/x"
-    )
+    draft = "See [docs](https://example.org/guide) and https://example.org/x"
+    session, _ = make_session(answer=draft)
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
     assert outcome.validation_errors == []
-    # Renderer untouched: no numbering, no bibliography appended.
-    assert outcome.text == (
-        "See [docs](https://example.org/guide) and https://example.org/x"
-    )
+    assert outcome.text == draft
     assert "Sources:" not in outcome.text
 
 
@@ -697,19 +563,19 @@ def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_pat
     session, _ = make_session()
     assert session._build_sources_hint() is None
     session.activate_skill("citation")
-    assert session._build_sources_hint() is None  # active but empty registry
+    assert session._build_sources_hint() is None
     _seed_verified_source(session, tmp_path)
     hint = session._build_sources_hint()
     assert hint is not None
     assert "[[cite:src-known]]" in hint.content
+    assert "never write raw" not in hint.content
     history = session._prompt_history()
-    assert any("[[cite:src-known]]" in str(m.content) for m in history)
+    assert any("[[cite:src-known]]" in str(message.content) for message in history)
 
 
-def test_extended_mode_early_error_goes_through_finalizer(make_session, monkeypatch):
+def test_extended_mode_early_error_goes_through_finalizer(make_session):
     session, _ = make_session()
     session.thinking_mode = "extended"
-    # No thinking models configured -> early error branch.
     outcome = asyncio.run(session.turn_outcome("question"))
     assert isinstance(outcome, TurnOutcome)
     assert session.turn_logs[-1]["validation_errors"] == []

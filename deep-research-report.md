@@ -1,5 +1,9 @@
 # Minervamuses RESEARCH-AGENT-WORKSPACE 問題盤點與改動計畫深度研究報告
 
+> 歷史研究文件：本文分析的是早期 citation candidate/confirm 架構，並非目前
+> `citation_workflow` 的公開契約。現行行為請以 `README.md`、`guide.md` 與
+> `app/skills/citation/SKILL.md` 為準。
+
 ## 執行摘要
 
 本次研究先以 `prob.md` 為主軸，再回頭交叉比對 `README.md`、`app/` 與 `app/skills/citation/` 實作、既有測試，以及檔案歷史。整體來看，`prob.md` 列出的八個問題不是平均分散的八個獨立缺陷，而是集中在四個技術面向：其一是 **工具額度與回合終結路徑**，其二是 **citation workflow 的公開契約與 grounding**，其三是 **confirm 成功後的收據、gate 封鎖與自然語言確認**，其四是 **discovery 品質、分頁與版本去重**。其中最緊急的不是搜尋品質，而是「成功工具結果被埋沒、回合可能空白結束、模型把未執行工具意圖輸出成普通文字」這類會直接破壞使用者信任與資料正確性的路徑。`prob.md` 本身也是在 2026-07-11 新近更新，commit message 明確寫成「record citation CLI findings from 2026-07-11 live test」，顯示這些問題是剛由實測收斂出的現況，而不是陳年待辦。citeturn4view0turn28view0turn11view0turn13view0

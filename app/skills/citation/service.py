@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
 from skills.citation.authority import AuthorityRecord, AuthorityRegistry, export_bibtex
 from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
-from skills.citation.doi import doi_equal
+from skills.citation.doi import canonicalize_doi, doi_equal
 from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import ProviderError
 from skills.citation.resolution import (
-    HostIntentClaim,
     WorkIntent,
     WorkResolver,
     evaluate_record,
@@ -30,26 +28,6 @@ from skills.citation.types import (
     SaveReceipt,
     SourceRef,
 )
-
-
-@dataclass
-class MutationGuard:
-    claimed: bool = False
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-    async def claim(self) -> bool:
-        async with self.lock:
-            if self.claimed:
-                return False
-            self.claimed = True
-            return True
-
-
-@dataclass(frozen=True)
-class CitationTurnContext:
-    token: str
-    claims: tuple[HostIntentClaim, ...]
-    guard: MutationGuard
 
 
 class CitationService:
@@ -102,14 +80,34 @@ class CitationService:
         batch_id = uuid.uuid4().hex
         resolutions = await asyncio.gather(*(self.resolver.resolve(intent) for intent in intents))
         outcomes: list[SaveItemOutcome] = []
-        eligible: list[tuple[int, WorkIntent, object]] = []
+        eligible: list[tuple[int, WorkIntent, object, str]] = []
         for index, (intent, resolution) in enumerate(zip(intents, resolutions, strict=True)):
             decision = resolution.decision
             if decision.status == "eligible" and decision.record is not None:
-                eligible.append((index, intent, decision.record))
+                eligible.append((index, intent, decision.record, decision.reason_code))
                 outcomes.append(None)  # type: ignore[arg-type]
                 continue
-            authority = await self.authorities.resolve(intent)
+            # An exact DOI is the selected target. Never replace a failed DOI
+            # lookup (or conflicting identifier set) with a different
+            # authority identity merely because descriptive fields resemble it.
+            has_exact_doi = any(
+                identifier.kind == "doi" for identifier in intent.identifiers
+            )
+            authority = None
+            if (
+                not has_exact_doi
+                and decision.reason_code != "multiple_exact_identifiers"
+            ):
+                try:
+                    authority = await self.authorities.resolve(intent)
+                except ProviderError:
+                    outcomes.append(SaveItemOutcome(
+                        index,
+                        intent.requested_label,
+                        "provider_failed",
+                        "authority_lookup_failed",
+                    ))
+                    continue
             if authority is not None:
                 authority_record = ProviderRecord(
                     provider=authority.provider,
@@ -139,16 +137,25 @@ class CitationService:
                 )
                 authority_decision = evaluate_record(intent, authority_record)
                 if authority_decision.status == "eligible":
-                    eligible.append((index, intent, authority))
+                    eligible.append((index, intent, authority, "authoritative_exact_record"))
                     outcomes.append(None)  # type: ignore[arg-type]
                     continue
                 decision = authority_decision
+            elif decision.reason_code == "exact_arxiv_requires_authority":
+                outcomes.append(SaveItemOutcome(
+                    index,
+                    intent.requested_label,
+                    "not_found",
+                    "exact_arxiv_not_found",
+                ))
+                continue
             status_map = {"unsupported": "unsupported_no_doi"}
             status = status_map.get(decision.status, decision.status)
             alternatives = tuple(
                 SaveAlternative(
                     record.title, tuple(record.authors), record.year, record.venue,
-                    infer_version_kind(record),
+                    infer_version_kind(record), canonicalize_doi(record.doi),
+                    record.identifiers.get("arxiv") or None,
                 )
                 for record in decision.alternatives[:5]
             )
@@ -158,9 +165,18 @@ class CitationService:
             ))
 
         # All resolution/provider verification completes before the first write.
-        for index, intent, record in eligible:
+        for index, intent, record, resolution_reason in eligible:
             if isinstance(record, AuthorityRecord):
-                canonical = export_bibtex(record)
+                try:
+                    canonical = export_bibtex(record)
+                except BibtexValidationError as exc:
+                    outcomes[index] = SaveItemOutcome(
+                        index,
+                        intent.requested_label,
+                        "verification_failed",
+                        getattr(exc, "code", "authority_bibtex_invalid"),
+                    )
+                    continue
                 identity = record.identity
                 sid = source_id_for(identity)
                 ref = SourceRef(
@@ -172,8 +188,12 @@ class CitationService:
                 )
                 sidecar = {
                     "source_ref": ref.to_persisted_dict(),
-                    "creation_evidence": {"batch_id": batch_id, "request_index": index, "normalized_hints": {"title": intent.title, "year": intent.year, "venue": intent.venue}, "verified_constraint_reason_codes": [f"{c.field}_constraint" for c in intent.constraints if c.is_hard]},
-                    "resolution": {"record_source": record.provider, "provider_record_ids": [identity.key], "version_kind": "preprint" if record.provider == "arxiv" else "published", "decision_reason_codes": ["authoritative_exact_record"]},
+                    "creation_evidence": {
+                        "batch_id": batch_id,
+                        "request_index": index,
+                        "agent_intent": self._intent_evidence(intent),
+                    },
+                    "resolution": {"record_source": record.provider, "provider_record_ids": [identity.key], "version_kind": "preprint" if record.provider == "arxiv" else "published", "decision_reason_codes": [resolution_reason]},
                 }
                 try:
                     bundle = await asyncio.to_thread(write_identity_bundle, self.output_dir, identity=identity, title=ref.title, bibtex_text=canonical.text, sidecar=sidecar)
@@ -181,6 +201,7 @@ class CitationService:
                         sid, identity, None, ref.title, ref.year, ref.work_type,
                         str(bundle.bundle_dir), ref.verification_level,
                         f"[[cite:{sid}]]",
+                        "preprint" if record.provider == "arxiv" else "published",
                     )
                     self.registry.register(ref, receipt=receipt)
                 except (StorageError, ValueError) as exc:
@@ -218,19 +239,13 @@ class CitationService:
                 "creation_evidence": {
                     "batch_id": batch_id,
                     "request_index": index,
-                    "normalized_hints": {
-                        "title": intent.title, "authors": list(intent.authors),
-                        "year": intent.year, "venue": intent.venue,
-                    },
-                    "verified_constraint_reason_codes": [
-                        f"{c.field}_constraint" for c in intent.constraints if c.is_hard
-                    ],
+                    "agent_intent": self._intent_evidence(intent),
                 },
                 "resolution": {
                     "record_source": record.provider,
                     "provider_record_ids": [record.provider_id],
                     "version_kind": infer_version_kind(record),
-                    "decision_reason_codes": ["unique_strong_match"],
+                    "decision_reason_codes": [resolution_reason],
                 },
             }
             try:
@@ -245,7 +260,7 @@ class CitationService:
                 receipt = SaveReceipt(
                     sid, identity, identity.value, ref.title, ref.year,
                     ref.work_type, str(bundle.bundle_dir), ref.verification_level,
-                    f"[[cite:{sid}]]",
+                    f"[[cite:{sid}]]", infer_version_kind(record),
                 )
                 self.registry.register(ref, receipt=receipt)
             except (StorageError, ValueError) as exc:
@@ -255,7 +270,24 @@ class CitationService:
                 index, intent.requested_label, "reused" if bundle.reused else "saved",
                 "reused_existing" if bundle.reused else "saved_new", receipt,
             )
-        return SaveBatchOutcome(batch_id, "attempted", "none", tuple(outcomes))
+        return SaveBatchOutcome(batch_id, tuple(outcomes))
+
+    @staticmethod
+    def _intent_evidence(intent: WorkIntent) -> dict:
+        """Record the agent selection used for this save without claiming proof."""
+        return {
+            "title": intent.title,
+            "authors": list(intent.authors),
+            "year": intent.year,
+            "venue": intent.venue,
+            "work_type": intent.work_type,
+            "work_kind": intent.work_kind,
+            "version_kind": intent.version_kind,
+            "identifiers": [
+                {"kind": identifier.kind, "value": identifier.value}
+                for identifier in intent.identifiers
+            ],
+        }
 
     def list_sources(self, page: int = 1):
         sources = self.registry.list()

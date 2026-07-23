@@ -2,9 +2,8 @@
 
 import asyncio
 import logging
-import re
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,12 +15,8 @@ from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
 from skills.citation.types import (
     SaveBatchOutcome,
-    SaveItemOutcome,
-    SaveReceipt,
     is_citable_source,
 )
-from skills.citation.resolution import HostIntentClaim
-from skills.citation.service import CitationTurnContext, MutationGuard
 from agent.turn_outcome import TurnOutcome
 from agent.turn_safety import (
     build_recovery_message,
@@ -171,7 +166,6 @@ class ChatSession:
         # the session-scoped service behind it is built lazily on first use.
         self.citation_workflow_tool = create_citation_workflow_tool(
             service_getter=lambda: self.citation_service,
-            context_getter=lambda: self._citation_turn_context,
         )
         self.graph = build_graph(
             config,
@@ -200,7 +194,6 @@ class ChatSession:
         self._progress_cb = progress_cb
         self._citation_service = None
         self._turn_execution_lock = asyncio.Lock()
-        self._citation_turn_context: CitationTurnContext | None = None
 
     @property
     def citation_service(self):
@@ -313,34 +306,30 @@ class ChatSession:
         if not sources:
             return None
         lines = [
-            "[Citable sources] Cite ONLY via these markers; never write raw "
-            "DOIs, [1]-style numbers, author-year citations, or a References "
-            "section yourself — the renderer numbers sources. Use "
-            "[[citation-needed]] when a claim lacks a source.",
+            "[Citable sources] Use these markers when you want the citation "
+            "renderer to number a saved source and append its bibliography "
+            "entry. Use [[citation-needed]] when a claim lacks a source.",
         ]
         for ref in sources:
             label = ref.title or ref.doi or ref.url or "(unknown)"
             lines.append(f"- [[cite:{ref.source_id}]] {label}")
         return SystemMessage(content="\n".join(lines))
 
-    @staticmethod
-    def _markdown_code_span(value: object) -> str:
-        """Render arbitrary one-line trusted data as a Markdown code span."""
-        text = str(value).replace("\n", " ")
-        longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
-        fence = "`" * (longest + 1)
-        if text.startswith(("`", " ")) or text.endswith(("`", " ")):
-            text = f" {text} "
-        return f"{fence}{text}{fence}"
+    def _citation_save_metrics(self, new_messages: list) -> CitationSaveMetrics:
+        """Aggregate trustworthy item counts across every attempted save batch.
 
-    def _trusted_save_outcomes(
-        self, new_messages: list
-    ) -> tuple[SaveBatchOutcome | None, tuple[SaveBatchOutcome, ...]]:
+        Save results are returned directly to the model by the tool.  This
+        parser exists only for redaction-safe telemetry; it never rewrites the
+        model's answer.  Successful receipts are still checked against the
+        live registry before they contribute to success counts.
+        """
         registry = self._citation_registry() if self.citation_skill_active else None
         if registry is None:
-            return None, ()
-        attempted: list[SaveBatchOutcome] = []
-        rejected: list[SaveBatchOutcome] = []
+            return CitationSaveMetrics()
+        batch_count = 0
+        saved_count = 0
+        reused_count = 0
+        failed_count = 0
         for message in new_messages:
             if not isinstance(message, ToolMessage) or getattr(message, "name", None) != "citation_workflow":
                 continue
@@ -351,137 +340,34 @@ class ChatSession:
                 continue
             try:
                 batch = SaveBatchOutcome.from_artifact(artifact)
-            except ValueError as exc:
+            except (TypeError, ValueError) as exc:
                 logger.warning("ignored invalid citation save batch: %s", exc)
                 continue
-            if batch.batch_status == "rejected":
-                rejected.append(batch)
-                continue
-            checked: list[SaveItemOutcome] = []
+            batch_count += 1
             for item in batch.items:
                 receipt = item.receipt
-                if receipt is None:
-                    checked.append(item)
-                    continue
-                ref = registry.get(receipt.source_id)
-                if (
-                    ref is None
-                    or not registry.receipt_is_trusted(receipt)
-                    or not is_citable_source(ref)
-                ):
-                    logger.warning("save receipt/registry mismatch")
-                    checked.append(SaveItemOutcome(
-                        item.request_index, item.requested_label,
-                        "verification_failed", "registry_mismatch",
-                        alternatives=item.alternatives,
-                    ))
+                if receipt is not None:
+                    ref = registry.get(receipt.source_id)
+                    if (
+                        ref is None
+                        or not registry.receipt_is_trusted(receipt)
+                        or not is_citable_source(ref)
+                    ):
+                        logger.warning("save receipt/registry mismatch")
+                        failed_count += 1
+                        continue
+                if item.status == "saved":
+                    saved_count += 1
+                elif item.status == "reused":
+                    reused_count += 1
                 else:
-                    checked.append(item)
-            attempted.append(replace(batch, items=tuple(checked)))
-        if len(attempted) > 1:
-            logger.error("citation invariant breach: multiple attempted save batches")
-            first = attempted[0]
-            failed = tuple(
-                SaveItemOutcome(item.request_index, item.requested_label, "verification_failed", "multiple_attempted_batches")
-                for item in first.items
-            )
-            return replace(first, items=failed), tuple(rejected)
-        return (attempted[0] if attempted else None), tuple(rejected)
-
-    @staticmethod
-    def _citation_save_metrics(
-        attempted: SaveBatchOutcome | None,
-        rejected: tuple[SaveBatchOutcome, ...],
-    ) -> CitationSaveMetrics:
-        if attempted is None:
-            return CitationSaveMetrics(
-                batch_status="rejected" if rejected else None,
-            )
+                    failed_count += 1
         return CitationSaveMetrics(
-            batch_status="attempted",
-            new_saved_count=sum(item.status == "saved" for item in attempted.items),
-            reused_count=sum(item.status == "reused" for item in attempted.items),
-            failed_count=sum(
-                item.status not in {"saved", "reused"}
-                for item in attempted.items
-            ),
+            batch_count=batch_count,
+            new_saved_count=saved_count,
+            reused_count=reused_count,
+            failed_count=failed_count,
         )
-
-    def _render_save_outcome(
-        self,
-        attempted: SaveBatchOutcome | None,
-        rejected: tuple[SaveBatchOutcome, ...],
-        *,
-        validation_errors: list[str],
-    ) -> str:
-        reason_messages = {
-            "insufficient_identity_anchor": "資訊不足，需補充可辨識的作品資料",
-            "intent_binding_ambiguous": "條件無法唯一綁定到批次中的作品",
-            "negative_target": "目前語意並未授權保存此作品",
-            "identifier_mismatch": "指定識別碼與查得作品不符",
-            "multiple_exact_identifiers": "提供了互相衝突的精確識別碼",
-            "title_mismatch": "查得標題與指定作品不符",
-            "author_mismatch": "查得作者與指定作品不符",
-            "hard_year_mismatch": "查得年份違反使用者指定條件",
-            "hard_venue_mismatch": "查得 venue 違反使用者指定條件",
-            "hard_version_mismatch": "查得版本違反使用者指定條件",
-            "version_clarification_required": "版本不明，請分辨要保存的版本",
-            "multiple_plausible_records": "找到多筆同樣合理的作品，請補充條件",
-            "earliest_manifestation_unknown": "無法判定最早版本",
-            "multiple_earliest_manifestations": "找到多筆可能的最早版本，請補充條件",
-            "not_original_research": "結果不是所要求的 original research",
-            "no_provider_records": "找不到足夠強的書目結果",
-            "exact_doi_not_found": "指定 DOI 查無正式書目記錄",
-            "exact_arxiv_requires_authority": "指定 arXiv 記錄尚無可保存的權威身分",
-            "unsupported_no_doi": "目前版本尚不能保存此無 DOI 來源",
-            "all_providers_failed": "書目供應者本次皆失敗",
-            "doi_refetch_rate_limited": "DOI 權威查詢遭限流，請稍後重試",
-            "doi_refetch_timeout": "DOI 權威查詢逾時，請稍後重試",
-            "doi_refetch_failed": "DOI 權威查詢失敗，請稍後重試",
-            "refetch_identity_conflict": "DOI 權威資料與指定作品衝突",
-            "bibtex_lookup_failed": "無法從 doi.org 取得 BibTeX",
-            "bibtex_doi_mismatch": "BibTeX DOI 與查證結果不一致",
-            "parse_failed": "BibTeX 無法安全解析",
-            "payload_too_large": "BibTeX 資料超過安全大小限制",
-            "not_exactly_one_entry": "BibTeX 並非恰好一筆書目",
-            "nonempty_preamble": "BibTeX 含不允許的 preamble",
-            "bundle_conflict": "既有 bundle 驗證衝突，未覆寫",
-            "source_id_collision": "source ID 與既有來源衝突，未覆寫",
-            "write_failed": "bundle 寫入失敗",
-            "registry_conflict": "來源無法安全登錄至 live registry",
-            "registry_mismatch": "保存收據未通過 live registry 驗證",
-            "multiple_attempted_batches": "偵測到同輪多個 attempted batch，已 fail closed",
-        }
-        lines = ["（引用保存結果。）"]
-        if attempted is not None:
-            for item in sorted(attempted.items, key=lambda value: value.request_index):
-                label = self._markdown_code_span(item.requested_label[:160])
-                if item.receipt is not None:
-                    receipt = item.receipt
-                    state = "已保存" if item.status == "saved" else "已重用"
-                    lines.extend([
-                        f"- {label}：{state}",
-                        f"  - source ID：{self._markdown_code_span(receipt.source_id)}",
-                        f"  - title：{self._markdown_code_span(receipt.title[:512])}",
-                        f"  - year：{self._markdown_code_span(receipt.year or 'unknown')}",
-                        f"  - type：{self._markdown_code_span(receipt.work_type[:256])}",
-                        f"  - bundle：{self._markdown_code_span(receipt.bundle_path)}",
-                        f"  - 引用標記：{self._markdown_code_span(receipt.cite_marker)}",
-                    ])
-                else:
-                    message = reason_messages.get(item.reason_code, item.status.replace("_", " "))
-                    lines.append(f"- {label}：{message} ({self._markdown_code_span(item.reason_code)})")
-                    for alt in item.alternatives[:5]:
-                        facts = " / ".join(str(value) for value in (alt.title[:512], alt.year or "year unknown", alt.venue[:256], alt.version_kind) if value)
-                        lines.append(f"  - 可分辨項：{self._markdown_code_span(facts)}")
-        if rejected:
-            for batch in rejected:
-                message = "workflow 正忙，保存嘗試已拒絕" if batch.batch_reason_code == "workflow_busy" else "本輪已嘗試過保存，後續嘗試已拒絕"
-                lines.append(f"- {message} ({self._markdown_code_span(batch.batch_reason_code)})")
-        if validation_errors:
-            lines.append("- 被攔截草稿的檢查結果：")
-            lines.extend(f"  - {self._markdown_code_span(error)}" for error in validation_errors)
-        return "\n".join(lines)
 
     def _finalize_answer(
         self, answer: str, *, user_input: str
@@ -490,8 +376,9 @@ class ChatSession:
 
         Citation skill active: markers are checked against the registry's
         identity-verified IDs and the renderer numbers them and appends the
-        bibliography. Inactive: verified IDs are empty, every citation form
-        blocks, and the renderer never runs. Returns ``(final_text,
+        bibliography. Inactive: registry-backed marker syntax is unavailable
+        and the renderer never runs; ordinary citation prose remains allowed.
+        Returns ``(final_text,
         validation_errors)``; a violating draft is replaced by the safe
         message and never returned.
         """
@@ -548,18 +435,12 @@ class ChatSession:
                 had_tool_results=has_tool_results(new_messages),
             )
             recovery_reason = recovery_reason or f"finalizer:{safety_issue}"
-        save_attempted, save_rejected = self._trusted_save_outcomes(new_messages)
-        save_metrics = self._citation_save_metrics(save_attempted, save_rejected)
+        save_metrics = self._citation_save_metrics(new_messages)
         save_call_observed = any(
             action == "save"
             for action, _status in completed_citation_calls(new_messages)
         )
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
-        # A trusted save artifact outranks model prose or a generic fallback.
-        if save_attempted is not None or save_rejected:
-            final_text = self._render_save_outcome(
-                save_attempted, save_rejected, validation_errors=errors
-            )
         log_citation_save_metrics(
             save_metrics,
             save_call_observed=save_call_observed,
@@ -898,53 +779,7 @@ class ChatSession:
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""
         async with self._turn_execution_lock:
-            context = CitationTurnContext(
-                uuid.uuid4().hex,
-                tuple(self._extract_citation_claims(user_input)),
-                MutationGuard(),
-            )
-            self._citation_turn_context = context
-            try:
-                return await self._run_turn(user_input)
-            finally:
-                if self._citation_turn_context is context:
-                    self._citation_turn_context = None
-
-    @staticmethod
-    def _extract_citation_claims(text: str) -> list[HostIntentClaim]:
-        """Extract only explicit current-turn anchors; never infer a version."""
-        from skills.citation.doi import extract_doi_candidates
-
-        claims = [HostIntentClaim("doi", doi) for doi in extract_doi_candidates(text)]
-        for match in re.finditer(r"(?:arxiv\s*[:：]?\s*)?(\d{4}\.\d{4,5})(?:v\d+)?", text, re.I):
-            claims.append(HostIntentClaim("arxiv", match.group(1), span=match.span()))
-        lowered = text.casefold()
-        if re.search(r"(?:original research|原創研究|原始研究)", lowered):
-            claims.append(HostIntentClaim("work_kind", "original_research"))
-        elif re.search(r"(?:\boriginal\b|原始|原版)", lowered):
-            claims.append(HostIntentClaim("original", "original"))
-        if re.search(r"(?:正式版|出版版|published|version of record|\bvor\b)", lowered):
-            claims.append(HostIntentClaim("version_kind", "published"))
-        if re.search(r"(?:預印本|preprint|arxiv\s*版)", lowered):
-            claims.append(HostIntentClaim("version_kind", "preprint"))
-        if re.search(
-            r"(?:\brepository\b|"
-            r"accepted\s+manuscript|institutional\s+repository\s+version|"
-            r"接受稿|作者接受稿|機構典藏版|典藏版本)",
-            lowered,
-        ):
-            claims.append(HostIntentClaim("version_kind", "repository"))
-        if re.search(
-            r"(?:\brepost(?:ed)?\b|reposted\s+version|轉載版|重貼版|再發布版)",
-            lowered,
-        ):
-            claims.append(HostIntentClaim("version_kind", "repost"))
-        if re.search(r"(?:最早版本|earliest manifestation|first manifestation)", lowered):
-            claims.append(HostIntentClaim("version_kind", "earliest"))
-        years = re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", text)
-        if len(set(years)) == 1:
-            claims.append(HostIntentClaim("year", years[0]))
-        return claims
+            return await self._run_turn(user_input)
 
     async def turn(self, user_input: str) -> str:
         """Process one conversation turn. Returns the final text response."""

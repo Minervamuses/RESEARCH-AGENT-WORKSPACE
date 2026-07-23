@@ -1,23 +1,20 @@
-"""Model-facing citation workflow with stateless search and one-shot saving."""
+"""Model-facing citation workflow with stateless search and verified saving."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import re
+import weakref
 from typing import Callable, Literal
 
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from skills.citation.resolution import (
-    HostIntentBinder,
-    WorkConstraint,
     WorkIdentifier,
     WorkIntent,
 )
-from skills.citation.service import CitationTurnContext
-from skills.citation.types import PublishedDateFilter, SaveBatchOutcome, SourceRef
+from skills.citation.types import PublishedDateFilter, SourceRef
 
 TOOL_NAME = "citation_workflow"
 TOOL_DESCRIPTION = (
@@ -26,9 +23,9 @@ TOOL_DESCRIPTION = (
     "resolves each work through provider-specific bibliographic queries and "
     "authoritative DOI verification. Pass title, authors, year, venue, "
     "work_type, work_kind, identifiers, and version_kind as separate fields, "
-    "using only user-stated facts or metadata visible in tool results. Never invent "
-    "bibliographic facts, pass provider syntax, or pass a result position. "
-    "Each user turn permits at most one valid save batch."
+    "using the conversation and visible tool results to select the user's target. "
+    "Never invent bibliographic facts, pass provider syntax, or pass a result "
+    "position. save returns the actual per-item persistence result."
 )
 
 CitationAction = Literal["search", "save", "sources", "source", "explain"]
@@ -42,41 +39,10 @@ class IdentifierInput(BaseModel):
     value: str = Field(
         min_length=1,
         max_length=2048,
-        description="An explicit identifier from the user or visible metadata.",
-    )
-    provenance: Literal["explicit_current_user", "visible_context"] = Field(
         description=(
-            "Use explicit_current_user only when this exact value occurs in the "
-            "current user message; otherwise use visible_context. This claim "
-            "does not override the host's independent verification."
-        )
-    )
-
-
-class ConstraintInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    field: Literal["year", "venue"] = Field(
-        description=(
-            "The constrained property. Put work-class and manifestation "
-            "requests in the top-level work_kind and version_kind fields."
-        )
-    )
-    value: str = Field(
-        min_length=1,
-        max_length=256,
-        description="The human-readable constraint value, never provider syntax.",
-    )
-    provenance: Literal["explicit_current_user", "visible_context"] = Field(
-        description=(
-            "Use explicit_current_user only when this exact value occurs in the "
-            "current user message; otherwise use visible_context. The host "
-            "independently decides whether it is trusted."
-        )
-    )
-    requested_strength: Literal["hard", "preference"] = Field(
-        description=(
-            "Requested treatment only; the host decides the effective strength."
-        )
+            "The DOI or arXiv identifier for the selected manifestation, taken "
+            "from the conversation or visible metadata."
+        ),
     )
 
 
@@ -138,71 +104,26 @@ class WorkIntentInput(BaseModel):
     identifiers: list[IdentifierInput] = Field(
         default_factory=list,
         max_length=8,
-        description="Explicit DOI or arXiv identifiers for this work.",
-    )
-    constraints: list[ConstraintInput] = Field(
-        default_factory=list,
-        max_length=8,
         description=(
-            "Additional year or venue constraints. Use work_kind and "
-            "version_kind for semantic work-class and manifestation requests."
+            "Stable DOI or arXiv identifiers for the selected manifestation. "
+            "Do not combine identifiers belonging to different versions."
         ),
     )
 
-    @model_validator(mode="after")
-    def _limit_domain_constraints(self):
-        direct = int(self.work_kind is not None) + int(self.version_kind is not None)
-        if len(self.constraints) + direct > 8:
-            raise ValueError("combined constraints exceed 8 items")
-        return self
-
     def to_domain(self) -> WorkIntent:
-        constraints = tuple(
-            WorkConstraint(
-                c.field,
-                c.value,
-                c.provenance,
-                c.requested_strength,
-                "visible_context",
-                "preference",
-                False,
-            )
-            for c in self.constraints
-        )
-        if self.version_kind is not None:
-            constraints += (
-                WorkConstraint(
-                    "version_kind",
-                    self.version_kind,
-                    "visible_context",
-                    "preference",
-                    "visible_context",
-                    "preference",
-                    False,
-                ),
-            )
-        if self.work_kind is not None:
-            constraints += (
-                WorkConstraint(
-                    "work_kind",
-                    self.work_kind,
-                    "visible_context",
-                    "preference",
-                    "visible_context",
-                    "preference",
-                    False,
-                ),
-            )
         return WorkIntent(
-            self.requested_label,
+            requested_label=self.requested_label,
             title=self.title,
             authors=tuple(self.authors),
             year=self.year,
             venue=self.venue,
             work_type=self.work_type,
-            identifiers=tuple(WorkIdentifier(i.kind, i.value, i.provenance) for i in self.identifiers),
-            # Tool claims are untrusted hints until HostIntentBinder upgrades them.
-            constraints=constraints,
+            work_kind=self.work_kind,
+            version_kind=self.version_kind,
+            identifiers=tuple(
+                WorkIdentifier(identifier.kind, identifier.value)
+                for identifier in self.identifiers
+            ),
         )
 
 
@@ -250,26 +171,31 @@ def _error(message: str) -> str:
     return f"validation error: {message}"
 
 
-def _redact_dois(text: str) -> str:
-    return re.sub(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", "[DOI withheld]", text, flags=re.I)
-
-
 def _format_records(records, states) -> str:
     if not records:
         return "No bibliographic records found. " + "; ".join(states)
     lines = [f"Found {len(records)} bibliographic record(s):"]
     for record in records:
         authors = ", ".join(record.authors) or "authors unknown"
-        metadata = " | ".join(str(value) for value in (
+        metadata = [str(value) for value in (
             record.title or "untitled", authors, record.year or "year unknown",
             record.venue or "venue unknown", record.work_type or "type unknown",
             record.version_kind or "version unknown",
-        ))
-        lines.append(f"- {metadata}")
+        )]
+        if record.doi:
+            metadata.append(f"DOI: {record.doi}")
+        arxiv = record.identifiers.get("arxiv")
+        if arxiv:
+            metadata.append(f"arXiv: {arxiv}")
+        if record.url:
+            metadata.append(f"URL: {record.url}")
+        lines.append("- " + " | ".join(metadata))
     lines.append("Provider states: " + "; ".join(states))
-    lines.append("No result number is a save identifier; build a complete WorkIntent from the metadata.")
-    lines.append("Provider order and scores are discovery evidence only; they do not choose a canonical version.")
-    return _redact_dois("\n".join(lines))
+    lines.append(
+        "No result number is a save identifier; select the intended record from "
+        "the conversation and pass its stable DOI/arXiv identifier when available."
+    )
+    return "\n".join(lines)
 
 
 def _format_sources(sources: list[SourceRef], page: int, total_pages: int) -> str:
@@ -292,27 +218,37 @@ def _format_source(ref: SourceRef) -> str:
 
 def format_explain(output_dir) -> str:
     return (
-        "search is stateless and returns full metadata without cX/mX IDs. "
+        "search is stateless and returns full metadata plus stable DOI/arXiv "
+        "identifiers without cX/mX IDs. "
         "save accepts 1–10 self-contained WorkIntent objects, resolves each "
         "through provider-specific Crossref, DataCite, and optional OpenAlex "
-        "queries, retains multiple candidate manifestations, verifies a "
-        "shortlisted DOI before persistence, applies blocking work/version "
-        "checks, and permits one attempted mutation batch per user turn. "
-        "Provider ranking alone never authorizes a save. Generic "
-        "'this paper' with an unknown version and unqualified 'original' require "
-        "clarification. Bundles are written atomically under " + str(output_dir)
+        "queries when no exact identifier is supplied, verifies authoritative "
+        "metadata and BibTeX before persistence, and returns the actual result "
+        "for every requested item. The agent owns conversational target and "
+        "authorization decisions; bundles are written atomically under "
+        + str(output_dir)
     )
 
 
 def create_citation_workflow_tool(
     *,
     service_getter: Callable | None = None,
-    context_getter: Callable[[], CitationTurnContext | None] | None = None,
 ) -> StructuredTool:
     if service_getter is None:
         raise ValueError("service_getter is required")
-    context_getter = context_getter or (lambda: None)
-    busy_lock = asyncio.Lock()
+    # asyncio primitives are loop-bound once contended. Keep one serializer
+    # per loop so a tool reused by tests or library callers across
+    # ``asyncio.run`` invocations remains valid; storage has its own
+    # cross-process identity lock for the actual filesystem mutation.
+    save_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+    def _save_lock() -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        lock = save_locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            save_locks[loop] = lock
+        return lock
 
     async def _run(
         action: CitationAction,
@@ -348,20 +284,17 @@ def create_citation_workflow_tool(
         if action == "save":
             if not works or any(value is not None for value in (query, source_id, page, year_from, year_to)):
                 return _error("save requires only works (1..10)"), None
-            context = context_getter()
-            if context is None:
-                return "turn_context_missing", None
             intents = tuple(work.to_domain() for work in works)
-            binding = HostIntentBinder().bind(intents, context.claims)
-            if busy_lock.locked():
-                rejected = SaveBatchOutcome(context.token, "rejected", "workflow_busy")
-                return "save rejected: workflow_busy", rejected.to_artifact()
-            async with busy_lock:
-                if not await context.guard.claim():
-                    rejected = SaveBatchOutcome(context.token, "rejected", "mutation_already_attempted")
-                    return "save rejected: mutation_already_attempted", rejected.to_artifact()
-                outcome = await service.save(binding.intents)
-                return "save batch attempted; trusted artifact contains per-item results", outcome.to_artifact()
+            # Queue concurrent calls instead of rejecting a legitimate retry or
+            # a second user-authorized save in the same conversation turn.
+            async with _save_lock():
+                outcome = await service.save(intents)
+            artifact = outcome.to_artifact()
+            return (
+                "Actual citation save result:\n"
+                + json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                artifact,
+            )
         if action == "sources":
             if any(value is not None for value in (query, works, source_id, year_from, year_to)):
                 return _error("sources accepts only page"), None

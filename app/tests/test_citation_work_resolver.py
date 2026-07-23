@@ -78,26 +78,36 @@ def test_refetch_conflict_blocks_eligibility():
     assert run(resolver).decision.status == "verification_failed"
 
 
-def test_same_title_different_versions_requires_clarification_before_refetch():
+def test_same_title_different_versions_use_model_selection_before_refetch():
     resolver = WorkResolver(
         crossref=SearchProvider([record("crossref", "10.1000/pub")]),
         datacite=SearchProvider([record("datacite", "10.1000/pre", version="preprint")]),
-        doi_org=DoiProvider(csl()),
+        doi_org=DoiProvider(csl("10.1000/pre")),
     )
-    outcome = run(resolver)
-    assert outcome.decision.status == "ambiguous"
-    assert outcome.decision.reason_code == "version_clarification_required"
-    assert resolver._doi_org.calls == []
+    intent = WorkIntent(
+        "preprint", title="A Work", authors=("Ada Author",),
+        version_kind="preprint",
+    )
+
+    outcome = run(resolver, intent)
+
+    assert outcome.decision.status == "eligible"
+    assert outcome.decision.record.doi == "10.1000/pre"
+    assert outcome.decision.record.version_kind == "preprint"
+    assert resolver._doi_org.calls == ["10.1000/pre"]
 
 
-def test_exact_doi_refetch_still_cannot_override_metadata_veto():
+def test_exact_doi_refetch_uses_authoritative_metadata_without_semantic_veto():
     intent = WorkIntent("work", title="A Work", identifiers=(WorkIdentifier("doi", "10.1000/work"),))
     doi_org = DoiProvider(csl(title="Different Work"))
     resolver = WorkResolver(
         crossref=SearchProvider([record("crossref")]),
         datacite=SearchProvider([]), doi_org=doi_org,
     )
-    assert run(resolver, intent).decision.status == "identity_conflict"
+    outcome = run(resolver, intent)
+    assert outcome.decision.status == "eligible"
+    assert outcome.decision.reason_code == "exact_identifier"
+    assert outcome.decision.record.title == "Different Work"
     assert doi_org.calls == ["10.1000/work"]
     assert resolver._providers[0][1].calls == []
 
@@ -174,6 +184,7 @@ def test_matching_arxiv_and_datacite_doi_share_one_exact_lane():
 
     assert outcome.decision.status == "eligible"
     assert outcome.decision.record.identifiers["arxiv"] == "1706.03762"
+    assert outcome.decision.record.version_kind == "preprint"
     assert doi_org.calls == [doi]
     assert crossref.calls == datacite.calls == []
 

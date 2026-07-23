@@ -1,69 +1,69 @@
 ---
 name: citation
-description: Stateless work-identity citation resolution, verified bundle saving, and [[cite:...]] rendering.
+description: Conversational citation selection, verified bundle saving, and [[cite:...]] rendering.
 ---
 
 # Citation Skill
 
-Use only `citation_workflow` to discover or select a persistent citation
-identity. Its actions are `search`, `save`, `sources`, `source`, and `explain`.
-Use Web/RAG to read or summarize content when needed, but treat any DOI found
-outside this workflow as an untrusted clue; never save it directly.
+Use `citation_workflow` to discover and save persistent citation identities.
+Its actions are `search`, `save`, `sources`, `source`, and `explain`. You own
+the conversational decision about which work/version the user requested and
+whether they authorized a write; the tool owns metadata retrieval, BibTeX,
+storage, and the factual save outcome.
 
 ## Search and present
 
 - `search` is stateless. Pass a natural-language topic/title in `query` and
   optional `year_from`/`year_to`; never pass Crossref, DataCite, or OpenAlex
   query syntax.
-- Treat bibliographic facts as grounded only when they appear in explicit user
-  text or a visible `citation_workflow` result. Never complete, correct, or
-  expand a title, author list, year, venue, work type, version, or identifier
-  from model memory. If search does not expose enough identity evidence, say
-  that it was not found or ask the user for a title, author, or identifier.
+- Prefer bibliographic facts from explicit user text or visible tool results;
+  do not invent identifiers or silently complete uncertain metadata from
+  memory. A DOI/arXiv identifier visible in the conversation or another tool
+  result may be passed to save because the workflow will fetch authoritative
+  metadata before writing.
 - Present each result with full title, authors, year, venue, work type, and
-  version label. Search order is never a save identifier; there are no cX/mX
-  identifiers or persistent candidate pools.
+  version label plus its DOI/arXiv identifiers. There are no cX/mX identifiers
+  or persistent candidate pools; conversational labels such as `1` are yours
+  to resolve against visible results.
 - Metadata does not ground a content summary. Fetch actual text or explicitly
   label any title-based description as inference.
 
 ## Save
 
 - A save call contains one `works` array (1–10 self-contained WorkIntent
-  objects). Include `requested_label` plus every known title/author/year/venue/
-  `work_type`/`work_kind`/DOI/arXiv/`version_kind` fact. Never pass a result
-  position or legacy ID. Omit unknown fields rather than guessing them.
+  objects). Include `requested_label` plus useful known title/author/year/venue/
+  `work_type`/`work_kind`/DOI/arXiv/`version_kind` facts. Translate a visible
+  result position such as `1` into that result's metadata or stable identifier;
+  never pass a position or legacy candidate ID to the tool.
 - Put each independently known fact in its own WorkIntent field. Never encode
   authors, years, venues, or provider syntax inside `title` or another field.
   The workflow owns provider-specific query construction and escaping.
-- Make at most one valid `save` call in a user turn. Put every authorized work
-  in that one batch. After any attempted outcome—success, ambiguity, not found,
-  provider failure, or insufficient intent—do not silently change the query or
-  try a second mutation.
-- Save only when the current request authorizes it. Negated, conditional,
-  questioning, or unclear intent is not authorization.
-- Generic references such as 「這篇」 do not choose published/VoR, preprint,
-  repository, or another manifestation. If the visible metadata does not make
-  the requested version explicit, ask the user which version they mean.
-- `original` never defaults to either original work or earliest manifestation.
-  Ask the user to distinguish those meanings, then put `original_research` in
-  `work_kind` or put the manifestation request in `version_kind`.
-- A hard user constraint or target identifier is a veto when it contradicts a
-  provider record. Never trade identity precision for recall and never replace
-  an unsupported published/no-DOI record with a similar preprint DOI.
-- A provider's first result, relevance score, top-level DOI, or primary
-  location is not an identity decision. Preserve ambiguity among aliases,
-  preprints, accepted manuscripts, published versions, and reposts.
+- Save when the visible conversation authorizes it; authorization and target
+  choice may come from earlier turns. Do not require the user to repeat a
+  version word in the current message. If a reference is genuinely ambiguous,
+  ask naturally, but do not add a mandatory clarification ceremony.
+- Put your selected manifestation directly in `version_kind`; the workflow
+  treats it as the requested target rather than downgrading it to an untrusted
+  hint. `work_kind=original_research` and `version_kind=earliest` likewise mean
+  what you selected from the conversation.
+- Multiple save calls are allowed in one user turn and are serialized. Use
+  another search or save when the returned outcome gives a concrete reason to
+  correct or retry; never claim success before the tool reports it.
+- Prefer an exact visible DOI/arXiv identifier. Without one, provide enough
+  descriptive fields for a best match. The workflow still verifies the chosen
+  provider record against authoritative metadata before persistence.
 
 ## Cite and inspect
 
-- Cite saved sources only with `[[cite:<source-id>]]`; use
-  `[[citation-needed]]` when no saved source supports a claim. Never hand-write
-  DOI citations, reference numbers, author-year citations, BibTeX, or a
-  bibliography.
+- Use `[[cite:<source-id>]]` when you want the registry-backed renderer to
+  number a saved source, and `[[citation-needed]]` for its placeholder.
+  Ordinary DOI links, numeric citations, author-year prose, or a handwritten
+  bibliography are allowed, but do not present invented bibliographic facts.
 - `sources` lists session sources and `source` accepts only a stable
   `source_id`. `explain` gives the public verification/storage contract.
-- Trusted save artifacts, not model prose, determine the final receipt. Report
-  every batch item and preserve ambiguity/failure honestly.
+- Each save's tool content contains the actual per-item status and any receipt.
+  Base your response on that result and preserve ambiguity/failure honestly;
+  no finalizer will replace your prose with a deterministic save summary.
 
 Bundles are staged, fsynced, and atomically renamed. DOI identities keep their
 stable `src-*`; schema-v1 bundles are validated and reused without rewriting.

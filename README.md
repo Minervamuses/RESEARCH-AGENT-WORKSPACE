@@ -295,7 +295,7 @@ Skill 是手動啟用的工作模式,agent 不會自行決定啟用哪個 skill:
 
 內建 skills:
 
-- `citation`:驗證式引用工作流(見第 11 節);只授權 skill 專屬的 `citation_workflow` 工具,啟用時自動切回 normal thinking。也可用 `/citation` 啟用。
+- `citation`:對話式引用選擇與驗證保存(見第 11 節);只授權 skill 專屬的 `citation_workflow` 工具,啟用時自動切回 normal thinking。也可用 `/citation` 啟用。
 - `academic-paper-writing`:學術寫作、文獻回顧、段落/章節修訂、投稿支援。task modes:`revision`、`literature-review`、`drafting`、`submission-support`。允許檔案讀取、RAG、history search,選配 web search,禁止 `bash`。
 - `_prompt-master`:extended thinking 內部 helper,一般使用者通常不需手動啟用。
 
@@ -403,7 +403,7 @@ chunks = list_chunks()         # 從 raw.json 列 chunks,不跑 embedding
 
 ## 11. Citation Skill
 
-citation 是內建 skill(engine 位於 `app/skills/citation/`)。`/citation` 啟用後，`citation_workflow` 以 stateless 搜尋呈現完整 metadata；保存則接受自足的 WorkIntent，重新跨 provider 解析、阻擋作品／版本矛盾，再原子保存。
+citation 是內建 skill(engine 位於 `app/skills/citation/`)。`/citation` 啟用後，`citation_workflow` 以 stateless 搜尋呈現完整 metadata 與 DOI/arXiv 等穩定 identifier；保存則接受 agent 根據可見對話選定的自足 WorkIntent，取得正式 metadata/BibTeX 後原子保存。
 
 ```text
 /citation                      # 啟用 citation skill(不觸發網路);同時自動切回 normal thinking
@@ -414,30 +414,31 @@ citation 是內建 skill(engine 位於 `app/skills/citation/`)。`/citation` 啟
 模式與隔離:
 
 - 啟用會取代目前 active skill(無 restoration stack);啟用失敗保留原 skill。citation active 期間 `/thinking extended` 會被拒絕。
-- 停用/切換 skill 立即清除 in-memory workflow 與 session 來源 registry(已寫入磁碟的 bundle 保留);citation hint、renderer 與工具同時消失。
+- 停用/切換 skill 立即清除 session 來源 registry(已寫入磁碟的 bundle 保留);citation hint、renderer 與工具同時消失。
 - `citation_workflow` 是 skill 專屬工具:普通模式與其他 skills 完全綁不到,偽造的 tool call 也會被執行層(PolicyToolNode)拒絕。
-- 每個 user turn 最多一個合法 `save(works=[...])` mutation batch；一次可帶 1–10 個 WorkIntent。第一次 attempted outcome 不論成功、資訊不足、歧義或 provider/storage failure 都會消耗本輪寫入機會。
-- 搜尋結果沒有 cX/mX 或可回傳的順位 ID。下一輪保存時，模型必須由可見的完整 title/authors/year/venue/type/version metadata 建立 WorkIntent。
-- generic「這篇」版本不明時一律詢問，不預設 published/VoR；`original` 一律要求分辨 original work 與 earliest manifestation。
-- Actions 僅有 `search`、`save`、`sources`、`source`、`explain`。否定、條件、疑問或不明確語氣不得 save。
+- 每個 `save(works=[...])` 可帶 1–10 個 WorkIntent；同一 user turn 可以依工具結果再搜尋、修正或重試，多個 save 會序列化執行，不再有 one-shot mutation guard。
+- 搜尋結果沒有 cX/mX 或持久 candidate pool，但會顯示完整 title/authors/year/venue/type/version 及 DOI/arXiv。模型可理解對話中的「1」「第一篇」「正式版」等指稱，再用可見 metadata/identifier 建立 WorkIntent。
+- 作品、版本與寫入授權由 agent 依完整可見對話判斷；host 不再只掃描當前一句，也不再用 regex/provenance/binder 覆蓋模型的理解。確有歧義時仍由 agent 自然詢問。
+- Actions 僅有 `search`、`save`、`sources`、`source`、`explain`。`save` 的真實逐項結果與 receipt 直接出現在 tool content，供 agent 如實回覆。
 
-`search` 是探索式搜尋，可帶 `year_from`/`year_to`；年份限制會先送入 Crossref、DataCite 與可用的 OpenAlex，再做本地防禦性過濾。`save` 才進入特定作品的 identity resolution：WorkIntent 的 title/authors/year/venue/type 分欄傳入，各 provider adapter 自行產生適合的 query plan，而不是共用一串關鍵字。明確 DOI 直接走 doi.org exact lookup；明確 arXiv ID 直接走 export.arxiv.org，兩者都不先做模糊搜尋。
+`search` 是探索式搜尋，可帶 `year_from`/`year_to`；年份限制會先送入 Crossref、DataCite 與可用的 OpenAlex，再做本地防禦性過濾。`save` 才執行 agent 已選定的目標：WorkIntent 的 title/authors/year/venue/type/version 分欄傳入，各 provider adapter 自行產生適合的 query plan，而不是共用一串關鍵字。明確 DOI 直接走 doi.org exact lookup；明確 arXiv ID 直接走 export.arxiv.org，兩者都不先做模糊搜尋。
 
-Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bibliographic citation lookup；DataCite 使用 title/creator/publicationYear 欄位查詢並逐步放寬年份；OpenAlex 使用 exact phrase、author/date filters，再條件式放寬，且保留同一 Work 的多個 DOI locations。provider 第一名、score、OpenAlex top-level DOI/primary location 都只是候選證據；resolver 仍須做多欄位與版本判定，再由 doi.org CSL/BibTeX 重新驗證。無 DOI 的作品若命中 trusted authority 仍可保存。`source` 只接受 stable `source_id`。
+Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bibliographic citation lookup；DataCite 使用 title/creator/publicationYear 欄位查詢並逐步放寬年份；OpenAlex 使用 exact phrase、author/date filters，再條件式放寬。descriptive save 會依 agent 提交的欄位與 `version_kind` 選擇最佳相符記錄；程式不再充當第二個語意授權裁判。選中的 DOI 仍由 doi.org CSL/BibTeX 重新驗證，無 DOI 的作品若命中 trusted authority 仍可保存。`source` 只接受 stable `source_id`。
 
-引用政策(單一 finalization chokepoint、兩種明確政策):
+引用標記政策(單一 finalization chokepoint、兩種明確政策):
 
-- **citation inactive**:禁止一切 citation markers(含 `[[citation-needed]]`)、raw DOI、`[1]` 數字引用、作者年份引用與手寫 References;一般非 DOI 網址連結不受影響;renderer 不執行。
-- **citation active**:只接受 registry 中通過 `is_citable_source` 的 `[[cite:<source-id>]]` 與 `[[citation-needed]]`;renderer 負責編號與 bibliography。
-- save artifact 優先於模型文字；成功收據必須符合 live registry 的 canonical identity/path/verification level，全失敗也 deterministic render。
+- **citation inactive**:禁止 `[[cite:...]]`、`[[citation-needed]]` 等 renderer 專用 marker；renderer 不執行。
+- **citation active**:只接受 registry 中通過 `is_citable_source` 的 `[[cite:<source-id>]]` 與 `[[citation-needed]]`;renderer 負責這些 marker 的編號與 bibliography。
+- raw DOI、`[1]` 數字引用、作者年份引用與手寫 References 都是一般模型文字，兩種模式均不封鎖；未知或 dangling `[[...]]` marker 仍會封鎖。
+- finalizer 不會用 deterministic receipt prose 覆蓋模型回答。save artifact 仍供 telemetry 驗證；面向模型的 tool content 本身包含真實逐項 outcome/receipt。
 
 流程與保證:
 
-- **Discovery/Resolution**:search stateless；save 走 exact identifier 或 provider-specific strict→conditional fallback query，hard constraint 先 veto、score 只作 provider 內召回證據。
+- **Discovery/Resolution**:search stateless 且暴露穩定 identifier；save 信任模型提交的作品/版本 selection，走 exact identifier 或 provider-specific descriptive best-match query。
 - **驗證**:DOI winner 必須由 doi.org refetch，BibTeX 經 pybtex canonical round-trip，identity-critical 衝突一律零寫入。trusted non-DOI 記錄由 authority adapter 提供 metadata，以 `authority_metadata_verified` 等級保存(BibTeX 同樣走 canonical round-trip)。
 - **保存**:schema v2 canonical identity bundle 使用 source-slot 跨程序鎖、staging+fsync+rename；v1 DOI bundle只驗證／重用，不背景重寫。
-- **Batch artifact**:逐項保存 success/ambiguity/not-found/failure；不攜 provider arbitrary prose。
-- **範圍**:來源 registry 是 session 內、citation 模式內的狀態;turn record 與 Chroma history 不再夾帶 SourceRef snapshot或額外 receipt metadata(收據只存在於 finalized assistant text;舊資料中的 `sources_json` metadata 會被忽略,不影響一般 history 查詢)。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
+- **Batch result**:tool content 與 strict artifact 都列出逐項 success/reused/ambiguity/not-found/failure；不攜 provider arbitrary prose。artifact 供 telemetry，content 供 agent 判斷下一步及回覆。
+- **範圍**:來源 registry 是 session 內、citation 模式內的狀態;turn record 與 Chroma history 不夾帶 SourceRef snapshot或額外 receipt metadata。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
 
 ## 12. 疑難排解
 

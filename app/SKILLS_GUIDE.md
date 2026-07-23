@@ -41,10 +41,10 @@ Skill 採用**漸進式揭露（progressive disclosure）**：
 
 ### Built-in skill：`citation`
 
-`skills/citation/` 是內建的驗證式引用 skill，同一個資料夾**既是 skill bundle 也是可 import 的 `skills.citation` package**（stateless resolver/service、providers、gate、renderer、tool adapter 都住在裡面）。它有兩個一般 skill 沒有的特性：
+`skills/citation/` 是內建的引用 skill，同一個資料夾**既是 skill bundle 也是可 import 的 `skills.citation` package**（stateless resolver/service、providers、marker gate、renderer、tool adapter 都住在裡面）。它有兩個一般 skill 沒有的特性：
 
 1. **skill 專屬工具**：manifest 在 `tools.required.local` 要求 session-scoped 的 `citation_workflow` 工具。這類 skill 工具不屬於全域工具，普通模式與其他 skills 綁不到也呼叫不了（執行層 PolicyToolNode 會拒絕偽造呼叫）；只有 manifest 明確要求它的 skill 才綁得到。全域工具（local base tools + Web Search MCP）在 citation skill 下照常可用。
-2. **session 隔離副作用**：啟用時強制切回 normal thinking；停用或切換 skill 時清除來源 registry 與 one-shot turn guard。搜尋本身不建立 candidate pool。
+2. **session 隔離副作用**：啟用時強制切回 normal thinking；停用或切換 skill 時清除來源 registry。搜尋本身不建立 candidate pool，會直接回傳可供後續 save 使用的 metadata 與穩定 identifier；同輪多次 save 由工具序列化，不設 one-shot turn guard。
 
 `/citation` 是它的專屬啟用入口（等價於 `/skill citation` 加上提示訊息與自然語言 followup）。新增一般 skill 不需要、也不應該仿照這種 host 深度整合；請以 `academic-paper-writing` 為範本。
 

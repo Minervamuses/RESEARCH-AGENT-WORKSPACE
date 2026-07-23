@@ -1,4 +1,4 @@
-"""Citation gate: masking, marker validation, and strict blocking."""
+"""Citation gate: registry-backed marker integrity, not prose-style policing."""
 
 from skills.citation.gate import (
     GateViolation,
@@ -11,7 +11,7 @@ VERIFIED = frozenset({"src-abc123"})
 
 
 def _codes(violations: list[GateViolation]) -> set[str]:
-    return {v.code for v in violations}
+    return {violation.code for violation in violations}
 
 
 def _check(text, *, user_input="", verified=VERIFIED, active=True):
@@ -23,7 +23,7 @@ def _check(text, *, user_input="", verified=VERIFIED, active=True):
     )
 
 
-def test_clean_text_with_known_markers_passes():
+def test_known_markers_and_placeholder_pass_in_citation_mode():
     text = (
         "Transformers changed NLP [[cite:src-abc123]]. "
         "More work is needed [[citation-needed]]."
@@ -31,19 +31,28 @@ def test_clean_text_with_known_markers_passes():
     assert _check(text) == []
 
 
-def test_dangling_and_unknown_markers_block():
+def test_dangling_and_unknown_markers_still_block():
     assert _codes(_check("x [[cite:src-nope]]")) == {"dangling_cite"}
-    # The retired user-cite marker form is now just an unknown marker.
     assert _codes(_check("x [[user-cite:usr-nope]]")) == {"unknown_marker"}
     assert _codes(_check("x [[made-up:thing]]")) == {"unknown_marker"}
 
 
-def test_raw_doi_blocks_even_inside_markdown_links():
-    assert "raw_doi" in _codes(_check("see 10.1234/abc for details"))
-    assert "raw_doi" in _codes(_check("see https://doi.org/10.1234/abc"))
-    assert "raw_doi" in _codes(
-        _check("see [the paper](https://doi.org/10.1234/abc)")
+def test_raw_doi_numeric_author_year_and_bibliography_are_allowed():
+    text = (
+        "See https://doi.org/10.1234/abc and [1]. "
+        "As Smith et al. (2020) explain:\n\n"
+        "## References\n- Smith, A. (2020). A paper."
     )
+    assert _check(text) == []
+
+
+def test_raw_citation_prose_is_also_allowed_outside_citation_mode():
+    text = (
+        "Evidence [12] and (Vaswani et al., 2017). "
+        "DOI 10.48550/arXiv.1706.03762.\n\n"
+        "參考文獻：\n- Vaswani et al."
+    )
+    assert _check(text, active=False) == []
 
 
 def test_plain_web_links_are_allowed():
@@ -51,71 +60,49 @@ def test_plain_web_links_are_allowed():
     assert _check("docs at https://example.org/guide") == []
 
 
-def test_raw_numeric_citation_blocks_but_link_labels_do_not():
-    assert "raw_numeric_citation" in _codes(_check("as shown in [1]"))
-    assert "raw_numeric_citation" in _codes(_check("evidence [12] suggests"))
-    # A markdown link whose label is numeric is a link, not a citation.
-    assert _check("see [1](https://example.org/one)") == []
-
-
-def test_raw_author_year_blocks():
-    assert "raw_author_year" in _codes(_check("as (Vaswani et al., 2017) showed"))
-    assert "raw_author_year" in _codes(_check("Smith et al. (2020) argue that"))
-    assert "raw_author_year" in _codes(_check("this idea (Smith, 2020) is old"))
-
-
-def test_handwritten_bibliography_blocks():
-    text = "Some answer.\n\n## References\n- Vaswani, A. Attention is all you need."
-    assert "handwritten_bibliography" in _codes(_check(text))
-    assert "handwritten_bibliography" in _codes(_check("答案。\n\n參考文獻:\n- 某論文"))
-
-
-def test_code_fences_and_inline_code_are_not_scanned():
+def test_code_fences_and_inline_code_are_not_scanned_for_markers():
     text = (
-        "Run this:\n```python\ndoi = '10.1234/abc'  # [1] (Smith, 2020)\n```\n"
-        "and read `cite [2] 10.5555/xyz` carefully."
+        "Run this:\n```python\nmarker = '[[cite:ghost]]'\n```\n"
+        "and read `[[made-up:thing]]` carefully."
     )
     assert _check(text) == []
 
 
-def test_user_quote_block_is_not_scanned_when_it_matches_input():
-    user_input = "我看到論文說 as shown in [1] (Vaswani et al., 2017) 是對的嗎?"
+def test_user_quote_block_does_not_exempt_renderer_markers():
+    user_input = "Why did it emit [[cite:ghost]]?"
     text = (
-        "你引用的段落:\n"
-        "> as shown in [1] (Vaswani et al., 2017)\n"
-        "這段的說法需要查證 [[citation-needed]]。"
+        "You wrote:\n"
+        "> Why did it emit [[cite:ghost]]?\n"
+        "That marker would otherwise be invalid."
     )
-    assert _check(text, user_input=user_input) == []
+    assert _codes(_check(text, user_input=user_input)) == {"dangling_cite"}
 
 
 def test_quote_not_from_user_input_is_still_scanned():
-    text = "> as shown in [1] (Vaswani et al., 2017)\nsounds right."
-    codes = _codes(_check(text, user_input="unrelated question"))
-    assert "raw_numeric_citation" in codes
-    assert "raw_author_year" in codes
+    codes = _codes(_check(
+        "> Unsupported [[cite:ghost]].\nThat is wrong.",
+        user_input="unrelated question",
+    ))
+    assert codes == {"dangling_cite"}
 
 
 def test_mask_preserves_offsets():
-    text = "abc ```x``` def"
+    text = "abc ```[[cite:ghost]]``` def"
     masked = mask_unscanned_regions(text)
     assert len(masked) == len(text)
     assert masked.startswith("abc ") and masked.endswith(" def")
 
 
-def test_multiple_violations_all_reported():
-    text = "as [1] and (Smith, 2020) plus [[cite:ghost]] and 10.1234/raw"
-    codes = _codes(_check(text))
-    assert codes == {
-        "raw_numeric_citation",
-        "raw_author_year",
-        "dangling_cite",
-        "raw_doi",
-    }
+def test_multiple_marker_violations_are_all_reported():
+    codes = _codes(_check(
+        "[[cite:ghost]] plus [[made-up:thing]] and [[cite:another]]"
+    ))
+    assert codes == {"dangling_cite", "unknown_marker"}
 
 
-def test_inactive_policy_blocks_every_marker_form():
+def test_inactive_policy_blocks_every_renderer_marker_form():
     for text in (
-        "ok [[cite:src-abc123]]",          # even a would-be verified id
+        "ok [[cite:src-abc123]]",
         "todo [[citation-needed]]",
         "legacy [[user-cite:usr-x]]",
         "odd [[made-up]]",
@@ -123,29 +110,17 @@ def test_inactive_policy_blocks_every_marker_form():
         assert _codes(_check(text, active=False)) == {"citation_inactive_marker"}
 
 
-def test_inactive_policy_keeps_raw_form_blocks_and_allows_plain_links():
-    assert "raw_doi" in _codes(_check("see 10.1234/abc", active=False))
-    assert "raw_numeric_citation" in _codes(_check("as [1] shows", active=False))
-    assert "raw_author_year" in _codes(
-        _check("per (Smith, 2020)", active=False)
+def test_safe_message_describes_marker_errors_per_mode():
+    message = build_safe_message(
+        _check("bad [[cite:ghost]]"), citation_active=True,
     )
-    assert "handwritten_bibliography" in _codes(
-        _check("x\n\n## References\n- y", active=False)
-    )
-    # Ordinary non-DOI links stay allowed outside the skill.
-    assert _check("see [docs](https://example.org/guide)", active=False) == []
-    assert _check("docs at https://example.org/guide", active=False) == []
-
-
-def test_safe_message_lists_validation_errors_per_mode():
-    violations = _check("bad [1]")
-    message = build_safe_message(violations, citation_active=True)
-    assert "raw_numeric_citation" in message
-    assert "封鎖" in message
+    assert "dangling_cite" in message
+    assert "registry" in message
     assert "[[cite:" in message
 
     inactive = build_safe_message(
-        _check("bad [[citation-needed]]", active=False), citation_active=False,
+        _check("bad [[citation-needed]]", active=False),
+        citation_active=False,
     )
     assert "citation_inactive_marker" in inactive
     assert "/citation" in inactive

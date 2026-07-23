@@ -1,5 +1,10 @@
 # Citation WorkIntent 解析與保存流程落地計畫
 
+> 歷史文件（已被取代）：本文記錄 2026-07-13 的嚴格保存政策設計，
+> 包含 host 字面意圖綁定、單一 user turn 一次 mutation、版本 veto 與
+> deterministic finalizer。這些政策已在後續的 agent-trust 簡化重構中移除；
+> 現行契約請以 `README.md`、`guide.md` 與 `app/skills/citation/SKILL.md` 為準。
+
 日期:2026-07-13
 
 狀態:待審核；尚未修改 production code

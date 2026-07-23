@@ -1,13 +1,9 @@
-import json
-from pathlib import Path
+"""Model-selected citation targets and deterministic bibliographic lookup."""
 
 import pytest
 
 from skills.citation.providers.base import ProviderRecord
 from skills.citation.resolution import (
-    HostIntentBinder,
-    HostIntentClaim,
-    WorkConstraint,
     WorkIdentifier,
     WorkIntent,
     decide_resolution,
@@ -15,122 +11,154 @@ from skills.citation.resolution import (
 )
 
 
-def _hard(field, value):
-    return WorkConstraint(
-        field, value,
-        provenance="explicit_current_user",
-        requested_strength="hard",
-        effective_provenance="explicit_current_user",
-        effective_strength="hard",
-        host_verified=True,
+def manifestation(version, *, rank=0, year=2020, doi=None):
+    return ProviderRecord(
+        "fixture",
+        f"fixture:{version}",
+        rank,
+        title="A Work",
+        authors=["Ada Author"],
+        year=year,
+        venue="A Venue" if version == "published" else "",
+        work_type="article" if version == "published" else version,
+        version_kind=version,
+        doi=doi or f"10.1000/{version}",
     )
 
 
-@pytest.mark.parametrize("case", json.loads(
-    (Path(__file__).parent / "fixtures/citation_resolution_cases.json").read_text()
-))
-def test_resolution_corpus(case):
-    raw_intent = case["intent"]
-    constraints = ()
-    if raw_intent.get("work_kind"):
-        constraints = (_hard("work_kind", raw_intent["work_kind"]),)
-    identifiers = ()
-    if raw_intent.get("doi"):
-        identifiers = (WorkIdentifier("doi", raw_intent["doi"]),)
+@pytest.mark.parametrize("requested", ["published", "preprint", "repository", "repost"])
+def test_model_selected_version_directly_filters_manifestations(requested):
+    other = "published" if requested != "published" else "preprint"
+    intent = WorkIntent("selected", title="A Work", version_kind=requested)
+
+    decision = decide_resolution(intent, [
+        manifestation(other, rank=0),
+        manifestation(requested, rank=1),
+    ])
+
+    assert decision.status == "eligible"
+    assert decision.reason_code == "best_match"
+    assert decision.record.version_kind == requested
+
+
+def test_missing_version_uses_best_deterministic_match_without_forced_clarification():
+    intent = WorkIntent("this paper", title="A Work", authors=("Ada Author",))
+
+    decision = decide_resolution(intent, [
+        manifestation("published", rank=0),
+        manifestation("preprint", rank=1),
+    ])
+
+    assert decision.status == "eligible"
+    assert decision.record.version_kind == "published"
+    assert decision.reason_code != "version_clarification_required"
+
+
+def test_earliest_selection_chooses_oldest_dated_manifestation():
+    intent = WorkIntent("earliest", title="A Work", version_kind="earliest")
+
+    decision = decide_resolution(intent, [
+        manifestation("published", year=2022, rank=0),
+        manifestation("preprint", year=2020, rank=1),
+    ])
+
+    assert decision.status == "eligible"
+    assert decision.record.year == 2020
+    assert decision.record.version_kind == "preprint"
+
+
+@pytest.mark.parametrize("derivative_type", ["review", "posted-content"])
+def test_model_selected_original_research_excludes_derivative_record(
+    derivative_type,
+):
     intent = WorkIntent(
-        requested_label=case["name"],
-        title=raw_intent["title"],
-        authors=tuple(raw_intent.get("authors", [])),
-        year=raw_intent.get("year"),
-        identifiers=identifiers,
-        constraints=constraints,
+        "original",
+        title="A Work",
+        work_kind="original_research",
     )
-    record = ProviderRecord("fixture", "fixture:1", 0, **case["record"])
-    decision = evaluate_record(intent, record)
-    assert decision.status == case["status"]
-    assert decision.reason_code == case["reason"]
+    review = manifestation("published")
+    review.work_type = derivative_type
 
+    decision = evaluate_record(intent, review)
 
-def test_exact_identifier_does_not_override_title_conflict():
-    intent = WorkIntent("wanted", title="Right work", identifiers=(WorkIdentifier("doi", "10.1000/abc"),))
-    record = ProviderRecord("x", "x:1", 0, title="Entirely different", doi="10.1000/abc")
-    decision = evaluate_record(intent, record)
-    assert decision.status == "identity_conflict"
-    assert decision.reason_code == "title_mismatch"
-
-
-def test_generic_reference_with_two_versions_requires_clarification():
-    intent = WorkIntent("這篇", title="A Work", authors=("An Author",))
-    records = [
-        ProviderRecord("x", "x:published", 0, title="A Work", authors=["An Author"], doi="10.1000/pub", venue="Venue"),
-        ProviderRecord("x", "x:preprint", 1, title="A Work", authors=["An Author"], doi="10.1000/pre", work_type="preprint"),
-    ]
-    decision = decide_resolution(intent, records)
-    assert decision.status == "ambiguous"
-    assert decision.reason_code == "version_clarification_required"
-
-
-def test_unqualified_original_requires_semantic_disambiguation():
-    intent = WorkIntent("original", title="A Work")
-    result = HostIntentBinder().bind([intent], [HostIntentClaim("original", "original")])
-    assert result.ambiguous
-    assert result.reason_code == "intent_binding_ambiguous"
-
-
-def test_only_host_verified_hard_constraint_can_veto():
-    record = ProviderRecord("x", "x:1", 0, title="A Work", year=2020)
-    visible = WorkConstraint("year", "2017")
-    assert evaluate_record(WorkIntent("x", title="A Work", constraints=(visible,)), record).status == "eligible"
-    assert evaluate_record(WorkIntent("x", title="A Work", constraints=(_hard("year", "2017"),)), record).status == "identity_conflict"
+    assert decision.status == "not_found"
+    assert decision.reason_code == "not_original_research"
 
 
 @pytest.mark.parametrize(
-    "version_kind", ["published", "preprint", "repository", "repost"]
+    ("intent", "record", "reason"),
+    [
+        (
+            WorkIntent("title", title="Right work"),
+            ProviderRecord("x", "x:1", 0, title="Entirely different"),
+            "title_mismatch",
+        ),
+        (
+            WorkIntent("author", title="A Work", authors=("Ada Author",)),
+            ProviderRecord("x", "x:1", 0, title="A Work", authors=["Other Person"]),
+            "author_mismatch",
+        ),
+        (
+            WorkIntent("year", title="A Work", year=2017),
+            ProviderRecord("x", "x:1", 0, title="A Work", year=2020),
+            "year_mismatch",
+        ),
+        (
+            WorkIntent("venue", title="A Work", venue="Venue A"),
+            ProviderRecord("x", "x:1", 0, title="A Work", venue="Venue B"),
+            "venue_mismatch",
+        ),
+    ],
 )
-def test_every_host_verified_version_kind_vetoes_other_manifestations(version_kind):
-    bound = HostIntentBinder().bind(
-        [WorkIntent("wanted", title="A Work")],
-        [HostIntentClaim("version_kind", version_kind)],
-    ).intents[0]
-    requested = ProviderRecord(
-        "x", f"x:{version_kind}", 0, title="A Work", version_kind=version_kind
+def test_descriptive_fields_still_reject_nonmatching_provider_records(
+    intent, record, reason,
+):
+    decision = evaluate_record(intent, record)
+    assert decision.status == "not_found"
+    assert decision.reason_code == reason
+
+
+def test_exact_identifier_is_the_model_selected_target_not_a_second_semantic_vote():
+    intent = WorkIntent(
+        "selected DOI",
+        title="A stale conversational title",
+        identifiers=(WorkIdentifier("doi", "10.1000/abc"),),
     )
-    other = ProviderRecord(
-        "x",
-        "x:other",
-        1,
-        title="A Work",
-        version_kind=("published" if version_kind != "published" else "preprint"),
+    record = ProviderRecord(
+        "doi.org",
+        "doi.org:10.1000/abc",
+        0,
+        title="Authoritative title",
+        doi="10.1000/abc",
     )
 
-    assert evaluate_record(bound, requested).status == "eligible"
-    mismatch = evaluate_record(bound, other)
-    assert mismatch.status == "identity_conflict"
-    assert mismatch.reason_code == "hard_version_mismatch"
+    decision = evaluate_record(intent, record)
+
+    assert decision.status == "eligible"
+    assert decision.reason_code == "exact_identifier"
 
 
-def test_binder_injects_single_item_claim_and_rejects_unbound_multi_item_claim():
-    binder = HostIntentBinder()
-    one = binder.bind([WorkIntent("one", title="One")], [HostIntentClaim("year", "2020")])
-    assert one.intents[0].constraints[0].is_hard
-    multi = binder.bind(
-        [WorkIntent("one", title="One"), WorkIntent("two", title="Two")],
-        [HostIntentClaim("year", "2020")],
+def test_conflicting_identifier_does_not_match_a_different_record():
+    intent = WorkIntent(
+        "selected DOI",
+        identifiers=(WorkIdentifier("doi", "10.1000/right"),),
     )
-    assert multi.ambiguous
-    assert all(i.binding_reason == "intent_binding_ambiguous" for i in multi.intents)
-
-
-def test_negative_target_never_becomes_eligible():
-    result = HostIntentBinder().bind(
-        [WorkIntent("one", title="One")],
-        [HostIntentClaim("year", "2020", polarity="negative")],
+    record = ProviderRecord(
+        "x", "x:wrong", 0, title="A Work", doi="10.1000/wrong",
     )
-    assert evaluate_record(result.intents[0], ProviderRecord("x", "x:1", 0, title="One")).status == "insufficient_intent"
+
+    decision = evaluate_record(intent, record)
+
+    assert decision.status == "not_found"
+    assert decision.reason_code == "identifier_mismatch"
 
 
-def test_bounds_are_strict():
+def test_bounds_and_identifier_validation_remain_strict():
     with pytest.raises(ValueError):
         WorkIntent("x", title="a" * 513)
     with pytest.raises(ValueError):
         WorkIdentifier("doi", "c1")
+    with pytest.raises(ValueError):
+        WorkIntent("x", identifiers=tuple(
+            WorkIdentifier("doi", f"10.1000/{index}") for index in range(9)
+        ))
