@@ -114,6 +114,8 @@ class ApplyReport:
 
 @dataclass(frozen=True)
 class ExtensionStatus:
+    dropin_root: Path
+    state_root: Path
     desired_count: int
     applied_count: int
     applied_revision: int
@@ -624,6 +626,8 @@ class ExtensionManager:
             manager_available = True
             manager_error = None
         return ExtensionStatus(
+            dropin_root=paths.dropin_root,
+            state_root=paths.state_root,
             desired_count=len(scan.items),
             applied_count=len(registry.extensions),
             applied_revision=registry.revision,

@@ -183,6 +183,8 @@ def test_status_never_constructs_model_and_reports_restart(tmp_path):
     )
 
     assert status.applied_count == 1
+    assert status.dropin_root == Path(config.extension_dropin_dir).resolve()
+    assert status.state_root == Path(config.extension_state_dir).resolve()
     assert status.applied_revision == 1
     assert status.restart_required is True
     assert status.manager_available is True

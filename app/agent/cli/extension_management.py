@@ -93,6 +93,8 @@ def render_apply_report(report: ApplyReport) -> str:
 def render_status(status: ExtensionStatus) -> str:
     lines = [
         "Extension Management status",
+        f"drop-in root: {status.dropin_root}",
+        f"state root: {status.state_root}",
         f"desired: {status.desired_count}",
         f"applied: {status.applied_count}",
         f"applied revision: {status.applied_revision}",
