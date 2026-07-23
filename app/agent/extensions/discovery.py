@@ -199,6 +199,8 @@ def scan_extensions(root: Path, *, config: AgentConfig) -> ScanResult:
             complete = False
             continue
         for bundle in children:
+            if bundle.name.startswith("."):
+                continue
             item = inspect_bundle(kind, bundle.name, bundle, config=config)
             items[item.key] = item
             observed_ids[item.id.casefold()].append(item.key)

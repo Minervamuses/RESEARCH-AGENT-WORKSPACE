@@ -9,3 +9,9 @@ build/
 *.sqlite3
 *:Zone.Identifier
 cite/.staging-*
+/app/tool/skill/*
+!/app/tool/skill/.gitkeep
+/app/tool/mcp/*
+!/app/tool/mcp/.gitkeep
+/app/tool/local/*
+!/app/tool/local/README.md

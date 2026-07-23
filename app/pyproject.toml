@@ -24,6 +24,8 @@ dependencies = [
 packages = [{ include = "agent" }, { include = "skills" }]
 include = [
     { path = "skills/citation/venue_catalog.yaml", format = ["sdist", "wheel"] },
+    { path = "tool/_internal/extension-management/SKILL.md", format = ["sdist", "wheel"] },
+    { path = "tool/local/README.md", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
