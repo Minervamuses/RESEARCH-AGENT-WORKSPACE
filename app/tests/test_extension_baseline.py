@@ -24,7 +24,9 @@ def test_default_slash_commands_use_case_insensitive_local_lookup():
 
     assert registry.get("STATUS") is registry.get("status")
     assert registry.get("SKILL") is registry.get("skill")
-    assert registry.get("extension-management") is None
+    assert registry.get("Extension-Management") is registry.get(
+        "extension-management"
+    )
 
 
 def test_only_web_search_mcp_is_global_before_extension_changes():

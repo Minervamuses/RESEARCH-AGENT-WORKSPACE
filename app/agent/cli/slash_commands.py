@@ -139,6 +139,8 @@ async def execute_slash_command(
 
 def build_default_registry() -> SlashCommandRegistry:
     """Create the built-in local slash command set for the chat CLI."""
+    from agent.cli.extension_management import handle_extension_management
+
     return SlashCommandRegistry(
         [
             SlashCommand(
@@ -165,6 +167,13 @@ def build_default_registry() -> SlashCommandRegistry:
                 name="skill",
                 description="Activate or deactivate a local skill.",
                 handler=_handle_skill,
+            ),
+            SlashCommand(
+                name="extension-management",
+                description=(
+                    "Scan and apply drop-in Skill/MCP changes for next restart."
+                ),
+                handler=handle_extension_management,
             ),
             SlashCommand(
                 name="init",
