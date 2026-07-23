@@ -384,6 +384,7 @@ do_not_index: true
 | `/mode [normal|plan]` | 切換一般模式或 plan mode；不帶參數會出互動選單 |
 | `/thinking [normal|extended]` | 切換一般回答或 extended thinking |
 | `/skill [name|none] [mode]` | 啟用/停用 skill；不帶參數會出互動選單 |
+| `/Extension-Management [--dry-run|status]` | 管理 drop-in Skill/MCP；套用後重啟才生效 |
 | `/init` | ingest host workspace，排除 `app/` 與 `rag/` |
 | `/ingest <file-or-folder>` | upsert 單檔或資料夾到 RAG store |
 | `/sync [folder]` | dry run 檢查磁碟與 store 差異 |
@@ -425,6 +426,48 @@ Plan mode：
 ```
 
 如果 key 未設定或模型 slug 在 OpenRouter 不可用，切換時會直接報錯。這是預期的 fail-fast 設計；請先完成 API key 與模型設定。
+
+### `/Extension-Management`
+
+這個指令用來安裝、更新或移除使用者下載的 Skill/MCP，不需要為每個工具修改 host 程式：
+
+```text
+app/tool/
+├── skill/<id>/SKILL.md
+├── mcp/<id>/extension.yaml
+└── local/README.md
+```
+
+實際流程：
+
+1. 把完整 bundle 拖進 `tool/skill/` 或 `tool/mcp/`；資料夾 ID 使用小寫英數與連字號。
+2. 輸入 `/Extension-Management --dry-run`，查看 add/update/delete、blocked reason，以及 MCP 的完整啟動綁定。
+3. 輸入 `/Extension-Management`；確認 resolved command、args、cwd、env 來源、family 與 scope 後輸入 `yes`。
+4. 指令回報 `restart_required: true` 後，結束並重啟 CLI。
+5. Skill 會出現在新 session 的 `/skill`；MCP 工具會在新 session 啟動。舊 session 不變。
+
+有變更的 apply/dry-run 會用目前設定的 chat model 做一次隔離規劃，並 fresh-read package 內的私有管理 Skill；它沒有檔案寫入或 process execution 權限，也不會出現在一般 `/skill`。`/Extension-Management status` 是 host-only 操作，不用 LLM，也不啟動 MCP。它會顯示實際 drop-in/state root、desired/applied/running revision、restart 狀態、已載入 MCP family 與 startup diagnostics；wheel 安裝版請以這裡顯示的 user-data 路徑為準。
+
+MCP v1 只接受已經能直接執行的 stdio server。建議 descriptor：
+
+```yaml
+schema_version: 1
+kind: mcp
+id: example
+family: example
+scope: skill
+runtime:
+  transport: stdio
+  command: node
+  args: [server.js]
+  cwd: .
+environment:
+  API_TOKEN:
+    from_env: EXAMPLE_API_TOKEN
+    required: true
+```
+
+Secret 只能從 host 環境變數引用，不會寫進 registry。需要 build/install/download、HTTP/SSE/WebSocket、bundle 外 entrypoint、literal secret 或模糊啟動方式時會被阻擋。Apply/dry-run 都不執行 bundle script 或啟動 MCP；原始 drop-in 不會被管理器改寫或刪除。Local Tool 動態載入延後到 v2，`tool/local/` 目前不會執行任何內容。
 
 ## 10. Agent 可用工具
 
@@ -524,29 +567,36 @@ Skill 啟用後會影響：
 
 ## 13. Skills 管理
 
-Skills 預設放在：
+一般使用者安裝從網路下載的 Skill，請走 drop-in 流程：
 
 ```text
-app/skills/
+app/tool/skill/<skill-name>/
 ```
 
-每個 skill 是一個資料夾，至少要有：
+至少放入 `SKILL.md`，然後執行：
 
 ```text
-app/skills/<skill-name>/SKILL.md
+/Extension-Management --dry-run
+/Extension-Management
 ```
 
-基本結構：
+確認後重啟 CLI。更新時直接替換/修改同一個 drop-in bundle 再重跑指令；刪除時移走該 bundle 再重跑指令。管理器保留原始資料夾不動，只更新受管理副本；invalid update 不會覆蓋上一個可用版本。
+
+Drop-in Skill 的基本結構：
 
 ```text
-app/skills/my-skill/
+app/tool/skill/my-skill/
 ├── SKILL.md
 ├── manifest.yaml
 └── references/
     └── checklist.md
 ```
 
-### 新增 skill
+`SKILL.md` 的 UTF-8 YAML frontmatter 至少要有 `name` 和 `description`，且 `name` 必須與資料夾名稱一致。外掛的 scripts 只會被當成資源，不會自動執行。
+
+### Repo 內建 Skill（開發者）
+
+`app/skills/` 保留給隨專案版本控管的 built-in Skills。開發者要新增 built-in 時：
 
 1. 建資料夾，名稱用小寫 kebab-case，例如 `literature-screening`。
 2. 新增 `SKILL.md`，開頭要有 YAML frontmatter：
@@ -567,18 +617,14 @@ Follow the user's inclusion and exclusion criteria...
 最小 manifest 範例：
 
 ```yaml
-capabilities:
+tools:
   required:
-    - file.read
-    - rag.search
+    mcp_families:
+      - github
 
 resources: []
 task_modes:
   - screening
-
-tool_policy:
-  disallow:
-    - bash
 ```
 
 4. 重啟 chat CLI，或建立新的 `ChatSession`。目前 CLI 啟動時會掃描 skills；已啟動的 session 不會自動重新掃 skill list。
@@ -601,24 +647,12 @@ rm -rf app/skills/my-skill
 
 支援欄位：
 
-- `capabilities.required`: 必要 capability。解析不到可用工具會讓 skill 啟用失敗。
-- `capabilities.optional`: 選配 capability。解析不到不阻止啟用。
+- `tools.required.local` / `tools.required.mcp_families`: 必要工具；解析不到會讓 skill 啟用失敗。
+- `tools.optional.local` / `tools.optional.mcp_families`: 選配工具；解析不到不阻止啟用。
 - `resources`: skill 內的補充檔案，可標記 `pinned: true`。
 - `task_modes`: `/skill <name> <mode>` 可用的模式。
-- `tool_policy.disallow`: 禁用工具或 MCP family pattern。
 
-目前 capability map：
-
-| Capability | 對應工具 |
-|---|---|
-| `file.read` | `read_file` |
-| `rag.search` | `rag_explore`, `rag_search`, `rag_get_context` |
-| `history.search` | `recall_history` |
-| `shell.execute` | `bash` |
-| `web.search` | Web Search MCP family |
-| `github.repo.read` | GitHub MCP family |
-
-`manifest.yaml` 是嚴格 schema；未知欄位、錯誤型別、空的 `capabilities: {}` 都會在啟用 skill 時報錯。
+`manifest.yaml` 是嚴格 schema；未知欄位、錯誤型別、空的 `tools: {}`，以及舊格式 `capabilities` / `tool_policy` 都會在啟用時報錯。Local base tools、Web Search 與 scope=`global` 的 drop-in MCP 是全域工具；GitHub 與 scope=`skill` 的 drop-in MCP 必須由 active Skill 明確要求 family。
 
 ### Skill references
 

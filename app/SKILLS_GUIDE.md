@@ -435,6 +435,12 @@ Group findings by severity:
 
 ## 七、新建 Skill 的工作流程
 
+先分清楚用途：
+
+- **使用者下載的外部 Skill**：放到 `tool/skill/<skill-name>/`，執行 `/Extension-Management`，確認後重啟。不要修改 host Python，也不要搬進 `skills/`。
+- **隨專案版本控管的 built-in Skill**：才直接建立 `skills/<skill-name>/` 並提交程式庫。
+- `tool/_internal/extension-management/` 是 package 內的私有管理規則；每次管理操作都會重新讀取，但一般 `/skill` 不會列出，也不得拿使用者 drop-in 覆蓋。
+
 當 AI 助手或開發者要新增一個 skill，依序做：
 
 1. **確認流程已成熟**
@@ -451,8 +457,8 @@ Group findings by severity:
    - `description`：套用第三節的公式
 
 4. **視需要撰寫 manifest.yaml**
-   - 全域工具（local base tools + Web Search MCP）不需宣告，永遠可用
-   - 需要 skill 專屬工具或非 web 的 MCP family 時，才使用 `tools.required` / `tools.optional`
+   - 全域工具（local base tools + Web Search MCP + scope=`global` 的 drop-in MCP）不需宣告，永遠可用
+   - 需要 skill 專屬工具、GitHub 或 scope=`skill` 的 drop-in MCP family 時，才使用 `tools.required` / `tools.optional`
    - 需要 task mode 時，使用 `task_modes`
    - 需要 reference routing 時，使用 `resources`
    - 不要寫空的 `tools: {}`；沒有專屬工具就省略 `tools`
@@ -462,7 +468,8 @@ Group findings by severity:
    - 控制在 500 行以內
 
 6. **本地驗證**
-   - 啟動 agent，用 `/skill <name>` 或 `/skill <name> <mode>` 明確啟用
+   - 外部 Skill 先跑 `/Extension-Management --dry-run`、apply 並重啟；built-in Skill 直接重啟
+   - 用 `/skill <name>` 或 `/skill <name> <mode>` 明確啟用
    - 確認啟用時沒有 manifest validation / capability resolution 錯誤
    - 確認 agent 真的有讀 `SKILL.md` 並照做
 

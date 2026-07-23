@@ -188,6 +188,7 @@ repo/folder ingest 收集常見文字與程式檔:
 | `/thinking [normal\|extended]` | 切換一般回答或 extended thinking |
 | `/skill [name\|none] [mode]` | 啟用/停用 skill;不帶參數出互動選單 |
 | `/citation [文字\|off]` | 啟用 citation skill(持續生效);帶文字時同時把該句話交給 agent;`off` 停用 |
+| `/Extension-Management [--dry-run\|status]` | 掃描並套用 drop-in Skill/MCP；重啟後生效 |
 | `/init` | ingest host workspace,排除 `app/` 與 `rag/` |
 | `/ingest <file-or-folder>` | upsert 單檔或資料夾到 RAG store |
 | `/sync [folder]` | dry run 檢查磁碟與 store 差異 |
@@ -205,6 +206,40 @@ repo/folder ingest 收集常見文字與程式檔:
 - **normal**(預設):直接的 agent flow。
 - **extended**:啟用較重流程——prompt rewrite、候選回答、review/revise、final validation。適合嚴謹推理、寫作、長文本修訂,但較慢,且依賴 OpenRouter key 與 config 中 reviewer/rewrite/repair/fusion 模型的可用性。模型 slug 不會預先驗證;key 缺失或模型不可用時,切換當下會直接報錯(fail-fast 設計),請先完成設定。
 
+### `/Extension-Management`
+
+使用者下載新的 Skill 或 ready-to-run stdio MCP 後，不必修改 Python：
+
+1. 把整個資料夾放進 `app/tool/skill/<id>/` 或 `app/tool/mcp/<id>/`。
+2. 用 `/Extension-Management --dry-run` 查看完整增、改、刪與 MCP 啟動命令。
+3. 用 `/Extension-Management`，核對畫面後輸入 `yes`。
+4. 關閉並重新啟動 CLI；新的 Skill/MCP 才會進入新 session。
+
+有變更的 apply/dry-run 會用目前設定的 chat model 做一次隔離規劃，並在每次操作重新讀取 package 內的私有管理 Skill；該 Skill 不會出現在一般 `/skill`。`/Extension-Management status` 不呼叫模型或啟動 MCP，會顯示 drop-in/state 路徑、desired/applied/running revision、目前載入的 MCP 與診斷。指令名稱大小寫不敏感。
+
+Skill 至少要有 UTF-8 `SKILL.md`，frontmatter 的 `name` 必須等於資料夾 ID；可另放現有格式的 `manifest.yaml`、`references/`、`assets/`。MCP 建議附上嚴格的 `extension.yaml`：
+
+```yaml
+schema_version: 1
+kind: mcp
+id: example
+family: example
+scope: skill             # skill 或 global
+runtime:
+  transport: stdio
+  command: python3       # 也支援 node 等已允許的直譯器
+  args: [server.py]
+  cwd: .
+environment:
+  API_TOKEN:
+    from_env: EXAMPLE_API_TOKEN
+    required: true
+```
+
+管理畫面會列出 resolved command、argv、cwd、環境變數來源、family、scope 與 binding hash；批准只對這組內容有效。Apply 只寫入受管理副本與 registry，不會啟動 MCP、改寫原始 drop-in，或改變目前 session。缺少 descriptor 時管理 agent 只可根據 bundle metadata 提出唯一、可直接執行的 stdio 啟動方式；需要 `pip install`、`npm install`、build、下載、遠端 transport 或無法唯一判定時會 blocked。`tool/local/` 在 v1 只保留位置，不會 import/execute。
+
+Source checkout 的 drop-in root 是 `app/tool/`；wheel 安裝版使用平台 user-data 目錄，以 `status` 顯示的實際路徑為準。受管理 state 與使用者 drop-in 分開；`--no-mcp` 會略過內建和 drop-in MCP，但已套用 Skill 仍可載入。
+
 ## 7. Agent 可用工具
 
 一般模式下的本地工具:
@@ -220,7 +255,7 @@ repo/folder ingest 收集常見文字與程式檔:
 
 `read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。
 
-MCP 工具:Web Search MCP 預設載入,用於即時網路搜尋；GitHub MCP 是選配,用於遠端 repo、PR、issue、Actions。
+MCP 工具:Web Search MCP 預設載入,用於即時網路搜尋；GitHub MCP 是選配,用於遠端 repo、PR、issue、Actions；獲准的 drop-in MCP 會在下一次啟動加入。
 
 工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;問早先對話內容 → `recall_history`;問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
 
@@ -266,7 +301,9 @@ Skill 是手動啟用的工作模式,agent 不會自行決定啟用哪個 skill:
 
 Skill 啟用後會影響:agent 看到的指令、可用工具 policy、task mode、pinned references 是否自動進 context。
 
-### 新增/修改/刪除 skill
+### 修改 repo 內建 skill（開發者）
+
+一般使用者安裝外部 Skill 應使用上一節的 `app/tool/skill/` + `/Extension-Management` 流程。以下 `app/skills/` 是隨專案版本控管的內建 Skill，仍由開發者直接修改。
 
 Skills 放在 `app/skills/<skill-name>/`,至少要有 `SKILL.md`:
 
@@ -296,7 +333,7 @@ Follow the user's inclusion and exclusion criteria...
 
 ### `manifest.yaml`
 
-工具模型是兩級的:**全域工具**(local base tools:`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`,加上已載入的 Web Search MCP family)在普通模式與所有 skill 下永遠可用;其他工具(如 GitHub MCP family、`citation_workflow`)只有在 active skill 的 manifest `tools` 區段明確要求時才存在。
+工具模型是兩級的:**全域工具**(local base tools:`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`,加上已載入的 Web Search 與 scope=`global` drop-in MCP family)在普通模式與所有 skill 下永遠可用;其他工具(如 GitHub、scope=`skill` drop-in MCP family、`citation_workflow`)只有在 active skill 的 manifest `tools` 區段明確要求時才存在。
 
 最小範例(沒有專屬工具的 skill 可完全省略 `tools`):
 
