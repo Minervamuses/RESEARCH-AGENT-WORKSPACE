@@ -4,7 +4,7 @@
 
 目標分支：repair_temp
 
-狀態：v1 已依本計畫完成實作與自動測試；待補使用者角度的隔離沙盒驗收紀錄。
+狀態：v1 已完成實作、自動測試、wheel smoke test 與使用者角度的隔離沙盒驗收；結果見 extension_management_user_trial.md。
 
 ## 1. 這個計畫究竟要做什麼
 
