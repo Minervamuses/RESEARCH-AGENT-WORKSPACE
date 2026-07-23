@@ -48,6 +48,7 @@ from agent.observability import (
     log_citation_save_metrics,
 )
 from agent.skills import (
+    SkillMetadata,
     SkillRuntime,
     discover_skills,
     load_skill_runtime,
@@ -115,6 +116,9 @@ class ChatSession:
         progress_cb=None,
         web_search_tool_names: set[str] | frozenset[str] | None = None,
         mcp_families: dict[str, str] | None = None,
+        loaded_skills: list[SkillMetadata] | None = None,
+        running_extension_revision: int = 0,
+        extension_startup_diagnostics: tuple[str, ...] = (),
     ):
         self.config = config
         self.recursion_limit = recursion_limit
@@ -126,7 +130,15 @@ class ChatSession:
         self.mcp_families = dict(mcp_families or {})
         self.web_search_tool_names = frozenset(web_search_tool_names or ())
 
-        self.loaded_skills = discover_skills(config)
+        self.loaded_skills = (
+            list(loaded_skills)
+            if loaded_skills is not None
+            else discover_skills(config)
+        )
+        self.running_extension_revision = running_extension_revision
+        self.extension_startup_diagnostics = tuple(
+            extension_startup_diagnostics
+        )
         self.system_prompt_message = SystemMessage(content=system_prompt)
         self.recent_turns: list[TurnRecord] = []
 
@@ -621,6 +633,7 @@ class ChatSession:
             all_tools=self._tool_universe_refs(),
             mcp_families=self.mcp_families,
             task_mode=task_mode,
+            catalog=self.loaded_skills,
         )
         previous = self.active_skill_runtime
         self.active_skill_runtime = runtime
@@ -943,6 +956,10 @@ class ChatSession:
             "mcp_families": (
                 ", ".join(sorted(set(self.mcp_families.values()))) or "none"
             ),
+            "extension_revision": self.running_extension_revision,
+            "extension_diagnostics": "; ".join(
+                self.extension_startup_diagnostics
+            ),
             "active_skill": (
                 self.active_skill_runtime.name
                 if self.active_skill_runtime is not None
@@ -975,6 +992,14 @@ class ChatSession:
         MCP tool loading is async; turn processing stays asynchronous via
         graph.astream once the session is built.
         """
+        builtin_skills = discover_skills(config)
+        from agent.extensions.startup import load_extension_startup
+
+        extension_startup = load_extension_startup(
+            config,
+            builtin_skills=builtin_skills,
+        )
+        loaded_skills = [*builtin_skills, *extension_startup.skills]
         extra_tools: list = []
         if load_mcp:
             from agent.mcp import load_mcp_tools_with_families
@@ -998,4 +1023,7 @@ class ChatSession:
             progress_cb=progress_cb,
             web_search_tool_names=web_search_tool_names,
             mcp_families=families,
+            loaded_skills=loaded_skills,
+            running_extension_revision=extension_startup.revision,
+            extension_startup_diagnostics=extension_startup.diagnostics,
         )

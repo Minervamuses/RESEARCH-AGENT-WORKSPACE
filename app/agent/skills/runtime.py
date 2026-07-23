@@ -160,9 +160,10 @@ def load_skill_runtime(
     all_tools: Sequence[Any],
     mcp_families: Mapping[str, str] | None = None,
     task_mode: str | None = None,
+    catalog: Sequence[SkillMetadata] | None = None,
 ) -> SkillRuntime:
     """Load a skill and resolve its runtime tool access."""
-    metadata = find_skill_metadata(name, config=config)
+    metadata = find_skill_metadata(name, config=config, catalog=catalog)
     if metadata is None:
         raise KeyError(f"unknown skill: {name}")
 
@@ -202,10 +203,16 @@ def load_skill_runtime(
     )
 
 
-def find_skill_metadata(name: str, *, config: AgentConfig) -> SkillMetadata | None:
+def find_skill_metadata(
+    name: str,
+    *,
+    config: AgentConfig,
+    catalog: Sequence[SkillMetadata] | None = None,
+) -> SkillMetadata | None:
     """Find a discovered skill by name."""
     normalized = name.casefold()
-    for skill in discover_skills(config):
+    skills = discover_skills(config) if catalog is None else catalog
+    for skill in skills:
         if skill.name.casefold() == normalized:
             return skill
     return None

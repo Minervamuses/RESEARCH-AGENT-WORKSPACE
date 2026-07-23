@@ -5,6 +5,7 @@ from agent.skills.metadata import (
     DEFAULT_SKILLS_DIR,
     SkillMetadata,
     discover_skills,
+    read_skill_metadata,
     resolve_skills_dir,
 )
 from agent.skills.runtime import (
@@ -18,6 +19,7 @@ __all__ = [
     "DEFAULT_SKILLS_DIR",
     "SkillMetadata",
     "discover_skills",
+    "read_skill_metadata",
     "resolve_skill_tool_access",
     "resolve_skills_dir",
     "SkillRuntime",

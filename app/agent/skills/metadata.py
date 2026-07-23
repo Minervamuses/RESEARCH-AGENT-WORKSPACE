@@ -56,6 +56,14 @@ def discover_skills(config: AgentConfig | None = None) -> list[SkillMetadata]:
     return skills
 
 
+def read_skill_metadata(skill_file: Path) -> SkillMetadata:
+    """Read one exact public SKILL.md or raise when metadata is invalid."""
+    metadata = _read_skill_metadata(skill_file)
+    if metadata is None:
+        raise ValueError(f"invalid Skill metadata: {skill_file}")
+    return metadata
+
+
 def load_skill_file(path: Path) -> tuple[Mapping[str, Any] | None, str]:
     """Read a SKILL.md once and parse its YAML frontmatter.
 
