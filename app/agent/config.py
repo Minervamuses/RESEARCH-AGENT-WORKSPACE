@@ -78,6 +78,16 @@ class AgentConfig(RAGConfig):
     # Optional local skills directory. When unset, defaults to `<repo>/skills`.
     skills_dir: str | None = None
 
+    # User-managed extension roots.  The drop-in directory is desired state;
+    # the state directory contains host-validated copies and registry metadata.
+    # Both are injectable so tests and installed deployments never write into
+    # package directories.
+    extension_dropin_dir: str | None = None
+    extension_state_dir: str | None = None
+    extension_max_files: int = 512
+    extension_max_file_bytes: int = 8 * 1024 * 1024
+    extension_max_bundle_bytes: int = 64 * 1024 * 1024
+
     # Citation bundle output directory. Highest-precedence override; when
     # unset the CITATION_OUTPUT_DIR env var, then workspace cite/, then the
     # platform user-data fail-safe apply (see citation.storage.resolve_output_dir).
