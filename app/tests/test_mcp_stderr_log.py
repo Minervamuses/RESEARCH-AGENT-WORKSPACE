@@ -72,3 +72,25 @@ def test_spec_to_connection_prepares_log(monkeypatch, tmp_path):
     assert oct(log_path.stat().st_mode & 0o777) == "0o600"
     assert "=== mcp run" in log_path.read_text(encoding="utf-8")
     assert str(log_path) in " ".join(conn["args"])
+
+
+def test_dropin_spec_uses_direct_argv_cwd_and_env_without_shell(tmp_path):
+    spec = MCPServerSpec(
+        name="clock",
+        family="clock",
+        command="/usr/bin/python3",
+        args=["server.py"],
+        env={"TOKEN": "value"},
+        cwd=str(tmp_path),
+        sanitize_stdout=False,
+    )
+
+    conn = _spec_to_connection(spec)
+
+    assert conn == {
+        "transport": "stdio",
+        "command": "/usr/bin/python3",
+        "args": ["server.py"],
+        "env": {"TOKEN": "value"},
+        "cwd": str(tmp_path),
+    }

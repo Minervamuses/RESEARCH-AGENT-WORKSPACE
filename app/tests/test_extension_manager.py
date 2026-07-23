@@ -176,12 +176,18 @@ def test_status_never_constructs_model_and_reports_restart(tmp_path):
         ),
     )
 
-    status = no_model.status(running_revision=0)
+    status = no_model.status(
+        running_revision=0,
+        running_mcp_families=("clock",),
+        startup_diagnostics=("mcp:broken: applied_but_unavailable",),
+    )
 
     assert status.applied_count == 1
     assert status.applied_revision == 1
     assert status.restart_required is True
     assert status.manager_available is True
+    assert status.running_mcp_families == ("clock",)
+    assert "mcp:broken: applied_but_unavailable" in status.diagnostics
 
 
 def test_delete_removes_only_applied_entry_and_not_dropin_root(tmp_path):

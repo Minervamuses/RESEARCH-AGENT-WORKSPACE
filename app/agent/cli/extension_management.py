@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from agent.extensions.manager import (
     ApplyReport,
@@ -43,6 +44,32 @@ def render_preview(preview: ExtensionPreview) -> str:
         lines.append(
             f"- {change.key}: {change.operation} -> {item.decision}: {detail}"
         )
+        candidate = preview.mcp_candidates.get(change.key)
+        if candidate is not None:
+            descriptor = candidate.descriptor
+            env_bindings = []
+            for target, binding in sorted(descriptor.environment.items()):
+                if binding.from_env is not None:
+                    requirement = "required" if binding.required else "optional"
+                    env_bindings.append(
+                        f"{target} <- ${binding.from_env} ({requirement})"
+                    )
+                else:
+                    env_bindings.append(
+                        f"{target} = {json.dumps(binding.value)}"
+                    )
+            lines.extend(
+                [
+                    f"  family/scope: {descriptor.family}/{descriptor.scope}",
+                    f"  command: {candidate.resolved_command}",
+                    f"  args: {json.dumps(candidate.args)}",
+                    f"  cwd: {candidate.cwd}",
+                    f"  env: {', '.join(env_bindings) or '(none)'}",
+                    f"  binding: {candidate.binding_hash}",
+                ]
+            )
+        if change.key in preview.host_blocks:
+            lines.append(f"  host blocked: {preview.host_blocks[change.key]}")
     for diagnostic in preview.diff.diagnostics:
         lines.append(f"! {diagnostic}")
     return "\n".join(lines)
@@ -72,6 +99,11 @@ def render_status(status: ExtensionStatus) -> str:
         f"running revision: {status.running_revision}",
         f"restart_required: {str(status.restart_required).lower()}",
         (
+            "running MCP: " + ", ".join(status.running_mcp_families)
+            if status.running_mcp_families
+            else "running MCP: none"
+        ),
+        (
             "manager: available"
             if status.manager_available
             else f"manager: unavailable ({status.manager_error})"
@@ -99,6 +131,16 @@ async def handle_extension_management(context, parsed):
             status = await asyncio.to_thread(
                 manager.status,
                 running_revision=running,
+                running_mcp_families=tuple(
+                    getattr(context.session, "mcp_families", {}).values()
+                ),
+                startup_diagnostics=tuple(
+                    getattr(
+                        context.session,
+                        "extension_startup_diagnostics",
+                        (),
+                    )
+                ),
             )
             return SlashCommandResult(message=render_status(status))
 
@@ -112,7 +154,15 @@ async def handle_extension_management(context, parsed):
         )
         if raw.strip().casefold() not in _YES:
             return SlashCommandResult(message=rendered + "\n\ncancelled")
-        report = await asyncio.to_thread(manager.apply, preview)
+        approvals = {
+            candidate.binding_hash
+            for candidate in preview.mcp_candidates.values()
+        }
+        report = await asyncio.to_thread(
+            manager.apply,
+            preview,
+            approved_mcp_bindings=approvals,
+        )
         return SlashCommandResult(message=render_apply_report(report))
     except ManagementError as exc:
         raise SlashCommandError(str(exc)) from exc

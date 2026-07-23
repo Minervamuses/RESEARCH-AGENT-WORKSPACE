@@ -116,6 +116,7 @@ class ChatSession:
         progress_cb=None,
         web_search_tool_names: set[str] | frozenset[str] | None = None,
         mcp_families: dict[str, str] | None = None,
+        global_mcp_families: set[str] | frozenset[str] | None = None,
         loaded_skills: list[SkillMetadata] | None = None,
         running_extension_revision: int = 0,
         extension_startup_diagnostics: tuple[str, ...] = (),
@@ -128,6 +129,11 @@ class ChatSession:
         self.active_skill_runtime: SkillRuntime | None = None
         self.extra_tools = list(extra_tools or [])
         self.mcp_families = dict(mcp_families or {})
+        self.global_mcp_families = frozenset(
+            global_mcp_families
+            if global_mcp_families is not None
+            else {"web_search"}
+        )
         self.web_search_tool_names = frozenset(web_search_tool_names or ())
 
         self.loaded_skills = (
@@ -174,6 +180,7 @@ class ChatSession:
             skill_runtime_getter=lambda: self.active_skill_runtime,
             skill_tools=[self.citation_workflow_tool],
             mcp_families=self.mcp_families,
+            global_mcp_families=self.global_mcp_families,
         )
         # The graph builder and model getters resolve here (not at import), so
         # monkeypatches of the agent.session module attributes before
@@ -250,6 +257,7 @@ class ChatSession:
             None,
             self._tool_universe_refs(),
             mcp_families=self.mcp_families,
+            global_mcp_families=self.global_mcp_families,
         )
 
     def _tool_availability_block(self) -> str:
@@ -632,6 +640,7 @@ class ChatSession:
             config=self.config,
             all_tools=self._tool_universe_refs(),
             mcp_families=self.mcp_families,
+            global_mcp_families=self.global_mcp_families,
             task_mode=task_mode,
             catalog=self.loaded_skills,
         )
@@ -1000,19 +1009,39 @@ class ChatSession:
             builtin_skills=builtin_skills,
         )
         loaded_skills = [*builtin_skills, *extension_startup.skills]
+        runtime_diagnostics = list(extension_startup.diagnostics)
         extra_tools: list = []
         if load_mcp:
-            from agent.mcp import load_mcp_tools_with_families
+            from agent.mcp import (
+                load_mcp_tools_with_families,
+                resolve_mcp_specs,
+            )
 
             try:
-                extra_tools, families = await load_mcp_tools_with_families()
-            except Exception:
+                if extension_startup.mcp_specs:
+                    specs = [
+                        *resolve_mcp_specs(),
+                        *extension_startup.mcp_specs,
+                    ]
+                    extra_tools, families = await load_mcp_tools_with_families(
+                        specs=specs,
+                        diagnostics=runtime_diagnostics,
+                    )
+                else:
+                    extra_tools, families = await load_mcp_tools_with_families()
+            except Exception as exc:
                 extra_tools = []
                 families = {}
+                runtime_diagnostics.append(
+                    "MCP loader unavailable: " + type(exc).__name__
+                )
         else:
             families = {}
         web_search_tool_names = frozenset(
             name for name, family in families.items() if family == "web_search"
+        )
+        global_mcp_families = frozenset(
+            {"web_search", *extension_startup.global_mcp_families}
         )
         return cls(
             config,
@@ -1023,7 +1052,8 @@ class ChatSession:
             progress_cb=progress_cb,
             web_search_tool_names=web_search_tool_names,
             mcp_families=families,
+            global_mcp_families=global_mcp_families,
             loaded_skills=loaded_skills,
             running_extension_revision=extension_startup.revision,
-            extension_startup_diagnostics=extension_startup.diagnostics,
+            extension_startup_diagnostics=tuple(runtime_diagnostics),
         )

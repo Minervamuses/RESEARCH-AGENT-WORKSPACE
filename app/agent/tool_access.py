@@ -16,7 +16,7 @@ the same :class:`ToolAccessResolution`; none of them re-derives access rules.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,6 +42,7 @@ def resolve_tool_access(
     all_tools: Sequence[Any],
     *,
     mcp_families: Mapping[str, str],
+    global_mcp_families: Collection[str] | None = None,
 ) -> ToolAccessResolution:
     """Resolve the effective tool set for a manifest over a tool universe.
 
@@ -57,12 +58,17 @@ def resolve_tool_access(
     ordered_names = _dedupe(_tool_name(tool) for tool in all_tools)
     available = set(ordered_names)
     families = dict(mcp_families)
+    global_families = set(
+        global_mcp_families
+        if global_mcp_families is not None
+        else (GLOBAL_MCP_FAMILY,)
+    )
     base_names = set(base_tool_names())
 
     global_selected = {
         name
         for name in available
-        if name in base_names or families.get(name) == GLOBAL_MCP_FAMILY
+        if name in base_names or families.get(name) in global_families
     }
 
     tools_section = (manifest or {}).get("tools") or {}

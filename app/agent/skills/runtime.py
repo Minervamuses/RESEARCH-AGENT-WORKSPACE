@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Collection, Mapping, Sequence
 
 import yaml
 
@@ -74,6 +74,7 @@ def render_tool_availability_block(
     task_mode: str | None = None,
     all_tool_names: Sequence[str] | None = None,
     mcp_families: Mapping[str, str] | None = None,
+    global_mcp_families: Collection[str] | None = None,
 ) -> str:
     """Render prompt-visible tool availability from a shared resolution.
 
@@ -93,6 +94,7 @@ def render_tool_availability_block(
             if all_tool_names is not None
             else tool_inventory.base_tool_names(),
             mcp_families=mcp_families or {},
+            global_mcp_families=global_mcp_families,
         )
     effective = _dedupe_strings(resolution.effective_tools)
     skill_tools = _dedupe_strings(resolution.skill_tools)
@@ -159,6 +161,7 @@ def load_skill_runtime(
     config: AgentConfig,
     all_tools: Sequence[Any],
     mcp_families: Mapping[str, str] | None = None,
+    global_mcp_families: Collection[str] | None = None,
     task_mode: str | None = None,
     catalog: Sequence[SkillMetadata] | None = None,
 ) -> SkillRuntime:
@@ -176,6 +179,7 @@ def load_skill_runtime(
         manifest,
         all_tools,
         mcp_families=mcp_families or {},
+        global_mcp_families=global_mcp_families,
     )
     runtime = SkillRuntime(
         name=metadata.name,

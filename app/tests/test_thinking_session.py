@@ -40,7 +40,8 @@ class _Factory:
         self.calls: list[dict] = []
 
     def __call__(self, cfg, extra_tools=None, history_store=None,
-                 skill_runtime_getter=None, skill_tools=None, mcp_families=None):
+                 skill_runtime_getter=None, skill_tools=None, mcp_families=None,
+                 global_mcp_families=None):
         self.built.append({
             "model_id": cfg.llm_model,
             "max_tool_interactions": cfg.agent_max_tool_interactions,

@@ -204,6 +204,7 @@ def build_graph(
     skill_runtime_getter=None,
     skill_tools: list | None = None,
     mcp_families: dict[str, str] | None = None,
+    global_mcp_families: set[str] | frozenset[str] | None = None,
 ):
     """Build and compile the conversational RAG agent graph.
 
@@ -250,6 +251,7 @@ def build_graph(
         None,
         tools,
         mcp_families=mcp_families or {},
+        global_mcp_families=global_mcp_families,
     ).effective_tools
     default_tools = [tools_by_name[name] for name in default_names]
     bound_model_cache = {default_names: model.bind_tools(default_tools)}

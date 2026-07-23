@@ -195,6 +195,99 @@ def test_load_mcp_tools_with_families_maps_loaded_tools(monkeypatch):
     assert families == {"web_fetch": "web_search", "github_repo": "github"}
 
 
+def test_two_dropins_with_same_tool_are_both_excluded(monkeypatch):
+    @tool("shared_tool")
+    def shared_tool(value: str) -> str:
+        """A tool name claimed by two drop-in servers."""
+        return value
+
+    class FakeClient:
+        def __init__(self, connections=None):
+            self.connections = connections
+
+        async def get_tools(self):
+            return [shared_tool]
+
+    import langchain_mcp_adapters.client as client_module
+    monkeypatch.setattr(client_module, "MultiServerMCPClient", FakeClient)
+    diagnostics: list[str] = []
+    specs = [
+        mcp_module.MCPServerSpec(
+            name="alpha",
+            family="alpha",
+            command="x",
+            args=[],
+            env={},
+            dropin=True,
+        ),
+        mcp_module.MCPServerSpec(
+            name="beta",
+            family="beta",
+            command="y",
+            args=[],
+            env={},
+            dropin=True,
+        ),
+    ]
+
+    tools, families = asyncio.run(
+        mcp_module.load_mcp_tools_with_families(
+            specs=specs,
+            diagnostics=diagnostics,
+        )
+    )
+
+    assert tools == []
+    assert families == {}
+    assert len(diagnostics) == 2
+    assert all("tool shared_tool" in item for item in diagnostics)
+
+
+def test_builtin_server_wins_tool_collision_with_dropin(monkeypatch):
+    @tool("shared_tool")
+    def shared_tool(value: str) -> str:
+        """A tool name shared with an attempted drop-in."""
+        return value
+
+    class FakeClient:
+        def __init__(self, connections=None):
+            self.connections = connections
+
+        async def get_tools(self):
+            return [shared_tool]
+
+    import langchain_mcp_adapters.client as client_module
+    monkeypatch.setattr(client_module, "MultiServerMCPClient", FakeClient)
+    diagnostics: list[str] = []
+    specs = [
+        mcp_module.MCPServerSpec(
+            name="legacy",
+            command="x",
+            args=[],
+            env={},
+        ),
+        mcp_module.MCPServerSpec(
+            name="dropin",
+            family="dropin",
+            command="y",
+            args=[],
+            env={},
+            dropin=True,
+        ),
+    ]
+
+    tools, families = asyncio.run(
+        mcp_module.load_mcp_tools_with_families(
+            specs=specs,
+            diagnostics=diagnostics,
+        )
+    )
+
+    assert [item.name for item in tools] == ["shared_tool"]
+    assert families == {"shared_tool": "legacy"}
+    assert diagnostics == ["mcp:dropin: collision: tool shared_tool"]
+
+
 def test_session_create_without_mcp(monkeypatch, tmp_path):
     from agent.session import ChatSession
     from agent.config import AgentConfig

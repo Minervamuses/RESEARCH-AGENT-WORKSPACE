@@ -16,6 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent.config import AgentConfig
 from agent.extensions.discovery import build_diff, scan_extensions
+from agent.extensions.mcp_manifest import (
+    MCPLaunchCandidate,
+    MCPManifestError,
+    descriptor_for_bundle,
+    resolve_mcp_candidate,
+)
 from agent.extensions.models import (
     ExtensionChange,
     ExtensionDiff,
@@ -86,6 +92,8 @@ class ExtensionPreview:
     diff: ExtensionDiff
     plan: ManagementPlan
     private_skill_hash: str
+    mcp_candidates: dict[str, MCPLaunchCandidate]
+    host_blocks: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,7 @@ class ExtensionStatus:
     manager_available: bool
     manager_error: str | None
     diagnostics: tuple[str, ...]
+    running_mcp_families: tuple[str, ...] = ()
 
 
 def default_private_skill_path() -> Path:
@@ -265,6 +274,65 @@ def _diff_signature(diff: ExtensionDiff) -> tuple[tuple[str, str, str | None], .
     )
 
 
+def _resolve_mcp_previews(
+    diff: ExtensionDiff,
+    plan: ManagementPlan,
+) -> tuple[dict[str, MCPLaunchCandidate], dict[str, str]]:
+    plan_by_key = {item.key: item for item in plan.items}
+    candidates: dict[str, MCPLaunchCandidate] = {}
+    blocks: dict[str, str] = {}
+    family_owners: dict[str, str] = {}
+    for change in diff.changes:
+        applied = change.applied
+        if (
+            applied is None
+            or applied.kind != "mcp"
+            or change.operation in {"update", "delete"}
+            or not isinstance(applied.mcp_descriptor, dict)
+        ):
+            continue
+        family = applied.mcp_descriptor.get("family")
+        if isinstance(family, str) and family:
+            family_owners[family.casefold()] = change.key
+    for change in diff.changes:
+        desired = change.desired
+        if (
+            desired is None
+            or desired.kind != "mcp"
+            or change.operation not in {"add", "update"}
+        ):
+            continue
+        plan_item = plan_by_key[change.key]
+        if plan_item.decision == "block":
+            continue
+        try:
+            descriptor = descriptor_for_bundle(
+                desired.source_path,
+                extension_id=desired.id,
+                proposal=plan_item.mcp_descriptor,
+            )
+            candidates[change.key] = resolve_mcp_candidate(
+                descriptor,
+                bundle=desired.source_path,
+                source_hash=desired.source_hash or "",
+            )
+        except (OSError, MCPManifestError) as exc:
+            blocks[change.key] = str(exc)
+
+    for key, candidate in candidates.items():
+        family = candidate.descriptor.family.casefold()
+        owner = family_owners.get(family)
+        if owner is None:
+            family_owners[family] = key
+            continue
+        blocks[key] = f"MCP family collides with {owner}"
+        if owner in candidates:
+            blocks[owner] = f"MCP family collides with {key}"
+    for key in blocks:
+        candidates.pop(key, None)
+    return candidates, blocks
+
+
 class ExtensionManager:
     """Orchestrate one-shot planning while host code owns all mutations."""
 
@@ -324,6 +392,7 @@ class ExtensionManager:
         else:
             plan = ManagementPlan(items=[])
         _validate_plan(plan, diff)
+        mcp_candidates, host_blocks = _resolve_mcp_previews(diff, plan)
         if load_private_skill(self.private_skill_path).sha256 != private.sha256:
             raise ManagementError("private Skill changed during planning")
         return ExtensionPreview(
@@ -333,14 +402,26 @@ class ExtensionManager:
             diff=diff,
             plan=plan,
             private_skill_hash=private.sha256,
+            mcp_candidates=mcp_candidates,
+            host_blocks=host_blocks,
         )
 
-    def apply(self, preview: ExtensionPreview) -> ApplyReport:
+    def apply(
+        self,
+        preview: ExtensionPreview,
+        *,
+        approved_mcp_bindings: set[str] | frozenset[str] | None = None,
+    ) -> ApplyReport:
         if not _APPLY_LOCK.acquire(blocking=False):
             raise ManagementError("another extension apply is already running")
         try:
             try:
-                return self._apply_locked(preview)
+                return self._apply_locked(
+                    preview,
+                    approved_mcp_bindings=frozenset(
+                        approved_mcp_bindings or ()
+                    ),
+                )
             except ManagementError:
                 raise
             except (OSError, RegistryError, ValueError) as exc:
@@ -348,7 +429,12 @@ class ExtensionManager:
         finally:
             _APPLY_LOCK.release()
 
-    def _apply_locked(self, preview: ExtensionPreview) -> ApplyReport:
+    def _apply_locked(
+        self,
+        preview: ExtensionPreview,
+        *,
+        approved_mcp_bindings: frozenset[str],
+    ) -> ApplyReport:
         latest = load_registry(preview.paths.state_root)
         if latest.revision != preview.registry.revision:
             raise ManagementError("extension registry changed; run preview again")
@@ -380,6 +466,15 @@ class ExtensionManager:
                     )
                 )
                 continue
+            if change.key in preview.host_blocks:
+                results.append(
+                    ApplyItemResult(
+                        change.key,
+                        "blocked",
+                        preview.host_blocks[change.key],
+                    )
+                )
+                continue
             if change.operation == "delete":
                 if change.key in extensions:
                     extensions.pop(change.key)
@@ -392,11 +487,65 @@ class ExtensionManager:
             if desired is None:
                 raise ManagementError(f"missing desired item for {change.key}")
             if desired.kind == "mcp":
+                candidate = preview.mcp_candidates.get(change.key)
+                if candidate is None:
+                    results.append(
+                        ApplyItemResult(
+                            change.key,
+                            "blocked",
+                            "MCP launch candidate is unavailable",
+                        )
+                    )
+                    continue
+                if candidate.binding_hash not in approved_mcp_bindings:
+                    results.append(
+                        ApplyItemResult(
+                            change.key,
+                            "pending_approval",
+                            "exact MCP command binding was not approved",
+                        )
+                    )
+                    continue
+                try:
+                    installed = install_scanned_extension(
+                        desired,
+                        state_root=preview.paths.state_root,
+                        config=self.config,
+                    )
+                    installed_root = (
+                        preview.paths.state_root
+                        / installed.installed_relpath
+                    )
+                    verified = resolve_mcp_candidate(
+                        candidate.descriptor,
+                        bundle=installed_root,
+                        source_hash=installed.source_hash,
+                    )
+                    if verified.binding_hash != candidate.binding_hash:
+                        raise ManagementError(
+                            "MCP binding changed while installing"
+                        )
+                except (OSError, RegistryError, MCPManifestError) as exc:
+                    results.append(
+                        ApplyItemResult(change.key, "blocked", str(exc))
+                    )
+                    continue
+                installed = installed.model_copy(
+                    update={
+                        "mcp_descriptor": candidate.descriptor.model_dump(
+                            mode="json"
+                        ),
+                        "command_binding_hash": candidate.binding_hash,
+                        "execution_approved": True,
+                    }
+                )
+                extensions[change.key] = installed
+                changed = True
                 results.append(
                     ApplyItemResult(
                         change.key,
-                        "blocked",
-                        "MCP descriptor activation is not available in this commit",
+                        "added" if change.operation == "add" else "updated",
+                        plan_item.summary,
                     )
                 )
                 continue
@@ -446,7 +595,13 @@ class ExtensionManager:
             diagnostics=diff.diagnostics,
         )
 
-    def status(self, *, running_revision: int = 0) -> ExtensionStatus:
+    def status(
+        self,
+        *,
+        running_revision: int = 0,
+        running_mcp_families: tuple[str, ...] = (),
+        startup_diagnostics: tuple[str, ...] = (),
+    ) -> ExtensionStatus:
         try:
             paths = resolve_extension_paths(self.config)
         except (OSError, ValueError) as exc:
@@ -459,6 +614,7 @@ class ExtensionManager:
             diagnostics.append(str(exc))
         scan = scan_extensions(paths.dropin_root, config=self.config)
         diagnostics.extend(scan.diagnostics)
+        diagnostics.extend(startup_diagnostics)
         try:
             load_private_skill(self.private_skill_path)
         except ManagementError as exc:
@@ -476,4 +632,5 @@ class ExtensionManager:
             manager_available=manager_available,
             manager_error=manager_error,
             diagnostics=tuple(diagnostics),
+            running_mcp_families=tuple(sorted(set(running_mcp_families))),
         )

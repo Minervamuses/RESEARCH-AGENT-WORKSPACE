@@ -17,6 +17,7 @@ import os
 import shlex
 import shutil
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,10 @@ class MCPServerSpec:
     command: str
     args: list[str]
     env: dict[str, str]
+    family: str | None = None
+    cwd: str | None = None
+    sanitize_stdout: bool = True
+    dropin: bool = False
 
 
 def _parse_args(raw: str | None) -> list[str]:
@@ -186,6 +191,18 @@ def prepare_stderr_log(log_path: str, *, run_id: str | None = None) -> str:
 
 
 def _spec_to_connection(spec: MCPServerSpec) -> dict:
+    if not spec.sanitize_stdout:
+        connection: dict = {
+            "transport": "stdio",
+            "command": spec.command,
+            "args": list(spec.args),
+        }
+        if spec.env:
+            connection["env"] = dict(spec.env)
+        if spec.cwd:
+            connection["cwd"] = spec.cwd
+        return connection
+
     # Some MCP servers (notably mrkrsl/web-search-mcp) are careless about
     # what they write to stdout: startup banners, shutdown notices, etc.
     # The stdio transport then tries to JSON-parse those lines and, on
@@ -225,6 +242,9 @@ async def load_mcp_tools(specs: list[MCPServerSpec] | None = None) -> list:
 
 async def load_mcp_tools_with_families(
     specs: list[MCPServerSpec] | None = None,
+    *,
+    diagnostics: list[str] | None = None,
+    reserved_tool_names: set[str] | None = None,
 ) -> tuple[list, dict[str, str]]:
     """Load MCP tools and return a tool-name to server-family map."""
     if specs is None:
@@ -241,6 +261,13 @@ async def load_mcp_tools_with_families(
 
     tools: list = []
     families: dict[str, str] = {}
+    if reserved_tool_names is None:
+        from agent.tools.inventory import base_tool_names
+
+        claimed_names = {*base_tool_names(), "citation_workflow"}
+    else:
+        claimed_names = set(reserved_tool_names)
+    loaded: list[tuple[MCPServerSpec, list, tuple[str, ...]]] = []
     for spec in specs:
         connections = {spec.name: _spec_to_connection(spec)}
         try:
@@ -248,10 +275,116 @@ async def load_mcp_tools_with_families(
             server_tools = await client.get_tools()
         except Exception as exc:
             logger.warning("MCP server %r failed to load: %s", spec.name, exc)
+            if diagnostics is not None:
+                diagnostics.append(
+                    f"mcp:{spec.name}: applied_but_unavailable: "
+                    f"{type(exc).__name__}"
+                )
             continue
+        server_names = tuple(
+            getattr(tool, "name", None)
+            for tool in server_tools
+        )
+        if any(not name for name in server_names):
+            logger.warning("MCP server %r returned an unnamed tool", spec.name)
+            if diagnostics is not None:
+                diagnostics.append(f"mcp:{spec.name}: unnamed tool")
+            continue
+        duplicates = {
+            name for name in server_names if server_names.count(name) > 1
+        }
+        conflicts = claimed_names.intersection(server_names)
+        if duplicates or conflicts:
+            detail = sorted(duplicates | conflicts)
+            logger.warning(
+                "MCP server %r has tool-name collisions: %s",
+                spec.name,
+                ", ".join(detail),
+            )
+            if diagnostics is not None:
+                diagnostics.append(
+                    f"mcp:{spec.name}: tool-name collision: "
+                    + ", ".join(detail)
+                )
+            continue
+        loaded.append((spec, list(server_tools), server_names))
+
+    # Preserve legacy servers in their configured order. Drop-ins are then
+    # admitted as a group so two colliding drop-ins are both excluded instead
+    # of whichever happened to load second silently losing.
+    accepted: list[tuple[MCPServerSpec, list, tuple[str, ...]]] = []
+    legacy_names = set(claimed_names)
+    legacy_server_ids: set[str] = set()
+    legacy_families: set[str] = set()
+    dropins: list[tuple[MCPServerSpec, list, tuple[str, ...]]] = []
+    for loaded_server in loaded:
+        spec, _server_tools, server_names = loaded_server
+        if spec.dropin:
+            dropins.append(loaded_server)
+            continue
+        conflicts = legacy_names.intersection(server_names)
+        if conflicts:
+            detail = ", ".join(sorted(conflicts))
+            logger.warning(
+                "MCP server %r has tool-name collisions: %s",
+                spec.name,
+                detail,
+            )
+            if diagnostics is not None:
+                diagnostics.append(
+                    f"mcp:{spec.name}: tool-name collision: {detail}"
+                )
+            continue
+        accepted.append(loaded_server)
+        legacy_names.update(server_names)
+        legacy_server_ids.add(spec.name.casefold())
+        legacy_families.add((spec.family or spec.name).casefold())
+
+    name_owners: dict[str, list[int]] = defaultdict(list)
+    server_owners: dict[str, list[int]] = defaultdict(list)
+    family_owners: dict[str, list[int]] = defaultdict(list)
+    rejected: dict[int, set[str]] = defaultdict(set)
+    for index, (spec, _server_tools, server_names) in enumerate(dropins):
+        server_id = spec.name.casefold()
+        family = (spec.family or spec.name).casefold()
+        if server_id in legacy_server_ids:
+            rejected[index].add(f"server ID {spec.name}")
+        if family in legacy_families:
+            rejected[index].add(f"family {spec.family or spec.name}")
+        for name in set(server_names):
+            if name in legacy_names:
+                rejected[index].add(f"tool {name}")
+            name_owners[name].append(index)
+        server_owners[server_id].append(index)
+        family_owners[family].append(index)
+
+    for label, owners_by_value in (
+        ("tool", name_owners),
+        ("server ID", server_owners),
+        ("family", family_owners),
+    ):
+        for value, owners in owners_by_value.items():
+            if len(owners) > 1:
+                for index in owners:
+                    rejected[index].add(f"{label} {value}")
+
+    for index, loaded_server in enumerate(dropins):
+        spec, _server_tools, _server_names = loaded_server
+        if index in rejected:
+            detail = ", ".join(sorted(rejected[index]))
+            logger.warning(
+                "Drop-in MCP server %r has collisions: %s",
+                spec.name,
+                detail,
+            )
+            if diagnostics is not None:
+                diagnostics.append(f"mcp:{spec.name}: collision: {detail}")
+            continue
+        accepted.append(loaded_server)
+
+    for spec, server_tools, server_names in accepted:
         tools.extend(server_tools)
-        for tool in server_tools:
-            tool_name = getattr(tool, "name", None)
-            if tool_name:
-                families[tool_name] = spec.name
+        family = spec.family or spec.name
+        for tool_name in server_names:
+            families[tool_name] = family
     return tools, families
