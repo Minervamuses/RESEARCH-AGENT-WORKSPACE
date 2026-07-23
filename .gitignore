@@ -8,7 +8,7 @@ dist/
 build/
 *.sqlite3
 *:Zone.Identifier
-cite/.staging-*
+/cite/
 /app/tool/skill/*
 !/app/tool/skill/.gitkeep
 /app/tool/mcp/*
