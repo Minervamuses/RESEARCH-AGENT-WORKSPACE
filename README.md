@@ -280,7 +280,7 @@ conda env config vars set -n app \
   AGENT_MCP_GITHUB_TOOLSETS=repos,pull_requests,issues,actions,context
 ```
 
-MCP server 啟動失敗時 agent 仍會啟動,只是少那組外部工具;stderr log 在 `~/.cache/agent-mcp/`(啟動前以 0600 建立,每次 run 寫入 timestamp/run-ID header,達 5 MiB 輪替並保留 3 份)。
+MCP server 啟動失敗時 agent 仍會啟動,只是少那組外部工具。既有 Web Search/GitHub 的 legacy shell sanitizer 把 stderr 寫到 `~/.cache/agent-mcp/`(啟動前以 0600 建立,每次 run 寫入 timestamp/run-ID header,達 5 MiB 輪替並保留 3 份)；drop-in MCP 為了維持 direct argv 不經 shell，server 自己寫到 stderr 的內容目前可能直接出現在終端。
 
 ## 9. Skills
 
