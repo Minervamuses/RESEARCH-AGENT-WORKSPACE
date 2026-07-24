@@ -4,7 +4,7 @@
 
 - 類型：完整性邊界缺口。
 - 優先度：中。
-- 是否阻擋 `repair` branch 整併：否；整併已完成。
+- 整併判定：不阻擋將 `repair` fast-forward 至 `main`；此完整性缺口保留為後續技術債。
 - 主要適用情境：同一個 session 存活期間，installed bundle 被其他程序或手動操作修改。
 
 ## 專案背景

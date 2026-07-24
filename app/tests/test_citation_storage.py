@@ -59,7 +59,7 @@ def test_output_dir_precedence_config_env_workspace(monkeypatch, tmp_path):
     assert resolve_output_dir(None, env={"CITATION_OUTPUT_DIR": "/from/env"}) == Path(
         "/from/env"
     )
-    # Default: version-controlled workspace cite/ directory.
+    # Default: workspace-local ignored cite/ directory.
     default = resolve_output_dir(None, env={})
     assert default == tmp_path / "cite"
 

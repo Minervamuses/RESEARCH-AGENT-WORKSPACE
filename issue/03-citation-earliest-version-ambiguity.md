@@ -38,7 +38,7 @@ Citation Skill 使用 `WorkIntent` 描述 agent 從對話中選定的作品。`W
 
 1. 是否缺 year。
 2. year 由小到大。
-3. score、provider rank 與 provider ID。
+3. score、provider rank 與 provider 名稱；若這些鍵仍相同，則沿用輸入順序。
 
 若候選年份不同，例如 2020 與 2022，可以合理選 2020。
 

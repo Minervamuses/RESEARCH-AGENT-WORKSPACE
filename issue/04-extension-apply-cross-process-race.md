@@ -4,7 +4,7 @@
 
 - 類型：併發狀態一致性。
 - 優先度：低至中。
-- 是否阻擋 `repair` branch 整併：否；整併已完成。
+- 整併判定：不阻擋將 `repair` fast-forward 至 `main`；跨 process 併發修正保留為後續技術債。
 - 成立條件：兩個獨立 CLI process 對同一個 extension state root 幾乎同時 apply。
 
 ## 專案背景

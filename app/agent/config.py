@@ -5,8 +5,7 @@ Extends :class:`rag.config.RAGConfig` with fields that only the agent layer
 so rag remains a framework-neutral library.
 """
 
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from rag.config import RAGConfig
 
@@ -93,14 +92,6 @@ class AgentConfig(RAGConfig):
     # platform user-data fail-safe apply (see citation.storage.resolve_output_dir).
     # The default never writes inside app/rag/skills package trees.
     citation_output_dir: str | None = None
-
-    # Discovery ranking rollout switch. ``rrf`` preserves the original
-    # provider-fusion ordering; ``lexical`` adds the bounded deterministic
-    # title-relevance multiplier. The environment override makes rollback
-    # possible without touching session state or persisted citation bundles.
-    citation_ranking_mode: str = field(
-        default_factory=lambda: os.environ.get("CITATION_RANKING_MODE", "lexical")
-    )
 
     # Skill runtime controls.
     skill_max_pinned_reference_chars: int = 65536
