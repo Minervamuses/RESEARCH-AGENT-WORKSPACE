@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 
 from agent.config import AgentConfig
 from agent.extensions.discovery import inspect_bundle
-from agent.extensions.models import AppliedExtension, ExtensionRegistry
+from agent.extensions.models import AppliedExtension
 from agent.extensions.mcp_manifest import (
     MCPLaunchCandidate,
     MCPManifestError,
