@@ -201,12 +201,12 @@ def test_structured_tool_content_is_detected_before_flattening():
     ) == "structured_tool_content"
 
 
-def test_turn_and_trace_wrappers_return_finalized_text(make_session):
+def test_turn_and_outcome_return_finalized_text(make_session):
     session, _ = make_session(answer="wrapped")
     assert asyncio.run(session.turn("q")) == "wrapped"
-    text, calls = asyncio.run(session.turn_with_trace("q"))
-    assert text == "wrapped"
-    assert calls == []
+    outcome = asyncio.run(session.turn_outcome("q"))
+    assert outcome.text == "wrapped"
+    assert outcome.tool_calls == []
 
 
 def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):

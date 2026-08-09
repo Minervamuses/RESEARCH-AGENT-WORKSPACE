@@ -158,9 +158,10 @@ def test_case_a_retrieval_not_attempted_routes_to_reviser_with_recall_history(
     )
     session = _make_session(monkeypatch, tmp_path, graph, models, runtime)
 
-    answer, tool_calls = asyncio.run(
-        session.turn_with_trace("你應該能看見我的紀錄才對，不應該問我")
+    outcome = asyncio.run(
+        session.turn_outcome("你應該能看見我的紀錄才對，不應該問我")
     )
+    answer, tool_calls = outcome.text, outcome.tool_calls
 
     # Two graph rounds: writer (no tool) then reviser (recall_history).
     assert len(graph.calls) == 2
@@ -217,9 +218,10 @@ def test_case_b_empty_history_yields_honest_answer_mentioning_plan_logs(
     )
     session = _make_session(monkeypatch, tmp_path, graph, models, runtime)
 
-    answer, tool_calls = asyncio.run(
-        session.turn_with_trace("告訴我一月上半月我做的成果")
+    outcome = asyncio.run(
+        session.turn_outcome("告訴我一月上半月我做的成果")
     )
+    answer, tool_calls = outcome.text, outcome.tool_calls
 
     # Only the writer round runs; empty retrieval is accepted, not escalated.
     assert len(graph.calls) == 1
@@ -268,9 +270,10 @@ def test_case_c_denied_history_tool_explains_policy_without_intake_checklist(
     )
     session = _make_session(monkeypatch, tmp_path, graph, models, runtime)
 
-    answer, _tool_calls = asyncio.run(
-        session.turn_with_trace("你應該能看見我的紀錄才對")
+    outcome = asyncio.run(
+        session.turn_outcome("你應該能看見我的紀錄才對")
     )
+    answer = outcome.text
 
     # No reviser round; the turn stops and asks the user.
     assert len(graph.calls) == 1

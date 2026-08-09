@@ -403,14 +403,14 @@ def test_turn_holds_flat_calls_metadata_and_segmented_traces(monkeypatch, tmp_pa
     assert {ev["candidate_id"] for ev in candidate_events} == {"candidate-1", "candidate-2"}
 
 
-def test_turn_with_trace_preserves_eval_shape(monkeypatch, tmp_path):
+def test_turn_outcome_preserves_eval_shape(monkeypatch, tmp_path):
     session, _factory, _models = _two_tool_candidate_session(monkeypatch, tmp_path)
 
-    answer, tool_calls = asyncio.run(session.turn_with_trace("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "fused"
-    assert isinstance(tool_calls, list)
-    for call in tool_calls:
+    assert outcome.text == "fused"
+    assert isinstance(outcome.tool_calls, list)
+    for call in outcome.tool_calls:
         assert "name" in call and "args" in call
 
 

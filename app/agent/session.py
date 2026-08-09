@@ -797,11 +797,6 @@ class ChatSession:
             ),
         }
 
-    async def turn_with_trace(self, user_input: str) -> tuple[str, list[dict]]:
-        """Compatibility wrapper over :meth:`turn_outcome`."""
-        outcome = await self.turn_outcome(user_input)
-        return outcome.text, outcome.tool_calls
-
     @classmethod
     async def create(
         cls,
