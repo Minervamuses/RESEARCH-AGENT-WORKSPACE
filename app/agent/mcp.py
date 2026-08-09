@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent.paths import user_data_root
+
 logger = logging.getLogger(__name__)
 
 # Per-server stderr log policy: files are created 0600 before the server
@@ -59,9 +61,7 @@ def _env_flag(name: str, *, default: bool) -> bool:
 
 
 def _default_web_search_entrypoint() -> Path:
-    data_home = os.environ.get("XDG_DATA_HOME")
-    root = Path(data_home).expanduser() if data_home else Path.home() / ".local/share"
-    return root / "mcp-servers/web-search-mcp/dist/index.js"
+    return user_data_root(dict(os.environ)) / "mcp-servers/web-search-mcp/dist/index.js"
 
 
 def _web_search_spec() -> MCPServerSpec | None:
