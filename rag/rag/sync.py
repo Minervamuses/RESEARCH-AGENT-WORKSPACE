@@ -82,22 +82,19 @@ def list_diff(
 def prune_orphans(
     repo_root: str,
     config: RAGConfig | None = None,
-    extra_skip: set[str] | None = None,
 ) -> list[str]:
     """Delete store entries whose source file no longer exists on disk.
 
     Args:
         repo_root: Directory the store entries are anchored under.
         config: Pipeline configuration; defaults to `RAGConfig()`.
-        extra_skip: Additional directory names to skip (passed through to
-            `list_diff` for parity).
 
     Returns:
         Sorted list of pids that were deleted from both Chroma and the
         JSON backup. The list is empty if nothing was orphaned.
     """
     cfg = config or RAGConfig()
-    diff = list_diff(repo_root, cfg, extra_skip)
+    diff = list_diff(repo_root, cfg)
     orphans = diff["missing_from_disk"]
     if not orphans:
         return []
