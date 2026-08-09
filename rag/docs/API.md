@@ -359,9 +359,7 @@ class RAGConfig:
     chunk_overlap: int = 100
     encoding_model: str = "o200k_base"
     embed_model: str = "bge-m3"
-    default_k: int = 10
     tagger_model: str = "z-ai/glm-5"
-    raw_collection: str = "raw"
 ```
 
 Fields:
@@ -371,9 +369,7 @@ Fields:
 - `chunk_overlap`: number of tokens repeated between adjacent chunks during ingest.
 - `encoding_model`: tiktoken encoding name used by the token chunker.
 - `embed_model`: Ollama embedding model name used for ingest and semantic search.
-- `default_k`: default retrieval count for callers that choose to use config defaults.
 - `tagger_model`: OpenRouter model name used by repo ingest folder tagging.
-- `raw_collection`: legacy raw collection name retained for store compatibility.
 
 Use subclassing for host-specific settings:
 

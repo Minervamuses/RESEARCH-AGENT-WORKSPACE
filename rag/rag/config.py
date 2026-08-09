@@ -53,17 +53,9 @@ class RAGConfig:
     embed_model: str = "bge-m3"
     """Ollama embedding model name used for ingest and semantic search."""
 
-    # Retrieval
-    default_k: int = 10
-    """Default retrieval count for callers that choose to use config defaults."""
-
     # LLM used by rag's own tagger
     tagger_model: str = "z-ai/glm-5"
     """OpenRouter model name used by repo ingest folder tagging."""
-
-    # Collection names
-    raw_collection: str = "raw"
-    """Legacy raw collection name retained for store compatibility."""
 
     def raw_json_path(self) -> str:
         """Path to the raw chunks JSON file."""
