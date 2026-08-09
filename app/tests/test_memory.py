@@ -2,7 +2,7 @@
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent.memory import TurnRecord, assemble_prompt_history, render_turns
+from agent.turns.memory import TurnRecord, assemble_prompt_history, render_turns
 
 
 def test_render_turns_flattens_in_order():

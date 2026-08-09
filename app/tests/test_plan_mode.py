@@ -7,7 +7,7 @@ import pytest
 from conftest import FakeHistoryStore, make_astream_graph, tool_then_answer_updates
 
 from agent.config import AgentConfig
-from agent.memory import TurnRecord
+from agent.turns.memory import TurnRecord
 from agent.session import ChatSession
 
 

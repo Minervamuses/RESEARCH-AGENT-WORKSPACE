@@ -8,7 +8,7 @@ explicit parameters (raise_on_add, record_repr, ...), never silently dropped.
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agent.memory import TurnRecord
+from agent.turns.memory import TurnRecord
 
 
 class FakeHistoryStore:

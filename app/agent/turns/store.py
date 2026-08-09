@@ -1,8 +1,7 @@
-"""Persistence half of the recent-turns window.
+"""Persistence for the recent-turns window.
 
-Owns spilling prompt-visible turns into the long-term chat-history store;
-the session facade keeps the recent_turns list itself (shared by reference)
-because prompt assembly reads it every turn.
+Spills prompt-visible turns into the long-term chat-history store using the
+recent-turn list supplied by its owner.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ import asyncio
 import logging
 
 from agent.config import AgentConfig
-from agent.memory import TurnRecord
+from agent.turns.memory import TurnRecord
 
 logger = logging.getLogger(__name__)
 

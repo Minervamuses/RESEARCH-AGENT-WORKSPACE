@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 
 from agent.config import AgentConfig
 from agent.history_rag.tool import create_history_tool
-from agent.memory import TurnRecord
+from agent.turns.memory import TurnRecord
 
 
 class _StoreWithDocs:

@@ -52,13 +52,13 @@ from agent.state import skill_runtime_to_agent_state
 from agent.tool_access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
-from agent.memory import (
+from agent.turns.memory import (
     TurnRecord,
     assemble_prompt_history,
 )
 from agent.paths import find_app_root
 from agent.plan_log import PlanLog
-from agent.turn_store import TurnStore
+from agent.turns.store import TurnStore
 
 logger = logging.getLogger(__name__)
 

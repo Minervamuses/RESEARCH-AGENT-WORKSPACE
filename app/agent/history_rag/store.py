@@ -17,7 +17,7 @@ from langchain_core.documents import Document
 from rag import VectorRetriever, get_chroma_store
 
 from agent.config import AgentConfig
-from agent.memory import TurnRecord
+from agent.turns.memory import TurnRecord
 
 CHAT_HISTORY_COLLECTION = "chat_history"
 CHAT_HISTORY_SUBDIR = "chat_history"

@@ -48,7 +48,7 @@ from agent.thinking import (
 )
 from agent.tool_access import ToolAccessResolution
 from agent.tools import inventory as tool_inventory
-from agent.memory import assemble_prompt_history
+from agent.turns.memory import assemble_prompt_history
 
 if TYPE_CHECKING:
     from agent.session import ChatSession

@@ -1,4 +1,4 @@
-"""Turn-aware conversation memory.
+"""Turn-aware conversation memory models and prompt assembly.
 
 Two-layer model:
 

@@ -40,7 +40,7 @@ def fake_chroma(monkeypatch):
 
 def test_add_turn_emits_two_documents_with_role_metadata(tmp_path, fake_chroma):
     from agent.config import AgentConfig
-    from agent.memory import TurnRecord
+    from agent.turns.memory import TurnRecord
     from agent.history_rag.store import ChatHistoryStore
 
     store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
@@ -71,7 +71,7 @@ def test_add_turn_emits_two_documents_with_role_metadata(tmp_path, fake_chroma):
 
 def test_add_turn_skips_empty_strings(tmp_path, fake_chroma):
     from agent.config import AgentConfig
-    from agent.memory import TurnRecord
+    from agent.turns.memory import TurnRecord
     from agent.history_rag.store import ChatHistoryStore
 
     store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
@@ -89,7 +89,7 @@ def test_add_turn_skips_empty_strings(tmp_path, fake_chroma):
 
 def test_add_turn_with_both_empty_does_not_call_store(tmp_path, fake_chroma):
     from agent.config import AgentConfig
-    from agent.memory import TurnRecord
+    from agent.turns.memory import TurnRecord
     from agent.history_rag.store import ChatHistoryStore
 
     store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
