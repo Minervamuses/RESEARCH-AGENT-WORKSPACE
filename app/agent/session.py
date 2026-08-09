@@ -637,55 +637,21 @@ class ChatSession:
         MCP tool loading is async; turn processing stays asynchronous via
         graph.astream once the session is built.
         """
-        builtin_skills = discover_skills(config)
-        from agent.extensions.startup import load_extension_startup
+        from agent.startup import load_session_startup
 
-        extension_startup = load_extension_startup(
-            config,
-            builtin_skills=builtin_skills,
-        )
-        loaded_skills = [*builtin_skills, *extension_startup.skills]
-        runtime_diagnostics = list(extension_startup.diagnostics)
-        extra_tools: list = []
-        if load_mcp:
-            from agent.mcp import (
-                load_mcp_tools_with_families,
-                resolve_mcp_specs,
-            )
-
-            try:
-                if extension_startup.mcp_specs:
-                    specs = [
-                        *resolve_mcp_specs(),
-                        *extension_startup.mcp_specs,
-                    ]
-                    extra_tools, families = await load_mcp_tools_with_families(
-                        specs=specs,
-                        diagnostics=runtime_diagnostics,
-                    )
-                else:
-                    extra_tools, families = await load_mcp_tools_with_families()
-            except Exception as exc:
-                extra_tools = []
-                families = {}
-                runtime_diagnostics.append(
-                    "MCP loader unavailable: " + type(exc).__name__
-                )
-        else:
-            families = {}
-        global_mcp_families = frozenset(
-            {"web_search", *extension_startup.global_mcp_families}
-        )
+        startup = await load_session_startup(config, load_mcp=load_mcp)
         return cls(
             config,
             recursion_limit=recursion_limit,
             system_prompt=system_prompt,
-            extra_tools=extra_tools,
+            extra_tools=list(startup.extra_tools),
             history_store=history_store,
             progress_cb=progress_cb,
-            mcp_families=families,
-            global_mcp_families=global_mcp_families,
-            loaded_skills=loaded_skills,
-            running_extension_revision=extension_startup.revision,
-            extension_startup_diagnostics=tuple(runtime_diagnostics),
+            mcp_families=dict(startup.mcp_families),
+            global_mcp_families=startup.global_mcp_families,
+            loaded_skills=list(startup.loaded_skills),
+            running_extension_revision=startup.running_extension_revision,
+            extension_startup_diagnostics=(
+                startup.extension_startup_diagnostics
+            ),
         )
