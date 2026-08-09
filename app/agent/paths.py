@@ -1,5 +1,6 @@
 """Path helpers shared by the agent core, CLI, and tests."""
 
+import os
 from pathlib import Path
 
 
@@ -22,3 +23,15 @@ def user_state_root(env: dict[str, str]) -> Path:
     """Return the Linux XDG user-state root."""
     raw = env.get("XDG_STATE_HOME", "").strip()
     return Path(raw).expanduser() if raw else Path.home() / ".local" / "state"
+
+
+def fsync_directory(path: Path) -> None:
+    """Flush directory metadata when the filesystem supports it."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)

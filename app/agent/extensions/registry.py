@@ -17,6 +17,7 @@ from agent.extensions.models import (
     ExtensionRegistry,
     ScannedExtension,
 )
+from agent.paths import fsync_directory
 
 REGISTRY_FILENAME = "registry.json"
 
@@ -35,18 +36,6 @@ def load_registry(state_root: Path) -> ExtensionRegistry:
         return ExtensionRegistry.model_validate(raw)
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
         raise RegistryError(f"invalid extension registry: {exc}") from exc
-
-
-def _fsync_dir(path: Path) -> None:
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
 
 def write_registry(state_root: Path, registry: ExtensionRegistry) -> Path:
     """Durably replace registry.json without exposing a partial document."""
@@ -76,7 +65,7 @@ def write_registry(state_root: Path, registry: ExtensionRegistry) -> Path:
             os.chmod(path, 0o600)
         except OSError:
             pass
-        _fsync_dir(state_root)
+        fsync_directory(state_root)
     except OSError as exc:
         try:
             temp.unlink(missing_ok=True)
@@ -140,7 +129,7 @@ def install_scanned_extension(
             shutil.rmtree(staging)
         else:
             os.replace(staging, destination)
-            _fsync_dir(destination.parent)
+            fsync_directory(destination.parent)
     except Exception:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)

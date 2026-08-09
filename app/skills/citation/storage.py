@@ -40,7 +40,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent.paths import user_data_root
+from agent.paths import fsync_directory, user_data_root
 from skills.citation.types import (
     BUNDLE_SCHEMA_V2,
     PERSIST_SCHEMA_VERSION,
@@ -186,18 +186,6 @@ def _write_file_0600(path: Path, data: bytes) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
-
-
-def _fsync_dir(path: Path) -> None:
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return  # not supported on this platform/filesystem
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
 
 def _sidecar_identity(sidecar: dict) -> CanonicalIdentity:
     schema = sidecar.get("schema_version")
@@ -389,9 +377,9 @@ def write_identity_bundle(
             staging.mkdir(mode=0o700)
             _write_file_0600(staging / BIB_FILENAME, bib_bytes)
             _write_file_0600(staging / SIDECAR_FILENAME, sidecar_bytes)
-            _fsync_dir(staging)
+            fsync_directory(staging)
             os.rename(staging, final_dir)
-            _fsync_dir(output_dir)
+            fsync_directory(output_dir)
         except OSError as exc:
             _remove_tree(staging)
             raise StorageError("write_failed", f"bundle write failed: {exc}") from exc
