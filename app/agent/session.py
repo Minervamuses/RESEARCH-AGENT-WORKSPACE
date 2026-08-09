@@ -751,13 +751,10 @@ class ChatSession:
             recovery_reason=result.recovery_reason,
         )
 
-    async def _run_extended_turn(self, user_input: str) -> TurnOutcome:
-        return await self._fusion.run_extended_turn(user_input)
-
     async def _run_turn(self, user_input: str) -> TurnOutcome:
         """Process one turn through the single finalization chokepoint."""
         if self.thinking_mode == "extended":
-            return await self._run_extended_turn(user_input)
+            return await self._fusion.run_extended_turn(user_input)
         return await self._run_normal_turn(user_input)
 
     async def turn_outcome(self, user_input: str) -> TurnOutcome:
