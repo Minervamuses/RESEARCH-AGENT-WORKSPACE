@@ -6,16 +6,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import SystemMessage
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
-from skills.citation.gate import build_safe_message, check_citations
-from skills.citation.render import render_citations
-from skills.citation.tool import create_citation_workflow_tool
-from skills.citation.types import (
-    SaveBatchOutcome,
-    is_citable_source,
-)
 from agent.turns.results import GraphTurnResult, TurnOutcome
 from agent.turns.safety import (
     build_recovery_message,
@@ -44,6 +37,7 @@ from agent.skills import (
     discover_skills,
     load_skill_runtime,
 )
+from agent.skills.citation.session_policy import CitationSessionPolicy
 from agent.skills.runtime import render_tool_availability_block
 from agent.state import skill_runtime_to_agent_state
 from agent.tools.access import ToolAccessResolution, resolve_tool_access
@@ -149,12 +143,8 @@ class ChatSession:
             session_id=self.session_id,
             recent_turns=self.recent_turns,
         )
-        # Skill-scoped tool: bound into the graph universe but callable only
-        # while the citation skill's manifest requests it. Creation is cheap —
-        # the session-scoped service behind it is built lazily on first use.
-        self.citation_workflow_tool = create_citation_workflow_tool(
-            service_getter=lambda: self.citation_service,
-        )
+        self._citation_policy = CitationSessionPolicy(config)
+        self.citation_workflow_tool = self._citation_policy.workflow_tool
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
@@ -179,8 +169,16 @@ class ChatSession:
         self.last_tool_calls: list[dict] = []
 
         self._progress_cb = progress_cb
-        self._citation_service = None
         self._turn_execution_lock = asyncio.Lock()
+
+    @property
+    def _citation_service(self):
+        """Return the loaded citation service without constructing it."""
+        return self._citation_policy.loaded_service
+
+    @_citation_service.setter
+    def _citation_service(self, service) -> None:
+        self._citation_policy.set_loaded_service(service)
 
     @property
     def citation_service(self):
@@ -189,11 +187,7 @@ class ChatSession:
         Built lazily on first use. Its mutating methods are reachable only
         through the skill-only citation_workflow tool.
         """
-        if self._citation_service is None:
-            from skills.citation.service import CitationService
-            from skills.citation.hub import get_provider_hub
-            self._citation_service = CitationService(get_provider_hub(), config=self.config)
-        return self._citation_service
+        return self._citation_policy.service
 
     def _prompt_history(self) -> list:
         base = assemble_prompt_history(
@@ -274,8 +268,7 @@ class ChatSession:
 
     def _citation_registry(self):
         """The session source registry, or None before first citation use."""
-        service = self._citation_service
-        return service.registry if service is not None else None
+        return self._citation_policy.registry
 
     def _build_sources_hint(self) -> SystemMessage | None:
         """Inject the visible/recently-activated sources (at most 20).
@@ -283,24 +276,9 @@ class ChatSession:
         Citation-mode only: outside the citation skill there are no citable
         sources, so no hint is rendered and no registry is consulted.
         """
-        if not self.citation_skill_active:
-            return None
-        registry = self._citation_registry()
-        if registry is None:
-            return None
-        sources = registry.prompt_sources()
-        sources = [ref for ref in sources if is_citable_source(ref)]
-        if not sources:
-            return None
-        lines = [
-            "[Citable sources] Use these markers when you want the citation "
-            "renderer to number a saved source and append its bibliography "
-            "entry. Use [[citation-needed]] when a claim lacks a source.",
-        ]
-        for ref in sources:
-            label = ref.title or ref.doi or ref.url or "(unknown)"
-            lines.append(f"- [[cite:{ref.source_id}]] {label}")
-        return SystemMessage(content="\n".join(lines))
+        return self._citation_policy.build_sources_hint(
+            citation_active=self.citation_skill_active,
+        )
 
     def _citation_save_metrics(self, new_messages: list) -> CitationSaveMetrics:
         """Aggregate trustworthy item counts across every attempted save batch.
@@ -310,50 +288,9 @@ class ChatSession:
         model's answer.  Successful receipts are still checked against the
         live registry before they contribute to success counts.
         """
-        registry = self._citation_registry() if self.citation_skill_active else None
-        if registry is None:
-            return CitationSaveMetrics()
-        batch_count = 0
-        saved_count = 0
-        reused_count = 0
-        failed_count = 0
-        for message in new_messages:
-            if not isinstance(message, ToolMessage) or getattr(message, "name", None) != "citation_workflow":
-                continue
-            if getattr(message, "status", "success") != "success":
-                continue
-            artifact = getattr(message, "artifact", None)
-            if not isinstance(artifact, dict) or artifact.get("kind") != "citation_save_batch":
-                continue
-            try:
-                batch = SaveBatchOutcome.from_artifact(artifact)
-            except (TypeError, ValueError) as exc:
-                logger.warning("ignored invalid citation save batch: %s", exc)
-                continue
-            batch_count += 1
-            for item in batch.items:
-                receipt = item.receipt
-                if receipt is not None:
-                    ref = registry.get(receipt.source_id)
-                    if (
-                        ref is None
-                        or not registry.receipt_is_trusted(receipt)
-                        or not is_citable_source(ref)
-                    ):
-                        logger.warning("save receipt/registry mismatch")
-                        failed_count += 1
-                        continue
-                if item.status == "saved":
-                    saved_count += 1
-                elif item.status == "reused":
-                    reused_count += 1
-                else:
-                    failed_count += 1
-        return CitationSaveMetrics(
-            batch_count=batch_count,
-            new_saved_count=saved_count,
-            reused_count=reused_count,
-            failed_count=failed_count,
+        return self._citation_policy.save_metrics(
+            new_messages,
+            citation_active=self.citation_skill_active,
         )
 
     def _finalize_answer(
@@ -369,30 +306,11 @@ class ChatSession:
         validation_errors)``; a violating draft is replaced by the safe
         message and never returned.
         """
-        citation_active = self.citation_skill_active
-        registry = self._citation_registry() if citation_active else None
-        verified_ids = frozenset(
-            ref.source_id
-            for ref in (registry.list() if registry is not None else [])
-            if is_citable_source(ref)
-        )
-        violations = check_citations(
+        return self._citation_policy.finalize_answer(
             answer,
-            verified_source_ids=verified_ids,
-            citation_active=citation_active,
             user_input=user_input,
+            citation_active=self.citation_skill_active,
         )
-        if violations:
-            errors = [f"{v.code}: {v.detail}" for v in violations]
-            logger.warning(
-                "citation gate blocked a draft: %s", [v.code for v in violations]
-            )
-            safe = build_safe_message(violations, citation_active=citation_active)
-            return safe, errors
-        if not citation_active:
-            return answer, []
-        resolve = registry.get if registry is not None else (lambda _sid: None)
-        return render_citations(answer, resolve=resolve).text, []
 
     async def finalize_and_record(
         self,
@@ -490,7 +408,7 @@ class ChatSession:
         already written to disk are untouched. The next activation lazily
         builds a fresh service.
         """
-        self._citation_service = None
+        self._citation_policy.reset()
 
     def activate_skill(self, name: str, task_mode: str | None = None) -> SkillRuntime:
         """Activate a local skill for subsequent turns.
