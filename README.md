@@ -468,7 +468,3 @@ conda run -n rag python -c "import rag; print('rag ok')"
 conda run -n app poetry check --lock
 conda run -n rag poetry check --lock
 ```
-
-## Repository Notes
-
-Python package 名稱維持 `agent` 與 `rag` 以保持 import 穩定。本 review copy 刻意省略歷史 log、本地筆記、run ledgers 與專案特定 fixtures。
