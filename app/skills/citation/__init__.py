@@ -19,10 +19,8 @@ Nothing here fabricates bibliographic data: failed lookups, DOI mismatches,
 and storage conflicts fail closed and write nothing.
 """
 
-__all__ = ["SKILL_NAME", "__version__"]
+__all__ = ["SKILL_NAME"]
 
 # The skill bundle's frontmatter name; the session keys its citation-specific
 # behavior (thinking isolation, teardown, gate policy) on this.
 SKILL_NAME = "citation"
-
-__version__ = "0.4.0"
