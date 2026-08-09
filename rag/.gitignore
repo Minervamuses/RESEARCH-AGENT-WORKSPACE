@@ -1,13 +1,4 @@
-__pycache__/
-*.pyc
-.env
-*.egg-info/
-dist/
-build/
-.venv/
-.pytest_cache/
 /store/*
-*.sqlite3
 
 # Agent / AI tool configs
 CLAUDE.md
@@ -17,6 +8,3 @@ AGENTS.md
 .cursor/
 .cursorrules
 .github/copilot-instructions.md
-
-# Windows zone identifier
-*:Zone.Identifier
