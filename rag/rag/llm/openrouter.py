@@ -24,9 +24,7 @@ class OpenRouterLLM:
     MAX_RETRIES = 10
 
     def __init__(self, model_name: str | None = None, config: RAGConfig | None = None):
-        # Retries are delegated to the SDK: besides 429 it also retries
-        # connection errors and 5xx, with a shorter backoff than the old
-        # hand-rolled 10s-doubling loop.
+        # Delegate 429, connection-error, and 5xx retries to one SDK policy.
         self.client = OpenAI(
             base_url=OPENROUTER_BASE_URL,
             api_key=get_openrouter_api_key(),

@@ -1,7 +1,6 @@
 """File collection for ingest: which files to index, grouped by folder.
 
-Library-level module so both the ingest CLI and rag.sync share one
-implementation (sync previously reached into the CLI's private helpers).
+The ingest CLI and ``rag.sync`` share this library-level implementation.
 """
 
 from __future__ import annotations

@@ -43,9 +43,8 @@ def _tag_folders(folders: dict[str, list[Path]], config: RAGConfig) -> dict[str,
 
     Failure policy: LLMTagger.tag only swallows parse errors; a hard error
     (retries exhausted, auth, connection) propagates. All futures are
-    collected first, then any failure aborts the whole run before
-    folder_meta is persisted — same fail-fast outcome as the old serial
-    loop, which stopped at the first hard error.
+    collected first, then any failure aborts the whole run before folder_meta
+    is persisted.
     """
     tagger = LLMTagger(config)
 
@@ -147,8 +146,7 @@ def ingest_repo(
     total_chunks = 0
 
     print(f"\nIngesting files...")
-    # One atomic raw.json write for the whole run instead of a full-file
-    # rewrite per document (the old O(n^2) ingest).
+    # Persist raw.json once after the run rather than rewriting it per document.
     with json_store.deferred_save():
         for folder_rel, files in sorted(folders.items()):
             meta = folder_meta.get(folder_rel, {"tags": [], "summary": ""})
