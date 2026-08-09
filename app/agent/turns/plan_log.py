@@ -1,15 +1,17 @@
-"""Plan-mode markdown log: file creation and turn-block rendering."""
+"""Plan-mode markdown persistence and turn-block rendering."""
 
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from agent.config import AgentConfig
-from agent.history import group_tool_messages_by_call_id
-from agent.thinking import FusionCandidateTrace
+from agent.turns.trace import group_tool_messages_by_call_id
+
+if TYPE_CHECKING:
+    from agent.thinking.schemas import FusionCandidateTrace
 
 
 class PlanLog:

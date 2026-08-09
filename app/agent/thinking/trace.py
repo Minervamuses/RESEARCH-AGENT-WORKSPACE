@@ -7,7 +7,7 @@ from typing import Sequence
 
 from langchain_core.messages import ToolMessage
 
-from agent.history import group_tool_messages_by_call_id
+from agent.turns.trace import group_tool_messages_by_call_id
 from agent.llm.text import normalize_content
 from agent.thinking.schemas import (
     FusionAggregateResult,

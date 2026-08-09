@@ -27,7 +27,7 @@ from agent.turns.safety import (
 from agent.config import AgentConfig
 from agent.fusion import FusionOrchestrator
 from agent.graph import build_graph
-from agent.history import (
+from agent.turns.trace import (
     extract_tool_calls,
     format_tool_counts,
 )
@@ -57,7 +57,7 @@ from agent.turns.memory import (
     assemble_prompt_history,
 )
 from agent.paths import find_app_root
-from agent.plan_log import PlanLog
+from agent.turns.plan_log import PlanLog
 from agent.turns.store import TurnStore
 
 logger = logging.getLogger(__name__)

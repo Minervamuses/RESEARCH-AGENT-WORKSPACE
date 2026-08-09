@@ -1,4 +1,4 @@
-"""Utilities for tool-call traces."""
+"""Utilities for normalized turn tool-call traces."""
 
 from collections import Counter
 
