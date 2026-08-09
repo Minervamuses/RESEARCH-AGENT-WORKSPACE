@@ -71,7 +71,7 @@
 - `app/skills/citation/coordinator.py` 的 `_new_generation()` 會清空 candidates/matches 並重設 counter。
 - `app/skills/citation/ranking.py` 每次 fusion/filter 後重新賦予 `c1...cN`。
 - `CitationCoordinator.get_candidate()` 只比較目前 pool 中的 bare `candidate_id`；它不能知道 prompt 裡的 `c1` 原本指向另一個 workflow。
-- `app/agent/memory.py` 的 `TurnRecord` 只保存 user input 與 finalized assistant prose。第一輪的 ToolMessage/candidate lists 不會進入下一輪 prompt。
+- `app/agent/turns/memory.py` 的 `TurnRecord` 只保存 user input 與 finalized assistant prose。第一輪的 ToolMessage/candidate lists 不會進入下一輪 prompt。
 - `ChatSession._prompt_history()` 會注入 skill、tool availability、plan mode 與已保存 sources；沒有 active candidate pool 的權威投影。
 - `app/skills/citation/tool.py` 明定自然語言保存授權由模型判斷；tool 驗 workflow/identifier state，但 sidecar 沒有 user request、作品意圖、版本偏好或授權範圍可供驗證。
 - busy lock 只阻止並行的 state mutation，不能阻止同一輪先後兩次 save。

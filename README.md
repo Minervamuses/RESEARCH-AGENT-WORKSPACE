@@ -10,6 +10,14 @@ research-agent-workspace/
 
 一般使用只需從 `app/` 啟動 chat CLI;要直接管理知識庫時才會用到 `rag/`。預設把 workspace 根目錄視為 host project:`/init` 會 ingest `app/` 的上層目錄並排除 `app/` 與 `rag/`,讓知識庫只收研究材料、不收 agent 自身的程式碼。
 
+## 開發者導覽
+
+- [App package](app/README.md)：Agent application 的分層、入口與文件地圖。
+- [Agent architecture](app/agent/README.md)：`agent` package 的根層邊界與單回合流程。
+- [Skills 規範](app/SKILLS_GUIDE.md)：Skill bundle schema 與建立規則。
+- [Citation subsystem](app/skills/citation/README.md)：Citation engine 的資料流與信任邊界。
+- [RAG package](rag/README.md) 與 [Python API](rag/docs/API.md)：Framework-neutral retrieval library。
+
 ## 1. 前置作業
 
 缺少某個前置條件時,對應功能會 fail-fast 或停用——這是預期行為,不代表專案故障。
