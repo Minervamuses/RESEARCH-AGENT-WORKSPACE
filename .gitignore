@@ -9,6 +9,7 @@ build/
 *.sqlite3
 *:Zone.Identifier
 /cite/
+/AGENTS.md
 /app/tool/skill/*
 !/app/tool/skill/.gitkeep
 /app/tool/mcp/*
