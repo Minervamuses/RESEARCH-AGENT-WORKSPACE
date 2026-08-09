@@ -262,7 +262,6 @@ class FusionOrchestrator:
                     skill_state=skill_state,
                     recursion_limit=self._proposer_recursion_limit(),
                     extra_system_messages=rewrite_hints,
-                    trace_label="proposer",
                     candidate_id=candidate_id,
                 ),
                 timeout=config.thinking_fusion_candidate_timeout_seconds,

@@ -591,7 +591,6 @@ class ChatSession:
         skill_state: dict,
         recursion_limit: int,
         extra_system_messages: list[SystemMessage] | None = None,
-        trace_label: str = "writer",
         candidate_id: str | None = None,
     ) -> GraphTurnResult:
         """Internal graph runner shared by the session and fusion proposers.
@@ -602,7 +601,6 @@ class ChatSession:
         ``candidate_id`` is set, each emitted tool call and trace event carries
         the candidate id so candidate-scoped rendering never has to guess.
         """
-        del trace_label  # reserved for future structured tracing; documents intent
         input_messages = [
             *prompt_history,
             *(extra_system_messages or []),
@@ -672,7 +670,6 @@ class ChatSession:
             skill_state=skill_runtime_to_agent_state(self.active_skill_runtime),
             recursion_limit=self.recursion_limit,
             extra_system_messages=extra_system_messages,
-            trace_label="writer",
             candidate_id=None,
         )
 
