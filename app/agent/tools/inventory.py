@@ -125,20 +125,6 @@ BASE_TOOL_DOCS: tuple[BaseToolDoc, ...] = (
     ),
 )
 
-RAG_TOOL_NAMES: tuple[str, ...] = tuple(
-    doc.name for doc in BASE_TOOL_DOCS if doc.family == "rag"
-)
-HISTORY_TOOL_NAMES: tuple[str, ...] = tuple(
-    doc.name for doc in BASE_TOOL_DOCS if doc.family == "history"
-)
-FILE_TOOL_NAMES: tuple[str, ...] = tuple(
-    doc.name for doc in BASE_TOOL_DOCS if doc.family == "file"
-)
-SHELL_TOOL_NAMES: tuple[str, ...] = tuple(
-    doc.name for doc in BASE_TOOL_DOCS if doc.family == "shell"
-)
-# Tools the behavior evaluator classifies as "local" (non-RAG, non-history).
-LOCAL_TOOL_NAMES: tuple[str, ...] = FILE_TOOL_NAMES + SHELL_TOOL_NAMES
 # Web behavior tool names are frozen here so the evaluator taxonomy keeps a
 # stable universe even though these tools are provided by MCP at runtime.
 WEB_BEHAVIOR_TOOL_NAMES: tuple[str, ...] = (
