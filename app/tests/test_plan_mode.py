@@ -226,4 +226,4 @@ def test_unknown_persist_target_raises(make_session):
     )
 
     with pytest.raises(ValueError, match="unknown persist_target"):
-        asyncio.run(session._store_turn(turn))
+        asyncio.run(session._turn_store.store_turn(turn))

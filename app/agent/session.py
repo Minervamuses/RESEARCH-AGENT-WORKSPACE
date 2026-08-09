@@ -459,9 +459,6 @@ class ChatSession:
             tool_calls=tool_calls,
         )
 
-    async def _store_turn(self, turn: TurnRecord) -> None:
-        await self._turn_store.store_turn(turn)
-
     async def enter_plan_mode(self) -> Path:
         """Enable plan mode for newly created turns."""
         if self.plan_mode:
