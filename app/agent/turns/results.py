@@ -1,8 +1,10 @@
-"""The unified result of one finalized chat turn."""
+"""Result models shared by normal and extended-thinking turns."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from agent.thinking.schemas import FusionCandidateTrace
 
 
 @dataclass
@@ -18,3 +20,16 @@ class TurnOutcome:
     text: str
     validation_errors: list[str] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GraphTurnResult:
+    """Normalized output collected from one graph execution."""
+
+    answer: str
+    new_messages: list
+    tool_calls: list[dict]
+    trace_events: list[dict]
+    recovery_reason: str | None = None
+    fusion: dict | None = None
+    candidate_traces: list[FusionCandidateTrace] = field(default_factory=list)

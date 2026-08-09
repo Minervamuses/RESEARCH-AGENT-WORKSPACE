@@ -14,7 +14,6 @@ import asyncio
 import dataclasses
 import logging
 import time
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import SystemMessage
@@ -27,6 +26,7 @@ from agent.llm.thinking import (
     resolve_fusion_proposer_models,
 )
 from agent.skills.runtime import render_tool_availability_block
+from agent.turns.results import GraphTurnResult
 from agent.thinking import (
     Clarify,
     FusionAggregateResult,
@@ -81,17 +81,6 @@ DRAFT:
 
 REBUTTAL:
 <對 reviewer findings 的反對說明；若無，寫 (none)。這段只給下輪 Reviewer 看，不會回給使用者。>"""
-
-
-@dataclass(frozen=True)
-class GraphTurnResult:
-    answer: str
-    new_messages: list
-    tool_calls: list[dict]
-    trace_events: list[dict]
-    recovery_reason: str | None = None
-    fusion: dict | None = None
-    candidate_traces: list[FusionCandidateTrace] = field(default_factory=list)
 
 
 class FusionOrchestrator:

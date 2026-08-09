@@ -16,7 +16,7 @@ from skills.citation.types import (
     SaveBatchOutcome,
     is_citable_source,
 )
-from agent.turn_outcome import TurnOutcome
+from agent.turns.results import GraphTurnResult, TurnOutcome
 from agent.turn_safety import (
     build_recovery_message,
     content_text,
@@ -25,7 +25,7 @@ from agent.turn_safety import (
 )
 
 from agent.config import AgentConfig
-from agent.fusion import FusionOrchestrator, GraphTurnResult
+from agent.fusion import FusionOrchestrator
 from agent.graph import build_graph
 from agent.history import (
     extract_tool_calls,
