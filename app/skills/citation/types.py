@@ -52,19 +52,6 @@ class CanonicalIdentity:
 
 
 @dataclass(frozen=True)
-class VenueAnnotation:
-    canonical_name: str
-    kind: str = "unclassified"
-    tier: str | None = None
-    source: str = ""
-    catalog_version: str = ""
-
-    @property
-    def classified(self):
-        return self.kind != "unclassified"
-
-
-@dataclass(frozen=True)
 class ProviderState:
     provider: str
     status: ProviderStatus
