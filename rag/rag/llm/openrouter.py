@@ -6,7 +6,6 @@ from typing import Any
 from openai import OpenAI
 
 from rag.config import RAGConfig
-from rag.llm.base import BaseLLM
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -19,7 +18,7 @@ def get_openrouter_api_key() -> str:
     return api_key
 
 
-class OpenRouterLLM(BaseLLM):
+class OpenRouterLLM:
     """LLM provider via OpenRouter API. Used by LLMTagger for simple prompt→text calls."""
 
     MAX_RETRIES = 10
