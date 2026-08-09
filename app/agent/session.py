@@ -186,7 +186,6 @@ class ChatSession:
 
         self.turn_logs: list[dict] = []
         self.last_tool_calls: list[dict] = []
-        self.last_trace_events: list[dict] = []
 
         self._progress_cb = progress_cb
         self._citation_service = None
@@ -740,7 +739,6 @@ class ChatSession:
             )
         )
         self.last_tool_calls = tool_calls
-        self.last_trace_events = trace_events
         self.turn_logs.append({
             "user_input": user_input,
             "tool_calls": tool_calls,

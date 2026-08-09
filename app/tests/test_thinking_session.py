@@ -397,8 +397,9 @@ def test_turn_holds_flat_calls_metadata_and_segmented_traces(monkeypatch, tmp_pa
     fusion = session.turn_logs[-1]["fusion"]
     assert fusion["candidate_statuses"] == {"candidate-1": "success", "candidate-2": "success"}
     assert fusion["model_ids"] == {"candidate-1": "p1", "candidate-2": "p2"}
-    assert any(ev.get("type") == "fusion" for ev in session.last_trace_events)
-    candidate_events = [ev for ev in session.last_trace_events if ev.get("candidate_id")]
+    trace_events = session.turn_logs[-1]["trace_events"]
+    assert any(ev.get("type") == "fusion" for ev in trace_events)
+    candidate_events = [ev for ev in trace_events if ev.get("candidate_id")]
     assert {ev["candidate_id"] for ev in candidate_events} == {"candidate-1", "candidate-2"}
 
 
