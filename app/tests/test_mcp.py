@@ -118,18 +118,13 @@ def test_resolve_mcp_specs_both_servers(monkeypatch):
     assert names == {"web_search", "github"}
 
 
-def test_load_mcp_tools_empty_without_specs():
-    tools = asyncio.run(mcp_module.load_mcp_tools(specs=[]))
-    assert tools == []
-
-
 def test_load_mcp_tools_with_families_empty_without_specs():
     tools, families = asyncio.run(mcp_module.load_mcp_tools_with_families(specs=[]))
     assert tools == []
     assert families == {}
 
 
-def test_load_mcp_tools_skips_failing_server(monkeypatch):
+def test_load_mcp_tools_with_families_skips_failing_server(monkeypatch):
     @tool("web_fetch")
     def fake_web(url: str) -> str:
         """Fake web search tool."""
@@ -157,9 +152,12 @@ def test_load_mcp_tools_skips_failing_server(monkeypatch):
         mcp_module.MCPServerSpec(name="web_search", command="x", args=[], env={}),
         mcp_module.MCPServerSpec(name="github", command="y", args=[], env={}),
     ]
-    tools = asyncio.run(mcp_module.load_mcp_tools(specs=specs))
+    tools, families = asyncio.run(
+        mcp_module.load_mcp_tools_with_families(specs=specs)
+    )
     assert len(tools) == 1
     assert tools[0].name == "web_fetch"
+    assert families == {"web_fetch": "web_search"}
 
 
 def test_load_mcp_tools_with_families_maps_loaded_tools(monkeypatch):

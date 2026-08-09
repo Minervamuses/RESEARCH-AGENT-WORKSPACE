@@ -229,17 +229,6 @@ def _spec_to_connection(spec: MCPServerSpec) -> dict:
         conn["env"] = dict(spec.env)
     return conn
 
-
-async def load_mcp_tools(specs: list[MCPServerSpec] | None = None) -> list:
-    """Start the configured MCP servers and return the merged LangChain tool list.
-
-    Failures from any single server are logged and that server is skipped;
-    tools from surviving servers are still returned.
-    """
-    tools, _families = await load_mcp_tools_with_families(specs=specs)
-    return tools
-
-
 async def load_mcp_tools_with_families(
     specs: list[MCPServerSpec] | None = None,
     *,
