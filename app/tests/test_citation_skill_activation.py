@@ -10,7 +10,7 @@ from conftest import FakeHistoryStore, make_astream_graph
 from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.skills import discover_skills
-from agent.turn_safety import find_tool_protocol_artifact
+from agent.turns.safety import find_tool_protocol_artifact
 
 
 @pytest.fixture

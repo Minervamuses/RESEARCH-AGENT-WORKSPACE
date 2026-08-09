@@ -1,4 +1,4 @@
-"""Final-response safety helpers shared by the graph, session, and CLI."""
+"""Final-response safety helpers shared by turn consumers."""
 
 from __future__ import annotations
 

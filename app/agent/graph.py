@@ -18,7 +18,7 @@ from agent.policy_tool_node import PolicyToolNode
 from agent.state import AgentState, skill_runtime_to_agent_state
 from agent.tool_access import resolve_tool_access
 from agent.tools import inventory as tool_inventory
-from agent.turn_safety import (
+from agent.turns.safety import (
     build_empty_upstream_message,
     build_recovery_message,
     content_text,

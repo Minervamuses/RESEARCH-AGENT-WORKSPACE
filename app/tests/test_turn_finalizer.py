@@ -12,7 +12,7 @@ from conftest import FakeHistoryStore, make_astream_graph
 from agent.config import AgentConfig
 from agent.session import ChatSession
 from agent.turns.results import TurnOutcome
-from agent.turn_safety import find_content_tool_protocol_artifact
+from agent.turns.safety import find_content_tool_protocol_artifact
 from skills.citation.hub import CitationProviderHub
 from skills.citation.service import CitationService
 from skills.citation.types import (

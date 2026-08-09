@@ -17,7 +17,7 @@ from agent.cli.slash_commands import (
 )
 from agent.config import AgentConfig
 from agent.session import ChatSession, DEFAULT_RECURSION_LIMIT
-from agent.turn_safety import build_recovery_message
+from agent.turns.safety import build_recovery_message
 
 _EXIT_COMMANDS = {"q", "quit", "exit"}
 
