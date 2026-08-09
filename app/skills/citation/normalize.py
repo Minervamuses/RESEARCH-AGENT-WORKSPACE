@@ -76,14 +76,3 @@ def normalize_title(raw: str | None) -> str:
         ch if (ch.isalnum() or ch.isspace()) else " " for ch in text
     )
     return _WS_RE.sub(" ", text).strip()
-
-
-def titles_match(a: str | None, b: str | None) -> bool:
-    """True when both titles normalize to the same non-empty string.
-
-    An empty normalized title never matches — a record with no comparable
-    title cannot be confirmed equal to anything.
-    """
-    na = normalize_title(a)
-    nb = normalize_title(b)
-    return bool(na) and na == nb
