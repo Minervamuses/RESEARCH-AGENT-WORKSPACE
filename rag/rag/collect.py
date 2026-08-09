@@ -18,7 +18,7 @@ TEXT_EXTENSIONS = {
     # Web
     ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".vue", ".svelte",
     # Config
-    ".ini", ".cfg", ".conf", ".env.example",
+    ".ini", ".cfg", ".conf",
     # Data
     ".sql", ".sh", ".bash", ".zsh",
     # Other code
