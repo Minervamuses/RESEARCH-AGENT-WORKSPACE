@@ -7,8 +7,8 @@ Every saved citation persists as one bundle directory::
 
 Atomicity: both files are written into a hidden staging directory on the
 same filesystem (0600, flushed and fsynced), then a single ``rename`` makes
-the bundle visible — a visible bundle is never half-written. Stale staging
-directories are only reclaimed after 24 hours.
+the bundle visible — a visible bundle is never half-written. Failures trigger
+best-effort removal of the staging directory before returning an error.
 
 Idempotency and fail-closed rules:
   * saving the same canonical identity validates the existing sidecar and
@@ -53,7 +53,6 @@ SIDECAR_FILENAME = "citation.json"
 MAX_BUNDLE_DIR_BYTES = 180
 HASH_LENGTHS = (12, 20, 64)
 STAGING_PREFIX = ".staging-"
-STALE_STAGING_SECONDS = 24 * 60 * 60
 LOCKS_DIRNAME = ".locks"
 DEFAULT_LOCK_TIMEOUT_SECONDS = 5.0
 
@@ -65,7 +64,7 @@ class StorageError(RuntimeError):
 
     ``code`` is ``bundle_conflict`` (existing bundle fails validation),
     ``source_id_collision`` (the stable slot belongs to another identity), or
-    ``write_failed`` (I/O failure, staging left for later inspection/cleanup).
+    ``write_failed`` (I/O failure after best-effort staging cleanup).
     """
 
     def __init__(self, code: str, message: str):
@@ -422,30 +421,4 @@ def _remove_tree(path: Path) -> None:
             child.unlink()
         path.rmdir()
     except OSError:
-        pass  # best-effort; stale-staging cleanup will reclaim it
-
-
-def cleanup_stale_staging(
-    output_dir: Path,
-    *,
-    max_age_seconds: float = STALE_STAGING_SECONDS,
-    now: float | None = None,
-) -> list[Path]:
-    """Remove staging dirs older than 24 h; younger ones are left alone."""
-    output_dir = Path(output_dir)
-    if not output_dir.is_dir():
-        return []
-    current = time.time() if now is None else now
-    removed: list[Path] = []
-    for entry in output_dir.iterdir():
-        if not entry.name.startswith(STAGING_PREFIX) or not entry.is_dir():
-            continue
-        try:
-            age = current - entry.stat().st_mtime
-        except OSError:
-            continue
-        if age >= max_age_seconds:
-            _remove_tree(entry)
-            if not entry.exists():
-                removed.append(entry)
-    return removed
+        pass  # best-effort cleanup; the original write error remains primary

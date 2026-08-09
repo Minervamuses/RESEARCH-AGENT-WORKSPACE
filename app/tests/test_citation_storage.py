@@ -1,7 +1,6 @@
 """Atomic bundle storage: precedence, atomicity, idempotency, fail-closed."""
 
 import json
-import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +13,6 @@ from skills.citation.storage import (
     MAX_BUNDLE_DIR_BYTES,
     SIDECAR_FILENAME,
     StorageError,
-    cleanup_stale_staging,
     identity_bundle_dir_name,
     resolve_output_dir,
     write_identity_bundle,
@@ -225,25 +223,6 @@ def test_different_doi_source_id_collision_fails_closed(tmp_path, monkeypatch):
         )
     assert exc.value.code == "source_id_collision"
     assert [p for p in tmp_path.iterdir() if p.is_dir() and not p.name.startswith(".")] == [first.bundle_dir]
-
-
-def test_stale_staging_cleanup_only_after_24h(tmp_path):
-    fresh = tmp_path / ".staging-fresh"
-    stale = tmp_path / ".staging-stale"
-    fresh.mkdir()
-    stale.mkdir()
-    (stale / "reference.bib").write_text("x", encoding="utf-8")
-    old = 1_000_000.0
-    os.utime(stale, (old, old))
-    os.utime(fresh, (old + 100_000, old + 100_000))
-
-    removed = cleanup_stale_staging(
-        tmp_path, now=old + 24 * 3600 + 1
-    )
-    assert stale in removed
-    assert not stale.exists()
-    assert fresh.exists()
-
 
 def test_write_failure_surfaces_as_storage_error(tmp_path):
     blocked = tmp_path / "no-write"
