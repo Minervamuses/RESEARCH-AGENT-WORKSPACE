@@ -8,18 +8,12 @@ from typing import TYPE_CHECKING
 
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.filters import build_where, date_to_int
-from rag.store.cache import get_chroma_store, get_json_store, get_vector_retriever
-from rag.store.chroma_store import ChromaStore
+from rag.store.cache import get_json_store, get_vector_retriever
 from rag.types import ContextChunk, ContextWindow, FolderSummary, Hit, Inventory
 from rag.utils.paths import extract_date
 
 if TYPE_CHECKING:
     from langchain_core.documents import Document
-
-
-def _get_store(cfg: RAGConfig) -> ChromaStore:
-    """Return the process-cached knowledge-collection ChromaStore."""
-    return get_chroma_store(KNOWLEDGE_COLLECTION, cfg)
 
 
 def _doc_to_hit(doc: "Document") -> Hit:
