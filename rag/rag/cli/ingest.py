@@ -36,7 +36,7 @@ from rag.utils.paths import extract_date
 _ADD_BATCH_SIZE = 256
 
 
-def _tag_folders(folders: dict[str, list[Path]], root: Path, config: RAGConfig) -> dict[str, dict]:
+def _tag_folders(folders: dict[str, list[Path]], config: RAGConfig) -> dict[str, dict]:
     """Use LLM to tag and summarize each folder, four folders at a time.
 
     Returns dict mapping folder_rel -> {"tags": [...], "summary": "..."}.
@@ -118,7 +118,7 @@ def ingest_repo(
 
     # Phase 1: Collect and tag folders
     folders = collect_folders(root, extra_skip=extra_skip, skip_rel_paths=skip_rel_paths)
-    folder_meta = _tag_folders(folders, root, config)
+    folder_meta = _tag_folders(folders, config)
 
     # Save folder metadata (merge with existing so partial ingest doesn't lose
     # tags from folders outside this run's scope).
