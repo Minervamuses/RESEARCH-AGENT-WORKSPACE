@@ -4,8 +4,6 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage
-
 from conftest import FakeHistoryStore, QueuedModel
 from conftest import answer_updates as _answer
 from conftest import tool_then_answer_updates as _tool_then_answer

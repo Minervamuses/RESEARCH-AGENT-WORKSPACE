@@ -1,5 +1,4 @@
 import asyncio
-from dataclasses import dataclass
 
 from skills.citation.providers.base import BibliographicQuery, ProviderRecord
 from skills.citation.providers.doi_org import StructuredRecord

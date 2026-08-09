@@ -3,14 +3,11 @@
 import json
 import subprocess
 
-import pytest
 from langchain_core.tools import StructuredTool
 
 from agent.config import AgentConfig
-from agent.tools import bash as bash_mod
 from agent.tools.bash import (
     BashInput,
-    DEFAULT_TIMEOUT_SEC,
     MAX_OUTPUT_BYTES,
     TOOL_NAME,
     create_bash_tool,

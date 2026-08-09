@@ -1,7 +1,5 @@
 """MCP stderr log policy: 0600 creation, 5 MiB rotation, run headers."""
 
-import os
-
 from agent.mcp import (
     MCP_LOG_KEEP_ROTATED,
     MCP_LOG_MAX_BYTES,

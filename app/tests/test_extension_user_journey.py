@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import yaml
-import pytest
 from langchain_core.messages import AIMessage
 
 from agent.cli.slash_commands import (
