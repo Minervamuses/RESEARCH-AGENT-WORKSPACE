@@ -1,6 +1,6 @@
 """DOI canonicalization utilities.
 
-Canonicalization contract (per plan):
+Canonicalization contract:
   * Strip ``doi:`` labels and doi.org / dx.doi.org URL prefixes by context.
   * HTML-unescape and percent-decode exactly once each — never in a loop, so
     a DOI that legitimately contains ``%25`` or ``&amp;`` survives one decode.

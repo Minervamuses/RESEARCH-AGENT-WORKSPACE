@@ -1,8 +1,8 @@
 """Process-level networking primitives shared by all citation providers.
 
 One TTL cache and one rate limiter per provider live on the process-scoped
-:class:`citation.hub.CitationProviderHub`; every session-scoped CitationService
-shares them. Policy constants (per plan):
+:class:`skills.citation.hub.CitationProviderHub`; every session-scoped
+CitationService shares them. Policy constants:
 
   * search results cached 15 minutes, DOI lookups 24 hours;
   * errors are never cached;

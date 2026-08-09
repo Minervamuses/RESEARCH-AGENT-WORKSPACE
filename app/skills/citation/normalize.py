@@ -1,6 +1,6 @@
 """Title normalization for cross-provider bibliographic comparison.
 
-Comparison pipeline (per plan): HTML unescape -> LaTeX normalization ->
+Comparison pipeline: HTML unescape -> LaTeX normalization ->
 Unicode NFKC -> casefold -> whitespace collapse. Normalization is only ever
 used to *compare* titles; the original strings and their provenance are kept
 by the caller. An empty normalized title never matches anything.
