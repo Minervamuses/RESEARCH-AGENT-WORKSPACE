@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -91,11 +90,6 @@ Language policy:
 - For other languages, match the user's input language without conversion."""
 
 DEFAULT_RECURSION_LIMIT = 32
-
-
-@dataclass(frozen=True)
-class _ToolRef:
-    name: str
 
 
 class ChatSession:
@@ -255,7 +249,7 @@ class ChatSession:
             resolution=self.tool_access_resolution(),
             active_skill=runtime.name if runtime is not None else None,
             task_mode=runtime.task_mode if runtime is not None else None,
-            all_tool_names=[tool.name for tool in self._tool_universe_refs()],
+            all_tool_names=self._tool_universe_refs(),
             mcp_families=self.mcp_families,
         )
 
@@ -533,7 +527,7 @@ class ChatSession:
         if was_citation:
             self._teardown_citation_session_state()
 
-    def _tool_universe_refs(self) -> list[_ToolRef]:
+    def _tool_universe_refs(self) -> list[str]:
         """Every tool that actually exists in this session, global or skill.
 
         This is the universe ``resolve_tool_access`` narrows into effective
@@ -541,11 +535,10 @@ class ChatSession:
         (e.g. ``citation_workflow``) that only an active skill manifest can
         surface.
         """
-        names = [
+        return [
             *tool_inventory.base_tool_names(extra_tools=self.extra_tools),
             self.citation_workflow_tool.name,
         ]
-        return [_ToolRef(name) for name in names]
 
     def _append_block_to_md(self, log_path: str, block: str) -> None:
         # Kept as a facade method: the turn flow (and tests patching this on
