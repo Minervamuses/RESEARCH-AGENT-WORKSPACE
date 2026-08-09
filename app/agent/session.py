@@ -1,9 +1,7 @@
 """Multi-turn conversational session for the agent."""
 
 import asyncio
-import logging
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import SystemMessage
@@ -43,15 +41,9 @@ from agent.state import skill_runtime_to_agent_state
 from agent.tools.access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
-from agent.turns.memory import (
-    TurnRecord,
-    assemble_prompt_history,
-)
+from agent.turns.journal import TurnJournal
+from agent.turns.memory import assemble_prompt_history
 from agent.paths import find_app_root
-from agent.turns.plan_log import PlanLog
-from agent.turns.store import TurnStore
-
-logger = logging.getLogger(__name__)
 
 # The base tool inventory, its selection policy, and the base workflow are
 # owned by agent.tools.inventory (single source of truth). Only the optional
@@ -102,9 +94,7 @@ class ChatSession:
     ):
         self.config = config
         self.recursion_limit = recursion_limit
-        self.plan_mode = False
         self.thinking_mode = "normal"
-        self.plan_log_path: Path | None = None
         self.active_skill_runtime: SkillRuntime | None = None
         self.extra_tools = list(extra_tools or [])
         self.mcp_families = dict(mcp_families or {})
@@ -123,25 +113,13 @@ class ChatSession:
             extension_startup_diagnostics
         )
         self.system_prompt_message = SystemMessage(content=system_prompt)
-        self.recent_turns: list[TurnRecord] = []
-
         self.session_id = uuid.uuid4().hex
-        self._turn_counter = 0
         self.history_store = history_store or get_chat_history_store(config)
-        # find_app_root resolves here (not at import), so a monkeypatch of
-        # agent.session.find_app_root before construction stays effective.
-        self._plan_log = PlanLog(
-            config,
-            session_id=self.session_id,
-            app_root_resolver=lambda: find_app_root(),
-        )
-        # Shares the recent_turns list by reference: prompt assembly reads it
-        # on the facade while TurnStore owns spilling it into the store.
-        self._turn_store = TurnStore(
-            self.history_store,
+        self._turn_journal = TurnJournal(
             config=config,
             session_id=self.session_id,
-            recent_turns=self.recent_turns,
+            history_store=self.history_store,
+            app_root_resolver=lambda: find_app_root(),
         )
         self._citation_policy = CitationSessionPolicy(config)
         self.citation_workflow_tool = self._citation_policy.workflow_tool
@@ -165,11 +143,36 @@ class ChatSession:
         )
         self._prompt_master_skill_text_cache: str | None = None
 
-        self.turn_logs: list[dict] = []
-        self.last_tool_calls: list[dict] = []
-
         self._progress_cb = progress_cb
         self._turn_execution_lock = asyncio.Lock()
+
+    @property
+    def recent_turns(self) -> list:
+        return self._turn_journal.recent_turns
+
+    @property
+    def turn_logs(self) -> list[dict]:
+        return self._turn_journal.turn_logs
+
+    @property
+    def last_tool_calls(self) -> list[dict]:
+        return self._turn_journal.last_tool_calls
+
+    @property
+    def plan_mode(self) -> bool:
+        return self._turn_journal.plan_mode
+
+    @property
+    def plan_log_path(self) -> Path | None:
+        return self._turn_journal.plan_log_path
+
+    @property
+    def _turn_counter(self) -> int:
+        return self._turn_journal.turn_count
+
+    @property
+    def _turn_store(self):
+        return self._turn_journal.turn_store
 
     @property
     def _citation_service(self):
@@ -370,18 +373,11 @@ class ChatSession:
 
     async def enter_plan_mode(self) -> Path:
         """Enable plan mode for newly created turns."""
-        if self.plan_mode:
-            if self.plan_log_path is None:
-                self.plan_log_path = self._plan_log.new_log_file()
-            return self.plan_log_path
-        self.plan_log_path = self._plan_log.new_log_file()
-        self.plan_mode = True
-        return self.plan_log_path
+        return self._turn_journal.enter_plan_mode()
 
     async def exit_plan_mode(self) -> None:
         """Disable plan mode without mutating prompt-visible turns."""
-        self.plan_mode = False
-        self.plan_log_path = None
+        self._turn_journal.exit_plan_mode()
 
     def set_thinking_mode(self, mode: str) -> None:
         """Set the per-session thinking workflow mode."""
@@ -458,7 +454,7 @@ class ChatSession:
     def _append_block_to_md(self, log_path: str, block: str) -> None:
         # Kept as a facade method: the turn flow (and tests patching this on
         # the instance) must see every plan-log write pass through here.
-        self._plan_log.append_block(log_path, block)
+        self._turn_journal.append_block(log_path, block)
 
     def _visible_context_text(self) -> str:
         lines: list[str] = []
@@ -483,7 +479,7 @@ class ChatSession:
 
     async def flush_recent_turns(self) -> None:
         """Persist all prompt-visible turns before the session is discarded."""
-        await self._turn_store.flush()
+        await self._turn_journal.flush()
 
     async def _execute_graph(
         self,
@@ -555,54 +551,19 @@ class ChatSession:
         ``turn_logs[-1]["fusion"]`` only through this ``fusion`` argument,
         never reverse-engineered from rendered text.
         """
-        turn_id = self._turn_counter + 1
-        timestamp = datetime.now(timezone.utc).isoformat()
-        if self.plan_mode:
-            if self.plan_log_path is None:
-                raise RuntimeError("plan mode is enabled without a log path")
-            target = "plan_log"
-            log_path = str(self.plan_log_path)
-            try:
-                block = self._plan_log.render_block(
-                    turn_id=turn_id,
-                    timestamp=timestamp,
-                    user_input=user_input,
-                    answer=answer,
-                    new_messages=new_messages,
-                    tool_calls=tool_calls,
-                    candidate_traces=candidate_traces,
-                )
-                await asyncio.to_thread(self._append_block_to_md, log_path, block)
-            except Exception as exc:
-                logger.error("plan md write failed for turn %s: %s", turn_id, exc)
-                raise
-        else:
-            target = "chroma"
-            log_path = None
-
-        self._turn_counter = turn_id
-        self.recent_turns.append(
-            TurnRecord(
-                user_input=user_input,
-                assistant_output=answer,
-                turn_id=turn_id,
-                timestamp=timestamp,
-                persist_target=target,
-                log_path=log_path,
-            )
+        await self._turn_journal.record_turn(
+            user_input=user_input,
+            answer=answer,
+            new_messages=new_messages,
+            tool_calls=tool_calls,
+            trace_events=trace_events,
+            fusion=fusion,
+            candidate_traces=candidate_traces,
+            validation_errors=validation_errors,
+            recovery_reason=recovery_reason,
+            citation_save_metrics=citation_save_metrics,
+            append_block=self._append_block_to_md,
         )
-        self.last_tool_calls = tool_calls
-        self.turn_logs.append({
-            "user_input": user_input,
-            "tool_calls": tool_calls,
-            "trace_events": trace_events,
-            "tool_counts": format_tool_counts(tool_calls),
-            "fusion": fusion,
-            "validation_errors": list(validation_errors or []),
-            "recovery": recovery_reason,
-            **citation_save_metrics.to_record(),
-        })
-        await self._turn_store.evict_overflow()
 
     async def _run_normal_turn(self, user_input: str) -> TurnOutcome:
         result = await self._run_graph_turn(user_input)
