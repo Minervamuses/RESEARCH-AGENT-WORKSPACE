@@ -5,4 +5,3 @@ channels:
 dependencies:
   - python=3.13
   - poetry>=2.3,<3
-prefix: /home/minervamuses/miniconda3/envs/rag
