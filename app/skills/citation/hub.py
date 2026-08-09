@@ -85,10 +85,6 @@ class CitationProviderHub:
             limiter=self.doi_org_limiter,
         )
 
-    @property
-    def openalex_enabled(self) -> bool:
-        return self.openalex is not None
-
     async def _fetch(self, url: str, headers: dict[str, str]) -> FetchResponse:
         if self._injected_fetcher is not None:
             return await self._injected_fetcher(url, headers)
@@ -174,10 +170,3 @@ def get_provider_hub() -> CitationProviderHub:
         if _hub is None:
             _hub = CitationProviderHub()
         return _hub
-
-
-def reset_provider_hub() -> None:
-    """Testing hook: drop the singleton so the next call rebuilds it."""
-    global _hub
-    with _hub_lock:
-        _hub = None
