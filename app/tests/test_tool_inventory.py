@@ -134,14 +134,3 @@ def test_session_source_does_not_duplicate_base_tool_inventory():
 
     # A single semantic mention (e.g. the plan-mode hint) is still allowed.
     assert "recall_history" in source
-
-
-def test_behavior_tool_names_include_web_behavior_universe():
-    names = tool_inventory.behavior_tool_names()
-
-    for web_name in tool_inventory.WEB_BEHAVIOR_TOOL_NAMES:
-        assert web_name in names
-    # Behavior universe = local base behavior tools + frozen web names.
-    assert set(names) == set(tool_inventory.base_tool_names()) | set(
-        tool_inventory.WEB_BEHAVIOR_TOOL_NAMES
-    )

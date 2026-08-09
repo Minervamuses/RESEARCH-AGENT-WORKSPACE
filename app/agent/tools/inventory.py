@@ -1,20 +1,18 @@
 """Single source of truth for the agent's local base tool inventory.
 
-This module owns three things so prompts, graph binding, skill policy, and
-evaluators cannot drift apart:
+This module owns three things so prompts, graph binding, and skill policy
+cannot drift apart:
 
 1. the declarative metadata for the local base tools (knowledge-base search,
    chat-history recall, file reading, shell);
-2. the ordered tool-name lists consumed by the graph, the session, and the
-   evaluators;
+2. the ordered tool-name list consumed by the graph and session;
 3. the prompt block describing those tools, their selection policy, and the
    base workflow.
 
 Only :func:`build_base_tools` instantiates tools (and the ``recall_history``
-store). :func:`base_tool_names`, :func:`behavior_tool_names`, and
-:func:`render_base_tool_prompt` read static metadata only, so importing this
-module or rendering the prompt never touches Chroma, the history store, or any
-external service.
+store). :func:`base_tool_names` and :func:`render_base_tool_prompt` read static
+metadata only, so importing this module or rendering the prompt never touches
+Chroma, the history store, or any external service.
 """
 
 from __future__ import annotations
@@ -125,14 +123,6 @@ BASE_TOOL_DOCS: tuple[BaseToolDoc, ...] = (
     ),
 )
 
-# Web behavior tool names are frozen here so the evaluator taxonomy keeps a
-# stable universe even though these tools are provided by MCP at runtime.
-WEB_BEHAVIOR_TOOL_NAMES: tuple[str, ...] = (
-    "full-web-search",
-    "get-web-search-summaries",
-    "get-single-web-page-content",
-)
-
 _BASE_TOOL_NAMES: tuple[str, ...] = tuple(doc.name for doc in BASE_TOOL_DOCS)
 
 _TOOL_SELECTION_POLICY = """Tool selection policy:
@@ -167,23 +157,9 @@ def base_tool_names(extra_tools: list | None = None) -> list[str]:
     """Return the ordered local base tool names plus any extra tool names.
 
     Local base tools always win on name collisions: a same-named extra tool is
-    dropped so the bound graph, the prompt, and the evaluators agree.
+    dropped so the bound graph and prompt agree.
     """
     return _dedupe([*_BASE_TOOL_NAMES, *_extra_tool_names(extra_tools)])
-
-
-def behavior_tool_names(extra_tools: list | None = None) -> list[str]:
-    """Return the tool-name universe scored by the behavior evaluator.
-
-    This is the local base behavior tools plus the frozen web behavior tool
-    names (provided by MCP at runtime), then any extra tool names. Keeping the
-    web names here prevents the RAG/WEB/ALL forbidden universes from shrinking
-    when MCP tools are not loaded.
-    """
-    return _dedupe(
-        [*_BASE_TOOL_NAMES, *WEB_BEHAVIOR_TOOL_NAMES, *_extra_tool_names(extra_tools)]
-    )
-
 
 def build_base_tools(
     config: AgentConfig,
