@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
 from skills.citation.gate import build_safe_message, check_citations
@@ -19,7 +19,6 @@ from skills.citation.types import (
 from agent.turns.results import GraphTurnResult, TurnOutcome
 from agent.turns.safety import (
     build_recovery_message,
-    content_text,
     final_response_problem,
     has_tool_results,
 )
@@ -27,10 +26,8 @@ from agent.turns.safety import (
 from agent.config import AgentConfig
 from agent.thinking.orchestrator import FusionOrchestrator
 from agent.graph import build_graph
-from agent.turns.trace import (
-    extract_tool_calls,
-    format_tool_counts,
-)
+from agent.turns.execution import execute_graph
+from agent.turns.trace import format_tool_counts
 from agent.history_rag import ChatHistoryStore, get_chat_history_store
 from agent.llm.thinking import (
     get_chat_model_for_role,
@@ -589,59 +586,15 @@ class ChatSession:
         ``candidate_id`` is set, each emitted tool call and trace event carries
         the candidate id so candidate-scoped rendering never has to guess.
         """
-        input_messages = [
-            *prompt_history,
-            *(extra_system_messages or []),
-            HumanMessage(content=user_input),
-        ]
-        messages: list = list(input_messages)
-        initial_state = {
-            "messages": input_messages,
-            **skill_state,
-        }
-        async for update in graph.astream(
-            initial_state,
-            config={"recursion_limit": recursion_limit},
-            stream_mode="updates",
-        ):
-            for node_name, delta in update.items():
-                new_msgs = delta.get("messages", []) if isinstance(delta, dict) else []
-                messages.extend(new_msgs)
-                if self._progress_cb is not None:
-                    self._progress_cb(node_name, new_msgs)
-        new_messages = messages[len(input_messages):]
-        tool_calls = extract_tool_calls(new_messages)
-        if candidate_id is not None:
-            tool_calls = [{**call, "candidate_id": candidate_id} for call in tool_calls]
-        trace_events = [
-            {
-                "type": "tool",
-                "name": call["name"],
-                "args": call["args"],
-                "id": call.get("id"),
-                **({"candidate_id": candidate_id} if candidate_id is not None else {}),
-            }
-            for call in tool_calls
-        ]
-        answer = content_text(messages[-1].content) if messages else ""
-        last_ai = next(
-            (
-                message
-                for message in reversed(new_messages)
-                if isinstance(message, AIMessage)
-            ),
-            None,
-        )
-        recovery_reason = None
-        if last_ai is not None:
-            recovery_reason = (last_ai.response_metadata or {}).get("turn_recovery")
-
-        return GraphTurnResult(
-            answer=answer,
-            new_messages=new_messages,
-            tool_calls=tool_calls,
-            trace_events=trace_events,
-            recovery_reason=recovery_reason,
+        return await execute_graph(
+            graph=graph,
+            user_input=user_input,
+            prompt_history=prompt_history,
+            skill_state=skill_state,
+            recursion_limit=recursion_limit,
+            extra_system_messages=extra_system_messages,
+            candidate_id=candidate_id,
+            progress_cb=self._progress_cb,
         )
 
     async def _run_graph_turn(
