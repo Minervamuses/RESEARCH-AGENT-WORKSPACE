@@ -533,12 +533,6 @@ class ChatSession:
         if was_citation:
             self._teardown_citation_session_state()
 
-    def _all_tool_refs(self) -> list[_ToolRef]:
-        return [
-            _ToolRef(name)
-            for name in tool_inventory.base_tool_names(extra_tools=self.extra_tools)
-        ]
-
     def _tool_universe_refs(self) -> list[_ToolRef]:
         """Every tool that actually exists in this session, global or skill.
 
@@ -547,10 +541,11 @@ class ChatSession:
         (e.g. ``citation_workflow``) that only an active skill manifest can
         surface.
         """
-        return [
-            *self._all_tool_refs(),
-            _ToolRef(self.citation_workflow_tool.name),
+        names = [
+            *tool_inventory.base_tool_names(extra_tools=self.extra_tools),
+            self.citation_workflow_tool.name,
         ]
+        return [_ToolRef(name) for name in names]
 
     def _append_block_to_md(self, log_path: str, block: str) -> None:
         # Kept as a facade method: the turn flow (and tests patching this on
