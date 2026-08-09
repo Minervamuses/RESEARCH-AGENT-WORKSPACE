@@ -62,7 +62,7 @@ def _config(tmp_path, **overrides):
 
 
 def _academic_runtime(tmp_path, *, effective):
-    from agent.tool_access import ToolAccessResolution
+    from agent.tools.access import ToolAccessResolution
 
     effective = tuple(effective)
     return SimpleNamespace(

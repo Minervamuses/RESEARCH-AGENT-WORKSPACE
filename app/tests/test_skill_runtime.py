@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 
 from agent.config import AgentConfig
 from agent.skills.runtime import load_skill_runtime, render_tool_availability_block
-from agent.tool_access import ToolAccessResolution, resolve_tool_access
+from agent.tools.access import ToolAccessResolution, resolve_tool_access
 
 
 @tool("read_file")

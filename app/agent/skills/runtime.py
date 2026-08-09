@@ -12,7 +12,7 @@ from agent.config import AgentConfig
 from agent.skills.broker import resolve_skill_tool_access
 from agent.skills.manifest_schema import validate_skill_manifest
 from agent.skills.metadata import SkillMetadata, discover_skills, load_skill_file
-from agent.tool_access import ToolAccessResolution, resolve_tool_access
+from agent.tools.access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from agent.cli.slash_commands import build_default_registry
 from agent.skills import discover_skills
-from agent.tool_access import resolve_tool_access
+from agent.tools.access import resolve_tool_access
 
 
 @dataclass(frozen=True)

@@ -49,7 +49,7 @@ from agent.skills import (
 )
 from agent.skills.runtime import render_tool_availability_block
 from agent.state import skill_runtime_to_agent_state
-from agent.tool_access import ToolAccessResolution, resolve_tool_access
+from agent.tools.access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
 from agent.turns.memory import (

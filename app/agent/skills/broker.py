@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
-from agent.tool_access import ToolAccessResolution, resolve_tool_access
+from agent.tools.access import ToolAccessResolution, resolve_tool_access
 
 
 def resolve_skill_tool_access(

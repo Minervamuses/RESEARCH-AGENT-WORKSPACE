@@ -2,7 +2,7 @@
 
 from langchain_core.tools import tool
 
-from agent.tool_access import resolve_tool_access
+from agent.tools.access import resolve_tool_access
 
 
 @tool("rag_search")

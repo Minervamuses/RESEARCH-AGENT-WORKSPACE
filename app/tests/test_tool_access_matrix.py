@@ -25,7 +25,7 @@ from agent.graph import build_graph
 from agent.fusion import FUSION_READ_ONLY_ALLOWLIST
 from agent.session import ChatSession
 from agent.skills.runtime import load_skill_runtime
-from agent.tool_access import resolve_tool_access
+from agent.tools.access import resolve_tool_access
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]

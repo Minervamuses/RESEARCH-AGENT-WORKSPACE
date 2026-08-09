@@ -17,7 +17,7 @@ from agent.extensions.mcp_manifest import (
 )
 from agent.extensions.registry import load_registry, write_registry
 from agent.extensions.startup import load_extension_startup
-from agent.tool_access import resolve_tool_access
+from agent.tools.access import resolve_tool_access
 
 
 class _PlanModel:

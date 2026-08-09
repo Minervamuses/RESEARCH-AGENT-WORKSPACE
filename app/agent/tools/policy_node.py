@@ -1,4 +1,4 @@
-"""ToolNode wrapper that enforces the shared tool access resolution."""
+"""ToolNode wrapper enforcing the shared tool access resolution."""
 
 from __future__ import annotations
 

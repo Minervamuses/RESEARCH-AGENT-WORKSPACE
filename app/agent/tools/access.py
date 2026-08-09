@@ -1,4 +1,4 @@
-"""Single source of truth for global vs skill-scoped tool access.
+"""Resolve global vs skill-scoped tool access from one policy source.
 
 Tools fall into exactly two classes:
 

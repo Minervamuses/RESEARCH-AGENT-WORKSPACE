@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agent.state import skill_runtime_to_agent_state
-from agent.tool_access import ToolAccessResolution
+from agent.tools.access import ToolAccessResolution
 
 _EXPECTED_KEYS = {
     "active_skill",

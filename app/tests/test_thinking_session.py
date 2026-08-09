@@ -495,7 +495,7 @@ def test_proposer_prompt_availability_matches_bound_tools(monkeypatch, tmp_path)
 
 
 def _skill_resolution(effective):
-    from agent.tool_access import ToolAccessResolution
+    from agent.tools.access import ToolAccessResolution
 
     effective = tuple(effective)
     return ToolAccessResolution(

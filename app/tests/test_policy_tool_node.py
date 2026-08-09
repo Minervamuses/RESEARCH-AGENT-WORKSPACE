@@ -4,7 +4,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import START, StateGraph
 
-from agent.policy_tool_node import PolicyToolNode
+from agent.tools.policy_node import PolicyToolNode
 from agent.state import AgentState
 
 

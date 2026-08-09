@@ -46,7 +46,7 @@ from agent.thinking import (
     trim_head,
     trim_tail,
 )
-from agent.tool_access import ToolAccessResolution
+from agent.tools.access import ToolAccessResolution
 from agent.tools import inventory as tool_inventory
 from agent.turns.memory import assemble_prompt_history
 
