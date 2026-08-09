@@ -70,8 +70,7 @@ def _tag_folders(folders: dict[str, list[Path]], config: RAGConfig) -> dict[str,
         }
 
     folder_meta: dict[str, dict] = {}
-    for folder_rel, _files in ordered:
-        meta = results[folder_rel]
+    for folder_rel, meta in results.items():
         folder_meta[folder_rel] = {
             "tags": meta.tags,
             "summary": meta.summary,
