@@ -25,6 +25,15 @@ def __getattr__(name: str):
         }
         return exports[name]
 
+    if name in {"OPENROUTER_BASE_URL", "get_openrouter_api_key"}:
+        from rag.llm.openrouter import OPENROUTER_BASE_URL, get_openrouter_api_key
+
+        exports = {
+            "OPENROUTER_BASE_URL": OPENROUTER_BASE_URL,
+            "get_openrouter_api_key": get_openrouter_api_key,
+        }
+        return exports[name]
+
     if name in {"ChromaStore", "VectorRetriever", "get_chroma_store"}:
         from rag.retriever.vector import VectorRetriever
         from rag.store.cache import get_chroma_store
@@ -40,6 +49,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
+    "OPENROUTER_BASE_URL",
     "ChromaStore",
     "ContextChunk",
     "ContextWindow",
@@ -53,6 +63,7 @@ __all__ = [
     "explore",
     "get_chroma_store",
     "get_context",
+    "get_openrouter_api_key",
     "ingest_repo",
     "ingest_single",
     "list_chunks",
