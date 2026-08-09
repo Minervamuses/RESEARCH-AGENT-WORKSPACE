@@ -322,7 +322,6 @@ def test_session_create_without_mcp(monkeypatch, tmp_path):
     session = asyncio.run(ChatSession.create(cfg, load_mcp=False))
     assert session is not None
     assert session.recent_turns == []
-    assert session.web_search_tool_names == frozenset()
 
 
 def test_session_create_loads_mcp_tools(monkeypatch, tmp_path):
@@ -394,7 +393,6 @@ def test_session_create_loads_mcp_tools(monkeypatch, tmp_path):
         "web_fetch",
     ]
     assert session is not None
-    assert session.web_search_tool_names == frozenset({"web_fetch"})
 
 
 def test_session_create_survives_mcp_failure(monkeypatch, tmp_path):

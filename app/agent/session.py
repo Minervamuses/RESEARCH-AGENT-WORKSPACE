@@ -109,7 +109,6 @@ class ChatSession:
         extra_tools: list | None = None,
         history_store: ChatHistoryStore | None = None,
         progress_cb=None,
-        web_search_tool_names: set[str] | frozenset[str] | None = None,
         mcp_families: dict[str, str] | None = None,
         global_mcp_families: set[str] | frozenset[str] | None = None,
         loaded_skills: list[SkillMetadata] | None = None,
@@ -129,8 +128,6 @@ class ChatSession:
             if global_mcp_families is not None
             else {"web_search"}
         )
-        self.web_search_tool_names = frozenset(web_search_tool_names or ())
-
         self.loaded_skills = (
             list(loaded_skills)
             if loaded_skills is not None
@@ -872,9 +869,6 @@ class ChatSession:
                 )
         else:
             families = {}
-        web_search_tool_names = frozenset(
-            name for name, family in families.items() if family == "web_search"
-        )
         global_mcp_families = frozenset(
             {"web_search", *extension_startup.global_mcp_families}
         )
@@ -885,7 +879,6 @@ class ChatSession:
             extra_tools=extra_tools,
             history_store=history_store,
             progress_cb=progress_cb,
-            web_search_tool_names=web_search_tool_names,
             mcp_families=families,
             global_mcp_families=global_mcp_families,
             loaded_skills=loaded_skills,

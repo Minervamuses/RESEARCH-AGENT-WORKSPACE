@@ -200,7 +200,6 @@ def _make_session(monkeypatch, tmp_path) -> ChatSession:
             SimpleNamespace(name="github_search"),
         ],
         history_store=FakeHistoryStore(),
-        web_search_tool_names={"full-web-search"},
         mcp_families=dict(MCP_FAMILIES),
     )
 

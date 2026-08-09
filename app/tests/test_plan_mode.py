@@ -40,14 +40,13 @@ def make_session(monkeypatch, tmp_path):
         lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
     )
 
-    def _make(window: int = 2, graph=None, web_search_tool_names=None):
+    def _make(window: int = 2, graph=None):
         cfg = AgentConfig(persist_dir=str(tmp_path / "persist"))
         cfg.agent_recent_turns_window = window
         store = FakeHistoryStore()
         session = ChatSession(
             cfg,
             history_store=store,
-            web_search_tool_names=web_search_tool_names,
         )
         if graph is not None:
             session.graph = graph
