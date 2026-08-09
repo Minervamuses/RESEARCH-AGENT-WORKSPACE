@@ -372,46 +372,9 @@ async def _handle_thinking(
     return SlashCommandResult(message=f"thinking -> {target}")
 
 
-@dataclass(frozen=True)
-class ModeSpec:
-    """Definition for one selectable session mode."""
-
-    name: str
-    description: str
-    enter: Callable[[object], Awaitable["Path | None"]]
-    exit: Callable[[object], Awaitable[None]]
-
-
-async def _enter_normal_mode(session: object) -> "Path | None":
-    del session
-    return None
-
-
-async def _exit_normal_mode(session: object) -> None:
-    del session
-
-
-async def _enter_plan_mode(session: object) -> "Path | None":
-    return await session.enter_plan_mode()
-
-
-async def _exit_plan_mode(session: object) -> None:
-    await session.exit_plan_mode()
-
-
-_MODE_REGISTRY: dict[str, ModeSpec] = {
-    "normal": ModeSpec(
-        name="normal",
-        description="turns saved to ChromaDB (default)",
-        enter=_enter_normal_mode,
-        exit=_exit_normal_mode,
-    ),
-    "plan": ModeSpec(
-        name="plan",
-        description="turns saved to plan_logs/, never indexed",
-        enter=_enter_plan_mode,
-        exit=_exit_plan_mode,
-    ),
+_MODE_DESCRIPTIONS = {
+    "normal": "turns saved to ChromaDB (default)",
+    "plan": "turns saved to plan_logs/, never indexed",
 }
 
 
@@ -422,7 +385,7 @@ def _current_mode_name(session: object) -> str:
 def _render_mode_prompt(current: str) -> str:
     return _render_numbered_menu(
         header=[f"Current mode: {current}", "Available modes:"],
-        options=[(spec.name, spec.description) for spec in _MODE_REGISTRY.values()],
+        options=list(_MODE_DESCRIPTIONS.items()),
     )
 
 
@@ -434,7 +397,7 @@ def _resolve_mode_choice(raw: str) -> str | None:
     """
     return _resolve_numbered_choice(
         raw,
-        [spec.name for spec in _MODE_REGISTRY.values()],
+        list(_MODE_DESCRIPTIONS),
         cancel_tokens=_MENU_CANCEL_TOKENS,
     )
 
@@ -456,8 +419,8 @@ async def _handle_mode(
         if target_name is None:
             return SlashCommandResult(message="cancelled")
 
-    if target_name not in _MODE_REGISTRY:
-        valid = ", ".join(_MODE_REGISTRY)
+    if target_name not in _MODE_DESCRIPTIONS:
+        valid = ", ".join(_MODE_DESCRIPTIONS)
         raise SlashCommandError(
             f"unknown mode: {target_name} (available: {valid})"
         )
@@ -465,8 +428,9 @@ async def _handle_mode(
     if target_name == current:
         return SlashCommandResult(message=f"already in {current} mode")
 
-    await _MODE_REGISTRY[current].exit(session)
-    log_path = await _MODE_REGISTRY[target_name].enter(session)
+    if current == "plan":
+        await session.exit_plan_mode()
+    log_path = await session.enter_plan_mode() if target_name == "plan" else None
 
     suffix = f" -> {log_path}" if log_path else ""
     return SlashCommandResult(message=f"mode -> {target_name}{suffix}")
