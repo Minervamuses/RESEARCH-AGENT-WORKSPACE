@@ -4,7 +4,6 @@ from skills.citation.doi import (
     ascii_casefold,
     canonicalize_doi,
     doi_equal,
-    extract_doi_candidates,
 )
 
 
@@ -58,21 +57,3 @@ def test_doi_equal_compares_canonical_forms():
     assert not doi_equal("10.1234/abc", "10.1234/abd")
     assert not doi_equal(None, "10.1234/abc")
     assert not doi_equal("junk", "junk")
-
-
-def test_extract_returns_raw_and_trimmed_variants_as_candidates():
-    text = "See (10.1000/123(45)). Also 10.5555/xyz, and doi:10.1/ignored-bad."
-    candidates = extract_doi_candidates(text)
-    # Raw match keeps trailing prose punctuation as one candidate, with the
-    # trimmed variant offered separately; resolver decides which exists.
-    assert "10.1000/123(45))." in candidates
-    assert "10.1000/123(45" in candidates
-    assert "10.5555/xyz," in candidates
-    assert "10.5555/xyz" in candidates
-
-
-def test_extract_dedupes_and_spans_multiple_texts():
-    candidates = extract_doi_candidates(
-        "primary 10.1234/abc", None, "again 10.1234/ABC and 10.9999/zz"
-    )
-    assert candidates == ["10.1234/abc", "10.9999/zz"]

@@ -1,4 +1,4 @@
-"""DOI canonicalization and candidate extraction.
+"""DOI canonicalization utilities.
 
 Canonicalization contract (per plan):
   * Strip ``doi:`` labels and doi.org / dx.doi.org URL prefixes by context.
@@ -8,9 +8,7 @@ Canonicalization contract (per plan):
     but Unicode NFKC is never applied — it can change identity of non-ASCII
     suffix characters.
   * No blind trailing-punctuation stripping: ``)`` or ``.`` can be a legal
-    part of a DOI suffix. Extraction from prose returns both the raw match
-    and a punctuation-trimmed variant as separate candidates; existence is
-    decided by the resolver / structured lookup, never by regex.
+    part of a DOI suffix; existence is decided by a structured lookup.
 """
 
 from __future__ import annotations
@@ -19,8 +17,6 @@ import html
 import re
 import urllib.parse
 
-# Candidate shape only. Existence must be confirmed by a resolver lookup.
-_DOI_CANDIDATE_RE = re.compile(r"10\.\d{4,9}/\S+", re.IGNORECASE)
 _DOI_SHAPE_RE = re.compile(r"^10\.\d{4,9}/\S+$")
 
 # Prefixes removed by context (label or resolver URL), longest first.
@@ -28,11 +24,6 @@ _URL_PREFIX_RE = re.compile(
     r"^(?:https?://)?(?:www\.)?(?:dx\.)?doi\.org/+", re.IGNORECASE
 )
 _LABEL_PREFIX_RE = re.compile(r"^doi\s*:\s*", re.IGNORECASE)
-
-# Sentence punctuation that often trails a DOI quoted in prose. Only used to
-# offer an *additional* trimmed candidate — never to rewrite the raw match.
-_TRAILING_PROSE_PUNCT = ".,;:'\"”’)]}>"
-
 
 def ascii_casefold(text: str) -> str:
     """Fold only ASCII A-Z to a-z; leave all other characters untouched."""
@@ -67,32 +58,3 @@ def doi_equal(a: str | None, b: str | None) -> bool:
     ca = canonicalize_doi(a)
     cb = canonicalize_doi(b)
     return ca is not None and ca == cb
-
-
-def extract_doi_candidates(*texts: str | None) -> list[str]:
-    """Extract canonical DOI *candidates* from free text, in order, deduped.
-
-    For each regex match the raw canonical form is returned, and — when the
-    match ends in common prose punctuation — a trimmed variant as a second
-    candidate. Both may be real; only a resolver lookup can decide, so
-    neither is dropped here.
-    """
-    out: list[str] = []
-    seen: set[str] = set()
-
-    def _push(value: str | None) -> None:
-        canonical = canonicalize_doi(value)
-        if canonical and canonical not in seen:
-            seen.add(canonical)
-            out.append(canonical)
-
-    for text in texts:
-        if not text:
-            continue
-        for match in _DOI_CANDIDATE_RE.finditer(text):
-            raw = match.group(0)
-            _push(raw)
-            trimmed = raw.rstrip(_TRAILING_PROSE_PUNCT)
-            if trimmed != raw:
-                _push(trimmed)
-    return out
