@@ -417,7 +417,7 @@ class ChatSession:
         """
         safety_issue = final_response_problem(
             str(answer),
-            tool_names=(ref.name for ref in self._tool_universe_refs()),
+            tool_names=self._tool_universe_refs(),
         )
         if safety_issue is not None:
             answer = build_recovery_message(
