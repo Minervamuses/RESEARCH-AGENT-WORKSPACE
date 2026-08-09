@@ -8,8 +8,6 @@ for turn observability. The rag package keeps its own factory; only the
 agent layer migrates here.
 """
 
-from typing import Any
-
 from langchain_openrouter import ChatOpenRouter
 from rag import OPENROUTER_BASE_URL, get_openrouter_api_key
 
@@ -38,18 +36,14 @@ def get_openrouter_chat_model(
     model_name: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
-    extra_body: dict[str, Any] | None = None,
 ) -> ChatOpenRouter:
     """Return an OpenRouter-backed LangChain chat model.
 
-    Core runtime, evaluation, and one-off prompt-to-text helpers all share this
-    factory so the agent has one model access contract. ``extra_body`` keeps
-    the historical request-payload contract: keys that are first-class
-    ChatOpenRouter fields (``reasoning``) are promoted to the field, the rest
-    pass through ``model_kwargs`` into the request body.
+    Core runtime and one-off prompt-to-text helpers share this factory so the
+    agent has one model access contract.
     """
     config = config or AgentConfig()
-    kwargs: dict[str, Any] = {
+    kwargs: dict[str, object] = {
         "base_url": OPENROUTER_BASE_URL,
         "api_key": get_openrouter_api_key(),
         "model": model_name or config.llm_model,
@@ -59,10 +53,4 @@ def get_openrouter_chat_model(
         kwargs["max_tokens"] = max_tokens
     if temperature is not None:
         kwargs["temperature"] = temperature
-    if extra_body:
-        body = dict(extra_body)
-        if "reasoning" in body:
-            kwargs["reasoning"] = body.pop("reasoning")
-        if body:
-            kwargs["model_kwargs"] = body
     return ChatOpenRouter(**kwargs)

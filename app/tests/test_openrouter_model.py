@@ -59,42 +59,12 @@ def test_get_openrouter_chat_model_applies_eval_overrides(monkeypatch, tmp_path)
         model_name="openai/gpt-5.2",
         max_tokens=300,
         temperature=0.0,
-        extra_body={"reasoning": {"enabled": False}},
     )
 
     assert calls[0]["model"] == "openai/gpt-5.2"
     assert calls[0]["max_tokens"] == 300
     assert calls[0]["temperature"] == 0.0
     assert calls[0]["max_retries"] == 7
-    # reasoning is a first-class ChatOpenRouter field, not raw request body.
-    assert calls[0]["reasoning"] == {"enabled": False}
-    assert "extra_body" not in calls[0]
-    assert "model_kwargs" not in calls[0]
-
-
-def test_get_openrouter_chat_model_passes_unknown_body_via_model_kwargs(
-    monkeypatch, tmp_path
-):
-    calls: list[dict] = []
-
-    class FakeChatOpenRouter:
-        def __init__(self, **kwargs):
-            calls.append(kwargs)
-
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.setattr(openrouter, "ChatOpenRouter", FakeChatOpenRouter)
-    cfg = AgentConfig(persist_dir=str(tmp_path))
-
-    get_openrouter_chat_model(
-        cfg,
-        extra_body={
-            "reasoning": {"enabled": True},
-            "transforms": ["middle-out"],
-        },
-    )
-
-    assert calls[0]["reasoning"] == {"enabled": True}
-    assert calls[0]["model_kwargs"] == {"transforms": ["middle-out"]}
 
 
 def test_real_chat_openrouter_accepts_factory_kwargs(monkeypatch, tmp_path):
@@ -120,7 +90,7 @@ def test_real_chat_openrouter_accepts_factory_kwargs(monkeypatch, tmp_path):
     assert callable(model.bind_tools)
 
 
-def test_real_chat_openrouter_accepts_reasoning_override(monkeypatch, tmp_path):
+def test_real_chat_openrouter_accepts_model_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     cfg = AgentConfig(persist_dir=str(tmp_path))
 
@@ -128,10 +98,9 @@ def test_real_chat_openrouter_accepts_reasoning_override(monkeypatch, tmp_path):
         cfg,
         model_name="openai/gpt-5.2",
         temperature=0.0,
-        extra_body={"reasoning": {"enabled": False}},
     )
 
-    assert model.reasoning == {"enabled": False}
+    assert model.model_name == "openai/gpt-5.2"
     assert model.temperature == 0.0
 
 
