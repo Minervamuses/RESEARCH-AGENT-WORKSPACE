@@ -22,7 +22,7 @@ from conftest import FakeHistoryStore, make_astream_graph
 
 from agent.config import AgentConfig
 from agent.graph import build_graph
-from agent.fusion import FUSION_READ_ONLY_ALLOWLIST
+from agent.thinking.orchestrator import FUSION_READ_ONLY_ALLOWLIST
 from agent.session import ChatSession
 from agent.skills.runtime import load_skill_runtime
 from agent.tools.access import resolve_tool_access

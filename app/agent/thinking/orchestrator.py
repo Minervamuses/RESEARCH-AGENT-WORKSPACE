@@ -1,4 +1,4 @@
-"""Extended-thinking fusion pipeline (proposer panel + aggregate + review loop).
+"""Extended-thinking orchestration (proposer panel + aggregate + review loop).
 
 FusionOrchestrator is a ChatSession collaborator holding a back-reference to
 the facade: shared turn plumbing (_execute_graph, _run_graph_turn,
@@ -27,21 +27,25 @@ from agent.llm.thinking import (
 )
 from agent.skills.runtime import render_tool_availability_block
 from agent.turns.results import GraphTurnResult
-from agent.thinking import (
+from agent.thinking.parsers import parse_reviser_output
+from agent.thinking.review import (
+    aggregate_candidates,
+    render_route_message,
+    review_draft,
+    rewrite_prompt,
+    route_review_report,
+)
+from agent.thinking.schemas import (
     Clarify,
     FusionAggregateResult,
     FusionCandidate,
     FusionCandidateTrace,
     FusionTurnMetadata,
     ThinkingOutputError,
-    aggregate_candidates,
+)
+from agent.thinking.trace import (
     append_tool_trace,
     build_fusion_evidence_summary,
-    parse_reviser_output,
-    render_route_message,
-    review_draft,
-    route_review_report,
-    rewrite_prompt,
     summarize_tool_trace,
     trim_head,
     trim_tail,

@@ -218,9 +218,11 @@ def test_rewrite_messages_do_not_embed_stale_tool_names():
         skill_context="",
     )
     package_dir = Path(__file__).resolve().parents[1] / "agent" / "thinking"
+    # The orchestrator owns the explicit read-only tool policy; prompt helpers do not.
     source = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(package_dir.rglob("*.py"))
+        if path.name != "orchestrator.py"
     )
 
     for name in (

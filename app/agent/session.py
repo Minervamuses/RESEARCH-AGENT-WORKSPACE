@@ -25,7 +25,7 @@ from agent.turns.safety import (
 )
 
 from agent.config import AgentConfig
-from agent.fusion import FusionOrchestrator
+from agent.thinking.orchestrator import FusionOrchestrator
 from agent.graph import build_graph
 from agent.turns.trace import (
     extract_tool_calls,
