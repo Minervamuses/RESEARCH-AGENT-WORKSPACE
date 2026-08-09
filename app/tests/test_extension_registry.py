@@ -1,6 +1,5 @@
 """Tests for strict drop-in discovery and the single applied registry."""
 
-import os
 import stat
 from pathlib import Path
 
@@ -205,8 +204,7 @@ def test_install_copy_and_registry_round_trip(tmp_path):
 
     assert load_registry(state_root) == registry
     assert (state_root / installed.installed_relpath / "SKILL.md").is_file()
-    if os.name != "nt":
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_install_refuses_source_changed_after_scan(tmp_path):

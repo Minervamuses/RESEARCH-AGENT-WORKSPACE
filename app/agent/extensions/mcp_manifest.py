@@ -187,7 +187,7 @@ def _resolve_command(
         path = _contained(bundle, raw, kind="command")
         if not path.is_file() or path.is_symlink():
             raise MCPManifestError("bundle command is missing or not regular")
-        if os.name != "nt" and not os.access(path, os.X_OK):
+        if not os.access(path, os.X_OK):
             raise MCPManifestError("bundle command is not executable")
         rel = path.relative_to(bundle.resolve()).as_posix()
         return str(path), f"bundle:{rel}"

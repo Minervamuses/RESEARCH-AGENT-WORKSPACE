@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from agent.config import AgentConfig
-from agent.paths import find_app_root
+from agent.paths import find_app_root, user_data_root, user_state_root
 
 
 @dataclass(frozen=True)
@@ -18,27 +17,6 @@ class ExtensionPaths:
 
     dropin_root: Path
     state_root: Path
-
-
-def _platform_data_root(env: dict[str, str]) -> Path:
-    if sys.platform == "win32":
-        raw = env.get("APPDATA", "")
-        return Path(raw) if raw else Path.home() / "AppData" / "Roaming"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support"
-    raw = env.get("XDG_DATA_HOME", "").strip()
-    return Path(raw).expanduser() if raw else Path.home() / ".local" / "share"
-
-
-def _platform_state_root(env: dict[str, str]) -> Path:
-    if sys.platform == "win32":
-        raw = env.get("LOCALAPPDATA", "") or env.get("APPDATA", "")
-        return Path(raw) if raw else Path.home() / "AppData" / "Local"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support"
-    raw = env.get("XDG_STATE_HOME", "").strip()
-    return Path(raw).expanduser() if raw else Path.home() / ".local" / "state"
-
 
 def _source_checkout_tool_root() -> Path | None:
     try:
@@ -68,7 +46,7 @@ def resolve_extension_paths(
     if dropin is None:
         dropin = _source_checkout_tool_root()
     if dropin is None:
-        dropin = _platform_data_root(env) / "research-agent" / "tool"
+        dropin = user_data_root(env) / "research-agent" / "tool"
     dropin = dropin.resolve()
 
     state = _configured_path(config.extension_state_dir)
@@ -77,7 +55,7 @@ def resolve_extension_paths(
             str(dropin).encode("utf-8")
         ).hexdigest()[:16]
         state = (
-            _platform_state_root(env)
+            user_state_root(env)
             / "research-agent"
             / "extensions"
             / workspace_id

@@ -34,13 +34,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
 import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.paths import user_data_root
 from skills.citation.types import (
     BUNDLE_SCHEMA_V2,
     PERSIST_SCHEMA_VERSION,
@@ -98,7 +98,7 @@ def resolve_output_dir(
     workspace = _workspace_root()
     if workspace is not None:
         return workspace / "cite"
-    return _platform_user_data_dir(env) / "research-agent" / "citation"
+    return user_data_root(env) / "research-agent" / "citation"
 
 
 def _workspace_root(
@@ -130,17 +130,6 @@ def _workspace_root(
         else Path(package_start)
     )
     return nearest(package_origin)
-
-
-def _platform_user_data_dir(env: dict[str, str]) -> Path:
-    if sys.platform == "win32":
-        base = env.get("APPDATA", "")
-        return Path(base) if base else Path.home() / "AppData" / "Roaming"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support"
-    xdg = env.get("XDG_DATA_HOME", "").strip()
-    return Path(xdg) if xdg else Path.home() / ".local" / "share"
-
 
 def doi_hash(canonical_doi: str, *, length: int = HASH_LENGTHS[0]) -> str:
     return hashlib.sha256(canonical_doi.encode("utf-8")).hexdigest()[:length]
@@ -295,8 +284,6 @@ def validate_identity_bundle(bundle_dir: Path, identity: CanonicalIdentity) -> B
 def _source_slot_lock(
     output_dir: Path, source_id: str, *, timeout_seconds: float
 ):
-    if os.name != "posix":
-        raise StorageError("write_failed", "cross-process storage lock unsupported")
     import fcntl
 
     locks = output_dir / LOCKS_DIRNAME

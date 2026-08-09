@@ -178,8 +178,6 @@ def _write_mcp(bundle: Path) -> None:
 
 
 def test_user_dropin_apply_restart_use_update_delete(monkeypatch, tmp_path):
-    if os.name == "nt":
-        pytest.skip("acceptance fixture uses a POSIX executable shebang")
     dropin_root = tmp_path / "dropins"
     state_root = tmp_path / "state"
     skill_bundle = dropin_root / "skill" / "sandbox-writer"

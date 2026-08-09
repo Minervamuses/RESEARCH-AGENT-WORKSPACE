@@ -63,7 +63,6 @@ def test_output_dir_precedence_config_env_workspace(monkeypatch, tmp_path):
 
 
 def test_output_dir_default_honors_xdg_data_home(monkeypatch):
-    monkeypatch.setattr(storage.sys, "platform", "linux")
     monkeypatch.setattr(storage, "_workspace_root", lambda: None)
     default = resolve_output_dir(None, env={"XDG_DATA_HOME": "/xdg/data"})
     assert default == Path("/xdg/data/research-agent/citation")
