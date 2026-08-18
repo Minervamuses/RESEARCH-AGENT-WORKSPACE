@@ -1,7 +1,0 @@
-name: rag
-channels:
-  - conda-forge
-  - defaults
-dependencies:
-  - python=3.13
-  - poetry>=2.3,<3

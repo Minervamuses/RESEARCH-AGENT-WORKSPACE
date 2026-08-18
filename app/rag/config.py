@@ -14,19 +14,18 @@ KNOWLEDGE_COLLECTION = "knowledge"
 def _default_persist_dir() -> str:
     """Resolve the store directory.
 
-    The store is a rag-specific artifact (Chroma + JSON); it conceptually
-    belongs to rag, not the host. Default to ``store/`` at the rag repo root,
-    so running ingest from any host lands data in rag's own territory rather
-    than polluting the host project. Order:
+    The store is application-owned local state (Chroma + JSON). Default to
+    ``store/`` at the app project root, which remains excluded from workspace
+    ingest. Order:
       1. ``KMS_STORE_DIR`` env var (explicit override, host may still pin
          it wherever it wants).
-      2. ``<rag repo root>/store/``.
+      2. ``<app project root>/store/``.
     """
     env = os.environ.get("KMS_STORE_DIR")
     if env:
         return env
-    rag_repo_root = Path(__file__).resolve().parent.parent
-    return str(rag_repo_root / "store")
+    app_root = Path(__file__).resolve().parent.parent
+    return str(app_root / "store")
 
 
 @dataclass
