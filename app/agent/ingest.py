@@ -16,16 +16,13 @@ from agent.paths import find_app_root
 
 
 async def init_workspace(config: AgentConfig) -> tuple[int, int, Path, set[str]]:
-    """Ingest the host workspace root, skipping the app (and rag) projects.
+    """Ingest the host workspace root, skipping the app project.
 
     Returns (files, chunks, host_root, excluded_names).
     """
     app_root = find_app_root()
     host_root = app_root.parent
     skip = {app_root.name}
-    rag_root = host_root / "rag"
-    if rag_root.is_dir():
-        skip.add(rag_root.name)
     files, chunks = await asyncio.to_thread(
         ingest_repo,
         str(host_root),
