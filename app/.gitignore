@@ -9,3 +9,6 @@ AGENTS.md
 
 # Plan-mode markdown logs (kept on disk for the user; never indexed by RAG)
 plan_logs/
+
+# Local RAG knowledge and chat-history state
+store/
