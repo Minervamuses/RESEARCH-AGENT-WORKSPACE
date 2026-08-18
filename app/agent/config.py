@@ -47,19 +47,19 @@ class AgentConfig(RAGConfig):
     thinking_fusion_candidate_timeout_seconds: float = 180.0
     thinking_fusion_quorum: int = 2
 
-    # Per-turn hard cap on tool interactions (enforced in graph.agent_node and
-    # graph._cap_tool_calls). Default 4 is data-backed: in the C1 dev routing
-    # run, every normal eligible case fit within 0-4 tool calls, while the only
-    # runaway (the embedding case) made 8 RAG calls because the topic was absent
-    # from the indexed KB and the agent lacked give-up discipline -- not because
-    # 4 was too low. So the fix is graceful give-up (prompt + eval), not a larger
-    # cap. Scope is per turn, not per conversation.
-    agent_max_tool_interactions: int = 4
+    # Per-turn hard cap on primary/external tool interactions (enforced in
+    # graph.agent_node and graph._cap_tool_calls). Keep this at 20 because a
+    # citation flow can require several discovery calls before its final save;
+    # the original limit of 4 could stop that valid sequence early. The accepted
+    # tradeoff is that one turn may take longer and use more API/compute. This
+    # counter covers every tool call except the three local citation actions
+    # listed below. Scope is per turn, not per conversation.
+    agent_max_tool_interactions: int = 20
 
-    # Separate bounded allowance for citation_workflow operations that only
-    # navigate or deterministically refine session-local state. Keeping these
-    # out of the primary budget prevents status/list/show calls from crowding
-    # out retrieval, while the independent cap still prevents runaway loops.
+    # Separate bounded allowance only for citation_workflow actions `explain`,
+    # `sources`, and `source`. These inspect session-local citation state without
+    # retrieval or external API work, so they do not consume the primary budget;
+    # their independent limit of 4 still prevents a local inspection loop.
     agent_max_local_tool_interactions: int = 4
 
     # Long-term memory: keep this many most-recent turns in the prompt;

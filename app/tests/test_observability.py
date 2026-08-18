@@ -364,7 +364,7 @@ def test_graph_logs_tool_call_round_with_budget(monkeypatch, tmp_path, caplog):
 
     lines = [record.getMessage() for record in caplog.records]
     assert any(
-        "tool_calls=1" in line and "primary_budget_remaining=4" in line
+        "tool_calls=1" in line and "primary_budget_remaining=20" in line
         for line in lines
     )
-    assert any("primary_budget_remaining=3" in line for line in lines)
+    assert any("primary_budget_remaining=19" in line for line in lines)
