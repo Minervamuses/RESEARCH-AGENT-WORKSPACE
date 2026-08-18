@@ -8,12 +8,13 @@ The public API is intentionally small: four functions, five return dataclasses, 
 
 ## Install & Prerequisites
 
-Install the package and dependencies from the repository root inside the `rag`
-conda environment. Poetry is configured with `virtualenvs.create = false`, so it
+Install the app project and all of its packages inside the single `app` Conda
+environment. Poetry is configured with `virtualenvs.create = false`, so it
 installs packages into the active conda environment.
 
 ```bash
-conda activate rag
+conda activate app
+cd app
 poetry install
 ```
 
@@ -28,7 +29,7 @@ ollama pull bge-m3
 
 - `OPENROUTER_API_KEY` is required only for repo ingest folder tagging. It is not required for `search`, `explore`, `list_chunks`, or `get_context` after data has been ingested.
 
-The default store location is `<rag repo root>/store`. Set `KMS_STORE_DIR` to point rag at another store directory.
+The default store location is `<app project root>/store`. Set `KMS_STORE_DIR` to point rag at another store directory.
 
 ## The Four Functions
 
@@ -364,7 +365,7 @@ class RAGConfig:
 
 Fields:
 
-- `persist_dir`: directory containing Chroma state, `raw.json`, and `folder_meta.json`. Defaults to `KMS_STORE_DIR` if set, otherwise `<rag repo root>/store`.
+- `persist_dir`: directory containing Chroma state, `raw.json`, and `folder_meta.json`. Defaults to `KMS_STORE_DIR` if set, otherwise `<app project root>/store`.
 - `chunk_size`: maximum token count per chunk produced during ingest.
 - `chunk_overlap`: number of tokens repeated between adjacent chunks during ingest.
 - `encoding_model`: tiktoken encoding name used by the token chunker.

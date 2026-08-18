@@ -4,11 +4,13 @@
 
 ```text
 research-agent-workspace/
-├── app/  # LangGraph chat agent、CLI、slash commands、skills(含 citation skill)、對話記憶
-└── rag/  # 獨立 RAG library:ingest、Chroma/JSON store、語意搜尋、context window
+└── app/                 # 唯一的 Python/Poetry project
+    ├── agent/           # LangGraph chat agent、CLI、tools、對話記憶
+    ├── rag/             # framework-neutral ingest/retrieval subsystem
+    └── skills/          # built-in skills（含 citation skill）
 ```
 
-一般使用只需從 `app/` 啟動 chat CLI;要直接管理知識庫時才會用到 `rag/`。預設把 workspace 根目錄視為 host project:`/init` 會 ingest `app/` 的上層目錄並排除 `app/` 與 `rag/`,讓知識庫只收研究材料、不收 agent 自身的程式碼。
+一般使用從 `app/` 啟動 chat CLI；直接管理知識庫時也使用同一個 project 內的 `rag` package。預設把 workspace 根目錄視為 host project：`/init` 會 ingest `app/` 的上層目錄並排除整個 `app/`，讓知識庫只收研究材料、不收 runtime 自身的程式碼。
 
 ## 開發者導覽
 
@@ -16,7 +18,7 @@ research-agent-workspace/
 - [Agent architecture](app/agent/README.md)：`agent` package 的根層邊界與單回合流程。
 - [Skills 規範](app/SKILLS_GUIDE.md)：Skill bundle schema 與建立規則。
 - [Citation subsystem](app/skills/citation/README.md)：Citation engine 的資料流與信任邊界。
-- [RAG package](rag/README.md) 與 [Python API](rag/docs/API.md)：Framework-neutral retrieval library。
+- [RAG package](app/rag/README.md) 與 [Python API](app/rag/docs/API.md)：Framework-neutral retrieval subsystem。
 
 ## 1. 前置作業
 
@@ -27,12 +29,12 @@ research-agent-workspace/
 | 項目 | 要求 |
 |---|---|
 | Python | `>=3.12,<3.14`(env 檔 pin `python=3.13`) |
-| conda env | `app` 與 `rag` 兩個獨立環境 |
-| Poetry | `>=2.3,<3`;兩邊 `poetry.toml` 都設 `virtualenvs.create = false`、`in-project = false` |
+| conda env | 單一 `app` 環境 |
+| Poetry | `>=2.3,<3`;`app/poetry.toml` 設 `virtualenvs.create = false`、`in-project = false` |
 
-Poetry 不會建立或採用 `.venv`,`poetry install` 直接裝進目前啟用的 conda env。務必先 `conda activate app` / `conda activate rag` 再執行；chat CLI 也會驗證 Python runtime 與 `CONDA_PREFIX` 相同,不符合就直接拒絕啟動。
+Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用的 `app` conda env。chat CLI 也會驗證 Python runtime 與 `CONDA_PREFIX` 相同，不符合就直接拒絕啟動。
 
-rag 的 distribution 名稱是 **`research-agent-rag`**(PyPI 上已有不相干的 `rag==0.1.0`),Python import 仍是 `import rag`;app 在 `[project.dependencies]` 宣告 `research-agent-rag==0.1.0`,本機開發由 `[tool.poetry.dependencies]` 的 editable path(`../rag`)提供,不會進 wheel metadata。
+單一 `agent` distribution 同時封裝 `agent`、`skills` 與 `rag` 三個 Python import namespaces；既有的 `import rag` 與 `python -m rag.cli.ingest` 保持不變。
 
 ### 外部服務
 
@@ -57,7 +59,7 @@ rag 的 distribution 名稱是 **`research-agent-rag`**(PyPI 上已有不相干�
 
 確認目前使用者對以下位置有寫入權限:
 
-- `rag/store/`(或 `KMS_STORE_DIR` 指向的位置):Chroma、`raw.json`、`folder_meta.json`、chat history。
+- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):Chroma、`raw.json`、`folder_meta.json`、chat history。
 - `app/plan_logs/`:plan mode markdown logs。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
@@ -67,15 +69,10 @@ rag 的 distribution 名稱是 **`research-agent-rag`**(PyPI 上已有不相干�
 第一次安裝:
 
 ```bash
-conda env create -f rag/env/env-rag.yml
 conda env create -f app/env/env-app.yml
 
-conda activate rag
-cd rag
-poetry install
-
 conda activate app
-cd ../app
+cd app
 poetry install
 
 ollama pull bge-m3
@@ -84,7 +81,6 @@ ollama pull bge-m3
 更新既有環境:
 
 ```bash
-conda env update -n rag -f rag/env/env-rag.yml --prune
 conda env update -n app -f app/env/env-app.yml --prune
 ```
 
@@ -92,7 +88,6 @@ conda env update -n app -f app/env/env-app.yml --prune
 
 ```bash
 conda run -n app python --version && conda run -n app poetry --version && conda run -n app node --version
-conda run -n rag python --version && conda run -n rag poetry --version
 ```
 
 ## 3. Conda 環境變數設定
@@ -101,11 +96,7 @@ conda run -n rag python --version && conda run -n rag poetry --version
 
 ```bash
 conda env config vars set -n app OPENROUTER_API_KEY=...
-conda env config vars set -n rag OPENROUTER_API_KEY=...
-
-# 自訂共用 store 時,兩個 env 必須設成相同路徑
 conda env config vars set -n app KMS_STORE_DIR=/path/to/store
-conda env config vars set -n rag KMS_STORE_DIR=/path/to/store
 ```
 
 設定後重新 `conda activate` 才會更新目前 shell。CLI、RAG 與直接 import 都只讀取啟動程序收到的真實環境變數。
@@ -113,7 +104,7 @@ conda env config vars set -n rag KMS_STORE_DIR=/path/to/store
 | 變數 | 必要性 | 用途 |
 |---|---|---|
 | `OPENROUTER_API_KEY` | chat、extended thinking、repo/folder ingest 必要 | OpenRouter chat model、RAG folder tagging |
-| `KMS_STORE_DIR` | 選用 | 改 RAG store 位置;app 與 rag 要共用資料必須設同一值 |
+| `KMS_STORE_DIR` | 選用 | 改 agent 與 direct RAG API 共用的 store 位置 |
 | `AGENT_ENABLE_MCP_WEB_SEARCH` | 選用 | 未設定時預設啟用；只在要持久關閉時設 `0`/`false`/`no`/`off` |
 | `AGENT_MCP_WEB_SEARCH_COMMAND` | 選用 | 覆蓋預設的 Conda `node` 啟動命令 |
 | `AGENT_MCP_WEB_SEARCH_ARGS` | 選用 | 與自訂 command 搭配的啟動參數 |
@@ -147,7 +138,7 @@ python -m agent.cli.chat
 
 ## 5. 知識庫與資料匯入
 
-RAG store 預設在 `rag/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置),內含:
+RAG store 預設在 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置),內含:
 
 - **ChromaDB**:語意搜尋用。
 - **`raw.json`**:chunk 的 JSON 備份,`get_context`、`list_chunks`、sync/prune 讀它。
@@ -158,7 +149,7 @@ RAG store 預設在 `rag/store/`(可用 `export KMS_STORE_DIR=/path/to/store` �
 
 | 指令 | 行為 |
 |---|---|
-| `/init` | 把 `app/` 的上層(目前的 workspace 根目錄)當 host project ingest,排除頂層 `app/` 與 `rag/` |
+| `/init` | 把 `app/` 的上層(目前的 workspace 根目錄)當 host project ingest,排除頂層 `app/` |
 | `/ingest <file-or-folder>` | upsert 單檔或整個資料夾;單檔不做 LLM folder tagging,資料夾/repo 會做 |
 | `/sync [folder]` | 只比對磁碟與 store 差異、不刪東西;輸出分 `on disk, not in store` 與 `in store, not on disk` |
 | `/prune [folder]` | dry run,列出會刪的 orphan entries;加 `--yes` 才真的刪除 |
@@ -182,7 +173,7 @@ repo/folder ingest 收集常見文字與程式檔:
 
 - **更新已修改的檔案**:重新 `/ingest` 同一路徑即可。repo/folder ingest 是 upsert:先刪同 folder 這輪涉及的 pids,再加入新 chunks。
 - **刪掉已不存在檔案的 entries**:先 `/sync` 檢查,再 `/prune <folder> --yes`。
-- **完全重建**:先停止 chat CLI,再 `mv rag/store rag/store.backup`(有設 `KMS_STORE_DIR` 就操作那個目錄),然後重新 `/init` 或 `/ingest`。
+- **完全重建**:先停止 chat CLI,再 `mv app/store app/store.backup`(有設 `KMS_STORE_DIR` 就操作那個目錄),然後重新 `/init` 或 `/ingest`。
 
 ## 6. Slash Commands
 
@@ -197,7 +188,7 @@ repo/folder ingest 收集常見文字與程式檔:
 | `/skill [name\|none] [mode]` | 啟用/停用 skill;不帶參數出互動選單 |
 | `/citation [文字\|off]` | 啟用 citation skill(持續生效);帶文字時同時把該句話交給 agent;`off` 停用 |
 | `/Extension-Management [--dry-run\|status]` | 掃描並套用 drop-in Skill/MCP；重啟後生效 |
-| `/init` | ingest host workspace,排除 `app/` 與 `rag/` |
+| `/init` | ingest host workspace,排除 `app/` |
 | `/ingest <file-or-folder>` | upsert 單檔或資料夾到 RAG store |
 | `/sync [folder]` | dry run 檢查磁碟與 store 差異 |
 | `/prune [folder] [--yes]` | dry run 或實際刪除 orphan store entries |
@@ -373,10 +364,9 @@ Skill 的 `references/`、`assets/`、`scripts/` 用 `read_file` 讀相對路徑
 ### CLI
 
 ```bash
-conda activate rag
-cd rag
+conda activate app
+cd app
 
-python -m rag.cli.ingest                                  # 匯入目前目錄
 python -m rag.cli.ingest -r /path/to/project              # 匯入指定 repo/folder
 python -m rag.cli.ingest /path/to/file.md                 # 匯入單檔,pid 預設檔名 slug
 python -m rag.cli.ingest /path/to/file.md --pid my-note   # 單檔自訂 pid
@@ -387,7 +377,7 @@ RAG CLI 與 chat CLI 用同一套 store 設定,且都只讀取 Conda／程序環
 
 ```bash
 export OPENROUTER_API_KEY=...        # repo/folder ingest 的 folder tagging 需要
-export KMS_STORE_DIR=/path/to/store  # 若不用預設 rag/store;app 與 rag 兩邊要設同一值
+export KMS_STORE_DIR=/path/to/store  # 若不用預設 app/store
 ```
 
 ### Python API
@@ -407,7 +397,7 @@ window = get_context(hits[0].pid, hits[0].chunk_id, window=2)  # 擴展某個 hi
 chunks = list_chunks()         # 從 raw.json 列 chunks,不跑 embedding
 ```
 
-完整參數與 dataclass 欄位見 `rag/docs/API.md`。
+完整參數與 dataclass 欄位見 [RAG API](app/rag/docs/API.md)。
 
 ## 11. Citation Skill
 
@@ -452,7 +442,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 
 | 狀況 | 處理 |
 |---|---|
-| `ModuleNotFoundError`(如 pytest)或套件找不到 | 多半是沒啟用對的 conda env,或在錯的 env 跑 `poetry install`;`conda activate app && cd app && poetry install`(rag 同理) |
+| `ModuleNotFoundError`(如 pytest)或套件找不到 | 多半是沒啟用 `app` conda env,或沒有從 `app/` 跑 `poetry install`;執行 `conda activate app && cd app && poetry install` |
 | 功能報錯提到 OpenRouter key | `OPENROUTER_API_KEY` 未進入目前 Conda／程序環境；用 `conda env config vars set -n app ...` 後重新 activate。直接報錯是預期的 fail-fast |
 | ingest/search 失敗提到 Ollama/embeddings | 確認 Ollama 正在跑,且 `ollama pull bge-m3` 已完成 |
 | `/thinking extended` 切換即報錯 | 需要 OpenRouter key,且 config 設定的 reviewer/rewrite/repair/fusion 模型都要在 OpenRouter 可用;先完成設定再啟用 |
@@ -464,15 +454,14 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 ## 13. 開發者驗證
 
 ```bash
-# 測試
-conda activate app && cd app && poetry run pytest
-conda activate rag && cd ../rag && poetry run pytest
+conda activate app
+cd app
 
-# import smoke
-conda run -n app python -c "import agent, skills.citation, rag; print('app ok')"
-conda run -n rag python -c "import rag; print('rag ok')"
+# 單一 suite（包含 tests/rag/）
+poetry run pytest
 
-# Poetry manifest/lock 檢查
-conda run -n app poetry check --lock
-conda run -n rag poetry check --lock
+# import、manifest/lock 與 build
+python -c "import agent, skills.citation, rag; print('app ok')"
+poetry check --lock
+poetry build
 ```

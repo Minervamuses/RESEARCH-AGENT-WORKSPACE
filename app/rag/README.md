@@ -4,13 +4,14 @@
 
 ## Install
 
-From this repository root, activate the `rag` conda environment before running
-Poetry. Poetry is configured with `virtualenvs.create = false`, so it installs
-packages into the active conda environment.
+`rag` ships inside the app distribution and uses the same `app` Conda
+environment, Poetry manifest, lock file, and local store as the chat agent.
+From the workspace root:
 
 ```bash
-conda env create -f env/env-rag.yml
-conda activate rag
+conda env create -f app/env/env-app.yml
+conda activate app
+cd app
 poetry install
 ```
 
@@ -54,7 +55,3 @@ python -m rag.cli.ingest -r /path/to/project
 ## API Reference
 
 See [docs/API.md](docs/API.md) for the complete public API contract, dataclass fields, configuration details, error model, and tool-calling interface.
-
-## Agent Notes
-
-`CLAUDE.md` and `AGENTS.md` are git-ignored by design. Keep local agent instructions in those files without treating them as part of the published library contract.

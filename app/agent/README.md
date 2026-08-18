@@ -69,4 +69,4 @@ ChatSession.turn_outcome()  [session-wide async lock]
 - [Extensions](extensions/README.md)
 - [Citation subsystem](../skills/citation/README.md)
 - [Skills 規範](../SKILLS_GUIDE.md)
-- [RAG API](../../rag/docs/API.md)
+- [RAG API](../rag/docs/API.md)
