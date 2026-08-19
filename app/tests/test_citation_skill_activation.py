@@ -28,13 +28,14 @@ def make_session(monkeypatch, tmp_path):
     return _make
 
 
-def test_citation_bundle_is_discovered_with_lean_layout():
+def test_citation_bundle_is_discovered_with_architecture_docs():
     skills = {skill.name: skill for skill in discover_skills(None)}
     assert "citation" in skills
     bundle_root = skills["citation"].path.parent
     assert (bundle_root / "manifest.yaml").exists()
-    # Lean bundle: no README, no .skill archive inside the bundle.
-    assert not (bundle_root / "README.md").exists()
+    # Source bundles include developer-facing architecture docs, but not a
+    # generated .skill archive.
+    assert (bundle_root / "README.md").exists()
     assert not list(bundle_root.glob("*.skill"))
 
 
