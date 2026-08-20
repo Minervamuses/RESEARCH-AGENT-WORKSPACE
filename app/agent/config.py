@@ -9,6 +9,18 @@ from dataclasses import dataclass
 
 from rag.config import RAGConfig
 
+MIN_GRAPH_RECURSION_LIMIT = 3
+
+
+def validate_graph_recursion_limit(value: object) -> int:
+    """Return a graph limit that can reach at least one finalization node."""
+    if type(value) is not int or value < MIN_GRAPH_RECURSION_LIMIT:
+        raise ValueError(
+            "graph_recursion_limit must be an integer greater than or equal to "
+            f"{MIN_GRAPH_RECURSION_LIMIT}"
+        )
+    return value
+
 
 @dataclass
 class AgentConfig(RAGConfig):
@@ -86,3 +98,6 @@ class AgentConfig(RAGConfig):
     # Skill runtime controls.
     skill_max_pinned_reference_chars: int = 65536
     skill_max_total_skill_context_chars: int = 200000
+
+    def __post_init__(self) -> None:
+        validate_graph_recursion_limit(self.graph_recursion_limit)

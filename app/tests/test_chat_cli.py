@@ -50,6 +50,23 @@ def test_chat_cli_builds_config_from_single_graph_limit_source(monkeypatch):
     assert overridden_session.config.graph_recursion_limit == 91
 
 
+@pytest.mark.parametrize("value", ["1", "2", "not-an-int"])
+def test_chat_cli_rejects_graph_limits_that_cannot_finalize(
+    monkeypatch, capsys, value
+):
+    from agent.cli import chat
+
+    monkeypatch.setattr(
+        "sys.argv", ["chat", "--max-graph-steps", value]
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        chat.main()
+
+    assert exc_info.value.code == 2
+    assert "graph" in capsys.readouterr().err
+
+
 def test_chat_cli_banner_reports_loaded_mcp_families(monkeypatch, capsys):
     session = FakeChatSession()
     session.mcp_families = {

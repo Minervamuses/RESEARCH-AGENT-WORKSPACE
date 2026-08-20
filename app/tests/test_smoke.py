@@ -1,5 +1,6 @@
 """Smoke tests that should pass before and after the decoupling refactor."""
 
+import pytest
 from langchain_core.messages import AIMessage
 
 
@@ -20,6 +21,20 @@ def test_imports():
     }
 
     import agent.graph
+
+
+@pytest.mark.parametrize("value", [1, 2, True, 3.5])
+def test_agent_config_rejects_graph_limits_that_cannot_finalize(value):
+    from agent.config import AgentConfig
+
+    with pytest.raises(ValueError, match="greater than or equal to 3"):
+        AgentConfig(graph_recursion_limit=value)
+
+
+def test_agent_config_accepts_minimum_graph_limit():
+    from agent.config import AgentConfig
+
+    assert AgentConfig(graph_recursion_limit=3).graph_recursion_limit == 3
 
 
 def test_graph_builds_without_error(monkeypatch, tmp_path):

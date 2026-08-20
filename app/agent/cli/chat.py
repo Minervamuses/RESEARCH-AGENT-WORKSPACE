@@ -15,11 +15,24 @@ from agent.cli.slash_commands import (
     execute_slash_command,
     parse_slash_command,
 )
-from agent.config import AgentConfig
+from agent.config import AgentConfig, validate_graph_recursion_limit
 from agent.session import ChatSession
 from agent.turns.safety import build_recovery_message
 
 _EXIT_COMMANDS = {"q", "quit", "exit"}
+
+
+def _parse_graph_steps(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "graph recursion limit must be an integer"
+        ) from exc
+    try:
+        return validate_graph_recursion_limit(parsed)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _normalize_cli_command(value: str) -> str:
@@ -175,7 +188,7 @@ def main():
         "Uses LangGraph with tool-calling to let the LLM search the knowledge base."
     )
     parser.add_argument(
-        "--max-graph-steps", type=int, default=None,
+        "--max-graph-steps", type=_parse_graph_steps, default=None,
         help=(
             "Max LangGraph supersteps per graph invocation "
             f"(default: {AgentConfig.graph_recursion_limit})"
