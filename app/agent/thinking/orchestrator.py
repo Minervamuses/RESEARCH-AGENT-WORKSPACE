@@ -209,9 +209,6 @@ class FusionOrchestrator:
         cloned = dataclasses.replace(
             self._session.config,
             llm_model=model_id,
-            agent_max_tool_interactions=(
-                self._session.config.thinking_fusion_proposer_tool_interactions
-            ),
         )
         graph = self._graph_builder(
             cloned,

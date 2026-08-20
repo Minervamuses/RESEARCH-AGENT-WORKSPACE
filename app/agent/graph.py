@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from agent.config import AgentConfig
@@ -29,10 +27,6 @@ from agent.turns.safety import (
 )
 
 
-_LOCAL_CITATION_ACTIONS = frozenset({
-    "explain", "sources", "source",
-})
-
 # Immediate same-request retries after a truly empty upstream reply, before
 # the recovery ladder is even considered.
 _EMPTY_RESPONSE_RETRY_LIMIT = 2
@@ -42,8 +36,8 @@ def _is_empty_model_response(message: AIMessage) -> bool:
     """A reply with no text, no tool calls, and no malformed tool calls.
 
     This is upstream flakiness (typically a lone EOS token), not a reasoning
-    failure: budget-capped or malformed responses are excluded so they keep
-    flowing through the recovery ladder.
+    failure: structured or malformed tool responses are excluded so they keep
+    flowing through the normal tool or recovery paths.
     """
     return (
         not (getattr(message, "tool_calls", None) or [])
@@ -52,128 +46,19 @@ def _is_empty_model_response(message: AIMessage) -> bool:
     )
 
 
-@dataclass(frozen=True)
-class _BudgetUsage:
-    primary: int = 0
-    local: int = 0
-
-
-def _tool_call_parts(tool_call) -> tuple[str, dict, str | None]:
-    if isinstance(tool_call, dict):
-        raw_args = tool_call.get("args", {})
-        return (
-            str(tool_call.get("name", "unknown")),
-            raw_args if isinstance(raw_args, dict) else {},
-            tool_call.get("id"),
-        )
-    return (
-        str(getattr(tool_call, "name", "unknown")),
-        getattr(tool_call, "args", {}) or {},
-        getattr(tool_call, "id", None),
-    )
-
-
-def _budget_class(tool_name: str, args: dict) -> str:
-    if tool_name != "citation_workflow":
-        return "primary"
-    action = args.get("action")
-    return "local" if action in _LOCAL_CITATION_ACTIONS else "primary"
-
-
-def _tool_budget_usage(messages: list) -> _BudgetUsage:
-    """Count completed primary/local calls by matching call ids to results."""
-    classes_by_id: dict[str, str] = {}
-    for message in messages:
-        if not isinstance(message, AIMessage):
-            continue
-        for tool_call in getattr(message, "tool_calls", None) or []:
-            name, args, tool_id = _tool_call_parts(tool_call)
-            if tool_id:
-                classes_by_id[str(tool_id)] = _budget_class(name, args)
-
-    primary = local = 0
-    for message in messages:
-        if not isinstance(message, ToolMessage):
-            continue
-        tool_id = getattr(message, "tool_call_id", None)
-        category = classes_by_id.get(str(tool_id), "primary")
-        if category == "local":
-            local += 1
-        else:
-            primary += 1
-    return _BudgetUsage(primary=primary, local=local)
-
-
-def _cap_tool_calls(
-    message: AIMessage,
-    *,
-    primary_remaining: int,
-    local_remaining: int,
-) -> tuple[AIMessage, int]:
-    """Trim parallel calls independently against primary and local budgets.
-
-    The tool budget is checked once before each round, so a round that emits
-    several parallel tool calls could push the per-turn tool count past the
-    limits. Preserve emission order and keep a call only while its category
-    has room; dropped calls are never committed to history.
-    """
+def _strip_tool_calls(message: AIMessage) -> tuple[AIMessage, int]:
+    """Remove structured tool calls from a response that must be tool-free."""
     tool_calls = list(getattr(message, "tool_calls", None) or [])
     if not tool_calls:
         return message, 0
-    kept = []
-    primary_used = local_used = 0
-    for tool_call in tool_calls:
-        name, args, _tool_id = _tool_call_parts(tool_call)
-        category = _budget_class(name, args)
-        if category == "local":
-            if local_used >= max(local_remaining, 0):
-                continue
-            local_used += 1
-        else:
-            if primary_used >= max(primary_remaining, 0):
-                continue
-            primary_used += 1
-        kept.append(tool_call)
-    dropped = len(tool_calls) - len(kept)
-    if not dropped:
-        return message, 0
-    return AIMessage(
-        content=message.content,
-        additional_kwargs={
+    return message.model_copy(update={
+        "additional_kwargs": {
             key: value
             for key, value in message.additional_kwargs.items()
             if key != "tool_calls"
         },
-        response_metadata=message.response_metadata,
-        tool_calls=kept,
-    ), dropped
-
-
-def _tool_budget_note(
-    *, primary_used: int, primary_limit: int, local_used: int, local_limit: int
-) -> SystemMessage:
-    primary_exhausted = primary_used >= primary_limit
-    local_exhausted = local_used >= local_limit
-    content = (
-        "[Tool budgets]\n"
-        f"Primary/external tool results: {primary_used}/{primary_limit}. "
-        f"Local citation navigation results: {local_used}/{local_limit}. "
-    )
-    if primary_exhausted:
-        content += "Do not request another primary/external operation. "
-    if local_exhausted:
-        content += "Do not request another local citation navigation operation. "
-    if primary_exhausted and local_exhausted:
-        content += (
-            "Both budgets are exhausted. Do not call tools again. Synthesize the "
-            "best answer from available context and evidence."
-        )
-    else:
-        content += (
-            "Use another allowed operation only if necessary; otherwise synthesize "
-            "the answer now."
-        )
-    return SystemMessage(content=content)
+        "tool_calls": [],
+    }), len(tool_calls)
 
 
 _REPAIR_INSTRUCTION = SystemMessage(content=(
@@ -222,7 +107,7 @@ def build_graph(
 
     Returns:
         A compiled LangGraph that accepts AgentState and manages
-        the bounded agent ↔ tools loop for a single turn.
+        the agent ↔ tools loop for a single graph invocation.
     """
     model = get_chat_model(config)
     base_tools = tool_inventory.build_base_tools(
@@ -273,30 +158,8 @@ def build_graph(
     def agent_node(state: AgentState):
         messages = state["messages"]
         tool_names = _effective_names(state)
-        usage = _tool_budget_usage(messages)
-        primary_limit = max(int(config.agent_max_tool_interactions), 0)
-        local_limit = (
-            max(int(config.agent_max_local_tool_interactions), 0)
-            if "citation_workflow" in tool_names
-            else 0
-        )
-        primary_exhausted = usage.primary >= primary_limit
-        local_exhausted = usage.local >= local_limit
-        prompt_messages = [
-            *messages,
-            _tool_budget_note(
-                primary_used=usage.primary,
-                primary_limit=primary_limit,
-                local_used=usage.local,
-                local_limit=local_limit,
-            ),
-        ]
-        if primary_exhausted and local_exhausted:
-            invoke_model = model
-        else:
-            invoke_model = _model_for_state(state)
-        primary_remaining = primary_limit - usage.primary
-        local_remaining = local_limit - usage.local
+        prompt_messages = list(messages)
+        invoke_model = _model_for_state(state)
         response = invoke_model.invoke(prompt_messages)
         # A truly empty reply is upstream flakiness: retry the identical
         # request instead of entering the recovery ladder, whose no-tool
@@ -315,8 +178,6 @@ def build_graph(
                 ),
                 issue="empty_model_response",
                 dropped_tool_calls=0,
-                primary_remaining=primary_remaining,
-                local_remaining=local_remaining,
                 messages=messages,
             )
             response = invoke_model.invoke(prompt_messages)
@@ -326,15 +187,11 @@ def build_graph(
                 stage=f"empty_retry_{empty_attempts}",
                 issue="empty_model_response",
                 dropped_tool_calls=0,
-                primary_remaining=primary_remaining,
-                local_remaining=local_remaining,
                 messages=messages,
             )
             log_recovery_fallback(
                 issue="empty_model_response",
                 repair_issue="empty_retries_exhausted",
-                primary_remaining=primary_remaining,
-                local_remaining=local_remaining,
                 messages=messages,
             )
             return {"messages": [AIMessage(
@@ -346,49 +203,35 @@ def build_graph(
                     "turn_recovery": "fallback:empty_model_response",
                 },
             )]}
-        capped, dropped = _cap_tool_calls(
-            response,
-            primary_remaining=primary_remaining,
-            local_remaining=local_remaining,
-        )
-        if capped.tool_calls:
+        if response.tool_calls:
             log_model_response(
-                capped,
+                response,
                 stage="initial",
                 issue=None,
-                dropped_tool_calls=dropped,
-                primary_remaining=primary_remaining,
-                local_remaining=local_remaining,
+                dropped_tool_calls=0,
                 messages=messages,
             )
-            return {"messages": [capped]}
+            return {"messages": [response]}
 
         issue = find_content_tool_protocol_artifact(
-            capped.content,
+            response.content,
             tool_names=tool_names,
         ) or final_response_problem(
-            content_text(capped.content),
+            content_text(response.content),
             tool_names=tool_names,
-            dropped_tool_calls=dropped > 0,
         )
         log_model_response(
-            capped,
+            response,
             stage="initial",
             issue=issue,
-            dropped_tool_calls=dropped,
-            primary_remaining=primary_remaining,
-            local_remaining=local_remaining,
+            dropped_tool_calls=0,
             messages=messages,
         )
         if issue is None:
-            return {"messages": [capped]}
+            return {"messages": [response]}
 
         repaired = model.invoke([*prompt_messages, _REPAIR_INSTRUCTION])
-        repaired, repair_dropped = _cap_tool_calls(
-            repaired,
-            primary_remaining=0,
-            local_remaining=0,
-        )
+        repaired, repair_dropped = _strip_tool_calls(repaired)
         repair_issue = find_content_tool_protocol_artifact(
             repaired.content,
             tool_names=tool_names,
@@ -402,8 +245,6 @@ def build_graph(
             stage="repair",
             issue=repair_issue,
             dropped_tool_calls=repair_dropped,
-            primary_remaining=primary_remaining,
-            local_remaining=local_remaining,
             messages=messages,
         )
         if repair_issue is None and not repaired.tool_calls:
@@ -414,8 +255,6 @@ def build_graph(
         log_recovery_fallback(
             issue=issue,
             repair_issue=repair_issue,
-            primary_remaining=primary_remaining,
-            local_remaining=local_remaining,
             messages=messages,
         )
         fallback = build_recovery_message(

@@ -18,8 +18,6 @@ def _summary(message: AIMessage, **overrides) -> dict:
         "stage": "initial",
         "issue": None,
         "dropped_tool_calls": 0,
-        "primary_remaining": 4,
-        "local_remaining": 4,
         "last_citation_action": None,
         "last_citation_tool_status": None,
     }
@@ -175,8 +173,6 @@ def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
             stage="initial",
             issue="invalid_tool_calls",
             dropped_tool_calls=0,
-            primary_remaining=3,
-            local_remaining=4,
             messages=[search_call, completed],
         )
 
@@ -199,8 +195,6 @@ def test_valid_response_is_debug_only(caplog):
             stage="initial",
             issue=None,
             dropped_tool_calls=0,
-            primary_remaining=4,
-            local_remaining=4,
             messages=[],
         )
 
@@ -330,7 +324,9 @@ def test_graph_logs_invalid_tool_calls_on_initial_stage(
     assert any("invalid_tool_calls=1" in line for line in initial_lines)
 
 
-def test_graph_logs_tool_call_round_with_budget(monkeypatch, tmp_path, caplog):
+def test_graph_logs_tool_call_round_without_budget_fields(
+    monkeypatch, tmp_path, caplog
+):
     class OneToolModel:
         def __init__(self):
             self.rounds = 0
@@ -363,8 +359,5 @@ def test_graph_logs_tool_call_round_with_budget(monkeypatch, tmp_path, caplog):
         )
 
     lines = [record.getMessage() for record in caplog.records]
-    assert any(
-        "tool_calls=1" in line and "primary_budget_remaining=20" in line
-        for line in lines
-    )
-    assert any("primary_budget_remaining=19" in line for line in lines)
+    assert any("tool_calls=1" in line for line in lines)
+    assert not any("budget_remaining" in line for line in lines)

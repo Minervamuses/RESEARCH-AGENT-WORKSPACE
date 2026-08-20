@@ -48,24 +48,8 @@ class AgentConfig(RAGConfig):
     thinking_fusion_proposer_models: tuple[str, ...] = ()
     thinking_fusion_aggregator_model: str = ""
     thinking_fusion_aggregator_max_tokens: int = 4096
-    thinking_fusion_proposer_tool_interactions: int = 2
     thinking_fusion_candidate_timeout_seconds: float = 180.0
     thinking_fusion_quorum: int = 2
-
-    # Per-turn hard cap on primary/external tool interactions (enforced in
-    # graph.agent_node and graph._cap_tool_calls). Keep this at 20 because a
-    # citation flow can require several discovery calls before its final save;
-    # the original limit of 4 could stop that valid sequence early. The accepted
-    # tradeoff is that one turn may take longer and use more API/compute. This
-    # counter covers every tool call except the three local citation actions
-    # listed below. Scope is per turn, not per conversation.
-    agent_max_tool_interactions: int = 20
-
-    # Separate bounded allowance only for citation_workflow actions `explain`,
-    # `sources`, and `source`. These inspect session-local citation state without
-    # retrieval or external API work, so they do not consume the primary budget;
-    # their independent limit of 4 still prevents a local inspection loop.
-    agent_max_local_tool_interactions: int = 4
 
     # Long-term memory: keep this many most-recent turns in the prompt;
     # evicted turns spill into the chat_history vector store.

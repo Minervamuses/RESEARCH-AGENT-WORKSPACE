@@ -139,7 +139,7 @@ _BASE_WORKFLOW = """Workflow:
 - Use rag_search with appropriate filters based on what you learned from rag_explore.
 - Use rag_get_context only when a result is clearly relevant but you need more of its surrounding text.
 - Use read_file when the answer depends on a local file.
-- After at most 1-3 rag_search calls, stop searching and synthesize your answer. Don't keep searching for perfection.
+- Stop searching and synthesize as soon as the available results provide enough relevant evidence. Don't keep searching for perfection.
 - Give up gracefully: if the search results are empty, repetitive, or unrelated to the question, do NOT keep re-searching and do NOT call rag_get_context on irrelevant results. Instead, stop and state plainly that the indexed knowledge base does not contain enough evidence to answer.
 - Do NOT make up information. Only answer based on tool results or your conversation with the user."""
 

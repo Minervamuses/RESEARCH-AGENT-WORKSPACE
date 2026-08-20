@@ -3,7 +3,8 @@
 One log line per model response at each recovery stage (initial, repair,
 fallback, and any future continuation stage) so a live incident can be
 diagnosed after the fact: was the response a true zero-content reply, a
-malformed tool call (``invalid_tool_calls``), or a budget-capped one?
+malformed tool call (``invalid_tool_calls``), or a tool call stripped from a
+stage that must be tool-free?
 Artifact-derived citation saves additionally emit only aggregate item counts,
 clearly separated from tool execution status.
 
@@ -132,8 +133,6 @@ def summarize_model_response(
     stage: str,
     issue: str | None,
     dropped_tool_calls: int,
-    primary_remaining: int,
-    local_remaining: int,
     last_citation_action: str | None,
     last_citation_tool_status: str | None,
 ) -> dict[str, object]:
@@ -157,8 +156,6 @@ def summarize_model_response(
         "dropped_tool_calls": dropped_tool_calls,
         "last_citation_action": last_citation_action,
         "last_citation_tool_status": last_citation_tool_status,
-        "primary_budget_remaining": primary_remaining,
-        "local_budget_remaining": local_remaining,
         "issue": issue,
     }
 
@@ -173,8 +170,6 @@ def log_model_response(
     stage: str,
     issue: str | None,
     dropped_tool_calls: int,
-    primary_remaining: int,
-    local_remaining: int,
     messages: Iterable[object],
 ) -> None:
     """Log one model response summary at a severity useful in the default CLI.
@@ -190,8 +185,6 @@ def log_model_response(
         stage=stage,
         issue=issue,
         dropped_tool_calls=dropped_tool_calls,
-        primary_remaining=primary_remaining,
-        local_remaining=local_remaining,
         last_citation_action=last_action,
         last_citation_tool_status=last_tool_status,
     )
@@ -203,8 +196,6 @@ def log_recovery_fallback(
     *,
     issue: str | None,
     repair_issue: str | None,
-    primary_remaining: int,
-    local_remaining: int,
     messages: Iterable[object],
 ) -> None:
     """Log the deterministic-fallback event (no model response to summarize)."""
@@ -215,8 +206,6 @@ def log_recovery_fallback(
         "repair_issue": repair_issue,
         "last_citation_action": last_action,
         "last_citation_tool_status": last_tool_status,
-        "primary_budget_remaining": primary_remaining,
-        "local_budget_remaining": local_remaining,
     }
     logger.warning("model_response %s", _format_record(record))
 

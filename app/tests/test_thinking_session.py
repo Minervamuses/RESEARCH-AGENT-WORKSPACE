@@ -46,7 +46,7 @@ class _Factory:
                  global_mcp_families=None):
         self.built.append({
             "model_id": cfg.llm_model,
-            "max_tool_interactions": cfg.agent_max_tool_interactions,
+            "graph_recursion_limit": cfg.graph_recursion_limit,
             "getter_is_none": skill_runtime_getter is None,
             "extra_tool_names": [getattr(t, "name", str(t)) for t in (extra_tools or [])],
         })
@@ -153,7 +153,7 @@ def test_extended_builds_independent_proposer_graphs(monkeypatch, tmp_path):
     assert {b["model_id"] for b in proposer_builds} == {"p1", "p2", "p3"}
     for build in proposer_builds:
         # Proposers switch model via a cloned config, not just AgentState.
-        assert build["max_tool_interactions"] == cfg.thinking_fusion_proposer_tool_interactions
+        assert build["graph_recursion_limit"] == cfg.graph_recursion_limit
         assert build["getter_is_none"] is True
     proposer_calls = [
         call for call in factory.calls if call["model_id"] in {"p1", "p2", "p3"}
