@@ -1,15 +1,10 @@
-"""Configuration for the agent host.
-
-Extends :class:`rag.config.RAGConfig` with fields that only the agent layer
-(conversation loop, evaluation, compaction) needs to know about. Kept here
-so rag remains a framework-neutral library.
-"""
+"""Agent host settings layered on the framework-neutral RAG configuration."""
 
 from dataclasses import dataclass
 
 from rag.config import RAGConfig
 
-MIN_GRAPH_RECURSION_LIMIT = 3
+MIN_GRAPH_RECURSION_LIMIT = 3  # Minimum graph steps needed for finalization.
 
 
 def validate_graph_recursion_limit(value: object) -> int:
@@ -24,80 +19,56 @@ def validate_graph_recursion_limit(value: object) -> int:
 
 @dataclass
 class AgentConfig(RAGConfig):
-    """Runtime config for the LangGraph agent, eval harness, and CLI."""
+    """Runtime settings for the agent graph, CLI, and local extensions."""
 
-    # Main chat LLM used by the agent's LangGraph loop.
-    llm_model: str = "z-ai/glm-5.2"
-    llm_max_tokens: int = 4096
-    # Retry count delegated through LangChain/OpenAI clients. Single source of
-    # truth for runtime and evaluation OpenRouter chat models.
-    llm_max_retries: int = 10
+    # Core runtime
+    llm_model: str = "z-ai/glm-5.2"  # Main chat model.
+    llm_max_tokens: int = 4_096  # Main response token cap.
+    llm_max_retries: int = 10  # OpenRouter retry count.
+    graph_recursion_limit: int = 64  # Per-graph superstep limit.
 
-    # Per-graph LangGraph superstep limit. This is a shared emergency fuse for
-    # normal, skill, proposer, fallback, and reviser graph invocations; it is
-    # intentionally not a per-tool or per-user-turn budget. The graph switches
-    # to no-tool finalization before this framework limit is exhausted.
-    graph_recursion_limit: int = 64
+    # Thinking models
+    gen_llm_model: str = "google/gemini-3.1-pro-preview"  # Fusion proposer fallback.
+    judge_llm_model: str = "openai/gpt-5.2"  # Fusion aggregator fallback.
+    thinking_reviewer_model: str = "anthropic/claude-haiku-4.5"  # Reviewer model.
+    thinking_reviewer_max_tokens: int = 4_096  # Reviewer response token cap.
+    thinking_rewrite_model: str = "openai/gpt-5-mini"  # Rewrite model.
+    thinking_repair_model: str = "openai/gpt-5-mini"  # Repair model.
 
-    # Evaluation LLMs
-    gen_llm_model: str = "google/gemini-3.1-pro-preview"
-    judge_llm_model: str = "openai/gpt-5.2"
+    # Thinking context
+    thinking_tool_trace_chars: int = 500  # Character cap per trace result.
+    thinking_tool_trace_total_chars: int = 4_000  # Combined trace character cap.
+    thinking_rewrite_visible_chars: int = 2_000  # Visible-context cap for rewrites.
+    thinking_rewrite_skill_chars: int = 4_000  # Skill-context cap for rewrites.
 
-    # Extended thinking role models.
-    thinking_reviewer_model: str = "anthropic/claude-haiku-4.5"
-    thinking_reviewer_max_tokens: int = 4096
-    thinking_rewrite_model: str = "openai/gpt-5-mini"
-    thinking_repair_model: str = "openai/gpt-5-mini"
+    # Thinking fusion
+    thinking_fusion_proposer_models: tuple[str, ...] = ()  # Explicit proposer panel.
+    thinking_fusion_aggregator_model: str = ""  # Aggregator model override.
+    thinking_fusion_aggregator_max_tokens: int = 4_096  # Aggregator response token cap.
+    thinking_fusion_candidate_timeout_seconds: float = 180.0  # Per-candidate timeout.
+    thinking_fusion_quorum: int = 2  # Required successful candidates.
 
-    # Extended thinking context caps.
-    thinking_tool_trace_chars: int = 500
-    thinking_tool_trace_total_chars: int = 4000
-    thinking_rewrite_visible_chars: int = 2000
-    thinking_rewrite_skill_chars: int = 4000
+    # Conversation and logging
+    agent_recent_turns_window: int = 10  # Recent turns retained in the prompt.
+    plan_logs_dir: str = "plan_logs"  # Plan-log directory under the app root.
+    plan_log_max_tool_chars: int = 65_536  # Per-tool character cap in plan logs.
 
-    # Extended-thinking fusion candidate panel (replaces the single writer stage
-    # of /thinking extended). Empty proposer/aggregator slots resolve to existing
-    # role models in agent.llm.thinking; no new slash command or mode is added.
-    thinking_fusion_proposer_models: tuple[str, ...] = ()
-    thinking_fusion_aggregator_model: str = ""
-    thinking_fusion_aggregator_max_tokens: int = 4096
-    thinking_fusion_candidate_timeout_seconds: float = 180.0
-    thinking_fusion_quorum: int = 2
+    # Skill discovery
+    skills_dir: str | None = None  # Skill-root override; None uses app/skills.
 
-    # Long-term memory: keep this many most-recent turns in the prompt;
-    # evicted turns spill into the chat_history vector store.
-    agent_recent_turns_window: int = 10
+    # Extensions
+    extension_dropin_dir: str | None = None  # Desired-state root override.
+    extension_state_dir: str | None = None  # Validated-state root override.
+    extension_max_files: int = 512  # Maximum files per bundle.
+    extension_max_file_bytes: int = 8 * 1024 * 1024  # Maximum bytes per file.
+    extension_max_bundle_bytes: int = 64 * 1024 * 1024  # Maximum bytes per bundle.
 
-    # Plan mode markdown logs. Relative to the app project root.
-    plan_logs_dir: str = "plan_logs"
+    # Citation output
+    citation_output_dir: str | None = None  # Citation-bundle root override.
 
-    # Soft cap on a single ToolMessage payload written to a plan log
-    # (UTF-8 chars). Truncation only affects the markdown copy; the LLM
-    # still receives the full ToolMessage in its context window.
-    plan_log_max_tool_chars: int = 65536
-
-    # Optional local skills directory. When unset, defaults to `<repo>/skills`.
-    skills_dir: str | None = None
-
-    # User-managed extension roots.  The drop-in directory is desired state;
-    # the state directory contains host-validated copies and registry metadata.
-    # Both are injectable so tests and installed deployments never write into
-    # package directories.
-    extension_dropin_dir: str | None = None
-    extension_state_dir: str | None = None
-    extension_max_files: int = 512
-    extension_max_file_bytes: int = 8 * 1024 * 1024
-    extension_max_bundle_bytes: int = 64 * 1024 * 1024
-
-    # Citation bundle output directory. Highest-precedence override; when
-    # unset the CITATION_OUTPUT_DIR env var, then workspace cite/, then the
-    # platform user-data fail-safe apply (see citation.storage.resolve_output_dir).
-    # The default never writes inside app/rag/skills package trees.
-    citation_output_dir: str | None = None
-
-    # Skill runtime controls.
-    skill_max_pinned_reference_chars: int = 65536
-    skill_max_total_skill_context_chars: int = 200000
+    # Skill context
+    skill_max_pinned_reference_chars: int = 65_536  # Characters per pinned reference.
+    skill_max_total_skill_context_chars: int = 200_000  # Total active-skill context chars.
 
     def __post_init__(self) -> None:
         validate_graph_recursion_limit(self.graph_recursion_limit)
