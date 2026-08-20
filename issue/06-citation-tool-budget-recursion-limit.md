@@ -4,8 +4,21 @@
 
 - 類型：Citation workflow 執行上限不一致。
 - 優先度：高。
-- 狀態：已確認、尚未修正。
-- 影響：預設設定宣告可執行 20 次主要工具呼叫，但模型產生第 16 次 action 後、tool 執行前即觸發 `GraphRecursionError`；最後的 citation `save` 可能完全沒有執行。
+- 狀態：已解決（2026-08-20）。
+- 修正前影響：預設設定宣告可執行 20 次主要工具呼叫，但模型產生第 16 次 action 後、tool 執行前即觸發 `GraphRecursionError`；最後的 citation `save` 可能完全沒有執行。
+
+## 解決結果
+
+本 issue 原先把「提高 recursion 以兌現 20+4 tool quota」視為既定方向；實作前重新追查設定 consumer、歷史證據與真實失效後，改以更小且一致的政策解決：
+
+- 刪除 primary 20、citation-local 4、proposer 2 三套 tool-call quota，以及對應計數、prompt、裁切與 budget telemetry。
+- 在 `AgentConfig.graph_recursion_limit` 保留唯一的 per-graph emergency fuse，預設 64；normal、citation、proposer、fallback 與 reviser 都讀同一設定。
+- 使用 LangGraph `RemainingSteps` 在剩餘步數少於 3 時禁止新工具並產生 best-effort final answer，避免到達 framework hard error 才丟失既有結果。
+- CLI 改為 `--max-graph-steps`，override 仍先寫入 `AgentConfig`；`/status` 顯示同一設定。
+
+完整決策、consumer map、commit 與驗證紀錄見 [`note/20260820/agent_loop_guardrail_consolidation.md`](../note/20260820/agent_loop_guardrail_consolidation.md)。
+
+以下內容保留為修正前的問題描述與重現證據；其中 20、4、32 與 `--max-turns` 不再是現行設定。
 
 ## 專案背景
 
