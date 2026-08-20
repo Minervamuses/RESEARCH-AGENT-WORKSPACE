@@ -12,7 +12,8 @@
 本 issue 原先把「提高 recursion 以兌現 20+4 tool quota」視為既定方向；實作前重新追查設定 consumer、歷史證據與真實失效後，改以更小且一致的政策解決：
 
 - 刪除 primary 20、citation-local 4、proposer 2 三套 tool-call quota，以及對應計數、prompt、裁切與 budget telemetry。
-- 在 `AgentConfig.graph_recursion_limit` 保留唯一的 per-graph emergency fuse，預設 64；normal、citation、proposer、fallback 與 reviser 都讀同一設定。
+- 在 `AgentConfig.graph_recursion_limit` 保留唯一的 per-graph emergency fuse，預設 64、最小 3；programmatic config 與 CLI 共用同一驗證。
+- `build_graph(config)` 在 compile 時把該值綁到 graph；normal、citation、proposer、fallback、reviser 與公開 builder 不需另外傳 raw recursion 設定。
 - 使用 LangGraph `RemainingSteps` 在剩餘步數少於 3 時禁止新工具並產生 best-effort final answer，避免到達 framework hard error 才丟失既有結果。
 - CLI 改為 `--max-graph-steps`，override 仍先寫入 `AgentConfig`；`/status` 顯示同一設定。
 

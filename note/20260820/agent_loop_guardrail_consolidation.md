@@ -34,18 +34,23 @@
 
 ```text
 AgentConfig.graph_recursion_limit = 64
-    └─ ChatSession._execute_graph()
-        └─ turns.execution.execute_graph()
-            └─ graph.astream(config={"recursion_limit": 64})
+    └─ build_graph(config)
+        └─ graph.compile().with_config({"recursion_limit": 64})
+            ├─ ChatSession normal/citation/fallback/reviser
+            ├─ extended proposer graphs
+            └─ public agent.build_graph(config) callers
 ```
 
 實際 consumers：
 
 - Normal 與 citation：`ChatSession._run_graph_turn()`。
 - Extended zero-success base fallback 與每次 reviser：同樣走 `_run_graph_turn()`。
-- 每個 proposer：直接走同一個 `_execute_graph()`；只 clone `llm_model`，不覆寫 limit。
+- 每個 proposer：只 clone `llm_model`；`build_graph(cloned_config)` 自動綁定同一 limit。
+- 公開 `agent.build_graph(config)`：compiled graph 自帶 config limit，不依賴 ChatSession caller 再傳 raw recursion config。
 - CLI `--max-graph-steps`：建立 `AgentConfig` 時覆寫該欄位，不再把第二份 recursion 值傳給 `ChatSession`。
 - `/status` 與 CLI recursion error：讀同一個 config 欄位。
+
+`AgentConfig` 以同一個 validator 要求 `graph_recursion_limit` 是整數且至少為 3；CLI parser 直接重用該 validator，在建立 session 前拒絕無法走到 finalization node 的 1 或 2。
 
 Citation skill 沒有自己的 graph limit；它啟用時仍使用 normal thinking graph。Aggregator、reviewer 與 prompt rewrite 是直接 model invocation，不是 LangGraph consumer，也不偽裝成 recursion 設定。
 
@@ -89,6 +94,10 @@ limit 5: loader rem4 → agent rem3 → tools rem2 → agent rem1 → final
    - 刪除三套 quota、graph budget machinery、budget telemetry與 numeric RAG soft cap；保留專用 no-tool strip；新增超過舊 20/4 界線的 deterministic tests。
 3. `563b069 fix(agent): finalize before graph recursion limit`
    - 加入 `RemainingSteps`、`<3` graceful cutoff、graph-steps telemetry與 boundary/defiant-model tests。
+4. `4a8838c fix(agent): bind graph limit at compilation`
+   - 讓公開 `build_graph(config)` 自動綁定 limit；刪除 ChatSession／`execute_graph()` 的 raw recursion plumbing；新增無 invoke override 的回歸測試。
+5. `f17b2ed fix(agent): validate graph recursion limit`
+   - 在 `config.py` 驗證 limit 至少為 3；CLI parser 重用同一 validator；涵蓋 programmatic config、CLI 與 minimum boundary。
 
 ## 驗證結果
 
@@ -142,6 +151,28 @@ conda run -n app poetry run pytest \
 # 42 passed, 1 warning
 ```
 
+Compiled-graph binding focused tests：
+
+```bash
+conda run -n app poetry run pytest \
+  tests/test_graph_skill_loader.py \
+  tests/test_thinking_session.py \
+  tests/test_turn_finalizer.py \
+  tests/test_citation_e2e.py \
+  tests/test_history_recall_scenario.py -q
+# 85 passed, 1 warning
+```
+
+Config/CLI validation focused tests：
+
+```bash
+conda run -n app poetry run pytest \
+  tests/test_chat_cli.py \
+  tests/test_smoke.py \
+  tests/test_graph_skill_loader.py -q
+# 40 passed, 1 warning
+```
+
 各步結果摘要：
 
 ```text
@@ -150,6 +181,8 @@ central config focused tests: 98 passed, 1 warning
 quota removal first run:      66 passed, 1 failed, 1 warning
 quota removal corrected run:  67 passed, 1 warning
 graceful cutoff tests:         42 passed, 1 warning
+compiled graph binding tests:  85 passed, 1 warning
+config/CLI validation tests:   40 passed, 1 warning
 ```
 
 Quota removal 第一次失敗是新 test 沿用舊 fallback 英文句子；runtime 已正確回傳 `repair:dropped_tool_calls` 且沒有執行工具。Assertion 改為穩定的 recovery metadata 後，同一組測試全過；production code 不需第二次修正。
@@ -160,14 +193,14 @@ Quota removal 第一次失敗是新 test 沿用舊 fallback 英文句子；runti
 # from repository root
 cd app
 conda run -n app poetry run pytest
-# 686 passed, 1 warning in 5.21s
+# 694 passed, 1 warning in 5.24s
 
 conda run -n app poetry run python -m agent.cli.chat --help
 # --max-graph-steps MAX_GRAPH_STEPS
 # Max LangGraph supersteps per graph invocation (default: 64)
 
 cd ..
-git diff --check 131875d..f0dd91b
+git diff --check 131875d..f17b2ed
 # passed (no output)
 ```
 
@@ -180,6 +213,7 @@ git diff --check 131875d..f0dd91b
 - 本次沒有執行 live paid-model trial，也沒有宣稱現行 GLM 5.2 永遠不會 loop。
 - Repository 從初始 commit 起就有 tool cap，沒有可比較的 no-cap live baseline；歷史 C1「8 次 RAG runaway」只剩不可重驗的 code comment。
 - `graph_recursion_limit=64` 是 deterministic emergency policy；未來只有在真實 trace 顯示過低或過高時才應調整。
+- 直接呼叫 LangGraph runnable 並顯式傳入 invoke-time `recursion_limit` 仍可覆寫 bound config；現行 production/session/CLI 沒有這條第二設定路徑，測試只用它驗證 4／5 邊界。
 - 若之後出現成本問題，應量測整個 user turn 的 provider requests、tokens、duration或金額，再設相符的 run-level policy；不要重新用 ToolMessage 數當成本代理。
 
 ## 結論
