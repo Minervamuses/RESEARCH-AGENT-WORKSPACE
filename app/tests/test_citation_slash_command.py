@@ -128,8 +128,6 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
     from agent.cli import chat
 
     class LoopSession(StubSession):
-        recursion_limit = 32
-
         def __init__(self):
             super().__init__()
             self.turns: list[str] = []
@@ -152,7 +150,7 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
         return next(inputs)
 
     monkeypatch.setattr(chat.ChatSession, "create", fake_create)
-    args = argparse.Namespace(max_turns=32, no_mcp=True)
+    args = argparse.Namespace(max_graph_steps=None, no_mcp=True)
     asyncio.run(chat._run(args, read_line=fake_read_line))
 
     assert session.calls[0] == "activate:citation"

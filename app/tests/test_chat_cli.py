@@ -8,11 +8,12 @@ import pytest
 from conftest import FakeChatSession
 
 
-def _run_cli(monkeypatch, session, inputs):
+def _run_cli(monkeypatch, session, inputs, *, max_graph_steps=None):
     """Drive chat._run with a fake session and scripted line inputs."""
     from agent.cli import chat
 
-    async def fake_create(*args, **kwargs):
+    async def fake_create(config, **kwargs):
+        session.config = config
         return session
 
     input_iter = iter(inputs)
@@ -22,7 +23,7 @@ def _run_cli(monkeypatch, session, inputs):
 
     monkeypatch.setattr(chat.ChatSession, "create", fake_create)
 
-    args = argparse.Namespace(max_turns=32, no_mcp=True)
+    args = argparse.Namespace(max_graph_steps=max_graph_steps, no_mcp=True)
     asyncio.run(chat._run(args, read_line=fake_read_line))
 
 
@@ -32,6 +33,21 @@ def test_chat_cli_flushes_recent_turns_on_quit(monkeypatch):
     _run_cli(monkeypatch, session, ["hello", "q"])
 
     assert session.calls == ["turn:hello", "flush"]
+
+
+def test_chat_cli_builds_config_from_single_graph_limit_source(monkeypatch):
+    default_session = FakeChatSession()
+    _run_cli(monkeypatch, default_session, ["q"])
+    assert default_session.config.graph_recursion_limit == 64
+
+    overridden_session = FakeChatSession()
+    _run_cli(
+        monkeypatch,
+        overridden_session,
+        ["q"],
+        max_graph_steps=91,
+    )
+    assert overridden_session.config.graph_recursion_limit == 91
 
 
 def test_chat_cli_banner_reports_loaded_mcp_families(monkeypatch, capsys):
@@ -101,7 +117,7 @@ def test_chat_cli_slash_help_stays_local(monkeypatch, capsys):
         "session_id": "session-1",
         "turn_count": 0,
         "recent_turn_count": 0,
-        "recursion_limit": 32,
+        "graph_recursion_limit": 64,
         "last_tool_counts": "none",
     })
 
@@ -118,7 +134,7 @@ def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
         "session_id": "session-42",
         "turn_count": 3,
         "recent_turn_count": 2,
-        "recursion_limit": 32,
+        "graph_recursion_limit": 64,
         "last_tool_counts": "rag_search x1",
         "thinking_mode": "extended",
         "mcp_families": "web_search",
@@ -129,6 +145,7 @@ def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Session status:" in output
     assert "session_id: session-42" in output
+    assert "graph_recursion_limit: 64" in output
     assert "last_tool_calls: rag_search x1" in output
     assert "thinking_mode: extended" in output
     assert "mcp_families: web_search" in output
@@ -140,7 +157,7 @@ def test_chat_cli_slash_quit_exits_without_agent_turn(monkeypatch):
         "session_id": "session-1",
         "turn_count": 0,
         "recent_turn_count": 0,
-        "recursion_limit": 32,
+        "graph_recursion_limit": 64,
         "last_tool_counts": "none",
     })
 

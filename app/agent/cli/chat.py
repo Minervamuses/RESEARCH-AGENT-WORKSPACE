@@ -16,7 +16,7 @@ from agent.cli.slash_commands import (
     parse_slash_command,
 )
 from agent.config import AgentConfig
-from agent.session import ChatSession, DEFAULT_RECURSION_LIMIT
+from agent.session import ChatSession
 from agent.turns.safety import build_recovery_message
 
 _EXIT_COMMANDS = {"q", "quit", "exit"}
@@ -88,10 +88,13 @@ async def _run(
     args: argparse.Namespace,
     read_line: LineReader | None = None,
 ) -> None:
-    config = AgentConfig()
+    config = AgentConfig(
+        graph_recursion_limit=args.max_graph_steps
+        if args.max_graph_steps is not None
+        else AgentConfig.graph_recursion_limit,
+    )
     session = await ChatSession.create(
         config,
-        recursion_limit=args.max_turns,
         load_mcp=not args.no_mcp,
         progress_cb=_print_progress,
     )
@@ -150,8 +153,9 @@ async def _run(
                 response = await session.turn(user_input)
             except GraphRecursionError:
                 response = (
-                    f"(agent hit recursion limit of {session.recursion_limit} tool "
-                    "rounds without settling. Try rephrasing or narrowing the question.)"
+                    f"(agent hit graph recursion limit of "
+                    f"{config.graph_recursion_limit} supersteps without settling. "
+                    "Try rephrasing or narrowing the question.)"
                 )
             except Exception as exc:
                 response = f"(agent error: {type(exc).__name__}: {exc})"
@@ -171,8 +175,11 @@ def main():
         "Uses LangGraph with tool-calling to let the LLM search the knowledge base."
     )
     parser.add_argument(
-        "--max-turns", type=int, default=DEFAULT_RECURSION_LIMIT,
-        help=f"Max recursion depth per turn (default: {DEFAULT_RECURSION_LIMIT})",
+        "--max-graph-steps", type=int, default=None,
+        help=(
+            "Max LangGraph supersteps per graph invocation "
+            f"(default: {AgentConfig.graph_recursion_limit})"
+        ),
     )
     parser.add_argument(
         "--no-mcp", action="store_true",

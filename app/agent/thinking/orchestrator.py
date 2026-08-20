@@ -202,10 +202,6 @@ class FusionOrchestrator:
             hints.append(plan_hint)
         return [base[0], *hints, *base[1:]]
 
-    def _proposer_recursion_limit(self) -> int:
-        cap = max(int(self._session.config.thinking_fusion_proposer_tool_interactions), 0)
-        return max(8, 2 * (cap + 1) + 6)
-
     def _proposer_graph(self, model_id: str):
         cached = self._proposer_graphs.get(model_id)
         if cached is not None:
@@ -253,7 +249,6 @@ class FusionOrchestrator:
                     user_input=rewritten_prompt,
                     prompt_history=prompt_history,
                     skill_state=skill_state,
-                    recursion_limit=self._proposer_recursion_limit(),
                     extra_system_messages=rewrite_hints,
                     candidate_id=candidate_id,
                 ),

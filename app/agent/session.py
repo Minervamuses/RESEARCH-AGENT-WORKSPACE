@@ -72,16 +72,12 @@ Language policy:
 - When the user writes in Chinese, ALWAYS use Traditional Chinese (繁體中文). Never produce Simplified Chinese characters even if the user's input contains some.
 - For other languages, match the user's input language without conversion."""
 
-DEFAULT_RECURSION_LIMIT = 32
-
-
 class ChatSession:
     """Multi-turn conversational retrieval session backed by LangGraph."""
 
     def __init__(
         self,
         config: AgentConfig,
-        recursion_limit: int = DEFAULT_RECURSION_LIMIT,
         system_prompt: str = SYSTEM_PROMPT,
         extra_tools: list | None = None,
         history_store: ChatHistoryStore | None = None,
@@ -93,7 +89,6 @@ class ChatSession:
         extension_startup_diagnostics: tuple[str, ...] = (),
     ):
         self.config = config
-        self.recursion_limit = recursion_limit
         self.thinking_mode = "normal"
         self.active_skill_runtime: SkillRuntime | None = None
         self.extra_tools = list(extra_tools or [])
@@ -488,7 +483,6 @@ class ChatSession:
         user_input: str,
         prompt_history: list,
         skill_state: dict,
-        recursion_limit: int,
         extra_system_messages: list[SystemMessage] | None = None,
         candidate_id: str | None = None,
     ) -> GraphTurnResult:
@@ -505,7 +499,7 @@ class ChatSession:
             user_input=user_input,
             prompt_history=prompt_history,
             skill_state=skill_state,
-            recursion_limit=recursion_limit,
+            graph_recursion_limit=self.config.graph_recursion_limit,
             extra_system_messages=extra_system_messages,
             candidate_id=candidate_id,
             progress_cb=self._progress_cb,
@@ -523,7 +517,6 @@ class ChatSession:
             user_input=user_input,
             prompt_history=self._prompt_history(),
             skill_state=skill_runtime_to_agent_state(self.active_skill_runtime),
-            recursion_limit=self.recursion_limit,
             extra_system_messages=extra_system_messages,
             candidate_id=None,
         )
@@ -598,7 +591,7 @@ class ChatSession:
             "session_id": self.session_id,
             "turn_count": self._turn_counter,
             "recent_turn_count": len(self.recent_turns),
-            "recursion_limit": self.recursion_limit,
+            "graph_recursion_limit": self.config.graph_recursion_limit,
             "last_tool_counts": format_tool_counts(self.last_tool_calls) or "none",
             "plan_mode": self.plan_mode,
             "plan_log_path": str(self.plan_log_path) if self.plan_log_path else "",
@@ -626,7 +619,6 @@ class ChatSession:
     async def create(
         cls,
         config: AgentConfig,
-        recursion_limit: int = DEFAULT_RECURSION_LIMIT,
         system_prompt: str = SYSTEM_PROMPT,
         history_store: ChatHistoryStore | None = None,
         load_mcp: bool = True,
@@ -642,7 +634,6 @@ class ChatSession:
         startup = await load_session_startup(config, load_mcp=load_mcp)
         return cls(
             config,
-            recursion_limit=recursion_limit,
             system_prompt=system_prompt,
             extra_tools=list(startup.extra_tools),
             history_store=history_store,

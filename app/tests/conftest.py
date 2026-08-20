@@ -75,9 +75,11 @@ class AstreamGraph:
         self.updates = list(updates)
         self.on_state = on_state
         self.states: list[dict] = []
+        self.configs: list[dict | None] = []
 
     async def astream(self, state, config=None, stream_mode="updates"):
         self.states.append(state)
+        self.configs.append(config)
         if self.on_state is not None:
             self.on_state(state)
         for update in self.updates:
@@ -93,8 +95,6 @@ def make_astream_graph(updates=None, *, answer="ok", on_state=None) -> AstreamGr
 
 class FakeChatSession:
     """ChatSession stand-in for CLI-level tests: records turns and flushes."""
-
-    recursion_limit = 32
 
     def __init__(self, *, turn_result="ok", turn_error=None, record_repr=False,
                  status=None, config=None):

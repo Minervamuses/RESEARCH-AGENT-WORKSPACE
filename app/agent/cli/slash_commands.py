@@ -247,7 +247,7 @@ async def _handle_status(
         f"session_id: {status['session_id']}",
         f"turn_count: {status['turn_count']}",
         f"recent_turn_count: {status['recent_turn_count']}",
-        f"recursion_limit: {status['recursion_limit']}",
+        f"graph_recursion_limit: {status['graph_recursion_limit']}",
         f"last_tool_calls: {status['last_tool_counts']}",
         f"plan_mode: {status.get('plan_mode', False)}",
         f"plan_log_path: {status.get('plan_log_path', '') or 'none'}",

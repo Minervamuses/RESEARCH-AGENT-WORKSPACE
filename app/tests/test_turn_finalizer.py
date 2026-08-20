@@ -154,6 +154,16 @@ def test_clean_turn_returns_outcome_and_records(make_session):
     _assert_save_metrics(session)
 
 
+def test_normal_turn_uses_configured_graph_recursion_limit(make_session):
+    session, _ = make_session(answer="plain answer")
+    session.config.graph_recursion_limit = 73
+
+    asyncio.run(session.turn("hello"))
+
+    assert session.graph.configs == [{"recursion_limit": 73}]
+    assert session.status_snapshot()["graph_recursion_limit"] == 73
+
+
 @pytest.mark.parametrize("draft", ["", "   \n\t"])
 def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, draft):
     session, _ = make_session(answer=draft)

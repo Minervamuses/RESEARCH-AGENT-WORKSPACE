@@ -21,6 +21,11 @@ class AgentConfig(RAGConfig):
     # truth for runtime and evaluation OpenRouter chat models.
     llm_max_retries: int = 10
 
+    # Per-graph LangGraph superstep limit. This is a shared emergency fuse for
+    # normal, skill, proposer, fallback, and reviser graph invocations; it is
+    # intentionally not a per-tool or per-user-turn budget.
+    graph_recursion_limit: int = 64
+
     # Evaluation LLMs
     gen_llm_model: str = "google/gemini-3.1-pro-preview"
     judge_llm_model: str = "openai/gpt-5.2"

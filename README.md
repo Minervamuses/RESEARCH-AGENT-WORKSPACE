@@ -131,7 +131,8 @@ python -m agent.cli.chat
 
 可用參數:
 
-- `--max-turns 32`:每回合 LangGraph 最多跑幾輪工具/模型循環。
+- `--max-graph-steps 64`:覆寫 `AgentConfig.graph_recursion_limit`,限制每次
+  LangGraph invocation 的 supersteps;這是緊急保險絲,不是工具呼叫額度。
 - `--no-mcp`:只對這次執行停用所有 MCP 工具。
 
 離開:輸入 `q`、`quit`、`exit`、`/quit` 或 `/exit`。
