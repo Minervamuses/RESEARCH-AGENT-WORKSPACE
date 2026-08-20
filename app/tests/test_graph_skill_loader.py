@@ -362,7 +362,6 @@ def test_agent_node_allows_more_than_legacy_primary_quota(monkeypatch, tmp_path)
 
     result = graph.invoke(
         {"messages": [HumanMessage(content="hi")]},
-        config={"recursion_limit": cfg.graph_recursion_limit},
     )
 
     completed = [m for m in result["messages"] if isinstance(m, ToolMessage)]
@@ -420,11 +419,11 @@ def test_agent_node_allows_more_than_legacy_citation_local_quota(
 
 
 @pytest.mark.parametrize(
-    ("recursion_limit", "expected_tool_results"),
-    [(4, 0), (5, 1)],
+    ("configured_limit", "invoke_limit", "expected_tool_results"),
+    [(4, None, 0), (64, 5, 1)],
 )
 def test_agent_node_finalizes_before_recursion_limit(
-    monkeypatch, tmp_path, recursion_limit, expected_tool_results
+    monkeypatch, tmp_path, configured_limit, invoke_limit, expected_tool_results
 ):
     class BoundaryModel:
         def __init__(self):
@@ -460,11 +459,17 @@ def test_agent_node_finalizes_before_recursion_limit(
         "agent.tools.inventory.create_history_tool",
         lambda _cfg, store=None: _recall_history,
     )
-    graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+    graph = build_graph(AgentConfig(
+        persist_dir=str(tmp_path),
+        graph_recursion_limit=configured_limit,
+    ))
 
+    invoke_config = (
+        {"recursion_limit": invoke_limit} if invoke_limit is not None else None
+    )
     result = graph.invoke(
         {"messages": [HumanMessage(content="hi")]},
-        config={"recursion_limit": recursion_limit},
+        config=invoke_config,
     )
 
     completed = [m for m in result["messages"] if isinstance(m, ToolMessage)]

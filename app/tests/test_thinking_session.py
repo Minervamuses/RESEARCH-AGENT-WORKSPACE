@@ -24,7 +24,6 @@ class _QueueGraph:
         self.factory.calls.append({
             "model_id": self.model_id,
             "state": state,
-            "config": config,
         })
         queue = self.factory.scripts.get(self.model_id)
         updates = queue.pop(0) if queue else _answer(self.factory.default)
@@ -155,13 +154,6 @@ def test_extended_builds_independent_proposer_graphs(monkeypatch, tmp_path):
         # Proposers switch model via a cloned config, not just AgentState.
         assert build["graph_recursion_limit"] == cfg.graph_recursion_limit
         assert build["getter_is_none"] is True
-    proposer_calls = [
-        call for call in factory.calls if call["model_id"] in {"p1", "p2", "p3"}
-    ]
-    assert all(
-        call["config"] == {"recursion_limit": cfg.graph_recursion_limit}
-        for call in proposer_calls
-    )
     assert len(models["rewrite"].calls) == 1
 
 

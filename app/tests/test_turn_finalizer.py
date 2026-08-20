@@ -32,8 +32,11 @@ def make_session(monkeypatch, tmp_path):
         lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
     )
 
-    def _make(answer="ok", window: int = 5):
-        cfg = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    def _make(answer="ok", window: int = 5, graph_recursion_limit: int = 64):
+        cfg = AgentConfig(
+            persist_dir=str(tmp_path / "persist"),
+            graph_recursion_limit=graph_recursion_limit,
+        )
         cfg.agent_recent_turns_window = window
         store = FakeHistoryStore()
         session = ChatSession(cfg, history_store=store)
@@ -154,13 +157,9 @@ def test_clean_turn_returns_outcome_and_records(make_session):
     _assert_save_metrics(session)
 
 
-def test_normal_turn_uses_configured_graph_recursion_limit(make_session):
-    session, _ = make_session(answer="plain answer")
-    session.config.graph_recursion_limit = 73
+def test_status_reports_configured_graph_recursion_limit(make_session):
+    session, _ = make_session(graph_recursion_limit=73)
 
-    asyncio.run(session.turn("hello"))
-
-    assert session.graph.configs == [{"recursion_limit": 73}]
     assert session.status_snapshot()["graph_recursion_limit"] == 73
 
 

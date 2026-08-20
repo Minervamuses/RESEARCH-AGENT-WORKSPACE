@@ -75,11 +75,9 @@ class AstreamGraph:
         self.updates = list(updates)
         self.on_state = on_state
         self.states: list[dict] = []
-        self.configs: list[dict | None] = []
 
     async def astream(self, state, config=None, stream_mode="updates"):
         self.states.append(state)
-        self.configs.append(config)
         if self.on_state is not None:
             self.on_state(state)
         for update in self.updates:

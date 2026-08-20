@@ -333,4 +333,6 @@ def build_graph(
     graph.add_conditional_edges("agent", route_after_agent)
     graph.add_edge("tools", "agent")
 
-    return graph.compile()
+    return graph.compile().with_config({
+        "recursion_limit": config.graph_recursion_limit,
+    })

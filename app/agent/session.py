@@ -499,7 +499,6 @@ class ChatSession:
             user_input=user_input,
             prompt_history=prompt_history,
             skill_state=skill_state,
-            graph_recursion_limit=self.config.graph_recursion_limit,
             extra_system_messages=extra_system_messages,
             candidate_id=candidate_id,
             progress_cb=self._progress_cb,

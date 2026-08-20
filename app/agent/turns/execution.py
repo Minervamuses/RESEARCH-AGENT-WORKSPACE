@@ -19,7 +19,6 @@ async def execute_graph(
     user_input: str,
     prompt_history: list,
     skill_state: dict,
-    graph_recursion_limit: int,
     extra_system_messages: list[SystemMessage] | None = None,
     candidate_id: str | None = None,
     progress_cb: ProgressCallback | None = None,
@@ -37,7 +36,6 @@ async def execute_graph(
     }
     async for update in graph.astream(
         initial_state,
-        config={"recursion_limit": graph_recursion_limit},
         stream_mode="updates",
     ):
         for node_name, delta in update.items():
