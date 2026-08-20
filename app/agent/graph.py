@@ -69,6 +69,13 @@ _REPAIR_INSTRUCTION = SystemMessage(content=(
     "insufficient, state that plainly. Return only the answer."
 ))
 
+_GRAPH_LIMIT_FINALIZATION_INSTRUCTION = SystemMessage(content=(
+    "[Graph limit]\nThe graph is near its emergency superstep limit. Using only "
+    "the context and completed tool results already available, write the best "
+    "user-facing final answer now. Do not call or describe a tool invocation. "
+    "If the evidence is insufficient, state that plainly. Return only the answer."
+))
+
 
 def _with_recovery_metadata(message: AIMessage, reason: str) -> AIMessage:
     metadata = dict(message.response_metadata or {})
@@ -158,8 +165,13 @@ def build_graph(
     def agent_node(state: AgentState):
         messages = state["messages"]
         tool_names = _effective_names(state)
-        prompt_messages = list(messages)
-        invoke_model = _model_for_state(state)
+        graph_steps_remaining = int(state["remaining_steps"])
+        force_final = graph_steps_remaining < 3
+        prompt_messages = [
+            *messages,
+            *([_GRAPH_LIMIT_FINALIZATION_INSTRUCTION] if force_final else []),
+        ]
+        invoke_model = model if force_final else _model_for_state(state)
         response = invoke_model.invoke(prompt_messages)
         # A truly empty reply is upstream flakiness: retry the identical
         # request instead of entering the recovery ladder, whose no-tool
@@ -178,6 +190,7 @@ def build_graph(
                 ),
                 issue="empty_model_response",
                 dropped_tool_calls=0,
+                graph_steps_remaining=graph_steps_remaining,
                 messages=messages,
             )
             response = invoke_model.invoke(prompt_messages)
@@ -187,11 +200,13 @@ def build_graph(
                 stage=f"empty_retry_{empty_attempts}",
                 issue="empty_model_response",
                 dropped_tool_calls=0,
+                graph_steps_remaining=graph_steps_remaining,
                 messages=messages,
             )
             log_recovery_fallback(
                 issue="empty_model_response",
                 repair_issue="empty_retries_exhausted",
+                graph_steps_remaining=graph_steps_remaining,
                 messages=messages,
             )
             return {"messages": [AIMessage(
@@ -203,12 +218,16 @@ def build_graph(
                     "turn_recovery": "fallback:empty_model_response",
                 },
             )]}
+        dropped = 0
+        if force_final:
+            response, dropped = _strip_tool_calls(response)
         if response.tool_calls:
             log_model_response(
                 response,
                 stage="initial",
                 issue=None,
                 dropped_tool_calls=0,
+                graph_steps_remaining=graph_steps_remaining,
                 messages=messages,
             )
             return {"messages": [response]}
@@ -219,15 +238,21 @@ def build_graph(
         ) or final_response_problem(
             content_text(response.content),
             tool_names=tool_names,
+            dropped_tool_calls=dropped > 0,
         )
         log_model_response(
             response,
             stage="initial",
             issue=issue,
-            dropped_tool_calls=0,
+            dropped_tool_calls=dropped,
+            graph_steps_remaining=graph_steps_remaining,
             messages=messages,
         )
         if issue is None:
+            if force_final:
+                response = _with_recovery_metadata(
+                    response, "finalized:graph_recursion_limit"
+                )
             return {"messages": [response]}
 
         repaired = model.invoke([*prompt_messages, _REPAIR_INSTRUCTION])
@@ -245,16 +270,21 @@ def build_graph(
             stage="repair",
             issue=repair_issue,
             dropped_tool_calls=repair_dropped,
+            graph_steps_remaining=graph_steps_remaining,
             messages=messages,
         )
         if repair_issue is None and not repaired.tool_calls:
+            recovery_reason = f"repaired:{issue}"
+            if force_final:
+                recovery_reason = f"repaired:graph_recursion_limit:{issue}"
             return {"messages": [
-                _with_recovery_metadata(repaired, f"repaired:{issue}")
+                _with_recovery_metadata(repaired, recovery_reason)
             ]}
 
         log_recovery_fallback(
             issue=issue,
             repair_issue=repair_issue,
+            graph_steps_remaining=graph_steps_remaining,
             messages=messages,
         )
         fallback = build_recovery_message(
@@ -264,7 +294,11 @@ def build_graph(
         return {"messages": [AIMessage(
             content=fallback,
             response_metadata={
-                "turn_recovery": f"fallback:{issue};repair:{repair_issue}"
+                "turn_recovery": (
+                    f"fallback:graph_recursion_limit:{issue};repair:{repair_issue}"
+                    if force_final
+                    else f"fallback:{issue};repair:{repair_issue}"
+                )
             },
         )]}
 

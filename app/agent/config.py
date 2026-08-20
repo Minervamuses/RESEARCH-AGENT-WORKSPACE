@@ -23,7 +23,8 @@ class AgentConfig(RAGConfig):
 
     # Per-graph LangGraph superstep limit. This is a shared emergency fuse for
     # normal, skill, proposer, fallback, and reviser graph invocations; it is
-    # intentionally not a per-tool or per-user-turn budget.
+    # intentionally not a per-tool or per-user-turn budget. The graph switches
+    # to no-tool finalization before this framework limit is exhausted.
     graph_recursion_limit: int = 64
 
     # Evaluation LLMs

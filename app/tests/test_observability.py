@@ -18,6 +18,7 @@ def _summary(message: AIMessage, **overrides) -> dict:
         "stage": "initial",
         "issue": None,
         "dropped_tool_calls": 0,
+        "graph_steps_remaining": 7,
         "last_citation_action": None,
         "last_citation_tool_status": None,
     }
@@ -58,6 +59,7 @@ def test_summary_captures_provider_metadata_and_counts():
     assert record["content_chars"] == len("short answer")
     assert record["tool_calls"] == 0
     assert record["invalid_tool_calls"] == 1
+    assert record["graph_steps_remaining"] == 7
     assert record["issue"] == "empty_final_answer"
     assert record["stage"] == "initial"
 
@@ -173,6 +175,7 @@ def test_invalid_response_warning_never_contains_content_args_or_dois(caplog):
             stage="initial",
             issue="invalid_tool_calls",
             dropped_tool_calls=0,
+            graph_steps_remaining=5,
             messages=[search_call, completed],
         )
 
@@ -195,6 +198,7 @@ def test_valid_response_is_debug_only(caplog):
             stage="initial",
             issue=None,
             dropped_tool_calls=0,
+            graph_steps_remaining=5,
             messages=[],
         )
 
@@ -360,4 +364,6 @@ def test_graph_logs_tool_call_round_without_budget_fields(
 
     lines = [record.getMessage() for record in caplog.records]
     assert any("tool_calls=1" in line for line in lines)
+    assert any("graph_steps_remaining=6" in line for line in lines)
+    assert any("graph_steps_remaining=4" in line for line in lines)
     assert not any("budget_remaining" in line for line in lines)

@@ -3,6 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
@@ -316,8 +317,6 @@ def test_skill_tools_bound_only_when_effective_tools_grant_them(
 
 
 def test_skill_tool_name_collision_fails_fast(monkeypatch, tmp_path):
-    import pytest
-
     _patch_graph_tools(monkeypatch)
 
     @tool("rag_search")
@@ -418,6 +417,116 @@ def test_agent_node_allows_more_than_legacy_citation_local_quota(
     completed = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert len(completed) == 5
     assert result["messages"][-1].content == "done"
+
+
+@pytest.mark.parametrize(
+    ("recursion_limit", "expected_tool_results"),
+    [(4, 0), (5, 1)],
+)
+def test_agent_node_finalizes_before_recursion_limit(
+    monkeypatch, tmp_path, recursion_limit, expected_tool_results
+):
+    class BoundaryModel:
+        def __init__(self):
+            self.bound_calls = 0
+            self.raw_calls = 0
+
+        def bind_tools(self, _tools):
+            model = self
+
+            class Bound:
+                def invoke(_self, _messages):
+                    model.bound_calls += 1
+                    return AIMessage(content="", tool_calls=[{
+                        "name": "rag_search",
+                        "args": {"query": "x"},
+                        "id": f"search-{model.bound_calls}",
+                    }])
+
+            return Bound()
+
+        def invoke(self, messages):
+            self.raw_calls += 1
+            assert "[Graph limit]" in messages[-1].content
+            return AIMessage(content="best available answer")
+
+    model = BoundaryModel()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+
+    result = graph.invoke(
+        {"messages": [HumanMessage(content="hi")]},
+        config={"recursion_limit": recursion_limit},
+    )
+
+    completed = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert len(completed) == expected_tool_results
+    assert model.bound_calls == expected_tool_results
+    assert model.raw_calls == 1
+    final = result["messages"][-1]
+    assert final.content == "best available answer"
+    assert final.response_metadata["turn_recovery"] == (
+        "finalized:graph_recursion_limit"
+    )
+
+
+def test_graph_limit_finalization_strips_structured_tool_call(
+    monkeypatch, tmp_path
+):
+    class DefiantModel:
+        def __init__(self):
+            self.raw_calls = 0
+
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, _messages):
+                    raise AssertionError("bound model must not run near the fuse")
+
+            return Bound()
+
+        def invoke(self, _messages):
+            self.raw_calls += 1
+            if self.raw_calls == 1:
+                return AIMessage(content="still trying", tool_calls=[{
+                    "name": "rag_search",
+                    "args": {"query": "x"},
+                    "id": "defiant-search",
+                }])
+            return AIMessage(content="repaired final answer")
+
+    model = DefiantModel()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools",
+        lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
+    )
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_history_tool",
+        lambda _cfg, store=None: _recall_history,
+    )
+    graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+
+    result = graph.invoke(
+        {"messages": [HumanMessage(content="hi")]},
+        config={"recursion_limit": 4},
+    )
+
+    assert not [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert model.raw_calls == 2
+    final = result["messages"][-1]
+    assert final.content == "repaired final answer"
+    assert not final.tool_calls
+    assert final.response_metadata["turn_recovery"] == (
+        "repaired:graph_recursion_limit:dropped_tool_calls"
+    )
 
 
 def test_agent_node_strips_tool_calls_from_repair_response(monkeypatch, tmp_path):

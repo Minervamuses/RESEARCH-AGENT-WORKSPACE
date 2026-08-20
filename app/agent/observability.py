@@ -133,6 +133,7 @@ def summarize_model_response(
     stage: str,
     issue: str | None,
     dropped_tool_calls: int,
+    graph_steps_remaining: int,
     last_citation_action: str | None,
     last_citation_tool_status: str | None,
 ) -> dict[str, object]:
@@ -154,6 +155,7 @@ def summarize_model_response(
             getattr(message, "invalid_tool_calls", None) or []
         ),
         "dropped_tool_calls": dropped_tool_calls,
+        "graph_steps_remaining": graph_steps_remaining,
         "last_citation_action": last_citation_action,
         "last_citation_tool_status": last_citation_tool_status,
         "issue": issue,
@@ -170,6 +172,7 @@ def log_model_response(
     stage: str,
     issue: str | None,
     dropped_tool_calls: int,
+    graph_steps_remaining: int,
     messages: Iterable[object],
 ) -> None:
     """Log one model response summary at a severity useful in the default CLI.
@@ -185,6 +188,7 @@ def log_model_response(
         stage=stage,
         issue=issue,
         dropped_tool_calls=dropped_tool_calls,
+        graph_steps_remaining=graph_steps_remaining,
         last_citation_action=last_action,
         last_citation_tool_status=last_tool_status,
     )
@@ -196,6 +200,7 @@ def log_recovery_fallback(
     *,
     issue: str | None,
     repair_issue: str | None,
+    graph_steps_remaining: int,
     messages: Iterable[object],
 ) -> None:
     """Log the deterministic-fallback event (no model response to summarize)."""
@@ -204,6 +209,7 @@ def log_recovery_fallback(
         "stage": "fallback",
         "issue": issue,
         "repair_issue": repair_issue,
+        "graph_steps_remaining": graph_steps_remaining,
         "last_citation_action": last_action,
         "last_citation_tool_status": last_tool_status,
     }
