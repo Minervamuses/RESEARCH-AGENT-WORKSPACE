@@ -94,13 +94,58 @@ limit 5: loader rem4 → agent rem3 → tools rem2 → agent rem1 → final
 
 修改前 focused baseline：
 
-```text
-81 passed, 1 warning
+```bash
+cd app
+conda run -n app poetry run pytest \
+  tests/test_chat_cli.py \
+  tests/test_citation_slash_command.py \
+  tests/test_thinking_session.py \
+  tests/test_graph_skill_loader.py \
+  tests/test_observability.py \
+  tests/test_tool_inventory.py -q
+# 81 passed, 1 warning
 ```
 
-各步驗證：
+Single-config focused tests：
+
+```bash
+conda run -n app poetry run pytest \
+  tests/test_chat_cli.py \
+  tests/test_citation_slash_command.py \
+  tests/test_thinking_session.py \
+  tests/test_turn_finalizer.py \
+  tests/test_mcp.py -q
+# 98 passed, 1 warning
+```
+
+Quota-removal focused tests（第一次與修正 assertion 後使用同一命令）：
+
+```bash
+conda run -n app poetry run pytest \
+  tests/test_graph_skill_loader.py \
+  tests/test_observability.py \
+  tests/test_thinking_session.py \
+  tests/test_tool_inventory.py \
+  tests/test_tool_access_matrix.py -q
+# first:     66 passed, 1 failed, 1 warning
+# corrected: 67 passed, 1 warning
+```
+
+Graceful-cutoff focused tests：
+
+```bash
+conda run -n app poetry run pytest \
+  tests/test_graph_skill_loader.py \
+  tests/test_observability.py \
+  tests/test_state.py \
+  tests/test_tool_access_matrix.py -q
+# 42 passed, 1 warning
+```
+
+各步結果摘要：
 
 ```text
+baseline focused tests:       81 passed, 1 warning
 central config focused tests: 98 passed, 1 warning
 quota removal first run:      66 passed, 1 failed, 1 warning
 quota removal corrected run:  67 passed, 1 warning
@@ -111,16 +156,19 @@ Quota removal 第一次失敗是新 test 沿用舊 fallback 英文句子；runti
 
 最終完整驗證：
 
-```text
+```bash
+# from repository root
+cd app
 conda run -n app poetry run pytest
-686 passed, 1 warning in 5.21s
+# 686 passed, 1 warning in 5.21s
 
-python -m agent.cli.chat --help
---max-graph-steps MAX_GRAPH_STEPS
-Max LangGraph supersteps per graph invocation (default: 64)
+conda run -n app poetry run python -m agent.cli.chat --help
+# --max-graph-steps MAX_GRAPH_STEPS
+# Max LangGraph supersteps per graph invocation (default: 64)
 
-git diff --check 131875d..563b069
-passed (no output)
+cd ..
+git diff --check 131875d..f0dd91b
+# passed (no output)
 ```
 
 唯一 warning 是 installed LangGraph cache serializer 的 pending deprecation，與本次變更無關。
