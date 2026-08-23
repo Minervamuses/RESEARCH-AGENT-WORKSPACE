@@ -178,7 +178,7 @@ plan mode 的 `plan_logs/` 由目錄規則直接略過。**敏感資料不要放
 
 - **更新已修改的檔案**:重新 `/ingest` 同一路徑即可。repo/folder ingest 是 upsert:先刪同 folder 這輪涉及的 pids,再加入新 chunks。
 - **刪掉已不存在檔案的 entries**:先 `/sync` 檢查,再 `/prune <folder> --yes`。
-- **不相容 schema 的維護／復原**:這個 student-owned local project 不維護 migration framework。先停止 chat CLI，備份或移走既有 generated store(預設位置可用 `mv app/store app/store.backup`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local store，不是新使用者的安裝要求。
+- **不相容 schema 的維護／復原**:這個 student-owned local project 不維護 migration framework。先停止 chat CLI，把既有 generated store 備份或移到 workspace 外(預設操作 `app/store/`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local store，不是新使用者的安裝要求。
 
 ## 6. Slash Commands
 
