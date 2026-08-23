@@ -177,7 +177,7 @@ def build_default_registry() -> SlashCommandRegistry:
             ),
             SlashCommand(
                 name="init",
-                description="Ingest the host project workspace, excluding app and rag.",
+                description="Ingest the host project workspace, excluding top-level app.",
                 handler=_handle_init,
             ),
             SlashCommand(

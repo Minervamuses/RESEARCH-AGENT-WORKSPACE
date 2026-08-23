@@ -4,7 +4,7 @@
 
 `rag` is a framework-neutral Python library for indexing text files into a local knowledge store.
 It stores chunks in Chroma for semantic search and in a JSON backup for deterministic enumeration and context windows.
-The public API is intentionally small: four functions, five return dataclasses, one configuration dataclass, and an optional tool-calling layer.
+The public retrieval API is intentionally small: four functions, five return dataclasses, one configuration dataclass, and an optional tool-calling layer.
 
 ## Install & Prerequisites
 
@@ -47,9 +47,9 @@ the application, back up or move the generated store, and run `/init` or
 `/ingest` again. Treat a full rebuild as maintenance/recovery for existing
 local state, not as part of installation.
 
-## The Four Functions
+## The Four Retrieval Functions
 
-Import the public API from `rag`:
+Import the public retrieval API from `rag`:
 
 ```python
 from rag import explore, get_context, list_chunks, search
@@ -423,7 +423,7 @@ Errors propagate from the layer that raises them:
 - JSON/file errors propagate from the local store paths.
 - `get_context` raises `ValueError` when a document exists but the requested chunk id is absent.
 
-Callers that need stable application-level failures should wrap these calls at the integration boundary. A typed `rag` exception hierarchy is intentionally left for future work.
+Callers that need stable application-level failures should wrap these calls at the integration boundary.
 
 ## Tool-Calling
 

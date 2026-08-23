@@ -12,7 +12,7 @@ from rag.store.base import BaseStore
 
 
 class JSONStore(BaseStore):
-    """File-based store for BM25 and backup.
+    """File-based raw chunk store and backup.
 
     Every read/write entry point revalidates the in-memory copy against an
     (st_mtime_ns, st_size) fingerprint of raw.json, so a process-cached

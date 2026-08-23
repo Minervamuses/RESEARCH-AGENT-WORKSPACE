@@ -1,4 +1,4 @@
-"""Token-based chunker — GraphRAG-style sliding window over tokens."""
+"""Token-based sliding-window chunker."""
 
 import tiktoken
 from langchain_core.documents import Document

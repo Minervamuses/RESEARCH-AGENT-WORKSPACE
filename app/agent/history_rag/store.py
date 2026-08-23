@@ -80,11 +80,5 @@ class ChatHistoryStore:
 
 
 def get_chat_history_store(config: AgentConfig) -> ChatHistoryStore:
-    """Return a ChatHistoryStore for the config's chat-history dir.
-
-    The SharedSystemClient race that the old module-local mirror cache
-    guarded against is now handled centrally: rag.get_chroma_store dedupes the
-    underlying Chroma client per (persist_dir, collection), so the wrapper
-    itself can be constructed freely.
-    """
+    """Return a wrapper backed by the shared Chroma client for this config."""
     return ChatHistoryStore(config)

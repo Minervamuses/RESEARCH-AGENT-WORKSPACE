@@ -76,4 +76,4 @@ operation, not a fresh-install step.
 
 ## API Reference
 
-See [docs/API.md](docs/API.md) for the complete public API contract, dataclass fields, configuration details, error model, and tool-calling interface.
+See [docs/API.md](docs/API.md) for the retrieval API contract, dataclass fields, configuration details, error model, and tool-calling interface.
