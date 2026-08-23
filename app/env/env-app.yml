@@ -6,3 +6,4 @@ dependencies:
   - python=3.13
   - poetry>=2.3,<3
   - nodejs>=20,<25
+  - rust=1.97.1
