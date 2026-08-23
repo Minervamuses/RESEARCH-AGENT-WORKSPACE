@@ -20,24 +20,6 @@ def test_create_rag_tools_defaults_to_chat_safe_tools(tmp_path):
     ]
 
 
-def test_create_rag_tools_can_include_list_chunks(tmp_path):
-    """rag_list_chunks is available as an explicit opt-in."""
-    from agent.adapters.langchain.rag_tools import create_rag_tools
-    from agent.config import AgentConfig
-
-    tools = create_rag_tools(
-        AgentConfig(persist_dir=str(tmp_path)),
-        include_list_chunks=True,
-    )
-
-    assert [tool.name for tool in tools] == [
-        "rag_explore",
-        "rag_search",
-        "rag_get_context",
-        "rag_list_chunks",
-    ]
-
-
 def test_rag_tool_invokes_dispatch_and_renders_json(monkeypatch, tmp_path):
     """Tool output should be stable JSON returned from rag.dispatch."""
     from agent.adapters.langchain import rag_tools

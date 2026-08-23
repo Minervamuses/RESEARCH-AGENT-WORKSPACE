@@ -33,24 +33,17 @@ def _make_rag_runner(tool_name: str, config: AgentConfig):
     return _run
 
 
-def create_rag_tools(
-    config: AgentConfig,
-    *,
-    include_list_chunks: bool = False,
-) -> list[StructuredTool]:
+def create_rag_tools(config: AgentConfig) -> list[StructuredTool]:
     """Create LangChain tools from rag.TOOL_SCHEMAS.
 
-    Chat binds the interactive retrieval tools by default. ``rag_list_chunks``
-    is intentionally opt-in because an unfiltered call can dump the entire raw
-    JSON backup into the prompt.
+    Chat binds only the interactive retrieval tools. ``rag_list_chunks`` stays
+    available through rag's framework-neutral API, but is not bound here
+    because an unfiltered call can dump the entire raw JSON backup into the
+    prompt.
     """
-    names = list(DEFAULT_RAG_TOOL_NAMES)
-    if include_list_chunks:
-        names.append("rag_list_chunks")
-
     tools: list[StructuredTool] = []
     schemas_by_name = {schema["name"]: schema for schema in TOOL_SCHEMAS}
-    for name in names:
+    for name in DEFAULT_RAG_TOOL_NAMES:
         schema = schemas_by_name[name]
         runner = _make_rag_runner(name, config)
         tools.append(
