@@ -170,7 +170,7 @@ repo/folder ingest 收集常見文字與程式檔:
 
 預設略過目錄:`.git`、`.github`、`__pycache__`、`node_modules`、`.venv`、`venv`、`env`、`.claude`、`.opencode`、`.cursor`、`plan_logs`、`volumes`、`dist`、`build`。
 
-不想被 ingest 的檔案:在檔案前幾行加 `do_not_index: true` 即會被跳過或拒絕(repo/folder ingest 檢查 Markdown 檔前幾行;單檔 ingest 檢查該檔前幾行)。plan mode 的 `plan_logs/` 本來就會被跳過。**敏感資料不要放進可 ingest 的資料夾**——即使 `.env` 不在文字副檔名清單內,也不要依賴副檔名當唯一保護。
+plan mode 的 `plan_logs/` 由目錄規則直接略過。**敏感資料不要放進要 ingest 的資料夾**——即使 `.env` 不在文字副檔名清單內，也不要依賴副檔名當唯一保護。
 
 ### 既有本機 store 的維護
 
@@ -203,7 +203,7 @@ repo/folder ingest 收集常見文字與程式檔:
 ### `/mode`
 
 - **normal**:回合保存在近期 prompt window;過舊的 turn 寫入 `chat_history` Chroma store,之後可用 `recall_history` 找回。
-- **plan**:回合寫進 `app/plan_logs/plan-...md`,不寫入 ChromaDB,也不會被 RAG ingest(`plan_logs/` 被排除且檔案 frontmatter 有 `do_not_index: true`)。
+- **plan**:回合寫進 `app/plan_logs/plan-...md`,不寫入 ChromaDB,也不會被 RAG ingest(`plan_logs/` 由目錄規則排除)。
 
 ### `/thinking`
 

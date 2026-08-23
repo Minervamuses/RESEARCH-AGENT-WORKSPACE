@@ -5,7 +5,6 @@ The ingest CLI and ``rag.sync`` share this library-level implementation.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 # File extensions to ingest as text
@@ -44,8 +43,6 @@ SKIP_DIRS = {
     "build",
 }
 
-_DO_NOT_INDEX_PATTERN = re.compile(r"^\s*do_not_index\s*:\s*true\s*$", re.IGNORECASE)
-
 
 def _should_ingest(path: Path) -> bool:
     """Check if a file should be ingested."""
@@ -67,21 +64,6 @@ def get_file_preview(path: Path) -> str:
         return ""
     except (UnicodeDecodeError, PermissionError):
         return ""
-
-
-def has_do_not_index_sentinel(path: Path, scan_lines: int = 8) -> bool:
-    """Return True when early file lines contain a do_not_index flag."""
-    try:
-        with path.open("r", encoding="utf-8", errors="ignore") as f:
-            for _ in range(scan_lines):
-                line = f.readline()
-                if not line:
-                    break
-                if _DO_NOT_INDEX_PATTERN.match(line):
-                    return True
-    except OSError:
-        return False
-    return False
 
 
 def collect_folders(
@@ -112,8 +94,6 @@ def collect_folders(
         if any(parts[: len(sp)] == sp for sp in skip_path_parts):
             continue
         if not _should_ingest(file_path):
-            continue
-        if file_path.suffix.lower() == ".md" and has_do_not_index_sentinel(file_path):
             continue
         folder_rel = str(file_path.parent.relative_to(root))
         if folder_rel == ".":

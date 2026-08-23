@@ -23,7 +23,6 @@ from rag.collect import (
     SKIP_DIRS,
     collect_folders,
     get_file_preview,
-    has_do_not_index_sentinel,
 )
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.store.cache import get_chroma_store, get_json_store
@@ -232,9 +231,6 @@ def ingest_single(
         raise FileNotFoundError(f"File not found: {file_path}")
     if any(part in SKIP_DIRS for part in path.parts):
         raise ValueError(f"refusing to ingest: {path} lies under skip dir")
-    if has_do_not_index_sentinel(path):
-        raise ValueError(f"refusing to ingest: {path} carries do_not_index sentinel")
-
     pid_val = pid or path.stem.lower().replace(" ", "-").replace("_", "-")
 
     chunker = TokenChunker(config)

@@ -43,7 +43,6 @@ class PlanLog:
         path = log_dir / f"plan-{self._session_id}-{safe_ts}.md"
         header = (
             "---\n"
-            "do_not_index: true\n"
             "generated_by: agent.plan_mode\n"
             f"session_id: {self._session_id}\n"
             f"created_at: {created_at}\n"
