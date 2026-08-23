@@ -1,0 +1,328 @@
+{
+  "protocolVersion": 1,
+  "maxLineBytes": 2097152,
+  "requestIdMaxBytes": 128,
+  "errorMessageMaxBytes": 4096,
+  "messageTypes": ["request", "event", "result"],
+  "requestEvents": [
+    "request.started",
+    "request.progress",
+    "stage.changed",
+    "tool.started",
+    "tool.finished",
+    "tool.failed",
+    "approval.required",
+    "knowledge.progress",
+    "shutdown.progress",
+    "collecting.started",
+    "collecting.completed",
+    "tagging.started",
+    "tagging.folder_completed",
+    "metadata.written",
+    "writing.started",
+    "writing.file_completed",
+    "ingest.completed",
+    "ingest.failed"
+  ],
+  "processEvents": [
+    "backend.ready",
+    "backend.crashed",
+    "backend.shutting_down",
+    "backend.protocol_error"
+  ],
+  "processEventOrigins": {
+    "backend.ready": ["python"],
+    "backend.crashed": ["rust"],
+    "backend.shutting_down": ["python", "rust"],
+    "backend.protocol_error": ["python", "rust"]
+  },
+  "forbiddenDataKeyFragments": [
+    "apikey",
+    "authorization",
+    "langchain",
+    "messages",
+    "rawpayload",
+    "rawprovider",
+    "responsemetadata",
+    "secret",
+    "token",
+    "toolargs",
+    "toolcalls",
+    "toolresult",
+    "traceback",
+    "turnlogs"
+  ],
+  "toolEventDataKeys": ["name", "callId", "status", "candidateId"],
+  "toolStatuses": ["started", "ok", "failed", "denied"],
+  "eventDataSchemas": {
+    "approval.required": {
+      "approvalId": {"type": "string", "required": true, "maxBytes": 256},
+      "parentRequestId": {"type": "requestId", "required": true},
+      "turnId": {"type": "string", "required": true, "maxBytes": 256},
+      "command": {"type": "string", "required": true, "maxBytes": 65536},
+      "description": {"type": "string", "required": true, "maxBytes": 4096},
+      "executionTimeoutSeconds": {"type": "integer", "required": true, "minimum": 1, "maximum": 3600},
+      "createdAt": {"type": "utcTimestamp", "required": true},
+      "expiresAt": {"type": "utcTimestamp", "required": true}
+    },
+    "collecting.started": {},
+    "collecting.completed": {
+      "folders": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "files": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
+    },
+    "tagging.started": {
+      "total": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
+    },
+    "tagging.folder_completed": {
+      "completed": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "total": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "folder": {"type": "string", "required": true, "maxBytes": 8192}
+    },
+    "metadata.written": {
+      "path": {"type": "string", "required": true, "maxBytes": 8192}
+    },
+    "writing.started": {},
+    "writing.file_completed": {
+      "filePath": {"type": "string", "required": true, "maxBytes": 8192},
+      "chunks": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "filesCompleted": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
+    },
+    "ingest.completed": {
+      "files": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "chunks": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
+    },
+    "ingest.failed": {
+      "stage": {"type": "string", "required": true, "maxBytes": 256},
+      "partialWritePossible": {"type": "boolean", "required": true}
+    }
+  },
+  "resultDataSchemas": {
+    "runtime.diagnostics": {
+      "backendState": {"type": "string", "required": true, "enum": ["starting", "ready", "shutting_down", "stopped", "crashed"]},
+      "platform": {"type": "string", "required": true, "enum": ["linux"]},
+      "appRoot": {"type": "string", "required": true, "maxBytes": 8192},
+      "workingDirectory": {"type": "string", "required": true, "maxBytes": 8192},
+      "originalWorkingDirectory": {"type": "string", "required": true, "maxBytes": 8192},
+      "pythonVersion": {"type": "string", "required": true, "maxBytes": 256},
+      "sysPrefix": {"type": "string", "required": true, "maxBytes": 8192},
+      "condaEnvironment": {"type": "nullableString", "required": true, "maxBytes": 256},
+      "condaPrefix": {"type": "nullableString", "required": true, "maxBytes": 8192},
+      "protocolVersion": {"type": "integer", "required": true, "minimum": 1, "maximum": 1},
+      "backendVersion": {"type": "string", "required": true, "maxBytes": 256},
+      "openRouterConfigured": {"type": "boolean", "required": true},
+      "openAlexConfigured": {"type": "boolean", "required": true},
+      "storePath": {"type": "string", "required": true, "maxBytes": 8192},
+      "citationOutputPath": {"type": "string", "required": true, "maxBytes": 8192},
+      "ollamaReachable": {"type": "nullableBoolean", "required": true},
+      "ollamaModelAvailable": {"type": "nullableBoolean", "required": true},
+      "mcpEnabled": {"type": "boolean", "required": true},
+      "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
+      "mcpDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096}
+    },
+    "session.create": {
+      "sessionId": {"type": "string", "required": true, "maxBytes": 256},
+      "turnCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
+      "planMode": {"type": "boolean", "required": true},
+      "planLogPath": {"type": "nullableString", "required": true, "maxBytes": 8192},
+      "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
+      "activeSkill": {"type": "nullableString", "required": true, "maxBytes": 256},
+      "taskMode": {"type": "nullableString", "required": true, "maxBytes": 256},
+      "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
+      "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
+      "startupDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096},
+      "extensionRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
+    },
+    "session.turn": {
+      "sessionId": {"type": "string", "required": true, "maxBytes": 256},
+      "turnId": {"type": "string", "required": true, "maxBytes": 256},
+      "text": {"type": "string", "required": true, "maxBytes": 2097152},
+      "validationErrors": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096},
+      "toolSummaries": {
+        "type": "objectArray",
+        "required": true,
+        "maxItems": 512,
+        "items": {
+          "name": {"type": "string", "required": true, "maxBytes": 256},
+          "status": {"type": "string", "required": true, "enum": ["ok", "failed", "denied"]},
+          "callId": {"type": "string", "required": false, "maxBytes": 256},
+          "candidateId": {"type": "string", "required": false, "maxBytes": 256}
+        }
+      }
+    },
+    "extensions.preview": {
+      "previewId": {"type": "string", "required": true, "maxBytes": 256},
+      "summary": {"type": "string", "required": true, "maxBytes": 4096},
+      "proposedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
+      "bindings": {
+        "type": "objectArray",
+        "required": true,
+        "maxItems": 512,
+        "items": {
+          "name": {"type": "string", "required": true, "maxBytes": 256},
+          "server": {"type": "string", "required": true, "maxBytes": 256},
+          "bindingHash": {"type": "string", "required": true, "maxBytes": 256},
+          "requiresApproval": {"type": "boolean", "required": true}
+        }
+      }
+    }
+  },
+  "methods": [
+    {"name": "runtime.diagnostics", "operation": "read", "requiredParams": [], "params": {}},
+    {
+      "name": "session.create",
+      "operation": "lifecycle",
+      "requiredParams": [],
+      "params": {
+        "loadMcp": {"type": "boolean", "required": false},
+        "graphRecursionLimit": {"type": "integer", "required": false, "minimum": 3, "maximum": 4294967295}
+      }
+    },
+    {"name": "session.status", "operation": "read", "requiredParams": [], "params": {}},
+    {
+      "name": "session.turn",
+      "operation": "mutation",
+      "requiredParams": ["text"],
+      "params": {"text": {"type": "string", "required": true, "maxBytes": 1048576}}
+    },
+    {
+      "name": "session.set_mode",
+      "operation": "mutation",
+      "requiredParams": ["mode"],
+      "params": {"mode": {"type": "string", "required": true, "enum": ["normal", "plan"]}}
+    },
+    {
+      "name": "session.set_thinking",
+      "operation": "mutation",
+      "requiredParams": ["mode"],
+      "params": {"mode": {"type": "string", "required": true, "enum": ["normal", "extended"]}}
+    },
+    {"name": "session.list_skills", "operation": "read", "requiredParams": [], "params": {}},
+    {
+      "name": "session.activate_skill",
+      "operation": "mutation",
+      "requiredParams": ["name"],
+      "params": {
+        "name": {"type": "string", "required": true, "maxBytes": 256},
+        "taskMode": {"type": "string", "required": false, "maxBytes": 256}
+      }
+    },
+    {"name": "session.deactivate_skill", "operation": "mutation", "requiredParams": [], "params": {}},
+    {"name": "session.shutdown", "operation": "lifecycle", "requiredParams": [], "params": {}},
+    {"name": "knowledge.overview", "operation": "read", "requiredParams": [], "params": {}},
+    {
+      "name": "knowledge.search",
+      "operation": "read",
+      "requiredParams": ["query"],
+      "params": {
+        "query": {"type": "string", "required": true, "maxBytes": 16384},
+        "k": {"type": "integer", "required": false, "minimum": 1, "maximum": 20},
+        "folderPrefix": {"type": "string", "required": false, "maxBytes": 8192},
+        "category": {"type": "string", "required": false, "maxBytes": 256},
+        "fileType": {"type": "string", "required": false, "maxBytes": 64},
+        "dateFrom": {"type": "string", "required": false, "maxBytes": 10},
+        "dateTo": {"type": "string", "required": false, "maxBytes": 10}
+      }
+    },
+    {
+      "name": "knowledge.list_chunks",
+      "operation": "read",
+      "requiredParams": [],
+      "params": {
+        "folderPrefix": {"type": "string", "required": false, "maxBytes": 8192},
+        "pid": {"type": "string", "required": false, "maxBytes": 1024},
+        "category": {"type": "string", "required": false, "maxBytes": 256},
+        "fileType": {"type": "string", "required": false, "maxBytes": 64},
+        "dateFrom": {"type": "string", "required": false, "maxBytes": 10},
+        "dateTo": {"type": "string", "required": false, "maxBytes": 10},
+        "offset": {"type": "integer", "required": false, "minimum": 0, "maximum": 4294967295},
+        "limit": {"type": "integer", "required": false, "minimum": 1, "maximum": 100}
+      }
+    },
+    {
+      "name": "knowledge.get_context",
+      "operation": "read",
+      "requiredParams": ["pid", "chunkId"],
+      "params": {
+        "pid": {"type": "string", "required": true, "maxBytes": 1024},
+        "chunkId": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+        "window": {"type": "integer", "required": false, "minimum": 0, "maximum": 3}
+      }
+    },
+    {"name": "knowledge.init_workspace", "operation": "mutation", "requiredParams": [], "params": {}},
+    {
+      "name": "knowledge.ingest_file",
+      "operation": "mutation",
+      "requiredParams": ["path"],
+      "params": {"path": {"type": "string", "required": true, "maxBytes": 8192}}
+    },
+    {
+      "name": "knowledge.ingest_folder",
+      "operation": "mutation",
+      "requiredParams": ["path"],
+      "params": {"path": {"type": "string", "required": true, "maxBytes": 8192}}
+    },
+    {
+      "name": "knowledge.sync",
+      "operation": "mutation",
+      "requiredParams": ["path"],
+      "params": {"path": {"type": "string", "required": true, "maxBytes": 8192}}
+    },
+    {
+      "name": "knowledge.prune_preview",
+      "operation": "preview",
+      "requiredParams": ["path"],
+      "params": {"path": {"type": "string", "required": true, "maxBytes": 8192}}
+    },
+    {
+      "name": "knowledge.prune_apply",
+      "operation": "destructive",
+      "requiredParams": ["previewId"],
+      "params": {"previewId": {"type": "string", "required": true, "maxBytes": 256}}
+    },
+    {"name": "extensions.status", "operation": "read", "requiredParams": [], "params": {}},
+    {"name": "extensions.preview", "operation": "paid-preview", "requiredParams": [], "params": {}},
+    {
+      "name": "extensions.apply",
+      "operation": "destructive",
+      "requiredParams": ["previewId", "approvedBindingHashes"],
+      "params": {
+        "previewId": {"type": "string", "required": true, "maxBytes": 256},
+        "approvedBindingHashes": {"type": "stringArray", "required": true, "maxItems": 512}
+      }
+    },
+    {
+      "name": "approval.resolve",
+      "operation": "control",
+      "requiredParams": ["approvalId", "approved"],
+      "params": {
+        "approvalId": {"type": "string", "required": true, "maxBytes": 256},
+        "approved": {"type": "boolean", "required": true}
+      }
+    },
+    {"name": "runtime.shutdown", "operation": "lifecycle", "requiredParams": [], "params": {}}
+  ],
+  "errorCodes": [
+    "PROTOCOL_INVALID",
+    "PROTOCOL_VERSION_UNSUPPORTED",
+    "RUNTIME_WRONG_CONDA_ENV",
+    "SESSION_NOT_READY",
+    "OPENROUTER_NOT_CONFIGURED",
+    "OLLAMA_UNREACHABLE",
+    "OLLAMA_MODEL_MISSING",
+    "GRAPH_LIMIT_REACHED",
+    "BUSY_TURN",
+    "BUSY_KNOWLEDGE_MUTATION",
+    "BUSY_EXTENSION_OPERATION",
+    "INVALID_PATH",
+    "RAG_READ_FAILED",
+    "RAG_WRITE_FAILED",
+    "RAG_PARTIAL_WRITE_POSSIBLE",
+    "PRUNE_PREVIEW_STALE",
+    "EXTENSION_PREVIEW_FAILED",
+    "EXTENSION_APPLY_FAILED",
+    "APPROVAL_DENIED",
+    "SHUTDOWN_FLUSH_FAILED",
+    "INTERNAL_ERROR"
+  ]
+}

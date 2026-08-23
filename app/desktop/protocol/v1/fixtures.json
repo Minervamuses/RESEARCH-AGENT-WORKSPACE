@@ -1,0 +1,1009 @@
+{
+  "messages": [
+    {
+      "name": "backend-ready",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "event": "backend.ready",
+        "data": {"status": "ready"}
+      }
+    },
+    {
+      "name": "diagnostics-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000002",
+        "method": "runtime.diagnostics",
+        "params": {}
+      }
+    },
+    {
+      "name": "tool-finished-event",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000001",
+        "sequence": 1,
+        "event": "tool.finished",
+        "data": {
+          "name": "rag_search",
+          "callId": "call-1",
+          "status": "ok",
+          "candidateId": "candidate-1"
+        }
+      }
+    },
+    {
+      "name": "success-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000002",
+        "ok": true,
+        "data": {}
+      }
+    },
+    {
+      "name": "configured-error-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000003",
+        "ok": false,
+        "error": {
+          "code": "OPENROUTER_NOT_CONFIGURED",
+          "message": "OpenRouter 尚未設定。",
+          "retryable": false,
+          "details": {}
+        }
+      }
+    },
+    {
+      "name": "unicode-path-with-spaces",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000004",
+        "method": "knowledge.ingest_file",
+        "params": {"path": "/tmp/研究 資料/paper 01.pdf"}
+      }
+    },
+    {
+      "name": "prune-apply-with-server-preview",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000020",
+        "method": "knowledge.prune_apply",
+        "params": {"previewId": "prune-preview-opaque-1"}
+      }
+    },
+    {
+      "name": "prune-apply-missing-preview",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000021",
+        "method": "knowledge.prune_apply",
+        "params": {}
+      }
+    },
+    {
+      "name": "extension-apply-with-approved-bindings",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000022",
+        "method": "extensions.apply",
+        "params": {
+          "previewId": "extension-preview-opaque-1",
+          "approvedBindingHashes": ["sha256:binding-1"]
+        }
+      }
+    },
+    {
+      "name": "extension-apply-extra-payload",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000023",
+        "method": "extensions.apply",
+        "params": {
+          "previewId": "extension-preview-opaque-1",
+          "approvedBindingHashes": [],
+          "preview": {"raw": "must stay in Python memory"}
+        }
+      }
+    },
+    {
+      "name": "approval-resolve-by-opaque-id",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000024",
+        "method": "approval.resolve",
+        "params": {"approvalId": "approval-opaque-1", "approved": false}
+      }
+    },
+    {
+      "name": "approval-cannot-replace-command",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000025",
+        "method": "approval.resolve",
+        "params": {
+          "approvalId": "approval-opaque-1",
+          "approved": true,
+          "command": "replacement command"
+        }
+      }
+    },
+    {
+      "name": "non-canonical-request-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "not-a-uuid",
+        "method": "runtime.diagnostics",
+        "params": {}
+      }
+    },
+    {
+      "name": "unsupported-version",
+      "valid": false,
+      "errorCode": "PROTOCOL_VERSION_UNSUPPORTED",
+      "message": {
+        "protocolVersion": 2,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000005",
+        "method": "runtime.diagnostics",
+        "params": {}
+      }
+    },
+    {
+      "name": "missing-request-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "method": "runtime.diagnostics",
+        "params": {}
+      }
+    },
+    {
+      "name": "unknown-method",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000006",
+        "method": "run_shell",
+        "params": {}
+      }
+    },
+    {
+      "name": "unknown-message-type",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "notification",
+        "event": "backend.ready",
+        "data": {}
+      }
+    },
+    {
+      "name": "request-event-without-sequence",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000007",
+        "event": "request.progress",
+        "data": {"stage": "agent"}
+      }
+    },
+    {
+      "name": "unknown-process-event",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "event": "backend.secret_dump",
+        "data": {}
+      }
+    },
+    {
+      "name": "tool-result-leak",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000008",
+        "sequence": 1,
+        "event": "tool.finished",
+        "data": {
+          "name": "rag_search",
+          "status": "ok",
+          "result": "raw provider payload"
+        }
+      }
+    },
+    {
+      "name": "unknown-error-code",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000009",
+        "ok": false,
+        "error": {
+          "code": "NEW_UNKNOWN_ERROR",
+          "message": "unknown",
+          "retryable": false,
+          "details": {}
+        }
+      }
+    },
+    {
+      "name": "internal-error-traceback-leak",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-00000000000c",
+        "ok": false,
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "內部錯誤。",
+          "retryable": false,
+          "details": {"traceback": "must remain on stderr"}
+        }
+      }
+    },
+    {
+      "name": "success-with-error",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-00000000000a",
+        "ok": true,
+        "data": {},
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "must not be present",
+          "retryable": false,
+          "details": {}
+        }
+      }
+    },
+    {
+      "name": "failure-without-error",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-00000000000b",
+        "ok": false
+      }
+    },
+    {
+      "name": "session-create-whitelisted-options",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000030",
+        "method": "session.create",
+        "params": {"loadMcp": false, "graphRecursionLimit": 64}
+      }
+    },
+    {
+      "name": "session-create-rejects-arbitrary-config",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000031",
+        "method": "session.create",
+        "params": {"llmModel": "untrusted/model"}
+      }
+    },
+    {
+      "name": "unknown-mode-enum",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000032",
+        "method": "session.set_mode",
+        "params": {"mode": "admin"}
+      }
+    },
+    {
+      "name": "turn-text-wrong-type",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000033",
+        "method": "session.turn",
+        "params": {"text": {"raw": "not text"}}
+      }
+    },
+    {
+      "name": "knowledge-search-bounded-filters",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000034",
+        "method": "knowledge.search",
+        "params": {
+          "query": "研究代理",
+          "k": 20,
+          "folderPrefix": "docs/研究",
+          "dateFrom": "2026-01-01"
+        }
+      }
+    },
+    {
+      "name": "knowledge-search-k-out-of-range",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000035",
+        "method": "knowledge.search",
+        "params": {"query": "研究代理", "k": 21}
+      }
+    },
+    {
+      "name": "success-result-raw-provider-payload",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000036",
+        "ok": true,
+        "data": {"rawProviderPayload": {"choices": []}}
+      }
+    },
+    {
+      "name": "process-event-explicit-null-request-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": null,
+        "event": "backend.ready",
+        "data": {"status": "ready"}
+      }
+    },
+    {
+      "name": "success-result-explicit-null-error",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000037",
+        "ok": true,
+        "data": {},
+        "error": null
+      }
+    },
+    {
+      "name": "failure-result-explicit-null-data",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000038",
+        "ok": false,
+        "data": null,
+        "error": {
+          "code": "SESSION_NOT_READY",
+          "message": "Session 尚未建立。",
+          "retryable": true,
+          "details": {}
+        }
+      }
+    },
+    {
+      "name": "approval-required-safe-dto",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000039",
+        "sequence": 1,
+        "event": "approval.required",
+        "data": {
+          "approvalId": "approval-opaque-2",
+          "parentRequestId": "00000000-0000-4000-8000-000000000039",
+          "turnId": "turn-2",
+          "command": "printf '%s' safe",
+          "description": "顯示測試文字",
+          "executionTimeoutSeconds": 30,
+          "createdAt": "2026-08-24T01:02:03Z",
+          "expiresAt": "2026-08-24T01:03:03.123Z"
+        }
+      }
+    },
+    {
+      "name": "approval-required-rejects-raw-args",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-00000000003a",
+        "sequence": 1,
+        "event": "approval.required",
+        "data": {
+          "approvalId": "approval-opaque-3",
+          "parentRequestId": "00000000-0000-4000-8000-00000000003a",
+          "turnId": "turn-3",
+          "command": "echo safe",
+          "description": "測試",
+          "executionTimeoutSeconds": 30,
+          "createdAt": "2026-08-24T01:02:03Z",
+          "expiresAt": "2026-08-24T01:03:03Z",
+          "rawArgs": {"shell": true}
+        }
+      }
+    },
+    {
+      "name": "ingest-progress-safe-dto",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-00000000003b",
+        "sequence": 1,
+        "event": "writing.file_completed",
+        "data": {"filePath": "docs/研究 paper.md", "chunks": 3, "filesCompleted": 1}
+      }
+    },
+    {
+      "name": "ingest-progress-rejects-source-text",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-00000000003c",
+        "sequence": 1,
+        "event": "writing.file_completed",
+        "data": {
+          "filePath": "docs/paper.md",
+          "chunks": 3,
+          "filesCompleted": 1,
+          "sourceText": "must remain in Python"
+        }
+      }
+    },
+    {
+      "name": "success-result-rejects-api-key-suffix",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000040",
+        "ok": true,
+        "data": {"openRouterApiKey": "must remain in Python"}
+      }
+    },
+    {
+      "name": "success-result-rejects-unicode-api-key-suffix",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000044",
+        "ok": true,
+        "data": {"openRouterApiKey": "must remain in Python"}
+      }
+    },
+    {
+      "name": "success-result-rejects-access-token",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000041",
+        "ok": true,
+        "data": {"accessToken": "must remain in Python"}
+      }
+    },
+    {
+      "name": "success-result-rejects-langchain-messages",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000042",
+        "ok": true,
+        "data": {"messages": [{"type": "ai", "content": "raw internal object"}]}
+      }
+    },
+    {
+      "name": "approval-required-rejects-impossible-timestamp",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000043",
+        "sequence": 1,
+        "event": "approval.required",
+        "data": {
+          "approvalId": "approval-opaque-4",
+          "parentRequestId": "00000000-0000-4000-8000-000000000043",
+          "turnId": "turn-4",
+          "command": "echo safe",
+          "description": "測試",
+          "executionTimeoutSeconds": 30,
+          "createdAt": "2026-99-99T99:99:99Z",
+          "expiresAt": "2026-08-24T01:03:03Z"
+        }
+      }
+    }
+  ],
+  "rawLines": [
+    {
+      "name": "malformed-json",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "line": "{\"protocolVersion\":1"
+    },
+    {
+      "name": "non-object-json",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "line": "[]"
+    },
+    {
+      "name": "empty-line",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "line": ""
+    },
+    {
+      "name": "numeric-equivalent-version",
+      "valid": true,
+      "line": "{\"protocolVersion\":1.0,\"messageType\":\"request\",\"requestId\":\"00000000-0000-4000-8000-00000000003d\",\"method\":\"runtime.diagnostics\",\"params\":{}}"
+    },
+    {
+      "name": "numeric-equivalent-sequence",
+      "valid": true,
+      "line": "{\"protocolVersion\":1,\"messageType\":\"event\",\"requestId\":\"00000000-0000-4000-8000-00000000003e\",\"sequence\":1.0,\"event\":\"request.progress\",\"data\":{\"stage\":\"agent\"}}"
+    }
+  ],
+  "originCases": [
+    {"name": "python-ready", "event": "backend.ready", "origin": "python", "valid": true},
+    {"name": "rust-cannot-spoof-ready", "event": "backend.ready", "origin": "rust", "valid": false, "errorCode": "PROTOCOL_INVALID"},
+    {"name": "rust-crash", "event": "backend.crashed", "origin": "rust", "valid": true},
+    {"name": "python-cannot-spoof-crash", "event": "backend.crashed", "origin": "python", "valid": false, "errorCode": "PROTOCOL_INVALID"},
+    {"name": "python-protocol-error", "event": "backend.protocol_error", "origin": "python", "valid": true},
+    {"name": "rust-protocol-error", "event": "backend.protocol_error", "origin": "rust", "valid": true}
+  ],
+  "traces": [
+    {
+      "name": "ordered-request-event-result",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000010",
+          "method": "session.status",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000010",
+          "sequence": 1,
+          "event": "request.started",
+          "data": {"stage": "diagnostics"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000010",
+          "ok": true,
+          "data": {}
+        }
+      ]
+    },
+    {
+      "name": "duplicate-pending-request-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000011",
+          "method": "session.status",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000011",
+          "method": "session.status",
+          "params": {}
+        }
+      ]
+    },
+    {
+      "name": "out-of-order-event",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000012",
+          "method": "session.turn",
+          "params": {"text": "請摘要"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000012",
+          "sequence": 2,
+          "event": "request.progress",
+          "data": {"stage": "agent"}
+        }
+      ]
+    },
+    {
+      "name": "post-terminal-event",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000013",
+          "method": "session.status",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000013",
+          "ok": true,
+          "data": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000013",
+          "sequence": 1,
+          "event": "request.progress",
+          "data": {"stage": "late"}
+        }
+      ]
+    },
+    {
+      "name": "event-without-known-request",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000014",
+          "sequence": 1,
+          "event": "request.progress",
+          "data": {"stage": "unknown"}
+        }
+      ]
+    },
+    {
+      "name": "session-create-safe-result-dto",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.create",
+          "params": {"loadMcp": false, "graphRecursionLimit": 64}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnCount": 0,
+            "graphRecursionLimit": 64,
+            "planMode": false,
+            "planLogPath": null,
+            "thinkingMode": "normal",
+            "activeSkill": null,
+            "taskMode": null,
+            "loadedSkills": ["literature-review"],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-create-rejects-session-startup-object",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000067",
+          "method": "session.create",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000067",
+          "ok": true,
+          "data": {
+            "sessionStartup": {
+              "extraTools": [],
+              "mcpFamilies": {},
+              "loadedSkills": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "diagnostics-safe-result-dto",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000060",
+          "method": "runtime.diagnostics",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000060",
+          "ok": true,
+          "data": {
+            "backendState": "ready",
+            "platform": "linux",
+            "appRoot": "/workspace/app",
+            "workingDirectory": "/workspace/app",
+            "originalWorkingDirectory": "/workspace",
+            "pythonVersion": "3.13.14",
+            "sysPrefix": "/conda/envs/app",
+            "condaEnvironment": "app",
+            "condaPrefix": "/conda/envs/app",
+            "protocolVersion": 1,
+            "backendVersion": "0.1.0",
+            "openRouterConfigured": false,
+            "openAlexConfigured": false,
+            "storePath": "/workspace/app/store",
+            "citationOutputPath": "/workspace/cite",
+            "ollamaReachable": null,
+            "ollamaModelAvailable": null,
+            "mcpEnabled": false,
+            "mcpFamilies": [],
+            "mcpDiagnostics": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "diagnostics-rejects-unlisted-result-data",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "runtime.diagnostics",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "ok": true,
+          "data": {
+            "backendState": "ready",
+            "platform": "linux",
+            "appRoot": "/workspace/app",
+            "workingDirectory": "/workspace/app",
+            "originalWorkingDirectory": "/workspace",
+            "pythonVersion": "3.13.14",
+            "sysPrefix": "/conda/envs/app",
+            "condaEnvironment": "app",
+            "condaPrefix": "/conda/envs/app",
+            "protocolVersion": 1,
+            "backendVersion": "0.1.0",
+            "openRouterConfigured": false,
+            "openAlexConfigured": false,
+            "storePath": "/workspace/app/store",
+            "citationOutputPath": "/workspace/cite",
+            "ollamaReachable": null,
+            "ollamaModelAvailable": null,
+            "mcpEnabled": false,
+            "mcpFamilies": [],
+            "mcpDiagnostics": [],
+            "providerState": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-completed-safe-result-dto",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000062",
+          "method": "session.turn",
+          "params": {"text": "請摘要"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000062",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "text": "完成的安全答案。",
+            "validationErrors": [],
+            "toolSummaries": [
+              {"name": "rag_search", "status": "ok", "callId": "call-1"}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-completed-rejects-unlisted-result-data",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000063",
+          "method": "session.turn",
+          "params": {"text": "請摘要"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000063",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnId": "turn-2",
+            "text": "完成的安全答案。",
+            "validationErrors": [],
+            "toolSummaries": [],
+            "providerState": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "extension-preview-safe-result-dto",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000064",
+          "method": "extensions.preview",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000064",
+          "ok": true,
+          "data": {
+            "previewId": "extension-preview-opaque-2",
+            "summary": "一項 MCP binding 等待核准。",
+            "proposedSkills": ["literature-review"],
+            "bindings": [
+              {
+                "name": "local-search",
+                "server": "local-search",
+                "bindingHash": "sha256:binding-2",
+                "requiresApproval": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "extension-preview-rejects-full-preview-object",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000065",
+          "method": "extensions.preview",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000065",
+          "ok": true,
+          "data": {
+            "previewId": "extension-preview-opaque-3",
+            "summary": "摘要",
+            "proposedSkills": [],
+            "bindings": [],
+            "preview": {"privateSkillHash": "must remain in Python"}
+          }
+        }
+      ]
+    }
+  ]
+}
