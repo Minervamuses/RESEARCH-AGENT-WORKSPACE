@@ -57,10 +57,22 @@ PIDs combine that namespace with the root-relative path, while `file_path`
 stays root-relative for display. Sync, prune, and folder metadata are scoped
 to that namespace, so different roots may safely contain the same paths.
 
-Stores created before root namespaces were introduced must be rebuilt before
-use. The store is generated output: rag does not migrate or automatically
-delete an existing `store/`, `raw.json`, Chroma collection, or
-`folder_meta.json`.
+## Local Store Lifecycle
+
+The default `app/store/` is generated local state. The `store/` rule in
+`app/.gitignore` excludes the whole directory, so a normal fresh clone has no
+Chroma database, `raw.json`, `folder_meta.json`, or `chat_history/`. Branches
+and commits do not carry different copies of this state. A new user can run
+`/init`, `/ingest`, or the ingest CLI directly; there is no old database to
+migrate or rebuild first.
+
+Compatibility matters only when a machine or working copy has run an older
+version and keeps its gitignored `app/store/` while the code is updated, or
+when `KMS_STORE_DIR` points to a persistent store created earlier. If an
+on-disk schema is incompatible, this local project does not migrate it in
+place: stop the application, back up or move that generated store, then run
+`/init` or `/ingest` again. A full rebuild is a local maintenance/recovery
+operation, not a fresh-install step.
 
 ## API Reference
 

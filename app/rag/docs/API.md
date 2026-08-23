@@ -31,6 +31,22 @@ ollama pull bge-m3
 
 The default store location is `<app project root>/store`. Set `KMS_STORE_DIR` to point rag at another store directory.
 
+### Local store lifecycle
+
+The default `app/store/` is generated local state and is excluded by the
+`store/` rule in `app/.gitignore`. A normal fresh clone therefore contains no
+Chroma database, `raw.json`, `folder_meta.json`, or `chat_history/`; none of
+these files move between branches or commits. First-time users can ingest
+directly and do not need a database migration or rebuild.
+
+Store compatibility is relevant only when code is updated in a working copy
+that retains an older gitignored `app/store/`, or when `KMS_STORE_DIR` points
+to a persistent store created by an older version. This local project has no
+store migration framework. If such a store has an incompatible schema, stop
+the application, back up or move the generated store, and run `/init` or
+`/ingest` again. Treat a full rebuild as maintenance/recovery for existing
+local state, not as part of installation.
+
 ## The Four Functions
 
 Import the public API from `rag`:

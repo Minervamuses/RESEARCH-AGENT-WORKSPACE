@@ -59,7 +59,7 @@ Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用
 
 確認目前使用者對以下位置有寫入權限:
 
-- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):Chroma、`raw.json`、`folder_meta.json`、chat history。
+- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):執行後產生的 Chroma、`raw.json`、`folder_meta.json` 與 chat history。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
 - `app/plan_logs/`:plan mode markdown logs。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
@@ -139,7 +139,9 @@ python -m agent.cli.chat
 
 ## 5. 知識庫與資料匯入
 
-RAG store 預設在 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置),內含:
+RAG store 是程式執行後才建立的本機狀態。預設位置是 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置)，而 `app/.gitignore` 的 `store/` 會排除整個預設目錄。正常的 fresh clone 不包含 Chroma DB、`raw.json`、`folder_meta.json` 或 `chat_history/`；Git branch 與 commit 也不攜帶這些資料。第一次使用直接執行 `/init` 或 `/ingest` 即可，不需要先 migration 或重建舊 DB。
+
+store 建立後可能包含:
 
 - **ChromaDB**:語意搜尋用。
 - **`raw.json`**:chunk 的 JSON 備份,`get_context`、`list_chunks`、sync/prune 讀它。
@@ -170,11 +172,13 @@ repo/folder ingest 收集常見文字與程式檔:
 
 不想被 ingest 的檔案:在檔案前幾行加 `do_not_index: true` 即會被跳過或拒絕(repo/folder ingest 檢查 Markdown 檔前幾行;單檔 ingest 檢查該檔前幾行)。plan mode 的 `plan_logs/` 本來就會被跳過。**敏感資料不要放進可 ingest 的資料夾**——即使 `.env` 不在文字副檔名清單內,也不要依賴副檔名當唯一保護。
 
-### 知識庫維護
+### 既有本機 store 的維護
+
+這一節只適用於本機已經有 store 的情況，例如同一個 working copy 曾執行過舊版程式，更新 code 後仍保留 gitignored 的 `app/store/`；或 `KMS_STORE_DIR` 明確指向先前建立的 persistent store。它不是 fresh install 步驟。
 
 - **更新已修改的檔案**:重新 `/ingest` 同一路徑即可。repo/folder ingest 是 upsert:先刪同 folder 這輪涉及的 pids,再加入新 chunks。
 - **刪掉已不存在檔案的 entries**:先 `/sync` 檢查,再 `/prune <folder> --yes`。
-- **完全重建**:先停止 chat CLI,再 `mv app/store app/store.backup`(有設 `KMS_STORE_DIR` 就操作那個目錄),然後重新 `/init` 或 `/ingest`。
+- **不相容 schema 的維護／復原**:這個 student-owned local project 不維護 migration framework。先停止 chat CLI，備份或移走既有 generated store(預設位置可用 `mv app/store app/store.backup`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local store，不是新使用者的安裝要求。
 
 ## 6. Slash Commands
 
