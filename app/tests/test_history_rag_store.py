@@ -26,7 +26,7 @@ def fake_chroma(monkeypatch):
         def __init__(self, store):
             self._store = store
 
-        def retrieve(self, query, k, pid_filter=None, where=None):
+        def retrieve(self, query, k, where=None):
             captured["retrieve_calls"].append({"query": query, "k": k, "where": where})
             return []
 
@@ -167,7 +167,7 @@ def test_search_returns_documents_from_retriever(tmp_path, monkeypatch):
         def __init__(self, store):
             pass
 
-        def retrieve(self, query, k, pid_filter=None, where=None):
+        def retrieve(self, query, k, where=None):
             return sentinel
 
     from rag.store import cache as cache_mod
