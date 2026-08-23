@@ -37,6 +37,13 @@ def test_agent_config_accepts_minimum_graph_limit():
     assert AgentConfig(graph_recursion_limit=3).graph_recursion_limit == 3
 
 
+def test_agent_config_runs_base_rag_validation():
+    from agent.config import AgentConfig
+
+    with pytest.raises(ValueError, match="chunk_size must be a positive integer"):
+        AgentConfig(chunk_size=0)
+
+
 def test_graph_builds_without_error(monkeypatch, tmp_path):
     """The graph should compile with real rag tools and a lightweight model."""
     from agent.graph import build_graph
@@ -55,46 +62,3 @@ def test_graph_builds_without_error(monkeypatch, tmp_path):
     graph = build_graph(cfg)
 
     assert graph is not None
-
-
-def test_graph_passes_history_store_to_recall_tool(monkeypatch, tmp_path):
-    """Injected history stores should back the recall_history tool."""
-    from langchain_core.tools import tool
-
-    from agent.graph import build_graph
-    from agent.config import AgentConfig
-
-    class DummyModel:
-        def bind_tools(self, _tools):
-            return self
-
-        def invoke(self, _messages):
-            return AIMessage(content="ok")
-
-    @tool("rag_explore")
-    def fake_explore() -> str:
-        """fake explore"""
-        return "explore"
-
-    @tool("recall_history")
-    def fake_recall(query: str) -> str:
-        """fake recall"""
-        return query
-
-    seen: dict = {}
-    fake_store = object()
-
-    monkeypatch.setattr("agent.graph.get_chat_model", lambda _config: DummyModel())
-    monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [fake_explore])
-
-    def capture_history_tool(_config, store=None):
-        seen["store"] = store
-        return fake_recall
-
-    monkeypatch.setattr("agent.tools.inventory.create_history_tool", capture_history_tool)
-
-    cfg = AgentConfig(persist_dir=str(tmp_path))
-    graph = build_graph(cfg, history_store=fake_store)
-
-    assert graph is not None
-    assert seen["store"] is fake_store

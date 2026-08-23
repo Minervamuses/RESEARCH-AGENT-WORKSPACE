@@ -101,7 +101,7 @@ def _run_bash(command: str, description: str, timeout_sec: int) -> str:
     if not _user_approves(command, description):
         return _denied(f"user denied execution of: {command}", command)
 
-    capped_timeout = max(1, min(int(timeout_sec or DEFAULT_TIMEOUT_SEC), MAX_TIMEOUT_SEC))
+    capped_timeout = max(1, min(int(timeout_sec), MAX_TIMEOUT_SEC))
     cwd = str(find_app_root())
 
     try:

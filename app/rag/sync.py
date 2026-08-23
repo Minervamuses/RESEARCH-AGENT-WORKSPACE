@@ -5,10 +5,10 @@ automatic mtime/hash diff, so this module exposes only the primitives the
 host needs: list the disk-vs-store delta, and prune store entries whose
 source file no longer exists on disk.
 
-Only entries written by `ingest_repo` are in scope (they carry a
-`file_path` metadata tag that is the rel_path under the ingest root).
-Single-file ingests done via `ingest_single` set no such tag and are
-therefore ignored — they don't represent a tracked tree.
+Only entries written by `ingest_repo` are in scope. They carry both a
+deterministic `source_namespace` for the canonical ingest root and a
+root-relative `file_path`. Single-file ingests done via `ingest_single` set
+neither tag and are ignored because they don't represent a tracked tree.
 """
 
 from __future__ import annotations
@@ -18,21 +18,26 @@ from pathlib import Path
 from rag.collect import collect_folders
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.store.cache import get_chroma_store, get_json_store
+from rag.utils.paths import source_namespace
 
 
-def _stored_file_paths(config: RAGConfig) -> set[str]:
-    """Return the set of `file_path` values currently in the store.
+def _stored_file_paths(config: RAGConfig, namespace: str) -> dict[str, str]:
+    """Return root-relative file paths mapped to their pids for one root.
 
     Reads from the JSON backup since it holds full metadata without a
-    Chroma round-trip. Pids without a `file_path` (single-file ingests)
-    are skipped — they aren't part of any tracked tree.
+    Chroma round-trip. Entries from other roots and single-file ingests are
+    skipped.
     """
     json_store = get_json_store(config)
-    paths: set[str] = set()
+    paths: dict[str, str] = {}
     for doc in json_store.get():
-        file_path = doc.metadata.get("file_path")
-        if file_path:
-            paths.add(file_path)
+        metadata = doc.metadata
+        if metadata.get("source_namespace") != namespace:
+            continue
+        file_path = metadata.get("file_path")
+        pid = metadata.get("pid")
+        if file_path and pid:
+            paths[file_path] = pid
     return paths
 
 
@@ -59,6 +64,7 @@ def list_diff(
     root = Path(repo_root).resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Repo root not found: {root}")
+    namespace = source_namespace(root)
 
     folders = collect_folders(root, extra_skip=extra_skip)
     on_disk: set[str] = set()
@@ -66,7 +72,7 @@ def list_diff(
         for file_path in files:
             on_disk.add(str(file_path.relative_to(root)))
 
-    in_store = _stored_file_paths(cfg)
+    in_store = set(_stored_file_paths(cfg, namespace))
 
     missing_from_store = sorted(on_disk - in_store)
     missing_from_disk = sorted(
@@ -90,18 +96,22 @@ def prune_orphans(
         config: Pipeline configuration; defaults to `RAGConfig()`.
 
     Returns:
-        Sorted list of pids that were deleted from both Chroma and the
-        JSON backup. The list is empty if nothing was orphaned.
+        Sorted list of namespaced pids that were deleted from both Chroma and
+        the JSON backup. The list is empty if nothing was orphaned.
     """
     cfg = config or RAGConfig()
-    diff = list_diff(repo_root, cfg)
-    orphans = diff["missing_from_disk"]
-    if not orphans:
+    root = Path(repo_root).resolve()
+    namespace = source_namespace(root)
+    diff = list_diff(str(root), cfg)
+    orphan_paths = diff["missing_from_disk"]
+    if not orphan_paths:
         return []
 
+    stored_paths = _stored_file_paths(cfg, namespace)
+    orphan_pids = sorted(stored_paths[path] for path in orphan_paths)
     chroma = get_chroma_store(KNOWLEDGE_COLLECTION, cfg)
     json_store = get_json_store(cfg)
-    for pid in orphans:
+    for pid in orphan_pids:
         chroma.delete(pid)
         json_store.delete(pid)
-    return orphans
+    return orphan_pids

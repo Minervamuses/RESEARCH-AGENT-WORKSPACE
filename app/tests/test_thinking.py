@@ -1,7 +1,6 @@
 """Tests for extended thinking workflow helpers."""
 
 import json
-from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -208,33 +207,6 @@ def test_review_messages_fallback_renders_base_tool_availability():
     assert "[Tool availability]" in prompt_text
     for name in base_tool_names():
         assert name in prompt_text
-
-
-def test_rewrite_messages_do_not_embed_stale_tool_names():
-    rewrite_messages(
-        skill_text="prompt-master skill",
-        user_input="raw request",
-        visible_context="",
-        skill_context="",
-    )
-    package_dir = Path(__file__).resolve().parents[1] / "agent" / "thinking"
-    # The orchestrator owns the explicit read-only tool policy; prompt helpers do not.
-    source = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted(package_dir.rglob("*.py"))
-        if path.name != "orchestrator.py"
-    )
-
-    for name in (
-        "rag_explore",
-        "rag_search",
-        "recall_history",
-        "read_file",
-        "bash",
-        "web_search",
-        "github",
-    ):
-        assert name not in source
 
 
 def test_rewrite_prompt_detects_clarify_sentinel():

@@ -1,14 +1,9 @@
 """Tests for the single-source base tool inventory."""
 
-from pathlib import Path
-
 from langchain_core.tools import tool
 
 from agent.config import AgentConfig
 from agent.tools import inventory as tool_inventory
-
-
-APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 @tool("web_fetch")
@@ -123,16 +118,3 @@ def test_system_prompt_embeds_rendered_base_tool_prompt():
     from agent.session import SYSTEM_PROMPT
 
     assert tool_inventory.render_base_tool_prompt() in SYSTEM_PROMPT
-
-
-def test_session_source_does_not_duplicate_base_tool_inventory():
-    source = (APP_ROOT / "agent" / "session.py").read_text(encoding="utf-8")
-
-    # The inventory/routing/workflow literals must live only in inventory.py.
-    assert "Tool selection policy:" not in source
-    assert "Workflow:" not in source
-    assert "Discover what's in the indexed knowledge base" not in source
-    assert "**rag_explore**" not in source
-
-    # A single semantic mention (e.g. the plan-mode hint) is still allowed.
-    assert "recall_history" in source

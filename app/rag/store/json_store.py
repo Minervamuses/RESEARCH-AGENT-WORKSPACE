@@ -62,7 +62,11 @@ class JSONStore(BaseStore):
     def _save(self) -> None:
         if self._defer_depth:
             return
-        self._write_out()
+        try:
+            self._write_out()
+        except BaseException:
+            self._load()
+            raise
 
     def _write_out(self) -> None:
         """Atomically replace raw.json (temp file + os.replace)."""
@@ -97,21 +101,32 @@ class JSONStore(BaseStore):
         hold partial writes; recovery is to re-run the ingest.
         """
         self._maybe_reload()
-        entry_fingerprint = self._fingerprint
+        outermost = self._defer_depth == 0
+        entry_fingerprint = self._fingerprint if outermost else None
         self._defer_depth += 1
         try:
             yield self
-        finally:
+        except BaseException:
             self._defer_depth -= 1
-        if self._defer_depth:
+            if outermost:
+                self._load()
+            raise
+        else:
+            self._defer_depth -= 1
+        if not outermost:
             return
         if self._read_fingerprint() != entry_fingerprint:
+            self._load()
             raise RuntimeError(
                 f"{self.json_path} was modified by another process during a "
                 "deferred_save batch; this batch's JSON updates were discarded. "
                 "Re-run the ingest (upserts are idempotent)."
             )
-        self._write_out()
+        try:
+            self._write_out()
+        except BaseException:
+            self._load()
+            raise
 
     # --- Store API ------------------------------------------------------------
 

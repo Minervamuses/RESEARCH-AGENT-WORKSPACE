@@ -144,7 +144,8 @@ def explore(
     dates: list[int] = []
     folders: list[FolderSummary] = []
 
-    for folder_rel, meta in folder_meta.items():
+    for meta in folder_meta.values():
+        folder_rel = meta["folder"]
         tags = meta.get("tags", [])
         summary = meta.get("summary", "")
         cat = tags[0] if tags else "unknown"

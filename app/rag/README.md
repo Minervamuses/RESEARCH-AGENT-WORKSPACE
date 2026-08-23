@@ -52,6 +52,16 @@ For repo ingest instead of a single file:
 python -m rag.cli.ingest -r /path/to/project
 ```
 
+Each canonical repo root gets a deterministic source namespace. Repo-ingest
+PIDs combine that namespace with the root-relative path, while `file_path`
+stays root-relative for display. Sync, prune, and folder metadata are scoped
+to that namespace, so different roots may safely contain the same paths.
+
+Stores created before root namespaces were introduced must be rebuilt before
+use. The store is generated output: rag does not migrate or automatically
+delete an existing `store/`, `raw.json`, Chroma collection, or
+`folder_meta.json`.
+
 ## API Reference
 
 See [docs/API.md](docs/API.md) for the complete public API contract, dataclass fields, configuration details, error model, and tool-calling interface.

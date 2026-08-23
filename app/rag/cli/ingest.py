@@ -29,7 +29,7 @@ from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.store.cache import get_chroma_store, get_json_store
 from rag.store.document_store import DocumentStore
 from rag.tagger.llm_tagger import FolderMeta, LLMTagger
-from rag.utils.paths import extract_date
+from rag.utils.paths import extract_date, scoped_source_id, source_namespace
 
 # Chroma add() batch size for repo ingest; folder-level delete+add batching
 # keeps reruns upsert-correct after an interruption.
@@ -109,14 +109,25 @@ def ingest_repo(
         Tuple of (files_ingested, total_chunks).
     """
     config = config or RAGConfig()
-    root = Path(repo_root).resolve() if repo_root else Path.cwd()
+    root = (Path(repo_root) if repo_root else Path.cwd()).resolve()
 
     if not root.is_dir():
         raise FileNotFoundError(f"Repo root not found: {root}")
 
     # Phase 1: Collect and tag folders
+    namespace = source_namespace(root)
     folders = collect_folders(root, extra_skip=extra_skip, skip_rel_paths=skip_rel_paths)
     folder_meta = _tag_folders(folders, config)
+
+    scoped_folder_meta = {
+        scoped_source_id(namespace, folder_rel): {
+            "source_namespace": namespace,
+            "source_root": str(root),
+            "folder": folder_rel,
+            **meta,
+        }
+        for folder_rel, meta in folder_meta.items()
+    }
 
     # Save folder metadata (merge with existing so partial ingest doesn't lose
     # tags from folders outside this run's scope).
@@ -129,7 +140,7 @@ def ingest_repo(
                 existing_meta = json.load(f)
         except (json.JSONDecodeError, OSError):
             existing_meta = {}
-    existing_meta.update(folder_meta)
+    existing_meta.update(scoped_folder_meta)
     with meta_path.open("w", encoding="utf-8") as f:
         json.dump(existing_meta, f, ensure_ascii=False, indent=2)
     print(f"\nFolder metadata saved to {meta_path}")
@@ -165,11 +176,14 @@ def ingest_repo(
                     continue
 
                 rel_path = str(file_path.relative_to(root))
+                source_pid = scoped_source_id(namespace, rel_path)
                 date = extract_date(rel_path)
 
-                docs = chunker.chunk(text, rel_path)
+                docs = chunker.chunk(text, source_pid)
 
                 for doc in docs:
+                    doc.metadata["source_namespace"] = namespace
+                    doc.metadata["source_root"] = str(root)
                     doc.metadata["file_path"] = rel_path
                     doc.metadata["file_type"] = file_path.suffix.lower()
                     doc.metadata["folder"] = folder_rel
@@ -178,7 +192,7 @@ def ingest_repo(
                     doc.metadata["tags"] = json.dumps(tags)
 
                 if docs:
-                    folder_pids.append(rel_path)
+                    folder_pids.append(source_pid)
                     folder_docs.extend(docs)
                     files_ingested += 1
                     total_chunks += len(docs)

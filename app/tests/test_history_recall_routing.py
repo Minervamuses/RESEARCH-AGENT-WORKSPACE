@@ -1,4 +1,4 @@
-"""Deterministic regression for the archived history-recall failure.
+"""Scripted routing regressions for the archived history-recall failure.
 
 Archived scenario: under the academic-paper-writing skill in extended thinking
 mode, the user asks the agent to look at prior records ("你自行看一下紀錄").
@@ -6,10 +6,9 @@ The agent repeatedly asked intake questions and eventually surfaced internal
 reviewer-style instructions instead of either using recall_history or honestly
 explaining what it could retrieve.
 
-These tests drive ChatSession's extended turn with a scripted graph that emits
-real AIMessage(tool_calls=...) + matching ToolMessage(tool_call_id=...) so the
-tool trace is exercised end to end, and a scripted reviewer so the routing and
-user-facing rendering logic is what is under test.
+These tests intentionally use a scripted graph, including test-created
+ToolMessages, to isolate extended-thinking reviewer/reviser routing and
+user-facing rendering. They are routing tests, not E2E or journey coverage.
 """
 
 import asyncio
@@ -112,7 +111,7 @@ def _recall_tool_call(call_id="call-1", query="一月上半研究成果"):
 
 # --- Case A: available recall_history not attempted -> reviser must retry it ---
 
-def test_case_a_retrieval_not_attempted_routes_to_reviser_with_recall_history(
+def test_retrieval_not_attempted_routes_to_reviser_with_recall_history(
     monkeypatch,
     tmp_path,
 ):
@@ -176,7 +175,7 @@ def test_case_a_retrieval_not_attempted_routes_to_reviser_with_recall_history(
 
 # --- Case B: recall_history attempted but empty -> honest user-facing answer ---
 
-def test_case_b_empty_history_yields_honest_answer_mentioning_plan_logs(
+def test_empty_history_routes_to_honest_answer_with_storage_boundaries(
     monkeypatch,
     tmp_path,
 ):
@@ -238,7 +237,7 @@ def test_case_b_empty_history_yields_honest_answer_mentioning_plan_logs(
 
 # --- Case C: recall_history denied -> stop message blames policy, not the user ---
 
-def test_case_c_denied_history_tool_explains_policy_without_intake_checklist(
+def test_unavailable_history_tool_routes_to_policy_explanation(
     monkeypatch,
     tmp_path,
 ):

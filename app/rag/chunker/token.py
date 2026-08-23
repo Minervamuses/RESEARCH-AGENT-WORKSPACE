@@ -3,7 +3,7 @@
 import tiktoken
 from langchain_core.documents import Document
 
-from rag.config import RAGConfig
+from rag.config import RAGConfig, validate_chunking
 
 
 class TokenChunker:
@@ -15,6 +15,7 @@ class TokenChunker:
     """
 
     def __init__(self, config: RAGConfig):
+        validate_chunking(config.chunk_size, config.chunk_overlap)
         self.config = config
         self.chunk_size = config.chunk_size
         self.chunk_overlap = config.chunk_overlap

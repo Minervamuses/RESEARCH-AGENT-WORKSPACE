@@ -11,6 +11,21 @@ from pathlib import Path
 KNOWLEDGE_COLLECTION = "knowledge"
 
 
+def validate_chunking(chunk_size: object, chunk_overlap: object) -> None:
+    """Reject chunk windows that cannot advance safely."""
+    if type(chunk_size) is not int or chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer")
+    if (
+        type(chunk_overlap) is not int
+        or chunk_overlap < 0
+        or chunk_overlap >= chunk_size
+    ):
+        raise ValueError(
+            "chunk_overlap must be an integer satisfying "
+            "0 <= chunk_overlap < chunk_size"
+        )
+
+
 def _default_persist_dir() -> str:
     """Resolve the store directory.
 
@@ -55,6 +70,9 @@ class RAGConfig:
     # LLM used by rag's own tagger
     tagger_model: str = "z-ai/glm-5"
     """OpenRouter model name used by repo ingest folder tagging."""
+
+    def __post_init__(self) -> None:
+        validate_chunking(self.chunk_size, self.chunk_overlap)
 
     def raw_json_path(self) -> str:
         """Path to the raw chunks JSON file."""

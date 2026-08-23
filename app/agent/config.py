@@ -71,4 +71,5 @@ class AgentConfig(RAGConfig):
     skill_max_total_skill_context_chars: int = 200_000  # Total active-skill context chars.
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         validate_graph_recursion_limit(self.graph_recursion_limit)

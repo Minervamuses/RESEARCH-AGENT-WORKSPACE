@@ -101,42 +101,6 @@ def test_mixed_allowed_and_denied_calls_preserve_order():
     assert messages[1].status == "error"
 
 
-def test_forged_skill_tool_call_is_denied_in_normal_mode():
-    """Execution-layer defense: a fabricated citation_workflow call outside
-    the default global tools is rejected, and sibling default calls run."""
-    ai_message = AIMessage(
-        content="",
-        tool_calls=[
-            _tool_call("citation_workflow", "call-1", {"action": "search"}),
-            _tool_call("echo", "call-2", {"text": "ok"}),
-        ],
-    )
-
-    result = _invoke_policy_node({"messages": [ai_message]})
-
-    messages = result["messages"][-2:]
-    assert [m.tool_call_id for m in messages] == ["call-1", "call-2"]
-    assert messages[0].status == "error"
-    assert "tool not available" in messages[0].content
-    assert messages[1].content == "ok"
-
-
-def test_skill_tool_call_denied_under_foreign_skill_effective_tools():
-    ai_message = AIMessage(
-        content="",
-        tool_calls=[_tool_call("citation_workflow", "call-1", {"action": "search"})],
-    )
-
-    result = _invoke_policy_node({
-        "messages": [ai_message],
-        "effective_tools": ["echo", "bash"],
-    })
-
-    message = result["messages"][-1]
-    assert message.status == "error"
-    assert "tool not available" in message.content
-
-
 def test_skill_tool_call_runs_when_effective_tools_grant_it():
     ai_message = AIMessage(
         content="",

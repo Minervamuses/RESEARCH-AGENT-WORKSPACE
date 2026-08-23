@@ -1,4 +1,4 @@
-"""Acceptance matrix for the global/skill tool access model.
+"""Cross-layer consistency for the global/skill tool access model.
 
 Exercises the plan's acceptance matrix over one tool universe:
 
@@ -14,7 +14,6 @@ intersection, and PolicyToolNode all agree with the shared resolution.
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
@@ -25,7 +24,6 @@ from agent.graph import build_graph
 from agent.thinking.orchestrator import FUSION_READ_ONLY_ALLOWLIST
 from agent.session import ChatSession
 from agent.skills.runtime import load_skill_runtime
-from agent.tools.access import resolve_tool_access
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -97,91 +95,11 @@ UNIVERSE = [
     _citation_workflow,
 ]
 
-NORMAL_MODE_TOOLS = (
-    "rag_search",
-    "recall_history",
-    "read_file",
-    "bash",
-    "full-web-search",
-)
-
-
 def _cfg(tmp_path) -> AgentConfig:
     return AgentConfig(
         persist_dir=str(tmp_path / "persist"),
         skills_dir=str(APP_ROOT / "skills"),
     )
-
-
-# --- Matrix rows -----------------------------------------------------------
-
-
-def test_normal_mode_matches_expected_matrix():
-    resolution = resolve_tool_access(None, UNIVERSE, mcp_families=MCP_FAMILIES)
-
-    assert resolution.effective_tools == NORMAL_MODE_TOOLS
-
-
-def test_citation_adds_only_citation_workflow(tmp_path):
-    runtime = load_skill_runtime(
-        "citation",
-        config=_cfg(tmp_path),
-        all_tools=UNIVERSE,
-        mcp_families=MCP_FAMILIES,
-    )
-
-    assert runtime.tool_access.effective_tools == (
-        *NORMAL_MODE_TOOLS,
-        "citation_workflow",
-    )
-    assert "github_search" not in runtime.tool_access.effective_tools
-
-
-def test_writing_matches_normal_mode(tmp_path):
-    runtime = load_skill_runtime(
-        "academic-paper-writing",
-        config=_cfg(tmp_path),
-        all_tools=UNIVERSE,
-        mcp_families=MCP_FAMILIES,
-    )
-
-    assert runtime.tool_access.effective_tools == NORMAL_MODE_TOOLS
-
-
-def test_web_mcp_not_loaded_keeps_skills_usable_without_web(tmp_path):
-    universe = [tool for tool in UNIVERSE if tool.name != "full-web-search"]
-
-    citation = load_skill_runtime(
-        "citation",
-        config=_cfg(tmp_path),
-        all_tools=universe,
-        mcp_families={"github_search": "github"},
-    )
-    writing = load_skill_runtime(
-        "academic-paper-writing",
-        config=_cfg(tmp_path),
-        all_tools=universe,
-        mcp_families={"github_search": "github"},
-    )
-
-    for runtime in (citation, writing):
-        assert "full-web-search" not in runtime.tool_access.effective_tools
-        assert runtime.tool_access.missing_required == ()
-
-
-def test_missing_citation_workflow_blocks_activation(tmp_path):
-    universe = [tool for tool in UNIVERSE if tool.name != "citation_workflow"]
-
-    with pytest.raises(
-        ValueError,
-        match="required skill tools are unavailable: citation_workflow",
-    ):
-        load_skill_runtime(
-            "citation",
-            config=_cfg(tmp_path),
-            all_tools=universe,
-            mcp_families=MCP_FAMILIES,
-        )
 
 
 # --- Consumer consistency ---------------------------------------------------

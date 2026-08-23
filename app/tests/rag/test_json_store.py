@@ -5,6 +5,7 @@ import json
 import pytest
 from langchain_core.documents import Document
 
+import rag.store.json_store as json_store_module
 from rag.store.json_store import JSONStore
 
 
@@ -71,6 +72,7 @@ def test_deferred_save_fails_loudly_on_external_rewrite(tmp_path):
 
     # the batch was discarded: the external content survives untouched
     assert [d["metadata"]["pid"] for d in _read_raw(path)] == ["external"]
+    assert [d.metadata["pid"] for d in store.get()] == ["external"]
 
 
 def test_exception_inside_deferred_batch_writes_nothing(tmp_path):
@@ -84,20 +86,37 @@ def test_exception_inside_deferred_batch_writes_nothing(tmp_path):
             raise ValueError("boom")
 
     assert [d["metadata"]["pid"] for d in _read_raw(path)] == ["committed"]
+    assert [d.metadata["pid"] for d in store.get()] == ["committed"]
+
+    store.add([_doc("later")])
+    assert [d["metadata"]["pid"] for d in _read_raw(path)] == [
+        "committed",
+        "later",
+    ]
 
 
-def test_failed_write_leaves_previous_file_intact(tmp_path):
+def test_failed_write_restores_memory_to_previous_file(tmp_path, monkeypatch):
     path = tmp_path / "raw.json"
     store = JSONStore(str(path))
     store.add([_doc("stable")])
 
-    class NotSerializable:
-        pass
+    real_replace = json_store_module.os.replace
 
-    store._docs.append({"page_content": NotSerializable(), "metadata": {}})
-    with pytest.raises(TypeError):
-        store._write_out()
+    def fail_replace(_source, _destination):
+        raise OSError("replace failed")
 
-    # the atomic replace never happened: the old file still parses cleanly
+    monkeypatch.setattr(json_store_module.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        store.add([_doc("failed")])
+
+    # The atomic replace never happened, and the live instance rolls back too.
     assert [d["metadata"]["pid"] for d in _read_raw(path)] == ["stable"]
+    assert [d.metadata["pid"] for d in store.get()] == ["stable"]
     assert list(tmp_path.glob("*.tmp")) == []
+
+    monkeypatch.setattr(json_store_module.os, "replace", real_replace)
+    store.add([_doc("later")])
+    assert [d["metadata"]["pid"] for d in _read_raw(path)] == [
+        "stable",
+        "later",
+    ]

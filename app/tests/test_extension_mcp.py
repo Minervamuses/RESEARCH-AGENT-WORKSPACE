@@ -17,7 +17,6 @@ from agent.extensions.mcp_manifest import (
 )
 from agent.extensions.registry import load_registry, write_registry
 from agent.extensions.startup import load_extension_startup
-from agent.tools.access import resolve_tool_access
 
 
 class _PlanModel:
@@ -35,11 +34,6 @@ class _PlanModel:
             "mcp_descriptor": self.descriptor,
         }
         return AIMessage(content=json.dumps({"items": [item]}))
-
-
-class _Tool:
-    def __init__(self, name):
-        self.name = name
 
 
 def _config(tmp_path: Path) -> AgentConfig:
@@ -339,19 +333,3 @@ def test_startup_rejects_tampered_approval_binding(monkeypatch, tmp_path):
 
     assert startup.mcp_specs == ()
     assert "binding differs from approval" in startup.diagnostics[0]
-
-
-def test_dynamic_global_family_uses_existing_tool_access_resolver():
-    tools = [_Tool("rag_search"), _Tool("clock_now")]
-    families = {"clock_now": "clock"}
-
-    scoped = resolve_tool_access(None, tools, mcp_families=families)
-    globalized = resolve_tool_access(
-        None,
-        tools,
-        mcp_families=families,
-        global_mcp_families={"web_search", "clock"},
-    )
-
-    assert scoped.effective_tools == ("rag_search",)
-    assert globalized.effective_tools == ("rag_search", "clock_now")

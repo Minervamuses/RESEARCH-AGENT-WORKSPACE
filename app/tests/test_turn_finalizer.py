@@ -1,4 +1,4 @@
-"""Chat E2E contracts for response safety, marker rendering, and save telemetry."""
+"""Focused finalization contracts for safety, rendering, and save telemetry."""
 
 import asyncio
 import json

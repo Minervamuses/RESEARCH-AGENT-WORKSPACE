@@ -3,6 +3,7 @@
 import json
 import subprocess
 
+import pytest
 from langchain_core.tools import StructuredTool
 
 from agent.config import AgentConfig
@@ -80,6 +81,35 @@ def test_bash_rejects_when_user_denies(monkeypatch):
     assert spy["calls"] == 0
 
 
+def test_bash_approval_prompt_on_stderr_includes_command_and_description(
+    monkeypatch,
+    capsys,
+):
+    _force_tty(monkeypatch, True)
+    _patch_input(monkeypatch, "n")
+    calls: list[tuple] = []
+
+    def fail_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("subprocess.run must not be called when denied")
+
+    monkeypatch.setattr("agent.tools.bash.subprocess.run", fail_run)
+    tool = create_bash_tool(AgentConfig(persist_dir="/tmp"))
+
+    raw = tool.invoke(
+        {
+            "command": "printf sensitive-command",
+            "description": "inspect the requested target",
+        }
+    )
+
+    assert json.loads(raw)["approved"] is False
+    assert calls == []
+    prompt = capsys.readouterr().err
+    assert "printf sensitive-command" in prompt
+    assert "inspect the requested target" in prompt
+
+
 def test_bash_default_deny_on_empty_input(monkeypatch):
     _force_tty(monkeypatch, True)
     _patch_input(monkeypatch, "")
@@ -133,6 +163,46 @@ def test_bash_timeout_enforced(monkeypatch):
 
     assert payload["approved"] is True
     assert "timeout" in payload["error"]
+
+
+@pytest.mark.parametrize(
+    ("requested_timeout", "expected_timeout"),
+    [(17, 17), (0, 1), (301, 300)],
+)
+def test_bash_passes_clamped_timeout_to_subprocess(
+    monkeypatch,
+    requested_timeout,
+    expected_timeout,
+):
+    _force_tty(monkeypatch, True)
+    _patch_input(monkeypatch, "y")
+    calls: list[tuple[tuple, dict]] = []
+
+    class _Done:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _Done()
+
+    monkeypatch.setattr("agent.tools.bash.subprocess.run", fake_run)
+    tool = create_bash_tool(AgentConfig(persist_dir="/tmp"))
+
+    raw = tool.invoke(
+        {
+            "command": "echo bounded",
+            "description": "verify timeout forwarding",
+            "timeout_sec": requested_timeout,
+        }
+    )
+
+    assert json.loads(raw)["approved"] is True
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == ("echo bounded",)
+    assert kwargs["timeout"] == expected_timeout
 
 
 def test_bash_output_truncated_when_oversize(monkeypatch):
