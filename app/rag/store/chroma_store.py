@@ -15,14 +15,12 @@ class ChromaStore(BaseStore):
         self,
         collection_name: str,
         config: RAGConfig,
-        use_embeddings: bool = True,
     ):
         self.config = config
         self.collection_name = collection_name
-        embedder = OllamaEmbedder(config) if use_embeddings else None
         self._store = Chroma(
             collection_name=collection_name,
-            embedding_function=embedder,
+            embedding_function=OllamaEmbedder(config),
             persist_directory=config.persist_dir,
         )
 
