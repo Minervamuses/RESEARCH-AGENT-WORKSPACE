@@ -176,7 +176,6 @@ class _DeterministicFolderTagger:
 @pytest.fixture
 def offline_rag_config(monkeypatch):
     """Patch external model boundaries and return temp-store configs."""
-    rag_cache_module._retriever_cache.clear()
     rag_cache_module._store_cache.clear()
     rag_cache_module._json_store_cache.clear()
     monkeypatch.setenv("ANONYMIZED_TELEMETRY", "FALSE")
@@ -196,6 +195,5 @@ def offline_rag_config(monkeypatch):
 
     yield make_config
 
-    rag_cache_module._retriever_cache.clear()
     rag_cache_module._store_cache.clear()
     rag_cache_module._json_store_cache.clear()
