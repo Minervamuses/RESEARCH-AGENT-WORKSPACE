@@ -21,15 +21,12 @@ def _doc_to_hit(doc: "Document") -> Hit:
     """Convert a LangChain document into a framework-neutral Hit."""
     metadata = dict(doc.metadata or {})
     raw_tags = metadata.get("tags")
+    tags = []
     if isinstance(raw_tags, str):
         try:
             tags = json.loads(raw_tags)
         except json.JSONDecodeError:
-            tags = []
-    elif isinstance(raw_tags, list):
-        tags = raw_tags
-    else:
-        tags = []
+            pass
 
     return Hit(
         pid=str(metadata.get("pid", "")),
