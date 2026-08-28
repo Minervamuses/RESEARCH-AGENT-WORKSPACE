@@ -137,6 +137,32 @@ python -m agent.cli.chat
 
 離開:輸入 `q`、`quit`、`exit`、`/quit` 或 `/exit`。
 
+### 桌面 GUI（WSL/Linux source checkout）
+
+桌面版只支援 Linux runtime；在 Windows 主機上請從 WSL 內執行以下命令，不要改用 native Windows 的 Python、Node 或 Cargo。除了上面的 Python 環境，還需要 Rust/Cargo、Node/npm，以及 Tauri 在 Linux 使用的系統 build dependencies。
+
+```bash
+conda activate app
+cd app
+poetry install
+
+cd desktop
+npm install
+npm run tauri dev
+```
+
+啟動視窗與本機 backend runtime check 不需要 `OPENROUTER_API_KEY`，也不會發出 provider 請求；建立對話後的正常 chat、extended thinking 與 folder ingest 仍需符合「各功能入口需求對照」列出的 provider/Ollama 條件。缺少設定時，GUI 會保留 lifecycle controls 並顯示可操作的本機診斷。
+
+在 `app/desktop/` 驗證 desktop source checkout：
+
+```bash
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri -- build --no-bundle
+```
+
+最後一個命令會透過 Tauri 的 `beforeBuildCommand` 執行 `npm run build`。目前 `src-tauri/tauri.conf.json` 設定 `bundle.active = false`；`--no-bundle` 只驗證 Linux source checkout 可建置，不會產生 installer 或可攜式 standalone bundle。
+
 ## 5. 知識庫與資料匯入
 
 RAG store 是程式執行後才建立的本機狀態。預設位置是 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置)，而 `app/.gitignore` 的 `store/` 會排除整個預設目錄。正常的 fresh clone 不包含 Chroma DB、`raw.json`、`folder_meta.json` 或 `chat_history/`；Git branch 與 commit 也不攜帶這些資料。第一次使用直接執行 `/init` 或 `/ingest` 即可，不需要先 migration 或重建舊 DB。

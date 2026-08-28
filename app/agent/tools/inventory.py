@@ -175,15 +175,17 @@ def build_base_tools(
     base tools win on name collisions, so a same-named extra tool is ignored
     rather than bound twice.
     """
+    bash_kwargs = {}
+    if bash_approval_handler is not None:
+        bash_kwargs["approval_handler"] = bash_approval_handler
+    if bash_command_runner is not None:
+        bash_kwargs["command_runner"] = bash_command_runner
+
     tools = [
         *create_rag_tools(config),
         create_history_tool(config, store=history_store),
         create_read_file_tool(config),
-        create_bash_tool(
-            config,
-            approval_handler=bash_approval_handler,
-            command_runner=bash_command_runner,
-        ),
+        create_bash_tool(config, **bash_kwargs),
     ]
     seen = {getattr(tool, "name", str(tool)) for tool in tools}
     for extra in extra_tools or []:
