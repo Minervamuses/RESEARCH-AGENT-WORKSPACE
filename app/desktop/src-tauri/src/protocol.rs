@@ -13,7 +13,12 @@ pub const MAX_ERROR_MESSAGE_BYTES: usize = 4096;
 
 pub const PROTOCOL_METHODS: &[&str] = &[
     "runtime.diagnostics",
+    "project.list",
     "session.create",
+    "session.list",
+    "session.select",
+    "session.retry_registration",
+    "session.transcript",
     "session.status",
     "session.turn",
     "session.set_mode",
@@ -58,6 +63,7 @@ pub const REQUEST_EVENTS: &[&str] = &[
     "writing.file_completed",
     "ingest.completed",
     "ingest.failed",
+    "answer.chunk",
 ];
 
 pub const PROCESS_EVENTS: &[&str] = &[
@@ -87,6 +93,9 @@ pub const PROTOCOL_ERROR_CODES: &[&str] = &[
     "EXTENSION_PREVIEW_FAILED",
     "EXTENSION_APPLY_FAILED",
     "APPROVAL_DENIED",
+    "CONVERSATION_FLUSH_FAILED",
+    "PROVIDER_RATE_LIMITED",
+    "PROVIDER_REQUEST_FAILED",
     "SHUTDOWN_FLUSH_FAILED",
     "INTERNAL_ERROR",
 ];
@@ -253,7 +262,12 @@ impl Error for ProtocolViolation {}
 fn required_params(method: &str) -> Option<&'static [&'static str]> {
     match method {
         "runtime.diagnostics" => Some(&[]),
+        "project.list" => Some(&[]),
         "session.create" => Some(&[]),
+        "session.list" => Some(&["projectId"]),
+        "session.select" | "session.retry_registration" | "session.transcript" => {
+            Some(&["projectId", "sessionId"])
+        }
         "session.status" => Some(&[]),
         "session.turn" => Some(&["text"]),
         "session.set_mode" => Some(&["mode"]),
@@ -284,6 +298,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
 fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
     match method {
         "runtime.diagnostics"
+        | "project.list"
         | "session.status"
         | "session.list_skills"
         | "session.deactivate_skill"
@@ -293,7 +308,10 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         | "extensions.status"
         | "extensions.preview"
         | "runtime.shutdown" => Some(&[]),
-        "session.create" => Some(&["loadMcp", "graphRecursionLimit"]),
+        "session.create" => Some(&["loadMcp", "graphRecursionLimit", "projectId"]),
+        "session.list" => Some(&["projectId", "offset", "limit"]),
+        "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
+        "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "session.turn" => Some(&["text"]),
         "session.set_mode" | "session.set_thinking" => Some(&["mode"]),
         "session.activate_skill" => Some(&["name", "taskMode"]),
@@ -462,6 +480,22 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
                 }
             }
             validate_optional_integer(params, "graphRecursionLimit", 3, u32::MAX as i64)?;
+            validate_optional_string(params, "projectId", 256)?;
+        }
+        "session.list" => {
+            validate_optional_string(params, "projectId", 256)?;
+            validate_optional_integer(params, "offset", 0, u32::MAX as i64)?;
+            validate_optional_integer(params, "limit", 1, 50)?;
+        }
+        "session.select" | "session.retry_registration" => {
+            validate_optional_string(params, "projectId", 256)?;
+            validate_optional_string(params, "sessionId", 32)?;
+        }
+        "session.transcript" => {
+            validate_optional_string(params, "projectId", 256)?;
+            validate_optional_string(params, "sessionId", 32)?;
+            validate_optional_integer(params, "offset", 0, u32::MAX as i64)?;
+            validate_optional_integer(params, "limit", 1, 20)?;
         }
         "session.turn" => {
             expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
@@ -725,6 +759,21 @@ fn validate_event_data(
     validate_safe_object(data, "data")?;
     validate_tool_event(event, data)?;
     match event {
+        "answer.chunk" => {
+            validate_exact_data_keys(
+                data,
+                &["sessionId", "turnId", "chunkIndex", "streamKind", "text"],
+            )?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
+            expect_bounded_string(&data["turnId"], "data.turnId", 64)?;
+            expect_integer_range(&data["chunkIndex"], "data.chunkIndex", 0, 127)?;
+            if data["streamKind"] != "post_finalized" {
+                return Err(ProtocolViolation::invalid(
+                    "data.streamKind contains an unknown enum value",
+                ));
+            }
+            expect_bounded_string(&data["text"], "data.text", 16_384)?;
+        }
         "approval.required" => {
             const KEYS: &[&str] = &[
                 "approvalId",
@@ -860,6 +909,104 @@ fn validate_string_array(
     Ok(())
 }
 
+fn validate_enum(value: &Value, field: &str, allowed: &[&str]) -> Result<(), ProtocolViolation> {
+    let text = expect_non_empty_string(value, field)?;
+    if !allowed.contains(&text) {
+        return Err(ProtocolViolation::invalid(format!(
+            "{field} contains an unknown enum value"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_session_snapshot(
+    data: &Map<String, Value>,
+    require_registration: bool,
+) -> Result<(), ProtocolViolation> {
+    const BASE_KEYS: &[&str] = &[
+        "sessionId",
+        "turnCount",
+        "graphRecursionLimit",
+        "planMode",
+        "planLogPath",
+        "thinkingMode",
+        "activeSkill",
+        "taskMode",
+        "loadedSkills",
+        "mcpFamilies",
+        "startupDiagnostics",
+        "extensionRevision",
+    ];
+    const ALL_KEYS: &[&str] = &[
+        "sessionId",
+        "turnCount",
+        "graphRecursionLimit",
+        "planMode",
+        "planLogPath",
+        "thinkingMode",
+        "activeSkill",
+        "taskMode",
+        "loadedSkills",
+        "mcpFamilies",
+        "startupDiagnostics",
+        "extensionRevision",
+        "projectId",
+        "registered",
+    ];
+    let required = if require_registration {
+        ALL_KEYS
+    } else {
+        BASE_KEYS
+    };
+    validate_data_keys(data, ALL_KEYS, required)?;
+    expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
+    expect_integer_range(&data["turnCount"], "data.turnCount", 0, u32::MAX as i64)?;
+    expect_integer_range(
+        &data["graphRecursionLimit"],
+        "data.graphRecursionLimit",
+        3,
+        u32::MAX as i64,
+    )?;
+    if !data["planMode"].is_boolean() {
+        return Err(ProtocolViolation::invalid(
+            "data.planMode must be a boolean",
+        ));
+    }
+    validate_nullable_string(data, "planLogPath", 8_192)?;
+    validate_enum(
+        &data["thinkingMode"],
+        "data.thinkingMode",
+        &["normal", "extended"],
+    )?;
+    validate_nullable_string(data, "activeSkill", 256)?;
+    validate_nullable_string(data, "taskMode", 256)?;
+    validate_string_array(&data["loadedSkills"], "data.loadedSkills", 512, 256)?;
+    validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
+    validate_string_array(
+        &data["startupDiagnostics"],
+        "data.startupDiagnostics",
+        512,
+        4_096,
+    )?;
+    expect_integer_range(
+        &data["extensionRevision"],
+        "data.extensionRevision",
+        0,
+        u32::MAX as i64,
+    )?;
+    if let Some(project_id) = data.get("projectId") {
+        expect_bounded_string(project_id, "data.projectId", 256)?;
+    }
+    if let Some(registered) = data.get("registered") {
+        if !registered.is_boolean() {
+            return Err(ProtocolViolation::invalid(
+                "data.registered must be a boolean",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolViolation> {
     let data = expect_object(value, "data")?;
     validate_safe_object(data, "data")?;
@@ -929,63 +1076,23 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
             validate_string_array(&data["mcpDiagnostics"], "data.mcpDiagnostics", 512, 4_096)?;
         }
-        "session.create" => {
-            const KEYS: &[&str] = &[
-                "sessionId",
-                "turnCount",
-                "graphRecursionLimit",
-                "planMode",
-                "planLogPath",
-                "thinkingMode",
-                "activeSkill",
-                "taskMode",
-                "loadedSkills",
-                "mcpFamilies",
-                "startupDiagnostics",
-                "extensionRevision",
-            ];
-            validate_exact_data_keys(data, KEYS)?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-            expect_integer_range(&data["turnCount"], "data.turnCount", 0, 0xffff_ffff)?;
-            expect_integer_range(
-                &data["graphRecursionLimit"],
-                "data.graphRecursionLimit",
-                3,
-                0xffff_ffff,
-            )?;
-            if !data["planMode"].is_boolean() {
-                return Err(ProtocolViolation::invalid(
-                    "data.planMode must be a boolean",
-                ));
-            }
-            validate_nullable_string(data, "planLogPath", 8_192)?;
-            let thinking_mode =
-                expect_non_empty_string(&data["thinkingMode"], "data.thinkingMode")?;
-            if !["normal", "extended"].contains(&thinking_mode) {
-                return Err(ProtocolViolation::invalid(
-                    "data.thinkingMode contains an unknown enum value",
-                ));
-            }
-            validate_nullable_string(data, "activeSkill", 256)?;
-            validate_nullable_string(data, "taskMode", 256)?;
-            validate_string_array(&data["loadedSkills"], "data.loadedSkills", 512, 256)?;
-            validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
-            validate_string_array(
-                &data["startupDiagnostics"],
-                "data.startupDiagnostics",
-                512,
-                4_096,
-            )?;
-            expect_integer_range(
-                &data["extensionRevision"],
-                "data.extensionRevision",
-                0,
-                0xffff_ffff,
-            )?;
-        }
+        "session.create" => validate_session_snapshot(data, false)?,
+        "session.select" => validate_session_snapshot(data, true)?,
         "session.turn" => {
-            validate_exact_data_keys(
+            validate_data_keys(
                 data,
+                &[
+                    "sessionId",
+                    "turnId",
+                    "text",
+                    "validationErrors",
+                    "toolSummaries",
+                    "responseKind",
+                    "streamKind",
+                    "chunkCount",
+                    "registrationStatus",
+                    "registrationIssue",
+                ],
                 &[
                     "sessionId",
                     "turnId",
@@ -1041,6 +1148,219 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                         )?;
                     }
                 }
+            }
+            if let Some(value) = data.get("responseKind") {
+                validate_enum(value, "data.responseKind", &["answer", "command"])?;
+            }
+            if let Some(value) = data.get("streamKind") {
+                validate_enum(value, "data.streamKind", &["post_finalized", "final_only"])?;
+            }
+            if let Some(value) = data.get("chunkCount") {
+                expect_integer_range(value, "data.chunkCount", 0, 128)?;
+            }
+            if let Some(value) = data.get("registrationStatus") {
+                validate_enum(
+                    value,
+                    "data.registrationStatus",
+                    &["registered", "pending", "not_required"],
+                )?;
+            }
+            if let Some(value) = data.get("registrationIssue") {
+                if !value.is_null() {
+                    expect_bounded_string(value, "data.registrationIssue", 4_096)?;
+                }
+            }
+        }
+        "project.list" => {
+            validate_exact_data_keys(
+                data,
+                &[
+                    "status",
+                    "issue",
+                    "projects",
+                    "selectedProjectId",
+                    "selectedSessionId",
+                ],
+            )?;
+            validate_enum(&data["status"], "data.status", &["ready", "unavailable"])?;
+            validate_nullable_string(data, "issue", 4_096)?;
+            validate_nullable_string(data, "selectedProjectId", 256)?;
+            validate_nullable_string(data, "selectedSessionId", 32)?;
+            let projects = data["projects"]
+                .as_array()
+                .ok_or_else(|| ProtocolViolation::invalid("data.projects must be an array"))?;
+            if projects.len() > 50 {
+                return Err(ProtocolViolation::invalid(
+                    "data.projects contains too many items",
+                ));
+            }
+            for (index, project) in projects.iter().enumerate() {
+                let project = expect_object(project, &format!("data.projects[{index}]"))?;
+                validate_exact_data_keys(project, &["projectId", "name", "sessionCount"])?;
+                expect_bounded_string(
+                    &project["projectId"],
+                    &format!("data.projects[{index}].projectId"),
+                    256,
+                )?;
+                expect_bounded_string(
+                    &project["name"],
+                    &format!("data.projects[{index}].name"),
+                    256,
+                )?;
+                expect_integer_range(
+                    &project["sessionCount"],
+                    &format!("data.projects[{index}].sessionCount"),
+                    0,
+                    u32::MAX as i64,
+                )?;
+            }
+        }
+        "session.list" => {
+            validate_exact_data_keys(
+                data,
+                &[
+                    "projectId",
+                    "status",
+                    "issue",
+                    "items",
+                    "total",
+                    "offset",
+                    "limit",
+                    "hasMore",
+                ],
+            )?;
+            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
+            validate_enum(&data["status"], "data.status", &["ready", "unavailable"])?;
+            validate_nullable_string(data, "issue", 4_096)?;
+            let items = data["items"]
+                .as_array()
+                .ok_or_else(|| ProtocolViolation::invalid("data.items must be an array"))?;
+            if items.len() > 50 {
+                return Err(ProtocolViolation::invalid(
+                    "data.items contains too many items",
+                ));
+            }
+            for (index, item) in items.iter().enumerate() {
+                let item = expect_object(item, &format!("data.items[{index}]"))?;
+                validate_exact_data_keys(
+                    item,
+                    &[
+                        "sessionId",
+                        "title",
+                        "turnCount",
+                        "updatedAt",
+                        "status",
+                        "issue",
+                    ],
+                )?;
+                expect_bounded_string(
+                    &item["sessionId"],
+                    &format!("data.items[{index}].sessionId"),
+                    32,
+                )?;
+                expect_bounded_string(&item["title"], &format!("data.items[{index}].title"), 256)?;
+                expect_integer_range(
+                    &item["turnCount"],
+                    &format!("data.items[{index}].turnCount"),
+                    0,
+                    u32::MAX as i64,
+                )?;
+                if !item["updatedAt"].is_null() {
+                    expect_bounded_string(
+                        &item["updatedAt"],
+                        &format!("data.items[{index}].updatedAt"),
+                        64,
+                    )?;
+                }
+                validate_enum(
+                    &item["status"],
+                    &format!("data.items[{index}].status"),
+                    &["ready", "degraded", "unavailable"],
+                )?;
+                if !item["issue"].is_null() {
+                    expect_bounded_string(
+                        &item["issue"],
+                        &format!("data.items[{index}].issue"),
+                        4_096,
+                    )?;
+                }
+            }
+            for field in ["total", "offset"] {
+                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
+            }
+            expect_integer_range(&data["limit"], "data.limit", 1, 50)?;
+            if !data["hasMore"].is_boolean() {
+                return Err(ProtocolViolation::invalid("data.hasMore must be a boolean"));
+            }
+        }
+        "session.retry_registration" => {
+            validate_exact_data_keys(data, &["projectId", "sessionId", "status", "issue"])?;
+            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
+            validate_enum(&data["status"], "data.status", &["registered", "pending"])?;
+            validate_nullable_string(data, "issue", 4_096)?;
+        }
+        "session.transcript" => {
+            validate_exact_data_keys(
+                data,
+                &[
+                    "projectId",
+                    "sessionId",
+                    "status",
+                    "issue",
+                    "items",
+                    "total",
+                    "offset",
+                    "limit",
+                    "hasMore",
+                ],
+            )?;
+            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
+            validate_enum(
+                &data["status"],
+                "data.status",
+                &["ready", "degraded", "unavailable"],
+            )?;
+            validate_nullable_string(data, "issue", 4_096)?;
+            let items = data["items"]
+                .as_array()
+                .ok_or_else(|| ProtocolViolation::invalid("data.items must be an array"))?;
+            if items.len() > 20 {
+                return Err(ProtocolViolation::invalid(
+                    "data.items contains too many items",
+                ));
+            }
+            for (index, item) in items.iter().enumerate() {
+                let item = expect_object(item, &format!("data.items[{index}]"))?;
+                validate_exact_data_keys(
+                    item,
+                    &["turnNumber", "timestamp", "userText", "assistantText"],
+                )?;
+                expect_integer_range(
+                    &item["turnNumber"],
+                    &format!("data.items[{index}].turnNumber"),
+                    1,
+                    u32::MAX as i64,
+                )?;
+                for (field, max_bytes) in [
+                    ("timestamp", 64),
+                    ("userText", 32_768),
+                    ("assistantText", 32_768),
+                ] {
+                    expect_bounded_string(
+                        &item[field],
+                        &format!("data.items[{index}].{field}"),
+                        max_bytes,
+                    )?;
+                }
+            }
+            for field in ["total", "offset"] {
+                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
+            }
+            expect_integer_range(&data["limit"], "data.limit", 1, 20)?;
+            if !data["hasMore"].is_boolean() {
+                return Err(ProtocolViolation::invalid("data.hasMore must be a boolean"));
             }
         }
         "extensions.preview" => {
@@ -1743,13 +2063,14 @@ mod tests {
 
                 let mut missing = data.clone();
                 missing.remove(field);
-                assert!(
+                assert_eq!(
                     validate_result_trace(
                         method,
                         Value::Object(params.clone()),
                         Value::Object(missing),
                     )
-                    .is_err(),
+                    .is_ok(),
+                    rule["required"] == false,
                     "{method}.{field} missing"
                 );
 

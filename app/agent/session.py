@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from langchain_core.messages import SystemMessage
@@ -42,7 +43,9 @@ from agent.tools.access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
 from agent.turns.journal import TurnJournal
-from agent.turns.memory import assemble_prompt_history
+from agent.turns.journal import merge_restored_turns
+from agent.turns.memory import TurnRecord, assemble_prompt_history
+from agent.turns.plan_log import PlanLog
 from agent.paths import find_app_root
 
 # The base tool inventory, its selection policy, and the base workflow are
@@ -87,6 +90,8 @@ class ChatSession:
         loaded_skills: list[SkillMetadata] | None = None,
         running_extension_revision: int = 0,
         extension_startup_diagnostics: tuple[str, ...] = (),
+        session_id: str | None = None,
+        restored_turns: list[TurnRecord] | None = None,
     ):
         self.config = config
         self.thinking_mode = "normal"
@@ -108,13 +113,22 @@ class ChatSession:
             extension_startup_diagnostics
         )
         self.system_prompt_message = SystemMessage(content=system_prompt)
-        self.session_id = uuid.uuid4().hex
+        if restored_turns and session_id is None:
+            raise ValueError("session_id is required when restoring turns")
+        self.session_id = session_id or uuid.uuid4().hex
+        try:
+            parsed_session_id = uuid.UUID(hex=self.session_id)
+        except ValueError as exc:
+            raise ValueError("session_id must be canonical UUIDv4 hex") from exc
+        if parsed_session_id.version != 4 or parsed_session_id.hex != self.session_id:
+            raise ValueError("session_id must be canonical UUIDv4 hex")
         self.history_store = history_store or get_chat_history_store(config)
         self._turn_journal = TurnJournal(
             config=config,
             session_id=self.session_id,
             history_store=self.history_store,
             app_root_resolver=lambda: find_app_root(),
+            restored_turns=restored_turns,
         )
         self._citation_policy = CitationSessionPolicy(config)
         self.citation_workflow_tool = self._citation_policy.workflow_tool
@@ -140,6 +154,14 @@ class ChatSession:
 
         self._progress_cb = progress_cb
         self._turn_execution_lock = asyncio.Lock()
+        self._final_text_validator: Callable[[str, list[str]], None] | None = None
+
+    def _set_final_text_validator(
+        self,
+        validator: Callable[[str, list[str]], None],
+    ) -> None:
+        """Install a desktop-only pre-persistence final-text boundary."""
+        self._final_text_validator = validator
 
     @property
     def recent_turns(self) -> list:
@@ -344,6 +366,8 @@ class ChatSession:
             for action, _status in completed_citation_calls(new_messages)
         )
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
+        if self._final_text_validator is not None:
+            self._final_text_validator(final_text, errors)
         log_citation_save_metrics(
             save_metrics,
             save_call_observed=save_call_observed,
@@ -369,6 +393,10 @@ class ChatSession:
     async def enter_plan_mode(self) -> Path:
         """Enable plan mode for newly created turns."""
         return self._turn_journal.enter_plan_mode()
+
+    async def resume_plan_mode(self, log_path: str | Path) -> Path:
+        """Resume an in-process plan log after a conversation switch."""
+        return self._turn_journal.resume_plan_mode(log_path)
 
     async def exit_plan_mode(self) -> None:
         """Disable plan mode without mutating prompt-visible turns."""
@@ -622,6 +650,8 @@ class ChatSession:
         history_store: ChatHistoryStore | None = None,
         load_mcp: bool = True,
         progress_cb=None,
+        session_id: str | None = None,
+        restored_turns: list[TurnRecord] | None = None,
     ) -> "ChatSession":
         """Async factory that loads MCP tools (if enabled) before graph construction.
 
@@ -644,4 +674,47 @@ class ChatSession:
             extension_startup_diagnostics=(
                 startup.extension_startup_diagnostics
             ),
+            session_id=session_id,
+            restored_turns=restored_turns,
+        )
+
+    @classmethod
+    async def restore(
+        cls,
+        config: AgentConfig,
+        *,
+        session_id: str,
+        system_prompt: str = SYSTEM_PROMPT,
+        history_store: ChatHistoryStore | None = None,
+        load_mcp: bool = True,
+        progress_cb=None,
+    ) -> "ChatSession":
+        """Restore one cataloged session from unchanged Chroma and plan logs."""
+        try:
+            parsed_session_id = uuid.UUID(hex=session_id)
+        except ValueError as exc:
+            raise ValueError("session_id must be canonical UUIDv4 hex") from exc
+        if parsed_session_id.version != 4 or parsed_session_id.hex != session_id:
+            raise ValueError("session_id must be canonical UUIDv4 hex")
+
+        resolved_store = history_store or get_chat_history_store(config)
+        history_turns = await asyncio.to_thread(
+            resolved_store.read_session_turns,
+            session_id,
+        )
+        plan_log = PlanLog(
+            config,
+            session_id=session_id,
+            app_root_resolver=lambda: find_app_root(),
+        )
+        plan_turns = await asyncio.to_thread(plan_log.read_direct_answer_turns)
+        restored_turns = merge_restored_turns(history_turns, plan_turns)
+        return await cls.create(
+            config,
+            system_prompt=system_prompt,
+            history_store=resolved_store,
+            load_mcp=load_mcp,
+            progress_cb=progress_cb,
+            session_id=session_id,
+            restored_turns=restored_turns,
         )

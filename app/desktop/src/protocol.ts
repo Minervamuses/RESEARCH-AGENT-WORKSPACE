@@ -5,7 +5,12 @@ export const MAX_ERROR_MESSAGE_BYTES = 4096;
 
 export const PROTOCOL_METHODS = [
   "runtime.diagnostics",
+  "project.list",
   "session.create",
+  "session.list",
+  "session.select",
+  "session.retry_registration",
+  "session.transcript",
   "session.status",
   "session.turn",
   "session.set_mode",
@@ -50,6 +55,7 @@ export const REQUEST_EVENTS = [
   "writing.file_completed",
   "ingest.completed",
   "ingest.failed",
+  "answer.chunk",
 ] as const;
 
 export const PROCESS_EVENTS = [
@@ -79,6 +85,9 @@ export const PROTOCOL_ERROR_CODES = [
   "EXTENSION_PREVIEW_FAILED",
   "EXTENSION_APPLY_FAILED",
   "APPROVAL_DENIED",
+  "CONVERSATION_FLUSH_FAILED",
+  "PROVIDER_RATE_LIMITED",
+  "PROVIDER_REQUEST_FAILED",
   "SHUTDOWN_FLUSH_FAILED",
   "INTERNAL_ERROR",
 ] as const;
@@ -141,6 +150,13 @@ export const FORBIDDEN_DATA_KEY_FRAGMENTS = [
 ] as const;
 
 export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
+  "answer.chunk": {
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    turnId: { type: "string", required: true, maxBytes: 64 },
+    chunkIndex: { type: "integer", required: true, minimum: 0, maximum: 127 },
+    streamKind: { type: "string", required: true, enum: ["post_finalized"] },
+    text: { type: "string", required: true, maxBytes: 16_384 },
+  },
   "approval.required": {
     approvalId: { type: "string", required: true, maxBytes: 256 },
     parentRequestId: { type: "requestId", required: true },
@@ -258,6 +274,8 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
       minimum: 0,
       maximum: 0xffff_ffff,
     },
+    projectId: { type: "string", required: false, maxBytes: 256 },
+    registered: { type: "boolean", required: false },
   },
   "session.turn": {
     sessionId: { type: "string", required: true, maxBytes: 256 },
@@ -280,6 +298,96 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
         candidateId: { type: "string", required: false, maxBytes: 256 },
       },
     },
+    responseKind: { type: "string", required: false, enum: ["answer", "command"] },
+    streamKind: { type: "string", required: false, enum: ["post_finalized", "final_only"] },
+    chunkCount: { type: "integer", required: false, minimum: 0, maximum: 128 },
+    registrationStatus: {
+      type: "string",
+      required: false,
+      enum: ["registered", "pending", "not_required"],
+    },
+    registrationIssue: { type: "nullableString", required: false, maxBytes: 4_096 },
+  },
+  "project.list": {
+    status: { type: "string", required: true, enum: ["ready", "unavailable"] },
+    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
+    projects: {
+      type: "objectArray",
+      required: true,
+      maxItems: 50,
+      items: {
+        projectId: { type: "string", required: true, maxBytes: 256 },
+        name: { type: "string", required: true, maxBytes: 256 },
+        sessionCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+      },
+    },
+    selectedProjectId: { type: "nullableString", required: true, maxBytes: 256 },
+    selectedSessionId: { type: "nullableString", required: true, maxBytes: 32 },
+  },
+  "session.list": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    status: { type: "string", required: true, enum: ["ready", "unavailable"] },
+    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
+    items: {
+      type: "objectArray",
+      required: true,
+      maxItems: 50,
+      items: {
+        sessionId: { type: "string", required: true, maxBytes: 32 },
+        title: { type: "string", required: true, maxBytes: 256 },
+        turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+        updatedAt: { type: "nullableString", required: true, maxBytes: 64 },
+        status: { type: "string", required: true, enum: ["ready", "degraded", "unavailable"] },
+        issue: { type: "nullableString", required: true, maxBytes: 4_096 },
+      },
+    },
+    total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    offset: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    limit: { type: "integer", required: true, minimum: 1, maximum: 50 },
+    hasMore: { type: "boolean", required: true },
+  },
+  "session.select": {
+    sessionId: { type: "string", required: true, maxBytes: 256 },
+    turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    graphRecursionLimit: { type: "integer", required: true, minimum: 3, maximum: 0xffff_ffff },
+    planMode: { type: "boolean", required: true },
+    planLogPath: { type: "nullableString", required: true, maxBytes: 8_192 },
+    thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
+    activeSkill: { type: "nullableString", required: true, maxBytes: 256 },
+    taskMode: { type: "nullableString", required: true, maxBytes: 256 },
+    loadedSkills: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
+    mcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
+    startupDiagnostics: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 4_096 },
+    extensionRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    registered: { type: "boolean", required: true },
+  },
+  "session.retry_registration": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    status: { type: "string", required: true, enum: ["registered", "pending"] },
+    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
+  },
+  "session.transcript": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    status: { type: "string", required: true, enum: ["ready", "degraded", "unavailable"] },
+    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
+    items: {
+      type: "objectArray",
+      required: true,
+      maxItems: 20,
+      items: {
+        turnNumber: { type: "integer", required: true, minimum: 1, maximum: 0xffff_ffff },
+        timestamp: { type: "string", required: true, maxBytes: 64 },
+        userText: { type: "string", required: true, maxBytes: 32_768 },
+        assistantText: { type: "string", required: true, maxBytes: 32_768 },
+      },
+    },
+    total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    offset: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    limit: { type: "integer", required: true, minimum: 1, maximum: 20 },
+    hasMore: { type: "boolean", required: true },
   },
   "extensions.preview": {
     previewId: { type: "string", required: true, maxBytes: 256 },
@@ -306,6 +414,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
 
 export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "runtime.diagnostics": {},
+  "project.list": {},
   "session.create": {
     loadMcp: { type: "boolean", required: false },
     graphRecursionLimit: {
@@ -314,6 +423,26 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
       minimum: 3,
       maximum: 0xffff_ffff,
     },
+    projectId: { type: "string", required: false, maxBytes: 256 },
+  },
+  "session.list": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    offset: { type: "integer", required: false, minimum: 0, maximum: 0xffff_ffff },
+    limit: { type: "integer", required: false, minimum: 1, maximum: 50 },
+  },
+  "session.select": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+  },
+  "session.retry_registration": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+  },
+  "session.transcript": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    offset: { type: "integer", required: false, minimum: 0, maximum: 0xffff_ffff },
+    limit: { type: "integer", required: false, minimum: 1, maximum: 20 },
   },
   "session.status": {},
   "session.turn": {
@@ -415,6 +544,11 @@ export interface TurnCompletedDto {
   text: string;
   validationErrors: string[];
   toolSummaries: ToolSummaryDto[];
+  responseKind?: "answer" | "command";
+  streamKind?: "post_finalized" | "final_only";
+  chunkCount?: number;
+  registrationStatus?: "registered" | "pending" | "not_required";
+  registrationIssue?: string | null;
 }
 
 export interface SessionCreatedDto {
@@ -430,6 +564,81 @@ export interface SessionCreatedDto {
   mcpFamilies: string[];
   startupDiagnostics: string[];
   extensionRevision: number;
+  projectId?: string;
+  registered?: boolean;
+}
+
+export interface ProjectSummaryDto {
+  projectId: string;
+  name: string;
+  sessionCount: number;
+}
+
+export interface ProjectListDto {
+  status: "ready" | "unavailable";
+  issue: string | null;
+  projects: ProjectSummaryDto[];
+  selectedProjectId: string | null;
+  selectedSessionId: string | null;
+}
+
+export interface SessionSummaryDto {
+  sessionId: string;
+  title: string;
+  turnCount: number;
+  updatedAt: string | null;
+  status: "ready" | "degraded" | "unavailable";
+  issue: string | null;
+}
+
+export interface SessionListDto {
+  projectId: string;
+  status: "ready" | "unavailable";
+  issue: string | null;
+  items: SessionSummaryDto[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
+export interface SessionSelectedDto extends SessionCreatedDto {
+  projectId: string;
+  registered: boolean;
+}
+
+export interface RegistrationRetryDto {
+  projectId: string;
+  sessionId: string;
+  status: "registered" | "pending";
+  issue: string | null;
+}
+
+export interface TranscriptTurnDto {
+  turnNumber: number;
+  timestamp: string;
+  userText: string;
+  assistantText: string;
+}
+
+export interface SessionTranscriptDto {
+  projectId: string;
+  sessionId: string;
+  status: "ready" | "degraded" | "unavailable";
+  issue: string | null;
+  items: TranscriptTurnDto[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
+export interface AnswerChunkDto {
+  sessionId: string;
+  turnId: string;
+  chunkIndex: number;
+  streamKind: "post_finalized";
+  text: string;
 }
 
 export interface RuntimeDiagnosticsDto {

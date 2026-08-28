@@ -379,15 +379,27 @@ async def run_backend(
     original_cwd: Path,
 ) -> int:
     """Run one backend process after the runtime and cwd gates pass."""
-    from agent.desktop.service import DesktopService
-
     reader, transport = await open_stdin_reader(protocol_stdin)
     try:
-        service = DesktopService(original_cwd=original_cwd)
+        service = _build_runtime_service(original_cwd)
         server = DesktopServer(service, ProtocolWriter(protocol_stdout))
         return await server.run(reader)
     finally:
         transport.close()
+
+
+def _build_runtime_service(original_cwd: Path) -> Any:
+    """Select the exact opt-in isolated fixture or normal production service."""
+    if os.environ.get("RESEARCH_AGENT_DESKTOP_FIXTURE") == "phase02":
+        from agent.desktop.fixture_session import build_phase02_fixture_service
+
+        return build_phase02_fixture_service(
+            original_cwd=original_cwd,
+            environ=os.environ,
+        )
+    from agent.desktop.service import DesktopService
+
+    return DesktopService(original_cwd=original_cwd)
 
 
 def write_bootstrap_error(

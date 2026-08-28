@@ -467,8 +467,14 @@ export interface BackendClient {
   start(): Promise<BackendSnapshot>;
   snapshot(): Promise<BackendSnapshot>;
   request(method: ProtocolMethod, params: JsonObject): Promise<JsonObject>;
+  requestTracked(method: ProtocolMethod, params: JsonObject): TrackedBackendRequest;
   shutdown(): Promise<BackendSnapshot>;
   restart(): Promise<BackendSnapshot>;
+}
+
+export interface TrackedBackendRequest {
+  requestId: string;
+  result: Promise<JsonObject>;
 }
 
 export class BackendClientError extends Error {
@@ -519,38 +525,47 @@ export function createBackendClient(options: {
     return snapshot();
   }
 
+  function requestTracked(method: ProtocolMethod, params: JsonObject): TrackedBackendRequest {
+    let request: RequestEnvelope;
+    try {
+      request = buildProtocolRequest(method, params, idFactory);
+    } catch (error) {
+      throw asClientError(error, "protocol");
+    }
+
+    const result = Promise.resolve()
+      .then(async () => {
+        try {
+          return await options.invoke<unknown>("backend_request", { request });
+        } catch (error) {
+          throw asClientError(error, "transport");
+        }
+      })
+      .then((raw) => {
+        try {
+          const message = parseProtocolMessage(raw);
+          if (message.messageType !== "result" || message.requestId !== request.requestId) {
+            throw new Error("Backend returned an uncorrelated response.");
+          }
+          if (!message.ok) {
+            throw new BackendClientError(normalizeUiError(message.error, "business"));
+          }
+          validateResultData(method, message.data);
+          return message.data;
+        } catch (error) {
+          throw asClientError(error, "protocol");
+        }
+      });
+    return { requestId: request.requestId, result };
+  }
+
   return {
     start: () => lifecycleCommand("backend_start"),
     snapshot,
     async request(method, params) {
-      let request: RequestEnvelope;
-      try {
-        request = buildProtocolRequest(method, params, idFactory);
-      } catch (error) {
-        throw asClientError(error, "protocol");
-      }
-
-      let raw: unknown;
-      try {
-        raw = await options.invoke<unknown>("backend_request", { request });
-      } catch (error) {
-        throw asClientError(error, "transport");
-      }
-
-      try {
-        const message = parseProtocolMessage(raw);
-        if (message.messageType !== "result" || message.requestId !== request.requestId) {
-          throw new Error("Backend returned an uncorrelated response.");
-        }
-        if (!message.ok) {
-          throw new BackendClientError(normalizeUiError(message.error, "business"));
-        }
-        validateResultData(method, message.data);
-        return message.data;
-      } catch (error) {
-        throw asClientError(error, "protocol");
-      }
+      return requestTracked(method, params).result;
     },
+    requestTracked,
     shutdown,
     restart: () => lifecycleCommand("backend_restart"),
   };

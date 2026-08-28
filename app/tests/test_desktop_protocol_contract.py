@@ -31,7 +31,12 @@ def test_protocol_manifest_safety_invariants() -> None:
     )
     assert set(CONTRACT["resultDataSchemas"]) == {
         "runtime.diagnostics",
+        "project.list",
         "session.create",
+        "session.list",
+        "session.select",
+        "session.retry_registration",
+        "session.transcript",
         "session.turn",
         "extensions.preview",
     }

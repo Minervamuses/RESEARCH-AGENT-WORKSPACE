@@ -8,6 +8,11 @@ from conftest import FakeHistoryStore, make_astream_graph, tool_then_answer_upda
 
 from agent.config import AgentConfig
 from agent.turns.memory import TurnRecord
+from agent.turns.plan_log import (
+    MAX_PLAN_RESTORE_FILES,
+    PlanLog,
+    PlanLogRestoreError,
+)
 from agent.session import ChatSession
 
 
@@ -84,6 +89,22 @@ def test_exit_plan_keeps_recent_turns_visible(make_session):
     prompt_contents = [message.content for message in session._prompt_history()]
     assert "plan q1" in prompt_contents
     assert "plan q2" in prompt_contents
+
+
+def test_resume_plan_mode_reuses_the_same_validated_log(make_session):
+    session, _store, _log_dir = make_session(window=10)
+    original_path = asyncio.run(session.enter_plan_mode())
+    asyncio.run(session.turn("first plan turn"))
+    asyncio.run(session.exit_plan_mode())
+
+    resumed_path = asyncio.run(session.resume_plan_mode(original_path))
+    asyncio.run(session.turn("second plan turn"))
+
+    assert resumed_path == original_path
+    assert session.plan_log_path == original_path
+    content = original_path.read_text(encoding="utf-8")
+    assert "first plan turn" in content
+    assert "second plan turn" in content
 
 
 def test_no_chroma_leak_after_exit(make_session):
@@ -227,3 +248,135 @@ def test_unknown_persist_target_raises(make_session):
 
     with pytest.raises(ValueError, match="unknown persist_target"):
         asyncio.run(session._turn_store.store_turn(turn))
+
+
+def test_direct_answer_reader_round_trips_existing_plan_format(tmp_path):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    block = plan_log.render_block(
+        turn_id=1,
+        timestamp="2026-08-28T01:00:00+00:00",
+        user_input="direct question",
+        answer="direct answer\n\n```python\nprint('safe')\n```",
+        new_messages=[],
+        tool_calls=[],
+    )
+    plan_log.append_block(str(path), block)
+
+    turns = plan_log.read_direct_answer_turns()
+
+    assert len(turns) == 1
+    assert turns[0] == TurnRecord(
+        user_input="direct question",
+        assistant_output="direct answer\n\n```python\nprint('safe')\n```",
+        turn_id=1,
+        timestamp="2026-08-28T01:00:00+00:00",
+        persist_target="none",
+    )
+
+
+def test_direct_answer_reader_rejects_tool_content_without_leaking_it(tmp_path):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    secret = "private tool payload"
+    plan_log.append_block(
+        str(path),
+        "## Turn 1 - 2026-08-28T01:00:00+00:00\n\n"
+        "**User:**\n\nquestion\n\n"
+        "### Tool: rag_search\n\n```\n"
+        f"{secret}\n"
+        "```\n\n**Assistant:**\n\nanswer\n\n---\n",
+    )
+
+    with pytest.raises(PlanLogRestoreError) as captured:
+        plan_log.read_direct_answer_turns()
+
+    assert secret not in str(captured.value)
+
+
+def test_direct_answer_reader_rejects_ambiguous_markers(tmp_path):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    plan_log.append_block(
+        str(path),
+        "## Turn 1 - 2026-08-28T01:00:00+00:00\n\n"
+        "**User:**\n\nquestion\n\n"
+        "**Assistant:**\n\nanswer with a marker\n"
+        "**Assistant:**\n\nsecond answer\n\n---\n",
+    )
+
+    with pytest.raises(PlanLogRestoreError, match="marker is ambiguous"):
+        plan_log.read_direct_answer_turns()
+
+
+def test_direct_answer_reader_rejects_partial_turn(tmp_path):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    plan_log.append_block(
+        str(path),
+        "## Turn 1 - 2026-08-28T01:00:00+00:00\n\n"
+        "**User:**\n\nquestion without an answer",
+    )
+
+    with pytest.raises(PlanLogRestoreError):
+        plan_log.read_direct_answer_turns()
+
+
+def test_direct_answer_reader_rejects_oversize_file(tmp_path):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    plan_log.append_block(str(path), "x" * (1024 * 1024))
+
+    with pytest.raises(PlanLogRestoreError, match="file limit"):
+        plan_log.read_direct_answer_turns()
+
+
+def test_direct_answer_reader_rejects_too_many_matching_files(
+    tmp_path,
+    monkeypatch,
+):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    monkeypatch.setattr(
+        "agent.turns.plan_log.Path.glob",
+        lambda _self, _pattern: iter([path] * (MAX_PLAN_RESTORE_FILES + 1)),
+    )
+
+    with pytest.raises(PlanLogRestoreError, match="file-count limit"):
+        plan_log.read_direct_answer_turns()

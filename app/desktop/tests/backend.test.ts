@@ -189,6 +189,29 @@ test("backend client correlates results and applies method-specific success vali
   );
 });
 
+test("tracked request exposes its request ID before transport invocation", async () => {
+  let invoked = false;
+  const client = createBackendClient({
+    idFactory: () => requestId,
+    invoke: async <T>() => {
+      invoked = true;
+      return {
+        protocolVersion: 1,
+        messageType: "result",
+        requestId,
+        ok: true,
+        data: diagnostics,
+      } as T;
+    },
+  });
+
+  const tracked = client.requestTracked("runtime.diagnostics", {});
+  assert.equal(tracked.requestId, requestId);
+  assert.equal(invoked, false);
+  assert.equal((await tracked.result).backendVersion, "0.1.0");
+  assert.equal(invoked, true);
+});
+
 test("lifecycle commands validate start/restart snapshots and snapshot after shutdown", async () => {
   const restartedSnapshot = { ...readySnapshot, generation: 2 };
   const shutdownSnapshot: BackendSnapshot = {

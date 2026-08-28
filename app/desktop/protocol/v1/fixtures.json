@@ -329,6 +329,105 @@
       }
     },
     {
+      "name": "project-list-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000070",
+        "method": "project.list",
+        "params": {}
+      }
+    },
+    {
+      "name": "session-list-bounded-page",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000071",
+        "method": "session.list",
+        "params": {"projectId": "local", "offset": 0, "limit": 50}
+      }
+    },
+    {
+      "name": "session-list-rejects-oversized-page",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000072",
+        "method": "session.list",
+        "params": {"projectId": "local", "limit": 51}
+      }
+    },
+    {
+      "name": "session-select-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000073",
+        "method": "session.select",
+        "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+      }
+    },
+    {
+      "name": "session-transcript-bounded-page",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000074",
+        "method": "session.transcript",
+        "params": {
+          "projectId": "local",
+          "sessionId": "0123456789abcdef0123456789abcdef",
+          "offset": 0,
+          "limit": 20
+        }
+      }
+    },
+    {
+      "name": "answer-chunk-safe-dto",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000075",
+        "sequence": 1,
+        "event": "answer.chunk",
+        "data": {
+          "sessionId": "0123456789abcdef0123456789abcdef",
+          "turnId": "turn-1",
+          "chunkIndex": 0,
+          "streamKind": "post_finalized",
+          "text": "安全答案"
+        }
+      }
+    },
+    {
+      "name": "answer-chunk-rejects-provider-token",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000076",
+        "sequence": 1,
+        "event": "answer.chunk",
+        "data": {
+          "sessionId": "0123456789abcdef0123456789abcdef",
+          "turnId": "turn-1",
+          "chunkIndex": 0,
+          "streamKind": "post_finalized",
+          "text": "安全答案",
+          "providerToken": "must not cross"
+        }
+      }
+    },
+    {
       "name": "session-create-rejects-arbitrary-config",
       "valid": false,
       "errorCode": "PROTOCOL_INVALID",
@@ -743,6 +842,178 @@
           "sequence": 1,
           "event": "request.progress",
           "data": {"stage": "unknown"}
+        }
+      ]
+    },
+    {
+      "name": "conversation-protocol-safe-dtos",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000077",
+          "method": "project.list",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000077",
+          "ok": true,
+          "data": {
+            "status": "ready",
+            "issue": null,
+            "projects": [{"projectId": "local", "name": "Local research", "sessionCount": 1}],
+            "selectedProjectId": "local",
+            "selectedSessionId": "0123456789abcdef0123456789abcdef"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000078",
+          "method": "session.list",
+          "params": {"projectId": "local", "offset": 0, "limit": 50}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000078",
+          "ok": true,
+          "data": {
+            "projectId": "local",
+            "status": "ready",
+            "issue": null,
+            "items": [{
+              "sessionId": "0123456789abcdef0123456789abcdef",
+              "title": "研究摘要",
+              "turnCount": 1,
+              "updatedAt": "2026-08-28T00:00:00Z",
+              "status": "ready",
+              "issue": null
+            }],
+            "total": 1,
+            "offset": 0,
+            "limit": 50,
+            "hasMore": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000079",
+          "method": "session.select",
+          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000079",
+          "ok": true,
+          "data": {
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "turnCount": 1,
+            "graphRecursionLimit": 64,
+            "planMode": false,
+            "planLogPath": null,
+            "thinkingMode": "normal",
+            "activeSkill": null,
+            "taskMode": null,
+            "loadedSkills": [],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2,
+            "projectId": "local",
+            "registered": true
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000007a",
+          "method": "session.retry_registration",
+          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000007a",
+          "ok": true,
+          "data": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "status": "registered",
+            "issue": null
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000007b",
+          "method": "session.transcript",
+          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000007b",
+          "ok": true,
+          "data": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "status": "ready",
+            "issue": null,
+            "items": [{
+              "turnNumber": 1,
+              "timestamp": "2026-08-28T00:00:00Z",
+              "userText": "請摘要",
+              "assistantText": "完成。"
+            }],
+            "total": 1,
+            "offset": 0,
+            "limit": 20,
+            "hasMore": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000007c",
+          "method": "session.turn",
+          "params": {"text": "請摘要"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-00000000007c",
+          "sequence": 1,
+          "event": "answer.chunk",
+          "data": {
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "turnId": "turn-1",
+            "chunkIndex": 0,
+            "streamKind": "post_finalized",
+            "text": "完成。"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000007c",
+          "ok": true,
+          "data": {
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "turnId": "turn-1",
+            "text": "完成。",
+            "validationErrors": [],
+            "toolSummaries": [],
+            "responseKind": "answer",
+            "streamKind": "post_finalized",
+            "chunkCount": 1,
+            "registrationStatus": "registered",
+            "registrationIssue": null
+          }
         }
       ]
     },

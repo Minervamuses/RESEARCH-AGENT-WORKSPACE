@@ -24,6 +24,40 @@ logger = logging.getLogger(__name__)
 AppendBlock = Callable[[str, str], None]
 
 
+class TurnRestoreError(RuntimeError):
+    """Persisted turn sources cannot form one unambiguous conversation."""
+
+
+def merge_restored_turns(*sources: list[TurnRecord]) -> list[TurnRecord]:
+    """Merge persisted sources into one contiguous, non-persisting turn list."""
+    by_id: dict[int, TurnRecord] = {}
+    for source in sources:
+        for turn in source:
+            if type(turn.turn_id) is not int or turn.turn_id < 1:
+                raise TurnRestoreError("restored turn_id must be a positive integer")
+            if turn.turn_id in by_id:
+                raise TurnRestoreError(
+                    f"restored turn_id appears more than once: {turn.turn_id}"
+                )
+            if not isinstance(turn.user_input, str) or not turn.user_input:
+                raise TurnRestoreError("restored user input must not be empty")
+            if not isinstance(turn.assistant_output, str) or not turn.assistant_output:
+                raise TurnRestoreError("restored assistant output must not be empty")
+            if not isinstance(turn.timestamp, str) or not turn.timestamp:
+                raise TurnRestoreError("restored timestamp must not be empty")
+            by_id[turn.turn_id] = TurnRecord(
+                user_input=turn.user_input,
+                assistant_output=turn.assistant_output,
+                turn_id=turn.turn_id,
+                timestamp=turn.timestamp,
+                persist_target="none",
+            )
+    ordered_ids = sorted(by_id)
+    if ordered_ids and ordered_ids != list(range(1, ordered_ids[-1] + 1)):
+        raise TurnRestoreError("restored turn_ids must be contiguous from 1")
+    return [by_id[turn_id] for turn_id in ordered_ids]
+
+
 class TurnJournal:
     """Own recent-turn, plan-mode, and observable turn-log state."""
 
@@ -34,13 +68,18 @@ class TurnJournal:
         session_id: str,
         history_store,
         app_root_resolver: Callable[[], Path],
+        restored_turns: list[TurnRecord] | None = None,
     ) -> None:
-        self.recent_turns: list[TurnRecord] = []
+        restored = merge_restored_turns(list(restored_turns or []))
+        window = config.agent_recent_turns_window
+        self.recent_turns: list[TurnRecord] = (
+            restored[-window:] if window > 0 else []
+        )
         self.turn_logs: list[dict] = []
         self.last_tool_calls: list[dict] = []
         self.plan_mode = False
         self.plan_log_path: Path | None = None
-        self._turn_counter = 0
+        self._turn_counter = restored[-1].turn_id if restored else 0
 
         self._plan_log = PlanLog(
             config,
@@ -69,6 +108,12 @@ class TurnJournal:
                 self.plan_log_path = self._plan_log.new_log_file()
             return self.plan_log_path
         self.plan_log_path = self._plan_log.new_log_file()
+        self.plan_mode = True
+        return self.plan_log_path
+
+    def resume_plan_mode(self, log_path: str | Path) -> Path:
+        """Resume an existing plan log retained by the desktop process."""
+        self.plan_log_path = self._plan_log.resume_log_file(log_path)
         self.plan_mode = True
         return self.plan_log_path
 

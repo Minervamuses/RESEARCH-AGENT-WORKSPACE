@@ -15,7 +15,7 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,29 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
 from agent.config import AgentConfig, validate_graph_recursion_limit
-from agent.desktop.protocol import PROTOCOL_VERSION, ProtocolError
+from agent.cli.slash_commands import (
+    SlashCommandContext,
+    SlashCommandError,
+    SlashCommandRegistry,
+    build_default_registry,
+    execute_slash_command,
+    parse_slash_command,
+)
+from agent.desktop.catalog import (
+    CATALOG_MAX_SESSIONS,
+    DEFAULT_PROJECT_ID,
+    CatalogError,
+    CatalogMalformedError,
+    CatalogUnavailableError,
+    DesktopProjectCatalog,
+    is_canonical_session_id,
+)
+from agent.desktop.protocol import (
+    PROTOCOL_VERSION,
+    ProtocolError,
+    encode_message,
+    success_result,
+)
 from agent.extensions.manager import (
     ApplyReport,
     ExtensionManager,
@@ -33,10 +55,14 @@ from agent.extensions.manager import (
 )
 from agent.extensions.paths import resolve_extension_paths
 from agent.ingest import diff_folder, ingest_file, prune_folder
+from agent.history_rag.store import HistoryRestoreError, get_chat_history_store
 from agent.paths import find_app_root
 from agent.session import ChatSession
 from agent.skills import DEFAULT_SKILLS_DIR, load_skill_manifest
 from agent.turns.safety import content_text
+from agent.turns.journal import TurnRestoreError, merge_restored_turns
+from agent.turns.memory import TurnRecord
+from agent.turns.plan_log import PlanLog, PlanLogRestoreError
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.storage import resolve_output_dir
@@ -60,6 +86,15 @@ _KNOWLEDGE_MUTATIONS = {
     "knowledge.ingest_folder",
     "knowledge.prune_apply",
 }
+_DESKTOP_SLASH_COMMANDS = frozenset({"status"})
+_MAX_ANSWER_BYTES = 2_097_152
+_MAX_ANSWER_CHUNK_BYTES = 16_384
+_MAX_ANSWER_CHUNKS = 128
+_MAX_LOCAL_COMMAND_BYTES = 65_536
+_MAX_TRANSCRIPT_PAGE_BYTES = 1_048_576
+_MAX_CONTROL_SNAPSHOTS = CATALOG_MAX_SESSIONS
+_WIRE_BUDGET_REQUEST_ID = "00000000-0000-4000-8000-000000000000"
+_WIRE_BUDGET_TURN_ID = "0" * 32
 
 
 class DesktopServiceError(ProtocolError):
@@ -73,6 +108,15 @@ class _PrunePreview:
     digest: str
 
 
+@dataclass(frozen=True)
+class _ConversationControlSnapshot:
+    plan_mode: bool
+    plan_log_path: str | None
+    thinking_mode: str
+    active_skill: str | None
+    task_mode: str | None
+
+
 class DesktopService:
     """Own one backend lifecycle and adapt existing domain APIs to safe DTOs."""
 
@@ -84,6 +128,8 @@ class DesktopService:
         config: AgentConfig | None = None,
         extension_manager: ExtensionManager | None = None,
         session_factory: Callable[..., Any] | None = None,
+        slash_registry: SlashCommandRegistry | None = None,
+        project_catalog: DesktopProjectCatalog | None = None,
     ) -> None:
         self.original_cwd = (original_cwd or Path.cwd()).expanduser().resolve()
         self.environ = dict(os.environ if environ is None else environ)
@@ -92,7 +138,28 @@ class DesktopService:
         self.session: ChatSession | None = None
 
         self._session_factory = session_factory or ChatSession.create
+        self._slash_registry = slash_registry or build_default_registry()
         self._extension_manager = extension_manager or ExtensionManager(self.config)
+        self._catalog: DesktopProjectCatalog | None = project_catalog
+        self._catalog_issue: str | None = None
+        if self._catalog is None:
+            try:
+                self._catalog = DesktopProjectCatalog(self.config.persist_dir)
+            except (CatalogMalformedError, CatalogUnavailableError):
+                self._catalog_issue = "The local project catalog is unavailable."
+        catalog_projects = (
+            self._catalog.snapshot()["projects"] if self._catalog is not None else []
+        )
+        project_ids = [project["projectId"] for project in catalog_projects]
+        self._selected_project_id: str | None = (
+            DEFAULT_PROJECT_ID
+            if DEFAULT_PROJECT_ID in project_ids
+            else (project_ids[0] if project_ids else None)
+        )
+        self._session_registered = False
+        self._pending_registration: tuple[str, str] | None = None
+        self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
+        self._history_store = None
         self._load_mcp = False
         self._session_creating = False
         self._turn_active = False
@@ -115,7 +182,12 @@ class DesktopService:
         """Execute one allowlisted protocol method and return a safe DTO."""
         handlers: dict[str, Callable[[dict[str, Any], EventSink | None], Any]] = {
             "runtime.diagnostics": self._runtime_diagnostics,
+            "project.list": self._project_list,
             "session.create": self._session_create,
+            "session.list": self._session_list,
+            "session.select": self._session_select,
+            "session.retry_registration": self._session_retry_registration,
+            "session.transcript": self._session_transcript,
             "session.status": self._session_status,
             "session.turn": self._session_turn,
             "session.set_mode": self._session_set_mode,
@@ -196,6 +268,24 @@ class DesktopService:
                 "OPENROUTER_NOT_CONFIGURED",
                 "OpenRouter is not configured.",
             )
+        if method == "session.turn":
+            status_code = self._exception_http_status(exc)
+            if status_code == 429:
+                return DesktopServiceError(
+                    "PROVIDER_RATE_LIMITED",
+                    "The model provider is rate limited. Your draft was preserved.",
+                    retryable=True,
+                )
+            if status_code is not None or self._exception_chain_looks_provider_owned(exc):
+                retryable = status_code is None or status_code >= 500 or status_code in {
+                    408,
+                    409,
+                }
+                return DesktopServiceError(
+                    "PROVIDER_REQUEST_FAILED",
+                    "The model provider could not complete the turn.",
+                    retryable=retryable,
+                )
         if isinstance(exc, ManagementError):
             code = (
                 "EXTENSION_APPLY_FAILED"
@@ -294,6 +384,31 @@ class DesktopService:
             current = current.__cause__ or current.__context__
         return " | ".join(parts)
 
+    @staticmethod
+    def _exception_http_status(exc: BaseException) -> int | None:
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            for source in (current, getattr(current, "response", None)):
+                status = getattr(source, "status_code", None)
+                if type(status) is int and 400 <= status <= 599:
+                    return status
+            current = current.__cause__ or current.__context__
+        return None
+
+    @staticmethod
+    def _exception_chain_looks_provider_owned(exc: BaseException) -> bool:
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        prefixes = ("httpx", "openai", "langchain_openrouter")
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if type(current).__module__.startswith(prefixes):
+                return True
+            current = current.__cause__ or current.__context__
+        return False
+
     async def _runtime_diagnostics(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -345,6 +460,556 @@ class DesktopService:
             "mcpDiagnostics": mcp_diagnostics,
         }
 
+    async def _project_list(
+        self, _params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        if self._catalog is None:
+            return {
+                "status": "unavailable",
+                "issue": self._catalog_issue
+                or "The local project catalog is unavailable.",
+                "projects": [],
+                "selectedProjectId": None,
+                "selectedSessionId": None,
+            }
+        snapshot = self._catalog.snapshot()
+        return {
+            "status": "ready",
+            "issue": None,
+            "projects": [
+                {
+                    "projectId": project["projectId"],
+                    "name": project["name"],
+                    "sessionCount": len(project["sessionIds"]),
+                }
+                for project in snapshot["projects"]
+            ],
+            "selectedProjectId": self._selected_project_id,
+            "selectedSessionId": (
+                self.session.session_id if self.session is not None else None
+            ),
+        }
+
+    async def _session_list(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        if self._turn_active:
+            raise DesktopServiceError(
+                "BUSY_TURN",
+                "Conversation summaries are unavailable during an active turn.",
+                retryable=True,
+            )
+        project = self._require_catalog_project(params["projectId"])
+        offset = int(params.get("offset", 0))
+        limit = int(params.get("limit", 50))
+        session_ids = project["sessionIds"]
+        items: list[dict[str, Any]] = []
+        for session_id in session_ids[offset : offset + limit]:
+            items.append(await self._conversation_summary(session_id))
+        return {
+            "projectId": project["projectId"],
+            "status": "ready",
+            "issue": None,
+            "items": items,
+            "total": len(session_ids),
+            "offset": offset,
+            "limit": limit,
+            "hasMore": offset + len(items) < len(session_ids),
+        }
+
+    async def _session_select(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        if self._turn_active:
+            raise DesktopServiceError(
+                "BUSY_TURN",
+                "A conversation cannot be changed during an active turn.",
+                retryable=True,
+            )
+        if self._session_creating:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                "A desktop session is already being materialized.",
+                retryable=True,
+            )
+        if self._knowledge_active or self._extension_active:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                "The selected conversation cannot change during another operation.",
+                retryable=True,
+            )
+        project = self._require_catalog_project(params["projectId"])
+        session_id = params["sessionId"]
+        if session_id not in project["sessionIds"]:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID",
+                "The requested conversation does not belong to that project.",
+            )
+        if (
+            self.session is not None
+            and self.session.session_id == session_id
+            and self._selected_project_id == project["projectId"]
+        ):
+            return {
+                **self._session_snapshot(self.session),
+                "projectId": project["projectId"],
+                "registered": True,
+            }
+
+        try:
+            restored_turns = await asyncio.to_thread(
+                self._read_conversation_turns,
+                session_id,
+                False,
+            )
+        except (HistoryRestoreError, PlanLogRestoreError, TurnRestoreError) as exc:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                "The stored conversation is degraded and cannot be selected.",
+            ) from exc
+        if not restored_turns:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                "The stored conversation has no restorable transcript.",
+            )
+
+        self._session_creating = True
+        current = self.session
+        saved_recent: list[TurnRecord] = []
+        saved_controls: _ConversationControlSnapshot | None = None
+        if current is not None:
+            saved_recent = self._copy_recent_turns(current)
+            saved_controls = self._capture_controls(current)
+        try:
+            if current is not None:
+                await self._flush_for_conversation_switch(current, saved_recent)
+            target = await self._materialize_session(
+                self.config,
+                load_mcp=self._load_mcp,
+                session_id=session_id,
+                restored_turns=restored_turns,
+            )
+            await self._apply_controls(
+                target,
+                self._control_snapshots.get(session_id),
+            )
+            if self.lifecycle != "ready":
+                raise DesktopServiceError(
+                    "SESSION_NOT_READY",
+                    "The desktop backend changed state while selecting a conversation.",
+                )
+        except Exception:
+            if current is not None:
+                self._restore_recent_turns(current, saved_recent)
+            raise
+        finally:
+            self._session_creating = False
+
+        if (
+            current is not None
+            and saved_controls is not None
+            and self._session_registered
+        ):
+            self._store_control_snapshot(current.session_id, saved_controls)
+        self.session = target
+        self._selected_project_id = project["projectId"]
+        self._session_registered = True
+        self._pending_registration = None
+        return {
+            **self._session_snapshot(target),
+            "projectId": project["projectId"],
+            "registered": True,
+        }
+
+    async def _session_retry_registration(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        session = self._require_idle_session()
+        project_id = params["projectId"]
+        session_id = params["sessionId"]
+        self._require_catalog_project(project_id)
+        if session.session_id != session_id or self._selected_project_id != project_id:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID",
+                "Registration can only be retried for the selected conversation.",
+            )
+        if self._catalog is None:
+            return {
+                "projectId": project_id,
+                "sessionId": session_id,
+                "status": "pending",
+                "issue": "The local project catalog is unavailable.",
+            }
+        owner = self._catalog.project_for_session(session_id)
+        if owner == project_id:
+            self._session_registered = True
+            self._pending_registration = None
+            return {
+                "projectId": project_id,
+                "sessionId": session_id,
+                "status": "registered",
+                "issue": None,
+            }
+        if self._pending_registration != (project_id, session_id):
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID",
+                "The selected conversation has no pending catalog registration.",
+            )
+        try:
+            self._catalog.register_session(project_id, session_id)
+        except CatalogError:
+            return {
+                "projectId": project_id,
+                "sessionId": session_id,
+                "status": "pending",
+                "issue": "The conversation is saved, but catalog registration still failed.",
+            }
+        self._session_registered = True
+        self._pending_registration = None
+        return {
+            "projectId": project_id,
+            "sessionId": session_id,
+            "status": "registered",
+            "issue": None,
+        }
+
+    async def _session_transcript(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        if self._turn_active:
+            raise DesktopServiceError(
+                "BUSY_TURN",
+                "The transcript is unavailable during an active turn.",
+                retryable=True,
+            )
+        project = self._require_catalog_project(params["projectId"])
+        session_id = params["sessionId"]
+        if session_id not in project["sessionIds"]:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID",
+                "The requested conversation does not belong to that project.",
+            )
+        offset = int(params.get("offset", 0))
+        limit = int(params.get("limit", 20))
+        try:
+            turns = await asyncio.to_thread(
+                self._read_conversation_turns,
+                session_id,
+                True,
+            )
+        except (HistoryRestoreError, PlanLogRestoreError, TurnRestoreError):
+            return self._transcript_result(
+                project["projectId"],
+                session_id,
+                status="degraded",
+                issue="The stored transcript is malformed or incomplete.",
+                turns=[],
+                offset=offset,
+                limit=limit,
+                total=0,
+            )
+        if not turns:
+            return self._transcript_result(
+                project["projectId"],
+                session_id,
+                status="unavailable",
+                issue="No persisted transcript is available.",
+                turns=[],
+                offset=offset,
+                limit=limit,
+                total=0,
+            )
+        page = turns[offset : offset + limit]
+        if any(
+            len(turn.user_input.encode("utf-8")) > 32_768
+            or len(turn.assistant_output.encode("utf-8")) > 32_768
+            or len(turn.timestamp.encode("utf-8")) > 64
+            for turn in page
+        ):
+            return self._transcript_result(
+                project["projectId"],
+                session_id,
+                status="degraded",
+                issue="The requested transcript page contains an oversized turn.",
+                turns=[],
+                offset=offset,
+                limit=limit,
+                total=len(turns),
+            )
+        page_bytes = sum(
+            len(turn.user_input.encode("utf-8"))
+            + len(turn.assistant_output.encode("utf-8"))
+            + len(turn.timestamp.encode("utf-8"))
+            for turn in page
+        )
+        if page_bytes > _MAX_TRANSCRIPT_PAGE_BYTES:
+            return self._transcript_result(
+                project["projectId"],
+                session_id,
+                status="degraded",
+                issue="The requested transcript page exceeds the desktop limit.",
+                turns=[],
+                offset=offset,
+                limit=limit,
+                total=len(turns),
+            )
+        return self._transcript_result(
+            project["projectId"],
+            session_id,
+            status="ready",
+            issue=None,
+            turns=page,
+            offset=offset,
+            limit=limit,
+            total=len(turns),
+        )
+
+    async def _conversation_summary(self, session_id: str) -> dict[str, Any]:
+        try:
+            turns = await asyncio.to_thread(
+                self._read_conversation_turns,
+                session_id,
+                True,
+            )
+        except (HistoryRestoreError, PlanLogRestoreError, TurnRestoreError):
+            return {
+                "sessionId": session_id,
+                "title": f"Conversation {session_id[:8]}",
+                "turnCount": 0,
+                "updatedAt": None,
+                "status": "degraded",
+                "issue": "The stored transcript is malformed or incomplete.",
+            }
+        if not turns:
+            return {
+                "sessionId": session_id,
+                "title": f"Conversation {session_id[:8]}",
+                "turnCount": 0,
+                "updatedAt": None,
+                "status": "unavailable",
+                "issue": "No persisted transcript is available.",
+            }
+        title = " ".join(turns[0].user_input.split())
+        return {
+            "sessionId": session_id,
+            "title": self._bounded_text(title, 256)
+            or f"Conversation {session_id[:8]}",
+            "turnCount": turns[-1].turn_id,
+            "updatedAt": self._bounded_text(turns[-1].timestamp, 64),
+            "status": "ready",
+            "issue": None,
+        }
+
+    def _require_catalog_project(self, project_id: str) -> dict[str, Any]:
+        if self._catalog is None:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                self._catalog_issue or "The local project catalog is unavailable.",
+                retryable=True,
+            )
+        project = next(
+            (
+                item
+                for item in self._catalog.snapshot()["projects"]
+                if item["projectId"] == project_id
+            ),
+            None,
+        )
+        if project is None:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID", "The requested project does not exist."
+            )
+        return project
+
+    def _read_conversation_turns(
+        self,
+        session_id: str,
+        include_current: bool,
+    ) -> list[TurnRecord]:
+        if not is_canonical_session_id(session_id):
+            raise TurnRestoreError("session_id must be canonical UUIDv4 hex")
+        if self._history_store is None:
+            self._history_store = get_chat_history_store(self.config)
+        history_turns = self._history_store.read_session_turns(session_id)
+        plan_turns = PlanLog(
+            self.config,
+            session_id=session_id,
+            app_root_resolver=lambda: find_app_root(),
+        ).read_direct_answer_turns()
+        stored = merge_restored_turns(history_turns, plan_turns)
+        if (
+            not include_current
+            or self.session is None
+            or self.session.session_id != session_id
+        ):
+            return stored
+
+        by_turn = {turn.turn_id: turn for turn in stored}
+        for turn in self._copy_recent_turns(self.session):
+            restored = replace(turn, persist_target="none")
+            existing = by_turn.get(restored.turn_id)
+            if existing is not None and (
+                existing.user_input != restored.user_input
+                or existing.assistant_output != restored.assistant_output
+                or existing.timestamp != restored.timestamp
+            ):
+                raise TurnRestoreError(
+                    "current and persisted conversation turns disagree"
+                )
+            by_turn[restored.turn_id] = restored
+        return merge_restored_turns(list(by_turn.values()))
+
+    @staticmethod
+    def _transcript_result(
+        project_id: str,
+        session_id: str,
+        *,
+        status: str,
+        issue: str | None,
+        turns: list[TurnRecord],
+        offset: int,
+        limit: int,
+        total: int,
+    ) -> dict[str, Any]:
+        return {
+            "projectId": project_id,
+            "sessionId": session_id,
+            "status": status,
+            "issue": issue,
+            "items": [
+                {
+                    "turnNumber": turn.turn_id,
+                    "timestamp": turn.timestamp,
+                    "userText": turn.user_input,
+                    "assistantText": turn.assistant_output,
+                }
+                for turn in turns
+            ],
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "hasMore": status == "ready" and offset + len(turns) < total,
+        }
+
+    async def _materialize_session(
+        self,
+        config: AgentConfig,
+        *,
+        load_mcp: bool,
+        session_id: str | None = None,
+        restored_turns: list[TurnRecord] | None = None,
+    ) -> ChatSession:
+        kwargs: dict[str, Any] = {
+            "load_mcp": load_mcp,
+            "progress_cb": self._on_session_progress,
+        }
+        if session_id is not None:
+            kwargs["session_id"] = session_id
+            kwargs["restored_turns"] = list(restored_turns or [])
+        session = await self._session_factory(config, **kwargs)
+        if isinstance(session, ChatSession):
+            session._set_final_text_validator(
+                lambda text, errors: self._validate_final_text_before_record(
+                    session.session_id,
+                    text,
+                    errors,
+                )
+            )
+        return session
+
+    @staticmethod
+    def _capture_controls(session: ChatSession) -> _ConversationControlSnapshot:
+        runtime = session.active_skill_runtime
+        return _ConversationControlSnapshot(
+            plan_mode=bool(session.plan_mode),
+            plan_log_path=(
+                str(session.plan_log_path) if session.plan_log_path else None
+            ),
+            thinking_mode=str(session.thinking_mode),
+            active_skill=(str(runtime.name) if runtime is not None else None),
+            task_mode=(
+                str(runtime.task_mode)
+                if runtime is not None and runtime.task_mode
+                else None
+            ),
+        )
+
+    async def _apply_controls(
+        self,
+        session: ChatSession,
+        snapshot: _ConversationControlSnapshot | None,
+    ) -> None:
+        if snapshot is None:
+            return
+        if snapshot.active_skill is not None:
+            session.activate_skill(snapshot.active_skill, snapshot.task_mode)
+        session.set_thinking_mode(snapshot.thinking_mode)
+        if snapshot.plan_mode:
+            if snapshot.plan_log_path is not None:
+                await session.resume_plan_mode(snapshot.plan_log_path)
+            else:
+                await session.enter_plan_mode()
+
+    def _store_control_snapshot(
+        self,
+        session_id: str,
+        snapshot: _ConversationControlSnapshot,
+    ) -> None:
+        self._control_snapshots.pop(session_id, None)
+        while len(self._control_snapshots) >= _MAX_CONTROL_SNAPSHOTS:
+            self._control_snapshots.pop(next(iter(self._control_snapshots)))
+        self._control_snapshots[session_id] = snapshot
+
+    @staticmethod
+    def _copy_recent_turns(session: ChatSession) -> list[TurnRecord]:
+        turns: list[TurnRecord] = []
+        for turn in getattr(session, "recent_turns", []):
+            if not isinstance(turn, TurnRecord):
+                continue
+            turns.append(replace(turn))
+        return turns
+
+    @staticmethod
+    def _restore_recent_turns(
+        session: ChatSession,
+        turns: list[TurnRecord],
+    ) -> None:
+        recent = getattr(session, "recent_turns", None)
+        if not isinstance(recent, list):
+            return
+        by_id = {
+            turn.turn_id: turn
+            for turn in recent
+            if isinstance(turn, TurnRecord)
+        }
+        for turn in turns:
+            by_id.setdefault(turn.turn_id, replace(turn, persist_target="none"))
+        recent[:] = [by_id[turn_id] for turn_id in sorted(by_id)]
+
+    async def _flush_for_conversation_switch(
+        self,
+        session: ChatSession,
+        saved_recent: list[TurnRecord],
+    ) -> None:
+        try:
+            await session.flush_recent_turns()
+        except Exception as exc:
+            self._restore_recent_turns(session, saved_recent)
+            raise DesktopServiceError(
+                "CONVERSATION_FLUSH_FAILED",
+                "Recent turns could not be flushed before changing conversations.",
+                retryable=True,
+            ) from exc
+        remaining = len(getattr(session, "recent_turns", []))
+        if remaining:
+            self._restore_recent_turns(session, saved_recent)
+            raise DesktopServiceError(
+                "CONVERSATION_FLUSH_FAILED",
+                "Recent turns remain unflushed; the current conversation was retained.",
+                retryable=True,
+                details={"remainingTurns": remaining},
+            )
+
     async def _session_create(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -354,12 +1019,20 @@ class DesktopService:
                 "A desktop session is already being created.",
                 retryable=True,
             )
-        if self.session is not None:
-            raise DesktopServiceError(
-                "SESSION_NOT_READY", "A desktop session already exists."
-            )
         if self._turn_active:
             raise DesktopServiceError("BUSY_TURN", "A session turn is still active.")
+        if self._knowledge_active or self._extension_active:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                "A new conversation cannot be created during another operation.",
+                retryable=True,
+            )
+        project_id = params.get("projectId") or self._selected_project_id
+        if project_id is None:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "No local project is available."
+            )
+        self._require_catalog_project(project_id)
         load_mcp = bool(params.get("loadMcp", True))
         graph_limit = params.get(
             "graphRecursionLimit", self.config.graph_recursion_limit
@@ -372,23 +1045,47 @@ class DesktopService:
             }
         )
         self._session_creating = True
+        current = self.session
+        saved_recent: list[TurnRecord] = []
+        saved_controls: _ConversationControlSnapshot | None = None
+        if current is not None:
+            saved_recent = self._copy_recent_turns(current)
+            saved_controls = self._capture_controls(current)
         try:
-            session = await self._session_factory(
+            if current is not None:
+                await self._flush_for_conversation_switch(current, saved_recent)
+            session = await self._materialize_session(
                 config,
                 load_mcp=load_mcp,
-                progress_cb=self._on_session_progress,
             )
             if self.lifecycle != "ready":
                 raise DesktopServiceError(
                     "SESSION_NOT_READY",
                     "The desktop backend changed state while creating the session.",
                 )
-            self.config = config
-            self.session = session
-            self._load_mcp = load_mcp
+        except Exception:
+            if current is not None:
+                self._restore_recent_turns(current, saved_recent)
+            raise
         finally:
             self._session_creating = False
-        return self._session_snapshot(session)
+        if (
+            current is not None
+            and saved_controls is not None
+            and self._session_registered
+        ):
+            self._store_control_snapshot(current.session_id, saved_controls)
+        self.config = config
+        self.session = session
+        self._load_mcp = load_mcp
+        self._selected_project_id = project_id
+        self._session_registered = False
+        self._pending_registration = None
+        return {
+            **self._session_snapshot(session),
+            "projectId": project_id,
+            "registered": False,
+        }
 
     async def _session_status(
         self, _params: dict[str, Any], _event_sink: EventSink | None
@@ -396,6 +1093,59 @@ class DesktopService:
         if self.session is None:
             return {"ready": False, "lifecycle": self.lifecycle}
         return {"ready": True, **self._session_snapshot(self.session)}
+
+    def _validation_error_dtos(self, errors: list[Any]) -> list[str]:
+        return [
+            self._bounded_text(str(item), 4_096)
+            for item in errors[:128]
+            if str(item)
+        ]
+
+    def _ensure_turn_result_fits_wire(
+        self,
+        *,
+        session_id: str,
+        text: str,
+        validation_errors: list[str],
+        tool_summaries: list[dict[str, str]],
+    ) -> None:
+        """Budget the complete worst-case success line before side effects."""
+        candidate = {
+            "sessionId": session_id,
+            "turnId": _WIRE_BUDGET_TURN_ID,
+            "text": text,
+            "validationErrors": validation_errors,
+            "toolSummaries": tool_summaries,
+            "responseKind": "answer",
+            "streamKind": "post_finalized",
+            "chunkCount": _MAX_ANSWER_CHUNKS,
+            "registrationStatus": "pending",
+            "registrationIssue": "\u0000" * 4_096,
+        }
+        try:
+            encode_message(success_result(
+                _WIRE_BUDGET_REQUEST_ID,
+                "session.turn",
+                candidate,
+            ))
+        except ProtocolError as exc:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The finalized answer exceeded the desktop response limit.",
+            ) from exc
+
+    def _validate_final_text_before_record(
+        self,
+        session_id: str,
+        text: str,
+        errors: list[str],
+    ) -> None:
+        self._ensure_turn_result_fits_wire(
+            session_id=session_id,
+            text=text,
+            validation_errors=self._validation_error_dtos(errors),
+            tool_summaries=list(self._tool_summaries.values())[:512],
+        )
 
     async def _session_turn(
         self, params: dict[str, Any], event_sink: EventSink | None
@@ -409,28 +1159,181 @@ class DesktopService:
         self._turn_event_sink = event_sink
         self._tool_names = {}
         self._tool_summaries = {}
+        turn_id = uuid.uuid4().hex
         try:
-            outcome = await session.turn_outcome(params["text"])
+            original_text = params["text"]
+            try:
+                parsed = parse_slash_command(original_text)
+            except SlashCommandError as exc:
+                raise DesktopServiceError(
+                    "PROTOCOL_INVALID",
+                    self._bounded_text(str(exc), 4_096),
+                ) from exc
+
+            if parsed is not None:
+                command = self._slash_registry.get(parsed.name)
+                if command is None:
+                    raise DesktopServiceError(
+                        "PROTOCOL_INVALID",
+                        f"Unknown slash command: /{self._bounded_text(parsed.name, 256)}",
+                    )
+                if (
+                    parsed.name.casefold() != command.name.casefold()
+                    or command.name not in _DESKTOP_SLASH_COMMANDS
+                ):
+                    raise DesktopServiceError(
+                        "PROTOCOL_INVALID",
+                        "That slash command is not available in the desktop composer.",
+                    )
+                try:
+                    result = await execute_slash_command(
+                        parsed,
+                        SlashCommandContext(
+                            session=session,
+                            registry=self._slash_registry,
+                        ),
+                    )
+                except SlashCommandError as exc:
+                    raise DesktopServiceError(
+                        "PROTOCOL_INVALID",
+                        self._bounded_text(str(exc), 4_096),
+                    ) from exc
+                if (
+                    result.should_exit
+                    or result.clear_screen
+                    or result.followup_input is not None
+                ):
+                    raise DesktopServiceError(
+                        "PROTOCOL_INVALID",
+                        "That slash-command result is not supported by the desktop composer.",
+                    )
+                message = self._bounded_text(
+                    str(result.message),
+                    _MAX_LOCAL_COMMAND_BYTES,
+                )
+                if not message.strip():
+                    raise DesktopServiceError(
+                        "PROTOCOL_INVALID",
+                        "The slash command returned no displayable result.",
+                    )
+                return {
+                    "sessionId": session.session_id,
+                    "turnId": turn_id,
+                    "text": message,
+                    "validationErrors": [],
+                    "toolSummaries": [],
+                    "responseKind": "command",
+                    "streamKind": "final_only",
+                    "chunkCount": 0,
+                    "registrationStatus": "not_required",
+                    "registrationIssue": None,
+                }
+
+            outcome = await session.turn_outcome(original_text)
             if not isinstance(outcome.text, str) or not outcome.text.strip():
                 raise DesktopServiceError(
                     "INTERNAL_ERROR", "The session returned no displayable answer."
                 )
+            if len(outcome.text.encode("utf-8")) > _MAX_ANSWER_BYTES:
+                raise DesktopServiceError(
+                    "INTERNAL_ERROR", "The session answer exceeded the desktop limit."
+                )
+            validation_errors = self._validation_error_dtos(
+                outcome.validation_errors
+            )
+            tool_summaries = list(self._tool_summaries.values())[:512]
+            self._ensure_turn_result_fits_wire(
+                session_id=session.session_id,
+                text=outcome.text,
+                validation_errors=validation_errors,
+                tool_summaries=tool_summaries,
+            )
+            registration_status = "registered"
+            registration_issue: str | None = None
+            if not self._session_registered:
+                project_id = self._selected_project_id
+                if self._catalog is None or project_id is None:
+                    registration_status = "pending"
+                    registration_issue = (
+                        "The answer was saved, but the project catalog is unavailable."
+                    )
+                else:
+                    try:
+                        self._catalog.register_session(
+                            project_id,
+                            session.session_id,
+                        )
+                    except CatalogError:
+                        registration_status = "pending"
+                        registration_issue = (
+                            "The answer was saved, but catalog registration failed."
+                        )
+                if registration_status == "registered":
+                    self._session_registered = True
+                    self._pending_registration = None
+                elif project_id is not None:
+                    self._pending_registration = (project_id, session.session_id)
+            chunk_count = self._emit_answer_chunks(
+                event_sink,
+                session_id=session.session_id,
+                turn_id=turn_id,
+                text=outcome.text,
+            )
             return {
                 "sessionId": session.session_id,
-                "turnId": uuid.uuid4().hex,
+                "turnId": turn_id,
                 "text": outcome.text,
-                "validationErrors": [
-                    self._bounded_text(str(item), 4_096)
-                    for item in outcome.validation_errors[:128]
-                    if str(item)
-                ],
-                "toolSummaries": list(self._tool_summaries.values())[:512],
+                "validationErrors": validation_errors,
+                "toolSummaries": tool_summaries,
+                "responseKind": "answer",
+                "streamKind": (
+                    "post_finalized" if chunk_count else "final_only"
+                ),
+                "chunkCount": chunk_count,
+                "registrationStatus": registration_status,
+                "registrationIssue": registration_issue,
             }
         finally:
             self._turn_event_sink = None
             self._tool_names = {}
             self._tool_summaries = {}
             self._turn_active = False
+
+    @classmethod
+    def _emit_answer_chunks(
+        cls,
+        event_sink: EventSink | None,
+        *,
+        session_id: str,
+        turn_id: str,
+        text: str,
+    ) -> int:
+        if event_sink is None:
+            return 0
+        chunks = cls._utf8_chunks(text, _MAX_ANSWER_CHUNK_BYTES)
+        if len(chunks) > _MAX_ANSWER_CHUNKS:
+            return 0
+        emitted = 0
+        for chunk_index, chunk in enumerate(chunks):
+            try:
+                event_sink(
+                    "answer.chunk",
+                    {
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "chunkIndex": chunk_index,
+                        "streamKind": "post_finalized",
+                        "text": chunk,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Desktop answer event sink failed with %s",
+                    type(exc).__name__,
+                )
+                break
+            emitted += 1
+        return emitted
 
     async def _session_set_mode(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -575,6 +1478,9 @@ class DesktopService:
             )
         session = self.session
         if session is None:
+            self._session_registered = False
+            self._pending_registration = None
+            self._control_snapshots.clear()
             self._clear_session_caches()
             return {"status": "no_session", "flushed": True}
         self._session_closing = True
@@ -603,6 +1509,9 @@ class DesktopService:
             self._session_closing = False
         self.session = None
         self._load_mcp = False
+        self._session_registered = False
+        self._pending_registration = None
+        self._control_snapshots.clear()
         self._clear_session_caches()
         return {"status": "stopped", "flushed": True}
 
@@ -611,6 +1520,12 @@ class DesktopService:
         self._prune_previews.clear()
 
     def _require_session(self) -> ChatSession:
+        if self._session_creating:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                "A desktop session is being materialized.",
+                retryable=True,
+            )
         if self._session_closing:
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "The desktop session is shutting down."
@@ -1199,6 +2114,26 @@ class DesktopService:
         if len(encoded) <= max_bytes:
             return text
         return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _utf8_chunks(text: str, max_bytes: int) -> list[str]:
+        """Split text on UTF-8 byte boundaries without losing characters."""
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        chunks: list[str] = []
+        current: list[str] = []
+        current_bytes = 0
+        for character in text:
+            encoded_size = len(character.encode("utf-8"))
+            if current and current_bytes + encoded_size > max_bytes:
+                chunks.append("".join(current))
+                current = []
+                current_bytes = 0
+            current.append(character)
+            current_bytes += encoded_size
+        if current:
+            chunks.append("".join(current))
+        return chunks
 
     @staticmethod
     def _bounded_cache_insert(cache: dict[str, Any], key: str, value: Any) -> None:

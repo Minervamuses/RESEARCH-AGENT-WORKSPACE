@@ -12,7 +12,12 @@ from langchain_core.documents import Document
 @pytest.fixture
 def fake_chroma(monkeypatch):
     """Replace ChromaStore inside the shared rag cache + VectorRetriever."""
-    captured: dict = {"add_calls": [], "retrieve_calls": []}
+    captured: dict = {
+        "add_calls": [],
+        "retrieve_calls": [],
+        "get_calls": [],
+        "get_documents": [],
+    }
 
     class FakeChromaStore:
         def __init__(self, collection_name, config):
@@ -21,6 +26,10 @@ def fake_chroma(monkeypatch):
 
         def add(self, documents):
             captured["add_calls"].append(documents)
+
+        def get_where(self, where, *, limit=None):
+            captured["get_calls"].append({"where": where, "limit": limit})
+            return list(captured["get_documents"])
 
     class FakeVectorRetriever:
         def __init__(self, store):
@@ -180,3 +189,151 @@ def test_search_returns_documents_from_retriever(tmp_path, monkeypatch):
 
     store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
     assert store.search("q") is sentinel
+
+
+def test_read_session_turns_pairs_roles_without_semantic_search(tmp_path, fake_chroma):
+    from agent.config import AgentConfig
+    from agent.history_rag.store import ChatHistoryStore
+
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    fake_chroma["get_documents"] = [
+        Document(
+            page_content="answer",
+            metadata={
+                "role": "assistant",
+                "turn_id": 2,
+                "session_id": session_id,
+                "timestamp": "2026-08-28T01:00:00+00:00",
+            },
+        ),
+        Document(
+            page_content="question",
+            metadata={
+                "role": "user",
+                "turn_id": 2,
+                "session_id": session_id,
+                "timestamp": "2026-08-28T01:00:00+00:00",
+            },
+        ),
+    ]
+    store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
+
+    turns = store.read_session_turns(session_id)
+
+    assert fake_chroma["retrieve_calls"] == []
+    assert fake_chroma["get_calls"] == [{
+        "where": {"session_id": {"$eq": session_id}},
+        "limit": 8193,
+    }]
+    assert len(turns) == 1
+    assert turns[0].user_input == "question"
+    assert turns[0].assistant_output == "answer"
+    assert turns[0].turn_id == 2
+    assert turns[0].persist_target == "none"
+
+
+def test_read_session_turns_rejects_non_iso_or_naive_timestamps(
+    tmp_path,
+    fake_chroma,
+):
+    from agent.config import AgentConfig
+    from agent.history_rag.store import ChatHistoryStore, HistoryRestoreError
+
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
+    for timestamp in ("not-a-timestamp", "2026-08-28T01:00:00"):
+        fake_chroma["get_documents"] = [
+            Document(
+                page_content=text,
+                metadata={
+                    "role": role,
+                    "turn_id": 1,
+                    "session_id": session_id,
+                    "timestamp": timestamp,
+                },
+            )
+            for role, text in (("user", "question"), ("assistant", "answer"))
+        ]
+
+        with pytest.raises(HistoryRestoreError, match="timestamp"):
+            store.read_session_turns(session_id)
+
+
+@pytest.mark.parametrize(
+    "documents",
+    [
+        [Document(
+            page_content="question",
+            metadata={
+                "role": "user",
+                "turn_id": 1,
+                "session_id": "28b222e0cc6543aa8d7bbdc423de99a7",
+                "timestamp": "t",
+            },
+        )],
+        [
+            Document(
+                page_content="q1",
+                metadata={
+                    "role": "user",
+                    "turn_id": 1,
+                    "session_id": "28b222e0cc6543aa8d7bbdc423de99a7",
+                    "timestamp": "t",
+                },
+            ),
+            Document(
+                page_content="q2",
+                metadata={
+                    "role": "user",
+                    "turn_id": 1,
+                    "session_id": "28b222e0cc6543aa8d7bbdc423de99a7",
+                    "timestamp": "t",
+                },
+            ),
+        ],
+    ],
+)
+def test_read_session_turns_fails_closed_on_incomplete_or_duplicate_roles(
+    tmp_path,
+    fake_chroma,
+    documents,
+):
+    from agent.config import AgentConfig
+    from agent.history_rag.store import ChatHistoryStore, HistoryRestoreError
+
+    fake_chroma["get_documents"] = documents
+    store = ChatHistoryStore(AgentConfig(persist_dir=str(tmp_path)))
+
+    with pytest.raises(HistoryRestoreError):
+        store.read_session_turns("28b222e0cc6543aa8d7bbdc423de99a7")
+
+
+def test_chroma_get_where_is_a_bounded_raw_metadata_read():
+    from rag.store.chroma_store import ChromaStore
+
+    captured = {}
+
+    class RawStore:
+        def get(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "documents": ["raw text"],
+                "metadatas": [{"session_id": "s"}],
+            }
+
+    store = ChromaStore.__new__(ChromaStore)
+    store._store = RawStore()
+
+    documents = store.get_where(
+        {"session_id": {"$eq": "s"}},
+        limit=3,
+    )
+
+    assert captured == {
+        "where": {"session_id": {"$eq": "s"}},
+        "limit": 3,
+    }
+    assert documents == [Document(
+        page_content="raw text",
+        metadata={"session_id": "s"},
+    )]

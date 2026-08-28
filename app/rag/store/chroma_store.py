@@ -31,9 +31,23 @@ class ChromaStore(BaseStore):
     def get(self, pid: str | None = None) -> list[Document]:
         """Retrieve documents, optionally filtered by pid."""
         where = {"pid": pid} if pid else None
-        results = self._store.get(where=where)
+        return self.get_where(where)
+
+    def get_where(
+        self,
+        where: dict | None,
+        *,
+        limit: int | None = None,
+    ) -> list[Document]:
+        """Retrieve raw documents by metadata without invoking embeddings."""
+        if limit is not None and (type(limit) is not int or limit < 1):
+            raise ValueError("limit must be a positive integer")
+        kwargs = {"where": where}
+        if limit is not None:
+            kwargs["limit"] = limit
+        results = self._store.get(**kwargs)
         docs = []
-        for i, content in enumerate(results["documents"]):
+        for i, content in enumerate(results.get("documents") or []):
             meta = results["metadatas"][i] if results["metadatas"] else {}
             docs.append(Document(page_content=content, metadata=meta))
         return docs

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from agent.desktop.protocol import PROTOCOL_VERSION, ProtocolError, parse_line
-from agent.desktop.server import DesktopServer, ProtocolWriter
+from agent.desktop.server import DesktopServer, ProtocolWriter, _build_runtime_service
 from agent.desktop.service import DesktopService
 
 
@@ -419,3 +419,35 @@ def test_late_progress_cannot_follow_terminal_result() -> None:
         )
         for index, message in enumerate(messages)
     )
+
+
+def test_runtime_service_uses_production_for_unset_or_nonexact_fixture_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel = object()
+    calls: list[Path] = []
+
+    def production_service(*, original_cwd: Path):
+        calls.append(original_cwd)
+        return sentinel
+
+    monkeypatch.setattr("agent.desktop.service.DesktopService", production_service)
+    monkeypatch.delenv("RESEARCH_AGENT_DESKTOP_FIXTURE", raising=False)
+    assert _build_runtime_service(tmp_path) is sentinel
+    monkeypatch.setenv("RESEARCH_AGENT_DESKTOP_FIXTURE", "Phase02")
+    assert _build_runtime_service(tmp_path) is sentinel
+    assert calls == [tmp_path, tmp_path]
+
+
+def test_exact_fixture_gate_refuses_startup_without_caller_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.desktop.fixture_session import FixtureConfigurationError
+
+    monkeypatch.setenv("RESEARCH_AGENT_DESKTOP_FIXTURE", "phase02")
+    monkeypatch.delenv("RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT", raising=False)
+
+    with pytest.raises(FixtureConfigurationError, match="is required"):
+        _build_runtime_service(tmp_path)

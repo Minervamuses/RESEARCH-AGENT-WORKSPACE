@@ -20,6 +20,8 @@ from conftest import FakeHistoryStore, make_astream_graph
 
 from agent.config import AgentConfig
 from agent.session import ChatSession
+from agent.turns.journal import TurnRestoreError
+from agent.turns.memory import TurnRecord
 
 
 def _snapshot_graph(store: FakeHistoryStore):
@@ -57,6 +59,20 @@ def test_no_eviction_below_window(make_session):
         asyncio.run(session.turn(f"q{i}"))
     assert store.adds == []
     assert len(session.recent_turns) == 3
+
+
+def test_final_text_validator_runs_before_the_turn_is_recorded(make_session):
+    session, store = make_session(window=3)
+
+    def reject(_text: str, _errors: list[str]) -> None:
+        raise RuntimeError("desktop wire budget rejected the answer")
+
+    session._set_final_text_validator(reject)
+    with pytest.raises(RuntimeError, match="wire budget"):
+        asyncio.run(session.turn("must not persist"))
+
+    assert session.recent_turns == []
+    assert store.adds == []
 
 
 def test_overflow_evicts_oldest_into_history_store(make_session):
@@ -173,3 +189,52 @@ def test_flush_recent_turns_logs_and_keeps_turn_on_failure(make_session, caplog)
 
     assert len(session.recent_turns) == 1
     assert any("shutdown flush failed" in rec.message for rec in caplog.records)
+
+
+def test_restored_turns_use_latest_window_continue_counter_and_do_not_repersist(
+    make_session,
+):
+    session, store = make_session(window=2)
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    restored = [
+        TurnRecord(
+            user_input=f"old q{turn_id}",
+            assistant_output=f"old a{turn_id}",
+            turn_id=turn_id,
+            timestamp=f"2026-08-28T00:00:0{turn_id}+00:00",
+        )
+        for turn_id in range(1, 4)
+    ]
+    session = ChatSession(
+        session.config,
+        history_store=store,
+        session_id=session_id,
+        restored_turns=restored,
+    )
+
+    assert session.session_id == session_id
+    assert [turn.turn_id for turn in session.recent_turns] == [2, 3]
+    assert all(turn.persist_target == "none" for turn in session.recent_turns)
+    assert session._turn_counter == 3
+
+    asyncio.run(session.turn("new q"))
+    asyncio.run(session.flush_recent_turns())
+
+    assert [item["turn_id"] for item in store.adds] == [4]
+    assert [item["user_input"] for item in store.adds] == ["new q"]
+
+
+def test_restored_turn_ids_must_be_contiguous(make_session):
+    session, store = make_session(window=2)
+    restored = [
+        TurnRecord("q1", "a1", turn_id=1, timestamp="t1"),
+        TurnRecord("q3", "a3", turn_id=3, timestamp="t3"),
+    ]
+
+    with pytest.raises(TurnRestoreError, match="contiguous"):
+        ChatSession(
+            session.config,
+            history_store=store,
+            session_id="28b222e0cc6543aa8d7bbdc423de99a7",
+            restored_turns=restored,
+        )

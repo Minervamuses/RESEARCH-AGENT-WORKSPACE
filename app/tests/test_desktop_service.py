@@ -11,6 +11,11 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from agent.config import AgentConfig
+from agent.cli.slash_commands import (
+    SlashCommand,
+    SlashCommandRegistry,
+    SlashCommandResult,
+)
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus
@@ -49,8 +54,10 @@ class _FakeSession:
         self.block_flush = False
         self.flush_started = asyncio.Event()
         self.flush_release = asyncio.Event()
+        self.turn_inputs: list[str] = []
 
     async def turn_outcome(self, text: str) -> TurnOutcome:
+        self.turn_inputs.append(text)
         self.turn_started.set()
         if self.block_turn:
             await self.turn_release.wait()
@@ -98,8 +105,28 @@ class _FakeSession:
     def deactivate_skill(self) -> None:
         self.active_skill_runtime = None
 
-    def status_snapshot(self) -> dict[str, int]:
-        return {"turn_count": 0}
+    def status_snapshot(self) -> dict[str, object]:
+        return {
+            "session_id": self.session_id,
+            "turn_count": 0,
+            "recent_turn_count": len(self.recent_turns),
+            "graph_recursion_limit": self.config.graph_recursion_limit,
+            "last_tool_counts": "none",
+            "plan_mode": self.plan_mode,
+            "plan_log_path": str(self.plan_log_path or ""),
+            "thinking_mode": self.thinking_mode,
+            "mcp_families": "web_search",
+            "active_skill": (
+                self.active_skill_runtime.name
+                if self.active_skill_runtime is not None
+                else ""
+            ),
+            "task_mode": (
+                self.active_skill_runtime.task_mode
+                if self.active_skill_runtime is not None
+                else ""
+            ),
+        }
 
     async def flush_recent_turns(self) -> None:
         self.flush_calls += 1
@@ -299,6 +326,116 @@ def test_session_create_is_single_flight_and_blocks_shutdown(tmp_path: Path) -> 
         assert service.session is not None
 
     asyncio.run(run())
+
+
+def test_composer_keeps_normal_text_and_runs_status_without_model(
+    tmp_path: Path,
+) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session = factory.created
+    assert session is not None
+
+    raw_text = "  keep this spacing exactly  "
+    answer = asyncio.run(service.dispatch("session.turn", {"text": raw_text}))
+    assert session.turn_inputs == [raw_text]
+    assert answer["responseKind"] == "answer"
+
+    status = asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+    assert session.turn_inputs == [raw_text]
+    assert status["responseKind"] == "command"
+    assert status["streamKind"] == "final_only"
+    assert status["chunkCount"] == 0
+    assert "Session status:" in status["text"]
+
+
+@pytest.mark.parametrize("text", ["/", "/unknown", "/init"])
+def test_composer_rejects_invalid_or_disallowed_commands_before_model(
+    tmp_path: Path,
+    text: str,
+) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session = factory.created
+    assert session is not None
+
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(service.dispatch("session.turn", {"text": text}))
+
+    assert raised.value.code == "PROTOCOL_INVALID"
+    assert session.turn_inputs == []
+
+
+def test_composer_rejects_aliases_and_unsupported_typed_results(
+    tmp_path: Path,
+) -> None:
+    handler_calls = 0
+
+    async def handler(_context, _parsed):
+        nonlocal handler_calls
+        handler_calls += 1
+        return SlashCommandResult(message="local", should_exit=True)
+
+    registry = SlashCommandRegistry(
+        [
+            SlashCommand(
+                name="status",
+                aliases=("s",),
+                description="test status",
+                handler=handler,
+            )
+        ]
+    )
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        session_factory=factory,
+        slash_registry=registry,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    with pytest.raises(DesktopServiceError) as alias_error:
+        asyncio.run(service.dispatch("session.turn", {"text": "/s"}))
+    assert alias_error.value.code == "PROTOCOL_INVALID"
+    assert handler_calls == 0
+
+    with pytest.raises(DesktopServiceError) as result_error:
+        asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+    assert result_error.value.code == "PROTOCOL_INVALID"
+    assert handler_calls == 1
+    assert factory.created is not None
+    assert factory.created.turn_inputs == []
+
+
+def test_composer_bounds_local_command_output_and_safe_errors(
+    tmp_path: Path,
+) -> None:
+    async def large_handler(_context, _parsed):
+        return SlashCommandResult(message="🙂" * 20_000)
+
+    registry = SlashCommandRegistry(
+        [
+            SlashCommand(
+                name="status",
+                description="large status",
+                handler=large_handler,
+            )
+        ]
+    )
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        session_factory=factory,
+        slash_registry=registry,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    result = asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+
+    assert len(result["text"].encode("utf-8")) == 65_536
+    assert result["registrationStatus"] == "not_required"
 
 
 def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) -> None:
