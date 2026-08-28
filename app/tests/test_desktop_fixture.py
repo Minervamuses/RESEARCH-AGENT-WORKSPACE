@@ -11,14 +11,18 @@ import pytest
 
 from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog
 from agent.desktop.fixture_session import (
+    FIXTURE_CHANGED_ORPHAN_MARKER,
+    FIXTURE_KNOWLEDGE_DIRNAME,
     FIXTURE_MODE,
     FIXTURE_MODE_ENV,
+    FIXTURE_RAG_QUESTION,
     FIXTURE_ROOT_ENV,
     FIXTURE_ROOT_PREFIX,
     SESSION_A,
     SESSION_B,
     SESSION_C,
     FixtureConfigurationError,
+    FixtureKnowledgeOperations,
     build_phase02_fixture_service,
     require_fixture_root,
 )
@@ -191,6 +195,132 @@ def test_real_service_round_trip_transient_registration_restore_and_chunks(
         )
     )
     assert reopened["turnCount"] == 3
+
+
+def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_writes(
+    fixture_root: Path,
+) -> None:
+    service = _service(fixture_root)
+    source = fixture_root / FIXTURE_KNOWLEDGE_DIRNAME
+    document = source / "fixture-notes.md"
+    events: list[tuple[str, dict]] = []
+
+    async def run():
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        answer = await service.dispatch(
+            "session.turn",
+            {"text": FIXTURE_RAG_QUESTION},
+            event_sink=lambda event, data: events.append((event, data)),
+        )
+        plan_logs = {
+            path: path.read_bytes()
+            for path in Path(service.config.plan_logs_dir).glob("*.md")
+        }
+        store_snapshot = {
+            path.relative_to(service.config.persist_dir): path.read_bytes()
+            for path in Path(service.config.persist_dir).rglob("*")
+            if path.is_file()
+        }
+        source_snapshot = {
+            path.relative_to(source): path.read_bytes()
+            for path in source.rglob("*")
+            if path.is_file()
+        }
+        commands = [
+            "/init",
+            f"/ingest {document}",
+            f"/ingest {source}",
+            f"/sync {source}",
+            f"/prune {source}",
+            f"/prune {source} --yes",
+        ]
+        results = [
+            await service.dispatch("session.turn", {"text": command})
+            for command in commands
+        ]
+        empty_preview = await service.dispatch(
+            "session.turn",
+            {"text": f"/prune {source}"},
+        )
+        marker = source / FIXTURE_CHANGED_ORPHAN_MARKER
+        marker.write_text("changed after preview\n", encoding="utf-8")
+        try:
+            with pytest.raises(DesktopServiceError) as changed:
+                await service.dispatch(
+                    "session.turn",
+                    {"text": f"/prune {source} --yes"},
+                )
+        finally:
+            marker.unlink(missing_ok=True)
+        return (
+            answer,
+            results,
+            empty_preview,
+            changed.value,
+            plan_logs,
+            store_snapshot,
+            source_snapshot,
+        )
+
+    (
+        answer,
+        results,
+        empty_preview,
+        changed_error,
+        plan_logs,
+        store_snapshot,
+        source_snapshot,
+    ) = asyncio.run(run())
+
+    assert answer["responseKind"] == "answer"
+    assert answer["text"].startswith("Fixture knowledge says:")
+    assert any(
+        summary["name"] == "rag_search"
+        for summary in answer["toolSummaries"]
+    )
+    assert any(
+        event == "tool.finished" and data["name"] == "rag_search"
+        for event, data in events
+    )
+    assert all(result["responseKind"] == "command" for result in results)
+    assert "fixture-file-pid" in results[1]["text"]
+    assert "fixture-notes.md" in results[3]["text"]
+    assert "removed-from-disk.md" in results[4]["text"]
+    assert "pruned 1 orphaned pid(s)" in results[5]["text"]
+    assert "Would prune 0 orphaned path(s)" in empty_preview["text"]
+    assert changed_error.code == "PRUNE_PREVIEW_STALE"
+    assert "previewId" not in repr(results)
+    assert {
+        path: path.read_bytes()
+        for path in Path(service.config.plan_logs_dir).glob("*.md")
+    } == plan_logs
+    assert {
+        path.relative_to(service.config.persist_dir): path.read_bytes()
+        for path in Path(service.config.persist_dir).rglob("*")
+        if path.is_file()
+    } == store_snapshot
+    assert {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    } == source_snapshot
+    operations = service._knowledge_operations
+    spy = operations.init_workspace.__self__
+    assert isinstance(spy, FixtureKnowledgeOperations)
+    assert [name for name, _target in spy.calls] == [
+        "init",
+        "ingest_file",
+        "ingest_folder",
+        "diff",
+        "diff",
+        "diff",
+        "prune",
+        "diff",
+        "diff",
+    ]
 
 
 def test_extended_success_and_scripted_provider_errors_are_bounded(

@@ -350,7 +350,7 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
     assert "Session status:" in status["text"]
 
 
-@pytest.mark.parametrize("text", ["/", "/unknown", "/init"])
+@pytest.mark.parametrize("text", ["/", "/unknown", "/mode normal"])
 def test_composer_rejects_invalid_or_disallowed_commands_before_model(
     tmp_path: Path,
     text: str,
@@ -436,6 +436,413 @@ def test_composer_bounds_local_command_output_and_safe_errors(
 
     assert len(result["text"].encode("utf-8")) == 65_536
     assert result["registrationStatus"] == "not_required"
+
+
+def test_composer_routes_exact_knowledge_commands_through_injected_operations(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "knowledge-source"
+    source.mkdir()
+    document = source / "paper.md"
+    document.write_text("research", encoding="utf-8")
+    calls: list[tuple[str, object]] = []
+
+    async def init_workspace(config):
+        calls.append(("init", config))
+        return 2, 5, tmp_path / "workspace", {"app"}
+
+    async def ingest_file(target, config):
+        calls.append(("ingest_file", (target, config)))
+        return "paper-pid", 3
+
+    async def ingest_folder(target, config):
+        calls.append(("ingest_folder", (target, config)))
+        return 1, 3
+
+    async def diff_folder(target, config):
+        calls.append(("diff", (target, config)))
+        return {
+            "missing_from_store": ["paper.md"],
+            "missing_from_disk": ["removed.md"],
+        }
+
+    async def prune_folder(target, config):
+        calls.append(("prune", (target, config)))
+        return ["removed-pid"]
+
+    operations = SimpleNamespace(
+        init_workspace=init_workspace,
+        ingest_file=ingest_file,
+        ingest_folder=ingest_folder,
+        diff_folder=diff_folder,
+        prune_folder=prune_folder,
+    )
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        session_factory=factory,
+        knowledge_operations=operations,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    commands = [
+        "/init",
+        f"/ingest {document}",
+        f"/ingest {source}",
+        f"/sync {source}",
+        f"/prune {source}",
+        f"/prune {source} --yes",
+    ]
+    results = [
+        asyncio.run(service.dispatch("session.turn", {"text": command}))
+        for command in commands
+    ]
+
+    assert factory.created is not None
+    assert factory.created.turn_inputs == []
+    assert all(result["responseKind"] == "command" for result in results)
+    assert all(result["streamKind"] == "final_only" for result in results)
+    assert all(result["registrationStatus"] == "not_required" for result in results)
+    assert "initialized: 2 files, 5 chunks" in results[0]["text"]
+    assert "ingested paper-pid (3 chunks)" in results[1]["text"]
+    assert "ingested 1 files (3 chunks)" in results[2]["text"]
+    assert "+ paper.md" in results[3]["text"]
+    assert "Would prune 1 orphaned path(s)" in results[4]["text"]
+    assert "Re-run the same command with --yes" in results[4]["text"]
+    assert "pruned 1 orphaned pid(s)" in results[5]["text"]
+    assert "previewId" not in repr(results)
+    assert [name for name, _payload in calls] == [
+        "init",
+        "ingest_file",
+        "ingest_folder",
+        "diff",
+        "diff",
+        "diff",
+        "prune",
+    ]
+
+
+def test_composer_knowledge_paths_fail_closed_before_injected_operations(
+    tmp_path: Path,
+) -> None:
+    protected = tmp_path / "store"
+    protected.mkdir()
+    source = tmp_path / "source"
+    source.mkdir()
+    document = source / "paper.md"
+    document.write_text("research", encoding="utf-8")
+    unsupported = source / ".env"
+    unsupported.write_text("PRIVATE=value", encoding="utf-8")
+    linked = tmp_path / "linked"
+    linked.symlink_to(source, target_is_directory=True)
+    called = False
+
+    async def forbidden(*_args):
+        nonlocal called
+        called = True
+        raise AssertionError("knowledge operation must not run")
+
+    operations = SimpleNamespace(
+        init_workspace=forbidden,
+        ingest_file=forbidden,
+        ingest_folder=forbidden,
+        diff_folder=forbidden,
+        prune_folder=forbidden,
+    )
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        session_factory=factory,
+        knowledge_operations=operations,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    invalid = [
+        "/init extra",
+        "/ingest",
+        "/ingest relative.md",
+        "/ingest ~/paper.md",
+        r"/ingest C:\\Users\\paper.md",
+        f"/ingest {unsupported}",
+        f"/sync {tmp_path / 'missing'}",
+        f"/sync {document}",
+        f"/sync {protected}",
+        f"/sync {linked}",
+        "/sync /",
+        f"/prune {document}",
+        f"/prune {source} --yes extra",
+    ]
+    for command in invalid:
+        with pytest.raises(DesktopServiceError) as raised:
+            asyncio.run(service.dispatch("session.turn", {"text": command}))
+        assert raised.value.code in {"PROTOCOL_INVALID", "INVALID_PATH"}, command
+
+    assert called is False
+    assert factory.created is not None
+    assert factory.created.turn_inputs == []
+
+
+def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
+    tmp_path: Path,
+) -> None:
+    root_a = tmp_path / "source-a"
+    root_b = tmp_path / "source-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    disk_file = root_a / "disk-only.md"
+    disk_file.write_bytes(b"disk remains unchanged")
+    fake_store = {"known.md", "gone-a.md"}
+    pruned: list[tuple[Path, tuple[str, ...]]] = []
+
+    async def forbidden(*_args):
+        raise AssertionError("unrelated construction seam entered")
+
+    async def diff_folder(target, _config):
+        return {
+            "missing_from_store": (
+                ["disk-only.md"] if target == root_a.resolve() else []
+            ),
+            "missing_from_disk": sorted(
+                path for path in fake_store if path.startswith("gone-")
+            ),
+        }
+
+    async def prune_folder(target, _config):
+        orphans = tuple(sorted(path for path in fake_store if path.startswith("gone-")))
+        pruned.append((target, orphans))
+        fake_store.difference_update(orphans)
+        return [f"pid:{path}" for path in orphans]
+
+    operations = SimpleNamespace(
+        init_workspace=forbidden,
+        ingest_file=forbidden,
+        ingest_folder=forbidden,
+        diff_folder=diff_folder,
+        prune_folder=prune_folder,
+    )
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        session_factory=factory,
+        knowledge_operations=operations,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    before_source = disk_file.read_bytes()
+    before_store = set(fake_store)
+    sync = asyncio.run(
+        service.dispatch("session.turn", {"text": f"/sync {root_a}"})
+    )
+    assert sync["responseKind"] == "command"
+    assert disk_file.read_bytes() == before_source
+    assert fake_store == before_store
+
+    with pytest.raises(DesktopServiceError) as missing:
+        asyncio.run(
+            service.dispatch(
+                "session.turn", {"text": f"/prune {root_a} --yes"}
+            )
+        )
+    assert missing.value.code == "PRUNE_PREVIEW_STALE"
+
+    preview = asyncio.run(
+        service.dispatch("session.turn", {"text": f"/prune {root_a}"})
+    )
+    assert "gone-a.md" in preview["text"]
+    assert pruned == []
+    assert fake_store == before_store
+
+    with pytest.raises(DesktopServiceError) as wrong_root:
+        asyncio.run(
+            service.dispatch(
+                "session.turn", {"text": f"/prune {root_b} --yes"}
+            )
+        )
+    assert wrong_root.value.code == "PRUNE_PREVIEW_STALE"
+    with pytest.raises(DesktopServiceError) as consumed_by_mismatch:
+        asyncio.run(
+            service.dispatch(
+                "session.turn", {"text": f"/prune {root_a} --yes"}
+            )
+        )
+    assert consumed_by_mismatch.value.code == "PRUNE_PREVIEW_STALE"
+    assert pruned == []
+
+    asyncio.run(service.dispatch("session.turn", {"text": f"/prune {root_a}"}))
+    fake_store.add("gone-b.md")
+    with pytest.raises(DesktopServiceError) as changed:
+        asyncio.run(
+            service.dispatch(
+                "session.turn", {"text": f"/prune {root_a} --yes"}
+            )
+        )
+    assert changed.value.code == "PRUNE_PREVIEW_STALE"
+    assert pruned == []
+
+    fake_store.remove("gone-b.md")
+    asyncio.run(service.dispatch("session.turn", {"text": f"/prune {root_a}"}))
+    applied = asyncio.run(
+        service.dispatch(
+            "session.turn", {"text": f"/prune {root_a} --yes"}
+        )
+    )
+    assert applied["responseKind"] == "command"
+    assert pruned == [(root_a.resolve(), ("gone-a.md",))]
+    assert fake_store == {"known.md"}
+    with pytest.raises(DesktopServiceError) as reused:
+        asyncio.run(
+            service.dispatch(
+                "session.turn", {"text": f"/prune {root_a} --yes"}
+            )
+        )
+    assert reused.value.code == "PRUNE_PREVIEW_STALE"
+
+    restarted = _service(
+        tmp_path,
+        session_factory=_SessionFactory(),
+        knowledge_operations=operations,
+    )
+    asyncio.run(restarted.dispatch("session.create", {"loadMcp": False}))
+    with pytest.raises(DesktopServiceError) as after_restart:
+        asyncio.run(
+            restarted.dispatch(
+                "session.turn", {"text": f"/prune {root_a} --yes"}
+            )
+        )
+    assert after_restart.value.code == "PRUNE_PREVIEW_STALE"
+    assert len(pruned) == 1
+
+
+def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocking_init(_config):
+            started.set()
+            await release.wait()
+            return 1, 1, tmp_path / "workspace", {"app"}
+
+        async def forbidden(*_args):
+            raise AssertionError("unexpected knowledge operation")
+
+        operations = SimpleNamespace(
+            init_workspace=blocking_init,
+            ingest_file=forbidden,
+            ingest_folder=forbidden,
+            diff_folder=forbidden,
+            prune_folder=forbidden,
+        )
+        factory = _SessionFactory()
+        service = _service(
+            tmp_path,
+            session_factory=factory,
+            knowledge_operations=operations,
+        )
+        await service.dispatch("session.create", {"loadMcp": False})
+        first = asyncio.create_task(
+            service.dispatch("session.turn", {"text": "/init"})
+        )
+        await started.wait()
+        with pytest.raises(DesktopServiceError) as normal_busy:
+            await service.dispatch("session.turn", {"text": "normal question"})
+        with pytest.raises(DesktopServiceError) as command_busy:
+            await service.dispatch("session.turn", {"text": "/init"})
+        assert normal_busy.value.code == "BUSY_TURN"
+        assert command_busy.value.code == "BUSY_TURN"
+        release.set()
+        assert (await first)["responseKind"] == "command"
+        assert factory.created is not None
+        assert factory.created.turn_inputs == []
+
+    asyncio.run(run())
+
+    async def failing_init(_config):
+        raise RuntimeError("private construction failure detail")
+
+    async def forbidden(*_args):
+        raise AssertionError("unexpected knowledge operation")
+
+    failed_factory = _SessionFactory()
+    failed = _service(
+        tmp_path,
+        session_factory=failed_factory,
+        knowledge_operations=SimpleNamespace(
+            init_workspace=failing_init,
+            ingest_file=forbidden,
+            ingest_folder=forbidden,
+            diff_folder=forbidden,
+            prune_folder=forbidden,
+        ),
+    )
+    asyncio.run(failed.dispatch("session.create", {"loadMcp": False}))
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(failed.dispatch("session.turn", {"text": "/init"}))
+    assert raised.value.code == "RAG_WRITE_FAILED"
+    assert raised.value.details == {"partialWritePossible": True}
+    assert "private construction" not in str(raised.value)
+    assert failed_factory.created is not None
+    assert failed_factory.created.turn_inputs == []
+
+
+def test_composer_rejects_oversized_prune_preview_without_arming_confirmation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    oversized_orphans = [
+        f"{index:03}-{'x' * 4_000}.md"
+        for index in range(20)
+    ]
+    prune_calls = 0
+
+    async def forbidden(*_args):
+        raise AssertionError("unrelated knowledge operation")
+
+    async def diff_folder(_target, _config):
+        return {
+            "missing_from_store": [],
+            "missing_from_disk": oversized_orphans,
+        }
+
+    async def prune_folder(_target, _config):
+        nonlocal prune_calls
+        prune_calls += 1
+        return []
+
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        session_factory=factory,
+        knowledge_operations=SimpleNamespace(
+            init_workspace=forbidden,
+            ingest_file=forbidden,
+            ingest_folder=forbidden,
+            diff_folder=diff_folder,
+            prune_folder=prune_folder,
+        ),
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    with pytest.raises(DesktopServiceError) as preview:
+        asyncio.run(
+            service.dispatch("session.turn", {"text": f"/prune {source}"})
+        )
+    assert preview.value.code == "RAG_READ_FAILED"
+
+    with pytest.raises(DesktopServiceError) as apply:
+        asyncio.run(
+            service.dispatch(
+                "session.turn",
+                {"text": f"/prune {source} --yes"},
+            )
+        )
+    assert apply.value.code == "PRUNE_PREVIEW_STALE"
+    assert prune_calls == 0
+    assert factory.created is not None
+    assert factory.created.turn_inputs == []
 
 
 def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) -> None:

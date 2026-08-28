@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from langchain_core.messages import AIMessage, ToolMessage
 
 from agent.config import AgentConfig
 from agent.desktop.catalog import (
@@ -16,7 +19,7 @@ from agent.desktop.catalog import (
     CatalogUnavailableError,
     DesktopProjectCatalog,
 )
-from agent.desktop.service import DesktopService
+from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
 from agent.turns.memory import TurnRecord
 from agent.turns.plan_log import PlanLog
 from agent.turns.results import TurnOutcome
@@ -26,6 +29,11 @@ FIXTURE_MODE_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE"
 FIXTURE_ROOT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT"
 FIXTURE_MODE = "phase02"
 FIXTURE_ROOT_PREFIX = "research-agent-desktop-phase02-"
+FIXTURE_KNOWLEDGE_DIRNAME = "knowledge-source"
+FIXTURE_BLOCK_INIT_MARKER = ".fixture-block-init"
+FIXTURE_CHANGED_ORPHAN_MARKER = ".fixture-changed-orphans"
+FIXTURE_LONG_OUTPUT_MARKER = ".fixture-long-output"
+FIXTURE_RAG_QUESTION = "What does the fixture knowledge say?"
 
 SESSION_A = "28b222e0cc6543aa8d7bbdc423de99a7"
 SESSION_B = "f2ddf2369f994905afa0b85d8cca79b1"
@@ -134,11 +142,22 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         root / "extensions" / "desired",
         root / "extensions" / "state",
         root / "citations",
+        root / FIXTURE_KNOWLEDGE_DIRNAME,
     )
     if any(path.is_symlink() for path in guarded_paths):
         raise FixtureConfigurationError("fixture child roots must not be symlinks")
     persist_dir.mkdir(exist_ok=True)
     plan_logs_dir.mkdir(exist_ok=True)
+    knowledge_source = root / FIXTURE_KNOWLEDGE_DIRNAME
+    knowledge_source.mkdir(exist_ok=True)
+    knowledge_document = knowledge_source / "fixture-notes.md"
+    if knowledge_document.is_symlink():
+        raise FixtureConfigurationError("fixture knowledge files must not be symlinks")
+    if not knowledge_document.exists():
+        knowledge_document.write_text(
+            "The fixture knowledge answer is local and deterministic.\n",
+            encoding="utf-8",
+        )
     catalog_path = persist_dir / CATALOG_FILENAME
     if catalog_path.is_symlink() or any(
         path.is_symlink() for path in plan_logs_dir.iterdir()
@@ -175,8 +194,125 @@ def seed_fixture_root(root: Path) -> AgentConfig:
     return config
 
 
+def _fixture_search(query: str) -> list[dict[str, str]]:
+    """Return one deterministic hit through the fake agent/search seam."""
+    return [
+        {
+            "pid": "fixture-knowledge",
+            "file_path": "fixture-notes.md",
+            "text": f"Local fixture result for: {query}",
+        }
+    ]
+
+
+class FixtureKnowledgeOperations:
+    """In-memory Knowledge handlers limited to the fixture source directory."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.source_root = (root / FIXTURE_KNOWLEDGE_DIRNAME).resolve(strict=True)
+        self.calls: list[tuple[str, str]] = []
+        self._orphans = ["removed-from-disk.md"]
+        self._changed_orphan_pruned = False
+
+    def _target(self, target: Path) -> Path:
+        resolved = target.resolve(strict=True)
+        if resolved != self.source_root and not resolved.is_relative_to(
+            self.source_root
+        ):
+            raise ValueError("fixture knowledge target is outside its source root")
+        return resolved
+
+    def _current_orphans(self) -> list[str]:
+        orphans = list(self._orphans)
+        if (
+            not self._changed_orphan_pruned
+            and (self.source_root / FIXTURE_CHANGED_ORPHAN_MARKER).is_file()
+        ):
+            orphans.append("changed-after-preview.md")
+        return orphans
+
+    async def init_workspace(
+        self,
+        _config: AgentConfig,
+    ) -> tuple[int, int, Path, set[str]]:
+        self.calls.append(("init", str(self.source_root)))
+        if (self.source_root / FIXTURE_BLOCK_INIT_MARKER).is_file():
+            await asyncio.sleep(1.5)
+        return 1, 1, self.root, {"app"}
+
+    async def ingest_file(
+        self,
+        target: Path,
+        _config: AgentConfig,
+    ) -> tuple[str, int]:
+        resolved = self._target(target)
+        if not resolved.is_file():
+            raise ValueError("fixture file target is invalid")
+        self.calls.append(("ingest_file", str(resolved)))
+        return "fixture-file-pid", 1
+
+    async def ingest_folder(
+        self,
+        target: Path,
+        _config: AgentConfig,
+    ) -> tuple[int, int]:
+        resolved = self._target(target)
+        if not resolved.is_dir():
+            raise ValueError("fixture folder target is invalid")
+        self.calls.append(("ingest_folder", str(resolved)))
+        return 1, 1
+
+    async def diff_folder(
+        self,
+        target: Path,
+        _config: AgentConfig,
+    ) -> dict[str, list[str]]:
+        resolved = self._target(target)
+        if not resolved.is_dir():
+            raise ValueError("fixture sync target is invalid")
+        self.calls.append(("diff", str(resolved)))
+        on_disk = sorted(
+            str(path.relative_to(resolved))
+            for path in resolved.rglob("*.md")
+            if path.is_file()
+        )
+        if (self.source_root / FIXTURE_LONG_OUTPUT_MARKER).is_file():
+            on_disk.extend(
+                f"long-output/nested-research-document-{index:03}.md"
+                for index in range(80)
+            )
+        return {
+            "missing_from_store": on_disk,
+            "missing_from_disk": self._current_orphans(),
+        }
+
+    async def prune_folder(
+        self,
+        target: Path,
+        _config: AgentConfig,
+    ) -> list[str]:
+        resolved = self._target(target)
+        self.calls.append(("prune", str(resolved)))
+        orphans = self._current_orphans()
+        removed = [f"fixture:{path}" for path in orphans]
+        self._orphans.clear()
+        if "changed-after-preview.md" in orphans:
+            self._changed_orphan_pruned = True
+        return removed
+
+    def as_operations(self) -> DesktopKnowledgeOperations:
+        return DesktopKnowledgeOperations(
+            init_workspace=self.init_workspace,
+            ingest_file=self.ingest_file,
+            ingest_folder=self.ingest_folder,
+            diff_folder=self.diff_folder,
+            prune_folder=self.prune_folder,
+        )
+
+
 class FixtureSession:
-    """Deterministic ChatSession-shaped implementation with no model or tools."""
+    """Deterministic ChatSession-shaped implementation with no model/provider."""
 
     def __init__(
         self,
@@ -185,6 +321,7 @@ class FixtureSession:
         session_id: str,
         restored_turns: list[TurnRecord],
         progress_cb: Callable[[str, list[Any]], None] | None,
+        search_handler: Callable[[str], list[dict[str, str]]],
     ) -> None:
         self.config = config
         self.session_id = session_id
@@ -198,6 +335,7 @@ class FixtureSession:
         self.plan_mode = False
         self.plan_log_path: Path | None = None
         self._progress_cb = progress_cb
+        self._search_handler = search_handler
         self._turn_count = max(
             (turn.turn_id for turn in self.recent_turns),
             default=0,
@@ -226,7 +364,33 @@ class FixtureSession:
         context = " | ".join(
             turn.user_input for turn in self.recent_turns[-_MAX_CONTEXT_ITEMS:]
         )[:_MAX_CONTEXT_CHARS]
-        if text == "[[fixture:malicious-content]]":
+        if text == FIXTURE_RAG_QUESTION:
+            hits = self._search_handler(text)
+            if self._progress_cb is not None:
+                self._progress_cb(
+                    "tools",
+                    [
+                        AIMessage(
+                            content="",
+                            tool_calls=[
+                                {
+                                    "name": "rag_search",
+                                    "args": {"query": text},
+                                    "id": "fixture-rag-search",
+                                    "type": "tool_call",
+                                }
+                            ],
+                        ),
+                        ToolMessage(
+                            content=json.dumps(hits, ensure_ascii=False),
+                            tool_call_id="fixture-rag-search",
+                            name="rag_search",
+                            status="success",
+                        ),
+                    ],
+                )
+            answer = f"Fixture knowledge says: {hits[0]['text']}"
+        elif text == "[[fixture:malicious-content]]":
             answer = (
                 "Fixture content: <script>unsafe()</script> "
                 "[safe](https://example.com) [unsafe](file:///etc/passwd)"
@@ -319,8 +483,13 @@ class FixtureSession:
 class FixtureSessionFactory:
     """Allocate deterministic unused session IDs within one fixture process."""
 
-    def __init__(self, catalog: DesktopProjectCatalog | None) -> None:
+    def __init__(
+        self,
+        catalog: DesktopProjectCatalog | None,
+        search_handler: Callable[[str], list[dict[str, str]]] = _fixture_search,
+    ) -> None:
         self._catalog = catalog
+        self._search_handler = search_handler
         self._next_index = 0
         self._issued: set[str] = set()
 
@@ -353,6 +522,7 @@ class FixtureSessionFactory:
             session_id=session_id,
             restored_turns=list(restored_turns or []),
             progress_cb=progress_cb,
+            search_handler=self._search_handler,
         )
 
 
@@ -375,10 +545,12 @@ def build_phase02_fixture_service(
         for key in ("CONDA_DEFAULT_ENV", "CONDA_PREFIX")
         if key in environ
     }
+    knowledge_operations = FixtureKnowledgeOperations(root)
     return DesktopService(
         original_cwd=original_cwd,
         environ=sanitized_environ,
         config=config,
         project_catalog=catalog,
         session_factory=FixtureSessionFactory(catalog),
+        knowledge_operations=knowledge_operations.as_operations(),
     )

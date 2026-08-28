@@ -124,6 +124,36 @@ test("a differing authoritative result replaces provisional assembly exactly onc
   assert.equal(duplicateResult.latestAnswer?.text, "final answer");
 });
 
+test("a local slash command is one final-only inert conversation result", () => {
+  const state = conversationReducer(activeState("/sync /tmp/research"), {
+    type: "turn-succeeded",
+    generation: 1,
+    requestId,
+    projectId,
+    result: {
+      sessionId,
+      turnId,
+      text: "Diff against /tmp/research:\n  (none)",
+      responseKind: "command",
+      streamKind: "final_only",
+      chunkCount: 0,
+    },
+  });
+
+  assert.equal(state.activeTurn, null);
+  assert.equal(state.draft, "");
+  assert.deepEqual(state.latestAnswer, {
+    projectId,
+    sessionId,
+    requestId,
+    turnId,
+    text: "Diff against /tmp/research:\n  (none)",
+    responseKind: "command",
+    streamKind: "final_only",
+    presentation: "final_only",
+  });
+});
+
 test("duplicate, gap, stale, cross-session, mismatched, and malformed chunks are rejected", () => {
   const started = activeState();
   const first = receive(started, chunk(0, "a"));
