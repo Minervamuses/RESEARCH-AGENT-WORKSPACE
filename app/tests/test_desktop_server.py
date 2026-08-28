@@ -183,6 +183,103 @@ def test_reader_accepts_status_while_turn_is_active_and_lines_never_interleave()
     assert "界" * 100 in turn_result["data"]["text"]
 
 
+class _ApprovalRelayService:
+    def __init__(self) -> None:
+        self.lifecycle = "ready"
+        self.staged = asyncio.Event()
+        self.released = asyncio.Event()
+
+    async def dispatch(self, method, params, *, event_sink=None):
+        if method == "session.turn":
+            assert event_sink is not None
+            parent_request_id = event_sink.request_id
+            event_sink("approval.required", {
+                "approvalId": "approval-server-1",
+                "parentRequestId": parent_request_id,
+                "turnId": "turn-server-1",
+                "command": "printf fixture",
+                "description": "Exercise the bounded relay.",
+                "executionTimeoutSeconds": 5,
+                "createdAt": "2026-08-28T04:00:00.000Z",
+                "expiresAt": "2026-08-28T04:01:00.000Z",
+            })
+            self.staged.set()
+            await self.released.wait()
+            return {
+                "sessionId": "session-1",
+                "turnId": "turn-server-1",
+                "text": "approved through relay",
+                "validationErrors": [],
+                "toolSummaries": [],
+            }
+        if method == "approval.resolve":
+            await self.staged.wait()
+            assert params == {
+                "approvalId": "approval-server-1",
+                "parentRequestId": "00000000-0000-4000-8000-000000000212",
+                "turnId": "turn-server-1",
+                "approved": True,
+            }
+            self.released.set()
+            return {"approvalId": "approval-server-1", "approved": True}
+        if method == "runtime.shutdown":
+            self.lifecycle = "stopped"
+            return {"status": "stopped"}
+        raise AssertionError(method)
+
+
+def test_server_correlates_and_relays_approval_while_parent_turn_is_pending() -> None:
+    turn_id = "00000000-0000-4000-8000-000000000212"
+    resolve_id = "00000000-0000-4000-8000-000000000213"
+
+    async def run() -> list[dict[str, Any]]:
+        output = io.StringIO()
+        server = DesktopServer(_ApprovalRelayService(), ProtocolWriter(output))
+        reader = _reader(
+            _request(turn_id, "session.turn", {"text": "approve"}),
+            _request(resolve_id, "approval.resolve", {
+                "approvalId": "approval-server-1",
+                "parentRequestId": turn_id,
+                "turnId": "turn-server-1",
+                "approved": True,
+            }),
+            _request(
+                "00000000-0000-4000-8000-000000000214",
+                "runtime.shutdown",
+                {},
+            ),
+        )
+        assert await server.run(reader) == 0
+        return _messages(output)
+
+    messages = asyncio.run(run())
+    approval_event = next(
+        message
+        for message in messages
+        if message.get("event") == "approval.required"
+    )
+    resolve_result = next(
+        message
+        for message in messages
+        if message.get("requestId") == resolve_id
+        and message.get("messageType") == "result"
+    )
+    turn_result = next(
+        message
+        for message in messages
+        if message.get("requestId") == turn_id
+        and message.get("messageType") == "result"
+    )
+    assert approval_event["requestId"] == turn_id
+    assert approval_event["data"]["parentRequestId"] == turn_id
+    assert messages.index(approval_event) < messages.index(resolve_result)
+    assert messages.index(resolve_result) < messages.index(turn_result)
+    assert resolve_result["data"] == {
+        "approvalId": "approval-server-1",
+        "approved": True,
+    }
+
+
 def test_duplicate_request_id_reports_process_error_without_second_result(
     tmp_path: Path,
 ) -> None:

@@ -1,0 +1,191 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createServer } from "vite";
+
+import type {
+  ApprovalRequiredDto,
+  ExtensionApplyDto,
+  ExtensionPreviewDto,
+} from "../src/protocol.ts";
+
+interface TrustModule {
+  ApprovalDialog: (props: {
+    approval: ApprovalRequiredDto;
+    resolving: boolean;
+    onResolve: (approved: boolean) => void;
+    returnFocus: () => void;
+  }) => unknown;
+  acceptApprovalEvent: (
+    generation: number,
+    requestId: string,
+    activeRequestId: string | null,
+    data: ApprovalRequiredDto,
+    now?: number,
+    activeTurnId?: string,
+  ) => unknown;
+  approvedBindingHashes: (flow: unknown) => string[] | null;
+  beginExtensionApply: (flow: unknown) => unknown;
+  createExtensionFlow: (turnId: string) => unknown;
+  decideExtensionBinding: (
+    flow: unknown,
+    bindingHash: string,
+    decision: "approve" | "deny",
+  ) => unknown;
+  markExtensionAwaitingLoad: (flow: unknown) => unknown;
+  markExtensionRestarting: (flow: unknown) => unknown;
+  observeExtensionRevision: (flow: unknown, revision: number) => unknown;
+  receiveExtensionApply: (flow: unknown, report: ExtensionApplyDto) => unknown;
+  receiveExtensionPreview: (flow: unknown, preview: ExtensionPreviewDto) => unknown;
+}
+
+async function loadTrust(): Promise<TrustModule> {
+  const server = await createServer({
+    configFile: false,
+    root: new URL("..", import.meta.url).pathname,
+    server: { middlewareMode: true, hmr: false },
+    appType: "custom",
+  });
+  try {
+    return await server.ssrLoadModule("/src/trust.tsx") as TrustModule;
+  } finally {
+    await server.close();
+  }
+}
+
+const preview: ExtensionPreviewDto = {
+  previewId: "preview-1",
+  summary: "Two exact bindings.",
+  proposedSkills: ["writer"],
+  bindings: [
+    {
+      name: "clock",
+      server: "clock",
+      bindingHash: "a".repeat(64),
+      requiresApproval: true,
+      command: "/conda/envs/app/bin/python",
+      arguments: ["server.py"],
+      workingDirectory: "/tmp/extensions/clock",
+      environmentNames: ["CLOCK_MODE"],
+    },
+    {
+      name: "search",
+      server: "search",
+      bindingHash: "b".repeat(64),
+      requiresApproval: true,
+      command: "/conda/envs/app/bin/python",
+      arguments: ["search.py", "--stdio"],
+      workingDirectory: "/tmp/extensions/search",
+      environmentNames: [],
+    },
+  ],
+};
+
+test("extension apply remains disabled until every exact binding has a decision", async () => {
+  const trust = await loadTrust();
+  let flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-1"), preview);
+  assert.equal(trust.approvedBindingHashes(flow), null);
+
+  const unchanged = trust.decideExtensionBinding(flow, "unknown", "approve");
+  assert.equal(trust.approvedBindingHashes(unchanged), null);
+
+  flow = trust.decideExtensionBinding(flow, "a".repeat(64), "approve");
+  assert.equal(trust.approvedBindingHashes(flow), null);
+  flow = trust.decideExtensionBinding(flow, "b".repeat(64), "deny");
+  assert.deepEqual(trust.approvedBindingHashes(flow), ["a".repeat(64)]);
+});
+
+test("an extension preview with no MCP bindings can apply an empty decision set", async () => {
+  const trust = await loadTrust();
+  const flow = trust.receiveExtensionPreview(
+    trust.createExtensionFlow("turn-2"),
+    { ...preview, bindings: [] },
+  );
+  assert.deepEqual(trust.approvedBindingHashes(flow), []);
+});
+
+test("extension apply is one-use and only the exact loaded revision completes restart", async () => {
+  const trust = await loadTrust();
+  let flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-3"), preview);
+  flow = trust.decideExtensionBinding(flow, "a".repeat(64), "approve");
+  flow = trust.decideExtensionBinding(flow, "b".repeat(64), "deny");
+  flow = trust.beginExtensionApply(flow);
+  assert.equal(trust.approvedBindingHashes(flow), null);
+
+  const report: ExtensionApplyDto = {
+    previousRevision: 0,
+    appliedRevision: 1,
+    restartRequired: true,
+    items: [{ key: "skill:writer", outcome: "added", detail: "Installed." }],
+    diagnostics: [],
+  };
+  flow = trust.receiveExtensionApply(flow, report);
+  flow = trust.markExtensionRestarting(flow);
+  flow = trust.markExtensionAwaitingLoad(flow);
+  assert.equal((flow as { phase: string }).phase, "awaiting-load");
+  flow = trust.observeExtensionRevision(flow, 0);
+  assert.equal((flow as { phase: string }).phase, "awaiting-load");
+  flow = trust.observeExtensionRevision(flow, 1);
+  assert.equal((flow as { phase: string }).phase, "loaded");
+});
+
+test("approval events must correlate to the active request and remain unexpired", async () => {
+  const { acceptApprovalEvent } = await loadTrust();
+  const data: ApprovalRequiredDto = {
+    approvalId: "approval-1",
+    parentRequestId: "00000000-0000-4000-8000-000000000401",
+    turnId: "turn-1",
+    command: "printf safe",
+    description: "Return deterministic output.",
+    executionTimeoutSeconds: 5,
+    createdAt: "2026-08-28T04:00:00.000Z",
+    expiresAt: "2026-08-28T04:01:00.000Z",
+  };
+  const now = Date.parse("2026-08-28T04:00:30.000Z");
+
+  assert.notEqual(
+    acceptApprovalEvent(3, data.parentRequestId, data.parentRequestId, data, now),
+    null,
+  );
+  assert.equal(
+    acceptApprovalEvent(3, data.parentRequestId, "other-request", data, now),
+    null,
+  );
+  assert.equal(
+    acceptApprovalEvent(3, data.parentRequestId, data.parentRequestId, data, Date.parse(data.expiresAt)),
+    null,
+  );
+  assert.equal(
+    acceptApprovalEvent(3, data.parentRequestId, data.parentRequestId, data, now, "other-turn"),
+    null,
+  );
+});
+
+test("Bash approval renders inert context with exactly Deny and Approve actions", async () => {
+  const { ApprovalDialog } = await loadTrust();
+  const approval: ApprovalRequiredDto = {
+    approvalId: "approval-2",
+    parentRequestId: "00000000-0000-4000-8000-000000000402",
+    turnId: "turn-2",
+    command: "printf '<script>inert()</script>'",
+    description: "Show <img src=x> as text.",
+    executionTimeoutSeconds: 5,
+    createdAt: "2026-08-28T04:00:00.000Z",
+    expiresAt: "2026-08-28T04:01:00.000Z",
+  };
+  const html = renderToStaticMarkup(createElement(ApprovalDialog, {
+    approval,
+    resolving: false,
+    onResolve: () => undefined,
+    returnFocus: () => undefined,
+  }));
+
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.equal((html.match(/<button\b/g) ?? []).length, 2);
+  assert.match(html, />Deny<\/button>/);
+  assert.match(html, />Approve<\/button>/);
+  assert.doesNotMatch(html, /<script\b|<img\b/i);
+  assert.match(html, /&lt;script&gt;inert\(\)&lt;\/script&gt;/);
+});

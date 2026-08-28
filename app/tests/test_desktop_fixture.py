@@ -11,6 +11,8 @@ import pytest
 
 from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog
 from agent.desktop.fixture_session import (
+    FIXTURE_BASH_APPROVE,
+    FIXTURE_BASH_DENY,
     FIXTURE_CHANGED_ORPHAN_MARKER,
     FIXTURE_KNOWLEDGE_DIRNAME,
     FIXTURE_MODE,
@@ -22,6 +24,8 @@ from agent.desktop.fixture_session import (
     SESSION_B,
     SESSION_C,
     FixtureConfigurationError,
+    FixtureBashRunner,
+    FixtureExtensionProvider,
     FixtureKnowledgeOperations,
     build_phase02_fixture_service,
     require_fixture_root,
@@ -414,6 +418,205 @@ def test_fixture_never_uses_chat_session_factory_or_exposes_credentials(
         )
     )
     assert result["mcpFamilies"] == []
+
+
+def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
+    fixture_root: Path,
+) -> None:
+    service = _service(fixture_root)
+    provider = service._extension_manager.model_factory.__self__
+    assert isinstance(provider, FixtureExtensionProvider)
+
+    async def run_first_process():
+        created = await service.dispatch(
+            "session.create",
+            {"projectId": "p1", "loadMcp": True},
+        )
+        status_turn = await service.dispatch(
+            "session.turn",
+            {"text": "/extension-management status"},
+        )
+        preview_gate = await service.dispatch(
+            "session.turn",
+            {"text": "/extension-management"},
+        )
+        direct_status = await service.dispatch("extensions.status", {})
+        preview = await service.dispatch("extensions.preview", {})
+        status_after_preview = await service.dispatch("extensions.status", {})
+        binding = preview["bindings"][0]
+        applied = await service.dispatch(
+            "extensions.apply",
+            {
+                "previewId": preview["previewId"],
+                "approvedBindingHashes": [binding["bindingHash"]],
+            },
+        )
+        post_apply = await service.dispatch("extensions.status", {})
+        with pytest.raises(DesktopServiceError) as replayed:
+            await service.dispatch(
+                "extensions.apply",
+                {
+                    "previewId": preview["previewId"],
+                    "approvedBindingHashes": [binding["bindingHash"]],
+                },
+            )
+        return (
+            created,
+            status_turn,
+            preview_gate,
+            direct_status,
+            preview,
+            status_after_preview,
+            applied,
+            post_apply,
+            replayed.value,
+        )
+
+    (
+        created,
+        status_turn,
+        preview_gate,
+        direct_status,
+        preview,
+        status_after_preview,
+        applied,
+        post_apply,
+        replayed,
+    ) = asyncio.run(run_first_process())
+    assert created["extensionRevision"] == 0
+    assert status_turn["extensionAction"] == "status"
+    assert preview_gate["extensionAction"] == "preview"
+    assert direct_status["appliedRevision"] == 0
+    assert provider.calls == 1
+    assert status_after_preview["appliedRevision"] == 0
+    assert preview["proposedSkills"] == ["fixture-writer"]
+    assert len(preview["bindings"]) == 1
+    binding = preview["bindings"][0]
+    assert binding["name"] == "fixture-clock"
+    assert binding["server"] == "fixture-clock"
+    assert binding["arguments"] == ["--stdio"]
+    assert binding["environmentNames"] == ["FIXTURE_MODE"]
+    assert binding["command"].startswith(str(fixture_root.resolve()))
+    assert binding["workingDirectory"].startswith(str(fixture_root.resolve()))
+    assert "must-not-be-copied" not in repr((direct_status, preview, applied))
+    assert applied["previousRevision"] == 0
+    assert applied["appliedRevision"] == 1
+    assert applied["restartRequired"] is True
+    assert {item["outcome"] for item in applied["items"]} == {"added"}
+    assert post_apply["runningRevision"] == 0
+    assert post_apply["restartRequired"] is True
+    assert replayed.code == "EXTENSION_APPLY_FAILED"
+
+    restarted = _service(fixture_root)
+    restarted_provider = restarted._extension_manager.model_factory.__self__
+
+    async def run_restarted_process():
+        loaded = await restarted.dispatch(
+            "session.create",
+            {"projectId": "p1", "loadMcp": True},
+        )
+        status = await restarted.dispatch("extensions.status", {})
+        return loaded, status
+
+    loaded, status = asyncio.run(run_restarted_process())
+    assert loaded["extensionRevision"] == 1
+    assert loaded["loadedSkills"] == ["fixture-writer"]
+    assert loaded["mcpFamilies"] == ["fixture-clock"]
+    assert status["runningRevision"] == 1
+    assert status["restartRequired"] is False
+    assert isinstance(restarted_provider, FixtureExtensionProvider)
+    assert restarted_provider.calls == 0
+
+
+def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
+    fixture_root: Path,
+) -> None:
+    service = _service(fixture_root)
+    runner = service._bash_command_runner
+    assert isinstance(runner, FixtureBashRunner)
+
+    class EventSink:
+        def __init__(self, request_id: str) -> None:
+            self.request_id = request_id
+            self.events: list[tuple[str, dict]] = []
+            self.approval_ready = asyncio.Event()
+
+        def __call__(self, event: str, data: dict) -> None:
+            self.events.append((event, data))
+            if event == "approval.required":
+                self.approval_ready.set()
+
+    async def decide(marker: str, approved: bool, request_id: str):
+        sink = EventSink(request_id)
+        turn = asyncio.create_task(
+            service.dispatch(
+                "session.turn",
+                {"text": marker},
+                event_sink=sink,
+            )
+        )
+        await asyncio.wait_for(sink.approval_ready.wait(), timeout=2)
+        approval = next(
+            data for event, data in sink.events if event == "approval.required"
+        )
+        resolved = await service.dispatch(
+            "approval.resolve",
+            {
+                "approvalId": approval["approvalId"],
+                "parentRequestId": approval["parentRequestId"],
+                "turnId": approval["turnId"],
+                "approved": approved,
+            },
+        )
+        result = await asyncio.wait_for(turn, timeout=2)
+        return sink, approval, resolved, result
+
+    async def run():
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        approved = await decide(
+            FIXTURE_BASH_APPROVE,
+            True,
+            "00000000-0000-4000-8000-000000000501",
+        )
+        denied = await decide(
+            FIXTURE_BASH_DENY,
+            False,
+            "00000000-0000-4000-8000-000000000502",
+        )
+        with pytest.raises(DesktopServiceError) as replayed:
+            await service.dispatch(
+                "approval.resolve",
+                {
+                    "approvalId": denied[1]["approvalId"],
+                    "parentRequestId": denied[1]["parentRequestId"],
+                    "turnId": denied[1]["turnId"],
+                    "approved": True,
+                },
+            )
+        return approved, denied, replayed.value
+
+    approved, denied, replayed = asyncio.run(run())
+    assert approved[1]["command"] == "printf fixture-approved"
+    assert approved[1]["executionTimeoutSeconds"] == 5
+    assert approved[2]["approved"] is True
+    assert approved[3]["toolSummaries"] == [{
+        "name": "bash",
+        "status": "ok",
+        "callId": "fixture-bash-2",
+    }]
+    assert denied[1]["command"] == "printf fixture-denied"
+    assert denied[2]["approved"] is False
+    assert denied[3]["toolSummaries"] == [{
+        "name": "bash",
+        "status": "denied",
+        "callId": "fixture-bash-3",
+    }]
+    assert len(runner.calls) == 1
+    assert runner.calls[0][0] == ("printf fixture-approved",)
+    assert replayed.code == "APPROVAL_DENIED"
 
 
 def test_malformed_existing_catalog_is_preserved_and_reported_unavailable(

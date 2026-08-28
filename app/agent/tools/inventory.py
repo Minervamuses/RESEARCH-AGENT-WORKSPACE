@@ -165,6 +165,9 @@ def build_base_tools(
     config: AgentConfig,
     history_store=None,
     extra_tools: list | None = None,
+    *,
+    bash_approval_handler=None,
+    bash_command_runner=None,
 ) -> list:
     """Instantiate the local base tools, then append de-duplicated extra tools.
 
@@ -176,7 +179,11 @@ def build_base_tools(
         *create_rag_tools(config),
         create_history_tool(config, store=history_store),
         create_read_file_tool(config),
-        create_bash_tool(config),
+        create_bash_tool(
+            config,
+            approval_handler=bash_approval_handler,
+            command_runner=bash_command_runner,
+        ),
     ]
     seen = {getattr(tool, "name", str(tool)) for tool in tools}
     for extra in extra_tools or []:

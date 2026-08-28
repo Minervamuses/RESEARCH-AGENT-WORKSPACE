@@ -38,7 +38,10 @@ def test_protocol_manifest_safety_invariants() -> None:
         "session.retry_registration",
         "session.transcript",
         "session.turn",
+        "extensions.status",
         "extensions.preview",
+        "extensions.apply",
+        "approval.resolve",
     }
     assert len(METHODS) == len(CONTRACT["methods"])
     assert not {
@@ -54,6 +57,38 @@ def test_protocol_manifest_safety_invariants() -> None:
         assert method["requiredParams"] == required_from_schema
         if method["operation"] == "destructive":
             assert "previewId" in method["requiredParams"]
+
+
+def test_phase04_approval_correlation_and_extension_action_are_v1_additions() -> None:
+    approval = METHODS["approval.resolve"]
+    assert approval["requiredParams"] == ["approvalId", "approved"]
+    assert approval["params"]["parentRequestId"] == {
+        "type": "requestId",
+        "required": False,
+    }
+    assert approval["params"]["turnId"] == {
+        "type": "string",
+        "required": False,
+        "maxBytes": 256,
+    }
+    assert CONTRACT["resultDataSchemas"]["session.turn"]["extensionAction"] == {
+        "type": "string",
+        "required": False,
+        "enum": ["status", "preview"],
+    }
+    binding = CONTRACT["resultDataSchemas"]["extensions.preview"]["bindings"][
+        "items"
+    ]
+    assert set(binding) == {
+        "name",
+        "server",
+        "bindingHash",
+        "requiresApproval",
+        "command",
+        "arguments",
+        "workingDirectory",
+        "environmentNames",
+    }
 
 
 @pytest.mark.parametrize("case", FIXTURES["messages"], ids=lambda case: case["name"])

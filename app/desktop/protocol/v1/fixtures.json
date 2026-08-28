@@ -1184,7 +1184,8 @@
             "validationErrors": [],
             "toolSummaries": [
               {"name": "rag_search", "status": "ok", "callId": "call-1"}
-            ]
+            ],
+            "extensionAction": "preview"
           }
         }
       ]
@@ -1242,7 +1243,11 @@
                 "name": "local-search",
                 "server": "local-search",
                 "bindingHash": "sha256:binding-2",
-                "requiresApproval": true
+                "requiresApproval": true,
+                "command": "/conda/envs/app/bin/python",
+                "arguments": ["server.py", "--safe"],
+                "workingDirectory": "/workspace/extensions/local-search",
+                "environmentNames": ["LOCAL_SEARCH_MODE"]
               }
             ]
           }

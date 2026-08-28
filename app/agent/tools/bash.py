@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -30,6 +32,9 @@ TOOL_DESCRIPTION = (
 MAX_OUTPUT_BYTES = 256_000
 DEFAULT_TIMEOUT_SEC = 30
 MAX_TIMEOUT_SEC = 300
+
+BashApprovalHandler = Callable[[str, str, int], bool]
+BashCommandRunner = Callable[..., Any]
 
 
 class BashInput(BaseModel):
@@ -94,18 +99,35 @@ def _user_approves(command: str, description: str) -> bool:
     return answer in {"y", "yes"}
 
 
-def _run_bash(command: str, description: str, timeout_sec: int) -> str:
-    if not sys.stdin.isatty():
-        return _denied("non-interactive environment; bash auto-denied", command)
+def _run_bash(
+    command: str,
+    description: str,
+    timeout_sec: int,
+    *,
+    approval_handler: BashApprovalHandler | None = None,
+    command_runner: BashCommandRunner | None = None,
+) -> str:
+    capped_timeout = max(1, min(int(timeout_sec), MAX_TIMEOUT_SEC))
+    if approval_handler is None:
+        if not sys.stdin.isatty():
+            return _denied("non-interactive environment; bash auto-denied", command)
+        approved = _user_approves(command, description)
+    else:
+        try:
+            approved = bool(
+                approval_handler(command, description, capped_timeout)
+            )
+        except Exception:
+            approved = False
 
-    if not _user_approves(command, description):
+    if not approved:
         return _denied(f"user denied execution of: {command}", command)
 
-    capped_timeout = max(1, min(int(timeout_sec), MAX_TIMEOUT_SEC))
     cwd = str(find_app_root())
+    runner = command_runner or subprocess.run
 
     try:
-        completed = subprocess.run(
+        completed = runner(
             command,
             shell=True,
             capture_output=True,
@@ -137,12 +159,23 @@ def _run_bash(command: str, description: str, timeout_sec: int) -> str:
     )
 
 
-def create_bash_tool(config: AgentConfig) -> StructuredTool:
+def create_bash_tool(
+    config: AgentConfig,
+    *,
+    approval_handler: BashApprovalHandler | None = None,
+    command_runner: BashCommandRunner | None = None,
+) -> StructuredTool:
     """Build the bash tool. `config` accepted for factory symmetry."""
     del config
 
     def _run(command: str, description: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> str:
-        return _run_bash(command, description, timeout_sec)
+        return _run_bash(
+            command,
+            description,
+            timeout_sec,
+            approval_handler=approval_handler,
+            command_runner=command_runner,
+        )
 
     _run.__name__ = TOOL_NAME
 

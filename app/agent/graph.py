@@ -96,6 +96,8 @@ def build_graph(
     skill_tools: list | None = None,
     mcp_families: dict[str, str] | None = None,
     global_mcp_families: set[str] | frozenset[str] | None = None,
+    bash_approval_handler=None,
+    bash_command_runner=None,
 ):
     """Build and compile the conversational RAG agent graph.
 
@@ -121,6 +123,8 @@ def build_graph(
         config,
         history_store=history_store,
         extra_tools=extra_tools,
+        bash_approval_handler=bash_approval_handler,
+        bash_command_runner=bash_command_runner,
     )
     skill_tools = list(skill_tools or [])
     base_names = [getattr(tool, "name", str(tool)) for tool in base_tools]

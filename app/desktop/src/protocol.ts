@@ -307,6 +307,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
       enum: ["registered", "pending", "not_required"],
     },
     registrationIssue: { type: "nullableString", required: false, maxBytes: 4_096 },
+    extensionAction: { type: "string", required: false, enum: ["status", "preview"] },
   },
   "project.list": {
     status: { type: "string", required: true, enum: ["ready", "unavailable"] },
@@ -389,6 +390,19 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     limit: { type: "integer", required: true, minimum: 1, maximum: 20 },
     hasMore: { type: "boolean", required: true },
   },
+  "extensions.status": {
+    dropinRoot: { type: "string", required: true, maxBytes: 8_192 },
+    stateRoot: { type: "string", required: true, maxBytes: 8_192 },
+    desiredCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    appliedCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    appliedRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    runningRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    restartRequired: { type: "boolean", required: true },
+    managerAvailable: { type: "boolean", required: true },
+    managerError: { type: "nullableString", required: true, maxBytes: 4_096 },
+    diagnostics: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 4_096 },
+    runningMcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
+  },
   "extensions.preview": {
     previewId: { type: "string", required: true, maxBytes: 256 },
     summary: { type: "string", required: true, maxBytes: 4_096 },
@@ -407,8 +421,36 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
         server: { type: "string", required: true, maxBytes: 256 },
         bindingHash: { type: "string", required: true, maxBytes: 256 },
         requiresApproval: { type: "boolean", required: true },
+        command: { type: "string", required: true, maxBytes: 8_192 },
+        arguments: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 4_096 },
+        workingDirectory: { type: "string", required: true, maxBytes: 8_192 },
+        environmentNames: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 256 },
       },
     },
+  },
+  "extensions.apply": {
+    previousRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    appliedRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+    restartRequired: { type: "boolean", required: true },
+    items: {
+      type: "objectArray",
+      required: true,
+      maxItems: 512,
+      items: {
+        key: { type: "string", required: true, maxBytes: 256 },
+        outcome: {
+          type: "string",
+          required: true,
+          enum: ["added", "updated", "removed", "unchanged", "blocked", "pending_approval"],
+        },
+        detail: { type: "string", required: true, maxBytes: 4_096 },
+      },
+    },
+    diagnostics: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 4_096 },
+  },
+  "approval.resolve": {
+    approvalId: { type: "string", required: true, maxBytes: 256 },
+    approved: { type: "boolean", required: true },
   },
 };
 
@@ -510,6 +552,8 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "approval.resolve": {
     approvalId: { type: "string", required: true, maxBytes: 256 },
+    parentRequestId: { type: "requestId", required: false },
+    turnId: { type: "string", required: false, maxBytes: 256 },
     approved: { type: "boolean", required: true },
   },
   "runtime.shutdown": {},
@@ -549,6 +593,7 @@ export interface TurnCompletedDto {
   chunkCount?: number;
   registrationStatus?: "registered" | "pending" | "not_required";
   registrationIssue?: string | null;
+  extensionAction?: "status" | "preview";
 }
 
 export interface SessionCreatedDto {
@@ -669,6 +714,10 @@ export interface ExtensionBindingDto {
   server: string;
   bindingHash: string;
   requiresApproval: boolean;
+  command: string;
+  arguments: string[];
+  workingDirectory: string;
+  environmentNames: string[];
 }
 
 export interface ExtensionPreviewDto {
@@ -676,6 +725,36 @@ export interface ExtensionPreviewDto {
   summary: string;
   proposedSkills: string[];
   bindings: ExtensionBindingDto[];
+}
+
+export interface ExtensionApplyItemDto {
+  key: string;
+  outcome: "added" | "updated" | "removed" | "unchanged" | "blocked" | "pending_approval";
+  detail: string;
+}
+
+export interface ExtensionApplyDto {
+  previousRevision: number;
+  appliedRevision: number;
+  restartRequired: boolean;
+  items: ExtensionApplyItemDto[];
+  diagnostics: string[];
+}
+
+export interface ApprovalRequiredDto {
+  approvalId: string;
+  parentRequestId: string;
+  turnId: string;
+  command: string;
+  description: string;
+  executionTimeoutSeconds: number;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ApprovalResolvedDto {
+  approvalId: string;
+  approved: boolean;
 }
 
 interface EnvelopeBase {

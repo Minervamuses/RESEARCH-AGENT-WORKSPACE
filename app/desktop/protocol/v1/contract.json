@@ -163,7 +163,8 @@
       "streamKind": {"type": "string", "required": false, "enum": ["post_finalized", "final_only"]},
       "chunkCount": {"type": "integer", "required": false, "minimum": 0, "maximum": 128},
       "registrationStatus": {"type": "string", "required": false, "enum": ["registered", "pending", "not_required"]},
-      "registrationIssue": {"type": "nullableString", "required": false, "maxBytes": 4096}
+      "registrationIssue": {"type": "nullableString", "required": false, "maxBytes": 4096},
+      "extensionAction": {"type": "string", "required": false, "enum": ["status", "preview"]}
     },
     "project.list": {
       "status": {"type": "string", "required": true, "enum": ["ready", "unavailable"]},
@@ -246,6 +247,19 @@
       "limit": {"type": "integer", "required": true, "minimum": 1, "maximum": 20},
       "hasMore": {"type": "boolean", "required": true}
     },
+    "extensions.status": {
+      "dropinRoot": {"type": "string", "required": true, "maxBytes": 8192},
+      "stateRoot": {"type": "string", "required": true, "maxBytes": 8192},
+      "desiredCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "appliedCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "appliedRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "runningRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "restartRequired": {"type": "boolean", "required": true},
+      "managerAvailable": {"type": "boolean", "required": true},
+      "managerError": {"type": "nullableString", "required": true, "maxBytes": 4096},
+      "diagnostics": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096},
+      "runningMcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256}
+    },
     "extensions.preview": {
       "previewId": {"type": "string", "required": true, "maxBytes": 256},
       "summary": {"type": "string", "required": true, "maxBytes": 4096},
@@ -258,9 +272,33 @@
           "name": {"type": "string", "required": true, "maxBytes": 256},
           "server": {"type": "string", "required": true, "maxBytes": 256},
           "bindingHash": {"type": "string", "required": true, "maxBytes": 256},
-          "requiresApproval": {"type": "boolean", "required": true}
+          "requiresApproval": {"type": "boolean", "required": true},
+          "command": {"type": "string", "required": true, "maxBytes": 8192},
+          "arguments": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096},
+          "workingDirectory": {"type": "string", "required": true, "maxBytes": 8192},
+          "environmentNames": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 256}
         }
       }
+    },
+    "extensions.apply": {
+      "previousRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "appliedRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+      "restartRequired": {"type": "boolean", "required": true},
+      "items": {
+        "type": "objectArray",
+        "required": true,
+        "maxItems": 512,
+        "items": {
+          "key": {"type": "string", "required": true, "maxBytes": 256},
+          "outcome": {"type": "string", "required": true, "enum": ["added", "updated", "removed", "unchanged", "blocked", "pending_approval"]},
+          "detail": {"type": "string", "required": true, "maxBytes": 4096}
+        }
+      },
+      "diagnostics": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096}
+    },
+    "approval.resolve": {
+      "approvalId": {"type": "string", "required": true, "maxBytes": 256},
+      "approved": {"type": "boolean", "required": true}
     }
   },
   "methods": [
@@ -434,6 +472,8 @@
       "requiredParams": ["approvalId", "approved"],
       "params": {
         "approvalId": {"type": "string", "required": true, "maxBytes": 256},
+        "parentRequestId": {"type": "requestId", "required": false},
+        "turnId": {"type": "string", "required": false, "maxBytes": 256},
         "approved": {"type": "boolean", "required": true}
       }
     },

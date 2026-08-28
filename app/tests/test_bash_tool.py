@@ -241,3 +241,73 @@ def test_bash_captures_nonzero_exit(monkeypatch):
     assert payload["exit_code"] != 0
     # `false` produces empty output but must not raise.
     assert payload["stdout"] == ""
+
+
+def test_injected_approval_and_runner_preserve_the_python_execution_path(
+    monkeypatch,
+):
+    _force_tty(monkeypatch, False)
+    approvals: list[tuple[str, str, int]] = []
+    runs: list[tuple[tuple, dict]] = []
+
+    class _Done:
+        returncode = 0
+        stdout = "fixture output\n"
+        stderr = ""
+
+    def approve(command: str, description: str, timeout_sec: int) -> bool:
+        approvals.append((command, description, timeout_sec))
+        return True
+
+    def runner(*args, **kwargs):
+        runs.append((args, kwargs))
+        return _Done()
+
+    tool = create_bash_tool(
+        AgentConfig(persist_dir="/tmp"),
+        approval_handler=approve,
+        command_runner=runner,
+    )
+    payload = json.loads(tool.invoke({
+        "command": "printf fixture",
+        "description": "Return deterministic fixture output.",
+        "timeout_sec": 17,
+    }))
+
+    assert approvals == [(
+        "printf fixture",
+        "Return deterministic fixture output.",
+        17,
+    )]
+    assert len(runs) == 1
+    assert runs[0][0] == ("printf fixture",)
+    assert runs[0][1]["timeout"] == 17
+    assert payload["approved"] is True
+    assert payload["stdout"] == "fixture output\n"
+
+
+def test_injected_denial_or_failure_never_calls_runner(monkeypatch):
+    _force_tty(monkeypatch, False)
+    calls = 0
+
+    def runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("denied injected request must not run")
+
+    for approval_handler in (
+        lambda *_args: False,
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("approval unavailable")),
+    ):
+        tool = create_bash_tool(
+            AgentConfig(persist_dir="/tmp"),
+            approval_handler=approval_handler,
+            command_runner=runner,
+        )
+        payload = json.loads(tool.invoke({
+            "command": "printf denied",
+            "description": "Exercise fail-closed approval.",
+        }))
+        assert payload["approved"] is False
+
+    assert calls == 0

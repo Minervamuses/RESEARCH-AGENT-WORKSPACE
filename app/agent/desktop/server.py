@@ -123,6 +123,10 @@ class RequestContext:
         )
         self._next_sequence += 1
 
+    def __call__(self, event: str, data: dict[str, Any]) -> None:
+        """Expose a correlated callable sink without widening wire payloads."""
+        self.event_nowait(event, data)
+
     def event_nowait(self, event: str, data: dict[str, Any]) -> None:
         if self._terminal:
             raise ProtocolError(
@@ -293,7 +297,7 @@ class DesktopServer:
             data = await self._service.dispatch(
                 context.method,
                 params,
-                event_sink=context.event_nowait,
+                event_sink=context,
             )
             await context.success(data)
         except ProtocolError as exc:

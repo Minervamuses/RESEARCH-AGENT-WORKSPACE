@@ -32,7 +32,11 @@ import {
   type ConversationSelection,
 } from "./conversations.ts";
 import type {
+  ApprovalRequiredDto,
+  ApprovalResolvedDto,
   AnswerChunkDto,
+  ExtensionApplyDto,
+  ExtensionPreviewDto,
   JsonObject,
   ProjectListDto,
   ProjectSummaryDto,
@@ -47,6 +51,25 @@ import type {
   TurnCompletedDto,
 } from "./protocol.ts";
 import { SafeContent } from "./SafeContent.tsx";
+import {
+  ApprovalDialog,
+  ExtensionPanel,
+  acceptApprovalEvent,
+  approvedBindingHashes,
+  beginExtensionApply,
+  beginExtensionPreview,
+  createExtensionFlow,
+  decideExtensionBinding,
+  failExtensionFlow,
+  markExtensionAwaitingLoad,
+  markExtensionRestarting,
+  observeExtensionRevision,
+  receiveExtensionApply,
+  receiveExtensionPreview,
+  type ExtensionBindingDecision,
+  type ExtensionFlow,
+  type PendingApproval,
+} from "./trust.tsx";
 
 const backendClient = createBackendClient({
   invoke: <T,>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args),
@@ -218,6 +241,9 @@ export default function App() {
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [registrationIssue, setRegistrationIssue] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [extensionFlow, setExtensionFlow] = useState<ExtensionFlow | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
+  const [approvalResolving, setApprovalResolving] = useState(false);
   const inFlight = useRef(false);
   const catalogLoading = useRef<number | null>(null);
   const diagnosticsAttempt = useRef<number | null>(null);
@@ -227,8 +253,11 @@ export default function App() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const workspaceOperation = useRef<symbol | null>(null);
+  const pendingApprovalRef = useRef<PendingApproval | null>(null);
+  const approvalResolvingRef = useRef(false);
 
   useEffect(() => { conversationRef.current = conversation; }, [conversation]);
+  useEffect(() => { pendingApprovalRef.current = pendingApproval; }, [pendingApproval]);
 
   const applyConversation = useCallback((action: ConversationAction) => {
     const next = conversationReducer(conversationRef.current, action);
@@ -266,6 +295,23 @@ export default function App() {
           try {
             const event = parseBridgeEvent(payload);
             if (event.type === "lifecycle") {
+              const generationChanged = generationRef.current !== event.snapshot.generation;
+              if (generationChanged || event.snapshot.lifecycle !== "ready") {
+                pendingApprovalRef.current = null;
+                approvalResolvingRef.current = false;
+                setPendingApproval(null);
+                setApprovalResolving(false);
+                setExtensionFlow((current) => {
+                  if (current === null || current.report === null) return null;
+                  if (event.snapshot.lifecycle === "restarting") {
+                    return markExtensionRestarting(current);
+                  }
+                  if (event.snapshot.lifecycle === "ready" && generationChanged) {
+                    return markExtensionAwaitingLoad(markExtensionRestarting(current));
+                  }
+                  return current;
+                });
+              }
               generationRef.current = event.snapshot.generation;
               applyConversation({ type: "backend-generation-changed", generation: event.snapshot.generation });
               dispatch({ type: "snapshot", snapshot: event.snapshot });
@@ -273,11 +319,38 @@ export default function App() {
             }
             dispatch({ type: "protocol-event", message: event.message });
             const message = event.message;
+            if (
+              message.messageType === "event" &&
+              !("requestId" in message) &&
+              (message.event === "backend.crashed" || message.event === "backend.shutting_down")
+            ) {
+              pendingApprovalRef.current = null;
+              approvalResolvingRef.current = false;
+              setPendingApproval(null);
+              setApprovalResolving(false);
+              setExtensionFlow((current) => current === null || current.report === null ? null : current);
+            }
             if (message.messageType !== "event" || !("requestId" in message)) return;
             const active = conversationRef.current.activeTurn;
             if (active === null) return;
             const generation = generationRef.current;
-            if (message.event === "answer.chunk") {
+            if (message.event === "approval.required") {
+              const accepted = acceptApprovalEvent(
+                generation,
+                message.requestId,
+                active.requestId,
+                message.data as unknown as ApprovalRequiredDto,
+                Date.now(),
+                active.turnId ?? undefined,
+              );
+              if (accepted !== null) {
+                setPendingApproval((current) => {
+                  if (current !== null) return current;
+                  pendingApprovalRef.current = accepted;
+                  return accepted;
+                });
+              }
+            } else if (message.event === "answer.chunk") {
               applyConversation({
                 type: "answer-chunk-received",
                 generation,
@@ -310,6 +383,23 @@ export default function App() {
         removeListener = unlisten;
         const snapshot = await backendClient.snapshot();
         if (!disposed) {
+          const generationChanged = generationRef.current !== snapshot.generation;
+          if (generationChanged || snapshot.lifecycle !== "ready") {
+            pendingApprovalRef.current = null;
+            approvalResolvingRef.current = false;
+            setPendingApproval(null);
+            setApprovalResolving(false);
+            setExtensionFlow((current) => {
+              if (current === null || current.report === null) return null;
+              if (snapshot.lifecycle === "restarting") {
+                return markExtensionRestarting(current);
+              }
+              if (snapshot.lifecycle === "ready" && generationChanged) {
+                return markExtensionAwaitingLoad(markExtensionRestarting(current));
+              }
+              return current;
+            });
+          }
           generationRef.current = snapshot.generation;
           applyConversation({ type: "backend-generation-changed", generation: snapshot.generation });
           dispatch({ type: "snapshot", snapshot });
@@ -332,12 +422,18 @@ export default function App() {
 
   const runLifecycle = useCallback((action: "start" | "restart" | "shutdown") => {
     if (workspaceOperation.current !== null) return;
+    if (action === "restart") {
+      setExtensionFlow((current) => current === null ? null : markExtensionRestarting(current));
+    }
     const operation = action === "start" ? backendClient.start : action === "restart" ? backendClient.restart : backendClient.shutdown;
     void runExclusive(action, async () => {
       const snapshot = await operation();
       generationRef.current = snapshot.generation;
       applyConversation({ type: "backend-generation-changed", generation: snapshot.generation });
       dispatch({ type: "snapshot", snapshot });
+      if (action === "restart" && snapshot.lifecycle === "ready") {
+        setExtensionFlow((current) => current === null ? null : markExtensionAwaitingLoad(current));
+      }
       dispatch({ type: "action-completed", action });
     });
   }, [applyConversation, runExclusive]);
@@ -428,6 +524,11 @@ export default function App() {
       setPendingUserText(null);
       setRegistrationIssue(null);
       setSkills([]);
+      pendingApprovalRef.current = null;
+      approvalResolvingRef.current = false;
+      setPendingApproval(null);
+      setApprovalResolving(false);
+      setExtensionFlow((current) => current === null || current.report === null ? null : current);
       setCatalogGeneration(null);
     }
   }, [applyConversation, catalogGeneration, state.snapshot?.generation]);
@@ -438,6 +539,61 @@ export default function App() {
   }, [catalogGeneration, loadCatalog, state.diagnostics, state.snapshot?.generation, state.snapshot?.lifecycle]);
 
   const focusComposer = useCallback(() => { requestAnimationFrame(() => composerRef.current?.focus()); }, []);
+
+  const resolvePendingApproval = useCallback((approved: boolean) => {
+    const approval = pendingApprovalRef.current;
+    if (approval === null || approvalResolvingRef.current) return;
+    approvalResolvingRef.current = true;
+    setApprovalResolving(true);
+    void backendClient.request("approval.resolve", {
+      approvalId: approval.approvalId,
+      parentRequestId: approval.parentRequestId,
+      turnId: approval.turnId,
+      approved,
+    }).then((data) => {
+      const result = data as unknown as ApprovalResolvedDto;
+      if (result.approvalId !== approval.approvalId) {
+        throw protocolMismatch("The backend resolved a different approval request.");
+      }
+    }).catch((error: unknown) => {
+      if (generationRef.current === approval.generation) {
+        setWorkspaceIssue(workspaceError(error));
+      }
+    }).finally(() => {
+      if (pendingApprovalRef.current?.approvalId === approval.approvalId) {
+        pendingApprovalRef.current = null;
+        setPendingApproval(null);
+      }
+      approvalResolvingRef.current = false;
+      setApprovalResolving(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (pendingApproval === null) return;
+    const remaining = Date.parse(pendingApproval.expiresAt) - Date.now();
+    if (remaining <= 0) {
+      resolvePendingApproval(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => resolvePendingApproval(false), remaining);
+    return () => window.clearTimeout(timeout);
+  }, [pendingApproval, resolvePendingApproval]);
+
+  useEffect(() => {
+    if (pendingApproval === null) return;
+    const active = conversation.activeTurn;
+    if (
+      active === null ||
+      active.requestId !== pendingApproval.parentRequestId ||
+      (active.turnId !== null && active.turnId !== pendingApproval.turnId)
+    ) {
+      pendingApprovalRef.current = null;
+      approvalResolvingRef.current = false;
+      setPendingApproval(null);
+      setApprovalResolving(false);
+    }
+  }, [conversation.activeTurn, pendingApproval]);
 
   const loadSkills = useCallback(async (generation: number) => {
     try {
@@ -464,6 +620,7 @@ export default function App() {
         throw protocolMismatch("The backend returned a different conversation than requested.");
       }
       dispatch({ type: "session-created", session: selected });
+      setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
       applyConversation({ type: "conversation-selected", generation: generationRef.current, projectId, sessionId: session.sessionId });
       selectionApplied = true;
       setRegistrationIssue(null);
@@ -516,6 +673,7 @@ export default function App() {
           throw protocolMismatch("The backend created a conversation in a different project.");
         }
         dispatch({ type: "session-created", session });
+        setExtensionFlow((current) => observeExtensionRevision(current, session.extensionRevision));
         applyConversation({ type: "conversation-selected", generation, projectId: activeProjectId, sessionId: session.sessionId });
         setTranscript({ projectId: activeProjectId, sessionId: session.sessionId, status: "ready", issue: null, items: [], offset: 0, total: 0, hasOlder: false });
         setLiveTurns([]);
@@ -588,6 +746,13 @@ export default function App() {
       }
       setLiveTurns((turns) => [...turns, { key: answer.turnId, userText: draft, assistantText: answer.text, responseKind: answer.responseKind, presentation: answer.presentation }]);
       setPendingUserText(null);
+      pendingApprovalRef.current = null;
+      approvalResolvingRef.current = false;
+      setPendingApproval(null);
+      setApprovalResolving(false);
+      if (result.extensionAction === "preview") {
+        setExtensionFlow(createExtensionFlow(result.turnId));
+      }
       if (state.session !== null && (result.responseKind ?? "answer") === "answer") {
         dispatch({
           type: "session-created",
@@ -612,10 +777,74 @@ export default function App() {
       const next = applyConversation({ type: "turn-failed", generation, requestId: tracked.requestId, projectId: selected.projectId, sessionId: selected.sessionId, message: safe.message, retryable: safe.retryable });
       if (next.failure?.requestId !== tracked.requestId) return;
       setPendingUserText(null);
+      pendingApprovalRef.current = null;
+      approvalResolvingRef.current = false;
+      setPendingApproval(null);
+      setApprovalResolving(false);
       setWorkspaceIssue(safe);
       focusComposer();
     });
   }, [applyConversation, focusComposer, loadCatalog, state.session]);
+
+  const previewExtensions = useCallback(() => {
+    const flow = extensionFlow;
+    if (flow === null || (flow.phase !== "ready" && flow.phase !== "error")) return;
+    const operation = beginWorkspaceOperation("Previewing extensions");
+    if (operation === null) return;
+    const generation = generationRef.current;
+    setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? beginExtensionPreview(current) : current);
+    void backendClient.request("extensions.preview", {}).then((data) => {
+      if (generationRef.current !== generation) return;
+      const preview = data as unknown as ExtensionPreviewDto;
+      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? receiveExtensionPreview(current, preview) : current);
+    }).catch((error: unknown) => {
+      if (generationRef.current !== generation) return;
+      const safe = workspaceError(error);
+      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? failExtensionFlow(current, safe.message) : current);
+    }).finally(() => finishWorkspaceOperation(operation));
+  }, [beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation]);
+
+  const decideBinding = useCallback((
+    bindingHash: string,
+    decision: Exclude<ExtensionBindingDecision, null>,
+  ) => {
+    setExtensionFlow((current) => current === null ? null : decideExtensionBinding(current, bindingHash, decision));
+  }, []);
+
+  const applyExtensions = useCallback(() => {
+    const flow = extensionFlow;
+    if (flow === null || flow.preview === null) return;
+    const approved = approvedBindingHashes(flow);
+    if (approved === null) return;
+    const operation = beginWorkspaceOperation("Applying extensions");
+    if (operation === null) return;
+    const generation = generationRef.current;
+    const previewId = flow.preview.previewId;
+    setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? beginExtensionApply(current) : current);
+    void backendClient.request("extensions.apply", {
+      previewId,
+      approvedBindingHashes: approved,
+    }).then((data) => {
+      if (generationRef.current !== generation) return;
+      const report = data as unknown as ExtensionApplyDto;
+      setExtensionFlow((current) => {
+        if (current?.triggerTurnId !== flow.triggerTurnId || current.preview?.previewId !== previewId) return current;
+        return observeExtensionRevision(
+          receiveExtensionApply(current, report),
+          state.session?.extensionRevision ?? -1,
+        );
+      });
+    }).catch((error: unknown) => {
+      if (generationRef.current !== generation) return;
+      const safe = workspaceError(error);
+      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? failExtensionFlow(current, safe.message) : current);
+    }).finally(() => finishWorkspaceOperation(operation));
+  }, [beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, state.session?.extensionRevision]);
+
+  const restartForExtensions = useCallback(() => {
+    if (extensionFlow?.phase !== "applied" || extensionFlow.report?.restartRequired !== true) return;
+    runLifecycle("restart");
+  }, [extensionFlow, runLifecycle]);
 
   const retryRegistration = useCallback(() => {
     const selected = conversation.selected;
@@ -702,6 +931,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
       <aside className="sidebar" aria-label="Research Agent workspace">
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">R</span><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>Research Agent</h1></div></div>
         <button className="new-session-button" type="button" onClick={createSession} disabled={!canCreateSession || interaction.createDisabled}><span aria-hidden="true">＋</span> New conversation</button>
@@ -730,9 +960,18 @@ export default function App() {
         </section>
       </aside>
 
-      <main className="main-workspace">
+      <main id="main-workspace" className="main-workspace" tabIndex={-1}>
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
         <div className={`workspace-body${renderConversation ? " conversation-workspace-body" : ""}`}>
+          {extensionFlow !== null && <ExtensionPanel
+            flow={extensionFlow}
+            busy={workspaceBusy !== null || state.activeAction !== null || interaction.turnActive}
+            canRestart={canRestart}
+            onPreview={previewExtensions}
+            onDecision={decideBinding}
+            onApply={applyExtensions}
+            onRestart={restartForExtensions}
+          />}
           {(state.error !== null || workspaceIssue !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{(workspaceIssue ?? state.error)?.code}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{(workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={sendTurn} disabled={interaction.turnActive}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
           {registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
           {state.phase === "stopped" && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><p className="section-kicker">LOCAL · PRIVATE · ON THIS DEVICE</p><h3 id="stopped-title">Your research workspace is ready to connect</h3><p>Start the Linux backend, verify the local runtime, then create a conversation. No provider request is made by the runtime check.</p><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
@@ -762,6 +1001,12 @@ export default function App() {
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}
         </div>
       </main>
+      {pendingApproval !== null && <ApprovalDialog
+        approval={pendingApproval}
+        resolving={approvalResolving}
+        onResolve={resolvePendingApproval}
+        returnFocus={focusComposer}
+      />}
     </div>
   );
 }

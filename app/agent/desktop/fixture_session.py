@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -20,6 +21,9 @@ from agent.desktop.catalog import (
     DesktopProjectCatalog,
 )
 from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
+from agent.extensions.manager import ExtensionManager
+from agent.extensions.startup import load_extension_startup
+from agent.tools.bash import create_bash_tool
 from agent.turns.memory import TurnRecord
 from agent.turns.plan_log import PlanLog
 from agent.turns.results import TurnOutcome
@@ -34,6 +38,9 @@ FIXTURE_BLOCK_INIT_MARKER = ".fixture-block-init"
 FIXTURE_CHANGED_ORPHAN_MARKER = ".fixture-changed-orphans"
 FIXTURE_LONG_OUTPUT_MARKER = ".fixture-long-output"
 FIXTURE_RAG_QUESTION = "What does the fixture knowledge say?"
+FIXTURE_BASH_APPROVE = "[[fixture:bash-approve]]"
+FIXTURE_BASH_DENY = "[[fixture:bash-deny]]"
+FIXTURE_PRIVATE_SKILL_DIRNAME = "fixture-extension-management"
 
 SESSION_A = "28b222e0cc6543aa8d7bbdc423de99a7"
 SESSION_B = "f2ddf2369f994905afa0b85d8cca79b1"
@@ -59,6 +66,50 @@ class FixtureProviderError(RuntimeError):
     def __init__(self, status_code: int) -> None:
         super().__init__("synthetic fixture provider failure")
         self.status_code = status_code
+
+
+class FixtureExtensionProvider:
+    """Deterministic manager response with a visible no-network call count."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def model_factory(self, _config: AgentConfig) -> "FixtureExtensionProvider":
+        self.calls += 1
+        return self
+
+    def invoke(self, messages: list[Any]) -> AIMessage:
+        content = str(messages[-1].content)
+        payload = json.loads(content[content.index("{") :])
+        items = []
+        for change in payload["authoritative_changes"]:
+            operation = change["operation"]
+            blocked = operation in {"blocked", "guarded"}
+            items.append({
+                "key": change["key"],
+                "operation": operation,
+                "decision": "block" if blocked else "apply",
+                "summary": f"Fixture accepts validated {operation}.",
+                "reason": change["reason"] if blocked else None,
+                "mcp_descriptor": None,
+            })
+        return AIMessage(content=json.dumps({"items": items}))
+
+
+class FixtureBashRunner:
+    """Record approved commands and return output without starting a process."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append((args, kwargs))
+        return subprocess.CompletedProcess(
+            args=args[0] if args else "",
+            returncode=0,
+            stdout="fixture bash runner output\n",
+            stderr="",
+        )
 
 
 def require_fixture_root(environ: Mapping[str, str]) -> Path:
@@ -129,6 +180,64 @@ def _seed_plan_turn(config: AgentConfig, session_id: str, user: str, answer: str
     )
 
 
+def _seed_fixture_extensions(root: Path) -> Path:
+    """Create deterministic desired bundles and a private manager Skill."""
+    private_root = root / FIXTURE_PRIVATE_SKILL_DIRNAME
+    skill_bundle = root / "extensions" / "desired" / "skill" / "fixture-writer"
+    mcp_bundle = root / "extensions" / "desired" / "mcp" / "fixture-clock"
+    directories = (private_root, skill_bundle, mcp_bundle)
+    if any(path.is_symlink() for path in directories):
+        raise FixtureConfigurationError("fixture extension roots must not be symlinks")
+    for path in directories:
+        path.mkdir(parents=True, exist_ok=True)
+
+    files = {
+        private_root / "SKILL.md": (
+            "---\n"
+            "name: extension-management\n"
+            "description: Deterministic private fixture extension planner.\n"
+            "---\n\n"
+            "Return one JSON plan item for every authoritative host change.\n"
+        ),
+        skill_bundle / "SKILL.md": (
+            "---\n"
+            "name: fixture-writer\n"
+            "description: Deterministic applied Skill for desktop fixture verification.\n"
+            "---\n\n"
+            "Use only for the isolated desktop fixture.\n"
+        ),
+        mcp_bundle / "server": (
+            "#!/bin/sh\n"
+            "# This fixture executable is resolved and copied but never launched.\n"
+            "exit 0\n"
+        ),
+        mcp_bundle / "extension.yaml": (
+            "schema_version: 1\n"
+            "kind: mcp\n"
+            "id: fixture-clock\n"
+            "family: fixture-clock\n"
+            "scope: global\n"
+            "runtime:\n"
+            "  transport: stdio\n"
+            "  command: ./server\n"
+            "  args:\n"
+            "    - --stdio\n"
+            "  cwd: .\n"
+            "environment:\n"
+            "  FIXTURE_MODE:\n"
+            "    value: deterministic\n"
+        ),
+    }
+    for path, content in files.items():
+        if path.is_symlink():
+            raise FixtureConfigurationError("fixture extension files must not be symlinks")
+        if not path.exists():
+            path.write_text(content, encoding="utf-8")
+    server = mcp_bundle / "server"
+    server.chmod(0o755)
+    return private_root / "SKILL.md"
+
+
 def seed_fixture_root(root: Path) -> AgentConfig:
     """Seed only the production catalog and canonical plan-log formats."""
     persist_dir = root / "store"
@@ -141,6 +250,7 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         root / "extensions",
         root / "extensions" / "desired",
         root / "extensions" / "state",
+        root / FIXTURE_PRIVATE_SKILL_DIRNAME,
         root / "citations",
         root / FIXTURE_KNOWLEDGE_DIRNAME,
     )
@@ -189,6 +299,7 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         extension_state_dir=str(root / "extensions" / "state"),
         citation_output_dir=str(root / "citations"),
     )
+    _seed_fixture_extensions(root)
     for session_id, (user, answer) in _SEED_TURNS.items():
         _seed_plan_turn(config, session_id, user, answer)
     return config
@@ -322,20 +433,34 @@ class FixtureSession:
         restored_turns: list[TurnRecord],
         progress_cb: Callable[[str, list[Any]], None] | None,
         search_handler: Callable[[str], list[dict[str, str]]],
+        bash_approval_handler: Callable[[str, str, int], bool] | None,
+        bash_command_runner: Callable[..., Any] | None,
     ) -> None:
         self.config = config
         self.session_id = session_id
         self.recent_turns = list(restored_turns)
         self.thinking_mode = "normal"
         self.active_skill_runtime = None
-        self.loaded_skills: list[Any] = []
-        self.mcp_families: dict[str, str] = {}
-        self.running_extension_revision = 0
-        self.extension_startup_diagnostics: tuple[str, ...] = ()
+        startup = load_extension_startup(config, env={})
+        self.loaded_skills = list(startup.skills)
+        self.mcp_families = {
+            spec.name: spec.family for spec in startup.mcp_specs
+        }
+        self.running_extension_revision = startup.revision
+        self.extension_startup_diagnostics = startup.diagnostics
         self.plan_mode = False
         self.plan_log_path: Path | None = None
         self._progress_cb = progress_cb
         self._search_handler = search_handler
+        self._bash_tool = (
+            create_bash_tool(
+                config,
+                approval_handler=bash_approval_handler,
+                command_runner=bash_command_runner,
+            )
+            if bash_approval_handler is not None and bash_command_runner is not None
+            else None
+        )
         self._turn_count = max(
             (turn.turn_id for turn in self.recent_turns),
             default=0,
@@ -390,6 +515,65 @@ class FixtureSession:
                     ],
                 )
             answer = f"Fixture knowledge says: {hits[0]['text']}"
+        elif text in {FIXTURE_BASH_APPROVE, FIXTURE_BASH_DENY}:
+            if self._bash_tool is None:
+                raise RuntimeError("fixture Bash seam is unavailable")
+            approved_marker = text == FIXTURE_BASH_APPROVE
+            command = (
+                "printf fixture-approved"
+                if approved_marker
+                else "printf fixture-denied"
+            )
+            description = (
+                "Return deterministic fixture output through the fake runner."
+                if approved_marker
+                else "Exercise the deterministic denied Bash path."
+            )
+            call_id = f"fixture-bash-{next_turn}"
+            if self._progress_cb is not None:
+                self._progress_cb(
+                    "tools",
+                    [
+                        AIMessage(
+                            content="",
+                            tool_calls=[{
+                                "name": "bash",
+                                "args": {
+                                    "command": command,
+                                    "description": description,
+                                },
+                                "id": call_id,
+                                "type": "tool_call",
+                            }],
+                        )
+                    ],
+                )
+            raw_result = await asyncio.to_thread(
+                self._bash_tool.invoke,
+                {
+                    "command": command,
+                    "description": description,
+                    "timeout_sec": 5,
+                },
+            )
+            payload = json.loads(str(raw_result))
+            if self._progress_cb is not None:
+                self._progress_cb(
+                    "tools",
+                    [
+                        ToolMessage(
+                            content=str(raw_result),
+                            tool_call_id=call_id,
+                            name="bash",
+                            status="success",
+                        )
+                    ],
+                )
+            answer = (
+                "Fixture Bash request was approved and completed through the fake runner."
+                if payload.get("approved") is True
+                else "Fixture Bash request was denied; the fake runner was not called."
+            )
         elif text == "[[fixture:malicious-content]]":
             answer = (
                 "Fixture content: <script>unsafe()</script> "
@@ -472,9 +656,9 @@ class FixtureSession:
             "plan_mode": self.plan_mode,
             "plan_log_path": str(self.plan_log_path or ""),
             "thinking_mode": self.thinking_mode,
-            "mcp_families": "none",
-            "extension_revision": 0,
-            "extension_diagnostics": "",
+            "mcp_families": ",".join(sorted(set(self.mcp_families.values()))) or "none",
+            "extension_revision": self.running_extension_revision,
+            "extension_diagnostics": ";".join(self.extension_startup_diagnostics),
             "active_skill": "",
             "task_mode": "",
         }
@@ -501,6 +685,8 @@ class FixtureSessionFactory:
         progress_cb: Callable[[str, list[Any]], None] | None,
         session_id: str | None = None,
         restored_turns: list[TurnRecord] | None = None,
+        bash_approval_handler: Callable[[str, str, int], bool] | None = None,
+        bash_command_runner: Callable[..., Any] | None = None,
     ) -> FixtureSession:
         del load_mcp
         if session_id is None:
@@ -523,6 +709,8 @@ class FixtureSessionFactory:
             restored_turns=list(restored_turns or []),
             progress_cb=progress_cb,
             search_handler=self._search_handler,
+            bash_approval_handler=bash_approval_handler,
+            bash_command_runner=bash_command_runner,
         )
 
 
@@ -546,11 +734,20 @@ def build_phase02_fixture_service(
         if key in environ
     }
     knowledge_operations = FixtureKnowledgeOperations(root)
+    extension_provider = FixtureExtensionProvider()
+    extension_manager = ExtensionManager(
+        config,
+        private_skill_path=root / FIXTURE_PRIVATE_SKILL_DIRNAME / "SKILL.md",
+        model_factory=extension_provider.model_factory,
+    )
+    bash_runner = FixtureBashRunner()
     return DesktopService(
         original_cwd=original_cwd,
         environ=sanitized_environ,
         config=config,
         project_catalog=catalog,
+        extension_manager=extension_manager,
         session_factory=FixtureSessionFactory(catalog),
         knowledge_operations=knowledge_operations.as_operations(),
+        bash_command_runner=bash_runner,
     )

@@ -92,6 +92,8 @@ class ChatSession:
         extension_startup_diagnostics: tuple[str, ...] = (),
         session_id: str | None = None,
         restored_turns: list[TurnRecord] | None = None,
+        bash_approval_handler=None,
+        bash_command_runner=None,
     ):
         self.config = config
         self.thinking_mode = "normal"
@@ -132,6 +134,11 @@ class ChatSession:
         )
         self._citation_policy = CitationSessionPolicy(config)
         self.citation_workflow_tool = self._citation_policy.workflow_tool
+        bash_tool_options = {}
+        if bash_approval_handler is not None:
+            bash_tool_options["bash_approval_handler"] = bash_approval_handler
+        if bash_command_runner is not None:
+            bash_tool_options["bash_command_runner"] = bash_command_runner
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
@@ -140,6 +147,7 @@ class ChatSession:
             skill_tools=[self.citation_workflow_tool],
             mcp_families=self.mcp_families,
             global_mcp_families=self.global_mcp_families,
+            **bash_tool_options,
         )
         # The graph builder and model getters resolve here (not at import), so
         # monkeypatches of the agent.session module attributes before
@@ -652,6 +660,8 @@ class ChatSession:
         progress_cb=None,
         session_id: str | None = None,
         restored_turns: list[TurnRecord] | None = None,
+        bash_approval_handler=None,
+        bash_command_runner=None,
     ) -> "ChatSession":
         """Async factory that loads MCP tools (if enabled) before graph construction.
 
@@ -676,6 +686,8 @@ class ChatSession:
             ),
             session_id=session_id,
             restored_turns=restored_turns,
+            bash_approval_handler=bash_approval_handler,
+            bash_command_runner=bash_command_runner,
         )
 
     @classmethod

@@ -341,7 +341,12 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         | "knowledge.prune_preview" => Some(&["path"]),
         "knowledge.prune_apply" => Some(&["previewId"]),
         "extensions.apply" => Some(&["previewId", "approvedBindingHashes"]),
-        "approval.resolve" => Some(&["approvalId", "approved"]),
+        "approval.resolve" => Some(&[
+            "approvalId",
+            "parentRequestId",
+            "turnId",
+            "approved",
+        ]),
         _ => None,
     }
 }
@@ -577,6 +582,18 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         }
         "approval.resolve" => {
             validate_optional_string(params, "approvalId", 256)?;
+            if let Some(parent_request_id) = params.get("parentRequestId") {
+                let parent_request_id = expect_non_empty_string(
+                    parent_request_id,
+                    "params.parentRequestId",
+                )?;
+                if !is_canonical_uuid(parent_request_id) {
+                    return Err(ProtocolViolation::invalid(
+                        "params.parentRequestId must be a canonical UUID",
+                    ));
+                }
+            }
+            validate_optional_string(params, "turnId", 256)?;
             if !params["approved"].is_boolean() {
                 return Err(ProtocolViolation::invalid(
                     "params.approved must be a boolean",
@@ -1092,6 +1109,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "chunkCount",
                     "registrationStatus",
                     "registrationIssue",
+                    "extensionAction",
                 ],
                 &[
                     "sessionId",
@@ -1169,6 +1187,9 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 if !value.is_null() {
                     expect_bounded_string(value, "data.registrationIssue", 4_096)?;
                 }
+            }
+            if let Some(value) = data.get("extensionAction") {
+                validate_enum(value, "data.extensionAction", &["status", "preview"])?;
             }
         }
         "project.list" => {
@@ -1363,6 +1384,52 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 return Err(ProtocolViolation::invalid("data.hasMore must be a boolean"));
             }
         }
+        "extensions.status" => {
+            const KEYS: &[&str] = &[
+                "dropinRoot",
+                "stateRoot",
+                "desiredCount",
+                "appliedCount",
+                "appliedRevision",
+                "runningRevision",
+                "restartRequired",
+                "managerAvailable",
+                "managerError",
+                "diagnostics",
+                "runningMcpFamilies",
+            ];
+            validate_exact_data_keys(data, KEYS)?;
+            expect_bounded_string(&data["dropinRoot"], "data.dropinRoot", 8_192)?;
+            expect_bounded_string(&data["stateRoot"], "data.stateRoot", 8_192)?;
+            for field in [
+                "desiredCount",
+                "appliedCount",
+                "appliedRevision",
+                "runningRevision",
+            ] {
+                expect_integer_range(
+                    &data[field],
+                    &format!("data.{field}"),
+                    0,
+                    u32::MAX as i64,
+                )?;
+            }
+            for field in ["restartRequired", "managerAvailable"] {
+                if !data[field].is_boolean() {
+                    return Err(ProtocolViolation::invalid(format!(
+                        "data.{field} must be a boolean"
+                    )));
+                }
+            }
+            validate_nullable_string(data, "managerError", 4_096)?;
+            validate_string_array(&data["diagnostics"], "data.diagnostics", 128, 4_096)?;
+            validate_string_array(
+                &data["runningMcpFamilies"],
+                "data.runningMcpFamilies",
+                512,
+                256,
+            )?;
+        }
         "extensions.preview" => {
             validate_exact_data_keys(
                 data,
@@ -1383,7 +1450,16 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 let binding = expect_object(binding, &format!("data.bindings[{index}]"))?;
                 validate_exact_data_keys(
                     binding,
-                    &["name", "server", "bindingHash", "requiresApproval"],
+                    &[
+                        "name",
+                        "server",
+                        "bindingHash",
+                        "requiresApproval",
+                        "command",
+                        "arguments",
+                        "workingDirectory",
+                        "environmentNames",
+                    ],
                 )?;
                 for field in ["name", "server", "bindingHash"] {
                     expect_bounded_string(
@@ -1397,6 +1473,97 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                         "data.bindings requiresApproval must be a boolean",
                     ));
                 }
+                expect_bounded_string(
+                    &binding["command"],
+                    &format!("data.bindings[{index}].command"),
+                    8_192,
+                )?;
+                expect_bounded_string(
+                    &binding["workingDirectory"],
+                    &format!("data.bindings[{index}].workingDirectory"),
+                    8_192,
+                )?;
+                validate_string_array(
+                    &binding["arguments"],
+                    &format!("data.bindings[{index}].arguments"),
+                    128,
+                    4_096,
+                )?;
+                validate_string_array(
+                    &binding["environmentNames"],
+                    &format!("data.bindings[{index}].environmentNames"),
+                    128,
+                    256,
+                )?;
+            }
+        }
+        "extensions.apply" => {
+            validate_exact_data_keys(
+                data,
+                &[
+                    "previousRevision",
+                    "appliedRevision",
+                    "restartRequired",
+                    "items",
+                    "diagnostics",
+                ],
+            )?;
+            for field in ["previousRevision", "appliedRevision"] {
+                expect_integer_range(
+                    &data[field],
+                    &format!("data.{field}"),
+                    0,
+                    u32::MAX as i64,
+                )?;
+            }
+            if !data["restartRequired"].is_boolean() {
+                return Err(ProtocolViolation::invalid(
+                    "data.restartRequired must be a boolean",
+                ));
+            }
+            let items = data["items"]
+                .as_array()
+                .ok_or_else(|| ProtocolViolation::invalid("data.items must be an array"))?;
+            if items.len() > 512 {
+                return Err(ProtocolViolation::invalid(
+                    "data.items contains too many items",
+                ));
+            }
+            for (index, item) in items.iter().enumerate() {
+                let item = expect_object(item, &format!("data.items[{index}]"))?;
+                validate_exact_data_keys(item, &["key", "outcome", "detail"])?;
+                expect_bounded_string(
+                    &item["key"],
+                    &format!("data.items[{index}].key"),
+                    256,
+                )?;
+                validate_enum(
+                    &item["outcome"],
+                    &format!("data.items[{index}].outcome"),
+                    &[
+                        "added",
+                        "updated",
+                        "removed",
+                        "unchanged",
+                        "blocked",
+                        "pending_approval",
+                    ],
+                )?;
+                expect_bounded_string(
+                    &item["detail"],
+                    &format!("data.items[{index}].detail"),
+                    4_096,
+                )?;
+            }
+            validate_string_array(&data["diagnostics"], "data.diagnostics", 128, 4_096)?;
+        }
+        "approval.resolve" => {
+            validate_exact_data_keys(data, &["approvalId", "approved"])?;
+            expect_bounded_string(&data["approvalId"], "data.approvalId", 256)?;
+            if !data["approved"].is_boolean() {
+                return Err(ProtocolViolation::invalid(
+                    "data.approved must be a boolean",
+                ));
             }
         }
         _ => {}

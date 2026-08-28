@@ -96,6 +96,26 @@ h3 {
   border: 0;
 }
 
+.skip-link {
+  position: fixed;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 1100;
+  padding: 0.55rem 0.75rem;
+  color: #ffffff;
+  font-weight: 720;
+  text-decoration: none;
+  background: #17533f;
+  border-radius: 0.45rem;
+  transform: translateY(calc(-100% - 1rem));
+}
+
+.skip-link:focus {
+  outline: 3px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 2px;
+  transform: translateY(0);
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(14.5rem, 17rem) minmax(0, 1fr);
@@ -844,6 +864,205 @@ h3 {
   background: #fffdf6;
 }
 
+.extension-card {
+  width: min(100%, 52rem);
+  min-width: 0;
+  max-height: min(62vh, 38rem);
+  padding: clamp(1rem, 3vw, 1.35rem);
+  margin: 0 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: #fffdf8;
+  border: 1px solid #dfd6bf;
+  border-radius: 0.85rem;
+  box-shadow: 0 0.7rem 2rem rgba(58, 51, 35, 0.07);
+}
+
+.extension-card > p:not(.section-kicker) {
+  color: #626a68;
+  line-height: 1.55;
+}
+
+.extension-summary,
+.extension-binding dl > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.extension-summary {
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+  margin-bottom: 0.8rem;
+  font-size: 0.78rem;
+}
+
+.extension-bindings {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0.85rem 0;
+}
+
+.extension-binding {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid #d9d5c9;
+  border-radius: 0.65rem;
+}
+
+.extension-binding legend {
+  max-width: 100%;
+  padding: 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.extension-binding dl,
+.approval-context {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.extension-binding dt,
+.approval-context dt {
+  color: #707874;
+  font-size: 0.67rem;
+  font-weight: 720;
+}
+
+.extension-binding dd,
+.approval-context dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.extension-binding code,
+.approval-context code {
+  display: block;
+  max-width: 100%;
+  padding: 0.25rem 0.35rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: #f1efe8;
+  border-radius: 0.3rem;
+}
+
+.extension-binding dd code + code {
+  margin-top: 0.25rem;
+}
+
+.binding-decision {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 0.75rem;
+}
+
+.binding-decision label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.35rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.76rem;
+  background: #f8f7f2;
+  border: 1px solid #dedbd0;
+  border-radius: 0.5rem;
+}
+
+.binding-decision input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.extension-empty-bindings,
+.extension-decision-note,
+.approval-note {
+  font-size: 0.74rem;
+}
+
+.extension-outcomes {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0;
+  list-style: none;
+}
+
+.extension-outcomes li {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.55rem;
+  font-size: 0.75rem;
+  background: #f6f4ed;
+  border-radius: 0.45rem;
+}
+
+.extension-outcomes span,
+.extension-diagnostics li {
+  overflow-wrap: anywhere;
+}
+
+.extension-diagnostics {
+  margin-bottom: 0.8rem;
+  font-size: 0.76rem;
+}
+
+.extension-error {
+  color: #843c38 !important;
+}
+
+.approval-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: clamp(0.65rem, 3vw, 1.5rem);
+  overflow-y: auto;
+  background: rgba(21, 25, 24, 0.62);
+}
+
+.approval-dialog {
+  width: min(100%, 36rem);
+  min-width: 0;
+  max-height: calc(100vh - 1.3rem);
+  padding: clamp(1rem, 4vw, 1.5rem);
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #cfd3d0;
+  border-radius: 0.9rem;
+  box-shadow: 0 1.4rem 4rem rgba(12, 17, 15, 0.32);
+}
+
+.approval-dialog > p:not(.section-kicker) {
+  color: #5e6763;
+  line-height: 1.55;
+}
+
+.approval-context > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.55rem;
+  background: #f7f7f4;
+  border-radius: 0.5rem;
+}
+
+.approval-note {
+  margin: 0.8rem 0;
+}
+
+.approval-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -901,6 +1120,10 @@ h3 {
 
   .conversation-surface {
     min-height: 70vh;
+  }
+
+  .extension-card {
+    max-height: 70vh;
   }
 }
 
@@ -966,5 +1189,10 @@ h3 {
   .composer-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .extension-summary,
+  .approval-actions {
+    grid-template-columns: 1fr;
   }
 }

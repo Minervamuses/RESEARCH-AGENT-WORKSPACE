@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,7 +96,12 @@ _KNOWLEDGE_MUTATIONS = {
     "knowledge.prune_apply",
 }
 _DESKTOP_KNOWLEDGE_COMMANDS = frozenset({"init", "ingest", "sync", "prune"})
-_DESKTOP_SLASH_COMMANDS = frozenset({"status", *_DESKTOP_KNOWLEDGE_COMMANDS})
+_DESKTOP_EXTENSION_COMMAND = "extension-management"
+_DESKTOP_SLASH_COMMANDS = frozenset({
+    "status",
+    _DESKTOP_EXTENSION_COMMAND,
+    *_DESKTOP_KNOWLEDGE_COMMANDS,
+})
 _MAX_ANSWER_BYTES = 2_097_152
 _MAX_ANSWER_CHUNK_BYTES = 16_384
 _MAX_ANSWER_CHUNKS = 128
@@ -104,8 +110,19 @@ _MAX_TRANSCRIPT_PAGE_BYTES = 1_048_576
 _MAX_CONTROL_SNAPSHOTS = CATALOG_MAX_SESSIONS
 _MAX_KNOWLEDGE_RESULT_PATHS = 512
 _MAX_KNOWLEDGE_PATH_BYTES = 4_096
+_MAX_APPROVAL_COMMAND_BYTES = 65_536
+_MAX_APPROVAL_DESCRIPTION_BYTES = 4_096
+_MAX_EXTENSION_ARGUMENTS = 128
+_MAX_EXTENSION_ENVIRONMENT_NAMES = 128
 _WIRE_BUDGET_REQUEST_ID = "00000000-0000-4000-8000-000000000000"
 _WIRE_BUDGET_TURN_ID = "0" * 32
+_SECRET_APPROVAL_CONTEXT = re.compile(
+    r"(?i)(?:authorization\s*:|(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=])\s*\S+"
+)
+_SECRET_FLAG_VALUE = re.compile(
+    r"(?i)(?:^|\s)--?(?:api[-_]?key|access[-_]?token|token|secret|password|private[-_]?key)(?:\s+|[:=])\S+"
+)
+_CREDENTIAL_URL = re.compile(r"(?i)https?://[^\s/:@]+:[^\s/@]+@")
 
 
 class DesktopServiceError(ProtocolError):
@@ -140,6 +157,15 @@ class _PrunePreview:
 
 
 @dataclass(frozen=True)
+class _PendingApproval:
+    approval_id: str
+    parent_request_id: str
+    turn_id: str
+    expires_at: datetime
+    future: asyncio.Future[bool]
+
+
+@dataclass(frozen=True)
 class _ConversationControlSnapshot:
     plan_mode: bool
     plan_log_path: str | None
@@ -162,6 +188,8 @@ class DesktopService:
         slash_registry: SlashCommandRegistry | None = None,
         project_catalog: DesktopProjectCatalog | None = None,
         knowledge_operations: DesktopKnowledgeOperations | None = None,
+        bash_command_runner: Callable[..., Any] | None = None,
+        approval_timeout_seconds: float = 60.0,
     ) -> None:
         self.original_cwd = (original_cwd or Path.cwd()).expanduser().resolve()
         self.environ = dict(os.environ if environ is None else environ)
@@ -170,6 +198,14 @@ class DesktopService:
         self.session: ChatSession | None = None
 
         self._session_factory = session_factory or ChatSession.create
+        self._session_factory_accepts_bash = (
+            session_factory is None or bash_command_runner is not None
+        )
+        self._bash_command_runner = bash_command_runner
+        self._approval_timeout_seconds = max(
+            0.01,
+            min(float(approval_timeout_seconds), 3_600.0),
+        )
         self._slash_registry = slash_registry or build_default_registry()
         self._knowledge_operations = knowledge_operations or DesktopKnowledgeOperations(
             init_workspace=init_workspace,
@@ -206,6 +242,10 @@ class DesktopService:
         self._knowledge_active = False
         self._extension_active = False
         self._turn_event_sink: EventSink | None = None
+        self._turn_loop: asyncio.AbstractEventLoop | None = None
+        self._active_parent_request_id: str | None = None
+        self._active_turn_id: str | None = None
+        self._pending_approval: _PendingApproval | None = None
         self._tool_names: dict[str, str] = {}
         self._tool_summaries: dict[str, dict[str, str]] = {}
         self._extension_previews: dict[str, ExtensionPreview] = {}
@@ -565,6 +605,7 @@ class DesktopService:
     async def _session_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
+        self._complete_pending_approval(False)
         if self._turn_active:
             raise DesktopServiceError(
                 "BUSY_TURN",
@@ -948,6 +989,11 @@ class DesktopService:
             "load_mcp": load_mcp,
             "progress_cb": self._on_session_progress,
         }
+        if self._session_factory_accepts_bash:
+            kwargs.update({
+                "bash_approval_handler": self._desktop_bash_approval,
+                "bash_command_runner": self._bash_command_runner,
+            })
         if session_id is not None:
             kwargs["session_id"] = session_id
             kwargs["restored_turns"] = list(restored_turns or [])
@@ -1058,6 +1104,7 @@ class DesktopService:
     async def _session_create(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
+        self._complete_pending_approval(False)
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
@@ -1503,6 +1550,41 @@ class DesktopService:
             lines.append("    (none)")
         return "\n".join(lines)
 
+    async def _execute_desktop_extension_command(
+        self,
+        parsed: ParsedSlashCommand,
+    ) -> tuple[SlashCommandResult, str]:
+        args = tuple(arg.casefold() for arg in parsed.args)
+        if args == ("status",):
+            status = await self._extensions_status({}, None)
+            diagnostics = len(status["diagnostics"])
+            running = ", ".join(status["runningMcpFamilies"]) or "none"
+            message = "\n".join([
+                "Extension Management status",
+                f"desired: {status['desiredCount']}",
+                f"applied: {status['appliedCount']}",
+                f"applied revision: {status['appliedRevision']}",
+                f"running revision: {status['runningRevision']}",
+                (
+                    "restart required: yes"
+                    if status["restartRequired"]
+                    else "restart required: no"
+                ),
+                f"running MCP: {running}",
+                f"diagnostics: {diagnostics}",
+            ])
+            return SlashCommandResult(message=message), "status"
+        if args in {(), ("--dry-run",)}:
+            return SlashCommandResult(message=(
+                "Extension preview is ready to request. Preview may contact "
+                "the configured model provider, but it writes no changes. "
+                "Review the exact preview before applying."
+            )), "preview"
+        raise DesktopServiceError(
+            "PROTOCOL_INVALID",
+            "usage: /extension-management [--dry-run|status]",
+        )
+
     async def _session_turn(
         self, params: dict[str, Any], event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -1517,11 +1599,23 @@ class DesktopService:
                 "A knowledge operation is already active.",
                 retryable=True,
             )
+        if self._extension_active:
+            raise DesktopServiceError(
+                "BUSY_EXTENSION_OPERATION",
+                "An extension operation is already active.",
+                retryable=True,
+            )
         self._turn_active = True
         self._turn_event_sink = event_sink
         self._tool_names = {}
         self._tool_summaries = {}
         turn_id = uuid.uuid4().hex
+        parent_request_id = getattr(event_sink, "request_id", None)
+        self._turn_loop = asyncio.get_running_loop()
+        self._active_parent_request_id = (
+            parent_request_id if isinstance(parent_request_id, str) else None
+        )
+        self._active_turn_id = turn_id
         try:
             original_text = params["text"]
             try:
@@ -1547,11 +1641,16 @@ class DesktopService:
                         "PROTOCOL_INVALID",
                         "That slash command is not available in the desktop composer.",
                     )
+                extension_action: str | None = None
                 try:
                     if command.name in _DESKTOP_KNOWLEDGE_COMMANDS:
                         result = await self._execute_desktop_knowledge_command(
                             session,
                             parsed,
+                        )
+                    elif command.name == _DESKTOP_EXTENSION_COMMAND:
+                        result, extension_action = (
+                            await self._execute_desktop_extension_command(parsed)
                         )
                     else:
                         result = await execute_slash_command(
@@ -1584,7 +1683,7 @@ class DesktopService:
                         "PROTOCOL_INVALID",
                         "The slash command returned no displayable result.",
                     )
-                return {
+                response = {
                     "sessionId": session.session_id,
                     "turnId": turn_id,
                     "text": message,
@@ -1596,6 +1695,9 @@ class DesktopService:
                     "registrationStatus": "not_required",
                     "registrationIssue": None,
                 }
+                if extension_action is not None:
+                    response["extensionAction"] = extension_action
+                return response
 
             outcome = await session.turn_outcome(original_text)
             if not isinstance(outcome.text, str) or not outcome.text.strip():
@@ -1662,6 +1764,10 @@ class DesktopService:
                 "registrationIssue": registration_issue,
             }
         finally:
+            self._complete_pending_approval(False)
+            self._active_parent_request_id = None
+            self._active_turn_id = None
+            self._turn_loop = None
             self._turn_event_sink = None
             self._tool_names = {}
             self._tool_summaries = {}
@@ -1782,6 +1888,7 @@ class DesktopService:
     async def _runtime_shutdown(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
+        self._complete_pending_approval(False)
         if self.lifecycle == "stopped":
             return {"status": "stopped", "flushed": True}
         if self._session_creating:
@@ -1816,6 +1923,7 @@ class DesktopService:
         return {"status": "stopped", "flushed": bool(shutdown["flushed"])}
 
     async def _shutdown_session(self) -> dict[str, Any]:
+        self._complete_pending_approval(False)
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
@@ -1884,6 +1992,7 @@ class DesktopService:
         return {"status": "stopped", "flushed": True}
 
     def _clear_session_caches(self) -> None:
+        self._complete_pending_approval(False)
         self._extension_previews.clear()
         self._prune_previews.clear()
         self._composer_prune_preview = None
@@ -2270,12 +2379,143 @@ class DesktopService:
                 self._extension_previews.pop(preview_id, None)
         return self._extension_apply_dto(report)
 
-    async def _approval_resolve(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        raise DesktopServiceError(
-            "APPROVAL_DENIED", "No pending desktop approval exists."
+    @staticmethod
+    def _approval_context_is_safe(command: str, description: str) -> bool:
+        if (
+            not command.strip()
+            or not description.strip()
+            or len(command.encode("utf-8")) > _MAX_APPROVAL_COMMAND_BYTES
+            or len(description.encode("utf-8")) > _MAX_APPROVAL_DESCRIPTION_BYTES
+            or any(ord(character) < 32 or ord(character) == 127 for character in command)
+            or any(
+                ord(character) < 32 or ord(character) == 127
+                for character in description
+            )
+        ):
+            return False
+        combined = f"{command}\n{description}"
+        return not (
+            _SECRET_APPROVAL_CONTEXT.search(combined)
+            or _SECRET_FLAG_VALUE.search(combined)
+            or _CREDENTIAL_URL.search(combined)
         )
+
+    @staticmethod
+    def _utc_timestamp(value: datetime) -> str:
+        return value.astimezone(timezone.utc).isoformat(
+            timespec="milliseconds"
+        ).replace("+00:00", "Z")
+
+    def _desktop_bash_approval(
+        self,
+        command: str,
+        description: str,
+        execution_timeout_seconds: int,
+    ) -> bool:
+        loop = self._turn_loop
+        if loop is None or loop.is_closed():
+            return False
+        staged = asyncio.run_coroutine_threadsafe(
+            self._stage_bash_approval(
+                command,
+                description,
+                execution_timeout_seconds,
+            ),
+            loop,
+        )
+        try:
+            return bool(staged.result(timeout=self._approval_timeout_seconds + 1.0))
+        except Exception:
+            staged.cancel()
+            return False
+
+    async def _stage_bash_approval(
+        self,
+        command: str,
+        description: str,
+        execution_timeout_seconds: int,
+    ) -> bool:
+        sink = self._turn_event_sink
+        parent_request_id = self._active_parent_request_id
+        turn_id = self._active_turn_id
+        if (
+            self._pending_approval is not None
+            or sink is None
+            or parent_request_id is None
+            or turn_id is None
+            or not self._approval_context_is_safe(command, description)
+        ):
+            return False
+
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(seconds=self._approval_timeout_seconds)
+        pending = _PendingApproval(
+            approval_id=uuid.uuid4().hex,
+            parent_request_id=parent_request_id,
+            turn_id=turn_id,
+            expires_at=expires_at,
+            future=asyncio.get_running_loop().create_future(),
+        )
+        self._pending_approval = pending
+        try:
+            sink("approval.required", {
+                "approvalId": pending.approval_id,
+                "parentRequestId": pending.parent_request_id,
+                "turnId": pending.turn_id,
+                "command": command,
+                "description": description,
+                "executionTimeoutSeconds": execution_timeout_seconds,
+                "createdAt": self._utc_timestamp(now),
+                "expiresAt": self._utc_timestamp(expires_at),
+            })
+        except Exception:
+            self._complete_pending_approval(False)
+            return False
+
+        try:
+            return bool(await asyncio.wait_for(
+                asyncio.shield(pending.future),
+                timeout=self._approval_timeout_seconds,
+            ))
+        except (TimeoutError, asyncio.CancelledError):
+            return False
+        finally:
+            if self._pending_approval is pending:
+                self._pending_approval = None
+            if not pending.future.done():
+                pending.future.cancel()
+
+    def _complete_pending_approval(self, approved: bool) -> None:
+        pending = self._pending_approval
+        if pending is None:
+            return
+        self._pending_approval = None
+        if not pending.future.done():
+            pending.future.set_result(bool(approved))
+
+    async def _approval_resolve(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        pending = self._pending_approval
+        if pending is None or params["approvalId"] != pending.approval_id:
+            raise DesktopServiceError(
+                "APPROVAL_DENIED",
+                "The desktop approval is unknown, expired, or already used.",
+            )
+        if (
+            params.get("parentRequestId") != pending.parent_request_id
+            or params.get("turnId") != pending.turn_id
+            or datetime.now(timezone.utc) >= pending.expires_at
+        ):
+            self._complete_pending_approval(False)
+            raise DesktopServiceError(
+                "APPROVAL_DENIED",
+                "The desktop approval no longer matches the active request.",
+            )
+        approved = bool(params["approved"])
+        approval_id = pending.approval_id
+        self._complete_pending_approval(approved)
+        return {"approvalId": approval_id, "approved": approved}
 
     @asynccontextmanager
     async def _knowledge_operation(self, *, turn_owned: bool = False):
@@ -2293,10 +2533,16 @@ class DesktopService:
 
     @asynccontextmanager
     async def _extension_operation(self):
-        if self._extension_active:
+        if (
+            self._extension_active
+            or self._turn_active
+            or self._knowledge_active
+            or self._session_creating
+            or self._session_closing
+        ):
             raise DesktopServiceError(
                 "BUSY_EXTENSION_OPERATION",
-                "Another extension operation is active.",
+                "An extension operation cannot start while other desktop work is active.",
                 retryable=True,
             )
         self._extension_active = True
@@ -2412,9 +2658,64 @@ class DesktopService:
             "runningRevision": status.running_revision,
             "restartRequired": status.restart_required,
             "managerAvailable": status.manager_available,
-            "managerError": status.manager_error,
-            "diagnostics": list(status.diagnostics),
+            "managerError": (
+                "The extension manager is unavailable."
+                if status.manager_error is not None
+                else None
+            ),
+            "diagnostics": [
+                "An extension or MCP item is unavailable."
+                for _item in status.diagnostics[:128]
+            ],
             "runningMcpFamilies": list(status.running_mcp_families),
+        }
+
+    @classmethod
+    def _extension_binding_dto(cls, candidate: Any) -> dict[str, Any]:
+        name = str(candidate.descriptor.id)
+        server = str(candidate.descriptor.family)
+        binding_hash = str(candidate.binding_hash)
+        command = str(candidate.resolved_command)
+        arguments = [str(item) for item in candidate.args]
+        working_directory = str(candidate.cwd)
+        environment_names = [str(item) for item in candidate.env_names]
+        display_context = "\n".join((command, *arguments))
+        bounded_strings = (
+            (name, 256),
+            (server, 256),
+            (command, 8_192),
+            (working_directory, 8_192),
+        )
+        if (
+            any(not value or len(value.encode("utf-8")) > limit for value, limit in bounded_strings)
+            or not _BINDING_HASH.fullmatch(binding_hash)
+            or len(arguments) > _MAX_EXTENSION_ARGUMENTS
+            or any(
+                not item or len(item.encode("utf-8")) > 4_096
+                for item in arguments
+            )
+            or len(environment_names) > _MAX_EXTENSION_ENVIRONMENT_NAMES
+            or any(
+                not item or len(item.encode("utf-8")) > 256
+                for item in environment_names
+            )
+            or _SECRET_APPROVAL_CONTEXT.search(display_context)
+            or _SECRET_FLAG_VALUE.search(display_context)
+            or _CREDENTIAL_URL.search(display_context)
+        ):
+            raise DesktopServiceError(
+                "EXTENSION_PREVIEW_FAILED",
+                "An extension binding cannot be displayed safely.",
+            )
+        return {
+            "name": name,
+            "server": server,
+            "bindingHash": binding_hash,
+            "requiresApproval": True,
+            "command": command,
+            "arguments": arguments,
+            "workingDirectory": working_directory,
+            "environmentNames": environment_names,
         }
 
     def _extension_preview_dto(
@@ -2450,12 +2751,7 @@ class DesktopService:
             }
         )
         bindings = [
-            {
-                "name": candidate.descriptor.id,
-                "server": candidate.descriptor.family,
-                "bindingHash": candidate.binding_hash,
-                "requiresApproval": True,
-            }
+            self._extension_binding_dto(candidate)
             for _key, candidate in sorted(preview.mcp_candidates.items())
         ]
         return {
