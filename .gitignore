@@ -16,3 +16,6 @@ build/
 !/app/tool/mcp/.gitkeep
 /app/tool/local/*
 !/app/tool/local/README.md
+
+# Local agent-maintained repository knowledge
+/for_agents/

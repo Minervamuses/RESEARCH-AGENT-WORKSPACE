@@ -27,7 +27,7 @@ Complete the Extensions user journey, present the existing Python-owned per-comm
 
 ## Non-goals
 
-- Extension discovery marketplace, generic plugin framework, hot reload, unbounded or repeated live/paid-provider use, real user extension roots, or background auto-apply.
+- Extension discovery marketplace, generic plugin framework, hot reload, any paid-model verification in this phase, real user extension roots, or background auto-apply. Live Extended Thinking trials, if any, remain Phase 05 work under the shared plan-wide budget.
 - Replacing the existing Bash policy, adding conversation-wide/session-wide/remembered approval, editing the pending command, accepting arbitrary user-submitted shell commands, or executing commands in React or Rust.
 - Replacing or removing the Phase 01 verified Rust-owned Python-child mechanism merely because it uses Tauri's official Shell child-process API, or granting React/WebView a generic Tauri shell/filesystem permission or API.
 - Changing Phase 03 knowledge commands or adding a prune modal, broad WCAG certification, design-system rewrite, telemetry, new logging service, or convenience-only dependency changes.
@@ -39,7 +39,7 @@ Complete the Extensions user journey, present the existing Python-owned per-comm
 - Reuse the current manager/registry behavior and Phase 02 Python slash-command seam instead of parsing CLI text or command syntax in React/Rust. Preserve terminal CLI behavior and do not call CLI `input()` or printing code from the desktop route.
 - Enable the existing `/extension-management` command family through the desktop allowlist: status returns the read-only state, while preview/apply remain an explicit conversation-owned flow whose typed actions refer to one opaque Python-owned preview. React does not infer command effects from rendered text.
 - Make status read-only and free of model/provider calls.
-- Require an explicit user action for preview and clearly label that the operation may consume a provider. A bounded live preview is authorized only under the shared PLANS.md notice, temporary-root, credential-confidentiality, and evidence rules.
+- Require an explicit user action for preview and clearly label that the operation may contact a provider. Fake preview evidence is required. An optional live preview may run only after the resolved main model is confirmed free with no paid fallback and under the shared temporary-root, credential-confidentiality, and evidence rules; otherwise keep it fake.
 - Present bounded, secret-safe details sufficient to identify each exact requested MCP command binding and collect a separate decision for each item. Apply only the same approved preview/revision through Python.
 - Report partial failures and restart-required state. Verify the loaded revision only after the controlled Phase 01 restart flow.
 
@@ -54,7 +54,7 @@ Complete the Extensions user journey, present the existing Python-owned per-comm
 ### 3. Keep tests isolated and deterministic
 
 - Route extension status/preview/apply verification to temporary config, registry, skill, and MCP roots.
-- Use a fake preview/provider response by default and never inspect, disclose, edit, or copy credential values. One bounded live preview may be used when materially useful under the shared PLANS.md safeguards; status and apply remain no-call operations.
+- Use a fake preview/provider response for required evidence and never inspect, disclose, edit, or copy credential values. One optional live preview may be used only when materially useful and the resolved main model is confirmed free with no paid fallback; it is not an Extended Thinking live GUI trial. Status and apply remain no-call operations, and this phase makes no paid-model call.
 - Use a fake/stubbed Bash runner and execution spy for approval verification; never execute an arbitrary real shell command as test evidence.
 - Confirm that status alone produces no provider request and that stale/mismatched preview/apply is rejected.
 
@@ -85,7 +85,7 @@ Complete the Extensions user journey, present the existing Python-owned per-comm
 ## Acceptance
 
 - [ ] `/extension-management` status, preview, per-binding decisions, apply, and restart-required behavior work through the Phase 02 Python-owned conversation route with isolated data and no React/Rust command parser.
-- [ ] Status makes no provider call; preview is explicit; stale or mismatched apply is rejected.
+- [ ] Status makes no provider call; preview is explicit and passes with the required fake provider; any optional live preview used only a confirmed-free resolved main model with no paid fallback; stale or mismatched apply is rejected.
 - [ ] One existing Python Bash request presents bounded informed context with exactly Approve and Deny; Approve executes that exact staged request once, while Deny executes nothing, and React/Rust cannot bypass or replace the Python policy.
 - [ ] Unknown, expired, reused, stale, mismatched, timed-out, dismissed, crashed, restarted, or shutdown approval requests execute nothing and leave no reusable pending approval; terminal CLI Bash approval behavior remains compatible.
 - [ ] The Phase 01 Rust-owned Python-child mechanism and protocol-v1 compatibility remain intact, while React/WebView has no generic shell/filesystem permission or API.

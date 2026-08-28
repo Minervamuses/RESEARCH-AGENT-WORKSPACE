@@ -5,14 +5,14 @@ This file is the sole owner of runtime phase status, the compact resume checkpoi
 ## Resume Checkpoint
 
 - Execution mode: Autonomous within the launch-message authorization envelope
-- Execution authorization: Activated by the user's 2026-08-28 launch message using the complete How to Start envelope; no later narrowing or expansion
-- Current phase: 05 — Acceptance and Linux delivery (Blocked)
-- Current checkpoint: The focused repair and all still-unrun npm/Cargo/Tauri final commands passed; the final audit is clean, and the only remaining acceptance path is a second broad Python selector gated on fresh user authority
-- Next action: After fresh user authority, rerun only the exact Python selector once under Conda `app`; if it passes, close the crosswalk and mark Phase 05/overall Complete without another source change
+- Execution authorization: Activated by the user's 2026-08-28 launch message using the complete How to Start envelope; the user then explicitly granted fresh authority at 17:58 Asia/Taipei for one second Phase 05 Python selector
+- Current phase: None — overall plan Complete
+- Current checkpoint: Phase 05 and the overall desktop GUI plan are Complete after the freshly authorized selector passed `879/879`; all final npm/Cargo/Tauri, integrated GUI, delivery, crosswalk, and boundary evidence is closed at checkpoint `a553b06bb303`
+- Next action: None; return the completion report without an extra completion-only commit
 - Current attempt/hypothesis: Focused repair 1 / Confirmed — omitting absent Bash injection keywords preserves the legacy factory seam and the explicit desktop injection path
 - Extended Thinking live GUI trials: 0 / 3
-- Blocked branches: Phase 05 final Python selector rerun — requires fresh user authority after the first broad pass exposed and focused repair resolved a defect
-- Last durable update: 2026-08-28 17:48 Asia/Taipei — npm 107, Rust 25, and Tauri no-bundle release build passed; final audit clean; only second Python selector is authority-blocked
+- Blocked branches: None
+- Last durable update: 2026-08-28 18:00 Asia/Taipei — Phase 05 and overall plan marked Complete after final selector and audit
 
 ## Phase Summary and Status
 
@@ -22,7 +22,7 @@ This file is the sole owner of runtime phase status, the compact resume checkpoi
 | 02 — Chat and session | Complete | 2026-08-28 01:57 | 2026-08-28 11:06 | 203 Python, 101 TypeScript, 8 Rust protocol tests; real Tauri conversation/recovery journey; `7b820966a547` | None |
 | 03 — Knowledge slash commands | Complete | 2026-08-28 11:15 | 2026-08-28 12:05 | 63 Phase selector, 12 fixture, 102 TypeScript; fake-boundary command/refusal/cleanup journey; `5d4dccc2c06e` | None |
 | 04 — Extensions and trust boundary | Complete | 2026-08-28 12:14 | 2026-08-28 13:27 | 252 Python, 107 TypeScript, 25 Rust; real extension/Bash/crash journey; `1e22f90ecfac` | None |
-| 05 — Acceptance and Linux delivery | Blocked | 2026-08-28 13:29 | — | Cross-phase/no-provider replay, focused repair, npm 107, Rust 25, and Tauri release build passed | Fresh authority for second broad Python selector |
+| 05 — Acceptance and Linux delivery | Complete | 2026-08-28 13:29 | 2026-08-28 18:00 | Integrated/no-provider GUI replay; 879 Python, 107 TypeScript, 25 Rust; Tauri no-bundle release build; `a553b06bb303` | None |
 
 Allowed status values are Not started, In progress, Blocked, and Complete. Complete requires observed evidence for every required acceptance item in the phase.
 
@@ -448,6 +448,41 @@ Before the authorized 2026-08-28 launch, no implementation phase had started. Th
 - **Extended Thinking live GUI trials:** `0 / 3`; required fake success/429/503 remains passed, so no paid trial is proposed.
 - **Blocker:** Fresh user authority for the second broad Python selector. No external-state, technical, safety, or other authority blocker remains.
 - **Next action:** Create the scoped local checkpoint commit from only `README.md`, `app/agent/tools/inventory.py`, and this build log, then stop with the single consolidated rerun request.
+
+## 2026-08-28 17:49 Asia/Taipei — Phase 05: scoped blocked checkpoint committed
+
+- **Status:** Phase 05 remains `Blocked` only on fresh authority for the second broad Python selector.
+- **Scoped commit:** `a553b06bb303750fa95ab7b936be6ee50b7c9ff3` (`fix(desktop): preserve optional bash tool seam`) contains exactly `README.md`, `app/agent/tools/inventory.py`, and the Phase 05 build-log evidence through the blocker/audit checkpoint. Cached `git diff --check` passed and the cached name set was inspected before commit.
+- **Dirty-tree preservation:** The commit excludes user-owned `.gitignore`, `GUI/00.md`–`GUI/18.md` deletions, durable plan-source edits other than the build log, and old-harness deletions. No branch/worktree/remote/history action occurred; the existing `GUI` branch was not changed except for this authorized local commit.
+- **Next action:** Await fresh authority for one exact second Python selector. If it passes, append the final acceptance/overall completion record; do not create an extra completion-only commit.
+
+## 2026-08-28 17:58 Asia/Taipei — Phase 05: fresh selector authority recorded and execution resumed
+
+- **Status:** Phase 05 `Blocked` → `In progress`.
+- **Authorized scope:** The user explicitly authorized one more Phase 05 Python selector and instructed continuation. This satisfies the fresh-authority gate recorded after the first broad selector exposed the now-repaired optional Bash factory seam.
+- **Durable reload/runtime gate:** Re-read the applicable repository `AGENTS.md`, complete `PROMPTS.md` How to Start and Autonomous Start/Resume instructions, `GOALS.md`, `PLANS.md`, Phase 05, and the complete build log. The project remains `/home/minervamuses/research-agent-workspace` on branch `GUI` at `a553b06bb303`; the intended runtime is WSL/Linux with Conda `app`, Python 3.13.14, Poetry 2.4.1, Node 24.18.0, npm 11.16.0, Rust/Cargo 1.97.1, and Git 2.43.0. One initial compound version-display command had a read-only shell-quoting failure; split identity checks corrected it without a test run or write.
+- **Exact write set:** This build log only. No application source, test, dependency, manifest, lockfile, configuration, branch, worktree, remote, or provider state is intended to change.
+- **Existing overlap:** Preserve the user's `.gitignore` edit, `GUI/00.md`–`GUI/18.md` deletions, durable plan-source edits other than this runtime log, and deleted old harness. There are no untracked files and no `context/` or `code_review/` evidence directories to ingest.
+- **Hypothesis/attempt:** Second broad selector, newly authorized. The committed one-file repair conditionally passes only present Bash injection keywords; its focused verification already passed `37/37`.
+- **Planned verification:** From `app/` under Conda `app`, run exactly `poetry run pytest --ignore=tests/rag/test_component_flow.py --ignore=tests/rag/test_root_identity.py` once. Do not repeat the already-passing npm, Cargo, or Tauri build commands.
+- **Limitations:** No provider, credential, Ollama, real store/root, actual `/init` or `/ingest`, arbitrary Bash, installer, deployment, or live Extended Thinking GUI trial is authorized or needed.
+- **Blockers:** None.
+- **Next action:** Execute the one authorized selector, then append its observed result and the final acceptance crosswalk if it passes.
+
+## 2026-08-28 18:00 Asia/Taipei — Phase 05 and overall plan complete
+
+- **Status:** Phase 05 `In progress` → `Complete`; overall plan → `Complete`.
+- **Freshly authorized Python result (observed, WSL/Linux Conda `app`):** From `app/`, the exact second `poetry run pytest --ignore=tests/rag/test_component_flow.py --ignore=tests/rag/test_root_identity.py` selector collected `879` tests and passed `879/879` in `4.39s`, with only the existing LangChain pending-deprecation warning. The two construction-bearing RAG modules remained excluded; no actual `/init` or `/ingest`, Ollama, provider, credential, real store/root, or arbitrary Bash path ran. The first selector's `876 passed, 3 failed` result remains preserved at 17:41 and is superseded for final acceptance by the committed optional-keyword repair, its `37/37` focused check, and this passing rerun.
+- **Final command-set closure:** Phase 05 `A3` now passes: selected Python `879/879`, npm `107/107`, Rust `25/25` plus empty binary/doc targets, and `npm run tauri -- build --no-bundle` with its single configured TypeScript/Vite production build all passed. The npm, Cargo, and Tauri members were not repeated after their recorded 17:48 pass.
+- **Phase 05 acceptance closure:** `A1` passes through the 17:39 integrated real-Tauri Chat/RAG/Knowledge/Extensions/Bash-denial/restart/flush replay; `A2` passes through the exact G/O/M/P crosswalk at 13:29 plus the closures below; `A3` passes through the final command set above; `A4` passes through required fake Extended success/429/503 with optional live trials `0 / 3`; `A5` passes through the verified README WSL/Linux source commands and production no-provider launch at 17:39; `A6` passes through the final dirty-tree, manifest, artifact, process, credential, and data-boundary audit; `A7` passes because the only final regression defect was focused, repaired, committed, and reverified with no critical user-visible or required review finding remaining.
+- **GOALS.md closure:** The 13:29 exact mappings for `G1`–`G11` remain the evidence index. `G1` additionally closes on the 17:39 documented production no-provider startup; `G2`–`G7` remain satisfied by the 11:03, 12:03, 13:26, and 17:39 real-boundary journeys; `G8` closes on the complete final command set; `G9`–`G10` remain satisfied by the recorded safe-content, accessibility/layout, lifecycle, crash, and flush evidence; `G11` closes on the five scoped commits and final ownership/status audit. No goal relies only on a phase label or plan claim.
+- **PLANS.md Overall Completion closure:** `O1` closes with all five phases Complete; `O2` closes with this final crosswalk; `O3`–`O4` remain covered by shared protocol tests, the five-command Tauri seam, minimal capability set, and one Rust-owned child; `O5` closes on `879/107/25` plus the Tauri release build; `O6` closes on the 17:39 representative post-integration journey and earlier fake error journeys; `O7` closes with all exact manual roots absent; `O8` remains covered by privacy/security/accessibility/layout evidence; `O9` closes on verified README Linux source guidance; `O10` closes on scoped commits `30f8b18e112a`, `7b820966a547`, `5d4dccc2c06e`, `1e22f90ecfac`, and `a553b06bb303` plus preserved user WIP; `O11` closes with the explicit limitations below and live-trial count `0 / 3`.
+- **Matrix and earlier-phase closure:** Phase 05 `M1`–`M7` all retain their exact 13:29 mappings and are reinforced by the 17:39 replay and final regression/build set. Every relied-upon Phase 01 `P1.1`–`P1.9`, Phase 02 `P2.1`–`P2.15`, Phase 03 `P3.1`–`P3.8`, and Phase 04 `P4.1`–`P4.9` item remains backed by the specific observed tests/procedures recorded in the 13:29 crosswalk; no final evidence contradicted or invalidated them.
+- **Final audit (observed):** `git diff --check` passed. `README.md`, `app/agent/tools/inventory.py`, npm/Cargo manifests and locks, and `tauri.conf.json` have no working-tree diff from HEAD. There are no untracked files, exact `research-agent-desktop-phase02-*` roots under `/tmp`, or relevant Research Agent/Vite/Python desktop-server processes. The only plan-owned uncommitted change is this completion record; all user-owned `.gitignore`, GUI-record deletions, other durable-plan edits, and old-harness deletions remain untouched. A process-filter helper first self-matched its wrapper, a quoted `awk` retry failed read-only, and `rg` was unavailable; the final wrapper-safe `grep` process check and ordinary `grep` evidence lookup succeeded and are the evidence counted here.
+- **Limitations:** Exact default/minimum/200%-equivalent viewport evidence used browser-rendered production React components because native WSLg resizing was not exact; the behavioral journeys themselves ran in real Tauri windows. Optional live Extended Thinking GUI trials intentionally remain `0 / 3` because required fake success/429/503 passed. The verified Tauri command is a Linux source `--no-bundle` build with `bundle.active=false`, not an installer or packaged release. The selected Python run retains one upstream LangChain pending-deprecation warning. `/init` and `/ingest` acceptance intentionally proves real routing/presentation through handler spies, not RAG construction.
+- **Commit boundary:** No extra completion-only commit is created. The Phase 05 source/doc repair checkpoint remains `a553b06bb303`; this final runtime record stays uncommitted for durable handoff, matching the established phase-completion pattern.
+- **Blockers:** None.
+- **Next action:** None; return the concise completion report required by repository instructions.
 
 <!-- Append material runtime entries in this form:
 

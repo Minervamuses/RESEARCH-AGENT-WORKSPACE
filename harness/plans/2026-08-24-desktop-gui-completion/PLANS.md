@@ -15,7 +15,7 @@
 - Phase graph, execution algorithm, authorization envelope, verification cadence, and overall completion: PLANS.md
 - Copy-ready entry instructions that keep the durable plan in attention: PROMPTS.md
 - Bounded phase work, acceptance, and handoff: phases/phase-*.md
-- Current phase, checkpoint, attempt count, blockers, exact commands, and observed results: build-log.md
+- Current phase, checkpoint, implementation-attempt count, shared Extended Thinking live-GUI-trial count, blockers, exact commands, and observed results: build-log.md
 - Material implementation discoveries, created only when needed: context/
 - Actual review findings, created only when a review occurs: code_review/
 - Strongest implementation truth: live code, manifests, tests, worktree state, and observed behavior.
@@ -43,7 +43,7 @@ The main Start/Resume prompt runs the following loop; a phase boundary is a chec
 5. Implement only the phase's causal scope. Use the cheapest focused check that can reject the current hypothesis before broad validation.
 6. After a coherent in-scope checkpoint passes its focused verification, create a local Git commit containing only that checkpoint and explicitly user-designated pre-existing changes; record the commit hash in build-log.md. Do not sweep unrelated dirty-tree changes into the commit.
 7. Record exact results. If acceptance passes, mark the phase Complete and immediately continue the loop.
-8. If two focused implementation attempts against the same cause fail, or fresh authority is genuinely required, mark that branch Blocked with evidence and continue another eligible branch.
+8. If two focused implementation attempts against the same cause fail, or fresh authority is genuinely required, mark that branch Blocked with evidence and continue another eligible branch. This implementation-attempt rule neither grants nor resets the separate three-trial live Extended Thinking budget owned by build-log.md.
 9. If live evidence invalidates future work, repair the smallest affected part of this plan, record the reason, reload the durable files, and continue.
 10. Stop only when all required phases are Complete, or when every meaningful remaining path is Blocked by fresh authority, missing external state, or an unsafe contradiction. Present all blockers in one concise request.
 
@@ -63,9 +63,9 @@ Do not ask for confirmation after a successful file, check, checkpoint, or phase
 - Add the smallest bounded Python desktop adapter that reuses the existing slash-command parser and typed results. React sends raw composer text and never parses command syntax or infers command effects; knowledge and extension command families are enabled only by their owning phases.
 - Preserve the product agent's existing per-command Bash decision: present the bounded command context with exactly Approve and Deny actions, resolve the pending request as a boolean decision, and execute only the exact approved request. Do not add conversation-wide approval in this plan.
 - Add dependencies directly required by the GUI only through the matching existing manager: Conda for Conda-managed runtime requirements, Poetry for Python, npm for TypeScript, and Cargo for Rust. Update the matching manifest and lockfile; do not use direct pip/pipx, global installs, a project .venv, or another package manager.
-- Use local fake providers, temporary data roots, fixtures, and repository-native tools by default. A bounded live/paid-provider call is allowed when it materially improves verification: notify the user once before the first such call in this plan, record that notice in build-log.md so resumed agents do not repeat it, and do not expose or retrieve the credential value.
+- Use local fake providers, temporary data roots, fixtures, and repository-native tools by default. Paid-model verification is allowed only for Extended Thinking and is limited to three live GUI trials across the whole plan. Read the shared count from build-log.md and reserve, increment, and record a trial before starting a backend/session specifically for it or, if already ready, before dispatching its one `session.turn`. If startup prevents dispatch, record `dispatch not reached / startup failure`; count success, HTTP 429, timeout, provider error, crash, or no terminal result alike, wait for terminal state or fully stop the backend before another trial, stop early once live evidence is sufficient, and never begin a fourth trial. Notify the user once before the first trial and record the notice, operation, paid model set, and temporary-data boundary without exposing or retrieving credential values. One dispatched Extended Thinking turn may contain several paid logical model invocations and provider retries, so this user-level limit is not an HTTP-request or cost cap. A normal-chat or extension-preview live check may use only a resolved model confirmed free with no paid fallback; otherwise use a fake.
 - Remove manually created temporary test stores, data roots, and scratch directories after their evidence is recorded and before the owning phase is complete; verify cleanup without touching user data.
-- Run focused checks during phases and one final appropriate Python suite, npm test/build, Cargo test/build or Tauri build pass even if the first such final pass may exceed ten minutes.
+- Run focused checks during phases and one final appropriate Python regression selector that excludes actual `/init`/`/ingest` construction tests, plus the Phase 05 npm, Cargo, and Tauri checks, even if the first such final pass may exceed ten minutes.
 - Update this plan bundle with status/evidence and minimal plan repairs.
 - Stage and create small local Git commits at verified checkpoints. Local commits are recovery points, not authorization to rewrite history or publish work.
 
@@ -76,7 +76,7 @@ The executing agent must record its exact live write set before editing. The roo
 - Changing a persistent data format/schema, public CLI behavior, protocol version/envelope, or removing/renaming a public method.
 - Adding a service, database, queue, cache, generic framework, broad compatibility layer, or unrelated concurrency model.
 - Reading, displaying, editing, or copying credentials; mutating the user's real store/citation/extension roots; or bypassing the product agent's exact per-command Bash approval.
-- Broad full-dataset/GPU/model sweeps, unbounded paid-provider use, a second expensive attempt, or unrelated benchmarks.
+- Broad full-dataset/GPU/model sweeps, a paid-model call outside Extended Thinking, a fourth live Extended Thinking GUI trial, a second expensive broad pass, or unrelated benchmarks.
 - Editing AGENTS.md.
 - Pushing, merging, rebasing, rewriting history, switching branches/worktrees, deploying, releasing, publishing, purchasing, or changing a provider subscription.
 
@@ -88,7 +88,7 @@ If a non-authorized action becomes truly necessary, block only the affected bran
 |---|---|---|---|
 | 01 — Desktop foundation | Existing Python WIP, the minimal application protocol, official Tauri IPC/process primitives where they fit source-run operation, lifecycle, and a startup/fatal-error fallback form one verified runnable vertical slice | None | phases/phase-01-desktop-foundation.md |
 | 02 — Chat and conversations | A Codex-like sidebar opens, creates, restores, and continues separate conversations while assistant output streams incrementally in the main pane; its Python boundary owns a narrow reusable slash-command dispatch seam | Phase 01 | phases/phase-02-chat-session.md |
-| 03 — Knowledge slash commands | Normal chat keeps agent-owned RAG behavior, while `/init`, `/ingest`, read-only `/sync`, and preview-confirmed `/prune` work in the conversation without a standalone Knowledge UI | Phase 02 | phases/phase-03-knowledge.md |
+| 03 — Knowledge slash commands | Normal chat keeps agent-owned RAG behavior; `/init` and `/ingest` are verified through the conversation route with Python handler spies rather than RAG construction, while read-only `/sync` and preview-confirmed `/prune` use prebuilt fake/temp state without a standalone Knowledge UI | Phase 02 | phases/phase-03-knowledge.md |
 | 04 — Extensions and Bash approval | Slash-command extension management works with isolated roots, and an existing product Bash request is decided with per-request Approve/Deny buttons without a new approval policy | Phase 02 | phases/phase-04-extensions-trust.md |
 | 05 — Acceptance and Linux delivery | Representative integrated journeys, one final broader verification pass, and source-run guidance provide honest completion evidence | Phases 02, 03, and 04 | phases/phase-05-acceptance-delivery.md |
 
@@ -97,13 +97,13 @@ Phases 03 and 04 are logically independent after Phase 02. The default selector 
 ## Phase Boundaries and Verification Cadence
 
 - Phase 01 uses "supervision" only to mean a thin Rust owner for one Python child: start it from the active Conda source-run environment, exchange bounded input/output, notice exit, and shut it down. React talks to Rust through official Tauri commands/channels. Phase 01 evaluates Tauri's official Shell child-process API before adding custom lifecycle glue, but does not bundle a sidecar merely to use that label; the app-specific protocol defines only the agent messages crossing the remaining boundary.
-- Normal provider/tool failures such as HTTP 429 are delivered into the conversation so the agent can explain them. The minimal fallback outside chat exists only for failures that prevent the agent from answering at all, such as Python startup failure, child crash, or protocol incompatibility; there is no permanent Diagnostics application area.
-- Phase 02 owns the persistent project/conversation sidebar, conversation restoration, ordered streaming answer lifecycle, and the narrow Python-owned composer-input/slash-command dispatch seam rather than a single disposable session. It does not implement Phase 03 or Phase 04 command behavior.
-- Phase 03 preserves the agent's existing RAG tool use for normal questions and adds only the four knowledge-maintenance commands to the Phase 02 conversation route. It adds no Knowledge page, frontend semantic-search state, document/chunk explorer, management controls, or command-specific progress system.
+- Normal provider/tool failures such as HTTP 429 are delivered into the conversation so the agent can explain them. Any such result from a live Extended Thinking trial consumes that trial before diagnosis and never creates a new reason-specific budget; a startup failure consumes its reserved trial even when dispatch was not reached. The minimal fallback outside chat exists only for failures that prevent the agent from answering at all, such as Python startup failure, child crash, or protocol incompatibility; there is no permanent Diagnostics application area.
+- Phase 02 owns the persistent project/conversation sidebar, conversation restoration, ordered streaming answer lifecycle, fake Extended Thinking success/error presentation, and the narrow Python-owned composer-input/slash-command dispatch seam rather than a single disposable session. It does not implement Phase 03 or Phase 04 command behavior and makes no paid-model call.
+- Phase 03 preserves the agent's existing RAG tool use for normal questions and adds only the four knowledge-maintenance commands to the Phase 02 conversation route. `/init` and `/ingest` reach injected Python handler spies for GUI/dispatch evidence and do not execute actual RAG construction; `/sync` and `/prune` use prebuilt fake/temp state. It adds no Knowledge page, frontend semantic-search state, document/chunk explorer, management controls, or command-specific progress system, and makes no live/paid-provider call.
 - Phase 04 combines slash-command Extensions, the existing two-outcome product Bash decision, and targeted trust-boundary closure; security is also implemented locally in earlier phases and is not deferred to this audit.
 - Each phase starts with relevant existing tests/characterization, then the smallest changed-layer checks. Exact test selectors are discovered from live tests and recorded in build-log.md rather than invented here.
-- Do not rerun npm build, full Cargo tests, or the complete Python suite at every phase. Run focused tests while iterating and one appropriate broader/final pass in Phase 05.
-- Manual UI checks use a fake/temp backend wherever possible. Live provider success is not required for completion, although one-time-noticed bounded calls are authorized when useful.
+- Do not rerun npm build, full Cargo tests, or the selected final Python regression at every phase. Run focused tests while iterating and one appropriate broader/final pass in Phase 05.
+- Manual UI checks use a fake/temp backend wherever possible. A fake Extended Thinking success and provider-error journey is required; live Extended Thinking success is optional. At most three reserved live GUI trials may be used under the shared build-log counter, including trials whose startup fails before dispatch, and an honestly presented external failure does not block GUI completion when required fake success/error evidence passes.
 - A failed required check keeps the phase In progress or Blocked. An unrelated existing failure is recorded separately and is not silently fixed.
 
 ## Phase-Specific Write Surfaces
@@ -134,9 +134,9 @@ Unexpected files outside these surfaces require a causal explanation in build-lo
 - [ ] Python, TypeScript, and Rust agree on protocol-v1 behavior and preserve the stated ownership/persistence boundaries.
 - [ ] React-to-Rust communication uses Tauri's official command/channel IPC, Rust owns one source-run Python child through the narrowest verified process primitive, and the custom application protocol remains bounded to domain messages rather than becoming a generic RPC or supervisor framework.
 - [ ] Focused checks and the single final broader verification pass have exact recorded results.
-- [ ] Fake/temp representative Chat with agent-owned RAG, knowledge slash commands, Extensions, lifecycle, crash/recovery, and shutdown journeys pass without agent inspection/disclosure of credential values or real-data mutation.
+- [ ] Fake/temp representative Chat with agent-owned RAG, fake Extended Thinking success/error presentation, handler-spied `/init` and `/ingest`, prebuilt-store `/sync` and `/prune`, Extensions, lifecycle, crash/recovery, and shutdown journeys pass without actual RAG construction, agent inspection/disclosure of credential values, or real-data mutation.
 - [ ] Every manually created temporary test root or scratch directory is removed after its evidence is recorded, without deleting user-owned data.
 - [ ] Security/privacy/accessibility and the default, minimum, and 200%-zoom layouts have observed evidence.
 - [ ] Linux source-run instructions are verified from the Conda app context and do not claim a standalone bundle.
 - [ ] Pre-existing user WIP and deletions remain preserved and distinguishable; each plan-created verified checkpoint has a scoped local commit recorded without absorbing unrelated changes.
-- [ ] Remaining optional limitations are stated honestly; no unmanaged dependency, credential exposure, Bash-policy bypass, real-data mutation, remote Git, deployment, or release action occurred.
+- [ ] Remaining optional limitations are stated honestly; any live Extended Thinking outcome and failure reason is recorded, no more than three live GUI trials began, and no paid-model use outside Extended Thinking, unmanaged dependency, credential exposure, Bash-policy bypass, real-data mutation, remote Git, deployment, or release action occurred.
