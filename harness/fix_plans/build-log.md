@@ -10,7 +10,7 @@
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
 | 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | `78589e95ea7ea2e4886529b568c78ecbdb24666c` |
 | 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` |
-| 05 — Final-only Normal answer delivery | In progress | 0 | USER DECISION 014 superseded the live-streaming requirement; durable plan repair underway | Attempt 1 characterisation remains valid history; final-only implementation is now authorized | No implementation |
+| 05 — Final-only Normal answer delivery | Complete | 1 | Focused verification and scope audit passed | No answer event/preview; terminal `final_only`/0 after validation+persistence; Python `190`, Node `86`, Rust `8`, TypeScript passed | Pending local checkpoint |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
 | 07 — Integration acceptance | Not started | 0 | None | None | None |
 
@@ -18,11 +18,11 @@
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
 - Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
-- Phases 01–04 complete；Phase 05已由USER DECISION 014從`Blocked`恢復為`In progress`，先完成durable plan repair，再實作authoritative final-only delivery。Phases 06–07仍須等待Phase 05 Complete。
+- Phases 01–05 complete；Phase 05 durable plan repair與authoritative final-only implementation已通過focused verification。Phase 06現在是第一個dependency-eligible phase，Phase 07仍等待Phase 06。
 - Prior blocker disposition: true provider-live tokens無法在later token/tool metadata與post-generation gates前證明accepted；這項characterisation仍有效，但USER DECISION 014已取消live-token要求並明確禁止post-finalized模擬串流，因此不再阻擋final-only path。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message、USER DECISION 014追加訊息與[`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
-- Broader-suite counters remain `0`；Phases 01–04與Phase 05 characterisation只執行focused selectors。
+- Broader-suite counters remain `0`；Phases 01–05只執行各自focused selectors。
 
 ## Authoring Baseline — 2026-08-31 Asia/Taipei
 
@@ -380,6 +380,70 @@
 - Commit scope: exact 7-fileplan repair set；`170 insertions(+), 109 deletions(-)`。Pre-commit `git diff --cached --check` exit`0`，cached name audit只列上述7個paths。
 - Immediate post-commit audit: `git status --short`無輸出；no application、dependency、lockfile、branch/worktree或remote change。
 - Next eligible action: record the Phase 05 implementation preflight/write set，add the single final-only rejecting regression，and run only that selector。
+
+## 2026-09-01 01:55 CST — Phase 05: final-only implementation preflight
+
+- Status transition: remains `In progress`；current final-only cause attempt`1`開始。Prior live-stream characterisation仍是歷史attempt 1，但不計入已改變產品目標後的cause counter。
+- Durable sources reloaded: repaired Phase 05、USER DECISION 014、live `DesktopService` result/event path、`ChatSession.finalize_and_record()` ordering、shared contract/fixtures、Rust/TypeScript validators、React reducer/render與direct Python/Node tests已對照。
+- Runtime/Git/dirty-tree gate: WSL/Linux；branch`GUI`tracking`origin/GUI`and ahead11；HEAD`31774bc3feeb499a1f39cba8d3aafcdcc65a5c2f`；first implementation write前`git status --short`無輸出。Python/Node/Cargo仍使用Conda`app`與Linux toolchains。
+- Authorization in force: USER DECISION 014與Start/Resume envelope允許direct Python/React/TypeScript/Rust/internal protocol/fixtures/tests和local phase commit；dependency/lockfile、live provider、real MCP/Ollama/store/credential、Fusion/Extended/Citation redesign、branch/worktree/push仍禁止。
+- Current causal hypothesis: `turn_outcome()`已在validator與`_record_turn()`完成後回傳，normal service卻再呼叫`_emit_answer_chunks()`；移除sole producer並同步刪除contract/consumer即可達成final-only，不需改session、graph或model stream。
+- Exact initial production/contract write set: `app/agent/desktop/service.py`、`app/desktop/protocol/v1/contract.json`、`fixtures.json`、`app/desktop/src/protocol.ts`、`app/desktop/src-tauri/src/protocol.rs`、`app/desktop/src/conversations.ts`、`app/desktop/src/App.tsx`。
+- Exact initial test/log write set: `app/tests/test_desktop_answer_stream.py`、`app/tests/test_desktop_fixture.py`、`app/tests/test_desktop_protocol_contract.py`、`app/desktop/tests/answer_stream.test.ts`、`app/desktop/tests/protocol.test.ts`、本檔。`app/tests/test_desktop_service.py`與`test_turn_finalizer.py`先作required read-only verification；只有red/ripple證明缺口才編輯。
+- Cheapest rejecting check: modify only`test_answer_chunks_are_emitted_only_after_turn_finalizes`into a final-only barrier assertion，then run that exact selector。Current service should fail only because it emitsone`answer.chunk`and returns`post_finalized`。
+- Commands/results so far: source reads only；no Phase 05 implementation test、broader suite、build或external call已執行。
+- Diff/scope/safety audit: this log is the first dirty path；no dependency/lockfile/generated/non-goal change。
+- Commit disposition/hash: pending focused verification and phase-only scope audit。
+- Next eligible action: apply the one-test red and run exactly that selector before production change。
+
+## 2026-09-01 01:57 CST — Phase 05: final-only causal red established
+
+- Status transition: remains `In progress`；final-only cause attempt`1`confirmed。
+- Exact write before check: only`app/tests/test_desktop_answer_stream.py`regression plus this log；production unchanged。
+- Exact command: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_answer_stream.py::test_answer_is_delivered_only_by_the_final_terminal_result -q`。
+- Exact result: exit`1`；`1 failed, 1 warning in 0.15s`。Failure is the post-release assertion`events == []`because current service emitted exactly one`answer.chunk`with`streamKind=post_finalized`andtext`final answer`。Before releasingthefake session barrier，events were empty。
+- Evidence classification: expected causal red，not pass evidence。It directly proves the obsolete Desktop emitter is the first missing final-only boundary；no provider/network/store/credential was used，andpytest`tmp_path`owned the service paths。
+- Diff/scope/safety audit: no production、protocol、dependency或lockfile change at red checkpoint。
+- Next eligible action: remove the Python emitter/constants and fix terminal/wire fields to`final_only`/0，rerun this selector，then synchronize shared contract/React consumers and their direct tests。
+
+## 2026-09-01 01:59 CST — Phase 05: smallest Python green and ordering-oracle correction
+
+- Status transition: remains `In progress`；attempt`1`production hypothesis held at the first boundary。
+- Minimal production change: removed the answer chunk byte/count constants、`_emit_answer_chunks()`、its UTF-8 slicing helper and normal success call from`app/agent/desktop/service.py`；wire-budget candidate andterminal result now use`streamKind=final_only`/`chunkCount=0`。
+- Exact command: reran `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_answer_stream.py::test_answer_is_delivered_only_by_the_final_terminal_result -q`。
+- Exact result: exit`0`；`1 passed, 1 warning in 0.10s`。Barrier observation remains events`[]`before release and after completion；terminal text is the full`final answer`。Warning is the existingLangGraph`allowed_objects`pending deprecation。
+- Live plan correction: direct validation-before-record regression is`tests/test_session_eviction.py::test_final_text_validator_runs_before_the_turn_is_recorded`；`test_turn_finalizer.py`owns successful finalization/record outcomes。Active Phase 05 focused command now includes the former exact selector；both files remainread-only unless they fail。
+- Expanded write set: only the active phase file and thislog were added for the evidence-backed selector correction；application candidate set otherwise unchanged。
+- Pass boundary: Python sole-producer green only。Shared contract/fixtures/Rust/TypeScript/React still expose`answer.chunk`/`post_finalized`and must be synchronized before Phase completion。
+- Next eligible action: update the remaining direct Python tests and remove the shared protocol/React chain，then run the planned focused matrix。
+
+## 2026-09-01 02:04 CST — Phase 05: first synchronized focused matrix and fixture correction
+
+- Status transition: remains `In progress`；attempt`1`implementation retained，one test-only assertion correction pending。
+- Synchronized changes under check: Python emitter removal；contract/fixtures/Rust/TypeScript event inventory and terminal enum；React chunk/provisional/reconciliation removal；direct final-only/error/cancel/protocol tests。
+- Exact Python command: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_answer_stream.py tests/test_desktop_service.py tests/test_desktop_fixture.py tests/test_desktop_protocol_contract.py tests/test_turn_finalizer.py tests/test_session_eviction.py::test_final_text_validator_runs_before_the_turn_is_recorded -q`。
+- Python result: exit`1`；`1 failed, 189 passed, 1 warning in 1.34s`。Only failure was`test_real_service_round_trip_registration_restore_and_final_only_answer`: assertion incorrectly requiredall events`[]`，but the production fixture emitted two allowed`stage.changed`events (`fixture.prepare`/`fixture.finalized`) and noanswer event。This does not contradict USER DECISION 014，which permits bounded progress/activity without answer text。
+- Exact TypeScript command/result: `cd app/desktop && /home/minervamuses/miniconda3/bin/conda run -n app ./node_modules/.bin/tsc --noEmit`→exit`0`/no output。
+- Exact Rust command/result: `cd app/desktop && env PATH=/home/minervamuses/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/local/bin:/usr/bin:/bin /home/minervamuses/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --manifest-path src-tauri/Cargo.toml protocol::tests`→exit`0`；library`8 passed, 0 failed, 20 filtered out`，main`0 tests`。
+- Earlier exact narrow checks after synchronization: Python`tests/test_desktop_answer_stream.py -q`→`11 passed, 1 warning in 0.25s`；Node`node --test --experimental-strip-types tests/answer_stream.test.ts tests/protocol.test.ts`→`86 passed, 0 failed`in`185.122772ms`。
+- Failure disposition: not pass evidence for the Python matrix；smallest correction is assert zero`answer.chunk`and absence ofterminal answer text in event payload while retaining stage events。No production change or new causal hypothesis needed。
+- Next eligible action: correct that fixture assertion，run only its selector，then repeat the exact Python focused matrix once。
+
+## 2026-09-01 02:06 CST — Phase 05: focused verification, scope audit and completion
+
+- Status transition: `In progress` → `Complete`in final-only cause attempt`1`。USER DECISION 014 acceptance is satisfied without revisitingthepreserved attempt-1 live-stream blocker evidence。
+- Confirmed implementation: `DesktopService`no longer has answer-chunk constants、UTF-8 slicer、emitter orsuccess call；worst-case wire budgeting and every normal/command success now use`streamKind=final_only`/`chunkCount=0`。Shared v1 contract、JSON fixtures、Rust/TypeScript validators and DTOs no longer advertise`answer.chunk`or`post_finalized`。React no longer stores chunk indexes/bytes/provisional text、reconciles prefixes or labels streamingfallback；pendingUI shows onlyworking spinner plus bounded stage/tool activity，and terminal success appends one complete answer。
+- Ordering/persistence evidence: the barrier regression observed noanswer event before or after fake turn release and one full terminal text。The final Python matrix includedall`test_turn_finalizer.py`cases plus`test_session_eviction.py::test_final_text_validator_runs_before_the_turn_is_recorded`，proving successful finalized records precede returned outcomes and validator rejection leaves no recent/history record。This evidence usesfake graph/history/temp paths，not a real store/provider。
+- Error/cancel/validation evidence: direct tests observed provider failures、oversize/wire-envelope rejection、cancelled blocked turn and a deliberately throwing event sink without any answer event/preview；cancel cleared`_turn_active`。Unicode final text returned intact in theterminal result。React failure retained onlytherecoverableuser draft and no assistant preview。
+- Fixture observation: isolated Desktop fixture retained two allowed`stage.changed`events (`fixture.prepare`/`fixture.finalized`) whilezero answer events crossed the sink and terminal text was absent from event payloads；the registered conversation still restored/continued normally。
+- Exact corrected selector: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_fixture.py::test_real_service_round_trip_registration_restore_and_final_only_answer -q`→exit`0`；`1 passed, 1 warning in 0.25s`。
+- Exact final Python command/result: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_answer_stream.py tests/test_desktop_service.py tests/test_desktop_fixture.py tests/test_desktop_protocol_contract.py tests/test_turn_finalizer.py tests/test_session_eviction.py::test_final_text_validator_runs_before_the_turn_is_recorded -q`→exit`0`；`190 passed, 1 warning in 1.12s`。Warning is the existingLangGraph`allowed_objects`pending deprecation。
+- Exact Node command/result: `cd app/desktop && /home/minervamuses/miniconda3/bin/conda run -n app node --test --experimental-strip-types tests/answer_stream.test.ts tests/protocol.test.ts`→exit`0`；`86 passed, 0 failed`in`185.122772ms`。
+- Exact TypeScript/Rust results: `./node_modules/.bin/tsc --noEmit`underConda`app`→exit`0`/no output；the exact Rust protocol selector recorded at02:04→exit`0`，library`8 passed, 0 failed, 20 filtered out`andmain`0 tests`。
+- Diff/scope/safety audit: repository-root`git diff --check`exit`0`/no output。Production-only search across`app/agent`、`app/desktop/src`、`src-tauri`and`contract.json`found no`answer.chunk`、`post_finalized`、`provisionalText`、retiredchunk action or streamingfallback labels。Remaining literals are explicit negative fixture/tests only。Changed paths are exactly7production/contract files、5direct test/fixture files、theactive Phase 05 file and this log；`session.py`、graph/execution、Fusion/Extended/Citation、dependencies/locks remain unchanged。
+- External/safety counters: live/paid provider`0`、real MCP/Ollama`0`、real user store/credential`0`、broader suites/builds`0`。Cargo used existing dependency graph and ignored target output only。
+- Commit disposition/hash: authorized Phase 05 local implementation commit pending；hash will be appended in a log-only follow-up。Remote push unauthorized。
+- Next eligible action: run final uncached/cached name checks，commit exactlythe14 Phase 05 paths，record hash/clean tree，then immediately loadPhase 06。
 
 ## Execution Entry Template
 

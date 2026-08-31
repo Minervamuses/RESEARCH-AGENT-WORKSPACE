@@ -60,7 +60,6 @@ pub const REQUEST_EVENTS: &[&str] = &[
     "writing.file_completed",
     "ingest.completed",
     "ingest.failed",
-    "answer.chunk",
 ];
 
 pub const PROCESS_EVENTS: &[&str] = &[
@@ -763,21 +762,6 @@ fn validate_event_data(
     validate_safe_object(data, "data")?;
     validate_tool_event(event, data)?;
     match event {
-        "answer.chunk" => {
-            validate_exact_data_keys(
-                data,
-                &["sessionId", "turnId", "chunkIndex", "streamKind", "text"],
-            )?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
-            expect_bounded_string(&data["turnId"], "data.turnId", 64)?;
-            expect_integer_range(&data["chunkIndex"], "data.chunkIndex", 0, 127)?;
-            if data["streamKind"] != "post_finalized" {
-                return Err(ProtocolViolation::invalid(
-                    "data.streamKind contains an unknown enum value",
-                ));
-            }
-            expect_bounded_string(&data["text"], "data.text", 16_384)?;
-        }
         "approval.required" => {
             const KEYS: &[&str] = &[
                 "approvalId",
@@ -1152,10 +1136,10 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 validate_enum(value, "data.responseKind", &["answer", "command"])?;
             }
             if let Some(value) = data.get("streamKind") {
-                validate_enum(value, "data.streamKind", &["post_finalized", "final_only"])?;
+                validate_enum(value, "data.streamKind", &["final_only"])?;
             }
             if let Some(value) = data.get("chunkCount") {
-                expect_integer_range(value, "data.chunkCount", 0, 128)?;
+                expect_integer_range(value, "data.chunkCount", 0, 0)?;
             }
             if let Some(value) = data.get("registrationStatus") {
                 validate_enum(

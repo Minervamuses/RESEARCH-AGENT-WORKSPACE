@@ -52,7 +52,6 @@ export const REQUEST_EVENTS = [
   "writing.file_completed",
   "ingest.completed",
   "ingest.failed",
-  "answer.chunk",
 ] as const;
 
 export const PROCESS_EVENTS = [
@@ -147,13 +146,6 @@ export const FORBIDDEN_DATA_KEY_FRAGMENTS = [
 ] as const;
 
 export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
-  "answer.chunk": {
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    turnId: { type: "string", required: true, maxBytes: 64 },
-    chunkIndex: { type: "integer", required: true, minimum: 0, maximum: 127 },
-    streamKind: { type: "string", required: true, enum: ["post_finalized"] },
-    text: { type: "string", required: true, maxBytes: 16_384 },
-  },
   "approval.required": {
     approvalId: { type: "string", required: true, maxBytes: 256 },
     parentRequestId: { type: "requestId", required: true },
@@ -294,8 +286,8 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
       },
     },
     responseKind: { type: "string", required: false, enum: ["answer", "command"] },
-    streamKind: { type: "string", required: false, enum: ["post_finalized", "final_only"] },
-    chunkCount: { type: "integer", required: false, minimum: 0, maximum: 128 },
+    streamKind: { type: "string", required: false, enum: ["final_only"] },
+    chunkCount: { type: "integer", required: false, minimum: 0, maximum: 0 },
     registrationStatus: {
       type: "string",
       required: false,
@@ -576,7 +568,7 @@ export interface TurnCompletedDto {
   validationErrors: string[];
   toolSummaries: ToolSummaryDto[];
   responseKind?: "answer" | "command";
-  streamKind?: "post_finalized" | "final_only";
+  streamKind?: "final_only";
   chunkCount?: number;
   registrationStatus?: "registered" | "pending" | "not_required";
   registrationIssue?: string | null;
@@ -661,14 +653,6 @@ export interface SessionTranscriptDto {
   offset: number;
   limit: number;
   hasMore: boolean;
-}
-
-export interface AnswerChunkDto {
-  sessionId: string;
-  turnId: string;
-  chunkIndex: number;
-  streamKind: "post_finalized";
-  text: string;
 }
 
 export interface RuntimeDiagnosticsDto {

@@ -22,8 +22,7 @@
     "writing.started",
     "writing.file_completed",
     "ingest.completed",
-    "ingest.failed",
-    "answer.chunk"
+    "ingest.failed"
   ],
   "processEvents": [
     "backend.ready",
@@ -95,13 +94,6 @@
     "ingest.failed": {
       "stage": {"type": "string", "required": true, "maxBytes": 256},
       "partialWritePossible": {"type": "boolean", "required": true}
-    },
-    "answer.chunk": {
-      "sessionId": {"type": "string", "required": true, "maxBytes": 32},
-      "turnId": {"type": "string", "required": true, "maxBytes": 64},
-      "chunkIndex": {"type": "integer", "required": true, "minimum": 0, "maximum": 127},
-      "streamKind": {"type": "string", "required": true, "enum": ["post_finalized"]},
-      "text": {"type": "string", "required": true, "maxBytes": 16384}
     }
   },
   "resultDataSchemas": {
@@ -158,8 +150,8 @@
         }
       },
       "responseKind": {"type": "string", "required": false, "enum": ["answer", "command"]},
-      "streamKind": {"type": "string", "required": false, "enum": ["post_finalized", "final_only"]},
-      "chunkCount": {"type": "integer", "required": false, "minimum": 0, "maximum": 128},
+      "streamKind": {"type": "string", "required": false, "enum": ["final_only"]},
+      "chunkCount": {"type": "integer", "required": false, "minimum": 0, "maximum": 0},
       "registrationStatus": {"type": "string", "required": false, "enum": ["registered", "pending", "not_required"]},
       "registrationIssue": {"type": "nullableString", "required": false, "maxBytes": 4096},
       "extensionAction": {"type": "string", "required": false, "enum": ["status", "preview"]}

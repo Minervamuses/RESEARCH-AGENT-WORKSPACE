@@ -151,6 +151,22 @@ test("language-neutral manifest matches TypeScript constants", async () => {
   }
 });
 
+test("normal answers use only the final terminal result", () => {
+  assert.equal(REQUEST_EVENTS.includes("answer.chunk" as never), false);
+  assert.equal("answer.chunk" in EVENT_DATA_SCHEMAS, false);
+  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].streamKind, {
+    type: "string",
+    required: false,
+    enum: ["final_only"],
+  });
+  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].chunkCount, {
+    type: "integer",
+    required: false,
+    minimum: 0,
+    maximum: 0,
+  });
+});
+
 test("shared process-event origin fixtures", async (context) => {
   const fixtures = await loadJson<FixtureDocument>("fixtures.json");
   for (const fixture of fixtures.originCases) {

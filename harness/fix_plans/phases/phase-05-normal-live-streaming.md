@@ -43,6 +43,7 @@ Phase 04 Complete.
 - `app/tests/test_desktop_fixture.py`
 - `app/tests/test_desktop_protocol_contract.py`
 - `app/tests/test_turn_finalizer.py`
+- `app/tests/test_session_eviction.py::test_final_text_validator_runs_before_the_turn_is_recorded`（read-only ordering oracle unless a regression is exposed）
 - `app/agent/session.py`／turn finalizer先作read-only ordering oracle；只有rejecting evidence證明現有chokepoint不足才可最小修改。
 
 ### Desktop contract and rendering
@@ -112,7 +113,7 @@ Phase 04 Complete.
 
 ```bash
 cd /home/minervamuses/research-agent-workspace/app
-poetry run pytest tests/test_desktop_answer_stream.py tests/test_desktop_service.py tests/test_desktop_fixture.py tests/test_desktop_protocol_contract.py tests/test_turn_finalizer.py -q
+poetry run pytest tests/test_desktop_answer_stream.py tests/test_desktop_service.py tests/test_desktop_fixture.py tests/test_desktop_protocol_contract.py tests/test_turn_finalizer.py tests/test_session_eviction.py::test_final_text_validator_runs_before_the_turn_is_recorded -q
 
 cd /home/minervamuses/research-agent-workspace/app/desktop
 node --test --experimental-strip-types tests/answer_stream.test.ts tests/protocol.test.ts

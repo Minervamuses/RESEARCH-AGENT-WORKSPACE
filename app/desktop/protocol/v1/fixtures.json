@@ -390,8 +390,9 @@
       }
     },
     {
-      "name": "answer-chunk-safe-dto",
-      "valid": true,
+      "name": "retired-answer-chunk-is-rejected",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
       "message": {
         "protocolVersion": 1,
         "messageType": "event",
@@ -402,28 +403,8 @@
           "sessionId": "0123456789abcdef0123456789abcdef",
           "turnId": "turn-1",
           "chunkIndex": 0,
-          "streamKind": "post_finalized",
-          "text": "安全答案"
-        }
-      }
-    },
-    {
-      "name": "answer-chunk-rejects-provider-token",
-      "valid": false,
-      "errorCode": "PROTOCOL_INVALID",
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "event",
-        "requestId": "00000000-0000-4000-8000-000000000076",
-        "sequence": 1,
-        "event": "answer.chunk",
-        "data": {
-          "sessionId": "0123456789abcdef0123456789abcdef",
-          "turnId": "turn-1",
-          "chunkIndex": 0,
-          "streamKind": "post_finalized",
-          "text": "安全答案",
-          "providerToken": "must not cross"
+          "streamKind": "final_only",
+          "text": "retired event"
         }
       }
     },
@@ -983,20 +964,6 @@
         },
         {
           "protocolVersion": 1,
-          "messageType": "event",
-          "requestId": "00000000-0000-4000-8000-00000000007c",
-          "sequence": 1,
-          "event": "answer.chunk",
-          "data": {
-            "sessionId": "0123456789abcdef0123456789abcdef",
-            "turnId": "turn-1",
-            "chunkIndex": 0,
-            "streamKind": "post_finalized",
-            "text": "完成。"
-          }
-        },
-        {
-          "protocolVersion": 1,
           "messageType": "result",
           "requestId": "00000000-0000-4000-8000-00000000007c",
           "ok": true,
@@ -1007,8 +974,8 @@
             "validationErrors": [],
             "toolSummaries": [],
             "responseKind": "answer",
-            "streamKind": "post_finalized",
-            "chunkCount": 1,
+            "streamKind": "final_only",
+            "chunkCount": 0,
             "registrationStatus": "registered",
             "registrationIssue": null
           }

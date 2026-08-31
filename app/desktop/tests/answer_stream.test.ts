@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  MAX_ANSWER_CHUNK_BYTES,
   MAX_ACTIVITY_ITEMS,
   conversationInteractionState,
   conversationReducer,
   initialConversationState,
-  type AnswerChunkMessage,
+  type AuthoritativeTurnResult,
   type ConversationAction,
   type ConversationState,
 } from "../src/conversations.ts";
@@ -42,36 +41,9 @@ function activeState(draft = "question"): ConversationState {
   });
 }
 
-function chunk(
-  chunkIndex: number,
-  text: string,
-  overrides: Partial<AnswerChunkMessage> & { data?: Partial<AnswerChunkMessage["data"]> } = {},
-): AnswerChunkMessage {
-  return {
-    requestId: overrides.requestId ?? requestId,
-    sequence: overrides.sequence ?? chunkIndex + 2,
-    data: {
-      sessionId: overrides.data?.sessionId ?? sessionId,
-      turnId: overrides.data?.turnId ?? turnId,
-      chunkIndex: overrides.data?.chunkIndex ?? chunkIndex,
-      streamKind: overrides.data?.streamKind ?? "post_finalized",
-      text: overrides.data?.text ?? text,
-    },
-  };
-}
-
-function receive(state: ConversationState, event: AnswerChunkMessage): ConversationState {
-  return conversationReducer(state, {
-    type: "answer-chunk-received",
-    generation: 1,
-    event,
-  });
-}
-
 function succeed(
   state: ConversationState,
-  text: string,
-  chunkCount: number,
+  overrides: Partial<AuthoritativeTurnResult> = {},
 ): ConversationState {
   return conversationReducer(state, {
     type: "turn-succeeded",
@@ -81,67 +53,42 @@ function succeed(
     result: {
       sessionId,
       turnId,
-      text,
+      text: "complete answer",
       responseKind: "answer",
-      streamKind: "post_finalized",
-      chunkCount,
+      streamKind: "final_only",
+      chunkCount: 0,
+      ...overrides,
     },
   });
 }
 
-test("equal provisional and authoritative text becomes one final answer", () => {
-  let state = receive(activeState(), chunk(0, "Hello "));
-  state = receive(state, chunk(1, "world"));
-  assert.equal(state.activeTurn?.provisionalText, "Hello world");
+test("one final-only result creates one complete authoritative answer", () => {
+  const started = activeState();
+  assert.equal(started.latestAnswer, null);
 
-  state = succeed(state, "Hello world", 2);
+  const state = succeed(started);
   assert.equal(state.activeTurn, null);
+  assert.equal(state.draft, "");
   assert.deepEqual(state.latestAnswer, {
     projectId,
     sessionId,
     requestId,
     turnId,
-    text: "Hello world",
+    text: "complete answer",
     responseKind: "answer",
-    streamKind: "post_finalized",
-    presentation: "final",
+    streamKind: "final_only",
   });
-  assert.equal(state.draft, "");
 
-  const afterLateChunk = receive(state, chunk(2, "duplicate"));
-  assert.equal(afterLateChunk, state);
-  assert.equal(afterLateChunk.latestAnswer?.text, "Hello world");
-});
-
-test("a differing authoritative result replaces provisional assembly exactly once", () => {
-  let state = receive(activeState(), chunk(0, "draft answer"));
-  state = succeed(state, "final answer", 1);
-  assert.equal(state.latestAnswer?.text, "final answer");
-  assert.equal(state.latestAnswer?.presentation, "reconciled");
-
-  const duplicateResult = succeed(state, "second answer", 1);
-  assert.equal(duplicateResult, state);
-  assert.equal(duplicateResult.latestAnswer?.text, "final answer");
+  assert.equal(succeed(state, { text: "duplicate" }), state);
+  assert.equal(state.latestAnswer?.text, "complete answer");
 });
 
 test("a local slash command is one final-only inert conversation result", () => {
-  const state = conversationReducer(activeState("/sync /tmp/research"), {
-    type: "turn-succeeded",
-    generation: 1,
-    requestId,
-    projectId,
-    result: {
-      sessionId,
-      turnId,
-      text: "Diff against /tmp/research:\n  (none)",
-      responseKind: "command",
-      streamKind: "final_only",
-      chunkCount: 0,
-    },
+  const state = succeed(activeState("/sync /tmp/research"), {
+    text: "Diff against /tmp/research:\n  (none)",
+    responseKind: "command",
   });
 
-  assert.equal(state.activeTurn, null);
-  assert.equal(state.draft, "");
   assert.deepEqual(state.latestAnswer, {
     projectId,
     sessionId,
@@ -150,56 +97,36 @@ test("a local slash command is one final-only inert conversation result", () => 
     text: "Diff against /tmp/research:\n  (none)",
     responseKind: "command",
     streamKind: "final_only",
-    presentation: "final_only",
   });
 });
 
-test("duplicate, gap, stale, cross-session, mismatched, and malformed chunks are rejected", () => {
+test("post-finalized, nonzero-chunk, cross-session, and malformed results fail closed", () => {
   const started = activeState();
-  const first = receive(started, chunk(0, "a"));
-  assert.notEqual(first, started);
-
-  const rejected = [
-    chunk(0, "duplicate", { sequence: 3 }),
-    chunk(2, "gap", { sequence: 4 }),
-    chunk(1, "stale", { sequence: 2 }),
-    chunk(1, "cross", { sequence: 4, data: { sessionId: otherSessionId } }),
-    chunk(1, "mismatch", { sequence: 4, data: { turnId: "turn-2" } }),
-    chunk(1, "", { sequence: 4 }),
-    chunk(1, "x".repeat(MAX_ANSWER_CHUNK_BYTES + 1), { sequence: 4 }),
-    chunk(1, "wrong request", {
-      sequence: 4,
-      requestId: "223e4567-e89b-42d3-a456-426614174000",
-    }),
+  const invalidResults = [
+    { streamKind: "post_finalized" } as unknown as Partial<AuthoritativeTurnResult>,
+    { chunkCount: 1 },
+    { sessionId: otherSessionId },
+    { turnId: "" },
+    { text: null } as unknown as Partial<AuthoritativeTurnResult>,
+    { responseKind: "other" } as unknown as Partial<AuthoritativeTurnResult>,
   ];
-  for (const event of rejected) {
-    assert.equal(receive(first, event), first);
+  for (const invalid of invalidResults) {
+    assert.equal(succeed(started, invalid), started);
   }
-  assert.equal(receive(first, null as unknown as AnswerChunkMessage), first);
 
-  const wrongGeneration = conversationReducer(first, {
+  const retiredChunkAction = {
     type: "answer-chunk-received",
-    generation: 2,
-    event: chunk(1, "stale generation", { sequence: 4 }),
-  });
-  assert.equal(wrongGeneration, first);
+    generation: 1,
+    event: {},
+  } as unknown as ConversationAction;
+  assert.equal(conversationReducer(started, retiredChunkAction), started);
 });
 
-test("oversized aggregate stream is rejected without altering accepted text", () => {
-  const maxChunk = "a".repeat(16_384);
-  let state = activeState();
-  for (let index = 0; index < 128; index += 1) {
-    state = receive(state, chunk(index, maxChunk));
-  }
-  assert.equal(state.activeTurn?.chunks.length, 128);
-  assert.equal(state.activeTurn?.chunkBytes, 2 * 1024 * 1024);
-  const full = state;
-  assert.equal(receive(full, chunk(127, "extra", { sequence: 131 })), full);
-});
-
-test("failure discards provisional text, preserves recoverable draft, and unlocks controls", () => {
-  let state = receive(activeState("retry this"), chunk(0, "partial"));
+test("failure preserves the recoverable draft and never creates an assistant preview", () => {
+  let state = activeState("retry this");
   assert.equal(conversationInteractionState(state).createDisabled, true);
+  assert.equal(state.latestAnswer, null);
+
   state = conversationReducer(state, {
     type: "turn-failed",
     generation: 1,
@@ -209,6 +136,7 @@ test("failure discards provisional text, preserves recoverable draft, and unlock
     message: "Provider is temporarily unavailable.",
     retryable: true,
   });
+
   assert.equal(state.activeTurn, null);
   assert.equal(state.latestAnswer, null);
   assert.equal(state.draft, "retry this");
@@ -218,28 +146,29 @@ test("failure discards provisional text, preserves recoverable draft, and unlock
   assert.equal(conversationInteractionState(state).sendDisabled, false);
 });
 
-test("backend generation change drops stale selection, stream, answer, and failure", () => {
-  let state = receive(activeState(), chunk(0, "partial"));
-  state = conversationReducer(state, {
+test("backend generation change drops stale selection, pending turn, answer, and failure", () => {
+  const started = activeState();
+  const state = conversationReducer(started, {
     type: "backend-generation-changed",
     generation: 2,
   });
+
   assert.equal(state.backendGeneration, 2);
   assert.equal(state.selected, null);
   assert.equal(state.activeTurn, null);
   assert.equal(state.latestAnswer, null);
   assert.equal(state.failure, null);
   assert.equal(state.draft, "question");
-  assert.equal(receive(state, chunk(1, "late")), state);
-
-  const staleGeneration = conversationReducer(state, {
-    type: "backend-generation-changed",
-    generation: 1,
-  });
-  assert.equal(staleGeneration, state);
+  assert.equal(
+    conversationReducer(state, {
+      type: "backend-generation-changed",
+      generation: 1,
+    }),
+    state,
+  );
 });
 
-test("activity is correlated, bounded, and global turn lock blocks selection and control", () => {
+test("activity is correlated, bounded, and the global turn lock blocks controls", () => {
   let state = activeState();
   const blockedSelection: ConversationAction = {
     type: "conversation-selected",
@@ -262,10 +191,18 @@ test("activity is correlated, bounded, and global turn lock blocks selection and
       generation: 1,
       requestId,
       sessionId,
-      turnId: null,
       activity: { kind: "stage", label: `stage-${index}`, status: null },
     });
   }
   assert.equal(state.activeTurn?.activity.length, MAX_ACTIVITY_ITEMS);
   assert.equal(state.activeTurn?.activity[0]?.label, "stage-5");
+
+  const wrongRequest = conversationReducer(state, {
+    type: "activity-received",
+    generation: 1,
+    requestId: "223e4567-e89b-42d3-a456-426614174000",
+    sessionId,
+    activity: { kind: "tool", label: "ignored", status: "ok" },
+  });
+  assert.equal(wrongRequest, state);
 });

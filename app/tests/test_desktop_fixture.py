@@ -133,7 +133,7 @@ def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     assert transcripts["items"][0]["userText"] == "A seed question"
 
 
-def test_real_service_round_trip_transient_registration_restore_and_chunks(
+def test_real_service_round_trip_registration_restore_and_final_only_answer(
     fixture_root: Path,
 ) -> None:
     service = _service(fixture_root)
@@ -155,12 +155,10 @@ def test_real_service_round_trip_transient_registration_restore_and_chunks(
             event_sink=lambda event, data: events.append((event, data)),
         )
         assert result["registrationStatus"] == "registered"
-        assert result["streamKind"] == "post_finalized"
-        assert result["chunkCount"] >= 1
-        chunks = [data for event, data in events if event == "answer.chunk"]
-        assert [item["chunkIndex"] for item in chunks] == list(range(len(chunks)))
-        assert "".join(item["text"] for item in chunks) == result["text"]
-        assert all(item["sessionId"] == transient_id for item in chunks)
+        assert result["streamKind"] == "final_only"
+        assert result["chunkCount"] == 0
+        assert all(event != "answer.chunk" for event, _data in events)
+        assert result["text"] not in repr(events)
 
         await service.dispatch(
             "session.select",

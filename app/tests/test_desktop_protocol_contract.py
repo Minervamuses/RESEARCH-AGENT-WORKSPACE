@@ -91,6 +91,23 @@ def test_phase04_approval_correlation_and_extension_action_are_v1_additions() ->
     }
 
 
+def test_normal_answers_use_only_the_final_terminal_result() -> None:
+    assert "answer.chunk" not in CONTRACT["requestEvents"]
+    assert "answer.chunk" not in CONTRACT["eventDataSchemas"]
+    turn = CONTRACT["resultDataSchemas"]["session.turn"]
+    assert turn["streamKind"] == {
+        "type": "string",
+        "required": False,
+        "enum": ["final_only"],
+    }
+    assert turn["chunkCount"] == {
+        "type": "integer",
+        "required": False,
+        "minimum": 0,
+        "maximum": 0,
+    }
+
+
 @pytest.mark.parametrize("case", FIXTURES["messages"], ids=lambda case: case["name"])
 def test_shared_message_fixture(case: dict) -> None:
     if case["valid"]:

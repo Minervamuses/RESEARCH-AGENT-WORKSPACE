@@ -103,8 +103,6 @@ _DESKTOP_SLASH_COMMANDS = frozenset({
     *_DESKTOP_KNOWLEDGE_COMMANDS,
 })
 _MAX_ANSWER_BYTES = 2_097_152
-_MAX_ANSWER_CHUNK_BYTES = 16_384
-_MAX_ANSWER_CHUNKS = 128
 _MAX_LOCAL_COMMAND_BYTES = 65_536
 _MAX_TRANSCRIPT_PAGE_BYTES = 1_048_576
 _MAX_CONTROL_SNAPSHOTS = CATALOG_MAX_SESSIONS
@@ -1195,8 +1193,8 @@ class DesktopService:
             "validationErrors": validation_errors,
             "toolSummaries": tool_summaries,
             "responseKind": "answer",
-            "streamKind": "post_finalized",
-            "chunkCount": _MAX_ANSWER_CHUNKS,
+            "streamKind": "final_only",
+            "chunkCount": 0,
             "registrationStatus": "pending",
             "registrationIssue": "\u0000" * 4_096,
         }
@@ -1771,12 +1769,6 @@ class DesktopService:
                     self._pending_registration = None
                 elif project_id is not None:
                     self._pending_registration = (project_id, session.session_id)
-            chunk_count = self._emit_answer_chunks(
-                event_sink,
-                session_id=session.session_id,
-                turn_id=turn_id,
-                text=outcome.text,
-            )
             return {
                 "sessionId": session.session_id,
                 "turnId": turn_id,
@@ -1784,10 +1776,8 @@ class DesktopService:
                 "validationErrors": validation_errors,
                 "toolSummaries": tool_summaries,
                 "responseKind": "answer",
-                "streamKind": (
-                    "post_finalized" if chunk_count else "final_only"
-                ),
-                "chunkCount": chunk_count,
+                "streamKind": "final_only",
+                "chunkCount": 0,
                 "registrationStatus": registration_status,
                 "registrationIssue": registration_issue,
             }
@@ -1800,42 +1790,6 @@ class DesktopService:
             self._tool_names = {}
             self._tool_summaries = {}
             self._turn_active = False
-
-    @classmethod
-    def _emit_answer_chunks(
-        cls,
-        event_sink: EventSink | None,
-        *,
-        session_id: str,
-        turn_id: str,
-        text: str,
-    ) -> int:
-        if event_sink is None:
-            return 0
-        chunks = cls._utf8_chunks(text, _MAX_ANSWER_CHUNK_BYTES)
-        if len(chunks) > _MAX_ANSWER_CHUNKS:
-            return 0
-        emitted = 0
-        for chunk_index, chunk in enumerate(chunks):
-            try:
-                event_sink(
-                    "answer.chunk",
-                    {
-                        "sessionId": session_id,
-                        "turnId": turn_id,
-                        "chunkIndex": chunk_index,
-                        "streamKind": "post_finalized",
-                        "text": chunk,
-                    },
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Desktop answer event sink failed with %s",
-                    type(exc).__name__,
-                )
-                break
-            emitted += 1
-        return emitted
 
     async def _session_set_mode(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -2764,26 +2718,6 @@ class DesktopService:
         if len(encoded) <= max_bytes:
             return text
         return encoded[:max_bytes].decode("utf-8", errors="ignore")
-
-    @staticmethod
-    def _utf8_chunks(text: str, max_bytes: int) -> list[str]:
-        """Split text on UTF-8 byte boundaries without losing characters."""
-        if max_bytes < 1:
-            raise ValueError("max_bytes must be positive")
-        chunks: list[str] = []
-        current: list[str] = []
-        current_bytes = 0
-        for character in text:
-            encoded_size = len(character.encode("utf-8"))
-            if current and current_bytes + encoded_size > max_bytes:
-                chunks.append("".join(current))
-                current = []
-                current_bytes = 0
-            current.append(character)
-            current_bytes += encoded_size
-        if current:
-            chunks.append("".join(current))
-        return chunks
 
     @staticmethod
     def _bounded_cache_insert(cache: dict[str, Any], key: str, value: Any) -> None:
