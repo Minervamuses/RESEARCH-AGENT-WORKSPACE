@@ -33,7 +33,7 @@
 - CLI source 已預設載入 MCP；GUI `App.tsx` 建立 session 時明確送 `loadMcp: false`，Python desktop service 對缺省值則採 `true`。
 - Rust backend 把一般 request timeout 固定為 600 秒，timeout 後形成 fatal/kill；尚無真實 600 秒 incident replay，因此只有 source-confirmed risk。
 - 一般 Skill 目前是 session-persistent `/skill <name> [mode]` control，Task mode 穿越 manifest/runtime/state/CLI/Desktop/protocol/UI；Desktop composer 不接受 dynamic Skill command。
-- Desktop answer event 目前在 authoritative answer 完成後才切成最多 16 KiB chunk，標示 `streamKind=post_finalized`。Graph 的 initial/empty-retry/repair 可能共用 node，live token attribution 仍是 Phase 05 engineering unknown。
+- Desktop answer event 目前在 `ChatSession.turn_outcome()` 已完成 finalization、Desktop pre-record wire validation 與 turn persistence後，才把 authoritative answer切成最多16 KiB的`post_finalized answer.chunk`；React再維護 provisional/reconciliation state。Phase 05 attempt 1 已證明真正live token無安全pre-token acceptance seam，USER DECISION 014因此把目標改為移除整條answer-event模擬串流鏈並只回傳`final_only` terminal result。
 - Plan log reader 遇到 tool markers 會 degraded/refuse；transcript DTO 只有 `userText`／`assistantText`，React 只呈現 You/Assistant。
 - Authoring 本身不執行 application test、build、provider、MCP、Ollama 或 data mutation；後續 actual evidence 只能由 `build-log.md` 記錄。
 
@@ -42,7 +42,7 @@
 下列舊 bundle assumptions 已被使用者新決策取代，executor 不得因舊 phase 已 Complete 而恢復它們：
 
 - GUI `loadMcp:false` 不是保留行為；CLI/GUI 都須 default on。
-- `post_finalized` answer slicing 不再符合 Normal OpenRouter streaming acceptance。
+- USER DECISION 014 supersede USER DECISION 006；Normal answer 不再要求live token streaming，也不得保留`post_finalized` answer slicing。唯一正式delivery是完成validation/persistence後的`final_only` terminal result。
 - Active Skill dropdown、persistent `/skill` activation 與 Task mode 不再是產品要求。
 - 「不得修改 Plan log format」不適用於完成 tool-aware restore 所需的最小 versioned 延伸。
 - Fusion 與 Extended Thinking 仍排除；舊 bundle 的 live Extended trials 或 acceptance 不會被本計劃重跑。
@@ -55,7 +55,7 @@
 | 02 | [`phase-02-long-request-liveness.md`](phases/phase-02-long-request-liveness.md) | none | Not started | 移除一般 request absolute deadline，保留真 terminal failures |
 | 03 | [`phase-03-one-shot-skill-runtime.md`](phases/phase-03-one-shot-skill-runtime.md) | none | Not started | Python-owned dynamic command + one-shot runtime；移除 Task mode core |
 | 04 | [`phase-04-desktop-skill-command.md`](phases/phase-04-desktop-skill-command.md) | Phase 03 | Not started | Desktop command route；移除 GUI control/RPC/protocol residue |
-| 05 | [`phase-05-normal-live-streaming.md`](phases/phase-05-normal-live-streaming.md) | Phase 04 | Not started | Normal OpenRouter accepted-answer live delta + reconciliation |
+| 05 | [`phase-05-normal-live-streaming.md`](phases/phase-05-normal-live-streaming.md) | Phase 04 | Not started | Normal authoritative final-only answer delivery；移除 answer chunk/reconciliation chain |
 | 06 | [`phase-06-tool-aware-conversation-restore.md`](phases/phase-06-tool-aware-conversation-restore.md) | Phase 05 | Not started | Versioned tool-aware Plan persistence/transcript/continuation |
 | 07 | [`phase-07-integration-acceptance.md`](phases/phase-07-integration-acceptance.md) | Phases 01–06 | Not started | Isolated cross-feature journey、broader checks、delivery audit |
 
@@ -86,6 +86,7 @@ Phases 01、02、03 可依 numeric order 獨立開始。04 必須建立在 03 �
 - 修改 phase 明列且有 causal need 的 Python、TypeScript/React、Rust、protocol contract、manifest、system prompt、fixture 與 focused test files。
 - 為 USER DECISION 011 做最小 versioned Plan log format/DTO addition，並同步 writer、reader、prompt reconstruction、protocol fixture、Rust/TypeScript type 與 UI；不建立第二套 persistence。
 - 為 USER DECISION 012 移除 Task mode 與一般 Skill persistent control chain；允許跨超過三個直接相關 production files，因為該契約目前本來就橫跨 schema/runtime/session/CLI/Desktop。
+- 為 USER DECISION 014 移除 Normal `post_finalized answer.chunk` producer、internal protocol event/schema/fixture、React provisional/reconciliation consumer與直接tests；同步保留`session.turn`的`final_only` terminal DTO，不改protocol major version。
 - 用既有 fixture seam、fake provider/tool/MCP 與 caller-owned direct `/tmp` child 做 deterministic test；只能操作該次 test 建立且已驗證的 temporary root。
 - 執行 phase 列出的 focused tests；Near final 只執行一次 Phase 07 列出的 broader suites/build。
 - 在 prompt 明確授權時建立 phase-scoped local commit；保留其他 dirty change unstaged。
@@ -105,7 +106,7 @@ Phases 01、02、03 可依 numeric order 獨立開始。04 必須建立在 03 �
 - 不用 system Python、direct `pip install`、project `.venv`、Windows-native runtime 或 cross-environment file mutation。
 - 不刪除/重置使用者變更，不執行 destructive broad path command。
 - 不讀、輸出、複製或編輯 secret/credential value。
-- 不把 fake post-final chunk、legacy tool text 或 unchecked disk boolean 描述成符合 acceptance。
+- 不把planned result、任何`answer.chunk`、post-finalized event、legacy tool text或unchecked disk boolean描述成符合acceptance。
 
 ## Expected Write Surfaces
 
@@ -136,9 +137,9 @@ Phases 01、02、03 可依 numeric order 獨立開始。04 必須建立在 03 �
 
 ### Phase 05
 
-- Python turn/graph/desktop seam: `app/agent/turns/execution.py`、`app/agent/graph.py`、`app/agent/session.py`、`app/agent/desktop/service.py` 與 existing stream fake/tests。
-- Desktop contract/rendering: `app/desktop/protocol/v1/contract.json`、`app/desktop/src/protocol.ts`、`App.tsx`、`app/desktop/tests/answer_stream.test.ts`、Rust protocol/backend only if event transport semantics require it。
-- 不得觸及 Fusion/Extended implementation files except a focused assertion that they remain on existing behavior。
+- Python delivery owner: `app/agent/desktop/service.py`與`app/tests/test_desktop_answer_stream.py`、`test_desktop_service.py`、`test_turn_finalizer.py`。`app/agent/session.py`/turn finalizer先作read-only ordering oracle；只有rejecting evidence證明既有validation/persistence chokepoint不足時才可最小修改。Graph/execution不再需要streaming seam。
+- Desktop contract/rendering: `app/desktop/protocol/v1/contract.json`、fixtures、`app/desktop/src/protocol.ts`、`app/desktop/src/conversations.ts`、`App.tsx`、`app/desktop/tests/answer_stream.test.ts`、`protocol.test.ts`與Rust protocol validator/tests。移除`answer.chunk` inventory/DTO/reconciliation，同步保留`session.turn`的`final_only`/zero-chunk result。
+- 不得觸及 Fusion/Extended/Citation implementation files；focused audit只證明它們未因Normal final-only cleanup改變。
 
 ### Phase 06
 
@@ -203,7 +204,7 @@ Phase 06 的預設最小設計如下；實作前若 live code 顯示名稱需調
 
 - 一個 phase 的 source evidence 若顯示預期 write surface 錯誤，先在 `build-log.md` 記錄原因與新 exact file，再編輯；不可事後合理化 broad diff。
 - 需要 dependency、另一個 persistence system、protocol major version、extra model call 或 unsafe draft display 才能前進時，停止該 path 並要求 fresh authority。
-- Phase 05 若無法證明 live delta 屬於 accepted final answer，不得保留 `post_finalized` fallback 後宣稱完成；應把 phase 標 Blocked，附 characterisation evidence。
+- Phase 05 必須保留attempt 1的live-token blocker evidence，但新attempt只在證明terminal result前沒有answer text、result在validation/persistence後一次交付、error/cancel/validation failure沒有partial，且`post_finalized answer.chunk`全鏈已移除後才能Complete。
 - Phase 06 若 legacy tool identity 不足，只能 display-only；不得猜 call id 或讓 restore 觸發 execution。
 - Unrelated test failure 只記錄，不修；若它阻擋 required verification，說明最小選項。
 - 每個 phase 最多對同一因果假設做兩次 focused implementation attempt。一次 expensive attempt 無實質改善即停止，不自動開始第二次。
@@ -214,7 +215,7 @@ Phase 06 的預設最小設計如下；實作前若 live code 顯示名稱需調
 
 1. Phases 01–07 都在 `build-log.md` 有 `Complete` status、exact evidence 與 scoped diff/commit disposition。
 2. [`GOALS.md`](GOALS.md) 所有 required success conditions 都能映射到 observed test或 isolated journey，不以 inference/plan 取代。
-3. MCP default、long-turn liveness、dynamic one-shot Skill、live accepted-answer streaming、tool-aware restore/continue 在同一 current codebase 無相互回歸。
+3. MCP default、long-turn liveness、dynamic one-shot Skill、authoritative final-only answer delivery、tool-aware restore/continue 在同一 current codebase 無相互回歸。
 4. Citation deferred boundary、Fusion/Extended exclusion、first-turn durability deferral 與 single-GUI assumption 都沒有被偷偷擴張或誤稱已解決。
 5. Final broader commands、Tauri no-bundle build、`git diff --check` 與 final scope audit 有實際結果；failure/skip/unavailable 都已說明且不被勾為 pass。
 6. 沒有 dependency/lockfile、real data、credential、provider/MCP/Ollama、remote push 或 non-goal change。

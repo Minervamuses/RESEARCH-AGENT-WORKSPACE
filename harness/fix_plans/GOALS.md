@@ -2,18 +2,18 @@
 
 ## Purpose
 
-以目前已完成的 Desktop GUI 為基礎，修正五個已由使用者確認的產品缺口：MCP 預設值、長回合固定總時限、一般 Skill 的啟動契約、Normal OpenRouter 的真正生成中串流，以及含工具紀錄的 sidebar conversation 恢復與接續。
+以目前已完成的 Desktop GUI 為基礎，修正五個已由使用者確認的產品缺口：MCP 預設值、長回合固定總時限、一般 Skill 的啟動契約、Normal answer 的 authoritative final-only delivery，以及含工具紀錄的 sidebar conversation 恢復與接續。
 
 本計劃是既有 `harness/plans/2026-08-24-desktop-gui-completion/` 完成後的 corrective plan。舊 bundle 保留為歷史證據，不回寫舊 phase；若舊 bundle 的假設與本計劃的使用者決策衝突，以 [`user-decisions.md`](user-decisions.md) 與本 bundle 為準。
 
-本輪只建立可供後續 coding agent 跨 session 執行的長期計劃，不修改 application code、test、manifest、lockfile 或 `AGENTS.md`。
+本 bundle 同時保存跨 session 的執行計劃與實際 evidence；application code、test、manifest 或 internal protocol 只有在 [`PLANS.md`](PLANS.md) authorization envelope 與 eligible phase causal scope 內才可修改。Dependency/lockfile 與 `AGENTS.md` 不在授權內。
 
 ## Required Outcomes
 
 - CLI 與 GUI 建立 session 時都預設載入 MCP；CLI 的既有正確預設要有 regression protection，GUI 不得再硬送 `loadMcp: false`。
 - Desktop 一般 request 不再因固定 600 秒 absolute deadline 被終止；仍保留有因果依據的啟動、關閉、child exit 與 transport failure 邊界。
 - 非 Citation Skill 由 CLI 與 GUI 共用的 Python-owned `/<skill-name> <自然語言 prompt>` 契約啟動，且只作用於該命令所建立的一次工作；成功、失敗、取消或關閉後都不得殘留 Active Skill 或 Task mode。
-- Normal、非 Fusion、非 Extended Thinking 的 OpenRouter 回合，在模型仍生成時就送出正確的 final-answer text delta；不得再把已完成答案切塊冒充 live streaming。
+- Normal answer 只有在 Python 完成 generation、repair、finalization、validation 與 persistence 後才交付；Desktop 一次顯示完整 authoritative final answer，不發送 `answer.chunk`，也不以完成後切塊模擬串流。
 - Sidebar 能載入並接續含工具活動的 Plan conversation：歷史 user、tool activity/result、final assistant 分開顯示，舊 tool call 永不因 restore 而重跑，可靠的新格式資料才能以 tool role 加入後續 prompt。
 - Citation 的專用流程本次不重設；它保留為 built-in `/citation` 例外，已知 GUI 入口缺口另由 [`issue/09-citation-skill-flow-deferred.md`](../../issue/09-citation-skill-flow-deferred.md) 追蹤。
 
@@ -40,12 +40,13 @@
 - [ ] 一般 `/skill <name> [mode]`、`/skill none`、Task mode schema/runtime/manifest/UI/protocol control 與 Desktop Skill dropdown/RPC 都被完整移除，不留下第二套 hidden activation path。
 - [ ] `/citation` 保留 built-in 優先權；focused Citation regression 證明一般 Skill 改動沒有順便重寫既有 CLI Citation lifecycle。本計劃不要求 GUI 可啟動 Citation。
 
-### True Normal OpenRouter streaming
+### Normal authoritative final-only delivery
 
-- [ ] Fake streaming model 證明至少一個 `answer.chunk` 在 authoritative terminal result 之前抵達 React，且前端能增量顯示並以 terminal result 對帳為一份答案。
-- [ ] Stream 只包含使用者最後可見的 accepted final-answer text，不洩漏 tool call、reasoning、provider payload、empty-retry draft、repair 前草稿或 finalizer 會刪改的內容。
-- [ ] Normal OpenRouter success path 不再使用 `streamKind=post_finalized` 或完成後全文 slicing fallback；若無安全 attribution seam，該 phase 必須停下並呈報證據，不得以假串流勾選完成。
-- [ ] Error、cancel、child failure 與 final reconciliation 都是 bounded、可重試且不重複顯示文字；Fusion 與 Extended Thinking 不因本修復改變。
+- [ ] Deterministic fake normal turn 證明 terminal `session.turn` result 是唯一 answer-text delivery，`streamKind=final_only`、`chunkCount=0`，且整個 success path 沒有 `answer.chunk`。
+- [ ] Python generation、repair、finalization、final-text/wire validation 與 turn persistence 全部完成後，Desktop 才收到一次完整 authoritative answer；React 在此之前只顯示 bounded progress/activity 與 waiting state，不顯示 provisional answer text。
+- [ ] Normal production、protocol 與 UI 不再保留 `post_finalized` 全文 slicing／reconciliation path；不得用另一種完成後 event 模擬串流。
+- [ ] Error、cancel、provider/child failure、oversize 或 validation failure 不顯示、reconcile 或 persist partial answer；user draft 的既有 retry 行為可保留。
+- [ ] Phase 05 的既有 rejected-draft characterisation evidence 保留為產品決策依據；Fusion、Extended Thinking 與 Citation redesign 不因 final-only 修復改變。
 
 ### Tool-aware conversation restore
 
@@ -60,7 +61,7 @@
 ### Final integration
 
 - [ ] 各 phase 的 focused checks 通過，最後只執行一次適當的 Python broader suite、完整 npm tests、完整 Cargo tests 與 Tauri no-bundle build；實際命令與結果記入 `build-log.md`。
-- [ ] 一次 isolated fake Desktop journey 證明 MCP default、長回合存活、dynamic Skill command、live delta、tool-aware restore/continue 之間沒有互相回歸。
+- [ ] 一次 isolated fake Desktop journey 證明 MCP default、長回合存活、dynamic Skill command、final-only answer delivery、tool-aware restore/continue 之間沒有互相回歸。
 - [ ] `git diff --check` 通過，實際 diff 僅包含 phase 宣告且有因果必要性的檔案；沒有 dependency、lockfile、真實 user store、credential 或付費 provider 變更。
 
 ## In Scope
@@ -90,7 +91,7 @@
 - Composer 原始文字由 React 傳給 Python；React 不自行推測 dynamic Skill 名稱、command collision、permission 或 lifecycle。
 - Static built-in commands與 alias 先取得 command namespace；`/citation` 是保留 built-in。Dynamic Skill 只能來自該 `ChatSession` 已載入且驗證成功的 catalog。
 - Restore 是唯讀載入歷史，不呼叫模型、不執行工具、不重播 slash command。只有恢復後的新 user turn 能產生新的模型或工具工作。
-- Authoritative final result 仍由 Python/finalizer 擁有；stream delta 是進度呈現，不得取代最終結果、繞過 finalization 或污染 durable history。
+- Authoritative final result 由 Python/finalizer 擁有；answer text 只經 terminal `final_only` result 交付。Progress/tool activity 不得攜帶 answer preview、繞過 finalization 或污染 durable history。
 - 所有 transport/persistent strings、arrays 與 file reads 延續現有 bounded/fail-closed policy；不顯示 secret、credential、unbounded stderr、traceback、provider payload 或任意 raw tool data。
 - Verification 預設用 injected fake 與 direct `/tmp` child；不讀 credential value、不改 real store、不呼叫 provider/MCP/Ollama。
 - 執行者保留使用者既有 dirty-tree work，不 reset、checkout、格式化或順手修理無關檔案。
@@ -103,7 +104,8 @@
 - First-turn durability 延後：USER SCOPE DECISION 003 與 issue 07。
 - 取消 600 秒總時限：USER DECISION 004 與 issue 08。
 - 移除 Task mode／GUI Skill control：USER DECISION 005。
-- Normal OpenRouter live streaming：USER DECISION 006。
+- Normal OpenRouter live streaming 的歷史要求：USER DECISION 006；已由 USER DECISION 014 明確 supersede。
+- Normal authoritative final-only delivery：USER DECISION 014。
 - Active Skill 不持久化：USER DECISION 007、009。
 - 不支援多 GUI process：USER SCOPE DECISION 008。
 - GUI 接受 Skill command：USER DECISION 010。
@@ -113,11 +115,11 @@
 
 ## Known Engineering Unknowns / 工程未知
 
-目前 graph 的 initial answer、empty retry 與 repair 可能共用同一 node，既有 `stream_mode="updates"` 也不足以直接證明某段 token 是 finalizer 最終接受的 answer。Phase 05 必須先以 live source 與 fake stream characterisation 找到最小、可測試的 stage attribution seam。這是工程 preflight，不是重新詢問產品語意；使用者已決定需要真正 live streaming。若唯一可行方案會增加付費模型呼叫、顯示未驗證草稿或擴張成廣泛 graph rewrite，必須記錄證據並要求新 authority。
+None currently identified for the Phase 05 product boundary. Phase 05 attempt 1 已用 fake live graph 證明 pre-token accepted-answer attribution 不安全；USER DECISION 014 以 final-only 契約解除該 blocker。實作者仍須用 focused tests 證明既有 finalization／validation／persistence ordering 與全鏈 `answer.chunk` removal，而不能把 source inference 當成 pass。
 
 ## Source Inputs
 
-- [`user-decisions.md`](user-decisions.md) 中截至 2026-08-31 的使用者決策與官方 OpenRouter/LangGraph 蒐證。
+- [`user-decisions.md`](user-decisions.md) 中截至 2026-09-01 的使用者決策、USER DECISION 006 歷史蒐證與 superseding USER DECISION 014。
 - Repository root `AGENTS.md` 與 live Git/runtime/toolchain evidence。
 - 既有完成 bundle：`harness/plans/2026-08-24-desktop-gui-completion/`。
 - [`issue/07-gui-first-turn-durability-deferred.md`](../../issue/07-gui-first-turn-durability-deferred.md)、[`issue/08-desktop-absolute-request-timeout.md`](../../issue/08-desktop-absolute-request-timeout.md)、[`issue/09-citation-skill-flow-deferred.md`](../../issue/09-citation-skill-flow-deferred.md)。

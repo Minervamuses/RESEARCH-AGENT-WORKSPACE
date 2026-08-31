@@ -10,7 +10,7 @@
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
 | 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | `78589e95ea7ea2e4886529b568c78ecbdb24666c` |
 | 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` |
-| 05 — Normal live streaming | Blocked | 1 | Mandatory characterisation proved no authorized safe pre-token acceptance seam | Fake live graph exposed rejected draft before accepted repair; waiting for one product-boundary decision | No implementation |
+| 05 — Final-only Normal answer delivery | In progress | 0 | USER DECISION 014 superseded the live-streaming requirement; durable plan repair underway | Attempt 1 characterisation remains valid history; final-only implementation is now authorized | No implementation |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
 | 07 — Integration acceptance | Not started | 0 | None | None | None |
 
@@ -18,11 +18,11 @@
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
 - Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
-- Phases 01–04 complete；Phase 05 is Blocked by the accepted-answer-versus-live-token product boundary；Phases 06–07 are dependency-ineligible。
-- Blocker: true provider-live tokens cannot be known to belong to the accepted authoritative answer before later tokens/tool-call metadata and post-generation gates complete。Fresh authority must relax either provisional-draft visibility or the Phase 05 true-live requirement。
-- Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
+- Phases 01–04 complete；Phase 05已由USER DECISION 014從`Blocked`恢復為`In progress`，先完成durable plan repair，再實作authoritative final-only delivery。Phases 06–07仍須等待Phase 05 Complete。
+- Prior blocker disposition: true provider-live tokens無法在later token/tool metadata與post-generation gates前證明accepted；這項characterisation仍有效，但USER DECISION 014已取消live-token要求並明確禁止post-finalized模擬串流，因此不再阻擋final-only path。
+- Implementation authorization: active under the 2026-09-01 Start/Resume message、USER DECISION 014追加訊息與[`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
-- Broader-suite counters remain `0`；Phase 01只執行focused selectors。
+- Broader-suite counters remain `0`；Phases 01–04與Phase 05 characterisation只執行focused selectors。
 
 ## Authoring Baseline — 2026-08-31 Asia/Taipei
 
@@ -346,6 +346,32 @@
 - Minimal fresh-authority decision required: either (A) permit explicitly provisional, unchecked normal-model deltas to appear and later be cleared/reconciled on repair/error, accepting that discarded draft text can be briefly visible；or (B) waive true provider-live Phase 05, retain the verified `post_finalized` safety boundary, and authorize the dependency/status adjustment needed to proceed to Phase 06。Authorizing only an extra model call does not by itself prove pre-token acceptance。
 - Commit disposition: no Phase 05 implementation commit。This characterisation/blocker record may be committed locally as a log-only checkpoint；remote push remains unauthorized。
 - Next eligible action: make the log-only blocker checkpoint, verify clean tree, then stop once with the minimal fresh-authority request because Phases 06–07 are dependency-ineligible。
+
+## 2026-09-01 01:48 CST — Phase 05: USER DECISION 014解除blocker並開始durable plan repair
+
+- Status transition: `Blocked` → `In progress`。USER DECISION 014明確supersede USER DECISION 006：Normal answer不做live token streaming，也不做`post_finalized`模擬串流；Python完成generation、repair、finalization、validation與persistence後，Desktop只以完整`final_only` terminal result顯示答案。
+- Durable sources reloaded: personal/repository `AGENTS.md`、`PROMPTS.md`、`GOALS.md`、`PLANS.md`、`user-decisions.md`、本檔、Phase 05/06/07與long-horizon-plan-author `SKILL.md`及其四份required references已完整重讀。Phase 01–04仍有Complete evidence，Phase 05是新決策下第一個dependency-eligible phase。
+- Runtime/Git/dirty-tree gate: repository`/home/minervamuses/research-agent-workspace`、WSL/Linux、branch`GUI`tracking`origin/GUI`；HEAD`63cd3d0c24c037a7f9794d521a439298d693230c`，首次寫入前`git status --short`無輸出。Conda`app`提供Python 3.13.14/Poetry 2.4.1/Node 24.18.0；未切branch/worktree。
+- Authorization in force: 使用者明確授權本次durable plan repair、直接相關Python/React/TypeScript/Rust/internal protocol/fixtures/tests、Phase 05–07 focused/one-time broader checks與phase-scoped local commits；dependency/lockfile、live provider、real MCP/Ollama/store/credential、Fusion/Extended/Citation redesign、first-turn durability、多GUI、branch/worktree/push/release仍未授權。
+- Current causal hypothesis and attempt number: new final-only cause attempt`0`（plan repair；尚未做implementation attempt）。`ChatSession.finalize_and_record()`在回傳前執行safety/finalization、Desktop final-text/wire validator與`_record_turn()`；唯一直接違反新契約的current chain是`DesktopService._emit_answer_chunks()`在outcome後送`post_finalized answer.chunk`，shared protocol/Rust/TypeScript/React再接受並reconcile它。最小實作是移除該producer/contract/consumer chain並固定terminal`final_only`/0，不改graph/model stream。
+- Exact plan-only write set and ownership: `harness/fix_plans/user-decisions.md`、`GOALS.md`、`PLANS.md`、`PROMPTS.md`、`phases/phase-05-normal-live-streaming.md`、`phases/phase-07-integration-acceptance.md`、`build-log.md`。Phase 06內容與新契約無衝突，保持read-only；application/tests尚未修改。
+- Commands actually run and exact outcomes: live `git grep -n -E "answer\\.chunk|post_finalized|streamKind|chunkCount|final_only" -- app/agent app/desktop app/tests`確認sole Python producer在`service.py`、shared contract/fixtures/Rust/TypeScript/React consumer與direct tests；`session.py` source確認final-text validator在`_record_turn()`前、`TurnOutcome`在record完成後回傳。這些是source evidence，不是implementation pass。
+- Prior evidence disposition: 01:26 characterisation trace與所有blocked conclusions完整保留。它們證明unsafe live preview不可接受；新決策改變產品目標，因此解除blocker而不是推翻觀察。
+- Verification so far: no application test、provider、MCP、Ollama、real store、broader suite或build已執行。Durable plan strict validator與`git diff --check`尚待執行，不能列為pass。
+- Diff/scope/safety audit: first writes限定上述7個plan paths；no application、dependency、lockfile、generated output或non-goal change。
+- Commit disposition/hash: pending plan validator與scope audit；remote push unauthorized。
+- Next eligible action:完成7-file cross-reference/residue review，跑long-horizon strict validator與`git diff --check`；plan-only checkpoint通過後再開始Phase 05 first rejecting test。
+
+## 2026-09-01 01:51 CST — Phase 05: durable plan repair validation
+
+- Status transition: remains `In progress`；這是planning evidence，不是Phase 05 implementation pass。
+- Plan repair result: USER DECISION 014已append且保留006；GOALS/PLANS/PROMPTS、Phase 05、Phase 07與mutable status已一致改為authoritative final-only。Phase 06不依賴answer streaming細節，無需改動。
+- Exact validator command: `/home/minervamuses/miniconda3/bin/conda run -n app python /mnt/c/Users/garyc/.codex/skills/long-horizon-plan-author/scripts/validate_harness.py --repo /home/minervamuses/research-agent-workspace --plan-root harness/fix_plans --project-shape application --risk medium --harness-only --strict --json`，並對上述7個write paths各重複傳入`--proposed-path <path> --allowed-path <path>`。
+- Validator result: exit`0`；`valid: true`、`errors: 0`、`warnings: 0`、`findings: []`。這只驗證durable plan結構與write boundary。
+- Exact whitespace/scope checks: repository root `git diff --check` exit`0`/no output；`git diff --name-only`列出exactly上述7個plan paths，沒有application、test、dependency、lockfile或`AGENTS.md`。
+- Skill disposition: long-horizon-plan-author planning-only checkpoint到此完成；其規則未允許在該invocation中修改application或Git state，因此尚未commit。後續動作屬使用者同一訊息另行明確授權的implementation run。
+- Commit disposition/hash: plan-only coherent checkpoint可在離開skill invocation後依使用者local-commit authority建立；remote push仍未授權。
+- Next eligible action:結束planning-only invocation，建立scoped local plan-repair checkpoint，然後以更新後Phase 05的單一Python selector取得final-only causal red。
 
 ## Execution Entry Template
 

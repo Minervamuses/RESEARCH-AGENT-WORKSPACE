@@ -4,7 +4,7 @@
 
 本檔只記錄目前修復計劃必須遵守的產品決策與範圍界線。
 
-以下各項均以專案擁有者／使用者本人於 2026-08-30 或 2026-08-31 明確提出的要求為準。引文是使用者原話；「現況蒐證」只說明程式現在怎麼做，不把 coding agent 的推論冒充為使用者決定。本輪只建立紀錄與 issue，不實作修復。
+以下各項均以專案擁有者／使用者本人於 2026-08-30、2026-08-31 或 2026-09-01 明確提出的要求為準。引文是使用者原話；「現況蒐證」只說明程式在決策當時怎麼做，不把 coding agent 的推論冒充為使用者決定。實作狀態與證據只由 [`build-log.md`](build-log.md) 記錄，本檔不把決策本身冒充為完成證據。
 
 ## USER DECISION 001 — CLI 與 GUI 預設開啟 MCP
 
@@ -233,3 +233,24 @@ LangGraph 的 message stream 可能同時包含工具呼叫、empty retry、repa
 - 移除共用 Task mode 欄位時，只能做維持共用 runtime/schema 一致性所需的機械調整；不得藉此重設 Citation 的 registry 生命週期、thinking 限制、持續期間或恢復語意。
 - 目前 CLI Citation 的既有行為應以 focused regression 保護，避免一般 Skill 修復意外破壞；產品流程的正式改造另案處理。
 - 後續問題、未決產品選擇與驗收方向見 [`issue/09-citation-skill-flow-deferred.md`](../../issue/09-citation-skill-flow-deferred.md)。
+
+## USER DECISION 014 — Normal answer 改為 authoritative final-only delivery
+
+使用者在 Phase 05 的 accepted-answer／live-token characterisation blocker 已被完整記錄後，做出新的正式產品決定：
+
+> 「取消 USER DECISION 006 的真正生成中串流要求。Normal answer 不再進行 live token streaming，也不要在答案完成後用 post_finalized chunk 模擬串流。」
+
+本決定明確 **supersede USER DECISION 006**。USER DECISION 006 與其官方蒐證、工程邊界仍保留為歷史，不刪除、不改寫成未曾存在；從本決定起，Phase 05 與最終驗收必須遵守以下契約：
+
+- Python agent 必須先完成 generation、repair、finalization、validation 與 persistence，Desktop 才能顯示 answer。
+- GUI 一次顯示 authoritative final answer 的完整內容，不顯示 provisional answer preview。
+- Normal success path 不發送 `answer.chunk`；terminal `session.turn` result 使用 `streamKind=final_only`，並以 `chunkCount=0` 表示沒有 answer event。
+- 不得把完成後的全文切成 `post_finalized` chunks，或用任何 post-finalized event 模擬串流。
+- Error、cancel、provider/child failure 或 validation failure 不顯示任何 partial answer；可保留原始 user draft 與既有 bounded activity/progress，但它們不能包含 answer text。
+- Fusion、Extended Thinking 與 Citation redesign 仍維持 USER SCOPE DECISION 002／013 的排除範圍；本決定不授權改寫它們。
+
+### 對既有 blocker 的處置
+
+- `build-log.md` 中 Phase 05 的 fake live-graph characterisation、rejected draft trace 與 blocker conclusion 都是有效歷史證據，必須保留。
+- 該 blocker 不再需要 provisional-draft authority，因為產品目標已改成 final-only；Phase 05 可在本決策授權下恢復執行。
+- 最小實作方向是移除現行 Normal `post_finalized answer.chunk` producer／consumer chain，保留 Python 已有的 authoritative finalization、validation 與 persistence chokepoint，並以 deterministic fake 驗證 terminal result 前沒有 answer text。

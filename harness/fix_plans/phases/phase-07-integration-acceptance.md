@@ -15,7 +15,7 @@ Phases 01、02、03、04、05、06 all Complete with evidence in `build-log.md`.
 ## Scope
 
 - Reuse既有exact environment-gated Desktop fixture與caller-owned temporary state root；只在缺少Phases 01–06 required observation時做最小fixture/test extension。
-- Run one representative React/Rust/Python boundary journey with fake MCP loader、fake streaming model、fake dynamic Skill、fake tool與Plan log。
+- Run one representative React/Rust/Python boundary journey with fake MCP loader、fake finalized-answer model、fake dynamic Skill、fake tool與Plan log。
 - Run planned broader Python/npm/Cargo/Tauri checks once。
 - Audit manifests/lockfiles、protocol/versioned format、Git diff、deferred issues與user-visible UI。
 - 若integration發現regression，回到owning phase記錄focused attempt；Phase 07不另做unrelated redesign。
@@ -32,7 +32,7 @@ Phases 01、02、03、04、05、06 all Complete with evidence in `build-log.md`.
 
 1. Reload all durable sources and confirm every dependency is Complete with actual evidence, not onlycheckbox。
 2. Recheck WSL/Linux、Conda `app`、Node/Cargo paths、Git branch/upstream/HEAD、dirty ownership。
-3. Confirm no unresolved Phase 05 attribution or Phase 06 migration/safety blocker；有任何一項就不能開始broader pass。
+3. Confirm Phase 05 final-only delivery與Phase 06 migration/safety沒有unresolved blocker；有任何一項就不能開始broader pass。舊live-token characterisation是保留的歷史evidence，不是仍待解的attribution requirement。
 4. Inspect current package scripts/test topology. If planned command changed，record smallest equivalent before running；do not improvise dependency install。
 5. Create one exact direct non-symlink child under `/tmp`，record owner/path，route all fixture state there；never point fixture to repository `app/store`、`app/plan_logs` or user data。
 
@@ -41,12 +41,12 @@ Phases 01、02、03、04、05、06 all Complete with evidence in `build-log.md`.
 使用production Tauri supervisor、protocol validation、Desktop service、React reducer/rendering與Plan writer/parser，只替換external/agent execution owners：
 
 1. Start backend with fake MCP loader；normal GUI session creation observes MCP default on，without external connection。
-2. Dispatch a controlled normal long request that sends progress/live events across the fixture's shortened former deadline boundary；UI remains busy/responsive，Rust does not kill child，then terminal result succeeds。
-3. Enter a fixture-loaded `/<skill-name> <自然語言 prompt>`。Observe exact Python resolution、one agent invocation、first accepted-answer delta before terminal result、single reconciled answer、no Task mode/Active Skill control，and next ordinary turn has no Skill context。
-4. Exercise a Skill error or cancel terminal branch；no transient Skill/partial final answer persists，retry starts clean。
+2. Dispatch a controlled normal long request that sends bounded progress/activity events across the fixture's shortened former deadline boundary；UI remains busy/responsive，Rust does not kill child，no answer text appears early，then one complete `final_only` terminal result succeeds。
+3. Enter a fixture-loaded `/<skill-name> <自然語言 prompt>`。Observe exact Python resolution、one agent invocation、zero `answer.chunk` events、one complete authoritative terminal answer、no Task mode/Active Skill control，and next ordinary turn has no Skill context。
+4. Exercise a Skill error or cancel terminal branch；no transient Skill or partial assistant answer appears/persists，retry starts clean。
 5. In Plan mode execute one fake generic tool once，persist v2，record invocation count，gracefully stop backend。
 6. Restart on the same temporary root，select conversation from sidebar。Observe user、independent tool activity/result、final assistant in order；selection itself makes zero model/tool calls。
-7. Send a new ordinary question。Captured context has only validated generic v2 roles，old call count remains unchanged，new final answer live-streams and persists once。
+7. Send a new ordinary question。Captured context has only validated generic v2 roles，old call count remains unchanged，new final answer在persistence完成後以`final_only` result交付一次。
 8. Load one legacy tool-bearing fixture。It is selectable/display-only，legacy sentinel is absent frommodel prompt，no tool replay occurs。
 9. Verify bounded error/restart state by terminating the owned fake child only if existing fixture already supports it；do not expand phase solely for an unrelated crash campaign。
 
@@ -54,7 +54,7 @@ Phases 01、02、03、04、05、06 all Complete with evidence in `build-log.md`.
 
 - No Active Skill dropdown/button、Task mode label或hidden disabled gap。
 - Dynamic Skill command can be typed/sent fromcomposer；unknown/empty command error is legible and draft recoverable。
-- Live answer visibly grows before completion and settles to one answer，without duplicated prefix。
+- Pending answer只顯示working spinner與bounded stage/tool activity；完整assistant answer在terminal success後一次出現，沒有provisional growth、reconciled prefix或`final-only fallback`誤導標籤。
 - Tool activity/result is visually distinct fromYou/Assistant，long bounded content scrolls/wraps，untrusted marker/HTML remains inert。
 - Sidebar select/restart/continue works bykeyboard for the representative conversation。
 
@@ -84,7 +84,7 @@ On broad failure，do not immediately rerun。Isolate with the smallest owning-p
 ## Delivery Audit
 
 - Map every GOALS success checkbox to build-log evidence/command/journey step。
-- Search for forbidden residue：normal `loadMcp:false` caller、normal request absolute deadline、Task mode/general persistent `/skill` controls、`post_finalized` normal success、Tool/Result concatenation into user role。
+- Search for forbidden residue：normal `loadMcp:false` caller、normal request absolute deadline、Task mode/general persistent `/skill` controls、current `answer.chunk`/`post_finalized` contract或producer/consumer、Tool/Result concatenation into user role。
 - Confirm Citation `/citation` remains reserved/static，issue 09 remains open/deferred，and no GUI replacement is claimed。
 - Confirm Fusion/Extended code/acceptance and issue 07 deferral were not expanded。
 - Inspect `git diff --stat`、`git diff --name-status`、`git diff` and manifests/lockfiles；every changed file maps to an owning phase，no dependency/real data/generated output。
@@ -93,8 +93,8 @@ On broad failure，do not immediately rerun。Isolate with the smallest owning-p
 
 ## Acceptance Criteria
 
-- Integrated journey demonstrates all fiverequired outcomes on current code，including delta-before-result and no-old-tool-replay counts。
-- Visual/keyboard observations cover changed Skill/stream/tool-history surfaces，with limitations honestly recorded。
+- Integrated journey demonstrates all five required outcomes on current code，including no-answer-before-final result、`final_only`/zero-chunk delivery and no-old-tool-replay counts。
+- Visual/keyboard observations cover changed Skill/final-only/tool-history surfaces，with limitations honestly recorded。
 - One broader Python suite、npm suite、Cargo suite、Tauri no-bundle build and `git diff --check` pass，or any nonpass remainsexplicit and prevents incorrect Complete status。
 - No dependency/lockfile、provider/MCP/Ollama/credential/real store、Fusion/Extended/Citation redesign、first-turn durability或multi-GUI change。
 - Every changed file/evidence maps to a phase，temporary resources are cleaned，remote remains untouched。
@@ -105,7 +105,7 @@ On broad failure，do not immediately rerun。Isolate with the smallest owning-p
 Append a final `build-log.md` entry containing：
 
 - Runtime/Git/authorization and temporary root boundary。
-- Exact integrated event timeline，MCP boolean，Skill invocation/cleanup state，live delta/result order，tool invocation counts before/after restart/new turn。
+- Exact integrated event timeline，MCP boolean，Skill invocation/cleanup state，absence of answer events before the complete `final_only` result，tool invocation counts before/after restart/new turn。
 - Transcript role/prompt capture and visual/keyboard observations。
 - Exact broader command results/durations，failed/skipped/unavailable items。
 - Final changed-file/manifest/lockfile/deferred-scope audit，temporary cleanup。

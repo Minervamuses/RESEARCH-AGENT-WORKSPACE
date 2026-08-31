@@ -2,7 +2,7 @@
 
 ## 使用方式
 
-這些 prompt 只在使用者實際貼回 coding agent 時生效。本 bundle 的存在，以及 2026-08-31 對 plan-authoring 檔案的 commit/push 授權，都**不**授權後續修改 application code、建立 implementation commit 或 push。
+這些 prompt 只在使用者實際貼回 coding agent 時生效。本 bundle 的存在不自行授權後續修改 application code、建立 implementation commit 或 push；每次執行以當次使用者訊息與 [`PLANS.md`](PLANS.md) envelope 的交集為準。
 
 推薦用「開始／繼續完整計劃」啟動。Agent 必須從 durable files 與 dependency graph 找下一個 eligible phase，不可依聊天記憶猜測，也不可每個 phase 都停下要求確認。
 
@@ -21,7 +21,7 @@
 
 這次授權不包括：新增或更新 dependency/lockfile、live/paid provider、真實 MCP/Ollama/user store/credential、Fusion、Extended Thinking、Citation redesign、first-turn durability、多 GUI process、branch/worktree/rebase/merge、remote push、release/deployment，或其他 GOALS non-goal。需要其中任一項時先停止該 path、記錄 evidence，再一次提出最小 fresh-authority request。
 
-完成 runtime/dirty-tree gate 後，選第一個 Not started 或 In progress 且 dependencies 全部 Complete 的 phase。每個 phase 先記錄 write set/hypothesis/attempt，做最便宜的 focused rejecting check，再做最小實作；exact command/result、failure、checkpoint 與 status 都寫入 build-log.md。不要把 planned command、post-finalized chunk、unsafe draft stream 或 legacy tool text 當成 pass evidence。
+完成 runtime/dirty-tree gate 後，選第一個 Not started 或 In progress 且 dependencies 全部 Complete 的 phase。每個 phase 先記錄 write set/hypothesis/attempt，做最便宜的 focused rejecting check，再做最小實作；exact command/result、failure、checkpoint 與 status 都寫入 build-log.md。不要把 planned command、任何 answer.chunk、post-finalized event、unsafe draft stream 或 legacy tool text 當成 pass evidence。
 
 Phase 完成後直接繼續下一 eligible phase，不要因正常 checkpoint 暫停。只有全部 required phases Complete，或所有有意義的剩餘路徑都因同一已證實 blocker 需要 fresh authority 時才停止。最後回報實際 changed files、checks、commit hashes、deferred issues 與未執行事項；不要 push。
 ```
@@ -64,7 +64,7 @@ Phase 完成後直接繼續下一 eligible phase，不要因正常 checkpoint �
 
 ```text
 請對 /home/minervamuses/research-agent-workspace/harness/fix_plans 已完成的 implementation 做 read-only final review。以 GOALS success conditions、user-decisions、每個 phase acceptance、build-log actual evidence、live diff/commits/tests 為準；特別檢查：
-1. Normal streaming 是否真的在 terminal result 前出現且只含 accepted final-answer text；
+1. Normal answer 是否只由完成 generation/repair/finalization/validation/persistence 後的 `final_only` terminal result 一次完整交付，success/error/cancel/validation-failure path 都沒有 `answer.chunk` 或 partial answer；
 2. 一般 Skill 是否在 success/error/cancel/shutdown 後清除非 Citation transient state；Citation pre-state 的 failed generic command 是否保持不變、successful switch 是否 teardown/no-restore，且 deferred boundary 未被改寫；
 3. Conversation restore 是否從不重跑舊工具，legacy tool data 是否只 display-only；
 4. MCP default 與 long-request liveness 是否沒有引入另一個 hidden off/default 或 arbitrary timeout；
