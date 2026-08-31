@@ -7,8 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from conftest import make_astream_graph
+from conftest import FakeHistoryStore, make_astream_graph, tool_then_answer_updates
 
 from agent.config import AgentConfig
 from agent.desktop.catalog import (
@@ -24,7 +25,7 @@ from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.history_rag.store import HistoryRestoreError
 from agent.session import ChatSession
-from agent.turns.memory import TurnRecord
+from agent.turns.memory import ToolActivityRecord, TurnRecord
 from agent.turns.plan_log import PlanLog
 from agent.turns.results import TurnOutcome
 
@@ -55,6 +56,7 @@ class _CoordinatorSession:
                 turn_id=turn.turn_id,
                 timestamp=turn.timestamp,
                 persist_target="none",
+                tool_activities=tuple(turn.tool_activities),
             )
             for turn in restored_turns
         ]
@@ -103,6 +105,7 @@ class _CoordinatorSession:
                     turn_id=turn.turn_id,
                     timestamp=turn.timestamp,
                     persist_target="none",
+                    tool_activities=tuple(turn.tool_activities),
                 )
         self._persisted[self.session_id] = [
             existing[turn_id] for turn_id in sorted(existing)
@@ -226,6 +229,7 @@ def _seed_coordinator(tmp_path, *, new_ids=()):
                 turn_id=turn.turn_id,
                 timestamp=turn.timestamp,
                 persist_target="none",
+                tool_activities=tuple(turn.tool_activities),
             )
             for turn in persisted.get(session_id, [])
         }
@@ -242,6 +246,7 @@ def _seed_coordinator(tmp_path, *, new_ids=()):
                     turn_id=turn.turn_id,
                     timestamp=turn.timestamp,
                     persist_target="none",
+                    tool_activities=tuple(turn.tool_activities),
                 )
         return [by_id[turn_id] for turn_id in sorted(by_id)]
 
@@ -691,6 +696,234 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     assert catalog.snapshot()["projects"][0]["sessionIds"].count(SESSION_D) == 1
     assert transcript["status"] == "ready"
     assert transcript["items"][0]["assistantText"] == answer["text"]
+
+
+def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
+    monkeypatch.setattr("agent.desktop.service.find_app_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _cfg, extra_tools=None, history_store=None, **kwargs: (
+            make_astream_graph(answer="constructor placeholder")
+        ),
+    )
+    persist_dir = tmp_path / "plan-lifecycle-store"
+    catalog = DesktopProjectCatalog(persist_dir)
+    config = AgentConfig(
+        persist_dir=str(persist_dir),
+        plan_logs_dir="plans",
+    )
+
+    class EmptyStoredHistory:
+        def read_session_turns(self, _session_id):
+            return []
+
+    fake_tool_invocations: list[str] = []
+    first_graph = make_astream_graph(
+        tool_then_answer_updates(
+            "rag_search",
+            {"query": "persisted tool"},
+            "call-persisted",
+            "persisted tool result",
+            "persisted final answer",
+        ),
+        on_state=lambda _state: fake_tool_invocations.append("call-persisted"),
+    )
+
+    async def first_factory(
+        current_config,
+        *,
+        load_mcp,
+        progress_cb,
+        session_id=None,
+        restored_turns=None,
+    ):
+        del load_mcp
+        session = ChatSession(
+            current_config,
+            history_store=FakeHistoryStore(),
+            progress_cb=progress_cb,
+            loaded_skills=[],
+            global_mcp_families=frozenset(),
+            session_id=session_id or SESSION_D,
+            restored_turns=list(restored_turns or []),
+        )
+        session.graph = first_graph
+        return session
+
+    first = DesktopService(
+        original_cwd=tmp_path,
+        config=config,
+        project_catalog=catalog,
+        session_factory=first_factory,
+        environ={
+            "CONDA_DEFAULT_ENV": "app",
+            "CONDA_PREFIX": "/conda/envs/app",
+        },
+    )
+    first._history_store = EmptyStoredHistory()
+
+    async def run_first_process():
+        created = await first.dispatch(
+            "session.create",
+            {"projectId": "local", "loadMcp": False},
+        )
+        await first.dispatch("session.set_mode", {"mode": "plan"})
+        answer = await first.dispatch(
+            "session.turn",
+            {"text": "persist this tool turn"},
+        )
+        shutdown = await first.dispatch("session.shutdown", {})
+        return created, answer, shutdown
+
+    created, first_answer, first_shutdown = asyncio.run(run_first_process())
+    assert created["sessionId"] == SESSION_D
+    assert first_answer["text"] == "persisted final answer"
+    assert first_shutdown == {"status": "stopped", "flushed": True}
+    assert fake_tool_invocations == ["call-persisted"]
+    assert catalog.project_for_session(SESSION_D) == "local"
+
+    second_graph = make_astream_graph(answer="continued answer")
+
+    async def second_factory(
+        current_config,
+        *,
+        load_mcp,
+        progress_cb,
+        session_id=None,
+        restored_turns=None,
+    ):
+        del load_mcp
+        session = ChatSession(
+            current_config,
+            history_store=FakeHistoryStore(),
+            progress_cb=progress_cb,
+            loaded_skills=[],
+            global_mcp_families=frozenset(),
+            session_id=session_id,
+            restored_turns=list(restored_turns or []),
+        )
+        session.graph = second_graph
+        return session
+
+    second = DesktopService(
+        original_cwd=tmp_path,
+        config=config,
+        project_catalog=DesktopProjectCatalog(persist_dir),
+        session_factory=second_factory,
+        environ={
+            "CONDA_DEFAULT_ENV": "app",
+            "CONDA_PREFIX": "/conda/envs/app",
+        },
+    )
+    second._history_store = EmptyStoredHistory()
+
+    async def run_second_process():
+        transcript = await second.dispatch(
+            "session.transcript",
+            {"projectId": "local", "sessionId": SESSION_D, "limit": 20},
+        )
+        selected = await second.dispatch(
+            "session.select",
+            {"projectId": "local", "sessionId": SESSION_D},
+        )
+        continued = await second.dispatch(
+            "session.turn",
+            {"text": "continue without replay"},
+        )
+        return transcript, selected, continued
+
+    transcript, selected, continued = asyncio.run(run_second_process())
+
+    assert selected["turnCount"] == 1
+    assert continued["text"] == "continued answer"
+    assert fake_tool_invocations == ["call-persisted"]
+    assert transcript["status"] == "ready"
+    assert transcript["items"] == [{
+        "turnNumber": 1,
+        "timestamp": transcript["items"][0]["timestamp"],
+        "userText": "persist this tool turn",
+        "assistantText": "persisted final answer",
+        "toolActivities": [{
+            "callId": "call-persisted",
+            "name": "rag_search",
+            "arguments": '{"query":"persisted tool"}',
+            "result": "persisted tool result",
+            "status": "ok",
+            "promptEligible": True,
+        }],
+    }]
+    prompt_messages = [
+        message
+        for message in second_graph.states[0]["messages"]
+        if not isinstance(message, SystemMessage)
+    ]
+    assert [type(message) for message in prompt_messages] == [
+        HumanMessage,
+        AIMessage,
+        ToolMessage,
+        AIMessage,
+        HumanMessage,
+    ]
+    assert prompt_messages[0].content == "persist this tool turn"
+    assert prompt_messages[1].tool_calls[0]["id"] == "call-persisted"
+    assert prompt_messages[2].tool_call_id == "call-persisted"
+    assert prompt_messages[2].content == "persisted tool result"
+    assert prompt_messages[3].content == "persisted final answer"
+    assert prompt_messages[4].content == "continue without replay"
+
+
+def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
+    tmp_path,
+    monkeypatch,
+):
+    service, _catalog, _factory, _persisted = _seed_coordinator(tmp_path)
+
+    def activity(result: str, index: int = 1) -> ToolActivityRecord:
+        return ToolActivityRecord(
+            call_id=f"call-{index}",
+            name="rag_search",
+            arguments='{"query":"bounded"}',
+            result=result,
+            status="ok",
+            prompt_eligible=True,
+        )
+
+    oversized_field = _stored_turn(SESSION_A)
+    oversized_field.tool_activities = (activity("x" * 65_537),)
+    monkeypatch.setattr(
+        service,
+        "_read_conversation_turns",
+        lambda _session_id, _include_current: [oversized_field],
+    )
+    field_result = asyncio.run(service.dispatch(
+        "session.transcript",
+        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+    ))
+    assert field_result["status"] == "degraded"
+    assert field_result["items"] == []
+    assert "oversized turn" in field_result["issue"]
+
+    page_turn = _stored_turn(SESSION_A)
+    page_turn.tool_activities = tuple(
+        activity("x" * 65_536, index)
+        for index in range(1, 17)
+    )
+    monkeypatch.setattr(
+        service,
+        "_read_conversation_turns",
+        lambda _session_id, _include_current: [page_turn],
+    )
+    page_result = asyncio.run(service.dispatch(
+        "session.transcript",
+        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+    ))
+    assert page_result["status"] == "degraded"
+    assert page_result["items"] == []
+    assert "page exceeds" in page_result["issue"]
 
 
 def test_flush_failure_retains_current_conversation_and_recent_turns(tmp_path):

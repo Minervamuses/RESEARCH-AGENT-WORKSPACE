@@ -947,7 +947,15 @@
               "turnNumber": 1,
               "timestamp": "2026-08-28T00:00:00Z",
               "userText": "請摘要",
-              "assistantText": "完成。"
+              "assistantText": "完成。",
+              "toolActivities": [{
+                "callId": "call-1",
+                "name": "rag_search",
+                "arguments": "{\"query\":\"研究\"}",
+                "result": "bounded local result",
+                "status": "ok",
+                "promptEligible": true
+              }]
             }],
             "total": 1,
             "offset": 0,
@@ -978,6 +986,50 @@
             "chunkCount": 0,
             "registrationStatus": "registered",
             "registrationIssue": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "transcript-rejects-unbounded-tool-status",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000007d",
+          "method": "session.transcript",
+          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000007d",
+          "ok": true,
+          "data": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "status": "ready",
+            "issue": null,
+            "items": [{
+              "turnNumber": 1,
+              "timestamp": "2026-08-28T00:00:00Z",
+              "userText": "question",
+              "assistantText": "answer",
+              "toolActivities": [{
+                "callId": null,
+                "name": "legacy_tool",
+                "arguments": "{}",
+                "result": "display only",
+                "status": "running",
+                "promptEligible": false
+              }]
+            }],
+            "total": 1,
+            "offset": 0,
+            "limit": 20,
+            "hasMore": false
           }
         }
       ]

@@ -497,31 +497,29 @@ class FixtureSession:
         context = " | ".join(
             turn.user_input for turn in self.recent_turns[-_MAX_CONTEXT_ITEMS:]
         )[:_MAX_CONTEXT_CHARS]
+        new_messages: list[Any] = []
+        tool_calls: list[dict] = []
         if text == FIXTURE_RAG_QUESTION:
             hits = self._search_handler(text)
+            tool_calls = [{
+                "name": "rag_search",
+                "args": {"query": text},
+                "id": "fixture-rag-search",
+            }]
+            new_messages = [
+                AIMessage(
+                    content="",
+                    tool_calls=[{**tool_calls[0], "type": "tool_call"}],
+                ),
+                ToolMessage(
+                    content=json.dumps(hits, ensure_ascii=False),
+                    tool_call_id="fixture-rag-search",
+                    name="rag_search",
+                    status="success",
+                ),
+            ]
             if self._progress_cb is not None:
-                self._progress_cb(
-                    "tools",
-                    [
-                        AIMessage(
-                            content="",
-                            tool_calls=[
-                                {
-                                    "name": "rag_search",
-                                    "args": {"query": text},
-                                    "id": "fixture-rag-search",
-                                    "type": "tool_call",
-                                }
-                            ],
-                        ),
-                        ToolMessage(
-                            content=json.dumps(hits, ensure_ascii=False),
-                            tool_call_id="fixture-rag-search",
-                            name="rag_search",
-                            status="success",
-                        ),
-                    ],
-                )
+                self._progress_cb("tools", new_messages)
             answer = f"Fixture knowledge says: {hits[0]['text']}"
         elif text in {FIXTURE_BASH_APPROVE, FIXTURE_BASH_DENY}:
             if self._bash_tool is None:
@@ -538,24 +536,21 @@ class FixtureSession:
                 else "Exercise the deterministic denied Bash path."
             )
             call_id = f"fixture-bash-{next_turn}"
+            tool_calls = [{
+                "name": "bash",
+                "args": {
+                    "command": command,
+                    "description": description,
+                },
+                "id": call_id,
+            }]
+            call_message = AIMessage(
+                content="",
+                tool_calls=[{**tool_calls[0], "type": "tool_call"}],
+            )
+            new_messages.append(call_message)
             if self._progress_cb is not None:
-                self._progress_cb(
-                    "tools",
-                    [
-                        AIMessage(
-                            content="",
-                            tool_calls=[{
-                                "name": "bash",
-                                "args": {
-                                    "command": command,
-                                    "description": description,
-                                },
-                                "id": call_id,
-                                "type": "tool_call",
-                            }],
-                        )
-                    ],
-                )
+                self._progress_cb("tools", [call_message])
             raw_result = await asyncio.to_thread(
                 self._bash_tool.invoke,
                 {
@@ -565,18 +560,15 @@ class FixtureSession:
                 },
             )
             payload = json.loads(str(raw_result))
+            result_message = ToolMessage(
+                content=str(raw_result),
+                tool_call_id=call_id,
+                name="bash",
+                status="success",
+            )
+            new_messages.append(result_message)
             if self._progress_cb is not None:
-                self._progress_cb(
-                    "tools",
-                    [
-                        ToolMessage(
-                            content=str(raw_result),
-                            tool_call_id=call_id,
-                            name="bash",
-                            status="success",
-                        )
-                    ],
-                )
+                self._progress_cb("tools", [result_message])
             answer = (
                 "Fixture Bash request was approved and completed through the fake runner."
                 if payload.get("approved") is True
@@ -601,14 +593,21 @@ class FixtureSession:
                     f"\nContext: {context or '(empty)'}"
                 )
         timestamp = _timestamp(next_turn)
+        plan_log = _plan_log(self.config, self.session_id)
+        plan_log.resume_log_file(self._persistence_log_path)
+        tool_activities = plan_log.build_tool_activities(
+            new_messages=new_messages,
+            tool_calls=tool_calls,
+            scope="normal",
+        )
         turn = TurnRecord(
             user_input=text,
             assistant_output=answer,
             turn_id=next_turn,
             timestamp=timestamp,
             persist_target="plan_log",
+            tool_activities=tool_activities,
         )
-        plan_log = _plan_log(self.config, self.session_id)
         plan_log.append_block(
             str(self._persistence_log_path),
             plan_log.render_block(
@@ -616,8 +615,9 @@ class FixtureSession:
                 timestamp=timestamp,
                 user_input=text,
                 answer=answer,
-                new_messages=[],
-                tool_calls=[],
+                new_messages=new_messages,
+                tool_calls=tool_calls,
+                tool_activities=tool_activities,
             ),
         )
         self.recent_turns.append(turn)

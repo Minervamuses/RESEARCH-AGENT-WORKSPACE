@@ -29,6 +29,20 @@ interface AppHelpersModule {
     selectedRegistered: boolean,
   ) => Array<SessionSummary & { transient: boolean }>;
   sessionCreateParams: (projectId: string) => Record<string, unknown>;
+  RestoredTurn: (props: { turn: {
+    turnNumber: number;
+    timestamp: string;
+    userText: string;
+    assistantText: string;
+    toolActivities: Array<{
+      callId: string | null;
+      name: string;
+      arguments: string;
+      result: string;
+      status: "ok" | "failed" | "denied" | "incomplete";
+      promptEligible: boolean;
+    }>;
+  } }) => unknown;
 }
 
 async function loadSafeContent(): Promise<SafeContentModule> {
@@ -170,6 +184,36 @@ test("new conversations delegate the MCP default to the backend", async () => {
 
   assert.deepEqual(params, { projectId: "local" });
   assert.equal("loadMcp" in params, false);
+});
+
+test("restored turns render tools between user and assistant without raw HTML", async () => {
+  const { RestoredTurn } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const html = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: {
+      turnNumber: 4,
+      timestamp: "2026-08-28T00:00:00Z",
+      userText: "question",
+      assistantText: "final answer",
+      toolActivities: [{
+        callId: "call-1",
+        name: "rag_search",
+        arguments: '{"query":"<script>bad()</script>"}',
+        result: "bounded result",
+        status: "ok",
+        promptEligible: true,
+      }],
+    },
+  }));
+
+  const user = html.indexOf("You · restored turn 4");
+  const tool = html.indexOf("Tool activity · rag_search · ok · restored context");
+  const result = html.indexOf("Tool result · rag_search");
+  const assistant = html.indexOf("Assistant · restored");
+  assert.ok(user >= 0 && user < tool && tool < result && result < assistant);
+  assert.doesNotMatch(html, /<script>/i);
+  assert.match(html, /&lt;script&gt;/);
 });
 
 test("conversation pages preserve membership order and replace duplicate summaries", async () => {

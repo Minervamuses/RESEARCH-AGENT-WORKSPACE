@@ -1321,7 +1321,13 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 let item = expect_object(item, &format!("data.items[{index}]"))?;
                 validate_exact_data_keys(
                     item,
-                    &["turnNumber", "timestamp", "userText", "assistantText"],
+                    &[
+                        "turnNumber",
+                        "timestamp",
+                        "userText",
+                        "assistantText",
+                        "toolActivities",
+                    ],
                 )?;
                 expect_integer_range(
                     &item["turnNumber"],
@@ -1339,6 +1345,61 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                         &format!("data.items[{index}].{field}"),
                         max_bytes,
                     )?;
+                }
+                let activities = item["toolActivities"].as_array().ok_or_else(|| {
+                    ProtocolViolation::invalid(format!(
+                        "data.items[{index}].toolActivities must be an array"
+                    ))
+                })?;
+                if activities.len() > 128 {
+                    return Err(ProtocolViolation::invalid(format!(
+                        "data.items[{index}].toolActivities contains too many items"
+                    )));
+                }
+                for (activity_index, activity) in activities.iter().enumerate() {
+                    let field = format!(
+                        "data.items[{index}].toolActivities[{activity_index}]"
+                    );
+                    let activity = expect_object(activity, &field)?;
+                    validate_exact_data_keys(
+                        activity,
+                        &[
+                            "callId",
+                            "name",
+                            "arguments",
+                            "result",
+                            "status",
+                            "promptEligible",
+                        ],
+                    )?;
+                    if !activity["callId"].is_null() {
+                        expect_bounded_string(
+                            &activity["callId"],
+                            &format!("{field}.callId"),
+                            256,
+                        )?;
+                    }
+                    for (name, max_bytes) in [
+                        ("name", 256),
+                        ("arguments", 32_768),
+                        ("result", 65_536),
+                    ] {
+                        expect_bounded_string(
+                            &activity[name],
+                            &format!("{field}.{name}"),
+                            max_bytes,
+                        )?;
+                    }
+                    validate_enum(
+                        &activity["status"],
+                        &format!("{field}.status"),
+                        &["ok", "failed", "denied", "incomplete"],
+                    )?;
+                    if !activity["promptEligible"].is_boolean() {
+                        return Err(ProtocolViolation::invalid(format!(
+                            "{field}.promptEligible must be a boolean"
+                        )));
+                    }
                 }
             }
             for field in ["total", "offset"] {

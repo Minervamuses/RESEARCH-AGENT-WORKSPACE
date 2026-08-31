@@ -368,6 +368,23 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
         timestamp: { type: "string", required: true, maxBytes: 64 },
         userText: { type: "string", required: true, maxBytes: 32_768 },
         assistantText: { type: "string", required: true, maxBytes: 32_768 },
+        toolActivities: {
+          type: "objectArray",
+          required: true,
+          maxItems: 128,
+          items: {
+            callId: { type: "nullableString", required: true, maxBytes: 256 },
+            name: { type: "string", required: true, maxBytes: 256 },
+            arguments: { type: "string", required: true, maxBytes: 32_768 },
+            result: { type: "string", required: true, maxBytes: 65_536 },
+            status: {
+              type: "string",
+              required: true,
+              enum: ["ok", "failed", "denied", "incomplete"],
+            },
+            promptEligible: { type: "boolean", required: true },
+          },
+        },
       },
     },
     total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
@@ -636,11 +653,21 @@ export interface RegistrationRetryDto {
   issue: string | null;
 }
 
+export interface ToolActivityDto {
+  callId: string | null;
+  name: string;
+  arguments: string;
+  result: string;
+  status: "ok" | "failed" | "denied" | "incomplete";
+  promptEligible: boolean;
+}
+
 export interface TranscriptTurnDto {
   turnNumber: number;
   timestamp: string;
   userText: string;
   assistantText: string;
+  toolActivities: ToolActivityDto[];
 }
 
 export interface SessionTranscriptDto {

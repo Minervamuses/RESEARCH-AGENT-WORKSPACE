@@ -606,6 +606,7 @@ class ChatSession:
             validation_errors=validation_errors,
             recovery_reason=recovery_reason,
             citation_save_metrics=citation_save_metrics,
+            citation_scope=self.citation_skill_active,
             append_block=self._append_block_to_md,
         )
 

@@ -51,6 +51,7 @@ def merge_restored_turns(*sources: list[TurnRecord]) -> list[TurnRecord]:
                 turn_id=turn.turn_id,
                 timestamp=turn.timestamp,
                 persist_target="none",
+                tool_activities=tuple(turn.tool_activities),
             )
     ordered_ids = sorted(by_id)
     if ordered_ids and ordered_ids != list(range(1, ordered_ids[-1] + 1)):
@@ -142,15 +143,30 @@ class TurnJournal:
         candidate_traces: list[FusionCandidateTrace] | None = None,
         validation_errors: list[str] | None = None,
         recovery_reason: str | None = None,
+        citation_scope: bool = False,
     ) -> None:
         """Record one finalized turn, preserving plan-write atomicity."""
         turn_id = self._turn_counter + 1
         timestamp = datetime.now(timezone.utc).isoformat()
+        tool_activities = ()
         if self.plan_mode:
             if self.plan_log_path is None:
                 raise RuntimeError("plan mode is enabled without a log path")
             target = "plan_log"
             log_path = str(self.plan_log_path)
+            scope = (
+                "fusion"
+                if fusion is not None or candidate_traces
+                else "citation"
+                if citation_scope
+                else "normal"
+            )
+            if scope != "fusion":
+                tool_activities = self._plan_log.build_tool_activities(
+                    new_messages=new_messages,
+                    tool_calls=tool_calls,
+                    scope=scope,
+                )
             try:
                 block = self._plan_log.render_block(
                     turn_id=turn_id,
@@ -160,6 +176,8 @@ class TurnJournal:
                     new_messages=new_messages,
                     tool_calls=tool_calls,
                     candidate_traces=candidate_traces,
+                    scope=scope,
+                    tool_activities=tool_activities,
                 )
                 await asyncio.to_thread(append_block, log_path, block)
             except Exception as exc:
@@ -178,6 +196,7 @@ class TurnJournal:
                 timestamp=timestamp,
                 persist_target=target,
                 log_path=log_path,
+                tool_activities=tool_activities,
             )
         )
         self.last_tool_calls = tool_calls

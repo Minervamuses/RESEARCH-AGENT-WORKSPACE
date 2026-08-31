@@ -217,6 +217,10 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
             {"text": FIXTURE_RAG_QUESTION},
             event_sink=lambda event, data: events.append((event, data)),
         )
+        transcript = await service.dispatch(
+            "session.transcript",
+            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        )
         plan_logs = {
             path: path.read_bytes()
             for path in Path(service.config.plan_logs_dir).glob("*.md")
@@ -259,6 +263,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
             marker.unlink(missing_ok=True)
         return (
             answer,
+            transcript,
             results,
             empty_preview,
             changed.value,
@@ -269,6 +274,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
 
     (
         answer,
+        transcript,
         results,
         empty_preview,
         changed_error,
@@ -287,6 +293,17 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
         event == "tool.finished" and data["name"] == "rag_search"
         for event, data in events
     )
+    assert transcript["items"][-1]["toolActivities"] == [{
+        "callId": "fixture-rag-search",
+        "name": "rag_search",
+        "arguments": f'{{"query":"{FIXTURE_RAG_QUESTION}"}}',
+        "result": transcript["items"][-1]["toolActivities"][0]["result"],
+        "status": "ok",
+        "promptEligible": True,
+    }]
+    assert "fixture knowledge" in transcript["items"][-1]["toolActivities"][0][
+        "result"
+    ].casefold()
     assert all(result["responseKind"] == "command" for result in results)
     assert "fixture-file-pid" in results[1]["text"]
     assert "fixture-notes.md" in results[3]["text"]

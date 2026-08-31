@@ -70,7 +70,7 @@ from agent.session import ChatSession
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.turns.safety import content_text
 from agent.turns.journal import TurnRestoreError, merge_restored_turns
-from agent.turns.memory import TurnRecord
+from agent.turns.memory import ToolActivityRecord, TurnRecord
 from agent.turns.plan_log import PlanLog, PlanLogRestoreError
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
@@ -105,6 +105,12 @@ _DESKTOP_SLASH_COMMANDS = frozenset({
 _MAX_ANSWER_BYTES = 2_097_152
 _MAX_LOCAL_COMMAND_BYTES = 65_536
 _MAX_TRANSCRIPT_PAGE_BYTES = 1_048_576
+_MAX_TRANSCRIPT_TOOL_ACTIVITIES = 128
+_MAX_TRANSCRIPT_TOOL_CALL_ID_BYTES = 256
+_MAX_TRANSCRIPT_TOOL_NAME_BYTES = 256
+_MAX_TRANSCRIPT_TOOL_ARGUMENT_BYTES = 32_768
+_MAX_TRANSCRIPT_TOOL_RESULT_BYTES = 65_536
+_TRANSCRIPT_TOOL_STATUSES = frozenset({"ok", "failed", "denied", "incomplete"})
 _MAX_CONTROL_SNAPSHOTS = CATALOG_MAX_SESSIONS
 _MAX_KNOWLEDGE_RESULT_PATHS = 512
 _MAX_KNOWLEDGE_PATH_BYTES = 4_096
@@ -799,12 +805,7 @@ class DesktopService:
                 total=0,
             )
         page = turns[offset : offset + limit]
-        if any(
-            len(turn.user_input.encode("utf-8")) > 32_768
-            or len(turn.assistant_output.encode("utf-8")) > 32_768
-            or len(turn.timestamp.encode("utf-8")) > 64
-            for turn in page
-        ):
+        if any(not self._transcript_turn_is_bounded(turn) for turn in page):
             return self._transcript_result(
                 project["projectId"],
                 session_id,
@@ -815,12 +816,7 @@ class DesktopService:
                 limit=limit,
                 total=len(turns),
             )
-        page_bytes = sum(
-            len(turn.user_input.encode("utf-8"))
-            + len(turn.assistant_output.encode("utf-8"))
-            + len(turn.timestamp.encode("utf-8"))
-            for turn in page
-        )
+        page_bytes = sum(self._transcript_turn_bytes(turn) for turn in page)
         if page_bytes > _MAX_TRANSCRIPT_PAGE_BYTES:
             return self._transcript_result(
                 project["projectId"],
@@ -931,12 +927,78 @@ class DesktopService:
                 existing.user_input != restored.user_input
                 or existing.assistant_output != restored.assistant_output
                 or existing.timestamp != restored.timestamp
+                or existing.tool_activities != restored.tool_activities
             ):
                 raise TurnRestoreError(
                     "current and persisted conversation turns disagree"
                 )
             by_turn[restored.turn_id] = restored
         return merge_restored_turns(list(by_turn.values()))
+
+    @staticmethod
+    def _tool_activity_payload(activity: ToolActivityRecord) -> dict[str, Any]:
+        return {
+            "callId": activity.call_id,
+            "name": activity.name,
+            "arguments": activity.arguments,
+            "result": activity.result or "(empty result)",
+            "status": activity.status,
+            "promptEligible": activity.prompt_eligible,
+        }
+
+    @classmethod
+    def _transcript_turn_is_bounded(cls, turn: TurnRecord) -> bool:
+        if (
+            len(turn.user_input.encode("utf-8")) > 32_768
+            or len(turn.assistant_output.encode("utf-8")) > 32_768
+            or len(turn.timestamp.encode("utf-8")) > 64
+            or len(turn.tool_activities) > _MAX_TRANSCRIPT_TOOL_ACTIVITIES
+        ):
+            return False
+        for activity in turn.tool_activities:
+            if not isinstance(activity, ToolActivityRecord):
+                return False
+            result = activity.result or "(empty result)"
+            if (
+                activity.status not in _TRANSCRIPT_TOOL_STATUSES
+                or type(activity.prompt_eligible) is not bool
+                or not activity.name
+                or not activity.arguments
+                or len(activity.name.encode("utf-8"))
+                > _MAX_TRANSCRIPT_TOOL_NAME_BYTES
+                or len(activity.arguments.encode("utf-8"))
+                > _MAX_TRANSCRIPT_TOOL_ARGUMENT_BYTES
+                or len(result.encode("utf-8"))
+                > _MAX_TRANSCRIPT_TOOL_RESULT_BYTES
+                or (
+                    activity.call_id is not None
+                    and (
+                        not activity.call_id
+                        or len(activity.call_id.encode("utf-8"))
+                        > _MAX_TRANSCRIPT_TOOL_CALL_ID_BYTES
+                    )
+                )
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _transcript_turn_bytes(turn: TurnRecord) -> int:
+        total = (
+            len(turn.user_input.encode("utf-8"))
+            + len(turn.assistant_output.encode("utf-8"))
+            + len(turn.timestamp.encode("utf-8"))
+        )
+        for activity in turn.tool_activities:
+            total += (
+                len((activity.call_id or "").encode("utf-8"))
+                + len(activity.name.encode("utf-8"))
+                + len(activity.arguments.encode("utf-8"))
+                + len((activity.result or "(empty result)").encode("utf-8"))
+                + len(activity.status.encode("utf-8"))
+                + 1
+            )
+        return total
 
     @staticmethod
     def _transcript_result(
@@ -961,6 +1023,10 @@ class DesktopService:
                     "timestamp": turn.timestamp,
                     "userText": turn.user_input,
                     "assistantText": turn.assistant_output,
+                    "toolActivities": [
+                        DesktopService._tool_activity_payload(activity)
+                        for activity in turn.tool_activities
+                    ],
                 }
                 for turn in turns
             ],

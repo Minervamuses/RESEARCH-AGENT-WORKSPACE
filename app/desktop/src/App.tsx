@@ -219,6 +219,40 @@ export function mergeSessionItems(
   return [...bySession.values()];
 }
 
+export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
+  return (
+    <article className="turn-group">
+      <div className="message user-message">
+        <p className="message-label">You · restored turn {turn.turnNumber}</p>
+        <SafeContent content={turn.userText} />
+      </div>
+      {turn.toolActivities.map((activity, index) => (
+        <section
+          className="tool-activity"
+          aria-label={`Tool activity ${activity.name}`}
+          key={`${activity.callId ?? "legacy"}-${activity.name}-${index}`}
+        >
+          <div className="message tool-message">
+            <p className="message-label">
+              Tool activity · {activity.name} · {activity.status}
+              {activity.promptEligible ? " · restored context" : " · display only"}
+            </p>
+            <SafeContent content={activity.arguments} />
+          </div>
+          <div className="message tool-result-message">
+            <p className="message-label">Tool result · {activity.name}</p>
+            <SafeContent content={activity.result} />
+          </div>
+        </section>
+      ))}
+      <div className="message assistant-message">
+        <p className="message-label">Assistant · restored</p>
+        <SafeContent content={turn.assistantText} />
+      </div>
+    </article>
+  );
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(backendReducer, initialBackendState);
   const [conversation, conversationDispatch] = useReducer(conversationReducer, initialConversationState);
@@ -951,7 +985,7 @@ export default function App() {
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
               {(transcript?.items.length ?? 0) === 0 && liveTurns.length === 0 && pendingUserText === null && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
-              {transcript?.items.map((turn) => <article className="turn-group" key={`restored-${turn.turnNumber}`}><div className="message user-message"><p className="message-label">You · restored turn {turn.turnNumber}</p><SafeContent content={turn.userText} /></div><div className="message assistant-message"><p className="message-label">Assistant · restored</p><SafeContent content={turn.assistantText} /></div></article>)}
+              {transcript?.items.map((turn) => <RestoredTurn turn={turn} key={`restored-${turn.turnNumber}`} />)}
               {liveTurns.map((turn) => <article className="turn-group" key={turn.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={turn.userText} /></div><div className={`message ${turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={turn.assistantText} /></div></article>)}
               {pendingUserText !== null && <article className="turn-group pending-turn"><div className="message user-message"><p className="message-label">You · pending</p><SafeContent content={pendingUserText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{(conversation.activeTurn?.activity.length ?? 0) > 0 && <ul className="activity-list">{conversation.activeTurn?.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>}
               <div ref={transcriptEndRef} />

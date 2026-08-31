@@ -108,6 +108,25 @@ def test_normal_answers_use_only_the_final_terminal_result() -> None:
     }
 
 
+def test_transcript_tool_activity_schema_is_bounded_and_parser_derived() -> None:
+    turn = CONTRACT["resultDataSchemas"]["session.transcript"]["items"]["items"]
+    activities = turn["toolActivities"]
+    assert activities["required"] is True
+    assert activities["maxItems"] == 128
+    assert activities["items"] == {
+        "callId": {"type": "nullableString", "required": True, "maxBytes": 256},
+        "name": {"type": "string", "required": True, "maxBytes": 256},
+        "arguments": {"type": "string", "required": True, "maxBytes": 32_768},
+        "result": {"type": "string", "required": True, "maxBytes": 65_536},
+        "status": {
+            "type": "string",
+            "required": True,
+            "enum": ["ok", "failed", "denied", "incomplete"],
+        },
+        "promptEligible": {"type": "boolean", "required": True},
+    }
+
+
 @pytest.mark.parametrize("case", FIXTURES["messages"], ids=lambda case: case["name"])
 def test_shared_message_fixture(case: dict) -> None:
     if case["valid"]:

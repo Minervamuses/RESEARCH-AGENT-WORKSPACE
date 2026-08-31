@@ -227,7 +227,20 @@
           "turnNumber": {"type": "integer", "required": true, "minimum": 1, "maximum": 4294967295},
           "timestamp": {"type": "string", "required": true, "maxBytes": 64},
           "userText": {"type": "string", "required": true, "maxBytes": 32768},
-          "assistantText": {"type": "string", "required": true, "maxBytes": 32768}
+          "assistantText": {"type": "string", "required": true, "maxBytes": 32768},
+          "toolActivities": {
+            "type": "objectArray",
+            "required": true,
+            "maxItems": 128,
+            "items": {
+              "callId": {"type": "nullableString", "required": true, "maxBytes": 256},
+              "name": {"type": "string", "required": true, "maxBytes": 256},
+              "arguments": {"type": "string", "required": true, "maxBytes": 32768},
+              "result": {"type": "string", "required": true, "maxBytes": 65536},
+              "status": {"type": "string", "required": true, "enum": ["ok", "failed", "denied", "incomplete"]},
+              "promptEligible": {"type": "boolean", "required": true}
+            }
+          }
         }
       },
       "total": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
