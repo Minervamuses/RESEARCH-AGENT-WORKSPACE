@@ -84,36 +84,6 @@ class _FakeSkillSession:
         self.config = object()
         self.loaded_skills = loaded_skills
         self.active_skill_runtime = None
-        self.activated = []
-        self.deactivated = False
-
-    def activate_skill(self, name, task_mode=None):
-        class Runtime:
-            def __init__(self, name, task_mode):
-                self.name = name
-                self.task_mode = task_mode
-
-        runtime = Runtime(name, task_mode)
-        self.active_skill_runtime = runtime
-        self.activated.append((name, task_mode))
-        return runtime
-
-    def deactivate_skill(self):
-        self.active_skill_runtime = None
-        self.deactivated = True
-
-
-class _ValidatingSkillSession(_FakeSkillSession):
-    def activate_skill(self, name, task_mode=None):
-        from agent.skills import load_skill_manifest
-
-        skill = next(skill for skill in self.loaded_skills if skill.name == name)
-        manifest = load_skill_manifest(skill.path.parent)
-        modes = manifest.get("task_modes")
-        valid_modes = {mode for mode in modes if isinstance(mode, str)}
-        if task_mode is not None and task_mode not in valid_modes:
-            raise ValueError(f"unknown task mode for skill: {task_mode}")
-        return super().activate_skill(name, task_mode)
 
 
 def _write_skill(tmp_path, name="paper-writing"):
@@ -128,19 +98,28 @@ description: Use when writing papers.
 """,
         encoding="utf-8",
     )
-    (root / "manifest.yaml").write_text(
-        """
-task_modes:
-  - revision
-  - drafting
-""",
-        encoding="utf-8",
-    )
     return SkillMetadata(
         name=name,
         description="Use when writing papers.",
         path=skill_file,
     )
+
+
+def test_session_registry_projects_one_shot_skill_and_preserves_raw_prompt(tmp_path):
+    skill = _write_skill(tmp_path)
+    session = _FakeSkillSession([skill])
+    registry = build_default_registry(session)
+
+    result = asyncio.run(
+        execute_slash_command(
+            parse_slash_command('/paper-writing draft  "quoted"   text'),
+            SlashCommandContext(session=session, registry=registry),
+        )
+    )
+
+    assert result.skill_name == "paper-writing"
+    assert result.followup_input == 'draft  "quoted"   text'
+    assert session.active_skill_runtime is None
 
 
 def test_handle_mode_oneshot_switches_to_plan(tmp_path):
@@ -425,130 +404,111 @@ def test_handle_thinking_rejects_extra_args(tmp_path):
         )
 
 
-def test_handle_skill_oneshot_activates_skill_with_mode(tmp_path):
-    skill = _write_skill(tmp_path)
-    session = _FakeSkillSession([skill])
-    registry = build_default_registry()
+def test_retired_persistent_skill_command_is_unknown(tmp_path):
+    session = _FakeSkillSession([_write_skill(tmp_path)])
+    registry = build_default_registry(session)
 
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/skill paper-writing revision"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert session.activated == [("paper-writing", "revision")]
-    assert "skill -> paper-writing revision" in result.message
-
-
-def test_handle_skill_oneshot_bad_mode_raises_slash_command_error(tmp_path):
-    skill = _write_skill(tmp_path)
-    session = _ValidatingSkillSession([skill])
-    registry = build_default_registry()
-
-    with pytest.raises(SlashCommandError, match="failed to activate skill"):
+    assert registry.get("skill") is None
+    with pytest.raises(SlashCommandError, match="unknown slash command: /skill"):
         asyncio.run(
             execute_slash_command(
-                parse_slash_command("/skill paper-writing wrong-mode"),
+                parse_slash_command("/skill paper-writing"),
                 SlashCommandContext(session=session, registry=registry),
             )
         )
 
 
-def test_handle_skill_deactivates_with_none(tmp_path):
-    skill = _write_skill(tmp_path)
-    session = _FakeSkillSession([skill])
-    registry = build_default_registry()
+def test_dynamic_skill_rejects_empty_prompt_without_arming_state(tmp_path):
+    session = _FakeSkillSession([_write_skill(tmp_path)])
+    registry = build_default_registry(session)
 
+    with pytest.raises(SlashCommandError, match="usage: /paper-writing <prompt>"):
+        asyncio.run(
+            execute_slash_command(
+                parse_slash_command("/paper-writing"),
+                SlashCommandContext(session=session, registry=registry),
+            )
+        )
+    assert session.active_skill_runtime is None
+
+
+def test_dynamic_skill_is_listed_by_help_and_completion(tmp_path):
+    session = _FakeSkillSession([_write_skill(tmp_path)])
+    registry = build_default_registry(session)
     result = asyncio.run(
         execute_slash_command(
-            parse_slash_command("/skill none"),
+            parse_slash_command("/help"),
             SlashCommandContext(session=session, registry=registry),
         )
     )
-
-    assert session.deactivated is True
-    assert result.message == "skill -> none"
-
-
-def test_handle_skill_interactive_selection_and_mode(monkeypatch, tmp_path):
-    skill = _write_skill(tmp_path)
-    session = _FakeSkillSession([skill])
-    registry = build_default_registry()
-    inputs = iter(["1", "1"])
-
-    async def fake_to_thread(func, *args, **kwargs):
-        return next(inputs)
-
-    monkeypatch.setattr("agent.cli.slash_commands.asyncio.to_thread", fake_to_thread)
-
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/skill"),
-            SlashCommandContext(session=session, registry=registry),
+    completions = list(
+        SlashCommandCompleter(registry).get_completions(
+            Document(text="/paper"), complete_event=None
         )
     )
 
-    assert session.activated == [("paper-writing", "revision")]
-    assert "skill -> paper-writing revision" in result.message
+    assert "/paper-writing - Use when writing papers." in result.message
+    assert [completion.text for completion in completions] == ["paper-writing"]
 
 
-def test_handle_skill_interactive_manifest_error_raises_slash_command_error(
-    monkeypatch,
+def test_dynamic_catalog_fails_closed_for_invalid_duplicate_and_collision(tmp_path):
+    def metadata(name: str, folder: str) -> SkillMetadata:
+        return SkillMetadata(
+            name=name,
+            description=f"{name} description",
+            path=tmp_path / folder / "SKILL.md",
+        )
+
+    session = _FakeSkillSession([
+        metadata("bad_name", "bad"),
+        metadata("writer", "writer-a"),
+        metadata("writer", "writer-b"),
+        metadata("help", "help"),
+        metadata("_prompt-master", "prompt-master"),
+        metadata("citation", "citation"),
+    ])
+    registry = build_default_registry(session)
+
+    assert registry.get("bad_name") is None
+    assert registry.get("writer") is None
+    assert registry.get("help").name == "help"
+    assert registry.get("_prompt-master") is not None
+    assert registry.get("citation").name == "citation"
+    diagnostics = "\n".join(registry.diagnostics)
+    assert "invalid command name" in diagnostics
+    assert "duplicate catalog name" in diagnostics
+    assert "reserved command collision" in diagnostics
+
+
+def test_prompt_master_exception_is_consistent_across_help_completion_and_dispatch(
     tmp_path,
 ):
-    skill = _write_skill(tmp_path)
-    (skill.path.parent / "manifest.yaml").write_text("task_modes: [", encoding="utf-8")
-    session = _FakeSkillSession([skill])
-    registry = build_default_registry()
-
-    async def fake_to_thread(func, *args, **kwargs):
-        return "1"
-
-    monkeypatch.setattr("agent.cli.slash_commands.asyncio.to_thread", fake_to_thread)
-
-    with pytest.raises(SlashCommandError, match="failed to activate skill"):
-        asyncio.run(
-            execute_slash_command(
-                parse_slash_command("/skill"),
-                SlashCommandContext(session=session, registry=registry),
-            )
+    session = _FakeSkillSession([
+        SkillMetadata(
+            name="_prompt-master",
+            description="Rewrite one prompt.",
+            path=tmp_path / "_prompt-master" / "SKILL.md",
         )
+    ])
+    registry = build_default_registry(session)
+    context = SlashCommandContext(session=session, registry=registry)
 
+    result = asyncio.run(execute_slash_command(
+        parse_slash_command("/_prompt-master improve  this"),
+        context,
+    ))
+    help_result = asyncio.run(execute_slash_command(
+        parse_slash_command("/help"),
+        context,
+    ))
+    completions = list(SlashCommandCompleter(registry).get_completions(
+        Document(text="/_p"), complete_event=None,
+    ))
 
-def test_handle_skill_interactive_deactivate(monkeypatch, tmp_path):
-    skill = _write_skill(tmp_path)
-    session = _FakeSkillSession([skill])
-    registry = build_default_registry()
-
-    async def fake_to_thread(func, *args, **kwargs):
-        return "0"
-
-    monkeypatch.setattr("agent.cli.slash_commands.asyncio.to_thread", fake_to_thread)
-
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/skill"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert session.deactivated is True
-    assert result.message == "skill -> none"
-
-
-def test_handle_skill_unknown_name_raises(tmp_path):
-    skill = _write_skill(tmp_path)
-    session = _FakeSkillSession([skill])
-    registry = build_default_registry()
-
-    with pytest.raises(SlashCommandError, match="unknown skill"):
-        asyncio.run(
-            execute_slash_command(
-                parse_slash_command("/skill mystery"),
-                SlashCommandContext(session=session, registry=registry),
-            )
-        )
+    assert result.skill_name == "_prompt-master"
+    assert result.followup_input == "improve  this"
+    assert "/_prompt-master - Rewrite one prompt." in help_result.message
+    assert [completion.text for completion in completions] == ["_prompt-master"]
 
 
 def test_handle_ingest_translates_value_error(monkeypatch, tmp_path):

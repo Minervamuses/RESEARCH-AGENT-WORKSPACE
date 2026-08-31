@@ -124,7 +124,7 @@ def _make_session(monkeypatch, tmp_path) -> ChatSession:
 
 def test_prompt_matches_effective_tools(monkeypatch, tmp_path):
     session = _make_session(monkeypatch, tmp_path)
-    session.activate_skill("citation")
+    session.activate_citation_skill()
 
     block = session._tool_availability_block()
     available_line = next(
@@ -159,7 +159,7 @@ def test_prompt_does_not_claim_web_search_when_mcp_missing(monkeypatch, tmp_path
 
 def test_fusion_matches_effective_tools(monkeypatch, tmp_path):
     session = _make_session(monkeypatch, tmp_path)
-    session.activate_skill("citation")
+    session.activate_citation_skill()
 
     state = session._fusion._proposer_read_only_state()
     effective = set(session.tool_access_resolution().effective_tools)

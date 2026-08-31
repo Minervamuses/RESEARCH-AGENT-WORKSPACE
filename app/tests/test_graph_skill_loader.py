@@ -86,7 +86,6 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
         root=Path(tmp_path / "skills" / "paper-writing"),
         instructions="# Skill",
         pinned_references={"references/guide.md": "guide"},
-        task_mode="revision",
         tool_access=_resolution(["read_file"]),
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
@@ -100,7 +99,6 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
         "skill_root",
         "skill_instructions",
         "loaded_references",
-        "task_mode",
         "effective_tools",
     }
     assert serialized_keys <= set(result)
@@ -108,7 +106,6 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
     assert result["skill_root"] == str(runtime.root)
     assert result["skill_instructions"] == "# Skill"
     assert result["loaded_references"] == {"references/guide.md": "guide"}
-    assert result["task_mode"] == "revision"
     assert result["effective_tools"] == ["read_file"]
 
 
@@ -139,7 +136,6 @@ def test_agent_node_binds_effective_tools_for_active_skill(monkeypatch, tmp_path
     state = {
         "messages": [HumanMessage(content="hi")],
         "active_skill": "paper-writing",
-        "task_mode": "revision",
         "effective_tools": ["read_file"],
     }
 

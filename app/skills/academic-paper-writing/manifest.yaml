@@ -14,9 +14,3 @@ resources:
   - path: references/submission-and-integrity.md
     use_when: journal fit, cover letter, reviewer response, publication ethics, AI disclosure, or reporting checklists
     pinned: false
-
-task_modes:
-  - revision
-  - literature-review
-  - drafting
-  - submission-support

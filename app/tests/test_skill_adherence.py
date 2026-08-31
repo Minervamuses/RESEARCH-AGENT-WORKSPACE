@@ -37,8 +37,6 @@ description: Use when writing academic papers.
 resources:
   - path: references/section-playbooks.md
     pinned: true
-task_modes:
-  - revision
 """,
         encoding="utf-8",
     )
@@ -65,28 +63,36 @@ def _make_session(tmp_path, monkeypatch, captured):
     return ChatSession(cfg)
 
 
-def test_slash_skill_command_activates_session_runtime(tmp_path, monkeypatch):
+def test_slash_skill_command_selects_exactly_one_runtime_turn(tmp_path, monkeypatch):
     captured = {}
     session = _make_session(tmp_path, monkeypatch, captured)
-    registry = build_default_registry()
+    registry = build_default_registry(session)
 
     result = asyncio.run(execute_slash_command(
-        parse_slash_command("/skill academic-paper-writing revision"),
+        parse_slash_command("/academic-paper-writing revise  this abstract"),
         SlashCommandContext(session=session, registry=registry),
     ))
+    assert result.skill_name == "academic-paper-writing"
+    assert result.followup_input == "revise  this abstract"
+    assert session.active_skill_runtime is None
 
-    assert result.message == "skill -> academic-paper-writing revision"
-    assert session.active_skill_runtime is not None
-    assert session.active_skill_runtime.name == "academic-paper-writing"
-    assert session.active_skill_runtime.task_mode == "revision"
+    answer = asyncio.run(session.turn(
+        result.followup_input,
+        skill_name=result.skill_name,
+    ))
+    assert answer == "ok"
+    assert captured["state"]["active_skill"] == "academic-paper-writing"
+    assert session.active_skill_runtime is None
 
 
 def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypatch):
     captured = {}
     session = _make_session(tmp_path, monkeypatch, captured)
-    session.activate_skill("academic-paper-writing", "revision")
 
-    answer = asyncio.run(session.turn("revise this abstract"))
+    answer = asyncio.run(session.turn(
+        "revise this abstract",
+        skill_name="academic-paper-writing",
+    ))
     state = captured["state"]
     prompt_text = "\n".join(message.content for message in state["messages"])
 
@@ -98,12 +104,10 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
         "skill_root",
         "skill_instructions",
         "loaded_references",
-        "task_mode",
         "effective_tools",
     }
     assert serialized_keys <= set(state)
     assert state["active_skill"] == "academic-paper-writing"
-    assert state["task_mode"] == "revision"
     assert state["skill_instructions"].startswith("---")
     assert state["loaded_references"] == {
         "references/section-playbooks.md": "section reference"
@@ -114,12 +118,15 @@ def test_active_skill_state_and_prompt_are_ready_before_turn(tmp_path, monkeypat
 def test_active_skill_relative_reference_resolves_to_skill_bundle(tmp_path, monkeypatch):
     captured = {}
     session = _make_session(tmp_path, monkeypatch, captured)
-    runtime = session.activate_skill("academic-paper-writing", "revision")
+    asyncio.run(session.turn(
+        "read the reference",
+        skill_name="academic-paper-writing",
+    ))
 
     payload = json.loads(
         _read_file(
             "references/section-playbooks.md",
-            skill_root=str(runtime.root),
+            skill_root=captured["state"]["skill_root"],
         )
     )
 
@@ -132,11 +139,13 @@ def test_active_skill_relative_reference_resolves_to_skill_bundle(tmp_path, monk
 def test_active_skill_keeps_global_tools(tmp_path, monkeypatch):
     captured = {}
     session = _make_session(tmp_path, monkeypatch, captured)
-    runtime = session.activate_skill("academic-paper-writing", "revision")
+    asyncio.run(session.turn(
+        "draft",
+        skill_name="academic-paper-writing",
+    ))
 
-    assert "read_file" in runtime.tool_access.effective_tools
-    assert "bash" in runtime.tool_access.effective_tools
-    assert runtime.tool_access.skill_tools == ()
+    assert "read_file" in captured["state"]["effective_tools"]
+    assert "bash" in captured["state"]["effective_tools"]
 
 
 def test_no_skill_turn_keeps_skill_state_empty(tmp_path, monkeypatch):

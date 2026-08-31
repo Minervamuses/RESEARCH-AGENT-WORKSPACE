@@ -111,7 +111,7 @@ async def _run(
         load_mcp=not args.no_mcp,
         progress_cb=_print_progress,
     )
-    command_registry = build_default_registry()
+    command_registry = build_default_registry(session)
     reader = read_line or build_line_reader(command_registry=command_registry)
 
     _print_banner(session)
@@ -130,6 +130,7 @@ async def _run(
                 break
 
             user_input = raw_input.strip()
+            skill_name = None
             try:
                 parsed = parse_slash_command(user_input)
             except SlashCommandError as exc:
@@ -161,9 +162,13 @@ async def _run(
                 # e.g. /citation <text>: the trailing text becomes a normal
                 # agent turn (recorded in history/trace like any user turn).
                 user_input = result.followup_input
+                skill_name = result.skill_name
 
             try:
-                response = await session.turn(user_input)
+                response = await session.turn(
+                    user_input,
+                    skill_name=skill_name,
+                )
             except GraphRecursionError:
                 response = (
                     f"(agent hit graph recursion limit of "

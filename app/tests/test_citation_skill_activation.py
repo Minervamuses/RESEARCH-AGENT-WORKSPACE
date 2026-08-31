@@ -9,7 +9,7 @@ from conftest import FakeHistoryStore, make_astream_graph
 
 from agent.config import AgentConfig
 from agent.session import ChatSession
-from agent.skills import discover_skills
+from agent.skills import SkillMetadata, discover_skills
 from agent.turns.safety import find_tool_protocol_artifact
 
 
@@ -59,7 +59,7 @@ def test_activation_adds_only_the_workflow_tool(make_session):
     session = make_session()
     normal_effective = session.tool_access_resolution().effective_tools
 
-    runtime = session.activate_skill("citation")
+    runtime = session.activate_citation_skill()
 
     assert runtime.name == "citation"
     assert runtime.tool_access.skill_tools == ("citation_workflow",)
@@ -77,7 +77,7 @@ def test_activation_adds_only_the_workflow_tool(make_session):
 def test_activation_forces_normal_thinking(make_session):
     session = make_session()
     session.thinking_mode = "extended"
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     assert session.thinking_mode == "normal"
     assert session.citation_skill_active is True
 
@@ -92,7 +92,7 @@ def test_extended_thinking_refused_while_citation_active(make_session):
     )
 
     session = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     with pytest.raises(ValueError, match="extended thinking is unavailable"):
         session.set_thinking_mode("extended")
 
@@ -108,7 +108,7 @@ def test_extended_thinking_refused_while_citation_active(make_session):
 
 def test_deactivation_tears_down_workflow_and_registry(make_session, tmp_path):
     session = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     service = session.citation_service  # lazily built
     from skills.citation.types import SourceRef
 
@@ -118,37 +118,78 @@ def test_deactivation_tears_down_workflow_and_registry(make_session, tmp_path):
     ))
     assert session._citation_service is not None
 
-    session.deactivate_skill()
+    session.deactivate_citation_skill()
     assert session.active_skill_runtime is None
     assert session._citation_service is None
     # A later activation starts from a fresh registry.
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     assert session.citation_service.registry.list() == []
 
 
 def test_switching_to_another_skill_tears_down_citation_state(make_session):
     session = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _ = session.citation_service
-    session.activate_skill("academic-paper-writing")
+    answer = asyncio.run(session.turn(
+        "draft this paper",
+        skill_name="academic-paper-writing",
+    ))
+    assert answer == "ok"
     assert session._citation_service is None
-    assert session.active_skill_runtime.name == "academic-paper-writing"
+    assert session.active_skill_runtime is None
     assert session.citation_skill_active is False
 
 
 def test_failed_activation_keeps_previous_skill_and_state(make_session, monkeypatch):
     session = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     marker = session.citation_service
 
     with pytest.raises(KeyError):
-        session.activate_skill("no-such-skill")
+        asyncio.run(session.turn("draft", skill_name="no-such-skill"))
+    assert session.citation_skill_active is True
+    assert session._citation_service is marker
+
+
+def test_failed_generic_slash_resolution_preserves_citation_state(
+    make_session,
+    tmp_path,
+):
+    from agent.cli.slash_commands import (
+        SlashCommandContext,
+        SlashCommandError,
+        build_default_registry,
+        execute_slash_command,
+        parse_slash_command,
+    )
+
+    session = make_session()
+    session.activate_citation_skill()
+    marker = session.citation_service
+    session.loaded_skills.append(SkillMetadata(
+        name="help",
+        description="Must not replace static help.",
+        path=tmp_path / "collision" / "SKILL.md",
+    ))
+    registry = build_default_registry(session)
+    context = SlashCommandContext(session=session, registry=registry)
+
+    for raw in ("/academic-paper-writing", "/missing prompt"):
+        with pytest.raises(SlashCommandError):
+            asyncio.run(execute_slash_command(parse_slash_command(raw), context))
+        assert session.citation_skill_active is True
+        assert session._citation_service is marker
+
+    assert any("/help" in item and "collision" in item for item in registry.diagnostics)
     assert session.citation_skill_active is True
     assert session._citation_service is marker
 
 
 def test_non_citation_skills_unaffected_by_teardown_logic(make_session):
     session = make_session()
-    session.activate_skill("academic-paper-writing")
-    session.deactivate_skill()
+    answer = asyncio.run(session.turn(
+        "draft this paper",
+        skill_name="academic-paper-writing",
+    ))
+    assert answer == "ok"
     assert session.active_skill_runtime is None

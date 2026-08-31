@@ -2,10 +2,12 @@
 
 import argparse
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from conftest import FakeChatSession
+from agent.skills import SkillMetadata
 
 
 def _run_cli(
@@ -174,6 +176,24 @@ def test_chat_cli_slash_help_stays_local(monkeypatch, capsys):
     assert "Available slash commands:" in output
     assert "/help" in output
     assert session.calls == ["flush"]
+
+
+def test_chat_cli_routes_dynamic_skill_with_exact_trailing_prompt(monkeypatch):
+    session = FakeChatSession()
+    session.loaded_skills = [
+        SkillMetadata(
+            name="writer",
+            description="Write one draft.",
+            path=Path("/fixture/writer/SKILL.md"),
+        )
+    ]
+
+    _run_cli(monkeypatch, session, ['/writer draft  "quoted"   text', "q"])
+
+    assert session.calls == [
+        'turn:draft  "quoted"   text skill:writer',
+        "flush",
+    ]
 
 
 def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):

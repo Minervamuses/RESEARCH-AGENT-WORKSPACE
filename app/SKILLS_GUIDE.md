@@ -21,32 +21,32 @@ Skills 有一份開放標準（Agent Skills），但各家 runtime（特別是 C
 
 Skill 是一個資料夾，至少包含一個 `SKILL.md` 檔案。`SKILL.md` 包含：
 
-1. **YAML frontmatter** — 給 `/skill` picker 顯示與辨識的 metadata
-2. **Markdown 內文** — 使用者明確啟用後，agent 該照著做的指令
-3. **manifest.yaml（選用，本專案擴充）** — 宣告 task modes、resource、capability、tool policy
+1. **YAML frontmatter** — 給 slash-command help 與 completion 顯示、辨識的 metadata
+2. **Markdown 內文** — 使用者明確選擇該次工作後，agent 該照著做的指令
+3. **manifest.yaml（選用，本專案擴充）** — 宣告 resource 與 tool policy
 
 Skill 採用**漸進式揭露（progressive disclosure）**：
 
 - **啟動時**：agent 不把 skill 清單、frontmatter 或 description 自動塞進 system prompt
-- **啟用時**：只有使用者透過 `/skill` 或 `/skill <name> [mode]` 明確選擇，runtime 才載入完整 `SKILL.md`
-- **延伸時**：`SKILL.md` 可引用同目錄的其他檔案；active skill 下，`references/`、`assets/`、`scripts/` 開頭的路徑會被限制在 skill bundle 內
+- **執行時**：只有使用者透過 `/<skill-name> <自然語言 prompt>` 明確選擇，runtime 才為該次工作載入完整 `SKILL.md`
+- **延伸時**：`SKILL.md` 可引用同目錄的其他檔案；該次 skill 工作中，`references/`、`assets/`、`scripts/` 開頭的路徑會被限制在 skill bundle 內
 
-這個機制讓我們可以維持可預期的手動啟用路徑，避免 agent 自行掃描、判斷或自動啟用 skills。
+這個機制讓我們可以維持可預期的手動、一次性選擇路徑，避免 agent 自行掃描、判斷或自動啟用 skills。
 
 ### Internal helper skill：`_prompt-master`
 
 `skills/_prompt-master/` 是 `/thinking extended` controller 使用的內部 helper。它一次性 vendor 自 `nidhinjs/prompt-master`，controller 只直接讀取 `SKILL.md` 作為 prompt rewrite 的 system context，不透過 skill loader 自動啟用，也不會改變使用者當前 active skill。
 
-如果使用者手動執行 `/skill _prompt-master`，它仍會走一般 skill runtime；它沒有 `tools` 區段，所以工具集合與普通模式完全相同。這個資料夾名稱前面的 `_` 是內部 helper 例外；一般新增給使用者選用的 skill 仍應使用 kebab-case。
+如果使用者手動執行 `/_prompt-master <prompt>`，它仍會走一般 one-shot skill runtime；它沒有 `tools` 區段，所以工具集合與普通模式完全相同。這個資料夾名稱前面的 `_` 是唯一 command-name 例外；一般新增給使用者選用的 skill 仍應使用 kebab-case。
 
 ### Built-in skill：`citation`
 
 `skills/citation/` 是內建的引用 skill，同一個資料夾**既是 skill bundle 也是可 import 的 `skills.citation` package**（stateless resolver/service、providers、marker gate、renderer、tool adapter 都住在裡面）。它有兩個一般 skill 沒有的特性：
 
 1. **skill 專屬工具**：manifest 在 `tools.required.local` 要求 session-scoped 的 `citation_workflow` 工具。這類 skill 工具不屬於全域工具，普通模式與其他 skills 綁不到也呼叫不了（執行層 PolicyToolNode 會拒絕偽造呼叫）；只有 manifest 明確要求它的 skill 才綁得到。全域工具（local base tools + Web Search MCP）在 citation skill 下照常可用。
-2. **session 隔離副作用**：啟用時強制切回 normal thinking；停用或切換 skill 時清除來源 registry。搜尋本身不建立 candidate pool，會直接回傳可供後續 save 使用的 metadata 與穩定 identifier；同輪多次 save 由工具序列化，不設 one-shot turn guard。
+2. **session 隔離副作用**：啟用時強制切回 normal thinking；停用或切換到另一個 one-shot skill 時清除來源 registry。搜尋本身不建立 candidate pool，會直接回傳可供後續 save 使用的 metadata 與穩定 identifier；同輪多次 save 由工具序列化，不設 one-shot turn guard。
 
-`/citation` 是它的專屬啟用入口（等價於 `/skill citation` 加上提示訊息與自然語言 followup）。新增一般 skill 不需要、也不應該仿照這種 host 深度整合；請以 `academic-paper-writing` 為範本。
+`/citation` 是它的專屬 persistent 啟用入口；`/citation off` 才會停用。它不會投影成一般 dynamic command。新增一般 skill 不需要、也不應該仿照這種 host 深度整合；請以 `academic-paper-writing` 為範本。
 
 ---
 
@@ -96,7 +96,7 @@ description: Use when the user wants to ... [具體適用情境]
 | 欄位 | 必要性 | 說明 |
 |------|--------|------|
 | `name` | 建議 | Skill 識別碼。省略時會用資料夾名稱推導。kebab-case。 |
-| `description` | **強烈建議** | `/skill` picker 顯示給使用者看的辨識文字。詳見下方寫作指引。 |
+| `description` | **強烈建議** | slash-command help 與 completion 顯示給使用者看的辨識文字。詳見下方寫作指引。 |
 
 **標準也定義但本專案通常不用：**
 
@@ -113,20 +113,19 @@ description: Use when the user wants to ... [具體適用情境]
 
 ### manifest.yaml 欄位（本專案擴充）
 
-`manifest.yaml` 是本專案 runtime 使用的嚴格 schema。未知 top-level key、型別錯誤、空的 `tools: {}` 都會在 skill 啟用時 raise `ValueError`，讓問題早點暴露。舊欄位 `capabilities` / `tool_policy` 已移除，出現時會被直接拒絕（錯誤訊息會指向 `tools` 區段）。
+`manifest.yaml` 是本專案 runtime 使用的嚴格 schema。未知 top-level key、型別錯誤、空的 `tools: {}` 都會在 skill 載入時 raise `ValueError`，讓問題早點暴露。舊欄位 `capabilities` / `tool_policy` 與舊版 per-task mode 欄位已移除，出現時會被直接拒絕；applied extension 會在下次 startup 顯示 unavailable diagnostic。
 
 工具模型是兩級的，manifest 只宣告「額外」需要什麼：
 
-- **全域工具**：local base tools（`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`）加上已載入的 Web Search MCP family。所有模式、所有 skill 都有，manifest 不需要（也無法）宣告或移除它們。
-- **skill 工具**：其他所有工具（GitHub MCP family、`citation_workflow`、未來的 stateful tools）。只有 active skill 的 manifest `tools` 區段明確要求時才存在。
+- **全域工具**：local base tools（`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`）加上已載入的 Web Search MCP family。所有模式、每次 skill 工作都有，manifest 不需要（也無法）宣告或移除它們。
+- **skill 工具**：其他所有工具（GitHub MCP family、`citation_workflow`、未來的 stateful tools）。只有該次所選 skill 的 manifest `tools` 區段明確要求時才存在。
 
 | 欄位 | 型別 | 說明 |
 |------|------|------|
-| `tools.required.local` | string list | 必要的本地工具名（如 `citation_workflow`）。解析不到時啟用失敗。 |
-| `tools.required.mcp_families` | string list | 必要的 MCP family 名（如 `github`）。該 family 沒有任何已載入工具時啟用失敗。 |
+| `tools.required.local` | string list | 必要的本地工具名（如 `citation_workflow`）。解析不到時載入失敗。 |
+| `tools.required.mcp_families` | string list | 必要的 MCP family 名（如 `github`）。該 family 沒有任何已載入工具時載入失敗。 |
 | `tools.optional.local` / `tools.optional.mcp_families` | string list | 選用工具；不存在時不阻止啟用。 |
 | `resources` | list | 每項需有 `path: string`，可選 `use_when: string`、`pinned: bool`。`pinned: "yes"` 這類字串不是 bool，會被拒絕。 |
-| `task_modes` | string list | `/skill <name> <mode>` 可選模式。非法 mode 會回 slash command error，不會炸掉 CLI loop。 |
 
 範例（大多數 skill 不需要 `tools`，省略即可——工具集合與普通模式相同）：
 
@@ -143,13 +142,9 @@ resources:
   - path: references/checklist.md
     use_when: checklist-heavy tasks
     pinned: false
-
-task_modes:
-  - revision
-  - drafting
 ```
 
-Pinned resources 會在啟用 skill 時直接放進每回合 context，受 `skill_max_pinned_reference_chars` 與 `skill_max_total_skill_context_chars` 限制。只 pin 每次都必要、且很小的檔案；其他 reference 讓 agent 在 active skill 下按需讀取。
+Pinned resources 會在執行該次 one-shot skill 工作時直接放進 context，受 `skill_max_pinned_reference_chars` 與 `skill_max_total_skill_context_chars` 限制。只 pin 每次都必要、且很小的檔案；其他 reference 讓 agent 在該次工作中按需讀取。
 
 工具語義要精確：
 
@@ -159,7 +154,7 @@ Pinned resources 會在啟用 skill 時直接放進每回合 context，受 `skil
 
 ## 三、Description 寫作指引
 
-`description` 不會讓 agent 自動啟用 skill。本專案只允許使用者透過 `/skill` 明確啟用；description 的作用是讓 picker 中的選項容易辨認，也讓人類維護者快速理解用途。
+`description` 不會讓 agent 自動選擇 skill。本專案只允許使用者透過 `/<skill-name> <prompt>` 明確選擇；description 的作用是讓 help/completion 中的 command 容易辨認，也讓人類維護者快速理解用途。
 
 ### 公式
 
@@ -173,7 +168,7 @@ What it does + When to use it + （選用）Specific signals / Negative cases
 description: Translates text to formal Chinese.
 ```
 
-問題：只說功能，使用者在 picker 裡不容易判斷該不該選它。
+問題：只說功能，使用者在 help/completion 裡不容易判斷該不該選它。
 
 ### 好的寫法
 
@@ -439,7 +434,7 @@ Group findings by severity:
 
 - **使用者下載的外部 Skill**：放到 `tool/skill/<skill-name>/`，執行 `/Extension-Management`，確認後重啟。不要修改 host Python，也不要搬進 `skills/`。
 - **隨專案版本控管的 built-in Skill**：才直接建立 `skills/<skill-name>/` 並提交程式庫。
-- `tool/_internal/extension-management/` 是 package 內的私有管理規則；每次管理操作都會重新讀取，但一般 `/skill` 不會列出，也不得拿使用者 drop-in 覆蓋。
+- `tool/_internal/extension-management/` 是 package 內的私有管理規則；每次管理操作都會重新讀取，但不會投影成 dynamic Skill command，也不得拿使用者 drop-in 覆蓋。
 
 當 AI 助手或開發者要新增一個 skill，依序做：
 
@@ -459,7 +454,6 @@ Group findings by severity:
 4. **視需要撰寫 manifest.yaml**
    - 全域工具（local base tools + Web Search MCP + scope=`global` 的 drop-in MCP）不需宣告，永遠可用
    - 需要 skill 專屬工具、GitHub 或 scope=`skill` 的 drop-in MCP family 時，才使用 `tools.required` / `tools.optional`
-   - 需要 task mode 時，使用 `task_modes`
    - 需要 reference routing 時，使用 `resources`
    - 不要寫空的 `tools: {}`；沒有專屬工具就省略 `tools`
 
@@ -469,8 +463,8 @@ Group findings by severity:
 
 6. **本地驗證**
    - 外部 Skill 先跑 `/Extension-Management --dry-run`、apply 並重啟；built-in Skill 直接重啟
-   - 用 `/skill <name>` 或 `/skill <name> <mode>` 明確啟用
-   - 確認啟用時沒有 manifest validation / capability resolution 錯誤
+   - 用 `/<skill-name> <自然語言 prompt>` 明確執行一次；空 prompt 應被 CLI 拒絕
+   - 確認載入時沒有 manifest validation / tool resolution 錯誤
    - 確認 agent 真的有讀 `SKILL.md` 並照做
 
 7. **不需要的東西不要加**
@@ -497,7 +491,7 @@ Group findings by severity:
 - [ ] 內文不含第五節列出的 Claude Code 專屬語法
 - [ ] 內文用祈使句
 - [ ] 內文 ≤ 500 行（超過就拆檔）
-- [ ] 本地驗證過可透過 `/skill <name>` 正確啟用
+- [ ] 本地驗證過可透過 `/<skill-name> <prompt>` 正確執行一次，下一個普通回合不保留該 skill
 
 ---
 

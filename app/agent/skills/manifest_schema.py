@@ -61,7 +61,6 @@ class SkillManifest(BaseModel):
 
     tools: SkillTools | None = None
     resources: list[SkillResource] = Field(default_factory=list)
-    task_modes: list[str] = Field(default_factory=list)
 
 
 def validate_skill_manifest(

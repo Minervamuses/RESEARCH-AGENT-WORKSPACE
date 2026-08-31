@@ -5,6 +5,7 @@ from pathlib import Path
 from agent.config import AgentConfig
 from agent.extensions.discovery import scan_extensions
 from agent.extensions.models import ExtensionRegistry
+from agent.extensions.models import AppliedExtension
 from agent.extensions.registry import install_scanned_extension, write_registry
 from agent.extensions.startup import load_extension_startup
 from agent.skills import SkillMetadata
@@ -112,6 +113,45 @@ def test_startup_skips_tampered_installed_skill(tmp_path):
     assert startup.revision == 1
     assert startup.skills == ()
     assert "applied_but_unavailable" in startup.diagnostics[0]
+
+
+def test_startup_reports_legacy_task_modes_manifest_as_unavailable(tmp_path):
+    config = _config(tmp_path)
+    state = Path(config.extension_state_dir)
+    source_hash = "legacy-task-modes"
+    bundle = state / "installed" / "skill" / "writer" / source_hash
+    bundle.mkdir(parents=True)
+    (bundle / "SKILL.md").write_text(
+        "---\nname: writer\ndescription: Legacy writer\n---\n",
+        encoding="utf-8",
+    )
+    (bundle / "manifest.yaml").write_text(
+        "task_modes:\n  - revision\n",
+        encoding="utf-8",
+    )
+    write_registry(
+        state,
+        ExtensionRegistry(
+            revision=1,
+            source_root=str(Path(config.extension_dropin_dir).resolve()),
+            extensions={
+                "skill:writer": AppliedExtension(
+                    kind="skill",
+                    id="writer",
+                    source_hash=source_hash,
+                    installed_relpath=bundle.relative_to(state).as_posix(),
+                    skill_manifest={"task_modes": ["revision"]},
+                )
+            },
+        ),
+    )
+
+    startup = load_extension_startup(config)
+
+    assert startup.skills == ()
+    assert len(startup.diagnostics) == 1
+    assert "applied_but_unavailable" in startup.diagnostics[0]
+    assert "task_modes" in startup.diagnostics[0]
 
 
 def test_startup_refuses_dropin_that_collides_with_builtin(tmp_path):

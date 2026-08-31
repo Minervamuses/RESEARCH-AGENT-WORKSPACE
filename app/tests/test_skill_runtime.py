@@ -57,8 +57,6 @@ tools:
 resources:
   - path: references/guide.md
     pinned: true
-task_modes:
-  - revision
 """,
         encoding="utf-8",
     )
@@ -73,7 +71,6 @@ def test_load_skill_runtime_reads_skill_and_pinned_references(tmp_path):
         "paper",
         config=cfg,
         all_tools=[_read_file, _rag_search, _bash, _paper_helper],
-        task_mode="revision",
     )
 
     assert runtime.name == "paper"
@@ -87,7 +84,6 @@ def test_load_skill_runtime_reads_skill_and_pinned_references(tmp_path):
         "bash",
         "paper_helper",
     )
-    assert runtime.task_mode == "revision"
 
 
 def test_load_skill_runtime_blocks_on_missing_required_tool(tmp_path):
@@ -275,19 +271,6 @@ def test_read_skill_resource_missing_file_has_clear_error(tmp_path):
         runtime.read_skill_resource("references/missing.md")
 
 
-def test_load_skill_runtime_rejects_unknown_task_mode(tmp_path):
-    skills_dir, _root = _write_skill(tmp_path)
-    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
-
-    with pytest.raises(ValueError, match="unknown task mode"):
-        load_skill_runtime(
-            "paper",
-            config=cfg,
-            all_tools=[_read_file, _paper_helper],
-            task_mode="drafting",
-        )
-
-
 def test_render_tool_availability_block_for_active_skill():
     resolution = ToolAccessResolution(
         global_tools=("rag_search", "read_file", "bash"),
@@ -300,13 +283,11 @@ def test_render_tool_availability_block_for_active_skill():
     block = render_tool_availability_block(
         resolution=resolution,
         active_skill="paper",
-        task_mode="revision",
         all_tool_names=["rag_search", "read_file", "bash", "github_search", "paper_helper"],
         mcp_families={"github_search": "github"},
     )
 
     assert "active_skill: paper" in block
-    assert "task_mode: revision" in block
     assert "available_tools: rag_search, read_file, bash, paper_helper" in block
     assert "skill_tools: paper_helper" in block
     assert "unavailable_tools: MCP family: github" in block

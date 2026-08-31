@@ -27,15 +27,15 @@ class StubSession:
         self.calls: list[str] = []
         self.thinking_mode = "extended"
 
-    def activate_skill(self, name, task_mode=None):
-        self.calls.append(f"activate:{name}")
+    def activate_citation_skill(self):
+        self.calls.append("activate:citation")
         if self.fail_activation:
             raise ValueError("boom")
-        self.active_skill_runtime = StubRuntime(name)
+        self.active_skill_runtime = StubRuntime("citation")
         self.thinking_mode = "normal"
         return self.active_skill_runtime
 
-    def deactivate_skill(self):
+    def deactivate_citation_skill(self):
         self.calls.append("deactivate")
         self.active_skill_runtime = None
 
@@ -132,7 +132,8 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
             super().__init__()
             self.turns: list[str] = []
 
-        async def turn(self, user_input):
+        async def turn(self, user_input, *, skill_name=None):
+            assert skill_name is None
             self.turns.append(user_input)
             return "answer"
 

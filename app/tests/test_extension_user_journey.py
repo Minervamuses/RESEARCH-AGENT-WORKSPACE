@@ -111,7 +111,6 @@ def _write_skill(bundle: Path, *, version: str) -> None:
                         "pinned": True,
                     }
                 ],
-                "task_modes": ["demo"],
             },
             sort_keys=False,
         ),
@@ -259,7 +258,6 @@ def test_user_dropin_apply_restart_use_update_delete(monkeypatch, tmp_path):
         all_tools=tools,
         mcp_families=families,
         global_mcp_families=restarted.global_mcp_families,
-        task_mode="demo",
         catalog=restarted.skills,
     )
     assert "version-one" in runtime_v1.instructions
@@ -303,7 +301,6 @@ def test_user_dropin_apply_restart_use_update_delete(monkeypatch, tmp_path):
         all_tools=tools,
         mcp_families=families,
         global_mcp_families=restarted_v2.global_mcp_families,
-        task_mode="demo",
         catalog=restarted_v2.skills,
     )
     assert restarted_v2.revision == 2

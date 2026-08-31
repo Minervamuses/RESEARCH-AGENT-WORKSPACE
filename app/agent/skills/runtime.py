@@ -29,7 +29,6 @@ class SkillRuntime:
     manifest: Mapping[str, Any]
     pinned_references: dict[str, str]
     tool_access: ToolAccessResolution
-    task_mode: str | None = None
 
     def read_skill_resource(self, rel_path: str) -> str:
         """Read a resource path relative to this skill root."""
@@ -49,8 +48,6 @@ class SkillRuntime:
             "[Active skill]",
             f"name: {self.name}",
         ]
-        if self.task_mode:
-            lines.append(f"task_mode: {self.task_mode}")
         lines.extend([
             "",
             "[SKILL.md]",
@@ -71,7 +68,6 @@ def render_tool_availability_block(
     *,
     resolution: ToolAccessResolution | None = None,
     active_skill: str | None = None,
-    task_mode: str | None = None,
     all_tool_names: Sequence[str] | None = None,
     mcp_families: Mapping[str, str] | None = None,
     global_mcp_families: Collection[str] | None = None,
@@ -107,7 +103,6 @@ def render_tool_availability_block(
     lines = [
         "[Tool availability]",
         f"active_skill: {active_skill or _NONE}",
-        f"task_mode: {task_mode or _NONE}",
         f"available_tools: {_format_tool_names(effective, mcp_families)}",
         f"skill_tools: {_format_tool_names(skill_tools, mcp_families)}",
         f"unavailable_tools: {_format_tool_names(unavailable, mcp_families)}",
@@ -162,7 +157,6 @@ def load_skill_runtime(
     all_tools: Sequence[Any],
     mcp_families: Mapping[str, str] | None = None,
     global_mcp_families: Collection[str] | None = None,
-    task_mode: str | None = None,
     catalog: Sequence[SkillMetadata] | None = None,
 ) -> SkillRuntime:
     """Load a skill and resolve its runtime tool access."""
@@ -172,7 +166,6 @@ def load_skill_runtime(
 
     root = metadata.path.parent.resolve()
     manifest = load_skill_manifest(root)
-    _validate_task_mode(task_mode, manifest)
 
     _frontmatter, instructions = load_skill_file(metadata.path)
     tool_access = resolve_skill_tool_access(
@@ -188,7 +181,6 @@ def load_skill_runtime(
         manifest=manifest,
         pinned_references={},
         tool_access=tool_access,
-        task_mode=task_mode,
     )
     pinned_references = _load_pinned_references(runtime, manifest, config)
     _validate_total_skill_context(
@@ -203,7 +195,6 @@ def load_skill_runtime(
         manifest=runtime.manifest,
         pinned_references=pinned_references,
         tool_access=runtime.tool_access,
-        task_mode=runtime.task_mode,
     )
 
 
@@ -284,15 +275,3 @@ def _validate_total_skill_context(
         raise ValueError(
             f"total skill context too large: {size} chars (limit {limit})"
         )
-
-
-def _validate_task_mode(task_mode: str | None, manifest: Mapping[str, Any]) -> None:
-    if task_mode is None:
-        return
-    modes = manifest.get("task_modes")
-    if not isinstance(modes, list):
-        return
-    valid_modes = {mode for mode in modes if isinstance(mode, str)}
-    if valid_modes and task_mode not in valid_modes:
-        valid = ", ".join(sorted(valid_modes))
-        raise ValueError(f"unknown task mode for skill: {task_mode} (available: {valid})")

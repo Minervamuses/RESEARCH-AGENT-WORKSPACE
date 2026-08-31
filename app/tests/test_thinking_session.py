@@ -524,7 +524,6 @@ def test_active_skill_proposer_keeps_instructions_with_read_only_intersection(
         root=tmp_path,
         instructions="# Paper instructions",
         pinned_references={},
-        task_mode="revision",
         tool_access=_skill_resolution(["read_file", "bash"]),
         context_block=lambda: "[Active skill]\nname: paper",
     )
@@ -550,7 +549,6 @@ def test_active_skill_effective_tools_intersect_read_only(monkeypatch, tmp_path)
         root=tmp_path,
         instructions="# Paper",
         pinned_references={},
-        task_mode=None,
         tool_access=_skill_resolution([
             "rag_explore", "rag_search", "rag_get_context", "recall_history", "bash",
         ]),

@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import shlex
 from typing import Awaitable, Callable, Sequence
 
@@ -16,7 +17,7 @@ from agent.ingest import (
     prune_folder,
 )
 from agent.llm.thinking import ExtendedModeNotConfigured, require_thinking_models
-from agent.skills import SkillMetadata, discover_skills, load_skill_manifest
+from agent.skills import SkillMetadata
 
 
 class SlashCommandError(ValueError):
@@ -39,15 +40,18 @@ class ParsedSlashCommand:
 class SlashCommandResult:
     """Outcome from executing a slash command locally.
 
-    ``followup_input`` asks the chat loop to feed the given text through a
-    normal agent turn (history, trace, and error handling included) right
-    after the local command completes — used by ``/citation <text>``.
+    ``followup_input`` asks the chat loop to feed the given text through an
+    agent turn (history, trace, and error handling included) right after the
+    local command completes. ``skill_name`` selects a transient runtime for
+    that turn; Citation followups leave it unset and use their persistent
+    static handler.
     """
 
     message: str = ""
     should_exit: bool = False
     clear_screen: bool = False
     followup_input: str | None = None
+    skill_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -71,8 +75,14 @@ class SlashCommandContext:
 class SlashCommandRegistry:
     """Lookup and completion support for CLI slash commands."""
 
-    def __init__(self, commands: list[SlashCommand]):
+    def __init__(
+        self,
+        commands: list[SlashCommand],
+        *,
+        diagnostics: Sequence[str] = (),
+    ):
         self._commands = tuple(commands)
+        self.diagnostics = tuple(diagnostics)
         self._by_name: dict[str, SlashCommand] = {}
 
         for command in self._commands:
@@ -137,12 +147,11 @@ async def execute_slash_command(
     return await command.handler(context, parsed)
 
 
-def build_default_registry() -> SlashCommandRegistry:
-    """Create the built-in local slash command set for the chat CLI."""
+def build_default_registry(session: object | None = None) -> SlashCommandRegistry:
+    """Create static commands plus this session's validated Skill commands."""
     from agent.cli.extension_management import handle_extension_management
 
-    return SlashCommandRegistry(
-        [
+    commands = [
             SlashCommand(
                 name="help",
                 description="Show available slash commands.",
@@ -162,11 +171,6 @@ def build_default_registry() -> SlashCommandRegistry:
                 name="thinking",
                 description="Switch reasoning workflow depth (normal or extended).",
                 handler=_handle_thinking,
-            ),
-            SlashCommand(
-                name="skill",
-                description="Activate or deactivate a local skill.",
-                handler=_handle_skill,
             ),
             SlashCommand(
                 name="extension-management",
@@ -216,7 +220,101 @@ def build_default_registry() -> SlashCommandRegistry:
                 handler=_handle_quit,
             ),
         ]
-    )
+    diagnostics: tuple[str, ...] = ()
+    if session is not None:
+        dynamic, diagnostics = _project_skill_commands(session, commands)
+        commands.extend(dynamic)
+    return SlashCommandRegistry(commands, diagnostics=diagnostics)
+
+
+_SKILL_COMMAND_NAME_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+)
+_PROMPT_MASTER_COMMAND = "_prompt-master"
+_RETIRED_SKILL_COMMANDS = frozenset({"skill"})
+_MAX_SKILL_COMMAND_DIAGNOSTICS = 20
+
+
+def _project_skill_commands(
+    session: object,
+    static_commands: Sequence[SlashCommand],
+) -> tuple[list[SlashCommand], tuple[str, ...]]:
+    """Fail closed while projecting the immutable session Skill catalog."""
+    loaded = getattr(session, "loaded_skills", ()) or ()
+    groups: dict[str, list[SkillMetadata]] = {}
+    diagnostics: list[str] = []
+    for skill in loaded:
+        name = getattr(skill, "name", None)
+        if not isinstance(name, str) or not name:
+            diagnostics.append("Skill command unavailable: invalid catalog name")
+            continue
+        groups.setdefault(name.casefold(), []).append(skill)
+
+    reserved = set(_RETIRED_SKILL_COMMANDS)
+    for command in static_commands:
+        reserved.add(command.name.casefold())
+        reserved.update(alias.casefold() for alias in command.aliases)
+
+    projected: list[SlashCommand] = []
+    for normalized, entries in groups.items():
+        # Citation is represented only by its dedicated static command.
+        if normalized == _CITATION_SKILL:
+            continue
+        name = entries[0].name
+        if len(entries) != 1:
+            diagnostics.append(
+                f"Skill command /{name} unavailable: duplicate catalog name"
+            )
+            continue
+        if (
+            name != _PROMPT_MASTER_COMMAND
+            and _SKILL_COMMAND_NAME_RE.fullmatch(name) is None
+        ):
+            diagnostics.append(
+                f"Skill command /{name} unavailable: invalid command name"
+            )
+            continue
+        if normalized in reserved:
+            diagnostics.append(
+                f"Skill command /{name} unavailable: reserved command collision"
+            )
+            continue
+        projected.append(
+            SlashCommand(
+                name=name,
+                description=entries[0].description,
+                handler=_one_shot_skill_handler(name),
+            )
+        )
+
+    if len(diagnostics) > _MAX_SKILL_COMMAND_DIAGNOSTICS:
+        omitted = len(diagnostics) - _MAX_SKILL_COMMAND_DIAGNOSTICS
+        diagnostics = [
+            *diagnostics[:_MAX_SKILL_COMMAND_DIAGNOSTICS],
+            f"{omitted} additional Skill command diagnostics omitted",
+        ]
+    return projected, tuple(diagnostics)
+
+
+def _one_shot_skill_handler(
+    skill_name: str,
+) -> Callable[["SlashCommandContext", ParsedSlashCommand], Awaitable[SlashCommandResult]]:
+    async def _handle(
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+    ) -> SlashCommandResult:
+        del context
+        body = parsed.raw_text[1:]
+        token = re.match(r"\S+", body)
+        prompt = body[token.end():].strip() if token is not None else ""
+        if not prompt:
+            raise SlashCommandError(f"usage: /{skill_name} <prompt>")
+        return SlashCommandResult(
+            followup_input=prompt,
+            skill_name=skill_name,
+        )
+
+    return _handle
 
 
 async def _handle_help(
@@ -232,6 +330,9 @@ async def _handle_help(
             alias_list = ", ".join(f"/{alias}" for alias in command.aliases)
             alias_suffix = f" (aliases: {alias_list})"
         lines.append(f"/{command.name} - {command.description}{alias_suffix}")
+    if context.registry.diagnostics:
+        lines.extend(["", "Unavailable Skill commands:"])
+        lines.extend(f"- {item}" for item in context.registry.diagnostics)
     return SlashCommandResult(message="\n".join(lines))
 
 
@@ -253,8 +354,6 @@ async def _handle_status(
         f"plan_log_path: {status.get('plan_log_path', '') or 'none'}",
         f"thinking_mode: {status.get('thinking_mode', 'normal')}",
         f"mcp_families: {status.get('mcp_families', 'none')}",
-        f"active_skill: {status.get('active_skill', '') or 'none'}",
-        f"task_mode: {status.get('task_mode', '') or 'none'}",
     ]
     return SlashCommandResult(message="\n".join(lines))
 
@@ -436,125 +535,8 @@ async def _handle_mode(
     return SlashCommandResult(message=f"mode -> {target_name}{suffix}")
 
 
-def _session_skills(session: object) -> list[SkillMetadata]:
-    loaded = getattr(session, "loaded_skills", None)
-    if loaded is not None:
-        return list(loaded)
-    config = getattr(session, "config", None)
-    return discover_skills(config)
-
-
-def _render_skill_prompt(session: object) -> str:
-    current = getattr(getattr(session, "active_skill_runtime", None), "name", "")
-    return _render_numbered_menu(
-        header=[f"Current skill: {current or 'none'}", "Available skills:"],
-        zero_option="  [0] none",
-        options=[(skill.name, None) for skill in _session_skills(session)],
-    )
-
-
-def _resolve_skill_choice(raw: str, skills: list[SkillMetadata]) -> str | None:
-    return _resolve_numbered_choice(
-        raw,
-        [skill.name for skill in skills],
-        cancel_tokens=_MENU_CANCEL_TOKENS,
-        zero_tokens=frozenset({"0", "none", "off", "deactivate"}),
-        zero_value="none",
-    )
-
-
-def _find_skill(skills: list[SkillMetadata], name: str) -> SkillMetadata | None:
-    normalized = name.casefold()
-    for skill in skills:
-        if skill.name.casefold() == normalized:
-            return skill
-    return None
-
-
-def _task_modes_for_skill(skill: SkillMetadata) -> list[str]:
-    manifest = load_skill_manifest(skill.path.parent)
-    modes = manifest.get("task_modes")
-    if not isinstance(modes, list):
-        return []
-    return [mode for mode in modes if isinstance(mode, str)]
-
-
 def _skill_command_error(exc: Exception) -> SlashCommandError:
     return SlashCommandError(f"failed to activate skill: {exc}")
-
-
-def _render_skill_mode_prompt(skill_name: str, modes: list[str]) -> str:
-    return _render_numbered_menu(
-        header=[f"Task mode for {skill_name}:", "Available modes:"],
-        zero_option="  [0] none  - no task mode",
-        options=[(mode, None) for mode in modes],
-        footer="Select (number or name; Enter for none): ",
-    )
-
-
-def _resolve_skill_mode_choice(raw: str, modes: list[str]) -> str | None:
-    choice = _resolve_numbered_choice(
-        raw, modes, cancel_tokens=frozenset({"", "0", "none"}),
-    )
-    if choice is not None and choice not in modes:
-        valid = ", ".join(modes)
-        raise SlashCommandError(f"unknown task mode: {choice} (available: {valid})")
-    return choice
-
-
-async def _handle_skill(
-    context: SlashCommandContext,
-    parsed: ParsedSlashCommand,
-) -> SlashCommandResult:
-    if len(parsed.args) > 2:
-        raise SlashCommandError("usage: /skill [name|none] [mode]")
-
-    session = context.session
-    skills = _session_skills(session)
-
-    if parsed.args:
-        target_name = parsed.args[0].strip().lower()
-    else:
-        raw = await asyncio.to_thread(input, _render_skill_prompt(session))
-        target_name = _resolve_skill_choice(raw, skills)
-        if target_name is None:
-            return SlashCommandResult(message="cancelled")
-
-    if target_name in {"none", "off", "deactivate"}:
-        session.deactivate_skill()
-        return SlashCommandResult(message="skill -> none")
-
-    skill = _find_skill(skills, target_name)
-    if skill is None:
-        valid = ", ".join(skill.name for skill in skills) or "none"
-        raise SlashCommandError(
-            f"unknown skill: {target_name} (available: {valid})"
-        )
-
-    if len(parsed.args) == 2:
-        task_mode = parsed.args[1].strip().lower()
-    elif parsed.args:
-        task_mode = None
-    else:
-        try:
-            modes = _task_modes_for_skill(skill)
-        except _SKILL_USER_ERRORS as exc:
-            raise _skill_command_error(exc) from exc
-        if modes:
-            raw = await asyncio.to_thread(
-                input,
-                _render_skill_mode_prompt(skill.name, modes),
-            )
-            task_mode = _resolve_skill_mode_choice(raw, modes)
-        else:
-            task_mode = None
-
-    try:
-        runtime = session.activate_skill(skill.name, task_mode)
-    except _SKILL_USER_ERRORS as exc:
-        raise _skill_command_error(exc) from exc
-    suffix = f" {runtime.task_mode}" if runtime.task_mode else ""
-    return SlashCommandResult(message=f"skill -> {runtime.name}{suffix}")
 
 
 _CITATION_SKILL = "citation"
@@ -585,14 +567,14 @@ async def _handle_citation(
             raise SlashCommandError(
                 "citation skill is not active; nothing to deactivate"
             )
-        session.deactivate_skill()
+        session.deactivate_citation_skill()
         return SlashCommandResult(message="citation skill deactivated")
 
     if _citation_skill_active(session):
         message = "citation skill already active"
     else:
         try:
-            session.activate_skill(_CITATION_SKILL)
+            session.activate_citation_skill()
         except _SKILL_USER_ERRORS as exc:
             raise _skill_command_error(exc) from exc
         message = (

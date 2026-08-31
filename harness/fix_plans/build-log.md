@@ -8,7 +8,7 @@
 | --- | --- | ---: | --- | --- | --- |
 | 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
-| 03 — One-shot Skill runtime | Not started | 0 | None | None | None |
+| 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | Pending local commit |
 | 04 — Desktop Skill command | Not started | 0 | None | None | None |
 | 05 — Normal live streaming | Not started | 0 | None | None | None |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
@@ -18,7 +18,7 @@
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
 - Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
-- Next eligible phase是Phase 03（dependencies none）。
+- Phases 01–03 focused implementation與scope audit完成；Phase 03 local commit pending。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
@@ -193,6 +193,51 @@
 - Commit disposition/hash: `45d446da4aa005019c7d8c8eded5e6a91b7251dc` (`fix(desktop): remove request deadline`)。This follow-up changes only the durable hash record。
 - Blockers or disproved assumptions: none。
 - Next eligible action: commit this hash record, verify clean tree, then load Phase 03。
+
+## 2026-09-01 00:45 CST — Phase 03: runtime/source preflight
+
+- Status transition: `Not started` → `In progress`。
+- Durable sources reloaded: `phases/phase-03-one-shot-skill-runtime.md`已完整重讀；root `AGENTS.md`、`PROMPTS.md`、`GOALS.md`、`PLANS.md`、`user-decisions.md`與本檔沿用本次Start/Resume的完整reload。Live `session.py`、Skill schema/runtime/state、thinking orchestrator、CLI registry/chat/completion、built-in manifests/guide、extension startup以及所有直接grep命中的core tests已重新檢查。
+- Runtime/Git/dirty-tree gate: repository `/home/minervamuses/research-agent-workspace`，WSL/Linux runtime，branch `GUI`；HEAD `772bffd855dd715eca47d0c2da93e057f975c517`；preflight前`git status --short`無輸出。後續Python命令固定用`/home/minervamuses/miniconda3/bin/conda run -n app poetry ...`；未切branch/worktree。
+- Authorization in force: 使用者明確授權移除Task mode全鏈、完成USER DECISION 011所需的多production-file core/CLI/manifest/test修改、focused checks與phase-only local commit；Desktop React/Rust/protocol留給Phase 04。Dependency/lockfile、provider、real MCP/Ollama/store/credential、其他non-goal與push仍未授權。
+- Current causal hypothesis and attempt number: attempt 1。現況把一般Skill綁在persistent `/skill` handler、`ChatSession.active_skill_runtime`與manifest/runtime/state/thinking的`task_mode`欄位；最小因果修復是從session的`loaded_skills`投影validated dynamic slash commands，保留static namespace優先與`_prompt-master`唯一例外，把raw trailing prompt交給session lock內先load後switch的one-shot `try/finally` runtime，並把Citation activation縮成citation-only seam。
+- Exact initial/expanded write set and ownership: core candidate set是`app/agent/skills/manifest_schema.py`、`app/agent/skills/runtime.py`、`app/agent/state.py`、`app/agent/session.py`、`app/agent/thinking/orchestrator.py`、`app/agent/cli/slash_commands.py`、`app/agent/cli/chat.py`（`prompting.py`目前只消費同一registry，除非rejecting evidence證明需要才改）；metadata/docs是兩個built-in `manifest.yaml`與`app/SKILLS_GUIDE.md`。Direct test set是phase明列tests，加上`app/tests/conftest.py`、`test_graph_skill_loader.py`、`test_history_recall_routing.py`、`test_skill_adherence.py`、`test_thinking_session.py`、`test_tool_access.py`、`test_thinking.py`、`test_citation_e2e.py`、`test_tool_access_matrix.py`、`test_turn_finalizer.py`，它們分別直接建構已刪欄位或呼叫將縮限的Citation seam。`app/agent/desktop/**`與desktop tests不在本phase write set。
+- Commands actually run and exact outcomes: Linux `git status --short`無輸出，`git rev-parse HEAD`得到上述hash；base WSL `rg`不存在（exit 127），改用`grep -R`。Production search確認core/CLI的Task-mode owners只有manifest schema、runtime、state、session、thinking orchestrator、slash handler與兩個built-in manifests/guide；`/skill` persistent owner只在session prompt、slash handler與guide。Test search辨識出上述直接field/seam consumers；尚未執行Phase 03 application tests。
+- User-visible/fixture observation: current `/skill academic-paper-writing revision`會建立跨turn runtime，status/help仍宣告active Skill與Task mode；dynamic `/<skill-name> <prompt>`尚未註冊。No provider、MCP process、Ollama、credential、real store或GUI process被啟動。
+- Diff/scope/safety audit: Phase 03第一個write只有本execution log；no application、dependency、lockfile或generated output changed。
+- Commit disposition/hash: pending focused verification。
+- Blockers or disproved assumptions: `prompting.py`已由傳入registry產生completion，預期不需production改動；Desktop generic calls確實仍存在，但依phase dependency明確延後Phase 04，不建立compatibility adapter。
+- Next eligible action: 先把dynamic namespace/raw prompt、one-shot lifecycle/cleanup、Citation matrix與legacy manifest unavailable契約寫成最小tests，跑phase列出的最小selectors取得能拒絕現況的red evidence，再做attempt 1 implementation。
+
+## 2026-09-01 00:47 CST — Phase 03: focused causal red established
+
+- Status transition: remains `In progress`；attempt 1 hypothesis retained。
+- Runtime/Git/dirty-tree gate: dirty paths are the three declared rejecting-test files plus `build-log.md`；production still unchanged。
+- Current causal hypothesis and attempt number: attempt 1 confirmed independently at registry、session lifecycle與legacy schema boundaries。
+- Exact initial/expanded write set and ownership: rejecting additions only in `app/tests/test_slash_commands.py`、`app/tests/test_skills.py`、`app/tests/test_extension_skill_startup.py`；final direct set remains the preflight declaration。
+- Commands actually run and exact outcomes: from `app/`, `/home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_slash_commands.py::test_session_registry_projects_one_shot_skill_and_preserves_raw_prompt tests/test_skills.py::test_chat_session_skill_runtime_is_one_shot_and_uses_trailing_prompt tests/test_extension_skill_startup.py::test_startup_reports_legacy_task_modes_manifest_as_unavailable -q` → exit 1, `3 failed, 1 warning in 0.35s`。Failures were: `build_default_registry(session)` TypeError（current registry is global/static only）；`ChatSession.turn(..., skill_name=...)` TypeError（no one-shot lifecycle seam）；legacy installed manifest diagnostic was `installed Skill hash differs from registry` and did not contain `task_modes` because current schema still accepts that field。Warning is the existing LangGraph `allowed_objects` pending-deprecation warning。
+- User-visible/fixture observation: raw example is `/paper-writing draft  "quoted"   text` and expected model/history input is exactly `draft  "quoted"   text` with internal spacing/quotes preserved。Legacy extension fixture is entirely under pytest-owned `tmp_path`; no real applied state or external system touched。
+- Diff/scope/safety audit: no production、dependency、lockfile or generated output changed before red；the failures directly distinguish all three intended production changes。
+- Commit disposition/hash: none；red checkpoint is not committable completion。
+- Blockers or disproved assumptions: none。
+- Next eligible action: implement session-specific static+dynamic registry projection, one-shot runtime inside the existing turn lock, Citation-only persistent seam, and removal of Task mode schema/runtime/state propagation; rerun these same selectors before rewriting obsolete persistent-contract tests。
+
+## 2026-09-01 01:01 CST — Phase 03: focused verification complete
+
+- Status transition: `In progress` → `Complete` after focused verification、catalog/lifecycle audit and exact write-set review。
+- Durable sources reloaded: Phase 03 objective、Citation matrix、lifecycle、catalog validation、Task-mode removal與handoff evidence逐項對照live diff/tests；global authorization/non-goals unchanged。
+- Runtime/Git/dirty-tree gate: WSL/Linux and Conda `app` retained；dirty tree contains exactly 29 declared Phase 03 paths（8 core/CLI production files、2 manifests、`SKILLS_GUIDE.md`、17 directly affected test/fake files、this log）。`app/agent/cli/prompting.py` remained read-only because its existing completer already consumes the session registry；no Desktop production/protocol/UI file changed。
+- Authorization in force: unchanged；Phase-only local commit authorized, push unauthorized。
+- Current causal hypothesis and attempt number: attempt 1 confirmed。The static registry now projects valid dynamic commands exclusively from `session.loaded_skills`; `ChatSession.turn(..., skill_name=...)` loads inside the existing turn lock, switches only after successful load, and identity-clears the transient runtime in `finally`。
+- Exact initial/expanded write set and ownership: final changed paths are the 29 paths shown by `git diff --name-only` at this checkpoint。The extra tests beyond the phase's expected list directly constructed the removed state field or called the old generic Citation seam; no unrelated implementation、new module or test framework was added。
+- Commands actually run and exact outcomes: smallest post-implementation rerun of the three causal-red selectors → `3 passed, 1 warning in 0.27s`。The first planned seven-file selector after core implementation → exit 1, `20 failed, 67 passed, 1 warning in 0.70s`; every failure was an obsolete persistent-command/Task-mode fixture or expectation（including the extension journey's old mode field）, not a new production branch failure。After replacing those contracts, the same planned command → `84 passed` then final rerun after `_prompt-master` coverage → `85 passed, 1 warning in 1.50s`。Planned Citation command `pytest tests/test_citation_slash_command.py tests/test_citation_skill_activation.py -q` → `20 passed, 1 warning in 0.14s`。Direct causal-ripple selector over graph loader、history routing、skill adherence、thinking、tool access、Citation E2E/matrix and finalizer → `152 passed, 1 warning in 0.81s`。All warnings are the pre-existing LangGraph `allowed_objects` pending-deprecation warning。
+- User-visible/fixture observation: static names/aliases remain `help`、`status`、`mode`、`thinking`、`extension-management`、`init`、`ingest`、`sync`、`prune`、`citation`、`clear`、`quit`/`exit`; retired `skill` is additionally reserved but unregistered。Valid dynamic entries use the loaded catalog only；invalid names、casefold duplicates and static/alias/retired collisions are omitted with at most 20 detail diagnostics plus one bounded omitted-count line。`citation` always resolves to the static handler；exact `_prompt-master` is the sole underscore exception and passed help、completion and dispatch checks。Raw `/paper-writing draft  "quoted"   text` produced Skill name `paper-writing` and model/history input exactly `draft  "quoted"   text`。
+- User-visible/fixture observation (lifecycle/Citation): success made the runtime visible in prompt/agent state for exactly one graph work and the next ordinary turn observed none；RuntimeError and `CancelledError` both observed the selected runtime during work and none afterward。Unknown/empty/collision fail in registry before model；target load failure happens before state mutation。With Citation active, empty/unknown/collision/load failure preserved the same service/registry identity；a valid academic Skill switch tore Citation down, completed once, then left no runtime and did not restore Citation。Citation's own static persistent semantics、finalizer and thinking rule remain otherwise unchanged；Citation redesign was not performed。
+- User-visible/fixture observation (extension): the explicit legacy installed-manifest fixture now returns one bounded `applied_but_unavailable` startup diagnostic naming the removed field。The extension user journey used only its existing pytest-owned temp roots and existing local sandbox MCP subprocess/echo fixture; it used no configured/real MCP server、network provider、credential or user store, and cleaned up through the existing test lifecycle。
+- Diff/scope/safety audit: `git diff --check` exit 0/no output。Core/manifests search excluding `app/agent/desktop` found no `task_mode`/`task_modes` or generic activate/deactivate seam；`SKILLS_GUIDE.md` search found none；non-Desktop Python tests contain the removed field only in `test_startup_reports_legacy_task_modes_manifest_as_unavailable`。Persistent-command search produced only unrelated path prose containing `/skill` as a directory fragment, and the explicit retired-command regression is the sole command-form legacy input。No dependency/lockfile path changed；broader-suite counters remain `0`。
+- Commit disposition/hash: authorized Phase 03 local commit pending；hash will be appended immediately after creation in a log-only follow-up commit。
+- Blockers or disproved assumptions: no blocker。Disproved only the expectation that `prompting.py` needed modification；the existing registry-backed completer required none。
+- Next eligible action: stage exactly these 29 paths, run cached diff/name audit, create the local Phase 03 commit, record its hash, verify clean tree, then continue directly to dependent Phase 04。
 
 ## Execution Entry Template
 

@@ -113,9 +113,19 @@ class FakeChatSession:
         self._record_repr = record_repr
         self._status = status
 
-    async def turn(self, user_input: str) -> str:
+    async def turn(
+        self,
+        user_input: str,
+        *,
+        skill_name: str | None = None,
+    ) -> str:
+        skill_suffix = f" skill:{skill_name}" if skill_name is not None else ""
         self.calls.append(
-            f"turn:{user_input!r}" if self._record_repr else f"turn:{user_input}"
+            (
+                f"turn:{user_input!r}{skill_suffix}"
+                if self._record_repr
+                else f"turn:{user_input}{skill_suffix}"
+            )
         )
         if self._turn_error is not None:
             raise self._turn_error

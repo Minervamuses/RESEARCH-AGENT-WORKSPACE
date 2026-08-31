@@ -86,7 +86,7 @@ GLOBAL_NAMES = (
             id="normal-mode",
         ),
         pytest.param(
-            {"resources": [], "task_modes": ["revision"]},
+            {"resources": []},
             ALL_TOOLS,
             MCP_FAMILIES,
             (GLOBAL_NAMES, (), GLOBAL_NAMES, (), ()),

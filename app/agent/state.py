@@ -23,7 +23,6 @@ class AgentState(TypedDict, total=False):
     skill_root: str | None
     skill_instructions: str | None
     loaded_references: dict[str, str]
-    task_mode: str | None
     # The shared tool access resolution's effective tool names for this turn.
     # Absent/None means normal mode: the graph binds its default global tools.
     effective_tools: list[str] | None
@@ -43,6 +42,5 @@ def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
         "skill_root": str(runtime.root),
         "skill_instructions": runtime.instructions,
         "loaded_references": dict(runtime.pinned_references),
-        "task_mode": runtime.task_mode,
         "effective_tools": list(runtime.tool_access.effective_tools),
     }

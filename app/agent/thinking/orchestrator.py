@@ -151,7 +151,6 @@ class FusionOrchestrator:
         return render_tool_availability_block(
             resolution=self._proposer_resolution(),
             active_skill=getattr(runtime, "name", None) if runtime else None,
-            task_mode=getattr(runtime, "task_mode", None) if runtime else None,
             all_tool_names=tool_inventory.base_tool_names(
                 extra_tools=self._session.extra_tools
             ),
@@ -180,7 +179,6 @@ class FusionOrchestrator:
             # No active skill: skill_instructions are intentionally not injected.
             "skill_instructions": runtime.instructions if runtime else None,
             "loaded_references": dict(runtime.pinned_references) if runtime else {},
-            "task_mode": runtime.task_mode if runtime else None,
             "effective_tools": self._proposer_read_only_names(),
         }
 

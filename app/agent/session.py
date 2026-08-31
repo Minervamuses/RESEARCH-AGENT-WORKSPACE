@@ -65,9 +65,10 @@ GitHub MCP tools (skill-scoped):
 - Use for remote GitHub state: repository content not in the local KB, pull requests, issues, Actions runs, code search across GitHub.
 - Do NOT use GitHub MCP as a substitute for local git shell operations (clone, pull, rebase, commit). Those belong to the user's terminal, not to you.
 
-Local skills (user-activated):
-- Skill bundles live under `skills/<name>/`. The user activates one via the `/skill` slash command; you cannot self-activate.
-- When a skill is active, its instructions and tool availability arrive as an ephemeral system message — follow them.
+Local skills (user-selected, one turn at a time):
+- Skill bundles live under `skills/<name>/`. The user selects one with `/<skill-name> <prompt>`; the slash wrapper is removed before the prompt reaches you, and you cannot self-select a skill.
+- For that one turn, the selected skill's instructions and tool availability arrive as ephemeral system messages — follow them. They do not persist into the next ordinary turn.
+- Citation is the sole persistent exception and is controlled by the dedicated `/citation` command.
 - If the user asks what skills are available, discover the bundle names by listing `skills/` via `bash`.
 
 Language policy:
@@ -267,7 +268,6 @@ class ChatSession:
         return render_tool_availability_block(
             resolution=self.tool_access_resolution(),
             active_skill=runtime.name if runtime is not None else None,
-            task_mode=runtime.task_mode if runtime is not None else None,
             all_tool_names=self._tool_universe_refs(),
             mcp_families=self.mcp_families,
         )
@@ -437,37 +437,53 @@ class ChatSession:
         """
         self._citation_policy.reset()
 
-    def activate_skill(self, name: str, task_mode: str | None = None) -> SkillRuntime:
-        """Activate a local skill for subsequent turns.
-
-        Activating the citation skill forces normal thinking (its session
-        registry must never be shared by parallel fusion candidates).
-        Leaving the citation skill — for another skill or none — tears down
-        its session state. A failed load leaves the previous skill active.
-        """
-        runtime = load_skill_runtime(
+    def _load_skill_runtime(self, name: str) -> SkillRuntime:
+        """Load one runtime from this session's immutable startup catalog."""
+        return load_skill_runtime(
             name,
             config=self.config,
             all_tools=self._tool_universe_refs(),
             mcp_families=self.mcp_families,
             global_mcp_families=self.global_mcp_families,
-            task_mode=task_mode,
             catalog=self.loaded_skills,
         )
-        previous = self.active_skill_runtime
+
+    def activate_citation_skill(self) -> SkillRuntime:
+        """Activate the sole persistent Skill and force normal thinking."""
+        runtime = self._load_skill_runtime(CITATION_SKILL_NAME)
         self.active_skill_runtime = runtime
-        if runtime.name == CITATION_SKILL_NAME:
-            self.thinking_mode = "normal"
-        elif previous is not None and previous.name == CITATION_SKILL_NAME:
-            self._teardown_citation_session_state()
+        self.thinking_mode = "normal"
         return runtime
 
-    def deactivate_skill(self) -> None:
-        """Deactivate the current local skill, if any."""
-        was_citation = self.citation_skill_active
+    def deactivate_citation_skill(self) -> None:
+        """Deactivate Citation without touching an unrelated transient Skill."""
+        if not self.citation_skill_active:
+            return
         self.active_skill_runtime = None
-        if was_citation:
-            self._teardown_citation_session_state()
+        self._teardown_citation_session_state()
+
+    async def _run_one_shot_skill_turn(
+        self,
+        user_input: str,
+        skill_name: str,
+    ) -> TurnOutcome:
+        """Load, run, and clear one non-Citation Skill under the turn lock."""
+        if not user_input.strip():
+            raise ValueError("skill prompt cannot be empty")
+        if skill_name.casefold() == CITATION_SKILL_NAME.casefold():
+            raise ValueError("citation must be controlled with /citation")
+
+        # Loading and validation happen before any active session state changes.
+        runtime = self._load_skill_runtime(skill_name)
+        previous = self.active_skill_runtime
+        self.active_skill_runtime = runtime
+        try:
+            if previous is not None and previous.name == CITATION_SKILL_NAME:
+                self._teardown_citation_session_state()
+            return await self._run_turn(user_input)
+        finally:
+            if self.active_skill_runtime is runtime:
+                self.active_skill_runtime = None
 
     def _tool_universe_refs(self) -> list[str]:
         """Every tool that actually exists in this session, global or skill.
@@ -610,14 +626,29 @@ class ChatSession:
             return await self._fusion.run_extended_turn(user_input)
         return await self._run_normal_turn(user_input)
 
-    async def turn_outcome(self, user_input: str) -> TurnOutcome:
+    async def turn_outcome(
+        self,
+        user_input: str,
+        *,
+        skill_name: str | None = None,
+    ) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""
         async with self._turn_execution_lock:
+            if skill_name is not None:
+                return await self._run_one_shot_skill_turn(
+                    user_input,
+                    skill_name,
+                )
             return await self._run_turn(user_input)
 
-    async def turn(self, user_input: str) -> str:
+    async def turn(
+        self,
+        user_input: str,
+        *,
+        skill_name: str | None = None,
+    ) -> str:
         """Process one conversation turn. Returns the final text response."""
-        outcome = await self.turn_outcome(user_input)
+        outcome = await self.turn_outcome(user_input, skill_name=skill_name)
         return outcome.text
 
     def status_snapshot(self) -> dict[str, str | int]:
@@ -637,16 +668,6 @@ class ChatSession:
             "extension_revision": self.running_extension_revision,
             "extension_diagnostics": "; ".join(
                 self.extension_startup_diagnostics
-            ),
-            "active_skill": (
-                self.active_skill_runtime.name
-                if self.active_skill_runtime is not None
-                else ""
-            ),
-            "task_mode": (
-                self.active_skill_runtime.task_mode
-                if self.active_skill_runtime is not None and self.active_skill_runtime.task_mode
-                else ""
             ),
         }
 

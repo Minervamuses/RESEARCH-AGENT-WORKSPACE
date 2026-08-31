@@ -11,7 +11,6 @@ _EXPECTED_KEYS = {
     "skill_root",
     "skill_instructions",
     "loaded_references",
-    "task_mode",
     "effective_tools",
 }
 
@@ -32,7 +31,6 @@ def _runtime(**overrides):
         root=Path("/tmp/skills/paper-writing"),
         instructions="# Skill",
         pinned_references={"references/guide.md": "guide"},
-        task_mode="revision",
         tool_access=_resolution(),
     )
     base.update(overrides)
@@ -51,7 +49,6 @@ def test_active_runtime_returns_exact_key_set_without_messages():
     assert state["active_skill"] == "paper-writing"
     assert state["skill_root"] == str(Path("/tmp/skills/paper-writing"))
     assert state["skill_instructions"] == "# Skill"
-    assert state["task_mode"] == "revision"
 
 
 def test_effective_tools_preserve_resolution_order():

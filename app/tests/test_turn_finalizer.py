@@ -222,7 +222,7 @@ def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):
     session, _ = make_session(
         answer="Transformers work [[cite:src-known]]. Really [[cite:src-known]]."
     )
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("tell me"))
     assert "Transformers work [1]. Really [1]." in outcome.text
@@ -242,7 +242,7 @@ def test_raw_citation_styles_are_not_blocked_or_rewritten(
     )
     session, _ = make_session(answer=draft)
     if active:
-        session.activate_skill("citation")
+        session.activate_citation_skill()
         _seed_verified_source(session, tmp_path)
 
     outcome = asyncio.run(session.turn_outcome("tell me"))
@@ -256,7 +256,7 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
     make_session, tmp_path, caplog,
 ):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
 
     with caplog.at_level(logging.INFO, logger="agent.observability"):
@@ -288,7 +288,7 @@ def test_multiple_save_artifacts_aggregate_without_invariant_failure(
     make_session, tmp_path,
 ):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     second = _save_tool_message(session, call_id="save-2")
     second.artifact["items"][1]["status"] = "reused"
@@ -318,7 +318,7 @@ def test_registry_mismatch_affects_telemetry_but_not_model_prose(
     make_session, tmp_path, field, forged_value,
 ):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
     message.artifact["items"][1]["receipt"][field] = forged_value
@@ -339,7 +339,7 @@ def test_forged_receipt_identifier_never_reaches_logs(
     make_session, tmp_path, caplog,
 ):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
     secret = "10.9999/private-provider-text"
@@ -362,7 +362,7 @@ def test_forged_receipt_identifier_never_reaches_logs(
 
 def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="save",
@@ -377,7 +377,7 @@ def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
 
 def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     save_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
         "args": {"action": "save", "works": []},
@@ -413,7 +413,7 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
 
 def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_path):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
     saved_item = message.artifact["items"][1]
@@ -436,7 +436,7 @@ def test_all_save_failures_do_not_deterministically_replace_model_draft(
     make_session, tmp_path,
 ):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="全部存下來",
@@ -458,7 +458,7 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     make_session, tmp_path, draft,
 ):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="確認",
@@ -474,7 +474,7 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
 
 def test_plan_log_records_model_answer_without_injecting_receipt(make_session, tmp_path):
     session, _ = make_session()
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     asyncio.run(session.enter_plan_mode())
     draft = "Saved according to the tool."
@@ -495,7 +495,7 @@ def test_plan_log_records_model_answer_without_injecting_receipt(make_session, t
 
 def test_eviction_persists_model_answer_as_plain_assistant_text(make_session, tmp_path):
     session, store = make_session(window=1)
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.finalize_and_record(
         user_input="儲存",
@@ -531,7 +531,7 @@ def test_user_doi_in_input_is_never_auto_registered(make_session):
 
 def test_dangling_cite_marker_blocks_in_citation_mode(make_session, tmp_path):
     session, _ = make_session(answer="Bogus [[cite:src-ghost]].")
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
     assert any("dangling_cite" in error for error in outcome.validation_errors)
@@ -560,10 +560,10 @@ def test_plain_web_link_passes_and_renderer_skips_outside_citation_mode(
 
 def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path):
     session, _ = make_session(answer="plain")
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     assert session._build_sources_hint() is not None
-    session.deactivate_skill()
+    session.deactivate_citation_skill()
     assert session._build_sources_hint() is None
     assert session._citation_service is None
 
@@ -571,7 +571,7 @@ def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):
     session, _ = make_session()
     assert session._build_sources_hint() is None
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     assert session._build_sources_hint() is None
     _seed_verified_source(session, tmp_path)
     hint = session._build_sources_hint()

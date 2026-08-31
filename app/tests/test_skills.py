@@ -1,9 +1,14 @@
 """Tests for local skill discovery and prompt rendering."""
 
+import asyncio
+
+import pytest
+
 from agent.config import AgentConfig
 from agent.state import AgentState
 from agent.skills import discover_skills
 from agent.session import ChatSession
+from agent.turns.results import TurnOutcome
 
 
 def test_discover_skills_reads_name_description_and_path(tmp_path):
@@ -131,12 +136,14 @@ def test_agent_config_exposes_skill_runtime_toggles(tmp_path):
     assert cfg.skill_max_total_skill_context_chars == 200000
 
 
-def test_chat_session_activate_skill_sets_status_and_prompt_context(tmp_path, monkeypatch):
+def test_chat_session_skill_runtime_is_one_shot_and_uses_trailing_prompt(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.chdir(tmp_path)
     skills_dir = tmp_path / "skills"
     target = skills_dir / "paper-writing"
-    refs = target / "references"
-    refs.mkdir(parents=True)
+    target.mkdir(parents=True)
     (target / "SKILL.md").write_text(
         """---
 name: paper-writing
@@ -147,72 +154,83 @@ description: Use when the user wants help with academic writing.
 """,
         encoding="utf-8",
     )
-    (refs / "guide.md").write_text("reference guide", encoding="utf-8")
-    (target / "manifest.yaml").write_text(
-        """
-resources:
-  - path: references/guide.md
-    pinned: true
-task_modes:
-  - revision
-""",
-        encoding="utf-8",
-    )
-
-    class _FakeGraph:
-        async def astream(self, state, config=None, stream_mode="updates"):
-            if False:  # pragma: no cover
-                yield state
 
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: _FakeGraph(),
+        lambda _cfg, extra_tools=None, history_store=None, **kwargs: object(),
     )
+    session = ChatSession(
+        AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
+    )
+    observed: list[tuple[str, str | None]] = []
 
-    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
-    session = ChatSession(cfg)
-    runtime = session.activate_skill("paper-writing", "revision")
+    async def capture_turn(user_input: str) -> TurnOutcome:
+        runtime = session.active_skill_runtime
+        observed.append((user_input, runtime.name if runtime else None))
+        return TurnOutcome(text="ok")
 
-    status = session.status_snapshot()
-    prompt = "\n".join(message.content for message in session._prompt_history())
+    monkeypatch.setattr(session, "_run_turn", capture_turn)
 
-    assert runtime.name == "paper-writing"
-    assert status["active_skill"] == "paper-writing"
-    assert status["task_mode"] == "revision"
-    assert "[Active skill]" in prompt
-    assert "# Paper Writing" in prompt
-    assert "reference guide" in prompt
+    assert asyncio.run(
+        session.turn("draft  this", skill_name="paper-writing")
+    ) == "ok"
+    assert session.active_skill_runtime is None
+    assert asyncio.run(session.turn("next")) == "ok"
+    assert observed == [
+        ("draft  this", "paper-writing"),
+        ("next", None),
+    ]
 
 
-def test_chat_session_deactivate_skill_clears_status(tmp_path, monkeypatch):
+def test_chat_session_one_shot_skill_cleans_up_on_error_and_cancel(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.chdir(tmp_path)
-    skills_dir = tmp_path / "skills"
-    target = skills_dir / "paper-writing"
+    target = tmp_path / "skills" / "paper-writing"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text(
-        """---
-name: paper-writing
-description: Use when the user wants help with academic writing.
----
-""",
+        "---\nname: paper-writing\n"
+        "description: Use when writing papers.\n---\n",
         encoding="utf-8",
     )
-
-    class _FakeGraph:
-        async def astream(self, state, config=None, stream_mode="updates"):
-            if False:  # pragma: no cover
-                yield state
-
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: _FakeGraph(),
+        lambda _cfg, extra_tools=None, history_store=None, **kwargs: object(),
+    )
+    session = ChatSession(
+        AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
     )
 
-    cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
-    session = ChatSession(cfg)
-    session.activate_skill("paper-writing")
-    session.deactivate_skill()
+    async def fail(_user_input: str) -> TurnOutcome:
+        assert session.active_skill_runtime.name == "paper-writing"
+        raise RuntimeError("provider failed")
+
+    monkeypatch.setattr(session, "_run_turn", fail)
+    with pytest.raises(RuntimeError, match="provider failed"):
+        asyncio.run(session.turn("draft", skill_name="paper-writing"))
+    assert session.active_skill_runtime is None
+
+    async def cancel(_user_input: str) -> TurnOutcome:
+        assert session.active_skill_runtime.name == "paper-writing"
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(session, "_run_turn", cancel)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(session.turn("draft", skill_name="paper-writing"))
+    assert session.active_skill_runtime is None
+
+
+def test_chat_session_status_has_no_persistent_generic_skill_state(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _cfg, extra_tools=None, history_store=None, **kwargs: object(),
+    )
+    session = ChatSession(AgentConfig(persist_dir=str(tmp_path)))
 
     status = session.status_snapshot()
-    assert status["active_skill"] == ""
-    assert status["task_mode"] == ""
+
+    assert "active_skill" not in status

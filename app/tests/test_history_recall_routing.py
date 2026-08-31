@@ -69,7 +69,6 @@ def _academic_runtime(tmp_path, *, effective):
         root=tmp_path,
         instructions="# Academic paper writing",
         pinned_references={},
-        task_mode=None,
         tool_access=ToolAccessResolution(
             global_tools=effective,
             skill_tools=(),

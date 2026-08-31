@@ -297,7 +297,7 @@ def test_search_selection_save_bundle_journey_reads_tool_messages(
 ):
     model = _SearchSaveModel()
     session = _make_session(monkeypatch, tmp_path, model)
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     service = _seed_fixture_service(session, tmp_path)
 
     answer = asyncio.run(
@@ -341,20 +341,18 @@ def test_citation_workflow_denial_is_consumed_by_model(
 ):
     model = _DenialAwareModel()
     session = _make_session(monkeypatch, tmp_path, model)
-    if active_skill is not None:
-        session.activate_skill(active_skill)
+    outcome = asyncio.run(session.turn_outcome(
+        "查 HPC 論文",
+        skill_name=active_skill,
+    ))
 
-    result = asyncio.run(session._run_graph_turn("查 HPC 論文"))
-
-    denial = next(
-        message
-        for message in result.new_messages
-        if isinstance(message, ToolMessage) and message.name == "citation_workflow"
-    )
+    denial = model.denial_message
+    assert denial is not None
     assert denial.status == "error"
     assert model.denial_message is denial
-    assert result.answer == f"citation unavailable: {denial.content}"
+    assert outcome.text == f"citation unavailable: {denial.content}"
     assert session._citation_service is None
+    assert session.active_skill_runtime is None
 
 
 def test_search_selection_journey_stops_when_search_is_empty(
@@ -364,7 +362,7 @@ def test_search_selection_journey_stops_when_search_is_empty(
     model = _EmptySearchAwareModel()
     fetcher = _EmptyFetcher()
     session = _make_session(monkeypatch, tmp_path, model)
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     service = _seed_fixture_service(session, tmp_path, fetcher=fetcher)
 
     answer = asyncio.run(session.turn("搜尋並保存不存在的論文"))
@@ -385,7 +383,7 @@ def test_search_selection_journey_rejects_malformed_save_receipt(
 ):
     model = _RejectingReceiptModel()
     session = _make_session(monkeypatch, tmp_path, model)
-    session.activate_skill("citation")
+    session.activate_citation_skill()
     service = _seed_fixture_service(session, tmp_path)
 
     async def malformed_save(_intents):
