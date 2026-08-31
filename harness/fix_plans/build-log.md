@@ -373,6 +373,14 @@
 - Commit disposition/hash: plan-only coherent checkpoint可在離開skill invocation後依使用者local-commit authority建立；remote push仍未授權。
 - Next eligible action:結束planning-only invocation，建立scoped local plan-repair checkpoint，然後以更新後Phase 05的單一Python selector取得final-only causal red。
 
+## 2026-09-01 01:53 CST — Phase 05: durable plan repair commit recorded
+
+- Status transition: remains `In progress`；application implementation尚未開始。
+- Exact commit: `2c6d946c5b8f540fe7995ea55592a3aef66afc13` (`docs(plan): adopt final-only answers`)。
+- Commit scope: exact 7-fileplan repair set；`170 insertions(+), 109 deletions(-)`。Pre-commit `git diff --cached --check` exit`0`，cached name audit只列上述7個paths。
+- Immediate post-commit audit: `git status --short`無輸出；no application、dependency、lockfile、branch/worktree或remote change。
+- Next eligible action: record the Phase 05 implementation preflight/write set，add the single final-only rejecting regression，and run only that selector。
+
 ## Execution Entry Template
 
 後續每個 checkpoint append 一筆，不覆寫歷史 evidence：
