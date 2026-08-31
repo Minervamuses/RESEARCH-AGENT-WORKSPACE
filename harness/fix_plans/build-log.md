@@ -6,7 +6,7 @@
 
 | Phase | Status | Attempts against current cause | Last checkpoint | Evidence / 證據 | Commit |
 | --- | --- | ---: | --- | --- | --- |
-| 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | Pending phase commit |
+| 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
 | 02 — Long-request liveness | Not started | 0 | None | None | None |
 | 03 — One-shot Skill runtime | Not started | 0 | None | None | None |
 | 04 — Desktop Skill command | Not started | 0 | None | None | None |
@@ -16,7 +16,7 @@
 
 ## Current Checkpoint
 
-- Phase 01 focused implementation與scope audit完成；local commit/hash recording pending。
+- Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成。
 - Next eligible phase依 numeric order是Phase 02；Phase 03亦無dependencies，但executor每次只選第一個eligible phase。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
@@ -91,6 +91,16 @@
 - Commit disposition/hash: authorized phase-only local commit pending；hash will be appended immediately after creation in a Phase 01 log-only follow-up commit。
 - Blockers or disproved assumptions: none。
 - Next eligible action: create the scoped local commit, record its hash, restore a clean tree, then continue directly to Phase 02。
+
+## 2026-09-01 00:22 CST — Phase 01: local commit recorded
+
+- Status transition: remains `Complete`。
+- Runtime/Git/dirty-tree gate: explicit five-path staging audit passed；implementation commit後worktree clean。
+- Commands actually run and exact outcomes: `git diff --check` and `git diff --cached --check` both exited 0 with no output；`git diff --cached --name-only` listed exactly the five declared Phase 01 paths。
+- Diff/scope/safety audit: local commit contains only Phase 01 production、regressions與execution evidence；no branch/worktree operation or push occurred。
+- Commit disposition/hash: `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` (`fix(desktop): enable MCP by default`)。This follow-up changes only the durable hash record。
+- Blockers or disproved assumptions: the first inline `git rev-parse` print was host-expanded before the commit and displayed the pre-commit hash；a separate direct WSL `git rev-parse HEAD` established the authoritative hash above。No test/evidence claim depended on the stale print。
+- Next eligible action: commit this Phase 01 hash record, verify clean tree, then load Phase 02。
 
 ## Execution Entry Template
 
