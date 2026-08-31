@@ -745,6 +745,10 @@ class PlanLog:
         for result_index, message, raw_call_id in result_entries:
             if result_index in consumed_results:
                 continue
+            raw_name = getattr(message, "name", None) or "unknown"
+            name, _ = _bounded_utf8(str(raw_name), MAX_PLAN_TOOL_NAME_BYTES)
+            if scope == "citation" and name.casefold() == _CITATION_TOOL_NAME:
+                continue
             result = content_text(message.content)
             result, _truncated = _bounded_utf8(
                 result,
@@ -753,8 +757,6 @@ class PlanLog:
                     MAX_PLAN_TOOL_RESULT_BYTES,
                 ),
             )
-            raw_name = getattr(message, "name", None) or "unknown"
-            name, _ = _bounded_utf8(str(raw_name), MAX_PLAN_TOOL_NAME_BYTES)
             call_id = raw_call_id
             if call_id is not None:
                 call_id, _ = _bounded_utf8(
