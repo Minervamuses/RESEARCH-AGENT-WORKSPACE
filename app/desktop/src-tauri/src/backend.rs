@@ -22,7 +22,6 @@ pub const BACKEND_EVENT_NAME: &str = "research-agent://backend-event";
 const MAX_PENDING_REQUESTS: usize = 64;
 const WRITER_QUEUE_CAPACITY: usize = MAX_PENDING_REQUESTS + 2;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -196,7 +195,6 @@ struct LaunchConfig {
 #[derive(Clone, Copy)]
 struct SupervisorTimeouts {
     startup: Duration,
-    request: Duration,
     shutdown_response: Duration,
     shutdown_exit: Duration,
 }
@@ -205,7 +203,6 @@ impl Default for SupervisorTimeouts {
     fn default() -> Self {
         Self {
             startup: STARTUP_TIMEOUT,
-            request: REQUEST_TIMEOUT,
             shutdown_response: SHUTDOWN_RESPONSE_TIMEOUT,
             shutdown_exit: SHUTDOWN_EXIT_TIMEOUT,
         }
@@ -382,14 +379,14 @@ impl BackendSupervisor {
     }
 
     fn request(&self, request: Value) -> PendingResult {
-        self.submit_request(request, false, self.timeouts.request)
+        self.submit_request(request, false, None)
     }
 
     fn submit_request(
         &self,
         request: Value,
         allow_shutting_down: bool,
-        timeout: Duration,
+        timeout: Option<Duration>,
     ) -> PendingResult {
         let parsed = parse_protocol_value(request.clone()).map_err(bridge_protocol_violation)?;
         let ProtocolMessage::Request(RequestEnvelope {
@@ -469,20 +466,35 @@ impl BackendSupervisor {
             }
         }
 
-        match receiver.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(_) => {
-                let removed = self.remove_pending(&request_id);
-                let error = BridgeError::new(
-                    "BACKEND_REQUEST_TIMEOUT",
-                    "The desktop backend request did not finish in time.",
-                    true,
-                );
-                if removed {
-                    fatal_generation(&self.core, child.generation, error.clone(), true);
-                }
-                Err(error)
+        let fail_wait = |error: BridgeError| {
+            let removed = self.remove_pending(&request_id);
+            if removed {
+                fatal_generation(&self.core, child.generation, error.clone(), true);
             }
+            Err(error)
+        };
+        match timeout {
+            Some(timeout) => match receiver.recv_timeout(timeout) {
+                Ok(result) => result,
+                Err(mpsc::RecvTimeoutError::Timeout) => fail_wait(BridgeError::new(
+                    "BACKEND_SHUTDOWN_TIMEOUT",
+                    "The desktop backend did not acknowledge shutdown in time.",
+                    true,
+                )),
+                Err(mpsc::RecvTimeoutError::Disconnected) => fail_wait(BridgeError::new(
+                    "BACKEND_RESPONSE_CLOSED",
+                    "The desktop backend response channel closed unexpectedly.",
+                    true,
+                )),
+            },
+            None => match receiver.recv() {
+                Ok(result) => result,
+                Err(_) => fail_wait(BridgeError::new(
+                    "BACKEND_RESPONSE_CLOSED",
+                    "The desktop backend response channel closed unexpectedly.",
+                    true,
+                )),
+            },
         }
     }
 
@@ -556,7 +568,8 @@ impl BackendSupervisor {
             "method": "runtime.shutdown",
             "params": {}
         });
-        let graceful_result = self.submit_request(request, true, self.timeouts.shutdown_response);
+        let graceful_result =
+            self.submit_request(request, true, Some(self.timeouts.shutdown_response));
         let flushed = graceful_result
             .as_ref()
             .ok()
@@ -1384,7 +1397,6 @@ mod tests {
     fn timeouts() -> SupervisorTimeouts {
         SupervisorTimeouts {
             startup: Duration::from_millis(500),
-            request: Duration::from_millis(500),
             shutdown_response: Duration::from_millis(250),
             shutdown_exit: Duration::from_millis(500),
         }
@@ -1425,11 +1437,32 @@ for raw in sys.stdin:
         print('x' * (2 * 1024 * 1024 + 1), flush=True)
         time.sleep(5)
         continue
+    if MODE == 'output_close':
+        os.close(sys.stdout.fileno())
+        time.sleep(5)
+        continue
+    if MODE == 'wrong_id':
+        send({{'protocolVersion':1,'messageType':'result','requestId':'123e4567-e89b-42d3-a456-426614174001','ok':True,'data':{{}}}})
+        time.sleep(5)
+        continue
+    if MODE == 'blocked_request' and method != 'runtime.shutdown':
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
+        time.sleep(5)
+        continue
     if MODE == 'forced' and method == 'runtime.shutdown':
         time.sleep(5)
         continue
     if MODE == 'slow_graceful' and method == 'runtime.shutdown':
         time.sleep(0.15)
+    if MODE == 'long_request' and method != 'runtime.shutdown':
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
+        time.sleep(0.05)
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':2,'event':'request.progress','data':{{'stage':'before-old-deadline'}}}})
+        time.sleep(0.08)
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':3,'event':'request.progress','data':{{'stage':'after-old-deadline'}}}})
+        time.sleep(0.05)
+        send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{}}}})
+        continue
     send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
     data = {{'status':'stopped','flushed':True}} if method == 'runtime.shutdown' else {{}}
     send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':data}})
@@ -1497,6 +1530,47 @@ for raw in sys.stdin:
                 flushed: Some(true)
             }
         );
+        assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
+    }
+
+    #[test]
+    fn progressing_request_can_outlive_the_prior_absolute_deadline() {
+        let (supervisor, _script, events) = supervisor("long_request");
+        let prior_deadline = Duration::from_millis(100);
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+
+        let started = Instant::now();
+        let result = supervisor
+            .request(request(REQUEST_ID))
+            .expect("progressing request result");
+
+        assert!(started.elapsed() > prior_deadline);
+        assert_eq!(result["ok"], true);
+        assert!(supervisor.snapshot().child_running);
+        let captured = events.lock().expect("events");
+        let order = captured
+            .iter()
+            .filter_map(|event| match event {
+                BackendEvent::Protocol { message, .. } if message["requestId"] == REQUEST_ID => {
+                    if message["messageType"] == "result" {
+                        Some("result")
+                    } else {
+                        message["event"].as_str()
+                    }
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            order,
+            [
+                "request.started",
+                "request.progress",
+                "request.progress",
+                "result",
+            ]
+        );
+        drop(captured);
         assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
     }
 
@@ -1618,8 +1692,8 @@ for raw in sys.stdin:
     }
 
     #[test]
-    fn malformed_and_oversized_output_fail_the_pending_request() {
-        for mode in ["malformed", "oversized"] {
+    fn malformed_oversized_and_wrong_id_output_fail_the_pending_request() {
+        for mode in ["malformed", "oversized", "wrong_id"] {
             let (supervisor, _script, _events) = supervisor(mode);
             assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
             let error = supervisor.request(request(REQUEST_ID)).expect_err(mode);
@@ -1627,6 +1701,20 @@ for raw in sys.stdin:
             assert_eq!(supervisor.snapshot().pending_requests, 0);
             assert!(supervisor.wait_until_stopped(Duration::from_secs(1)));
         }
+    }
+
+    #[test]
+    fn stdout_pipe_close_fails_the_pending_request_without_a_deadline() {
+        let (supervisor, _script, _events) = supervisor("output_close");
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+
+        let error = supervisor
+            .request(request(REQUEST_ID))
+            .expect_err("closed stdout must fail");
+
+        assert_eq!(error.code, "BACKEND_OUTPUT_CLOSED");
+        assert_eq!(supervisor.snapshot().pending_requests, 0);
+        assert!(supervisor.wait_until_stopped(Duration::from_secs(1)));
     }
 
     #[test]
@@ -1653,6 +1741,38 @@ for raw in sys.stdin:
         let report = supervisor.shutdown();
         assert_eq!(report.kind, ShutdownKind::Forced);
         assert_eq!(report.flushed, None);
+    }
+
+    #[test]
+    fn shutdown_bounds_an_in_flight_request() {
+        let (mut supervisor, _script, events) = supervisor("blocked_request");
+        supervisor.timeouts.shutdown_response = Duration::from_millis(60);
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+        let pending_supervisor = supervisor.clone();
+        let pending = thread::spawn(move || pending_supervisor.request(request(REQUEST_ID)));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !events.lock().expect("events").iter().any(|event| {
+            matches!(
+                event,
+                BackendEvent::Protocol { message, .. }
+                    if message["requestId"] == REQUEST_ID
+                        && message["event"] == "request.started"
+            )
+        }) && Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(Instant::now() < deadline, "pending request did not start");
+
+        assert_eq!(supervisor.shutdown().kind, ShutdownKind::Forced);
+        let error = pending
+            .join()
+            .expect("pending request thread")
+            .expect_err("shutdown must fail pending request");
+
+        assert_eq!(error.code, "BACKEND_SHUTDOWN_TIMEOUT");
+        assert_eq!(supervisor.snapshot().pending_requests, 0);
+        assert!(!supervisor.snapshot().child_running);
     }
 
     #[test]

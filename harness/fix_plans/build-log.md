@@ -7,7 +7,7 @@
 | Phase | Status | Attempts against current cause | Last checkpoint | Evidence / 證據 | Commit |
 | --- | --- | ---: | --- | --- | --- |
 | 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
-| 02 — Long-request liveness | Not started | 0 | None | None | None |
+| 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | Pending phase commit |
 | 03 — One-shot Skill runtime | Not started | 0 | None | None | None |
 | 04 — Desktop Skill command | Not started | 0 | None | None | None |
 | 05 — Normal live streaming | Not started | 0 | None | None | None |
@@ -16,8 +16,9 @@
 
 ## Current Checkpoint
 
-- Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成。
-- Next eligible phase依 numeric order是Phase 02；Phase 03亦無dependencies，但executor每次只選第一個eligible phase。
+- Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
+- Phases 01–02 focused implementation與scope audit完成；Phase 02 local commit/hash recording pending。
+- Next eligible phase是Phase 03（dependencies none）。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
@@ -101,6 +102,87 @@
 - Commit disposition/hash: `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` (`fix(desktop): enable MCP by default`)。This follow-up changes only the durable hash record。
 - Blockers or disproved assumptions: the first inline `git rev-parse` print was host-expanded before the commit and displayed the pre-commit hash；a separate direct WSL `git rev-parse HEAD` established the authoritative hash above。No test/evidence claim depended on the stale print。
 - Next eligible action: commit this Phase 01 hash record, verify clean tree, then load Phase 02。
+
+## 2026-09-01 00:24 CST — Phase 02: runtime/source preflight
+
+- Status transition: `Not started` → `In progress`。
+- Durable sources reloaded: `phases/phase-02-long-request-liveness.md` 與 live `app/desktop/src-tauri/src/backend.rs` supervisor、I/O terminal paths及同檔 tests已重讀；durable global sources沿用本次 Start/Resume 的完整 reload。
+- Runtime/Git/dirty-tree gate: WSL/Linux；branch `GUI` tracking `origin/GUI` and ahead 2；HEAD `21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`；Phase 01 hash-record commit後worktree clean。Rust commands使用Linux rustc/Cargo 1.91.1並由Conda `app` 提供fake-child Python/`CONDA_PREFIX`。
+- Authorization in force: Phase 02 direct Rust/test/log change、focused Cargo selector與phase-scoped local commit已由本次 prompt 授權；provider、real MCP/Ollama、dependency/lockfile、heartbeat framework、branch/worktree與push仍未授權。
+- Current causal hypothesis and attempt number: attempt 1。`REQUEST_TIMEOUT=600s` 只透過 `SupervisorTimeouts.request` 傳入 normal `request()`，再由 `receiver.recv_timeout(timeout)` expiry移除pending並`fatal_generation(..., kill=true)`；child exit、stdout close、malformed protocol與shutdown已有獨立sender/error或bounded shutdown signals，所以normal wait可改為untimed `recv()`，shutdown仍保留自己的response timeout。
+- Exact initial/expanded write set and ownership: `app/desktop/src-tauri/src/backend.rs`（production與同檔test）及`harness/fix_plans/build-log.md`。No new module、dependency或protocol change planned。
+- Commands actually run and exact outcomes: `git grep` observed `REQUEST_TIMEOUT` at line 25、`SupervisorTimeouts.request` initialization at line 208、normal wait `recv_timeout` at line 472、timeout error/kill at lines 477–482；startup uses a separate condvar deadline and shutdown uses `shutdown_response`/`shutdown_exit`。No Phase 02 test run yet。
+- User-visible/fixture observation: none；planned fixture is a caller-owned temporary Python child only。
+- Diff/scope/safety audit: first Phase 02 write is this log entry；application Rust remains unchanged。
+- Commit disposition/hash: pending focused verification。
+- Blockers or disproved assumptions: none。The existing response channel already receives terminal errors from `fatal_generation`、`stdout_closed` and `child_exited`, so removing the normal absolute deadline does not erase those signals。
+- Next eligible action: add one deterministic fake mode/test with a 100ms substitute old deadline, progress before and after that boundary, and a terminal result around 180ms；run only that test to establish red before changing production wait semantics。
+
+## 2026-09-01 00:26 CST — Phase 02: rejecting-test compile correction
+
+- Status transition: remains `In progress`；attempt 1 causal hypothesis not yet exercised。
+- Runtime/Git/dirty-tree gate: only declared `backend.rs` test additions and `build-log.md` are dirty。
+- Current causal hypothesis and attempt number: unchanged；the observed failure was test-code compilation, not request-timeout behavior。
+- Exact initial/expanded write set and ownership: unchanged two-file Phase 02 set。
+- Commands actually run and exact outcomes: from `app/desktop/`, `/home/minervamuses/miniconda3/bin/conda run -n app /home/minervamuses/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --manifest-path src-tauri/Cargo.toml backend::tests::progressing_request_can_outlive_the_prior_absolute_deadline -- --exact` → exit 1 after the first local Rust dependency compile；`rustc E0716` at `backend.rs:1528` because collected `&str` values outlived a temporary `MutexGuard` in the new test。The test binary did not run, so this is not pass/red evidence for the product cause。
+- User-visible/fixture observation: none；fake child did not execute。
+- Diff/scope/safety audit: no production line changed；Cargo used existing lock/dependency graph and did not modify a lockfile。
+- Commit disposition/hash: none。
+- Blockers or disproved assumptions: none；compiler suggestion confirms a local guard binding is sufficient。
+- Next eligible action: bind the captured-events guard for the assertion lifetime (and remove one trailing-space line), then rerun the exact same selector to obtain functional red evidence。
+
+## 2026-09-01 00:28 CST — Phase 02: rejecting-fixture indentation correction
+
+- Status transition: remains `In progress`；attempt 1 production hypothesis still unexercised。
+- Runtime/Git/dirty-tree gate: unchanged two declared files。
+- Current causal hypothesis and attempt number: unchanged。This result exposed only malformed test-fixture source。
+- Commands actually run and exact outcomes: reran the exact single Cargo selector；Rust compiled successfully in 2.98s, then the one test failed in 0.04s at `backend.rs:1518`: expected startup lifecycle `Ready`, observed `Crashed`。Readback of the raw Python fixture showed the newly added `slow_graceful`/`long_request` branches and generic response line had lost the four-space `for raw in sys.stdin` indentation, making the child script invalid before request handling。
+- User-visible/fixture observation: no valid progress/result event was produced；this failure is not deadline evidence。
+- Diff/scope/safety audit: production supervisor remains unchanged；fix is indentation-only inside the existing test fixture。
+- Commit disposition/hash: none。
+- Blockers or disproved assumptions: none；live fixture text identifies the exact local cause。
+- Next eligible action: restore all affected lines under the existing stdin loop and rerun the exact selector。If it does not then fail specifically with `BACKEND_REQUEST_TIMEOUT`, stop this red-harness path and reassess rather than stacking more changes。
+
+## 2026-09-01 00:30 CST — Phase 02: focused causal red established
+
+- Status transition: remains `In progress`；attempt 1 hypothesis confirmed by rejecting evidence。
+- Runtime/Git/dirty-tree gate: same declared Rust test/log paths；production timeout code still unchanged at this checkpoint。
+- Current causal hypothesis and attempt number: attempt 1 confirmed。A valid, ready fake child cannot complete a progressing request after the shortened absolute boundary because normal `request()` still calls `recv_timeout` and kills the generation。
+- Commands actually run and exact outcomes: exact single Cargo selector compiled in 2.86s and ran one test；exit 1, `0 passed, 1 failed, 25 filtered out` in 0.12s。The panic at `backend.rs:1522` was `progressing request result: BridgeError { code: "BACKEND_REQUEST_TIMEOUT", message: "The desktop backend request did not finish in time.", retryable: true }`。This occurred after the valid child emitted its pre-boundary sequence but before it could emit the planned post-boundary progress and terminal result。
+- User-visible/fixture observation: fixture boundary is caller-owned temp script directory removed by `TempScript::drop`; no provider/MCP/Ollama/credential/real store。Old deadline substitute: 100ms；planned events at approximately 0ms/50ms/130ms and result around 180ms。
+- Diff/scope/safety audit: no production change yet；no lockfile/dependency modification。
+- Commit disposition/hash: none；red is not a completion checkpoint。
+- Blockers or disproved assumptions: none。
+- Next eligible action: remove `REQUEST_TIMEOUT` and `SupervisorTimeouts.request`; make normal `request()` use untimed channel receive, pass `Some(shutdown_response)` only for internal graceful shutdown, preserve explicit closed-channel/child/pipe/protocol terminal errors, then rerun the same test。
+
+## 2026-09-01 00:34 CST — Phase 02: production green and pipe-fixture hang
+
+- Status transition: remains `In progress`；attempt 1 production change retained, terminal-case fixture correction pending。
+- Runtime/Git/dirty-tree gate: exact two-file write set retained；Cargo created only ignored `src-tauri/target` outputs and did not modify lockfiles。
+- Current causal hypothesis and attempt number: normal request deadline hypothesis passed its smallest check。The later hang was isolated to a newly added output-close fixture that did not actually close the inherited OS pipe。
+- Exact initial/expanded write set and ownership: unchanged `backend.rs` plus this log；same-file tests added for progress order, wrong-id, pipe close and pending shutdown because they are explicit Phase 02 terminal conditions。
+- Commands actually run and exact outcomes: after removing the normal timeout, the exact liveness selector → `1 passed, 0 failed, 25 filtered out` in 0.20s；observed total duration exceeded the 100ms substitute and child remained running through terminal result。Then the planned `cargo test --manifest-path src-tauri/Cargo.toml backend::tests` produced no completion output for over 90s。Read-only `pgrep` showed test binary PID 28688 and temp child `/tmp/research-agent-supervisor-28688-12/fake_backend.py`; reading that caller-owned script identified `MODE = "output_close"`。The run was interrupted with Ctrl-C (exit 1), and a subsequent `pgrep` confirmed no matching Cargo/test/fake child remained。
+- User-visible/fixture observation: the hanging fake used `sys.stdout.close()` but retained the inherited OS write fd, then waited for more stdin; therefore no EOF/exit/error signal existed and untimed normal receive correctly remained pending。No external system was touched。
+- Diff/scope/safety audit: production currently has no `REQUEST_TIMEOUT`、`timeouts.request` or `BACKEND_REQUEST_TIMEOUT`; only the shutdown path calls `recv_timeout`。No dependency/lockfile change。
+- Commit disposition/hash: none；focused suite did not pass。
+- Blockers or disproved assumptions: disproved fixture assumption that `sys.stdout.close()` closes the inherited protocol fd in this Python runtime。Use `os.close(sys.stdout.fileno())` for a real pipe EOF。
+- Next eligible action: make that one fixture correction, run only `stdout_pipe_close_fails_the_pending_request_without_a_deadline`, then rerun the Phase 02 backend selector once it passes。
+
+## 2026-09-01 00:34 CST — Phase 02: focused verification complete
+
+- Status transition: `In progress` → `Complete` after all Phase 02 acceptance paths received observed evidence。
+- Durable sources reloaded: Phase 02 required design/acceptance rechecked against final `backend.rs` diff and test names。
+- Runtime/Git/dirty-tree gate: WSL/Linux, Conda `app`, Linux Cargo retained；final dirty paths are exactly `app/desktop/src-tauri/src/backend.rs` and `harness/fix_plans/build-log.md`。
+- Authorization in force: unchanged；phase-only local commit authorized, push unauthorized。
+- Current causal hypothesis and attempt number: attempt 1 confirmed。Normal `request()` now passes `None` and blocks only on the response channel；private `submit_request` uses `recv_timeout` only when graceful shutdown passes `Some(shutdown_response)`。No replacement normal absolute deadline or inactivity watchdog exists。
+- Exact initial/expanded write set and ownership: final two-file set unchanged。Production/test code share the existing `backend.rs` module；no new module、protocol、dependency or lockfile。
+- Commands actually run and exact outcomes: post-change liveness selector → `1 passed, 0 failed, 25 filtered out` in 0.20s。After correcting the OS-pipe fixture, its selector → `1 passed, 0 failed, 27 filtered out` in 0.02s。Planned focused command from `app/desktop/`, `/home/minervamuses/miniconda3/bin/conda run -n app /home/minervamuses/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --manifest-path src-tauri/Cargo.toml backend::tests` → `20 passed, 0 failed, 8 filtered out` in 0.21s。`git diff --check` exit 0/no output。
+- User-visible/fixture observation: long request emitted request-scoped order `request.started` → pre-boundary `request.progress` → post-boundary `request.progress` → terminal `result`; elapsed exceeded 100ms substitute, result `ok=true`, child remained running and then shut down gracefully。Focused suite also observed child crash → `BACKEND_CRASHED`; live pipe EOF → `BACKEND_OUTPUT_CLOSED`; malformed/oversized/wrong-id → `PROTOCOL_INVALID`; startup deadline → `BACKEND_START_TIMEOUT`; blocked pending request plus application shutdown → forced report and `BACKEND_SHUTDOWN_TIMEOUT` with zero pending/child stopped。All fake children used `TempScript` caller-owned temp directories；the interrupted-run processes were explicitly confirmed absent afterward。
+- Diff/scope/safety audit: source grep has no `REQUEST_TIMEOUT`、`timeouts.request`、`BACKEND_REQUEST_TIMEOUT` or `Duration::from_secs(600)` in `backend.rs`; only caller sites are normal `submit_request(..., None)` and shutdown `submit_request(..., Some(self.timeouts.shutdown_response))`; only the latter branch contains `recv_timeout`。Changed paths are exactly the two declared files；broader Cargo suite counter remains `0` because only `backend::tests` ran。
+- Additional formatting evidence: whole-crate `cargo fmt -- ... --check` exited 1, showing three new `backend.rs` layout suggestions plus pre-existing unmodified `protocol.rs` formatting differences。Only the three `backend.rs` suggestions were applied manually；an attempted direct toolchain `rustfmt` path exited 127 because that binary is not installed there, then `/home/minervamuses/miniconda3/bin/conda run -n app rustfmt --check --edition 2021 .../backend.rs` exited 0/no output。`protocol.rs` was not touched。
+- Commit disposition/hash: authorized phase-only local commit pending；hash will be appended in a Phase 02 log-only follow-up commit。
+- Blockers or disproved assumptions: no blocker。Disproved only the test-fixture assumptions already recorded above；the production cause and design held on attempt 1。
+- Next eligible action: stage exactly the two Phase 02 paths, run cached diff checks, commit locally, record hash, verify clean tree, then continue to Phase 03。
 
 ## Execution Entry Template
 
