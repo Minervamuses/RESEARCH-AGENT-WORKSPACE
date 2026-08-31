@@ -12,7 +12,7 @@
 | 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` |
 | 05 — Final-only Normal answer delivery | Complete | 1 | Focused verification and scope audit passed | No answer event/preview; terminal `final_only`/0 after validation+persistence; Python `190`, Node `86`, Rust `8`, TypeScript passed | `b95ff9a0eb5e5c7871f50fbe7eb20153a99328fb` |
 | 06 — Tool-aware conversation restore | Complete | 2 | Integration-discovered Citation receipt regression repaired | v2 tool lifecycle/legacy/prompt safety passed; Python `190`, Node `89`, Rust `8`; Citation follow-up `3 passed` | `3c3ae7e84f5b860a16d4ef304b0e8f026edc3256`, `63e0ed0a3abbd1a61e542eaa18c4e3ac07fe3659` |
-| 07 — Integration acceptance | Blocked | 1 | All non-repeatable evidence gathered; broader rerun authority required | Integrated fixture、focused Rust/React、npm `108` and Tauri build passed; one-time Python/Cargo runs each had one isolated failure with focused repair/pass | Pending checkpoint commit |
+| 07 — Integration acceptance | Blocked | 1 | All non-repeatable evidence gathered; broader rerun authority required | Integrated fixture、focused Rust/React、npm `108` and Tauri build passed; one-time Python/Cargo runs each had one isolated failure with focused repair/pass | `c1cfd8c37857676916cd05e6afe17c7a9bc673c2` |
 
 ## Current Checkpoint
 
@@ -626,6 +626,13 @@
 - GOALS disposition: every substantive Phase 01–06 and diff/integration condition is checked from evidence. The broader-suite success condition remains the sole unchecked condition because Python and Cargo each lack a corrected complete-suite pass.
 - Commit disposition: create one local Phase 07 blocked-checkpoint commit containing exactly these five paths, then append its hash in a log-only commit. This preserves completed work without claiming Phase 07/overall Complete.
 - Only remaining action requiring fresh authority: rerun `cd app && poetry run pytest --ignore=tests/rag/test_component_flow.py --ignore=tests/rag/test_root_identity.py` once after the Citation fix, and rerun `cd app/desktop && CONDA_DEFAULT_ENV=app CONDA_PREFIX=/home/minervamuses/miniconda3/envs/app cargo test --manifest-path src-tauri/Cargo.toml` once. If both pass, no npm/build rerun is needed; update Phase 07/GOALS/overall status and make a log-only completion commit. Current authorization expressly forbids those second full runs.
+
+## 2026-09-01 03:33 CST — Phase 07: blocked checkpoint commit recorded
+
+- Local checkpoint commit: `c1cfd8c37857676916cd05e6afe17c7a9bc673c2` (`test(desktop): add integration acceptance journey`).
+- Commit scope/result: exactly the five declared Phase 07 paths；`5 files changed, 483 insertions(+), 36 deletions(-)`. Cached name-status listed only those paths and cached whitespace check exited 0. Immediate post-commit `git status --short` returned no output.
+- This checkpoint intentionally records Phase 07 as Blocked and leaves the broader GOALS checkbox unchecked; it does not claim overall completion. Append this hash record in one log-only commit, then stop because the only remaining commands require fresh authority.
+- Remote push、branch/worktree、dependency/lockfile and release/deployment actions remain unperformed.
 
 ## Execution Entry Template
 
