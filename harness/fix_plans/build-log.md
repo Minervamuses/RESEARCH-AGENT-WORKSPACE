@@ -8,7 +8,7 @@
 | --- | --- | ---: | --- | --- | --- |
 | 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
-| 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | Pending local commit |
+| 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | `78589e95ea7ea2e4886529b568c78ecbdb24666c` |
 | 04 — Desktop Skill command | Not started | 0 | None | None | None |
 | 05 — Normal live streaming | Not started | 0 | None | None | None |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
@@ -18,7 +18,7 @@
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
 - Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
-- Phases 01–03 focused implementation與scope audit完成；Phase 03 local commit pending。
+- Phases 01–03 focused implementation、scope audit與local implementation commits完成；Phase 03 commit是`78589e95ea7ea2e4886529b568c78ecbdb24666c`。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
@@ -238,6 +238,16 @@
 - Commit disposition/hash: authorized Phase 03 local commit pending；hash will be appended immediately after creation in a log-only follow-up commit。
 - Blockers or disproved assumptions: no blocker。Disproved only the expectation that `prompting.py` needed modification；the existing registry-backed completer required none。
 - Next eligible action: stage exactly these 29 paths, run cached diff/name audit, create the local Phase 03 commit, record its hash, verify clean tree, then continue directly to dependent Phase 04。
+
+## 2026-09-01 01:02 CST — Phase 03: local commit recorded
+
+- Status transition: remains `Complete`。
+- Runtime/Git/dirty-tree gate: explicit 29-path staging audit passed；implementation commit後worktree clean。
+- Commands actually run and exact outcomes: `git diff --check` and `git diff --cached --check` both exit 0/no output；cached names were exactly the final declared Phase 03 set and `git diff --name-only` showed no unstaged path before commit。
+- Diff/scope/safety audit: commit contains only Phase 03 core/CLI、manifests/guide、direct regressions/fakes and durable evidence；no Desktop production、dependency/lockfile、branch/worktree or remote state change。
+- Commit disposition/hash: `78589e95ea7ea2e4886529b568c78ecbdb24666c` (`fix(skills): run dynamic skills once`)。This follow-up changes only the durable hash record。
+- Blockers or disproved assumptions: none。
+- Next eligible action: commit this Phase 03 hash record, verify clean tree, then load dependent Phase 04。
 
 ## Execution Entry Template
 
