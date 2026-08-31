@@ -9,7 +9,7 @@
 | 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
 | 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | `78589e95ea7ea2e4886529b568c78ecbdb24666c` |
-| 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | Pending local commit |
+| 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` |
 | 05 — Normal live streaming | Not started | 0 | None | None | None |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
 | 07 — Integration acceptance | Not started | 0 | None | None | None |
@@ -18,7 +18,7 @@
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
 - Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
-- Phases 01–04 focused implementation and verification complete；Phase 04 local implementation commit is pending。
+- Phases 01–04 focused implementation、verification and local commits complete；Phase 04 commit is `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d`。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
@@ -307,9 +307,16 @@
 - Corrected Cargo result: exit `0` after the first local dependency compile；`8 passed, 0 failed, 20 filtered out` for the library protocol selector and `0 tests` for the main target。
 - Shared resolver regression command/result: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_slash_commands.py -q` exited `0`；`29 passed, 1 warning in 0.14s`。
 - Diff/scope/safety audit: tracked production removal search returned no matches；only explicit negative tests retain retired method/field strings。`git diff --check` exited `0` with no output；React slash-parser search returned no matches；no dependency manifest or lockfile changed。Changed paths are exactly the 12 Phase 04 code/contract/test paths plus this log；CSS、Python protocol owner、backend Rust process code and all non-goals remained untouched。
-- Commit disposition/hash: focused verification complete；Phase 04 implementation commit pending immediately after this log update。
+- Commit disposition/hash: Phase 04 implementation committed locally as `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` (`fix(desktop): run dynamic skills once`)；the tree was clean immediately after commit。
 - Blockers or deferred issues: none for Phase 04。Citation GUI access remains deliberately deferred under issue 09/non-goal；live answer delta remains Phase 05。
 - Next eligible action: create the authorized Phase 04-only local commit, record its hash, verify clean tree, then load Phase 05 as the next dependency-eligible phase without running broader suites。
+
+## 2026-09-01 01:20 CST — Phase 04: implementation hash record
+
+- Local implementation commit: `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` (`fix(desktop): run dynamic skills once`)。
+- Commit result: `13 files changed, 348 insertions(+), 280 deletions(-)`；the count includes this Phase 04 build-log evidence and no dependency/lockfile。
+- Immediate post-commit audit: `git status --short` returned no output。
+- Next eligible action: commit this hash record as a log-only follow-up, verify clean tree, then load Phase 05 because Phase 04 is Complete and all Phase 05 dependencies are satisfied。
 
 ## Execution Entry Template
 
