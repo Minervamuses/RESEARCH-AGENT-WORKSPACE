@@ -7,7 +7,7 @@
 | Phase | Status | Attempts against current cause | Last checkpoint | Evidence / 證據 | Commit |
 | --- | --- | ---: | --- | --- | --- |
 | 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
-| 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | Pending phase commit |
+| 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
 | 03 — One-shot Skill runtime | Not started | 0 | None | None | None |
 | 04 — Desktop Skill command | Not started | 0 | None | None | None |
 | 05 — Normal live streaming | Not started | 0 | None | None | None |
@@ -17,7 +17,7 @@
 ## Current Checkpoint
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
-- Phases 01–02 focused implementation與scope audit完成；Phase 02 local commit/hash recording pending。
+- Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
 - Next eligible phase是Phase 03（dependencies none）。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
@@ -183,6 +183,16 @@
 - Commit disposition/hash: authorized phase-only local commit pending；hash will be appended in a Phase 02 log-only follow-up commit。
 - Blockers or disproved assumptions: no blocker。Disproved only the test-fixture assumptions already recorded above；the production cause and design held on attempt 1。
 - Next eligible action: stage exactly the two Phase 02 paths, run cached diff checks, commit locally, record hash, verify clean tree, then continue to Phase 03。
+
+## 2026-09-01 00:35 CST — Phase 02: local commit recorded
+
+- Status transition: remains `Complete`。
+- Runtime/Git/dirty-tree gate: explicit two-path staging audit passed；implementation commit後worktree clean。
+- Commands actually run and exact outcomes: `git diff --check` and `git diff --cached --check` exit 0/no output；cached paths were exactly `app/desktop/src-tauri/src/backend.rs` and `harness/fix_plans/build-log.md`。
+- Diff/scope/safety audit: commit contains only Phase 02 Rust production/tests and durable execution evidence；no Cargo lock、branch/worktree or remote state change。
+- Commit disposition/hash: `45d446da4aa005019c7d8c8eded5e6a91b7251dc` (`fix(desktop): remove request deadline`)。This follow-up changes only the durable hash record。
+- Blockers or disproved assumptions: none。
+- Next eligible action: commit this hash record, verify clean tree, then load Phase 03。
 
 ## Execution Entry Template
 
