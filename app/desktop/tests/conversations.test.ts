@@ -28,6 +28,7 @@ interface AppHelpersModule {
     selected: { projectId: string; sessionId: string } | null,
     selectedRegistered: boolean,
   ) => Array<SessionSummary & { transient: boolean }>;
+  sessionCreateParams: (projectId: string) => Record<string, unknown>;
 }
 
 async function loadSafeContent(): Promise<SafeContentModule> {
@@ -160,6 +161,15 @@ test("sidebar rows never duplicate a registered or already-listed conversation",
     ).length,
     1,
   );
+});
+
+test("new conversations delegate the MCP default to the backend", async () => {
+  const { sessionCreateParams } = await loadAppHelpers();
+
+  const params = sessionCreateParams("local");
+
+  assert.deepEqual(params, { projectId: "local" });
+  assert.equal("loadMcp" in params, false);
 });
 
 test("conversation pages preserve membership order and replace duplicate summaries", async () => {

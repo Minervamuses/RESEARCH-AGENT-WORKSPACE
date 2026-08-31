@@ -378,6 +378,23 @@ def test_diagnostics_stays_available_without_provider_keys(tmp_path: Path) -> No
     )
 
 
+@pytest.mark.parametrize(
+    ("params", "expected_load_mcp"),
+    [({}, True), ({"loadMcp": False}, False)],
+)
+def test_session_create_defaults_mcp_on_and_preserves_explicit_opt_out(
+    tmp_path: Path,
+    params: dict[str, object],
+    expected_load_mcp: bool,
+) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+
+    asyncio.run(service.dispatch("session.create", params))
+
+    assert factory.calls[-1][1] is expected_load_mcp
+
+
 def test_session_create_failure_keeps_backend_retryable(tmp_path: Path) -> None:
     factory = _SessionFactory()
     factory.fail_once = True

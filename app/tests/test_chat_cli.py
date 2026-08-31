@@ -8,12 +8,22 @@ import pytest
 from conftest import FakeChatSession
 
 
-def _run_cli(monkeypatch, session, inputs, *, max_graph_steps=None):
+def _run_cli(
+    monkeypatch,
+    session,
+    inputs,
+    *,
+    max_graph_steps=None,
+    no_mcp=False,
+):
     """Drive chat._run with a fake session and scripted line inputs."""
     from agent.cli import chat
 
+    create_kwargs = {}
+
     async def fake_create(config, **kwargs):
         session.config = config
+        create_kwargs.update(kwargs)
         return session
 
     input_iter = iter(inputs)
@@ -23,8 +33,9 @@ def _run_cli(monkeypatch, session, inputs, *, max_graph_steps=None):
 
     monkeypatch.setattr(chat.ChatSession, "create", fake_create)
 
-    args = argparse.Namespace(max_graph_steps=max_graph_steps, no_mcp=True)
+    args = argparse.Namespace(max_graph_steps=max_graph_steps, no_mcp=no_mcp)
     asyncio.run(chat._run(args, read_line=fake_read_line))
+    return create_kwargs
 
 
 def test_chat_cli_flushes_recent_turns_on_quit(monkeypatch):
@@ -48,6 +59,25 @@ def test_chat_cli_builds_config_from_single_graph_limit_source(monkeypatch):
         max_graph_steps=91,
     )
     assert overridden_session.config.graph_recursion_limit == 91
+
+
+@pytest.mark.parametrize(
+    ("no_mcp", "expected_load_mcp"),
+    [(False, True), (True, False)],
+)
+def test_chat_cli_defaults_mcp_on_and_preserves_explicit_opt_out(
+    monkeypatch, no_mcp, expected_load_mcp
+):
+    session = FakeChatSession()
+
+    create_kwargs = _run_cli(
+        monkeypatch,
+        session,
+        ["q"],
+        no_mcp=no_mcp,
+    )
+
+    assert create_kwargs["load_mcp"] is expected_load_mcp
 
 
 @pytest.mark.parametrize("value", ["1", "2", "not-an-int"])

@@ -147,6 +147,10 @@ export function sidebarRowsForProject(
   return rows;
 }
 
+export function sessionCreateParams(projectId: string): JsonObject {
+  return { projectId };
+}
+
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -666,7 +670,7 @@ export default function App() {
     const generation = generationRef.current;
     void (async () => {
       try {
-        const data = await backendClient.request("session.create", { loadMcp: false, projectId: activeProjectId });
+        const data = await backendClient.request("session.create", sessionCreateParams(activeProjectId));
         const session = data as unknown as SessionCreatedDto;
         if (generationRef.current !== generation) return;
         if (session.projectId !== undefined && session.projectId !== activeProjectId) {

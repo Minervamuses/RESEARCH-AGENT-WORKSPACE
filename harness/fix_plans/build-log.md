@@ -6,7 +6,7 @@
 
 | Phase | Status | Attempts against current cause | Last checkpoint | Evidence / 證據 | Commit |
 | --- | --- | ---: | --- | --- | --- |
-| 01 — MCP defaults | Not started | 0 | None | None | None |
+| 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | Pending phase commit |
 | 02 — Long-request liveness | Not started | 0 | None | None | None |
 | 03 — One-shot Skill runtime | Not started | 0 | None | None | None |
 | 04 — Desktop Skill command | Not started | 0 | None | None | None |
@@ -16,12 +16,12 @@
 
 ## Current Checkpoint
 
-- Plan bundle authoring only；application implementation 尚未開始。
-- Next eligible phase 依 numeric order 是 Phase 01；Phases 02 與 03 也沒有 dependencies，但 executor 仍依 [`PLANS.md`](PLANS.md) selection algorithm 每次只選一個。
+- Phase 01 focused implementation與scope audit完成；local commit/hash recording pending。
+- Next eligible phase依 numeric order是Phase 02；Phase 03亦無dependencies，但executor每次只選第一個eligible phase。
 - Blockers: none recorded。
-- Implementation authorization: not active。只有使用者之後實際送出 [`PROMPTS.md`](PROMPTS.md) 的 Start/Resume prompt 或等價明確訊息才啟動。
-- Local implementation commits: not authorized yet。
-- Remote push: not authorized for future implementation。2026-08-31 對 plan-authoring current worktree 的 commit/push 指示不延伸到本計劃執行期。
+- Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
+- Local phase-scoped commits: authorized；remote push remains unauthorized。
+- Broader-suite counters remain `0`；Phase 01只執行focused selectors。
 
 ## Authoring Baseline — 2026-08-31 Asia/Taipei
 
@@ -46,6 +46,51 @@
 - Main-agent structural walkthrough確認7個phase各有objective/scope/non-goals/dependencies/verification/acceptance/handoff，所有status仍為`Not started`，dependency graph從numeric-first eligible Phase 01開始。
 - Independent fresh-agent walkthrough只找到一個cross-file contradiction：Phase 04曾列完整`npm test`，與Phase 07唯一broader npm pass衝突。Phase 04已改成targeted protocol/conversation/backend Node selectors，strict validator於修正後重新通過。
 - No application test、build或implementation acceptance was run；本節只證明planning bundle結構與交接可讀性，不使任何phase成為Complete。
+
+## 2026-09-01 00:17 CST — Phase 01: runtime/source preflight
+
+- Status transition: `Not started` → `In progress`。
+- Durable sources reloaded: root `AGENTS.md`、`PROMPTS.md`、`GOALS.md`、`PLANS.md`、`user-decisions.md`、本檔與 `phases/phase-01-mcp-defaults.md` 已完整重讀；依 numeric-first eligible rule 選 Phase 01。
+- Runtime/Git/dirty-tree gate: repository `/home/minervamuses/research-agent-workspace`；WSL2 Linux；branch `GUI` tracking `origin/GUI`；HEAD `1b4a4a9f989b6fd8aa1beb0a8015156c7ea29d26`；首次寫入前 `git status --short` 無輸出。命令固定由 WSL 執行；Conda `app` 實測 Python 3.13.14、Poetry 2.4.1、Node 24.18.0、npm 11.16.0；Linux rustc/Cargo 1.91.1。
+- Authorization in force: 使用者本次 Start/Resume 訊息授權 phase causal scope 內 application/tests、focused checks、phase-scoped local commit 與 build-log hash；不授權 dependency/lockfile、live provider/MCP/Ollama/credential/real store、non-goals、branch/worktree、push或release。
+- Current causal hypothesis and attempt number: attempt 1。唯一 production defect是 `app/desktop/src/App.tsx` 的 normal create caller明確送 `loadMcp:false`，覆蓋 `DesktopService` 缺省 `true`；CLI `load_mcp=not args.no_mcp` 與 backend explicit-false/default-true semantics 不需 production rewrite，只需 regression protection。
+- Exact initial/expanded write set and ownership: `app/desktop/src/App.tsx`、`app/desktop/tests/conversations.test.ts`、`app/tests/test_chat_cli.py`、`app/tests/test_desktop_service.py`、`harness/fix_plans/build-log.md`。全部為 Phase 01 direct scope；初始 tree 無其他 owner change。
+- Commands actually run and exact outcomes: read-only `git grep` 找到唯一 React `session.create` caller在 `App.tsx:669` 且 payload 是 `{ loadMcp: false, projectId: activeProjectId }`；Python service `service.py:1128` 是 `params.get("loadMcp", True)`；CLI `chat.py:111` 是 `load_mcp=not args.no_mcp`，parser `--no-mcp` 使用 `store_true`。尚未執行 application test。
+- User-visible/fixture observation: none；未啟動 provider、MCP process或 GUI。
+- Diff/scope/safety audit: first write只更新本 phase execution log；dependency/lockfile與 application code尚未改動。
+- Commit disposition/hash: pending focused verification。
+- Blockers or disproved assumptions: `rg` 不在 base shell；後續 repository search 使用 Linux `git grep`。Conda nested login shell會重設 PATH，因此實際命令使用 `/home/minervamuses/miniconda3/bin/conda run -n app <command>`，不使用會解析到 Windows npm 的 host PATH。
+- Next eligible action: 先加入 CLI/backend/frontend caller regression，執行最小 red selectors；確認能拒絕現況後只移除 GUI 的 false override。
+
+## 2026-09-01 00:20 CST — Phase 01: focused rejecting check
+
+- Status transition: remains `In progress`；attempt 1 hypothesis retained。
+- Durable sources reloaded: unchanged from Phase 01 preflight。
+- Runtime/Git/dirty-tree gate: only declared Phase 01 tests and `build-log.md` were dirty before the rejecting check。
+- Authorization in force: unchanged；fake/injected tests only。
+- Current causal hypothesis and attempt number: attempt 1；Python semantics already correct, React false override is the single causal variable。
+- Exact initial/expanded write set and ownership: added regression-only changes in `app/tests/test_chat_cli.py`、`app/tests/test_desktop_service.py`、`app/desktop/tests/conversations.test.ts`; planned production write remains only `app/desktop/src/App.tsx`。
+- Commands actually run and exact outcomes: from `app/`, `/home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_chat_cli.py::test_chat_cli_defaults_mcp_on_and_preserves_explicit_opt_out tests/test_desktop_service.py::test_session_create_defaults_mcp_on_and_preserves_explicit_opt_out -q` → `4 passed, 1 warning in 0.21s`（既有 LangGraph pending-deprecation warning）。From `app/desktop/`, `/home/minervamuses/miniconda3/bin/conda run -n app node --test --experimental-strip-types --test-name-pattern="MCP" tests/conversations.test.ts` → exit 1, `1 failed`; exact rejection was `TypeError: sessionCreateParams is not a function` at the new normal-create MCP regression。
+- User-visible/fixture observation: Python fake factory observed CLI booleans `True`/`False` and Desktop service booleans `True`/`False`; no real MCP loader, process, provider or credential access occurred。
+- Diff/scope/safety audit: rejecting diff remains within four declared test/log files；no dependency、lockfile或 production modification yet。
+- Commit disposition/hash: none；red checkpoint is not committable completion。
+- Blockers or disproved assumptions: none；red failure distinguishes the planned React payload change。
+- Next eligible action: add the smallest exported request-parameter helper in `App.tsx`, use it at the sole `session.create` caller, and rerun the same selectors。
+
+## 2026-09-01 00:21 CST — Phase 01: focused verification complete
+
+- Status transition: `In progress` → `Complete` after focused verification and diff/scope audit。
+- Durable sources reloaded: Phase 01 acceptance and handoff evidence were rechecked against live source/tests。
+- Runtime/Git/dirty-tree gate: WSL/Linux and Conda `app` retained；dirty paths are exactly the five declared Phase 01 files。
+- Authorization in force: unchanged；local phase commit authorized, remote push unauthorized。
+- Current causal hypothesis and attempt number: attempt 1 confirmed。Omitting `loadMcp` at the sole React caller restores the Python-owned default without removing explicit protocol opt-out。
+- Exact initial/expanded write set and ownership: final set is `app/desktop/src/App.tsx`、`app/desktop/tests/conversations.test.ts`、`app/tests/test_chat_cli.py`、`app/tests/test_desktop_service.py`、`harness/fix_plans/build-log.md`; `app/agent/desktop/service.py` and CLI production remain read-only because focused evidence showed their behavior was already correct。
+- Commands actually run and exact outcomes: same minimal Python selectors after production change → `4 passed, 1 warning in 0.11s`; same MCP-filtered Node selector → `1 passed, 0 failed`。Phase planned focused command from `app/`, `/home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_chat_cli.py tests/test_desktop_service.py -q` → `56 passed, 1 warning in 0.40s`。From `app/desktop/`, `/home/minervamuses/miniconda3/bin/conda run -n app node --test --experimental-strip-types tests/conversations.test.ts` → `7 passed, 0 failed` in `7525.883855ms`。The warning is the pre-existing LangGraph `allowed_objects` pending-deprecation warning。
+- User-visible/fixture observation: CLI fake session observed default `load_mcp=True` and explicit opt-out `False`; Desktop injected session factory observed omitted-field `True` and direct `loadMcp:false` as `False`; frontend helper produced exactly `{ projectId: "local" }` with no `loadMcp` key。No provider、MCP process、credential、real store or external system was touched。
+- Diff/scope/safety audit: `git diff --check` exit 0 with no output。`git diff --name-only` contains only the five declared paths；`git grep` finds one production React `session.create` request using `sessionCreateParams(activeProjectId)` and no production `loadMcp:false` override。No dependency、manifest、lockfile or generated file changed。
+- Commit disposition/hash: authorized phase-only local commit pending；hash will be appended immediately after creation in a Phase 01 log-only follow-up commit。
+- Blockers or disproved assumptions: none。
+- Next eligible action: create the scoped local commit, record its hash, restore a clean tree, then continue directly to Phase 02。
 
 ## Execution Entry Template
 
