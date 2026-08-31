@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog
 from agent.desktop.fixture_session import (
     FIXTURE_BASH_APPROVE,
     FIXTURE_BASH_DENY,
     FIXTURE_CHANGED_ORPHAN_MARKER,
+    FIXTURE_DELAYED_FINAL,
     FIXTURE_KNOWLEDGE_DIRNAME,
     FIXTURE_MODE,
     FIXTURE_MODE_ENV,
@@ -35,6 +38,20 @@ from agent.desktop.service import DesktopServiceError
 
 @pytest.fixture
 def fixture_root():
+    root = Path(tempfile.mkdtemp(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp"))
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root)
+        assert not root.exists()
+
+
+@pytest.fixture
+def phase07_fixture_root():
+    configured = os.environ.get(FIXTURE_ROOT_ENV)
+    if configured is not None:
+        yield require_fixture_root({FIXTURE_ROOT_ENV: configured})
+        return
     root = Path(tempfile.mkdtemp(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp"))
     try:
         yield root
@@ -569,6 +586,304 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
     assert status["restartRequired"] is False
     assert isinstance(restarted_provider, FixtureExtensionProvider)
     assert restarted_provider.calls == 0
+
+
+def test_phase07_integrated_final_only_skill_tool_restore_journey(
+    phase07_fixture_root: Path,
+) -> None:
+    root = phase07_fixture_root
+    first = _service(root)
+
+    async def run_first_process():
+        created = await first.dispatch("session.create", {"projectId": "p1"})
+        diagnostics = await first.dispatch("runtime.diagnostics", {})
+        events: list[tuple[str, dict]] = []
+        crossed_old_deadline = asyncio.Event()
+
+        def capture(event: str, data: dict) -> None:
+            events.append((event, data))
+            if (
+                event == "stage.changed"
+                and data.get("stage") == "fixture.after-old-deadline"
+            ):
+                crossed_old_deadline.set()
+
+        pending = asyncio.create_task(first.dispatch(
+            "session.turn",
+            {"text": FIXTURE_DELAYED_FINAL},
+            event_sink=capture,
+        ))
+        await asyncio.wait_for(crossed_old_deadline.wait(), timeout=1)
+        assert not pending.done()
+        assert all(event != "answer.chunk" for event, _data in events)
+        delayed = await asyncio.wait_for(pending, timeout=3)
+
+        preview = await first.dispatch("extensions.preview", {})
+        binding = preview["bindings"][0]
+        applied = await first.dispatch(
+            "extensions.apply",
+            {
+                "previewId": preview["previewId"],
+                "approvedBindingHashes": [binding["bindingHash"]],
+            },
+        )
+        shutdown = await first.dispatch("session.shutdown", {})
+        return created, diagnostics, events, delayed, applied, shutdown
+
+    created, diagnostics, delayed_events, delayed, applied, shutdown = asyncio.run(
+        run_first_process()
+    )
+    delayed_stages = [
+        data["stage"]
+        for event, data in delayed_events
+        if event == "stage.changed"
+    ]
+    assert created["registered"] is False
+    assert diagnostics["mcpEnabled"] is True
+    assert delayed_stages == [
+        "fixture.prepare",
+        "fixture.before-old-deadline",
+        "fixture.after-old-deadline",
+        "fixture.finalized",
+    ]
+    assert delayed["streamKind"] == "final_only"
+    assert delayed["chunkCount"] == 0
+    assert all(event != "answer.chunk" for event, _data in delayed_events)
+    assert delayed["text"] not in repr(delayed_events)
+    assert applied["restartRequired"] is True
+    assert shutdown == {"status": "stopped", "flushed": True}
+
+    tool_invocations: list[str] = []
+
+    def counting_search(query: str) -> list[dict[str, str]]:
+        tool_invocations.append(query)
+        return [{
+            "pid": "phase07-fixture-knowledge",
+            "file_path": "fixture-notes.md",
+            "text": f"Local fixture result for: {query}",
+        }]
+
+    second = _service(root)
+
+    async def run_second_process():
+        loaded = await second.dispatch("session.create", {"projectId": "p1"})
+        diagnostics = await second.dispatch("runtime.diagnostics", {})
+        assert second.session is not None
+        before_skill_turn = second.session._turn_count
+        skill_events: list[tuple[str, dict]] = []
+        skill = await second.dispatch(
+            "session.turn",
+            {"text": '/fixture-writer Draft  "quoted"   body'},
+            event_sink=lambda event, data: skill_events.append((event, data)),
+        )
+        assert second.session._turn_count == before_skill_turn + 1
+        ordinary = await second.dispatch(
+            "session.turn",
+            {"text": "ordinary after skill"},
+        )
+
+        failed_events: list[tuple[str, dict]] = []
+        with pytest.raises(DesktopServiceError) as failed:
+            await second.dispatch(
+                "session.turn",
+                {"text": "/fixture-writer [[fixture:provider-error]]"},
+                event_sink=lambda event, data: failed_events.append((event, data)),
+            )
+        retry = await second.dispatch(
+            "session.turn",
+            {"text": "retry after skill error"},
+        )
+
+        await second.dispatch("session.set_mode", {"mode": "plan"})
+        assert second.session is not None
+        second.session._search_handler = counting_search
+        tool_events: list[tuple[str, dict]] = []
+        tool_answer = await second.dispatch(
+            "session.turn",
+            {"text": FIXTURE_RAG_QUESTION},
+            event_sink=lambda event, data: tool_events.append((event, data)),
+        )
+        transcript = await second.dispatch(
+            "session.transcript",
+            {
+                "projectId": "p1",
+                "sessionId": loaded["sessionId"],
+                "limit": 20,
+            },
+        )
+        shutdown = await second.dispatch("session.shutdown", {})
+        return (
+            loaded,
+            diagnostics,
+            skill_events,
+            skill,
+            ordinary,
+            failed.value,
+            failed_events,
+            retry,
+            tool_events,
+            tool_answer,
+            transcript,
+            shutdown,
+        )
+
+    (
+        loaded,
+        restarted_diagnostics,
+        skill_events,
+        skill,
+        ordinary,
+        skill_failure,
+        failed_events,
+        retry,
+        tool_events,
+        tool_answer,
+        transcript,
+        second_shutdown,
+    ) = asyncio.run(run_second_process())
+    assert restarted_diagnostics["mcpEnabled"] is True
+    assert restarted_diagnostics["mcpFamilies"] == ["fixture-clock"]
+    assert loaded["loadedSkills"] == ["fixture-writer"]
+    assert "activeSkill" not in loaded and "taskMode" not in loaded
+    assert skill["streamKind"] == "final_only" and skill["chunkCount"] == 0
+    assert skill["text"].startswith("Fixture skill fixture-writer")
+    assert all(event != "answer.chunk" for event, _data in skill_events)
+    assert skill["text"] not in repr(skill_events)
+    assert ordinary["streamKind"] == "final_only"
+    assert "Fixture skill" not in ordinary["text"]
+    assert skill_failure.code == "PROVIDER_REQUEST_FAILED"
+    assert all(event != "answer.chunk" for event, _data in failed_events)
+    assert retry["streamKind"] == "final_only"
+    assert "Fixture skill" not in retry["text"]
+    assert tool_answer["streamKind"] == "final_only"
+    assert tool_answer["chunkCount"] == 0
+    assert all(event != "answer.chunk" for event, _data in tool_events)
+    assert tool_answer["text"] not in repr(tool_events)
+    assert tool_invocations == [FIXTURE_RAG_QUESTION]
+    assert all(
+        item["userText"] != "[[fixture:provider-error]]"
+        for item in transcript["items"]
+    )
+    tool_turn = next(
+        item for item in transcript["items"]
+        if item["userText"] == FIXTURE_RAG_QUESTION
+    )
+    assert tool_turn["toolActivities"][0]["name"] == "rag_search"
+    assert tool_turn["toolActivities"][0]["promptEligible"] is True
+    assert second_shutdown == {"status": "stopped", "flushed": True}
+
+    plan_dir = root / "plan_logs"
+    for path in plan_dir.glob(f"plan-{SESSION_B}-*.md"):
+        path.unlink()
+    legacy_sentinel = "phase07 legacy tool sentinel"
+    (plan_dir / f"plan-{SESSION_B}-20990101T000000Z.md").write_text(
+        "---\n"
+        "generated_by: agent.plan_mode\n"
+        f"session_id: {SESSION_B}\n"
+        "created_at: 2099-01-01T00:00:00+00:00\n"
+        "---\n\n"
+        "# Plan log\n\n"
+        "## Turn 1 - 2099-01-01T00:00:01+00:00\n\n"
+        "**User:**\n\nlegacy question\n\n"
+        "### Tool: rag_search\n\n```json\n"
+        '{"query": "legacy"}\n'
+        "```\n\n**Result:**\n\n```\n"
+        f"{legacy_sentinel}\n"
+        "```\n\n**Assistant:**\n\nlegacy answer\n\n---\n",
+        encoding="utf-8",
+    )
+
+    third = _service(root)
+    third._session_factory._search_handler = counting_search
+
+    async def run_third_process():
+        await third.dispatch("session.create", {"projectId": "p1"})
+        diagnostics = await third.dispatch("runtime.diagnostics", {})
+        restored = await third.dispatch(
+            "session.transcript",
+            {
+                "projectId": "p1",
+                "sessionId": loaded["sessionId"],
+                "limit": 20,
+            },
+        )
+        selected = await third.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": loaded["sessionId"]},
+        )
+        assert third.session is not None
+        restored_record = next(
+            turn for turn in third.session.recent_turns
+            if turn.user_input == FIXTURE_RAG_QUESTION
+        )
+        restored_messages = restored_record.to_messages()
+        continued_events: list[tuple[str, dict]] = []
+        continued = await third.dispatch(
+            "session.turn",
+            {"text": "continue after restore"},
+            event_sink=lambda event, data: continued_events.append((event, data)),
+        )
+        legacy = await third.dispatch(
+            "session.transcript",
+            {"projectId": "p1", "sessionId": SESSION_B, "limit": 20},
+        )
+        legacy_selected = await third.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_B},
+        )
+        assert third.session is not None
+        legacy_messages = third.session.recent_turns[0].to_messages()
+        shutdown = await third.dispatch("session.shutdown", {})
+        return (
+            diagnostics,
+            restored,
+            selected,
+            restored_messages,
+            continued_events,
+            continued,
+            legacy,
+            legacy_selected,
+            legacy_messages,
+            shutdown,
+        )
+
+    (
+        final_diagnostics,
+        restored,
+        selected,
+        restored_messages,
+        continued_events,
+        continued,
+        legacy,
+        legacy_selected,
+        legacy_messages,
+        final_shutdown,
+    ) = asyncio.run(run_third_process())
+    assert final_diagnostics["mcpEnabled"] is True
+    assert selected["turnCount"] == len(restored["items"])
+    assert [type(message) for message in restored_messages] == [
+        HumanMessage,
+        AIMessage,
+        ToolMessage,
+        AIMessage,
+    ]
+    assert restored_messages[1].tool_calls[0]["id"] == "fixture-rag-search"
+    assert restored_messages[2].tool_call_id == "fixture-rag-search"
+    assert tool_invocations == [FIXTURE_RAG_QUESTION]
+    assert continued["streamKind"] == "final_only"
+    assert continued["chunkCount"] == 0
+    assert all(event != "answer.chunk" for event, _data in continued_events)
+    assert continued["text"] not in repr(continued_events)
+    assert legacy_selected["turnCount"] == 1
+    assert legacy["items"][0]["toolActivities"][0]["callId"] is None
+    assert legacy["items"][0]["toolActivities"][0]["promptEligible"] is False
+    assert [type(message) for message in legacy_messages] == [
+        HumanMessage,
+        AIMessage,
+    ]
+    assert legacy_sentinel not in repr(legacy_messages)
+    assert tool_invocations == [FIXTURE_RAG_QUESTION]
+    assert final_shutdown == {"status": "stopped", "flushed": True}
 
 
 def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(

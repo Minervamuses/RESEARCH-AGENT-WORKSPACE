@@ -38,6 +38,7 @@ FIXTURE_BLOCK_INIT_MARKER = ".fixture-block-init"
 FIXTURE_CHANGED_ORPHAN_MARKER = ".fixture-changed-orphans"
 FIXTURE_LONG_OUTPUT_MARKER = ".fixture-long-output"
 FIXTURE_RAG_QUESTION = "What does the fixture knowledge say?"
+FIXTURE_DELAYED_FINAL = "[[fixture:delayed-final]]"
 FIXTURE_BASH_APPROVE = "[[fixture:bash-approve]]"
 FIXTURE_BASH_DENY = "[[fixture:bash-deny]]"
 FIXTURE_PRIVATE_SKILL_DIRNAME = "fixture-extension-management"
@@ -490,6 +491,14 @@ class FixtureSession:
             raise FixtureProviderError(429)
         if text == "[[fixture:provider-error]]":
             raise FixtureProviderError(503)
+        if text == FIXTURE_DELAYED_FINAL:
+            await asyncio.sleep(0.05)
+            if self._progress_cb is not None:
+                self._progress_cb("fixture.before-old-deadline", [])
+            await asyncio.sleep(0.1)
+            if self._progress_cb is not None:
+                self._progress_cb("fixture.after-old-deadline", [])
+            await asyncio.sleep(2.0)
         if self.thinking_mode == "extended" and self._progress_cb is not None:
             self._progress_cb("fixture.extended.aggregate", [])
 

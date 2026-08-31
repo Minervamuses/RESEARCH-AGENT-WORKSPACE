@@ -21,48 +21,48 @@
 
 ### MCP defaults
 
-- [ ] CLI 在沒有 `--no-mcp` 時仍以 `load_mcp=True` 建立 session；明確傳入 `--no-mcp` 時仍關閉。
-- [ ] GUI 的一般 session creation 讓 Python backend 的 `loadMcp=true` default 生效，或明確送 `true`；沒有另一條正常 GUI 建立路徑仍預設關閉 MCP。
-- [ ] 驗證以 fake MCP loader／protocol fixture 完成，不連接真實外部 MCP server。
+- [x] CLI 在沒有 `--no-mcp` 時仍以 `load_mcp=True` 建立 session；明確傳入 `--no-mcp` 時仍關閉。
+- [x] GUI 的一般 session creation 讓 Python backend 的 `loadMcp=true` default 生效，或明確送 `true`；沒有另一條正常 GUI 建立路徑仍預設關閉 MCP。
+- [x] 驗證以 fake MCP loader／protocol fixture 完成，不連接真實外部 MCP server。
 
 ### Long-request liveness
 
-- [ ] Rust supervisor 不再對已成功啟動的一般 `session.turn` 套用固定 600 秒總時限，也不以另一個任意較大 absolute deadline 取代。
-- [ ] 一個 deterministic fake request 跨過測試中縮短的舊 deadline、期間送出合法 progress/event、最後回傳 terminal result，必須成功且 child 不被 kill。
-- [ ] Child exit、stdout/pipe close、malformed protocol、startup failure 與 bounded graceful shutdown 仍會形成明確 terminal error；移除總時限不得把真正失敗變成永久等待。
+- [x] Rust supervisor 不再對已成功啟動的一般 `session.turn` 套用固定 600 秒總時限，也不以另一個任意較大 absolute deadline 取代。
+- [x] 一個 deterministic fake request 跨過測試中縮短的舊 deadline、期間送出合法 progress/event、最後回傳 terminal result，必須成功且 child 不被 kill。
+- [x] Child exit、stdout/pipe close、malformed protocol、startup failure 與 bounded graceful shutdown 仍會形成明確 terminal error；移除總時限不得把真正失敗變成永久等待。
 
 ### One-shot dynamic Skill invocation
 
-- [ ] CLI 與 Desktop 對同一個 session Skill catalog 接受 `/<skill-name> <自然語言 prompt>`，並保留 command 後方原始自然語言文字。
-- [ ] 空 prompt、未知 Skill、非法名稱、duplicate name、與 built-in command／alias 衝突，都在模型執行前 fail closed；起始沒有 Citation 時不留下任何 transient Skill，起始已有 Citation 時則保持其既有 state/registry。
-- [ ] 一般 Skill 的 runtime scope 被 session turn lock 包住；success、graph/provider/finalizer/persistence error、cancellation 與 backend shutdown 都以 `finally` 等價邊界清除非 Citation transient state。若命令前 Citation 已 active，parse/empty/load failure 不得先 teardown Citation；只有另一 Skill 成功切換才沿用現行 teardown/no-restore 語意。
-- [ ] 一般 Skill 成功執行後，緊接著的普通輸入以無 Active Skill 狀態執行；process restart 不恢復舊的一般 Active Skill。
-- [ ] 一般 `/skill <name> [mode]`、`/skill none`、Task mode schema/runtime/manifest/UI/protocol control 與 Desktop Skill dropdown/RPC 都被完整移除，不留下第二套 hidden activation path。
-- [ ] `/citation` 保留 built-in 優先權；focused Citation regression 證明一般 Skill 改動沒有順便重寫既有 CLI Citation lifecycle。本計劃不要求 GUI 可啟動 Citation。
+- [x] CLI 與 Desktop 對同一個 session Skill catalog 接受 `/<skill-name> <自然語言 prompt>`，並保留 command 後方原始自然語言文字。
+- [x] 空 prompt、未知 Skill、非法名稱、duplicate name、與 built-in command／alias 衝突，都在模型執行前 fail closed；起始沒有 Citation 時不留下任何 transient Skill，起始已有 Citation 時則保持其既有 state/registry。
+- [x] 一般 Skill 的 runtime scope 被 session turn lock 包住；success、graph/provider/finalizer/persistence error、cancellation 與 backend shutdown 都以 `finally` 等價邊界清除非 Citation transient state。若命令前 Citation 已 active，parse/empty/load failure 不得先 teardown Citation；只有另一 Skill 成功切換才沿用現行 teardown/no-restore 語意。
+- [x] 一般 Skill 成功執行後，緊接著的普通輸入以無 Active Skill 狀態執行；process restart 不恢復舊的一般 Active Skill。
+- [x] 一般 `/skill <name> [mode]`、`/skill none`、Task mode schema/runtime/manifest/UI/protocol control 與 Desktop Skill dropdown/RPC 都被完整移除，不留下第二套 hidden activation path。
+- [x] `/citation` 保留 built-in 優先權；focused Citation regression 證明一般 Skill 改動沒有順便重寫既有 CLI Citation lifecycle。本計劃不要求 GUI 可啟動 Citation。
 
 ### Normal authoritative final-only delivery
 
-- [ ] Deterministic fake normal turn 證明 terminal `session.turn` result 是唯一 answer-text delivery，`streamKind=final_only`、`chunkCount=0`，且整個 success path 沒有 `answer.chunk`。
-- [ ] Python generation、repair、finalization、final-text/wire validation 與 turn persistence 全部完成後，Desktop 才收到一次完整 authoritative answer；React 在此之前只顯示 bounded progress/activity 與 waiting state，不顯示 provisional answer text。
-- [ ] Normal production、protocol 與 UI 不再保留 `post_finalized` 全文 slicing／reconciliation path；不得用另一種完成後 event 模擬串流。
-- [ ] Error、cancel、provider/child failure、oversize 或 validation failure 不顯示、reconcile 或 persist partial answer；user draft 的既有 retry 行為可保留。
-- [ ] Phase 05 的既有 rejected-draft characterisation evidence 保留為產品決策依據；Fusion、Extended Thinking 與 Citation redesign 不因 final-only 修復改變。
+- [x] Deterministic fake normal turn 證明 terminal `session.turn` result 是唯一 answer-text delivery，`streamKind=final_only`、`chunkCount=0`，且整個 success path 沒有 `answer.chunk`。
+- [x] Python generation、repair、finalization、final-text/wire validation 與 turn persistence 全部完成後，Desktop 才收到一次完整 authoritative answer；React 在此之前只顯示 bounded progress/activity 與 waiting state，不顯示 provisional answer text。
+- [x] Normal production、protocol 與 UI 不再保留 `post_finalized` 全文 slicing／reconciliation path；不得用另一種完成後 event 模擬串流。
+- [x] Error、cancel、provider/child failure、oversize 或 validation failure 不顯示、reconcile 或 persist partial answer；user draft 的既有 retry 行為可保留。
+- [x] Phase 05 的既有 rejected-draft characterisation evidence 保留為產品決策依據；Fusion、Extended Thinking 與 Citation redesign 不因 final-only 修復改變。
 
 ### Tool-aware conversation restore
 
-- [ ] Plan persistence 使用一個最小、versioned 的既有格式延伸，能無歧義保存 user input、tool call/result activity 與 finalized assistant answer；不建立第二個 store 或 sidecar persistence framework。
-- [ ] Transcript DTO 與 React rendering 將 tool activity 顯示成獨立角色，不串進 `userText`、不標成 `You`、不暴露未設限 raw payload。
-- [ ] 新格式中只有完整且驗證通過的 call/result pair 可以重建為後續模型 tool context；prompt eligibility 由 parser 驗證推導，不能信任磁碟中的布林宣告。
-- [ ] Legacy Plan log 即使含 `Tool`／`Result` marker 也可以選取與閱讀；無可靠 identity 的 legacy activity 僅 display-only，後續 prompt 只取可確認的 user/final assistant 內容。
-- [ ] Citation scope／`citation_workflow` activity 本輪最多作 bounded display-only history；不設 prompt eligible、不重建 registry、不自動啟用 Citation。
-- [ ] 代表性 lifecycle 以 fake tool 完成 `turn → persist → backend shutdown → restart → sidebar select → user/tool/final display → new normal turn`，觀察到舊 tool invocation count 沒有增加，且新回合沒有重播或冒充歷史工具文字。
-- [ ] Catalog selection、pagination、merge/dedup 與 malformed/oversized input 邊界仍 fail closed，健康 conversation 不受單一壞檔污染。
+- [x] Plan persistence 使用一個最小、versioned 的既有格式延伸，能無歧義保存 user input、tool call/result activity 與 finalized assistant answer；不建立第二個 store 或 sidecar persistence framework。
+- [x] Transcript DTO 與 React rendering 將 tool activity 顯示成獨立角色，不串進 `userText`、不標成 `You`、不暴露未設限 raw payload。
+- [x] 新格式中只有完整且驗證通過的 call/result pair 可以重建為後續模型 tool context；prompt eligibility 由 parser 驗證推導，不能信任磁碟中的布林宣告。
+- [x] Legacy Plan log 即使含 `Tool`／`Result` marker 也可以選取與閱讀；無可靠 identity 的 legacy activity 僅 display-only，後續 prompt 只取可確認的 user/final assistant 內容。
+- [x] Citation scope／`citation_workflow` activity 本輪最多作 bounded display-only history；不設 prompt eligible、不重建 registry、不自動啟用 Citation。
+- [x] 代表性 lifecycle 以 fake tool 完成 `turn → persist → backend shutdown → restart → sidebar select → user/tool/final display → new normal turn`，觀察到舊 tool invocation count 沒有增加，且新回合沒有重播或冒充歷史工具文字。
+- [x] Catalog selection、pagination、merge/dedup 與 malformed/oversized input 邊界仍 fail closed，健康 conversation 不受單一壞檔污染。
 
 ### Final integration
 
 - [ ] 各 phase 的 focused checks 通過，最後只執行一次適當的 Python broader suite、完整 npm tests、完整 Cargo tests 與 Tauri no-bundle build；實際命令與結果記入 `build-log.md`。
-- [ ] 一次 isolated fake Desktop journey 證明 MCP default、長回合存活、dynamic Skill command、final-only answer delivery、tool-aware restore/continue 之間沒有互相回歸。
-- [ ] `git diff --check` 通過，實際 diff 僅包含 phase 宣告且有因果必要性的檔案；沒有 dependency、lockfile、真實 user store、credential 或付費 provider 變更。
+- [x] 一次 isolated fake Desktop journey 證明 MCP default、長回合存活、dynamic Skill command、final-only answer delivery、tool-aware restore/continue 之間沒有互相回歸。
+- [x] `git diff --check` 通過，實際 diff 僅包含 phase 宣告且有因果必要性的檔案；沒有 dependency、lockfile、真實 user store、credential 或付費 provider 變更。
 
 ## In Scope
 
