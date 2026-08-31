@@ -497,6 +497,13 @@
 - Blockers or disproved assumptions: no blocker。The only disproved write-set assumption was that `test_desktop_service.py` needed edits；existing coverage accepted the DTO extension unchanged。CSS became directly necessary to keep restored Tool/Result visually independent from user/assistant roles。
 - Next eligible action: stage exactly these 19 paths, audit the cached set/check, create the Phase 06 local commit, append its hash in a log-only commit, verify clean tree, then load Phase 07 and execute its one authorized broader acceptance sequence exactly once。
 
+## 2026-09-01 02:48 CST — Phase 06: implementation hash recorded
+
+- Local implementation commit: `3c3ae7e84f5b860a16d4ef304b0e8f026edc3256` (`fix(plan): restore tool-aware conversations`)。
+- Commit result: `19 files changed, 1932 insertions(+), 151 deletions(-)`；the count includes the phase status/evidence and no dependency/lockfile、generated user data or out-of-scope subsystem。
+- Immediate post-commit audit: `git status --short` returned no output。
+- Next eligible action: commit this hash record as a log-only follow-up, verify clean tree, then enter Phase 07 because all Phase 01–06 dependencies are Complete。
+
 ## Execution Entry Template
 
 後續每個 checkpoint append 一筆，不覆寫歷史 evidence：
