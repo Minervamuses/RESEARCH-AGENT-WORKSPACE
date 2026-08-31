@@ -134,8 +134,6 @@
       "planMode": {"type": "boolean", "required": true},
       "planLogPath": {"type": "nullableString", "required": true, "maxBytes": 8192},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
-      "activeSkill": {"type": "nullableString", "required": true, "maxBytes": 256},
-      "taskMode": {"type": "nullableString", "required": true, "maxBytes": 256},
       "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "startupDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096},
@@ -211,8 +209,6 @@
       "planMode": {"type": "boolean", "required": true},
       "planLogPath": {"type": "nullableString", "required": true, "maxBytes": 8192},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
-      "activeSkill": {"type": "nullableString", "required": true, "maxBytes": 256},
-      "taskMode": {"type": "nullableString", "required": true, "maxBytes": 256},
       "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "startupDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096},
@@ -372,17 +368,6 @@
       "requiredParams": ["mode"],
       "params": {"mode": {"type": "string", "required": true, "enum": ["normal", "extended"]}}
     },
-    {"name": "session.list_skills", "operation": "read", "requiredParams": [], "params": {}},
-    {
-      "name": "session.activate_skill",
-      "operation": "mutation",
-      "requiredParams": ["name"],
-      "params": {
-        "name": {"type": "string", "required": true, "maxBytes": 256},
-        "taskMode": {"type": "string", "required": false, "maxBytes": 256}
-      }
-    },
-    {"name": "session.deactivate_skill", "operation": "mutation", "requiredParams": [], "params": {}},
     {"name": "session.shutdown", "operation": "lifecycle", "requiredParams": [], "params": {}},
     {"name": "knowledge.overview", "operation": "read", "requiredParams": [], "params": {}},
     {

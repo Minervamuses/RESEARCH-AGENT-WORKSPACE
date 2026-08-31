@@ -67,7 +67,7 @@ from agent.ingest import (
 from agent.history_rag.store import HistoryRestoreError, get_chat_history_store
 from agent.paths import find_app_root
 from agent.session import ChatSession
-from agent.skills import DEFAULT_SKILLS_DIR, load_skill_manifest
+from agent.skills import DEFAULT_SKILLS_DIR
 from agent.turns.safety import content_text
 from agent.turns.journal import TurnRestoreError, merge_restored_turns
 from agent.turns.memory import TurnRecord
@@ -170,8 +170,6 @@ class _ConversationControlSnapshot:
     plan_mode: bool
     plan_log_path: str | None
     thinking_mode: str
-    active_skill: str | None
-    task_mode: str | None
 
 
 class DesktopService:
@@ -206,7 +204,7 @@ class DesktopService:
             0.01,
             min(float(approval_timeout_seconds), 3_600.0),
         )
-        self._slash_registry = slash_registry or build_default_registry()
+        self._slash_registry_override = slash_registry
         self._knowledge_operations = knowledge_operations or DesktopKnowledgeOperations(
             init_workspace=init_workspace,
             ingest_file=ingest_file,
@@ -272,9 +270,6 @@ class DesktopService:
             "session.turn": self._session_turn,
             "session.set_mode": self._session_set_mode,
             "session.set_thinking": self._session_set_thinking,
-            "session.list_skills": self._session_list_skills,
-            "session.activate_skill": self._session_activate_skill,
-            "session.deactivate_skill": self._session_deactivate_skill,
             "session.shutdown": self._session_shutdown,
             "knowledge.overview": self._knowledge_overview,
             "knowledge.search": self._knowledge_search,
@@ -1010,19 +1005,12 @@ class DesktopService:
 
     @staticmethod
     def _capture_controls(session: ChatSession) -> _ConversationControlSnapshot:
-        runtime = session.active_skill_runtime
         return _ConversationControlSnapshot(
             plan_mode=bool(session.plan_mode),
             plan_log_path=(
                 str(session.plan_log_path) if session.plan_log_path else None
             ),
             thinking_mode=str(session.thinking_mode),
-            active_skill=(str(runtime.name) if runtime is not None else None),
-            task_mode=(
-                str(runtime.task_mode)
-                if runtime is not None and runtime.task_mode
-                else None
-            ),
         )
 
     async def _apply_controls(
@@ -1032,8 +1020,6 @@ class DesktopService:
     ) -> None:
         if snapshot is None:
             return
-        if snapshot.active_skill is not None:
-            session.activate_skill(snapshot.active_skill, snapshot.task_mode)
         session.set_thinking_mode(snapshot.thinking_mode)
         if snapshot.plan_mode:
             if snapshot.plan_log_path is not None:
@@ -1618,6 +1604,8 @@ class DesktopService:
         self._active_turn_id = turn_id
         try:
             original_text = params["text"]
+            turn_text = original_text
+            turn_skill_name: str | None = None
             try:
                 parsed = parse_slash_command(original_text)
             except SlashCommandError as exc:
@@ -1627,79 +1615,119 @@ class DesktopService:
                 ) from exc
 
             if parsed is not None:
-                command = self._slash_registry.get(parsed.name)
+                registry = (
+                    self._slash_registry_override
+                    or build_default_registry(session)
+                )
+                command = registry.get(parsed.name)
                 if command is None:
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
                         f"Unknown slash command: /{self._bounded_text(parsed.name, 256)}",
                     )
-                if (
-                    parsed.name.casefold() != command.name.casefold()
-                    or command.name not in _DESKTOP_SLASH_COMMANDS
-                ):
+                if parsed.name.casefold() != command.name.casefold():
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
                         "That slash command is not available in the desktop composer.",
                     )
-                extension_action: str | None = None
-                try:
-                    if command.name in _DESKTOP_KNOWLEDGE_COMMANDS:
-                        result = await self._execute_desktop_knowledge_command(
-                            session,
-                            parsed,
-                        )
-                    elif command.name == _DESKTOP_EXTENSION_COMMAND:
-                        result, extension_action = (
-                            await self._execute_desktop_extension_command(parsed)
-                        )
-                    else:
+                if command.skill_name is not None:
+                    try:
                         result = await execute_slash_command(
                             parsed,
                             SlashCommandContext(
                                 session=session,
-                                registry=self._slash_registry,
+                                registry=registry,
                             ),
                         )
-                except SlashCommandError as exc:
+                    except SlashCommandError as exc:
+                        raise DesktopServiceError(
+                            "PROTOCOL_INVALID",
+                            self._bounded_text(str(exc), 4_096),
+                        ) from exc
+                    if (
+                        result.should_exit
+                        or result.clear_screen
+                        or not isinstance(result.followup_input, str)
+                        or not result.followup_input.strip()
+                        or result.skill_name != command.skill_name
+                    ):
+                        raise DesktopServiceError(
+                            "PROTOCOL_INVALID",
+                            "That Skill command returned an unsupported result.",
+                        )
+                    turn_text = result.followup_input
+                    turn_skill_name = result.skill_name
+                elif command.name not in _DESKTOP_SLASH_COMMANDS:
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
-                        self._bounded_text(str(exc), 4_096),
-                    ) from exc
-                if (
-                    result.should_exit
-                    or result.clear_screen
-                    or result.followup_input is not None
-                ):
-                    raise DesktopServiceError(
-                        "PROTOCOL_INVALID",
-                        "That slash-command result is not supported by the desktop composer.",
+                        "That slash command is not available in the desktop composer.",
                     )
-                message = self._bounded_text(
-                    str(result.message),
-                    _MAX_LOCAL_COMMAND_BYTES,
-                )
-                if not message.strip():
-                    raise DesktopServiceError(
-                        "PROTOCOL_INVALID",
-                        "The slash command returned no displayable result.",
+                else:
+                    extension_action: str | None = None
+                    try:
+                        if command.name in _DESKTOP_KNOWLEDGE_COMMANDS:
+                            result = await self._execute_desktop_knowledge_command(
+                                session,
+                                parsed,
+                            )
+                        elif command.name == _DESKTOP_EXTENSION_COMMAND:
+                            result, extension_action = (
+                                await self._execute_desktop_extension_command(parsed)
+                            )
+                        else:
+                            result = await execute_slash_command(
+                                parsed,
+                                SlashCommandContext(
+                                    session=session,
+                                    registry=registry,
+                                ),
+                            )
+                    except SlashCommandError as exc:
+                        raise DesktopServiceError(
+                            "PROTOCOL_INVALID",
+                            self._bounded_text(str(exc), 4_096),
+                        ) from exc
+                    if (
+                        result.should_exit
+                        or result.clear_screen
+                        or result.followup_input is not None
+                    ):
+                        raise DesktopServiceError(
+                            "PROTOCOL_INVALID",
+                            "That slash-command result is not supported by the desktop composer.",
+                        )
+                    message = self._bounded_text(
+                        str(result.message),
+                        _MAX_LOCAL_COMMAND_BYTES,
                     )
-                response = {
-                    "sessionId": session.session_id,
-                    "turnId": turn_id,
-                    "text": message,
-                    "validationErrors": [],
-                    "toolSummaries": [],
-                    "responseKind": "command",
-                    "streamKind": "final_only",
-                    "chunkCount": 0,
-                    "registrationStatus": "not_required",
-                    "registrationIssue": None,
-                }
-                if extension_action is not None:
-                    response["extensionAction"] = extension_action
-                return response
+                    if not message.strip():
+                        raise DesktopServiceError(
+                            "PROTOCOL_INVALID",
+                            "The slash command returned no displayable result.",
+                        )
+                    response = {
+                        "sessionId": session.session_id,
+                        "turnId": turn_id,
+                        "text": message,
+                        "validationErrors": [],
+                        "toolSummaries": [],
+                        "responseKind": "command",
+                        "streamKind": "final_only",
+                        "chunkCount": 0,
+                        "registrationStatus": "not_required",
+                        "registrationIssue": None,
+                    }
+                    if extension_action is not None:
+                        response["extensionAction"] = extension_action
+                    return response
 
-            outcome = await session.turn_outcome(original_text)
+            if turn_skill_name is None:
+                outcome = await session.turn_outcome(turn_text)
+            else:
+                outcome = await session.turn_outcome(
+                    turn_text,
+                    skill_name=turn_skill_name,
+                )
             if not isinstance(outcome.text, str) or not outcome.text.strip():
                 raise DesktopServiceError(
                     "INTERNAL_ERROR", "The session returned no displayable answer."
@@ -1825,59 +1853,6 @@ class DesktopService:
     ) -> dict[str, Any]:
         session = self._require_idle_session()
         session.set_thinking_mode(params["mode"])
-        return self._session_snapshot(session)
-
-    async def _session_list_skills(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        session = self._require_session()
-        active = session.active_skill_runtime
-        items: list[dict[str, Any]] = []
-        builtin_root = DEFAULT_SKILLS_DIR.resolve()
-        for skill in session.loaded_skills:
-            task_modes: list[str] = []
-            error: str | None = None
-            try:
-                manifest = load_skill_manifest(skill.path.parent)
-                task_modes = [
-                    str(mode)
-                    for mode in manifest.get("task_modes", [])
-                    if isinstance(mode, str)
-                ]
-            except (OSError, ValueError):
-                error = "Skill metadata is unavailable."
-            source = (
-                "builtin"
-                if skill.path.resolve().is_relative_to(builtin_root)
-                else "applied"
-            )
-            is_active = active is not None and active.name == skill.name
-            items.append(
-                {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "taskModes": task_modes,
-                    "source": source,
-                    "active": is_active,
-                    "activeTaskMode": active.task_mode if is_active else None,
-                    "available": error is None,
-                    "error": error,
-                }
-            )
-        return {"skills": items}
-
-    async def _session_activate_skill(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        session = self._require_idle_session()
-        session.activate_skill(params["name"], params.get("taskMode"))
-        return self._session_snapshot(session)
-
-    async def _session_deactivate_skill(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        session = self._require_idle_session()
-        session.deactivate_skill()
         return self._session_snapshot(session)
 
     async def _session_shutdown(
@@ -2029,7 +2004,6 @@ class DesktopService:
 
     def _session_snapshot(self, session: ChatSession) -> dict[str, Any]:
         status = session.status_snapshot()
-        runtime = session.active_skill_runtime
         return {
             "sessionId": session.session_id,
             "turnCount": int(status.get("turn_count", 0)),
@@ -2037,14 +2011,6 @@ class DesktopService:
             "planMode": bool(session.plan_mode),
             "planLogPath": str(session.plan_log_path) if session.plan_log_path else None,
             "thinkingMode": session.thinking_mode,
-            "activeSkill": (
-                self._bounded_text(runtime.name, 256) if runtime is not None else None
-            ),
-            "taskMode": (
-                self._bounded_text(runtime.task_mode, 256)
-                if runtime is not None and runtime.task_mode
-                else None
-            ),
             "loadedSkills": [
                 self._bounded_text(skill.name, 256)
                 for skill in session.loaded_skills[:512]

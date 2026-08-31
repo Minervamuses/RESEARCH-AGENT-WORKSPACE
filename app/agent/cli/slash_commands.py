@@ -62,6 +62,7 @@ class SlashCommand:
     description: str
     handler: Callable[["SlashCommandContext", ParsedSlashCommand], Awaitable[SlashCommandResult]]
     aliases: tuple[str, ...] = ()
+    skill_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,7 @@ def _project_skill_commands(
                 name=name,
                 description=entries[0].description,
                 handler=_one_shot_skill_handler(name),
+                skill_name=name,
             )
         )
 

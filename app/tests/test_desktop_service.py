@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,12 +26,6 @@ from agent.turns.results import TurnOutcome
 from rag.types import Hit
 
 
-@dataclass
-class _Runtime:
-    name: str
-    task_mode: str | None = None
-
-
 class _FakeSession:
     def __init__(self, config: AgentConfig, progress_cb=None) -> None:
         self.config = config
@@ -40,7 +34,6 @@ class _FakeSession:
         self.plan_mode = False
         self.plan_log_path: Path | None = None
         self.thinking_mode = "normal"
-        self.active_skill_runtime: _Runtime | None = None
         self.loaded_skills = [
             SkillMetadata("research", "Research local material.", Path(__file__))
         ]
@@ -57,9 +50,16 @@ class _FakeSession:
         self.flush_started = asyncio.Event()
         self.flush_release = asyncio.Event()
         self.turn_inputs: list[str] = []
+        self.skill_turn_inputs: list[tuple[str, str | None]] = []
 
-    async def turn_outcome(self, text: str) -> TurnOutcome:
+    async def turn_outcome(
+        self,
+        text: str,
+        *,
+        skill_name: str | None = None,
+    ) -> TurnOutcome:
         self.turn_inputs.append(text)
+        self.skill_turn_inputs.append((text, skill_name))
         self.turn_started.set()
         if self.block_turn:
             await self.turn_release.wait()
@@ -100,13 +100,6 @@ class _FakeSession:
     def set_thinking_mode(self, mode: str) -> None:
         self.thinking_mode = mode
 
-    def activate_skill(self, name: str, task_mode: str | None = None) -> _Runtime:
-        self.active_skill_runtime = _Runtime(name, task_mode)
-        return self.active_skill_runtime
-
-    def deactivate_skill(self) -> None:
-        self.active_skill_runtime = None
-
     def status_snapshot(self) -> dict[str, object]:
         return {
             "session_id": self.session_id,
@@ -118,16 +111,6 @@ class _FakeSession:
             "plan_log_path": str(self.plan_log_path or ""),
             "thinking_mode": self.thinking_mode,
             "mcp_families": "web_search",
-            "active_skill": (
-                self.active_skill_runtime.name
-                if self.active_skill_runtime is not None
-                else ""
-            ),
-            "task_mode": (
-                self.active_skill_runtime.task_mode
-                if self.active_skill_runtime is not None
-                else ""
-            ),
         }
 
     async def flush_recent_turns(self) -> None:
@@ -419,6 +402,8 @@ def test_session_create_failure_keeps_backend_retryable(tmp_path: Path) -> None:
     assert factory.calls[-1][0].graph_recursion_limit == 72
     assert factory.calls[-1][1] is False
     assert snapshot["loadedSkills"] == ["research"]
+    assert "activeSkill" not in snapshot
+    assert "taskMode" not in snapshot
     success_result(
         "00000000-0000-4000-8000-000000000102",
         "session.create",
@@ -486,6 +471,29 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
     assert "Session status:" in status["text"]
 
 
+def test_composer_routes_dynamic_skill_once_as_answer(tmp_path: Path) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session = factory.created
+    assert session is not None
+
+    raw_text = '/research draft  "quoted"   text'
+    skill_answer = asyncio.run(
+        service.dispatch("session.turn", {"text": raw_text})
+    )
+    ordinary_answer = asyncio.run(
+        service.dispatch("session.turn", {"text": "ordinary follow-up"})
+    )
+
+    assert skill_answer["responseKind"] == "answer"
+    assert ordinary_answer["responseKind"] == "answer"
+    assert session.skill_turn_inputs == [
+        ('draft  "quoted"   text', "research"),
+        ("ordinary follow-up", None),
+    ]
+
+
 def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     tmp_path: Path,
 ) -> None:
@@ -531,7 +539,10 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     assert manager.preview_calls == 0
 
 
-@pytest.mark.parametrize("text", ["/", "/unknown", "/mode normal"])
+@pytest.mark.parametrize(
+    "text",
+    ["/", "/unknown", "/mode normal", "/research", "/citation prompt"],
+)
 def test_composer_rejects_invalid_or_disallowed_commands_before_model(
     tmp_path: Path,
     text: str,
@@ -547,6 +558,51 @@ def test_composer_rejects_invalid_or_disallowed_commands_before_model(
 
     assert raised.value.code == "PROTOCOL_INVALID"
     assert session.turn_inputs == []
+
+
+def test_composer_rejects_duplicate_skill_collision_before_model(
+    tmp_path: Path,
+) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session = factory.created
+    assert session is not None
+    session.loaded_skills.append(
+        SkillMetadata("research", "Duplicate research Skill.", Path(__file__))
+    )
+
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(
+            service.dispatch("session.turn", {"text": "/research prompt"})
+        )
+
+    assert raised.value.code == "PROTOCOL_INVALID"
+    assert session.turn_inputs == []
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "session.list_skills",
+        "session.activate_skill",
+        "session.deactivate_skill",
+    ],
+)
+def test_removed_generic_skill_methods_are_unknown(
+    tmp_path: Path,
+    method: str,
+) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(service.dispatch(method, {}))
+
+    assert raised.value.code == "PROTOCOL_INVALID"
+    assert factory.created is not None
+    assert factory.created.turn_inputs == []
 
 
 def test_composer_rejects_aliases_and_unsupported_typed_results(
@@ -1038,17 +1094,23 @@ def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) ->
         first = asyncio.create_task(
             service.dispatch(
                 "session.turn",
-                {"text": "第一題"},
+                {"text": "/research 第一題"},
                 event_sink=lambda event, data: events.append((event, data)),
             )
         )
         await session.turn_started.wait()
 
+        with pytest.raises(DesktopServiceError) as second_dynamic:
+            await service.dispatch(
+                "session.turn",
+                {"text": "/research 第二題"},
+            )
         with pytest.raises(DesktopServiceError) as second:
             await service.dispatch("session.turn", {"text": "第二題"})
         with pytest.raises(DesktopServiceError) as mutation:
             await service.dispatch("session.set_mode", {"mode": "plan"})
 
+        assert second_dynamic.value.code == "BUSY_TURN"
         assert second.value.code == "BUSY_TURN"
         assert mutation.value.code == "BUSY_TURN"
         session.turn_release.set()
@@ -1060,6 +1122,42 @@ def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) ->
         rendered = repr(events) + repr(result)
         assert "private query" not in rendered
         assert "private tool result" not in rendered
+        assert session.skill_turn_inputs == [("第一題", "research")]
+
+    asyncio.run(run())
+
+
+def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        factory = _SessionFactory()
+        service = _service(tmp_path, session_factory=factory)
+        await service.dispatch("session.create", {"loadMcp": False})
+        session = factory.created
+        assert session is not None
+        session.block_turn = True
+        turn = asyncio.create_task(
+            service.dispatch(
+                "session.turn",
+                {"text": "/research cancellable prompt"},
+            )
+        )
+        await session.turn_started.wait()
+
+        turn.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await turn
+
+        assert service._turn_active is False
+        assert session.skill_turn_inputs == [
+            ("cancellable prompt", "research")
+        ]
+        session.block_turn = False
+        assert await service.dispatch("session.shutdown", {}) == {
+            "status": "stopped",
+            "flushed": True,
+        }
 
     asyncio.run(run())
 

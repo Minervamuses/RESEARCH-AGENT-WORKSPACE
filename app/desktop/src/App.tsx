@@ -110,17 +110,6 @@ interface LiveTurn {
   presentation: "final" | "reconciled" | "final_only";
 }
 
-interface SkillItem {
-  name: string;
-  description: string;
-  taskModes: string[];
-  source: "builtin" | "applied";
-  active: boolean;
-  activeTaskMode: string | null;
-  available: boolean;
-  error: string | null;
-}
-
 export function sidebarRowsForProject(
   projectId: string,
   sessions: readonly SessionSummaryDto[],
@@ -244,7 +233,6 @@ export default function App() {
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [registrationIssue, setRegistrationIssue] = useState<string | null>(null);
-  const [skills, setSkills] = useState<SkillItem[]>([]);
   const [extensionFlow, setExtensionFlow] = useState<ExtensionFlow | null>(null);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [approvalResolving, setApprovalResolving] = useState(false);
@@ -527,7 +515,6 @@ export default function App() {
       setLiveTurns([]);
       setPendingUserText(null);
       setRegistrationIssue(null);
-      setSkills([]);
       pendingApprovalRef.current = null;
       approvalResolvingRef.current = false;
       setPendingApproval(null);
@@ -599,17 +586,6 @@ export default function App() {
     }
   }, [conversation.activeTurn, pendingApproval]);
 
-  const loadSkills = useCallback(async (generation: number) => {
-    try {
-      const data = await backendClient.request("session.list_skills", {});
-      if (generationRef.current === generation) {
-        setSkills(Array.isArray(data.skills) ? data.skills as unknown as SkillItem[] : []);
-      }
-    } catch (error) {
-      if (generationRef.current === generation) setWorkspaceIssue(workspaceError(error));
-    }
-  }, []);
-
   const selectConversation = useCallback(async (projectId: string, session: SessionSummaryDto) => {
     if (conversationRef.current.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Selecting conversation");
@@ -638,8 +614,6 @@ export default function App() {
         throw protocolMismatch("The backend returned a transcript for a different conversation.");
       }
       setTranscript({ projectId, sessionId: session.sessionId, status: transcriptData.status, issue: transcriptData.issue, items: transcriptData.items, offset: transcriptData.offset, total: transcriptData.total, hasOlder: transcriptData.status === "ready" && transcriptData.offset > 0 });
-      await loadSkills(generation);
-      if (generationRef.current !== generation) return;
       requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
       focusComposer();
     } catch (error) {
@@ -651,7 +625,7 @@ export default function App() {
       setWorkspaceIssue(safe);
       focusComposer();
     } finally { finishWorkspaceOperation(operation); }
-  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadSkills]);
+  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer]);
 
   useEffect(() => {
     if (catalog === null || catalog.selectedProjectId === null || catalog.selectedSessionId === null || conversation.selected !== null || workspaceBusy !== null) return;
@@ -683,8 +657,6 @@ export default function App() {
         setLiveTurns([]);
         setPendingUserText(null);
         setRegistrationIssue(null);
-        await loadSkills(generation);
-        if (generationRef.current !== generation) return;
         focusComposer();
       } catch (error) {
         if (generationRef.current !== generation) return;
@@ -692,7 +664,7 @@ export default function App() {
         focusComposer();
       } finally { finishWorkspaceOperation(operation); }
     })();
-  }, [activeProjectId, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadSkills]);
+  }, [activeProjectId, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer]);
 
   const loadOlder = useCallback(() => {
     const current = transcript;
@@ -876,7 +848,7 @@ export default function App() {
   }, [beginWorkspaceOperation, conversation.activeTurn, conversation.selected, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 
   const updateSessionControl = useCallback(async (
-    method: "session.set_mode" | "session.set_thinking" | "session.activate_skill" | "session.deactivate_skill",
+    method: "session.set_mode" | "session.set_thinking",
     params: JsonObject,
   ) => {
     const selected = conversationRef.current.selected;
@@ -896,8 +868,6 @@ export default function App() {
           ? data as unknown as SessionCreatedDto
           : { ...state.session, ...data as unknown as SessionCreatedDto },
       });
-      await loadSkills(generation);
-      if (generationRef.current !== generation) return;
       focusComposer();
     } catch (error) {
       if (generationRef.current === generation) {
@@ -906,7 +876,7 @@ export default function App() {
       }
     }
     finally { finishWorkspaceOperation(operation); }
-  }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadSkills, state.session]);
+  }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
   const onComposerKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendTurn(); }
@@ -987,8 +957,7 @@ export default function App() {
             <div className="session-controls" aria-label="Session controls">
               <fieldset disabled={interaction.controlDisabled || workspaceBusy !== null}><legend>Response mode</legend><button type="button" aria-pressed={!activeSession.planMode} onClick={() => void updateSessionControl("session.set_mode", { mode: "normal" })}>Normal</button><button type="button" aria-pressed={activeSession.planMode} onClick={() => void updateSessionControl("session.set_mode", { mode: "plan" })}>Plan</button></fieldset>
               <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateSessionControl("session.set_thinking", { mode: event.target.value })}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
-              <label>Active skill<select value={activeSession.activeSkill ?? ""} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateSessionControl(event.target.value === "" ? "session.deactivate_skill" : "session.activate_skill", event.target.value === "" ? {} : { name: event.target.value })}><option value="">No active skill</option>{skills.filter((skill) => skill.available).map((skill) => <option key={skill.name} value={skill.name}>{skill.name}</option>)}</select></label>
-              <p className="control-state" aria-live="polite">Task: {activeSession.taskMode ?? "none"} · Citations: local output ready</p>
+              <p className="control-state">Skills run once with /&lt;skill-name&gt; &lt;prompt&gt;. Citation mode is currently CLI-only.</p>
             </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}

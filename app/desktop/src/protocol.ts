@@ -15,9 +15,6 @@ export const PROTOCOL_METHODS = [
   "session.turn",
   "session.set_mode",
   "session.set_thinking",
-  "session.list_skills",
-  "session.activate_skill",
-  "session.deactivate_skill",
   "session.shutdown",
   "knowledge.overview",
   "knowledge.search",
@@ -248,8 +245,6 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     planMode: { type: "boolean", required: true },
     planLogPath: { type: "nullableString", required: true, maxBytes: 8_192 },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
-    activeSkill: { type: "nullableString", required: true, maxBytes: 256 },
-    taskMode: { type: "nullableString", required: true, maxBytes: 256 },
     loadedSkills: {
       type: "stringArray",
       required: true,
@@ -354,8 +349,6 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     planMode: { type: "boolean", required: true },
     planLogPath: { type: "nullableString", required: true, maxBytes: 8_192 },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
-    activeSkill: { type: "nullableString", required: true, maxBytes: 256 },
-    taskMode: { type: "nullableString", required: true, maxBytes: 256 },
     loadedSkills: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     mcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     startupDiagnostics: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 4_096 },
@@ -496,12 +489,6 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "session.set_thinking": {
     mode: { type: "string", required: true, enum: ["normal", "extended"] },
   },
-  "session.list_skills": {},
-  "session.activate_skill": {
-    name: { type: "string", required: true, maxBytes: 256 },
-    taskMode: { type: "string", required: false, maxBytes: 256 },
-  },
-  "session.deactivate_skill": {},
   "session.shutdown": {},
   "knowledge.overview": {},
   "knowledge.search": {
@@ -603,8 +590,6 @@ export interface SessionCreatedDto {
   planMode: boolean;
   planLogPath: string | null;
   thinkingMode: "normal" | "extended";
-  activeSkill: string | null;
-  taskMode: string | null;
   loadedSkills: string[];
   mcpFamilies: string[];
   startupDiagnostics: string[];

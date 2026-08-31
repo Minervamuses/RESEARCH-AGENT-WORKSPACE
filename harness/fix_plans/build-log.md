@@ -9,7 +9,7 @@
 | 01 — MCP defaults | Complete | 1 | Focused verification and scope audit passed | CLI/backend observed `True` default and `False` opt-out; sole React caller omits `loadMcp`; Python `56 passed`, Node `7 passed` | `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` |
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
 | 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | `78589e95ea7ea2e4886529b568c78ecbdb24666c` |
-| 04 — Desktop Skill command | Not started | 0 | None | None | None |
+| 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | Pending local commit |
 | 05 — Normal live streaming | Not started | 0 | None | None | None |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
 | 07 — Integration acceptance | Not started | 0 | None | None | None |
@@ -18,7 +18,7 @@
 
 - Phase 01 focused implementation、scope audit與local implementation commit `f625d7b0f8c43c9970898dd0d34baeacdaadd3b3` 完成；hash-record commit是`21bcadfac3277c6f7a9a5926ac7944e82bdad8fa`。
 - Phases 01–02 focused implementation、scope audit與local implementation commits完成；Phase 02 commit是`45d446da4aa005019c7d8c8eded5e6a91b7251dc`。
-- Phases 01–03 focused implementation、scope audit與local implementation commits完成；Phase 03 commit是`78589e95ea7ea2e4886529b568c78ecbdb24666c`。
+- Phases 01–04 focused implementation and verification complete；Phase 04 local implementation commit is pending。
 - Blockers: none recorded。
 - Implementation authorization: active under the 2026-09-01 Start/Resume message and [`PLANS.md`](PLANS.md) envelope。
 - Local phase-scoped commits: authorized；remote push remains unauthorized。
@@ -248,6 +248,68 @@
 - Commit disposition/hash: `78589e95ea7ea2e4886529b568c78ecbdb24666c` (`fix(skills): run dynamic skills once`)。This follow-up changes only the durable hash record。
 - Blockers or disproved assumptions: none。
 - Next eligible action: commit this Phase 03 hash record, verify clean tree, then load dependent Phase 04。
+
+## 2026-09-01 01:06 CST — Phase 04: runtime/source preflight
+
+- Status transition: `Not started` → `In progress` after Phase 03 dependency becameComplete。
+- Durable sources reloaded: `phases/phase-04-desktop-skill-command.md`完整重讀；global plan/decision/authorization sources沿用本次完整reload。Live Desktop service turn dispatcher、conversation control snapshots、fixture session、contract/fixtures、TypeScript validators/DTO、Rust validator、React composer/control handlers及focused tests已逐一檢查。
+- Runtime/Git/dirty-tree gate: WSL/Linux；branch `GUI`；HEAD `bd9d70399cd94a1bf36e1235cda8d46ab449a2a4`；Phase 03 hash-record commit後`git status --short`無輸出。Python仍用Conda `app`/Poetry；Node/npm與Linux Cargo toolchains沿用已驗證runtime。
+- Authorization in force: Phase 04 Python Desktop、React/TypeScript、Rust、internal protocol/fixtures/tests及phase-only local commit在本次prompt envelope內；protocol major、dependency/lockfile、Citation redesign、live provider/real MCP/Ollama/store/credential、branch/worktree/push仍未授權。
+- Current causal hypothesis and attempt number: attempt 1。`DesktopService`目前在constructor建立global static registry，composer只允許`status`/extension/knowledge集合，未知dynamic command在model前一律拒絕；同時generic list/activate/deactivate RPC、React dropdown與control snapshot仍保存跨conversation state。最小修復是從current session建立Phase 03 registry，static dispatch優先，只有registry明確標記的dynamic Skill結果才落入既有answer-turn path，並刪除整條persistent control/DTO/RPC/snapshot鏈。
+- Exact initial/expanded write set and ownership: Python `app/agent/desktop/service.py`、`fixture_session.py`；shared resolver metadata owner `app/agent/cli/slash_commands.py`（新增read-only dynamic marker，讓Desktop不必執行有副作用的unsupported static handler來判型；不改Phase 03 lifecycle）；contract `app/desktop/protocol/v1/contract.json`、`fixtures.json`、`app/desktop/src/protocol.ts`、`app/desktop/src-tauri/src/protocol.rs`；UI `app/desktop/src/App.tsx`（no stylesheet change unless live diff reveals a gap）。Tests are the four planned Python Desktop files and three planned Node files。`app/agent/desktop/protocol.py`、conversation reducer、CSS與backend Rust remain read-only unless a rejecting check proves direct need。
+- Commands actually run and exact outcomes: read-only searches found generic RPCs in Python dispatch table、contract/TS/Rust inventories and validators；snapshot fields in service/contract/TS/Rust/two JSON fixtures；React owns `SkillItem`/`skills` state、three `loadSkills` calls、generic control method union、dropdown and task label。`session.turn` currently returns every accepted slash result as `responseKind=command` and calls `session.turn_outcome(original_text)` only when no slash parsed。No Phase 04 application test run yet。
+- User-visible/fixture observation: current GUI sends composer text raw, but `/research draft` is rejected before its fixture session because the service registry has no session catalog；normal/status behavior already shares the desired busy/registration/answer machinery。Citation is present only as an unsupported static registry command and must remain rejected/deferred after generic controls disappear。
+- Diff/scope/safety audit: Phase 04 first write is this log entry only；no application/protocol/dependency/lockfile changed yet。
+- Commit disposition/hash: pending focused verification。
+- Blockers or disproved assumptions: no blocker。`loadedSkills` remains useful bounded catalog evidence but React does not need to fetch a second selectable catalog once `session.list_skills` is removed。
+- Next eligible action: add one fake-session regression proving exact dynamic trailing prompt、answer classification and next ordinary turn state；run only that selector for causal red, then implement the Python dispatch/snapshot removal before synchronizing protocol and UI deletion tests。
+
+## 2026-09-01 01:09 CST — Phase 04: causal rejecting check
+
+- Write set used: `app/tests/test_desktop_service.py` only, adding a fake-session observation seam and one dynamic composer regression。
+- Hypothesis/attempt: attempt 1；the current Desktop constructor-static registry rejects a session-loaded Skill before the existing answer-turn path。
+- Exact command: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_service.py::test_composer_routes_dynamic_skill_once_as_answer -q`。
+- Exact result: exit `1`；`1 failed, 1 warning in 0.20s`。Failure is `DesktopServiceError: Unknown slash command: /research` at `agent/desktop/service.py:1632`；the fake model/session received no Skill turn before rejection。
+- Evidence classification: expected causal red, not pass evidence。It proves the missing boundary is the Desktop slash resolver rather than the React raw-text sender or model outcome classifier。
+- Next eligible action: add an explicit dynamic Skill marker to the existing Phase 03 projected command and make Desktop resolve against the current session registry, then route its exact trailing input through `turn_outcome(..., skill_name=...)` while preserving unsupported static-command rejection。
+
+## 2026-09-01 01:11 CST — Phase 04: dynamic Desktop dispatch checkpoint
+
+- Implementation: `SlashCommand` now carries an explicit optional `skill_name` marker populated only by validated session-catalog projections。`DesktopService` builds that registry from the current session unless a test registry is injected, rejects aliases/unsupported static commands before execution, validates the dynamic typed result, and sends only its exact trailing prompt through the existing answer path with a one-turn `skill_name` argument。
+- Exact command: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_service.py::test_composer_routes_dynamic_skill_once_as_answer -q`。
+- Exact result: exit `0`；`1 passed, 1 warning in 0.08s`。Both `/research` and the immediately following ordinary turn returned `responseKind=answer`; fake-session observations were `[('draft  "quoted"   text', 'research'), ('ordinary follow-up', None)]`。
+- Pass boundary: focused resolver/lifecycle evidence only；the Phase is not complete until the persistent control/RPC/DTO/UI chain is removed and all planned Python/Node/TypeScript/Rust checks pass。
+- Next eligible action: remove generic Skill/Task controls from Python session snapshots and conversation snapshots, then synchronize the v1 contract fixtures and Desktop clients without removing `loadedSkills`。
+
+## 2026-09-01 01:16 CST — Phase 04: first full Python focused run
+
+- Changes under check: Python persistent Skill/Task RPC、session DTO、conversation snapshot and fixture fake APIs removed；contract/TS/Rust/UI deletion synchronized；dynamic fixture and busy/cancel/collision/removal regressions added。
+- Exact command: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py tests/test_desktop_fixture.py -q`。
+- Exact result: exit `1`；`7 failed, 151 passed, 1 warning in 1.25s`。
+- Failure audit: all seven failures share `NameError: DEFAULT_SKILLS_DIR is not defined` in `DesktopService._protected_roots`。The RPC deletion correctly removed `load_skill_manifest`, but the same import line also owned the existing knowledge protected-root fallback。Resulting mapped failures affected only knowledge path tests (`RAG_*` instead of expected path/model codes)；dynamic Skill tests and contract synchronization passed in this run。
+- Attempt disposition: focused attempt 1 implementation correction, not a new causal hypothesis and not pass evidence。Smallest fix is restoring only `DEFAULT_SKILLS_DIR` import；no production dependency or write-set expansion。
+- Next eligible action: restore that import and repeat the same four-module selector once。
+
+## 2026-09-01 01:19 CST — Phase 04: focused verification, scope audit and completion
+
+- Status transition: `In progress` → `Complete` in attempt 1 after the single import correction and complete planned focused matrix。
+- Confirmed implementation/result: Desktop resolves dynamic commands from the current session catalog, validates an explicit resolver-owned dynamic marker, and sends the exact trailing prompt through the ordinary `answer` path with one-turn `skill_name`。Static `status`/extension/knowledge commands retain existing local `command` handling；aliases、unknown/empty/duplicate-collision commands and reserved `/citation` are rejected before model invocation。
+- Fixture/user-visible evidence: after isolated extension restart, `loadedSkills == ["fixture-writer"]`；`/fixture-writer Draft  "quoted"   body` returned `responseKind=answer` exactly once。The next ordinary turn contained no Skill label/context, and transcript `userText` ended with `['Draft  "quoted"   body', 'ordinary follow-up']` rather than the slash command。Busy rejected both a second dynamic and ordinary turn；cancelling a blocked dynamic request cleared `_turn_active`, retained only the one transient call observation, and allowed clean session shutdown。
+- Removed inventory: Python dispatch/fake APIs and control snapshots no longer expose/capture/restore `session.list_skills`、`session.activate_skill`、`session.deactivate_skill`、`active_skill` or `task_mode`；contract/JSON fixtures/TypeScript/Rust/React no longer contain those methods or `activeSkill`、`taskMode`、`taskModes`、`activeTaskMode`。`loadedSkills` remains bounded session catalog evidence only。React still submits raw composer text and contains no slash parser/allowlist。
+- Citation deferred boundary: static `/citation` remains reserved and Desktop-rejected；React now states `Citation mode is currently CLI-only` and no button、alias、hidden RPC or compatibility state was added。
+- Exact Python command: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py tests/test_desktop_fixture.py -q`。
+- Python result after the logged correction: exit `0`；`158 passed, 1 warning in 0.85s`。The warning is the existing LangGraph `allowed_objects` pending deprecation。
+- Exact Node command: `cd app/desktop && /home/minervamuses/miniconda3/bin/conda run -n app node --test --experimental-strip-types tests/protocol.test.ts tests/conversations.test.ts tests/backend.test.ts`。
+- Node result: exit `0`；`95 passed, 0 failed` in `9060.246394 ms`。
+- Exact TypeScript command: `cd app/desktop && /home/minervamuses/miniconda3/bin/conda run -n app ./node_modules/.bin/tsc --noEmit`；exit `0` with no output。
+- Cargo invocation failure: the first command appended host `$PATH` before WSL and exited `1` with bash syntax error at Windows `Program Files (x86)`；no Cargo test ran, so it is not pass evidence。
+- Exact corrected Cargo command: `cd app/desktop && env PATH=/home/minervamuses/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/local/bin:/usr/bin:/bin /home/minervamuses/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --manifest-path src-tauri/Cargo.toml protocol::tests`。
+- Corrected Cargo result: exit `0` after the first local dependency compile；`8 passed, 0 failed, 20 filtered out` for the library protocol selector and `0 tests` for the main target。
+- Shared resolver regression command/result: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_slash_commands.py -q` exited `0`；`29 passed, 1 warning in 0.14s`。
+- Diff/scope/safety audit: tracked production removal search returned no matches；only explicit negative tests retain retired method/field strings。`git diff --check` exited `0` with no output；React slash-parser search returned no matches；no dependency manifest or lockfile changed。Changed paths are exactly the 12 Phase 04 code/contract/test paths plus this log；CSS、Python protocol owner、backend Rust process code and all non-goals remained untouched。
+- Commit disposition/hash: focused verification complete；Phase 04 implementation commit pending immediately after this log update。
+- Blockers or deferred issues: none for Phase 04。Citation GUI access remains deliberately deferred under issue 09/non-goal；live answer delta remains Phase 05。
+- Next eligible action: create the authorized Phase 04-only local commit, record its hash, verify clean tree, then load Phase 05 as the next dependency-eligible phase without running broader suites。
 
 ## Execution Entry Template
 

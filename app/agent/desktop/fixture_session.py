@@ -440,7 +440,6 @@ class FixtureSession:
         self.session_id = session_id
         self.recent_turns = list(restored_turns)
         self.thinking_mode = "normal"
-        self.active_skill_runtime = None
         startup = load_extension_startup(config, env={})
         self.loaded_skills = list(startup.skills)
         self.mcp_families = {
@@ -475,7 +474,16 @@ class FixtureSession:
             return paths[-1]
         return _plan_log(self.config, self.session_id).new_log_file()
 
-    async def turn_outcome(self, text: str) -> TurnOutcome:
+    async def turn_outcome(
+        self,
+        text: str,
+        *,
+        skill_name: str | None = None,
+    ) -> TurnOutcome:
+        if skill_name is not None and skill_name not in {
+            skill.name for skill in self.loaded_skills
+        }:
+            raise ValueError(f"unknown skill: {skill_name}")
         if self._progress_cb is not None:
             self._progress_cb("fixture.prepare", [])
         if text == "[[fixture:rate-limit]]":
@@ -581,10 +589,17 @@ class FixtureSession:
             )
         else:
             mode = "extended" if self.thinking_mode == "extended" else "normal"
-            answer = (
-                f"Fixture {mode} {self.session_id[:8]} turn {next_turn}: {text}"
-                f"\nContext: {context or '(empty)'}"
-            )
+            if skill_name is None:
+                answer = (
+                    f"Fixture {mode} {self.session_id[:8]} turn {next_turn}: {text}"
+                    f"\nContext: {context or '(empty)'}"
+                )
+            else:
+                answer = (
+                    f"Fixture skill {skill_name} {self.session_id[:8]} "
+                    f"turn {next_turn}: {text}"
+                    f"\nContext: {context or '(empty)'}"
+                )
         timestamp = _timestamp(next_turn)
         turn = TurnRecord(
             user_input=text,
@@ -640,12 +655,6 @@ class FixtureSession:
             raise ValueError(f"unknown thinking mode: {mode}")
         self.thinking_mode = normalized
 
-    def activate_skill(self, _name: str, _task_mode: str | None = None) -> Any:
-        raise ValueError("the Phase 02 fixture exposes no skills")
-
-    def deactivate_skill(self) -> None:
-        self.active_skill_runtime = None
-
     def status_snapshot(self) -> dict[str, str | int | bool]:
         return {
             "session_id": self.session_id,
@@ -659,8 +668,6 @@ class FixtureSession:
             "mcp_families": ",".join(sorted(set(self.mcp_families.values()))) or "none",
             "extension_revision": self.running_extension_revision,
             "extension_diagnostics": ";".join(self.extension_startup_diagnostics),
-            "active_skill": "",
-            "task_mode": "",
         }
 
 

@@ -64,7 +64,6 @@ class _CoordinatorSession:
         self.plan_mode = False
         self.plan_log_path = None
         self.thinking_mode = "normal"
-        self.active_skill_runtime = None
         self.loaded_skills = []
         self.mcp_families = {}
         self.running_extension_revision = 0
@@ -73,7 +72,8 @@ class _CoordinatorSession:
         self.leave_after_flush = False
         self.flush_calls = 0
 
-    async def turn_outcome(self, text):
+    async def turn_outcome(self, text, *, skill_name=None):
+        assert skill_name is None
         self.turn_inputs.append(text)
         self.contexts.append([turn.user_input for turn in self.recent_turns])
         self._turn_count += 1
@@ -127,13 +127,6 @@ class _CoordinatorSession:
     def set_thinking_mode(self, mode):
         self.thinking_mode = mode
 
-    def activate_skill(self, name, task_mode=None):
-        self.active_skill_runtime = SimpleNamespace(name=name, task_mode=task_mode)
-        return self.active_skill_runtime
-
-    def deactivate_skill(self):
-        self.active_skill_runtime = None
-
     def status_snapshot(self):
         return {
             "session_id": self.session_id,
@@ -145,8 +138,6 @@ class _CoordinatorSession:
             "plan_log_path": str(self.plan_log_path or ""),
             "thinking_mode": self.thinking_mode,
             "mcp_families": "none",
-            "active_skill": "",
-            "task_mode": "",
         }
 
 

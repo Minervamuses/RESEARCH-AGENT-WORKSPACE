@@ -68,8 +68,6 @@ const session: SessionCreatedDto = {
   planMode: false,
   planLogPath: null,
   thinkingMode: "normal",
-  activeSkill: null,
-  taskMode: null,
   loadedSkills: [],
   mcpFamilies: [],
   startupDiagnostics: [],

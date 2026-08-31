@@ -23,9 +23,6 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "session.turn",
     "session.set_mode",
     "session.set_thinking",
-    "session.list_skills",
-    "session.activate_skill",
-    "session.deactivate_skill",
     "session.shutdown",
     "knowledge.overview",
     "knowledge.search",
@@ -272,9 +269,6 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "session.turn" => Some(&["text"]),
         "session.set_mode" => Some(&["mode"]),
         "session.set_thinking" => Some(&["mode"]),
-        "session.list_skills" => Some(&[]),
-        "session.activate_skill" => Some(&["name"]),
-        "session.deactivate_skill" => Some(&[]),
         "session.shutdown" => Some(&[]),
         "knowledge.overview" => Some(&[]),
         "knowledge.search" => Some(&["query"]),
@@ -300,8 +294,6 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "runtime.diagnostics"
         | "project.list"
         | "session.status"
-        | "session.list_skills"
-        | "session.deactivate_skill"
         | "session.shutdown"
         | "knowledge.overview"
         | "knowledge.init_workspace"
@@ -314,7 +306,6 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "session.turn" => Some(&["text"]),
         "session.set_mode" | "session.set_thinking" => Some(&["mode"]),
-        "session.activate_skill" => Some(&["name", "taskMode"]),
         "knowledge.search" => Some(&[
             "query",
             "k",
@@ -520,10 +511,6 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
                     "params.mode contains an unknown enum value: {mode}"
                 )));
             }
-        }
-        "session.activate_skill" => {
-            validate_optional_string(params, "name", 256)?;
-            validate_optional_string(params, "taskMode", 256)?;
         }
         "knowledge.search" => {
             validate_optional_string(params, "query", 16_384)?;
@@ -947,8 +934,6 @@ fn validate_session_snapshot(
         "planMode",
         "planLogPath",
         "thinkingMode",
-        "activeSkill",
-        "taskMode",
         "loadedSkills",
         "mcpFamilies",
         "startupDiagnostics",
@@ -961,8 +946,6 @@ fn validate_session_snapshot(
         "planMode",
         "planLogPath",
         "thinkingMode",
-        "activeSkill",
-        "taskMode",
         "loadedSkills",
         "mcpFamilies",
         "startupDiagnostics",
@@ -995,8 +978,6 @@ fn validate_session_snapshot(
         "data.thinkingMode",
         &["normal", "extended"],
     )?;
-    validate_nullable_string(data, "activeSkill", 256)?;
-    validate_nullable_string(data, "taskMode", 256)?;
     validate_string_array(&data["loadedSkills"], "data.loadedSkills", 512, 256)?;
     validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
     validate_string_array(

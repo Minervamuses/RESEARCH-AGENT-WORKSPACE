@@ -515,13 +515,41 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
             "session.create",
             {"projectId": "p1", "loadMcp": True},
         )
+        skill_turn = await restarted.dispatch(
+            "session.turn",
+            {"text": '/fixture-writer Draft  "quoted"   body'},
+        )
+        ordinary_turn = await restarted.dispatch(
+            "session.turn",
+            {"text": "ordinary follow-up"},
+        )
+        transcript = await restarted.dispatch(
+            "session.transcript",
+            {
+                "projectId": "p1",
+                "sessionId": loaded["sessionId"],
+                "limit": 20,
+            },
+        )
         status = await restarted.dispatch("extensions.status", {})
-        return loaded, status
+        return loaded, skill_turn, ordinary_turn, transcript, status
 
-    loaded, status = asyncio.run(run_restarted_process())
+    loaded, skill_turn, ordinary_turn, transcript, status = asyncio.run(
+        run_restarted_process()
+    )
     assert loaded["extensionRevision"] == 1
     assert loaded["loadedSkills"] == ["fixture-writer"]
+    assert "activeSkill" not in loaded
+    assert "taskMode" not in loaded
     assert loaded["mcpFamilies"] == ["fixture-clock"]
+    assert skill_turn["responseKind"] == "answer"
+    assert "Fixture skill fixture-writer" in skill_turn["text"]
+    assert ordinary_turn["responseKind"] == "answer"
+    assert "Fixture skill" not in ordinary_turn["text"]
+    assert [item["userText"] for item in transcript["items"][-2:]] == [
+        'Draft  "quoted"   body',
+        "ordinary follow-up",
+    ]
     assert status["runningRevision"] == 1
     assert status["restartRequired"] is False
     assert isinstance(restarted_provider, FixtureExtensionProvider)
