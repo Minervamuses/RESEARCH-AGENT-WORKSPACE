@@ -10,7 +10,7 @@
 | 02 — Long-request liveness | Complete | 1 | Focused verification and scope audit passed | No normal absolute timeout; long result order passed; backend selector `20 passed`; terminal/startup/shutdown cases preserved | `45d446da4aa005019c7d8c8eded5e6a91b7251dc` |
 | 03 — One-shot Skill runtime | Complete | 1 | Focused verification and scope audit passed | Dynamic one-shot command/lifecycle, Citation matrix and legacy manifest diagnostic passed; Python selectors `85 + 20 + 152 passed` | `78589e95ea7ea2e4886529b568c78ecbdb24666c` |
 | 04 — Desktop Skill command | Complete | 1 | Focused verification and scope audit passed | Dynamic fixture Skill is one-shot `answer`; natural prompt persisted; Python `158`, Node `95`, slash `29`, Rust `8` passed; TypeScript/diff/removal audit clean | `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` |
-| 05 — Final-only Normal answer delivery | Complete | 1 | Focused verification and scope audit passed | No answer event/preview; terminal `final_only`/0 after validation+persistence; Python `190`, Node `86`, Rust `8`, TypeScript passed | Pending local checkpoint |
+| 05 — Final-only Normal answer delivery | Complete | 1 | Focused verification and scope audit passed | No answer event/preview; terminal `final_only`/0 after validation+persistence; Python `190`, Node `86`, Rust `8`, TypeScript passed | `b95ff9a0eb5e5c7871f50fbe7eb20153a99328fb` |
 | 06 — Tool-aware conversation restore | Not started | 0 | None | None | None |
 | 07 — Integration acceptance | Not started | 0 | None | None | None |
 
@@ -444,6 +444,13 @@
 - External/safety counters: live/paid provider`0`、real MCP/Ollama`0`、real user store/credential`0`、broader suites/builds`0`。Cargo used existing dependency graph and ignored target output only。
 - Commit disposition/hash: authorized Phase 05 local implementation commit pending；hash will be appended in a log-only follow-up。Remote push unauthorized。
 - Next eligible action: run final uncached/cached name checks，commit exactlythe14 Phase 05 paths，record hash/clean tree，then immediately loadPhase 06。
+
+## 2026-09-01 02:08 CST — Phase 05: implementation hash recorded
+
+- Local implementation commit: `b95ff9a0eb5e5c7871f50fbe7eb20153a99328fb` (`fix(desktop): deliver final answers once`)。
+- Commit result: `14 files changed, 239 insertions(+), 457 deletions(-)`；cached name audit listed exactlythe14 declared Phase 05 paths，and both uncached/cached`git diff --check`exited`0`。
+- Immediate post-commit audit: `git status --short`returned no output。No branch/worktree、dependency/lockfile orremote operation occurred。
+- Next eligible action: commit this hash record as a log-only follow-up，verifyclean tree，then read Phase 06/live persistence/restore sources beforeitsfirst write。
 
 ## Execution Entry Template
 
