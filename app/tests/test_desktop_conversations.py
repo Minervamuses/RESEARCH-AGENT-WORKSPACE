@@ -149,6 +149,7 @@ class _CoordinatorFactory:
         self.persisted = persisted
         self.new_ids = list(new_ids)
         self.sessions = []
+        self.load_mcp_calls = []
 
     async def __call__(
         self,
@@ -159,7 +160,7 @@ class _CoordinatorFactory:
         session_id=None,
         restored_turns=None,
     ):
-        del load_mcp
+        self.load_mcp_calls.append(load_mcp)
         resolved_id = session_id or self.new_ids.pop(0)
         session = _CoordinatorSession(
             config,
@@ -498,6 +499,37 @@ def test_coordinator_preserves_p1_p2_membership_order_across_restart(tmp_path):
     assert selected["turnCount"] == 1
     assert selected["thinkingMode"] == "normal"
     assert selected["planMode"] is False
+
+
+def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
+    service, _catalog, factory, _persisted = _seed_coordinator(
+        tmp_path,
+        new_ids=(SESSION_D,),
+    )
+
+    async def run():
+        diagnostics = await service.dispatch("runtime.diagnostics", {})
+        assert diagnostics["mcpEnabled"] is True
+
+        await service.dispatch(
+            "session.create",
+            {"projectId": "p1", "loadMcp": False},
+        )
+        assert factory.load_mcp_calls == [False]
+
+        assert await service.dispatch("session.shutdown", {}) == {
+            "status": "stopped",
+            "flushed": True,
+        }
+        selected = await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+
+        assert selected["sessionId"] == SESSION_A
+        assert factory.load_mcp_calls == [False, True]
+
+    asyncio.run(run())
 
 
 def test_ready_conversation_and_transcript_pages_report_exact_boundaries(tmp_path):

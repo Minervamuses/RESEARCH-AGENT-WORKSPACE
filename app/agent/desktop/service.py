@@ -237,7 +237,7 @@ class DesktopService:
         self._pending_registration: tuple[str, str] | None = None
         self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
         self._history_store = None
-        self._load_mcp = False
+        self._load_mcp = True
         self._session_creating = False
         self._turn_active = False
         self._session_closing = False
@@ -1979,7 +1979,7 @@ class DesktopService:
         finally:
             self._session_closing = False
         self.session = None
-        self._load_mcp = False
+        self._load_mcp = True
         self._session_registered = False
         self._pending_registration = None
         self._control_snapshots.clear()
