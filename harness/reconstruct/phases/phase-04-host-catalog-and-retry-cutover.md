@@ -1,6 +1,6 @@
 # Phase 04 — 強化 host、catalog 與 retry edge cases
 
-Status: Not started
+Status: In progress
 
 ## Objective
 

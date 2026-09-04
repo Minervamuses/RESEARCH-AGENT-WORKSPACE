@@ -9,7 +9,7 @@
 | 01 — Canonical conversation contract | Complete | 2026-09-04 18:20 CST | 2026-09-04 18:44 CST | Contract, Red/Green tests, review, and commits below | None |
 | 02 — Legacy import bridge | Complete | 2026-09-04 18:48 CST | 2026-09-04 19:14 CST | Mapping, Red/Green tests, fault review, and commits below | None |
 | 03 — Write-through turn lifecycle | Complete | 2026-09-04 19:23 CST | 2026-09-04 20:30 CST | Atomic lifecycle, host/protocol cutover, fault tests, and fresh review below | None |
-| 04 — Host/catalog/retry cutover | Not started | — | — | — | None |
+| 04 — Host/catalog/retry cutover | In progress | 2026-09-04 20:39 CST | — | Preflight and Red/Green work below | None |
 | 05 — Remove Product Plan Mode | Not started | — | — | — | None |
 | 06 — Retire chat-history Chroma | Not started | — | — | — | None |
 | 07 — Migration, faults, docs | Not started | — | — | — | None |
@@ -180,6 +180,18 @@
 - **Evidence references:** finalizer/thinking tests=`314a30c`；Desktop journeys=`47d81e0`；Plan-control cutover tests=`88daa78`；server flush-residue fix=`a184bfc`；Phase 03 implementation commits自`85730ee`至`a184bfc`；completion HEAD before documentation=`a184bfc50a7f`。
 - **Blockers:** None。
 - **Next action:** 重新閱讀durable authority並開始Phase 04 host/catalog/retry hardening；不得把本phase的basic catalog fallback誤當Phase 04完整corruption/retry UX。
+
+## 2026-09-04 20:39 CST — Phase 04: host/catalog/retry preflight
+
+- **Status:** `Not started` → `In progress`。
+- **Runtime/ownership gate:** Phase 03 completion commit=`955b8dd`、worktree clean；仍使用root=`/home/minervamuses/research-agent-workspace`、branch=`GUI`、WSL/Linux與Conda`app`。Phase 04保持app offline，只使用temporary fixtures，不讀寫真實user store、provider、Ollama或credentials。
+- **Identity and retry mapping:** wire `requestId`只作transport correlation；caller建立的canonical UUIDv4 `turnId`是durable idempotency identity；`turnNumber`只作conversation ordering。Completed同ID可直接回既有結果；failed/interrupted只有帶明確`retry=true`的使用者動作才可用同ID重跑；restart不得auto replay。現有request尚缺explicit retry欄位，Python也把每次送出當retry，列為Red gap。
+- **UI state table:** not accepted=`state:null, accepted:false, persisted:false`且不建立record；accepted pending/failed/interrupted須回或由transcript恢復同一turn ID；completed須可在result delivery遺失後用同ID取回；display-only須先pending、後執行command、再terminal commit，且永不進model context。現有failure envelope、TS error mapping與completed-only transcript不足以表達此表，列為Red gap。
+- **Catalog reconciliation matrix:** 有效catalog+健康JSON orphan可補登；catalog-only missing JSON保留unavailable且不得造空transcript；單一malformed/oversized/version-mismatch JSON局部隔離；catalog整檔missing或malformed則只由健康JSON summary重建，且不得修改conversation files。有效catalog保留project display/order；重建時local使用既有default project name，其餘project display以stable project ID作deterministic fallback，sessions依`createdAt`再conversation ID排序。
+- **Transcript/command gaps:** 現有summary wire shape缺`createdAt`，transcript只輸出completed pair，因此無法正確支援50-turn paging與pending/failed/interrupted/display-only restore。CLI/Desktop local slash handlers目前在canonical pending write前執行；Green需共享display-only lifecycle並保留extension/prune既有one-shot approval、active-turn switch guard與approval不持久化規則。
+- **Protocol consumers:** 此checkout的language-neutral fixture、Python、TypeScript、Rust與React是同一lockstep app；未發現受支援的external v1 consumer。Phase 05才移除Plan fields，本階段只補turn lifecycle/retry，不越界清除Plan UI/protocol。
+- **Verification:** 尚未執行Phase 04 tests；下一步先提交focused Red tests，固定catalog rebuild、完整transcript/error lifecycle、explicit retry與display-only prompt-first contract。
+- **Blockers:** None。
 
 <!--
 Material implementation events append with this shape:
