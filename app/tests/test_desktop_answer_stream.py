@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,17 @@ class _AnswerSession:
         self.error: Exception | None = None
         self.validation_errors: list[str] = []
 
-    async def turn_outcome(self, _text: str) -> TurnOutcome:
+    async def turn_outcome(
+        self,
+        _text: str,
+        *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
+        skill_name: str | None = None,
+        retry: bool = False,
+    ) -> TurnOutcome:
+        del display_input, skill_name, retry
+        assert turn_id is not None
         self.started.set()
         if self.blocked:
             await self.release.wait()
@@ -31,7 +42,16 @@ class _AnswerSession:
         return TurnOutcome(
             text=self.text,
             validation_errors=self.validation_errors,
+            turn_id=turn_id,
+            turn_number=1,
+            state="completed",
+            accepted=True,
+            persisted=True,
         )
+
+
+def _turn_params(text: str) -> dict[str, object]:
+    return {"text": text, "turnId": uuid.uuid4().hex, "retry": False}
 
 
 def _service(tmp_path: Path, session: _AnswerSession) -> DesktopService:
@@ -63,7 +83,7 @@ def test_answer_is_delivered_only_by_the_final_terminal_result(tmp_path: Path) -
         task = asyncio.create_task(
             service.dispatch(
                 "session.turn",
-                {"text": "question"},
+                _turn_params("question"),
                 event_sink=lambda name, data: events.append((name, data)),
             )
         )
@@ -90,7 +110,7 @@ def test_unicode_answer_is_returned_whole_without_answer_events(tmp_path: Path) 
     result = asyncio.run(
         service.dispatch(
             "session.turn",
-            {"text": "question"},
+            _turn_params("question"),
             event_sink=lambda name, data: events.append((name, data)),
         )
     )
@@ -111,7 +131,7 @@ def test_failed_or_oversized_answer_emits_no_answer_events(tmp_path: Path) -> No
         asyncio.run(
             failing_service.dispatch(
                 "session.turn",
-                {"text": "question"},
+                _turn_params("question"),
                 event_sink=lambda name, data: failed_events.append((name, data)),
             )
         )
@@ -126,7 +146,7 @@ def test_failed_or_oversized_answer_emits_no_answer_events(tmp_path: Path) -> No
         asyncio.run(
             oversized_service.dispatch(
                 "session.turn",
-                {"text": "question"},
+                _turn_params("question"),
                 event_sink=lambda name, data: oversized_events.append((name, data)),
             )
         )
@@ -156,7 +176,7 @@ def test_complete_success_envelope_is_budgeted_before_delivery(
         asyncio.run(
             service.dispatch(
                 "session.turn",
-                {"text": "question"},
+                _turn_params("question"),
                 event_sink=lambda name, data: events.append((name, data)),
             )
         )
@@ -181,7 +201,7 @@ def test_final_only_answer_does_not_call_the_event_sink(
     result = asyncio.run(
         service.dispatch(
             "session.turn",
-            {"text": "question"},
+            _turn_params("question"),
             event_sink=broken_sink,
         )
     )
@@ -202,7 +222,7 @@ def test_cancelled_turn_emits_no_answer_events(tmp_path: Path) -> None:
         task = asyncio.create_task(
             service.dispatch(
                 "session.turn",
-                {"text": "question"},
+                _turn_params("question"),
                 event_sink=lambda name, data: events.append((name, data)),
             )
         )
@@ -245,7 +265,7 @@ def test_provider_http_failures_are_safe_and_bounded(
         asyncio.run(
             service.dispatch(
                 "session.turn",
-                {"text": "preserve this draft"},
+                _turn_params("preserve this draft"),
                 event_sink=lambda name, data: events.append((name, data)),
             )
         )

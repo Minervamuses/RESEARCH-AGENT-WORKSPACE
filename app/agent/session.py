@@ -191,6 +191,7 @@ class ChatSession:
         self._progress_cb = progress_cb
         self._turn_execution_lock = asyncio.Lock()
         self._final_text_validator: Callable[[str, list[str]], None] | None = None
+        self._prompt_persisted_callback: Callable[[], None] | None = None
 
     @staticmethod
     def _now_timestamp() -> str:
@@ -278,6 +279,7 @@ class ChatSession:
                 submitted_at=submitted_at,
                 **values,
             )
+            self._notify_prompt_persisted()
             return snapshot, snapshot.document.turns[-1], False
 
         existing = self._turn_from_snapshot(snapshot, turn_id)
@@ -290,6 +292,7 @@ class ChatSession:
             )
             existing = self._turn_from_snapshot(snapshot, turn_id)
             assert existing is not None
+            self._notify_prompt_persisted()
             if existing.state == "completed":
                 return snapshot, existing, True
             if existing.state == "pending":
@@ -308,6 +311,7 @@ class ChatSession:
             )
             retried = self._turn_from_snapshot(snapshot, turn_id)
             assert retried is not None
+            self._notify_prompt_persisted()
             return snapshot, retried, False
 
         snapshot = await asyncio.to_thread(
@@ -316,6 +320,7 @@ class ChatSession:
             submitted_at=submitted_at,
             **values,
         )
+        self._notify_prompt_persisted()
         return snapshot, snapshot.document.turns[-1], False
 
     async def _begin_turn(
@@ -409,6 +414,23 @@ class ChatSession:
     ) -> None:
         """Install a desktop-only pre-persistence final-text boundary."""
         self._final_text_validator = validator
+
+    def _set_prompt_persisted_callback(
+        self,
+        callback: Callable[[], None],
+    ) -> None:
+        """Install a best-effort host hook after each durable prompt write."""
+        self._prompt_persisted_callback = callback
+
+    def _notify_prompt_persisted(self) -> None:
+        callback = self._prompt_persisted_callback
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            # Catalog/index failures cannot revoke an already accepted prompt.
+            return
 
     @property
     def recent_turns(self) -> list:

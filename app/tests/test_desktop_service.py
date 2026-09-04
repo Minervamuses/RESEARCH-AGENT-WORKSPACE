@@ -58,6 +58,10 @@ class _FakeSession:
         self.skill_turn_inputs: list[tuple[str, str | None]] = []
         self.turn_calls: list[dict[str, object]] = []
         self._turn_number = 0
+        self._prompt_persisted_callback = None
+
+    def _set_prompt_persisted_callback(self, callback) -> None:
+        self._prompt_persisted_callback = callback
 
     async def turn_outcome(
         self,
@@ -79,6 +83,8 @@ class _FakeSession:
             "skillName": skill_name,
             "retry": retry,
         })
+        if self._prompt_persisted_callback is not None:
+            self._prompt_persisted_callback()
         self.turn_started.set()
         if self.block_turn:
             await self.turn_release.wait()
@@ -126,6 +132,8 @@ class _FakeSession:
         retry=False,
     ):
         del retry
+        if self._prompt_persisted_callback is not None:
+            self._prompt_persisted_callback()
         result = await action()
         text = render_result(result)
         self._turn_number += 1
@@ -1019,6 +1027,49 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
     assert sessions["items"][0]["turnCount"] == 1
     assert sessions["items"][0]["title"] == "durable before catalog"
     assert catalog.project_for_session(conversation_id) == "local"
+    assert factory.calls == []
+
+
+def test_session_list_reconciles_json_created_after_service_start(
+    tmp_path: Path,
+) -> None:
+    config = AgentConfig(
+        persist_dir=str(tmp_path / "store"),
+        plan_logs_dir=str(tmp_path / "plans"),
+    )
+    catalog = DesktopProjectCatalog(config.persist_dir)
+    repository = ConversationRepository(config.persist_dir)
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        config=config,
+        project_catalog=catalog,
+        conversation_repository=repository,
+        session_factory=factory,
+    )
+    conversation_id = uuid.uuid4().hex
+    repository.create(
+        conversation_id=conversation_id,
+        project_id="local",
+        turn_id=uuid.uuid4().hex,
+        kind="conversational",
+        display_input="appeared after startup",
+        semantic_input="appeared after startup",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at="2026-09-04T00:00:00Z",
+    )
+
+    sessions = asyncio.run(service.dispatch(
+        "session.list",
+        {"projectId": "local", "offset": 0, "limit": 50},
+    ))
+
+    assert catalog.project_for_session(conversation_id) == "local"
+    assert [item["sessionId"] for item in sessions["items"]] == [
+        conversation_id
+    ]
+    assert sessions["items"][0]["turnCount"] == 1
     assert factory.calls == []
 
 

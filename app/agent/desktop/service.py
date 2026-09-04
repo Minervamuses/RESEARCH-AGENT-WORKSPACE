@@ -630,6 +630,7 @@ class DesktopService:
     async def _project_list(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
+        self._reconcile_lagged_catalog_entries()
         if self._catalog is None:
             return {
                 "status": "unavailable",
@@ -666,6 +667,7 @@ class DesktopService:
                 "Conversation summaries are unavailable during an active turn.",
                 retryable=True,
             )
+        self._reconcile_lagged_catalog_entries()
         project = self._require_catalog_project(params["projectId"])
         offset = int(params.get("offset", 0))
         limit = int(params.get("limit", 50))
@@ -1178,6 +1180,15 @@ class DesktopService:
                     text,
                     errors,
                 )
+            )
+        set_prompt_persisted_callback = getattr(
+            session,
+            "_set_prompt_persisted_callback",
+            None,
+        )
+        if callable(set_prompt_persisted_callback):
+            set_prompt_persisted_callback(
+                lambda: self._register_saved_session(session)
             )
         return session
 
@@ -1722,6 +1733,29 @@ class DesktopService:
             self._pending_registration = (project_id, session.session_id)
         return status, issue
 
+    def _saved_session_registration_result(
+        self,
+        session: ChatSession,
+    ) -> tuple[str, str | None]:
+        if self._session_registered:
+            return "registered", None
+        project_id = self._selected_project_id
+        if self._pending_registration == (project_id, session.session_id):
+            issue = (
+                "The conversation is saved, but the project catalog is unavailable."
+                if self._catalog is None
+                else "The conversation is saved, but catalog registration failed."
+            )
+            return "pending", issue
+        if (
+            self._catalog is not None
+            and project_id is not None
+            and self._catalog.project_for_session(session.session_id) == project_id
+        ):
+            self._session_registered = True
+            return "registered", None
+        return "not_required", None
+
     async def _session_turn(
         self, params: dict[str, Any], event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -1900,7 +1934,7 @@ class DesktopService:
                             "The session returned an invalid durable command result.",
                         )
                     registration_status, registration_issue = (
-                        self._register_saved_session(session)
+                        self._saved_session_registration_result(session)
                     )
                     response = {
                         "sessionId": session.session_id,
@@ -1967,7 +2001,7 @@ class DesktopService:
                 tool_summaries=tool_summaries,
             )
             registration_status, registration_issue = (
-                self._register_saved_session(session)
+                self._saved_session_registration_result(session)
             )
             return {
                 "sessionId": session.session_id,

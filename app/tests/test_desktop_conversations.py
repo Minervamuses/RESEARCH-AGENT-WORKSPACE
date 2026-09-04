@@ -68,6 +68,14 @@ class _CoordinatorSession:
         self.running_extension_revision = 0
         self.extension_startup_diagnostics = ()
         self.flush_calls = 0
+        self._prompt_persisted_callback = None
+
+    def _set_prompt_persisted_callback(self, callback):
+        self._prompt_persisted_callback = callback
+
+    def _notify_prompt_persisted(self):
+        if self._prompt_persisted_callback is not None:
+            self._prompt_persisted_callback()
 
     @property
     def _snapshot(self):
@@ -146,6 +154,7 @@ class _CoordinatorSession:
                 turn for turn in snapshot.document.turns if turn.turn_id == turn_id
             )
             if existing.state == "completed":
+                self._notify_prompt_persisted()
                 return TurnOutcome(
                     text=existing.assistant_output or "",
                     turn_id=turn_id,
@@ -155,6 +164,7 @@ class _CoordinatorSession:
                     persisted=True,
                 )
 
+        self._notify_prompt_persisted()
         self.turn_inputs.append(text)
         self.turn_requests.append({
             "semantic_input": text,
@@ -234,6 +244,7 @@ class _CoordinatorSession:
                 turn for turn in snapshot.document.turns if turn.turn_id == turn_id
             )
             if existing.state == "completed":
+                self._notify_prompt_persisted()
                 return None, TurnOutcome(
                     text=existing.assistant_output or "",
                     turn_id=turn_id,
@@ -243,6 +254,7 @@ class _CoordinatorSession:
                     persisted=True,
                 )
 
+        self._notify_prompt_persisted()
         try:
             result = await action()
             text = render_result(result)
@@ -1246,6 +1258,93 @@ def test_transient_d_registers_once_after_first_durable_turn(tmp_path):
         turn.display_input
         for turn in repository.load(SESSION_D).document.turns
     ] == ["/status", "first", "second"]
+
+
+def test_first_prompt_registers_catalog_before_provider_failure(
+    tmp_path,
+    monkeypatch,
+):
+    config = AgentConfig(
+        persist_dir=str(tmp_path / "store"),
+        plan_logs_dir=str(tmp_path / "plans"),
+    )
+    catalog = DesktopProjectCatalog(config.persist_dir)
+    repository = ConversationRepository(config.persist_dir)
+    created_id: str | None = None
+    observed: dict[str, object] = {}
+
+    def fail_at_provider_boundary(_state):
+        assert created_id is not None
+        turn = repository.load(created_id).document.turns[-1]
+        observed.update({
+            "state": turn.state,
+            "owner": catalog.project_for_session(created_id),
+        })
+        raise RuntimeError("synthetic provider boundary failure")
+
+    graph = make_astream_graph(on_state=fail_at_provider_boundary)
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+    )
+
+    async def session_factory(
+        current_config,
+        *,
+        load_mcp,
+        progress_cb,
+        session_id=None,
+        conversation_repository=None,
+        project_id=None,
+    ):
+        del load_mcp
+        session = ChatSession(
+            current_config,
+            history_store=FakeHistoryStore(),
+            progress_cb=progress_cb,
+            loaded_skills=[],
+            global_mcp_families=frozenset(),
+            session_id=session_id,
+            conversation_repository=conversation_repository,
+            project_id=project_id,
+        )
+        session.graph = graph
+        return session
+
+    service = DesktopService(
+        original_cwd=tmp_path,
+        config=config,
+        project_catalog=catalog,
+        conversation_repository=repository,
+        session_factory=session_factory,
+        environ={
+            "CONDA_DEFAULT_ENV": "app",
+            "CONDA_PREFIX": "/conda/envs/app",
+        },
+    )
+    created = asyncio.run(service.dispatch(
+        "session.create",
+        {"projectId": "local", "loadMcp": False},
+    ))
+    created_id = created["sessionId"]
+    turn_id = _logical_turn_id(214)
+
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(service.dispatch("session.turn", {
+            "text": "persist before provider",
+            "turnId": turn_id,
+            "retry": False,
+        }))
+
+    assert observed == {"state": "pending", "owner": "local"}
+    assert raised.value.details == {
+        "turnId": turn_id,
+        "state": "failed",
+        "accepted": True,
+        "persisted": True,
+    }
+    assert catalog.project_for_session(created_id) == "local"
+    assert repository.load(created_id).document.turns[-1].state == "failed"
 
 
 def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):

@@ -466,6 +466,7 @@ class FixtureSession:
         self.plan_mode = False
         self.plan_log_path: Path | None = None
         self._progress_cb = progress_cb
+        self._prompt_persisted_callback: Callable[[], None] | None = None
         self._search_handler = search_handler
         self._bash_tool = (
             create_bash_tool(
@@ -550,6 +551,7 @@ class FixtureSession:
                 **values,
             )
             self._conversation_snapshot = snapshot
+            self._notify_prompt_persisted()
             return snapshot, snapshot.document.turns[-1], False
 
         existing = next(
@@ -563,6 +565,7 @@ class FixtureSession:
                     submitted_at=existing.submitted_at,
                     **values,
                 )
+                self._notify_prompt_persisted()
                 return snapshot, existing, True
             if not retry:
                 raise InvalidTransitionError(
@@ -580,10 +583,26 @@ class FixtureSession:
                 **values,
             )
         self._conversation_snapshot = snapshot
+        self._notify_prompt_persisted()
         pending = next(
             turn for turn in snapshot.document.turns if turn.turn_id == turn_id
         )
         return snapshot, pending, False
+
+    def _set_prompt_persisted_callback(
+        self,
+        callback: Callable[[], None],
+    ) -> None:
+        self._prompt_persisted_callback = callback
+
+    def _notify_prompt_persisted(self) -> None:
+        callback = self._prompt_persisted_callback
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            return
 
     def _fail_turn(
         self,
