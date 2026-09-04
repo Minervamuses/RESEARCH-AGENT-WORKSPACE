@@ -15,7 +15,8 @@ const projectId = "local";
 const sessionId = "123e4567e89b42d3a456426614174000";
 const otherSessionId = "223e4567e89b42d3a456426614174000";
 const requestId = "123e4567-e89b-42d3-a456-426614174000";
-const turnId = "turn-1";
+const turnId = "123e4567e89b42d3a456426614174001";
+const otherTurnId = "223e4567e89b42d3a456426614174001";
 
 function selectedState(draft = "question"): ConversationState {
   let state = conversationReducer(initialConversationState, {
@@ -38,6 +39,7 @@ function activeState(draft = "question"): ConversationState {
     projectId,
     sessionId,
     requestId,
+    turnId,
   });
 }
 
@@ -54,6 +56,10 @@ function succeed(
       sessionId,
       turnId,
       text: "complete answer",
+      turnNumber: 1,
+      state: "completed",
+      accepted: true,
+      persisted: true,
       responseKind: "answer",
       streamKind: "final_only",
       chunkCount: 0,
@@ -65,6 +71,7 @@ function succeed(
 test("one final-only result creates one complete authoritative answer", () => {
   const started = activeState();
   assert.equal(started.latestAnswer, null);
+  assert.equal(started.activeTurn?.turnId, turnId);
 
   const state = succeed(started);
   assert.equal(state.activeTurn, null);
@@ -81,6 +88,11 @@ test("one final-only result creates one complete authoritative answer", () => {
 
   assert.equal(succeed(state, { text: "duplicate" }), state);
   assert.equal(state.latestAnswer?.text, "complete answer");
+});
+
+test("a result for a different logical turn is rejected", () => {
+  const started = activeState();
+  assert.equal(succeed(started, { turnId: otherTurnId }), started);
 });
 
 test("a local slash command is one final-only inert conversation result", () => {

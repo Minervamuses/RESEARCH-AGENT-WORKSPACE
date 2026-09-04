@@ -108,6 +108,42 @@ def test_normal_answers_use_only_the_final_terminal_result() -> None:
     }
 
 
+def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
+    method = METHODS["session.turn"]
+    assert method["requiredParams"] == ["text", "turnId"]
+    assert method["params"]["turnId"] == {
+        "type": "turnId",
+        "required": True,
+    }
+    result = CONTRACT["resultDataSchemas"]["session.turn"]
+    assert result["turnNumber"] == {
+        "type": "integer",
+        "required": False,
+        "minimum": 1,
+        "maximum": 4_096,
+    }
+    assert result["state"] == {
+        "type": "nullableString",
+        "required": True,
+        "enum": ["completed"],
+    }
+    assert result["accepted"] == {"type": "boolean", "required": True}
+    assert result["persisted"] == {"type": "boolean", "required": True}
+
+
+def test_shutdown_contract_has_truthful_status_without_legacy_flush_fields() -> None:
+    assert "CONVERSATION_FLUSH_FAILED" not in CONTRACT["errorCodes"]
+    assert "SHUTDOWN_FLUSH_FAILED" not in CONTRACT["errorCodes"]
+    for method in ("session.shutdown", "runtime.shutdown"):
+        assert CONTRACT["resultDataSchemas"][method] == {
+            "status": {
+                "type": "string",
+                "required": True,
+                "enum": ["stopped", "no_session"],
+            }
+        }
+
+
 def test_transcript_tool_activity_schema_is_bounded_and_parser_derived() -> None:
     turn = CONTRACT["resultDataSchemas"]["session.transcript"]["items"]["items"]
     activities = turn["toolActivities"]

@@ -167,6 +167,35 @@ test("normal answers use only the final terminal result", () => {
   });
 });
 
+test("session turn carries one canonical logical identity and durable lifecycle", () => {
+  assert.deepEqual(METHOD_REQUIRED_PARAMS["session.turn"], ["text", "turnId"]);
+  assert.deepEqual(METHOD_PARAM_SCHEMAS["session.turn"].turnId, {
+    type: "turnId",
+    required: true,
+  });
+  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].turnNumber, {
+    type: "integer",
+    required: false,
+    minimum: 1,
+    maximum: 4_096,
+  });
+  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].state, {
+    type: "nullableString",
+    required: true,
+    enum: ["completed"],
+  });
+  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].accepted, {
+    type: "boolean",
+    required: true,
+  });
+  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].persisted, {
+    type: "boolean",
+    required: true,
+  });
+  assert.equal(PROTOCOL_ERROR_CODES.includes("CONVERSATION_FLUSH_FAILED" as never), false);
+  assert.equal(PROTOCOL_ERROR_CODES.includes("SHUTDOWN_FLUSH_FAILED" as never), false);
+});
+
 test("shared process-event origin fixtures", async (context) => {
   const fixtures = await loadJson<FixtureDocument>("fixtures.json");
   for (const fixture of fixtures.originCases) {

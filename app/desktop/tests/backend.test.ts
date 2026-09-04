@@ -143,6 +143,14 @@ test("request builder creates a canonical protocol-v1 request and validates para
     params: {},
   });
   assert.throws(() => buildProtocolRequest("session.turn", {}, () => requestId));
+  assert.deepEqual(
+    buildProtocolRequest(
+      "session.turn",
+      { text: "question", turnId: "123e4567e89b42d3a456426614174001" },
+      () => requestId,
+    ).params,
+    { text: "question", turnId: "123e4567e89b42d3a456426614174001" },
+  );
   assert.throws(() => buildProtocolRequest("runtime.diagnostics", {}, () => "not-a-uuid"));
 });
 
