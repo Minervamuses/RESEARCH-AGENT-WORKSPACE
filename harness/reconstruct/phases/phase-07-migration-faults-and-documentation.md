@@ -1,6 +1,6 @@
 # Phase 07 — 啟用一次性 migration、完成 fault journeys 與文件一致性
 
-Status: Not started
+Status: In progress
 
 ## Objective
 

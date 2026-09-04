@@ -12,7 +12,7 @@
 | 04 — Host/catalog/retry cutover | Complete | 2026-09-04 20:39 CST | 2026-09-04 22:26 CST | Catalog recovery, full lifecycle paging, explicit retry, display-only commands, and fresh review below | None |
 | 05 — Remove Product Plan Mode | Complete | 2026-09-04 22:31 CST | 2026-09-04 23:04 CST | Removal, preservation checks, docs, and fresh review below | None |
 | 06 — Retire chat-history Chroma | Complete | 2026-09-04 23:12 CST | 2026-09-05 00:22 CST | Runtime retirement, archive-access checks, docs, and fresh review below | None |
-| 07 — Migration, faults, docs | Not started | — | — | — | None |
+| 07 — Migration, faults, docs | In progress | 2026-09-05 00:29 CST | — | Preflight, repaired execution gates, and baseline below | None |
 
 允許的狀態只有 `Not started`、`In progress`、`Blocked`、`Complete`。只有 required acceptance與verification都有 observed evidence時才能標為 `Complete`。
 
@@ -316,3 +316,13 @@ Material implementation events append with this shape:
 - **Durable authorization correction:** 使用者已明確要求每個logical change都commit，因此`PROMPTS.md`/`PLANS.md`現已記錄commit authority；push/merge/rebase/branch/worktree/deploy/release/publish仍未授權。
 - **Evidence:** live `package.json`/`tauri.conf.json`、migration/fixture/test topology與先前GUI acceptance plans的read-only inspection；未執行tests、migration或application write。
 - **Blockers:** None；plan structural validation與fresh walkthrough通過後才開始Phase 07。
+
+## 2026-09-05 00:29 CST — Phase 07: migration/fault/manual-acceptance preflight
+
+- **Status:** `Not started` → `In progress`。
+- **Runtime/ownership gate:** root=`/home/minervamuses/research-agent-workspace`、branch=`GUI`、start HEAD=`9e366d8a61449bd61e26e7031ad34e2920870f32`、worktree clean；WSL/Linux、Conda`app`、Python 3.13.14、Poetry 2.4.1、Node 24.18.0、npm 11.16.0、Cargo/Rust 1.97.1。Phase 01–06 summary/evidence皆為Complete；沒有user-owned overlap。
+- **Migration trigger decision:** 新增內部batch API與fixture-only第二道exact opt-in gate `RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1`。只有已通過direct `/tmp` root validation且啟用既有fixture mode時可呼叫；normal production startup/list、protocol、TS/Rust不新增入口。Catalog提供bounded identity/project targets；不從legacy內容猜project ownership。Missing targets共用一次lazy immutable Chroma clone，all-canonical/empty batch不import或open Chroma；既有selected-session migration維持原行為。
+- **Fault/journey gap:** 現有Python service recreation、TS reducer與Rust fake child只是layered evidence，尚未逐一做到六個real `python -m agent.desktop.server` child termination→restart checkpoint，也不是production Tauri人工journey。兩者都列為本phase blocking acceptance，不互相替代。
+- **Focused baseline:** 從`app/`執行conversation migration/repository、Desktop conversation/fixture/server與session lifecycle六個modules，exit 0，`109 passed, 1 warning in 3.94s`；warning是既有LangGraph `allowed_objects` pending-deprecation。未啟動provider、Ollama、真實migration或native window。
+- **Manual gate:** 最終必須使用task-owned isolated fixture root啟動production Tauri supervisor，人工操作keyboard create/select/send/retry、A→B→A、restart/continue與normal→extended，觀察pending/final-only、tool separation、HTML inert、focus/scroll及default/minimum/200% layout；headless/automation不得替代。
+- **Blockers:** None；下一步提交migration batch Red contract與六個subprocess fault Red contract，再分別Green。
