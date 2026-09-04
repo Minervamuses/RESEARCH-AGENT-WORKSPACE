@@ -217,6 +217,38 @@ test("session turn carries one canonical logical identity and durable lifecycle"
   assert.equal(PROTOCOL_ERROR_CODES.includes("SHUTDOWN_FLUSH_FAILED" as never), false);
 });
 
+test("extension apply carries its own canonical durable turn lifecycle", () => {
+  assert.deepEqual(METHOD_REQUIRED_PARAMS["extensions.apply"], [
+    "previewId",
+    "approvedBindingHashes",
+    "turnId",
+    "retry",
+  ]);
+  assert.deepEqual(METHOD_PARAM_SCHEMAS["extensions.apply"].turnId, {
+    type: "turnId",
+    required: true,
+  });
+  assert.deepEqual(METHOD_PARAM_SCHEMAS["extensions.apply"].retry, {
+    type: "boolean",
+    required: true,
+  });
+  const result = RESULT_DATA_SCHEMAS["extensions.apply"];
+  assert.deepEqual(result.turnId, { type: "turnId", required: true });
+  assert.deepEqual(result.turnNumber, {
+    type: "integer",
+    required: true,
+    minimum: 1,
+    maximum: 4_096,
+  });
+  assert.deepEqual(result.state, {
+    type: "string",
+    required: true,
+    enum: ["completed"],
+  });
+  assert.deepEqual(result.accepted, { type: "boolean", required: true });
+  assert.deepEqual(result.persisted, { type: "boolean", required: true });
+});
+
 test("session summaries and transcripts expose canonical lifecycle state", () => {
   const summary = RESULT_DATA_SCHEMAS["session.list"]?.items.items;
   assert.deepEqual(summary?.createdAt, {

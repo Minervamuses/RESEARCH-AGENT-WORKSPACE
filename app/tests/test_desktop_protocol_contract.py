@@ -138,6 +138,50 @@ def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
     assert result["persisted"] == {"type": "boolean", "required": True}
 
 
+def test_extension_apply_is_a_durable_display_only_turn() -> None:
+    method = METHODS["extensions.apply"]
+    assert method["requiredParams"] == [
+        "previewId",
+        "approvedBindingHashes",
+        "turnId",
+        "retry",
+    ]
+    assert method["params"]["turnId"] == {
+        "type": "turnId",
+        "required": True,
+    }
+    assert method["params"]["retry"] == {
+        "type": "boolean",
+        "required": True,
+    }
+
+    result = CONTRACT["resultDataSchemas"]["extensions.apply"]
+    assert result["sessionId"] == {
+        "type": "string",
+        "required": True,
+        "maxBytes": 256,
+    }
+    assert result["turnId"] == {"type": "turnId", "required": True}
+    assert result["turnNumber"] == {
+        "type": "integer",
+        "required": True,
+        "minimum": 1,
+        "maximum": 4_096,
+    }
+    assert result["state"] == {
+        "type": "string",
+        "required": True,
+        "enum": ["completed"],
+    }
+    assert result["accepted"] == {"type": "boolean", "required": True}
+    assert result["persisted"] == {"type": "boolean", "required": True}
+    assert result["text"] == {
+        "type": "string",
+        "required": True,
+        "maxBytes": 65_536,
+    }
+
+
 def test_session_turn_failure_lifecycle_details_are_exact_and_bounded() -> None:
     assert CONTRACT["turnErrorDetailsSchema"] == {
         "turnId": {"type": "turnId", "required": True},

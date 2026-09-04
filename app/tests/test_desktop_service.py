@@ -251,6 +251,8 @@ class _FakeExtensionManager:
             diagnostics=(),
         )
         self.applied_preview = None
+        self.apply_calls = 0
+        self.before_apply = None
         self.status_calls = 0
         self.preview_calls = 0
         self.approved_bindings: set[str] | None = None
@@ -268,6 +270,9 @@ class _FakeExtensionManager:
         return self.preview_object
 
     def apply(self, preview, *, approved_mcp_bindings):
+        self.apply_calls += 1
+        if self.before_apply is not None:
+            self.before_apply()
         self.applied_preview = preview
         self.approved_bindings = set(approved_mcp_bindings)
         return ApplyReport(
@@ -1948,6 +1953,149 @@ def test_extension_preview_is_opaque_and_apply_cannot_replay(tmp_path: Path) -> 
             )
         )
     assert replay.value.code == "EXTENSION_APPLY_FAILED"
+
+
+def test_extension_apply_is_prompt_first_and_replays_completed_report_after_restart(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repository = ConversationRepository(tmp_path / "store")
+    factory, sessions = _canonical_session_factory(monkeypatch)
+    manager = _FakeExtensionManager(tmp_path)
+    service = _service(
+        tmp_path,
+        extension_manager=manager,
+        conversation_repository=repository,
+        session_factory=factory,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session_id = sessions[-1].session_id
+    preview = asyncio.run(service.dispatch("extensions.preview", {}))
+    turn_id = uuid.uuid4().hex
+    params = {
+        "previewId": preview["previewId"],
+        "approvedBindingHashes": ["a" * 64],
+        "turnId": turn_id,
+        "retry": False,
+    }
+    observed = []
+
+    def observe_pending() -> None:
+        turn = repository.load(session_id).document.turns[-1]
+        observed.append((turn.turn_id, turn.kind, turn.state, turn.display_input))
+
+    manager.before_apply = observe_pending
+    applied = asyncio.run(service.dispatch("extensions.apply", params))
+
+    turn = repository.load(session_id).document.turns[-1]
+    assert observed == [(turn_id, "display-only", "pending", turn.display_input)]
+    assert turn.turn_id == turn_id
+    assert turn.kind == "display-only"
+    assert turn.state == "completed"
+    assert turn.semantic_input is None
+    assert turn.context_eligible is False
+    assert turn.thinking_mode is None
+    assert repository.latest_context(repository.load(session_id)) == ()
+    assert preview["previewId"] not in turn.display_input
+    assert "a" * 64 not in turn.display_input
+    assert preview["previewId"] not in repository.path_for(session_id).read_text(
+        encoding="utf-8"
+    )
+    assert "a" * 64 not in repository.path_for(session_id).read_text(
+        encoding="utf-8"
+    )
+    assert applied["sessionId"] == session_id
+    assert applied["turnId"] == turn_id
+    assert applied["turnNumber"] == turn.turn_number
+    assert applied["state"] == "completed"
+    assert applied["accepted"] is True
+    assert applied["persisted"] is True
+    assert applied["text"] == turn.assistant_output
+    assert applied["appliedRevision"] == 1
+    assert manager.apply_calls == 1
+
+    restarted = _service(
+        tmp_path,
+        extension_manager=manager,
+        conversation_repository=repository,
+        session_factory=factory,
+    )
+    asyncio.run(restarted.dispatch(
+        "session.select",
+        {"projectId": "local", "sessionId": session_id},
+    ))
+    replayed = asyncio.run(restarted.dispatch("extensions.apply", params))
+
+    assert replayed == applied
+    assert manager.apply_calls == 1
+    assert len(repository.load(session_id).document.turns) == 1
+
+
+class _UncleanExtensionCrash(BaseException):
+    pass
+
+
+def test_extension_apply_unclean_crash_restores_interrupted_without_replay(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repository = ConversationRepository(tmp_path / "store")
+    factory, sessions = _canonical_session_factory(monkeypatch)
+    manager = _FakeExtensionManager(tmp_path)
+    service = _service(
+        tmp_path,
+        extension_manager=manager,
+        conversation_repository=repository,
+        session_factory=factory,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session_id = sessions[-1].session_id
+    preview = asyncio.run(service.dispatch("extensions.preview", {}))
+    turn_id = uuid.uuid4().hex
+
+    def crash_after_prompt() -> None:
+        turn = repository.load(session_id).document.turns[-1]
+        assert (turn.turn_id, turn.kind, turn.state) == (
+            turn_id,
+            "display-only",
+            "pending",
+        )
+        raise _UncleanExtensionCrash("synthetic process death")
+
+    manager.before_apply = crash_after_prompt
+    with pytest.raises(_UncleanExtensionCrash):
+        asyncio.run(service.dispatch(
+            "extensions.apply",
+            {
+                "previewId": preview["previewId"],
+                "approvedBindingHashes": ["a" * 64],
+                "turnId": turn_id,
+                "retry": False,
+            },
+        ))
+
+    pending = repository.load(session_id).document.turns[-1]
+    assert pending.state == "pending"
+    assert manager.apply_calls == 1
+
+    manager.before_apply = None
+    restarted = _service(
+        tmp_path,
+        extension_manager=manager,
+        conversation_repository=repository,
+        session_factory=factory,
+    )
+    asyncio.run(restarted.dispatch(
+        "session.select",
+        {"projectId": "local", "sessionId": session_id},
+    ))
+
+    interrupted = repository.load(session_id).document.turns[-1]
+    assert interrupted.turn_id == turn_id
+    assert interrupted.state == "interrupted"
+    assert interrupted.failure is not None
+    assert interrupted.failure.retryable is False
+    assert manager.apply_calls == 1
 
 
 def test_extension_preview_rejects_a_binding_with_undisplayable_secret_args(

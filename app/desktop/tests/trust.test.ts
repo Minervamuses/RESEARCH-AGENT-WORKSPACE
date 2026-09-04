@@ -26,7 +26,8 @@ interface TrustModule {
     activeTurnId?: string,
   ) => unknown;
   approvedBindingHashes: (flow: unknown) => string[] | null;
-  beginExtensionApply: (flow: unknown) => unknown;
+  beginExtensionApply: (flow: unknown, turnId: string) => unknown;
+  extensionApplyRequest: (flow: unknown) => unknown;
   createExtensionFlow: (turnId: string) => unknown;
   decideExtensionBinding: (
     flow: unknown,
@@ -110,10 +111,24 @@ test("extension apply is one-use and only the exact loaded revision completes re
   let flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-3"), preview);
   flow = trust.decideExtensionBinding(flow, "a".repeat(64), "approve");
   flow = trust.decideExtensionBinding(flow, "b".repeat(64), "deny");
-  flow = trust.beginExtensionApply(flow);
+  const applyTurnId = "123e4567e89b42d3a456426614174003";
+  flow = trust.beginExtensionApply(flow, applyTurnId);
   assert.equal(trust.approvedBindingHashes(flow), null);
+  assert.deepEqual(trust.extensionApplyRequest(flow), {
+    previewId: "preview-1",
+    approvedBindingHashes: ["a".repeat(64)],
+    turnId: applyTurnId,
+    retry: false,
+  });
 
   const report: ExtensionApplyDto = {
+    sessionId: "123e4567e89b42d3a456426614174000",
+    turnId: applyTurnId,
+    turnNumber: 2,
+    state: "completed",
+    accepted: true,
+    persisted: true,
+    text: "Extension Management applied revision 0 -> 1",
     previousRevision: 0,
     appliedRevision: 1,
     restartRequired: true,

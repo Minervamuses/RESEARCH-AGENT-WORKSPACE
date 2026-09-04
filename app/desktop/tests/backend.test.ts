@@ -328,6 +328,46 @@ test("backend client preserves validated session-turn lifecycle details", async 
   );
 });
 
+test("backend client preserves validated extension-apply lifecycle details", async () => {
+  const turnId = "123e4567e89b42d3a456426614174002";
+  const turnLifecycle = {
+    turnId,
+    state: "interrupted",
+    accepted: true,
+    persisted: true,
+  } as const;
+  const client = createBackendClient({
+    idFactory: () => requestId,
+    invoke: async <T>() => ({
+      protocolVersion: 1,
+      messageType: "result",
+      requestId,
+      ok: false,
+      error: {
+        code: "EXTENSION_APPLY_FAILED",
+        message: "The extension apply was interrupted.",
+        retryable: false,
+        details: turnLifecycle,
+      },
+    }) as T,
+  });
+
+  await assert.rejects(
+    client.request("extensions.apply", {
+      previewId: "preview-1",
+      approvedBindingHashes: [],
+      turnId,
+      retry: false,
+    }),
+    (error) => {
+      assert.ok(error instanceof BackendClientError);
+      assert.equal(error.uiError.source, "business");
+      assert.deepEqual(error.uiError.turnLifecycle, turnLifecycle);
+      return true;
+    },
+  );
+});
+
 test("bridge events validate lifecycle payloads and process-event origins", () => {
   assert.deepEqual(parseBridgeEvent({ type: "lifecycle", snapshot: readySnapshot }), {
     type: "lifecycle",
