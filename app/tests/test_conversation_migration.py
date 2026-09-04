@@ -129,13 +129,18 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     before = copy.deepcopy(documents)
 
     class FakeRawStore:
+        def __init__(self):
+            self.reads = 0
+
         def get_where(self, where, *, limit=None):
+            self.reads += 1
             assert where == {"session_id": {"$eq": SESSION_A}}
             assert limit == 8193
             return list(documents)
 
+    raw_store = FakeRawStore()
     history = ChatHistoryStore.__new__(ChatHistoryStore)
-    history._store = FakeRawStore()
+    history._store = raw_store
     repository = ConversationRepository(tmp_path / "target")
     migrator = ConversationMigrator(
         repository,
@@ -147,8 +152,13 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     assert result.status == "created"
     assert result.source_counts == (LegacySourceCount("chroma", 2),)
     assert result.turn_count == 2
+    assert result.dropped_activity_count == 0
+    assert raw_store.reads == 2
     snapshot = repository.load(SESSION_A)
+    assert snapshot.document.conversation_id == SESSION_A
     assert snapshot.document.project_id == "project-a"
+    assert snapshot.document.created_at == "2026-08-28T00:00:00Z"
+    assert snapshot.document.updated_at == "2026-08-28T01:00:00Z"
     assert [turn.turn_number for turn in snapshot.document.turns] == [1, 2]
     assert [turn.turn_id for turn in snapshot.document.turns] == [
         legacy_turn_id(SESSION_A, 1),
@@ -156,7 +166,14 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     ]
     assert [turn.display_input for turn in snapshot.document.turns] == ["問一", "問二"]
     assert [turn.assistant_output for turn in snapshot.document.turns] == ["答一", "答二"]
-    assert snapshot.document.turns[1].submitted_at == "2026-08-28T01:00:00Z"
+    assert [turn.submitted_at for turn in snapshot.document.turns] == [
+        "2026-08-28T00:00:00Z",
+        "2026-08-28T01:00:00Z",
+    ]
+    assert [turn.finished_at for turn in snapshot.document.turns] == [
+        "2026-08-28T00:00:00Z",
+        "2026-08-28T01:00:00Z",
+    ]
     assert all(turn.state == "completed" for turn in snapshot.document.turns)
     assert all(turn.kind == "display-only" for turn in snapshot.document.turns)
     assert all(turn.semantic_input is None for turn in snapshot.document.turns)
@@ -166,6 +183,7 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     first_bytes = repository.path_for(SESSION_A).read_bytes()
     second = migrator.import_conversation(SESSION_A, project_id="project-a")
     assert second.status == "already_present"
+    assert raw_store.reads == 2
     assert repository.path_for(SESSION_A).read_bytes() == first_bytes
     assert len(repository.load(SESSION_A).document.turns) == 2
 
@@ -184,14 +202,30 @@ def test_plan_v1_v2_import_drops_all_legacy_tool_payloads(tmp_path):
         _v2_plan_log(
             SESSION_A,
             second,
-            activities=[{
-                "call_id": "call-1",
-                "name": "bash",
-                "arguments": '{"api_key":"DO_NOT_PERSIST"}',
-                "result": "private reasoning and raw result DO_NOT_PERSIST",
-                "status": "ok",
-                "unexpected_secret": "DO_NOT_PERSIST",
-            }],
+            activities=[
+                {
+                    "call_id": "call-1",
+                    "name": "bash",
+                    "arguments": '{"api_key":"DO_NOT_PERSIST"}',
+                    "result": "private reasoning and raw result DO_NOT_PERSIST",
+                    "status": "ok",
+                },
+                {
+                    "call_id": "call-2",
+                    "name": "bash",
+                    "arguments": "{}",
+                    "result": "DO_NOT_PERSIST",
+                    "status": "ok",
+                    "unexpected_secret": "DO_NOT_PERSIST",
+                },
+                {
+                    "call_id": "call-3",
+                    "name": "bash",
+                    "arguments": "{}",
+                    "result": "X" * 65_537,
+                    "status": "ok",
+                },
+            ],
         ),
         encoding="utf-8",
     )
@@ -216,6 +250,7 @@ def test_plan_v1_v2_import_drops_all_legacy_tool_payloads(tmp_path):
 
     assert result.status == "created"
     assert result.source_counts == (LegacySourceCount("plan", 2),)
+    assert result.dropped_activity_count == 3
     snapshot = repository.load(SESSION_A)
     assert [turn.display_input for turn in snapshot.document.turns] == [
         "legacy v1",
@@ -302,6 +337,38 @@ def test_valid_existing_target_is_authoritative_without_reading_legacy(tmp_path)
     assert result.status == "already_present"
     assert result.turn_count == 1
     assert repository.path_for(SESSION_A).read_bytes() == before
+
+
+def test_existing_target_with_other_project_fails_without_reading_legacy(tmp_path):
+    repository = ConversationRepository(tmp_path)
+    snapshot = repository.create(
+        conversation_id=SESSION_A,
+        project_id="project-a",
+        turn_id=legacy_turn_id(SESSION_A, 1),
+        kind="display-only",
+        display_input="existing",
+        semantic_input=None,
+        context_eligible=False,
+        thinking_mode=None,
+        submitted_at="2026-08-28T01:00:00Z",
+    )
+    repository.complete_turn(
+        snapshot,
+        turn_id=legacy_turn_id(SESSION_A, 1),
+        assistant_output="answer",
+        finished_at="2026-08-28T01:00:00Z",
+    )
+
+    def must_not_read(_conversation_id):
+        raise AssertionError("legacy source must not be read")
+
+    result = ConversationMigrator(
+        repository,
+        LegacyConversationReader(chroma_read=must_not_read),
+    ).import_conversation(SESSION_A, project_id="project-b")
+
+    assert result.status == "failed"
+    assert result.reason == "canonical_target_invalid"
 
 
 def test_source_change_between_stage_and_publish_leaves_no_target(tmp_path):
