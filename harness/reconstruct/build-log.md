@@ -154,6 +154,20 @@
 - **Evidence reference:** Red commit=`2ffebb5`。
 - **Blockers:** None；下一步同步更新language-neutral contract、TypeScript與Rust validators，再接通React/Python host。
 
+## 2026-09-04 20:12 CST — Phase 03: protocol/host/fixture Green checkpoint
+
+- **Status:** `In progress`；尚未完成全部required verification與acceptance mapping。
+- **Protocol lockstep changes:** language-neutral v1 contract與fixtures、Python、TypeScript、React及Rust同步要求caller-owned canonical UUIDv4-hex `turnId`。Answer result回同一ID、`turnNumber`、`state=completed`、`accepted=true`、`persisted=true`；display-only local command回同一ID但`state=null`、`accepted=false`、`persisted=false`。Python/TypeScript/Rust移除`flushed`與flush-only errors；Rust graceful shutdown改由有效Python ACK加child exit判定。React在dispatch前建立logical ID、保存至active turn並拒絕mismatched result；transport request ID仍只作correlation。
+- **Protocol verification:** `tests/test_desktop_protocol_contract.py -q` exit 0，`85 passed, 1 warning`；從`app/desktop/`執行`node --test --experimental-strip-types tests/protocol.test.ts tests/backend.test.ts tests/answer_stream.test.ts` exit 0，`99 passed`；`./node_modules/.bin/tsc --noEmit` exit 0；`cargo test --manifest-path src-tauri/Cargo.toml protocol::tests` exit 0，`29 passed`。沒有install、npx、full npm/build或full Cargo。
+- **CLI changes/verification:** CLI在每個agent turn前產生logical UUIDv4 hex並同時傳original display input與semantic input；one-shot Skill保留slash display文字但只把follow-up送模型；exit不再flush。`tests/test_chat_cli.py -q` exit 0，`19 passed, 1 warning`。
+- **Desktop Python changes:** create/materialize/select/transcript/summary改用同一`ConversationRepository`；selected legacy-only session在materialization前經Phase 02 importer，runtime不merge Chroma/Plan/current memory。Caller `turnId`原樣送Session，completed lifecycle fields經service驗證後才回；switch/create/shutdown不呼叫legacy flush。Startup只做Phase 03最低限度的健康JSON→matching project catalog補登；pending JSON且catalog registration落後的restart test直接證明list可發現、title/turn count可讀且model/session factory零呼叫。
+- **Desktop/fixture verification:** `tests/test_desktop_service.py -q` exit 0，`46 passed, 1 warning`。Fixture改為canonical pending→completed/failed/interrupted唯一active authority；延遲synthetic work期間test直接從JSON讀到pending，provider failures讀到failed；safe tool summary不保存raw arguments/results；switch/shutdown前後legacy Plan bytes不變。`tests/test_desktop_fixture.py -q` exit 0，`15 passed, 1 warning`。
+- **Core lifecycle replacement:** 舊`test_session_eviction.py`已改為6個real-temp-repository tests，直接驗證graph前prompt durable、pending write failure時graph零呼叫、provider failure→failed、reload pending→interrupted且不replay、completed duplicate byte-identical/no graph、latest-10+current-once且legacy flush no-op。與`test_session_lifecycle.py`合跑exit 0，`12 passed, 1 warning`。
+- **Still-failing observed check:** `tests/test_memory.py tests/test_state.py tests/test_turn_finalizer.py tests/test_thinking.py tests/test_thinking_session.py tests/test_skill_runtime.py tests/test_citation_gate.py -q --tb=short` exit 1，`16 failed, 127 passed, 1 warning`。15項是`test_turn_finalizer.py`直接繞過新pending boundary呼叫internal finalizer或要求Plan/eviction寫入；1項是`test_thinking_session.py`仍要求Plan log。這些obsolete specs正在改寫，但在實際綠燈前Phase 03維持`In progress`。
+- **Manual inspection evidence:** 已逐段追蹤before/target sequence、normal/extended共用`finalize_and_record` chokepoint、citation/final-text validator排序、Session→CLI/Desktop→TS/Rust→React identity flow及Desktop read/restore boundary。沒有發現受支援的external protocol-v1 consumer；live checkout為同一source tree lockstep app。Phase 03–05仍是app-offline中間狀態，未操作真實store、credentials、provider或Ollama。
+- **Evidence references:** protocol Green=`f0fd27d`；CLI=`1845510`；Desktop host=`997ee1e`；catalog Red/Green=`5f54267`/`ff9290e`；fixture=`efc0ae8`；lifecycle replacement=`02233f8`。
+- **Blockers:** None。下一步完成canonical Desktop conversation journey與finalizer/thinking obsolete-spec改寫，跑完整Phase 03 required command sets後再判斷Complete。
+
 <!--
 Material implementation events append with this shape:
 
