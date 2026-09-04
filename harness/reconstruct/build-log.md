@@ -220,6 +220,15 @@
 - **Verification:** Phase 05 characterization/Red checks have not yet run. Next step is to record the current focused baseline, then commit tests that require the removed CLI/protocol/UI surface while retaining legacy parser and extended-thinking coverage.
 - **Blockers:** None。
 
+## 2026-09-04 22:37 CST — Phase 05: removal contract Red
+
+- **Status:** `In progress`。
+- **Characterization baseline:** before test changes, the required Python command exited 0 with `350 passed, 1 warning`; Desktop protocol/conversation tests exited 0 with `106 passed`, TypeScript `tsc --noEmit` exited 0, and Rust protocol tests exited 0 with `11 passed`. This proves the starting Plan-enabled interface was internally consistent; it is not evidence of the removal target.
+- **Red changes:** added focused Python contracts requiring the CLI registry to omit `/mode` while retaining `/thinking`, `ChatSession` to expose no Plan control/hint API, the strict legacy Plan reader to expose no writer methods, and create/select protocol DTOs plus methods to omit Plan fields/method while retaining normal/extended thinking. TypeScript now independently checks the language-neutral contract and React source for the same removal/preservation boundary.
+- **Red verification:** `pytest tests/test_plan_mode_removal.py -q` exited 1 with `4 failed, 1 warning`; failures are exactly the still-present CLI command, Session API, Plan writer methods, and protocol surface. `node --test --experimental-strip-types tests/protocol.test.ts` exited 1 with `97 passed, 1 failed`; the single failure is the still-present `session.set_mode`. An initial uncommitted test draft referenced a module-local fixture and produced one setup error; that test was corrected to use class-level API assertions before the Red commit and the recorded rerun contains no setup/collection error.
+- **Evidence reference:** Red commit=`d7bb592`。
+- **Blockers:** None；next implement consumer-to-producer removal while preserving raw legacy v1/v2 parser coverage.
+
 <!--
 Material implementation events append with this shape:
 
