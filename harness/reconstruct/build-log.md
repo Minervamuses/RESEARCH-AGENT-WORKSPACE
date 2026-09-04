@@ -136,6 +136,15 @@
 - **Evidence reference:** Red commit=`49f706a`。
 - **Blockers:** None；下一步實作最小repository/session lifecycle Green，再擴到host/protocol Red。
 
+## 2026-09-04 19:35 CST — Phase 03: Python lifecycle Green checkpoint
+
+- **Status:** `In progress`。
+- **Changes:** `ChatSession`現在注入canonical repository/project identity，在turn lock內create/append pending後才建立latest-10 prompt；normal/extended共用final chokepoint於SafeContent、citation與Desktop validator後transition completed，terminal commit完成才回`TurnOutcome`。同-ID completed request直接回durable answer；load/materialize把leftover pending一次轉interrupted；known exception嘗試寫typed failed/interrupted，失敗則保留pending供下次load recovery。Runtime prompt不再由legacy `TurnRecord`/Plan/Chroma組裝，Plan control不再建立log，journal只接收post-commit process-local diagnostics，flush成為不具durability責任的compatibility no-op。
+- **Verification (Green):** `PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_session_lifecycle.py tests/test_conversation_repository.py -q`，exit 0，`23 passed, 1 warning in 0.55s`；六項新ordering/recovery tests全綠。warning仍是既有LangGraph deprecation。
+- **Characterization checkpoint:** 跑`tests/test_session_eviction.py tests/test_turn_finalizer.py tests/test_thinking_session.py tests/test_skills.py -q`得到`26 failed, 57 passed`。失敗全部落在已被Phase 03刻意撤銷的Chroma eviction/flush/legacy restored-turn/Plan-log assertions，或直接繞過pending boundary呼叫internal `finalize_and_record`的舊測試；normal、extended與one-shot核心路徑其餘57項通過。這些是待改寫的obsolete specifications，不是保留行為 regression，phase仍維持`In progress`。
+- **Evidence reference:** Python lifecycle commit=`85730ee`。
+- **Blockers:** None；下一步把相關tests改成canonical public-turn assertions，並完成CLI/Desktop/protocol vertical slice。
+
 <!--
 Material implementation events append with this shape:
 
