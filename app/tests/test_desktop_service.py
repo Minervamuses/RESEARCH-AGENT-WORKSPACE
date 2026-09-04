@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
+from conftest import FakeHistoryStore
 from agent.config import AgentConfig
 from agent.cli.slash_commands import (
     SlashCommand,
@@ -24,6 +25,7 @@ from agent.desktop.catalog import DesktopProjectCatalog
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus
+from agent.session import ChatSession
 from agent.skills import SkillMetadata
 from agent.turns.results import TurnOutcome
 from rag.types import Hit
@@ -399,8 +401,49 @@ def _service(tmp_path: Path, **kwargs) -> DesktopService:
     )
 
 
-def _turn_params(text: str, *, turn_id: str | None = None) -> dict[str, str]:
-    return {"text": text, "turnId": turn_id or uuid.uuid4().hex}
+def _turn_params(
+    text: str,
+    *,
+    turn_id: str | None = None,
+    retry: bool = False,
+) -> dict[str, object]:
+    return {
+        "text": text,
+        "turnId": turn_id or uuid.uuid4().hex,
+        "retry": retry,
+    }
+
+
+def _canonical_session_factory(monkeypatch):
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _config, extra_tools=None, history_store=None, **kwargs: object(),
+    )
+    sessions: list[ChatSession] = []
+
+    async def factory(
+        config,
+        *,
+        load_mcp,
+        progress_cb,
+        conversation_repository,
+        project_id,
+        session_id=None,
+    ):
+        del load_mcp
+        session = ChatSession(
+            config,
+            history_store=FakeHistoryStore(),
+            progress_cb=progress_cb,
+            loaded_skills=[],
+            conversation_repository=conversation_repository,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        sessions.append(session)
+        return session
+
+    return factory, sessions
 
 
 def test_diagnostics_stays_available_without_provider_keys(tmp_path: Path) -> None:
@@ -538,6 +581,313 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
     assert status["streamKind"] == "final_only"
     assert status["chunkCount"] == 0
     assert "Session status:" in status["text"]
+
+
+def test_composer_first_attempt_is_not_an_implicit_retry(tmp_path: Path) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+
+    first_id = uuid.uuid4().hex
+    retry_id = uuid.uuid4().hex
+    asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params("first attempt", turn_id=first_id),
+    ))
+    asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params("explicit attempt", turn_id=retry_id, retry=True),
+    ))
+
+    assert factory.created is not None
+    assert factory.created.turn_calls == [
+        {
+            "semanticInput": "first attempt",
+            "displayInput": "first attempt",
+            "turnId": first_id,
+            "skillName": None,
+            "retry": False,
+        },
+        {
+            "semanticInput": "explicit attempt",
+            "displayInput": "explicit attempt",
+            "turnId": retry_id,
+            "skillName": None,
+            "retry": True,
+        },
+    ]
+
+
+def test_composer_help_is_durable_display_only_before_handler(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repository = ConversationRepository(tmp_path / "store")
+    factory, sessions = _canonical_session_factory(monkeypatch)
+    observed = []
+
+    async def help_handler(context, _parsed):
+        snapshot = repository.load_optional(context.session.session_id)
+        observed.append(
+            None
+            if snapshot is None
+            else (
+                snapshot.document.turns[-1].state,
+                snapshot.document.turns[-1].kind,
+                snapshot.document.turns[-1].display_input,
+            )
+        )
+        return SlashCommandResult(message="canonical desktop help")
+
+    registry = SlashCommandRegistry([
+        SlashCommand(
+            name="help",
+            description="Show local help.",
+            handler=help_handler,
+        )
+    ])
+    service = _service(
+        tmp_path,
+        conversation_repository=repository,
+        session_factory=factory,
+        slash_registry=registry,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    turn_id = uuid.uuid4().hex
+
+    result = asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params("/help", turn_id=turn_id),
+    ))
+
+    assert len(sessions) == 1
+    snapshot = repository.load(sessions[0].session_id)
+    turn = snapshot.document.turns[0]
+    assert observed == [("pending", "display-only", "/help")]
+    assert turn.turn_id == turn_id
+    assert turn.state == "completed"
+    assert turn.kind == "display-only"
+    assert turn.semantic_input is None
+    assert turn.context_eligible is False
+    assert turn.thinking_mode is None
+    assert turn.assistant_output == "canonical desktop help"
+    assert repository.latest_context(snapshot) == ()
+    assert result["turnId"] == turn_id
+    assert result["turnNumber"] == 1
+    assert result["state"] == "completed"
+    assert result["accepted"] is True
+    assert result["persisted"] is True
+    assert result["responseKind"] == "command"
+    assert result["text"] == "canonical desktop help"
+
+
+def test_composer_confirmed_prune_is_prompt_first_and_completed_duplicate_safe(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    repository = ConversationRepository(tmp_path / "store")
+    factory, sessions = _canonical_session_factory(monkeypatch)
+    observed: list[tuple[str, str, str, str]] = []
+    prune_calls = 0
+
+    async def forbidden(*_args):
+        raise AssertionError("unrelated knowledge operation")
+
+    async def diff_folder(_target, _config):
+        session_id = sessions[-1].session_id
+        turn = repository.load(session_id).document.turns[-1]
+        observed.append(("diff", turn.turn_id, turn.state, turn.kind))
+        return {
+            "missing_from_store": [],
+            "missing_from_disk": ["gone.md"],
+        }
+
+    async def prune_folder(_target, _config):
+        nonlocal prune_calls
+        prune_calls += 1
+        session_id = sessions[-1].session_id
+        turn = repository.load(session_id).document.turns[-1]
+        observed.append(("prune", turn.turn_id, turn.state, turn.kind))
+        return ["gone-pid"]
+
+    service = _service(
+        tmp_path,
+        conversation_repository=repository,
+        session_factory=factory,
+        knowledge_operations=SimpleNamespace(
+            init_workspace=forbidden,
+            ingest_file=forbidden,
+            ingest_folder=forbidden,
+            diff_folder=diff_folder,
+            prune_folder=prune_folder,
+        ),
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    preview_id = uuid.uuid4().hex
+    apply_id = uuid.uuid4().hex
+
+    asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params(f"/prune {source}", turn_id=preview_id),
+    ))
+    applied = asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params(f"/prune {source} --yes", turn_id=apply_id),
+    ))
+    duplicate = asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params(f"/prune {source} --yes", turn_id=apply_id),
+    ))
+
+    snapshot = repository.load(sessions[-1].session_id)
+    assert [(turn.turn_id, turn.kind, turn.state) for turn in snapshot.document.turns] == [
+        (preview_id, "display-only", "completed"),
+        (apply_id, "display-only", "completed"),
+    ]
+    assert all(turn.semantic_input is None for turn in snapshot.document.turns)
+    assert all(not turn.context_eligible for turn in snapshot.document.turns)
+    assert repository.latest_context(snapshot) == ()
+    assert observed == [
+        ("diff", preview_id, "pending", "display-only"),
+        ("diff", apply_id, "pending", "display-only"),
+        ("prune", apply_id, "pending", "display-only"),
+    ]
+    assert prune_calls == 1
+    assert duplicate["turnId"] == applied["turnId"] == apply_id
+    assert duplicate["turnNumber"] == applied["turnNumber"] == 2
+    assert duplicate["text"] == applied["text"]
+    assert duplicate["state"] == applied["state"] == "completed"
+
+
+@pytest.mark.parametrize(
+    ("failure_type", "expected_state"),
+    [
+        pytest.param(RuntimeError, "failed", id="failed"),
+        pytest.param(asyncio.CancelledError, "interrupted", id="interrupted"),
+    ],
+)
+def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_only(
+    monkeypatch,
+    tmp_path: Path,
+    failure_type,
+    expected_state: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    config = AgentConfig(
+        persist_dir=str(tmp_path / "store"),
+        citation_output_dir=str(tmp_path / "cite"),
+        extension_dropin_dir=str(tmp_path / "dropin"),
+        extension_state_dir=str(tmp_path / "state"),
+        plan_logs_dir=str(tmp_path / "plans"),
+    )
+    repository = ConversationRepository(config.persist_dir)
+    factory, sessions = _canonical_session_factory(monkeypatch)
+    prune_calls = 0
+
+    async def forbidden(*_args):
+        raise AssertionError("unrelated knowledge operation")
+
+    async def diff_folder(_target, _config):
+        return {
+            "missing_from_store": [],
+            "missing_from_disk": ["gone.md"],
+        }
+
+    async def prune_folder(_target, _config):
+        nonlocal prune_calls
+        prune_calls += 1
+        if prune_calls == 1:
+            raise failure_type("fixture command stopped")
+        return ["gone-pid"]
+
+    operations = SimpleNamespace(
+        init_workspace=forbidden,
+        ingest_file=forbidden,
+        ingest_folder=forbidden,
+        diff_folder=diff_folder,
+        prune_folder=prune_folder,
+    )
+    service = _service(
+        tmp_path,
+        config=config,
+        conversation_repository=repository,
+        session_factory=factory,
+        knowledge_operations=operations,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session_id = sessions[-1].session_id
+    apply_id = uuid.uuid4().hex
+    asyncio.run(service.dispatch(
+        "session.turn",
+        _turn_params(f"/prune {source}", turn_id=uuid.uuid4().hex),
+    ))
+
+    outward_error = (
+        asyncio.CancelledError
+        if failure_type is asyncio.CancelledError
+        else DesktopServiceError
+    )
+    with pytest.raises(outward_error):
+        asyncio.run(service.dispatch(
+            "session.turn",
+            _turn_params(f"/prune {source} --yes", turn_id=apply_id),
+        ))
+
+    failed = repository.load(session_id).document.turns[-1]
+    assert failed.turn_id == apply_id
+    assert failed.state == expected_state
+    assert failed.assistant_output is None
+    assert failed.failure is not None
+    assert failed.failure.retryable is True
+    assert prune_calls == 1
+
+    restarted = _service(
+        tmp_path,
+        config=config,
+        conversation_repository=repository,
+        session_factory=factory,
+        knowledge_operations=operations,
+    )
+    asyncio.run(restarted.dispatch(
+        "session.select",
+        {"projectId": "local", "sessionId": session_id},
+    ))
+    assert prune_calls == 1
+
+    asyncio.run(restarted.dispatch(
+        "session.turn",
+        _turn_params(f"/prune {source}", turn_id=uuid.uuid4().hex),
+    ))
+    with pytest.raises(DesktopServiceError):
+        asyncio.run(restarted.dispatch(
+            "session.turn",
+            _turn_params(f"/prune {source} --yes", turn_id=apply_id),
+        ))
+    assert prune_calls == 1
+
+    retried = asyncio.run(restarted.dispatch(
+        "session.turn",
+        _turn_params(
+            f"/prune {source} --yes",
+            turn_id=apply_id,
+            retry=True,
+        ),
+    ))
+
+    snapshot = repository.load(session_id)
+    matching = [
+        turn for turn in snapshot.document.turns if turn.turn_id == apply_id
+    ]
+    assert prune_calls == 2
+    assert len(matching) == 1
+    assert matching[0].state == "completed"
+    assert matching[0].turn_number == failed.turn_number
+    assert retried["turnId"] == apply_id
+    assert retried["turnNumber"] == failed.turn_number
+    assert retried["state"] == "completed"
 
 
 def test_composer_routes_dynamic_skill_once_as_answer(tmp_path: Path) -> None:

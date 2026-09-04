@@ -3,10 +3,19 @@
 import argparse
 import asyncio
 from pathlib import Path
+import uuid
 
 import pytest
 
-from conftest import FakeChatSession
+from conftest import FakeChatSession, FakeHistoryStore
+from agent.cli.slash_commands import (
+    SlashCommand,
+    SlashCommandRegistry,
+    SlashCommandResult,
+)
+from agent.config import AgentConfig
+from agent.conversations import ConversationRepository
+from agent.session import ChatSession
 from agent.skills import SkillMetadata
 
 
@@ -38,6 +47,24 @@ def _run_cli(
     args = argparse.Namespace(max_graph_steps=max_graph_steps, no_mcp=no_mcp)
     asyncio.run(chat._run(args, read_line=fake_read_line))
     return create_kwargs
+
+
+def _canonical_cli_session(monkeypatch, tmp_path):
+    repository = ConversationRepository(tmp_path / "store")
+    session_id = uuid.uuid4().hex
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _config, extra_tools=None, history_store=None, **kwargs: object(),
+    )
+    session = ChatSession(
+        AgentConfig(persist_dir=str(tmp_path / "store")),
+        history_store=FakeHistoryStore(),
+        loaded_skills=[],
+        conversation_repository=repository,
+        project_id="local",
+        session_id=session_id,
+    )
+    return session, repository
 
 
 def test_chat_cli_writes_each_turn_without_exit_flush(monkeypatch):
@@ -177,6 +204,102 @@ def test_chat_cli_slash_help_stays_local(monkeypatch, capsys):
     assert "Available slash commands:" in output
     assert "/help" in output
     assert session.calls == []
+
+
+def test_chat_cli_slash_help_is_durable_display_only_before_handler(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from agent.cli import chat
+
+    session, repository = _canonical_cli_session(monkeypatch, tmp_path)
+    session_id = session.session_id
+    observed = []
+
+    async def help_handler(_context, _parsed):
+        snapshot = repository.load_optional(session_id)
+        observed.append(
+            None
+            if snapshot is None
+            else (
+                snapshot.document.turns[-1].state,
+                snapshot.document.turns[-1].kind,
+                snapshot.document.turns[-1].display_input,
+            )
+        )
+        return SlashCommandResult(message="canonical local help")
+
+    registry = SlashCommandRegistry([
+        SlashCommand(
+            name="help",
+            description="Show local help.",
+            handler=help_handler,
+        )
+    ])
+    monkeypatch.setattr(chat, "build_default_registry", lambda _session: registry)
+
+    _run_cli(monkeypatch, session, ["/help", "q"])
+
+    snapshot = repository.load(session_id)
+    turn = snapshot.document.turns[0]
+    assert observed == [("pending", "display-only", "/help")]
+    assert turn.state == "completed"
+    assert turn.kind == "display-only"
+    assert turn.semantic_input is None
+    assert turn.context_eligible is False
+    assert turn.thinking_mode is None
+    assert turn.assistant_output == "canonical local help"
+    assert repository.latest_context(snapshot) == ()
+    assert "canonical local help" in capsys.readouterr().out
+
+
+def test_chat_cli_confirmed_prune_is_durable_before_side_effect(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from agent.cli import slash_commands
+
+    source = tmp_path / "source"
+    source.mkdir()
+    session, repository = _canonical_cli_session(monkeypatch, tmp_path)
+    observed = []
+    prune_calls = 0
+
+    async def prune_folder(target, _config):
+        nonlocal prune_calls
+        prune_calls += 1
+        snapshot = repository.load_optional(session.session_id)
+        observed.append(
+            None
+            if snapshot is None
+            else (
+                snapshot.document.turns[-1].state,
+                snapshot.document.turns[-1].kind,
+                snapshot.document.turns[-1].display_input,
+            )
+        )
+        assert target == source.resolve()
+        return ["gone-pid"]
+
+    monkeypatch.setattr(slash_commands, "prune_folder", prune_folder)
+
+    command = f"/prune {source} --yes"
+    _run_cli(monkeypatch, session, [command, "q"])
+
+    snapshot = repository.load(session.session_id)
+    turn = snapshot.document.turns[0]
+    assert prune_calls == 1
+    assert observed == [("pending", "display-only", command)]
+    assert turn.state == "completed"
+    assert turn.kind == "display-only"
+    assert turn.semantic_input is None
+    assert turn.context_eligible is False
+    assert turn.assistant_output is not None
+    assert "pruned 1 orphaned pid(s)" in turn.assistant_output
+    assert repository.latest_context(snapshot) == ()
+    assert turn.assistant_output in capsys.readouterr().out
 
 
 def test_chat_cli_routes_dynamic_skill_with_exact_trailing_prompt(monkeypatch):
