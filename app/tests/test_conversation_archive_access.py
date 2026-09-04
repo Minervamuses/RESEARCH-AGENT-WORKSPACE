@@ -134,6 +134,7 @@ def _canonical_fixture(tmp_path, marker: str) -> ConversationRepository:
         "marker",
         "query",
         "archive_copies",
+        "metachar_root",
         "expected_tools",
         "expected_text",
         "expected_pending_reads",
@@ -143,14 +144,16 @@ def _canonical_fixture(tmp_path, marker: str) -> ConversationRepository:
             "orchid-amber-731 research checkpoint",
             "orchid-amber-731 research checkpoint",
             1,
+            False,
             ["bash", "read_file", "read_file"],
             "Recovered: Archived answer",
             1,
         ),
         (
-            'quoted "path\\segment"\nnext line',
-            'quoted "path\\segment"\nnext line',
+            'literal $HOME $(printf query) `printf backtick` \'single\' "double"\\\nnext',
+            'literal $HOME $(printf query) `printf backtick` \'single\' "double"\\\nnext',
             1,
+            True,
             ["bash", "read_file", "read_file"],
             "Recovered: Archived answer",
             1,
@@ -159,6 +162,7 @@ def _canonical_fixture(tmp_path, marker: str) -> ConversationRepository:
             "orchid-amber-731 research checkpoint",
             "a paraphrase that is absent",
             1,
+            False,
             ["bash", "read_file"],
             "That exact wording was not found in an earlier completed turn.",
             1,
@@ -167,6 +171,7 @@ def _canonical_fixture(tmp_path, marker: str) -> ConversationRepository:
             "common archive wording",
             "common archive wording",
             20,
+            False,
             ["bash"],
             (
                 "The exact wording matched too many archive files; please "
@@ -182,13 +187,19 @@ def test_archive_lookup_uses_exact_approved_grep_without_rag_fallback(
     marker,
     query,
     archive_copies,
+    metachar_root,
     expected_tools,
     expected_text,
     expected_pending_reads,
 ):
+    persist_dir = (
+        tmp_path / "archive $HOME $(printf root) 'quoted'"
+        if metachar_root
+        else tmp_path
+    )
     repository = None
     for _index in range(archive_copies):
-        repository = _canonical_fixture(tmp_path, marker)
+        repository = _canonical_fixture(persist_dir, marker)
     assert repository is not None
     quoted_root = shlex.quote(str(repository.root.resolve()))
     encoded_query = json.dumps(query, ensure_ascii=False)[1:-1]
@@ -228,7 +239,7 @@ def test_archive_lookup_uses_exact_approved_grep_without_rag_fallback(
         lambda _config: [rag_explore, rag_search, rag_get_context],
     )
     config = AgentConfig(
-        persist_dir=str(tmp_path),
+        persist_dir=str(persist_dir),
         graph_recursion_limit=12,
     )
     session = ChatSession(

@@ -59,7 +59,7 @@ ChatSession._begin_turn()
 - `ChatSession` 擁有整個 turn lock 與呼叫順序。
 - `execute_graph()` 無長期 mutable state，不 import `ChatSession`。
 - `TurnJournal`只擁有turn logs與last tool calls；不持久化transcript。
-- `ConversationRepository`是prompt、terminal response與configured latest-context window的唯一authority。
+- `ConversationRepository`是prompt、terminal response與固定latest-10 context window的唯一authority。
 - Accepted prompt 必須在 provider/tool 執行前成為 canonical pending turn。
 - Safety/citation finalization 必須在 canonical completed transition 前完成；完成寫入後才可回傳 terminal outcome。
 - Legacy Plan v1/v2 parser 位於 `agent.conversations` migration boundary，不由一般 turn execution import，且不寫回來源檔。

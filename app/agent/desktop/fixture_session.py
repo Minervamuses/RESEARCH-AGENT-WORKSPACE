@@ -35,7 +35,6 @@ from agent.extensions.manager import ExtensionManager
 from agent.extensions.startup import load_extension_startup
 from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX
 from agent.tools.bash import create_bash_tool
-from agent.turns.memory import TurnRecord
 from agent.turns.results import TurnOutcome
 
 

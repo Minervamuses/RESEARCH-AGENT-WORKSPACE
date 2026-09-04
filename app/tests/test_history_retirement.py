@@ -122,7 +122,7 @@ def test_session_guidance_and_status_expose_the_canonical_archive_root(
     monkeypatch,
     tmp_path,
 ):
-    archive_parent = tmp_path / "含 空白"
+    archive_parent = tmp_path / "含 空白 $HOME $(printf root) 'quoted'"
     session, repository, _graph_kwargs = _session(
         monkeypatch,
         archive_parent,
@@ -141,10 +141,17 @@ def test_session_guidance_and_status_expose_the_canonical_archive_root(
     assert "approval-gated" in hint
     assert "fixed-string" in hint
     assert "json.dumps" in hint
+    assert "POSIX-shell-quote" in hint
+    assert "exactly one literal argument" in hint
+    assert "keep `--` before it" in hint
+    assert "Never interpolate either operand unquoted" in hint
+    assert (
+        "grep -lF -- <shell-quoted-escaped-phrase> "
+        "<shell-quoted-root>/*.json | head -n 21"
+    ) in hint
     assert "read_file" in hint
     assert "current pending match" in hint
     assert "offset_bytes=0" in hint
-    assert "Limit the listing with `| head -n 21`" in hint
     assert "at most 20 matched JSON files" in hint
     assert "must not fall back to rag_search or embeddings" in hint
 
