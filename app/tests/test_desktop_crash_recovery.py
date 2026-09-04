@@ -40,6 +40,7 @@ CHECKPOINT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_CHECKPOINT"
 CHECKPOINT_TURN_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_TURN_ID"
 SIDE_EFFECT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_SIDE_EFFECT_SENTINEL"
 CHECKPOINT_PATH = ".fixture-crash-checkpoint.json"
+CHECKPOINT_READY_PATH = ".fixture-crash-checkpoint.ready"
 SIDE_EFFECT_PATH = ".fixture-side-effects.jsonl"
 UNSAFE_CITATION_TOKEN = "fixture-crash-forged"
 TIMEOUT_SECONDS = 5.0
@@ -266,10 +267,14 @@ class BackendProcess:
         timeout: float = TIMEOUT_SECONDS,
     ) -> None:
         marker = self.root / CHECKPOINT_PATH
+        ready = self.root / CHECKPOINT_READY_PATH
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if marker.is_file():
-                raw = json.loads(marker.read_text(encoding="utf-8"))
+            if ready.is_file():
+                try:
+                    raw = json.loads(marker.read_text(encoding="utf-8"))
+                except (FileNotFoundError, json.JSONDecodeError):
+                    continue
                 assert raw == {"checkpoint": checkpoint, "turnId": turn_id}
                 return
             try:
@@ -510,7 +515,7 @@ def test_kill_after_citation_rejection_never_persists_unsafe_completed_text(
         first.kill_at_checkpoint(checkpoint, turn_id, request_id)
         pending = _turn(crash_root, turn_id)
         assert pending.state == "pending" and pending.assistant_output is None
-        assert UNSAFE_CITATION_TOKEN not in (
+        assert unsafe_draft not in (
             ConversationRepository(crash_root / "store")
             .path_for(SESSION_A)
             .read_text(encoding="utf-8")
@@ -538,8 +543,8 @@ def test_kill_after_citation_rejection_never_persists_unsafe_completed_text(
         )
         assert safe["state"] == "completed"
         assert safe["text"] == expected_safe
-        assert UNSAFE_CITATION_TOKEN not in safe["text"]
-        assert UNSAFE_CITATION_TOKEN not in (
+        assert unsafe_draft not in safe["text"]
+        assert unsafe_draft not in (
             ConversationRepository(crash_root / "store")
             .path_for(SESSION_A)
             .read_text(encoding="utf-8")

@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import json
 import os
+import stat
 import subprocess
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -16,6 +18,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from agent.config import AgentConfig
 from agent.conversations import (
     ConversationConflictError,
+    ConversationDocument,
     ConversationError,
     ConversationRepository,
     ConversationSnapshot,
@@ -35,6 +38,7 @@ from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
 from agent.extensions.manager import ExtensionManager
 from agent.extensions.startup import load_extension_startup
 from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX
+from agent.skills.citation.session_policy import CitationSessionPolicy
 from agent.tools.bash import create_bash_tool
 from agent.turns.results import TurnOutcome
 
@@ -53,6 +57,35 @@ FIXTURE_DELAYED_FINAL = "[[fixture:delayed-final]]"
 FIXTURE_BASH_APPROVE = "[[fixture:bash-approve]]"
 FIXTURE_BASH_DENY = "[[fixture:bash-deny]]"
 FIXTURE_PRIVATE_SKILL_DIRNAME = "fixture-extension-management"
+
+_FIXTURE_CRASH_CHECKPOINT_ENV = (
+    "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_CHECKPOINT"
+)
+_FIXTURE_CRASH_TURN_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_TURN_ID"
+_FIXTURE_SIDE_EFFECT_ENV = (
+    "RESEARCH_AGENT_DESKTOP_FIXTURE_SIDE_EFFECT_SENTINEL"
+)
+_FIXTURE_CRASH_CHECKPOINT_PATH = ".fixture-crash-checkpoint.json"
+_FIXTURE_CRASH_READY_PATH = ".fixture-crash-checkpoint.ready"
+_FIXTURE_SIDE_EFFECT_PATH = ".fixture-side-effects.jsonl"
+_FIXTURE_CRASH_TOOL = "[[fixture:crash-tool-after-side-effect]]"
+_FIXTURE_CRASH_CITATION = "[[fixture:crash-citation-rejection]]"
+_FIXTURE_UNSAFE_CITATION_DRAFT = (
+    "Fixture citation draft [[cite:fixture-crash-forged]]"
+)
+_FIXTURE_CRASH_CHECKPOINTS = frozenset({
+    "before_prompt_temp",
+    "after_pending_publish",
+    "during_tool_after_side_effect",
+    "after_citation_rejection",
+    "after_completed_temp_fsync",
+    "after_completed_commit",
+})
+_FIXTURE_SIDE_EFFECTS = frozenset({
+    "provider",
+    "tool",
+    "citation_rejected",
+})
 
 SESSION_A = "28b222e0cc6543aa8d7bbdc423de99a7"
 SESSION_B = "f2ddf2369f994905afa0b85d8cca79b1"
@@ -77,6 +110,212 @@ class FixtureProviderError(RuntimeError):
     def __init__(self, status_code: int) -> None:
         super().__init__("synthetic fixture provider failure")
         self.status_code = status_code
+
+
+class _FixtureCrashControl:
+    """Opt-in process-kill checkpoints confined to one validated fixture root."""
+
+    def __init__(self, root: Path, environ: Mapping[str, str]) -> None:
+        checkpoint = environ.get(_FIXTURE_CRASH_CHECKPOINT_ENV, "")
+        turn_id = environ.get(_FIXTURE_CRASH_TURN_ENV, "")
+        side_effects = environ.get(_FIXTURE_SIDE_EFFECT_ENV, "")
+        if bool(checkpoint) != bool(turn_id):
+            raise FixtureConfigurationError(
+                "fixture crash checkpoint and turn ID must be configured together"
+            )
+        if checkpoint and checkpoint not in _FIXTURE_CRASH_CHECKPOINTS:
+            raise FixtureConfigurationError("unknown fixture crash checkpoint")
+        if turn_id and not is_canonical_uuid4_hex(turn_id):
+            raise FixtureConfigurationError(
+                "fixture crash turn ID must be a canonical UUIDv4 hex value"
+            )
+        if side_effects not in {"", "1"}:
+            raise FixtureConfigurationError(
+                "fixture side-effect sentinel must be enabled with 1"
+            )
+        self.root = root
+        self.checkpoint = checkpoint or None
+        self.target_turn_id = turn_id or None
+        self.side_effects_enabled = side_effects == "1"
+        self._write_lock = threading.Lock()
+        self._blocked = threading.Event()
+
+    def hit(self, checkpoint: str, turn_id: str) -> None:
+        """Publish one durable marker, then wait for the test parent to kill us."""
+        if checkpoint not in _FIXTURE_CRASH_CHECKPOINTS:
+            raise FixtureConfigurationError("unknown fixture crash checkpoint")
+        if self.checkpoint != checkpoint or self.target_turn_id != turn_id:
+            return
+        payload = (
+            json.dumps(
+                {"checkpoint": checkpoint, "turnId": turn_id},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+        path = self.root / _FIXTURE_CRASH_CHECKPOINT_PATH
+        ready = self.root / _FIXTURE_CRASH_READY_PATH
+        with self._write_lock:
+            self._publish_new_file(path, payload)
+            self._write_new_file(ready, b"ready\n")
+        self._blocked.wait()
+        raise RuntimeError("fixture crash checkpoint unexpectedly resumed")
+
+    def record_effect(self, effect: str, turn_id: str) -> None:
+        """Append and fsync one deterministic provider/tool boundary sentinel."""
+        if not self.side_effects_enabled:
+            return
+        if effect not in _FIXTURE_SIDE_EFFECTS:
+            raise FixtureConfigurationError("unknown fixture side effect")
+        if not is_canonical_uuid4_hex(turn_id):
+            raise FixtureConfigurationError(
+                "fixture side-effect turn ID must be a canonical UUIDv4 hex value"
+            )
+        payload = (
+            json.dumps(
+                {"effect": effect, "turnId": turn_id},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+        path = self.root / _FIXTURE_SIDE_EFFECT_PATH
+        with self._write_lock:
+            self._append_file(path, payload)
+            self._fsync_directory()
+
+    @staticmethod
+    def _write_all(descriptor: int, payload: bytes) -> None:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("fixture sentinel write made no progress")
+            view = view[written:]
+
+    @classmethod
+    def _write_new_file(cls, path: Path, payload: bytes) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = -1
+        try:
+            descriptor = os.open(path, flags, 0o600)
+            file_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise OSError("fixture crash marker is not a regular file")
+            cls._write_all(descriptor, payload)
+            os.fsync(descriptor)
+        except OSError as exc:
+            raise FixtureConfigurationError(
+                "cannot publish fixture crash marker"
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def _publish_new_file(self, path: Path, payload: bytes) -> None:
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        self._write_new_file(temporary, payload)
+        try:
+            try:
+                os.link(temporary, path, follow_symlinks=False)
+            except OSError as exc:
+                raise FixtureConfigurationError(
+                    "cannot publish fixture crash marker"
+                ) from exc
+            self._fsync_directory()
+            try:
+                temporary.unlink()
+            except OSError as exc:
+                raise FixtureConfigurationError(
+                    "cannot remove fixture crash marker temporary file"
+                ) from exc
+            self._fsync_directory()
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @classmethod
+    def _append_file(cls, path: Path, payload: bytes) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        descriptor = -1
+        try:
+            descriptor = os.open(path, flags, 0o600)
+            file_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise OSError("fixture side-effect sentinel is not a regular file")
+            cls._write_all(descriptor, payload)
+            os.fsync(descriptor)
+        except OSError as exc:
+            raise FixtureConfigurationError(
+                "cannot append fixture side-effect sentinel"
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def _fsync_directory(self) -> None:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_DIRECTORY", 0)
+        descriptor = -1
+        try:
+            descriptor = os.open(self.root, flags)
+            directory_stat = os.fstat(descriptor)
+            if not stat.S_ISDIR(directory_stat.st_mode):
+                raise OSError("fixture sentinel root is not a directory")
+            os.fsync(descriptor)
+        except OSError as exc:
+            raise FixtureConfigurationError(
+                "cannot fsync fixture sentinel root"
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
+class _FixtureConversationRepository(ConversationRepository):
+    """Expose exact durable-write boundaries only to the crash fixture."""
+
+    def __init__(
+        self,
+        persist_dir: str | os.PathLike[str],
+        crash_control: _FixtureCrashControl,
+    ) -> None:
+        super().__init__(persist_dir)
+        self._crash_control = crash_control
+
+    def _write_validated_temp(
+        self,
+        payload: bytes,
+        document: ConversationDocument,
+    ) -> Path:
+        target_turn_id = self._crash_control.target_turn_id
+        target_turn = next(
+            (
+                turn
+                for turn in document.turns
+                if turn.turn_id == target_turn_id
+            ),
+            None,
+        )
+        if target_turn is not None and target_turn.state == "pending":
+            self._crash_control.hit("before_prompt_temp", target_turn.turn_id)
+        temporary = super()._write_validated_temp(payload, document)
+        if target_turn is not None and target_turn.state == "completed":
+            self._crash_control.hit(
+                "after_completed_temp_fsync",
+                target_turn.turn_id,
+            )
+        return temporary
 
 
 class FixtureExtensionProvider:
@@ -457,6 +696,7 @@ class FixtureSession:
         project_id: str,
         progress_cb: Callable[[str, list[Any]], None] | None,
         search_handler: Callable[[str], list[dict[str, str]]],
+        crash_control: _FixtureCrashControl,
         bash_approval_handler: Callable[[str, str, int], bool] | None,
         bash_command_runner: Callable[..., Any] | None,
     ) -> None:
@@ -478,6 +718,7 @@ class FixtureSession:
         self._progress_cb = progress_cb
         self._prompt_persisted_callback: Callable[[], None] | None = None
         self._search_handler = search_handler
+        self._crash_control = crash_control
         self._bash_tool = (
             create_bash_tool(
                 config,
@@ -680,7 +921,9 @@ class FixtureSession:
                 persisted=True,
             )
 
+        self._crash_control.hit("after_pending_publish", turn_id)
         try:
+            self._crash_control.record_effect("provider", turn_id)
             if self._progress_cb is not None:
                 self._progress_cb("fixture.prepare", [])
             if text == "[[fixture:rate-limit]]":
@@ -705,7 +948,34 @@ class FixtureSession:
             )[:_MAX_CONTEXT_CHARS]
             new_messages: list[Any] = []
             tool_activities: tuple[ToolActivitySummary, ...] = ()
-            if text == FIXTURE_RAG_QUESTION:
+            if text == _FIXTURE_CRASH_TOOL:
+                self._crash_control.record_effect("tool", turn_id)
+                self._crash_control.hit(
+                    "during_tool_after_side_effect",
+                    turn_id,
+                )
+                answer = "Fixture crash tool completed."
+            elif text == _FIXTURE_CRASH_CITATION:
+                answer, violations = CitationSessionPolicy(
+                    self.config
+                ).finalize_answer(
+                    _FIXTURE_UNSAFE_CITATION_DRAFT,
+                    user_input=text,
+                    citation_active=True,
+                )
+                if not violations:
+                    raise RuntimeError(
+                        "fixture citation draft was not rejected"
+                    )
+                self._crash_control.record_effect(
+                    "citation_rejected",
+                    turn_id,
+                )
+                self._crash_control.hit(
+                    "after_citation_rejection",
+                    turn_id,
+                )
+            elif text == FIXTURE_RAG_QUESTION:
                 hits = self._search_handler(text)
                 call_id = "fixture-rag-search"
                 call_message = AIMessage(
@@ -824,6 +1094,7 @@ class FixtureSession:
                 finished_at=snapshot.document.updated_at,
             )
             self._conversation_snapshot = completed
+            self._crash_control.hit("after_completed_commit", turn_id)
             if self._progress_cb is not None:
                 self._progress_cb("fixture.finalized", [])
             return TurnOutcome(
@@ -966,9 +1237,11 @@ class FixtureSessionFactory:
     def __init__(
         self,
         catalog: DesktopProjectCatalog | None,
+        crash_control: _FixtureCrashControl,
         search_handler: Callable[[str], list[dict[str, str]]] = _fixture_search,
     ) -> None:
         self._catalog = catalog
+        self._crash_control = crash_control
         self._search_handler = search_handler
         self._next_index = 0
         self._issued: set[str] = set()
@@ -1008,6 +1281,7 @@ class FixtureSessionFactory:
             project_id=project_id,
             progress_cb=progress_cb,
             search_handler=self._search_handler,
+            crash_control=self._crash_control,
             bash_approval_handler=bash_approval_handler,
             bash_command_runner=bash_command_runner,
         )
@@ -1020,6 +1294,7 @@ def build_phase02_fixture_service(
 ) -> DesktopService:
     """Construct the real coordinator around the isolated fake session only."""
     root = require_fixture_root(environ)
+    crash_control = _FixtureCrashControl(root, environ)
     config = seed_fixture_root(root)
     try:
         catalog: DesktopProjectCatalog | None = DesktopProjectCatalog(
@@ -1027,7 +1302,14 @@ def build_phase02_fixture_service(
         )
     except (CatalogMalformedError, CatalogUnavailableError):
         catalog = None
-    conversation_repository = ConversationRepository(config.persist_dir)
+    conversation_repository: ConversationRepository
+    if crash_control.target_turn_id is None:
+        conversation_repository = ConversationRepository(config.persist_dir)
+    else:
+        conversation_repository = _FixtureConversationRepository(
+            config.persist_dir,
+            crash_control,
+        )
     if (
         environ.get(FIXTURE_MODE_ENV) == FIXTURE_MODE
         and environ.get(FIXTURE_CATALOG_MIGRATION_ENV) == "1"
@@ -1058,7 +1340,7 @@ def build_phase02_fixture_service(
         config=config,
         project_catalog=catalog,
         extension_manager=extension_manager,
-        session_factory=FixtureSessionFactory(catalog),
+        session_factory=FixtureSessionFactory(catalog, crash_control),
         conversation_repository=conversation_repository,
         knowledge_operations=knowledge_operations.as_operations(),
         bash_command_runner=bash_runner,
