@@ -443,7 +443,8 @@
         "method": "session.turn",
         "params": {
           "text": {"raw": "not text"},
-          "turnId": "00000000000040008000000000000033"
+          "turnId": "00000000000040008000000000000033",
+          "retry": false
         }
       }
     },
@@ -458,7 +459,156 @@
         "method": "session.turn",
         "params": {
           "text": "請摘要",
-          "turnId": "00000000-0000-3000-8000-000000000091"
+          "turnId": "00000000-0000-3000-8000-000000000091",
+          "retry": false
+        }
+      }
+    },
+    {
+      "name": "turn-explicit-retry",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000092",
+        "method": "session.turn",
+        "params": {
+          "text": "請重試已接受的 turn",
+          "turnId": "00000000000040008000000000000092",
+          "retry": true
+        }
+      }
+    },
+    {
+      "name": "turn-requires-explicit-retry-boolean",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000093",
+        "method": "session.turn",
+        "params": {
+          "text": "缺少 retry",
+          "turnId": "00000000000040008000000000000093"
+        }
+      }
+    },
+    {
+      "name": "turn-retry-must-be-a-strict-boolean",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000099",
+        "method": "session.turn",
+        "params": {
+          "text": "錯誤 retry 型別",
+          "turnId": "00000000000040008000000000000099",
+          "retry": "true"
+        }
+      }
+    },
+    {
+      "name": "turn-failure-with-safe-lifecycle-details",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000094",
+        "ok": false,
+        "error": {
+          "code": "PROVIDER_REQUEST_FAILED",
+          "message": "Provider request failed.",
+          "retryable": true,
+          "details": {
+            "turnId": "00000000000040008000000000000094",
+            "state": "failed",
+            "accepted": true,
+            "persisted": true
+          }
+        }
+      }
+    },
+    {
+      "name": "turn-not-accepted-has-null-lifecycle-state",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000098",
+        "ok": false,
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "The prompt could not be saved.",
+          "retryable": true,
+          "details": {
+            "turnId": "00000000000040008000000000000098",
+            "state": null,
+            "accepted": false,
+            "persisted": false
+          }
+        }
+      }
+    },
+    {
+      "name": "turn-failure-lifecycle-details-must-be-complete",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000095",
+        "ok": false,
+        "error": {
+          "code": "PROVIDER_REQUEST_FAILED",
+          "message": "Provider request failed.",
+          "retryable": true,
+          "details": {
+            "turnId": "00000000000040008000000000000095",
+            "state": null,
+            "accepted": false
+          }
+        }
+      }
+    },
+    {
+      "name": "turn-failure-lifecycle-details-reject-extra-field",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000096",
+        "ok": false,
+        "error": {
+          "code": "PROVIDER_REQUEST_FAILED",
+          "message": "Provider request failed.",
+          "retryable": true,
+          "details": {
+            "turnId": "00000000000040008000000000000096",
+            "state": "failed",
+            "accepted": true,
+            "persisted": true,
+            "debug": "must not cross the boundary"
+          }
+        }
+      }
+    },
+    {
+      "name": "non-turn-error-keeps-method-specific-details",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000097",
+        "ok": false,
+        "error": {
+          "code": "RAG_PARTIAL_WRITE_POSSIBLE",
+          "message": "A partial write may have occurred.",
+          "retryable": false,
+          "details": {"partialWritePossible": true}
         }
       }
     },
@@ -790,7 +940,8 @@
           "method": "session.turn",
           "params": {
             "text": "請摘要",
-            "turnId": "00000000000040008000000000000012"
+            "turnId": "00000000000040008000000000000012",
+            "retry": false
           }
         },
         {
@@ -890,7 +1041,8 @@
             "items": [{
               "sessionId": "0123456789abcdef0123456789abcdef",
               "title": "研究摘要",
-              "turnCount": 1,
+              "turnCount": 4,
+              "createdAt": "2026-08-28T00:00:00Z",
               "updatedAt": "2026-08-28T00:00:00Z",
               "status": "ready",
               "issue": null
@@ -915,7 +1067,7 @@
           "ok": true,
           "data": {
             "sessionId": "0123456789abcdef0123456789abcdef",
-            "turnCount": 1,
+            "turnCount": 4,
             "graphRecursionLimit": 64,
             "planMode": false,
             "planLogPath": null,
@@ -964,21 +1116,68 @@
             "sessionId": "0123456789abcdef0123456789abcdef",
             "status": "ready",
             "issue": null,
-            "items": [{
-              "turnNumber": 1,
-              "timestamp": "2026-08-28T00:00:00Z",
-              "userText": "請摘要",
-              "assistantText": "完成。",
-              "toolActivities": [{
-                "callId": "call-1",
-                "name": "rag_search",
-                "arguments": "{\"query\":\"研究\"}",
-                "result": "bounded local result",
-                "status": "ok",
-                "promptEligible": true
-              }]
-            }],
-            "total": 1,
+            "items": [
+              {
+                "turnId": "00000000000040008000000000000081",
+                "turnNumber": 1,
+                "kind": "conversational",
+                "state": "completed",
+                "timestamp": "2026-08-28T00:00:00Z",
+                "userText": "請摘要",
+                "assistantText": "完成。",
+                "failureCode": null,
+                "failureMessage": null,
+                "failureRetryable": null,
+                "toolActivities": [{
+                  "callId": "call-1",
+                  "name": "rag_search",
+                  "arguments": "{\"query\":\"研究\"}",
+                  "result": "bounded local result",
+                  "status": "ok",
+                  "promptEligible": true
+                }]
+              },
+              {
+                "turnId": "00000000000040008000000000000082",
+                "turnNumber": 2,
+                "kind": "display-only",
+                "state": "pending",
+                "timestamp": "2026-08-28T00:01:00Z",
+                "userText": "/help",
+                "assistantText": null,
+                "failureCode": null,
+                "failureMessage": null,
+                "failureRetryable": null,
+                "toolActivities": []
+              },
+              {
+                "turnId": "00000000000040008000000000000083",
+                "turnNumber": 3,
+                "kind": "conversational",
+                "state": "failed",
+                "timestamp": "2026-08-28T00:02:00Z",
+                "userText": "再試一次",
+                "assistantText": null,
+                "failureCode": "execution_failed",
+                "failureMessage": "Provider request failed.",
+                "failureRetryable": true,
+                "toolActivities": []
+              },
+              {
+                "turnId": "00000000000040008000000000000084",
+                "turnNumber": 4,
+                "kind": "display-only",
+                "state": "interrupted",
+                "timestamp": "2026-08-28T00:03:00Z",
+                "userText": "/extensions apply",
+                "assistantText": null,
+                "failureCode": "interrupted",
+                "failureMessage": "Turn interrupted before completion.",
+                "failureRetryable": true,
+                "toolActivities": []
+              }
+            ],
+            "total": 4,
             "offset": 0,
             "limit": 20,
             "hasMore": false
@@ -991,7 +1190,8 @@
           "method": "session.turn",
           "params": {
             "text": "請摘要",
-            "turnId": "0000000000004000800000000000007c"
+            "turnId": "0000000000004000800000000000007c",
+            "retry": false
           }
         },
         {
@@ -1002,7 +1202,7 @@
           "data": {
             "sessionId": "0123456789abcdef0123456789abcdef",
             "turnId": "0000000000004000800000000000007c",
-            "turnNumber": 1,
+            "turnNumber": 5,
             "state": "completed",
             "accepted": true,
             "persisted": true,
@@ -1041,10 +1241,16 @@
             "status": "ready",
             "issue": null,
             "items": [{
+              "turnId": "00000000000040008000000000000085",
               "turnNumber": 1,
+              "kind": "conversational",
+              "state": "completed",
               "timestamp": "2026-08-28T00:00:00Z",
               "userText": "question",
               "assistantText": "answer",
+              "failureCode": null,
+              "failureMessage": null,
+              "failureRetryable": null,
               "toolActivities": [{
                 "callId": null,
                 "name": "legacy_tool",
@@ -1214,8 +1420,9 @@
           "requestId": "00000000-0000-4000-8000-000000000062",
           "method": "session.turn",
           "params": {
-            "text": "請摘要",
-            "turnId": "00000000000040008000000000000062"
+            "text": "/extensions",
+            "turnId": "00000000000040008000000000000062",
+            "retry": false
           }
         },
         {
@@ -1230,11 +1437,10 @@
             "state": "completed",
             "accepted": true,
             "persisted": true,
-            "text": "完成的安全答案。",
+            "text": "Extension preview ready.",
             "validationErrors": [],
-            "toolSummaries": [
-              {"name": "rag_search", "status": "ok", "callId": "call-1"}
-            ],
+            "toolSummaries": [],
+            "responseKind": "command",
             "extensionAction": "preview"
           }
         }
@@ -1252,7 +1458,8 @@
           "method": "session.turn",
           "params": {
             "text": "請摘要",
-            "turnId": "00000000000040008000000000000063"
+            "turnId": "00000000000040008000000000000063",
+            "retry": false
           }
         },
         {
@@ -1287,7 +1494,8 @@
           "method": "session.turn",
           "params": {
             "text": "請摘要",
-            "turnId": "00000000000040008000000000000066"
+            "turnId": "00000000000040008000000000000066",
+            "retry": false
           }
         },
         {
@@ -1305,6 +1513,105 @@
             "text": "完成的安全答案。",
             "validationErrors": [],
             "toolSummaries": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-failure-safe-lifecycle-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000009a",
+          "method": "session.turn",
+          "params": {
+            "text": "請執行",
+            "turnId": "0000000000004000800000000000009a",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000009a",
+          "ok": false,
+          "error": {
+            "code": "PROVIDER_REQUEST_FAILED",
+            "message": "Provider request failed.",
+            "retryable": true,
+            "details": {
+              "turnId": "0000000000004000800000000000009a",
+              "state": "failed",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-failure-requires-lifecycle-details",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000009b",
+          "method": "session.turn",
+          "params": {
+            "text": "請執行",
+            "turnId": "0000000000004000800000000000009b",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000009b",
+          "ok": false,
+          "error": {
+            "code": "PROVIDER_REQUEST_FAILED",
+            "message": "Provider request failed.",
+            "retryable": true,
+            "details": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-failure-rejects-mismatched-logical-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-00000000009c",
+          "method": "session.turn",
+          "params": {
+            "text": "請執行",
+            "turnId": "0000000000004000800000000000009c",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-00000000009c",
+          "ok": false,
+          "error": {
+            "code": "PROVIDER_REQUEST_FAILED",
+            "message": "Provider request failed.",
+            "retryable": true,
+            "details": {
+              "turnId": "0000000000004000800000000000009d",
+              "state": "failed",
+              "accepted": true,
+              "persisted": true
+            }
           }
         }
       ]

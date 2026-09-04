@@ -15,6 +15,7 @@ from agent.desktop.protocol import (
     parse_line,
     validate_message,
     validate_process_event_origin,
+    validate_result_data,
 )
 
 
@@ -112,9 +113,13 @@ def test_normal_answers_use_only_the_final_terminal_result() -> None:
 
 def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
     method = METHODS["session.turn"]
-    assert method["requiredParams"] == ["text", "turnId"]
+    assert method["requiredParams"] == ["text", "turnId", "retry"]
     assert method["params"]["turnId"] == {
         "type": "turnId",
+        "required": True,
+    }
+    assert method["params"]["retry"] == {
+        "type": "boolean",
         "required": True,
     }
     result = CONTRACT["resultDataSchemas"]["session.turn"]
@@ -131,6 +136,125 @@ def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
     }
     assert result["accepted"] == {"type": "boolean", "required": True}
     assert result["persisted"] == {"type": "boolean", "required": True}
+
+
+def test_session_turn_failure_lifecycle_details_are_exact_and_bounded() -> None:
+    assert CONTRACT["turnErrorDetailsSchema"] == {
+        "turnId": {"type": "turnId", "required": True},
+        "state": {
+            "type": "nullableString",
+            "required": True,
+            "enum": ["pending", "completed", "failed", "interrupted"],
+        },
+        "accepted": {"type": "boolean", "required": True},
+        "persisted": {"type": "boolean", "required": True},
+    }
+
+
+def test_session_summary_and_transcript_expose_complete_durable_lifecycle() -> None:
+    summary = CONTRACT["resultDataSchemas"]["session.list"]["items"]["items"]
+    assert summary["createdAt"] == {
+        "type": "nullableString",
+        "required": True,
+        "maxBytes": 64,
+    }
+
+    turn = CONTRACT["resultDataSchemas"]["session.transcript"]["items"]["items"]
+    assert set(turn) == {
+        "turnId",
+        "turnNumber",
+        "kind",
+        "state",
+        "timestamp",
+        "userText",
+        "assistantText",
+        "failureCode",
+        "failureMessage",
+        "failureRetryable",
+        "toolActivities",
+    }
+    assert turn["turnId"] == {"type": "turnId", "required": True}
+    assert turn["kind"] == {
+        "type": "string",
+        "required": True,
+        "enum": ["conversational", "display-only"],
+    }
+    assert turn["state"] == {
+        "type": "string",
+        "required": True,
+        "enum": ["pending", "completed", "failed", "interrupted"],
+    }
+    assert turn["assistantText"] == {
+        "type": "nullableString",
+        "required": True,
+        "maxBytes": 32_768,
+    }
+    assert turn["failureCode"] == {
+        "type": "nullableString",
+        "required": True,
+        "maxBytes": 256,
+        "enum": [
+            "execution_failed",
+            "persistence_failed",
+            "interrupted",
+            "cancelled",
+        ],
+    }
+    assert turn["failureMessage"] == {
+        "type": "nullableString",
+        "required": True,
+        "maxBytes": 4_096,
+    }
+    assert turn["failureRetryable"] == {
+        "type": "nullableBoolean",
+        "required": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("state", "assistant_text", "failure_code", "failure_message", "retryable"),
+    [
+        ("pending", None, None, None, None),
+        ("completed", "done", None, None, None),
+        ("failed", None, "execution_failed", "request failed", True),
+        ("interrupted", None, "interrupted", "turn interrupted", True),
+    ],
+)
+def test_transcript_schema_accepts_each_durable_lifecycle_state(
+    state: str,
+    assistant_text: str | None,
+    failure_code: str | None,
+    failure_message: str | None,
+    retryable: bool | None,
+) -> None:
+    validate_result_data(
+        "session.transcript",
+        {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "status": "ready",
+            "issue": None,
+            "items": [
+                {
+                    "turnId": "00000000000040008000000000000094",
+                    "turnNumber": 1,
+                    "kind": "conversational",
+                    "state": state,
+                    "timestamp": "2026-09-04T12:00:00Z",
+                    "userText": "fixture prompt",
+                    "assistantText": assistant_text,
+                    "failureCode": failure_code,
+                    "failureMessage": failure_message,
+                    "failureRetryable": retryable,
+                    "toolActivities": [],
+                }
+            ],
+            "total": 1,
+            "offset": 0,
+            "limit": 20,
+            "hasMore": False,
+        },
+    )
 
 
 def test_shutdown_contract_has_truthful_status_without_legacy_flush_fields() -> None:

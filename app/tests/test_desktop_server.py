@@ -40,9 +40,13 @@ def _reader(*lines: bytes) -> asyncio.StreamReader:
     return reader
 
 
-def _turn_params(text: str, request_id: str) -> dict[str, str]:
+def _turn_params(text: str, request_id: str) -> dict[str, Any]:
     """Build a protocol-valid logical turn identifier for a fixture request."""
-    return {"text": text, "turnId": request_id.replace("-", "")}
+    return {
+        "text": text,
+        "turnId": request_id.replace("-", ""),
+        "retry": False,
+    }
 
 
 def _messages(output: io.StringIO) -> list[dict[str, Any]]:
@@ -291,6 +295,140 @@ def test_server_correlates_and_relays_approval_while_parent_turn_is_pending() ->
     assert resolve_result["data"] == {
         "approvalId": "approval-server-1",
         "approved": True,
+    }
+
+
+class _DurableLocalCommandService:
+    def __init__(self) -> None:
+        self.lifecycle = "ready"
+        self.turn_calls = 0
+
+    async def dispatch(self, method, params, *, event_sink=None):
+        if method == "session.turn":
+            self.turn_calls += 1
+            assert params["retry"] is False
+            return {
+                "sessionId": "session-1",
+                "turnId": params["turnId"],
+                "turnNumber": 1,
+                "state": "completed",
+                "accepted": True,
+                "persisted": True,
+                "text": "Available commands: /help",
+                "validationErrors": [],
+                "toolSummaries": [],
+                "responseKind": "command",
+            }
+        if method == "runtime.shutdown":
+            self.lifecycle = "stopped"
+            return {"status": "stopped"}
+        raise AssertionError(method)
+
+
+def test_local_command_result_is_a_durable_completed_turn() -> None:
+    request_id = "00000000-0000-4000-8000-000000000215"
+
+    async def run() -> tuple[_DurableLocalCommandService, list[dict[str, Any]]]:
+        output = io.StringIO()
+        service = _DurableLocalCommandService()
+        server = DesktopServer(service, ProtocolWriter(output))
+        assert await server.run(
+            _reader(
+                _request(
+                    request_id,
+                    "session.turn",
+                    _turn_params("/help", request_id),
+                )
+            )
+        ) == 0
+        return service, _messages(output)
+
+    service, messages = asyncio.run(run())
+    result = next(
+        message
+        for message in messages
+        if message.get("requestId") == request_id
+        and message.get("messageType") == "result"
+    )
+    assert service.turn_calls == 1
+    assert result["ok"] is True
+    assert result["data"] == {
+        "sessionId": "session-1",
+        "turnId": "00000000000040008000000000000215",
+        "turnNumber": 1,
+        "state": "completed",
+        "accepted": True,
+        "persisted": True,
+        "text": "Available commands: /help",
+        "validationErrors": [],
+        "toolSummaries": [],
+        "responseKind": "command",
+    }
+
+
+class _LifecycleFailureService:
+    def __init__(self) -> None:
+        self.lifecycle = "ready"
+
+    async def dispatch(self, method, params, *, event_sink=None):
+        if method == "session.turn":
+            raise ProtocolError(
+                "PROVIDER_REQUEST_FAILED",
+                "Provider request failed.",
+                retryable=True,
+                details={
+                    "turnId": params["turnId"],
+                    "state": "failed",
+                    "accepted": True,
+                    "persisted": True,
+                },
+            )
+        if method == "runtime.shutdown":
+            self.lifecycle = "stopped"
+            return {"status": "stopped"}
+        raise AssertionError(method)
+
+
+def test_session_turn_failure_preserves_exact_durable_lifecycle_details() -> None:
+    request_id = "00000000-0000-4000-8000-000000000216"
+
+    async def run() -> list[dict[str, Any]]:
+        output = io.StringIO()
+        server = DesktopServer(_LifecycleFailureService(), ProtocolWriter(output))
+        assert await server.run(
+            _reader(
+                _request(
+                    request_id,
+                    "session.turn",
+                    _turn_params("fail", request_id),
+                )
+            )
+        ) == 0
+        return _messages(output)
+
+    messages = asyncio.run(run())
+    result = next(
+        message
+        for message in messages
+        if message.get("requestId") == request_id
+        and message.get("messageType") == "result"
+    )
+    assert result == {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": request_id,
+        "ok": False,
+        "error": {
+            "code": "PROVIDER_REQUEST_FAILED",
+            "message": "Provider request failed.",
+            "retryable": True,
+            "details": {
+                "turnId": "00000000000040008000000000000216",
+                "state": "failed",
+                "accepted": True,
+                "persisted": True,
+            },
+        },
     }
 
 
