@@ -145,6 +145,15 @@
 - **Evidence reference:** Python lifecycle commit=`85730ee`。
 - **Blockers:** None；下一步把相關tests改成canonical public-turn assertions，並完成CLI/Desktop/protocol vertical slice。
 
+## 2026-09-04 19:39 CST — Phase 03: Desktop durable-turn protocol Red
+
+- **Status:** `In progress`。
+- **Changes:** Python與TypeScript contract tests固定`session.turn`由caller提供canonical UUIDv4 hex `turnId`，terminal result回傳同一logical ID與`turnNumber/state/accepted/persisted`；React reducer tests固定active logical ID與mismatched result fail-closed；shutdown contract移除legacy flush-only fields/errors並只回真實status。
+- **Verification (Python Red):** `PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_desktop_protocol_contract.py -q`，exit 1，`2 failed, 81 passed, 1 warning`；失敗精確位於尚未更新的`requiredParams/resultDataSchemas/errorCodes`。
+- **Verification (TypeScript Red):** `conda run -n app node --test --experimental-strip-types tests/protocol.test.ts tests/backend.test.ts tests/answer_stream.test.ts`，exit 1，`4 failed, 93 passed`；失敗精確位於active turn未保存logical ID、未拒絕mismatched ID，以及protocol尚不接受`turnId`/lifecycle fields。
+- **Evidence reference:** Red commit=`2ffebb5`。
+- **Blockers:** None；下一步同步更新language-neutral contract、TypeScript與Rust validators，再接通React/Python host。
+
 <!--
 Material implementation events append with this shape:
 
