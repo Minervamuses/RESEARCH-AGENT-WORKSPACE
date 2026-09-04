@@ -19,6 +19,8 @@ from agent.cli.slash_commands import (
     SlashCommandRegistry,
     SlashCommandResult,
 )
+from agent.conversations import ConversationRepository
+from agent.desktop.catalog import DesktopProjectCatalog
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus
@@ -595,6 +597,48 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     assert manager.status_calls == 1
     assert manager.preview_calls == 0
     assert factory.created is not None
+
+
+def test_restart_discovers_pending_json_when_catalog_registration_lagged(
+    tmp_path: Path,
+) -> None:
+    config = AgentConfig(
+        persist_dir=str(tmp_path / "store"),
+        plan_logs_dir=str(tmp_path / "plans"),
+    )
+    catalog = DesktopProjectCatalog(config.persist_dir)
+    repository = ConversationRepository(config.persist_dir)
+    conversation_id = uuid.uuid4().hex
+    repository.create(
+        conversation_id=conversation_id,
+        project_id="local",
+        turn_id=uuid.uuid4().hex,
+        kind="conversational",
+        display_input="durable before catalog",
+        semantic_input="durable before catalog",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at="2026-09-04T00:00:00Z",
+    )
+    factory = _SessionFactory()
+
+    service = _service(
+        tmp_path,
+        config=config,
+        project_catalog=catalog,
+        conversation_repository=repository,
+        session_factory=factory,
+    )
+    sessions = asyncio.run(service.dispatch(
+        "session.list",
+        {"projectId": "local", "offset": 0, "limit": 50},
+    ))
+
+    assert [item["sessionId"] for item in sessions["items"]] == [conversation_id]
+    assert sessions["items"][0]["turnCount"] == 1
+    assert sessions["items"][0]["title"] == "durable before catalog"
+    assert catalog.project_for_session(conversation_id) == "local"
+    assert factory.calls == []
     assert factory.created.turn_inputs == []
 
     with pytest.raises(DesktopServiceError) as invalid:
