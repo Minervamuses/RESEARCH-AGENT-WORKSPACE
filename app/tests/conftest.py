@@ -10,6 +10,7 @@ import hashlib
 import math
 import re
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -143,6 +144,26 @@ class FakeChatSession:
         if self._turn_error is not None:
             raise self._turn_error
         return self._turn_result
+
+    async def run_display_only_turn(
+        self,
+        _display_input,
+        action,
+        render_result,
+        *,
+        turn_id,
+        retry=False,
+    ):
+        del retry
+        result = await action()
+        return result, SimpleNamespace(
+            text=render_result(result),
+            turn_id=turn_id,
+            turn_number=1,
+            state="completed",
+            accepted=True,
+            persisted=True,
+        )
 
     def status_snapshot(self) -> dict:
         return dict(self._status or {})

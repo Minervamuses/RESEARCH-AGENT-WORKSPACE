@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -245,11 +245,14 @@ class ChatSession:
             None,
         )
 
-    async def _begin_turn(
+    async def _begin_persisted_turn(
         self,
         *,
-        semantic_input: str,
+        kind: str,
         display_input: str,
+        semantic_input: str | None,
+        context_eligible: bool,
+        thinking_mode: str | None,
         turn_id: str,
         retry: bool,
     ):
@@ -260,11 +263,11 @@ class ChatSession:
         snapshot = await asyncio.to_thread(self._reload_and_recover)
         values = {
             "turn_id": turn_id,
-            "kind": "conversational",
+            "kind": kind,
             "display_input": display_input,
             "semantic_input": semantic_input,
-            "context_eligible": True,
-            "thinking_mode": self.thinking_mode,
+            "context_eligible": context_eligible,
+            "thinking_mode": thinking_mode,
         }
         submitted_at = self._now_timestamp()
         if snapshot is None:
@@ -314,6 +317,24 @@ class ChatSession:
             **values,
         )
         return snapshot, snapshot.document.turns[-1], False
+
+    async def _begin_turn(
+        self,
+        *,
+        semantic_input: str,
+        display_input: str,
+        turn_id: str,
+        retry: bool,
+    ):
+        return await self._begin_persisted_turn(
+            kind="conversational",
+            display_input=display_input,
+            semantic_input=semantic_input,
+            context_eligible=True,
+            thinking_mode=self.thinking_mode,
+            turn_id=turn_id,
+            retry=retry,
+        )
 
     async def _fail_active_turn(
         self,
@@ -876,6 +897,90 @@ class ChatSession:
         if self.thinking_mode == "extended":
             return await self._fusion.run_extended_turn(user_input)
         return await self._run_normal_turn(user_input)
+
+    async def run_display_only_turn(
+        self,
+        display_input: str,
+        action: Callable[[], Awaitable[object]],
+        render_result: Callable[[object], str],
+        *,
+        turn_id: str,
+        retry: bool = False,
+    ) -> tuple[object | None, TurnOutcome]:
+        """Run one local command inside the canonical durable turn lifecycle."""
+        async with self._turn_execution_lock:
+            snapshot, turn, duplicate = await self._begin_persisted_turn(
+                kind="display-only",
+                display_input=display_input,
+                semantic_input=None,
+                context_eligible=False,
+                thinking_mode=None,
+                turn_id=turn_id,
+                retry=retry,
+            )
+            self._conversation_snapshot = snapshot
+            if duplicate:
+                assert turn.assistant_output is not None
+                return None, TurnOutcome(
+                    text=turn.assistant_output,
+                    turn_id=turn.turn_id,
+                    turn_number=turn.turn_number,
+                    state="completed",
+                    accepted=True,
+                    persisted=True,
+                )
+
+            self._active_turn_snapshot = snapshot
+            self._active_turn_id = turn_id
+            try:
+                raw_result = await action()
+                final_text = render_result(raw_result)
+                if not isinstance(final_text, str) or not final_text.strip():
+                    raise ConversationValidationError(
+                        "display-only result must be nonblank text"
+                    )
+                if self._final_text_validator is not None:
+                    self._final_text_validator(final_text, [])
+                completed = await asyncio.to_thread(
+                    self.conversation_repository.complete_turn,
+                    snapshot,
+                    turn_id=turn_id,
+                    assistant_output=final_text,
+                    finished_at=self._now_timestamp(),
+                )
+                self._conversation_snapshot = completed
+                self._active_turn_snapshot = completed
+                completed_turn = self._turn_from_snapshot(completed, turn_id)
+                assert completed_turn is not None
+                return raw_result, TurnOutcome(
+                    text=final_text,
+                    turn_id=turn_id,
+                    turn_number=completed_turn.turn_number,
+                    state="completed",
+                    accepted=True,
+                    persisted=True,
+                )
+            except asyncio.CancelledError:
+                await self._fail_active_turn(
+                    state="interrupted",
+                    code="cancelled",
+                    message="The command was cancelled before completion.",
+                )
+                raise
+            except ConversationError:
+                await self._fail_active_turn(
+                    code="persistence_failed",
+                    message="The command result could not be saved.",
+                )
+                raise
+            except Exception:
+                await self._fail_active_turn(
+                    message="The local command could not be completed.",
+                )
+                raise
+            finally:
+                self._active_turn_snapshot = None
+                self._active_turn_id = None
 
     async def turn_outcome(
         self,

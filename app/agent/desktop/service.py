@@ -105,6 +105,7 @@ _KNOWLEDGE_MUTATIONS = {
 _DESKTOP_KNOWLEDGE_COMMANDS = frozenset({"init", "ingest", "sync", "prune"})
 _DESKTOP_EXTENSION_COMMAND = "extension-management"
 _DESKTOP_SLASH_COMMANDS = frozenset({
+    "help",
     "status",
     _DESKTOP_EXTENSION_COMMAND,
     *_DESKTOP_KNOWLEDGE_COMMANDS,
@@ -1629,6 +1630,32 @@ class DesktopService:
             "usage: /extension-management [--dry-run|status]",
         )
 
+    def _register_saved_session(
+        self,
+        session: ChatSession,
+    ) -> tuple[str, str | None]:
+        if self._session_registered:
+            return "registered", None
+        project_id = self._selected_project_id
+        if self._catalog is None or project_id is None:
+            status = "pending"
+            issue = "The conversation is saved, but the project catalog is unavailable."
+        else:
+            try:
+                self._catalog.register_session(project_id, session.session_id)
+            except CatalogError:
+                status = "pending"
+                issue = "The conversation is saved, but catalog registration failed."
+            else:
+                status = "registered"
+                issue = None
+        if status == "registered":
+            self._session_registered = True
+            self._pending_registration = None
+        elif project_id is not None:
+            self._pending_registration = (project_id, session.session_id)
+        return status, issue
+
     async def _session_turn(
         self, params: dict[str, Any], event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -1721,62 +1748,109 @@ class DesktopService:
                         "That slash command is not available in the desktop composer.",
                     )
                 else:
-                    extension_action: str | None = None
-                    try:
+                    extension_action: str | None = (
+                        (
+                            "status"
+                            if tuple(arg.casefold() for arg in parsed.args)
+                            == ("status",)
+                            else "preview"
+                        )
+                        if command.name == _DESKTOP_EXTENSION_COMMAND
+                        else None
+                    )
+
+                    async def execute_local_command() -> object:
                         if command.name in _DESKTOP_KNOWLEDGE_COMMANDS:
-                            result = await self._execute_desktop_knowledge_command(
+                            return await self._execute_desktop_knowledge_command(
                                 session,
                                 parsed,
                             )
-                        elif command.name == _DESKTOP_EXTENSION_COMMAND:
-                            result, extension_action = (
+                        if command.name == _DESKTOP_EXTENSION_COMMAND:
+                            result, _action = (
                                 await self._execute_desktop_extension_command(parsed)
                             )
-                        else:
-                            result = await execute_slash_command(
-                                parsed,
-                                SlashCommandContext(
-                                    session=session,
-                                    registry=registry,
-                                ),
+                            return result
+                        return await execute_slash_command(
+                            parsed,
+                            SlashCommandContext(
+                                session=session,
+                                registry=registry,
+                            ),
+                        )
+
+                    def render_local_command(value: object) -> str:
+                        if not isinstance(value, SlashCommandResult):
+                            raise DesktopServiceError(
+                                "INTERNAL_ERROR",
+                                "The slash command returned an invalid result.",
                             )
+                        result = value
+                        if (
+                            result.should_exit
+                            or result.clear_screen
+                            or result.followup_input is not None
+                        ):
+                            raise DesktopServiceError(
+                                "PROTOCOL_INVALID",
+                                "That slash-command result is not supported by the desktop composer.",
+                            )
+                        message = self._bounded_text(
+                            str(result.message),
+                            _MAX_LOCAL_COMMAND_BYTES,
+                        )
+                        if not message.strip():
+                            raise DesktopServiceError(
+                                "PROTOCOL_INVALID",
+                                "The slash command returned no displayable result.",
+                            )
+                        return message
+
+                    try:
+                        _result, outcome = await session.run_display_only_turn(
+                            original_text,
+                            execute_local_command,
+                            render_local_command,
+                            turn_id=turn_id,
+                            retry=params["retry"],
+                        )
                     except SlashCommandError as exc:
                         raise DesktopServiceError(
                             "PROTOCOL_INVALID",
                             self._bounded_text(str(exc), 4_096),
                         ) from exc
                     if (
-                        result.should_exit
-                        or result.clear_screen
-                        or result.followup_input is not None
+                        outcome.turn_id != turn_id
+                        or not 1 <= outcome.turn_number <= 4_096
+                        or outcome.state != "completed"
+                        or outcome.accepted is not True
+                        or outcome.persisted is not True
+                        or not isinstance(outcome.text, str)
+                        or not outcome.text.strip()
+                        or len(outcome.text.encode("utf-8"))
+                        > _MAX_LOCAL_COMMAND_BYTES
                     ):
                         raise DesktopServiceError(
-                            "PROTOCOL_INVALID",
-                            "That slash-command result is not supported by the desktop composer.",
+                            "INTERNAL_ERROR",
+                            "The session returned an invalid durable command result.",
                         )
-                    message = self._bounded_text(
-                        str(result.message),
-                        _MAX_LOCAL_COMMAND_BYTES,
+                    registration_status, registration_issue = (
+                        self._register_saved_session(session)
                     )
-                    if not message.strip():
-                        raise DesktopServiceError(
-                            "PROTOCOL_INVALID",
-                            "The slash command returned no displayable result.",
-                        )
                     response = {
                         "sessionId": session.session_id,
-                        "turnId": turn_id,
-                        "state": None,
-                        "accepted": False,
-                        "persisted": False,
-                        "text": message,
+                        "turnId": outcome.turn_id,
+                        "turnNumber": outcome.turn_number,
+                        "state": outcome.state,
+                        "accepted": outcome.accepted,
+                        "persisted": outcome.persisted,
+                        "text": outcome.text,
                         "validationErrors": [],
                         "toolSummaries": [],
                         "responseKind": "command",
                         "streamKind": "final_only",
                         "chunkCount": 0,
-                        "registrationStatus": "not_required",
-                        "registrationIssue": None,
+                        "registrationStatus": registration_status,
+                        "registrationIssue": registration_issue,
                     }
                     if extension_action is not None:
                         response["extensionAction"] = extension_action
@@ -1787,7 +1861,7 @@ class DesktopService:
                     turn_text,
                     display_input=original_text,
                     turn_id=turn_id,
-                    retry=True,
+                    retry=params["retry"],
                 )
             else:
                 outcome = await session.turn_outcome(
@@ -1795,7 +1869,7 @@ class DesktopService:
                     display_input=original_text,
                     turn_id=turn_id,
                     skill_name=turn_skill_name,
-                    retry=True,
+                    retry=params["retry"],
                 )
             if (
                 outcome.turn_id != turn_id
@@ -1826,31 +1900,9 @@ class DesktopService:
                 validation_errors=validation_errors,
                 tool_summaries=tool_summaries,
             )
-            registration_status = "registered"
-            registration_issue: str | None = None
-            if not self._session_registered:
-                project_id = self._selected_project_id
-                if self._catalog is None or project_id is None:
-                    registration_status = "pending"
-                    registration_issue = (
-                        "The answer was saved, but the project catalog is unavailable."
-                    )
-                else:
-                    try:
-                        self._catalog.register_session(
-                            project_id,
-                            session.session_id,
-                        )
-                    except CatalogError:
-                        registration_status = "pending"
-                        registration_issue = (
-                            "The answer was saved, but catalog registration failed."
-                        )
-                if registration_status == "registered":
-                    self._session_registered = True
-                    self._pending_registration = None
-                elif project_id is not None:
-                    self._pending_registration = (project_id, session.session_id)
+            registration_status, registration_issue = (
+                self._register_saved_session(session)
+            )
             return {
                 "sessionId": session.session_id,
                 "turnId": outcome.turn_id,

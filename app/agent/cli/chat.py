@@ -10,8 +10,11 @@ from langgraph.errors import GraphRecursionError
 from agent.cli.prompting import LineReader, build_line_reader
 from agent.cli.runtime import CondaRuntimeError, require_conda_runtime
 from agent.cli.slash_commands import (
+    ParsedSlashCommand,
+    SlashCommand,
     SlashCommandContext,
     SlashCommandError,
+    SlashCommandResult,
     build_default_registry,
     execute_slash_command,
     parse_slash_command,
@@ -21,6 +24,7 @@ from agent.session import ChatSession
 from agent.turns.safety import build_recovery_message
 
 _EXIT_COMMANDS = {"q", "quit", "exit"}
+_CITATION_STOP_ARGUMENTS = {"off", "none", "deactivate"}
 
 
 def _parse_graph_steps(value: str) -> int:
@@ -91,6 +95,33 @@ def _print_cli_message(message: str) -> None:
     print(f"\n{message}\n")
 
 
+def _command_feeds_agent(
+    command: SlashCommand,
+    parsed: ParsedSlashCommand,
+) -> bool:
+    if command.skill_name is not None:
+        return True
+    return (
+        command.name.casefold() == "citation"
+        and bool(parsed.args)
+        and parsed.args[0].casefold() not in _CITATION_STOP_ARGUMENTS
+    )
+
+
+def _display_only_result_text(value: object) -> str:
+    if not isinstance(value, SlashCommandResult) or value.followup_input is not None:
+        raise SlashCommandError(
+            "local command returned an unsupported result"
+        )
+    if value.message.strip():
+        return value.message
+    if value.clear_screen:
+        return "Screen cleared."
+    if value.should_exit:
+        return "Session closed."
+    raise SlashCommandError("local command returned no displayable result")
+
+
 def _clear_terminal() -> None:
     # \033[H = home, \033[2J = clear viewport, \033[3J = clear scrollback.
     # Without 3J modern terminals keep prior lines reachable by scrolling up,
@@ -139,6 +170,36 @@ async def _run(
             continue
 
         if parsed is not None:
+            command = command_registry.get(parsed.name)
+            if command is None:
+                _print_cli_message(
+                    f"(cli error: unknown slash command: /{parsed.name})"
+                )
+                continue
+            if not _command_feeds_agent(command, parsed):
+                try:
+                    result, outcome = await session.run_display_only_turn(
+                        display_input,
+                        lambda: execute_slash_command(
+                            parsed,
+                            SlashCommandContext(
+                                session=session,
+                                registry=command_registry,
+                            ),
+                        ),
+                        _display_only_result_text,
+                        turn_id=uuid.uuid4().hex,
+                    )
+                except SlashCommandError as exc:
+                    _print_cli_message(f"(cli error: {exc})")
+                    continue
+                if isinstance(result, SlashCommandResult) and result.clear_screen:
+                    _clear_terminal()
+                    _print_banner(session)
+                _print_cli_message(outcome.text)
+                if isinstance(result, SlashCommandResult) and result.should_exit:
+                    break
+                continue
             try:
                 result = await execute_slash_command(
                     parsed,

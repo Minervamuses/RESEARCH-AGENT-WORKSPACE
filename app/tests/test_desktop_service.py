@@ -35,7 +35,7 @@ class _FakeSession:
     def __init__(self, config: AgentConfig, progress_cb=None) -> None:
         self.config = config
         self.progress_cb = progress_cb
-        self.session_id = "session-safe-1"
+        self.session_id = "123e4567e89b42d3a456426614174000"
         self.plan_mode = False
         self.plan_log_path: Path | None = None
         self.thinking_mode = "normal"
@@ -109,6 +109,28 @@ class _FakeSession:
         return TurnOutcome(
             text=f"完成：{text}",
             validation_errors=[],
+            turn_id=turn_id,
+            turn_number=self._turn_number,
+            state="completed",
+            accepted=True,
+            persisted=True,
+        )
+
+    async def run_display_only_turn(
+        self,
+        _display_input,
+        action,
+        render_result,
+        *,
+        turn_id,
+        retry=False,
+    ):
+        del retry
+        result = await action()
+        text = render_result(result)
+        self._turn_number += 1
+        return result, TurnOutcome(
+            text=text,
             turn_id=turn_id,
             turn_number=self._turn_number,
             state="completed",
@@ -1135,7 +1157,7 @@ def test_composer_bounds_local_command_output_and_safe_errors(
     )
 
     assert len(result["text"].encode("utf-8")) == 65_536
-    assert result["registrationStatus"] == "not_required"
+    assert result["registrationStatus"] == "registered"
 
 
 def test_composer_routes_exact_knowledge_commands_through_injected_operations(
@@ -1202,7 +1224,7 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
     assert factory.created.turn_inputs == []
     assert all(result["responseKind"] == "command" for result in results)
     assert all(result["streamKind"] == "final_only" for result in results)
-    assert all(result["registrationStatus"] == "not_required" for result in results)
+    assert all(result["registrationStatus"] == "registered" for result in results)
     assert "initialized: 2 files, 5 chunks" in results[0]["text"]
     assert "ingested paper-pid (3 chunks)" in results[1]["text"]
     assert "ingested 1 files (3 chunks)" in results[2]["text"]

@@ -460,7 +460,7 @@ def validate_document(document: ConversationDocument) -> ConversationDocument:
         _invalid(f"turns exceeds the {MAX_TURNS}-item limit")
 
     seen_ids: set[str] = set()
-    pending_index: int | None = None
+    pending_seen = False
     for index, turn in enumerate(document.turns):
         validate_turn(turn)
         if turn.turn_number != index + 1:
@@ -469,11 +469,9 @@ def validate_document(document: ConversationDocument) -> ConversationDocument:
             _invalid("turnId values must be unique within a conversation")
         seen_ids.add(turn.turn_id)
         if turn.state == "pending":
-            if pending_index is not None:
+            if pending_seen:
                 _invalid("a conversation may contain at most one pending turn")
-            pending_index = index
-    if pending_index is not None and pending_index != len(document.turns) - 1:
-        _invalid("the pending turn must be the final turn")
+            pending_seen = True
     return document
 
 
