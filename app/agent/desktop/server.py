@@ -341,13 +341,13 @@ class DesktopServer:
                 process_event(
                     "backend.shutting_down",
                     {
-                        "status": "flush_failed",
+                        "status": "shutdown_failed",
                         "code": exc.code,
                         "message": bounded_error_message(str(exc)),
                     },
                 )
             )
-            logger.error("Desktop EOF cleanup returned %s", exc.code)
+            logger.error("Desktop EOF shutdown returned %s", exc.code)
             return False
         except Exception as exc:
             logger.error(
@@ -357,9 +357,9 @@ class DesktopServer:
                 process_event(
                     "backend.shutting_down",
                     {
-                        "status": "flush_failed",
+                        "status": "shutdown_failed",
                         "code": "INTERNAL_ERROR",
-                        "message": "The desktop backend could not flush before exit.",
+                        "message": "The desktop backend could not shut down cleanly.",
                     },
                 )
             )

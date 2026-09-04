@@ -40,6 +40,11 @@ def _reader(*lines: bytes) -> asyncio.StreamReader:
     return reader
 
 
+def _turn_params(text: str, request_id: str) -> dict[str, str]:
+    """Build a protocol-valid logical turn identifier for a fixture request."""
+    return {"text": text, "turnId": request_id.replace("-", "")}
+
+
 def _messages(output: io.StringIO) -> list[dict[str, Any]]:
     lines = output.getvalue().splitlines()
     assert lines
@@ -102,7 +107,7 @@ def test_malformed_input_does_not_kill_diagnostics_or_shutdown(
         "messageType": "result",
         "requestId": "00000000-0000-4000-8000-000000000202",
         "ok": True,
-        "data": {"status": "stopped", "flushed": True},
+        "data": {"status": "stopped"},
     }
     assert messages[-1]["event"] == "backend.shutting_down"
 
@@ -121,7 +126,10 @@ class _ConcurrentService:
             await self.release_turn.wait()
             return {
                 "sessionId": "session-1",
-                "turnId": "turn-1",
+                "turnId": params["turnId"],
+                "state": "completed",
+                "accepted": True,
+                "persisted": True,
                 "text": "多行\nUnicode 回答：" + "界" * 20_000,
                 "validationErrors": [],
                 "toolSummaries": [],
@@ -145,7 +153,9 @@ def test_reader_accepts_status_while_turn_is_active_and_lines_never_interleave()
             _request(
                 "00000000-0000-4000-8000-000000000203",
                 "session.turn",
-                {"text": "請回答"},
+                _turn_params(
+                    "請回答", "00000000-0000-4000-8000-000000000203"
+                ),
             ),
             _request(
                 "00000000-0000-4000-8000-000000000204",
@@ -193,10 +203,11 @@ class _ApprovalRelayService:
         if method == "session.turn":
             assert event_sink is not None
             parent_request_id = event_sink.request_id
+            turn_id = params["turnId"]
             event_sink("approval.required", {
                 "approvalId": "approval-server-1",
                 "parentRequestId": parent_request_id,
-                "turnId": "turn-server-1",
+                "turnId": turn_id,
                 "command": "printf fixture",
                 "description": "Exercise the bounded relay.",
                 "executionTimeoutSeconds": 5,
@@ -207,7 +218,10 @@ class _ApprovalRelayService:
             await self.released.wait()
             return {
                 "sessionId": "session-1",
-                "turnId": "turn-server-1",
+                "turnId": turn_id,
+                "state": "completed",
+                "accepted": True,
+                "persisted": True,
                 "text": "approved through relay",
                 "validationErrors": [],
                 "toolSummaries": [],
@@ -217,7 +231,7 @@ class _ApprovalRelayService:
             assert params == {
                 "approvalId": "approval-server-1",
                 "parentRequestId": "00000000-0000-4000-8000-000000000212",
-                "turnId": "turn-server-1",
+                "turnId": "00000000000040008000000000000212",
                 "approved": True,
             }
             self.released.set()
@@ -236,11 +250,11 @@ def test_server_correlates_and_relays_approval_while_parent_turn_is_pending() ->
         output = io.StringIO()
         server = DesktopServer(_ApprovalRelayService(), ProtocolWriter(output))
         reader = _reader(
-            _request(turn_id, "session.turn", {"text": "approve"}),
+            _request(turn_id, "session.turn", _turn_params("approve", turn_id)),
             _request(resolve_id, "approval.resolve", {
                 "approvalId": "approval-server-1",
                 "parentRequestId": turn_id,
-                "turnId": "turn-server-1",
+                "turnId": "00000000000040008000000000000212",
                 "approved": True,
             }),
             _request(
@@ -327,7 +341,10 @@ class _InvalidResultService:
         if method == "session.turn":
             return {
                 "sessionId": "session-1",
-                "turnId": "turn-1",
+                "turnId": _params["turnId"],
+                "state": "completed",
+                "accepted": True,
+                "persisted": True,
                 "text": "x" * (2 * 1024 * 1024),
                 "validationErrors": [],
                 "toolSummaries": [],
@@ -342,7 +359,12 @@ class _InvalidResultService:
     ("method", "params"),
     [
         ("runtime.diagnostics", {}),
-        ("session.turn", {"text": "oversized answer"}),
+        (
+            "session.turn",
+            _turn_params(
+                "oversized answer", "00000000-0000-4000-8000-000000000208"
+            ),
+        ),
     ],
 )
 def test_invalid_success_payload_becomes_exactly_one_failure_result(
@@ -369,22 +391,22 @@ def test_invalid_success_payload_becomes_exactly_one_failure_result(
     assert results[0]["error"]["code"] == "PROTOCOL_INVALID"
 
 
-class _FlushFailureService:
+class _ShutdownFailureService:
     lifecycle = "ready"
 
     async def dispatch(self, method, _params, *, event_sink=None):
         assert method == "runtime.shutdown"
         raise ProtocolError(
-            "SHUTDOWN_FLUSH_FAILED",
-            "Recent turns could not be flushed.",
+            "SHUTDOWN_FAILED",
+            "The desktop backend could not shut down cleanly.",
             retryable=True,
         )
 
 
-def test_eof_flush_failure_is_visible_and_returns_nonzero() -> None:
+def test_eof_shutdown_failure_is_visible_and_returns_nonzero() -> None:
     async def run() -> tuple[int, list[dict[str, Any]]]:
         output = io.StringIO()
-        server = DesktopServer(_FlushFailureService(), ProtocolWriter(output))
+        server = DesktopServer(_ShutdownFailureService(), ProtocolWriter(output))
         exit_code = await server.run(_reader())
         return exit_code, _messages(output)
 
@@ -392,8 +414,8 @@ def test_eof_flush_failure_is_visible_and_returns_nonzero() -> None:
     assert exit_code == 1
     failure = messages[-1]
     assert failure["event"] == "backend.shutting_down"
-    assert failure["data"]["status"] == "flush_failed"
-    assert failure["data"]["code"] == "SHUTDOWN_FLUSH_FAILED"
+    assert failure["data"]["status"] == "shutdown_failed"
+    assert failure["data"]["code"] == "SHUTDOWN_FAILED"
 
 
 def test_overlong_physical_line_cannot_execute_json_tail(tmp_path: Path) -> None:
@@ -446,7 +468,15 @@ def test_stdin_eof_cancels_stuck_request_after_bounded_grace() -> None:
             eof_grace_seconds=0.01,
         )
         exit_code = await asyncio.wait_for(
-            server.run(_reader(_request(request_id, "session.turn", {"text": "wait"}))),
+            server.run(
+                _reader(
+                    _request(
+                        request_id,
+                        "session.turn",
+                        _turn_params("wait", request_id),
+                    )
+                )
+            ),
             timeout=1,
         )
         return exit_code, service, _messages(output)
