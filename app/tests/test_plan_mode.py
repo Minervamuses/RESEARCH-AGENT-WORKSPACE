@@ -1,4 +1,4 @@
-"""Tests for plan-mode markdown persistence."""
+"""Plan-control cutover and strict legacy Plan-log reader tests."""
 
 import asyncio
 import os
@@ -28,15 +28,14 @@ def _web_search_updates():
     )
 
 
-def _large_tool_updates(payload: str):
-    """A single rag_search call whose result payload is very large."""
-    return tool_then_answer_updates(
-        "rag_search",
-        {"query": "big"},
-        "call-big",
-        payload,
-        "answer",
-    )
+def _turn_id(index: int) -> str:
+    return f"00000000000040008000{index:012x}"
+
+
+def _plan_log_bytes(log_dir) -> dict[str, bytes]:
+    if not log_dir.exists():
+        return {}
+    return {path.name: path.read_bytes() for path in sorted(log_dir.glob("*.md"))}
 
 
 def _write_legacy_log(tmp_path, config, session_id: str, body: str):
@@ -79,203 +78,223 @@ def make_session(monkeypatch, tmp_path):
     return _make
 
 
-def test_plan_writes_md_immediately(make_session):
-    session, store, log_dir = make_session(window=2)
+def test_plan_turn_uses_canonical_lifecycle_without_legacy_writes(make_session):
+    observed_states: list[str] = []
+    session = None
+
+    def inspect_pending(_state):
+        snapshot = session.conversation_repository.load(session.session_id)
+        observed_states.append(snapshot.document.turns[-1].state)
+
+    graph = make_astream_graph(on_state=inspect_pending)
+    session, store, log_dir = make_session(window=2, graph=graph)
+    legacy_before = _plan_log_bytes(log_dir)
     asyncio.run(session.enter_plan_mode())
 
-    for index in range(3):
-        asyncio.run(session.turn(f"q{index}"))
-        content = session.plan_log_path.read_text(encoding="utf-8")
-        assert f"## Turn {index + 1}" in content
-        assert f"q{index}" in content
+    turn_id = _turn_id(1)
+    outcome = asyncio.run(session.turn_outcome(
+        "plan question",
+        display_input="plan question",
+        turn_id=turn_id,
+    ))
 
+    snapshot = session.conversation_repository.load(session.session_id)
+    turn = snapshot.document.turns[-1]
+    assert observed_states == ["pending"]
+    assert (outcome.turn_id, outcome.turn_number, outcome.state) == (
+        turn_id,
+        1,
+        "completed",
+    )
+    assert outcome.accepted is True and outcome.persisted is True
+    assert turn.turn_id == turn_id
+    assert turn.state == "completed"
+    assert turn.display_input == "plan question"
+    assert turn.semantic_input == "plan question"
+    assert turn.thinking_mode == "normal"
+    assert session.plan_mode is True
+    assert session.plan_log_path is None
+    assert _plan_log_bytes(log_dir) == legacy_before
     assert store.adds == []
-    assert log_dir.exists()
 
 
 def test_exit_plan_keeps_recent_turns_visible(make_session):
-    session, _store, _log_dir = make_session(window=10)
+    session, store, log_dir = make_session(window=10)
+    legacy_before = _plan_log_bytes(log_dir)
     asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("plan q1"))
-    asyncio.run(session.turn("plan q2"))
+    asyncio.run(session.turn_outcome("plan q1", turn_id=_turn_id(2)))
 
     asyncio.run(session.exit_plan_mode())
+    asyncio.run(session.turn_outcome("normal q2", turn_id=_turn_id(3)))
 
     assert [turn.user_input for turn in session.recent_turns] == [
         "plan q1",
-        "plan q2",
+        "normal q2",
     ]
     prompt_contents = [message.content for message in session._prompt_history()]
     assert "plan q1" in prompt_contents
-    assert "plan q2" in prompt_contents
+    assert "normal q2" in prompt_contents
+    snapshot = session.conversation_repository.load(session.session_id)
+    assert [turn.turn_id for turn in snapshot.document.turns] == [
+        _turn_id(2),
+        _turn_id(3),
+    ]
+    assert all(turn.state == "completed" for turn in snapshot.document.turns)
+    assert _plan_log_bytes(log_dir) == legacy_before
+    assert store.adds == []
 
 
-def test_resume_plan_mode_reuses_the_same_validated_log(make_session):
-    session, _store, _log_dir = make_session(window=10)
-    original_path = asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("first plan turn"))
-    asyncio.run(session.exit_plan_mode())
+def test_resume_plan_control_leaves_legacy_log_read_only(make_session):
+    session, store, log_dir = make_session(window=10)
+    legacy = PlanLog(
+        session.config,
+        session_id=session.session_id,
+        app_root_resolver=lambda: log_dir.parent,
+    ).new_log_file()
+    legacy_before = legacy.read_bytes()
 
-    resumed_path = asyncio.run(session.resume_plan_mode(original_path))
-    asyncio.run(session.turn("second plan turn"))
+    resumed_path = asyncio.run(session.resume_plan_mode(legacy))
+    outcome = asyncio.run(session.turn_outcome(
+        "new canonical plan turn",
+        turn_id=_turn_id(4),
+    ))
 
-    assert resumed_path == original_path
-    assert session.plan_log_path == original_path
-    content = original_path.read_text(encoding="utf-8")
-    assert "first plan turn" in content
-    assert "second plan turn" in content
+    assert resumed_path is None
+    assert session.plan_mode is True
+    assert session.plan_log_path is None
+    assert legacy.read_bytes() == legacy_before
+    assert outcome.state == "completed" and outcome.persisted is True
+    turn = session.conversation_repository.load(
+        session.session_id
+    ).document.turns[-1]
+    assert turn.turn_id == _turn_id(4)
+    assert turn.semantic_input == "new canonical plan turn"
+    assert store.adds == []
 
 
-def test_no_chroma_leak_after_exit(make_session):
+def test_plan_and_normal_turns_never_write_or_flush_legacy_chroma(
+    make_session,
+    monkeypatch,
+):
     session, store, _log_dir = make_session(window=2)
-    asyncio.run(session.enter_plan_mode())
-    for index in range(5):
-        asyncio.run(session.turn(f"plan {index}"))
+    legacy_calls: list[str] = []
 
+    async def reject_store(_turn):
+        legacy_calls.append("store")
+        raise AssertionError("legacy Chroma store must not be called")
+
+    async def reject_flush():
+        legacy_calls.append("flush")
+        raise AssertionError("legacy Chroma flush must not be called")
+
+    monkeypatch.setattr(session._turn_store, "store_turn", reject_store)
+    monkeypatch.setattr(session._turn_store, "flush", reject_flush)
+    asyncio.run(session.enter_plan_mode())
+    asyncio.run(session.turn_outcome("plan", turn_id=_turn_id(5)))
     asyncio.run(session.exit_plan_mode())
-    for index in range(5):
-        asyncio.run(session.turn(f"normal {index}"))
+    asyncio.run(session.turn_outcome("normal", turn_id=_turn_id(6)))
     asyncio.run(session.flush_recent_turns())
 
-    assert [item["user_input"] for item in store.adds] == [f"normal {index}" for index in range(5)]
+    assert legacy_calls == []
+    assert store.adds == []
+    snapshot = session.conversation_repository.load(session.session_id)
+    assert [turn.semantic_input for turn in snapshot.document.turns] == [
+        "plan",
+        "normal",
+    ]
 
 
-def test_md_write_failure_aborts_turn(make_session, monkeypatch):
+def test_plan_write_seam_is_not_invoked(make_session, monkeypatch):
     session, store, _log_dir = make_session(window=2)
     asyncio.run(session.enter_plan_mode())
 
     def fail_append(_path, _block):
-        raise OSError("disk full")
+        raise AssertionError("retired Plan writer was invoked")
 
     monkeypatch.setattr(session, "_append_block_to_md", fail_append)
 
-    with pytest.raises(OSError, match="disk full"):
-        asyncio.run(session.turn("q"))
+    outcome = asyncio.run(session.turn_outcome("q", turn_id=_turn_id(7)))
 
-    assert session.recent_turns == []
-    assert session._turn_counter == 0
+    assert outcome.state == "completed" and outcome.persisted is True
+    assert session._turn_counter == 1
+    assert session.conversation_repository.load(
+        session.session_id
+    ).document.turns[0].state == "completed"
     assert store.adds == []
 
 
-def test_render_plan_block_includes_all_tools(make_session):
-    session, _store, _log_dir = make_session(
+def test_plan_tool_activity_persists_only_safe_canonical_summary(make_session):
+    session, store, log_dir = make_session(
         window=2,
         graph=make_astream_graph(_web_search_updates()),
     )
+    legacy_before = _plan_log_bytes(log_dir)
     asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("search for plan mode"))
+    asyncio.run(session.turn_outcome(
+        "search for plan mode",
+        turn_id=_turn_id(8),
+    ))
 
-    content = session.plan_log_path.read_text(encoding="utf-8")
-    assert "format_version: 2" in content
-    restored = PlanLog(
-        session.config,
-        session_id=session.session_id,
-        app_root_resolver=lambda: session.plan_log_path.parent.parent,
-    ).read_direct_answer_turns()
-    assert restored[0].tool_activities == session.recent_turns[0].tool_activities
-    assert restored[0].tool_activities[0].name == "tavily_search"
-    assert restored[0].tool_activities[0].arguments == '{"query":"plan mode"}'
-    assert restored[0].tool_activities[0].result == "search result payload"
-    assert restored[0].tool_activities[0].prompt_eligible is True
-
-
-def test_plan_log_truncates_oversize_tool_result(make_session):
-    payload = "x" * 100_000
-    session, _store, _log_dir = make_session(
-        window=2, graph=make_astream_graph(_large_tool_updates(payload)),
-    )
-    session.config.plan_log_max_tool_chars = 1024
-    asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("ask for big result"))
-
-    content = session.plan_log_path.read_text(encoding="utf-8")
-    assert f"[truncated; original {len(payload)} bytes]" in content
-    # Body of the rendered tool block must not contain the full payload.
-    assert "x" * 2000 not in content
-    assert session.recent_turns[0].tool_activities[0].status == "incomplete"
-    assert session.recent_turns[0].tool_activities[0].prompt_eligible is False
+    snapshot = session.conversation_repository.load(session.session_id)
+    activity = snapshot.document.turns[0].tool_activities[0]
+    assert activity.call_id == "call-1"
+    assert activity.name == "tavily_search"
+    assert activity.status == "ok"
+    assert activity.summary == "Tool execution completed."
+    persisted = session.conversation_repository.path_for(
+        session.session_id
+    ).read_text(encoding="utf-8")
+    assert '"query"' not in persisted
+    assert "search result payload" not in persisted
+    assert _plan_log_bytes(log_dir) == legacy_before
+    assert store.adds == []
 
 
-def test_plan_log_truncation_does_not_affect_llm_context(make_session, monkeypatch):
-    """The graph layer keeps the full ToolMessage; only the markdown copy is capped."""
-    payload = "y" * 50_000
-    captured: dict[str, list] = {"messages": []}
-
-    def _capture_state(state):
-        captured["messages"] = list(state["messages"])
-
-    session, _store, _log_dir = make_session(
-        window=2,
-        graph=make_astream_graph(_large_tool_updates(payload), on_state=_capture_state),
-    )
-    session.config.plan_log_max_tool_chars = 1024
-    asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("trigger big tool"))
-
-    # The graph's input state never carries the ToolMessage (graph generates it),
-    # but the assertion is symmetric: the payload returned by the tool node
-    # is full-size and reaches the agent loop unchanged. We verify by reading
-    # the in-memory sequence the session captured for its own bookkeeping.
-    full_results = [
-        m for m in session.recent_turns[-1].to_messages()
-        if hasattr(m, "content") and isinstance(m.content, str) and len(m.content) > 0
-    ]
-    # The recorded turn carries the assistant's final answer "answer", not the
-    # tool payload. The truncation we want to verify is on disk only.
-    md = session.plan_log_path.read_text(encoding="utf-8")
-    assert "[truncated;" in md
-    assert payload not in md
-    # And the assistant message kept by the session is unaffected:
-    assert "answer" in [m.content for m in full_results]
-
-
-def test_mode_hint_injected_when_plan_turns_in_recent(make_session):
+def test_mode_hint_exists_only_while_plan_control_is_active(make_session):
     session, _store, _log_dir = make_session(window=10)
     asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("plan question"))
-    asyncio.run(session.exit_plan_mode())
 
     history = session._prompt_history()
     hint_msgs = [m for m in history if "[Mode hint]" in str(getattr(m, "content", ""))]
     assert len(hint_msgs) == 1
-    assert "plan_logs/" in hint_msgs[0].content
-    assert "do NOT call recall_history" in hint_msgs[0].content
+    assert "conversation durability is unchanged" in hint_msgs[0].content
+    assert "plan_logs/" not in hint_msgs[0].content
+
+    asyncio.run(session.turn_outcome("plan question", turn_id=_turn_id(9)))
+    asyncio.run(session.exit_plan_mode())
+    exited = session._prompt_history()
+    assert all(
+        "[Mode hint]" not in str(getattr(message, "content", ""))
+        for message in exited
+    )
 
 
 def test_mode_hint_absent_in_pure_normal_session(make_session):
     session, _store, _log_dir = make_session(window=10)
-    asyncio.run(session.turn("normal question"))
+    asyncio.run(session.turn_outcome("normal question", turn_id=_turn_id(14)))
 
     history = session._prompt_history()
     hint_msgs = [m for m in history if "[Mode hint]" in str(getattr(m, "content", ""))]
     assert hint_msgs == []
 
 
-def test_mode_hint_disappears_after_plan_turns_evicted(make_session):
+def test_plan_control_does_not_persist_in_canonical_prompt_history(make_session):
     session, _store, _log_dir = make_session(window=2)
     asyncio.run(session.enter_plan_mode())
-    asyncio.run(session.turn("plan q"))
+    asyncio.run(session.turn_outcome("plan q", turn_id=_turn_id(10)))
     asyncio.run(session.exit_plan_mode())
-    # Push the plan turn out of the window with normal turns.
     for index in range(3):
-        asyncio.run(session.turn(f"normal {index}"))
+        asyncio.run(session.turn_outcome(
+            f"normal {index}",
+            turn_id=_turn_id(11 + index),
+        ))
 
     history = session._prompt_history()
     hint_msgs = [m for m in history if "[Mode hint]" in str(getattr(m, "content", ""))]
     assert hint_msgs == []
-
-
-def test_unknown_persist_target_raises(make_session):
-    session, _store, _log_dir = make_session(window=2)
-    turn = TurnRecord(
-        user_input="q",
-        assistant_output="a",
-        turn_id=1,
-        persist_target="mystery",
-    )
-
-    with pytest.raises(ValueError, match="unknown persist_target"):
-        asyncio.run(session._turn_store.store_turn(turn))
+    contents = [str(getattr(message, "content", "")) for message in history]
+    assert "plan q" in contents
+    assert all(f"normal {index}" in contents for index in range(3))
 
 
 def test_direct_answer_reader_round_trips_existing_plan_format(tmp_path):
