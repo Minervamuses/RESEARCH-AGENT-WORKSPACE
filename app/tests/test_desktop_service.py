@@ -597,6 +597,15 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     assert manager.status_calls == 1
     assert manager.preview_calls == 0
     assert factory.created is not None
+    assert factory.created.turn_inputs == []
+
+    with pytest.raises(DesktopServiceError) as invalid:
+        asyncio.run(service.dispatch(
+            "session.turn",
+            _turn_params("/extension-management apply"),
+        ))
+    assert invalid.value.code == "PROTOCOL_INVALID"
+    assert manager.preview_calls == 0
 
 
 def test_restart_discovers_pending_json_when_catalog_registration_lagged(
@@ -639,15 +648,6 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
     assert sessions["items"][0]["title"] == "durable before catalog"
     assert catalog.project_for_session(conversation_id) == "local"
     assert factory.calls == []
-    assert factory.created.turn_inputs == []
-
-    with pytest.raises(DesktopServiceError) as invalid:
-        asyncio.run(service.dispatch(
-            "session.turn",
-            _turn_params("/extension-management apply"),
-        ))
-    assert invalid.value.code == "PROTOCOL_INVALID"
-    assert manager.preview_calls == 0
 
 
 @pytest.mark.parametrize(
