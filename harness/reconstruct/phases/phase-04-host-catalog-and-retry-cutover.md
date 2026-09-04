@@ -70,7 +70,7 @@ Status: Not started
 - A→B→A 保留 completed/pending/display-only transcript，且不呼叫 legacy flush。
 - backend restart 後 completed turns 恢復；normal→extended→restart 不遺失內容。
 - 50-turn transcript 經 bounded DTO 分頁完整顯示，sidebar title、turn count、created/updated time 均從 JSON summary 推導；模型仍只取最後 10 個 eligible turns。
-- transport retry/duplicate delivery 使用同一 logical turn ID，不產生第二個 turn 或第二次 side effect。
+- transport duplicate delivery 或已 completed turn 的同-ID retry 使用既有 durable result，不建立第二個 turn，也不重跑 provider/tool；failed/interrupted turn 的使用者明確 retry 沿用原 logical turn ID，但可再次執行 provider/tool，不承諾通用外部 side-effect dedupe。
 - Completed commit 後、result delivery 前中斷或 UI timeout 時，React 仍持有首次 send 前的 logical ID，重送後 Python 回既有 durable result；完整 app restart 則由 transcript 恢復相同 ID/state。
 - prompt durable 前失敗時 React 保留 draft；已 durable 後中斷時顯示已接受 record，retry 不建立新 logical turn。
 - `/help` 等本地命令保留原始顯示內容但不進 context。
@@ -118,7 +118,7 @@ conda run -n app cargo test --manifest-path src-tauri/Cargo.toml backend::tests:
 ## Reliability, security, and recovery
 
 - Catalog 不是 authority；刪 catalog 不得刪 conversation，重建不得改 JSON。
-- Retry 必須 idempotent，且永不自動重播 provider/tool side effect。
+- Completed-result replay 與 duplicate delivery 必須 idempotent 且不得重跑 provider/tool；failed/interrupted retry 只保證沿用 logical turn ID、不新增 turn。Restart 永不自動重播 provider/tool，且不宣稱能對外部 side effect 提供通用 dedupe。
 - Malformed conversation 的錯誤可見但局部隔離；不要把其內容放入 UI error/log。
 - 原始 display input 與 semantic input 分離，避免 slash-command text 或 UI-only output 污染 prompt。
 - Cross-language deserialization 對未知 state/version fail closed，不自行降級成 completed。
@@ -129,7 +129,7 @@ conda run -n app cargo test --manifest-path src-tauri/Cargo.toml backend::tests:
 - [ ] Catalog 可由 JSON 重建，orphan/missing/malformed 案例各有測試且不破壞健康 sessions。
 - [ ] Catalog 全檔損壞可重建；catalog-only missing entry 明確顯示 unavailable，沒有靜默刪除或假 transcript。
 - [ ] 跨 Python/TS/Rust/React 的 logical turn ID 與 state 一致，transport ID 未被持久化為 domain identity。
-- [ ] 明確 retry 不重複 turn 或 side effect；系統不自動 replay。
+- [ ] Completed-result replay 與 duplicate delivery 不新增 turn 且不重跑 provider/tool；failed/interrupted retry 沿用原 logical turn ID，但允許重新執行且不宣稱通用外部 side-effect dedupe；restart 不自動 replay。
 - [ ] Completed-before-ack/UI-timeout 與 full-app-restart cases 都證明首次 send 前的 logical ID 可被保留或由 JSON 恢復。
 - [ ] UI 正確區分未接受與已接受的失敗，draft/transcript 行為符合 state table。
 - [ ] A→B→A、backend restart、normal→extended→restart 的代表 journey 通過。
