@@ -91,6 +91,14 @@
 - **Transaction/idempotency policy:** reader先產生完整bounded in-memory snapshot；任一source malformed、duplicate/gap或轉換失敗即整個conversation失敗。Publish前重新讀取同一sources並比對deterministic relevant-content fingerprint；不一致不發布。只用Phase 01 repository的一次性no-clobber whole-document create；有效target已存在回`already_present`，無效/mismatched target回`failed`且不覆寫，無legacy turns回`skipped`。JSON target本身是唯一success marker，不建立migration database或寫回legacy source。
 - **Blockers:** None；下一步加入focused Red migration contract。
 
+## 2026-09-04 18:53 CST — Phase 02: Red migration contract
+
+- **Status:** `In progress`。
+- **Changes:** 新增`app/tests/test_conversation_migration.py`，固定real Chroma strict-pair read、Plan v1/v2 read、deterministic UUIDv4 mapping、UTC normalization、display-only/no-context policy、tool payload drop、valid/invalid target precedence、rerun idempotency、source-change detection、gap/duplicate all-or-nothing、publish failure、per-conversation isolation與empty-source skip。
+- **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_migration.py -q`，exit 1；collection如預期因`ModuleNotFoundError: No module named 'agent.conversations.legacy'`失敗。這證明migration boundary與one-shot document publish尚未實作；唯一額外輸出是既有LangGraph deprecation warning。
+- **Review checkpoint:** live source audit另確認Phase 01 repository只有pending-first `create()`，若逐turn匯入會留下partial target；Green必須新增窄版whole-document no-clobber API。Plan v2 reader也需在本階段以focused tests固定duplicate-key/non-finite JSON與symlink/non-regular source fail-closed。
+- **Blockers:** None。
+
 <!--
 Material implementation events append with this shape:
 
