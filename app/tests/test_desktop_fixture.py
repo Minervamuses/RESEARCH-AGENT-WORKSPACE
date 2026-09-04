@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from agent.conversations import ConversationRepository
 from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog
 from agent.desktop.fixture_session import (
     FIXTURE_BASH_APPROVE,
@@ -77,6 +78,14 @@ def _service(root: Path):
     )
 
 
+_TURN_SEQUENCE = itertools.count(1)
+
+
+def _turn_params(text: str, *, turn_id: str | None = None) -> dict[str, str]:
+    logical_id = turn_id or f"00000000000040008000{next(_TURN_SEQUENCE):012x}"
+    return {"text": text, "turnId": logical_id}
+
+
 @pytest.mark.parametrize(
     "raw",
     [
@@ -140,14 +149,19 @@ def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     assert (
         Path(second.config.persist_dir) / CATALOG_FILENAME
     ).read_bytes() == original_catalog
-    transcripts = asyncio.run(
-        second.dispatch(
-            "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
-        )
-    )
+    asyncio.run(second.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
+    transcripts = asyncio.run(second.dispatch(
+        "session.transcript",
+        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+    ))
     assert transcripts["status"] == "ready"
     assert transcripts["items"][0]["userText"] == "A seed question"
+    assert ConversationRepository(second.config.persist_dir).path_for(
+        SESSION_A
+    ).is_file()
 
 
 def test_real_service_round_trip_registration_restore_and_final_only_answer(
@@ -166,11 +180,17 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
         before = DesktopProjectCatalog(service.config.persist_dir).snapshot()
         assert transient_id not in before["projects"][0]["sessionIds"]
 
+        turn_id = "00000000000040008000000000001001"
         result = await service.dispatch(
             "session.turn",
-            {"text": "register D"},
+            _turn_params("register D", turn_id=turn_id),
             event_sink=lambda event, data: events.append((event, data)),
         )
+        assert result["turnId"] == turn_id
+        assert result["turnNumber"] == 1
+        assert result["state"] == "completed"
+        assert result["accepted"] is True
+        assert result["persisted"] is True
         assert result["registrationStatus"] == "registered"
         assert result["streamKind"] == "final_only"
         assert result["chunkCount"] == 0
@@ -181,17 +201,20 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
             "session.select",
             {"projectId": "p1", "sessionId": SESSION_A},
         )
-        await service.dispatch("session.turn", {"text": "A second"})
+        await service.dispatch("session.turn", _turn_params("A second"))
         await service.dispatch(
             "session.select",
             {"projectId": "p1", "sessionId": SESSION_B},
         )
-        await service.dispatch("session.turn", {"text": "B second"})
+        await service.dispatch("session.turn", _turn_params("B second"))
         selected_a = await service.dispatch(
             "session.select",
             {"projectId": "p1", "sessionId": SESSION_A},
         )
-        continued_a = await service.dispatch("session.turn", {"text": "A third"})
+        continued_a = await service.dispatch(
+            "session.turn",
+            _turn_params("A third"),
+        )
         return transient_id, selected_a, continued_a
 
     transient_id, selected_a, continued_a = asyncio.run(run())
@@ -205,6 +228,9 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
         SESSION_B,
         transient_id,
     ]
+    transient = ConversationRepository(service.config.persist_dir).load(transient_id)
+    assert transient.document.turns[0].display_input == "register D"
+    assert transient.document.turns[0].semantic_input == "register D"
 
     restarted = _service(fixture_root)
     reopened = asyncio.run(
@@ -231,7 +257,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
         )
         answer = await service.dispatch(
             "session.turn",
-            {"text": FIXTURE_RAG_QUESTION},
+            _turn_params(FIXTURE_RAG_QUESTION),
             event_sink=lambda event, data: events.append((event, data)),
         )
         transcript = await service.dispatch(
@@ -261,12 +287,12 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
             f"/prune {source} --yes",
         ]
         results = [
-            await service.dispatch("session.turn", {"text": command})
+            await service.dispatch("session.turn", _turn_params(command))
             for command in commands
         ]
         empty_preview = await service.dispatch(
             "session.turn",
-            {"text": f"/prune {source}"},
+            _turn_params(f"/prune {source}"),
         )
         marker = source / FIXTURE_CHANGED_ORPHAN_MARKER
         marker.write_text("changed after preview\n", encoding="utf-8")
@@ -274,7 +300,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
             with pytest.raises(DesktopServiceError) as changed:
                 await service.dispatch(
                     "session.turn",
-                    {"text": f"/prune {source} --yes"},
+                    _turn_params(f"/prune {source} --yes"),
                 )
         finally:
             marker.unlink(missing_ok=True)
@@ -313,14 +339,11 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
     assert transcript["items"][-1]["toolActivities"] == [{
         "callId": "fixture-rag-search",
         "name": "rag_search",
-        "arguments": f'{{"query":"{FIXTURE_RAG_QUESTION}"}}',
-        "result": transcript["items"][-1]["toolActivities"][0]["result"],
+        "arguments": "(not retained)",
+        "result": "Fixture knowledge search completed.",
         "status": "ok",
-        "promptEligible": True,
+        "promptEligible": False,
     }]
-    assert "fixture knowledge" in transcript["items"][-1]["toolActivities"][0][
-        "result"
-    ].casefold()
     assert all(result["responseKind"] == "command" for result in results)
     assert "fixture-file-pid" in results[1]["text"]
     assert "fixture-notes.md" in results[3]["text"]
@@ -374,20 +397,34 @@ def test_extended_success_and_scripted_provider_errors_are_bounded(
             {"mode": "extended"},
         )
         events: list[tuple[str, dict]] = []
+        success_turn_id = "00000000000040008000000000002001"
         success = await service.dispatch(
             "session.turn",
-            {"text": "extended success"},
+            _turn_params("extended success", turn_id=success_turn_id),
             event_sink=lambda event, data: events.append((event, data)),
         )
         errors = []
-        for marker in ("[[fixture:rate-limit]]", "[[fixture:provider-error]]"):
+        failed_turn_ids = [
+            "00000000000040008000000000002002",
+            "00000000000040008000000000002003",
+        ]
+        for marker, turn_id in zip(
+            ("[[fixture:rate-limit]]", "[[fixture:provider-error]]"),
+            failed_turn_ids,
+            strict=True,
+        ):
             try:
-                await service.dispatch("session.turn", {"text": marker})
+                await service.dispatch(
+                    "session.turn",
+                    _turn_params(marker, turn_id=turn_id),
+                )
             except DesktopServiceError as exc:
                 errors.append(exc)
-        return thinking, events, success, errors
+        return thinking, events, success, errors, success_turn_id, failed_turn_ids
 
-    thinking, events, success, errors = asyncio.run(run())
+    thinking, events, success, errors, success_turn_id, failed_turn_ids = asyncio.run(
+        run()
+    )
     assert thinking["thinkingMode"] == "extended"
     assert success["text"].startswith("Fixture extended")
     assert [data["stage"] for event, data in events if event == "stage.changed"] == [
@@ -401,12 +438,25 @@ def test_extended_success_and_scripted_provider_errors_are_bounded(
     ]
     assert [error.retryable for error in errors] == [True, True]
     assert all("synthetic" not in str(error) for error in errors)
+    snapshot = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    by_id = {turn.turn_id: turn for turn in snapshot.document.turns}
+    assert by_id[success_turn_id].state == "completed"
+    assert [by_id[turn_id].state for turn_id in failed_turn_ids] == [
+        "failed",
+        "failed",
+    ]
+    assert all(by_id[turn_id].assistant_output is None for turn_id in failed_turn_ids)
 
 
-def test_scripted_flush_failure_retains_current_conversation(
+def test_switch_and_shutdown_leave_legacy_plan_logs_unchanged(
     fixture_root: Path,
 ) -> None:
     service = _service(fixture_root)
+    plan_dir = Path(service.config.plan_logs_dir)
+    legacy_before = {
+        path: path.read_bytes()
+        for path in plan_dir.glob("*.md")
+    }
 
     async def run():
         await service.dispatch(
@@ -415,20 +465,25 @@ def test_scripted_flush_failure_retains_current_conversation(
         )
         await service.dispatch(
             "session.turn",
-            {"text": "[[fixture:flush-failure]]"},
+            _turn_params("canonical before switch"),
         )
-        with pytest.raises(DesktopServiceError) as captured:
-            await service.dispatch(
-                "session.select",
-                {"projectId": "p1", "sessionId": SESSION_B},
-            )
-        return captured.value
+        selected = await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_B},
+        )
+        shutdown = await service.dispatch("session.shutdown", {})
+        return selected, shutdown
 
-    error = asyncio.run(run())
-    assert error.code == "CONVERSATION_FLUSH_FAILED"
-    assert error.retryable is True
-    assert service.session is not None
-    assert service.session.session_id == SESSION_A
+    selected, shutdown = asyncio.run(run())
+    assert selected["sessionId"] == SESSION_B
+    assert shutdown == {"status": "stopped"}
+    assert {
+        path: path.read_bytes()
+        for path in plan_dir.glob("*.md")
+    } == legacy_before
+    canonical = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    assert canonical.document.turns[-1].display_input == "canonical before switch"
+    assert canonical.document.turns[-1].state == "completed"
 
 
 def test_fixture_never_uses_chat_session_factory_or_exposes_credentials(
@@ -466,11 +521,11 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
         )
         status_turn = await service.dispatch(
             "session.turn",
-            {"text": "/extension-management status"},
+            _turn_params("/extension-management status"),
         )
         preview_gate = await service.dispatch(
             "session.turn",
-            {"text": "/extension-management"},
+            _turn_params("/extension-management"),
         )
         direct_status = await service.dispatch("extensions.status", {})
         preview = await service.dispatch("extensions.preview", {})
@@ -549,11 +604,11 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
         )
         skill_turn = await restarted.dispatch(
             "session.turn",
-            {"text": '/fixture-writer Draft  "quoted"   body'},
+            _turn_params('/fixture-writer Draft  "quoted"   body'),
         )
         ordinary_turn = await restarted.dispatch(
             "session.turn",
-            {"text": "ordinary follow-up"},
+            _turn_params("ordinary follow-up"),
         )
         transcript = await restarted.dispatch(
             "session.transcript",
@@ -579,9 +634,15 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
     assert ordinary_turn["responseKind"] == "answer"
     assert "Fixture skill" not in ordinary_turn["text"]
     assert [item["userText"] for item in transcript["items"][-2:]] == [
-        'Draft  "quoted"   body',
+        '/fixture-writer Draft  "quoted"   body',
         "ordinary follow-up",
     ]
+    snapshot = ConversationRepository(restarted.config.persist_dir).load(
+        loaded["sessionId"]
+    )
+    skill_record = snapshot.document.turns[-2]
+    assert skill_record.display_input == '/fixture-writer Draft  "quoted"   body'
+    assert skill_record.semantic_input == 'Draft  "quoted"   body'
     assert status["runningRevision"] == 1
     assert status["restartRequired"] is False
     assert isinstance(restarted_provider, FixtureExtensionProvider)
@@ -599,6 +660,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         diagnostics = await first.dispatch("runtime.diagnostics", {})
         events: list[tuple[str, dict]] = []
         crossed_old_deadline = asyncio.Event()
+        delayed_turn_id = "00000000000040008000000000003001"
 
         def capture(event: str, data: dict) -> None:
             events.append((event, data))
@@ -610,13 +672,19 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
 
         pending = asyncio.create_task(first.dispatch(
             "session.turn",
-            {"text": FIXTURE_DELAYED_FINAL},
+            _turn_params(FIXTURE_DELAYED_FINAL, turn_id=delayed_turn_id),
             event_sink=capture,
         ))
         await asyncio.wait_for(crossed_old_deadline.wait(), timeout=1)
         assert not pending.done()
+        pending_snapshot = ConversationRepository(first.config.persist_dir).load(
+            created["sessionId"]
+        )
+        assert pending_snapshot.document.turns[-1].turn_id == delayed_turn_id
+        assert pending_snapshot.document.turns[-1].state == "pending"
         assert all(event != "answer.chunk" for event, _data in events)
         delayed = await asyncio.wait_for(pending, timeout=3)
+        assert delayed["turnId"] == delayed_turn_id
 
         preview = await first.dispatch("extensions.preview", {})
         binding = preview["bindings"][0]
@@ -651,7 +719,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert all(event != "answer.chunk" for event, _data in delayed_events)
     assert delayed["text"] not in repr(delayed_events)
     assert applied["restartRequired"] is True
-    assert shutdown == {"status": "stopped", "flushed": True}
+    assert shutdown == {"status": "stopped"}
 
     tool_invocations: list[str] = []
 
@@ -673,25 +741,25 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         skill_events: list[tuple[str, dict]] = []
         skill = await second.dispatch(
             "session.turn",
-            {"text": '/fixture-writer Draft  "quoted"   body'},
+            _turn_params('/fixture-writer Draft  "quoted"   body'),
             event_sink=lambda event, data: skill_events.append((event, data)),
         )
         assert second.session._turn_count == before_skill_turn + 1
         ordinary = await second.dispatch(
             "session.turn",
-            {"text": "ordinary after skill"},
+            _turn_params("ordinary after skill"),
         )
 
         failed_events: list[tuple[str, dict]] = []
         with pytest.raises(DesktopServiceError) as failed:
             await second.dispatch(
                 "session.turn",
-                {"text": "/fixture-writer [[fixture:provider-error]]"},
+                _turn_params("/fixture-writer [[fixture:provider-error]]"),
                 event_sink=lambda event, data: failed_events.append((event, data)),
             )
         retry = await second.dispatch(
             "session.turn",
-            {"text": "retry after skill error"},
+            _turn_params("retry after skill error"),
         )
 
         await second.dispatch("session.set_mode", {"mode": "plan"})
@@ -700,7 +768,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         tool_events: list[tuple[str, dict]] = []
         tool_answer = await second.dispatch(
             "session.turn",
-            {"text": FIXTURE_RAG_QUESTION},
+            _turn_params(FIXTURE_RAG_QUESTION),
             event_sink=lambda event, data: tool_events.append((event, data)),
         )
         transcript = await second.dispatch(
@@ -769,8 +837,9 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         if item["userText"] == FIXTURE_RAG_QUESTION
     )
     assert tool_turn["toolActivities"][0]["name"] == "rag_search"
-    assert tool_turn["toolActivities"][0]["promptEligible"] is True
-    assert second_shutdown == {"status": "stopped", "flushed": True}
+    assert tool_turn["toolActivities"][0]["promptEligible"] is False
+    assert tool_turn["toolActivities"][0]["arguments"] == "(not retained)"
+    assert second_shutdown == {"status": "stopped"}
 
     plan_dir = root / "plan_logs"
     for path in plan_dir.glob(f"plan-{SESSION_B}-*.md"):
@@ -811,39 +880,29 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             "session.select",
             {"projectId": "p1", "sessionId": loaded["sessionId"]},
         )
-        assert third.session is not None
-        restored_record = next(
-            turn for turn in third.session.recent_turns
-            if turn.user_input == FIXTURE_RAG_QUESTION
-        )
-        restored_messages = restored_record.to_messages()
         continued_events: list[tuple[str, dict]] = []
         continued = await third.dispatch(
             "session.turn",
-            {"text": "continue after restore"},
+            _turn_params("continue after restore"),
             event_sink=lambda event, data: continued_events.append((event, data)),
-        )
-        legacy = await third.dispatch(
-            "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_B, "limit": 20},
         )
         legacy_selected = await third.dispatch(
             "session.select",
             {"projectId": "p1", "sessionId": SESSION_B},
         )
-        assert third.session is not None
-        legacy_messages = third.session.recent_turns[0].to_messages()
+        legacy = await third.dispatch(
+            "session.transcript",
+            {"projectId": "p1", "sessionId": SESSION_B, "limit": 20},
+        )
         shutdown = await third.dispatch("session.shutdown", {})
         return (
             diagnostics,
             restored,
             selected,
-            restored_messages,
             continued_events,
             continued,
             legacy,
             legacy_selected,
-            legacy_messages,
             shutdown,
         )
 
@@ -851,39 +910,43 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         final_diagnostics,
         restored,
         selected,
-        restored_messages,
         continued_events,
         continued,
         legacy,
         legacy_selected,
-        legacy_messages,
         final_shutdown,
     ) = asyncio.run(run_third_process())
     assert final_diagnostics["mcpEnabled"] is True
-    assert selected["turnCount"] == len(restored["items"])
-    assert [type(message) for message in restored_messages] == [
-        HumanMessage,
-        AIMessage,
-        ToolMessage,
-        AIMessage,
-    ]
-    assert restored_messages[1].tool_calls[0]["id"] == "fixture-rag-search"
-    assert restored_messages[2].tool_call_id == "fixture-rag-search"
+    restored_snapshot = ConversationRepository(third.config.persist_dir).load(
+        loaded["sessionId"]
+    )
+    assert selected["turnCount"] + 1 == len(restored_snapshot.document.turns)
+    assert len(restored["items"]) + 1 == sum(
+        turn.state == "completed" for turn in restored_snapshot.document.turns
+    )
+    restored_tool_turn = next(
+        turn
+        for turn in restored_snapshot.document.turns
+        if turn.semantic_input == FIXTURE_RAG_QUESTION
+    )
+    assert restored_tool_turn.tool_activities[0].summary == (
+        "Fixture knowledge search completed."
+    )
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
     assert continued["streamKind"] == "final_only"
     assert continued["chunkCount"] == 0
     assert all(event != "answer.chunk" for event, _data in continued_events)
     assert continued["text"] not in repr(continued_events)
     assert legacy_selected["turnCount"] == 1
-    assert legacy["items"][0]["toolActivities"][0]["callId"] is None
-    assert legacy["items"][0]["toolActivities"][0]["promptEligible"] is False
-    assert [type(message) for message in legacy_messages] == [
-        HumanMessage,
-        AIMessage,
-    ]
-    assert legacy_sentinel not in repr(legacy_messages)
+    assert legacy["items"][0]["toolActivities"] == []
+    imported = ConversationRepository(third.config.persist_dir).load(SESSION_B)
+    assert imported.document.turns[0].display_input == "legacy question"
+    assert imported.document.turns[0].kind == "display-only"
+    assert imported.document.turns[0].semantic_input is None
+    assert imported.document.turns[0].tool_activities == ()
+    assert legacy_sentinel not in repr(imported.document)
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
-    assert final_shutdown == {"status": "stopped", "flushed": True}
+    assert final_shutdown == {"status": "stopped"}
 
 
 def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
@@ -909,7 +972,7 @@ def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
         turn = asyncio.create_task(
             service.dispatch(
                 "session.turn",
-                {"text": marker},
+                _turn_params(marker),
                 event_sink=sink,
             )
         )

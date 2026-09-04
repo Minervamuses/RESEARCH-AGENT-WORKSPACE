@@ -14,6 +14,16 @@ from typing import Any, Callable, Mapping
 from langchain_core.messages import AIMessage, ToolMessage
 
 from agent.config import AgentConfig
+from agent.conversations import (
+    ConversationConflictError,
+    ConversationError,
+    ConversationRepository,
+    ConversationSnapshot,
+    FailureInfo,
+    InvalidTransitionError,
+    ToolActivitySummary,
+    is_canonical_uuid4_hex,
+)
 from agent.desktop.catalog import (
     CATALOG_FILENAME,
     CatalogMalformedError,
@@ -53,7 +63,6 @@ _SEED_TURNS = {
     SESSION_C: ("C seed question", "C seed answer"),
 }
 _FIXTURE_TIMESTAMP = datetime(2026, 8, 28, 2, 30, tzinfo=timezone.utc)
-_MAX_CONTEXT_ITEMS = 5
 _MAX_CONTEXT_CHARS = 2_048
 
 
@@ -151,7 +160,9 @@ def _fixture_session_id(index: int) -> str:
 
 
 def _timestamp(turn_id: int) -> str:
-    return (_FIXTURE_TIMESTAMP + timedelta(seconds=turn_id)).isoformat()
+    return (
+        _FIXTURE_TIMESTAMP + timedelta(seconds=turn_id)
+    ).isoformat().replace("+00:00", "Z")
 
 
 def _plan_log(config: AgentConfig, session_id: str) -> PlanLog:
@@ -431,7 +442,8 @@ class FixtureSession:
         config: AgentConfig,
         *,
         session_id: str,
-        restored_turns: list[TurnRecord],
+        conversation_repository: ConversationRepository,
+        project_id: str,
         progress_cb: Callable[[str, list[Any]], None] | None,
         search_handler: Callable[[str], list[dict[str, str]]],
         bash_approval_handler: Callable[[str, str, int], bool] | None,
@@ -439,7 +451,10 @@ class FixtureSession:
     ) -> None:
         self.config = config
         self.session_id = session_id
-        self.recent_turns = list(restored_turns)
+        self.project_id = project_id
+        self.conversation_repository = conversation_repository
+        self._conversation_snapshot = self._load_snapshot()
+        self._recover_interrupted_turn()
         self.thinking_mode = "normal"
         startup = load_extension_startup(config, env={})
         self.loaded_skills = list(startup.skills)
@@ -461,198 +476,352 @@ class FixtureSession:
             if bash_approval_handler is not None and bash_command_runner is not None
             else None
         )
-        self._turn_count = max(
-            (turn.turn_id for turn in self.recent_turns),
-            default=0,
-        )
-        self._persistence_log_path = self._find_or_create_log()
-        self._fail_next_flush = False
 
-    def _find_or_create_log(self) -> Path:
-        log_dir = Path(self.config.plan_logs_dir)
-        paths = sorted(log_dir.glob(f"plan-{self.session_id}-*.md"))
-        if paths:
-            return paths[-1]
-        return _plan_log(self.config, self.session_id).new_log_file()
+    @property
+    def recent_turns(self) -> list[Any]:
+        """Return a process-local view rebuilt only from canonical JSON."""
+        snapshot = self._conversation_snapshot
+        return list(snapshot.document.turns) if snapshot is not None else []
+
+    @property
+    def _turn_count(self) -> int:
+        snapshot = self._conversation_snapshot
+        return len(snapshot.document.turns) if snapshot is not None else 0
+
+    def _load_snapshot(self) -> ConversationSnapshot | None:
+        snapshot = self.conversation_repository.load_optional(self.session_id)
+        if snapshot is not None and snapshot.document.project_id != self.project_id:
+            raise ConversationConflictError(
+                "fixture conversation belongs to a different project"
+            )
+        return snapshot
+
+    def _recover_interrupted_turn(self) -> None:
+        snapshot = self._conversation_snapshot
+        if snapshot is None:
+            return
+        pending = next(
+            (turn for turn in snapshot.document.turns if turn.state == "pending"),
+            None,
+        )
+        if pending is None:
+            return
+        self._conversation_snapshot = self.conversation_repository.fail_turn(
+            snapshot,
+            turn_id=pending.turn_id,
+            state="interrupted",
+            failure=FailureInfo(
+                code="interrupted",
+                message="The previous fixture turn was interrupted.",
+                retryable=True,
+            ),
+            finished_at=snapshot.document.updated_at,
+        )
+
+    def _begin_turn(
+        self,
+        *,
+        semantic_input: str,
+        display_input: str,
+        turn_id: str,
+        retry: bool,
+    ) -> tuple[ConversationSnapshot, Any, bool]:
+        if not is_canonical_uuid4_hex(turn_id):
+            raise ValueError("turn_id must be a canonical UUIDv4 hex value")
+        self._conversation_snapshot = self._load_snapshot()
+        self._recover_interrupted_turn()
+        snapshot = self._conversation_snapshot
+        values = {
+            "turn_id": turn_id,
+            "kind": "conversational",
+            "display_input": display_input,
+            "semantic_input": semantic_input,
+            "context_eligible": True,
+            "thinking_mode": self.thinking_mode,
+        }
+        submitted_at = _timestamp((self._turn_count or 0) + 1)
+        if snapshot is None:
+            snapshot = self.conversation_repository.create(
+                conversation_id=self.session_id,
+                project_id=self.project_id,
+                submitted_at=submitted_at,
+                **values,
+            )
+            self._conversation_snapshot = snapshot
+            return snapshot, snapshot.document.turns[-1], False
+
+        existing = next(
+            (turn for turn in snapshot.document.turns if turn.turn_id == turn_id),
+            None,
+        )
+        if existing is not None:
+            if existing.state == "completed":
+                self.conversation_repository.append_pending(
+                    snapshot,
+                    submitted_at=existing.submitted_at,
+                    **values,
+                )
+                return snapshot, existing, True
+            if not retry:
+                raise InvalidTransitionError(
+                    "failed or interrupted fixture turn requires an explicit retry"
+                )
+            snapshot = self.conversation_repository.retry_turn(
+                snapshot,
+                retry_at=submitted_at,
+                **values,
+            )
+        else:
+            snapshot = self.conversation_repository.append_pending(
+                snapshot,
+                submitted_at=submitted_at,
+                **values,
+            )
+        self._conversation_snapshot = snapshot
+        pending = next(
+            turn for turn in snapshot.document.turns if turn.turn_id == turn_id
+        )
+        return snapshot, pending, False
+
+    def _fail_turn(
+        self,
+        snapshot: ConversationSnapshot,
+        *,
+        turn_id: str,
+        state: str = "failed",
+        code: str = "execution_failed",
+        message: str = "The fixture turn could not be completed.",
+    ) -> None:
+        self._conversation_snapshot = self.conversation_repository.fail_turn(
+            snapshot,
+            turn_id=turn_id,
+            state=state,
+            failure=FailureInfo(
+                code=code,
+                message=message,
+                retryable=True,
+            ),
+            finished_at=snapshot.document.updated_at,
+        )
 
     async def turn_outcome(
         self,
         text: str,
         *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
         skill_name: str | None = None,
+        retry: bool = False,
     ) -> TurnOutcome:
         if skill_name is not None and skill_name not in {
             skill.name for skill in self.loaded_skills
         }:
             raise ValueError(f"unknown skill: {skill_name}")
-        if self._progress_cb is not None:
-            self._progress_cb("fixture.prepare", [])
-        if text == "[[fixture:rate-limit]]":
-            raise FixtureProviderError(429)
-        if text == "[[fixture:provider-error]]":
-            raise FixtureProviderError(503)
-        if text == FIXTURE_DELAYED_FINAL:
-            await asyncio.sleep(0.05)
-            if self._progress_cb is not None:
-                self._progress_cb("fixture.before-old-deadline", [])
-            await asyncio.sleep(0.1)
-            if self._progress_cb is not None:
-                self._progress_cb("fixture.after-old-deadline", [])
-            await asyncio.sleep(2.0)
-        if self.thinking_mode == "extended" and self._progress_cb is not None:
-            self._progress_cb("fixture.extended.aggregate", [])
+        if turn_id is None:
+            raise ValueError("turn_id is required")
+        original_input = display_input if display_input is not None else text
+        snapshot, pending, duplicate = self._begin_turn(
+            semantic_input=text,
+            display_input=original_input,
+            turn_id=turn_id,
+            retry=retry,
+        )
+        if duplicate:
+            assert pending.assistant_output is not None
+            return TurnOutcome(
+                text=pending.assistant_output,
+                turn_id=pending.turn_id,
+                turn_number=pending.turn_number,
+                state="completed",
+                accepted=True,
+                persisted=True,
+            )
 
-        next_turn = self._turn_count + 1
-        context = " | ".join(
-            turn.user_input for turn in self.recent_turns[-_MAX_CONTEXT_ITEMS:]
-        )[:_MAX_CONTEXT_CHARS]
-        new_messages: list[Any] = []
-        tool_calls: list[dict] = []
-        if text == FIXTURE_RAG_QUESTION:
-            hits = self._search_handler(text)
-            tool_calls = [{
-                "name": "rag_search",
-                "args": {"query": text},
-                "id": "fixture-rag-search",
-            }]
-            new_messages = [
-                AIMessage(
+        try:
+            if self._progress_cb is not None:
+                self._progress_cb("fixture.prepare", [])
+            if text == "[[fixture:rate-limit]]":
+                raise FixtureProviderError(429)
+            if text == "[[fixture:provider-error]]":
+                raise FixtureProviderError(503)
+            if text == FIXTURE_DELAYED_FINAL:
+                await asyncio.sleep(0.05)
+                if self._progress_cb is not None:
+                    self._progress_cb("fixture.before-old-deadline", [])
+                await asyncio.sleep(0.1)
+                if self._progress_cb is not None:
+                    self._progress_cb("fixture.after-old-deadline", [])
+                await asyncio.sleep(2.0)
+            if self.thinking_mode == "extended" and self._progress_cb is not None:
+                self._progress_cb("fixture.extended.aggregate", [])
+
+            next_turn = pending.turn_number
+            context = " | ".join(
+                turn.user_input
+                for turn in self.conversation_repository.latest_context(snapshot)
+            )[:_MAX_CONTEXT_CHARS]
+            new_messages: list[Any] = []
+            tool_activities: tuple[ToolActivitySummary, ...] = ()
+            if text == FIXTURE_RAG_QUESTION:
+                hits = self._search_handler(text)
+                call_id = "fixture-rag-search"
+                call_message = AIMessage(
                     content="",
-                    tool_calls=[{**tool_calls[0], "type": "tool_call"}],
-                ),
-                ToolMessage(
+                    tool_calls=[{
+                        "name": "rag_search",
+                        "args": {"query": text},
+                        "id": call_id,
+                        "type": "tool_call",
+                    }],
+                )
+                result_message = ToolMessage(
                     content=json.dumps(hits, ensure_ascii=False),
-                    tool_call_id="fixture-rag-search",
+                    tool_call_id=call_id,
                     name="rag_search",
                     status="success",
-                ),
-            ]
-            if self._progress_cb is not None:
-                self._progress_cb("tools", new_messages)
-            answer = f"Fixture knowledge says: {hits[0]['text']}"
-        elif text in {FIXTURE_BASH_APPROVE, FIXTURE_BASH_DENY}:
-            if self._bash_tool is None:
-                raise RuntimeError("fixture Bash seam is unavailable")
-            approved_marker = text == FIXTURE_BASH_APPROVE
-            command = (
-                "printf fixture-approved"
-                if approved_marker
-                else "printf fixture-denied"
-            )
-            description = (
-                "Return deterministic fixture output through the fake runner."
-                if approved_marker
-                else "Exercise the deterministic denied Bash path."
-            )
-            call_id = f"fixture-bash-{next_turn}"
-            tool_calls = [{
-                "name": "bash",
-                "args": {
-                    "command": command,
-                    "description": description,
-                },
-                "id": call_id,
-            }]
-            call_message = AIMessage(
-                content="",
-                tool_calls=[{**tool_calls[0], "type": "tool_call"}],
-            )
-            new_messages.append(call_message)
-            if self._progress_cb is not None:
-                self._progress_cb("tools", [call_message])
-            raw_result = await asyncio.to_thread(
-                self._bash_tool.invoke,
-                {
-                    "command": command,
-                    "description": description,
-                    "timeout_sec": 5,
-                },
-            )
-            payload = json.loads(str(raw_result))
-            result_message = ToolMessage(
-                content=str(raw_result),
-                tool_call_id=call_id,
-                name="bash",
-                status="success",
-            )
-            new_messages.append(result_message)
-            if self._progress_cb is not None:
-                self._progress_cb("tools", [result_message])
-            answer = (
-                "Fixture Bash request was approved and completed through the fake runner."
-                if payload.get("approved") is True
-                else "Fixture Bash request was denied; the fake runner was not called."
-            )
-        elif text == "[[fixture:malicious-content]]":
-            answer = (
-                "Fixture content: <script>unsafe()</script> "
-                "[safe](https://example.com) [unsafe](file:///etc/passwd)"
-            )
-        else:
-            mode = "extended" if self.thinking_mode == "extended" else "normal"
-            if skill_name is None:
+                )
+                new_messages = [call_message, result_message]
+                if self._progress_cb is not None:
+                    self._progress_cb("tools", new_messages)
+                answer = f"Fixture knowledge says: {hits[0]['text']}"
+                tool_activities = (ToolActivitySummary(
+                    call_id=call_id,
+                    name="rag_search",
+                    status="ok",
+                    summary="Fixture knowledge search completed.",
+                ),)
+            elif text in {FIXTURE_BASH_APPROVE, FIXTURE_BASH_DENY}:
+                if self._bash_tool is None:
+                    raise RuntimeError("fixture Bash seam is unavailable")
+                approved_marker = text == FIXTURE_BASH_APPROVE
+                command = (
+                    "printf fixture-approved"
+                    if approved_marker
+                    else "printf fixture-denied"
+                )
+                description = (
+                    "Return deterministic fixture output through the fake runner."
+                    if approved_marker
+                    else "Exercise the deterministic denied Bash path."
+                )
+                call_id = f"fixture-bash-{next_turn}"
+                call_message = AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": "bash",
+                        "args": {
+                            "command": command,
+                            "description": description,
+                        },
+                        "id": call_id,
+                        "type": "tool_call",
+                    }],
+                )
+                new_messages.append(call_message)
+                if self._progress_cb is not None:
+                    self._progress_cb("tools", [call_message])
+                raw_result = await asyncio.to_thread(
+                    self._bash_tool.invoke,
+                    {
+                        "command": command,
+                        "description": description,
+                        "timeout_sec": 5,
+                    },
+                )
+                payload = json.loads(str(raw_result))
+                result_message = ToolMessage(
+                    content=str(raw_result),
+                    tool_call_id=call_id,
+                    name="bash",
+                    status="success",
+                )
+                new_messages.append(result_message)
+                if self._progress_cb is not None:
+                    self._progress_cb("tools", [result_message])
+                approved = payload.get("approved") is True
                 answer = (
-                    f"Fixture {mode} {self.session_id[:8]} turn {next_turn}: {text}"
-                    f"\nContext: {context or '(empty)'}"
+                    "Fixture Bash request was approved and completed through the fake runner."
+                    if approved
+                    else "Fixture Bash request was denied; the fake runner was not called."
+                )
+                tool_activities = (ToolActivitySummary(
+                    call_id=call_id,
+                    name="bash",
+                    status="ok" if approved else "denied",
+                    summary=(
+                        "Fixture Bash request completed."
+                        if approved
+                        else "Fixture Bash request was denied."
+                    ),
+                ),)
+            elif text == "[[fixture:malicious-content]]":
+                answer = (
+                    "Fixture content: <script>unsafe()</script> "
+                    "[safe](https://example.com) [unsafe](file:///etc/passwd)"
                 )
             else:
-                answer = (
-                    f"Fixture skill {skill_name} {self.session_id[:8]} "
-                    f"turn {next_turn}: {text}"
-                    f"\nContext: {context or '(empty)'}"
-                )
-        timestamp = _timestamp(next_turn)
-        plan_log = _plan_log(self.config, self.session_id)
-        plan_log.resume_log_file(self._persistence_log_path)
-        tool_activities = plan_log.build_tool_activities(
-            new_messages=new_messages,
-            tool_calls=tool_calls,
-            scope="normal",
-        )
-        turn = TurnRecord(
-            user_input=text,
-            assistant_output=answer,
-            turn_id=next_turn,
-            timestamp=timestamp,
-            persist_target="plan_log",
-            tool_activities=tool_activities,
-        )
-        plan_log.append_block(
-            str(self._persistence_log_path),
-            plan_log.render_block(
-                turn_id=next_turn,
-                timestamp=timestamp,
-                user_input=text,
-                answer=answer,
-                new_messages=new_messages,
-                tool_calls=tool_calls,
+                mode = "extended" if self.thinking_mode == "extended" else "normal"
+                if skill_name is None:
+                    answer = (
+                        f"Fixture {mode} {self.session_id[:8]} turn {next_turn}: {text}"
+                        f"\nContext: {context or '(empty)'}"
+                    )
+                else:
+                    answer = (
+                        f"Fixture skill {skill_name} {self.session_id[:8]} "
+                        f"turn {next_turn}: {text}"
+                        f"\nContext: {context or '(empty)'}"
+                    )
+
+            completed = self.conversation_repository.complete_turn(
+                snapshot,
+                turn_id=turn_id,
+                assistant_output=answer,
                 tool_activities=tool_activities,
-            ),
-        )
-        self.recent_turns.append(turn)
-        self._turn_count = next_turn
-        if text == "[[fixture:flush-failure]]":
-            self._fail_next_flush = True
-        if self._progress_cb is not None:
-            self._progress_cb("fixture.finalized", [])
-        return TurnOutcome(text=answer)
+                finished_at=snapshot.document.updated_at,
+            )
+            self._conversation_snapshot = completed
+            if self._progress_cb is not None:
+                self._progress_cb("fixture.finalized", [])
+            return TurnOutcome(
+                text=answer,
+                turn_id=turn_id,
+                turn_number=pending.turn_number,
+                state="completed",
+                accepted=True,
+                persisted=True,
+            )
+        except asyncio.CancelledError:
+            self._fail_turn(
+                snapshot,
+                turn_id=turn_id,
+                state="interrupted",
+                code="cancelled",
+                message="The fixture turn was cancelled.",
+            )
+            raise
+        except ConversationError:
+            try:
+                self._fail_turn(
+                    snapshot,
+                    turn_id=turn_id,
+                    code="persistence_failed",
+                    message="The fixture turn could not be saved.",
+                )
+            except ConversationError:
+                pass
+            raise
+        except Exception:
+            self._fail_turn(snapshot, turn_id=turn_id)
+            raise
 
-    async def flush_recent_turns(self) -> None:
-        if self._fail_next_flush:
-            self._fail_next_flush = False
-            raise OSError("synthetic fixture flush failure")
-        self.recent_turns.clear()
-
-    async def enter_plan_mode(self) -> Path:
+    async def enter_plan_mode(self) -> None:
         self.plan_mode = True
-        self.plan_log_path = self._persistence_log_path
-        return self.plan_log_path
+        self.plan_log_path = None
 
-    async def resume_plan_mode(self, log_path: str | Path) -> Path:
-        validated = _plan_log(self.config, self.session_id).resume_log_file(log_path)
+    async def resume_plan_mode(self, _log_path: str | Path) -> None:
         self.plan_mode = True
-        self.plan_log_path = validated
-        return validated
+        self.plan_log_path = None
 
     async def exit_plan_mode(self) -> None:
         self.plan_mode = False
@@ -699,8 +868,9 @@ class FixtureSessionFactory:
         *,
         load_mcp: bool,
         progress_cb: Callable[[str, list[Any]], None] | None,
+        conversation_repository: ConversationRepository,
+        project_id: str,
         session_id: str | None = None,
-        restored_turns: list[TurnRecord] | None = None,
         bash_approval_handler: Callable[[str, str, int], bool] | None = None,
         bash_command_runner: Callable[..., Any] | None = None,
     ) -> FixtureSession:
@@ -715,6 +885,7 @@ class FixtureSessionFactory:
                         self._catalog is None
                         or self._catalog.project_for_session(candidate) is None
                     )
+                    and conversation_repository.load_optional(candidate) is None
                 ):
                     session_id = candidate
                     self._issued.add(candidate)
@@ -722,7 +893,8 @@ class FixtureSessionFactory:
         return FixtureSession(
             config,
             session_id=session_id,
-            restored_turns=list(restored_turns or []),
+            conversation_repository=conversation_repository,
+            project_id=project_id,
             progress_cb=progress_cb,
             search_handler=self._search_handler,
             bash_approval_handler=bash_approval_handler,
