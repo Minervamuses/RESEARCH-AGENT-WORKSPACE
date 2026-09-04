@@ -7,7 +7,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Canonical conversation contract | Complete | 2026-09-04 18:20 CST | 2026-09-04 18:44 CST | Contract, Red/Green tests, review, and commits below | None |
-| 02 — Legacy import bridge | Not started | — | — | — | None |
+| 02 — Legacy import bridge | In progress | 2026-09-04 18:48 CST | — | Preflight and mapping checkpoint below | None |
 | 03 — Write-through turn lifecycle | Not started | — | — | — | None |
 | 04 — Host/catalog/retry cutover | Not started | — | — | — | None |
 | 05 — Remove Product Plan Mode | Not started | — | — | — | None |
@@ -80,6 +80,16 @@
 - **Limitations:** 本階段依計畫未跑live provider、Ollama、full migration或runtime integration；這些不是Phase 01 acceptance evidence。
 - **Blockers:** None。
 - **Next action:** 重新讀durable authority後開始Phase 02 legacy import bridge。
+
+## 2026-09-04 18:48 CST — Phase 02: preflight and mapping checkpoint
+
+- **Status:** `Not started` → `In progress`。
+- **Runtime/ownership gate:** Phase 01 completion commit=`0d5259d`、worktree clean；仍使用root=`/home/minervamuses/research-agent-workspace`、branch=`GUI`、WSL/Linux與Conda`app`。只允許synthetic/temp fixtures，不操作`app/store/`、真實Chroma或Plan logs。
+- **Legacy input facts:** Chroma strict reader以canonical session UUID查詢、要求每個positive integer `turn_id`恰有user/assistant role pair與相同aware timestamp，並以integer排序；Plan strict reader支援v1/v2、要求同session header、bounded files/turns/text、拒絕fusion、duplicate IDs、ambiguous blocks與unsupported versions。兩者都只回completed `TurnRecord`，不記錄normal/extended thinking mode。
+- **Source-to-target mapping:** legacy session ID原樣成為canonical `conversationId`；caller提供並驗證nullable `projectId`。跨Chroma/Plan的integer turn IDs必須唯一且合併後從1連續；`turnNumber`保留該integer，`turnId`由固定domain separator + conversation ID + turn number經SHA-256產生，再固定RFC 4122 variant/version-4 bits，確保重跑為同一合法logical ID。Aware legacy timestamp正規化為UTC `Z`並同時作該completed turn的`submittedAt`/`finishedAt`；document時間取可恢復timestamps的最早/最晚instant。
+- **Unrecoverable-field policy:** legacy沒有保存normal/extended thinking mode，因此不得把它猜成任一模式；完整user/assistant pair以completed `display-only`保存，`displayInput`保留原user文字、`semanticInput=null`、`contextEligible=false`、`thinkingMode=null`。這保留可見transcript但不捏造model-context authority。所有legacy tool activities一律丟棄，不把arguments/results、secret-like keys、reasoning或placeholder穿透至canonical JSON。
+- **Transaction/idempotency policy:** reader先產生完整bounded in-memory snapshot；任一source malformed、duplicate/gap或轉換失敗即整個conversation失敗。Publish前重新讀取同一sources並比對deterministic relevant-content fingerprint；不一致不發布。只用Phase 01 repository的一次性no-clobber whole-document create；有效target已存在回`already_present`，無效/mismatched target回`failed`且不覆寫，無legacy turns回`skipped`。JSON target本身是唯一success marker，不建立migration database或寫回legacy source。
+- **Blockers:** None；下一步加入focused Red migration contract。
 
 <!--
 Material implementation events append with this shape:
