@@ -60,6 +60,13 @@
 - **Verification:** 尚未執行Phase 01 tests；下一步先加入`tests/test_conversation_repository.py`並觀察Red。
 - **Blockers:** None。
 
+## 2026-09-04 18:24 CST — Phase 01: Red contract
+
+- **Status:** `In progress`。
+- **Changes:** 新增`app/tests/test_conversation_repository.py`，以11個focused tests固定pending/completed round trip、transition/retry/duplicate、single-pending、latest-10、title、UTF-8 bounds、closed metadata、per-file degradation、SHA-256 conflict與file/directory fsync ordering。
+- **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_repository.py -q`，exit 1；collection如預期因`ModuleNotFoundError: No module named 'agent.conversations'`失敗，證明新contract尚無implementation。唯一額外輸出是既有LangGraph deprecation warning。
+- **Blockers:** None；下一步實作新`agent/conversations/`package，不切換runtime caller。
+
 <!--
 Material implementation events append with this shape:
 
