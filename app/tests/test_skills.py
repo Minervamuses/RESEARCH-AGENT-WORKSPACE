@@ -107,7 +107,7 @@ description: Use when the user wants help with academic writing.
 
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: _FakeGraph(),
+        lambda _cfg, extra_tools=None, **kwargs: _FakeGraph(),
     )
 
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
@@ -157,7 +157,7 @@ description: Use when the user wants help with academic writing.
 
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: object(),
+        lambda _cfg, extra_tools=None, **kwargs: object(),
     )
     session = ChatSession(
         AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
@@ -196,7 +196,7 @@ def test_chat_session_one_shot_skill_cleans_up_on_error_and_cancel(
     )
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: object(),
+        lambda _cfg, extra_tools=None, **kwargs: object(),
     )
     session = ChatSession(
         AgentConfig(persist_dir=str(tmp_path), skills_dir="skills")
@@ -227,7 +227,7 @@ def test_chat_session_status_has_no_persistent_generic_skill_state(
 ):
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: object(),
+        lambda _cfg, extra_tools=None, **kwargs: object(),
     )
     session = ChatSession(AgentConfig(persist_dir=str(tmp_path)))
 

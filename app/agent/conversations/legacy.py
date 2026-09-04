@@ -410,7 +410,6 @@ def _read_legacy_chroma_turns(
             assistant_output=assistant_text,
             turn_id=turn_id,
             timestamp=user_timestamp,
-            persist_target="none",
         ))
     return turns
 
@@ -780,8 +779,6 @@ class LegacyConversationReader:
             MAX_OUTPUT_BYTES,
         )
         timestamp = _normalized_timestamp(value.timestamp)
-        if value.persist_target != "none":
-            _legacy_error("legacy turn contains unexpected runtime provenance")
         activities = value.tool_activities
         if type(activities) is not tuple:
             _legacy_error("legacy tool activities must be a tuple")

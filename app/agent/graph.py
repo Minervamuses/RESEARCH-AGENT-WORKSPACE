@@ -91,7 +91,6 @@ def _with_recovery_metadata(message: AIMessage, reason: str) -> AIMessage:
 def build_graph(
     config: AgentConfig,
     extra_tools: list | None = None,
-    history_store=None,
     skill_runtime_getter=None,
     skill_tools: list | None = None,
     mcp_families: dict[str, str] | None = None,
@@ -105,7 +104,6 @@ def build_graph(
         config: Agent configuration.
         extra_tools: Optional additional LangChain-compatible tools (e.g. MCP
             tools loaded at startup) appended after the local agent tools.
-        history_store: Optional store injected into the recall_history tool.
         skill_runtime_getter: Optional callable returning the active SkillRuntime.
         skill_tools: Optional skill-scoped tools. They join the executable tool
             universe but are bound/callable only while the active skill's
@@ -121,7 +119,6 @@ def build_graph(
     model = get_chat_model(config)
     base_tools = tool_inventory.build_base_tools(
         config,
-        history_store=history_store,
         extra_tools=extra_tools,
         bash_approval_handler=bash_approval_handler,
         bash_command_runner=bash_command_runner,

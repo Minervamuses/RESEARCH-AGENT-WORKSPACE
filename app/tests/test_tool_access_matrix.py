@@ -2,7 +2,7 @@
 
 Exercises the plan's acceptance matrix over one tool universe:
 
-    rag_search, recall_history, read_file, bash,
+    rag_search, read_file, bash,
     full-web-search (web_search family),
     github_search (github family),
     citation_workflow (skill tool)
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
-from conftest import FakeHistoryStore, make_astream_graph
+from conftest import make_astream_graph
 
 from agent.config import AgentConfig
 from agent.graph import build_graph
@@ -45,12 +45,6 @@ def _rag_search(query: str) -> str:
 def _rag_get_context(pid: str, chunk_id: int) -> str:
     """Expand one search hit."""
     return f"{pid}:{chunk_id}"
-
-
-@tool("recall_history")
-def _recall_history(query: str) -> str:
-    """Search chat history."""
-    return query
 
 
 @tool("read_file")
@@ -87,7 +81,6 @@ MCP_FAMILIES = {"full-web-search": "web_search", "github_search": "github"}
 
 UNIVERSE = [
     _rag_search,
-    _recall_history,
     _read_file,
     _bash,
     _full_web_search,
@@ -109,7 +102,7 @@ def _make_session(monkeypatch, tmp_path) -> ChatSession:
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
+        lambda _cfg, extra_tools=None, **kwargs: make_astream_graph(),
     )
     return ChatSession(
         _cfg(tmp_path),
@@ -117,7 +110,6 @@ def _make_session(monkeypatch, tmp_path) -> ChatSession:
             SimpleNamespace(name="full-web-search"),
             SimpleNamespace(name="github_search"),
         ],
-        history_store=FakeHistoryStore(),
         mcp_families=dict(MCP_FAMILIES),
     )
 
@@ -134,7 +126,7 @@ def test_prompt_matches_effective_tools(monkeypatch, tmp_path):
     # Web MCP tools collapse to their family; the skill tool renders as-is.
     assert "MCP family: web_search" in available_line
     assert "citation_workflow" in available_line
-    for name in ("rag_search", "recall_history", "read_file", "bash"):
+    for name in ("rag_search", "read_file", "bash"):
         assert name in available_line
     assert "github" not in available_line
     unavailable_line = next(
@@ -147,9 +139,9 @@ def test_prompt_does_not_claim_web_search_when_mcp_missing(monkeypatch, tmp_path
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
+        lambda _cfg, extra_tools=None, **kwargs: make_astream_graph(),
     )
-    session = ChatSession(_cfg(tmp_path), history_store=FakeHistoryStore())
+    session = ChatSession(_cfg(tmp_path))
 
     block = session._tool_availability_block()
 
@@ -189,10 +181,6 @@ def test_graph_binding_matches_effective_tools(monkeypatch, tmp_path):
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     monkeypatch.setattr("agent.tools.inventory.create_read_file_tool", lambda _cfg: _read_file)
     monkeypatch.setattr("agent.tools.inventory.create_bash_tool", lambda _cfg: _bash)
 
@@ -203,7 +191,7 @@ def test_graph_binding_matches_effective_tools(monkeypatch, tmp_path):
         mcp_families=MCP_FAMILIES,
     )
     universe = [
-        _rag_explore, _rag_search, _rag_get_context, _recall_history,
+        _rag_explore, _rag_search, _rag_get_context,
         _read_file, _bash, _full_web_search, _github_search, _citation_workflow,
     ]
     citation = load_skill_runtime(
@@ -221,7 +209,7 @@ def test_graph_binding_matches_effective_tools(monkeypatch, tmp_path):
 
     # Default binding = normal mode; skill binding = the citation resolution.
     assert bind_calls[0] == [
-        "rag_explore", "rag_search", "rag_get_context", "recall_history",
+        "rag_explore", "rag_search", "rag_get_context",
         "read_file", "bash", "full-web-search",
     ]
     assert bind_calls[1] == list(citation.tool_access.effective_tools)
@@ -264,10 +252,6 @@ def test_policy_tool_node_matches_effective_tools(monkeypatch, tmp_path):
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     monkeypatch.setattr("agent.tools.inventory.create_read_file_tool", lambda _cfg: _read_file)
     monkeypatch.setattr("agent.tools.inventory.create_bash_tool", lambda _cfg: _bash)
 
@@ -289,7 +273,7 @@ def test_policy_tool_node_matches_effective_tools(monkeypatch, tmp_path):
             "messages": [HumanMessage(content="hi")],
             "active_skill": "citation",
             "effective_tools": [
-                "rag_explore", "rag_search", "rag_get_context", "recall_history",
+                "rag_explore", "rag_search", "rag_get_context",
                 "read_file", "bash", "citation_workflow",
             ],
         },
@@ -332,10 +316,6 @@ def test_skill_switch_does_not_change_bash_permission_mode(monkeypatch, tmp_path
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     # read_file faked; bash stays the real gated tool.
     monkeypatch.setattr("agent.tools.inventory.create_read_file_tool", lambda _cfg: _read_file)
 
@@ -347,7 +327,7 @@ def test_skill_switch_does_not_change_bash_permission_mode(monkeypatch, tmp_path
             "messages": [HumanMessage(content="hi")],
             "active_skill": "citation",
             "effective_tools": [
-                "rag_explore", "rag_search", "rag_get_context", "recall_history",
+                "rag_explore", "rag_search", "rag_get_context",
                 "read_file", "bash", "citation_workflow",
             ],
         },

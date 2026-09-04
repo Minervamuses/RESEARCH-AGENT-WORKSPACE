@@ -1,6 +1,7 @@
 """Tests for the read_file StructuredTool factory."""
 
 import json
+import uuid
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
@@ -59,6 +60,44 @@ def test_read_file_oversize_returns_error(tmp_path):
     assert "error" in payload
     assert "too large" in payload["error"]
     assert str(MAX_BYTES) in payload["error"]
+
+
+def test_read_file_reads_oversize_text_in_bounded_chunks(tmp_path):
+    target = tmp_path / "conversations" / f"{uuid.uuid4().hex}.json"
+    target.parent.mkdir()
+    expected = "x" * (MAX_BYTES - 1) + "界" + "tail"
+    target.write_text(expected, encoding="utf-8")
+    tool = _make_tool(tmp_path)
+
+    first = json.loads(tool.invoke({
+        "path": str(target),
+        "offset_bytes": 0,
+    }))
+    second = json.loads(tool.invoke({
+        "path": str(target),
+        "offset_bytes": first["next_offset"],
+    }))
+
+    assert first["offset_bytes"] == 0
+    assert first["next_offset"] == MAX_BYTES - 1
+    assert second["offset_bytes"] == MAX_BYTES - 1
+    assert second["next_offset"] is None
+    assert first["content"] + second["content"] == expected
+
+
+def test_read_file_does_not_chunk_arbitrary_oversize_files(tmp_path):
+    target = tmp_path / "large.txt"
+    target.write_bytes(b"x" * (MAX_BYTES + 1))
+    tool = _make_tool(tmp_path)
+
+    payload = json.loads(tool.invoke({
+        "path": str(target),
+        "offset_bytes": 0,
+    }))
+
+    assert payload == {
+        "error": "chunked reads are limited to canonical conversation JSON files"
+    }
 
 
 def test_read_file_non_utf8_bytes_replaced(tmp_path):

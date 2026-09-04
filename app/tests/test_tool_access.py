@@ -12,12 +12,6 @@ def _rag_search(query: str) -> str:
     return query
 
 
-@tool("recall_history")
-def _recall_history(query: str) -> str:
-    """Recall history."""
-    return query
-
-
 @tool("read_file")
 def _read_file(path: str) -> str:
     """Read a file."""
@@ -56,7 +50,6 @@ def _citation_workflow(action: str) -> str:
 
 ALL_TOOLS = [
     _rag_search,
-    _recall_history,
     _read_file,
     _bash,
     _full_web_search,
@@ -68,7 +61,6 @@ MCP_FAMILIES = {"full-web-search": "web_search", "github_search": "github"}
 
 GLOBAL_NAMES = (
     "rag_search",
-    "recall_history",
     "read_file",
     "bash",
     "full-web-search",
@@ -120,12 +112,12 @@ GLOBAL_NAMES = (
         ),
         pytest.param(
             None,
-            [_rag_search, _recall_history, _read_file, _bash],
+            [_rag_search, _read_file, _bash],
             {},
             (
-                ("rag_search", "recall_history", "read_file", "bash"),
+                ("rag_search", "read_file", "bash"),
                 (),
-                ("rag_search", "recall_history", "read_file", "bash"),
+                ("rag_search", "read_file", "bash"),
                 (),
                 (),
             ),

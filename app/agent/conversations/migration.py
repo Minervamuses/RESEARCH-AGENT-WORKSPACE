@@ -7,12 +7,14 @@ from datetime import datetime
 from typing import Literal
 
 from agent.conversations.legacy import (
+    LegacyChromaReader,
     LegacyConversationReader,
     LegacyConversationSnapshot,
     LegacyReadError,
     LegacySourceCount,
     legacy_turn_id,
 )
+from agent.conversations.legacy_plan import LegacyPlanLogReader
 from agent.conversations.models import (
     SCHEMA_VERSION,
     ConversationConflictError,
@@ -29,6 +31,8 @@ from agent.conversations.repository import (
     ConversationRepository,
     ConversationSnapshot,
 )
+from agent.config import AgentConfig
+from agent.paths import find_app_root
 
 
 MigrationStatus = Literal["created", "already_present", "skipped", "failed"]
@@ -296,6 +300,24 @@ class ConversationMigrator:
         )
 
 
+def create_legacy_migrator(
+    config: AgentConfig,
+    repository: ConversationRepository,
+) -> ConversationMigrator:
+    """Build the strict legacy readers only at an explicit migration boundary."""
+    return ConversationMigrator(
+        repository,
+        LegacyConversationReader(
+            chroma_read=LegacyChromaReader(config.persist_dir),
+            plan_read=lambda conversation_id: LegacyPlanLogReader(
+                config,
+                session_id=conversation_id,
+                app_root_resolver=lambda: find_app_root(),
+            ).read_direct_answer_turns(),
+        ),
+    )
+
+
 def _parse_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
 
@@ -305,4 +327,5 @@ __all__ = [
     "MigrationReason",
     "MigrationResult",
     "MigrationStatus",
+    "create_legacy_migrator",
 ]

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from conftest import FakeHistoryStore, make_astream_graph, tool_then_answer_updates
+from conftest import make_astream_graph, tool_then_answer_updates
 
 from agent.config import AgentConfig
 from agent.conversations import (
@@ -65,7 +65,6 @@ class _CoordinatorSession:
         self.mcp_families = {}
         self.running_extension_revision = 0
         self.extension_startup_diagnostics = ()
-        self.flush_calls = 0
         self._prompt_persisted_callback = None
 
     def _set_prompt_persisted_callback(self, callback):
@@ -302,10 +301,6 @@ class _CoordinatorSession:
             )
             raise
 
-    async def flush_recent_turns(self):
-        self.flush_calls += 1
-        raise AssertionError("canonical write-through sessions must never flush")
-
     def set_thinking_mode(self, mode):
         self.thinking_mode = mode
 
@@ -314,6 +309,7 @@ class _CoordinatorSession:
         turn_count = len(snapshot.document.turns) if snapshot else 0
         return {
             "session_id": self.session_id,
+            "conversation_root": "/tmp/canonical-conversations",
             "turn_count": turn_count,
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
@@ -820,7 +816,6 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
         )
 
     config = AgentConfig(persist_dir=str(tmp_path / "persist"))
-    config.agent_recent_turns_window = 10
     repository = ConversationRepository(config.persist_dir)
     _append_completed_turn(
         repository,
@@ -830,7 +825,6 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
         semantic_input="canonical semantic q1",
         assistant_output="canonical a1",
     )
-    store = FakeHistoryStore()
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
@@ -841,7 +835,6 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
     session = asyncio.run(ChatSession.restore(
         config,
         session_id=SESSION_A,
-        history_store=store,
         conversation_repository=repository,
         project_id="p1",
         load_mcp=False,
@@ -860,7 +853,6 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
     snapshot = repository.load(SESSION_A)
 
     assert answer == "canonical a2"
-    assert store.adds == []
     assert [turn.state for turn in snapshot.document.turns] == [
         "completed",
         "completed",
@@ -1013,7 +1005,6 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
 
         assert selected["sessionId"] == SESSION_A
         assert factory.load_mcp_calls == [False, True]
-        assert all(session.flush_calls == 0 for session in factory.sessions)
 
     asyncio.run(run())
 
@@ -1268,7 +1259,7 @@ def test_first_prompt_registers_catalog_before_provider_failure(
     graph = make_astream_graph(on_state=fail_at_provider_boundary)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+        lambda _config, extra_tools=None, **kwargs: graph,
     )
 
     async def session_factory(
@@ -1283,7 +1274,6 @@ def test_first_prompt_registers_catalog_before_provider_failure(
         del load_mcp
         session = ChatSession(
             current_config,
-            history_store=FakeHistoryStore(),
             progress_cb=progress_cb,
             loaded_skills=[],
             global_mcp_families=frozenset(),
@@ -1397,7 +1387,6 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
         "completed",
         "completed",
     ]
-    assert all(session.flush_calls == 0 for session in factory.sessions)
     assert a_third["registrationStatus"] == "registered"
 
 
@@ -1490,7 +1479,6 @@ def test_select_imports_legacy_once_then_uses_canonical_transcript_and_context(
         assistant_output="legacy answer",
         turn_id=1,
         timestamp="2026-08-26T00:01:00+00:00",
-        persist_target="none",
     )
     read_calls = []
 
@@ -1547,7 +1535,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     monkeypatch.setattr("agent.desktop.service.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: (
+        lambda _cfg, extra_tools=None, **kwargs: (
             make_astream_graph(answer="constructor placeholder")
         ),
     )
@@ -1584,7 +1572,6 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
         assert conversation_repository is repository
         session = ChatSession(
             current_config,
-            history_store=FakeHistoryStore(),
             progress_cb=progress_cb,
             loaded_skills=[],
             global_mcp_families=frozenset(),
@@ -1647,7 +1634,6 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
         assert conversation_repository is repository
         session = ChatSession(
             current_config,
-            history_store=FakeHistoryStore(),
             progress_cb=progress_cb,
             loaded_skills=[],
             global_mcp_families=frozenset(),
@@ -1828,7 +1814,6 @@ def test_duplicate_caller_turn_id_returns_saved_answer_without_model_replay(tmp_
     assert factory.sessions[-1].turn_inputs == ["record exactly once"]
     turns = repository.load(SESSION_A).document.turns
     assert [turn.turn_id for turn in turns].count(turn_id) == 1
-    assert all(session.flush_calls == 0 for session in factory.sessions)
 
 
 def test_unknown_degraded_unavailable_and_busy_coordinator_states(

@@ -1,6 +1,7 @@
 """Multi-turn conversational session for the agent."""
 
 import asyncio
+import json
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
@@ -33,7 +34,6 @@ from agent.thinking.orchestrator import FusionOrchestrator
 from agent.graph import build_graph
 from agent.turns.execution import execute_graph
 from agent.turns.trace import format_tool_counts
-from agent.history_rag import ChatHistoryStore, get_chat_history_store
 from agent.llm.thinking import (
     get_chat_model_for_role,
     get_fusion_aggregator_model,
@@ -56,7 +56,7 @@ from agent.tools.access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
 from agent.turns.journal import TurnJournal
-from agent.turns.memory import CanonicalTurnView, TurnRecord
+from agent.turns.memory import CanonicalTurnView
 from agent.paths import find_app_root
 
 # The base tool inventory, its selection policy, and the base workflow are
@@ -98,7 +98,6 @@ class ChatSession:
         config: AgentConfig,
         system_prompt: str = SYSTEM_PROMPT,
         extra_tools: list | None = None,
-        history_store: ChatHistoryStore | None = None,
         progress_cb=None,
         mcp_families: dict[str, str] | None = None,
         global_mcp_families: set[str] | frozenset[str] | None = None,
@@ -106,7 +105,6 @@ class ChatSession:
         running_extension_revision: int = 0,
         extension_startup_diagnostics: tuple[str, ...] = (),
         session_id: str | None = None,
-        restored_turns: list[TurnRecord] | None = None,
         conversation_repository: ConversationRepository | None = None,
         project_id: str | None = None,
         bash_approval_handler=None,
@@ -132,8 +130,6 @@ class ChatSession:
             extension_startup_diagnostics
         )
         self.system_prompt_message = SystemMessage(content=system_prompt)
-        if restored_turns:
-            raise ValueError("legacy restored_turns are not accepted by canonical sessions")
         self.session_id = session_id or uuid.uuid4().hex
         if not is_canonical_uuid4_hex(self.session_id):
             raise ValueError("session_id must be canonical UUIDv4 hex")
@@ -141,6 +137,7 @@ class ChatSession:
         self.conversation_repository = (
             conversation_repository or ConversationRepository(config.persist_dir)
         )
+        self._conversation_root = self.conversation_repository.display_root()
         self._conversation_snapshot = self.conversation_repository.load_optional(
             self.session_id
         )
@@ -154,13 +151,7 @@ class ChatSession:
         self._recover_interrupted_turn()
         self._active_turn_snapshot: ConversationSnapshot | None = None
         self._active_turn_id: str | None = None
-        self.history_store = history_store or get_chat_history_store(config)
-        self._turn_journal = TurnJournal(
-            config=config,
-            session_id=self.session_id,
-            history_store=self.history_store,
-            restored_turns=restored_turns,
-        )
+        self._turn_journal = TurnJournal()
         self._citation_policy = CitationSessionPolicy(config)
         self.citation_workflow_tool = self._citation_policy.workflow_tool
         bash_tool_options = {}
@@ -171,7 +162,6 @@ class ChatSession:
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
-            history_store=self.history_store,
             skill_runtime_getter=lambda: self.active_skill_runtime,
             skill_tools=[self.citation_workflow_tool],
             mcp_families=self.mcp_families,
@@ -446,19 +436,21 @@ class ChatSession:
         snapshot = self._conversation_snapshot
         if snapshot is None:
             return []
-        completed = [
-            turn for turn in snapshot.document.turns if turn.state == "completed"
-        ]
-        window = self.config.agent_recent_turns_window
-        visible = completed[-window:] if window > 0 else []
+        visible = self.conversation_repository.latest_context(snapshot)
+        source_by_id = {
+            turn.turn_id: turn for turn in snapshot.document.turns
+        }
         return [
             CanonicalTurnView(
-                user_input=(turn.semantic_input or turn.display_input),
-                assistant_output=turn.assistant_output or "",
+                user_input=turn.user_input,
+                assistant_output=turn.assistant_output,
                 turn_id=turn.turn_number,
                 logical_turn_id=turn.turn_id,
-                timestamp=turn.finished_at or turn.submitted_at,
-                tool_activities=turn.tool_activities,
+                timestamp=(
+                    source_by_id[turn.turn_id].finished_at
+                    or source_by_id[turn.turn_id].submitted_at
+                ),
+                tool_activities=source_by_id[turn.turn_id].tool_activities,
             )
             for turn in visible
         ]
@@ -476,10 +468,6 @@ class ChatSession:
         if self._conversation_snapshot is None:
             return 0
         return len(self._conversation_snapshot.document.turns)
-
-    @property
-    def _turn_store(self):
-        return self._turn_journal.turn_store
 
     @property
     def _citation_service(self):
@@ -506,13 +494,50 @@ class ChatSession:
             if snapshot is not None
             else ()
         )
-        messages = [self.system_prompt_message]
+        messages = [
+            self.system_prompt_message,
+            self._build_conversation_archive_hint(),
+        ]
         for turn in context:
             messages.extend([
                 HumanMessage(content=turn.user_input),
                 AIMessage(content=turn.assistant_output),
             ])
         return messages
+
+    def _build_conversation_archive_hint(self) -> SystemMessage:
+        rendered_root = json.dumps(self._conversation_root, ensure_ascii=False)
+        if self.thinking_mode == "extended":
+            return SystemMessage(content=(
+                "[Conversation archive]\n"
+                f"Canonical conversation root: {rendered_root}\n"
+                "Only the latest ten completed context-eligible turns "
+                "are supplied automatically. Extended-thinking proposers do "
+                "not receive the approval-gated bash tool, so they cannot "
+                "search older archive files. If older exact wording is "
+                "required, state this limitation and ask the user to rerun the "
+                "request in normal thinking mode. Do not use document RAG or "
+                "embeddings as a conversation-history fallback."
+            ))
+        return SystemMessage(content=(
+            "[Conversation archive]\n"
+            f"Canonical conversation root: {rendered_root}\n"
+            "Only the latest ten completed context-eligible turns are supplied "
+            "automatically. For older exact wording, use fixed-string grep "
+            "(`grep -F`) under this root through the bash tool; every bash call "
+            "remains approval-gated. Search for the canonical JSON-escaped phrase "
+            "(`json.dumps(text, ensure_ascii=False)[1:-1]`), not unescaped raw "
+            "text. Limit the listing with `| head -n 21`. If the 21st path exists, "
+            "read none and ask for a more specific phrase; otherwise inspect at "
+            "most 20 matched JSON files with read_file. Prompt-first persistence "
+            "means the current request is already present in a pending turn: "
+            "accept only an earlier completed turn, never the current pending "
+            "match. If a file exceeds the single-call limit, read bounded chunks "
+            "with offset_bytes=0 and each next_offset. If no earlier completed "
+            "exact match remains, state that limitation or ask for the exact "
+            "wording; you must not fall back to rag_search or embeddings because "
+            "those search the document knowledge base, not conversation history."
+        ))
 
     def _prompt_history(self) -> list:
         base = self._base_prompt_history()
@@ -805,9 +830,6 @@ class ChatSession:
             )
         return self._prompt_master_skill_text_cache
 
-    async def flush_recent_turns(self) -> None:
-        """Compatibility no-op: every canonical state change is write-through."""
-
     async def _execute_graph(
         self,
         *,
@@ -1063,6 +1085,7 @@ class ChatSession:
         """Expose lightweight session state for local CLI commands."""
         return {
             "session_id": self.session_id,
+            "conversation_root": self._conversation_root,
             "turn_count": self._turn_counter,
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
@@ -1082,11 +1105,9 @@ class ChatSession:
         cls,
         config: AgentConfig,
         system_prompt: str = SYSTEM_PROMPT,
-        history_store: ChatHistoryStore | None = None,
         load_mcp: bool = True,
         progress_cb=None,
         session_id: str | None = None,
-        restored_turns: list[TurnRecord] | None = None,
         conversation_repository: ConversationRepository | None = None,
         project_id: str | None = None,
         bash_approval_handler=None,
@@ -1104,7 +1125,6 @@ class ChatSession:
             config,
             system_prompt=system_prompt,
             extra_tools=list(startup.extra_tools),
-            history_store=history_store,
             progress_cb=progress_cb,
             mcp_families=dict(startup.mcp_families),
             global_mcp_families=startup.global_mcp_families,
@@ -1114,7 +1134,6 @@ class ChatSession:
                 startup.extension_startup_diagnostics
             ),
             session_id=session_id,
-            restored_turns=restored_turns,
             conversation_repository=conversation_repository,
             project_id=project_id,
             bash_approval_handler=bash_approval_handler,
@@ -1128,7 +1147,6 @@ class ChatSession:
         *,
         session_id: str,
         system_prompt: str = SYSTEM_PROMPT,
-        history_store: ChatHistoryStore | None = None,
         conversation_repository: ConversationRepository | None = None,
         project_id: str | None = None,
         load_mcp: bool = True,
@@ -1140,7 +1158,6 @@ class ChatSession:
         return await cls.create(
             config,
             system_prompt=system_prompt,
-            history_store=history_store,
             conversation_repository=conversation_repository,
             project_id=project_id,
             load_mcp=load_mcp,

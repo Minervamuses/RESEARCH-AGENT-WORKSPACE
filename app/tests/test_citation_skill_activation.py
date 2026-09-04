@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeHistoryStore, make_astream_graph
+from conftest import make_astream_graph
 
 from agent.config import AgentConfig
 from agent.session import ChatSession
@@ -18,12 +18,12 @@ def make_session(monkeypatch, tmp_path):
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
+        lambda _cfg, extra_tools=None, **kwargs: make_astream_graph(),
     )
 
     def _make():
         cfg = AgentConfig(persist_dir=str(tmp_path / "persist"))
-        return ChatSession(cfg, history_store=FakeHistoryStore())
+        return ChatSession(cfg)
 
     return _make
 
@@ -49,7 +49,6 @@ def test_citation_skill_text_is_free_of_protocol_artifacts():
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
     ]
 
     assert find_tool_protocol_artifact(text, tool_names=tool_names) is None

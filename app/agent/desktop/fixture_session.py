@@ -463,6 +463,7 @@ class FixtureSession:
         self.session_id = session_id
         self.project_id = project_id
         self.conversation_repository = conversation_repository
+        self._conversation_root = self.conversation_repository.display_root()
         self._conversation_snapshot = self._load_snapshot()
         self._recover_interrupted_turn()
         self.thinking_mode = "normal"
@@ -490,7 +491,11 @@ class FixtureSession:
     def recent_turns(self) -> list[Any]:
         """Return a process-local view rebuilt only from canonical JSON."""
         snapshot = self._conversation_snapshot
-        return list(snapshot.document.turns) if snapshot is not None else []
+        return (
+            list(self.conversation_repository.latest_context(snapshot))
+            if snapshot is not None
+            else []
+        )
 
     @property
     def _turn_count(self) -> int:
@@ -942,6 +947,7 @@ class FixtureSession:
     def status_snapshot(self) -> dict[str, str | int | bool]:
         return {
             "session_id": self.session_id,
+            "conversation_root": self._conversation_root,
             "turn_count": self._turn_count,
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,

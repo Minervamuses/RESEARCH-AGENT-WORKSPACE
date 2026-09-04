@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.config import AgentConfig
 from agent.conversations.legacy_plan import (
@@ -142,11 +141,11 @@ def test_v1_reader_restores_direct_answer_without_mutating_source(tmp_path):
     assert turns[0].assistant_output.endswith("print('safe')\n```")
     assert turns[0].turn_id == 1
     assert turns[0].timestamp == TIMESTAMP
-    assert turns[0].persist_target == "none"
+    assert not hasattr(turns[0], "persist_target")
     assert path.read_bytes() == before
 
 
-def test_v1_tool_content_is_display_only(tmp_path):
+def test_v1_tool_content_is_marked_display_only(tmp_path):
     secret = "private tool payload"
     tool_text = (
         "### Tool: rag_search\n\n"
@@ -163,13 +162,9 @@ def test_v1_tool_content_is_display_only(tmp_path):
     assert activity.name == "rag_search"
     assert activity.result == secret
     assert activity.prompt_eligible is False
-    assert [type(message) for message in turn.to_messages()] == [
-        HumanMessage,
-        AIMessage,
-    ]
 
 
-def test_v1_malformed_tool_is_isolated_from_prompt_history(tmp_path):
+def test_v1_malformed_tool_is_isolated_from_the_answer(tmp_path):
     tool_text = "### Tool: rag_search\n\n```\nmalformed sentinel\n```"
     _write(tmp_path, _v1_turn(tool_text=tool_text))
 
@@ -178,10 +173,7 @@ def test_v1_malformed_tool_is_isolated_from_prompt_history(tmp_path):
     assert turn.tool_activities[0].status == "incomplete"
     assert turn.tool_activities[0].prompt_eligible is False
     assert "malformed sentinel" in turn.tool_activities[0].result
-    assert all(
-        "malformed sentinel" not in str(message.content)
-        for message in turn.to_messages()
-    )
+    assert "malformed sentinel" not in turn.assistant_output
 
 
 @pytest.mark.parametrize(
@@ -204,7 +196,7 @@ def test_v1_reader_rejects_ambiguous_or_partial_turn(tmp_path, body, error):
         _reader(tmp_path).read_direct_answer_turns()
 
 
-def test_v2_reader_restores_safe_tool_pair_and_prompt_roles(tmp_path):
+def test_v2_reader_restores_safe_tool_pair_metadata(tmp_path):
     arguments = {"query": "line one\n### Tool: not a marker\n```"}
     result = "unicode 臺灣\n**Result:**\n---\n## Turn 99 - payload"
     _write(
@@ -233,15 +225,6 @@ def test_v2_reader_restores_safe_tool_pair_and_prompt_roles(tmp_path):
     assert activity.result == result
     assert activity.status == "ok"
     assert activity.prompt_eligible is True
-    messages = turn.to_messages()
-    assert [type(message) for message in messages] == [
-        HumanMessage,
-        AIMessage,
-        ToolMessage,
-        AIMessage,
-    ]
-    assert messages[1].tool_calls[0]["args"] == arguments
-    assert messages[2].tool_call_id == "call-1"
 
 
 def test_v2_citation_and_duplicate_calls_are_display_only(tmp_path):
@@ -260,10 +243,6 @@ def test_v2_citation_and_duplicate_calls_are_display_only(tmp_path):
         False,
         False,
         False,
-    ]
-    assert [type(message) for message in turn.to_messages()] == [
-        HumanMessage,
-        AIMessage,
     ]
 
 

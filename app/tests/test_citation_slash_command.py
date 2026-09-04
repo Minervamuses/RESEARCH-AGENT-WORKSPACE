@@ -131,14 +131,21 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
         def __init__(self):
             super().__init__()
             self.turns: list[str] = []
+            self.display_inputs: list[str] = []
 
-        async def turn(self, user_input, *, skill_name=None):
+        async def turn(
+            self,
+            user_input,
+            *,
+            display_input=None,
+            turn_id=None,
+            skill_name=None,
+        ):
+            assert turn_id is not None
             assert skill_name is None
             self.turns.append(user_input)
+            self.display_inputs.append(display_input)
             return "answer"
-
-        async def flush_recent_turns(self):
-            self.calls.append("flush")
 
     session = LoopSession()
 
@@ -156,3 +163,4 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
 
     assert session.calls[0] == "activate:citation"
     assert session.turns == ["幫我找 HPC 論文"]
+    assert session.display_inputs == ["/citation 幫我找 HPC 論文"]

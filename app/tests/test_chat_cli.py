@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 
-from conftest import FakeChatSession, FakeHistoryStore
+from conftest import FakeChatSession
 from agent.cli.slash_commands import (
     SlashCommand,
     SlashCommandRegistry,
@@ -55,11 +55,10 @@ def _canonical_cli_session(monkeypatch, tmp_path):
     session_id = uuid.uuid4().hex
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _config, extra_tools=None, history_store=None, **kwargs: object(),
+        lambda _config, extra_tools=None, **kwargs: object(),
     )
     session = ChatSession(
         AgentConfig(persist_dir=str(tmp_path / "store")),
-        history_store=FakeHistoryStore(),
         loaded_skills=[],
         conversation_repository=repository,
         project_id="local",
@@ -451,7 +450,6 @@ def test_chat_cli_unclean_local_command_recovers_without_replay(
 
     restored = ChatSession(
         AgentConfig(persist_dir=str(tmp_path / "store")),
-        history_store=FakeHistoryStore(),
         loaded_skills=[],
         conversation_repository=repository,
         project_id="local",
@@ -490,6 +488,7 @@ def test_chat_cli_routes_dynamic_skill_with_exact_trailing_prompt(monkeypatch):
 def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
     session = FakeChatSession(status={
         "session_id": "session-42",
+        "conversation_root": "/tmp/canonical conversations",
         "turn_count": 3,
         "recent_turn_count": 2,
         "graph_recursion_limit": 64,
@@ -503,6 +502,7 @@ def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Session status:" in output
     assert "session_id: session-42" in output
+    assert 'conversation_root: "/tmp/canonical conversations"' in output
     assert "graph_recursion_limit: 64" in output
     assert "last_tool_calls: rag_search x1" in output
     assert "thinking_mode: extended" in output

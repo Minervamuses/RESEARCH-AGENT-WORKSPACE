@@ -62,6 +62,7 @@ _TURN_KEYS = frozenset({
 _TOOL_ACTIVITY_KEYS = frozenset({"callId", "name", "status", "summary"})
 _FAILURE_KEYS = frozenset({"code", "message", "retryable"})
 _READ_CHUNK_BYTES = 64 * 1024
+MAX_CONVERSATION_ROOT_DISPLAY_BYTES = 4096
 
 
 @dataclass(frozen=True)
@@ -345,6 +346,30 @@ class ConversationRepository:
 
     def __init__(self, persist_dir: str | os.PathLike[str]) -> None:
         self.root = Path(persist_dir) / "conversations"
+
+    def display_root(self) -> str:
+        """Return one absolute, bounded path safe for prompt/status display."""
+        try:
+            resolved = self.root.resolve(strict=False)
+            value = str(resolved)
+            encoded = value.encode("utf-8", errors="strict")
+        except (OSError, RuntimeError, UnicodeEncodeError) as exc:
+            raise ConversationValidationError(
+                "conversation root cannot be rendered safely"
+            ) from exc
+        if not resolved.is_absolute():
+            raise ConversationValidationError(
+                "conversation root must resolve to an absolute path"
+            )
+        if len(encoded) > MAX_CONVERSATION_ROOT_DISPLAY_BYTES:
+            raise ConversationValidationError(
+                "conversation root exceeds the display limit"
+            )
+        if any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise ConversationValidationError(
+                "conversation root must not contain control characters"
+            )
+        return value
 
     def path_for(self, conversation_id: str) -> Path:
         """Return the canonical path for a validated conversation ID."""

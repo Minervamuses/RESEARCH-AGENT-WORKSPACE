@@ -44,7 +44,6 @@ def _turn(
         assistant_output=answer,
         turn_id=number,
         timestamp=timestamp,
-        persist_target="none",
         tool_activities=activities,
     )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import os
 import shutil
 import tempfile
@@ -162,6 +163,33 @@ def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     assert ConversationRepository(second.config.persist_dir).path_for(
         SESSION_A
     ).is_file()
+
+
+def test_fixture_status_reports_canonical_conversation_root(
+    fixture_root: Path,
+) -> None:
+    service = _service(fixture_root)
+
+    async def run():
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        return await service.dispatch(
+            "session.turn",
+            _turn_params("/status"),
+        )
+
+    status = asyncio.run(run())
+    expected_root = ConversationRepository(
+        service.config.persist_dir
+    ).display_root()
+    assert status["responseKind"] == "command"
+    assert status["streamKind"] == "final_only"
+    assert (
+        f"conversation_root: {json.dumps(expected_root, ensure_ascii=False)}"
+        in status["text"]
+    )
 
 
 def test_real_service_round_trip_registration_restore_and_final_only_answer(

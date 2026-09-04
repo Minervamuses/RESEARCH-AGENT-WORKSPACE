@@ -38,21 +38,11 @@ def _rag_get_context(pid: str, chunk_id: int) -> str:
     return f"{pid}:{chunk_id}"
 
 
-@tool("recall_history")
-def _recall_history(query: str) -> str:
-    """Recall."""
-    return query
-
-
 def _patch_graph_tools(monkeypatch):
     monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: _DummyModel())
     monkeypatch.setattr(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
-    )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
     )
 
 
@@ -127,10 +117,6 @@ def test_agent_node_binds_effective_tools_for_active_skill(monkeypatch, tmp_path
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg)
     state = {
@@ -146,7 +132,6 @@ def test_agent_node_binds_effective_tools_for_active_skill(monkeypatch, tmp_path
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
     ]
@@ -172,21 +157,17 @@ def test_agent_node_binding_preserves_universe_order(monkeypatch, tmp_path):
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg)
 
     graph.invoke({
         "messages": [HumanMessage(content="hi")],
         "active_skill": "paper-writing",
-        "effective_tools": ["read_file", "rag_explore", "recall_history"],
+        "effective_tools": ["read_file", "rag_explore", "rag_search"],
     })
 
     # The binding follows the tool-universe order, not the state list order.
-    assert bind_calls[1] == ["rag_explore", "recall_history", "read_file"]
+    assert bind_calls[1] == ["rag_explore", "rag_search", "read_file"]
 
 
 @tool("citation_workflow")
@@ -228,10 +209,6 @@ def test_default_binding_includes_web_mcp_but_not_other_families(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(
         cfg,
@@ -268,10 +245,6 @@ def test_skill_tools_bound_only_when_effective_tools_grant_them(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg, skill_tools=[_citation_workflow])
 
@@ -295,7 +268,6 @@ def test_skill_tools_bound_only_when_effective_tools_grant_them(
             "rag_explore",
             "rag_search",
             "rag_get_context",
-            "recall_history",
             "read_file",
             "bash",
             "citation_workflow",
@@ -305,7 +277,6 @@ def test_skill_tools_bound_only_when_effective_tools_grant_them(
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
         "citation_workflow",
@@ -349,10 +320,6 @@ def test_agent_node_allows_more_than_legacy_primary_quota(monkeypatch, tmp_path)
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg)
 
@@ -392,10 +359,6 @@ def test_agent_node_allows_more_than_legacy_citation_local_quota(
     monkeypatch.setattr(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
-    )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
     )
     graph = build_graph(
         AgentConfig(persist_dir=str(tmp_path)),
@@ -451,10 +414,6 @@ def test_agent_node_finalizes_before_recursion_limit(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     graph = build_graph(AgentConfig(
         persist_dir=str(tmp_path),
         graph_recursion_limit=configured_limit,
@@ -509,10 +468,6 @@ def test_graph_limit_finalization_strips_structured_tool_call(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
 
     result = graph.invoke(
@@ -556,10 +511,6 @@ def test_agent_node_strips_tool_calls_from_repair_response(monkeypatch, tmp_path
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
 
     result = graph.invoke({"messages": [HumanMessage(content="hi")]})
@@ -596,10 +547,6 @@ def test_agent_node_repairs_dsml_protocol_artifact(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
-    )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
     )
     graph = build_graph(
         AgentConfig(persist_dir=str(tmp_path)),
@@ -646,10 +593,6 @@ def test_agent_node_reports_persistent_blank_answers_honestly(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
 
     result = graph.invoke({"messages": [HumanMessage(content="hello")]})
@@ -687,10 +630,6 @@ def test_agent_node_repairs_structured_tool_content(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
-    )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
     )
     graph = build_graph(
         AgentConfig(persist_dir=str(tmp_path)),

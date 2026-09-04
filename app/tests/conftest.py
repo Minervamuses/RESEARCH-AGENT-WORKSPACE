@@ -1,9 +1,9 @@
 """Shared fakes for app tests.
 
 One canonical copy of the stubs that used to be duplicated per test file:
-history store, queued chat model, scripted astream graphs, and the CLI-level
-ChatSession stand-in. Divergent behavior between the old copies is kept as
-explicit parameters (raise_on_add, record_repr, ...), never silently dropped.
+queued chat model, scripted astream graphs, and the CLI-level ChatSession
+stand-in. Divergent behavior between the old copies is kept as explicit
+parameters (record_repr, ...), never silently dropped.
 """
 
 import hashlib
@@ -18,35 +18,8 @@ from langchain_core.messages import AIMessage, ToolMessage
 import rag.cli.ingest as rag_ingest_module
 import rag.store.cache as rag_cache_module
 import rag.store.chroma_store as rag_chroma_store_module
-from agent.turns.memory import TurnRecord
 from rag.config import RAGConfig
 from rag.tagger.llm_tagger import FolderMeta
-
-
-class FakeHistoryStore:
-    """In-memory ChatHistoryStore stand-in recording every add_turn call.
-
-    Each entry keeps the full call payload (record plus keyword metadata) so a
-    test can assert on any subset; raise_on_add simulates a store outage.
-    """
-
-    def __init__(self, raise_on_add: bool = False):
-        self.adds: list[dict] = []
-        self.raise_on_add = raise_on_add
-
-    def add_turn(self, turn: TurnRecord, *, session_id: str, turn_id: int, timestamp: str) -> None:
-        if self.raise_on_add:
-            raise RuntimeError("ollama unavailable")
-        self.adds.append(
-            {
-                "turn": turn,
-                "user_input": turn.user_input,
-                "assistant_output": turn.assistant_output,
-                "session_id": session_id,
-                "turn_id": turn_id,
-                "timestamp": timestamp,
-            }
-        )
 
 
 class QueuedModel:
@@ -104,7 +77,7 @@ def make_astream_graph(updates=None, *, answer="ok", on_state=None) -> AstreamGr
 
 
 class FakeChatSession:
-    """ChatSession stand-in for CLI-level tests: records turns and flushes."""
+    """ChatSession stand-in for CLI-level tests that records turns."""
 
     def __init__(self, *, turn_result="ok", turn_error=None, record_repr=False,
                  status=None, config=None):
@@ -168,10 +141,6 @@ class FakeChatSession:
 
     def status_snapshot(self) -> dict:
         return dict(self._status or {})
-
-    async def flush_recent_turns(self) -> None:
-        self.calls.append("flush")
-
 
 _RAG_TOKEN_PATTERN = re.compile(r"[\w-]+", re.UNICODE)
 _RAG_VECTOR_SIZE = 128

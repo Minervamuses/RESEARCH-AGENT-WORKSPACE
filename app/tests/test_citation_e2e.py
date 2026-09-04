@@ -7,8 +7,6 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 
-from conftest import FakeHistoryStore
-
 from agent.config import AgentConfig
 from agent.session import ChatSession
 from skills.citation.hub import CitationProviderHub
@@ -25,12 +23,6 @@ from tests.citation_fixtures import DOI_A, RoutingFetcher
 @tool("rag_search")
 def _rag_search(query: str) -> str:
     """Search stub not invoked by these citation journeys."""
-    return query
-
-
-@tool("recall_history")
-def _recall_history(query: str) -> str:
-    """History stub not invoked by these citation journeys."""
     return query
 
 
@@ -275,13 +267,9 @@ def _make_session(monkeypatch, tmp_path, model) -> ChatSession:
         "agent.tools.inventory.create_rag_tools",
         lambda _config: [_rag_search],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _config, store=None: _recall_history,
-    )
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     config = AgentConfig(persist_dir=str(tmp_path / "persist"))
-    return ChatSession(config, history_store=FakeHistoryStore())
+    return ChatSession(config)
 
 
 def _seed_fixture_service(session, tmp_path, fetcher=None):

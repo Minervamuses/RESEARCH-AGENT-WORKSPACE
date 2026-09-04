@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import inspect
 import shlex
 import subprocess
+import sys
 import uuid
 
+import pytest
+
+from conftest import make_astream_graph
+
 from agent.config import AgentConfig
-from agent.conversations import ConversationRepository
+from agent.conversations import (
+    ConversationRepository,
+    ConversationValidationError,
+)
+from agent.graph import build_graph
 from agent.session import ChatSession
 from agent.tools import inventory as tool_inventory
 from agent.tools.bash import create_bash_tool
@@ -17,10 +28,11 @@ from agent.tools.read_file import create_read_file_tool
 
 def _session(monkeypatch, tmp_path, *, history_factory):
     graph_kwargs: dict[str, object] = {}
+    graph = make_astream_graph(answer="offline answer")
 
     def build_graph(_config, **kwargs):
         graph_kwargs.update(kwargs)
-        return object()
+        return graph
 
     monkeypatch.setattr("agent.session.build_graph", build_graph)
     monkeypatch.setattr(
@@ -56,6 +68,44 @@ def test_session_creation_has_no_active_history_store_surface(monkeypatch, tmp_p
     assert not hasattr(session, "history_store")
     assert not hasattr(session, "_turn_store")
     assert not hasattr(session, "flush_recent_turns")
+    assert "history_store" not in inspect.signature(ChatSession.__init__).parameters
+    assert "restored_turns" not in inspect.signature(ChatSession.__init__).parameters
+    assert "history_store" not in inspect.signature(ChatSession.create).parameters
+    assert "restored_turns" not in inspect.signature(ChatSession.create).parameters
+    assert "history_store" not in inspect.signature(ChatSession.restore).parameters
+    assert "history_store" not in inspect.signature(build_graph).parameters
+    assert "history_store" not in inspect.signature(
+        tool_inventory.build_base_tools
+    ).parameters
+    assert asyncio.run(session.turn(
+        "offline prompt",
+        turn_id=uuid.uuid4().hex,
+    )) == "offline answer"
+
+
+def test_desktop_startup_does_not_load_legacy_migration_modules(tmp_path):
+    script = "\n".join([
+        "import sys",
+        "from agent.config import AgentConfig",
+        "from agent.desktop.service import DesktopService",
+        f"DesktopService(config=AgentConfig(persist_dir={str(tmp_path)!r}))",
+        "legacy = {",
+        "    'agent.conversations.legacy',",
+        "    'agent.conversations.legacy_plan',",
+        "    'agent.conversations.migration',",
+        "}",
+        "loaded = sorted(legacy.intersection(sys.modules))",
+        "assert loaded == [], loaded",
+    ])
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_inventory_and_prompt_retire_recall_but_keep_document_rag_and_filesystem_tools():
@@ -72,9 +122,10 @@ def test_session_guidance_and_status_expose_the_canonical_archive_root(
     monkeypatch,
     tmp_path,
 ):
+    archive_parent = tmp_path / "含 空白"
     session, repository, _graph_kwargs = _session(
         monkeypatch,
-        tmp_path,
+        archive_parent,
         history_factory=lambda *_args, **_kwargs: object(),
     )
     expected_root = str(repository.root.resolve())
@@ -89,8 +140,40 @@ def test_session_guidance_and_status_expose_the_canonical_archive_root(
     assert len(hint.encode("utf-8")) <= 8_192
     assert "approval-gated" in hint
     assert "fixed-string" in hint
+    assert "json.dumps" in hint
     assert "read_file" in hint
+    assert "current pending match" in hint
+    assert "offset_bytes=0" in hint
+    assert "Limit the listing with `| head -n 21`" in hint
+    assert "at most 20 matched JSON files" in hint
     assert "must not fall back to rag_search or embeddings" in hint
+
+
+def test_extended_archive_hint_does_not_claim_bash_is_available(
+    monkeypatch,
+    tmp_path,
+):
+    session, _repository, _graph_kwargs = _session(
+        monkeypatch,
+        tmp_path,
+        history_factory=lambda *_args, **_kwargs: object(),
+    )
+    session.set_thinking_mode("extended")
+
+    hint = str(session._base_prompt_history()[1].content)
+
+    assert "do not receive the approval-gated bash tool" in hint
+    assert "normal thinking mode" in hint
+    assert "Do not use document RAG or embeddings" in hint
+
+
+def test_conversation_root_display_rejects_control_and_overlong_paths(tmp_path):
+    with pytest.raises(ConversationValidationError, match="control characters"):
+        ConversationRepository(tmp_path / "line\nbreak").display_root()
+
+    overlong = tmp_path.joinpath(*(["segment"] * 600))
+    with pytest.raises(ConversationValidationError, match="rendered safely|display limit"):
+        ConversationRepository(overlong).display_root()
 
 
 def test_exact_archive_grep_then_read_file_and_paraphrase_miss_use_no_rag(

@@ -65,7 +65,6 @@ FUSION_READ_ONLY_ALLOWLIST = (
     "rag_explore",
     "rag_search",
     "rag_get_context",
-    "recall_history",
     "read_file",
 )
 
@@ -205,7 +204,6 @@ class FusionOrchestrator:
         graph = self._graph_builder(
             cloned,
             extra_tools=None,
-            history_store=self._session.history_store,
             skill_runtime_getter=None,
         )
         self._proposer_graphs[model_id] = graph

@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
@@ -33,9 +33,6 @@ from agent.conversations import (
     ConversationUnavailableError,
     ToolActivitySummary,
 )
-from agent.conversations.legacy import LegacyChromaReader, LegacyConversationReader
-from agent.conversations.legacy_plan import LegacyPlanLogReader
-from agent.conversations.migration import ConversationMigrator
 from agent.cli.slash_commands import (
     ParsedSlashCommand,
     SlashCommandContext,
@@ -82,6 +79,9 @@ from agent.turns.safety import content_text
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.storage import resolve_output_dir
+
+if TYPE_CHECKING:
+    from agent.conversations.migration import ConversationMigrator
 
 
 logger = logging.getLogger(__name__)
@@ -238,17 +238,7 @@ class DesktopService:
         self._conversation_repository = (
             conversation_repository or ConversationRepository(self.config.persist_dir)
         )
-        self._conversation_migrator = conversation_migrator or ConversationMigrator(
-            self._conversation_repository,
-            LegacyConversationReader(
-                chroma_read=LegacyChromaReader(self.config.persist_dir),
-                plan_read=lambda conversation_id: LegacyPlanLogReader(
-                    self.config,
-                    session_id=conversation_id,
-                    app_root_resolver=lambda: find_app_root(),
-                ).read_direct_answer_turns(),
-            ),
-        )
+        self._conversation_migrator = conversation_migrator
         self._catalog: DesktopProjectCatalog | None = project_catalog
         self._catalog_issue: str | None = None
         if self._catalog is None:
@@ -1026,7 +1016,7 @@ class DesktopService:
         snapshot = self._load_conversation(session_id, project_id)
         if snapshot is not None:
             return snapshot
-        migration = self._conversation_migrator.import_conversation(
+        migration = self._get_conversation_migrator().import_conversation(
             session_id,
             project_id,
         )
@@ -1040,6 +1030,17 @@ class DesktopService:
                 "canonical conversation is unavailable after import"
             )
         return snapshot
+
+    def _get_conversation_migrator(self) -> ConversationMigrator:
+        """Load legacy migration code only after canonical lookup misses."""
+        if self._conversation_migrator is None:
+            from agent.conversations.migration import create_legacy_migrator
+
+            self._conversation_migrator = create_legacy_migrator(
+                self.config,
+                self._conversation_repository,
+            )
+        return self._conversation_migrator
 
     def _read_conversation_turns(
         self,

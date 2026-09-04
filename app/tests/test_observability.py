@@ -223,10 +223,6 @@ class _StubTools:
             "agent.tools.inventory.create_rag_tools",
             lambda _cfg: [_rag_search],
         )
-        monkeypatch.setattr(
-            "agent.tools.inventory.create_history_tool",
-            lambda _cfg, store=None: _rag_search,
-        )
 
 
 def test_graph_logs_initial_repair_and_fallback_stages(

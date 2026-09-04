@@ -332,7 +332,6 @@ class LegacyPlanLogReader:
                 assistant_output=assistant_output,
                 turn_id=turn_id,
                 timestamp=timestamp,
-                persist_target="none",
                 tool_activities=activities,
             ))
         return parsed
@@ -478,7 +477,6 @@ class LegacyPlanLogReader:
                 assistant_output=assistant_output,
                 turn_id=int(heading_match.group(1)),
                 timestamp=timestamp,
-                persist_target="none",
                 tool_activities=activities,
             ))
         return parsed

@@ -4,7 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from conftest import FakeHistoryStore, QueuedModel
+from conftest import QueuedModel
 from conftest import answer_updates as _answer
 from conftest import tool_then_answer_updates as _tool_then_answer
 
@@ -40,9 +40,10 @@ class _Factory:
         self.built: list[dict] = []
         self.calls: list[dict] = []
 
-    def __call__(self, cfg, extra_tools=None, history_store=None,
-                 skill_runtime_getter=None, skill_tools=None, mcp_families=None,
-                 global_mcp_families=None):
+    def __call__(self, cfg, extra_tools=None, skill_runtime_getter=None,
+                 skill_tools=None, mcp_families=None,
+                 global_mcp_families=None, bash_approval_handler=None,
+                 bash_command_runner=None):
         self.built.append({
             "model_id": cfg.llm_model,
             "graph_recursion_limit": cfg.graph_recursion_limit,
@@ -107,7 +108,7 @@ def _make_session(monkeypatch, tmp_path, factory, *, models, cfg):
         lambda _cfg: models["aggregator"],
     )
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
-    session = ChatSession(cfg, history_store=FakeHistoryStore())
+    session = ChatSession(cfg)
     session._prompt_master_skill_text_cache = "prompt-master skill"
     session.set_thinking_mode("extended")
     return session
@@ -469,7 +470,7 @@ def test_no_active_skill_proposer_is_read_only(monkeypatch, tmp_path):
 
     state = _state_for(factory, "p1")
     assert state["effective_tools"] == [
-        "rag_explore", "rag_search", "rag_get_context", "recall_history", "read_file",
+        "rag_explore", "rag_search", "rag_get_context", "read_file",
     ]
     assert "bash" not in state["effective_tools"]
     assert state["active_skill"] is None
@@ -561,7 +562,7 @@ def test_active_skill_effective_tools_intersect_read_only(monkeypatch, tmp_path)
         instructions="# Paper",
         pinned_references={},
         tool_access=_skill_resolution([
-            "rag_explore", "rag_search", "rag_get_context", "recall_history", "bash",
+            "rag_explore", "rag_search", "rag_get_context", "bash",
         ]),
         context_block=lambda: "[Active skill]\nname: paper",
     )
@@ -570,7 +571,7 @@ def test_active_skill_effective_tools_intersect_read_only(monkeypatch, tmp_path)
 
     state = _state_for(factory, "p1")
     assert state["effective_tools"] == [
-        "rag_explore", "rag_search", "rag_get_context", "recall_history",
+        "rag_explore", "rag_search", "rag_get_context",
     ]
     assert "read_file" not in state["effective_tools"]
     assert "bash" not in state["effective_tools"]

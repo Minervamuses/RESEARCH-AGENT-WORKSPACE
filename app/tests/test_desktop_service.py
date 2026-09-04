@@ -13,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from conftest import FakeHistoryStore
 from agent.config import AgentConfig
 from agent.cli.slash_commands import (
     SlashCommand,
@@ -47,11 +46,6 @@ class _FakeSession:
         self.turn_started = asyncio.Event()
         self.turn_release = asyncio.Event()
         self.block_turn = False
-        self.flush_calls = 0
-        self.leave_turns_after_flush = False
-        self.block_flush = False
-        self.flush_started = asyncio.Event()
-        self.flush_release = asyncio.Event()
         self.turn_inputs: list[str] = []
         self.skill_turn_inputs: list[tuple[str, str | None]] = []
         self.turn_calls: list[dict[str, object]] = []
@@ -151,6 +145,7 @@ class _FakeSession:
     def status_snapshot(self) -> dict[str, object]:
         return {
             "session_id": self.session_id,
+            "conversation_root": "/tmp/canonical-conversations",
             "turn_count": 0,
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
@@ -158,15 +153,6 @@ class _FakeSession:
             "thinking_mode": self.thinking_mode,
             "mcp_families": "web_search",
         }
-
-    async def flush_recent_turns(self) -> None:
-        self.flush_calls += 1
-        self.flush_started.set()
-        if self.block_flush:
-            await self.flush_release.wait()
-        if not self.leave_turns_after_flush:
-            self.recent_turns.clear()
-
 
 class _SessionFactory:
     def __init__(self) -> None:
@@ -442,7 +428,7 @@ def _turn_params(
 def _canonical_session_factory(monkeypatch):
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _config, extra_tools=None, history_store=None, **kwargs: object(),
+        lambda _config, extra_tools=None, **kwargs: object(),
     )
     sessions: list[ChatSession] = []
 
@@ -458,7 +444,6 @@ def _canonical_session_factory(monkeypatch):
         del load_mcp
         session = ChatSession(
             config,
-            history_store=FakeHistoryStore(),
             progress_cb=progress_cb,
             loaded_skills=[],
             conversation_repository=conversation_repository,
@@ -1697,12 +1682,11 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
         assert await service.dispatch("session.shutdown", {}) == {
             "status": "stopped",
         }
-        assert session.flush_calls == 0
 
     asyncio.run(run())
 
 
-def test_session_shutdown_never_calls_legacy_flush(
+def test_session_shutdown_clears_active_session(
     tmp_path: Path,
 ) -> None:
     async def run() -> None:
@@ -1711,7 +1695,6 @@ def test_session_shutdown_never_calls_legacy_flush(
         await service.dispatch("session.create", {})
         session = factory.created
         assert session is not None
-        session.block_flush = True
 
         result = await asyncio.wait_for(
             service.dispatch("session.shutdown", {}),
@@ -1719,20 +1702,18 @@ def test_session_shutdown_never_calls_legacy_flush(
         )
 
         assert result == {"status": "stopped"}
-        assert session.flush_calls == 0
         assert service.session is None
 
     asyncio.run(run())
 
 
-def test_runtime_shutdown_is_idempotent_without_legacy_flush(tmp_path: Path) -> None:
+def test_runtime_shutdown_is_idempotent(tmp_path: Path) -> None:
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
         await service.dispatch("session.create", {})
         session = factory.created
         assert session is not None
-        session.block_flush = True
 
         assert await asyncio.wait_for(
             service.dispatch("runtime.shutdown", {}),
@@ -1740,7 +1721,6 @@ def test_runtime_shutdown_is_idempotent_without_legacy_flush(tmp_path: Path) -> 
         ) == {"status": "stopped"}
         assert service.lifecycle == "stopped"
         assert await service.dispatch("runtime.shutdown", {}) == {"status": "stopped"}
-        assert session.flush_calls == 0
         with pytest.raises(DesktopServiceError) as late_work:
             await service.dispatch("session.turn", _turn_params("too late"))
         assert late_work.value.code == "SESSION_NOT_READY"

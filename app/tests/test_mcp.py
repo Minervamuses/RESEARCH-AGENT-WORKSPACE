@@ -363,18 +363,11 @@ def test_session_create_loads_mcp_tools(monkeypatch, tmp_path):
         def bind_tools(self, tools):
             return capture_bind(tools)
 
-    @tool("recall_history")
-    def fake_recall(query: str) -> str:
-        """h"""
-        return query
-
     monkeypatch.setattr("agent.graph.get_chat_model", lambda _c: DummyModel())
     monkeypatch.setattr(
         "agent.tools.inventory.create_rag_tools",
         lambda _c: [fake_explore, fake_search, fake_context],
     )
-    monkeypatch.setattr("agent.tools.inventory.create_history_tool", lambda _c, store=None: fake_recall)
-
     async def fake_load():
         return [fake_web], {"web_fetch": "web_search"}
 
@@ -387,7 +380,6 @@ def test_session_create_loads_mcp_tools(monkeypatch, tmp_path):
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
         "web_fetch",
@@ -414,11 +406,6 @@ def test_session_create_survives_mcp_failure(monkeypatch, tmp_path):
         """c"""
         return f"{pid}:{chunk_id}"
 
-    @tool("recall_history")
-    def fake_recall(query: str) -> str:
-        """h"""
-        return query
-
     seen: dict = {}
 
     class DummyModel:
@@ -436,8 +423,6 @@ def test_session_create_survives_mcp_failure(monkeypatch, tmp_path):
         "agent.tools.inventory.create_rag_tools",
         lambda _c: [fake_explore, fake_search, fake_context],
     )
-    monkeypatch.setattr("agent.tools.inventory.create_history_tool", lambda _c, store=None: fake_recall)
-
     async def failing_load():
         raise RuntimeError("mcp unavailable")
 
@@ -446,12 +431,11 @@ def test_session_create_survives_mcp_failure(monkeypatch, tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
     session = asyncio.run(ChatSession.create(cfg, load_mcp=True))
     assert session is not None
-    # Only local agent tools bound (rag + recall_history + read_file + bash); MCP load failed.
+    # Only local agent tools bound (RAG + read_file + bash); MCP load failed.
     assert [t.name for t in seen["bound"]] == [
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
     ]

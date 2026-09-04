@@ -1,8 +1,7 @@
 """Canonical ChatSession durability and recovery boundaries.
 
-These tests replace the retired recent-turn eviction contract. They use a real
-temporary conversation repository and scripted graphs, so no provider, Ollama,
-Chroma, or user store is involved.
+These tests use a real temporary conversation repository and scripted graphs,
+so no provider, Ollama, Chroma, or user store is involved.
 """
 
 import asyncio
@@ -10,7 +9,7 @@ import uuid
 
 import pytest
 
-from conftest import FakeHistoryStore, make_astream_graph
+from conftest import make_astream_graph
 
 from agent.config import AgentConfig
 from agent.conversations import (
@@ -38,17 +37,14 @@ def _session(
     repository: ConversationRepository,
     graph,
     session_id: str,
-    history_store: FakeHistoryStore | None = None,
 ) -> ChatSession:
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+        lambda _config, extra_tools=None, **kwargs: graph,
     )
     config = AgentConfig(persist_dir=str(tmp_path))
-    config.agent_recent_turns_window = 3
     return ChatSession(
         config,
-        history_store=history_store or FakeHistoryStore(),
         conversation_repository=repository,
         project_id=PROJECT_ID,
         session_id=session_id,
@@ -188,13 +184,12 @@ def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path
     graph = make_astream_graph()
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+        lambda _config, extra_tools=None, **kwargs: graph,
     )
 
     restored = asyncio.run(ChatSession.restore(
         AgentConfig(persist_dir=str(tmp_path)),
         session_id=session_id,
-        history_store=FakeHistoryStore(),
         conversation_repository=repository,
         project_id=PROJECT_ID,
         load_mcp=False,
@@ -298,7 +293,6 @@ def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
             finished_at=_timestamp(number),
         )
 
-    history_store = FakeHistoryStore()
     graph = make_astream_graph()
     session = _session(
         monkeypatch,
@@ -306,7 +300,6 @@ def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
         repository=repository,
         graph=graph,
         session_id=session_id,
-        history_store=history_store,
     )
     asyncio.run(session.turn_outcome(
         "q13",
@@ -326,7 +319,7 @@ def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
 
     persisted = repository.load(session_id).document
     assert len(persisted.turns) == 13
-    assert history_store.adds == []
-    asyncio.run(session.flush_recent_turns())
-    assert history_store.adds == []
-    assert len(repository.load(session_id).document.turns) == 13
+    assert [turn.user_input for turn in session.recent_turns] == [
+        f"q{number}" for number in range(4, 14)
+    ]
+    assert session.status_snapshot()["recent_turn_count"] == 10

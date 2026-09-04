@@ -57,7 +57,7 @@ def _make_session(tmp_path, monkeypatch, captured):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: _CaptureGraph(captured),
+        lambda _cfg, extra_tools=None, **kwargs: _CaptureGraph(captured),
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
     return ChatSession(cfg)

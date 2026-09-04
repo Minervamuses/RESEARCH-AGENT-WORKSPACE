@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from conftest import FakeHistoryStore, make_astream_graph
+from conftest import make_astream_graph
 
 from agent.config import AgentConfig
 from agent.conversations.models import ConversationUnavailableError
@@ -73,11 +73,10 @@ def make_session(monkeypatch, tmp_path):
     ) -> ChatSession:
         monkeypatch.setattr(
             "agent.session.build_graph",
-            lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+            lambda _config, extra_tools=None, **kwargs: graph,
         )
         return ChatSession(
             AgentConfig(persist_dir=str(tmp_path)),
-            history_store=FakeHistoryStore(),
             conversation_repository=repository,
             project_id=PROJECT_ID,
             session_id=session_id or _turn_id(),
@@ -299,13 +298,12 @@ def test_restore_marks_leftover_pending_interrupted_without_running_a_graph(
     graph = make_astream_graph()
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+        lambda _config, extra_tools=None, **kwargs: graph,
     )
 
     asyncio.run(ChatSession.restore(
         AgentConfig(persist_dir=str(tmp_path)),
         session_id=session_id,
-        history_store=FakeHistoryStore(),
         conversation_repository=repository,
         project_id=PROJECT_ID,
         load_mcp=False,

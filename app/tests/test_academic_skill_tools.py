@@ -32,12 +32,6 @@ def _rag_get_context(pid: str, chunk_id: int) -> str:
     return f"{pid}:{chunk_id}"
 
 
-@tool("recall_history")
-def _recall_history(query: str) -> str:
-    """Search persisted chat history."""
-    return query
-
-
 @tool("read_file")
 def _read_file(path: str) -> str:
     """Read a text file."""
@@ -71,7 +65,6 @@ def _all_tools() -> list:
         _rag_explore,
         _rag_search,
         _rag_get_context,
-        _recall_history,
         _read_file,
         _bash,
         _full_web_search,
@@ -102,7 +95,6 @@ def test_writing_activation_does_not_require_web_search(tmp_path):
             _rag_explore,
             _rag_search,
             _rag_get_context,
-            _recall_history,
             _read_file,
             _bash,
         ],
@@ -140,10 +132,6 @@ def test_academic_skill_writer_binding_matches_normal_mode(
         "agent.tools.inventory.create_rag_tools",
         lambda _cfg: [_rag_explore, _rag_search, _rag_get_context],
     )
-    monkeypatch.setattr(
-        "agent.tools.inventory.create_history_tool",
-        lambda _cfg, store=None: _recall_history,
-    )
     monkeypatch.setattr("agent.tools.inventory.create_read_file_tool", lambda _cfg: _read_file)
     monkeypatch.setattr("agent.tools.inventory.create_bash_tool", lambda _cfg: _bash)
 
@@ -163,7 +151,6 @@ def test_academic_skill_writer_binding_matches_normal_mode(
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
     ]

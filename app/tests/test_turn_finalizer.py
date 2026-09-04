@@ -8,7 +8,7 @@ import uuid
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from conftest import FakeHistoryStore, make_astream_graph
+from conftest import make_astream_graph
 
 from agent.config import AgentConfig
 from agent.session import ChatSession
@@ -30,19 +30,17 @@ def make_session(monkeypatch, tmp_path):
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
+        lambda _cfg, extra_tools=None, **kwargs: make_astream_graph(),
     )
 
-    def _make(answer="ok", window: int = 5, graph_recursion_limit: int = 64):
+    def _make(answer="ok", graph_recursion_limit: int = 64):
         cfg = AgentConfig(
             persist_dir=str(tmp_path / "persist"),
             graph_recursion_limit=graph_recursion_limit,
         )
-        cfg.agent_recent_turns_window = window
-        store = FakeHistoryStore()
-        session = ChatSession(cfg, history_store=store)
+        session = ChatSession(cfg)
         session.graph = make_astream_graph(answer=answer)
-        return session, store
+        return session
 
     return _make
 
@@ -173,7 +171,7 @@ def _assert_save_metrics(
 
 
 def test_clean_turn_returns_outcome_and_records(make_session):
-    session, _ = make_session(answer="plain answer")
+    session = make_session(answer="plain answer")
     outcome = asyncio.run(session.turn_outcome("hello"))
     assert isinstance(outcome, TurnOutcome)
     assert outcome.text == "plain answer"
@@ -185,14 +183,14 @@ def test_clean_turn_returns_outcome_and_records(make_session):
 
 
 def test_status_reports_configured_graph_recursion_limit(make_session):
-    session, _ = make_session(graph_recursion_limit=73)
+    session = make_session(graph_recursion_limit=73)
 
     assert session.status_snapshot()["graph_recursion_limit"] == 73
 
 
 @pytest.mark.parametrize("draft", ["", "   \n\t"])
 def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, draft):
-    session, _ = make_session(answer=draft)
+    session = make_session(answer=draft)
     outcome = asyncio.run(session.turn_outcome("請整理結果"))
     assert "未能產生可顯示" in outcome.text
     assert session.recent_turns[-1].assistant_output == outcome.text
@@ -207,7 +205,7 @@ def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, dra
     '{"type":"tool_use","name":"citation_workflow","input":{"action":"sources"}}',
 ])
 def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
-    session, _ = make_session(answer=draft)
+    session = make_session(answer=draft)
     outcome = asyncio.run(session.turn_outcome("繼續"))
     assert "citation_workflow" not in outcome.text
     assert draft not in session.recent_turns[-1].assistant_output
@@ -220,7 +218,7 @@ def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
     "The tool call begins only after approval.",
 ])
 def test_plain_tool_prose_is_not_a_protocol_artifact(make_session, draft):
-    session, _ = make_session(answer=draft)
+    session = make_session(answer=draft)
     outcome = asyncio.run(session.turn_outcome("explain"))
     assert outcome.text == draft
     assert session.turn_logs[-1]["recovery"] is None
@@ -238,7 +236,7 @@ def test_structured_tool_content_is_detected_before_flattening():
 
 
 def test_turn_and_outcome_return_finalized_text(make_session):
-    session, _ = make_session(answer="wrapped")
+    session = make_session(answer="wrapped")
     assert asyncio.run(session.turn("q")) == "wrapped"
     outcome = asyncio.run(session.turn_outcome("q"))
     assert outcome.text == "wrapped"
@@ -246,7 +244,7 @@ def test_turn_and_outcome_return_finalized_text(make_session):
 
 
 def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):
-    session, _ = make_session(
+    session = make_session(
         answer="Transformers work [[cite:src-known]]. Really [[cite:src-known]]."
     )
     session.activate_citation_skill()
@@ -267,7 +265,7 @@ def test_raw_citation_styles_are_not_blocked_or_rewritten(
         "https://doi.org/10.48550/arXiv.1706.03762.\n\n"
         "## References\n- Vaswani et al. (2017)."
     )
-    session, _ = make_session(answer=draft)
+    session = make_session(answer=draft)
     if active:
         session.activate_citation_skill()
         _seed_verified_source(session, tmp_path)
@@ -282,7 +280,7 @@ def test_raw_citation_styles_are_not_blocked_or_rewritten(
 def test_save_artifact_does_not_override_model_prose_and_records_metrics(
     make_session, tmp_path, caplog,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
 
@@ -315,7 +313,7 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
 def test_multiple_save_artifacts_aggregate_without_invariant_failure(
     make_session, tmp_path,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     second = _save_tool_message(session, call_id="save-2")
@@ -346,7 +344,7 @@ def test_multiple_save_artifacts_aggregate_without_invariant_failure(
 def test_registry_mismatch_affects_telemetry_but_not_model_prose(
     make_session, tmp_path, field, forged_value,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
@@ -368,7 +366,7 @@ def test_registry_mismatch_affects_telemetry_but_not_model_prose(
 def test_forged_receipt_identifier_never_reaches_logs(
     make_session, tmp_path, caplog,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
@@ -392,7 +390,7 @@ def test_forged_receipt_identifier_never_reaches_logs(
 
 
 def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(_finalize_pending(
@@ -408,7 +406,7 @@ def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
 
 
 def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     save_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
@@ -445,7 +443,7 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
 
 
 def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_path):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     message = _save_tool_message(session)
@@ -469,7 +467,7 @@ def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_p
 def test_all_save_failures_do_not_deterministically_replace_model_draft(
     make_session, tmp_path,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(_finalize_pending(
@@ -492,7 +490,7 @@ def test_all_save_failures_do_not_deterministically_replace_model_draft(
 def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     make_session, tmp_path, draft,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(_finalize_pending(
@@ -512,7 +510,7 @@ def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
     make_session,
     tmp_path,
 ):
-    session, _ = make_session()
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     draft = "Saved according to the tool."
@@ -550,11 +548,11 @@ def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
     assert "src-known" not in canonical_text
 
 
-def test_small_window_preserves_canonical_answer_without_chroma_eviction(
+def test_canonical_answer_survives_later_turn_without_secondary_store(
     make_session,
     tmp_path,
 ):
-    session, store = make_session(window=1)
+    session = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     tool_call = {
@@ -579,12 +577,11 @@ def test_small_window_preserves_canonical_answer_without_chroma_eviction(
     assert [(activity.name, activity.status) for activity in first.tool_activities] == [
         ("citation_workflow", "ok"),
     ]
-    assert store.adds == []
     assert not hasattr(first, "sources")
 
 
 def test_user_doi_in_input_is_never_auto_registered(make_session):
-    session, _ = make_session(answer="plain answer")
+    session = make_session(answer="plain answer")
     outcome = asyncio.run(
         session.turn_outcome("請看 https://doi.org/10.1234/user-paper")
     )
@@ -601,7 +598,7 @@ def test_user_doi_in_input_is_never_auto_registered(make_session):
 
 
 def test_dangling_cite_marker_blocks_in_citation_mode(make_session, tmp_path):
-    session, _ = make_session(answer="Bogus [[cite:src-ghost]].")
+    session = make_session(answer="Bogus [[cite:src-ghost]].")
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
@@ -609,7 +606,7 @@ def test_dangling_cite_marker_blocks_in_citation_mode(make_session, tmp_path):
 
 
 def test_verified_marker_blocks_outside_citation_mode(make_session, tmp_path):
-    session, _ = make_session(answer="Known [[cite:src-known]].")
+    session = make_session(answer="Known [[cite:src-known]].")
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
     assert any(
@@ -621,7 +618,7 @@ def test_plain_web_link_passes_and_renderer_skips_outside_citation_mode(
     make_session, tmp_path,
 ):
     draft = "See [docs](https://example.org/guide) and https://example.org/x"
-    session, _ = make_session(answer=draft)
+    session = make_session(answer=draft)
     _seed_verified_source(session, tmp_path)
     outcome = asyncio.run(session.turn_outcome("q"))
     assert outcome.validation_errors == []
@@ -630,7 +627,7 @@ def test_plain_web_link_passes_and_renderer_skips_outside_citation_mode(
 
 
 def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path):
-    session, _ = make_session(answer="plain")
+    session = make_session(answer="plain")
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     assert session._build_sources_hint() is not None
@@ -640,7 +637,7 @@ def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path
 
 
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):
-    session, _ = make_session()
+    session = make_session()
     assert session._build_sources_hint() is None
     session.activate_citation_skill()
     assert session._build_sources_hint() is None
@@ -654,7 +651,7 @@ def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_pat
 
 
 def test_extended_mode_early_error_goes_through_finalizer(make_session):
-    session, _ = make_session()
+    session = make_session()
     session.thinking_mode = "extended"
     outcome = asyncio.run(session.turn_outcome("question"))
     assert isinstance(outcome, TurnOutcome)

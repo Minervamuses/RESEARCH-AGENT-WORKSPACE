@@ -1,6 +1,7 @@
 """Slash command parsing, registry, and local command handlers."""
 
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -343,6 +344,8 @@ async def _handle_status(
     lines = [
         "Session status:",
         f"session_id: {status['session_id']}",
+        "conversation_root: "
+        + json.dumps(status["conversation_root"], ensure_ascii=False),
         f"turn_count: {status['turn_count']}",
         f"recent_turn_count: {status['recent_turn_count']}",
         f"graph_recursion_limit: {status['graph_recursion_limit']}",

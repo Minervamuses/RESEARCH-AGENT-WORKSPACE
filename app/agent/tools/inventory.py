@@ -4,15 +4,14 @@ This module owns three things so prompts, graph binding, and skill policy
 cannot drift apart:
 
 1. the declarative metadata for the local base tools (knowledge-base search,
-   chat-history recall, file reading, shell);
+   file reading, shell);
 2. the ordered tool-name list consumed by the graph and session;
 3. the prompt block describing those tools, their selection policy, and the
    base workflow.
 
-Only :func:`build_base_tools` instantiates tools (and the ``recall_history``
-store). :func:`base_tool_names` and :func:`render_base_tool_prompt` read static
-metadata only, so importing this module or rendering the prompt never touches
-Chroma, the history store, or any external service.
+Only :func:`build_base_tools` instantiates tools. :func:`base_tool_names` and
+:func:`render_base_tool_prompt` read static metadata only, so importing this
+module or rendering the prompt never touches Chroma or any external service.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from typing import Iterable
 
 from agent.adapters.langchain.rag_tools import create_rag_tools
 from agent.config import AgentConfig
-from agent.history_rag import create_history_tool
 from agent.tools.bash import create_bash_tool
 from agent.tools.read_file import create_read_file_tool
 
@@ -72,23 +70,6 @@ BASE_TOOL_DOCS: tuple[BaseToolDoc, ...] = (
         ),
     ),
     BaseToolDoc(
-        name="recall_history",
-        family="history",
-        section="Conversation history tool (always available):",
-        description=(
-            "Search persisted prior chat turns from this user, including older "
-            "parts of the current session and previous CLI sessions. Each user "
-            "prompt and each assistant response is stored as a separate entry; "
-            "results carry role, turn_id, and timestamp.\n"
-            "   Use when the user references earlier chat content that you "
-            "cannot see in the current prompt.\n"
-            "   Do NOT call this for content already visible in the current "
-            "conversation.\n"
-            "   Do NOT use this as a substitute for rag_search on general "
-            "knowledge questions."
-        ),
-    ),
-    BaseToolDoc(
         name="read_file",
         family="file",
         section="Local file-reading tool (always available):",
@@ -127,7 +108,6 @@ _BASE_TOOL_NAMES: tuple[str, ...] = tuple(doc.name for doc in BASE_TOOL_DOCS)
 
 _TOOL_SELECTION_POLICY = """Tool selection policy:
 - Questions about the indexed project or research notes → prefer `rag_explore` / `rag_search` / `rag_get_context`.
-- Questions about earlier chat history that is no longer visible → prefer `recall_history`.
 - Questions about local files → prefer `read_file`.
 - Filesystem enumeration or shell ops the user explicitly asked for → use `bash` (always with a clear description).
 - Questions needing live external information → prefer Web Search MCP.
@@ -163,7 +143,6 @@ def base_tool_names(extra_tools: list | None = None) -> list[str]:
 
 def build_base_tools(
     config: AgentConfig,
-    history_store=None,
     extra_tools: list | None = None,
     *,
     bash_approval_handler=None,
@@ -183,7 +162,6 @@ def build_base_tools(
 
     tools = [
         *create_rag_tools(config),
-        create_history_tool(config, store=history_store),
         create_read_file_tool(config),
         create_bash_tool(config, **bash_kwargs),
     ]
@@ -201,8 +179,7 @@ def render_base_tool_prompt() -> str:
     """Render the base tool descriptions, selection policy, and workflow.
 
     Reads only the static :data:`BASE_TOOL_DOCS` metadata and the policy/
-    workflow text. It does not call :func:`build_base_tools`, instantiate the
-    ``recall_history`` tool, or read any store.
+    workflow text. It does not call :func:`build_base_tools` or read any store.
     """
     blocks: list[str] = []
     last_section: str | None = None
