@@ -128,6 +128,14 @@
 - **Verification:** 尚未執行Phase 03 tests；下一步先提交focused Red lifecycle/host/protocol contract tests，觀察預期失敗後再實作vertical slice。
 - **Blockers:** None。
 
+## 2026-09-04 19:27 CST — Phase 03: Red session lifecycle contract
+
+- **Status:** `In progress`。
+- **Changes:** 新增`app/tests/test_session_lifecycle.py`，以real temporary `ConversationRepository`與scripted graph固定六個核心契約：graph前pending含original/semantic input、stable logical ID與turnNumber；pending write failure零graph呼叫；Desktop final validator先於completed commit且commit failure不回success；completed同-ID retry不重跑graph；12個歷史turn只注入最後10 pairs且current恰一次；restore把leftover pending轉interrupted且不執行graph。
+- **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_session_lifecycle.py -q`，exit 1，`6 failed, 1 warning in 0.19s`。六項都在construction boundary因`ChatSession.__init__/restore`尚不接受`conversation_repository`失敗，符合Red預期；graph/provider未被誤執行。warning是既有LangGraph `allowed_objects` deprecation。
+- **Evidence reference:** Red commit=`49f706a`。
+- **Blockers:** None；下一步實作最小repository/session lifecycle Green，再擴到host/protocol Red。
+
 <!--
 Material implementation events append with this shape:
 
