@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import unicodedata
+import uuid
 
 from langgraph.errors import GraphRecursionError
 
@@ -116,75 +117,75 @@ async def _run(
 
     _print_banner(session)
 
-    try:
-        while True:
-            try:
-                raw_input = await reader(">> ")
-            except (EOFError, KeyboardInterrupt):
-                print()
-                break
+    while True:
+        try:
+            raw_input = await reader(">> ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
 
-            if _is_blank_input(raw_input):
-                continue
-            if _is_exit_input(raw_input):
-                break
+        if _is_blank_input(raw_input):
+            continue
+        if _is_exit_input(raw_input):
+            break
 
-            user_input = raw_input.strip()
-            skill_name = None
+        display_input = raw_input.strip()
+        user_input = display_input
+        skill_name = None
+        try:
+            parsed = parse_slash_command(user_input)
+        except SlashCommandError as exc:
+            _print_cli_message(f"(cli error: {exc})")
+            continue
+
+        if parsed is not None:
             try:
-                parsed = parse_slash_command(user_input)
+                result = await execute_slash_command(
+                    parsed,
+                    SlashCommandContext(
+                        session=session,
+                        registry=command_registry,
+                    ),
+                )
             except SlashCommandError as exc:
                 _print_cli_message(f"(cli error: {exc})")
                 continue
 
-            if parsed is not None:
-                try:
-                    result = await execute_slash_command(
-                        parsed,
-                        SlashCommandContext(
-                            session=session,
-                            registry=command_registry,
-                        ),
-                    )
-                except SlashCommandError as exc:
-                    _print_cli_message(f"(cli error: {exc})")
-                    continue
+            if result.clear_screen:
+                _clear_terminal()
+                _print_banner(session)
+            if result.message:
+                _print_cli_message(result.message)
+            if result.should_exit:
+                break
+            if not result.followup_input:
+                continue
+            # e.g. /citation <text>: retain the original slash command for
+            # display while only the follow-up prompt enters model context.
+            user_input = result.followup_input
+            skill_name = result.skill_name
 
-                if result.clear_screen:
-                    _clear_terminal()
-                    _print_banner(session)
-                if result.message:
-                    _print_cli_message(result.message)
-                if result.should_exit:
-                    break
-                if not result.followup_input:
-                    continue
-                # e.g. /citation <text>: the trailing text becomes a normal
-                # agent turn (recorded in history/trace like any user turn).
-                user_input = result.followup_input
-                skill_name = result.skill_name
-
-            try:
-                response = await session.turn(
-                    user_input,
-                    skill_name=skill_name,
-                )
-            except GraphRecursionError:
-                response = (
-                    f"(agent hit graph recursion limit of "
-                    f"{config.graph_recursion_limit} supersteps without settling. "
-                    "Try rephrasing or narrowing the question.)"
-                )
-            except Exception as exc:
-                response = f"(agent error: {type(exc).__name__}: {exc})"
-            if not str(response).strip():
-                response = build_recovery_message(
-                    user_input=user_input,
-                    had_tool_results=False,
-                )
-            print(f"\n{response}\n")
-    finally:
-        await session.flush_recent_turns()
+        try:
+            response = await session.turn(
+                user_input,
+                display_input=display_input,
+                turn_id=uuid.uuid4().hex,
+                skill_name=skill_name,
+            )
+        except GraphRecursionError:
+            response = (
+                f"(agent hit graph recursion limit of "
+                f"{config.graph_recursion_limit} supersteps without settling. "
+                "Try rephrasing or narrowing the question.)"
+            )
+        except Exception as exc:
+            response = f"(agent error: {type(exc).__name__}: {exc})"
+        if not str(response).strip():
+            response = build_recovery_message(
+                user_input=user_input,
+                had_tool_results=False,
+            )
+        print(f"\n{response}\n")
 
 
 def main():

@@ -40,12 +40,13 @@ def _run_cli(
     return create_kwargs
 
 
-def test_chat_cli_flushes_recent_turns_on_quit(monkeypatch):
+def test_chat_cli_writes_each_turn_without_exit_flush(monkeypatch):
     session = FakeChatSession()
 
     _run_cli(monkeypatch, session, ["hello", "q"])
 
-    assert session.calls == ["turn:hello", "flush"]
+    assert session.calls == ["turn:hello"]
+    assert session.turn_requests[0]["display_input"] == "hello"
 
 
 def test_chat_cli_builds_config_from_single_graph_limit_source(monkeypatch):
@@ -124,7 +125,7 @@ def test_chat_cli_normalizes_quit_inputs(monkeypatch, quit_input):
 
     _run_cli(monkeypatch, session, [quit_input])
 
-    assert session.calls == ["flush"]
+    assert session.calls == []
 
 
 def test_chat_cli_blank_input_does_not_exit(monkeypatch):
@@ -132,7 +133,7 @@ def test_chat_cli_blank_input_does_not_exit(monkeypatch):
 
     _run_cli(monkeypatch, session, ["", "   ", "​", "﻿", "q"])
 
-    assert session.calls == ["flush"]
+    assert session.calls == []
 
 
 def test_chat_cli_does_not_normalize_regular_messages(monkeypatch):
@@ -140,15 +141,15 @@ def test_chat_cli_does_not_normalize_regular_messages(monkeypatch):
 
     _run_cli(monkeypatch, session, ["hello​", "q"])
 
-    assert session.calls == ["turn:'hello\\u200b'", "flush"]
+    assert session.calls == ["turn:'hello\\u200b'"]
 
 
-def test_chat_cli_flushes_recent_turns_on_turn_error(monkeypatch):
+def test_chat_cli_does_not_need_an_exit_flush_after_turn_error(monkeypatch):
     session = FakeChatSession(turn_error=RuntimeError("boom"))
 
     _run_cli(monkeypatch, session, ["hello", "q"])
 
-    assert session.calls == ["turn:hello", "flush"]
+    assert session.calls == ["turn:hello"]
 
 
 def test_chat_cli_never_prints_a_silent_blank_response(monkeypatch, capsys):
@@ -158,7 +159,7 @@ def test_chat_cli_never_prints_a_silent_blank_response(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert "未能產生可顯示" in output
-    assert session.calls == ["turn:請回答", "flush"]
+    assert session.calls == ["turn:請回答"]
 
 
 def test_chat_cli_slash_help_stays_local(monkeypatch, capsys):
@@ -175,7 +176,7 @@ def test_chat_cli_slash_help_stays_local(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Available slash commands:" in output
     assert "/help" in output
-    assert session.calls == ["flush"]
+    assert session.calls == []
 
 
 def test_chat_cli_routes_dynamic_skill_with_exact_trailing_prompt(monkeypatch):
@@ -192,8 +193,10 @@ def test_chat_cli_routes_dynamic_skill_with_exact_trailing_prompt(monkeypatch):
 
     assert session.calls == [
         'turn:draft  "quoted"   text skill:writer',
-        "flush",
     ]
+    assert session.turn_requests[0]["display_input"] == (
+        '/writer draft  "quoted"   text'
+    )
 
 
 def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
@@ -216,7 +219,7 @@ def test_chat_cli_slash_status_reports_session(monkeypatch, capsys):
     assert "last_tool_calls: rag_search x1" in output
     assert "thinking_mode: extended" in output
     assert "mcp_families: web_search" in output
-    assert session.calls == ["flush"]
+    assert session.calls == []
 
 
 def test_chat_cli_slash_quit_exits_without_agent_turn(monkeypatch):
@@ -230,4 +233,4 @@ def test_chat_cli_slash_quit_exits_without_agent_turn(monkeypatch):
 
     _run_cli(monkeypatch, session, ["/quit"])
 
-    assert session.calls == ["flush"]
+    assert session.calls == []

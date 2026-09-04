@@ -9,6 +9,7 @@ explicit parameters (raise_on_add, record_repr, ...), never silently dropped.
 import hashlib
 import math
 import re
+import uuid
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -112,13 +113,25 @@ class FakeChatSession:
         self._turn_error = turn_error
         self._record_repr = record_repr
         self._status = status
+        self.turn_requests: list[dict[str, object]] = []
 
     async def turn(
         self,
         user_input: str,
         *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
         skill_name: str | None = None,
     ) -> str:
+        parsed_turn_id = uuid.UUID(hex=str(turn_id))
+        assert parsed_turn_id.version == 4
+        assert parsed_turn_id.hex == turn_id
+        self.turn_requests.append({
+            "user_input": user_input,
+            "display_input": display_input,
+            "turn_id": turn_id,
+            "skill_name": skill_name,
+        })
         skill_suffix = f" skill:{skill_name}" if skill_name is not None else ""
         self.calls.append(
             (
