@@ -10,7 +10,7 @@
 | 02 — Legacy import bridge | Complete | 2026-09-04 18:48 CST | 2026-09-04 19:14 CST | Mapping, Red/Green tests, fault review, and commits below | None |
 | 03 — Write-through turn lifecycle | Complete | 2026-09-04 19:23 CST | 2026-09-04 20:30 CST | Atomic lifecycle, host/protocol cutover, fault tests, and fresh review below | None |
 | 04 — Host/catalog/retry cutover | Complete | 2026-09-04 20:39 CST | 2026-09-04 22:26 CST | Catalog recovery, full lifecycle paging, explicit retry, display-only commands, and fresh review below | None |
-| 05 — Remove Product Plan Mode | Not started | — | — | — | None |
+| 05 — Remove Product Plan Mode | In progress | 2026-09-04 22:31 CST | — | Preflight inventory below | None |
 | 06 — Retire chat-history Chroma | Not started | — | — | — | None |
 | 07 — Migration, faults, docs | Not started | — | — | — | None |
 
@@ -208,6 +208,17 @@
 - **Evidence references:** Phase start=`deb6ae2`; catalog Red/Green=`15ed991`/`d0911a9`; display-only Red/Green=`a1d81db`/`1fe8b3c`; retry/protocol/React Red=`fbec211`/`0bfd47d`; protocol/catalog/UX/Rust/CLI Green=`b8a999f`, `d255c28`, `adfb72d`, `526425b`, `5bdc913`; extension apply Red/Green=`2483e77`/`68e413a`.
 - **Blockers:** None。
 - **Next action:** reread durable authority and begin Phase 05 removal of Product Plan Mode. Plan fields may now be removed because active durability, restore, retry, and display-only lifecycle no longer depend on them.
+
+## 2026-09-04 22:31 CST — Phase 05: Product Plan Mode removal preflight
+
+- **Status:** `Not started` → `In progress`。
+- **Runtime/ownership gate:** Phase 04 completion commit=`b546731`、worktree clean；root=`/home/minervamuses/research-agent-workspace`、branch=`GUI`、WSL/Linux、Conda `app`，Python 3.13.14、Poetry 2.4.1、Node 24.18.0、Cargo 1.97.1。仍只使用temporary fixtures，不操作真實store、legacy files、provider、Ollama或credentials。
+- **Active Product Plan surfaces:** exact residue inventory found CLI `/mode`, banner/status fields, session/journal plan state and hint, extended-thinking hint injection, Desktop `session.set_mode`, control snapshots, session DTO fields, fixture controls, protocol-v1 contract/fixtures plus Python/TS/Rust validators, and React Plan buttons. The journal still contains unreachable Plan writer branches even though canonical completion no longer calls them; they remain removal scope rather than a supported compatibility path.
+- **Migration/historical allowlist:** `AgentConfig.plan_logs_dir`, protected-root handling, strict v1/v2 Plan log parsing, legacy fixture bytes, and `agent.conversations` importer calls remain solely for non-destructive legacy migration. Historical `harness/`, `note/`, and unrelated `issue/` records are not rewritten. Ordinary extension planning models, test plans, URLs containing `model`, and natural-language planning are not Product Plan Mode residues.
+- **Preserved controls:** `/thinking`, `session.set_thinking`, `thinkingMode`, normal/extended orchestration, proposer/reviewer/reviser/fusion, Skills, Citation, SafeContent, approvals, and canonical pending/completed ordering remain unchanged except for direct type/caller cleanup caused by removing Plan fields.
+- **Protocol boundary:** repository search still finds only the lockstep Python/TypeScript/Rust/React source checkout and no supported external protocol-v1 consumer. Old `session.set_mode` input must become an unknown method; no deprecated alias or compatibility adapter will be retained.
+- **Verification:** Phase 05 characterization/Red checks have not yet run. Next step is to record the current focused baseline, then commit tests that require the removed CLI/protocol/UI surface while retaining legacy parser and extended-thinking coverage.
+- **Blockers:** None。
 
 <!--
 Material implementation events append with this shape:

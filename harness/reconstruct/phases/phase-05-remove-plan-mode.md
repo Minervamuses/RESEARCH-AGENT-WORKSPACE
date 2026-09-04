@@ -1,6 +1,6 @@
 # Phase 05 — 移除產品 Plan Mode
 
-Status: Not started
+Status: In progress
 
 ## Objective
 
