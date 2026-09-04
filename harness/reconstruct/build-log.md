@@ -8,7 +8,7 @@
 |---|---|---|---|---|---|
 | 01 — Canonical conversation contract | Complete | 2026-09-04 18:20 CST | 2026-09-04 18:44 CST | Contract, Red/Green tests, review, and commits below | None |
 | 02 — Legacy import bridge | Complete | 2026-09-04 18:48 CST | 2026-09-04 19:14 CST | Mapping, Red/Green tests, fault review, and commits below | None |
-| 03 — Write-through turn lifecycle | Not started | — | — | — | None |
+| 03 — Write-through turn lifecycle | In progress | 2026-09-04 19:23 CST | — | Preflight sequence/ownership mapping below | None |
 | 04 — Host/catalog/retry cutover | Not started | — | — | — | None |
 | 05 — Remove Product Plan Mode | Not started | — | — | — | None |
 | 06 — Retire chat-history Chroma | Not started | — | — | — | None |
@@ -114,6 +114,19 @@
 - **Limitations:** legacy display-only transcript可完整顯示，但因無法證明historical thinking mode，不產生sidebar title或model context；這是已測試的fail-closed取捨，不是遺漏。未使用Ollama/provider、credentials、`app/store/`或真實user data。
 - **Blockers:** None。
 - **Next action:** 重新讀durable authority後開始Phase 03 atomic write/read vertical cutover。
+
+## 2026-09-04 19:23 CST — Phase 03: atomic lifecycle preflight
+
+- **Status:** `Not started` → `In progress`。
+- **Runtime/ownership gate:** Phase 02 completion commit=`464b761`；使用者操作前提澄清commit=`e9eaf23`；worktree clean；root=`/home/minervamuses/research-agent-workspace`、branch=`GUI`、WSL/Linux、Conda`app`、Python 3.13.14、Poetry 2.4.1。Phase 03–05保持app-offline且不操作真實user store。
+- **Observed sequence before cutover:** `turn_outcome`取得per-session async lock → caller僅傳semantic input且Desktop/Python在host內臨時產生不同用途的turn ID → `_prompt_history`從`TurnJournal.recent_turns`組裝 → graph/provider/tools → `finalize_and_record`執行SafeContent、citation render/gate與Desktop final-text validator → `TurnJournal.record_turn`才建立integer ID，Plan mode立即寫Markdown；normal mode僅在window overflow、switch或shutdown寫conversation Chroma → caller收到answer。故prompt目前不是write-through，且restore/read仍合併Chroma、Plan與current memory。
+- **Target sequence and single authority:** 同一session lock內：驗證caller logical UUIDv4 → load/recover canonical snapshot → exact duplicate completed直接回durable result → new或explicit retry先atomic寫`pending`並配置/保留turnNumber → 從該snapshot取latest-10 completed/context-eligible pairs，另把current semantic input恰加入一次 → graph/provider/tools →既有SafeContent/citation/final-text chokepoint → atomic transition至`completed` → 才回terminal success。Canonical `ConversationRepository`是transcript唯一writer/read/restore authority；TurnJournal只可保留暫時control/telemetry，不再寫Chroma/Plan、evict/drop或參與restore merge。
+- **Identity/input mapping:** Desktop React在`requestTracked`前產生canonical lowercase UUIDv4 hex，`requestId`只作transport correlation；TS/Rust逐字轉送`turnId`；Python驗證並持久化。CLI每次agent turn產生同型ID。普通turn的display/semantic相同；one-shot Skill保留原slash input為`displayInput`，剝除command wrapper後的follow-up為`semanticInput`；restore只恢復transcript，不恢復active Skill、approval或tool policy。
+- **Failure/recovery boundaries:** pending publish失敗時provider/tool不得啟動；可捕捉execution/finalization exception把已accepted turn轉`failed`，不保存raw exception或fake assistant output；completed publish未確認時caller不得收到success。Process crash無法catch，留下的唯一pending在下次ChatSession materialization/load時一次性轉`interrupted`且不自動replay；explicit retry才把同ID/turnNumber轉回pending。若publish已成功但fsync/response delivery回報不明，下一次同ID load以durable completed result為準且不重跑graph。
+- **Host/read cutover:** CLI與Desktop materialize/transcript/summary/select/switch改讀同一JSON；target JSON不存在的selected legacy session先以Phase 02 importer做單會話all-or-nothing import，失敗即unavailable且不建立空transcript。第一個pending JSON已足以供basic catalog reconcile補回索引；完整catalog corruption/paging/failure UX留Phase 04。Switch/create/shutdown不再flush legacy conversation state，Python/TS/Rust移除`flushed`與flush-only error contract；暫留Plan control只改prompt/control state，不建立Plan log。
+- **Preservation/test mapping:** 新增focused session lifecycle tests固定prompt-first、final-commit-before-return、provider exception、pending recovery、duplicate completed與latest-10+current-once；既有normal/extended/citation/one-shot Skill/tool-policy tests保留作route evidence。Desktop/CLI及Python/TS/Rust protocol tests固定logical ID、JSON restart/select/continue、legacy import ordering、no-flush與shutdown truthfulness；不呼叫live provider、Ollama或真實migration。
+- **Verification:** 尚未執行Phase 03 tests；下一步先提交focused Red lifecycle/host/protocol contract tests，觀察預期失敗後再實作vertical slice。
+- **Blockers:** None。
 
 <!--
 Material implementation events append with this shape:

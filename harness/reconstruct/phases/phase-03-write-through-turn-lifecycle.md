@@ -1,6 +1,6 @@
 # Phase 03 — 原子切換 write-through vertical slice
 
-Status: Not started
+Status: In progress
 
 ## Objective
 
