@@ -199,7 +199,9 @@ class _CoordinatorSession:
         *,
         turn_id,
         retry=False,
+        failure_retryable=True,
     ):
+        del failure_retryable
         snapshot = self._snapshot
         values = {
             "turn_id": turn_id,

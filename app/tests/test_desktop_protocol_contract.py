@@ -175,6 +175,11 @@ def test_extension_apply_is_a_durable_display_only_turn() -> None:
     }
     assert result["accepted"] == {"type": "boolean", "required": True}
     assert result["persisted"] == {"type": "boolean", "required": True}
+    assert result["displayInput"] == {
+        "type": "string",
+        "required": True,
+        "maxBytes": 256,
+    }
     assert result["text"] == {
         "type": "string",
         "required": True,
@@ -193,6 +198,84 @@ def test_session_turn_failure_lifecycle_details_are_exact_and_bounded() -> None:
         "accepted": {"type": "boolean", "required": True},
         "persisted": {"type": "boolean", "required": True},
     }
+
+
+def test_extension_apply_uses_the_same_durable_result_and_error_correlation() -> None:
+    request = {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a1",
+        "method": "extensions.apply",
+        "params": {
+            "previewId": "extension-preview-opaque-1",
+            "approvedBindingHashes": [],
+            "turnId": "000000000000400080000000000000a1",
+            "retry": False,
+        },
+    }
+    result_data = {
+        "sessionId": "0123456789abcdef0123456789abcdef",
+        "turnId": "000000000000400080000000000000a1",
+        "turnNumber": 1,
+        "state": "completed",
+        "accepted": True,
+        "persisted": True,
+        "displayInput": "One-shot local action: apply reviewed extension changes [hash]",
+        "text": "Extension Management applied revision 0 -> 1\ndiagnostics: 0\nrestart_required: false",
+        "previousRevision": 0,
+        "appliedRevision": 1,
+        "restartRequired": False,
+        "items": [],
+        "diagnostics": [],
+    }
+    validate_result_data("extensions.apply", result_data)
+
+    incomplete = {**result_data, "state": "pending"}
+    with pytest.raises(ProtocolError, match="unknown enum value"):
+        validate_result_data("extensions.apply", incomplete)
+
+    tracker = TraceValidator()
+    tracker.accept(validate_message(request))
+    with pytest.raises(ProtocolError, match="data.turnId"):
+        tracker.accept(
+            validate_message(
+                {
+                    "protocolVersion": 1,
+                    "messageType": "result",
+                    "requestId": request["requestId"],
+                    "ok": True,
+                    "data": {
+                        **result_data,
+                        "turnId": "000000000000400080000000000000a2",
+                    },
+                }
+            )
+        )
+
+    tracker = TraceValidator()
+    tracker.accept(validate_message(request))
+    with pytest.raises(ProtocolError, match="error.details.turnId"):
+        tracker.accept(
+            validate_message(
+                {
+                    "protocolVersion": 1,
+                    "messageType": "result",
+                    "requestId": request["requestId"],
+                    "ok": False,
+                    "error": {
+                        "code": "EXTENSION_APPLY_FAILED",
+                        "message": "Extension apply failed.",
+                        "retryable": False,
+                        "details": {
+                            "turnId": "000000000000400080000000000000a2",
+                            "state": "failed",
+                            "accepted": True,
+                            "persisted": True,
+                        },
+                    },
+                }
+            )
+        )
 
 
 def test_session_summary_and_transcript_expose_complete_durable_lifecycle() -> None:

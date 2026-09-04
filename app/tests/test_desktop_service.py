@@ -130,8 +130,9 @@ class _FakeSession:
         *,
         turn_id,
         retry=False,
+        failure_retryable=True,
     ):
-        del retry
+        del retry, failure_retryable
         if self._prompt_persisted_callback is not None:
             self._prompt_persisted_callback()
         result = await action()
@@ -219,6 +220,7 @@ class _FakeExtensionManager:
         desired_skill = SimpleNamespace(id="writer", kind="skill")
         self.preview_object = SimpleNamespace(
             private_skill_hash="private-manager-hash",
+            registry=SimpleNamespace(revision=0),
             diff=SimpleNamespace(
                 changes=[
                     SimpleNamespace(
@@ -226,7 +228,8 @@ class _FakeExtensionManager:
                         key="skill:writer",
                         desired=desired_skill,
                     )
-                ]
+                ],
+                diagnostics=(),
             ),
             plan=SimpleNamespace(
                 items=[
@@ -1902,9 +1905,17 @@ def test_folder_ingest_waits_for_structured_progress_step(tmp_path: Path) -> Non
     assert "structured progress" in str(raised.value)
 
 
-def test_extension_preview_is_opaque_and_apply_cannot_replay(tmp_path: Path) -> None:
+def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(
+    tmp_path: Path,
+) -> None:
     manager = _FakeExtensionManager(tmp_path)
-    service = _service(tmp_path, extension_manager=manager)
+    factory = _SessionFactory()
+    service = _service(
+        tmp_path,
+        extension_manager=manager,
+        session_factory=factory,
+    )
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     preview = asyncio.run(service.dispatch("extensions.preview", {}))
 
@@ -1936,23 +1947,24 @@ def test_extension_preview_is_opaque_and_apply_cannot_replay(tmp_path: Path) -> 
             {
                 "previewId": preview["previewId"],
                 "approvedBindingHashes": ["a" * 64],
+                "turnId": uuid.uuid4().hex,
+                "retry": False,
             },
         )
     )
     assert manager.applied_preview is manager.preview_object
     assert applied["appliedRevision"] == 1
+    assert applied["state"] == "completed"
+    assert applied["accepted"] is True
+    assert applied["persisted"] is True
+    assert applied["displayInput"].startswith("One-shot local action: ")
+    assert applied["text"].startswith("Extension Management applied revision ")
     assert "secret-from-untrusted-extension-metadata" not in repr(applied)
-    with pytest.raises(DesktopServiceError) as replay:
-        asyncio.run(
-            service.dispatch(
-                "extensions.apply",
-                {
-                    "previewId": preview["previewId"],
-                    "approvedBindingHashes": ["a" * 64],
-                },
-            )
-        )
-    assert replay.value.code == "EXTENSION_APPLY_FAILED"
+    success_result(
+        "00000000-0000-4000-8000-000000000104",
+        "extensions.apply",
+        applied,
+    )
 
 
 def test_extension_apply_is_prompt_first_and_replays_completed_report_after_restart(
@@ -2095,6 +2107,26 @@ def test_extension_apply_unclean_crash_restores_interrupted_without_replay(
     assert interrupted.state == "interrupted"
     assert interrupted.failure is not None
     assert interrupted.failure.retryable is False
+    assert manager.apply_calls == 1
+
+    with pytest.raises(DesktopServiceError) as replay:
+        asyncio.run(restarted.dispatch(
+            "extensions.apply",
+            {
+                "previewId": preview["previewId"],
+                "approvedBindingHashes": ["a" * 64],
+                "turnId": turn_id,
+                "retry": True,
+            },
+        ))
+    assert replay.value.code == "EXTENSION_APPLY_FAILED"
+    assert replay.value.retryable is False
+    assert replay.value.details == {
+        "turnId": turn_id,
+        "state": "interrupted",
+        "accepted": True,
+        "persisted": True,
+    }
     assert manager.apply_calls == 1
 
 

@@ -88,6 +88,9 @@ Language policy:
 - When the user writes in Chinese, ALWAYS use Traditional Chinese (繁體中文). Never produce Simplified Chinese characters even if the user's input contains some.
 - For other languages, match the user's input language without conversion."""
 
+ONE_SHOT_DISPLAY_INPUT_PREFIX = "One-shot local action: "
+
+
 class ChatSession:
     """Multi-turn conversational retrieval session backed by LangGraph."""
 
@@ -224,7 +227,12 @@ class ChatSession:
             failure=FailureInfo(
                 code="interrupted",
                 message="The previous turn was interrupted before completion.",
-                retryable=True,
+                retryable=not (
+                    pending.kind == "display-only"
+                    and pending.display_input.startswith(
+                        ONE_SHOT_DISPLAY_INPUT_PREFIX
+                    )
+                ),
             ),
             finished_at=self._now_timestamp(),
         )
@@ -299,6 +307,8 @@ class ChatSession:
                 raise ConversationConflictError(
                     "turn is already pending and will not be replayed automatically"
                 )
+            if existing.failure is not None and not existing.failure.retryable:
+                raise ConversationConflictError("turn cannot be retried")
             if not retry:
                 raise ConversationConflictError(
                     f"turn is {existing.state}; explicit retry is required"
@@ -347,6 +357,7 @@ class ChatSession:
         state: str = "failed",
         code: str = "execution_failed",
         message: str = "The turn could not be completed.",
+        retryable: bool = True,
     ) -> None:
         snapshot = self._active_turn_snapshot
         turn_id = self._active_turn_id
@@ -361,7 +372,7 @@ class ChatSession:
                 failure=FailureInfo(
                     code=code,
                     message=message,
-                    retryable=True,
+                    retryable=retryable,
                 ),
                 finished_at=self._now_timestamp(),
             )
@@ -928,6 +939,7 @@ class ChatSession:
         *,
         turn_id: str,
         retry: bool = False,
+        failure_retryable: bool = True,
     ) -> tuple[object | None, TurnOutcome]:
         """Run one local command inside the canonical durable turn lifecycle."""
         async with self._turn_execution_lock:
@@ -987,17 +999,20 @@ class ChatSession:
                     state="interrupted",
                     code="cancelled",
                     message="The command was cancelled before completion.",
+                    retryable=failure_retryable,
                 )
                 raise
             except ConversationError:
                 await self._fail_active_turn(
                     code="persistence_failed",
                     message="The command result could not be saved.",
+                    retryable=failure_retryable,
                 )
                 raise
             except Exception:
                 await self._fail_active_turn(
                     message="The local command could not be completed.",
+                    retryable=failure_retryable,
                 )
                 raise
             finally:

@@ -280,7 +280,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "knowledge.prune_apply" => Some(&["previewId"]),
         "extensions.status" => Some(&[]),
         "extensions.preview" => Some(&[]),
-        "extensions.apply" => Some(&["previewId", "approvedBindingHashes"]),
+        "extensions.apply" => Some(&["previewId", "approvedBindingHashes", "turnId", "retry"]),
         "approval.resolve" => Some(&["approvalId", "approved"]),
         "runtime.shutdown" => Some(&[]),
         _ => None,
@@ -329,7 +329,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         | "knowledge.sync"
         | "knowledge.prune_preview" => Some(&["path"]),
         "knowledge.prune_apply" => Some(&["previewId"]),
-        "extensions.apply" => Some(&["previewId", "approvedBindingHashes"]),
+        "extensions.apply" => Some(&["previewId", "approvedBindingHashes", "turnId", "retry"]),
         "approval.resolve" => Some(&[
             "approvalId",
             "parentRequestId",
@@ -588,6 +588,10 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
             for hash in hashes {
                 expect_non_empty_string(hash, "params.approvedBindingHashes[]")?;
             }
+            expect_turn_id(&params["turnId"], "params.turnId")?;
+            if !params["retry"].is_boolean() {
+                return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
+            }
         }
         "approval.resolve" => {
             validate_optional_string(params, "approvalId", 256)?;
@@ -713,6 +717,35 @@ fn validate_turn_error_details(details: &Map<String, Value>) -> Result<(), Proto
         return Err(ProtocolViolation::invalid(
             "a durable turn error state must be accepted and persisted",
         ));
+    }
+    Ok(())
+}
+
+fn is_durable_turn_method(method: &str) -> bool {
+    matches!(method, "session.turn" | "extensions.apply")
+}
+
+fn validate_completed_turn_fields(
+    data: &Map<String, Value>,
+    method: &str,
+    text_max_bytes: usize,
+) -> Result<(), ProtocolViolation> {
+    expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
+    expect_turn_id(&data["turnId"], "data.turnId")?;
+    expect_integer_range(&data["turnNumber"], "data.turnNumber", 1, 4_096)?;
+    validate_enum(&data["state"], "data.state", &["completed"])?;
+    expect_bounded_string(&data["text"], "data.text", text_max_bytes)?;
+    for field in ["accepted", "persisted"] {
+        if !data[field].is_boolean() {
+            return Err(ProtocolViolation::invalid(format!(
+                "data.{field} must be a boolean"
+            )));
+        }
+    }
+    if data["accepted"] != Value::Bool(true) || data["persisted"] != Value::Bool(true) {
+        return Err(ProtocolViolation::invalid(format!(
+            "{method} success must be durably completed"
+        )));
     }
     Ok(())
 }
@@ -1148,9 +1181,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "toolSummaries",
                 ],
             )?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-            expect_turn_id(&data["turnId"], "data.turnId")?;
-            expect_bounded_string(&data["text"], "data.text", MAX_PROTOCOL_LINE_BYTES)?;
+            validate_completed_turn_fields(data, "session.turn", MAX_PROTOCOL_LINE_BYTES)?;
             validate_string_array(
                 &data["validationErrors"],
                 "data.validationErrors",
@@ -1219,20 +1250,6 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             }
             if let Some(value) = data.get("extensionAction") {
                 validate_enum(value, "data.extensionAction", &["status", "preview"])?;
-            }
-            expect_integer_range(&data["turnNumber"], "data.turnNumber", 1, 4_096)?;
-            validate_enum(&data["state"], "data.state", &["completed"])?;
-            for field in ["accepted", "persisted"] {
-                if !data[field].is_boolean() {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "data.{field} must be a boolean"
-                    )));
-                }
-            }
-            if data["accepted"] != Value::Bool(true) || data["persisted"] != Value::Bool(true) {
-                return Err(ProtocolViolation::invalid(
-                    "session.turn success must be durably completed",
-                ));
             }
         }
         "session.shutdown" | "runtime.shutdown" => {
@@ -1710,6 +1727,14 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             validate_exact_data_keys(
                 data,
                 &[
+                    "sessionId",
+                    "turnId",
+                    "turnNumber",
+                    "state",
+                    "accepted",
+                    "persisted",
+                    "displayInput",
+                    "text",
                     "previousRevision",
                     "appliedRevision",
                     "restartRequired",
@@ -1717,13 +1742,10 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "diagnostics",
                 ],
             )?;
+            validate_completed_turn_fields(data, "extensions.apply", 65_536)?;
+            expect_bounded_string(&data["displayInput"], "data.displayInput", 256)?;
             for field in ["previousRevision", "appliedRevision"] {
-                expect_integer_range(
-                    &data[field],
-                    &format!("data.{field}"),
-                    0,
-                    u32::MAX as i64,
-                )?;
+                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
             }
             if !data["restartRequired"].is_boolean() {
                 return Err(ProtocolViolation::invalid(
@@ -2002,7 +2024,7 @@ impl ProtocolTraceValidator {
                         request.request_id
                     )));
                 }
-                let turn_id = if request.method == "session.turn" {
+                let turn_id = if is_durable_turn_method(&request.method) {
                     request
                         .params
                         .get("turnId")
@@ -2074,15 +2096,16 @@ impl ProtocolTraceValidator {
                             ));
                         }
                     }
-                } else if state.method == "session.turn" {
+                } else if is_durable_turn_method(&state.method) {
                     let details = result
                         .error
                         .as_ref()
                         .and_then(|error| error.details.as_object())
                         .ok_or_else(|| {
-                            ProtocolViolation::invalid(
-                                "session.turn failure requires lifecycle details",
-                            )
+                            ProtocolViolation::invalid(format!(
+                                "{} failure requires lifecycle details",
+                                state.method
+                            ))
                         })?;
                     validate_turn_error_details(details)?;
                     let actual_turn_id = details.get("turnId").and_then(Value::as_str);
@@ -2361,6 +2384,102 @@ mod tests {
     }
 
     #[test]
+    fn extension_apply_turn_id_must_match_across_a_successful_trace() {
+        let error = validate_result_trace(
+            "extensions.apply",
+            serde_json::json!({
+                "previewId": "extension-preview-opaque-1",
+                "approvedBindingHashes": ["sha256:binding-1"],
+                "turnId": "123e4567e89b42d3a456426614174000",
+                "retry": false,
+            }),
+            serde_json::json!({
+                "sessionId": "session-a",
+                "turnId": "223e4567e89b42d3a456426614174000",
+                "turnNumber": 1,
+                "state": "completed",
+                "accepted": true,
+                "persisted": true,
+                "displayInput": "Apply approved extension changes [123456789abc]",
+                "text": "Applied extension changes.",
+                "previousRevision": 0,
+                "appliedRevision": 1,
+                "restartRequired": true,
+                "items": [],
+                "diagnostics": [],
+            }),
+        )
+        .expect_err("mismatched extension apply turn IDs must be rejected");
+
+        assert_eq!(error.code(), "PROTOCOL_INVALID");
+    }
+
+    #[test]
+    fn extension_apply_failure_requires_exact_correlated_lifecycle() {
+        const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000060";
+        const TURN_ID: &str = "123e4567e89b42d3a456426614174000";
+
+        let request = parse_protocol_value(serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "messageType": "request",
+            "requestId": REQUEST_ID,
+            "method": "extensions.apply",
+            "params": {
+                "previewId": "extension-preview-opaque-1",
+                "approvedBindingHashes": ["sha256:binding-1"],
+                "turnId": TURN_ID,
+                "retry": false,
+            },
+        }))
+        .expect("valid extension apply request");
+
+        let missing_lifecycle = parse_protocol_value(serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "messageType": "result",
+            "requestId": REQUEST_ID,
+            "ok": false,
+            "error": {
+                "code": "EXTENSION_APPLY_FAILED",
+                "message": "apply failed",
+                "retryable": true,
+                "details": {},
+            },
+        }))
+        .expect("a standalone result cannot infer its request method");
+        let mut tracker = ProtocolTraceValidator::default();
+        tracker.accept(&request).expect("track request");
+        let error = tracker
+            .accept(&missing_lifecycle)
+            .expect_err("extension apply failure must include lifecycle details");
+        assert_eq!(error.code(), "PROTOCOL_INVALID");
+
+        let mismatched_lifecycle = parse_protocol_value(serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "messageType": "result",
+            "requestId": REQUEST_ID,
+            "ok": false,
+            "error": {
+                "code": "EXTENSION_APPLY_FAILED",
+                "message": "apply failed",
+                "retryable": true,
+                "details": {
+                    "turnId": "223e4567e89b42d3a456426614174000",
+                    "state": "failed",
+                    "accepted": true,
+                    "persisted": true,
+                },
+            },
+        }))
+        .expect("valid standalone lifecycle details");
+        let mut tracker = ProtocolTraceValidator::default();
+        tracker.accept(&request).expect("track request");
+        let error = tracker
+            .accept(&mismatched_lifecycle)
+            .expect_err("extension apply failure turn ID must match request");
+        assert_eq!(error.code(), "PROTOCOL_INVALID");
+    }
+
+    #[test]
     fn rust_request_param_rules_match_manifest() {
         const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000050";
         let contract: Value = serde_json::from_str(CONTRACT).expect("contract JSON");
@@ -2486,7 +2605,7 @@ mod tests {
                 .iter()
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
-            if method == "session.turn" {
+            if is_durable_turn_method(method) {
                 data.insert("accepted".to_owned(), Value::Bool(true));
                 data.insert("persisted".to_owned(), Value::Bool(true));
             }

@@ -23,6 +23,7 @@ _UTC_TIMESTAMP = re.compile(
 )
 _MAX_SAFE_DATA_DEPTH = 64
 _TURN_ERROR_DETAIL_KEYS = frozenset(CONTRACT["turnErrorDetailsSchema"])
+_DURABLE_TURN_METHODS = frozenset({"session.turn", "extensions.apply"})
 
 
 class ProtocolError(ValueError):
@@ -273,12 +274,12 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
     schema = CONTRACT["resultDataSchemas"].get(method)
     if schema is not None:
         _validate_object_schema(data, schema, "data")
-    if method == "session.turn" and (
+    if method in _DURABLE_TURN_METHODS and (
         data.get("state") != "completed"
         or data.get("accepted") is not True
         or data.get("persisted") is not True
     ):
-        _invalid("session.turn success must be durably completed")
+        _invalid(f"{method} success must be durably completed")
     if method == "session.transcript":
         for item in data["items"]:
             state = item["state"]
@@ -573,7 +574,7 @@ class TraceValidator:
                 "method": message["method"],
                 "turnId": (
                     message["params"]["turnId"]
-                    if message["method"] == "session.turn"
+                    if message["method"] in _DURABLE_TURN_METHODS
                     else None
                 ),
             }
@@ -607,7 +608,7 @@ class TraceValidator:
                     and message["data"].get("turnId") != expected_turn_id
                 ):
                     _invalid("data.turnId must match params.turnId")
-            elif state["method"] == "session.turn":
+            elif state["method"] in _DURABLE_TURN_METHODS:
                 details = message["error"]["details"]
                 _validate_turn_error_details(details)
                 if details["turnId"] != state["turnId"]:

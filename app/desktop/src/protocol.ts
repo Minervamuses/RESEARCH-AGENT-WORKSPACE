@@ -471,6 +471,14 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     },
   },
   "extensions.apply": {
+    sessionId: { type: "string", required: true, maxBytes: 256 },
+    turnId: { type: "turnId", required: true },
+    turnNumber: { type: "integer", required: true, minimum: 1, maximum: 4_096 },
+    state: { type: "string", required: true, enum: ["completed"] },
+    accepted: { type: "boolean", required: true },
+    persisted: { type: "boolean", required: true },
+    text: { type: "string", required: true, maxBytes: 65_536 },
+    displayInput: { type: "string", required: true, maxBytes: 256 },
     previousRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
     appliedRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
     restartRequired: { type: "boolean", required: true },
@@ -587,6 +595,8 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "extensions.apply": {
     previewId: { type: "string", required: true, maxBytes: 256 },
     approvedBindingHashes: { type: "stringArray", required: true, maxItems: 512 },
+    turnId: { type: "turnId", required: true },
+    retry: { type: "boolean", required: true },
   },
   "approval.resolve": {
     approvalId: { type: "string", required: true, maxBytes: 256 },
@@ -790,6 +800,14 @@ export interface ExtensionApplyItemDto {
 }
 
 export interface ExtensionApplyDto {
+  sessionId: string;
+  turnId: string;
+  turnNumber: number;
+  state: "completed";
+  accepted: boolean;
+  persisted: boolean;
+  text: string;
+  displayInput: string;
   previousRevision: number;
   appliedRevision: number;
   restartRequired: boolean;
@@ -1110,10 +1128,10 @@ export function validateResultData(method: ProtocolMethod, data: JsonObject): vo
     validateObjectSchema(data, schema, "data");
   }
   if (
-    method === "session.turn" &&
+    (method === "session.turn" || method === "extensions.apply") &&
     (data.state !== "completed" || data.accepted !== true || data.persisted !== true)
   ) {
-    invalid("session.turn success must be durably completed");
+    invalid(`${method} success must be durably completed`);
   }
   if (method === "session.transcript") {
     (data.items as JsonObject[]).forEach((item) => {
@@ -1404,7 +1422,10 @@ export class ProtocolTraceValidator {
         nextSequence: 1,
         terminal: false,
         method: message.method,
-        turnId: message.method === "session.turn" ? String(message.params.turnId) : null,
+        turnId:
+          message.method === "session.turn" || message.method === "extensions.apply"
+            ? String(message.params.turnId)
+            : null,
       });
       return;
     }

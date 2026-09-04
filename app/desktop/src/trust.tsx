@@ -9,6 +9,8 @@ import type {
   ApprovalRequiredDto,
   ExtensionApplyDto,
   ExtensionPreviewDto,
+  JsonObject,
+  TurnLifecycleDetailsDto,
 } from "./protocol.ts";
 
 export type ExtensionBindingDecision = "approve" | "deny" | null;
@@ -29,7 +31,15 @@ export interface ExtensionFlow {
   preview: ExtensionPreviewDto | null;
   decisions: Record<string, ExtensionBindingDecision>;
   report: ExtensionApplyDto | null;
+  applyRequest: ExtensionApplyRequest | null;
   error: string | null;
+}
+
+interface ExtensionApplyRequest extends JsonObject {
+  previewId: string;
+  approvedBindingHashes: string[];
+  turnId: string;
+  retry: boolean;
 }
 
 export interface PendingApproval extends ApprovalRequiredDto {
@@ -43,6 +53,7 @@ export function createExtensionFlow(turnId: string): ExtensionFlow {
     preview: null,
     decisions: {},
     report: null,
+    applyRequest: null,
     error: null,
   };
 }
@@ -54,6 +65,7 @@ export function beginExtensionPreview(flow: ExtensionFlow): ExtensionFlow {
     preview: null,
     decisions: {},
     report: null,
+    applyRequest: null,
     error: null,
   };
 }
@@ -70,6 +82,7 @@ export function receiveExtensionPreview(
       preview.bindings.map((binding) => [binding.bindingHash, null]),
     ),
     report: null,
+    applyRequest: null,
     error: null,
   };
 }
@@ -105,16 +118,46 @@ export function approvedBindingHashes(flow: ExtensionFlow): string[] | null {
     .map((binding) => binding.bindingHash);
 }
 
-export function beginExtensionApply(flow: ExtensionFlow): ExtensionFlow {
-  if (approvedBindingHashes(flow) === null) return flow;
-  return { ...flow, phase: "applying", error: null };
+export function beginExtensionApply(flow: ExtensionFlow, turnId: string): ExtensionFlow {
+  const approved = approvedBindingHashes(flow);
+  if (approved === null || flow.preview === null) return flow;
+  return {
+    ...flow,
+    phase: "applying",
+    applyRequest: {
+      previewId: flow.preview.previewId,
+      approvedBindingHashes: [...approved],
+      turnId,
+      retry: false,
+    },
+    error: null,
+  };
+}
+
+export function beginExtensionApplyRecovery(flow: ExtensionFlow): ExtensionFlow {
+  if (flow.phase !== "error" || flow.applyRequest === null) return flow;
+  return {
+    ...flow,
+    phase: "applying",
+    applyRequest: { ...flow.applyRequest, retry: true },
+    error: null,
+  };
+}
+
+export function extensionApplyRequest(flow: ExtensionFlow): ExtensionApplyRequest | null {
+  if (flow.phase !== "applying" || flow.applyRequest === null) return null;
+  return {
+    ...flow.applyRequest,
+    approvedBindingHashes: [...flow.applyRequest.approvedBindingHashes],
+  };
 }
 
 export function receiveExtensionApply(
   flow: ExtensionFlow,
   report: ExtensionApplyDto,
 ): ExtensionFlow {
-  return { ...flow, phase: "applied", report, error: null };
+  if (flow.applyRequest === null || report.turnId !== flow.applyRequest.turnId) return flow;
+  return { ...flow, phase: "applied", report, applyRequest: null, error: null };
 }
 
 export function markExtensionRestarting(flow: ExtensionFlow): ExtensionFlow {
@@ -138,6 +181,35 @@ export function observeExtensionRevision(
 
 export function failExtensionFlow(flow: ExtensionFlow, message: string): ExtensionFlow {
   return { ...flow, phase: "error", error: message };
+}
+
+export function failExtensionApply(
+  flow: ExtensionFlow,
+  message: string,
+  lifecycle?: TurnLifecycleDetailsDto,
+): ExtensionFlow {
+  if (lifecycle?.state === "failed" || lifecycle?.state === "interrupted") {
+    return {
+      ...flow,
+      phase: "error",
+      preview: null,
+      decisions: {},
+      report: null,
+      applyRequest: null,
+      error: message,
+    };
+  }
+  return { ...flow, phase: "error", error: message };
+}
+
+export function interruptExtensionFlow(flow: ExtensionFlow): ExtensionFlow | null {
+  if (flow.report !== null) return flow;
+  if (flow.applyRequest === null) return null;
+  return {
+    ...flow,
+    phase: "error",
+    error: "The backend stopped before the saved extension result was delivered.",
+  };
 }
 
 export function acceptApprovalEvent(
@@ -344,7 +416,12 @@ export function ExtensionPanel({
 
       {flow.phase === "error" && <>
         <p className="extension-error" role="alert">{flow.error ?? "The extension operation could not be completed."}</p>
-        <button type="button" disabled={busy} onClick={onPreview}>Retry preview</button>
+        {flow.applyRequest === null
+          ? <button type="button" disabled={busy} onClick={onPreview}>Retry preview</button>
+          : <>
+            <p>The saved result was not delivered. Nothing will replay unless you choose recovery.</p>
+            <button type="button" disabled={busy} onClick={onApply}>Recover saved apply result</button>
+          </>}
       </>}
     </section>
   );

@@ -153,8 +153,9 @@ class FakeChatSession:
         *,
         turn_id,
         retry=False,
+        failure_retryable=True,
     ):
-        del retry
+        del retry, failure_retryable
         result = await action()
         return result, SimpleNamespace(
             text=render_result(result),

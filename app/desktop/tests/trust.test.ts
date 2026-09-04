@@ -27,7 +27,10 @@ interface TrustModule {
   ) => unknown;
   approvedBindingHashes: (flow: unknown) => string[] | null;
   beginExtensionApply: (flow: unknown, turnId: string) => unknown;
+  beginExtensionApplyRecovery: (flow: unknown) => unknown;
   extensionApplyRequest: (flow: unknown) => unknown;
+  failExtensionApply: (flow: unknown, message: string, lifecycle?: unknown) => unknown;
+  interruptExtensionFlow: (flow: unknown) => unknown;
   createExtensionFlow: (turnId: string) => unknown;
   decideExtensionBinding: (
     flow: unknown,
@@ -128,6 +131,7 @@ test("extension apply is one-use and only the exact loaded revision completes re
     state: "completed",
     accepted: true,
     persisted: true,
+    displayInput: "One-shot local action: apply reviewed extension changes [123456789abcdef0]",
     text: "Extension Management applied revision 0 -> 1",
     previousRevision: 0,
     appliedRevision: 1,
@@ -143,6 +147,34 @@ test("extension apply is one-use and only the exact loaded revision completes re
   assert.equal((flow as { phase: string }).phase, "awaiting-load");
   flow = trust.observeExtensionRevision(flow, 1);
   assert.equal((flow as { phase: string }).phase, "loaded");
+});
+
+test("backend interruption preserves only an uncertain apply for explicit delivery recovery", async () => {
+  const trust = await loadTrust();
+  let flow = trust.receiveExtensionPreview(
+    trust.createExtensionFlow("turn-4"),
+    { ...preview, bindings: [] },
+  );
+  const applyTurnId = "123e4567e89b42d3a456426614174004";
+  flow = trust.beginExtensionApply(flow, applyTurnId);
+  flow = trust.interruptExtensionFlow(flow);
+  assert.equal((flow as { phase: string }).phase, "error");
+  flow = trust.beginExtensionApplyRecovery(flow);
+  assert.deepEqual(trust.extensionApplyRequest(flow), {
+    previewId: "preview-1",
+    approvedBindingHashes: [],
+    turnId: applyTurnId,
+    retry: true,
+  });
+
+  const terminal = trust.failExtensionApply(flow, "Apply was interrupted.", {
+    turnId: applyTurnId,
+    state: "interrupted",
+    accepted: true,
+    persisted: true,
+  });
+  assert.equal(trust.extensionApplyRequest(terminal), null);
+  assert.equal(trust.interruptExtensionFlow(terminal), null);
 });
 
 test("approval events must correlate to the active request and remain unexpired", async () => {

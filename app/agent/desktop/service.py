@@ -75,7 +75,7 @@ from agent.ingest import (
     prune_folder,
 )
 from agent.paths import find_app_root
-from agent.session import ChatSession
+from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.turns.safety import content_text
 from agent.turns.plan_log import PlanLog
@@ -89,6 +89,17 @@ logger = logging.getLogger(__name__)
 EventSink = Callable[[str, dict[str, Any]], None]
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 _BINDING_HASH = re.compile(r"^[0-9a-f]{64}$")
+_EXTENSION_APPLY_HEADER = re.compile(
+    r"^Extension Management applied revision (0|[1-9][0-9]*) -> (0|[1-9][0-9]*)$"
+)
+_EXTENSION_APPLY_OUTCOMES = frozenset({
+    "added",
+    "updated",
+    "removed",
+    "unchanged",
+    "blocked",
+    "pending_approval",
+})
 _EXTENSIONLESS_INGEST_FILES = {
     "Dockerfile",
     "Makefile",
@@ -349,8 +360,8 @@ class DesktopService:
         try:
             return await handler(params, event_sink)
         except DesktopServiceError as exc:
-            if method == "session.turn":
-                raise self._with_turn_lifecycle(exc, params) from exc
+            if method in {"session.turn", "extensions.apply"}:
+                raise self._with_turn_lifecycle(exc, method, params) from exc
             raise
         except Exception as exc:
             mapped = self._map_exception(method, exc)
@@ -367,17 +378,23 @@ class DesktopService:
                     mapped.code,
                     type(exc).__name__,
                 )
-            if method == "session.turn":
-                mapped = self._with_turn_lifecycle(mapped, params)
+            if method in {"session.turn", "extensions.apply"}:
+                mapped = self._with_turn_lifecycle(mapped, method, params)
             raise mapped from exc
 
     def _with_turn_lifecycle(
         self,
         error: DesktopServiceError,
+        method: str,
         params: Mapping[str, Any],
     ) -> DesktopServiceError:
         turn_id = params.get("turnId")
-        display_input = params.get("text")
+        display_input: object = params.get("text")
+        if method == "extensions.apply":
+            try:
+                display_input = self._extension_apply_display_input(params)
+            except DesktopServiceError:
+                display_input = None
         state: str | None = None
         accepted = False
         persisted = False
@@ -460,6 +477,11 @@ class DesktopService:
                 code,
                 "The extension operation could not be completed.",
                 retryable=code == "BUSY_EXTENSION_OPERATION",
+            )
+        if method == "extensions.apply" and isinstance(exc, ConversationError):
+            return DesktopServiceError(
+                "EXTENSION_APPLY_FAILED",
+                "The durable extension operation could not be completed.",
             )
         if method.startswith("knowledge."):
             if isinstance(exc, (FileNotFoundError, IsADirectoryError, NotADirectoryError)):
@@ -2487,35 +2509,117 @@ class DesktopService:
         self._bounded_cache_insert(self._extension_previews, preview_id, preview)
         return self._extension_preview_dto(preview_id, preview)
 
-    async def _extensions_apply(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        preview_id = params["previewId"]
-        preview = self._extension_previews.get(preview_id)
-        if preview is None:
-            raise DesktopServiceError(
-                "EXTENSION_APPLY_FAILED",
-                "The extension preview is unknown or already used.",
+    @staticmethod
+    def _extension_apply_values(
+        params: Mapping[str, Any],
+    ) -> tuple[str, tuple[str, ...]]:
+        preview_id = params.get("previewId")
+        approved_values = params.get("approvedBindingHashes")
+        if (
+            not isinstance(preview_id, str)
+            or not preview_id
+            or len(preview_id.encode("utf-8")) > 256
+            or not isinstance(approved_values, list)
+            or len(approved_values) > 512
+            or any(
+                not isinstance(item, str) or not _BINDING_HASH.fullmatch(item)
+                for item in approved_values
             )
-        approved = set(params["approvedBindingHashes"])
-        known = {
-            candidate.binding_hash for candidate in preview.mcp_candidates.values()
-        }
-        if any(not _BINDING_HASH.fullmatch(item) for item in approved) or not approved <= known:
+        ):
             raise DesktopServiceError(
                 "PROTOCOL_INVALID",
                 "The approved extension binding list is invalid.",
             )
-        async with self._extension_operation():
-            try:
-                report = await asyncio.to_thread(
-                    self._extension_manager.apply,
-                    preview,
-                    approved_mcp_bindings=approved,
+        return preview_id, tuple(sorted(set(approved_values)))
+
+    @classmethod
+    def _extension_apply_display_input(cls, params: Mapping[str, Any]) -> str:
+        preview_id, approved = cls._extension_apply_values(params)
+        payload = json.dumps(
+            {
+                "approvedBindingHashes": list(approved),
+                "previewId": preview_id,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+        return (
+            f"{ONE_SHOT_DISPLAY_INPUT_PREFIX}"
+            f"apply reviewed extension changes [{digest}]"
+        )
+
+    async def _extensions_apply(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        session = self._require_session()
+        preview_id, approved_values = self._extension_apply_values(params)
+        approved = set(approved_values)
+        display_input = self._extension_apply_display_input(params)
+
+        async def apply_once() -> ApplyReport:
+            preview = self._extension_previews.pop(preview_id, None)
+            if preview is None:
+                raise DesktopServiceError(
+                    "EXTENSION_APPLY_FAILED",
+                    "The extension preview is unknown or already used.",
                 )
-            finally:
-                self._extension_previews.pop(preview_id, None)
-        return self._extension_apply_dto(report)
+            known = {
+                candidate.binding_hash
+                for candidate in preview.mcp_candidates.values()
+            }
+            if not approved <= known:
+                raise DesktopServiceError(
+                    "PROTOCOL_INVALID",
+                    "The approved extension binding list is invalid.",
+                )
+            self._validate_extension_apply_preview_capacity(preview)
+            return await asyncio.to_thread(
+                self._extension_manager.apply,
+                preview,
+                approved_mcp_bindings=approved,
+            )
+
+        async with self._extension_operation():
+            raw_report, outcome = await session.run_display_only_turn(
+                display_input,
+                apply_once,
+                self._render_extension_apply_report,
+                turn_id=params["turnId"],
+                retry=params["retry"],
+                failure_retryable=False,
+            )
+
+        report = self._parse_extension_apply_report(outcome.text)
+        if raw_report is not None:
+            current = self._extension_apply_dto(raw_report)
+            if current != report:
+                raise DesktopServiceError(
+                    "INTERNAL_ERROR",
+                    "The durable extension result could not be verified.",
+                )
+        if (
+            outcome.turn_id != params["turnId"]
+            or outcome.state != "completed"
+            or outcome.accepted is not True
+            or outcome.persisted is not True
+        ):
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The durable extension lifecycle result is invalid.",
+            )
+        return {
+            "sessionId": session.session_id,
+            "turnId": outcome.turn_id,
+            "turnNumber": outcome.turn_number,
+            "state": outcome.state,
+            "accepted": outcome.accepted,
+            "persisted": outcome.persisted,
+            "displayInput": display_input,
+            "text": outcome.text,
+            **report,
+        }
 
     @staticmethod
     def _approval_context_is_safe(command: str, description: str) -> bool:
@@ -2900,24 +3004,236 @@ class DesktopService:
         }
 
     @classmethod
+    def _validate_extension_apply_preview_capacity(
+        cls,
+        preview: ExtensionPreview,
+    ) -> None:
+        revision = preview.registry.revision
+        changes = preview.diff.changes
+        diagnostics = preview.diff.diagnostics
+        if (
+            type(revision) is not int
+            or not 0 <= revision < 4_294_967_295
+            or len(changes) > 512
+            or len(diagnostics) > 128
+        ):
+            raise DesktopServiceError(
+                "EXTENSION_APPLY_FAILED",
+                "The extension preview cannot produce a bounded durable result.",
+            )
+        items: list[dict[str, str]] = []
+        for change in changes:
+            key = change.key
+            if (
+                not isinstance(key, str)
+                or not key
+                or len(key.encode("utf-8")) > 256
+            ):
+                raise DesktopServiceError(
+                    "EXTENSION_APPLY_FAILED",
+                    "The extension preview contains an invalid item key.",
+                )
+            items.append({
+                "key": key,
+                "outcome": "pending_approval",
+                "detail": cls._extension_outcome_detail("pending_approval"),
+            })
+        projected = {
+            "previousRevision": revision,
+            "appliedRevision": revision + 1,
+            "restartRequired": True,
+            "items": items,
+            "diagnostics": [
+                "The extension manager reported a host validation diagnostic."
+                for _diagnostic in diagnostics
+            ],
+        }
+        cls._serialize_extension_apply_dto(projected)
+
+    @classmethod
     def _extension_apply_dto(cls, report: ApplyReport) -> dict[str, Any]:
+        if (
+            not isinstance(report, ApplyReport)
+            or type(report.previous_revision) is not int
+            or type(report.applied_revision) is not int
+            or not 0 <= report.previous_revision <= 4_294_967_295
+            or not 0 <= report.applied_revision <= 4_294_967_295
+            or type(report.restart_required) is not bool
+            or len(report.items) > 512
+            or len(report.diagnostics) > 128
+        ):
+            raise DesktopServiceError(
+                "EXTENSION_APPLY_FAILED",
+                "The extension manager returned an invalid result.",
+            )
+        items: list[dict[str, str]] = []
+        for item in report.items:
+            if (
+                not isinstance(item.key, str)
+                or not item.key
+                or len(item.key.encode("utf-8")) > 256
+                or item.outcome not in _EXTENSION_APPLY_OUTCOMES
+            ):
+                raise DesktopServiceError(
+                    "EXTENSION_APPLY_FAILED",
+                    "The extension manager returned an invalid item result.",
+                )
+            items.append({
+                "key": item.key,
+                "outcome": item.outcome,
+                "detail": cls._extension_outcome_detail(item.outcome),
+            })
         return {
             "previousRevision": report.previous_revision,
             "appliedRevision": report.applied_revision,
             "restartRequired": report.restart_required,
-            "items": [
-                {
-                    "key": cls._bounded_text(item.key, 256),
-                    "outcome": cls._bounded_text(item.outcome, 64),
-                    "detail": cls._extension_outcome_detail(item.outcome),
-                }
-                for item in report.items
-            ],
+            "items": items,
             "diagnostics": [
                 "The extension manager reported a host validation diagnostic."
-                for _diagnostic in report.diagnostics[:128]
+                for _diagnostic in report.diagnostics
             ],
         }
+
+    @classmethod
+    def _serialize_extension_apply_dto(cls, report: Mapping[str, Any]) -> str:
+        lines = [
+            (
+                "Extension Management applied revision "
+                f"{report['previousRevision']} -> {report['appliedRevision']}"
+            ),
+            (
+                "restart_required: true"
+                if report["restartRequired"]
+                else "restart_required: false"
+            ),
+            f"items: {len(report['items'])}",
+        ]
+        lines.extend(
+            "- " + json.dumps(
+                {"key": item["key"], "outcome": item["outcome"]},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for item in report["items"]
+        )
+        lines.append(f"diagnostics: {len(report['diagnostics'])}")
+        text = "\n".join(lines)
+        if len(text.encode("utf-8")) > _MAX_LOCAL_COMMAND_BYTES:
+            raise DesktopServiceError(
+                "EXTENSION_APPLY_FAILED",
+                "The extension result is too large to save safely.",
+            )
+        return text
+
+    @classmethod
+    def _render_extension_apply_report(cls, value: object) -> str:
+        if not isinstance(value, ApplyReport):
+            raise DesktopServiceError(
+                "EXTENSION_APPLY_FAILED",
+                "The extension manager returned an invalid result.",
+            )
+        return cls._serialize_extension_apply_dto(
+            cls._extension_apply_dto(value)
+        )
+
+    @classmethod
+    def _parse_extension_apply_report(cls, text: str) -> dict[str, Any]:
+        if (
+            not isinstance(text, str)
+            or not text
+            or len(text.encode("utf-8")) > _MAX_LOCAL_COMMAND_BYTES
+        ):
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        lines = text.splitlines()
+        if len(lines) < 4:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        header = _EXTENSION_APPLY_HEADER.fullmatch(lines[0])
+        restart_value = {
+            "restart_required: true": True,
+            "restart_required: false": False,
+        }.get(lines[1])
+        items_match = re.fullmatch(r"items: (0|[1-9][0-9]*)", lines[2])
+        if header is None or restart_value is None or items_match is None:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        item_count = int(items_match.group(1))
+        if item_count > 512 or len(lines) != item_count + 4:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        diagnostics_match = re.fullmatch(
+            r"diagnostics: (0|[1-9][0-9]*)",
+            lines[-1],
+        )
+        if diagnostics_match is None or int(diagnostics_match.group(1)) > 128:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        items: list[dict[str, str]] = []
+        try:
+            for line in lines[3:-1]:
+                if not line.startswith("- "):
+                    raise ValueError("missing item marker")
+                item = json.loads(line[2:])
+                if not isinstance(item, dict) or set(item) != {"key", "outcome"}:
+                    raise ValueError("invalid item shape")
+                key = item["key"]
+                outcome = item["outcome"]
+                if (
+                    not isinstance(key, str)
+                    or not key
+                    or len(key.encode("utf-8")) > 256
+                    or outcome not in _EXTENSION_APPLY_OUTCOMES
+                ):
+                    raise ValueError("invalid item value")
+                items.append({
+                    "key": key,
+                    "outcome": outcome,
+                    "detail": cls._extension_outcome_detail(outcome),
+                })
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            ) from exc
+        previous_revision = int(header.group(1))
+        applied_revision = int(header.group(2))
+        diagnostic_count = int(diagnostics_match.group(1))
+        if (
+            previous_revision > 4_294_967_295
+            or applied_revision > 4_294_967_295
+        ):
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        report = {
+            "previousRevision": previous_revision,
+            "appliedRevision": applied_revision,
+            "restartRequired": restart_value,
+            "items": items,
+            "diagnostics": [
+                "The extension manager reported a host validation diagnostic."
+                for _index in range(diagnostic_count)
+            ],
+        }
+        if cls._serialize_extension_apply_dto(report) != text:
+            raise DesktopServiceError(
+                "INTERNAL_ERROR",
+                "The saved extension result is invalid.",
+            )
+        return report
 
     @staticmethod
     def _extension_outcome_detail(outcome: str) -> str:

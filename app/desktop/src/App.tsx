@@ -57,12 +57,15 @@ import {
   ApprovalDialog,
   ExtensionPanel,
   acceptApprovalEvent,
-  approvedBindingHashes,
   beginExtensionApply,
+  beginExtensionApplyRecovery,
   beginExtensionPreview,
   createExtensionFlow,
   decideExtensionBinding,
+  extensionApplyRequest,
+  failExtensionApply,
   failExtensionFlow,
+  interruptExtensionFlow,
   markExtensionAwaitingLoad,
   markExtensionRestarting,
   observeExtensionRevision,
@@ -360,14 +363,17 @@ export default function App() {
                 setPendingApproval(null);
                 setApprovalResolving(false);
                 setExtensionFlow((current) => {
-                  if (current === null || current.report === null) return null;
+                  if (current === null) return null;
+                  const recoverable = interruptExtensionFlow(current);
+                  if (recoverable === null) return null;
+                  if (recoverable.report === null) return recoverable;
                   if (event.snapshot.lifecycle === "restarting") {
-                    return markExtensionRestarting(current);
+                    return markExtensionRestarting(recoverable);
                   }
                   if (event.snapshot.lifecycle === "ready" && generationChanged) {
-                    return markExtensionAwaitingLoad(markExtensionRestarting(current));
+                    return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
                   }
-                  return current;
+                  return recoverable;
                 });
               }
               generationRef.current = event.snapshot.generation;
@@ -386,7 +392,7 @@ export default function App() {
               approvalResolvingRef.current = false;
               setPendingApproval(null);
               setApprovalResolving(false);
-              setExtensionFlow((current) => current === null || current.report === null ? null : current);
+              setExtensionFlow((current) => current === null ? null : interruptExtensionFlow(current));
             }
             if (message.messageType !== "event" || !("requestId" in message)) return;
             const active = conversationRef.current.activeTurn;
@@ -439,14 +445,17 @@ export default function App() {
             setPendingApproval(null);
             setApprovalResolving(false);
             setExtensionFlow((current) => {
-              if (current === null || current.report === null) return null;
+              if (current === null) return null;
+              const recoverable = interruptExtensionFlow(current);
+              if (recoverable === null) return null;
+              if (recoverable.report === null) return recoverable;
               if (snapshot.lifecycle === "restarting") {
-                return markExtensionRestarting(current);
+                return markExtensionRestarting(recoverable);
               }
               if (snapshot.lifecycle === "ready" && generationChanged) {
-                return markExtensionAwaitingLoad(markExtensionRestarting(current));
+                return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
               }
-              return current;
+              return recoverable;
             });
           }
           generationRef.current = snapshot.generation;
@@ -576,7 +585,7 @@ export default function App() {
       approvalResolvingRef.current = false;
       setPendingApproval(null);
       setApprovalResolving(false);
-      setExtensionFlow((current) => current === null || current.report === null ? null : current);
+      setExtensionFlow((current) => current === null ? null : interruptExtensionFlow(current));
       setCatalogGeneration(null);
     }
   }, [applyConversation, catalogGeneration, state.snapshot?.generation]);
@@ -876,33 +885,55 @@ export default function App() {
 
   const applyExtensions = useCallback(() => {
     const flow = extensionFlow;
-    if (flow === null || flow.preview === null) return;
-    const approved = approvedBindingHashes(flow);
-    if (approved === null) return;
+    if (flow === null) return;
+    const submitting = flow.phase === "error" && flow.applyRequest !== null
+      ? beginExtensionApplyRecovery(flow)
+      : beginExtensionApply(flow, newLogicalTurnId());
+    const request = extensionApplyRequest(submitting);
+    if (request === null) return;
     const operation = beginWorkspaceOperation("Applying extensions");
     if (operation === null) return;
     const generation = generationRef.current;
-    const previewId = flow.preview.previewId;
-    setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? beginExtensionApply(current) : current);
-    void backendClient.request("extensions.apply", {
-      previewId,
-      approvedBindingHashes: approved,
-    }).then((data) => {
+    setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? submitting : current);
+    void backendClient.request("extensions.apply", request).then((data) => {
       if (generationRef.current !== generation) return;
       const report = data as unknown as ExtensionApplyDto;
+      if (report.sessionId !== state.session?.sessionId || report.turnId !== request.turnId) {
+        throw protocolMismatch("The backend returned an apply result for a different conversation turn.");
+      }
+      const alreadyVisible =
+        (transcript?.items.some((turn) => turn.turnId === report.turnId) ?? false) ||
+        liveTurns.some((turn) => turn.key === report.turnId);
       setExtensionFlow((current) => {
-        if (current?.triggerTurnId !== flow.triggerTurnId || current.preview?.previewId !== previewId) return current;
+        if (current?.triggerTurnId !== flow.triggerTurnId || current.applyRequest?.turnId !== request.turnId) return current;
         return observeExtensionRevision(
           receiveExtensionApply(current, report),
           state.session?.extensionRevision ?? -1,
         );
       });
+      if (!alreadyVisible) {
+        setLiveTurns((turns) => [...turns, {
+          key: report.turnId,
+          userText: report.displayInput,
+          assistantText: report.text,
+          responseKind: "command",
+        }]);
+      }
+      if (state.session !== null && !alreadyVisible) {
+        dispatch({
+          type: "session-created",
+          session: { ...state.session, turnCount: state.session.turnCount + 1 },
+        });
+      }
+      requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
     }).catch((error: unknown) => {
       if (generationRef.current !== generation) return;
       const safe = workspaceError(error);
-      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? failExtensionFlow(current, safe.message) : current);
+      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId
+        ? failExtensionApply(current, safe.message, safe.turnLifecycle)
+        : current);
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, state.session?.extensionRevision]);
+  }, [beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, liveTurns, state.session, transcript]);
 
   const restartForExtensions = useCallback(() => {
     if (extensionFlow?.phase !== "applied" || extensionFlow.report?.restartRequired !== true) return;

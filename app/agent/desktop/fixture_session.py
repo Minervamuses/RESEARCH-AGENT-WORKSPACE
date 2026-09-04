@@ -33,6 +33,7 @@ from agent.desktop.catalog import (
 from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
 from agent.extensions.manager import ExtensionManager
 from agent.extensions.startup import load_extension_startup
+from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX
 from agent.tools.bash import create_bash_tool
 from agent.turns.memory import TurnRecord
 from agent.turns.plan_log import PlanLog
@@ -514,7 +515,12 @@ class FixtureSession:
             failure=FailureInfo(
                 code="interrupted",
                 message="The previous fixture turn was interrupted.",
-                retryable=True,
+                retryable=not (
+                    pending.kind == "display-only"
+                    and pending.display_input.startswith(
+                        ONE_SHOT_DISPLAY_INPUT_PREFIX
+                    )
+                ),
             ),
             finished_at=snapshot.document.updated_at,
         )
@@ -567,6 +573,8 @@ class FixtureSession:
                 )
                 self._notify_prompt_persisted()
                 return snapshot, existing, True
+            if existing.failure is not None and not existing.failure.retryable:
+                raise InvalidTransitionError("fixture turn cannot be retried")
             if not retry:
                 raise InvalidTransitionError(
                     "failed or interrupted fixture turn requires an explicit retry"
@@ -612,6 +620,7 @@ class FixtureSession:
         state: str = "failed",
         code: str = "execution_failed",
         message: str = "The fixture turn could not be completed.",
+        retryable: bool = True,
     ) -> None:
         self._conversation_snapshot = self.conversation_repository.fail_turn(
             snapshot,
@@ -620,7 +629,7 @@ class FixtureSession:
             failure=FailureInfo(
                 code=code,
                 message=message,
-                retryable=True,
+                retryable=retryable,
             ),
             finished_at=snapshot.document.updated_at,
         )
@@ -844,6 +853,7 @@ class FixtureSession:
         *,
         turn_id: str,
         retry: bool = False,
+        failure_retryable: bool = True,
     ) -> tuple[object | None, TurnOutcome]:
         """Run a deterministic local command through canonical persistence."""
         snapshot, pending, duplicate = self._begin_turn(
@@ -892,6 +902,7 @@ class FixtureSession:
                 state="interrupted",
                 code="cancelled",
                 message="The fixture command was cancelled.",
+                retryable=failure_retryable,
             )
             raise
         except ConversationError:
@@ -901,6 +912,7 @@ class FixtureSession:
                     turn_id=turn_id,
                     code="persistence_failed",
                     message="The fixture command result could not be saved.",
+                    retryable=failure_retryable,
                 )
             except ConversationError:
                 pass
@@ -910,6 +922,7 @@ class FixtureSession:
                 snapshot,
                 turn_id=turn_id,
                 message="The fixture command could not be completed.",
+                retryable=failure_retryable,
             )
             raise
 

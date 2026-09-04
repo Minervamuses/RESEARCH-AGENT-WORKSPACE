@@ -109,7 +109,9 @@
         "method": "extensions.apply",
         "params": {
           "previewId": "extension-preview-opaque-1",
-          "approvedBindingHashes": ["sha256:binding-1"]
+          "approvedBindingHashes": ["sha256:binding-1"],
+          "turnId": "00000000000040008000000000000022",
+          "retry": false
         }
       }
     },
@@ -125,6 +127,8 @@
         "params": {
           "previewId": "extension-preview-opaque-1",
           "approvedBindingHashes": [],
+          "turnId": "00000000000040008000000000000023",
+          "retry": false,
           "preview": {"raw": "must stay in Python memory"}
         }
       }

@@ -299,6 +299,14 @@
       }
     },
     "extensions.apply": {
+      "sessionId": {"type": "string", "required": true, "maxBytes": 256},
+      "turnId": {"type": "turnId", "required": true},
+      "turnNumber": {"type": "integer", "required": true, "minimum": 1, "maximum": 4096},
+      "state": {"type": "string", "required": true, "enum": ["completed"]},
+      "accepted": {"type": "boolean", "required": true},
+      "persisted": {"type": "boolean", "required": true},
+      "displayInput": {"type": "string", "required": true, "maxBytes": 256},
+      "text": {"type": "string", "required": true, "maxBytes": 65536},
       "previousRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "appliedRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "restartRequired": {"type": "boolean", "required": true},
@@ -477,10 +485,12 @@
     {
       "name": "extensions.apply",
       "operation": "destructive",
-      "requiredParams": ["previewId", "approvedBindingHashes"],
+      "requiredParams": ["previewId", "approvedBindingHashes", "turnId", "retry"],
       "params": {
         "previewId": {"type": "string", "required": true, "maxBytes": 256},
-        "approvedBindingHashes": {"type": "stringArray", "required": true, "maxItems": 512}
+        "approvedBindingHashes": {"type": "stringArray", "required": true, "maxItems": 512},
+        "turnId": {"type": "turnId", "required": true},
+        "retry": {"type": "boolean", "required": true}
       }
     },
     {

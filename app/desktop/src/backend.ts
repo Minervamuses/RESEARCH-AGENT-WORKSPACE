@@ -499,7 +499,7 @@ function normalizeBusinessError(
   method: ProtocolMethod,
 ): SafeUiError {
   const normalized = normalizeUiError(error, "business");
-  if (method !== "session.turn") {
+  if (method !== "session.turn" && method !== "extensions.apply") {
     return normalized;
   }
   return {

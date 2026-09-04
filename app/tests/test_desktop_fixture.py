@@ -545,22 +545,19 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
         preview = await service.dispatch("extensions.preview", {})
         status_after_preview = await service.dispatch("extensions.status", {})
         binding = preview["bindings"][0]
+        apply_turn_id = "00000000000040008000000000000549"
+        apply_params = {
+            "previewId": preview["previewId"],
+            "approvedBindingHashes": [binding["bindingHash"]],
+            "turnId": apply_turn_id,
+            "retry": False,
+        }
         applied = await service.dispatch(
             "extensions.apply",
-            {
-                "previewId": preview["previewId"],
-                "approvedBindingHashes": [binding["bindingHash"]],
-            },
+            apply_params,
         )
         post_apply = await service.dispatch("extensions.status", {})
-        with pytest.raises(DesktopServiceError) as replayed:
-            await service.dispatch(
-                "extensions.apply",
-                {
-                    "previewId": preview["previewId"],
-                    "approvedBindingHashes": [binding["bindingHash"]],
-                },
-            )
+        replayed = await service.dispatch("extensions.apply", apply_params)
         return (
             created,
             status_turn,
@@ -570,7 +567,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
             status_after_preview,
             applied,
             post_apply,
-            replayed.value,
+            replayed,
         )
 
     (
@@ -606,7 +603,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
     assert {item["outcome"] for item in applied["items"]} == {"added"}
     assert post_apply["runningRevision"] == 0
     assert post_apply["restartRequired"] is True
-    assert replayed.code == "EXTENSION_APPLY_FAILED"
+    assert replayed == applied
 
     restarted = _service(fixture_root)
     restarted_provider = restarted._extension_manager.model_factory.__self__
@@ -707,6 +704,8 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             {
                 "previewId": preview["previewId"],
                 "approvedBindingHashes": [binding["bindingHash"]],
+                "turnId": "00000000000040008000000000000706",
+                "retry": False,
             },
         )
         shutdown = await first.dispatch("session.shutdown", {})
