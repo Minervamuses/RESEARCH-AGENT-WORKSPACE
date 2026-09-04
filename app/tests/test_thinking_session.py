@@ -427,24 +427,39 @@ def test_recent_turns_exclude_candidate_answers(monkeypatch, tmp_path):
     assert "a2" not in record.assistant_output
 
 
-def test_plan_log_uses_candidate_scoped_trace_without_collision(monkeypatch, tmp_path):
+def test_plan_mode_keeps_canonical_tool_summaries_and_candidate_scoped_trace(
+    monkeypatch,
+    tmp_path,
+):
     session, _factory, _models = _two_tool_candidate_session(monkeypatch, tmp_path)
     asyncio.run(session.enter_plan_mode())
 
     asyncio.run(session.turn("question"))
+    snapshot = session.conversation_repository.load(session.session_id)
+    turn = snapshot.document.turns[-1]
+    trace_events = session.turn_logs[-1]["trace_events"]
+    candidate_events = {
+        event["candidate_id"]: event
+        for event in trace_events
+        if event.get("candidate_id")
+    }
 
-    content = session.plan_log_path.read_text(encoding="utf-8")
-    assert "Fusion candidate candidate-1" in content
-    assert "Fusion candidate candidate-2" in content
-    seg1 = content.split("Fusion candidate candidate-2")[0]
-    seg2 = content.split("Fusion candidate candidate-2")[1]
-    # Each candidate's call-1 result stays inside its own segment.
-    assert "RES1" in seg1 and "RES2" not in seg1
-    assert "RES2" in seg2
-    # The final Assistant block only shows the final answer.
-    assistant_block = content.split("**Assistant:**")[-1]
-    assert "fused" in assistant_block
-    assert "RES1" not in assistant_block and "RES2" not in assistant_block
+    assert turn.state == "completed"
+    assert turn.assistant_output == "fused"
+    assert [
+        (activity.name, activity.status, activity.summary)
+        for activity in turn.tool_activities
+    ] == [
+        ("rag_search", "ok", "Tool execution completed."),
+        ("rag_search", "ok", "Tool execution completed."),
+    ]
+    assert candidate_events["candidate-1"]["args"] == {"q": "x"}
+    assert candidate_events["candidate-2"]["args"] == {"q": "y"}
+    assert candidate_events["candidate-1"]["id"] == "call-1"
+    assert candidate_events["candidate-2"]["id"] == "call-1"
+    assert session.plan_mode is True
+    assert session.plan_log_path is None
+    assert not (tmp_path / session.config.plan_logs_dir).exists()
 
 
 def test_no_active_skill_proposer_is_read_only(monkeypatch, tmp_path):

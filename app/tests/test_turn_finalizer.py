@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import uuid
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -44,6 +45,32 @@ def make_session(monkeypatch, tmp_path):
         return session, store
 
     return _make
+
+
+async def _finalize_pending(session, *, user_input: str, **kwargs):
+    """Exercise the finalizer only after its canonical pending precondition."""
+    turn_id = uuid.uuid4().hex
+    snapshot, turn, duplicate = await session._begin_turn(
+        semantic_input=user_input,
+        display_input=user_input,
+        turn_id=turn_id,
+        retry=False,
+    )
+    assert duplicate is False
+    assert turn.state == "pending"
+    persisted = session.conversation_repository.load(session.session_id)
+    assert persisted.document.turns[-1].state == "pending"
+    session._conversation_snapshot = persisted
+    session._active_turn_snapshot = persisted
+    session._active_turn_id = turn_id
+    try:
+        return await session.finalize_and_record(
+            user_input=user_input,
+            **kwargs,
+        )
+    finally:
+        session._active_turn_snapshot = None
+        session._active_turn_id = None
 
 
 async def _noop_fetcher(url, headers):
@@ -260,7 +287,8 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
     _seed_verified_source(session, tmp_path)
 
     with caplog.at_level(logging.INFO, logger="agent.observability"):
-        outcome = asyncio.run(session.finalize_and_record(
+        outcome = asyncio.run(_finalize_pending(
+            session,
             user_input="save",
             answer="Model-selected response.",
             new_messages=[_save_tool_message(session)],
@@ -294,7 +322,8 @@ def test_multiple_save_artifacts_aggregate_without_invariant_failure(
     second.artifact["items"][1]["status"] = "reused"
     second.artifact["items"][1]["reason_code"] = "reused_existing"
 
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="save both",
         answer="Two save calls completed.",
         new_messages=[_save_tool_message(session), second],
@@ -323,7 +352,8 @@ def test_registry_mismatch_affects_telemetry_but_not_model_prose(
     message = _save_tool_message(session)
     message.artifact["items"][1]["receipt"][field] = forged_value
 
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="save",
         answer="The model owns this prose.",
         new_messages=[message],
@@ -348,7 +378,8 @@ def test_forged_receipt_identifier_never_reaches_logs(
     receipt["cite_marker"] = f"[[cite:{secret}]]"
 
     with caplog.at_level(logging.WARNING):
-        outcome = asyncio.run(session.finalize_and_record(
+        outcome = asyncio.run(_finalize_pending(
+            session,
             user_input="save",
             answer="No receipt details here.",
             new_messages=[message],
@@ -364,7 +395,8 @@ def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
     session, _ = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="save",
         answer="工具呼叫失敗。",
         new_messages=[_save_tool_message(session, status="error")],
@@ -391,7 +423,8 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
     )
 
     with caplog.at_level(logging.WARNING, logger="agent.observability"):
-        outcome = asyncio.run(session.finalize_and_record(
+        outcome = asyncio.run(_finalize_pending(
+            session,
             user_input="save",
             answer="保存未完成。",
             new_messages=[save_call, result],
@@ -420,7 +453,8 @@ def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_p
     saved_item["status"] = "reused"
     saved_item["reason_code"] = "reused_existing"
 
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="save",
         answer="Reused the existing bundle.",
         new_messages=[message],
@@ -438,7 +472,8 @@ def test_all_save_failures_do_not_deterministically_replace_model_draft(
     session, _ = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="全部存下來",
         answer="This is the model's final wording.",
         new_messages=[_save_failure_tool_message(
@@ -460,7 +495,8 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     session, _ = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="確認",
         answer=draft,
         new_messages=[_save_tool_message(session)],
@@ -472,44 +508,82 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
 
 
-def test_plan_log_records_model_answer_without_injecting_receipt(make_session, tmp_path):
+def test_plan_mode_records_canonical_answer_without_plan_log_or_receipt(
+    make_session,
+    tmp_path,
+):
     session, _ = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
     asyncio.run(session.enter_plan_mode())
     draft = "Saved according to the tool."
+    tool_call = {
+        "name": "citation_workflow",
+        "args": {"action": "save"},
+        "id": "save-1",
+    }
 
-    outcome = asyncio.run(session.finalize_and_record(
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="儲存",
         answer=draft,
         new_messages=[_save_tool_message(session)],
-        tool_calls=[],
-        trace_events=[],
+        tool_calls=[tool_call],
+        trace_events=[{"type": "tool", **tool_call}],
     ))
-    content = session.plan_log_path.read_text(encoding="utf-8")
+    snapshot = session.conversation_repository.load(session.session_id)
+    turn = snapshot.document.turns[-1]
+    canonical_text = session.conversation_repository.path_for(
+        session.session_id
+    ).read_text(encoding="utf-8")
 
     assert outcome.text == draft
-    assert draft in content
-    assert "src-known" not in content
+    assert turn.state == "completed"
+    assert turn.assistant_output == draft
+    summaries = [
+        (activity.name, activity.status, activity.summary)
+        for activity in turn.tool_activities
+    ]
+    assert summaries == [
+        ("citation_workflow", "ok", "Tool execution completed."),
+    ]
+    assert session.turn_logs[-1]["trace_events"] == [{"type": "tool", **tool_call}]
+    assert "src-known" not in canonical_text
+    assert session.plan_log_path is None
+    assert not (tmp_path / session.config.plan_logs_dir).exists()
 
 
-def test_eviction_persists_model_answer_as_plain_assistant_text(make_session, tmp_path):
+def test_small_window_preserves_canonical_answer_without_chroma_eviction(
+    make_session,
+    tmp_path,
+):
     session, store = make_session(window=1)
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(session.finalize_and_record(
+    tool_call = {
+        "name": "citation_workflow",
+        "args": {"action": "save"},
+        "id": "save-1",
+    }
+    outcome = asyncio.run(_finalize_pending(
+        session,
         user_input="儲存",
         answer="Saved according to the tool.",
         new_messages=[_save_tool_message(session)],
-        tool_calls=[],
-        trace_events=[],
+        tool_calls=[tool_call],
+        trace_events=[{"type": "tool", **tool_call}],
     ))
     asyncio.run(session.turn("下一步"))
+    snapshot = session.conversation_repository.load(session.session_id)
+    first, second = snapshot.document.turns
 
-    assert len(store.adds) == 1
-    assert store.adds[0]["assistant_output"] == outcome.text
-    assert store.adds[0]["assistant_output"] == "Saved according to the tool."
-    assert not hasattr(store.adds[0]["turn"], "sources")
+    assert [first.state, second.state] == ["completed", "completed"]
+    assert first.assistant_output == outcome.text == "Saved according to the tool."
+    assert [(activity.name, activity.status) for activity in first.tool_activities] == [
+        ("citation_workflow", "ok"),
+    ]
+    assert store.adds == []
+    assert not hasattr(first, "sources")
 
 
 def test_user_doi_in_input_is_never_auto_registered(make_session):
