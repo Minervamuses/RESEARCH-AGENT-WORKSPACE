@@ -63,7 +63,7 @@
 - `app/tests/test_session_lifecycle.py`與`app/tests/test_conversation_repository.py`覆蓋重啟恢復、explicit retry與latest-10 completed／eligible context。
 - `app/tests/test_history_retirement.py`與`app/tests/test_conversation_archive_access.py`驗證`recall_history`已移除，canonical exact grep/read-file workflow不fallback到RAG。
 
-這些是isolated fixture／fake external owners與本機subprocess證據。尚未執行真實使用者資料migration、live provider或Ollama，也不把尚待完成的native Tauri人工journey宣稱為已驗收；因此本issue的canonical lifecycle缺口已解決，不代表Phase 07或整體計畫已完成。
+這些證據使用isolated fixture／fake external owners、本機subprocess與production Tauri release window；native keyboard、pending/final-only、retry、A→B→A、restart/mode、tool separation、inert content、focus與scroll均已人工觀察。尚未執行真實使用者資料migration、live provider或Ollama；exact native `720×560`與200% zoom layout仍 unavailable/not passed，因此本issue的canonical lifecycle缺口已解決，不代表Phase 07或整體計畫已完成。
 
 ## 主要參考檔案
 

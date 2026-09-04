@@ -12,7 +12,7 @@
 | 04 — Host/catalog/retry cutover | Complete | 2026-09-04 20:39 CST | 2026-09-04 22:26 CST | Catalog recovery, full lifecycle paging, explicit retry, display-only commands, and fresh review below | None |
 | 05 — Remove Product Plan Mode | Complete | 2026-09-04 22:31 CST | 2026-09-04 23:04 CST | Removal, preservation checks, docs, and fresh review below | None |
 | 06 — Retire chat-history Chroma | Complete | 2026-09-04 23:12 CST | 2026-09-05 00:22 CST | Runtime retirement, archive-access checks, docs, and fresh review below | None |
-| 07 — Migration, faults, docs | In progress | 2026-09-05 00:29 CST | — | Preflight, repaired execution gates, and baseline below | None |
+| 07 — Migration, faults, docs | In progress | 2026-09-05 00:29 CST | — | Migration/fault/docs/broad/native behavioral evidence below | Exact native `720×560` and 200% zoom layout evidence |
 
 允許的狀態只有 `Not started`、`In progress`、`Blocked`、`Complete`。只有 required acceptance與verification都有 observed evidence時才能標為 `Complete`。
 
@@ -404,4 +404,5 @@ Material implementation events append with this shape:
 - **Why this follow-up ran:** residue checkpoint後發現系統已有`/usr/bin/xdotool`，因此在停下前嘗試以現成工具完成原生layout gate；沒有install、source edit或acceptance替代。
 - **Result:** 以第二個fresh direct root=`/tmp/research-agent-desktop-phase02-layout-0erLTE`重新啟動同一release binary與production supervisor；backend在Conda `app`中ready，native capture仍為`755×515` physical。`xdotool search --name "Research Agent"`與all-visible-window search均exit 1，確認WSLg `msrdc.exe` surface未暴露給X11。Native `Alt+F8`後再按Left不改變geometry；fresh foreground capture後的border drag仍被outer `msrdc.exe`/Codex coordinate mediation拒絕。未再嘗試browser/headless substitute，也不把OS/DPI env猜測冒充exact WebKit 200% zoom。
 - **Cleanup:** 由UI正常Shutdown至Backend stopped後關閉視窗，release exec session exit 0；desktop/backend process查詢各exit 1。刪除前再次確認第二個root的exact realpath、`/tmp` parent、directory type、mode `700`、owner與non-symlink，之後只刪除該synthetic root；`test ! -e` exit 0。兩個本phase manual roots均已清除。
+- **Fresh audit correction:** independent read-only audit發現phase summary與三份`for_agents`文件仍把已完成的broad/native behavioral evidence寫成Pending，可能誘使resumed agent重跑once-only broad suites；同一focused docs correction已把observed結果與只剩layout gate的狀態對齊，並同步修正issue 07。修正後final recheck無open P1/P2；沒有修改implementation或重跑tests/build。
 - **Status:** blocker不變且替代路徑已合理耗盡；Phase 07保持`In progress`，等待可控制native geometry與zoom的人工環境提供兩項evidence。

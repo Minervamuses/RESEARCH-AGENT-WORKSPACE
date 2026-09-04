@@ -21,7 +21,7 @@ Run project commands under Ubuntu/WSL from the repository root unless the comman
 | cd app && conda run -n app python -c "import agent, skills.citation, rag; print('app ok')" | Distribution import smoke | README.md | Installed project | app ok |
 | `python3 /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root /home/minervamuses/research-agent-workspace` | `for_agents` structure and ignore rule | Infrastructure skill | WSL system Python and local skill path | Validator result |
 
-Current focused Phase 07 evidence (broad and native-manual gates remain pending):
+Current Phase 07 evidence (automated broad checks and the native behavioral journey are observed; the exact layout gate remains):
 
 | Check | Result | Evidence source |
 |---|---|---|
@@ -30,8 +30,12 @@ Current focused Phase 07 evidence (broad and native-manual gates remain pending)
 | Fixture/repository/server selector | `51 passed, 1 warning` | Phase 07 build log; repository and fixture recovery coverage |
 | Repository temp-failure + restart-control + no-chat-history gap selector | `5 passed, 1 warning` | Phase 07 build log; current focused additions |
 | Migration + fixture + server + normal-startup history selector | `69 passed, 1 warning` | Phase 07 build log; normal startup remains batch-off and does not load active history |
-| Final broad Python/npm/Cargo/Tauri evidence | Pending | Active Phase 07 plan; no current claim |
-| Native Tauri keyboard/layout/manual journey | Pending and blocking | Active Phase 07 plan; subprocess/headless checks cannot substitute |
+| Full Python suite | `993 passed, 1 warning` | Phase 07 build log; one final broad run |
+| Desktop TypeScript suite | `136 passed, 0 failed` | Phase 07 build log; one final broad run |
+| Rust suite | Library `31 passed`; binary/doc targets passed with 0 tests | Phase 07 build log; one final broad run |
+| Tauri no-bundle release build | Exit 0; `beforeBuildCommand` supplied the only production TypeScript/Vite build | Phase 07 build log; release binary exercised by the native journey |
+| Native Tauri behavioral journey | Passed keyboard create/select/send/retry, pending/final-only, A→B→A, restart/continue, normal→extended, tool separation, inert content, focus, and scroll | Phase 07 build log; production release window and isolated fixture root |
+| Exact native `720×560` and 200% zoom layout | Unavailable/not passed and blocking | WSLg geometry cannot be set reliably and WebKit ignores zoom; browser/headless substitution is forbidden |
 | Live providers, Ollama, user stores, and real migration | Not run | Outside the authorized fixture-only validation scope |
 
 The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 and FAIL-002 using temporary data and deterministic doubles. Their relevant production paths did not change, but the probes were not repeated now.
@@ -102,4 +106,4 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 - Desktop fixture selection remains a runtime environment gate in tracked code; tests prove exact selection, but no build-time mechanism excludes it from ordinary source runs.
 - Installer, wheel protocol-asset lookup, bundled sidecar, signing, and cross-platform desktop checks do not exist by design.
 - Historical test counts in issue/note files do not establish current checkout health.
-- Current Phase 07 focused Python checks passed as listed above. Final broad Python/npm/Cargo/Tauri evidence, the blocking native Tauri manual journey, live providers, and user-state behavior remain unclaimed or Unknown.
+- Current Phase 07 focused checks, final broad Python/npm/Cargo/Tauri checks, release build, and native behavioral journey passed as listed above. Exact native `720×560` and 200% zoom layout remains unavailable/not passed and blocks completion; live providers, real migration, and real user-state behavior remain unclaimed or Unknown.
