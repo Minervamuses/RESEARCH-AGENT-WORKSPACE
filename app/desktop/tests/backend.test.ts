@@ -146,11 +146,16 @@ test("request builder creates a canonical protocol-v1 request and validates para
   assert.deepEqual(
     buildProtocolRequest(
       "session.turn",
-      { text: "question", turnId: "123e4567e89b42d3a456426614174001" },
+      { text: "question", turnId: "123e4567e89b42d3a456426614174001", retry: false },
       () => requestId,
     ).params,
-    { text: "question", turnId: "123e4567e89b42d3a456426614174001" },
+    { text: "question", turnId: "123e4567e89b42d3a456426614174001", retry: false },
   );
+  assert.throws(() => buildProtocolRequest(
+    "session.turn",
+    { text: "question", turnId: "123e4567e89b42d3a456426614174001", retry: "false" },
+    () => requestId,
+  ));
   assert.throws(() => buildProtocolRequest("runtime.diagnostics", {}, () => "not-a-uuid"));
 });
 
@@ -285,6 +290,42 @@ test("backend client maps protocol business failures into safe UI errors", async
     assert.doesNotMatch(error.uiError.message, /token/i);
     return true;
   });
+});
+
+test("backend client preserves validated session-turn lifecycle details", async () => {
+  const turnId = "123e4567e89b42d3a456426614174001";
+  const turnLifecycle = {
+    turnId,
+    state: "failed",
+    accepted: true,
+    persisted: true,
+  } as const;
+  const client = createBackendClient({
+    idFactory: () => requestId,
+    invoke: async <T>() => ({
+      protocolVersion: 1,
+      messageType: "result",
+      requestId,
+      ok: false,
+      error: {
+        code: "PROVIDER_REQUEST_FAILED",
+        message: "The provider request failed.",
+        retryable: true,
+        details: turnLifecycle,
+      },
+    }) as T,
+  });
+
+  await assert.rejects(
+    client.request("session.turn", { text: "question", turnId, retry: false }),
+    (error) => {
+      assert.ok(error instanceof BackendClientError);
+      assert.equal(error.uiError.source, "business");
+      assert.deepEqual(error.uiError.turnLifecycle, turnLifecycle);
+      assert.equal("details" in error.uiError, false, "arbitrary protocol details stay outside UI state");
+      return true;
+    },
+  );
 });
 
 test("bridge events validate lifecycle payloads and process-event origins", () => {

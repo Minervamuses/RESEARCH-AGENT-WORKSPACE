@@ -57,6 +57,7 @@ interface ContractDocument {
   forbiddenDataKeyFragments: string[];
   eventDataSchemas: Record<string, Record<string, ContractFieldRule>>;
   resultDataSchemas: Record<string, Record<string, ContractFieldRule>>;
+  turnErrorDetailsSchema: Record<string, ContractFieldRule>;
   methods: ContractMethod[];
   errorCodes: string[];
 }
@@ -110,6 +111,11 @@ function matchesExpectedError(error: unknown, code: string | undefined): boolean
 
 test("language-neutral manifest matches TypeScript constants", async () => {
   const contract = await loadJson<ContractDocument>("contract.json");
+  const turnErrorDetailsSchema = (
+    await import("../src/protocol.ts") as unknown as {
+      TURN_ERROR_DETAILS_SCHEMA: Record<string, ContractFieldRule>;
+    }
+  ).TURN_ERROR_DETAILS_SCHEMA;
   assert.equal(contract.protocolVersion, PROTOCOL_VERSION);
   assert.equal(contract.maxLineBytes, MAX_PROTOCOL_LINE_BYTES);
   assert.equal(contract.requestIdMaxBytes, MAX_REQUEST_ID_BYTES);
@@ -121,6 +127,17 @@ test("language-neutral manifest matches TypeScript constants", async () => {
   assert.deepEqual(contract.forbiddenDataKeyFragments, [...FORBIDDEN_DATA_KEY_FRAGMENTS]);
   assert.deepEqual(contract.eventDataSchemas, EVENT_DATA_SCHEMAS);
   assert.deepEqual(contract.resultDataSchemas, RESULT_DATA_SCHEMAS);
+  assert.deepEqual(turnErrorDetailsSchema, {
+    turnId: { type: "turnId", required: true },
+    state: {
+      type: "nullableString",
+      required: true,
+      enum: ["pending", "completed", "failed", "interrupted"],
+    },
+    accepted: { type: "boolean", required: true },
+    persisted: { type: "boolean", required: true },
+  });
+  assert.deepEqual(contract.turnErrorDetailsSchema, turnErrorDetailsSchema);
   assert.deepEqual(contract.errorCodes, [...PROTOCOL_ERROR_CODES]);
 
   for (const method of contract.methods) {
@@ -168,9 +185,13 @@ test("normal answers use only the final terminal result", () => {
 });
 
 test("session turn carries one canonical logical identity and durable lifecycle", () => {
-  assert.deepEqual(METHOD_REQUIRED_PARAMS["session.turn"], ["text", "turnId"]);
+  assert.deepEqual(METHOD_REQUIRED_PARAMS["session.turn"], ["text", "turnId", "retry"]);
   assert.deepEqual(METHOD_PARAM_SCHEMAS["session.turn"].turnId, {
     type: "turnId",
+    required: true,
+  });
+  assert.deepEqual(METHOD_PARAM_SCHEMAS["session.turn"].retry, {
+    type: "boolean",
     required: true,
   });
   assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].turnNumber, {
@@ -194,6 +215,59 @@ test("session turn carries one canonical logical identity and durable lifecycle"
   });
   assert.equal(PROTOCOL_ERROR_CODES.includes("CONVERSATION_FLUSH_FAILED" as never), false);
   assert.equal(PROTOCOL_ERROR_CODES.includes("SHUTDOWN_FLUSH_FAILED" as never), false);
+});
+
+test("session summaries and transcripts expose canonical lifecycle state", () => {
+  const summary = RESULT_DATA_SCHEMAS["session.list"]?.items.items;
+  assert.deepEqual(summary?.createdAt, {
+    type: "nullableString",
+    required: true,
+    maxBytes: 64,
+  });
+
+  const turn = RESULT_DATA_SCHEMAS["session.transcript"]?.items.items;
+  assert.deepEqual(Object.keys(turn ?? {}).sort(), [
+    "turnId",
+    "turnNumber",
+    "kind",
+    "state",
+    "timestamp",
+    "userText",
+    "assistantText",
+    "failureCode",
+    "failureMessage",
+    "failureRetryable",
+    "toolActivities",
+  ].sort());
+  assert.deepEqual(turn?.turnId, { type: "turnId", required: true });
+  assert.deepEqual(turn?.kind, {
+    type: "string",
+    required: true,
+    enum: ["conversational", "display-only"],
+  });
+  assert.deepEqual(turn?.state, {
+    type: "string",
+    required: true,
+    enum: ["pending", "completed", "failed", "interrupted"],
+  });
+  assert.deepEqual(turn?.timestamp, { type: "utcTimestamp", required: true });
+  assert.deepEqual(turn?.assistantText, {
+    type: "nullableString",
+    required: true,
+    maxBytes: 32_768,
+  });
+  assert.deepEqual(turn?.failureCode, {
+    type: "nullableString",
+    required: true,
+    maxBytes: 256,
+    enum: ["execution_failed", "persistence_failed", "interrupted", "cancelled"],
+  });
+  assert.deepEqual(turn?.failureMessage, {
+    type: "nullableString",
+    required: true,
+    maxBytes: 4_096,
+  });
+  assert.deepEqual(turn?.failureRetryable, { type: "nullableBoolean", required: true });
 });
 
 test("shared process-event origin fixtures", async (context) => {

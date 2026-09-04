@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as conversationModule from "../src/conversations.ts";
 import {
   MAX_ACTIVITY_ITEMS,
   conversationInteractionState,
@@ -15,8 +16,25 @@ const projectId = "local";
 const sessionId = "123e4567e89b42d3a456426614174000";
 const otherSessionId = "223e4567e89b42d3a456426614174000";
 const requestId = "123e4567-e89b-42d3-a456-426614174000";
+const retryRequestId = "223e4567-e89b-42d3-a456-426614174000";
 const turnId = "123e4567e89b42d3a456426614174001";
 const otherTurnId = "223e4567e89b42d3a456426614174001";
+
+interface TurnLifecycleDetails {
+  turnId: string;
+  state: "pending" | "completed" | "failed" | "interrupted" | null;
+  accepted: boolean;
+  persisted: boolean;
+}
+
+const nextTurnSubmission = (
+  conversationModule as unknown as {
+    nextTurnSubmission: (
+      state: ConversationState,
+      idFactory: () => string,
+    ) => { turnId: string; retry: boolean };
+  }
+).nextTurnSubmission;
 
 function selectedState(draft = "question"): ConversationState {
   let state = conversationReducer(initialConversationState, {
@@ -46,11 +64,12 @@ function activeState(draft = "question"): ConversationState {
 function succeed(
   state: ConversationState,
   overrides: Partial<AuthoritativeTurnResult> = {},
+  correlatedRequestId = requestId,
 ): ConversationState {
   return conversationReducer(state, {
     type: "turn-succeeded",
     generation: 1,
-    requestId,
+    requestId: correlatedRequestId,
     projectId,
     result: {
       sessionId,
@@ -95,14 +114,10 @@ test("a result for a different logical turn is rejected", () => {
   assert.equal(succeed(started, { turnId: otherTurnId }), started);
 });
 
-test("a local slash command is one final-only inert conversation result", () => {
+test("a local slash command is one durable final-only display result", () => {
   const state = succeed(activeState("/sync /tmp/research"), {
     text: "Diff against /tmp/research:\n  (none)",
     responseKind: "command",
-    turnNumber: undefined,
-    state: null,
-    accepted: false,
-    persisted: false,
   });
 
   assert.deepEqual(state.latestAnswer, {
@@ -167,6 +182,151 @@ test("failure preserves the recoverable draft and never creates an assistant pre
     draft: "retry this with changes",
   });
   assert.equal(edited.failure, null);
+});
+
+test("failure lifecycle distinguishes not accepted from durable terminal records", () => {
+  const cases: Array<{ name: string; lifecycle: TurnLifecycleDetails }> = [
+    {
+      name: "not accepted",
+      lifecycle: { turnId, state: null, accepted: false, persisted: false },
+    },
+    {
+      name: "durable failed",
+      lifecycle: { turnId, state: "failed", accepted: true, persisted: true },
+    },
+    {
+      name: "durable interrupted",
+      lifecycle: { turnId, state: "interrupted", accepted: true, persisted: true },
+    },
+    {
+      name: "completed before acknowledgement",
+      lifecycle: { turnId, state: "completed", accepted: true, persisted: true },
+    },
+  ];
+
+  for (const { name, lifecycle } of cases) {
+    const failed = conversationReducer(activeState(name), {
+      type: "turn-failed",
+      generation: 1,
+      requestId,
+      projectId,
+      sessionId,
+      message: `${name} failure`,
+      retryable: true,
+      turnLifecycle: lifecycle,
+    } as unknown as ConversationAction);
+    assert.deepEqual(failed.failure?.turnLifecycle, lifecycle, name);
+    assert.equal(failed.failure?.turnId, turnId, name);
+    assert.equal(failed.draft, name, name);
+    assert.equal(failed.latestAnswer, null, name);
+  }
+
+  const started = activeState("invalid lifecycle");
+  assert.equal(conversationReducer(started, {
+    type: "turn-failed",
+    generation: 1,
+    requestId,
+    projectId,
+    sessionId,
+    message: "invalid",
+    retryable: true,
+    turnLifecycle: { turnId, state: "failed", accepted: false, persisted: false },
+  } as unknown as ConversationAction), started);
+});
+
+test("first send is not a retry and an explicit transport retry keeps the logical ID", () => {
+  let generated = 0;
+  const first = nextTurnSubmission(selectedState("question"), () => {
+    generated += 1;
+    return turnId;
+  });
+  assert.deepEqual(first, { turnId, retry: false });
+  assert.equal(generated, 1);
+
+  const started = conversationReducer(selectedState("question"), {
+    type: "turn-started",
+    generation: 1,
+    projectId,
+    sessionId,
+    requestId,
+    turnId: first.turnId,
+  });
+  const timedOut = conversationReducer(started, {
+    type: "turn-failed",
+    generation: 1,
+    requestId,
+    projectId,
+    sessionId,
+    message: "The backend response timed out.",
+    retryable: true,
+  });
+  const retry = nextTurnSubmission(timedOut, () => {
+    throw new Error("retry must not allocate another logical turn ID");
+  });
+  assert.deepEqual(retry, { turnId, retry: true });
+});
+
+test("completed-before-ack retry replays the same logical turn", () => {
+  const deliveryFailed = conversationReducer(activeState("question"), {
+    type: "turn-failed",
+    generation: 1,
+    requestId,
+    projectId,
+    sessionId,
+    message: "The saved result was not acknowledged.",
+    retryable: true,
+    turnLifecycle: { turnId, state: "completed", accepted: true, persisted: true },
+  } as unknown as ConversationAction);
+  const submission = nextTurnSubmission(deliveryFailed, () => otherTurnId);
+  assert.deepEqual(submission, { turnId, retry: true });
+
+  const replayStarted = conversationReducer(deliveryFailed, {
+    type: "turn-started",
+    generation: 1,
+    projectId,
+    sessionId,
+    requestId: retryRequestId,
+    turnId: submission.turnId,
+  });
+  const replayed = succeed(replayStarted, { turnId, text: "saved answer" }, retryRequestId);
+  assert.equal(replayed.activeTurn, null);
+  assert.equal(replayed.failure, null);
+  assert.equal(replayed.latestAnswer?.turnId, turnId);
+  assert.equal(replayed.latestAnswer?.requestId, retryRequestId);
+});
+
+test("restart transcript can restore an interrupted same-ID retry target", () => {
+  let state = conversationReducer(activeState("question"), {
+    type: "backend-generation-changed",
+    generation: 2,
+  });
+  state = conversationReducer(state, {
+    type: "conversation-selected",
+    generation: 2,
+    projectId,
+    sessionId,
+  });
+  state = conversationReducer(state, {
+    type: "retry-target-restored",
+    generation: 2,
+    projectId,
+    sessionId,
+    turnId,
+    userText: "question",
+    state: "interrupted",
+    message: "The previous process stopped before completion.",
+    retryable: true,
+  } as unknown as ConversationAction);
+
+  assert.equal(state.failure?.requestId, null);
+  assert.deepEqual(state.failure?.turnLifecycle, {
+    turnId,
+    state: "interrupted",
+    accepted: true,
+    persisted: true,
+  });
+  assert.equal(state.draft, "question");
+  assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId, retry: true });
 });
 
 test("backend generation change drops stale selection, pending turn, answer, and failure", () => {

@@ -12,6 +12,7 @@ interface SessionSummary {
   sessionId: string;
   title: string;
   turnCount: number;
+  createdAt: string | null;
   updatedAt: string | null;
   status: "ready" | "degraded" | "unavailable";
   issue: string | null;
@@ -30,10 +31,16 @@ interface AppHelpersModule {
   ) => Array<SessionSummary & { transient: boolean }>;
   sessionCreateParams: (projectId: string) => Record<string, unknown>;
   RestoredTurn: (props: { turn: {
+    turnId: string;
     turnNumber: number;
+    kind: "conversational" | "display-only";
+    state: "pending" | "completed" | "failed" | "interrupted";
     timestamp: string;
     userText: string;
-    assistantText: string;
+    assistantText: string | null;
+    failureCode: "execution_failed" | "persistence_failed" | "interrupted" | "cancelled" | null;
+    failureMessage: string | null;
+    failureRetryable: boolean | null;
     toolActivities: Array<{
       callId: string | null;
       name: string;
@@ -130,6 +137,7 @@ test("sidebar rows expose a transient selected conversation without cataloging i
     sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     title: "Saved research",
     turnCount: 2,
+    createdAt: "2026-08-28T09:00:00Z",
     updatedAt: "2026-08-28T10:00:00Z",
     status: "ready",
     issue: null,
@@ -144,6 +152,7 @@ test("sidebar rows expose a transient selected conversation without cataloging i
     { sessionId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", transient: true },
     { sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", transient: false },
   ]);
+  assert.equal(rows[0].createdAt, null);
   assert.equal(saved.length, 1, "the catalog DTO remains unchanged");
 });
 
@@ -153,6 +162,7 @@ test("sidebar rows never duplicate a registered or already-listed conversation",
     sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     title: "Saved research",
     turnCount: 2,
+    createdAt: "2026-08-28T09:00:00Z",
     updatedAt: null,
     status: "ready",
     issue: null,
@@ -192,10 +202,16 @@ test("restored turns render tools between user and assistant without raw HTML", 
   const { createElement } = await import("react");
   const html = renderToStaticMarkup(createElement(RestoredTurn, {
     turn: {
+      turnId: "123e4567e89b42d3a456426614174001",
       turnNumber: 4,
+      kind: "conversational",
+      state: "completed",
       timestamp: "2026-08-28T00:00:00Z",
       userText: "question",
       assistantText: "final answer",
+      failureCode: null,
+      failureMessage: null,
+      failureRetryable: null,
       toolActivities: [{
         callId: "call-1",
         name: "rag_search",
@@ -216,12 +232,75 @@ test("restored turns render tools between user and assistant without raw HTML", 
   assert.match(html, /&lt;script&gt;/);
 });
 
+test("restored transcript renders durable non-completed and display-only states without a fake answer", async () => {
+  const { RestoredTurn } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const base = {
+    turnId: "123e4567e89b42d3a456426614174001",
+    turnNumber: 4,
+    kind: "conversational" as const,
+    timestamp: "2026-08-28T00:00:00Z",
+    userText: "question",
+    assistantText: null,
+    failureCode: null,
+    failureMessage: null,
+    failureRetryable: null,
+    toolActivities: [],
+  };
+
+  const pending = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: { ...base, state: "pending" },
+  }));
+  assert.match(pending, /pending/i);
+  assert.doesNotMatch(pending, /Assistant · restored/);
+
+  const failed = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: {
+      ...base,
+      state: "failed",
+      failureCode: "execution_failed",
+      failureMessage: "The turn could not be completed.",
+      failureRetryable: true,
+    },
+  }));
+  assert.match(failed, /failed/i);
+  assert.match(failed, /The turn could not be completed\./);
+  assert.doesNotMatch(failed, /Assistant · restored/);
+
+  const interrupted = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: {
+      ...base,
+      state: "interrupted",
+      failureCode: "interrupted",
+      failureMessage: "The previous process stopped before completion.",
+      failureRetryable: true,
+    },
+  }));
+  assert.match(interrupted, /interrupted/i);
+  assert.doesNotMatch(interrupted, /Assistant · restored/);
+
+  const displayOnly = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: {
+      ...base,
+      turnId: "223e4567e89b42d3a456426614174001",
+      state: "completed",
+      kind: "display-only",
+      userText: "/help",
+      assistantText: "Available commands",
+    },
+  }));
+  assert.match(displayOnly, /display.only/i);
+  assert.match(displayOnly, /Available commands/);
+});
+
 test("conversation pages preserve membership order and replace duplicate summaries", async () => {
   const { mergeSessionItems } = await loadAppHelpers();
   const session = (sessionId: string, title: string): SessionSummary => ({
     sessionId,
     title,
     turnCount: 1,
+    createdAt: null,
     updatedAt: null,
     status: "ready",
     issue: null,
