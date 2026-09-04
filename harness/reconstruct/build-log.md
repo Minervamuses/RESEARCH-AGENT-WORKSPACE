@@ -336,3 +336,15 @@ Material implementation events append with this shape:
 - **Harness review:** independent review先找出並修正stdout queue未排空造成假通過、clone未直接計數、startup failure可能遺留child、citation rejection缺可觀察證據四項問題；修後重新執行仍得到上述deterministic Red，no-index whitespace checks無診斷。
 - **Evidence reference:** Red commit=`2a51ffd`。
 - **Blockers:** None；下一步只實作default-off shared-snapshot migration Green。
+
+## 2026-09-05 00:53 CST — Phase 07: fixture batch migration Green
+
+- **Status:** `In progress`；migration acceptance已Green，fault journey與manual gate仍待完成。
+- **Implementation:** `LegacyChromaReader.shared_snapshot()`提供lazy、一次性immutable clone/client；`migrate_legacy_targets()`依catalog順序回傳frozen per-target results並沿用既有conversation-atomic importer。Exact `phase02` fixture再要求`RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1`才會呼叫；normal production startup/list/protocol與既有selected-session migration未改。
+- **Authority/retry:** 有效canonical target仍是唯一成功標記；全canonical、empty batch與成功後rerun不clone或open Chroma。單筆malformed/invalid source不阻斷健康target，legacy source bytes不變。Shared-client teardown錯誤只做redaction-safe warning，不會反向推翻已commit的canonical result或遮蔽body exception。
+- **Focused verification:** 新batch module exit 0，`7 passed, 1 warning in 0.22s`；migration + fixture + server + normal-startup history selector exit 0，`69 passed, 1 warning in 4.20s`。Warning只有既有LangGraph pending-deprecation；`git diff --check`通過。
+- **Unsuccessful command:** implementation期間曾誤填不存在的`tests/test_conversation_legacy.py` selector，pytest collection exit 4、0 tests；這是命令路徑錯誤，不是產品failure，已以上述正確selectors重跑通過。
+- **Fresh review:** reviewer指出client close失敗會讓已成功publish的整批無法回傳；補regression並改成不推翻canonical authority後，review確認無open P1/P2。
+- **Evidence reference:** migration Green commit=`fa62b11`。
+- **Limitations:** 未執行真實store migration、provider、Ollama或live Chroma；fixture以外沒有自動batch入口。
+- **Blockers:** None；下一步實作六個fixture-only subprocess checkpoint Green。
