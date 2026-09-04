@@ -88,7 +88,7 @@
 | 06 — Retire chat-history Chroma | 一般 runtime 不初始化/讀寫 conversation Chroma，`recall_history` 從 tool policy 移除；document RAG Chroma 保留 | Phase 05 | `phases/phase-06-retire-chat-history-chroma.md` |
 | 07 — Migration, faults, docs | Catalog-wide fixture migration、crash/corruption/idempotency journeys、三語整合與文件/invariants 完成，legacy source 保留為 archive | Phase 06 | `phases/phase-07-migration-faults-and-documentation.md` |
 
-所有 phases 為依序 dependency chain；不得因下一階段看似容易而跳過 failing gate。Phase 03 的實作過程可有短暫、未宣告完成的 integration window，但該 phase 只有在 write、read、selected-session import 與最小 client protocol 已形成可工作的 vertical slice 後才能完成；同一 turn 永遠不得雙寫 JSON 與 legacy store。暫存的 Product Plan control 若仍存在，也只能把新 turn 寫入同一 JSON，不得再建立 Plan log。Phase 05/06 結束後普通 runtime 只能走 JSON，legacy code 只由 Phase 02 建立的 explicit migration boundary 觸及。
+所有 phases 為依序 dependency chain；不得因下一階段看似容易而跳過 failing gate。Phase 03 的實作過程可有短暫、未宣告完成的 integration window，但該 phase 只有在 write、read、selected-session import 與最小 client protocol 已形成可工作的 vertical slice 後才能完成；同一 turn 永遠不得雙寫 JSON 與 legacy store。Phase 03–05 是 app-offline、不可對真實 user store 使用的非發布中間狀態；若執行在 Phase 06 前停止，app 保持不啟動。暫存的 Product Plan control 若仍存在，也只能把新 turn 寫入同一 JSON，不得再建立 Plan log。Phase 05/06 結束後普通 runtime 只能走 JSON，legacy code 只由 Phase 02 建立的 explicit migration boundary 觸及。
 
 ## Cross-phase technical decisions
 

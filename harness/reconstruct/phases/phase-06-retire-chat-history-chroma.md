@@ -27,7 +27,7 @@ Legacy Chroma conversation reader 只留給非破壞 migration；舊 `<persist_d
 
 ## Dependencies and prerequisites
 
-- Phase 03/04 已證明所有 active conversation write/read/restore 都使用 JSON；Phase 05 已移除 Plan runtime。
+- Phase 03/04 已證明 canonical transcript write/read/restore authority 都使用 JSON；Phase 05 已移除 Plan runtime。
 - 先用 imports、constructors、tool inventory、prompt text 與 tests 建立 conversation-Chroma 和 document-RAG 的精確邊界圖。
 - 特別檢查 dependency ownership：同一 package 仍被 document RAG 使用時，不得從 manifest/lock 移除。
 - 檢查 Bash allowlist/read tool tests，避免用廣泛字串刪除誤傷研究能力。
