@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 
 import pytest
@@ -477,6 +478,29 @@ def test_field_and_document_bounds_fail_before_publish(tmp_path):
             finished_at=_timestamp(2),
         )
 
+    second_pending = repository.append_pending(
+        snapshot,
+        turn_id=_uuid4_hex(2),
+        kind="conversational",
+        display_input=maximum_input,
+        semantic_input=maximum_input,
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at=_timestamp(3),
+    )
+    before_document_overflow = repository.path_for(CONVERSATION_ID).read_bytes()
+    with pytest.raises(ConversationTooLargeError):
+        repository.complete_turn(
+            second_pending,
+            turn_id=_uuid4_hex(2),
+            assistant_output=maximum_output,
+            finished_at=_timestamp(4),
+        )
+    assert (
+        repository.path_for(CONVERSATION_ID).read_bytes()
+        == before_document_overflow
+    )
+
 
 @pytest.mark.parametrize(
     ("location", "forbidden_key"),
@@ -678,10 +702,36 @@ def test_save_rejects_invalid_document_without_touching_disk(tmp_path):
         repository.save(snapshot, invalid_document)
     assert repository.path_for(CONVERSATION_ID).read_bytes() == before
 
+    rewritten_turn = replace(
+        snapshot.document.turns[0],
+        display_input="rewritten input",
+    )
+    rewritten_document = replace(snapshot.document, turns=(rewritten_turn,))
+    with pytest.raises(InvalidTransitionError, match="immutable"):
+        repository.save(snapshot, rewritten_document)
+    assert repository.path_for(CONVERSATION_ID).read_bytes() == before
+
     duplicate_id = CONVERSATION_ID
     with pytest.raises(ConversationConflictError, match="already exists"):
         _create(repository, conversation_id=duplicate_id)
     assert repository.path_for(CONVERSATION_ID).read_bytes() == before
+
+
+def test_nonregular_conversation_path_is_rejected_without_blocking(tmp_path):
+    repository = ConversationRepository(tmp_path)
+    repository.root.mkdir(parents=True, exist_ok=True)
+    fifo_id = _uuid4_hex(80)
+    os.mkfifo(repository.path_for(fifo_id))
+
+    with pytest.raises(ConversationUnavailableError, match="regular file"):
+        repository.load(fifo_id)
+
+    issue = next(
+        issue
+        for issue in repository.scan().issues
+        if issue.conversation_id == fifo_id
+    )
+    assert issue.code == "unavailable"
 
 
 def test_document_limit_error_type_is_distinct_from_schema_errors(tmp_path):
