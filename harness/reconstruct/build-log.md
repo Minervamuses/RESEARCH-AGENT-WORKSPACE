@@ -326,3 +326,13 @@ Material implementation events append with this shape:
 - **Focused baseline:** 從`app/`執行conversation migration/repository、Desktop conversation/fixture/server與session lifecycle六個modules，exit 0，`109 passed, 1 warning in 3.94s`；warning是既有LangGraph `allowed_objects` pending-deprecation。未啟動provider、Ollama、真實migration或native window。
 - **Manual gate:** 最終必須使用task-owned isolated fixture root啟動production Tauri supervisor，人工操作keyboard create/select/send/retry、A→B→A、restart/continue與normal→extended，觀察pending/final-only、tool separation、HTML inert、focus/scroll及default/minimum/200% layout；headless/automation不得替代。
 - **Blockers:** None；下一步提交migration batch Red contract與六個subprocess fault Red contract，再分別Green。
+
+## 2026-09-05 00:44 CST — Phase 07: migration and crash-recovery Red
+
+- **Status:** `In progress`；只提交tests，production仍未修改。
+- **Migration contract:** 新module固定fixture-only exact secondary opt-in、default-off/all-canonical/empty lazy behavior、有效canonical target authority、catalog order、逐conversation失敗隔離、安全structured results、legacy bytes不變，以及多個missing IDs在首次batch加rerun合計只clone/open一次Chroma snapshot。
+- **Crash contract:** 新module直接以目前Conda Python執行`python -m agent.desktop.server`，使用同一個owned direct `/tmp/research-agent-desktop-phase02-*` root，在六個checkpoint等待已fsync marker後SIGKILL，再由新process select/transcript/retry；provider/tool/citation rejection以bounded JSONL sentinel驗證不自動replay與duplicate side effect。這些tests明確不取代React/Rust/Tauri與人工驗收。
+- **Red verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_batch_migration.py tests/test_desktop_crash_recovery.py -q --tb=short`，exit 1，`12 failed, 1 warning in 7.30s`。六個migration failures只因fixture gate與`migrate_legacy_targets`尚未存在；六個crash failures只因各checkpoint尚未被production fixture觸發，均在terminal result前確定失敗且無hang。Warning只有既有LangGraph `allowed_objects` pending-deprecation。
+- **Harness review:** independent review先找出並修正stdout queue未排空造成假通過、clone未直接計數、startup failure可能遺留child、citation rejection缺可觀察證據四項問題；修後重新執行仍得到上述deterministic Red，no-index whitespace checks無診斷。
+- **Evidence reference:** Red commit=`2a51ffd`。
+- **Blockers:** None；下一步只實作default-off shared-snapshot migration Green。
