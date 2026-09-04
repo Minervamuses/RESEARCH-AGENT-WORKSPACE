@@ -965,9 +965,8 @@ export default function App() {
     });
   }, [beginWorkspaceOperation, conversation.activeTurn, conversation.selected, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 
-  const updateSessionControl = useCallback(async (
-    method: "session.set_mode" | "session.set_thinking",
-    params: JsonObject,
+  const updateThinkingMode = useCallback(async (
+    mode: "normal" | "extended",
   ) => {
     const selected = conversationRef.current.selected;
     if (selected === null || conversationRef.current.activeTurn !== null) return;
@@ -975,7 +974,7 @@ export default function App() {
     if (operation === null) return;
     const generation = generationRef.current;
     try {
-      const data = await backendClient.request(method, params);
+      const data = await backendClient.request("session.set_thinking", { mode });
       if (generationRef.current !== generation) return;
       if (data.sessionId !== selected.sessionId) {
         throw protocolMismatch("The backend returned controls for a different conversation.");
@@ -1073,8 +1072,7 @@ export default function App() {
 
           {activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
             <div className="session-controls" aria-label="Session controls">
-              <fieldset disabled={interaction.controlDisabled || workspaceBusy !== null}><legend>Response mode</legend><button type="button" aria-pressed={!activeSession.planMode} onClick={() => void updateSessionControl("session.set_mode", { mode: "normal" })}>Normal</button><button type="button" aria-pressed={activeSession.planMode} onClick={() => void updateSessionControl("session.set_mode", { mode: "plan" })}>Plan</button></fieldset>
-              <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateSessionControl("session.set_thinking", { mode: event.target.value })}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
+              <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateThinkingMode(event.target.value as "normal" | "extended")}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
               <p className="control-state">Skills run once with /&lt;skill-name&gt; &lt;prompt&gt;. Citation mode is currently CLI-only.</p>
             </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">

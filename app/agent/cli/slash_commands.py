@@ -164,11 +164,6 @@ def build_default_registry(session: object | None = None) -> SlashCommandRegistr
                 handler=_handle_status,
             ),
             SlashCommand(
-                name="mode",
-                description="Switch session mode (interactive picker; pass a name for one-shot).",
-                handler=_handle_mode,
-            ),
-            SlashCommand(
                 name="thinking",
                 description="Switch reasoning workflow depth (normal or extended).",
                 handler=_handle_thinking,
@@ -352,8 +347,6 @@ async def _handle_status(
         f"recent_turn_count: {status['recent_turn_count']}",
         f"graph_recursion_limit: {status['graph_recursion_limit']}",
         f"last_tool_calls: {status['last_tool_counts']}",
-        f"plan_mode: {status.get('plan_mode', False)}",
-        f"plan_log_path: {status.get('plan_log_path', '') or 'none'}",
         f"thinking_mode: {status.get('thinking_mode', 'normal')}",
         f"mcp_families: {status.get('mcp_families', 'none')}",
     ]
@@ -471,70 +464,6 @@ async def _handle_thinking(
         # e.g. extended thinking refused while the citation skill is active.
         raise SlashCommandError(str(exc)) from exc
     return SlashCommandResult(message=f"thinking -> {target}")
-
-
-_MODE_DESCRIPTIONS = {
-    "normal": "turns saved to ChromaDB (default)",
-    "plan": "turns saved to plan_logs/, never indexed",
-}
-
-
-def _current_mode_name(session: object) -> str:
-    return "plan" if getattr(session, "plan_mode", False) else "normal"
-
-
-def _render_mode_prompt(current: str) -> str:
-    return _render_numbered_menu(
-        header=[f"Current mode: {current}", "Available modes:"],
-        options=list(_MODE_DESCRIPTIONS.items()),
-    )
-
-
-def _resolve_mode_choice(raw: str) -> str | None:
-    """Map raw user input to a mode name, or None for cancel.
-
-    Numeric input maps to registry order; name input is returned as-is for
-    later validation by the handler. Cancel tokens: empty, ``q``, ``cancel``.
-    """
-    return _resolve_numbered_choice(
-        raw,
-        list(_MODE_DESCRIPTIONS),
-        cancel_tokens=_MENU_CANCEL_TOKENS,
-    )
-
-
-async def _handle_mode(
-    context: SlashCommandContext,
-    parsed: ParsedSlashCommand,
-) -> SlashCommandResult:
-    session = context.session
-    if len(parsed.args) > 1:
-        raise SlashCommandError("usage: /mode [name]")
-
-    current = _current_mode_name(session)
-    if parsed.args:
-        target_name: str | None = parsed.args[0].strip().lower()
-    else:
-        raw = await asyncio.to_thread(input, _render_mode_prompt(current))
-        target_name = _resolve_mode_choice(raw)
-        if target_name is None:
-            return SlashCommandResult(message="cancelled")
-
-    if target_name not in _MODE_DESCRIPTIONS:
-        valid = ", ".join(_MODE_DESCRIPTIONS)
-        raise SlashCommandError(
-            f"unknown mode: {target_name} (available: {valid})"
-        )
-
-    if target_name == current:
-        return SlashCommandResult(message=f"already in {current} mode")
-
-    if current == "plan":
-        await session.exit_plan_mode()
-    log_path = await session.enter_plan_mode() if target_name == "plan" else None
-
-    suffix = f" -> {log_path}" if log_path else ""
-    return SlashCommandResult(message=f"mode -> {target_name}{suffix}")
 
 
 def _skill_command_error(exc: Exception) -> SlashCommandError:

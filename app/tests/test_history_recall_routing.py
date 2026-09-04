@@ -180,8 +180,7 @@ def test_empty_history_routes_to_honest_answer_with_storage_boundaries(
 ):
     honest_draft = (
         "我用 recall_history 查了已保存的對話紀錄，但找不到足夠的一月研究內容。"
-        "如果那些內容是在 plan mode 下產生的，它只會存在 plan_logs/，"
-        "不在 recall_history 的對話索引裡，也不在已索引的知識庫 (rag_search) 中。"
+        "已索引的知識庫 (rag_search) 也沒有相關資料。"
         "你可以指定要我讀取的檔案，或補一句你記得的關鍵字。"
     )
     graph = _ScriptedGraph([
@@ -225,9 +224,8 @@ def test_empty_history_routes_to_honest_answer_with_storage_boundaries(
     assert len(graph.calls) == 1
     assert "recall_history" in [call["name"] for call in tool_calls]
     assert answer == honest_draft
-    # Honest answer distinguishes chat history, plan logs, and indexed KB.
+    # Honest answer distinguishes conversation history from the indexed KB.
     assert "recall_history" in answer
-    assert "plan_logs" in answer
     assert "rag_search" in answer
     # It is not an internal stop/checklist message.
     assert "無法安全自動修正" not in answer

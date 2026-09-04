@@ -60,8 +60,6 @@ class _CoordinatorSession:
         self.turn_inputs = []
         self.turn_requests = []
         self.contexts = []
-        self.plan_mode = False
-        self.plan_log_path = None
         self.thinking_mode = "normal"
         self.loaded_skills = []
         self.mcp_families = {}
@@ -308,20 +306,6 @@ class _CoordinatorSession:
         self.flush_calls += 1
         raise AssertionError("canonical write-through sessions must never flush")
 
-    async def enter_plan_mode(self):
-        self.plan_mode = True
-        self.plan_log_path = Path("/tmp/fake-plan.md")
-        return self.plan_log_path
-
-    async def resume_plan_mode(self, log_path):
-        self.plan_mode = True
-        self.plan_log_path = Path(log_path)
-        return self.plan_log_path
-
-    async def exit_plan_mode(self):
-        self.plan_mode = False
-        self.plan_log_path = None
-
     def set_thinking_mode(self, mode):
         self.thinking_mode = mode
 
@@ -334,8 +318,6 @@ class _CoordinatorSession:
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
             "last_tool_counts": "none",
-            "plan_mode": self.plan_mode,
-            "plan_log_path": str(self.plan_log_path or ""),
             "thinking_mode": self.thinking_mode,
             "mcp_families": "none",
         }
@@ -947,7 +929,6 @@ def test_coordinator_preserves_p1_p2_membership_order_across_restart(tmp_path):
     assert selected["sessionId"] == SESSION_A
     assert selected["turnCount"] == 1
     assert selected["thinkingMode"] == "normal"
-    assert selected["planMode"] is False
     assert restarted_factory.sessions[-1].turn_inputs == []
 
 
@@ -1360,7 +1341,6 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
         "session.set_thinking",
         {"mode": "extended"},
     ))
-    plan = asyncio.run(service.dispatch("session.set_mode", {"mode": "plan"}))
     a_second = asyncio.run(service.dispatch("session.turn", {
         "text": "A second",
         "turnId": _logical_turn_id(221),
@@ -1388,7 +1368,6 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
     for suffix, method, result in (
         (221, "session.select", selected_a),
         (222, "session.set_thinking", thinking),
-        (223, "session.set_mode", plan),
         (224, "session.turn", a_second),
         (225, "session.select", selected_b),
         (226, "session.turn", b_second),
@@ -1399,10 +1378,8 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
 
     assert selected_b["turnCount"] == 1
     assert selected_b["thinkingMode"] == "normal"
-    assert selected_b["planMode"] is False
     assert returned_a["turnCount"] == 2
     assert returned_a["thinkingMode"] == "extended"
-    assert returned_a["planMode"] is True
     assert a_third["text"].startswith(f"answer:{SESSION_A[:4]}:")
     assert b_second["text"].startswith(f"answer:{SESSION_B[:4]}:")
     final_a = factory.sessions[-1]
@@ -1635,7 +1612,6 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
             "session.create",
             {"projectId": "local", "loadMcp": False},
         )
-        await first.dispatch("session.set_mode", {"mode": "plan"})
         answer = await first.dispatch(
             "session.turn",
             {
@@ -1908,13 +1884,16 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     for method, params in (
         ("session.create", {"projectId": "p1", "loadMcp": False}),
         ("session.select", {"projectId": "p1", "sessionId": SESSION_B}),
-        ("session.set_mode", {"mode": "normal"}),
         ("session.set_thinking", {"mode": "normal"}),
     ):
         with pytest.raises(DesktopServiceError) as raised:
             asyncio.run(service.dispatch(method, params))
         assert raised.value.code == "BUSY_TURN"
     service._turn_active = False
+
+    with pytest.raises(DesktopServiceError) as retired:
+        asyncio.run(service.dispatch("session.set_mode", {"mode": "normal"}))
+    assert retired.value.code == "PROTOCOL_INVALID"
 
     malformed_dir = tmp_path / "malformed-store"
     malformed_dir.mkdir()

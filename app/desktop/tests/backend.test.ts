@@ -65,8 +65,6 @@ const session: SessionCreatedDto = {
   sessionId: "session-1",
   turnCount: 0,
   graphRecursionLimit: 25,
-  planMode: false,
-  planLogPath: null,
   thinkingMode: "normal",
   loadedSkills: [],
   mcpFamilies: [],

@@ -427,12 +427,11 @@ def test_recent_turns_exclude_candidate_answers(monkeypatch, tmp_path):
     assert "a2" not in record.assistant_output
 
 
-def test_plan_mode_keeps_canonical_tool_summaries_and_candidate_scoped_trace(
+def test_extended_thinking_keeps_canonical_tool_summaries_and_candidate_scoped_trace(
     monkeypatch,
     tmp_path,
 ):
     session, _factory, _models = _two_tool_candidate_session(monkeypatch, tmp_path)
-    asyncio.run(session.enter_plan_mode())
 
     asyncio.run(session.turn("question"))
     snapshot = session.conversation_repository.load(session.session_id)
@@ -457,9 +456,6 @@ def test_plan_mode_keeps_canonical_tool_summaries_and_candidate_scoped_trace(
     assert candidate_events["candidate-2"]["args"] == {"q": "y"}
     assert candidate_events["candidate-1"]["id"] == "call-1"
     assert candidate_events["candidate-2"]["id"] == "call-1"
-    assert session.plan_mode is True
-    assert session.plan_log_path is None
-    assert not (tmp_path / session.config.plan_logs_dir).exists()
 
 
 def test_no_active_skill_proposer_is_read_only(monkeypatch, tmp_path):

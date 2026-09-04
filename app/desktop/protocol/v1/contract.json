@@ -123,8 +123,6 @@
       "sessionId": {"type": "string", "required": true, "maxBytes": 256},
       "turnCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
-      "planMode": {"type": "boolean", "required": true},
-      "planLogPath": {"type": "nullableString", "required": true, "maxBytes": 8192},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
       "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
@@ -209,8 +207,6 @@
       "sessionId": {"type": "string", "required": true, "maxBytes": 256},
       "turnCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
-      "planMode": {"type": "boolean", "required": true},
-      "planLogPath": {"type": "nullableString", "required": true, "maxBytes": 8192},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
       "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
@@ -395,12 +391,6 @@
         "turnId": {"type": "turnId", "required": true},
         "retry": {"type": "boolean", "required": true}
       }
-    },
-    {
-      "name": "session.set_mode",
-      "operation": "mutation",
-      "requiredParams": ["mode"],
-      "params": {"mode": {"type": "string", "required": true, "enum": ["normal", "plan"]}}
     },
     {
       "name": "session.set_thinking",

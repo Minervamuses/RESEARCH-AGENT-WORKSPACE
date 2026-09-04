@@ -36,8 +36,6 @@ class _FakeSession:
         self.config = config
         self.progress_cb = progress_cb
         self.session_id = "123e4567e89b42d3a456426614174000"
-        self.plan_mode = False
-        self.plan_log_path: Path | None = None
         self.thinking_mode = "normal"
         self.loaded_skills = [
             SkillMetadata("research", "Research local material.", Path(__file__))
@@ -147,15 +145,6 @@ class _FakeSession:
             persisted=True,
         )
 
-    async def enter_plan_mode(self) -> Path:
-        self.plan_mode = True
-        self.plan_log_path = Path("/tmp/計劃 log.md")
-        return self.plan_log_path
-
-    async def exit_plan_mode(self) -> None:
-        self.plan_mode = False
-        self.plan_log_path = None
-
     def set_thinking_mode(self, mode: str) -> None:
         self.thinking_mode = mode
 
@@ -166,8 +155,6 @@ class _FakeSession:
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
             "last_tool_counts": "none",
-            "plan_mode": self.plan_mode,
-            "plan_log_path": str(self.plan_log_path or ""),
             "thinking_mode": self.thinking_mode,
             "mcp_families": "web_search",
         }
@@ -1661,7 +1648,7 @@ def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) ->
         with pytest.raises(DesktopServiceError) as second:
             await service.dispatch("session.turn", _turn_params("第二題"))
         with pytest.raises(DesktopServiceError) as mutation:
-            await service.dispatch("session.set_mode", {"mode": "plan"})
+            await service.dispatch("session.set_thinking", {"mode": "extended"})
 
         assert second_dynamic.value.code == "BUSY_TURN"
         assert second.value.code == "BUSY_TURN"

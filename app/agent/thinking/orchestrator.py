@@ -192,9 +192,6 @@ class FusionOrchestrator:
                 SystemMessage(content=session.active_skill_runtime.context_block())
             )
         hints.append(SystemMessage(content=availability_block))
-        plan_hint = session._build_plan_mode_hint()
-        if plan_hint is not None:
-            hints.append(plan_hint)
         return [base[0], *hints, *base[1:]]
 
     def _proposer_graph(self, model_id: str):

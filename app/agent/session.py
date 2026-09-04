@@ -4,7 +4,6 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
@@ -160,7 +159,6 @@ class ChatSession:
             config=config,
             session_id=self.session_id,
             history_store=self.history_store,
-            app_root_resolver=lambda: find_app_root(),
             restored_turns=restored_turns,
         )
         self._citation_policy = CitationSessionPolicy(config)
@@ -474,14 +472,6 @@ class ChatSession:
         return self._turn_journal.last_tool_calls
 
     @property
-    def plan_mode(self) -> bool:
-        return self._turn_journal.plan_mode
-
-    @property
-    def plan_log_path(self) -> Path | None:
-        return self._turn_journal.plan_log_path
-
-    @property
     def _turn_counter(self) -> int:
         if self._conversation_snapshot is None:
             return 0
@@ -531,7 +521,6 @@ class ChatSession:
             for hint in (
                 self._build_active_skill_hint(),
                 self._build_tool_availability_hint(),
-                self._build_plan_mode_hint(),
                 self._build_sources_hint(),
             )
             if hint is not None
@@ -579,15 +568,6 @@ class ChatSession:
         if self.active_skill_runtime is None:
             return None
         return SystemMessage(content=self._tool_availability_block())
-
-    def _build_plan_mode_hint(self) -> SystemMessage | None:
-        """Describe the temporary plan prompt behavior without a storage route."""
-        if not self.plan_mode:
-            return None
-        return SystemMessage(content=(
-            "[Mode hint] Plan mode is active for this turn. Focus on analysis "
-            "and an actionable plan; conversation durability is unchanged."
-        ))
 
     def _citation_registry(self):
         """The session source registry, or None before first citation use."""
@@ -710,18 +690,6 @@ class ChatSession:
             persisted=True,
         )
 
-    async def enter_plan_mode(self) -> None:
-        """Enable temporary plan prompt behavior without a Plan-log writer."""
-        return self._turn_journal.enter_plan_mode()
-
-    async def resume_plan_mode(self, log_path: str | Path) -> None:
-        """Restore temporary plan control without resuming legacy writes."""
-        return self._turn_journal.resume_plan_mode(log_path)
-
-    async def exit_plan_mode(self) -> None:
-        """Disable plan mode without mutating prompt-visible turns."""
-        self._turn_journal.exit_plan_mode()
-
     def set_thinking_mode(self, mode: str) -> None:
         """Set the per-session thinking workflow mode."""
         normalized = mode.strip().lower()
@@ -809,11 +777,6 @@ class ChatSession:
             *tool_inventory.base_tool_names(extra_tools=self.extra_tools),
             self.citation_workflow_tool.name,
         ]
-
-    def _append_block_to_md(self, log_path: str, block: str) -> None:
-        # Kept as a facade method: the turn flow (and tests patching this on
-        # the instance) must see every plan-log write pass through here.
-        self._turn_journal.append_block(log_path, block)
 
     def _visible_context_text(self) -> str:
         lines: list[str] = []
@@ -1104,8 +1067,6 @@ class ChatSession:
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
             "last_tool_counts": format_tool_counts(self.last_tool_calls) or "none",
-            "plan_mode": self.plan_mode,
-            "plan_log_path": str(self.plan_log_path) if self.plan_log_path else "",
             "thinking_mode": self.thinking_mode,
             "mcp_families": (
                 ", ".join(sorted(set(self.mcp_families.values()))) or "none"

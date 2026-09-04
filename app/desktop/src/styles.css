@@ -647,15 +647,6 @@ h3 {
   border-radius: 0.75rem;
 }
 
-.session-controls fieldset {
-  display: flex;
-  gap: 0.3rem;
-  padding: 0;
-  margin: 0;
-  border: 0;
-}
-
-.session-controls legend,
 .session-controls label {
   color: #626b67;
   font-size: 0.68rem;
@@ -667,17 +658,10 @@ h3 {
   gap: 0.2rem;
 }
 
-.session-controls button,
 .session-controls select {
   min-height: 2rem;
   padding: 0.35rem 0.55rem;
   font-size: 0.72rem;
-}
-
-.session-controls button[aria-pressed="true"] {
-  color: #ffffff;
-  background: #276c56;
-  border-color: #276c56;
 }
 
 .control-state {
@@ -1186,14 +1170,9 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .session-controls fieldset,
   .session-controls label,
   .session-controls select {
     width: 100%;
-  }
-
-  .session-controls button {
-    flex: 1 1 0;
   }
 
   .control-state {

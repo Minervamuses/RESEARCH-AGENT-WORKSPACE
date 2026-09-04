@@ -36,7 +36,6 @@ from agent.extensions.startup import load_extension_startup
 from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX
 from agent.tools.bash import create_bash_tool
 from agent.turns.memory import TurnRecord
-from agent.turns.plan_log import PlanLog
 from agent.turns.results import TurnOutcome
 
 
@@ -166,30 +165,40 @@ def _timestamp(turn_id: int) -> str:
     ).isoformat().replace("+00:00", "Z")
 
 
-def _plan_log(config: AgentConfig, session_id: str) -> PlanLog:
-    return PlanLog(
-        config,
-        session_id=session_id,
-        app_root_resolver=lambda: Path("/"),
-    )
-
-
 def _seed_plan_turn(config: AgentConfig, session_id: str, user: str, answer: str) -> None:
+    """Seed one synthetic legacy v2 source for migration-only coverage."""
     log_dir = Path(config.plan_logs_dir)
     if any(log_dir.glob(f"plan-{session_id}-*.md")):
         return
-    plan_log = _plan_log(config, session_id)
-    path = plan_log.new_log_file()
-    plan_log.append_block(
-        str(path),
-        plan_log.render_block(
-            turn_id=1,
-            timestamp=_timestamp(1),
-            user_input=user,
-            answer=answer,
-            new_messages=[],
-            tool_calls=[],
-        ),
+    created_at = _FIXTURE_TIMESTAMP.isoformat().replace("+00:00", "Z")
+    timestamp = _timestamp(1)
+    payload = json.dumps(
+        {
+            "format_version": 2,
+            "turn_id": 1,
+            "timestamp": timestamp,
+            "user": user,
+            "assistant": answer,
+            "scope": "normal",
+            "tool_activities": [],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    path = log_dir / f"plan-{session_id}-20260828T023000Z.md"
+    path.write_text(
+        "---\n"
+        "generated_by: agent.plan_mode\n"
+        "format_version: 2\n"
+        f"session_id: {session_id}\n"
+        f"created_at: {created_at}\n"
+        "---\n\n"
+        "# Plan log\n\n"
+        f"## Turn 1 - {timestamp}\n\n"
+        "**Turn data v2 (JSON):**\n\n"
+        f"{payload}\n\n"
+        "---\n",
+        encoding="utf-8",
     )
 
 
@@ -464,8 +473,6 @@ class FixtureSession:
         }
         self.running_extension_revision = startup.revision
         self.extension_startup_diagnostics = startup.diagnostics
-        self.plan_mode = False
-        self.plan_log_path: Path | None = None
         self._progress_cb = progress_cb
         self._prompt_persisted_callback: Callable[[], None] | None = None
         self._search_handler = search_handler
@@ -926,18 +933,6 @@ class FixtureSession:
             )
             raise
 
-    async def enter_plan_mode(self) -> None:
-        self.plan_mode = True
-        self.plan_log_path = None
-
-    async def resume_plan_mode(self, _log_path: str | Path) -> None:
-        self.plan_mode = True
-        self.plan_log_path = None
-
-    async def exit_plan_mode(self) -> None:
-        self.plan_mode = False
-        self.plan_log_path = None
-
     def set_thinking_mode(self, mode: str) -> None:
         normalized = mode.strip().lower()
         if normalized not in {"normal", "extended"}:
@@ -951,8 +946,6 @@ class FixtureSession:
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
             "last_tool_counts": "none",
-            "plan_mode": self.plan_mode,
-            "plan_log_path": str(self.plan_log_path or ""),
             "thinking_mode": self.thinking_mode,
             "mcp_families": ",".join(sorted(set(self.mcp_families.values()))) or "none",
             "extension_revision": self.running_extension_revision,

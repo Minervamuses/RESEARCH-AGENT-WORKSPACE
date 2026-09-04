@@ -21,7 +21,6 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "session.transcript",
     "session.status",
     "session.turn",
-    "session.set_mode",
     "session.set_thinking",
     "session.shutdown",
     "knowledge.overview",
@@ -265,7 +264,6 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         }
         "session.status" => Some(&[]),
         "session.turn" => Some(&["text", "turnId", "retry"]),
-        "session.set_mode" => Some(&["mode"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.shutdown" => Some(&[]),
         "knowledge.overview" => Some(&[]),
@@ -303,7 +301,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "session.turn" => Some(&["text", "turnId", "retry"]),
-        "session.set_mode" | "session.set_thinking" => Some(&["mode"]),
+        "session.set_thinking" => Some(&["mode"]),
         "knowledge.search" => Some(&[
             "query",
             "k",
@@ -516,14 +514,6 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
             expect_turn_id(&params["turnId"], "params.turnId")?;
             if !params["retry"].is_boolean() {
                 return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
-            }
-        }
-        "session.set_mode" => {
-            let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
-            if !["normal", "plan"].contains(&mode) {
-                return Err(ProtocolViolation::invalid(format!(
-                    "params.mode contains an unknown enum value: {mode}"
-                )));
             }
         }
         "session.set_thinking" => {
@@ -1004,8 +994,6 @@ fn validate_session_snapshot(
         "sessionId",
         "turnCount",
         "graphRecursionLimit",
-        "planMode",
-        "planLogPath",
         "thinkingMode",
         "loadedSkills",
         "mcpFamilies",
@@ -1016,8 +1004,6 @@ fn validate_session_snapshot(
         "sessionId",
         "turnCount",
         "graphRecursionLimit",
-        "planMode",
-        "planLogPath",
         "thinkingMode",
         "loadedSkills",
         "mcpFamilies",
@@ -1040,12 +1026,6 @@ fn validate_session_snapshot(
         3,
         u32::MAX as i64,
     )?;
-    if !data["planMode"].is_boolean() {
-        return Err(ProtocolViolation::invalid(
-            "data.planMode must be a boolean",
-        ));
-    }
-    validate_nullable_string(data, "planLogPath", 8_192)?;
     validate_enum(
         &data["thinkingMode"],
         "data.thinkingMode",

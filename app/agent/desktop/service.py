@@ -34,6 +34,7 @@ from agent.conversations import (
     ToolActivitySummary,
 )
 from agent.conversations.legacy import LegacyChromaReader, LegacyConversationReader
+from agent.conversations.legacy_plan import LegacyPlanLogReader
 from agent.conversations.migration import ConversationMigrator
 from agent.cli.slash_commands import (
     ParsedSlashCommand,
@@ -78,7 +79,6 @@ from agent.paths import find_app_root
 from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.turns.safety import content_text
-from agent.turns.plan_log import PlanLog
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.storage import resolve_output_dir
@@ -189,8 +189,6 @@ class _PendingApproval:
 
 @dataclass(frozen=True)
 class _ConversationControlSnapshot:
-    plan_mode: bool
-    plan_log_path: str | None
     thinking_mode: str
 
 
@@ -244,7 +242,7 @@ class DesktopService:
             self._conversation_repository,
             LegacyConversationReader(
                 chroma_read=LegacyChromaReader(self.config.persist_dir),
-                plan_read=lambda conversation_id: PlanLog(
+                plan_read=lambda conversation_id: LegacyPlanLogReader(
                     self.config,
                     session_id=conversation_id,
                     app_root_resolver=lambda: find_app_root(),
@@ -315,7 +313,6 @@ class DesktopService:
             "session.transcript": self._session_transcript,
             "session.status": self._session_status,
             "session.turn": self._session_turn,
-            "session.set_mode": self._session_set_mode,
             "session.set_thinking": self._session_set_thinking,
             "session.shutdown": self._session_shutdown,
             "knowledge.overview": self._knowledge_overview,
@@ -1217,10 +1214,6 @@ class DesktopService:
     @staticmethod
     def _capture_controls(session: ChatSession) -> _ConversationControlSnapshot:
         return _ConversationControlSnapshot(
-            plan_mode=bool(session.plan_mode),
-            plan_log_path=(
-                str(session.plan_log_path) if session.plan_log_path else None
-            ),
             thinking_mode=str(session.thinking_mode),
         )
 
@@ -1232,11 +1225,6 @@ class DesktopService:
         if snapshot is None:
             return
         session.set_thinking_mode(snapshot.thinking_mode)
-        if snapshot.plan_mode:
-            if snapshot.plan_log_path is not None:
-                await session.resume_plan_mode(snapshot.plan_log_path)
-            else:
-                await session.enter_plan_mode()
 
     def _store_control_snapshot(
         self,
@@ -2051,17 +2039,6 @@ class DesktopService:
             self._tool_summaries = {}
             self._turn_active = False
 
-    async def _session_set_mode(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        session = self._require_idle_session()
-        if params["mode"] == "plan":
-            if not session.plan_mode:
-                await session.enter_plan_mode()
-        elif session.plan_mode:
-            await session.exit_plan_mode()
-        return self._session_snapshot(session)
-
     async def _session_set_thinking(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -2202,8 +2179,6 @@ class DesktopService:
             "sessionId": session.session_id,
             "turnCount": int(status.get("turn_count", 0)),
             "graphRecursionLimit": int(session.config.graph_recursion_limit),
-            "planMode": bool(session.plan_mode),
-            "planLogPath": str(session.plan_log_path) if session.plan_log_path else None,
             "thinkingMode": session.thinking_mode,
             "loadedSkills": [
                 self._bounded_text(skill.name, 256)

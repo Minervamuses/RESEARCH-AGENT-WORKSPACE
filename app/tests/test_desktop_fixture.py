@@ -775,7 +775,6 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             _turn_params("retry after skill error"),
         )
 
-        await second.dispatch("session.set_mode", {"mode": "plan"})
         assert second.session is not None
         second.session._search_handler = counting_search
         tool_events: list[tuple[str, dict]] = []

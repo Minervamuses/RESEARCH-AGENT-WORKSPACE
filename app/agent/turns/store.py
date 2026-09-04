@@ -32,8 +32,6 @@ class TurnStore:
         self._recent_turns = recent_turns
 
     async def store_turn(self, turn: TurnRecord) -> None:
-        if turn.persist_target == "plan_log":
-            return
         if turn.persist_target == "none":
             return
         if turn.persist_target != "chroma":

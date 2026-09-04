@@ -48,7 +48,6 @@ class TurnRecord:
     turn_id: int = 0
     timestamp: str = ""
     persist_target: str = "chroma"
-    log_path: str | None = None
     tool_activities: tuple[ToolActivityRecord, ...] = ()
 
     def to_messages(self) -> list[BaseMessage]:

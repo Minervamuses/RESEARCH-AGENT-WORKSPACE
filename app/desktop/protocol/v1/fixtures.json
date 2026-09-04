@@ -425,7 +425,7 @@
       }
     },
     {
-      "name": "unknown-mode-enum",
+      "name": "retired-session-set-mode",
       "valid": false,
       "errorCode": "PROTOCOL_INVALID",
       "message": {
@@ -433,7 +433,18 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000032",
         "method": "session.set_mode",
-        "params": {"mode": "admin"}
+        "params": {"mode": "plan"}
+      }
+    },
+    {
+      "name": "session-set-thinking-extended",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000082",
+        "method": "session.set_thinking",
+        "params": {"mode": "extended"}
       }
     },
     {
@@ -1073,9 +1084,7 @@
             "sessionId": "0123456789abcdef0123456789abcdef",
             "turnCount": 4,
             "graphRecursionLimit": 64,
-            "planMode": false,
-            "planLogPath": null,
-            "thinkingMode": "normal",
+            "thinkingMode": "extended",
             "loadedSkills": [],
             "mcpFamilies": [],
             "startupDiagnostics": [],
@@ -1292,8 +1301,6 @@
             "sessionId": "session-1",
             "turnCount": 0,
             "graphRecursionLimit": 64,
-            "planMode": false,
-            "planLogPath": null,
             "thinkingMode": "normal",
             "loadedSkills": ["literature-review"],
             "mcpFamilies": [],

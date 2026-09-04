@@ -508,14 +508,13 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
 
 
-def test_plan_mode_records_canonical_answer_without_plan_log_or_receipt(
+def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
     make_session,
     tmp_path,
 ):
     session, _ = make_session()
     session.activate_citation_skill()
     _seed_verified_source(session, tmp_path)
-    asyncio.run(session.enter_plan_mode())
     draft = "Saved according to the tool."
     tool_call = {
         "name": "citation_workflow",
@@ -549,8 +548,6 @@ def test_plan_mode_records_canonical_answer_without_plan_log_or_receipt(
     ]
     assert session.turn_logs[-1]["trace_events"] == [{"type": "tool", **tool_call}]
     assert "src-known" not in canonical_text
-    assert session.plan_log_path is None
-    assert not (tmp_path / session.config.plan_logs_dir).exists()
 
 
 def test_small_window_preserves_canonical_answer_without_chroma_eviction(

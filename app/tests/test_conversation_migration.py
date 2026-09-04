@@ -22,10 +22,10 @@ from agent.conversations.legacy import (
     LegacySourceCount,
     legacy_turn_id,
 )
+from agent.conversations.legacy_plan import LegacyPlanLogReader
 from agent.conversations.migration import ConversationMigrator
 from agent.history_rag.store import ChatHistoryStore
 from agent.turns.memory import ToolActivityRecord, TurnRecord
-from agent.turns.plan_log import PlanLog
 
 
 SESSION_A = "28b222e0cc6543aa8d7bbdc423de99a7"
@@ -394,7 +394,7 @@ def test_plan_v1_v2_import_drops_all_legacy_tool_payloads(tmp_path):
     config = AgentConfig(plan_logs_dir="plan_logs")
 
     def read_plan(conversation_id: str):
-        return PlanLog(
+        return LegacyPlanLogReader(
             config,
             session_id=conversation_id,
             app_root_resolver=lambda: legacy_root,

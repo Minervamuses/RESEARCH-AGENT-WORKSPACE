@@ -58,22 +58,10 @@ def test_slash_command_completer_ignores_normal_chat_text():
     assert completions == []
 
 
-class _FakeModeSession:
-    def __init__(self, plan_log_path, config=None):
+class _FakeThinkingSession:
+    def __init__(self, config=None):
         self.config = config or AgentConfig()
-        self.plan_mode = False
         self.thinking_mode = "normal"
-        self.plan_log_path = None
-        self._target_log_path = plan_log_path
-
-    async def enter_plan_mode(self):
-        self.plan_mode = True
-        self.plan_log_path = self._target_log_path
-        return self.plan_log_path
-
-    async def exit_plan_mode(self):
-        self.plan_mode = False
-        self.plan_log_path = None
 
     def set_thinking_mode(self, mode):
         self.thinking_mode = mode
@@ -122,145 +110,15 @@ def test_session_registry_projects_one_shot_skill_and_preserves_raw_prompt(tmp_p
     assert session.active_skill_runtime is None
 
 
-def test_handle_mode_oneshot_switches_to_plan(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_registry_retires_mode_and_keeps_thinking_command():
     registry = build_default_registry()
 
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/mode plan"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert session.plan_mode is True
-    assert "mode -> plan" in result.message
-    assert str(tmp_path / "plan.md") in result.message
-
-
-def test_handle_mode_oneshot_switches_back_to_normal(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    asyncio.run(session.enter_plan_mode())
-    registry = build_default_registry()
-
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/mode normal"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert session.plan_mode is False
-    assert "mode -> normal" in result.message
-
-
-def test_handle_mode_interactive_selection(monkeypatch, tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    registry = build_default_registry()
-
-    async def fake_to_thread(func, *args, **kwargs):
-        return "2"
-
-    monkeypatch.setattr("agent.cli.slash_commands.asyncio.to_thread", fake_to_thread)
-
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/mode"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert session.plan_mode is True
-    assert "mode -> plan" in result.message
-
-
-def test_handle_mode_cancel_on_empty_input(monkeypatch, tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    registry = build_default_registry()
-
-    async def fake_to_thread(func, *args, **kwargs):
-        return ""
-
-    monkeypatch.setattr("agent.cli.slash_commands.asyncio.to_thread", fake_to_thread)
-
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/mode"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert session.plan_mode is False
-    assert "cancelled" in result.message
-
-
-def test_handle_mode_invalid_numeric_choice_raises(monkeypatch, tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    registry = build_default_registry()
-
-    async def fake_to_thread(func, *args, **kwargs):
-        return "9"
-
-    monkeypatch.setattr("agent.cli.slash_commands.asyncio.to_thread", fake_to_thread)
-
-    with pytest.raises(SlashCommandError, match="invalid choice"):
-        asyncio.run(
-            execute_slash_command(
-                parse_slash_command("/mode"),
-                SlashCommandContext(session=session, registry=registry),
-            )
-        )
-
-
-def test_handle_mode_unknown_name_raises(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    registry = build_default_registry()
-
-    with pytest.raises(SlashCommandError, match="unknown mode"):
-        asyncio.run(
-            execute_slash_command(
-                parse_slash_command("/mode mystery"),
-                SlashCommandContext(session=session, registry=registry),
-            )
-        )
-
-
-def test_handle_mode_same_mode_is_noop(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    registry = build_default_registry()
-
-    result = asyncio.run(
-        execute_slash_command(
-            parse_slash_command("/mode normal"),
-            SlashCommandContext(session=session, registry=registry),
-        )
-    )
-
-    assert "already in normal mode" in result.message
-
-
-def test_handle_mode_rejects_extra_args(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
-    registry = build_default_registry()
-
-    with pytest.raises(SlashCommandError, match="usage"):
-        asyncio.run(
-            execute_slash_command(
-                parse_slash_command("/mode plan extra"),
-                SlashCommandContext(session=session, registry=registry),
-            )
-        )
-
-
-def test_registry_includes_thinking_command():
-    registry = build_default_registry()
-
+    assert registry.get("mode") is None
     assert registry.get("thinking") is not None
 
 
-def test_handle_thinking_switches_to_extended(tmp_path):
-    session = _FakeModeSession(
-        tmp_path / "plan.md",
+def test_handle_thinking_switches_to_extended():
+    session = _FakeThinkingSession(
         config=AgentConfig(
             thinking_reviewer_model="openai/gpt-5.2",
             thinking_rewrite_model="anthropic/claude-haiku-5",
@@ -280,9 +138,8 @@ def test_handle_thinking_switches_to_extended(tmp_path):
     assert result.message == "thinking -> extended"
 
 
-def test_handle_thinking_extended_requires_role_models(tmp_path):
-    session = _FakeModeSession(
-        tmp_path / "plan.md",
+def test_handle_thinking_extended_requires_role_models():
+    session = _FakeThinkingSession(
         config=AgentConfig(
             thinking_reviewer_model="",
             thinking_rewrite_model="",
@@ -302,8 +159,8 @@ def test_handle_thinking_extended_requires_role_models(tmp_path):
     assert session.thinking_mode == "normal"
 
 
-def test_handle_thinking_switches_back_to_normal(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_handle_thinking_switches_back_to_normal():
+    session = _FakeThinkingSession()
     session.thinking_mode = "extended"
     registry = build_default_registry()
 
@@ -318,8 +175,8 @@ def test_handle_thinking_switches_back_to_normal(tmp_path):
     assert result.message == "thinking -> normal"
 
 
-def test_handle_thinking_interactive_selection(monkeypatch, tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_handle_thinking_interactive_selection(monkeypatch):
+    session = _FakeThinkingSession()
     registry = build_default_registry()
 
     async def fake_to_thread(func, *args, **kwargs):
@@ -340,8 +197,8 @@ def test_handle_thinking_interactive_selection(monkeypatch, tmp_path):
     assert result.message == "thinking -> extended"
 
 
-def test_handle_thinking_cancel_on_empty_input(monkeypatch, tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_handle_thinking_cancel_on_empty_input(monkeypatch):
+    session = _FakeThinkingSession()
     registry = build_default_registry()
 
     async def fake_to_thread(func, *args, **kwargs):
@@ -360,8 +217,8 @@ def test_handle_thinking_cancel_on_empty_input(monkeypatch, tmp_path):
     assert result.message == "cancelled"
 
 
-def test_handle_thinking_invalid_numeric_choice_raises(monkeypatch, tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_handle_thinking_invalid_numeric_choice_raises(monkeypatch):
+    session = _FakeThinkingSession()
     registry = build_default_registry()
 
     async def fake_to_thread(func, *args, **kwargs):
@@ -378,8 +235,8 @@ def test_handle_thinking_invalid_numeric_choice_raises(monkeypatch, tmp_path):
         )
 
 
-def test_handle_thinking_unknown_name_raises(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_handle_thinking_unknown_name_raises():
+    session = _FakeThinkingSession()
     registry = build_default_registry()
 
     with pytest.raises(SlashCommandError, match="unknown thinking mode"):
@@ -391,8 +248,8 @@ def test_handle_thinking_unknown_name_raises(tmp_path):
         )
 
 
-def test_handle_thinking_rejects_extra_args(tmp_path):
-    session = _FakeModeSession(tmp_path / "plan.md")
+def test_handle_thinking_rejects_extra_args():
+    session = _FakeThinkingSession()
     registry = build_default_registry()
 
     with pytest.raises(SlashCommandError, match="usage"):

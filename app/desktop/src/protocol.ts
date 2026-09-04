@@ -13,7 +13,6 @@ export const PROTOCOL_METHODS = [
   "session.transcript",
   "session.status",
   "session.turn",
-  "session.set_mode",
   "session.set_thinking",
   "session.shutdown",
   "knowledge.overview",
@@ -244,8 +243,6 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
       minimum: 3,
       maximum: 0xffff_ffff,
     },
-    planMode: { type: "boolean", required: true },
-    planLogPath: { type: "nullableString", required: true, maxBytes: 8_192 },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
     loadedSkills: {
       type: "stringArray",
@@ -359,8 +356,6 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     sessionId: { type: "string", required: true, maxBytes: 256 },
     turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
     graphRecursionLimit: { type: "integer", required: true, minimum: 3, maximum: 0xffff_ffff },
-    planMode: { type: "boolean", required: true },
-    planLogPath: { type: "nullableString", required: true, maxBytes: 8_192 },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
     loadedSkills: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     mcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
@@ -542,9 +537,6 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
     turnId: { type: "turnId", required: true },
     retry: { type: "boolean", required: true },
   },
-  "session.set_mode": {
-    mode: { type: "string", required: true, enum: ["normal", "plan"] },
-  },
   "session.set_thinking": {
     mode: { type: "string", required: true, enum: ["normal", "extended"] },
   },
@@ -659,8 +651,6 @@ export interface SessionCreatedDto {
   sessionId: string;
   turnCount: number;
   graphRecursionLimit: number;
-  planMode: boolean;
-  planLogPath: string | null;
   thinkingMode: "normal" | "extended";
   loadedSkills: string[];
   mcpFamilies: string[];

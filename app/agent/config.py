@@ -50,8 +50,7 @@ class AgentConfig(RAGConfig):
 
     # Conversation and logging
     agent_recent_turns_window: int = 10  # Recent turns retained in the prompt.
-    plan_logs_dir: str = "plan_logs"  # Plan-log directory under the app root.
-    plan_log_max_tool_chars: int = 65_536  # Per-tool character cap in plan logs.
+    plan_logs_dir: str = "plan_logs"  # Legacy Plan-log import root.
 
     # Skill discovery
     skills_dir: str | None = None  # Skill-root override; None uses app/skills.

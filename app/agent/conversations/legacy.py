@@ -674,7 +674,7 @@ class LegacyConversationReader:
             MAX_OUTPUT_BYTES,
         )
         timestamp = _normalized_timestamp(value.timestamp)
-        if value.persist_target != "none" or value.log_path is not None:
+        if value.persist_target != "none":
             _legacy_error("legacy turn contains unexpected runtime provenance")
         activities = value.tool_activities
         if type(activities) is not tuple:

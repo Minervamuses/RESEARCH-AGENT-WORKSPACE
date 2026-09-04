@@ -13,9 +13,9 @@ from agent.cli.slash_commands import (
     parse_slash_command,
 )
 from agent.config import AgentConfig
+from agent.conversations.legacy_plan import LegacyPlanLogReader
 from agent.desktop.protocol import CONTRACT, METHODS
 from agent.session import ChatSession
-from agent.turns.plan_log import PlanLog
 
 
 def test_cli_retires_mode_command_but_keeps_thinking() -> None:
@@ -48,7 +48,7 @@ def test_session_retires_product_plan_api() -> None:
 
 
 def test_legacy_plan_reader_has_no_writer_surface(tmp_path: Path) -> None:
-    reader = PlanLog(
+    reader = LegacyPlanLogReader(
         AgentConfig(plan_logs_dir=str(tmp_path / "legacy-plan-logs")),
         session_id="0123456789ab4def8123456789abcdef",
         app_root_resolver=lambda: Path("/"),
