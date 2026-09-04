@@ -96,6 +96,7 @@ pub const PROTOCOL_ERROR_CODES: &[&str] = &[
 
 const TOOL_EVENT_DATA_KEYS: &[&str] = &["name", "callId", "status", "candidateId"];
 const TOOL_STATUSES: &[&str] = &["started", "ok", "failed", "denied"];
+const TURN_ERROR_DETAIL_KEYS: &[&str] = &["turnId", "state", "accepted", "persisted"];
 const FORBIDDEN_DATA_KEY_FRAGMENTS: &[&str] = &[
     "apikey",
     "authorization",
@@ -263,7 +264,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
             Some(&["projectId", "sessionId"])
         }
         "session.status" => Some(&[]),
-        "session.turn" => Some(&["text", "turnId"]),
+        "session.turn" => Some(&["text", "turnId", "retry"]),
         "session.set_mode" => Some(&["mode"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.shutdown" => Some(&[]),
@@ -301,7 +302,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.list" => Some(&["projectId", "offset", "limit"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
-        "session.turn" => Some(&["text", "turnId"]),
+        "session.turn" => Some(&["text", "turnId", "retry"]),
         "session.set_mode" | "session.set_thinking" => Some(&["mode"]),
         "knowledge.search" => Some(&[
             "query",
@@ -513,6 +514,9 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         "session.turn" => {
             expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
             expect_turn_id(&params["turnId"], "params.turnId")?;
+            if !params["retry"].is_boolean() {
+                return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
+            }
         }
         "session.set_mode" => {
             let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
@@ -676,6 +680,39 @@ fn validate_safe_object(object: &Map<String, Value>, field: &str) -> Result<(), 
             )));
         }
         validate_safe_data(item, &format!("{field}.{key}"))?;
+    }
+    Ok(())
+}
+
+fn validate_turn_error_details(details: &Map<String, Value>) -> Result<(), ProtocolViolation> {
+    validate_exact_data_keys(details, TURN_ERROR_DETAIL_KEYS)?;
+    expect_turn_id(&details["turnId"], "error.details.turnId")?;
+    if !details["state"].is_null() {
+        validate_enum(
+            &details["state"],
+            "error.details.state",
+            &["pending", "completed", "failed", "interrupted"],
+        )?;
+    }
+    for field in ["accepted", "persisted"] {
+        if !details[field].is_boolean() {
+            return Err(ProtocolViolation::invalid(format!(
+                "error.details.{field} must be a boolean"
+            )));
+        }
+    }
+    let accepted = details["accepted"].as_bool().expect("validated boolean");
+    let persisted = details["persisted"].as_bool().expect("validated boolean");
+    if details["state"].is_null() {
+        if accepted || persisted {
+            return Err(ProtocolViolation::invalid(
+                "a null turn error state must not be accepted or persisted",
+            ));
+        }
+    } else if !accepted || !persisted {
+        return Err(ProtocolViolation::invalid(
+            "a durable turn error state must be accepted and persisted",
+        ));
     }
     Ok(())
 }
@@ -1085,6 +1122,10 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 &[
                     "sessionId",
                     "turnId",
+                    "turnNumber",
+                    "state",
+                    "accepted",
+                    "persisted",
                     "text",
                     "validationErrors",
                     "toolSummaries",
@@ -1094,20 +1135,17 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "registrationStatus",
                     "registrationIssue",
                     "extensionAction",
-                    "turnNumber",
-                    "state",
-                    "accepted",
-                    "persisted",
                 ],
                 &[
                     "sessionId",
                     "turnId",
-                    "text",
-                    "validationErrors",
-                    "toolSummaries",
+                    "turnNumber",
                     "state",
                     "accepted",
                     "persisted",
+                    "text",
+                    "validationErrors",
+                    "toolSummaries",
                 ],
             )?;
             expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
@@ -1182,18 +1220,19 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             if let Some(value) = data.get("extensionAction") {
                 validate_enum(value, "data.extensionAction", &["status", "preview"])?;
             }
-            if let Some(value) = data.get("turnNumber") {
-                expect_integer_range(value, "data.turnNumber", 1, 4_096)?;
-            }
-            if !data["state"].is_null() {
-                validate_enum(&data["state"], "data.state", &["completed"])?;
-            }
+            expect_integer_range(&data["turnNumber"], "data.turnNumber", 1, 4_096)?;
+            validate_enum(&data["state"], "data.state", &["completed"])?;
             for field in ["accepted", "persisted"] {
                 if !data[field].is_boolean() {
                     return Err(ProtocolViolation::invalid(format!(
                         "data.{field} must be a boolean"
                     )));
                 }
+            }
+            if data["accepted"] != Value::Bool(true) || data["persisted"] != Value::Bool(true) {
+                return Err(ProtocolViolation::invalid(
+                    "session.turn success must be durably completed",
+                ));
             }
         }
         "session.shutdown" | "runtime.shutdown" => {
@@ -1277,6 +1316,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                         "sessionId",
                         "title",
                         "turnCount",
+                        "createdAt",
                         "updatedAt",
                         "status",
                         "issue",
@@ -1294,12 +1334,14 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     0,
                     u32::MAX as i64,
                 )?;
-                if !item["updatedAt"].is_null() {
-                    expect_bounded_string(
-                        &item["updatedAt"],
-                        &format!("data.items[{index}].updatedAt"),
-                        64,
-                    )?;
+                for field in ["createdAt", "updatedAt"] {
+                    if !item[field].is_null() {
+                        expect_bounded_string(
+                            &item[field],
+                            &format!("data.items[{index}].{field}"),
+                            64,
+                        )?;
+                    }
                 }
                 validate_enum(
                     &item["status"],
@@ -1365,29 +1407,76 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 validate_exact_data_keys(
                     item,
                     &[
+                        "turnId",
                         "turnNumber",
+                        "kind",
+                        "state",
                         "timestamp",
                         "userText",
                         "assistantText",
+                        "failureCode",
+                        "failureMessage",
+                        "failureRetryable",
                         "toolActivities",
                     ],
                 )?;
+                expect_turn_id(&item["turnId"], &format!("data.items[{index}].turnId"))?;
                 expect_integer_range(
                     &item["turnNumber"],
                     &format!("data.items[{index}].turnNumber"),
                     1,
                     u32::MAX as i64,
                 )?;
-                for (field, max_bytes) in [
-                    ("timestamp", 64),
-                    ("userText", 32_768),
-                    ("assistantText", 32_768),
-                ] {
-                    expect_bounded_string(
-                        &item[field],
-                        &format!("data.items[{index}].{field}"),
-                        max_bytes,
+                validate_enum(
+                    &item["kind"],
+                    &format!("data.items[{index}].kind"),
+                    &["conversational", "display-only"],
+                )?;
+                validate_enum(
+                    &item["state"],
+                    &format!("data.items[{index}].state"),
+                    &["pending", "completed", "failed", "interrupted"],
+                )?;
+                let timestamp = expect_bounded_string(
+                    &item["timestamp"],
+                    &format!("data.items[{index}].timestamp"),
+                    64,
+                )?;
+                if !is_utc_timestamp(timestamp) {
+                    return Err(ProtocolViolation::invalid(format!(
+                        "data.items[{index}].timestamp must be a UTC ISO 8601 timestamp"
+                    )));
+                }
+                expect_bounded_string(
+                    &item["userText"],
+                    &format!("data.items[{index}].userText"),
+                    32_768,
+                )?;
+                for (field, max_bytes) in [("assistantText", 32_768), ("failureMessage", 4_096)] {
+                    if !item[field].is_null() {
+                        expect_bounded_string(
+                            &item[field],
+                            &format!("data.items[{index}].{field}"),
+                            max_bytes,
+                        )?;
+                    }
+                }
+                if !item["failureCode"].is_null() {
+                    validate_enum(
+                        &item["failureCode"],
+                        &format!("data.items[{index}].failureCode"),
+                        &[
+                            "execution_failed",
+                            "persistence_failed",
+                            "interrupted",
+                            "cancelled",
+                        ],
                     )?;
+                }
+                if !item["failureRetryable"].is_null() && !item["failureRetryable"].is_boolean() {
+                    return Err(ProtocolViolation::invalid(format!(
+                        "data.items[{index}].failureRetryable must be a boolean or null"
+                    )));
                 }
                 let activities = item["toolActivities"].as_array().ok_or_else(|| {
                     ProtocolViolation::invalid(format!(
@@ -1443,6 +1532,57 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                             "{field}.promptEligible must be a boolean"
                         )));
                     }
+                }
+
+                let state = item["state"].as_str().expect("validated state");
+                let assistant_is_null = item["assistantText"].is_null();
+                let failures = [
+                    &item["failureCode"],
+                    &item["failureMessage"],
+                    &item["failureRetryable"],
+                ];
+                match state {
+                    "completed" => {
+                        if assistant_is_null || failures.iter().any(|value| !value.is_null()) {
+                            return Err(ProtocolViolation::invalid(
+                                "completed transcript turn has invalid lifecycle fields",
+                            ));
+                        }
+                    }
+                    "pending" => {
+                        if !assistant_is_null
+                            || failures.iter().any(|value| !value.is_null())
+                            || !activities.is_empty()
+                        {
+                            return Err(ProtocolViolation::invalid(
+                                "pending transcript turn has invalid lifecycle fields",
+                            ));
+                        }
+                    }
+                    "failed" | "interrupted" => {
+                        if !assistant_is_null
+                            || failures.iter().any(|value| value.is_null())
+                            || !activities.is_empty()
+                        {
+                            return Err(ProtocolViolation::invalid(format!(
+                                "{state} transcript turn has invalid lifecycle fields"
+                            )));
+                        }
+                        let failure_code = item["failureCode"]
+                            .as_str()
+                            .expect("validated failure code");
+                        let valid_code = if state == "failed" {
+                            matches!(failure_code, "execution_failed" | "persistence_failed")
+                        } else {
+                            matches!(failure_code, "interrupted" | "cancelled")
+                        };
+                        if !valid_code {
+                            return Err(ProtocolViolation::invalid(format!(
+                                "{state} transcript turn has an invalid failure code"
+                            )));
+                        }
+                    }
+                    _ => unreachable!("validated transcript state"),
                 }
             }
             for field in ["total", "offset"] {
@@ -1820,7 +1960,12 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
                 }
                 let details = expect_object(&error.details, "error.details")?;
                 validate_safe_data(&error.details, "error.details")?;
-                if error.code == "INTERNAL_ERROR" && !details.is_empty() {
+                if TURN_ERROR_DETAIL_KEYS
+                    .iter()
+                    .any(|key| details.contains_key(*key))
+                {
+                    validate_turn_error_details(details)?;
+                } else if error.code == "INTERNAL_ERROR" && !details.is_empty() {
                     return Err(ProtocolViolation::invalid(
                         "INTERNAL_ERROR details must be empty",
                     ));
@@ -1928,6 +2073,23 @@ impl ProtocolTraceValidator {
                                 "data.turnId must match params.turnId",
                             ));
                         }
+                    }
+                } else if state.method == "session.turn" {
+                    let details = result
+                        .error
+                        .as_ref()
+                        .and_then(|error| error.details.as_object())
+                        .ok_or_else(|| {
+                            ProtocolViolation::invalid(
+                                "session.turn failure requires lifecycle details",
+                            )
+                        })?;
+                    validate_turn_error_details(details)?;
+                    let actual_turn_id = details.get("turnId").and_then(Value::as_str);
+                    if actual_turn_id != state.turn_id.as_deref() {
+                        return Err(ProtocolViolation::invalid(
+                            "error.details.turnId must match params.turnId",
+                        ));
                     }
                 }
                 state.terminal = true;
@@ -2176,6 +2338,7 @@ mod tests {
             serde_json::json!({
                 "text": "prompt",
                 "turnId": "123e4567e89b42d3a456426614174000",
+                "retry": false,
             }),
             serde_json::json!({
                 "sessionId": "session-a",
@@ -2319,10 +2482,27 @@ mod tests {
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
             let schema = schema_value.as_object().expect("result data schema");
-            let data = schema
+            let mut data = schema
                 .iter()
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
+            if method == "session.turn" {
+                data.insert("accepted".to_owned(), Value::Bool(true));
+                data.insert("persisted".to_owned(), Value::Bool(true));
+            }
+            if method == "session.transcript" {
+                let item = data["items"][0]
+                    .as_object_mut()
+                    .expect("transcript sample item");
+                item.insert("state".to_owned(), Value::String("completed".to_owned()));
+                item.insert(
+                    "assistantText".to_owned(),
+                    Value::String("answer".to_owned()),
+                );
+                for field in ["failureCode", "failureMessage", "failureRetryable"] {
+                    item.insert(field.to_owned(), Value::Null);
+                }
+            }
             assert!(
                 validate_result_trace(
                     method,
