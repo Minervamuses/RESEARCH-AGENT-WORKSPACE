@@ -1,6 +1,6 @@
 # Phase 06 — 退役 conversation-history Chroma
 
-Status: Not started
+Status: In progress
 
 ## Objective
 

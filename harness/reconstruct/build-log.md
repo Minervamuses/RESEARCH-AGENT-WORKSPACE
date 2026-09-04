@@ -262,3 +262,13 @@ Material implementation events append with this shape:
 - Next action: next eligible action from PLANS.md
 - Evidence references: context/review/log/artifact/commit if one exists
 -->
+
+## 2026-09-04 23:12 CST — Phase 06: conversation-history Chroma retirement preflight
+
+- **Status:** `Not started` → `In progress`。
+- **Runtime/ownership gate:** Phase 05 completion commit=`a08faae`、worktree clean；root=`/home/minervamuses/research-agent-workspace`、branch=`GUI`、WSL/Linux、Conda `app`。仍只使用temporary fixtures，不操作真實conversation store、legacy Chroma、provider、Ollama或credentials。
+- **Boundary map:** normal session目前由`ChatSession`建立`ChatHistoryStore`，再注入graph、tool inventory與extended-thinking proposer；`TurnStore` construction仍存在，但write/eviction/flush已無production caller。Desktop的`LegacyChromaReader`只在canonical JSON缺失時進入migration boundary，但暫時借用active store parser。
+- **Separation decision:** 將bounded strict legacy role-pair parser與常數移入`agent.conversations.legacy`後，可刪除active `agent.history_rag`與dead `TurnStore`，不需修改`app/rag/`或dependency manifests。保留`agent_recent_turns_window`作canonical JSON最近context視窗，保留document RAG所需`chromadb`、`langchain-chroma`與`langchain-ollama`。
+- **Canonical root:** `ConversationRepository.root`是authority；Phase Green會從同一repository boundary輸出resolved、bounded、escaped path到dynamic system guidance與`/status`，但不新增filesystem權限或繞過Bash approval。
+- **Baseline verification:** 從`app/`執行Phase 06指定Python command，exit 0，`177 passed, 1 warning in 4.60s`；warning是既有LangGraph `allowed_objects` pending-deprecation。此基線未啟動Ollama。
+- **Blockers:** None；下一步提交focused Red tests，固定active history removal、migration-only reader、canonical root與approval-gated exact-text journey。
