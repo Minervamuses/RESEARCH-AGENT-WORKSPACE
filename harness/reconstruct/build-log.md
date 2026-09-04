@@ -8,7 +8,7 @@
 |---|---|---|---|---|---|
 | 01 — Canonical conversation contract | Complete | 2026-09-04 18:20 CST | 2026-09-04 18:44 CST | Contract, Red/Green tests, review, and commits below | None |
 | 02 — Legacy import bridge | Complete | 2026-09-04 18:48 CST | 2026-09-04 19:14 CST | Mapping, Red/Green tests, fault review, and commits below | None |
-| 03 — Write-through turn lifecycle | In progress | 2026-09-04 19:23 CST | — | Preflight sequence/ownership mapping below | None |
+| 03 — Write-through turn lifecycle | Complete | 2026-09-04 19:23 CST | 2026-09-04 20:30 CST | Atomic lifecycle, host/protocol cutover, fault tests, and fresh review below | None |
 | 04 — Host/catalog/retry cutover | Not started | — | — | — | None |
 | 05 — Remove Product Plan Mode | Not started | — | — | — | None |
 | 06 — Retire chat-history Chroma | Not started | — | — | — | None |
@@ -167,6 +167,19 @@
 - **Manual inspection evidence:** 已逐段追蹤before/target sequence、normal/extended共用`finalize_and_record` chokepoint、citation/final-text validator排序、Session→CLI/Desktop→TS/Rust→React identity flow及Desktop read/restore boundary。沒有發現受支援的external protocol-v1 consumer；live checkout為同一source tree lockstep app。Phase 03–05仍是app-offline中間狀態，未操作真實store、credentials、provider或Ollama。
 - **Evidence references:** protocol Green=`f0fd27d`；CLI=`1845510`；Desktop host=`997ee1e`；catalog Red/Green=`5f54267`/`ff9290e`；fixture=`efc0ae8`；lifecycle replacement=`02233f8`。
 - **Blockers:** None。下一步完成canonical Desktop conversation journey與finalizer/thinking obsolete-spec改寫，跑完整Phase 03 required command sets後再判斷Complete。
+
+## 2026-09-04 20:30 CST — Phase 03: write-through vertical slice complete
+
+- **Status:** `In progress` → `Complete`。
+- **Final changes:** canonical Desktop journeys現在直接驗證JSON-only create/send/restart/select/continue、legacy一次性import、A→B→A context隔離、catalog落後補登、safe tool summary、caller logical-ID duplicate不重跑model，以及switch/shutdown零legacy flush。Plan-control tests保留strict legacy PlanLog reader coverage，但active normal/extended/Plan turns全走相同pending→completed repository lifecycle，不建立或修改Markdown，也不寫Chroma。Finalizer/thinking tests改由真實pending boundary進入，保留citation/trace/fusion assertions。
+- **Material failure and correction:** 額外執行`tests/test_desktop_server.py -q --tb=short`最初exit 1，`4 failed, 8 passed`；三項因fixture仍漏傳required `turnId`或期待removed `flushed`欄位而走錯protocol branch，另一項揭露`agent/desktop/server.py` EOF cleanup仍發出`flush_failed`與「could not flush」文案。Production residue與fixtures於`a184bfc`改成一般`shutdown_failed`/`SHUTDOWN_FAILED`語意；重跑server module exit 0，`12 passed, 1 warning`，再與protocol contract合跑為`97 passed, 1 warning`。全樹residue search只剩兩個「SHUTDOWN_FLUSH_FAILED不得存在」的negative assertions。
+- **Required Python verification:** 從`app/`執行phase列出的core command，exit 0，`149 passed, 1 warning in 2.08s`；host/protocol command exit 0，`247 passed, 1 warning in 4.54s`；policy/tool/extension/Bash preservation command exit 0，`31 passed, 1 warning in 1.06s`。warning皆為既有LangGraph `allowed_objects` deprecation，沒有live provider、Ollama或真實store操作。
+- **Required Desktop verification:** 從`app/desktop/`執行`conda run -n app node --test --experimental-strip-types tests/protocol.test.ts tests/backend.test.ts tests/conversations.test.ts`，exit 0，`100 passed`；`conda run -n app ./node_modules/.bin/tsc --noEmit`，exit 0；`conda run -n app cargo test --manifest-path src-tauri/Cargo.toml protocol::tests`，exit 0，`9 passed, 20 filtered out`。未install、未跑npx、production build或完整Cargo suite。
+- **Acceptance mapping:** (1) prompt-first與pending-write zero-provider由兩組lifecycle fault tests證明；(2) SafeContent→citation→Desktop validator→completed commit→return由finalizer ordering與commit-failure test證明；(3–4) normal/extended共用final chokepoint且latest-10/current-once綠燈；(5–6) failed/interrupted/completed restart、no replay、stable numbering與拒絕legacy restored turns綠燈；(7) citation/SafeContent/thinking/tool policy/Bash checks綠燈；(8–9) CLI/Desktop JSON authority、legacy import與React→TS→Rust→Python logical ID/duplicate journeys綠燈；(10) Plan control只改hint且不寫legacy source；(11) CLI/Desktop original/semantic input、one-shot Skill cleanup與forged unavailable tool拒絕皆有focused coverage；(12) pending與completed JSON的catalog-lag restart都不重跑model；(13) switch/shutdown、三語protocol與EOF path皆無active flush或flush-only success/error語意。
+- **Fresh review:** 獨立read-only reviewer從clean `88daa78`執行required checks，並在`a184bfc`後重查live code；逐條13項結果皆PASS，沒有P1/P2或completion blocker。人工inspection確認`turn_outcome`在graph前完成pending publish，`finalize_and_record`在既有安全/引用/Desktop validator後publish completed且之後才return；active host read/restore只使用canonical repository，legacy source僅存在於explicit importer boundary。`recall_history` query仍存在但沒有新conversation write caller，依Phase 06既定scope退場。
+- **Evidence references:** finalizer/thinking tests=`314a30c`；Desktop journeys=`47d81e0`；Plan-control cutover tests=`88daa78`；server flush-residue fix=`a184bfc`；Phase 03 implementation commits自`85730ee`至`a184bfc`；completion HEAD before documentation=`a184bfc50a7f`。
+- **Blockers:** None。
+- **Next action:** 重新閱讀durable authority並開始Phase 04 host/catalog/retry hardening；不得把本phase的basic catalog fallback誤當Phase 04完整corruption/retry UX。
 
 <!--
 Material implementation events append with this shape:
