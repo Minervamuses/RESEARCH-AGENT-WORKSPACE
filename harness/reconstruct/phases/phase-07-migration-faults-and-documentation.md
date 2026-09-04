@@ -4,14 +4,14 @@ Status: Not started
 
 ## Objective
 
-把已驗證的 non-destructive importer 接到明確的一次性 migration/reconciliation 入口，完成端到端故障注入與跨語言 Desktop journeys，並更新 active architecture/invariants/docs。最後證明 canonical JSON 是新對話唯一 authority，Plan Mode 與 conversation-history Chroma 不再被 active runtime 使用，而 legacy sources 仍可恢復。
+把已驗證的 non-destructive importer 接到明確、預設不執行的一次性 migration/reconciliation 入口，完成端到端故障注入、跨語言 Desktop journey與原生視窗人工驗收，並更新 active architecture/invariants/docs。最後證明 canonical JSON 是新對話唯一 authority，Plan Mode 與 conversation-history Chroma 不再被 active runtime 使用，而 legacy sources 仍可恢復。
 
 ## In Scope
 
-1. 在 application startup、catalog discovery 或明確 pre-runtime hook 中，以最小同步流程掃描尚無有效 JSON 的 legacy conversations 並逐會話 import。
+1. 提供明確呼叫、預設關閉的pre-runtime/catalog batch hook，以最小同步流程掃描尚無有效JSON的legacy conversations並逐會話import；本階段只由isolated fixture呼叫，production startup/list不得自動對真實persist root執行。
 2. 成功狀態只由有效 canonical target 存在決定；不新增 migration database。失敗可重跑且不阻斷健康 conversations。
 3. 補齊六個 durability crash/failure points、duplicate/retry、external rewrite、malformed/unknown version、catalog drift、A→B→A、normal→extended→restart 等代表性 tests。
-4. 建立至少一條從 React/TS/Rust/Python 到 JSON 再重啟恢復的 full Desktop journey，依現有 harness 能力使用 fixtures/stubs，不呼叫 live provider。
+4. 透過production Tauri supervisor與真實React/TS/Rust/Python邊界，在isolated fixture root人工完成到JSON再重啟恢復的full Desktop journey；fixtures/stubs只替換provider/search等external owners，不呼叫live provider。Layered automated tests是補充，不能替代人工可見狀態。
 5. 更新 active docs、for-agents invariants/data flow/module responsibilities/testing/failure modes，以及與已確認結果直接相關的 issue/backlog 狀態。
 6. 執行一次合理的 full Python suite、Desktop tests/build、Rust tests 與近最終 Tauri no-bundle build。
 
@@ -32,7 +32,7 @@ Status: Not started
 
 ## Expected components
 
-Migration wiring 應落在現有 startup/catalog/service 邊界的最小位置。Docs 檢查範圍至少包括：
+Migration wiring 應落在現有catalog/service邊界的最小default-off callable；不能新增production自動執行或public protocol method。一次batch必須共用單一stable legacy snapshot/read boundary，不能對每個candidate各複製兩次整個Chroma tree。Docs 檢查範圍至少包括：
 
 - `README.md`
 - `app/agent/README.md`
@@ -57,7 +57,7 @@ Migration wiring 應落在現有 startup/catalog/service 邊界的最小位置�
 
 ## Authorization and stop conditions
 
-本階段授權測試 fixture migration，不授權對真實使用者 persist directory 執行。若 startup migration 會使正常啟動需要 Ollama、網路或完整 Chroma service，停止並把 importer 改為可選的 local-read boundary；不可犧牲新 JSON conversations 的可用性。
+本階段授權測試 fixture migration，不授權對真實使用者 persist directory 執行。Batch hook預設不執行，production startup/catalog list不得呼叫；未來要啟用真實store rollout必須取得fresh authority、備份與dry run。若hook使未呼叫它的正常啟動需要Ollama、網路或載入Chroma，停止並修正；不可犧牲新JSON conversations的可用性。
 
 完整 launch block只授權第一組 broad checks；第二次昂貴 broad rerun、任何 dependency 安裝/升級或 lockfile 修改都仍需 fresh approval。若本階段不是由完整 launch block 啟動，任何預估超過約 10 分鐘的命令先請使用者批准。
 
@@ -66,7 +66,7 @@ Migration wiring 應落在現有 startup/catalog/service 邊界的最小位置�
 ### Preflight
 
 1. 檢查 Phase 01–06 build log，列出所有未解項；任何 correctness blocker 未解就不做 final validation。
-2. 固定 migration trigger 與 result reporting；確認有效 target 是唯一 completion signal。
+2. 固定default-off explicit migration trigger與result reporting；確認有效target是唯一completion signal，並設計一次legacy snapshot供bounded candidates共用。
 3. 盤點現有跨語言 test harness 與 fixtures，選最小能證明 full journey 的路徑。
 4. 記錄測試開始前 `git status --short --untracked-files=all`，把既有user-owned與本計畫task-owned paths分開，避免覆蓋使用者變更或提交generated stores；後續untracked audit只對本計畫相對baseline新增的paths主張所有權。
 
@@ -85,12 +85,23 @@ Migration wiring 應落在現有 startup/catalog/service 邊界的最小位置�
 
 ### Green
 
-1. 接上同步、逐 conversation、可重跑的 migration hook；每筆 structured result 可被安全記錄/顯示。
+1. 接上同步、逐conversation、可重跑、default-off的migration hook；每筆structured result可安全回傳，正常startup/list不呼叫它。Batch只建立一次stable legacy source view，避免每conversation重複clone整個Chroma tree。
 2. 僅針對 tests 揭露的缺口修正 lifecycle/retry/catalog；不得藉最終階段展開重構。
 3. 實作/完成 cross-language fixture journey：建立 turn → durable pending → completed → shutdown/restart → sidebar select → transcript 恢復 → 送出下一個 prompt；驗證下一個 context 與 turn number，並證明 no Plan/log/chat-history new writes。
 4. 依實際 code 更新 active docs 與 invariants，清楚標出 legacy source retained、single writer、no automatic replay、latest-10、display-only、RAG preserved。
 5. 在 `for_agents/invariants.md` 明確retire/replace舊 `INV-006`（Plan-only persistence）與 `INV-016`（switch-before-flush），並在architecture/data-flow/tools docs明確移除Chroma history lifecycle與`recall_history` workflow；不要只做泛稱更新。
 6. 對 issue 07/backlog 只記錄已由測試證實的狀態，不宣稱真實資料 migration 已執行。
+
+### Native Tauri manual journey
+
+Automated fixture、headless browser、reducer test與backend status flag都不能取代這個checkpoint。使用production Tauri supervisor與一個direct、non-symlink、task-owned `/tmp/research-agent-desktop-phase02-*` fixture root，在真正Research Agent視窗以keyboard完成create/select/send/retry、A→B→A、backend restart/restore/continue與normal→extended。人工觀察並記錄：
+
+- pending期間只有working spinner與bounded stage/tool activity，完整assistant answer不提前出現且terminal後只有一份；
+- tool activity/result與You/Assistant視覺分離，untrusted HTML/marker保持inert；
+- keyboard-only create/select/send/retry、composer/transcript focus與scroll可用；
+- sidebar/main pane在default viewport、supported minimum `720×560`與200% zoom沒有隱藏控制或不可操作內容。
+
+若native WSLg/window surface不可取得，必須把此acceptance記為unavailable並保持Phase 07未完成；不能以served React route或自動E2E宣稱通過。
 
 ### Refactor
 
@@ -110,10 +121,11 @@ conda run -n app poetry run pytest
 
 ```bash
 conda run -n app npm test
-conda run -n app npm run build
 conda run -n app cargo test --manifest-path src-tauri/Cargo.toml
 conda run -n app npm run tauri -- build --no-bundle
 ```
+
+目前Tauri `beforeBuildCommand`會執行`npm run build`，所以最後一個命令同時提供唯一一次TypeScript/Vite production build evidence；不得先另跑standalone `npm run build`。若live config改變，再先修訂本phase，不可臨時猜測替代命令。
 
 最後執行：
 
@@ -134,11 +146,11 @@ git status --short --untracked-files=all
 
 ## Acceptance Criteria
 
-- [ ] Fixture-based one-time migration 可重跑、逐會話隔離、以有效 target 判成功，且 legacy source 完整保留。
+- [ ] Default-off explicit fixture migration可重跑、逐會話隔離、以有效target判成功且legacy source完整保留；正常startup/list不呼叫或載入migration/Chroma，batch不為每個candidate重複clone整個source tree。
 - [ ] 六個 durability fault points 均有直接測試，UI/JSON/provider side-effect 結果符合 contract。
 - [ ] 六個checkpoint逐一使用真正subprocess termination→restart驗證；fake provider/tool side-effect sentinel與各checkpoint observable結果都有evidence，任何無法注入的點會阻擋完成。
 - [ ] 50-turn transcript 可恢復顯示；context 只含最新 10 個 completed eligible pairs，current prompt 一次。
-- [ ] Full Desktop cross-language journey 通過，stable logical ID 跨 retry/restart 不變。
+- [ ] Production Tauri視窗中的cross-language人工journey通過，stable logical ID跨retry/restart不變；layered automation另行通過但不取代人工觀察。
 - [ ] 新執行只寫 canonical JSON/catalog，不寫 Plan logs 或 conversation-history Chroma。
 - [ ] Document RAG、normal/extended thinking、Skills、Citation、SafeContent 與 Bash approval 的代表測試通過。
 - [ ] 固定 conversation root 的 exact-text grep/read-file workflow 有可見、approval-gated 證據；paraphrase miss 不觸發 embedding/RAG fallback。
@@ -148,6 +160,7 @@ git status --short --untracked-files=all
 - [ ] Broad suite/build 的結果、已知非本次失敗與未執行項目都如實記錄。
 - [ ] Final diff 只含必要 source/tests/docs，沒有 user data、generated stores、secrets 或 caches。
 - [ ] Task-owned tracked/untracked working-tree files都經residue、whitespace與content audit；既有無關user-owned files被保留並分開報告，證據未誤用只看index的plain `git grep`/`git diff`。
+- [ ] Native視窗的keyboard、pending/final-only、tool separation、HTML inert、focus/scroll、default/minimum/200% zoom逐項有observed evidence；無native surface時不得完成phase。
 
 ## Evidence to record
 

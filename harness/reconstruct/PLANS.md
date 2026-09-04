@@ -59,7 +59,8 @@
 - 在每個 phase 列出的 causal scope 內修改 `app/agent/`、`app/desktop/`、`app/tests/` 與直接受影響的現有 docs；可新增最小 `app/agent/conversations/` domain package 與對應 tests。
 - 明確實作 GOALS 已固定的一-conversation-一-JSON schema、prompt-first/finalized-response durability、legacy read-only migration、三語言 protocol-v1 lockstep changes，以及完整移除 Product Plan Mode 與 `recall_history`。
 - 這項 launch authorization明確涵蓋超過三個直接相關 production files、persistent JSON schema 與既有 public desktop protocol method/field removal；不得藉此擴到其他 schema/API 或一般重構。
-- 使用 isolated `tmp_path`/fixture roots 與 fake providers/runners，執行 phase-specific local checks；在 Phase 07 最多各執行一次 full Python suite、npm test/build、Cargo test 與 Tauri no-bundle build。
+- 使用 isolated `tmp_path`/fixture roots 與 fake providers/runners，執行 phase-specific local checks；在 Phase 07 最多執行一次full Python suite、一次npm test、一次Cargo test與一次Tauri no-bundle build；後者依live config觸發唯一一次npm production build。
+- 每個通過focused verification的logical change使用簡短Conventional Commit提交；push、merge、rebase、branch/worktree切換與publish仍不在授權內。
 - 更新本 bundle 的 `build-log.md`、material `context/`、真正 review 的 `code_review/`，並在 evidence 推翻 future plan 時修訂尚未開始的 phase files。
 
 ### 必須停止並取得 fresh authority
@@ -68,7 +69,7 @@
 - 要改變 GOALS 的 lifecycle、context=10、single-writer、Python-only writer、legacy retention、Plan/recall removal 或 preserved safety behavior。
 - 要對使用者真實 `persist_dir` 執行 migration、刪除/移動 legacy data、處理不可逆資料、讀 credentials、呼叫 live/paid providers，或寫入外部 system。
 - 要建立 service/database/queue/background worker/new concurrency model、protocol compatibility framework、conversation semantic index，或支援多 writer。
-- 要 commit、push、merge、rebase、switch branch/worktree、deploy、release、publish，或執行第二次昂貴 broad pass。
+- 要 push、merge、rebase、switch branch/worktree、deploy、release、publish，或執行第二次昂貴 broad pass。
 
 如果受支援的外部 protocol-v1 consumer、既有 JSON collision、無法安全判定的 legacy source，或 required evidence 不可取得，將該 phase 設為 `Blocked`；不要用猜測、雙寫或資料刪除跨過阻塞。
 
@@ -86,7 +87,7 @@
 | 04 — Host/catalog/retry hardening | Catalog corruption/orphan/missing reconcile、完整 bounded transcript、display-only command、before-ack retry 與 UI failure semantics 都完成跨語言 edge journeys | Phase 03 | `phases/phase-04-host-catalog-and-retry-cutover.md` |
 | 05 — Remove Product Plan Mode | CLI、session、protocol、Rust/TS/React、writer、tests 與現行 docs surfaces 不再有 Plan Mode；Extended Thinking 完整保留 | Phase 04 | `phases/phase-05-remove-plan-mode.md` |
 | 06 — Retire chat-history Chroma | 一般 runtime 不初始化/讀寫 conversation Chroma，`recall_history` 從 tool policy 移除；document RAG Chroma 保留 | Phase 05 | `phases/phase-06-retire-chat-history-chroma.md` |
-| 07 — Migration, faults, docs | Catalog-wide fixture migration、crash/corruption/idempotency journeys、三語整合與文件/invariants 完成，legacy source 保留為 archive | Phase 06 | `phases/phase-07-migration-faults-and-documentation.md` |
+| 07 — Migration, faults, docs | Explicit fixture-only batch migration、crash/corruption/idempotency journeys、三語整合、原生視窗人工驗收與文件/invariants 完成，legacy source 保留為 archive | Phase 06 | `phases/phase-07-migration-faults-and-documentation.md` |
 
 所有 phases 為依序 dependency chain；不得因下一階段看似容易而跳過 failing gate。Phase 03 的實作過程可有短暫、未宣告完成的 integration window，但該 phase 只有在 write、read、selected-session import 與最小 client protocol 已形成可工作的 vertical slice 後才能完成；同一 turn 永遠不得雙寫 JSON 與 legacy store。Phase 03–05 是 app-offline、不可對真實 user store 使用的非發布中間狀態；若執行在 Phase 06 前停止，app 保持不啟動。暫存的 Product Plan control 若仍存在，也只能把新 turn 寫入同一 JSON，不得再建立 Plan log。Phase 05/06 結束後普通 runtime 只能走 JSON，legacy code 只由 Phase 02 建立的 explicit migration boundary 觸及。
 
@@ -119,8 +120,8 @@
 - Phase 先跑最小 failing/characterization check，再做 minimal Green；material refactor 後重跑 focused check。Required check 失敗時該 phase 保持 `In progress`/`Blocked`。
 - Python commands 從 repository root 以 `cd app && conda run -n app poetry run pytest ... -q` 執行；TypeScript/Rust 從 `app/desktop` 以 Conda `app` toolchain 執行。
 - Live OpenRouter/Ollama/MCP/citation provider 不屬於 verification；conversation tests 使用 fake provider，RAG preservation 使用現有 deterministic/offline tests。
-- Phase 07 才各跑一次最終 broad Python、npm、Cargo、Tauri no-bundle build；若任何一項超過約十分鐘仍可讓第一次完成，但第二次 broad rerun 必須 fresh authority。
-- `git diff --check`、residue searches、`git status --short --untracked-files=all` 與 validator 是結尾 checks；它們不替代 user-visible lifecycle/integration evidence。因 execution 未授權 `git add`，所有 residue search 必須用 `git grep --untracked`（或等價、明確包含untracked source的工具），而且相對phase-start baseline由本計畫新增的task-owned untracked檔要另做content/whitespace review；既有無關user-owned untracked檔只盤點、保留、不納入本任務所有權。Plain `git grep`/`git diff`不能當完整working-tree證據。
+- Phase 07 才各跑一次最終 broad Python、npm test、Cargo test與Tauri no-bundle build；Tauri目前以`beforeBuildCommand`執行唯一一次`npm run build`，因此不另跑standalone production build。若任何一項超過約十分鐘仍可讓第一次完成，但第二次 broad rerun 必須 fresh authority。
+- `git diff --check`、residue searches、`git status --short --untracked-files=all` 與 validator 是結尾 checks；它們不替代 user-visible lifecycle/integration evidence。即使每個logical change都會commit，commit前與final residue search仍必須用`git grep --untracked`（或等價、明確包含untracked source的工具），而且相對phase-start baseline由本計畫新增的task-owned untracked檔要另做content/whitespace review；既有無關user-owned untracked檔只盤點、保留、不納入本任務所有權。Plain `git grep`/`git diff`不能當完整working-tree證據。
 
 ## Expected write surfaces
 
@@ -149,3 +150,4 @@ Phase files列出較精確的 expected components。整體外框如下；不是�
 - [ ] Conversation operation不需 Ollama/chat-history Chroma，document RAG deterministic suite仍通過，且 Chroma/Ollama dependencies沒有被錯刪。
 - [ ] Legacy fixture migration成功/失敗都符合 non-destructive rules；沒有操作或刪除真實 user store。
 - [ ] 一次 final Python/npm/Cargo/Tauri check set、`git diff --check`、path/residue/generated-data review與fresh-agent final review都有實際結果；任何 unavailable evidence/limitations 清楚記錄。
+- [ ] 使用隔離fixture root的原生Tauri視窗人工journey有逐項觀察紀錄；headless/browser/layered automation不得替代未觀察的native、keyboard、focus、scroll或layout行為。

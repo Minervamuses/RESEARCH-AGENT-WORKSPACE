@@ -21,9 +21,9 @@
 
 我明確授權在 GOALS 與每個 phase 的 causal scope 內，修改超過三個直接相關 production files；建立最小 `app/agent/conversations/` package 與 tests；加入一-conversation-一-JSON persistent schema；實作 prompt-first 與 finalized-response durability；建立 non-destructive legacy importer；原地同步更新 desktop protocol v1 contract/fixtures/Python/TypeScript/Rust implementations；移除 `session.set_mode`、Plan fields、Plan writer、conversation Chroma runtime 與 `recall_history`。這份授權只涵蓋 GOALS 已固定的 schema/API 變更，不涵蓋其他 public API、資料格式或架構擴張。
 
-我授權使用 isolated temporary roots、fake providers/runners、現有 repository tools與 phase-specific tests。Phase 07 可各執行一次完整 Python suite、npm test、npm build、Cargo test與 Tauri no-bundle build，即使第一次 final command set 約超過十分鐘；第二次昂貴 broad pass需重新取得我的同意。不得呼叫 live/paid provider、讀 credentials、操作真實 user store、執行真實資料 migration，或刪除/移動 legacy data。
+我授權使用 isolated temporary roots、fake providers/runners、現有 repository tools與 phase-specific tests。Phase 07 可執行一次完整 Python suite、一次 npm test、一次 Cargo test與一次 Tauri no-bundle build，即使第一次 final command set 約超過十分鐘；Tauri設定的`beforeBuildCommand`提供唯一一次npm production build，不另跑`npm run build`。第二次昂貴 broad pass需重新取得我的同意。不得呼叫 live/paid provider、讀 credentials、操作真實 user store、執行真實資料 migration，或刪除/移動 legacy data。
 
-Dependency/environment/manifest/lockfile 變更、service/database/queue/background worker/new concurrency model、compatibility framework、conversation semantic index、多 writer、AGENTS.md 修改、commit/push/merge/rebase/branch/worktree/deploy/release/publish 都沒有授權。如確實不可避免，先把 affected phase 標為 Blocked，說明最小必要變更、較小方案為何不足，以及時間/usage/maintenance cost。
+每個logical change完成focused verification後都要使用簡短Conventional Commit提交；這項授權不包含push、merge、rebase、branch/worktree切換、deploy、release或publish。Dependency/environment/manifest/lockfile 變更、service/database/queue/background worker/new concurrency model、compatibility framework、conversation semantic index、多 writer與AGENTS.md 修改都沒有授權。如確實不可避免，先把 affected phase 標為 Blocked，說明最小必要變更、較小方案為何不足，以及時間/usage/maintenance cost。
 
 依 PLANS.md 的 autonomous execution mode逐 phase 執行：每次只實作一個 eligible phase，先 preflight，做最小 Red/characterization、Green、必要的局部 refactor與 required verification。任何 required check失敗都不得前進。每次 phase開始、material failure/checkpoint與完成時，將 exact observed evidence寫進 build-log.md；只有 material discovery才建立 context file；只有真 review才建立 code_review file。Evidence推翻未開始的計畫時，先修訂 PLANS.md與 affected unstarted phase files，再繼續。
 

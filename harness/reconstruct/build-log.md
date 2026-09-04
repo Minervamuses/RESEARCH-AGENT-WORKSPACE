@@ -307,3 +307,12 @@ Material implementation events append with this shape:
 - **Limitations:** 真實user migration、provider、Ollama與Phase 07 broad/manual checks仍未執行；較早的`969 passed`不作final broad evidence。
 - **Blockers:** None。
 - **Next action:** 重新讀durable authority，先修正Phase 07尚未開始計畫中已被preflight證據推翻的migration trigger/build/manual-check描述，再開始Phase 07。
+
+## 2026-09-05 00:24 CST — Phase 07: pre-start plan correction
+
+- **Status:** remains `Not started`；本紀錄是evidence-driven plan repair，不是implementation start。
+- **Observed contradictions:** 自動startup/catalog migration會未經fresh authority操作真實persist root；現有legacy reader每次conversation會重複clone整個Chroma source；Tauri `beforeBuildCommand`已執行`npm run build`；目前Python fixture/TS reducer/Rust fake-child tests都不能取代既有GUI計畫要求的production Tauri人工觀察。
+- **Plan correction:** Phase 07改成default-off explicit batch hook，只由isolated fixture呼叫，正常startup/list不自動migration或載入Chroma；batch共用一次stable legacy source view。Final broad set不另跑standalone`npm run build`，由一次Tauri no-bundle build觸發唯一production frontend build。Native Tauri keyboard/pending/final-only/tool/HTML/focus/scroll/layout journey成為明確blocking acceptance，automation只作補充。
+- **Durable authorization correction:** 使用者已明確要求每個logical change都commit，因此`PROMPTS.md`/`PLANS.md`現已記錄commit authority；push/merge/rebase/branch/worktree/deploy/release/publish仍未授權。
+- **Evidence:** live `package.json`/`tauri.conf.json`、migration/fixture/test topology與先前GUI acceptance plans的read-only inspection；未執行tests、migration或application write。
+- **Blockers:** None；plan structural validation與fresh walkthrough通過後才開始Phase 07。
