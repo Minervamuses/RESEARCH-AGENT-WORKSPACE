@@ -125,13 +125,13 @@
 
 | State | Owner while active | Transition | Durable destination |
 |---|---|---|---|
-| User/model turn | ChatSession and graph | finalization then journal record | recent list, plan markdown, or history Chroma |
+| User/model turn | ChatSession and graph | pending JSON before execution; completed/failed JSON before terminal outcome | canonical conversation JSON |
 | RAG source file | User filesystem | collect/tag/chunk/index | raw.json, Chroma, folder_meta.json |
 | Citation discovery record | Citation provider hub/tool call | authority verification and canonical save | cite bundle plus session SourceRegistry |
 | Extension drop-in | User drop-in root | validate/approve/install/restart | private managed copy and registry |
 | Desktop child/request | Rust supervisor and Python `RequestContext` | ordered events then one result | wire only; underlying Python side effects persist separately |
 | Desktop conversation membership | `DesktopProjectCatalog` | first normal finalized turn or registration retry | `desktop-projects.json` |
-| Desktop conversation content | Python session/journal | eviction, switch, or shutdown flush | history Chroma and/or plan logs |
+| Desktop conversation content | Python session/repository | write-through pending and terminal transitions | canonical conversation JSON; legacy Chroma/Plan sources are import-only |
 
 ## Error, retry, and recovery paths
 

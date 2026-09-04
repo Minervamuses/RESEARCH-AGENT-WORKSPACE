@@ -31,17 +31,17 @@
 ## Boundary rules
 
 - agent may import rag public boundaries; rag must not import agent or skill/application code. Current import search found no reverse dependency.
-- ChatSession coordinates order and owns the session lock; it delegates graph execution, thinking, citation policy, and journal persistence rather than duplicating those implementations.
+- ChatSession coordinates order and owns the session lock; it delegates graph execution, thinking, citation policy, canonical repository transitions, and journal observability rather than duplicating those implementations.
 - Tool existence and tool authorization are separate. tools.access resolves the set, graph binding exposes it, and PolicyToolNode rechecks it at execution.
 - app/skills/citation owns citation truth; app/agent/skills/citation owns session integration only.
 - Extension source drop-ins are untrusted desired state. Only validated, approved managed copies may reach a future session.
 - raw.json is the full-content RAG read surface; Chroma is the semantic index; folder_meta.json is inventory metadata. None is independently a complete transactional store.
 - React gathers intent and renders bounded state; Rust owns native process/transport lifetime; Python owns policy and persistent writes. Frontend disabled controls are not authorization.
 - The desktop protocol owns cross-language shapes, limits, origin rules, and request ordering. All three implementations reject incompatible messages instead of adapting them silently.
-- Conversation project membership is catalog-owned, but conversation text remains in existing history/plan formats. The catalog is not the transcript store.
+- Conversation project membership is catalog-owned, while conversation text is canonical JSON under the conversation repository. The catalog is not the transcript store.
 - Desktop composer commands are parsed and executed in Python. React sends the original text and does not infer knowledge or extension side effects.
 - Untrusted assistant/tool text is rendered through `SafeContent`; only credential-free absolute HTTP(S) URLs may reach the native opener. Tauri capabilities grant the WebView no shell or filesystem access.
-- Generated store, cite, plan_logs, dist, node_modules, Rust target, caches, and user extension state are not source modules.
+- Generated store, cite, dist, node_modules, Rust target, caches, and user extension state are not source modules. Legacy `plan_logs` are preserved user migration input, not active runtime output.
 
 ## Ambiguous or overloaded ownership
 

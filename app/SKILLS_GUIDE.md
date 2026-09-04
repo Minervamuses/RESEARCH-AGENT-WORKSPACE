@@ -150,7 +150,6 @@ Pinned resources 會在執行該次 one-shot skill 工作時直接放進 context
 
 - `rag_explore` / `rag_search` / `rag_get_context` 查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料）；`recall_history` 查 persisted chat history（舊對話、較早 session、被 recent window eviction 的 turn）。兩者都是全域工具，skill 內文引導模型用對工具即可，不需要 manifest 宣告。
 - `citation_workflow` 是 skill 專屬工具，保留給內建 citation skill，一般 skill 不應宣告。
-- Plan mode logs 不進 Chroma `chat_history`，所以不能承諾 `recall_history` 能搜尋 plan-mode-only 的紀錄；需要時應請 agent 讀 `plan_logs/` 檔案或請使用者指出位置。
 
 ## 三、Description 寫作指引
 
@@ -487,7 +486,6 @@ Group findings by severity:
 - [ ] 沒有把全域工具（base tools、Web Search）寫進 `tools`；也沒有宣告保留給 citation skill 的 `citation_workflow`
 - [ ] `resources[].pinned` 使用真正 bool，不使用 `"yes"` / `"no"` 字串
 - [ ] `references/`、`assets/`、`scripts/` 內的檔案只依賴 skill bundle 內路徑，不假設會 fallback 到 cwd
-- [ ] 文件或 prompt 沒承諾 `recall_history` 能查到 plan mode logs
 - [ ] 內文不含第五節列出的 Claude Code 專屬語法
 - [ ] 內文用祈使句
 - [ ] 內文 ≤ 500 行（超過就拆檔）

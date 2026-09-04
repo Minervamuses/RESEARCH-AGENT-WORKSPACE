@@ -35,6 +35,7 @@
 
 ```text
 ChatSession.turn_outcome()  [session-wide async lock]
+    ├─ ConversationRepository.begin_turn() → pending JSON
     ├─ normal → graph → turns.execution.execute_graph()
     └─ extended → thinking.orchestrator.FusionOrchestrator
                          ↓
@@ -43,9 +44,8 @@ ChatSession.turn_outcome()  [session-wide async lock]
        ChatSession.finalize_and_record()
           ├─ generic response safety
           ├─ CitationSessionPolicy gate/render
-          └─ TurnJournal.record_turn()
-                 ├─ PlanLog
-                 └─ TurnStore → history_rag
+          ├─ ConversationRepository.complete_turn()
+          └─ TurnJournal.observe_turn()
                          ↓
                     TurnOutcome
 ```

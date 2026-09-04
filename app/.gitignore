@@ -7,7 +7,7 @@ AGENTS.md
 .cursorrules
 .github/copilot-instructions.md
 
-# Plan-mode markdown logs (kept on disk for the user; never indexed by RAG)
+# Legacy Plan logs (preserved as read-only migration input; never indexed by RAG)
 plan_logs/
 
 # Local RAG knowledge and chat-history state

@@ -59,10 +59,11 @@ Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用
 
 確認目前使用者對以下位置有寫入權限:
 
-- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):執行後產生的 Chroma、`raw.json`、`folder_meta.json` 與 chat history。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
-- `app/plan_logs/`:plan mode markdown logs。
+- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json`、`folder_meta.json` 與 legacy chat history。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
+
+舊版留下的 `app/plan_logs/` 是唯讀 migration input；目前版本不會建立或更新這些檔案。
 
 ## 2. 安裝
 
@@ -196,7 +197,7 @@ repo/folder ingest 收集常見文字與程式檔:
 
 預設略過目錄:`.git`、`.github`、`__pycache__`、`node_modules`、`.venv`、`venv`、`env`、`.claude`、`.opencode`、`.cursor`、`plan_logs`、`volumes`、`dist`、`build`。
 
-plan mode 的 `plan_logs/` 由目錄規則直接略過。**敏感資料不要放進要 ingest 的資料夾**——即使 `.env` 不在文字副檔名清單內，也不要依賴副檔名當唯一保護。
+Legacy `plan_logs/` 由目錄規則直接略過，避免把舊對話誤收進知識庫。**敏感資料不要放進要 ingest 的資料夾**——即使 `.env` 不在文字副檔名清單內，也不要依賴副檔名當唯一保護。
 
 ### 既有本機 store 的維護
 
@@ -213,8 +214,7 @@ plan mode 的 `plan_logs/` 由目錄規則直接略過。**敏感資料不要放
 | Command | 用途 |
 |---|---|
 | `/help` | 顯示 slash commands |
-| `/status` | 顯示 session id、turn count、mode、active skill、最近工具使用 |
-| `/mode [normal\|plan]` | 切換一般模式或 plan mode;不帶參數出互動選單 |
+| `/status` | 顯示 session id、turn count、thinking mode、active skill、最近工具使用 |
 | `/thinking [normal\|extended]` | 切換一般回答或 extended thinking |
 | `/skill [name\|none] [mode]` | 啟用/停用 skill;不帶參數出互動選單 |
 | `/citation [文字\|off]` | 啟用 citation skill(持續生效);帶文字時同時把該句話交給 agent;`off` 停用 |
@@ -225,11 +225,6 @@ plan mode 的 `plan_logs/` 由目錄規則直接略過。**敏感資料不要放
 | `/prune [folder] [--yes]` | dry run 或實際刪除 orphan store entries |
 | `/clear` | 清空終端機畫面 |
 | `/quit`、`/exit` | 離開 CLI |
-
-### `/mode`
-
-- **normal**:回合保存在近期 prompt window;過舊的 turn 寫入 `chat_history` Chroma store,之後可用 `recall_history` 找回。
-- **plan**:回合寫進 `app/plan_logs/plan-...md`,不寫入 ChromaDB,也不會被 RAG ingest(`plan_logs/` 由目錄規則排除)。
 
 ### `/thinking`
 
@@ -478,7 +473,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 | ingest/search 失敗提到 Ollama/embeddings | 確認 Ollama 正在跑,且 `ollama pull bge-m3` 已完成 |
 | `/thinking extended` 切換即報錯 | 需要 OpenRouter key,且 config 設定的 reviewer/rewrite/repair/fusion 模型都要在 OpenRouter 可用;先完成設定再啟用 |
 | `/sync` 顯示大量磁碟上不存在的檔案 | 確認 sync 的 root 與當初 ingest 的 root 相同;`file_path` 是以 ingest root 為基準的相對路徑,root 不同會誤判 |
-| 找不到 plan mode 的內容 | plan mode 只寫 `app/plan_logs/`,不進 Chroma、`recall_history` 搜不到;直接讀該 markdown 檔 |
+| 舊版 Plan log 沒出現在 desktop 對話 | 選取對應 desktop 對話時由 legacy importer 讀取 `app/plan_logs/`;來源檔保持不變。若匯入失敗,先保留原檔並查看 migration 錯誤 |
 | Web Search 工具沒出現 | 確認標準路徑下有 built `dist/index.js`,且 `conda run -n app node --version` 成功；再查 `~/.cache/agent-mcp/` log |
 | GitHub 工具沒出現 | 確認 `app` Conda env vars 已啟用 MCP、command 可執行且 token 有效；再查 MCP log |
 
