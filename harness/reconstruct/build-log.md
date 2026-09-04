@@ -10,8 +10,8 @@
 | 02 — Legacy import bridge | Complete | 2026-09-04 18:48 CST | 2026-09-04 19:14 CST | Mapping, Red/Green tests, fault review, and commits below | None |
 | 03 — Write-through turn lifecycle | Complete | 2026-09-04 19:23 CST | 2026-09-04 20:30 CST | Atomic lifecycle, host/protocol cutover, fault tests, and fresh review below | None |
 | 04 — Host/catalog/retry cutover | Complete | 2026-09-04 20:39 CST | 2026-09-04 22:26 CST | Catalog recovery, full lifecycle paging, explicit retry, display-only commands, and fresh review below | None |
-| 05 — Remove Product Plan Mode | In progress | 2026-09-04 22:31 CST | — | Preflight inventory below | None |
-| 06 — Retire chat-history Chroma | Not started | — | — | — | None |
+| 05 — Remove Product Plan Mode | Complete | 2026-09-04 22:31 CST | 2026-09-04 23:04 CST | Removal, preservation checks, docs, and fresh review below | None |
+| 06 — Retire chat-history Chroma | Complete | 2026-09-04 23:12 CST | 2026-09-05 00:22 CST | Runtime retirement, archive-access checks, docs, and fresh review below | None |
 | 07 — Migration, faults, docs | Not started | — | — | — | None |
 
 允許的狀態只有 `Not started`、`In progress`、`Blocked`、`Complete`。只有 required acceptance與verification都有 observed evidence時才能標為 `Complete`。
@@ -295,3 +295,15 @@ Material implementation events append with this shape:
 - **Evidence references:** migration extraction=`2f85804`；application/tests Green=`474a9b5`；active docs=`001b15a`。
 - **Limitations:** 未啟動live provider、Ollama、embedding、真實store或migration；未刪除legacy data。Phase 07的Desktop/npm/Cargo/Tauri broad checks與人工inspection尚未執行。
 - **Blockers:** None。
+
+## 2026-09-05 00:22 CST — Phase 06: completed after fresh review
+
+- **Status:** `In progress` → `Complete`。
+- **Final correction:** archive hint現在要求JSON-content escaping後，phrase與root各自作POSIX shell單一參數quoting，並給出精確bounded shape：`grep -lF -- <shell-quoted-escaped-phrase> <shell-quoted-root>/*.json | head -n 21`。含spaces、single/double quotes、`$HOME`、`$()`、backticks、backslash與newline的fixture journey成功，避免shell expansion或把matching JSON lines誤當paths。另移除fixture unused legacy DTO import，修正fixed latest-10與prompt-first catalog/provider-error文件敘述。
+- **Final verification:** review修正後，archive/history/Desktop fixture focused selector exit 0，`28 passed, 1 warning in 3.91s`；Phase-required selector再跑 exit 0，`184 passed, 1 warning in 1.69s`。`manage_for_agents.py check`與`git diff --check`通過；warning仍只有既有LangGraph pending-deprecation與9個tracked `for_agents/` ignore提示。
+- **Acceptance mapping:** no runtime Chroma/flush與no `recall_history`由retirement/import/residue tests證明；migration-only lazy reader與legacy retention由migration/startup tests證明；document RAG dependencies及offline component flows由required RAG selectors證明；Bash/Citation/Skills/Extended Thinking由required/focused selectors證明；fixed latest-10、validated root、shell-safe exact grep、20-file bound、chunked canonical read、pending self-match排除與no-RAG fallback由archive journeys證明。
+- **Fresh review:** reviewer逐項檢查live runtime、tests、active docs與commits，修正shell quoting/`-lF`、fixture `/status`、fixed-window wording及兩項prompt-first docs P3後，最終無open P1/P2。詳見`code_review/phase-06-retire-chat-history-chroma-review.md`。
+- **Evidence references:** Green=`474a9b5`；active docs=`001b15a`；review fixes=`75fa8a2`；review artifact如上。
+- **Limitations:** 真實user migration、provider、Ollama與Phase 07 broad/manual checks仍未執行；較早的`969 passed`不作final broad evidence。
+- **Blockers:** None。
+- **Next action:** 重新讀durable authority，先修正Phase 07尚未開始計畫中已被preflight證據推翻的migration trigger/build/manual-check描述，再開始Phase 07。

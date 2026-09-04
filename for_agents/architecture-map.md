@@ -28,7 +28,7 @@ The repository also contains a tracked source-checkout desktop application. Reac
 
 | External system | Adapter / use | Failure behavior | Evidence |
 |---|---|---|---|
-| OpenRouter | Main chat, extended-thinking roles, extension preview explanation, folder tagging | Missing key/model or provider errors fail the affected feature; normal turn exceptions are not recorded | app/agent/llm; app/rag/llm; README.md |
+| OpenRouter | Main chat, extended-thinking roles, extension preview explanation, folder tagging | Missing key/model prevents the affected feature; after prompt acceptance, provider errors leave a durable failed turn | app/agent/llm; app/rag/llm; README.md |
 | Ollama with bge-m3 | Ingest and semantic search embeddings | Ingest/search fail when service or model is absent; raw JSON inventory/context may still work | app/rag/embedder/ollama.py; README.md |
 | ChromaDB | Document knowledge vectors; legacy conversation data is read only from a disposable migration clone | RAG writes are not transactional with raw JSON; conversation create/turn execution does not initialize Chroma | app/rag/store; app/agent/conversations/legacy.py |
 | Web Search and optional GitHub MCP | External search and remote GitHub state | Missing/crashing servers are omitted with diagnostics; the session continues | app/agent/mcp.py; app/agent/startup.py |

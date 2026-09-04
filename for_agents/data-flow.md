@@ -130,7 +130,7 @@
 | Citation discovery record | Citation provider hub/tool call | authority verification and canonical save | cite bundle plus session SourceRegistry |
 | Extension drop-in | User drop-in root | validate/approve/install/restart | private managed copy and registry |
 | Desktop child/request | Rust supervisor and Python `RequestContext` | ordered events then one result | wire only; underlying Python side effects persist separately |
-| Desktop conversation membership | `DesktopProjectCatalog` | first normal finalized turn or registration retry | `desktop-projects.json` |
+| Desktop conversation membership | `DesktopProjectCatalog` | first durable pending prompt or later reconciliation retry | `desktop-projects.json` |
 | Desktop conversation content | Python session/repository | write-through pending and terminal transitions | canonical conversation JSON; legacy Chroma/Plan sources are import-only |
 
 ## Error, retry, and recovery paths

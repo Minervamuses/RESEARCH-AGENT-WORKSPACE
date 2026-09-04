@@ -1,6 +1,6 @@
 # Phase 06 — 退役 conversation-history Chroma
 
-Status: In progress
+Status: Complete
 
 ## Objective
 
@@ -100,14 +100,14 @@ conda run -n app poetry run pytest tests/test_conversation_migration.py tests/te
 
 ## Acceptance Criteria
 
-- [ ] Active agent/desktop runtime 不 construct、write、query 或 flush conversation-history Chroma。
-- [ ] `recall_history` 不在 tool inventory、prompt、help、policy 或 protocol 中。
-- [ ] Legacy Chroma strict reader 僅由 migration boundary 使用，來源資料保留。
-- [ ] Document RAG 的 Chroma/Ollama code、dependencies 與代表 tests 保持可用。
-- [ ] Bash approval、`grep`、`read_file` 與 Citation/Skills 沒有退化。
-- [ ] Conversation create/restore 在 Ollama 不可用時仍可於 stubbed/offline test 工作。
-- [ ] Agent與使用者能從system guidance/`/status`得知validated canonical root；exact-text grep→`read_file`有approval-gated journey，paraphrase miss不fallback到embedding/RAG。
-- [ ] Residue search 的剩餘 chat-history references 全部是 migration/historical/harness 用途。
+- [x] Active agent/desktop runtime 不 construct、write、query 或 flush conversation-history Chroma。
+- [x] `recall_history` 不在 tool inventory、prompt、help、policy 或 protocol 中。
+- [x] Legacy Chroma strict reader 僅由 migration boundary 使用，來源資料保留。
+- [x] Document RAG 的 Chroma/Ollama code、dependencies 與代表 tests 保持可用。
+- [x] Bash approval、`grep`、`read_file` 與 Citation/Skills 沒有退化。
+- [x] Conversation create/restore 在 Ollama 不可用時仍可於 stubbed/offline test 工作。
+- [x] Agent與使用者能從system guidance/`/status`得知validated canonical root；exact-text grep→`read_file`有approval-gated journey，paraphrase miss不fallback到embedding/RAG。
+- [x] Residue search 的剩餘 chat-history references 全部是 migration/historical/harness 用途。
 
 ## Evidence to record
 
