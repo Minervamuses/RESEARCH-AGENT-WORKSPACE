@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Iterable, Literal
 
 from agent.conversations.legacy import (
+    ChromaClientFactory,
     LegacyChromaReader,
     LegacyConversationReader,
     LegacyConversationSnapshot,
@@ -54,6 +55,15 @@ class MigrationResult:
     source_counts: tuple[LegacySourceCount, ...]
     turn_count: int
     dropped_activity_count: int
+
+
+@dataclass(frozen=True)
+class MigrationTargetResult:
+    """Safe structured batch outcome without legacy conversation text."""
+
+    conversation_id: str
+    project_id: str | None
+    result: MigrationResult
 
 
 class ConversationMigrator:
@@ -316,6 +326,48 @@ def create_legacy_migrator(
             ).read_direct_answer_turns(),
         ),
     )
+
+
+def migrate_legacy_targets(
+    config: AgentConfig,
+    repository: ConversationRepository,
+    targets: Iterable[tuple[str, str | None]],
+    *,
+    chroma_client_factory: ChromaClientFactory | None = None,
+) -> tuple[MigrationTargetResult, ...]:
+    """Import bounded targets in order through one lazy legacy snapshot."""
+    ordered_targets = tuple(targets)
+    if not ordered_targets:
+        return ()
+
+    chroma_reader = LegacyChromaReader(
+        config.persist_dir,
+        client_factory=chroma_client_factory,
+    )
+    results: list[MigrationTargetResult] = []
+    with chroma_reader.shared_snapshot() as read_chroma:
+        migrator = ConversationMigrator(
+            repository,
+            LegacyConversationReader(
+                chroma_read=read_chroma,
+                plan_read=lambda conversation_id: LegacyPlanLogReader(
+                    config,
+                    session_id=conversation_id,
+                    app_root_resolver=lambda: find_app_root(),
+                ).read_direct_answer_turns(),
+            ),
+        )
+        for conversation_id, project_id in ordered_targets:
+            result = migrator.import_conversation(
+                conversation_id,
+                project_id,
+            )
+            results.append(MigrationTargetResult(
+                conversation_id=conversation_id,
+                project_id=project_id,
+                result=result,
+            ))
+    return tuple(results)
 
 
 def _parse_timestamp(value: str) -> datetime:

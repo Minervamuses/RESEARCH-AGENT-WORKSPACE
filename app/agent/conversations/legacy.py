@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import stat
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal, Protocol
+from typing import Callable, Iterator, Literal, Protocol
 
 from langchain_core.documents import Document
 
@@ -40,6 +42,8 @@ CHAT_HISTORY_SUBDIR = "chat_history"
 MAX_RESTORED_SESSION_TURNS = 4096
 MAX_RESTORED_TURN_CHARS = 131_072
 MAX_RESTORED_SESSION_CHARS = 8 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 
 class LegacyReadError(RuntimeError):
@@ -489,6 +493,96 @@ class LegacyChromaReader:
     def read(self, conversation_id: str) -> list[TurnRecord]:
         """Named equivalent of the migration reader callable."""
         return self(conversation_id)
+
+    @contextmanager
+    def shared_snapshot(self) -> Iterator[LegacyRead]:
+        """Yield a lazy reader backed by one disposable immutable clone."""
+        temp_directory: tempfile.TemporaryDirectory[str] | None = None
+        client: _ChromaClient | None = None
+        store: _RawChromaStore | None = None
+        initialized = False
+        source_missing = False
+        initialization_problem: LegacyReadError | None = None
+
+        def read(conversation_id: str) -> list[TurnRecord]:
+            nonlocal client
+            nonlocal initialized
+            nonlocal initialization_problem
+            nonlocal source_missing
+            nonlocal store
+            nonlocal temp_directory
+
+            try:
+                validated_id = validate_conversation_id(conversation_id)
+            except ConversationValidationError:
+                raise LegacyReadError(
+                    "conversation_id must be canonical UUIDv4 hex"
+                ) from None
+
+            if not initialized:
+                initialized = True
+                try:
+                    temp_directory = tempfile.TemporaryDirectory(
+                        prefix="agent-legacy-chroma-"
+                    )
+                    clone = Path(temp_directory.name) / CHAT_HISTORY_SUBDIR
+                    if not _clone_chroma_source(self._persist_dir, clone):
+                        source_missing = True
+                    else:
+                        factory = self._client_factory
+                        if factory is None:
+                            from chromadb import PersistentClient
+
+                            factory = PersistentClient
+                        client = factory(str(clone))
+                        collection = client.get_collection(
+                            name=CHAT_HISTORY_COLLECTION,
+                            embedding_function=None,
+                        )
+                        store = _RawChromaStore(collection)
+                except LegacyReadError as exc:
+                    initialization_problem = exc
+                except Exception:
+                    initialization_problem = LegacyReadError(
+                        "legacy Chroma source is unavailable"
+                    )
+
+            if initialization_problem is not None:
+                raise initialization_problem from None
+            if source_missing:
+                return []
+            assert store is not None
+            try:
+                return _read_legacy_chroma_turns(store, validated_id)
+            except _LegacyChromaRestoreError:
+                raise LegacyReadError(
+                    "legacy Chroma conversation is malformed"
+                ) from None
+            except Exception:
+                raise LegacyReadError(
+                    "legacy Chroma source is unavailable"
+                ) from None
+
+        try:
+            yield read
+        finally:
+            if client is not None:
+                try:
+                    close = getattr(client, "close")
+                    if not callable(close):
+                        raise TypeError
+                    close()
+                except Exception:
+                    logger.warning(
+                        "legacy Chroma batch client could not be closed"
+                    )
+            if temp_directory is not None:
+                try:
+                    temp_directory.cleanup()
+                except Exception:
+                    logger.warning(
+                        "legacy Chroma batch clone could not be cleaned up"
+                    )
 
 
 def _utf8_size(value: str, field: str) -> int:

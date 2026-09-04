@@ -24,6 +24,7 @@ from agent.conversations import (
     ToolActivitySummary,
     is_canonical_uuid4_hex,
 )
+from agent.conversations.migration import migrate_legacy_targets
 from agent.desktop.catalog import (
     CATALOG_FILENAME,
     CatalogMalformedError,
@@ -40,6 +41,7 @@ from agent.turns.results import TurnOutcome
 
 FIXTURE_MODE_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE"
 FIXTURE_ROOT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT"
+FIXTURE_CATALOG_MIGRATION_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG"
 FIXTURE_MODE = "phase02"
 FIXTURE_ROOT_PREFIX = "research-agent-desktop-phase02-"
 FIXTURE_KNOWLEDGE_DIRNAME = "knowledge-source"
@@ -1025,6 +1027,18 @@ def build_phase02_fixture_service(
         )
     except (CatalogMalformedError, CatalogUnavailableError):
         catalog = None
+    conversation_repository = ConversationRepository(config.persist_dir)
+    if (
+        environ.get(FIXTURE_MODE_ENV) == FIXTURE_MODE
+        and environ.get(FIXTURE_CATALOG_MIGRATION_ENV) == "1"
+        and catalog is not None
+    ):
+        targets = tuple(
+            (session_id, project["projectId"])
+            for project in catalog.snapshot()["projects"]
+            for session_id in project["sessionIds"]
+        )
+        migrate_legacy_targets(config, conversation_repository, targets)
     sanitized_environ = {
         key: environ[key]
         for key in ("CONDA_DEFAULT_ENV", "CONDA_PREFIX")
@@ -1045,6 +1059,7 @@ def build_phase02_fixture_service(
         project_catalog=catalog,
         extension_manager=extension_manager,
         session_factory=FixtureSessionFactory(catalog),
+        conversation_repository=conversation_repository,
         knowledge_operations=knowledge_operations.as_operations(),
         bash_command_runner=bash_runner,
     )

@@ -441,3 +441,41 @@ def test_batch_results_are_structured_and_never_echo_legacy_text(tmp_path: Path)
     assert "created" in serialized
     assert SESSION_C in serialized
     assert repository.load(SESSION_C).document.turns[0].display_input == secret_user
+
+
+def test_batch_teardown_failure_does_not_hide_canonical_success(
+    tmp_path: Path,
+) -> None:
+    rows = {
+        SESSION_C: _raw_pair(
+            SESSION_C,
+            user="durable prompt",
+            assistant="durable answer",
+        )
+    }
+    config, repository, factory, _marker = _legacy_setup(tmp_path, rows)
+
+    def fail_after_close(clone_path: str):
+        client = factory(clone_path)
+        real_close = client.close
+
+        def close_then_fail() -> None:
+            real_close()
+            raise RuntimeError("injected teardown failure")
+
+        client.close = close_then_fail
+        return client
+
+    results = _run_batch(
+        config,
+        repository,
+        ((SESSION_C, "p2"),),
+        fail_after_close,
+    )
+
+    assert len(results) == 1
+    assert results[0].result.status == "created"
+    assert factory.close_count == 1
+    assert repository.load(SESSION_C).document.turns[0].assistant_output == (
+        "durable answer"
+    )
