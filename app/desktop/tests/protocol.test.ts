@@ -196,12 +196,12 @@ test("session turn carries one canonical logical identity and durable lifecycle"
   });
   assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].turnNumber, {
     type: "integer",
-    required: false,
+    required: true,
     minimum: 1,
     maximum: 4_096,
   });
   assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].state, {
-    type: "nullableString",
+    type: "string",
     required: true,
     enum: ["completed"],
   });

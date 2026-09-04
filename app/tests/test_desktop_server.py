@@ -131,6 +131,7 @@ class _ConcurrentService:
             return {
                 "sessionId": "session-1",
                 "turnId": params["turnId"],
+                "turnNumber": 1,
                 "state": "completed",
                 "accepted": True,
                 "persisted": True,

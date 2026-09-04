@@ -521,10 +521,12 @@ class FixtureSession:
     def _begin_turn(
         self,
         *,
-        semantic_input: str,
+        semantic_input: str | None,
         display_input: str,
         turn_id: str,
         retry: bool,
+        kind: str = "conversational",
+        context_eligible: bool = True,
     ) -> tuple[ConversationSnapshot, Any, bool]:
         if not is_canonical_uuid4_hex(turn_id):
             raise ValueError("turn_id must be a canonical UUIDv4 hex value")
@@ -533,11 +535,11 @@ class FixtureSession:
         snapshot = self._conversation_snapshot
         values = {
             "turn_id": turn_id,
-            "kind": "conversational",
+            "kind": kind,
             "display_input": display_input,
             "semantic_input": semantic_input,
-            "context_eligible": True,
-            "thinking_mode": self.thinking_mode,
+            "context_eligible": context_eligible,
+            "thinking_mode": self.thinking_mode if context_eligible else None,
         }
         submitted_at = _timestamp((self._turn_count or 0) + 1)
         if snapshot is None:
@@ -813,6 +815,83 @@ class FixtureSession:
             raise
         except Exception:
             self._fail_turn(snapshot, turn_id=turn_id)
+            raise
+
+    async def run_display_only_turn(
+        self,
+        display_input: str,
+        action: Callable[[], Any],
+        render_result: Callable[[object], str],
+        *,
+        turn_id: str,
+        retry: bool = False,
+    ) -> tuple[object | None, TurnOutcome]:
+        """Run a deterministic local command through canonical persistence."""
+        snapshot, pending, duplicate = self._begin_turn(
+            semantic_input=None,
+            display_input=display_input,
+            turn_id=turn_id,
+            retry=retry,
+            kind="display-only",
+            context_eligible=False,
+        )
+        if duplicate:
+            assert pending.assistant_output is not None
+            return None, TurnOutcome(
+                text=pending.assistant_output,
+                turn_id=pending.turn_id,
+                turn_number=pending.turn_number,
+                state="completed",
+                accepted=True,
+                persisted=True,
+            )
+
+        try:
+            result = await action()
+            text = render_result(result)
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("display-only result must be nonblank text")
+            completed = self.conversation_repository.complete_turn(
+                snapshot,
+                turn_id=turn_id,
+                assistant_output=text,
+                finished_at=snapshot.document.updated_at,
+            )
+            self._conversation_snapshot = completed
+            return result, TurnOutcome(
+                text=text,
+                turn_id=turn_id,
+                turn_number=pending.turn_number,
+                state="completed",
+                accepted=True,
+                persisted=True,
+            )
+        except asyncio.CancelledError:
+            self._fail_turn(
+                snapshot,
+                turn_id=turn_id,
+                state="interrupted",
+                code="cancelled",
+                message="The fixture command was cancelled.",
+            )
+            raise
+        except ConversationError:
+            try:
+                self._fail_turn(
+                    snapshot,
+                    turn_id=turn_id,
+                    code="persistence_failed",
+                    message="The fixture command result could not be saved.",
+                )
+            except ConversationError:
+                pass
+            raise
+        except Exception:
+            self._fail_turn(
+                snapshot,
+                turn_id=turn_id,
+                message="The fixture command could not be completed.",
+            )
             raise
 
     async def enter_plan_mode(self) -> None:

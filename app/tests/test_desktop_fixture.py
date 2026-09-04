@@ -81,9 +81,9 @@ def _service(root: Path):
 _TURN_SEQUENCE = itertools.count(1)
 
 
-def _turn_params(text: str, *, turn_id: str | None = None) -> dict[str, str]:
+def _turn_params(text: str, *, turn_id: str | None = None) -> dict[str, object]:
     logical_id = turn_id or f"00000000000040008000{next(_TURN_SEQUENCE):012x}"
-    return {"text": text, "turnId": logical_id}
+    return {"text": text, "turnId": logical_id, "retry": False}
 
 
 @pytest.mark.parametrize(
@@ -242,7 +242,7 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
     assert reopened["turnCount"] == 3
 
 
-def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_writes(
+def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes(
     fixture_root: Path,
 ) -> None:
     service = _service(fixture_root)
@@ -356,11 +356,25 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_store_write
         path: path.read_bytes()
         for path in Path(service.config.plan_logs_dir).glob("*.md")
     } == plan_logs
-    assert {
+    after_store = {
         path.relative_to(service.config.persist_dir): path.read_bytes()
         for path in Path(service.config.persist_dir).rglob("*")
         if path.is_file()
-    } == store_snapshot
+    }
+    assert {
+        path: content
+        for path, content in after_store.items()
+        if path.parts[0] != "conversations"
+    } == {
+        path: content
+        for path, content in store_snapshot.items()
+        if path.parts[0] != "conversations"
+    }
+    durable = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    assert [turn.kind for turn in durable.document.turns[-8:]] == [
+        "display-only"
+    ] * 8
+    assert durable.document.turns[-1].state == "failed"
     assert {
         path.relative_to(source): path.read_bytes()
         for path in source.rglob("*")
@@ -921,9 +935,8 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         loaded["sessionId"]
     )
     assert selected["turnCount"] + 1 == len(restored_snapshot.document.turns)
-    assert len(restored["items"]) + 1 == sum(
-        turn.state == "completed" for turn in restored_snapshot.document.turns
-    )
+    assert len(restored["items"]) + 1 == len(restored_snapshot.document.turns)
+    assert any(item["state"] == "failed" for item in restored["items"])
     restored_tool_turn = next(
         turn
         for turn in restored_snapshot.document.turns
@@ -1040,7 +1053,7 @@ def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
     assert replayed.code == "APPROVAL_DENIED"
 
 
-def test_malformed_existing_catalog_is_preserved_and_reported_unavailable(
+def test_malformed_existing_catalog_is_rebuilt_from_canonical_conversations(
     fixture_root: Path,
 ) -> None:
     store = fixture_root / "store"
@@ -1052,6 +1065,10 @@ def test_malformed_existing_catalog_is_preserved_and_reported_unavailable(
     service = _service(fixture_root)
     projects = asyncio.run(service.dispatch("project.list", {}))
 
-    assert path.read_bytes() == original
-    assert projects["status"] == "unavailable"
-    assert projects["projects"] == []
+    assert path.read_bytes() != original
+    assert projects["status"] == "ready"
+    assert projects["projects"] == [{
+        "projectId": "local",
+        "name": "Local research",
+        "sessionCount": 0,
+    }]

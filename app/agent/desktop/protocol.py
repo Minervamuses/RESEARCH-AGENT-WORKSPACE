@@ -22,6 +22,7 @@ _UTC_TIMESTAMP = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
 )
 _MAX_SAFE_DATA_DEPTH = 64
+_TURN_ERROR_DETAIL_KEYS = frozenset(CONTRACT["turnErrorDetailsSchema"])
 
 
 class ProtocolError(ValueError):
@@ -223,6 +224,26 @@ def _validate_safe_data(value: Any, field: str, *, depth: int = 0) -> None:
         _validate_safe_data(item, f"{field}.{key}", depth=depth + 1)
 
 
+def _validate_turn_error_details(details: dict[str, Any]) -> None:
+    _validate_object_schema(
+        details,
+        CONTRACT["turnErrorDetailsSchema"],
+        "error.details",
+    )
+    state = details["state"]
+    accepted = details["accepted"]
+    persisted = details["persisted"]
+    if state is None:
+        if accepted or persisted:
+            _invalid(
+                "a null turn error state must not be accepted or persisted"
+            )
+    elif accepted is not True or persisted is not True:
+        _invalid(
+            "a durable turn error state must be accepted and persisted"
+        )
+
+
 def _validate_event_data(
     event: str, request_id: str, data: dict[str, Any]
 ) -> None:
@@ -252,6 +273,46 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
     schema = CONTRACT["resultDataSchemas"].get(method)
     if schema is not None:
         _validate_object_schema(data, schema, "data")
+    if method == "session.turn" and (
+        data.get("state") != "completed"
+        or data.get("accepted") is not True
+        or data.get("persisted") is not True
+    ):
+        _invalid("session.turn success must be durably completed")
+    if method == "session.transcript":
+        for item in data["items"]:
+            state = item["state"]
+            assistant_text = item["assistantText"]
+            failure_values = (
+                item["failureCode"],
+                item["failureMessage"],
+                item["failureRetryable"],
+            )
+            if state == "completed":
+                if assistant_text is None or any(
+                    value is not None for value in failure_values
+                ):
+                    _invalid("completed transcript turn has invalid lifecycle fields")
+            elif state == "pending":
+                if assistant_text is not None or any(
+                    value is not None for value in failure_values
+                ) or item["toolActivities"]:
+                    _invalid("pending transcript turn has invalid lifecycle fields")
+            else:
+                if assistant_text is not None or any(
+                    value is None for value in failure_values
+                ) or item["toolActivities"]:
+                    _invalid(f"{state} transcript turn has invalid lifecycle fields")
+                if state == "failed" and item["failureCode"] not in {
+                    "execution_failed",
+                    "persistence_failed",
+                }:
+                    _invalid("failed transcript turn has an invalid failure code")
+                if state == "interrupted" and item["failureCode"] not in {
+                    "interrupted",
+                    "cancelled",
+                }:
+                    _invalid("interrupted transcript turn has an invalid failure code")
 
 
 def validate_process_event_origin(event: str, origin: str) -> None:
@@ -355,7 +416,9 @@ def validate_message(value: Any) -> dict[str, Any]:
                 _invalid("error.retryable must be a boolean")
             details = _expect_object(error.get("details"), "error.details")
             _validate_safe_data(details, "error.details")
-            if code == "INTERNAL_ERROR" and details:
+            if set(details) & _TURN_ERROR_DETAIL_KEYS:
+                _validate_turn_error_details(details)
+            elif code == "INTERNAL_ERROR" and details:
                 _invalid("INTERNAL_ERROR details must be empty")
             return message
         _invalid("result.ok must be a boolean")
@@ -544,4 +607,9 @@ class TraceValidator:
                     and message["data"].get("turnId") != expected_turn_id
                 ):
                     _invalid("data.turnId must match params.turnId")
+            elif state["method"] == "session.turn":
+                details = message["error"]["details"]
+                _validate_turn_error_details(details)
+                if details["turnId"] != state["turnId"]:
+                    _invalid("error.details.turnId must match params.turnId")
             state["terminal"] = True

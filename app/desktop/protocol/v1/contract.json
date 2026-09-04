@@ -136,8 +136,8 @@
     "session.turn": {
       "sessionId": {"type": "string", "required": true, "maxBytes": 256},
       "turnId": {"type": "turnId", "required": true},
-      "turnNumber": {"type": "integer", "required": false, "minimum": 1, "maximum": 4096},
-      "state": {"type": "nullableString", "required": true, "enum": ["completed"]},
+      "turnNumber": {"type": "integer", "required": true, "minimum": 1, "maximum": 4096},
+      "state": {"type": "string", "required": true, "enum": ["completed"]},
       "accepted": {"type": "boolean", "required": true},
       "persisted": {"type": "boolean", "required": true},
       "text": {"type": "string", "required": true, "maxBytes": 2097152},
@@ -194,6 +194,7 @@
           "sessionId": {"type": "string", "required": true, "maxBytes": 32},
           "title": {"type": "string", "required": true, "maxBytes": 256},
           "turnCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
+          "createdAt": {"type": "nullableString", "required": true, "maxBytes": 64},
           "updatedAt": {"type": "nullableString", "required": true, "maxBytes": 64},
           "status": {"type": "string", "required": true, "enum": ["ready", "degraded", "unavailable"]},
           "issue": {"type": "nullableString", "required": true, "maxBytes": 4096}
@@ -234,10 +235,16 @@
         "required": true,
         "maxItems": 20,
         "items": {
+          "turnId": {"type": "turnId", "required": true},
           "turnNumber": {"type": "integer", "required": true, "minimum": 1, "maximum": 4294967295},
-          "timestamp": {"type": "string", "required": true, "maxBytes": 64},
+          "kind": {"type": "string", "required": true, "enum": ["conversational", "display-only"]},
+          "state": {"type": "string", "required": true, "enum": ["pending", "completed", "failed", "interrupted"]},
+          "timestamp": {"type": "utcTimestamp", "required": true},
           "userText": {"type": "string", "required": true, "maxBytes": 32768},
-          "assistantText": {"type": "string", "required": true, "maxBytes": 32768},
+          "assistantText": {"type": "nullableString", "required": true, "maxBytes": 32768},
+          "failureCode": {"type": "nullableString", "required": true, "maxBytes": 256, "enum": ["execution_failed", "persistence_failed", "interrupted", "cancelled"]},
+          "failureMessage": {"type": "nullableString", "required": true, "maxBytes": 4096},
+          "failureRetryable": {"type": "nullableBoolean", "required": true},
           "toolActivities": {
             "type": "objectArray",
             "required": true,
@@ -312,6 +319,12 @@
       "approved": {"type": "boolean", "required": true}
     }
   },
+  "turnErrorDetailsSchema": {
+    "turnId": {"type": "turnId", "required": true},
+    "state": {"type": "nullableString", "required": true, "enum": ["pending", "completed", "failed", "interrupted"]},
+    "accepted": {"type": "boolean", "required": true},
+    "persisted": {"type": "boolean", "required": true}
+  },
   "methods": [
     {"name": "runtime.diagnostics", "operation": "read", "requiredParams": [], "params": {}},
     {"name": "project.list", "operation": "read", "requiredParams": [], "params": {}},
@@ -368,10 +381,11 @@
     {
       "name": "session.turn",
       "operation": "mutation",
-      "requiredParams": ["text", "turnId"],
+      "requiredParams": ["text", "turnId", "retry"],
       "params": {
         "text": {"type": "string", "required": true, "maxBytes": 1048576},
-        "turnId": {"type": "turnId", "required": true}
+        "turnId": {"type": "turnId", "required": true},
+        "retry": {"type": "boolean", "required": true}
       }
     },
     {

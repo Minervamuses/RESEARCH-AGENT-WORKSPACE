@@ -348,7 +348,9 @@ class DesktopService:
             )
         try:
             return await handler(params, event_sink)
-        except DesktopServiceError:
+        except DesktopServiceError as exc:
+            if method == "session.turn":
+                raise self._with_turn_lifecycle(exc, params) from exc
             raise
         except Exception as exc:
             mapped = self._map_exception(method, exc)
@@ -365,7 +367,56 @@ class DesktopService:
                     mapped.code,
                     type(exc).__name__,
                 )
+            if method == "session.turn":
+                mapped = self._with_turn_lifecycle(mapped, params)
             raise mapped from exc
+
+    def _with_turn_lifecycle(
+        self,
+        error: DesktopServiceError,
+        params: Mapping[str, Any],
+    ) -> DesktopServiceError:
+        turn_id = params.get("turnId")
+        display_input = params.get("text")
+        state: str | None = None
+        accepted = False
+        persisted = False
+        snapshot: ConversationSnapshot | None = None
+        session = self.session
+        if isinstance(turn_id, str) and session is not None:
+            try:
+                snapshot = self._conversation_repository.load_optional(
+                    session.session_id
+                )
+            except ConversationError:
+                candidate = getattr(session, "_conversation_snapshot", None)
+                if isinstance(candidate, ConversationSnapshot):
+                    snapshot = candidate
+            if snapshot is not None:
+                turn = next(
+                    (
+                        item
+                        for item in snapshot.document.turns
+                        if item.turn_id == turn_id
+                        and item.display_input == display_input
+                    ),
+                    None,
+                )
+                if turn is not None:
+                    state = turn.state
+                    accepted = True
+                    persisted = True
+        return DesktopServiceError(
+            error.code,
+            str(error),
+            retryable=error.retryable,
+            details={
+                "turnId": turn_id,
+                "state": state,
+                "accepted": accepted,
+                "persisted": persisted,
+            },
+        )
 
     def _map_exception(self, method: str, exc: Exception) -> DesktopServiceError:
         if isinstance(exc, GraphRecursionError):
@@ -876,6 +927,7 @@ class DesktopService:
                 "sessionId": session_id,
                 "title": f"Conversation {session_id[:8]}",
                 "turnCount": 0,
+                "createdAt": None,
                 "updatedAt": None,
                 "status": "degraded",
                 "issue": "The stored transcript is malformed or incomplete.",
@@ -885,6 +937,7 @@ class DesktopService:
                 "sessionId": session_id,
                 "title": f"Conversation {session_id[:8]}",
                 "turnCount": 0,
+                "createdAt": None,
                 "updatedAt": None,
                 "status": "unavailable",
                 "issue": "No persisted transcript is available.",
@@ -894,6 +947,7 @@ class DesktopService:
             "sessionId": session_id,
             "title": summary.title or f"Conversation {session_id[:8]}",
             "turnCount": summary.turn_count,
+            "createdAt": summary.created_at,
             "updatedAt": summary.updated_at,
             "status": "ready",
             "issue": None,
@@ -974,11 +1028,7 @@ class DesktopService:
         snapshot = self._load_conversation(session_id, project_id)
         if snapshot is None:
             return []
-        return [
-            turn
-            for turn in snapshot.document.turns
-            if turn.state == "completed" and turn.assistant_output is not None
-        ]
+        return list(snapshot.document.turns)
 
     @staticmethod
     def _tool_activity_payload(activity: ToolActivitySummary) -> dict[str, Any]:
@@ -993,12 +1043,17 @@ class DesktopService:
 
     @classmethod
     def _transcript_turn_is_bounded(cls, turn: ConversationTurn) -> bool:
-        assert turn.assistant_output is not None
-        timestamp = turn.finished_at or turn.submitted_at
         if (
             len(turn.display_input.encode("utf-8")) > 32_768
-            or len(turn.assistant_output.encode("utf-8")) > 32_768
-            or len(timestamp.encode("utf-8")) > 64
+            or len(turn.submitted_at.encode("utf-8")) > 64
+            or (
+                turn.assistant_output is not None
+                and len(turn.assistant_output.encode("utf-8")) > 32_768
+            )
+            or (
+                turn.failure is not None
+                and len(turn.failure.message.encode("utf-8")) > 4_096
+            )
             or len(turn.tool_activities) > _MAX_TRANSCRIPT_TOOL_ACTIVITIES
         ):
             return False
@@ -1027,12 +1082,11 @@ class DesktopService:
 
     @staticmethod
     def _transcript_turn_bytes(turn: ConversationTurn) -> int:
-        assert turn.assistant_output is not None
-        timestamp = turn.finished_at or turn.submitted_at
         total = (
             len(turn.display_input.encode("utf-8"))
-            + len(turn.assistant_output.encode("utf-8"))
-            + len(timestamp.encode("utf-8"))
+            + len((turn.assistant_output or "").encode("utf-8"))
+            + len(turn.submitted_at.encode("utf-8"))
+            + len((turn.failure.message if turn.failure else "").encode("utf-8"))
         )
         for activity in turn.tool_activities:
             total += (
@@ -1064,10 +1118,22 @@ class DesktopService:
             "issue": issue,
             "items": [
                 {
+                    "turnId": turn.turn_id,
                     "turnNumber": turn.turn_number,
-                    "timestamp": turn.finished_at or turn.submitted_at,
+                    "kind": turn.kind,
+                    "state": turn.state,
+                    "timestamp": turn.submitted_at,
                     "userText": turn.display_input,
                     "assistantText": turn.assistant_output,
+                    "failureCode": (
+                        turn.failure.code if turn.failure is not None else None
+                    ),
+                    "failureMessage": (
+                        turn.failure.message if turn.failure is not None else None
+                    ),
+                    "failureRetryable": (
+                        turn.failure.retryable if turn.failure is not None else None
+                    ),
                     "toolActivities": [
                         DesktopService._tool_activity_payload(activity)
                         for activity in turn.tool_activities

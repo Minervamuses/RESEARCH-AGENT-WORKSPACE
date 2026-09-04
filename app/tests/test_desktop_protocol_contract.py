@@ -125,12 +125,12 @@ def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
     result = CONTRACT["resultDataSchemas"]["session.turn"]
     assert result["turnNumber"] == {
         "type": "integer",
-        "required": False,
+        "required": True,
         "minimum": 1,
         "maximum": 4_096,
     }
     assert result["state"] == {
-        "type": "nullableString",
+        "type": "string",
         "required": True,
         "enum": ["completed"],
     }

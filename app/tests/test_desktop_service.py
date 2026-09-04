@@ -1509,7 +1509,10 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
     with pytest.raises(DesktopServiceError) as raised:
         asyncio.run(failed.dispatch("session.turn", _turn_params("/init")))
     assert raised.value.code == "RAG_WRITE_FAILED"
-    assert raised.value.details == {"partialWritePossible": True}
+    assert raised.value.details is not None
+    assert raised.value.details["state"] is None
+    assert raised.value.details["accepted"] is False
+    assert raised.value.details["persisted"] is False
     assert "private construction" not in str(raised.value)
     assert failed_factory.created is not None
     assert failed_factory.created.turn_inputs == []

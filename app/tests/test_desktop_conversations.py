@@ -181,6 +181,115 @@ class _CoordinatorSession:
             persisted=True,
         )
 
+    async def run_display_only_turn(
+        self,
+        display_input,
+        action,
+        render_result,
+        *,
+        turn_id,
+        retry=False,
+    ):
+        snapshot = self._snapshot
+        values = {
+            "turn_id": turn_id,
+            "kind": "display-only",
+            "display_input": display_input,
+            "semantic_input": None,
+            "context_eligible": False,
+            "thinking_mode": None,
+        }
+        next_number = len(snapshot.document.turns) + 1 if snapshot else 1
+        timestamp = f"2026-08-29T00:{next_number:02d}:00Z"
+        if snapshot is None:
+            snapshot = self._repository.create(
+                conversation_id=self.session_id,
+                project_id=self.project_id,
+                submitted_at=timestamp,
+                **values,
+            )
+        else:
+            existing = next(
+                (
+                    turn
+                    for turn in snapshot.document.turns
+                    if turn.turn_id == turn_id
+                ),
+                None,
+            )
+            if existing is not None and existing.state in {"failed", "interrupted"}:
+                assert retry is True
+                snapshot = self._repository.retry_turn(
+                    snapshot,
+                    retry_at=timestamp,
+                    **values,
+                )
+            else:
+                snapshot = self._repository.append_pending(
+                    snapshot,
+                    submitted_at=timestamp,
+                    **values,
+                )
+            existing = next(
+                turn for turn in snapshot.document.turns if turn.turn_id == turn_id
+            )
+            if existing.state == "completed":
+                return None, TurnOutcome(
+                    text=existing.assistant_output or "",
+                    turn_id=turn_id,
+                    turn_number=existing.turn_number,
+                    state="completed",
+                    accepted=True,
+                    persisted=True,
+                )
+
+        try:
+            result = await action()
+            text = render_result(result)
+            completed = self._repository.complete_turn(
+                snapshot,
+                turn_id=turn_id,
+                assistant_output=text,
+                finished_at=timestamp,
+            )
+            turn = next(
+                item for item in completed.document.turns if item.turn_id == turn_id
+            )
+            return result, TurnOutcome(
+                text=text,
+                turn_id=turn_id,
+                turn_number=turn.turn_number,
+                state="completed",
+                accepted=True,
+                persisted=True,
+            )
+        except asyncio.CancelledError:
+            self._repository.fail_turn(
+                snapshot,
+                turn_id=turn_id,
+                state="interrupted",
+                failure=FailureInfo(
+                    code="cancelled",
+                    message="The command was cancelled.",
+                    retryable=True,
+                ),
+                finished_at=timestamp,
+            )
+            raise
+        except Exception:
+            self._repository.fail_turn(
+                snapshot,
+                turn_id=turn_id,
+                state="failed",
+                failure=FailureInfo(
+                    code="execution_failed",
+                    message="The command failed.",
+                    retryable=True,
+                ),
+                finished_at=timestamp,
+            )
+            raise
+
     async def flush_recent_turns(self):
         self.flush_calls += 1
         raise AssertionError("canonical write-through sessions must never flush")
@@ -1080,7 +1189,7 @@ def test_fifty_turn_transcript_pages_preserve_every_lifecycle_record(tmp_path):
     ] is None
 
 
-def test_transient_d_registers_once_only_after_first_normal_turn(tmp_path):
+def test_transient_d_registers_once_after_first_durable_turn(tmp_path):
     service, catalog, factory, repository = _seed_coordinator(
         tmp_path,
         new_ids=(SESSION_D,),
@@ -1101,20 +1210,23 @@ def test_transient_d_registers_once_only_after_first_normal_turn(tmp_path):
     local = asyncio.run(service.dispatch("session.turn", {
         "text": "/status",
         "turnId": _logical_turn_id(211),
+        "retry": False,
     }))
     _assert_result("session.turn", local, 212)
     assert local["responseKind"] == "command"
-    assert local["registrationStatus"] == "not_required"
+    assert local["registrationStatus"] == "registered"
     assert factory.sessions[-1].turn_inputs == []
-    assert catalog.project_for_session(SESSION_D) is None
+    assert catalog.project_for_session(SESSION_D) == "p1"
 
     first = asyncio.run(service.dispatch("session.turn", {
         "text": "first",
         "turnId": _logical_turn_id(212),
+        "retry": False,
     }))
     second = asyncio.run(service.dispatch("session.turn", {
         "text": "second",
         "turnId": _logical_turn_id(213),
+        "retry": False,
     }))
     _assert_result("session.turn", first, 213)
     _assert_result("session.turn", second, 214)
@@ -1133,7 +1245,7 @@ def test_transient_d_registers_once_only_after_first_normal_turn(tmp_path):
     assert [
         turn.display_input
         for turn in repository.load(SESSION_D).document.turns
-    ] == ["first", "second"]
+    ] == ["/status", "first", "second"]
 
 
 def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
@@ -1151,6 +1263,7 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
     a_second = asyncio.run(service.dispatch("session.turn", {
         "text": "A second",
         "turnId": _logical_turn_id(221),
+        "retry": False,
     }))
     selected_b = asyncio.run(service.dispatch(
         "session.select",
@@ -1159,6 +1272,7 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
     b_second = asyncio.run(service.dispatch("session.turn", {
         "text": "B second",
         "turnId": _logical_turn_id(222),
+        "retry": False,
     }))
     returned_a = asyncio.run(service.dispatch(
         "session.select",
@@ -1167,6 +1281,7 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
     a_third = asyncio.run(service.dispatch("session.turn", {
         "text": "A third",
         "turnId": _logical_turn_id(223),
+        "retry": False,
     }))
 
     for suffix, method, result in (
@@ -1250,6 +1365,7 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     answer = asyncio.run(service.dispatch("session.turn", {
         "text": "record once",
         "turnId": turn_id,
+        "retry": False,
     }))
     _assert_result("session.turn", answer, 232)
     assert answer["registrationStatus"] == "pending"
@@ -1320,6 +1436,7 @@ def test_select_imports_legacy_once_then_uses_canonical_transcript_and_context(
     continued = asyncio.run(service.dispatch("session.turn", {
         "text": "new canonical question",
         "turnId": _logical_turn_id(241),
+        "retry": False,
     }))
 
     durable = repository.load(SESSION_A).document.turns
@@ -1423,6 +1540,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
             {
                 "text": "persist this tool turn",
                 "turnId": _logical_turn_id(251),
+                "retry": False,
             },
         )
         shutdown = await first.dispatch("session.shutdown", {})
@@ -1489,6 +1607,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
             {
                 "text": "continue without replay",
                 "turnId": _logical_turn_id(252),
+                "retry": False,
             },
         )
         return transcript, selected, continued
@@ -1500,10 +1619,16 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     assert fake_tool_invocations == ["call-persisted"]
     assert transcript["status"] == "ready"
     assert transcript["items"] == [{
+        "turnId": _logical_turn_id(251),
         "turnNumber": 1,
+        "kind": "conversational",
+        "state": "completed",
         "timestamp": transcript["items"][0]["timestamp"],
         "userText": "persist this tool turn",
         "assistantText": "persisted final answer",
+        "failureCode": None,
+        "failureMessage": None,
+        "failureRetryable": None,
         "toolActivities": [{
             "callId": "call-persisted",
             "name": "rag_search",
@@ -1612,10 +1737,12 @@ def test_duplicate_caller_turn_id_returns_saved_answer_without_model_replay(tmp_
     first = asyncio.run(service.dispatch("session.turn", {
         "text": "record exactly once",
         "turnId": turn_id,
+        "retry": False,
     }))
     duplicate = asyncio.run(service.dispatch("session.turn", {
         "text": "record exactly once",
         "turnId": turn_id,
+        "retry": False,
     }))
     _assert_result("session.select", selected, 241)
     _assert_result("session.turn", first, 242)
