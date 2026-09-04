@@ -6,7 +6,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Canonical conversation contract | In progress | 2026-09-04 18:20 CST | — | Preflight and schema checkpoint below | None |
+| 01 — Canonical conversation contract | Complete | 2026-09-04 18:20 CST | 2026-09-04 18:44 CST | Contract, Red/Green tests, review, and commits below | None |
 | 02 — Legacy import bridge | Not started | — | — | — | None |
 | 03 — Write-through turn lifecycle | Not started | — | — | — | None |
 | 04 — Host/catalog/retry cutover | Not started | — | — | — | None |
@@ -66,6 +66,20 @@
 - **Changes:** 新增`app/tests/test_conversation_repository.py`，以11個focused tests固定pending/completed round trip、transition/retry/duplicate、single-pending、latest-10、title、UTF-8 bounds、closed metadata、per-file degradation、SHA-256 conflict與file/directory fsync ordering。
 - **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_repository.py -q`，exit 1；collection如預期因`ModuleNotFoundError: No module named 'agent.conversations'`失敗，證明新contract尚無implementation。唯一額外輸出是既有LangGraph deprecation warning。
 - **Blockers:** None；下一步實作新`agent/conversations/`package，不切換runtime caller。
+
+## 2026-09-04 18:44 CST — Phase 01: canonical repository complete
+
+- **Status:** `In progress` → `Complete`。
+- **Authorized scope:** `phases/phase-01-canonical-conversation-contract.md`；只新增canonical conversation package與相鄰測試，沒有切換runtime caller、修改config、讀寫legacy source或遷移真實資料。
+- **Changes:** 新增`app/agent/conversations/{__init__,models,repository}.py`，實作schema v1 frozen DTO、closed parser/validation、typed errors、create/load/save、pending→terminal transition、同-ID retry/idempotency/conflict、summary/scan/latest-context，以及bounded deterministic UTF-8 JSON。Durable publish使用same-directory private temp、file flush/fsync、validated no-clobber create或atomic replace、directory fsync與SHA-256 optimistic conflict check；symlink、FIFO及其他non-regular paths fail closed。
+- **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_repository.py -q`，exit 0，`17 passed, 1 warning in 0.41s`；warning是既有LangGraph `allowed_objects` deprecation。`git diff --cached --check`於功能commit前exit 0。
+- **Failure injection:** tests實際驗證malformed/duplicate-key/unknown-version/oversized files逐檔隔離、外部rewrite fingerprint conflict、forced `os.replace` failure保留原檔且清除本次temp、file fsync發生在replace前且directory fsync發生在replace後、FIFO讀取不阻塞、invalid/arbitrary historical save不碰磁碟。
+- **Acceptance mapping:** schema/transition/identity/normal+extended+display-only/retry由round-trip與transition tests覆蓋；latest-10、display-vs-semantic、project/summary/first-valid title各有focused tests；max legal field、oversized field/document與bounded read有executable coverage；forbidden metadata/runtime objects及allowlisted bounded activity/failure DTO有negative tests；corruption/version/rewrite isolation與atomic publish如上；`git show --stat f86a25d`只含新package與單一相鄰test module，證明未切換runtime caller或修改舊資料。
+- **Review:** focused code review提出三項：`save()`可改寫歷史、FIFO open可能阻塞、retry會覆寫原始`submittedAt`。三項均在Green commit前修正並新增/擴充回歸測試；review後無未解P1/P2。
+- **Evidence references:** Red commit `c5fcf2b`；Green commit `f86a25d`；schema checkpoint commit `5e189d8`。
+- **Limitations:** 本階段依計畫未跑live provider、Ollama、full migration或runtime integration；這些不是Phase 01 acceptance evidence。
+- **Blockers:** None。
+- **Next action:** 重新讀durable authority後開始Phase 02 legacy import bridge。
 
 <!--
 Material implementation events append with this shape:
