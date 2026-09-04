@@ -18,17 +18,11 @@ def _shadow_rag_search(query: str) -> str:
     return query
 
 
-class _DummyHistoryStore:
-    def search(self, query, k=5, role=None):
-        return []
-
-
 def test_base_tool_names_fixed_local_order():
     assert tool_inventory.base_tool_names() == [
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
     ]
@@ -39,7 +33,6 @@ def test_base_tool_names_appends_extra_tools_in_order():
         "rag_explore",
         "rag_search",
         "rag_get_context",
-        "recall_history",
         "read_file",
         "bash",
         "web_fetch",
@@ -57,7 +50,6 @@ def test_build_base_tools_names_match_base_tool_names(tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
     tools = tool_inventory.build_base_tools(
         cfg,
-        history_store=_DummyHistoryStore(),
         extra_tools=[_web_fetch],
     )
     built_names = [tool.name for tool in tools]
@@ -69,7 +61,6 @@ def test_build_base_tools_does_not_double_bind_colliding_extra(tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
     tools = tool_inventory.build_base_tools(
         cfg,
-        history_store=_DummyHistoryStore(),
         extra_tools=[_shadow_rag_search],
     )
     built_names = [tool.name for tool in tools]
@@ -82,7 +73,6 @@ def test_render_base_tool_prompt_has_no_import_or_runtime_side_effects(monkeypat
     def _explode(*_args, **_kwargs):
         raise AssertionError("render_base_tool_prompt must not build tools")
 
-    monkeypatch.setattr(tool_inventory, "create_history_tool", _explode)
     monkeypatch.setattr(tool_inventory, "create_rag_tools", _explode)
     monkeypatch.setattr(tool_inventory, "create_read_file_tool", _explode)
     monkeypatch.setattr(tool_inventory, "create_bash_tool", _explode)
