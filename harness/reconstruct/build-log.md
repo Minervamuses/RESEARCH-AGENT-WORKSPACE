@@ -361,3 +361,17 @@ Material implementation events append with this shape:
 - **Evidence references:** focused gap tests=`9d4a2bf`；crash Green=`4ab4b5b`。
 - **Limitations:** 這是real Python backend subprocess + fixture external owners，不是React/Rust/native Tauri人工驗收，也未呼叫live provider、Ollama或真實user store。
 - **Blockers:** None；下一步更新active docs，完成layered cross-language/final broad checks與blocking native manual journey。
+
+## 2026-09-05 01:28 CST — Phase 07: active docs and final broad checks
+
+- **Status:** `In progress`；active docs與本phase唯一一次final broad checks已通過，blocking native Tauri manual journey仍待完成。
+- **Active docs:** 更新`README.md`、`app/agent/{README.md,tools/README.md,turns/README.md}`、8份`for_agents/`文件與`issue/07-gui-first-turn-durability-deferred.md`。內容明確區分canonical JSON sole authority／`ConversationRepository` sole writer、prompt-first、completed-before-success、failed transition best-effort與pending→interrupted fallback、no automatic replay、fixed latest-10、selected-session lazy import及default-off doubly gated fixture batch；legacy來源仍read-only且匯入turn為display-only/context-ineligible。
+- **Scoped no-change docs:** 逐檔檢查`app/agent/thinking/README.md`、`app/SKILLS_GUIDE.md`、`app/skills/citation/README.md`、`app/rag/README.md`與`app/rag/docs/API.md`後，沒有與本次實作直接相關且需要修改的段落。
+- **Docs verification/review:** `git diff --check` exit 0；`python3 /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root /home/minervamuses/research-agent-workspace` exit 0並回`Validation passed`，另有9個既有tracked `for_agents/` paths受ignore規則影響的warning。Fresh reviewer找出failed transition被誤寫成硬durability保證；修成best-effort failed write + restart interrupted fallback後，最終無open P1/P2。Docs commit=`e1bbc7c`。
+- **Full Python suite:** 從`app/`執行`conda run -n app poetry run pytest`，exit 0，`993 passed, 1 warning in 22.55s`。唯一warning為既有LangGraph `allowed_objects` pending-deprecation。
+- **Desktop TypeScript suite:** 從`app/desktop/`執行`conda run -n app npm test`，exit 0，`136 passed, 0 failed`，Node test duration `18927.352488ms`。SafeContent相關tests輸出`Port 24678 is already in use`的非致命Vite WebSocket訊息，未造成failure。
+- **Rust suite:** 從`app/desktop/`執行`conda run -n app cargo test --manifest-path src-tauri/Cargo.toml`，exit 0，library `31 passed, 0 failed`；binary與doc targets各為0 tests且通過。
+- **Tauri release build:** 從`app/desktop/`執行`conda run -n app npm run tauri -- build --no-bundle`，exit 0。`beforeBuildCommand`執行唯一一次`npm run build`：TypeScript no-emit及Vite `25 modules transformed`／`built in 132ms`通過；Rust release profile通過，輸出binary=`app/desktop/src-tauri/target/release/research-agent-desktop`（Cargo輸出`1m 10s`）。沒有另跑standalone production build或建立installer/bundle。
+- **Scope/limitations:** 沒有呼叫live provider、Ollama、network migration或真實user store；沒有執行real legacy migration。Native Tauri keyboard/pending/final/tool/HTML/focus/scroll/layout journey尚未執行，因此Phase 07尚未完成。
+- **Operational note:** 首次用單一`git add`列出全部docs時，Git因已tracked但受ignore規則影響的`for_agents/`路徑回exit 1 advisory；實際13檔均已stage。隨後以`git diff --cached --name-status`逐檔確認、`git diff --cached --check` exit 0，commit成功，沒有使用`-f`或納入其他路徑。
+- **Blockers:** None；下一步以fresh direct task-owned `/tmp/research-agent-desktop-phase02-*` root啟動上述production release binary，完成不可被automation取代的native manual acceptance。
