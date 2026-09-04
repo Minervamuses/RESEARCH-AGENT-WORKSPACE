@@ -430,6 +430,26 @@ class ConversationRepository:
         document = _document_from_json(data, validated_id)
         return ConversationSnapshot(document=document, fingerprint=_fingerprint(data))
 
+    def load_optional(self, conversation_id: str) -> ConversationSnapshot | None:
+        """Load one document, returning ``None`` only for an exact missing path."""
+        validated_id = validate_conversation_id(conversation_id)
+        if not self._ensure_root(create=False):
+            return None
+        target = self.path_for(validated_id)
+        try:
+            target_stat = os.lstat(target)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ConversationUnavailableError(
+                f"cannot inspect conversation file: {exc}"
+            ) from exc
+        if stat.S_ISLNK(target_stat.st_mode) or not stat.S_ISREG(target_stat.st_mode):
+            raise ConversationUnavailableError(
+                "conversation path must be a regular file"
+            )
+        return self.load(validated_id)
+
     def save(
         self,
         snapshot: ConversationSnapshot,

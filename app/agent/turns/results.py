@@ -22,6 +22,11 @@ class TurnOutcome:
     text: str
     validation_errors: list[str] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)
+    turn_id: str = ""
+    turn_number: int = 0
+    state: str = "completed"
+    accepted: bool = True
+    persisted: bool = True
 
 
 @dataclass(frozen=True)

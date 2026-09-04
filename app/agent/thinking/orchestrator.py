@@ -52,7 +52,6 @@ from agent.thinking.trace import (
 )
 from agent.tools.access import ToolAccessResolution
 from agent.tools import inventory as tool_inventory
-from agent.turns.memory import assemble_prompt_history
 
 if TYPE_CHECKING:
     from agent.session import ChatSession
@@ -186,9 +185,7 @@ class FusionOrchestrator:
         """Prompt history for a read-only proposer: session context + active skill
         context (if any) + the proposer-specific availability block."""
         session = self._session
-        base = assemble_prompt_history(
-            session.system_prompt_message, session.recent_turns
-        )
+        base = session._base_prompt_history()
         hints: list[SystemMessage] = []
         if session.active_skill_runtime is not None:
             hints.append(

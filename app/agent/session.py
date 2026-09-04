@@ -3,9 +3,10 @@
 import asyncio
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
 from agent.turns.results import GraphTurnResult, TurnOutcome
@@ -16,6 +17,19 @@ from agent.turns.safety import (
 )
 
 from agent.config import AgentConfig
+from agent.conversations import (
+    MAX_IDENTIFIER_BYTES,
+    MAX_TOOL_ACTIVITIES,
+    ConversationConflictError,
+    ConversationError,
+    ConversationRepository,
+    ConversationSnapshot,
+    ConversationValidationError,
+    FailureInfo,
+    ToolActivitySummary,
+    is_canonical_uuid4_hex,
+)
+from agent.conversations.models import validate_project_id
 from agent.thinking.orchestrator import FusionOrchestrator
 from agent.graph import build_graph
 from agent.turns.execution import execute_graph
@@ -43,9 +57,7 @@ from agent.tools.access import ToolAccessResolution, resolve_tool_access
 from agent.tools import inventory as tool_inventory
 from agent.thinking import FusionCandidateTrace
 from agent.turns.journal import TurnJournal
-from agent.turns.journal import merge_restored_turns
-from agent.turns.memory import TurnRecord, assemble_prompt_history
-from agent.turns.plan_log import PlanLog
+from agent.turns.memory import CanonicalTurnView, TurnRecord
 from agent.paths import find_app_root
 
 # The base tool inventory, its selection policy, and the base workflow are
@@ -93,6 +105,8 @@ class ChatSession:
         extension_startup_diagnostics: tuple[str, ...] = (),
         session_id: str | None = None,
         restored_turns: list[TurnRecord] | None = None,
+        conversation_repository: ConversationRepository | None = None,
+        project_id: str | None = None,
         bash_approval_handler=None,
         bash_command_runner=None,
     ):
@@ -116,15 +130,28 @@ class ChatSession:
             extension_startup_diagnostics
         )
         self.system_prompt_message = SystemMessage(content=system_prompt)
-        if restored_turns and session_id is None:
-            raise ValueError("session_id is required when restoring turns")
+        if restored_turns:
+            raise ValueError("legacy restored_turns are not accepted by canonical sessions")
         self.session_id = session_id or uuid.uuid4().hex
-        try:
-            parsed_session_id = uuid.UUID(hex=self.session_id)
-        except ValueError as exc:
-            raise ValueError("session_id must be canonical UUIDv4 hex") from exc
-        if parsed_session_id.version != 4 or parsed_session_id.hex != self.session_id:
+        if not is_canonical_uuid4_hex(self.session_id):
             raise ValueError("session_id must be canonical UUIDv4 hex")
+        self.project_id = validate_project_id(project_id)
+        self.conversation_repository = (
+            conversation_repository or ConversationRepository(config.persist_dir)
+        )
+        self._conversation_snapshot = self.conversation_repository.load_optional(
+            self.session_id
+        )
+        if (
+            self._conversation_snapshot is not None
+            and self._conversation_snapshot.document.project_id != self.project_id
+        ):
+            raise ConversationConflictError(
+                "conversation belongs to a different project"
+            )
+        self._recover_interrupted_turn()
+        self._active_turn_snapshot: ConversationSnapshot | None = None
+        self._active_turn_id: str | None = None
         self.history_store = history_store or get_chat_history_store(config)
         self._turn_journal = TurnJournal(
             config=config,
@@ -165,6 +192,196 @@ class ChatSession:
         self._turn_execution_lock = asyncio.Lock()
         self._final_text_validator: Callable[[str, list[str]], None] | None = None
 
+    @staticmethod
+    def _now_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _validate_snapshot_project(
+        self,
+        snapshot: ConversationSnapshot | None,
+    ) -> ConversationSnapshot | None:
+        if snapshot is not None and snapshot.document.project_id != self.project_id:
+            raise ConversationConflictError(
+                "conversation belongs to a different project"
+            )
+        return snapshot
+
+    def _recover_interrupted_turn(self) -> None:
+        snapshot = self._validate_snapshot_project(self._conversation_snapshot)
+        if snapshot is None:
+            return
+        pending = next(
+            (turn for turn in snapshot.document.turns if turn.state == "pending"),
+            None,
+        )
+        if pending is None:
+            return
+        self._conversation_snapshot = self.conversation_repository.fail_turn(
+            snapshot,
+            turn_id=pending.turn_id,
+            state="interrupted",
+            failure=FailureInfo(
+                code="interrupted",
+                message="The previous turn was interrupted before completion.",
+                retryable=True,
+            ),
+            finished_at=self._now_timestamp(),
+        )
+
+    def _reload_and_recover(self) -> ConversationSnapshot | None:
+        self._conversation_snapshot = self.conversation_repository.load_optional(
+            self.session_id
+        )
+        self._recover_interrupted_turn()
+        return self._conversation_snapshot
+
+    @staticmethod
+    def _turn_from_snapshot(
+        snapshot: ConversationSnapshot,
+        turn_id: str,
+    ):
+        return next(
+            (turn for turn in snapshot.document.turns if turn.turn_id == turn_id),
+            None,
+        )
+
+    async def _begin_turn(
+        self,
+        *,
+        semantic_input: str,
+        display_input: str,
+        turn_id: str,
+        retry: bool,
+    ):
+        if not is_canonical_uuid4_hex(turn_id):
+            raise ConversationValidationError(
+                "turnId must be a canonical lowercase UUIDv4 hex string"
+            )
+        snapshot = await asyncio.to_thread(self._reload_and_recover)
+        values = {
+            "turn_id": turn_id,
+            "kind": "conversational",
+            "display_input": display_input,
+            "semantic_input": semantic_input,
+            "context_eligible": True,
+            "thinking_mode": self.thinking_mode,
+        }
+        submitted_at = self._now_timestamp()
+        if snapshot is None:
+            snapshot = await asyncio.to_thread(
+                self.conversation_repository.create,
+                conversation_id=self.session_id,
+                project_id=self.project_id,
+                submitted_at=submitted_at,
+                **values,
+            )
+            return snapshot, snapshot.document.turns[-1], False
+
+        existing = self._turn_from_snapshot(snapshot, turn_id)
+        if existing is not None:
+            snapshot = await asyncio.to_thread(
+                self.conversation_repository.append_pending,
+                snapshot,
+                submitted_at=submitted_at,
+                **values,
+            )
+            existing = self._turn_from_snapshot(snapshot, turn_id)
+            assert existing is not None
+            if existing.state == "completed":
+                return snapshot, existing, True
+            if existing.state == "pending":
+                raise ConversationConflictError(
+                    "turn is already pending and will not be replayed automatically"
+                )
+            if not retry:
+                raise ConversationConflictError(
+                    f"turn is {existing.state}; explicit retry is required"
+                )
+            snapshot = await asyncio.to_thread(
+                self.conversation_repository.retry_turn,
+                snapshot,
+                retry_at=submitted_at,
+                **values,
+            )
+            retried = self._turn_from_snapshot(snapshot, turn_id)
+            assert retried is not None
+            return snapshot, retried, False
+
+        snapshot = await asyncio.to_thread(
+            self.conversation_repository.append_pending,
+            snapshot,
+            submitted_at=submitted_at,
+            **values,
+        )
+        return snapshot, snapshot.document.turns[-1], False
+
+    async def _fail_active_turn(
+        self,
+        *,
+        state: str = "failed",
+        code: str = "execution_failed",
+        message: str = "The turn could not be completed.",
+    ) -> None:
+        snapshot = self._active_turn_snapshot
+        turn_id = self._active_turn_id
+        if snapshot is None or turn_id is None:
+            return
+        try:
+            self._conversation_snapshot = await asyncio.to_thread(
+                self.conversation_repository.fail_turn,
+                snapshot,
+                turn_id=turn_id,
+                state=state,
+                failure=FailureInfo(
+                    code=code,
+                    message=message,
+                    retryable=True,
+                ),
+                finished_at=self._now_timestamp(),
+            )
+            self._active_turn_snapshot = self._conversation_snapshot
+        except Exception:
+            # Preserve the original execution/finalization failure. A leftover
+            # pending turn is deterministically recovered on the next load.
+            return
+
+    @staticmethod
+    def _tool_activity_summaries(
+        tool_calls: list[dict],
+        new_messages: list,
+    ) -> tuple[ToolActivitySummary, ...]:
+        results = {
+            str(getattr(message, "tool_call_id", "")): message
+            for message in new_messages
+            if isinstance(message, ToolMessage)
+            and getattr(message, "tool_call_id", None)
+        }
+        summaries: list[ToolActivitySummary] = []
+        for call in tool_calls[:MAX_TOOL_ACTIVITIES]:
+            name = call.get("name")
+            if not isinstance(name, str):
+                continue
+            raw_call_id = call.get("id")
+            call_id = raw_call_id if isinstance(raw_call_id, str) else None
+            if call_id is not None and len(call_id.encode("utf-8")) > MAX_IDENTIFIER_BYTES:
+                call_id = None
+            result = results.get(call_id or "")
+            status = "failed" if getattr(result, "status", None) == "error" else "ok"
+            try:
+                summaries.append(ToolActivitySummary(
+                    call_id=call_id,
+                    name=name,
+                    status=status,
+                    summary=(
+                        "Tool execution failed."
+                        if status == "failed"
+                        else "Tool execution completed."
+                    ),
+                ))
+            except ConversationValidationError:
+                continue
+        return tuple(summaries)
+
     def _set_final_text_validator(
         self,
         validator: Callable[[str, list[str]], None],
@@ -174,7 +391,25 @@ class ChatSession:
 
     @property
     def recent_turns(self) -> list:
-        return self._turn_journal.recent_turns
+        snapshot = self._conversation_snapshot
+        if snapshot is None:
+            return []
+        completed = [
+            turn for turn in snapshot.document.turns if turn.state == "completed"
+        ]
+        window = self.config.agent_recent_turns_window
+        visible = completed[-window:] if window > 0 else []
+        return [
+            CanonicalTurnView(
+                user_input=(turn.semantic_input or turn.display_input),
+                assistant_output=turn.assistant_output or "",
+                turn_id=turn.turn_number,
+                logical_turn_id=turn.turn_id,
+                timestamp=turn.finished_at or turn.submitted_at,
+                tool_activities=turn.tool_activities,
+            )
+            for turn in visible
+        ]
 
     @property
     def turn_logs(self) -> list[dict]:
@@ -194,7 +429,9 @@ class ChatSession:
 
     @property
     def _turn_counter(self) -> int:
-        return self._turn_journal.turn_count
+        if self._conversation_snapshot is None:
+            return 0
+        return len(self._conversation_snapshot.document.turns)
 
     @property
     def _turn_store(self):
@@ -218,11 +455,23 @@ class ChatSession:
         """
         return self._citation_policy.service
 
-    def _prompt_history(self) -> list:
-        base = assemble_prompt_history(
-            self.system_prompt_message,
-            self.recent_turns,
+    def _base_prompt_history(self) -> list:
+        snapshot = self._conversation_snapshot
+        context = (
+            self.conversation_repository.latest_context(snapshot)
+            if snapshot is not None
+            else ()
         )
+        messages = [self.system_prompt_message]
+        for turn in context:
+            messages.extend([
+                HumanMessage(content=turn.user_input),
+                AIMessage(content=turn.assistant_output),
+            ])
+        return messages
+
+    def _prompt_history(self) -> list:
+        base = self._base_prompt_history()
         hints = [
             hint
             for hint in (
@@ -278,20 +527,12 @@ class ChatSession:
         return SystemMessage(content=self._tool_availability_block())
 
     def _build_plan_mode_hint(self) -> SystemMessage | None:
-        """Tell the LLM that some visible turns are plan-mode (md only),
-        so it does not call recall_history looking for them in ChromaDB.
-        """
-        has_plan_turn = any(
-            getattr(turn, "persist_target", "chroma") == "plan_log"
-            for turn in self.recent_turns
-        )
-        if not has_plan_turn:
+        """Describe the temporary plan prompt behavior without a storage route."""
+        if not self.plan_mode:
             return None
         return SystemMessage(content=(
-            "[Mode hint] Some turns in the recent context were recorded under "
-            "plan mode (stored only in plan_logs/, NOT in ChromaDB). They ARE "
-            "visible to you in this prompt - do NOT call recall_history to "
-            "look for them."
+            "[Mode hint] Plan mode is active for this turn. Focus on analysis "
+            "and an actionable plan; conversation durability is unchanged."
         ))
 
     def _citation_registry(self):
@@ -352,12 +593,11 @@ class ChatSession:
         fusion: dict | None = None,
         candidate_traces=None,
     ) -> TurnOutcome:
-        """Single finalization chokepoint for every turn branch.
-
-        Gate + render happen here, strictly *before* the plan log, recent
-        turns, and Chroma history see any text — a blocked draft never
-        reaches persistence in any form.
-        """
+        """Finalize, durably complete, then expose one terminal result."""
+        snapshot = self._active_turn_snapshot
+        turn_id = self._active_turn_id
+        if snapshot is None or turn_id is None:
+            raise RuntimeError("finalization requires an active pending turn")
         safety_issue = final_response_problem(
             str(answer),
             tool_names=self._tool_universe_refs(),
@@ -380,6 +620,19 @@ class ChatSession:
             save_metrics,
             save_call_observed=save_call_observed,
         )
+        tool_activities = self._tool_activity_summaries(tool_calls, new_messages)
+        completed = await asyncio.to_thread(
+            self.conversation_repository.complete_turn,
+            snapshot,
+            turn_id=turn_id,
+            assistant_output=final_text,
+            finished_at=self._now_timestamp(),
+            tool_activities=tool_activities,
+        )
+        self._conversation_snapshot = completed
+        self._active_turn_snapshot = completed
+        completed_turn = self._turn_from_snapshot(completed, turn_id)
+        assert completed_turn is not None
         await self._record_turn(
             user_input=user_input,
             answer=final_text,
@@ -396,14 +649,19 @@ class ChatSession:
             text=final_text,
             validation_errors=errors,
             tool_calls=tool_calls,
+            turn_id=turn_id,
+            turn_number=completed_turn.turn_number,
+            state="completed",
+            accepted=True,
+            persisted=True,
         )
 
-    async def enter_plan_mode(self) -> Path:
-        """Enable plan mode for newly created turns."""
+    async def enter_plan_mode(self) -> None:
+        """Enable temporary plan prompt behavior without a Plan-log writer."""
         return self._turn_journal.enter_plan_mode()
 
-    async def resume_plan_mode(self, log_path: str | Path) -> Path:
-        """Resume an in-process plan log after a conversation switch."""
+    async def resume_plan_mode(self, log_path: str | Path) -> None:
+        """Restore temporary plan control without resuming legacy writes."""
         return self._turn_journal.resume_plan_mode(log_path)
 
     async def exit_plan_mode(self) -> None:
@@ -505,11 +763,17 @@ class ChatSession:
 
     def _visible_context_text(self) -> str:
         lines: list[str] = []
-        for turn in self.recent_turns[-self.config.agent_recent_turns_window:]:
+        snapshot = self._conversation_snapshot
+        context = (
+            self.conversation_repository.latest_context(snapshot)
+            if snapshot is not None
+            else ()
+        )
+        for turn in context:
             lines.extend([
-                f"User turn {turn.turn_id}:",
+                f"User turn {turn.turn_number}:",
                 turn.user_input,
-                f"Assistant turn {turn.turn_id}:",
+                f"Assistant turn {turn.turn_number}:",
                 turn.assistant_output,
                 "",
             ])
@@ -525,8 +789,7 @@ class ChatSession:
         return self._prompt_master_skill_text_cache
 
     async def flush_recent_turns(self) -> None:
-        """Persist all prompt-visible turns before the session is discarded."""
-        await self._turn_journal.flush()
+        """Compatibility no-op: every canonical state change is write-through."""
 
     async def _execute_graph(
         self,
@@ -586,28 +849,15 @@ class ChatSession:
         recovery_reason: str | None = None,
         citation_save_metrics: CitationSaveMetrics,
     ) -> None:
-        """Persist/log the final answer for one user-visible turn.
-
-        Only ever called through :meth:`finalize_and_record`, so ``answer``
-        is already gated/rendered. ``fusion``/``candidate_traces`` are only
-        supplied by the fusion extended turn; normal turns, reviser, and
-        final validation omit them. Compact fusion metadata reaches
-        ``turn_logs[-1]["fusion"]`` only through this ``fusion`` argument,
-        never reverse-engineered from rendered text.
-        """
-        await self._turn_journal.record_turn(
+        """Record non-authoritative diagnostics after durable completion."""
+        self._turn_journal.observe_turn(
             user_input=user_input,
-            answer=answer,
-            new_messages=new_messages,
             tool_calls=tool_calls,
             trace_events=trace_events,
             fusion=fusion,
-            candidate_traces=candidate_traces,
             validation_errors=validation_errors,
             recovery_reason=recovery_reason,
             citation_save_metrics=citation_save_metrics,
-            citation_scope=self.citation_skill_active,
-            append_block=self._append_block_to_md,
         )
 
     async def _run_normal_turn(self, user_input: str) -> TurnOutcome:
@@ -631,25 +881,77 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
         skill_name: str | None = None,
+        retry: bool = False,
     ) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""
         async with self._turn_execution_lock:
-            if skill_name is not None:
-                return await self._run_one_shot_skill_turn(
-                    user_input,
-                    skill_name,
+            logical_turn_id = turn_id or uuid.uuid4().hex
+            snapshot, turn, duplicate = await self._begin_turn(
+                semantic_input=user_input,
+                display_input=display_input if display_input is not None else user_input,
+                turn_id=logical_turn_id,
+                retry=retry,
+            )
+            self._conversation_snapshot = snapshot
+            if duplicate:
+                assert turn.assistant_output is not None
+                return TurnOutcome(
+                    text=turn.assistant_output,
+                    turn_id=turn.turn_id,
+                    turn_number=turn.turn_number,
+                    state="completed",
+                    accepted=True,
+                    persisted=True,
                 )
-            return await self._run_turn(user_input)
+            self._active_turn_snapshot = snapshot
+            self._active_turn_id = logical_turn_id
+            try:
+                if skill_name is not None:
+                    return await self._run_one_shot_skill_turn(
+                        user_input,
+                        skill_name,
+                    )
+                return await self._run_turn(user_input)
+            except asyncio.CancelledError:
+                await self._fail_active_turn(
+                    state="interrupted",
+                    code="cancelled",
+                    message="The turn was cancelled before completion.",
+                )
+                raise
+            except ConversationError:
+                await self._fail_active_turn(
+                    code="persistence_failed",
+                    message="The final response could not be saved.",
+                )
+                raise
+            except Exception:
+                await self._fail_active_turn()
+                raise
+            finally:
+                self._active_turn_snapshot = None
+                self._active_turn_id = None
 
     async def turn(
         self,
         user_input: str,
         *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
         skill_name: str | None = None,
+        retry: bool = False,
     ) -> str:
         """Process one conversation turn. Returns the final text response."""
-        outcome = await self.turn_outcome(user_input, skill_name=skill_name)
+        outcome = await self.turn_outcome(
+            user_input,
+            display_input=display_input,
+            turn_id=turn_id,
+            skill_name=skill_name,
+            retry=retry,
+        )
         return outcome.text
 
     def status_snapshot(self) -> dict[str, str | int]:
@@ -682,6 +984,8 @@ class ChatSession:
         progress_cb=None,
         session_id: str | None = None,
         restored_turns: list[TurnRecord] | None = None,
+        conversation_repository: ConversationRepository | None = None,
+        project_id: str | None = None,
         bash_approval_handler=None,
         bash_command_runner=None,
     ) -> "ChatSession":
@@ -708,6 +1012,8 @@ class ChatSession:
             ),
             session_id=session_id,
             restored_turns=restored_turns,
+            conversation_repository=conversation_repository,
+            project_id=project_id,
             bash_approval_handler=bash_approval_handler,
             bash_command_runner=bash_command_runner,
         )
@@ -720,35 +1026,21 @@ class ChatSession:
         session_id: str,
         system_prompt: str = SYSTEM_PROMPT,
         history_store: ChatHistoryStore | None = None,
+        conversation_repository: ConversationRepository | None = None,
+        project_id: str | None = None,
         load_mcp: bool = True,
         progress_cb=None,
     ) -> "ChatSession":
-        """Restore one cataloged session from unchanged Chroma and plan logs."""
-        try:
-            parsed_session_id = uuid.UUID(hex=session_id)
-        except ValueError as exc:
-            raise ValueError("session_id must be canonical UUIDv4 hex") from exc
-        if parsed_session_id.version != 4 or parsed_session_id.hex != session_id:
+        """Restore one canonical conversation and interrupt a leftover pending turn."""
+        if not is_canonical_uuid4_hex(session_id):
             raise ValueError("session_id must be canonical UUIDv4 hex")
-
-        resolved_store = history_store or get_chat_history_store(config)
-        history_turns = await asyncio.to_thread(
-            resolved_store.read_session_turns,
-            session_id,
-        )
-        plan_log = PlanLog(
-            config,
-            session_id=session_id,
-            app_root_resolver=lambda: find_app_root(),
-        )
-        plan_turns = await asyncio.to_thread(plan_log.read_direct_answer_turns)
-        restored_turns = merge_restored_turns(history_turns, plan_turns)
         return await cls.create(
             config,
             system_prompt=system_prompt,
-            history_store=resolved_store,
+            history_store=history_store,
+            conversation_repository=conversation_repository,
+            project_id=project_id,
             load_mcp=load_mcp,
             progress_cb=progress_cb,
             session_id=session_id,
-            restored_turns=restored_turns,
         )

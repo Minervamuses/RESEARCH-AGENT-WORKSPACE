@@ -102,21 +102,15 @@ class TurnJournal:
     def turn_store(self) -> TurnStore:
         return self._turn_store
 
-    def enter_plan_mode(self) -> Path:
-        """Enable plan persistence for newly recorded turns."""
-        if self.plan_mode:
-            if self.plan_log_path is None:
-                self.plan_log_path = self._plan_log.new_log_file()
-            return self.plan_log_path
-        self.plan_log_path = self._plan_log.new_log_file()
+    def enter_plan_mode(self) -> None:
+        """Enable the temporary plan prompt behavior without a durable side path."""
         self.plan_mode = True
-        return self.plan_log_path
+        self.plan_log_path = None
 
-    def resume_plan_mode(self, log_path: str | Path) -> Path:
-        """Resume an existing plan log retained by the desktop process."""
-        self.plan_log_path = self._plan_log.resume_log_file(log_path)
+    def resume_plan_mode(self, _log_path: str | Path) -> None:
+        """Restore only the temporary plan control; legacy logs stay read-only."""
         self.plan_mode = True
-        return self.plan_log_path
+        self.plan_log_path = None
 
     def exit_plan_mode(self) -> None:
         """Disable plan persistence without changing recent context."""
@@ -127,7 +121,31 @@ class TurnJournal:
         self._plan_log.append_block(log_path, block)
 
     async def flush(self) -> None:
-        await self._turn_store.flush()
+        """Compatibility no-op: canonical turns are write-through already."""
+
+    def observe_turn(
+        self,
+        *,
+        user_input: str,
+        tool_calls: list[dict],
+        trace_events: list[dict],
+        citation_save_metrics: CitationSaveMetrics,
+        fusion: dict | None = None,
+        validation_errors: list[str] | None = None,
+        recovery_reason: str | None = None,
+    ) -> None:
+        """Record process-local diagnostics after canonical completion."""
+        self.last_tool_calls = list(tool_calls)
+        self.turn_logs.append({
+            "user_input": user_input,
+            "tool_calls": list(tool_calls),
+            "trace_events": list(trace_events),
+            "tool_counts": format_tool_counts(tool_calls),
+            "fusion": fusion,
+            "validation_errors": list(validation_errors or []),
+            "recovery": recovery_reason,
+            **citation_save_metrics.to_record(),
+        })
 
     async def record_turn(
         self,
