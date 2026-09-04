@@ -1,240 +1,332 @@
-"""Tests for ChatSession's recent-turn persistence into the long-term store.
+"""Canonical ChatSession durability and recovery boundaries.
 
-Mocks both the LangGraph graph and the ChatHistoryStore so these tests
-don't need an LLM, Ollama, or ChromaDB. The point is to verify the
-eviction policy:
-
-- on overflow, the oldest turn is sent to history_store.add_turn
-- the recent_turns window stays bounded at the configured size
-- store failures are logged and the turn stays put
-- once recent_turns exceeds window * 3, oldest is dropped unrecorded
-- on shutdown, remaining prompt-visible turns are flushed to history_store
+These tests replace the retired recent-turn eviction contract. They use a real
+temporary conversation repository and scripted graphs, so no provider, Ollama,
+Chroma, or user store is involved.
 """
 
 import asyncio
-import logging
+import uuid
 
 import pytest
 
 from conftest import FakeHistoryStore, make_astream_graph
 
 from agent.config import AgentConfig
+from agent.conversations import (
+    ConversationRepository,
+    ConversationUnavailableError,
+)
 from agent.session import ChatSession
-from agent.turns.journal import TurnRestoreError
-from agent.turns.memory import TurnRecord
 
 
-def _snapshot_graph(store: FakeHistoryStore):
-    """Records what the agent would see: prompt messages and prior evictions."""
-    graph = make_astream_graph()
-    graph.snapshots = []
-    graph.on_state = lambda state: graph.snapshots.append({
-        "persisted_before_agent": [item["user_input"] for item in store.adds],
-        "contents": [msg.content for msg in state["messages"]],
-    })
-    return graph
+PROJECT_ID = "research-agent"
 
 
-@pytest.fixture
-def make_session(monkeypatch, tmp_path):
-    """Factory: build a ChatSession with a fake graph and fake history store."""
+def _id() -> str:
+    return uuid.uuid4().hex
+
+
+def _timestamp(second: int) -> str:
+    return f"2026-09-04T00:00:{second:02d}Z"
+
+
+def _session(
+    monkeypatch,
+    tmp_path,
+    *,
+    repository: ConversationRepository,
+    graph,
+    session_id: str,
+    history_store: FakeHistoryStore | None = None,
+) -> ChatSession:
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, extra_tools=None, history_store=None, **kwargs: make_astream_graph(),
+        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
     )
-
-    def _make(window: int, history_store: FakeHistoryStore | None = None):
-        cfg = AgentConfig(persist_dir=str(tmp_path))
-        cfg.agent_recent_turns_window = window
-        store = history_store or FakeHistoryStore()
-        session = ChatSession(cfg, history_store=store)
-        return session, store
-
-    return _make
-
-
-def test_no_eviction_below_window(make_session):
-    session, store = make_session(window=3)
-    for i in range(3):
-        asyncio.run(session.turn(f"q{i}"))
-    assert store.adds == []
-    assert len(session.recent_turns) == 3
-
-
-def test_final_text_validator_runs_before_the_turn_is_recorded(make_session):
-    session, store = make_session(window=3)
-
-    def reject(_text: str, _errors: list[str]) -> None:
-        raise RuntimeError("desktop wire budget rejected the answer")
-
-    session._set_final_text_validator(reject)
-    with pytest.raises(RuntimeError, match="wire budget"):
-        asyncio.run(session.turn("must not persist"))
-
-    assert session.recent_turns == []
-    assert store.adds == []
-
-
-def test_overflow_evicts_oldest_into_history_store(make_session):
-    session, store = make_session(window=3)
-    for i in range(4):
-        asyncio.run(session.turn(f"q{i}"))
-
-    assert len(store.adds) == 1
-    evicted = store.adds[0]
-    assert evicted["user_input"] == "q0"
-    assert evicted["assistant_output"] == "ok"
-    assert evicted["session_id"] == session.session_id
-    assert evicted["turn_id"] == 1
-    assert evicted["timestamp"]
-
-    assert len(session.recent_turns) == 3
-    assert [t.user_input for t in session.recent_turns] == ["q1", "q2", "q3"]
-
-
-def test_window_stays_bounded_across_many_turns(make_session):
-    session, store = make_session(window=3)
-    for i in range(10):
-        asyncio.run(session.turn(f"q{i}"))
-
-    assert len(session.recent_turns) == 3
-    assert [t.user_input for t in session.recent_turns] == ["q7", "q8", "q9"]
-    assert len(store.adds) == 7
-    assert [a["user_input"] for a in store.adds] == [f"q{i}" for i in range(7)]
-
-
-def test_eviction_failure_logs_and_keeps_turn(make_session, caplog):
-    failing_store = FakeHistoryStore(raise_on_add=True)
-    session, _ = make_session(window=2, history_store=failing_store)
-
-    with caplog.at_level(logging.WARNING, logger="agent.session"):
-        for i in range(3):
-            asyncio.run(session.turn(f"q{i}"))
-
-    assert len(session.recent_turns) == 3
-    assert any("eviction failed" in rec.message for rec in caplog.records)
-
-
-def test_hard_cap_drops_oldest_after_persistent_failure(make_session, caplog):
-    failing_store = FakeHistoryStore(raise_on_add=True)
-    session, _ = make_session(window=2, history_store=failing_store)
-
-    with caplog.at_level(logging.ERROR, logger="agent.session"):
-        # window=2, hard_cap = 6. Drive 8 turns; once recent_turns exceeds 6,
-        # oldest gets dropped unrecorded on each subsequent overflow.
-        for i in range(8):
-            asyncio.run(session.turn(f"q{i}"))
-
-    assert len(session.recent_turns) <= 6
-    assert any("hard cap" in rec.message for rec in caplog.records)
-
-
-def test_turn_stays_prompt_visible_until_evicted(make_session):
-    session, store = make_session(window=10)
-    graph = _snapshot_graph(store)
-    session.graph = graph
-
-    for i in range(1, 12):
-        asyncio.run(session.turn(f"q{i}"))
-
-    turn_11 = graph.snapshots[10]
-    assert turn_11["persisted_before_agent"] == []
-    assert "q1" in turn_11["contents"]
-    assert [item["user_input"] for item in store.adds] == ["q1"]
-
-
-def test_failed_eviction_turn_stays_prompt_visible(make_session):
-    failing_store = FakeHistoryStore(raise_on_add=True)
-    session, _ = make_session(window=2, history_store=failing_store)
-    graph = _snapshot_graph(failing_store)
-    session.graph = graph
-
-    for i in range(4):
-        asyncio.run(session.turn(f"q{i}"))
-
-    turn_4 = graph.snapshots[3]
-    assert "q0" in turn_4["contents"]
-
-
-def test_flush_recent_turns_persists_short_session(make_session):
-    session, store = make_session(window=10)
-    for i in range(2):
-        asyncio.run(session.turn(f"q{i}"))
-
-    assert store.adds == []
-
-    asyncio.run(session.flush_recent_turns())
-
-    assert [item["user_input"] for item in store.adds] == ["q0", "q1"]
-    assert session.recent_turns == []
-
-
-def test_flush_recent_turns_is_idempotent(make_session):
-    session, store = make_session(window=10)
-    asyncio.run(session.turn("q0"))
-
-    asyncio.run(session.flush_recent_turns())
-    asyncio.run(session.flush_recent_turns())
-
-    assert [item["user_input"] for item in store.adds] == ["q0"]
-
-
-def test_flush_recent_turns_logs_and_keeps_turn_on_failure(make_session, caplog):
-    failing_store = FakeHistoryStore(raise_on_add=True)
-    session, _ = make_session(window=10, history_store=failing_store)
-    asyncio.run(session.turn("q0"))
-
-    with caplog.at_level(logging.WARNING, logger="agent.session"):
-        asyncio.run(session.flush_recent_turns())
-
-    assert len(session.recent_turns) == 1
-    assert any("shutdown flush failed" in rec.message for rec in caplog.records)
-
-
-def test_restored_turns_use_latest_window_continue_counter_and_do_not_repersist(
-    make_session,
-):
-    session, store = make_session(window=2)
-    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
-    restored = [
-        TurnRecord(
-            user_input=f"old q{turn_id}",
-            assistant_output=f"old a{turn_id}",
-            turn_id=turn_id,
-            timestamp=f"2026-08-28T00:00:0{turn_id}+00:00",
-        )
-        for turn_id in range(1, 4)
-    ]
-    session = ChatSession(
-        session.config,
-        history_store=store,
+    config = AgentConfig(persist_dir=str(tmp_path))
+    config.agent_recent_turns_window = 3
+    return ChatSession(
+        config,
+        history_store=history_store or FakeHistoryStore(),
+        conversation_repository=repository,
+        project_id=PROJECT_ID,
         session_id=session_id,
-        restored_turns=restored,
     )
 
-    assert session.session_id == session_id
-    assert [turn.turn_id for turn in session.recent_turns] == [2, 3]
-    assert all(turn.persist_target == "none" for turn in session.recent_turns)
-    assert session._turn_counter == 3
 
-    asyncio.run(session.turn("new q"))
-    asyncio.run(session.flush_recent_turns())
+class FailingGraph:
+    """Provider boundary that records invocation and then fails."""
 
-    assert [item["turn_id"] for item in store.adds] == [4]
-    assert [item["user_input"] for item in store.adds] == ["new q"]
+    def __init__(self) -> None:
+        self.states: list[dict] = []
+
+    async def astream(self, state, config=None, stream_mode="updates"):
+        self.states.append(state)
+        if False:
+            yield {}
+        raise RuntimeError("provider unavailable")
 
 
-def test_restored_turn_ids_must_be_contiguous(make_session):
-    session, store = make_session(window=2)
-    restored = [
-        TurnRecord("q1", "a1", turn_id=1, timestamp="t1"),
-        TurnRecord("q3", "a3", turn_id=3, timestamp="t3"),
-    ]
+def test_prompt_is_durable_before_the_graph_starts(monkeypatch, tmp_path):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    turn_id = _id()
+    observed: dict[str, object] = {}
 
-    with pytest.raises(TurnRestoreError, match="contiguous"):
-        ChatSession(
-            session.config,
-            history_store=store,
-            session_id="28b222e0cc6543aa8d7bbdc423de99a7",
-            restored_turns=restored,
+    def inspect_pending(_state):
+        turn = repository.load(session_id).document.turns[-1]
+        observed.update({
+            "turn_id": turn.turn_id,
+            "turn_number": turn.turn_number,
+            "state": turn.state,
+            "display_input": turn.display_input,
+            "semantic_input": turn.semantic_input,
+        })
+
+    graph = make_astream_graph(on_state=inspect_pending)
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=graph,
+        session_id=session_id,
+    )
+
+    outcome = asyncio.run(session.turn_outcome(
+        "semantic prompt",
+        display_input="/skill semantic prompt",
+        turn_id=turn_id,
+    ))
+
+    assert observed == {
+        "turn_id": turn_id,
+        "turn_number": 1,
+        "state": "pending",
+        "display_input": "/skill semantic prompt",
+        "semantic_input": "semantic prompt",
+    }
+    assert outcome.state == "completed"
+    assert repository.load(session_id).document.turns[-1].state == "completed"
+
+
+def test_pending_write_failure_prevents_graph_or_provider_work(
+    monkeypatch,
+    tmp_path,
+):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    graph = make_astream_graph()
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=graph,
+        session_id=session_id,
+    )
+
+    def reject_pending(**_kwargs):
+        raise ConversationUnavailableError("injected pending write failure")
+
+    monkeypatch.setattr(repository, "create", reject_pending)
+
+    with pytest.raises(ConversationUnavailableError, match="pending write"):
+        asyncio.run(session.turn_outcome(
+            "must not execute",
+            display_input="must not execute",
+            turn_id=_id(),
+        ))
+
+    assert graph.states == []
+    assert repository.load_optional(session_id) is None
+
+
+def test_provider_failure_commits_failed_terminal_state(monkeypatch, tmp_path):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    turn_id = _id()
+    graph = FailingGraph()
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=graph,
+        session_id=session_id,
+    )
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        asyncio.run(session.turn_outcome(
+            "provider will fail",
+            display_input="provider will fail",
+            turn_id=turn_id,
+        ))
+
+    assert len(graph.states) == 1
+    turn = repository.load(session_id).document.turns[-1]
+    assert turn.turn_id == turn_id
+    assert turn.state == "failed"
+    assert turn.assistant_output is None
+    assert turn.failure is not None
+    assert turn.failure.code == "execution_failed"
+
+
+def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    turn_id = _id()
+    repository.create(
+        conversation_id=session_id,
+        project_id=PROJECT_ID,
+        turn_id=turn_id,
+        kind="conversational",
+        display_input="unfinished prompt",
+        semantic_input="unfinished prompt",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at=_timestamp(1),
+    )
+    graph = make_astream_graph()
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _config, extra_tools=None, history_store=None, **kwargs: graph,
+    )
+
+    restored = asyncio.run(ChatSession.restore(
+        AgentConfig(persist_dir=str(tmp_path)),
+        session_id=session_id,
+        history_store=FakeHistoryStore(),
+        conversation_repository=repository,
+        project_id=PROJECT_ID,
+        load_mcp=False,
+    ))
+
+    assert restored.session_id == session_id
+    assert graph.states == []
+    turn = repository.load(session_id).document.turns[-1]
+    assert turn.turn_id == turn_id
+    assert turn.state == "interrupted"
+    assert turn.assistant_output is None
+    assert turn.failure is not None
+    assert turn.failure.code == "interrupted"
+
+
+def test_completed_duplicate_returns_durable_answer_without_graph(
+    monkeypatch,
+    tmp_path,
+):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    turn_id = _id()
+    first_graph = make_astream_graph(answer="durable answer")
+    first_session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=first_graph,
+        session_id=session_id,
+    )
+    first = asyncio.run(first_session.turn_outcome(
+        "same logical request",
+        display_input="same logical request",
+        turn_id=turn_id,
+    ))
+    before = repository.path_for(session_id).read_bytes()
+
+    duplicate_graph = FailingGraph()
+    duplicate_session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=duplicate_graph,
+        session_id=session_id,
+    )
+    duplicate = asyncio.run(duplicate_session.turn_outcome(
+        "same logical request",
+        display_input="same logical request",
+        turn_id=turn_id,
+    ))
+
+    assert first.text == duplicate.text == "durable answer"
+    assert duplicate.turn_id == turn_id
+    assert duplicate.state == "completed"
+    assert duplicate.accepted is True
+    assert duplicate.persisted is True
+    assert duplicate_graph.states == []
+    assert repository.path_for(session_id).read_bytes() == before
+
+
+def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
+    monkeypatch,
+    tmp_path,
+):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    first_id = _id()
+    snapshot = repository.create(
+        conversation_id=session_id,
+        project_id=PROJECT_ID,
+        turn_id=first_id,
+        kind="conversational",
+        display_input="q1",
+        semantic_input="q1",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at=_timestamp(1),
+    )
+    snapshot = repository.complete_turn(
+        snapshot,
+        turn_id=first_id,
+        assistant_output="a1",
+        finished_at=_timestamp(1),
+    )
+    for number in range(2, 13):
+        turn_id = _id()
+        snapshot = repository.append_pending(
+            snapshot,
+            turn_id=turn_id,
+            kind="conversational",
+            display_input=f"q{number}",
+            semantic_input=f"q{number}",
+            context_eligible=True,
+            thinking_mode="normal",
+            submitted_at=_timestamp(number),
         )
+        snapshot = repository.complete_turn(
+            snapshot,
+            turn_id=turn_id,
+            assistant_output=f"a{number}",
+            finished_at=_timestamp(number),
+        )
+
+    history_store = FakeHistoryStore()
+    graph = make_astream_graph()
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=graph,
+        session_id=session_id,
+        history_store=history_store,
+    )
+    asyncio.run(session.turn_outcome(
+        "q13",
+        display_input="q13",
+        turn_id=_id(),
+    ))
+
+    contents = [message.content for message in graph.states[0]["messages"]]
+    assert "q1" not in contents
+    assert "a1" not in contents
+    assert "q2" not in contents
+    assert "a2" not in contents
+    for number in range(3, 13):
+        assert contents.count(f"q{number}") == 1
+        assert contents.count(f"a{number}") == 1
+    assert contents.count("q13") == 1
+
+    persisted = repository.load(session_id).document
+    assert len(persisted.turns) == 13
+    assert history_store.adds == []
+    asyncio.run(session.flush_recent_turns())
+    assert history_store.adds == []
+    assert len(repository.load(session_id).document.turns) == 13
