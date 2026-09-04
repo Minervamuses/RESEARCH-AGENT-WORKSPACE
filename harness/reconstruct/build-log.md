@@ -398,3 +398,10 @@ Material implementation events append with this shape:
 - **Tracked/untracked audit:** `git diff --name-status 9e366d8..HEAD` exit 0並只列出本phase的source/tests/active docs/plan evidence；沒有`app/store/`、`app/dist/`、cache、screenshot、secret或user data。`git diff --check` exit 0；本checkpoint寫入前`git status --short --untracked-files=all` exit 0且無輸出，所以沒有task-owned或user-owned untracked overlap需要no-index whitespace audit。
 - **Generated-root cleanup:** 刪除前再次確認realpath精確等於`/tmp/research-agent-desktop-phase02-manual-uC5DQF`、parent=`/tmp`、type=directory、mode=`700`、owner=`minervamuses:minervamuses`且不是symlink；其後只刪除這個task-owned synthetic fixture root。`test ! -e` exit 0；desktop與backend process查詢仍各exit 1。資料不可直接復原，但全是可由fixture重新建立的合成資料，沒有真實user data。
 - **Final status:** 所有可在目前環境執行的implementation、focused/broad checks、residue/content audit與native behavioral journey均已完成；未重跑昂貴broad suites。Phase 07仍為`In progress`，只等待exact native `720×560`與200% zoom人工layout evidence。
+
+## 2026-09-05 02:07 CST — Phase 07: native layout-control alternatives exhausted
+
+- **Why this follow-up ran:** residue checkpoint後發現系統已有`/usr/bin/xdotool`，因此在停下前嘗試以現成工具完成原生layout gate；沒有install、source edit或acceptance替代。
+- **Result:** 以第二個fresh direct root=`/tmp/research-agent-desktop-phase02-layout-0erLTE`重新啟動同一release binary與production supervisor；backend在Conda `app`中ready，native capture仍為`755×515` physical。`xdotool search --name "Research Agent"`與all-visible-window search均exit 1，確認WSLg `msrdc.exe` surface未暴露給X11。Native `Alt+F8`後再按Left不改變geometry；fresh foreground capture後的border drag仍被outer `msrdc.exe`/Codex coordinate mediation拒絕。未再嘗試browser/headless substitute，也不把OS/DPI env猜測冒充exact WebKit 200% zoom。
+- **Cleanup:** 由UI正常Shutdown至Backend stopped後關閉視窗，release exec session exit 0；desktop/backend process查詢各exit 1。刪除前再次確認第二個root的exact realpath、`/tmp` parent、directory type、mode `700`、owner與non-symlink，之後只刪除該synthetic root；`test ! -e` exit 0。兩個本phase manual roots均已清除。
+- **Status:** blocker不變且替代路徑已合理耗盡；Phase 07保持`In progress`，等待可控制native geometry與zoom的人工環境提供兩項evidence。
