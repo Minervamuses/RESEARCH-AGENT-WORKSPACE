@@ -168,6 +168,28 @@ test("language-neutral manifest matches TypeScript constants", async () => {
   }
 });
 
+test("Product Plan Mode is retired while extended thinking remains", async () => {
+  const contract = await loadJson<ContractDocument>("contract.json");
+  const methodNames = new Set(contract.methods.map(({ name }) => name));
+  assert.equal(methodNames.has("session.set_mode"), false);
+  assert.equal(PROTOCOL_METHODS.includes("session.set_mode" as never), false);
+  assert.equal("session.set_mode" in METHOD_PARAM_SCHEMAS, false);
+  assert.equal(methodNames.has("session.set_thinking"), true);
+
+  for (const method of ["session.create", "session.select"] as const) {
+    const schema = RESULT_DATA_SCHEMAS[method];
+    assert.equal("planMode" in schema, false);
+    assert.equal("planLogPath" in schema, false);
+    assert.deepEqual(schema.thinkingMode.enum, ["normal", "extended"]);
+  }
+
+  const appSource = await readFile(resolve(currentDir, "../src/App.tsx"), "utf8");
+  assert.equal(appSource.includes("session.set_mode"), false);
+  assert.equal(appSource.includes("Response mode"), false);
+  assert.equal(appSource.includes("session.set_thinking"), true);
+  assert.equal(appSource.includes('<option value="extended">Extended</option>'), true);
+});
+
 test("normal answers use only the final terminal result", () => {
   assert.equal(REQUEST_EVENTS.includes("answer.chunk" as never), false);
   assert.equal("answer.chunk" in EVENT_DATA_SCHEMAS, false);
