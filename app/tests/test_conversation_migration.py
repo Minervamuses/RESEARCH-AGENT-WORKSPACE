@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+from pathlib import Path
 
 import pytest
 from langchain_core.documents import Document
@@ -14,6 +16,7 @@ from agent.conversations import (
     ConversationUnavailableError,
 )
 from agent.conversations.legacy import (
+    LegacyChromaReader,
     LegacyConversationReader,
     LegacyReadError,
     LegacySourceCount,
@@ -186,6 +189,161 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     assert raw_store.reads == 2
     assert repository.path_for(SESSION_A).read_bytes() == first_bytes
     assert len(repository.load(SESSION_A).document.turns) == 2
+
+
+def test_chroma_migration_reader_opens_only_an_isolated_copy(tmp_path):
+    persist_dir = tmp_path / "legacy"
+    source = persist_dir / "chat_history"
+    source.mkdir(parents=True)
+    marker = source / "marker.bin"
+    marker.write_bytes(b"source must remain unchanged")
+    observed: dict[str, object] = {}
+
+    class FakeCollection:
+        def get(self, **kwargs):
+            observed["query"] = kwargs
+            return {
+                "documents": ["question", "answer"],
+                "metadatas": [
+                    {
+                        "role": "user",
+                        "turn_id": 1,
+                        "session_id": SESSION_A,
+                        "timestamp": "2026-08-28T01:00:00+00:00",
+                    },
+                    {
+                        "role": "assistant",
+                        "turn_id": 1,
+                        "session_id": SESSION_A,
+                        "timestamp": "2026-08-28T01:00:00+00:00",
+                    },
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, clone_path):
+            clone = Path(clone_path)
+            observed["clone"] = clone
+            assert clone != source
+            assert clone.is_dir()
+            (clone / "marker.bin").write_bytes(b"client mutated only the clone")
+
+        def get_collection(self, **kwargs):
+            observed["collection"] = kwargs
+            return FakeCollection()
+
+        def close(self):
+            observed["closed"] = True
+
+    before = marker.read_bytes()
+    reader = LegacyChromaReader(persist_dir, client_factory=FakeClient)
+
+    turns = reader(SESSION_A)
+
+    assert [(turn.user_input, turn.assistant_output) for turn in turns] == [
+        ("question", "answer")
+    ]
+    assert marker.read_bytes() == before
+    assert observed["closed"] is True
+    clone = observed["clone"]
+    assert isinstance(clone, Path)
+    assert not clone.exists()
+    assert observed["collection"] == {
+        "name": "chat_history",
+        "embedding_function": None,
+    }
+    assert observed["query"] == {
+        "where": {"session_id": {"$eq": SESSION_A}},
+        "limit": 8193,
+        "include": ["documents", "metadatas"],
+    }
+
+
+def test_chroma_migration_reader_reads_real_temporary_chroma_without_writes(
+    tmp_path,
+):
+    import chromadb
+
+    persist_dir = tmp_path / "legacy"
+    source = persist_dir / "chat_history"
+    client = chromadb.PersistentClient(path=str(source))
+    collection = client.create_collection(
+        name="chat_history",
+        embedding_function=None,
+    )
+    collection.add(
+        ids=["user-1", "assistant-1"],
+        embeddings=[[0.0, 1.0], [1.0, 0.0]],
+        documents=["question", "answer"],
+        metadatas=[
+            {
+                "role": "user",
+                "turn_id": 1,
+                "session_id": SESSION_A,
+                "timestamp": "2026-08-28T01:00:00+00:00",
+            },
+            {
+                "role": "assistant",
+                "turn_id": 1,
+                "session_id": SESSION_A,
+                "timestamp": "2026-08-28T01:00:00+00:00",
+            },
+        ],
+    )
+    client.close()
+    before = {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    }
+
+    turns = LegacyChromaReader(persist_dir)(SESSION_A)
+
+    assert [(turn.user_input, turn.assistant_output) for turn in turns] == [
+        ("question", "answer")
+    ]
+    assert {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    } == before
+
+
+def test_chroma_migration_reader_does_not_create_a_missing_source(tmp_path):
+    persist_dir = tmp_path / "legacy"
+
+    def must_not_open(_clone_path):
+        raise AssertionError("a missing source must not initialize Chroma")
+
+    reader = LegacyChromaReader(persist_dir, client_factory=must_not_open)
+
+    assert reader(SESSION_A) == []
+    assert not (persist_dir / "chat_history").exists()
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "fifo"])
+def test_chroma_migration_reader_rejects_unsafe_source_entries(
+    tmp_path,
+    unsafe_kind,
+):
+    persist_dir = tmp_path / "legacy"
+    source = persist_dir / "chat_history"
+    source.mkdir(parents=True)
+    unsafe = source / "unsafe-entry"
+    if unsafe_kind == "symlink":
+        outside = tmp_path / "outside"
+        outside.write_text("must not be copied", encoding="utf-8")
+        unsafe.symlink_to(outside)
+    else:
+        os.mkfifo(unsafe)
+
+    def must_not_open(_clone_path):
+        raise AssertionError("unsafe source must not initialize Chroma")
+
+    reader = LegacyChromaReader(persist_dir, client_factory=must_not_open)
+
+    with pytest.raises(LegacyReadError, match="symbolic link|non-regular"):
+        reader(SESSION_A)
 
 
 def test_plan_v1_v2_import_drops_all_legacy_tool_payloads(tmp_path):
@@ -390,6 +548,54 @@ def test_source_change_between_stage_and_publish_leaves_no_target(tmp_path):
     assert result.status == "failed"
     assert result.reason == "legacy_source_changed"
     assert not repository.path_for(SESSION_A).exists()
+
+
+def test_source_is_confirmed_after_document_staging(tmp_path, monkeypatch):
+    answer = "first"
+
+    def read_source(_conversation_id):
+        return [_turn(1, "question", answer)]
+
+    repository = ConversationRepository(tmp_path)
+    migrator = ConversationMigrator(
+        repository,
+        LegacyConversationReader(chroma_read=read_source),
+    )
+    real_to_document = migrator._to_document
+
+    def stage_then_change(snapshot, project_id):
+        nonlocal answer
+        document = real_to_document(snapshot, project_id)
+        answer = "changed during staging"
+        return document
+
+    monkeypatch.setattr(migrator, "_to_document", stage_then_change)
+
+    result = migrator.import_conversation(SESSION_A, project_id=None)
+
+    assert result.status == "failed"
+    assert result.reason == "legacy_source_changed"
+    assert not repository.path_for(SESSION_A).exists()
+
+
+def test_post_publish_durability_error_uses_valid_target_as_success_marker(
+    tmp_path,
+    monkeypatch,
+):
+    repository = ConversationRepository(tmp_path)
+
+    def fail_after_publish():
+        raise ConversationUnavailableError("injected directory fsync failure")
+
+    monkeypatch.setattr(repository, "_fsync_root", fail_after_publish)
+    result = ConversationMigrator(
+        repository,
+        _reader(chroma=[_turn(1, "question", "answer")]),
+    ).import_conversation(SESSION_A, project_id=None)
+
+    assert result.status == "created"
+    assert result.reason is None
+    assert repository.load(SESSION_A).document.turns[0].assistant_output == "answer"
 
 
 @pytest.mark.parametrize(

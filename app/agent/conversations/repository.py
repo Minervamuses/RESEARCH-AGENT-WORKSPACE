@@ -388,6 +388,13 @@ class ConversationRepository:
             updated_at=submitted_at,
             turns=(turn,),
         )
+        return self.create_document(document)
+
+    def create_document(
+        self,
+        document: ConversationDocument,
+    ) -> ConversationSnapshot:
+        """Atomically publish one complete validated document without clobbering."""
         payload = _encode_document(document)
         self._ensure_root(create=True)
         target = self.path_for(document.conversation_id)
