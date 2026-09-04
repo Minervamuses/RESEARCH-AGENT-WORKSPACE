@@ -7,7 +7,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Canonical conversation contract | Complete | 2026-09-04 18:20 CST | 2026-09-04 18:44 CST | Contract, Red/Green tests, review, and commits below | None |
-| 02 — Legacy import bridge | In progress | 2026-09-04 18:48 CST | — | Preflight and mapping checkpoint below | None |
+| 02 — Legacy import bridge | Complete | 2026-09-04 18:48 CST | 2026-09-04 19:14 CST | Mapping, Red/Green tests, fault review, and commits below | None |
 | 03 — Write-through turn lifecycle | Not started | — | — | — | None |
 | 04 — Host/catalog/retry cutover | Not started | — | — | — | None |
 | 05 — Remove Product Plan Mode | Not started | — | — | — | None |
@@ -98,6 +98,22 @@
 - **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_migration.py -q`，exit 1；collection如預期因`ModuleNotFoundError: No module named 'agent.conversations.legacy'`失敗。這證明migration boundary與one-shot document publish尚未實作；唯一額外輸出是既有LangGraph deprecation warning。
 - **Review checkpoint:** live source audit另確認Phase 01 repository只有pending-first `create()`，若逐turn匯入會留下partial target；Green必須新增窄版whole-document no-clobber API。Plan v2 reader也需在本階段以focused tests固定duplicate-key/non-finite JSON與symlink/non-regular source fail-closed。
 - **Blockers:** None。
+
+## 2026-09-04 19:14 CST — Phase 02: legacy import bridge complete
+
+- **Status:** `In progress` → `Complete`。
+- **Authorized scope:** `phases/phase-02-legacy-import-bridge.md`；只建立migration-only readers/importer、repository whole-document create與相鄰 strict-reader/tests，沒有接入startup/runtime、沒有執行真實migration，也沒有寫回或刪除legacy source。
+- **Changes:** 新增`agent.conversations.legacy`的strict merge、UTC normalization、deterministic legacy turn UUID、safe source counts/fingerprint及`LegacyChromaReader`；Chroma reader用non-following file-descriptor clone把`<persist_dir>/chat_history`複製到private temporary directory，只對副本開啟Chroma client。新增`agent.conversations.migration`的structured `created|already_present|skipped|failed`結果與all-or-nothing importer；repository新增一次性validated/no-clobber whole-document create。Plan v2 JSON改為拒絕duplicate keys/non-finite constants，Plan files以`O_NOFOLLOW|O_NONBLOCK`開啟並拒絕symlink/FIFO/non-regular source。
+- **Mapping result:** Chroma/Plan完整pairs保留conversation ID、caller project ID、integer order、user/assistant text與normalized event timestamp；因兩種legacy source都沒有normal/extended thinking mode，turn依checkpoint固定為completed `display-only`且不進context。所有legacy tool activities無條件drop，只留下安全count；不保存arguments/results、secret、reasoning或placeholder。
+- **Verification:** 從`app/`執行`PYTHONDONTWRITEBYTECODE=1 conda run -n app poetry run pytest tests/test_conversation_migration.py tests/test_conversation_repository.py tests/test_plan_mode.py tests/test_history_rag_store.py -q`，exit 0，`82 passed, 1 warning in 0.78s`。其中migration module為20個tests（含parameterized cases）；另單跑Plan strict-reader為`32 passed, 1 warning in 0.14s`。warning均為既有LangGraph `allowed_objects` deprecation；`git diff --check`與功能commit前`git diff --cached --check`皆exit 0。
+- **Fault/idempotency evidence:** executable tests證明source在staging期間或兩次read之間改變即不發布、gap/duplicate/malformed source不留target、publish前一次交付完整document、forced pre-link failure不留target、post-link directory-fsync錯誤以exact valid target作success marker、rerun不再讀legacy且bytes/turn count不變、valid target優先、invalid/identity/project mismatch target不覆寫，以及單一conversation失敗後另一個仍可成功。
+- **Read-only/security evidence:** fake client刻意改寫clone後source marker不變；installed Chroma 1.5.8的real temporary collection也成功經clone讀取，來源tree逐檔bytes前後相同。Missing source不被建立，symlink/FIFO source entry在client初始化前被拒絕；Plan v1/v2 source bytes不變。Valid、malformed、unknown-field與oversized activity fixtures均證明raw payload不進canonical JSON或context。
+- **Acceptance mapping:** Chroma/Plan strict malformed coverage=`test_history_rag_store.py`/`test_plan_mode.py`；conversation-atomic/source-change=`test_conversation_migration.py` staging/publish faults；rerun/target precedence=Chroma happy path與existing-target cases；不可恢復欄位=display-only mapping；欄位級identity/order/text/timestamps=real strict-reader round trips；cannot-smuggle=Plan activity cases；failure isolation=two-conversation case；真實store隔離=所有paths皆`tmp_path`且source snapshots比對不變。
+- **Review:** focused review提出三項P2：confirm read早於document staging、post-link error可能留下有效target卻回failed、缺少真正不開啟source的Chroma adapter。三項均補fault/real-client tests並修正；第二次focused adapter review未發現剩餘P1/P2。
+- **Evidence references:** start=`76a6bbe`；Red=`a36829e`；test tightening=`2bf5093`；Plan reader hardening=`3ddf7be`；Green=`3c58541`。
+- **Limitations:** legacy display-only transcript可完整顯示，但因無法證明historical thinking mode，不產生sidebar title或model context；這是已測試的fail-closed取捨，不是遺漏。未使用Ollama/provider、credentials、`app/store/`或真實user data。
+- **Blockers:** None。
+- **Next action:** 重新讀durable authority後開始Phase 03 atomic write/read vertical cutover。
 
 <!--
 Material implementation events append with this shape:
