@@ -15,7 +15,7 @@ import sys
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,17 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
 from agent.config import AgentConfig, validate_graph_recursion_limit
+from agent.conversations import (
+    ConversationConflictError,
+    ConversationError,
+    ConversationRepository,
+    ConversationSnapshot,
+    ConversationTurn,
+    ConversationUnavailableError,
+    ToolActivitySummary,
+)
+from agent.conversations.legacy import LegacyChromaReader, LegacyConversationReader
+from agent.conversations.migration import ConversationMigrator
 from agent.cli.slash_commands import (
     ParsedSlashCommand,
     SlashCommandContext,
@@ -41,7 +52,6 @@ from agent.desktop.catalog import (
     CatalogMalformedError,
     CatalogUnavailableError,
     DesktopProjectCatalog,
-    is_canonical_session_id,
 )
 from agent.desktop.protocol import (
     PROTOCOL_VERSION,
@@ -64,14 +74,11 @@ from agent.ingest import (
     init_workspace,
     prune_folder,
 )
-from agent.history_rag.store import HistoryRestoreError, get_chat_history_store
 from agent.paths import find_app_root
 from agent.session import ChatSession
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.turns.safety import content_text
-from agent.turns.journal import TurnRestoreError, merge_restored_turns
-from agent.turns.memory import ToolActivityRecord, TurnRecord
-from agent.turns.plan_log import PlanLog, PlanLogRestoreError
+from agent.turns.plan_log import PlanLog
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.storage import resolve_output_dir
@@ -108,7 +115,6 @@ _MAX_TRANSCRIPT_PAGE_BYTES = 1_048_576
 _MAX_TRANSCRIPT_TOOL_ACTIVITIES = 128
 _MAX_TRANSCRIPT_TOOL_CALL_ID_BYTES = 256
 _MAX_TRANSCRIPT_TOOL_NAME_BYTES = 256
-_MAX_TRANSCRIPT_TOOL_ARGUMENT_BYTES = 32_768
 _MAX_TRANSCRIPT_TOOL_RESULT_BYTES = 65_536
 _TRANSCRIPT_TOOL_STATUSES = frozenset({"ok", "failed", "denied", "incomplete"})
 _MAX_CONTROL_SNAPSHOTS = CATALOG_MAX_SESSIONS
@@ -119,7 +125,7 @@ _MAX_APPROVAL_DESCRIPTION_BYTES = 4_096
 _MAX_EXTENSION_ARGUMENTS = 128
 _MAX_EXTENSION_ENVIRONMENT_NAMES = 128
 _WIRE_BUDGET_REQUEST_ID = "00000000-0000-4000-8000-000000000000"
-_WIRE_BUDGET_TURN_ID = "0" * 32
+_WIRE_BUDGET_TURN_ID = "00000000000040008000000000000000"
 _SECRET_APPROVAL_CONTEXT = re.compile(
     r"(?i)(?:authorization\s*:|(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=])\s*\S+"
 )
@@ -189,6 +195,8 @@ class DesktopService:
         session_factory: Callable[..., Any] | None = None,
         slash_registry: SlashCommandRegistry | None = None,
         project_catalog: DesktopProjectCatalog | None = None,
+        conversation_repository: ConversationRepository | None = None,
+        conversation_migrator: ConversationMigrator | None = None,
         knowledge_operations: DesktopKnowledgeOperations | None = None,
         bash_command_runner: Callable[..., Any] | None = None,
         approval_timeout_seconds: float = 60.0,
@@ -217,6 +225,20 @@ class DesktopService:
             prune_folder=prune_folder,
         )
         self._extension_manager = extension_manager or ExtensionManager(self.config)
+        self._conversation_repository = (
+            conversation_repository or ConversationRepository(self.config.persist_dir)
+        )
+        self._conversation_migrator = conversation_migrator or ConversationMigrator(
+            self._conversation_repository,
+            LegacyConversationReader(
+                chroma_read=LegacyChromaReader(self.config.persist_dir),
+                plan_read=lambda conversation_id: PlanLog(
+                    self.config,
+                    session_id=conversation_id,
+                    app_root_resolver=lambda: find_app_root(),
+                ).read_direct_answer_turns(),
+            ),
+        )
         self._catalog: DesktopProjectCatalog | None = project_catalog
         self._catalog_issue: str | None = None
         if self._catalog is None:
@@ -236,7 +258,6 @@ class DesktopService:
         self._session_registered = False
         self._pending_registration: tuple[str, str] | None = None
         self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
-        self._history_store = None
         self._load_mcp = True
         self._session_creating = False
         self._turn_active = False
@@ -589,7 +610,9 @@ class DesktopService:
         session_ids = project["sessionIds"]
         items: list[dict[str, Any]] = []
         for session_id in session_ids[offset : offset + limit]:
-            items.append(await self._conversation_summary(session_id))
+            items.append(
+                await self._conversation_summary(session_id, project["projectId"])
+            )
         return {
             "projectId": project["projectId"],
             "status": "ready",
@@ -642,37 +665,28 @@ class DesktopService:
             }
 
         try:
-            restored_turns = await asyncio.to_thread(
-                self._read_conversation_turns,
+            await asyncio.to_thread(
+                self._load_or_import_conversation,
                 session_id,
-                False,
+                project["projectId"],
             )
-        except (HistoryRestoreError, PlanLogRestoreError, TurnRestoreError) as exc:
+        except ConversationError as exc:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "The stored conversation is degraded and cannot be selected.",
             ) from exc
-        if not restored_turns:
-            raise DesktopServiceError(
-                "SESSION_NOT_READY",
-                "The stored conversation has no restorable transcript.",
-            )
 
         self._session_creating = True
         current = self.session
-        saved_recent: list[TurnRecord] = []
         saved_controls: _ConversationControlSnapshot | None = None
         if current is not None:
-            saved_recent = self._copy_recent_turns(current)
             saved_controls = self._capture_controls(current)
         try:
-            if current is not None:
-                await self._flush_for_conversation_switch(current, saved_recent)
             target = await self._materialize_session(
                 self.config,
                 load_mcp=self._load_mcp,
+                project_id=project["projectId"],
                 session_id=session_id,
-                restored_turns=restored_turns,
             )
             await self._apply_controls(
                 target,
@@ -683,10 +697,6 @@ class DesktopService:
                     "SESSION_NOT_READY",
                     "The desktop backend changed state while selecting a conversation.",
                 )
-        except Exception:
-            if current is not None:
-                self._restore_recent_turns(current, saved_recent)
-            raise
         finally:
             self._session_creating = False
 
@@ -780,9 +790,9 @@ class DesktopService:
             turns = await asyncio.to_thread(
                 self._read_conversation_turns,
                 session_id,
-                True,
+                project["projectId"],
             )
-        except (HistoryRestoreError, PlanLogRestoreError, TurnRestoreError):
+        except ConversationError:
             return self._transcript_result(
                 project["projectId"],
                 session_id,
@@ -839,14 +849,18 @@ class DesktopService:
             total=len(turns),
         )
 
-    async def _conversation_summary(self, session_id: str) -> dict[str, Any]:
+    async def _conversation_summary(
+        self,
+        session_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
         try:
-            turns = await asyncio.to_thread(
-                self._read_conversation_turns,
+            snapshot = await asyncio.to_thread(
+                self._load_conversation,
                 session_id,
-                True,
+                project_id,
             )
-        except (HistoryRestoreError, PlanLogRestoreError, TurnRestoreError):
+        except ConversationError:
             return {
                 "sessionId": session_id,
                 "title": f"Conversation {session_id[:8]}",
@@ -855,7 +869,7 @@ class DesktopService:
                 "status": "degraded",
                 "issue": "The stored transcript is malformed or incomplete.",
             }
-        if not turns:
+        if snapshot is None:
             return {
                 "sessionId": session_id,
                 "title": f"Conversation {session_id[:8]}",
@@ -864,13 +878,12 @@ class DesktopService:
                 "status": "unavailable",
                 "issue": "No persisted transcript is available.",
             }
-        title = " ".join(turns[0].user_input.split())
+        summary = self._conversation_repository.summary(snapshot)
         return {
             "sessionId": session_id,
-            "title": self._bounded_text(title, 256)
-            or f"Conversation {session_id[:8]}",
-            "turnCount": turns[-1].turn_id,
-            "updatedAt": self._bounded_text(turns[-1].timestamp, 64),
+            "title": summary.title or f"Conversation {session_id[:8]}",
+            "turnCount": summary.turn_count,
+            "updatedAt": summary.updated_at,
             "status": "ready",
             "issue": None,
         }
@@ -896,78 +909,86 @@ class DesktopService:
             )
         return project
 
+    def _load_conversation(
+        self,
+        session_id: str,
+        project_id: str,
+    ) -> ConversationSnapshot | None:
+        snapshot = self._conversation_repository.load_optional(session_id)
+        if snapshot is not None and snapshot.document.project_id != project_id:
+            raise ConversationConflictError(
+                "conversation belongs to a different project"
+            )
+        return snapshot
+
+    def _load_or_import_conversation(
+        self,
+        session_id: str,
+        project_id: str,
+    ) -> ConversationSnapshot:
+        snapshot = self._load_conversation(session_id, project_id)
+        if snapshot is not None:
+            return snapshot
+        migration = self._conversation_migrator.import_conversation(
+            session_id,
+            project_id,
+        )
+        if migration.status not in {"created", "already_present"}:
+            raise ConversationUnavailableError(
+                "legacy conversation could not be imported"
+            )
+        snapshot = self._load_conversation(session_id, project_id)
+        if snapshot is None:
+            raise ConversationUnavailableError(
+                "canonical conversation is unavailable after import"
+            )
+        return snapshot
+
     def _read_conversation_turns(
         self,
         session_id: str,
-        include_current: bool,
-    ) -> list[TurnRecord]:
-        if not is_canonical_session_id(session_id):
-            raise TurnRestoreError("session_id must be canonical UUIDv4 hex")
-        if self._history_store is None:
-            self._history_store = get_chat_history_store(self.config)
-        history_turns = self._history_store.read_session_turns(session_id)
-        plan_turns = PlanLog(
-            self.config,
-            session_id=session_id,
-            app_root_resolver=lambda: find_app_root(),
-        ).read_direct_answer_turns()
-        stored = merge_restored_turns(history_turns, plan_turns)
-        if (
-            not include_current
-            or self.session is None
-            or self.session.session_id != session_id
-        ):
-            return stored
-
-        by_turn = {turn.turn_id: turn for turn in stored}
-        for turn in self._copy_recent_turns(self.session):
-            restored = replace(turn, persist_target="none")
-            existing = by_turn.get(restored.turn_id)
-            if existing is not None and (
-                existing.user_input != restored.user_input
-                or existing.assistant_output != restored.assistant_output
-                or existing.timestamp != restored.timestamp
-                or existing.tool_activities != restored.tool_activities
-            ):
-                raise TurnRestoreError(
-                    "current and persisted conversation turns disagree"
-                )
-            by_turn[restored.turn_id] = restored
-        return merge_restored_turns(list(by_turn.values()))
+        project_id: str,
+    ) -> list[ConversationTurn]:
+        snapshot = self._load_conversation(session_id, project_id)
+        if snapshot is None:
+            return []
+        return [
+            turn
+            for turn in snapshot.document.turns
+            if turn.state == "completed" and turn.assistant_output is not None
+        ]
 
     @staticmethod
-    def _tool_activity_payload(activity: ToolActivityRecord) -> dict[str, Any]:
+    def _tool_activity_payload(activity: ToolActivitySummary) -> dict[str, Any]:
         return {
             "callId": activity.call_id,
             "name": activity.name,
-            "arguments": activity.arguments,
-            "result": activity.result or "(empty result)",
+            "arguments": "(not retained)",
+            "result": activity.summary or "(no summary)",
             "status": activity.status,
-            "promptEligible": activity.prompt_eligible,
+            "promptEligible": False,
         }
 
     @classmethod
-    def _transcript_turn_is_bounded(cls, turn: TurnRecord) -> bool:
+    def _transcript_turn_is_bounded(cls, turn: ConversationTurn) -> bool:
+        assert turn.assistant_output is not None
+        timestamp = turn.finished_at or turn.submitted_at
         if (
-            len(turn.user_input.encode("utf-8")) > 32_768
+            len(turn.display_input.encode("utf-8")) > 32_768
             or len(turn.assistant_output.encode("utf-8")) > 32_768
-            or len(turn.timestamp.encode("utf-8")) > 64
+            or len(timestamp.encode("utf-8")) > 64
             or len(turn.tool_activities) > _MAX_TRANSCRIPT_TOOL_ACTIVITIES
         ):
             return False
         for activity in turn.tool_activities:
-            if not isinstance(activity, ToolActivityRecord):
+            if not isinstance(activity, ToolActivitySummary):
                 return False
-            result = activity.result or "(empty result)"
+            result = activity.summary or "(no summary)"
             if (
                 activity.status not in _TRANSCRIPT_TOOL_STATUSES
-                or type(activity.prompt_eligible) is not bool
                 or not activity.name
-                or not activity.arguments
                 or len(activity.name.encode("utf-8"))
                 > _MAX_TRANSCRIPT_TOOL_NAME_BYTES
-                or len(activity.arguments.encode("utf-8"))
-                > _MAX_TRANSCRIPT_TOOL_ARGUMENT_BYTES
                 or len(result.encode("utf-8"))
                 > _MAX_TRANSCRIPT_TOOL_RESULT_BYTES
                 or (
@@ -983,18 +1004,20 @@ class DesktopService:
         return True
 
     @staticmethod
-    def _transcript_turn_bytes(turn: TurnRecord) -> int:
+    def _transcript_turn_bytes(turn: ConversationTurn) -> int:
+        assert turn.assistant_output is not None
+        timestamp = turn.finished_at or turn.submitted_at
         total = (
-            len(turn.user_input.encode("utf-8"))
+            len(turn.display_input.encode("utf-8"))
             + len(turn.assistant_output.encode("utf-8"))
-            + len(turn.timestamp.encode("utf-8"))
+            + len(timestamp.encode("utf-8"))
         )
         for activity in turn.tool_activities:
             total += (
                 len((activity.call_id or "").encode("utf-8"))
                 + len(activity.name.encode("utf-8"))
-                + len(activity.arguments.encode("utf-8"))
-                + len((activity.result or "(empty result)").encode("utf-8"))
+                + len("(not retained)".encode("utf-8"))
+                + len((activity.summary or "(no summary)").encode("utf-8"))
                 + len(activity.status.encode("utf-8"))
                 + 1
             )
@@ -1007,7 +1030,7 @@ class DesktopService:
         *,
         status: str,
         issue: str | None,
-        turns: list[TurnRecord],
+        turns: list[ConversationTurn],
         offset: int,
         limit: int,
         total: int,
@@ -1019,9 +1042,9 @@ class DesktopService:
             "issue": issue,
             "items": [
                 {
-                    "turnNumber": turn.turn_id,
-                    "timestamp": turn.timestamp,
-                    "userText": turn.user_input,
+                    "turnNumber": turn.turn_number,
+                    "timestamp": turn.finished_at or turn.submitted_at,
+                    "userText": turn.display_input,
                     "assistantText": turn.assistant_output,
                     "toolActivities": [
                         DesktopService._tool_activity_payload(activity)
@@ -1041,8 +1064,8 @@ class DesktopService:
         config: AgentConfig,
         *,
         load_mcp: bool,
+        project_id: str,
         session_id: str | None = None,
-        restored_turns: list[TurnRecord] | None = None,
     ) -> ChatSession:
         kwargs: dict[str, Any] = {
             "load_mcp": load_mcp,
@@ -1053,9 +1076,12 @@ class DesktopService:
                 "bash_approval_handler": self._desktop_bash_approval,
                 "bash_command_runner": self._bash_command_runner,
             })
+        kwargs.update({
+            "conversation_repository": self._conversation_repository,
+            "project_id": project_id,
+        })
         if session_id is not None:
             kwargs["session_id"] = session_id
-            kwargs["restored_turns"] = list(restored_turns or [])
         session = await self._session_factory(config, **kwargs)
         if isinstance(session, ChatSession):
             session._set_final_text_validator(
@@ -1101,56 +1127,6 @@ class DesktopService:
             self._control_snapshots.pop(next(iter(self._control_snapshots)))
         self._control_snapshots[session_id] = snapshot
 
-    @staticmethod
-    def _copy_recent_turns(session: ChatSession) -> list[TurnRecord]:
-        turns: list[TurnRecord] = []
-        for turn in getattr(session, "recent_turns", []):
-            if not isinstance(turn, TurnRecord):
-                continue
-            turns.append(replace(turn))
-        return turns
-
-    @staticmethod
-    def _restore_recent_turns(
-        session: ChatSession,
-        turns: list[TurnRecord],
-    ) -> None:
-        recent = getattr(session, "recent_turns", None)
-        if not isinstance(recent, list):
-            return
-        by_id = {
-            turn.turn_id: turn
-            for turn in recent
-            if isinstance(turn, TurnRecord)
-        }
-        for turn in turns:
-            by_id.setdefault(turn.turn_id, replace(turn, persist_target="none"))
-        recent[:] = [by_id[turn_id] for turn_id in sorted(by_id)]
-
-    async def _flush_for_conversation_switch(
-        self,
-        session: ChatSession,
-        saved_recent: list[TurnRecord],
-    ) -> None:
-        try:
-            await session.flush_recent_turns()
-        except Exception as exc:
-            self._restore_recent_turns(session, saved_recent)
-            raise DesktopServiceError(
-                "CONVERSATION_FLUSH_FAILED",
-                "Recent turns could not be flushed before changing conversations.",
-                retryable=True,
-            ) from exc
-        remaining = len(getattr(session, "recent_turns", []))
-        if remaining:
-            self._restore_recent_turns(session, saved_recent)
-            raise DesktopServiceError(
-                "CONVERSATION_FLUSH_FAILED",
-                "Recent turns remain unflushed; the current conversation was retained.",
-                retryable=True,
-                details={"remainingTurns": remaining},
-            )
-
     async def _session_create(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -1188,27 +1164,20 @@ class DesktopService:
         )
         self._session_creating = True
         current = self.session
-        saved_recent: list[TurnRecord] = []
         saved_controls: _ConversationControlSnapshot | None = None
         if current is not None:
-            saved_recent = self._copy_recent_turns(current)
             saved_controls = self._capture_controls(current)
         try:
-            if current is not None:
-                await self._flush_for_conversation_switch(current, saved_recent)
             session = await self._materialize_session(
                 config,
                 load_mcp=load_mcp,
+                project_id=project_id,
             )
             if self.lifecycle != "ready":
                 raise DesktopServiceError(
                     "SESSION_NOT_READY",
                     "The desktop backend changed state while creating the session.",
                 )
-        except Exception:
-            if current is not None:
-                self._restore_recent_turns(current, saved_recent)
-            raise
         finally:
             self._session_creating = False
         if (
@@ -1255,6 +1224,10 @@ class DesktopService:
         candidate = {
             "sessionId": session_id,
             "turnId": _WIRE_BUDGET_TURN_ID,
+            "turnNumber": 4_096,
+            "state": "completed",
+            "accepted": True,
+            "persisted": True,
             "text": text,
             "validationErrors": validation_errors,
             "toolSummaries": tool_summaries,
@@ -1659,7 +1632,7 @@ class DesktopService:
         self._turn_event_sink = event_sink
         self._tool_names = {}
         self._tool_summaries = {}
-        turn_id = uuid.uuid4().hex
+        turn_id = params["turnId"]
         parent_request_id = getattr(event_sink, "request_id", None)
         self._turn_loop = asyncio.get_running_loop()
         self._active_parent_request_id = (
@@ -1772,6 +1745,9 @@ class DesktopService:
                     response = {
                         "sessionId": session.session_id,
                         "turnId": turn_id,
+                        "state": None,
+                        "accepted": False,
+                        "persisted": False,
                         "text": message,
                         "validationErrors": [],
                         "toolSummaries": [],
@@ -1786,11 +1762,30 @@ class DesktopService:
                     return response
 
             if turn_skill_name is None:
-                outcome = await session.turn_outcome(turn_text)
+                outcome = await session.turn_outcome(
+                    turn_text,
+                    display_input=original_text,
+                    turn_id=turn_id,
+                    retry=True,
+                )
             else:
                 outcome = await session.turn_outcome(
                     turn_text,
+                    display_input=original_text,
+                    turn_id=turn_id,
                     skill_name=turn_skill_name,
+                    retry=True,
+                )
+            if (
+                outcome.turn_id != turn_id
+                or not 1 <= outcome.turn_number <= 4_096
+                or outcome.state != "completed"
+                or outcome.accepted is not True
+                or outcome.persisted is not True
+            ):
+                raise DesktopServiceError(
+                    "INTERNAL_ERROR",
+                    "The session returned an invalid durable turn result.",
                 )
             if not isinstance(outcome.text, str) or not outcome.text.strip():
                 raise DesktopServiceError(
@@ -1837,7 +1832,11 @@ class DesktopService:
                     self._pending_registration = (project_id, session.session_id)
             return {
                 "sessionId": session.session_id,
-                "turnId": turn_id,
+                "turnId": outcome.turn_id,
+                "turnNumber": outcome.turn_number,
+                "state": outcome.state,
+                "accepted": outcome.accepted,
+                "persisted": outcome.persisted,
                 "text": outcome.text,
                 "validationErrors": validation_errors,
                 "toolSummaries": tool_summaries,
@@ -1885,7 +1884,7 @@ class DesktopService:
     ) -> dict[str, Any]:
         self._complete_pending_approval(False)
         if self.lifecycle == "stopped":
-            return {"status": "stopped", "flushed": True}
+            return {"status": "stopped"}
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
@@ -1910,12 +1909,12 @@ class DesktopService:
             )
         self.lifecycle = "shutting_down"
         try:
-            shutdown = await self._shutdown_session()
+            await self._shutdown_session()
         except DesktopServiceError:
             self.lifecycle = "ready"
             raise
         self.lifecycle = "stopped"
-        return {"status": "stopped", "flushed": bool(shutdown["flushed"])}
+        return {"status": "stopped"}
 
     async def _shutdown_session(self) -> dict[str, Any]:
         self._complete_pending_approval(False)
@@ -1953,38 +1952,18 @@ class DesktopService:
             self._pending_registration = None
             self._control_snapshots.clear()
             self._clear_session_caches()
-            return {"status": "no_session", "flushed": True}
+            return {"status": "no_session"}
         self._session_closing = True
         try:
-            try:
-                await session.flush_recent_turns()
-            except Exception as exc:
-                logger.warning(
-                    "Desktop session flush failed with %s", type(exc).__name__
-                )
-                raise DesktopServiceError(
-                    "SHUTDOWN_FLUSH_FAILED",
-                    "Recent turns could not be flushed.",
-                    retryable=True,
-                    details={"remainingTurns": len(getattr(session, "recent_turns", []))},
-                ) from exc
-            remaining = len(getattr(session, "recent_turns", []))
-            if remaining:
-                raise DesktopServiceError(
-                    "SHUTDOWN_FLUSH_FAILED",
-                    "Recent turns remain unflushed.",
-                    retryable=True,
-                    details={"remainingTurns": remaining},
-                )
+            self.session = None
         finally:
             self._session_closing = False
-        self.session = None
         self._load_mcp = True
         self._session_registered = False
         self._pending_registration = None
         self._control_snapshots.clear()
         self._clear_session_caches()
-        return {"status": "stopped", "flushed": True}
+        return {"status": "stopped"}
 
     def _clear_session_caches(self) -> None:
         self._complete_pending_approval(False)

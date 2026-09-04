@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import uuid
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,15 +52,29 @@ class _FakeSession:
         self.flush_release = asyncio.Event()
         self.turn_inputs: list[str] = []
         self.skill_turn_inputs: list[tuple[str, str | None]] = []
+        self.turn_calls: list[dict[str, object]] = []
+        self._turn_number = 0
 
     async def turn_outcome(
         self,
         text: str,
         *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
         skill_name: str | None = None,
+        retry: bool = False,
     ) -> TurnOutcome:
+        assert turn_id is not None
+        assert uuid.UUID(hex=turn_id).hex == turn_id
         self.turn_inputs.append(text)
         self.skill_turn_inputs.append((text, skill_name))
+        self.turn_calls.append({
+            "semanticInput": text,
+            "displayInput": display_input,
+            "turnId": turn_id,
+            "skillName": skill_name,
+            "retry": retry,
+        })
         self.turn_started.set()
         if self.block_turn:
             await self.turn_release.wait()
@@ -86,7 +101,16 @@ class _FakeSession:
                     ),
                 ],
             )
-        return TurnOutcome(text=f"完成：{text}", validation_errors=[])
+        self._turn_number += 1
+        return TurnOutcome(
+            text=f"完成：{text}",
+            validation_errors=[],
+            turn_id=turn_id,
+            turn_number=self._turn_number,
+            state="completed",
+            accepted=True,
+            persisted=True,
+        )
 
     async def enter_plan_mode(self) -> Path:
         self.plan_mode = True
@@ -128,7 +152,16 @@ class _SessionFactory:
         self.fail_once = False
         self.created: _FakeSession | None = None
 
-    async def __call__(self, config: AgentConfig, *, load_mcp: bool, progress_cb):
+    async def __call__(
+        self,
+        config: AgentConfig,
+        *,
+        load_mcp: bool,
+        progress_cb,
+        conversation_repository,
+        project_id,
+    ):
+        del conversation_repository, project_id
         self.calls.append((config, load_mcp))
         if self.fail_once:
             self.fail_once = False
@@ -247,7 +280,17 @@ class _DesktopBashSession(_FakeSession):
             command_runner=command_runner,
         )
 
-    async def turn_outcome(self, text: str) -> TurnOutcome:
+    async def turn_outcome(
+        self,
+        text: str,
+        *,
+        display_input: str | None = None,
+        turn_id: str | None = None,
+        skill_name: str | None = None,
+        retry: bool = False,
+    ) -> TurnOutcome:
+        del display_input, skill_name, retry
+        assert turn_id is not None
         command, description = {
             "bash": ("printf fixture", "Return deterministic fixture output."),
             "bash-secret": (
@@ -296,7 +339,15 @@ class _DesktopBashSession(_FakeSession):
                     status="success",
                 )],
             )
-        return TurnOutcome(text=raw)
+        self._turn_number += 1
+        return TurnOutcome(
+            text=raw,
+            turn_id=turn_id,
+            turn_number=self._turn_number,
+            state="completed",
+            accepted=True,
+            persisted=True,
+        )
 
 
 class _DesktopBashFactory:
@@ -311,8 +362,10 @@ class _DesktopBashFactory:
         progress_cb,
         bash_approval_handler,
         bash_command_runner,
+        conversation_repository,
+        project_id,
     ) -> _DesktopBashSession:
-        del load_mcp
+        del load_mcp, conversation_repository, project_id
         self.created = _DesktopBashSession(
             config,
             progress_cb,
@@ -342,6 +395,10 @@ def _service(tmp_path: Path, **kwargs) -> DesktopService:
         config=config,
         **kwargs,
     )
+
+
+def _turn_params(text: str, *, turn_id: str | None = None) -> dict[str, str]:
+    return {"text": text, "turnId": turn_id or uuid.uuid4().hex}
 
 
 def test_diagnostics_stays_available_without_provider_keys(tmp_path: Path) -> None:
@@ -417,7 +474,15 @@ def test_session_create_is_single_flight_and_blocks_shutdown(tmp_path: Path) -> 
         create_release = asyncio.Event()
         calls = 0
 
-        async def factory(config, *, load_mcp, progress_cb):
+        async def factory(
+            config,
+            *,
+            load_mcp,
+            progress_cb,
+            conversation_repository,
+            project_id,
+        ):
+            del load_mcp, conversation_repository, project_id
             nonlocal calls
             calls += 1
             create_started.set()
@@ -459,11 +524,13 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
     assert session is not None
 
     raw_text = "  keep this spacing exactly  "
-    answer = asyncio.run(service.dispatch("session.turn", {"text": raw_text}))
+    answer = asyncio.run(service.dispatch("session.turn", _turn_params(raw_text)))
     assert session.turn_inputs == [raw_text]
     assert answer["responseKind"] == "answer"
 
-    status = asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+    status = asyncio.run(
+        service.dispatch("session.turn", _turn_params("/status"))
+    )
     assert session.turn_inputs == [raw_text]
     assert status["responseKind"] == "command"
     assert status["streamKind"] == "final_only"
@@ -480,10 +547,10 @@ def test_composer_routes_dynamic_skill_once_as_answer(tmp_path: Path) -> None:
 
     raw_text = '/research draft  "quoted"   text'
     skill_answer = asyncio.run(
-        service.dispatch("session.turn", {"text": raw_text})
+        service.dispatch("session.turn", _turn_params(raw_text))
     )
     ordinary_answer = asyncio.run(
-        service.dispatch("session.turn", {"text": "ordinary follow-up"})
+        service.dispatch("session.turn", _turn_params("ordinary follow-up"))
     )
 
     assert skill_answer["responseKind"] == "answer"
@@ -508,15 +575,15 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
 
     status = asyncio.run(service.dispatch(
         "session.turn",
-        {"text": "/extension-management status"},
+        _turn_params("/extension-management status"),
     ))
     preview_gate = asyncio.run(service.dispatch(
         "session.turn",
-        {"text": "/extension-management"},
+        _turn_params("/extension-management"),
     ))
     dry_run_gate = asyncio.run(service.dispatch(
         "session.turn",
-        {"text": "/extension-management --dry-run"},
+        _turn_params("/extension-management --dry-run"),
     ))
 
     assert status["responseKind"] == "command"
@@ -533,7 +600,7 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     with pytest.raises(DesktopServiceError) as invalid:
         asyncio.run(service.dispatch(
             "session.turn",
-            {"text": "/extension-management apply"},
+            _turn_params("/extension-management apply"),
         ))
     assert invalid.value.code == "PROTOCOL_INVALID"
     assert manager.preview_calls == 0
@@ -554,7 +621,7 @@ def test_composer_rejects_invalid_or_disallowed_commands_before_model(
     assert session is not None
 
     with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(service.dispatch("session.turn", {"text": text}))
+        asyncio.run(service.dispatch("session.turn", _turn_params(text)))
 
     assert raised.value.code == "PROTOCOL_INVALID"
     assert session.turn_inputs == []
@@ -574,7 +641,7 @@ def test_composer_rejects_duplicate_skill_collision_before_model(
 
     with pytest.raises(DesktopServiceError) as raised:
         asyncio.run(
-            service.dispatch("session.turn", {"text": "/research prompt"})
+            service.dispatch("session.turn", _turn_params("/research prompt"))
         )
 
     assert raised.value.code == "PROTOCOL_INVALID"
@@ -634,12 +701,12 @@ def test_composer_rejects_aliases_and_unsupported_typed_results(
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     with pytest.raises(DesktopServiceError) as alias_error:
-        asyncio.run(service.dispatch("session.turn", {"text": "/s"}))
+        asyncio.run(service.dispatch("session.turn", _turn_params("/s")))
     assert alias_error.value.code == "PROTOCOL_INVALID"
     assert handler_calls == 0
 
     with pytest.raises(DesktopServiceError) as result_error:
-        asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+        asyncio.run(service.dispatch("session.turn", _turn_params("/status")))
     assert result_error.value.code == "PROTOCOL_INVALID"
     assert handler_calls == 1
     assert factory.created is not None
@@ -669,7 +736,9 @@ def test_composer_bounds_local_command_output_and_safe_errors(
     )
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
-    result = asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+    result = asyncio.run(
+        service.dispatch("session.turn", _turn_params("/status"))
+    )
 
     assert len(result["text"].encode("utf-8")) == 65_536
     assert result["registrationStatus"] == "not_required"
@@ -731,7 +800,7 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
         f"/prune {source} --yes",
     ]
     results = [
-        asyncio.run(service.dispatch("session.turn", {"text": command}))
+        asyncio.run(service.dispatch("session.turn", _turn_params(command)))
         for command in commands
     ]
 
@@ -811,7 +880,7 @@ def test_composer_knowledge_paths_fail_closed_before_injected_operations(
     ]
     for command in invalid:
         with pytest.raises(DesktopServiceError) as raised:
-            asyncio.run(service.dispatch("session.turn", {"text": command}))
+            asyncio.run(service.dispatch("session.turn", _turn_params(command)))
         assert raised.value.code in {"PROTOCOL_INVALID", "INVALID_PATH"}, command
 
     assert called is False
@@ -868,7 +937,7 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     before_source = disk_file.read_bytes()
     before_store = set(fake_store)
     sync = asyncio.run(
-        service.dispatch("session.turn", {"text": f"/sync {root_a}"})
+        service.dispatch("session.turn", _turn_params(f"/sync {root_a}"))
     )
     assert sync["responseKind"] == "command"
     assert disk_file.read_bytes() == before_source
@@ -877,13 +946,13 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     with pytest.raises(DesktopServiceError) as missing:
         asyncio.run(
             service.dispatch(
-                "session.turn", {"text": f"/prune {root_a} --yes"}
+                "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
     assert missing.value.code == "PRUNE_PREVIEW_STALE"
 
     preview = asyncio.run(
-        service.dispatch("session.turn", {"text": f"/prune {root_a}"})
+        service.dispatch("session.turn", _turn_params(f"/prune {root_a}"))
     )
     assert "gone-a.md" in preview["text"]
     assert pruned == []
@@ -892,35 +961,39 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     with pytest.raises(DesktopServiceError) as wrong_root:
         asyncio.run(
             service.dispatch(
-                "session.turn", {"text": f"/prune {root_b} --yes"}
+                "session.turn", _turn_params(f"/prune {root_b} --yes")
             )
         )
     assert wrong_root.value.code == "PRUNE_PREVIEW_STALE"
     with pytest.raises(DesktopServiceError) as consumed_by_mismatch:
         asyncio.run(
             service.dispatch(
-                "session.turn", {"text": f"/prune {root_a} --yes"}
+                "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
     assert consumed_by_mismatch.value.code == "PRUNE_PREVIEW_STALE"
     assert pruned == []
 
-    asyncio.run(service.dispatch("session.turn", {"text": f"/prune {root_a}"}))
+    asyncio.run(
+        service.dispatch("session.turn", _turn_params(f"/prune {root_a}"))
+    )
     fake_store.add("gone-b.md")
     with pytest.raises(DesktopServiceError) as changed:
         asyncio.run(
             service.dispatch(
-                "session.turn", {"text": f"/prune {root_a} --yes"}
+                "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
     assert changed.value.code == "PRUNE_PREVIEW_STALE"
     assert pruned == []
 
     fake_store.remove("gone-b.md")
-    asyncio.run(service.dispatch("session.turn", {"text": f"/prune {root_a}"}))
+    asyncio.run(
+        service.dispatch("session.turn", _turn_params(f"/prune {root_a}"))
+    )
     applied = asyncio.run(
         service.dispatch(
-            "session.turn", {"text": f"/prune {root_a} --yes"}
+            "session.turn", _turn_params(f"/prune {root_a} --yes")
         )
     )
     assert applied["responseKind"] == "command"
@@ -929,7 +1002,7 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     with pytest.raises(DesktopServiceError) as reused:
         asyncio.run(
             service.dispatch(
-                "session.turn", {"text": f"/prune {root_a} --yes"}
+                "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
     assert reused.value.code == "PRUNE_PREVIEW_STALE"
@@ -943,7 +1016,7 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     with pytest.raises(DesktopServiceError) as after_restart:
         asyncio.run(
             restarted.dispatch(
-                "session.turn", {"text": f"/prune {root_a} --yes"}
+                "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
     assert after_restart.value.code == "PRUNE_PREVIEW_STALE"
@@ -980,13 +1053,15 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
         )
         await service.dispatch("session.create", {"loadMcp": False})
         first = asyncio.create_task(
-            service.dispatch("session.turn", {"text": "/init"})
+            service.dispatch("session.turn", _turn_params("/init"))
         )
         await started.wait()
         with pytest.raises(DesktopServiceError) as normal_busy:
-            await service.dispatch("session.turn", {"text": "normal question"})
+            await service.dispatch(
+                "session.turn", _turn_params("normal question")
+            )
         with pytest.raises(DesktopServiceError) as command_busy:
-            await service.dispatch("session.turn", {"text": "/init"})
+            await service.dispatch("session.turn", _turn_params("/init"))
         assert normal_busy.value.code == "BUSY_TURN"
         assert command_busy.value.code == "BUSY_TURN"
         release.set()
@@ -1016,7 +1091,7 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
     )
     asyncio.run(failed.dispatch("session.create", {"loadMcp": False}))
     with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(failed.dispatch("session.turn", {"text": "/init"}))
+        asyncio.run(failed.dispatch("session.turn", _turn_params("/init")))
     assert raised.value.code == "RAG_WRITE_FAILED"
     assert raised.value.details == {"partialWritePossible": True}
     assert "private construction" not in str(raised.value)
@@ -1065,7 +1140,7 @@ def test_composer_rejects_oversized_prune_preview_without_arming_confirmation(
 
     with pytest.raises(DesktopServiceError) as preview:
         asyncio.run(
-            service.dispatch("session.turn", {"text": f"/prune {source}"})
+            service.dispatch("session.turn", _turn_params(f"/prune {source}"))
         )
     assert preview.value.code == "RAG_READ_FAILED"
 
@@ -1073,7 +1148,7 @@ def test_composer_rejects_oversized_prune_preview_without_arming_confirmation(
         asyncio.run(
             service.dispatch(
                 "session.turn",
-                {"text": f"/prune {source} --yes"},
+                _turn_params(f"/prune {source} --yes"),
             )
         )
     assert apply.value.code == "PRUNE_PREVIEW_STALE"
@@ -1094,7 +1169,7 @@ def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) ->
         first = asyncio.create_task(
             service.dispatch(
                 "session.turn",
-                {"text": "/research 第一題"},
+                _turn_params("/research 第一題"),
                 event_sink=lambda event, data: events.append((event, data)),
             )
         )
@@ -1103,10 +1178,10 @@ def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) ->
         with pytest.raises(DesktopServiceError) as second_dynamic:
             await service.dispatch(
                 "session.turn",
-                {"text": "/research 第二題"},
+                _turn_params("/research 第二題"),
             )
         with pytest.raises(DesktopServiceError) as second:
-            await service.dispatch("session.turn", {"text": "第二題"})
+            await service.dispatch("session.turn", _turn_params("第二題"))
         with pytest.raises(DesktopServiceError) as mutation:
             await service.dispatch("session.set_mode", {"mode": "plan"})
 
@@ -1140,7 +1215,7 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
         turn = asyncio.create_task(
             service.dispatch(
                 "session.turn",
-                {"text": "/research cancellable prompt"},
+                _turn_params("/research cancellable prompt"),
             )
         )
         await session.turn_started.wait()
@@ -1156,37 +1231,15 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
         session.block_turn = False
         assert await service.dispatch("session.shutdown", {}) == {
             "status": "stopped",
-            "flushed": True,
         }
+        assert session.flush_calls == 0
 
     asyncio.run(run())
 
 
-def test_shutdown_detects_swallowed_flush_failure_and_allows_retry(
+def test_session_shutdown_never_calls_legacy_flush(
     tmp_path: Path,
 ) -> None:
-    factory = _SessionFactory()
-    service = _service(tmp_path, session_factory=factory)
-    asyncio.run(service.dispatch("session.create", {}))
-    session = factory.created
-    assert session is not None
-    session.recent_turns.append(object())
-    session.leave_turns_after_flush = True
-
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(service.dispatch("session.shutdown", {}))
-
-    assert raised.value.code == "SHUTDOWN_FLUSH_FAILED"
-    assert raised.value.details == {"remainingTurns": 1}
-    assert service.session is session
-    session.leave_turns_after_flush = False
-    result = asyncio.run(service.dispatch("session.shutdown", {}))
-    assert result == {"status": "stopped", "flushed": True}
-    assert session.flush_calls == 2
-    assert service.session is None
-
-
-def test_concurrent_runtime_shutdown_cannot_reopen_backend(tmp_path: Path) -> None:
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
@@ -1194,29 +1247,20 @@ def test_concurrent_runtime_shutdown_cannot_reopen_backend(tmp_path: Path) -> No
         session = factory.created
         assert session is not None
         session.block_flush = True
-        first = asyncio.create_task(service.dispatch("runtime.shutdown", {}))
-        await session.flush_started.wait()
 
-        with pytest.raises(DesktopServiceError) as second:
-            await service.dispatch("runtime.shutdown", {})
-        with pytest.raises(DesktopServiceError) as late_work:
-            await service.dispatch("session.turn", {"text": "too late"})
+        result = await asyncio.wait_for(
+            service.dispatch("session.shutdown", {}),
+            timeout=1,
+        )
 
-        assert second.value.code == "SESSION_NOT_READY"
-        assert late_work.value.code == "SESSION_NOT_READY"
-        assert service.lifecycle == "shutting_down"
-        session.flush_release.set()
-        assert await first == {"status": "stopped", "flushed": True}
-        assert service.lifecycle == "stopped"
-        assert await service.dispatch("runtime.shutdown", {}) == {
-            "status": "stopped",
-            "flushed": True,
-        }
+        assert result == {"status": "stopped"}
+        assert session.flush_calls == 0
+        assert service.session is None
 
     asyncio.run(run())
 
 
-def test_session_shutdown_blocks_new_work_while_flushing(tmp_path: Path) -> None:
+def test_runtime_shutdown_is_idempotent_without_legacy_flush(tmp_path: Path) -> None:
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
@@ -1224,18 +1268,17 @@ def test_session_shutdown_blocks_new_work_while_flushing(tmp_path: Path) -> None
         session = factory.created
         assert session is not None
         session.block_flush = True
-        shutdown = asyncio.create_task(service.dispatch("session.shutdown", {}))
-        await session.flush_started.wait()
 
-        with pytest.raises(DesktopServiceError) as turn:
-            await service.dispatch("session.turn", {"text": "too late"})
-        with pytest.raises(DesktopServiceError) as extension:
-            await service.dispatch("extensions.status", {})
-
-        assert turn.value.code == "SESSION_NOT_READY"
-        assert extension.value.code == "SESSION_NOT_READY"
-        session.flush_release.set()
-        assert await shutdown == {"status": "stopped", "flushed": True}
+        assert await asyncio.wait_for(
+            service.dispatch("runtime.shutdown", {}),
+            timeout=1,
+        ) == {"status": "stopped"}
+        assert service.lifecycle == "stopped"
+        assert await service.dispatch("runtime.shutdown", {}) == {"status": "stopped"}
+        assert session.flush_calls == 0
+        with pytest.raises(DesktopServiceError) as late_work:
+            await service.dispatch("session.turn", _turn_params("too late"))
+        assert late_work.value.code == "SESSION_NOT_READY"
 
     asyncio.run(run())
 
@@ -1468,7 +1511,7 @@ def test_pending_bash_turn_blocks_extension_preview(tmp_path: Path) -> None:
             "00000000-0000-4000-8000-000000000309"
         )
         turn = asyncio.create_task(service.dispatch(
-            "session.turn", {"text": "bash"}, event_sink=sink
+            "session.turn", _turn_params("bash"), event_sink=sink
         ))
         await asyncio.wait_for(sink.approval_ready.wait(), timeout=1)
         event = next(
@@ -1516,7 +1559,7 @@ def test_extension_preview_blocks_a_concurrent_session_turn(tmp_path: Path) -> N
         assert await asyncio.to_thread(preview_started.wait, 1)
 
         with pytest.raises(DesktopServiceError) as blocked:
-            await service.dispatch("session.turn", {"text": "question"})
+            await service.dispatch("session.turn", _turn_params("question"))
         assert blocked.value.code == "BUSY_EXTENSION_OPERATION"
         assert factory.created is not None
         assert factory.created.turn_inputs == []
@@ -1555,7 +1598,7 @@ def test_desktop_bash_approve_executes_once_and_replay_is_denied(
         )
         turn = asyncio.create_task(service.dispatch(
             "session.turn",
-            {"text": "bash"},
+            _turn_params("bash"),
             event_sink=sink,
         ))
         await asyncio.wait_for(sink.approval_ready.wait(), timeout=1)
@@ -1619,7 +1662,7 @@ def test_desktop_bash_deny_timeout_and_unsafe_context_execute_nothing(
             "00000000-0000-4000-8000-000000000302"
         )
         denied_turn = asyncio.create_task(service.dispatch(
-            "session.turn", {"text": "bash"}, event_sink=denied_sink
+            "session.turn", _turn_params("bash"), event_sink=denied_sink
         ))
         await asyncio.wait_for(denied_sink.approval_ready.wait(), timeout=1)
         denied = next(
@@ -1637,7 +1680,7 @@ def test_desktop_bash_deny_timeout_and_unsafe_context_execute_nothing(
             "00000000-0000-4000-8000-000000000303"
         )
         timed_out = await asyncio.wait_for(service.dispatch(
-            "session.turn", {"text": "bash"}, event_sink=timeout_sink
+            "session.turn", _turn_params("bash"), event_sink=timeout_sink
         ), timeout=1)
         assert timeout_sink.approval_ready.is_set()
         assert json.loads(timed_out["text"])["approved"] is False
@@ -1647,7 +1690,7 @@ def test_desktop_bash_deny_timeout_and_unsafe_context_execute_nothing(
                 "00000000-0000-4000-8000-000000000304"
             )
             unsafe = await service.dispatch(
-                "session.turn", {"text": text}, event_sink=unsafe_sink
+                "session.turn", _turn_params(text), event_sink=unsafe_sink
             )
             assert json.loads(unsafe["text"])["approved"] is False
             assert not any(
@@ -1688,7 +1731,7 @@ def test_desktop_bash_rejects_unknown_and_clears_matching_mismatch(
             "00000000-0000-4000-8000-000000000305"
         )
         first_turn = asyncio.create_task(service.dispatch(
-            "session.turn", {"text": "bash"}, event_sink=first_sink
+            "session.turn", _turn_params("bash"), event_sink=first_sink
         ))
         await first_sink.approval_ready.wait()
         first = next(
@@ -1715,7 +1758,7 @@ def test_desktop_bash_rejects_unknown_and_clears_matching_mismatch(
             "00000000-0000-4000-8000-000000000306"
         )
         second_turn = asyncio.create_task(service.dispatch(
-            "session.turn", {"text": "bash"}, event_sink=second_sink
+            "session.turn", _turn_params("bash"), event_sink=second_sink
         ))
         await second_sink.approval_ready.wait()
         second = next(
@@ -1760,7 +1803,7 @@ def test_conversation_replacement_or_shutdown_denies_pending_bash(
             "00000000-0000-4000-8000-000000000307"
         )
         turn = asyncio.create_task(service.dispatch(
-            "session.turn", {"text": "bash"}, event_sink=sink
+            "session.turn", _turn_params("bash"), event_sink=sink
         ))
         await sink.approval_ready.wait()
 
