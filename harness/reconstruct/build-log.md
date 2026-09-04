@@ -348,3 +348,16 @@ Material implementation events append with this shape:
 - **Evidence reference:** migration Green commit=`fa62b11`。
 - **Limitations:** 未執行真實store migration、provider、Ollama或live Chroma；fixture以外沒有自動batch入口。
 - **Blockers:** None；下一步實作六個fixture-only subprocess checkpoint Green。
+
+## 2026-09-05 01:10 CST — Phase 07: subprocess crash Green and focused gap closure
+
+- **Status:** `In progress`；六個durability checkpoint與盤點出的focused evidence gaps已Green，native/manual與final broad checks仍待完成。
+- **Crash fixture:** 只有exact `phase02` fixture crash env + canonical target turn ID會使用repository checkpoint subclass。Marker先在private temp完整write+fsync，再以hard link原子發布、完成directory fsync與temp cleanup後建立ready sidecar；parent看到ready才SIGKILL。Provider/tool/citation rejection ledger使用allowlisted compact JSONL、`O_APPEND|O_NOFOLLOW`與file fsync。Normal production完全不import fixture；未設定target的normal/migration fixture仍使用原本repository。
+- **Six observed outcomes:** prompt temp前kill不改canonical且可正常重送；pending publish後kill重啟成interrupted且不auto replay；tool side effect後kill保留provider/tool各一次且不自動重跑；real citation gate rejection後unsafe draft未成為completed authority；completed temp fsync後kill仍以pending canonical為準並忽略orphan temp；completed commit後、terminal delivery前kill由同ID取回相同answer且provider仍只有一次。
+- **Focused gap closure:** pre-replace tempfile create/write/fsync failures都回`ConversationUnavailableError`、canonical bytes不變、無temp residue且不執行replace；normal與extended各完成一筆後restart，兩筆同時恢復completed且canonical保留各自mode，process-local control依現行契約重設normal；integrated fixture journey明確確認全程不建立`store/chat_history`。
+- **Verification:** crash subprocess module最後一次exit 0，`6 passed, 1 warning in 12.90s`；default fixture module exit 0，`17 passed, 1 warning in 2.69s`；較廣fixture/repository/server selector exit 0，`51 passed, 1 warning in 3.11s`；三項gap selector exit 0，`5 passed, 1 warning in 2.52s`。Warning皆只有既有LangGraph pending-deprecation，`git diff --check`通過。
+- **Test correction:** 原citation test一度同時要求結果精確等於既有policy safe message、又禁止該safe diagnostic中描述被拒marker的token，兩條互斥；已修成禁止完整unsafe draft被回傳/持久化，同時精確比對real policy safe replacement與`citation_rejected` sentinel，未修改Citation production行為。
+- **Fresh review:** reviewers確認六個checkpoint的真實durability位置；另發現並修正final marker提早可見的race。原子發布+ready gate後無open P1/P2，沒有殘留backend child。
+- **Evidence references:** focused gap tests=`9d4a2bf`；crash Green=`4ab4b5b`。
+- **Limitations:** 這是real Python backend subprocess + fixture external owners，不是React/Rust/native Tauri人工驗收，也未呼叫live provider、Ollama或真實user store。
+- **Blockers:** None；下一步更新active docs，完成layered cross-language/final broad checks與blocking native manual journey。
