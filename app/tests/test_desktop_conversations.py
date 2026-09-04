@@ -1698,8 +1698,25 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
         session_factory=_CoordinatorFactory(new_ids=(SESSION_D,)),
         environ={},
     )
-    unavailable_projects = asyncio.run(malformed_service.dispatch("project.list", {}))
-    _assert_result("project.list", unavailable_projects, 254)
-    assert unavailable_projects["status"] == "unavailable"
-    assert unavailable_projects["projects"] == []
-    assert (malformed_dir / CATALOG_FILENAME).read_bytes() == malformed_bytes
+    rebuilt_projects = asyncio.run(malformed_service.dispatch("project.list", {}))
+    _assert_result("project.list", rebuilt_projects, 254)
+    assert rebuilt_projects == {
+        "status": "ready",
+        "issue": None,
+        "projects": [{
+            "projectId": "local",
+            "name": "Local research",
+            "sessionCount": 0,
+        }],
+        "selectedProjectId": "local",
+        "selectedSessionId": None,
+    }
+    assert json.loads(
+        (malformed_dir / CATALOG_FILENAME).read_text(encoding="utf-8")
+    ) == {
+        "projects": [{
+            "projectId": "local",
+            "name": "Local research",
+            "sessionIds": [],
+        }]
+    }

@@ -8,8 +8,11 @@ import os
 import re
 import tempfile
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
+
+from agent.conversations import ConversationSummary
 
 CATALOG_FILENAME = "desktop-projects.json"
 CATALOG_MAX_BYTES = 1024 * 1024
@@ -179,6 +182,110 @@ class DesktopProjectCatalog:
         if target is None:
             raise CatalogConflictError(f"unknown projectId: {project_id}")
         target["sessionIds"].append(session_id)
+        validated = _validate_snapshot(candidate)
+        self._atomic_replace(validated)
+        self._snapshot = validated
+        return True
+
+    @classmethod
+    def rebuild_from_conversations(
+        cls,
+        persist_dir: str | Path,
+        summaries: Iterable[ConversationSummary],
+    ) -> "DesktopProjectCatalog":
+        """Replace a missing or malformed index from healthy JSON summaries."""
+        catalog = cls.__new__(cls)
+        catalog.path = Path(persist_dir) / CATALOG_FILENAME
+        grouped: dict[str, list[ConversationSummary]] = {}
+        for summary in summaries:
+            if summary.project_id is None:
+                continue
+            grouped.setdefault(summary.project_id, []).append(summary)
+
+        project_ids = sorted(grouped)
+        if DEFAULT_PROJECT_ID in project_ids:
+            project_ids.remove(DEFAULT_PROJECT_ID)
+        project_ids.insert(0, DEFAULT_PROJECT_ID)
+        candidate = {
+            "projects": [
+                {
+                    "projectId": project_id,
+                    "name": (
+                        DEFAULT_PROJECT_NAME
+                        if project_id == DEFAULT_PROJECT_ID
+                        else project_id
+                    ),
+                    "sessionIds": [
+                        summary.conversation_id
+                        for summary in sorted(
+                            grouped.get(project_id, ()),
+                            key=lambda item: (
+                                item.created_at,
+                                item.conversation_id,
+                            ),
+                        )
+                    ],
+                }
+                for project_id in project_ids
+            ]
+        }
+        validated = _validate_snapshot(candidate)
+        catalog._atomic_replace(validated)
+        catalog._snapshot = validated
+        return catalog
+
+    def reconcile_conversations(
+        self,
+        summaries: Iterable[ConversationSummary],
+    ) -> bool:
+        """Add or relocate healthy JSON sessions without removing missing entries."""
+        candidate = copy.deepcopy(self._snapshot)
+        additions: dict[str, list[ConversationSummary]] = {}
+        changed = False
+        for summary in summaries:
+            project_id = summary.project_id
+            if project_id is None:
+                continue
+            owner = self.project_for_session(summary.conversation_id)
+            if owner == project_id:
+                continue
+            if owner is not None:
+                owner_entry = next(
+                    project
+                    for project in candidate["projects"]
+                    if project["projectId"] == owner
+                )
+                owner_entry["sessionIds"].remove(summary.conversation_id)
+            additions.setdefault(project_id, []).append(summary)
+            changed = True
+
+        known_projects = {
+            project["projectId"]: project for project in candidate["projects"]
+        }
+        for project_id in sorted(additions):
+            project = known_projects.get(project_id)
+            if project is None:
+                project = {
+                    "projectId": project_id,
+                    "name": (
+                        DEFAULT_PROJECT_NAME
+                        if project_id == DEFAULT_PROJECT_ID
+                        else project_id
+                    ),
+                    "sessionIds": [],
+                }
+                candidate["projects"].append(project)
+                known_projects[project_id] = project
+            project["sessionIds"].extend(
+                summary.conversation_id
+                for summary in sorted(
+                    additions[project_id],
+                    key=lambda item: (item.created_at, item.conversation_id),
+                )
+            )
+
+        if not changed:
+            return False
         validated = _validate_snapshot(candidate)
         self._atomic_replace(validated)
         self._snapshot = validated

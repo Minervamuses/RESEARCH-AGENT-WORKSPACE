@@ -244,7 +244,16 @@ class DesktopService:
         if self._catalog is None:
             try:
                 self._catalog = DesktopProjectCatalog(self.config.persist_dir)
-            except (CatalogMalformedError, CatalogUnavailableError):
+            except CatalogMalformedError:
+                try:
+                    scan = self._conversation_repository.scan()
+                    self._catalog = DesktopProjectCatalog.rebuild_from_conversations(
+                        self.config.persist_dir,
+                        scan.summaries,
+                    )
+                except (ConversationError, CatalogError):
+                    self._catalog_issue = "The local project catalog is unavailable."
+            except CatalogUnavailableError:
                 self._catalog_issue = "The local project catalog is unavailable."
         self._reconcile_lagged_catalog_entries()
         catalog_projects = (
@@ -896,22 +905,9 @@ class DesktopService:
             return
         try:
             scan = self._conversation_repository.scan()
-            project_ids = {
-                project["projectId"]
-                for project in catalog.snapshot()["projects"]
-            }
+            catalog.reconcile_conversations(scan.summaries)
         except (ConversationError, CatalogError):
             return
-        for summary in reversed(scan.summaries):
-            project_id = summary.project_id
-            if project_id not in project_ids:
-                continue
-            if catalog.project_for_session(summary.conversation_id) is not None:
-                continue
-            try:
-                catalog.register_session(project_id, summary.conversation_id)
-            except CatalogError:
-                return
 
     def _require_catalog_project(self, project_id: str) -> dict[str, Any]:
         if self._catalog is None:
