@@ -7,11 +7,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from conftest import FakeHistoryStore, make_astream_graph, tool_then_answer_updates
 
 from agent.config import AgentConfig
+from agent.conversations import (
+    ConversationRepository,
+    ConversationTurn,
+    ConversationUnavailableError,
+    ToolActivitySummary,
+)
+from agent.conversations.legacy import LegacyConversationReader
+from agent.conversations.migration import ConversationMigrator
 from agent.desktop.catalog import (
     CATALOG_FILENAME,
     CATALOG_MAX_BYTES,
@@ -23,10 +31,8 @@ from agent.desktop.catalog import (
 )
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
-from agent.history_rag.store import HistoryRestoreError
 from agent.session import ChatSession
-from agent.turns.memory import ToolActivityRecord, TurnRecord
-from agent.turns.plan_log import PlanLog
+from agent.turns.memory import TurnRecord
 from agent.turns.results import TurnOutcome
 
 SESSION_A = "28b222e0cc6543aa8d7bbdc423de99a7"
@@ -39,29 +45,19 @@ class _CoordinatorSession:
     def __init__(
         self,
         config,
-        persisted,
         *,
         session_id,
-        restored_turns,
+        project_id,
+        conversation_repository,
         progress_cb,
     ):
         self.config = config
-        self._persisted = persisted
+        self._repository = conversation_repository
+        self.project_id = project_id
         self.progress_cb = progress_cb
         self.session_id = session_id
-        self.recent_turns = [
-            TurnRecord(
-                turn.user_input,
-                turn.assistant_output,
-                turn_id=turn.turn_id,
-                timestamp=turn.timestamp,
-                persist_target="none",
-                tool_activities=tuple(turn.tool_activities),
-            )
-            for turn in restored_turns
-        ]
-        self._turn_count = self.recent_turns[-1].turn_id if self.recent_turns else 0
         self.turn_inputs = []
+        self.turn_requests = []
         self.contexts = []
         self.plan_mode = False
         self.plan_log_path = None
@@ -70,48 +66,123 @@ class _CoordinatorSession:
         self.mcp_families = {}
         self.running_extension_revision = 0
         self.extension_startup_diagnostics = ()
-        self.fail_flush = False
-        self.leave_after_flush = False
         self.flush_calls = 0
 
-    async def turn_outcome(self, text, *, skill_name=None):
+    @property
+    def _snapshot(self):
+        return self._repository.load_optional(self.session_id)
+
+    @property
+    def recent_turns(self):
+        snapshot = self._snapshot
+        if snapshot is None:
+            return []
+        return [
+            SimpleNamespace(
+                user_input=turn.user_input,
+                assistant_output=turn.assistant_output,
+                turn_id=turn.turn_number,
+                logical_turn_id=turn.turn_id,
+            )
+            for turn in self._repository.latest_context(snapshot)
+        ]
+
+    async def turn_outcome(
+        self,
+        text,
+        *,
+        display_input=None,
+        turn_id=None,
+        skill_name=None,
+        retry=False,
+    ):
         assert skill_name is None
+        assert isinstance(turn_id, str)
+        snapshot = self._snapshot
+        context = self._repository.latest_context(snapshot) if snapshot else ()
+        self.contexts.append([turn.user_input for turn in context])
+        display = text if display_input is None else display_input
+        values = {
+            "turn_id": turn_id,
+            "kind": "conversational",
+            "display_input": display,
+            "semantic_input": text,
+            "context_eligible": True,
+            "thinking_mode": self.thinking_mode,
+        }
+        next_number = len(snapshot.document.turns) + 1 if snapshot else 1
+        timestamp = f"2026-08-29T00:{next_number:02d}:00Z"
+        if snapshot is None:
+            snapshot = self._repository.create(
+                conversation_id=self.session_id,
+                project_id=self.project_id,
+                submitted_at=timestamp,
+                **values,
+            )
+        else:
+            existing = next(
+                (
+                    turn
+                    for turn in snapshot.document.turns
+                    if turn.turn_id == turn_id
+                ),
+                None,
+            )
+            if existing is not None and existing.state in {"failed", "interrupted"}:
+                assert retry is True
+                snapshot = self._repository.retry_turn(
+                    snapshot,
+                    retry_at=timestamp,
+                    **values,
+                )
+            else:
+                snapshot = self._repository.append_pending(
+                    snapshot,
+                    submitted_at=timestamp,
+                    **values,
+                )
+            existing = next(
+                turn for turn in snapshot.document.turns if turn.turn_id == turn_id
+            )
+            if existing.state == "completed":
+                return TurnOutcome(
+                    text=existing.assistant_output or "",
+                    turn_id=turn_id,
+                    turn_number=existing.turn_number,
+                    state="completed",
+                    accepted=True,
+                    persisted=True,
+                )
+
         self.turn_inputs.append(text)
-        self.contexts.append([turn.user_input for turn in self.recent_turns])
-        self._turn_count += 1
+        self.turn_requests.append({
+            "semantic_input": text,
+            "display_input": display,
+            "turn_id": turn_id,
+        })
         answer = f"answer:{self.session_id[:4]}:{text}"
-        self.recent_turns.append(TurnRecord(
-            user_input=text,
+        snapshot = self._repository.complete_turn(
+            snapshot,
+            turn_id=turn_id,
             assistant_output=answer,
-            turn_id=self._turn_count,
-            timestamp=f"2026-08-28T00:00:{self._turn_count:02d}Z",
-            persist_target="chroma",
-        ))
-        return TurnOutcome(text=answer, validation_errors=[])
+            finished_at=timestamp,
+        )
+        completed = next(
+            turn for turn in snapshot.document.turns if turn.turn_id == turn_id
+        )
+        return TurnOutcome(
+            text=answer,
+            validation_errors=[],
+            turn_id=turn_id,
+            turn_number=completed.turn_number,
+            state="completed",
+            accepted=True,
+            persisted=True,
+        )
 
     async def flush_recent_turns(self):
         self.flush_calls += 1
-        if self.fail_flush:
-            raise OSError("simulated flush failure")
-        existing = {
-            turn.turn_id: turn
-            for turn in self._persisted.get(self.session_id, [])
-        }
-        for turn in self.recent_turns:
-            if turn.persist_target != "none":
-                existing[turn.turn_id] = TurnRecord(
-                    turn.user_input,
-                    turn.assistant_output,
-                    turn_id=turn.turn_id,
-                    timestamp=turn.timestamp,
-                    persist_target="none",
-                    tool_activities=tuple(turn.tool_activities),
-                )
-        self._persisted[self.session_id] = [
-            existing[turn_id] for turn_id in sorted(existing)
-        ]
-        if not self.leave_after_flush:
-            self.recent_turns.clear()
+        raise AssertionError("canonical write-through sessions must never flush")
 
     async def enter_plan_mode(self):
         self.plan_mode = True
@@ -131,9 +202,11 @@ class _CoordinatorSession:
         self.thinking_mode = mode
 
     def status_snapshot(self):
+        snapshot = self._snapshot
+        turn_count = len(snapshot.document.turns) if snapshot else 0
         return {
             "session_id": self.session_id,
-            "turn_count": self._turn_count,
+            "turn_count": turn_count,
             "recent_turn_count": len(self.recent_turns),
             "graph_recursion_limit": self.config.graph_recursion_limit,
             "last_tool_counts": "none",
@@ -145,8 +218,7 @@ class _CoordinatorSession:
 
 
 class _CoordinatorFactory:
-    def __init__(self, persisted, new_ids=()):
-        self.persisted = persisted
+    def __init__(self, new_ids=()):
         self.new_ids = list(new_ids)
         self.sessions = []
         self.load_mcp_calls = []
@@ -158,32 +230,75 @@ class _CoordinatorFactory:
         load_mcp,
         progress_cb,
         session_id=None,
-        restored_turns=None,
+        conversation_repository=None,
+        project_id=None,
     ):
         self.load_mcp_calls.append(load_mcp)
         resolved_id = session_id or self.new_ids.pop(0)
         session = _CoordinatorSession(
             config,
-            self.persisted,
             session_id=resolved_id,
-            restored_turns=list(restored_turns or []),
+            project_id=project_id,
+            conversation_repository=conversation_repository,
             progress_cb=progress_cb,
         )
         self.sessions.append(session)
         return session
 
 
-def _stored_turn(session_id, turn_id=1):
-    return TurnRecord(
-        user_input=f"{session_id[:4]} question {turn_id}",
-        assistant_output=f"{session_id[:4]} answer {turn_id}",
+def _logical_turn_id(value: int) -> str:
+    return uuid.UUID(int=value, version=4).hex
+
+
+def _append_completed_turn(
+    repository,
+    session_id,
+    project_id,
+    turn_number=1,
+    *,
+    display_input=None,
+    semantic_input=None,
+    assistant_output=None,
+    tool_activities=(),
+):
+    display = display_input or f"{session_id[:4]} question {turn_number}"
+    semantic = semantic_input or display
+    answer = assistant_output or f"{session_id[:4]} answer {turn_number}"
+    turn_id = _logical_turn_id(turn_number)
+    timestamp = f"2026-08-27T00:{turn_number:02d}:00Z"
+    snapshot = repository.load_optional(session_id)
+    values = {
+        "turn_id": turn_id,
+        "kind": "conversational",
+        "display_input": display,
+        "semantic_input": semantic,
+        "context_eligible": True,
+        "thinking_mode": "normal",
+        "submitted_at": timestamp,
+    }
+    if snapshot is None:
+        snapshot = repository.create(
+            conversation_id=session_id,
+            project_id=project_id,
+            **values,
+        )
+    else:
+        snapshot = repository.append_pending(snapshot, **values)
+    return repository.complete_turn(
+        snapshot,
         turn_id=turn_id,
-        timestamp=f"2026-08-27T00:00:{turn_id:02d}Z",
-        persist_target="none",
+        assistant_output=answer,
+        finished_at=timestamp,
+        tool_activities=tuple(tool_activities),
     )
 
 
-def _seed_coordinator(tmp_path, *, new_ids=()):
+def _seed_coordinator(
+    tmp_path,
+    *,
+    new_ids=(),
+    seeded_sessions=(SESSION_A, SESSION_B, SESSION_C),
+):
     persist_dir = tmp_path / "coordinator-store"
     persist_dir.mkdir()
     (persist_dir / CATALOG_FILENAME).write_text(json.dumps({
@@ -200,13 +315,20 @@ def _seed_coordinator(tmp_path, *, new_ids=()):
             },
         ]
     }), encoding="utf-8")
-    persisted = {
-        SESSION_A: [_stored_turn(SESSION_A)],
-        SESSION_B: [_stored_turn(SESSION_B)],
-        SESSION_C: [_stored_turn(SESSION_C)],
+    repository = ConversationRepository(persist_dir)
+    projects = {
+        SESSION_A: "p1",
+        SESSION_B: "p1",
+        SESSION_C: "p2",
     }
+    for session_id in seeded_sessions:
+        _append_completed_turn(
+            repository,
+            session_id,
+            projects[session_id],
+        )
     catalog = DesktopProjectCatalog(persist_dir)
-    factory = _CoordinatorFactory(persisted, new_ids=new_ids)
+    factory = _CoordinatorFactory(new_ids=new_ids)
     config = AgentConfig(
         persist_dir=str(persist_dir),
         plan_logs_dir=str(tmp_path / "plans"),
@@ -215,6 +337,7 @@ def _seed_coordinator(tmp_path, *, new_ids=()):
         original_cwd=tmp_path,
         config=config,
         project_catalog=catalog,
+        conversation_repository=repository,
         session_factory=factory,
         environ={
             "CONDA_DEFAULT_ENV": "app",
@@ -222,37 +345,7 @@ def _seed_coordinator(tmp_path, *, new_ids=()):
         },
     )
 
-    def read_turns(session_id, include_current):
-        by_id = {
-            turn.turn_id: TurnRecord(
-                turn.user_input,
-                turn.assistant_output,
-                turn_id=turn.turn_id,
-                timestamp=turn.timestamp,
-                persist_target="none",
-                tool_activities=tuple(turn.tool_activities),
-            )
-            for turn in persisted.get(session_id, [])
-        }
-        current = service.session
-        if (
-            include_current
-            and current is not None
-            and current.session_id == session_id
-        ):
-            for turn in current.recent_turns:
-                by_id[turn.turn_id] = TurnRecord(
-                    turn.user_input,
-                    turn.assistant_output,
-                    turn_id=turn.turn_id,
-                    timestamp=turn.timestamp,
-                    persist_target="none",
-                    tool_activities=tuple(turn.tool_activities),
-                )
-        return [by_id[turn_id] for turn_id in sorted(by_id)]
-
-    service._read_conversation_turns = read_turns
-    return service, catalog, factory, persisted
+    return service, catalog, factory, repository
 
 
 def _assert_result(method, data, suffix):
@@ -358,27 +451,10 @@ def test_catalog_rejects_noncanonical_uuid4_session_ids(tmp_path, value):
         catalog.register_session("local", value)
 
 
-def test_session_restore_merges_sources_and_persists_only_the_new_turn(
+def test_session_restore_uses_only_canonical_history_and_writes_through(
     tmp_path,
     monkeypatch,
 ):
-    class FakeStore:
-        def __init__(self):
-            self.adds = []
-
-        def read_session_turns(self, session_id):
-            assert session_id == SESSION_A
-            return [TurnRecord(
-                user_input="stored q1",
-                assistant_output="stored a1",
-                turn_id=1,
-                timestamp="2026-08-28T01:00:00+00:00",
-                persist_target="none",
-            )]
-
-        def add_turn(self, turn, **metadata):
-            self.adds.append((turn, metadata))
-
     async def fake_startup(_config, *, load_mcp):
         assert load_mcp is False
         return SimpleNamespace(
@@ -392,25 +468,20 @@ def test_session_restore_merges_sources_and_persists_only_the_new_turn(
 
     config = AgentConfig(persist_dir=str(tmp_path / "persist"))
     config.agent_recent_turns_window = 10
-    plan_log = PlanLog(
-        config,
-        session_id=SESSION_A,
-        app_root_resolver=lambda: tmp_path,
+    repository = ConversationRepository(config.persist_dir)
+    _append_completed_turn(
+        repository,
+        SESSION_A,
+        "p1",
+        display_input="canonical display q1",
+        semantic_input="canonical semantic q1",
+        assistant_output="canonical a1",
     )
-    log_path = plan_log.new_log_file()
-    plan_log.append_block(str(log_path), plan_log.render_block(
-        turn_id=2,
-        timestamp="2026-08-28T02:00:00+00:00",
-        user_input="plan q2",
-        answer="plan a2",
-        new_messages=[],
-        tool_calls=[],
-    ))
-    store = FakeStore()
+    store = FakeHistoryStore()
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
     monkeypatch.setattr(
         "agent.session.build_graph",
-        lambda _cfg, **_kwargs: make_astream_graph(),
+        lambda _cfg, **_kwargs: make_astream_graph(answer="canonical a2"),
     )
     monkeypatch.setattr("agent.startup.load_session_startup", fake_startup)
 
@@ -418,21 +489,37 @@ def test_session_restore_merges_sources_and_persists_only_the_new_turn(
         config,
         session_id=SESSION_A,
         history_store=store,
+        conversation_repository=repository,
+        project_id="p1",
         load_mcp=False,
     ))
 
     assert session.session_id == SESSION_A
-    assert [turn.turn_id for turn in session.recent_turns] == [1, 2]
-    assert session._turn_counter == 2
-    asyncio.run(session.turn("new q3"))
-    asyncio.run(session.flush_recent_turns())
-    assert len(store.adds) == 1
-    assert store.adds[0][0].turn_id == 3
-    assert store.adds[0][0].user_input == "new q3"
+    assert [turn.user_input for turn in session.recent_turns] == [
+        "canonical semantic q1"
+    ]
+    assert session._turn_counter == 1
+    answer = asyncio.run(session.turn(
+        "canonical semantic q2",
+        display_input="/skill canonical semantic q2",
+        turn_id=_logical_turn_id(102),
+    ))
+    snapshot = repository.load(SESSION_A)
+
+    assert answer == "canonical a2"
+    assert store.adds == []
+    assert [turn.state for turn in snapshot.document.turns] == [
+        "completed",
+        "completed",
+    ]
+    assert snapshot.document.turns[1].display_input == (
+        "/skill canonical semantic q2"
+    )
+    assert snapshot.document.turns[1].semantic_input == "canonical semantic q2"
 
 
 def test_coordinator_preserves_p1_p2_membership_order_across_restart(tmp_path):
-    service, catalog, _factory, persisted = _seed_coordinator(tmp_path)
+    service, catalog, _factory, repository = _seed_coordinator(tmp_path)
 
     projects = asyncio.run(service.dispatch("project.list", {}))
     p1 = asyncio.run(service.dispatch(
@@ -456,27 +543,18 @@ def test_coordinator_preserves_p1_p2_membership_order_across_restart(tmp_path):
     }
 
     restarted_catalog = DesktopProjectCatalog(service.config.persist_dir)
-    restarted_factory = _CoordinatorFactory(persisted)
+    restarted_factory = _CoordinatorFactory()
     restarted = DesktopService(
         original_cwd=tmp_path,
         config=service.config,
         project_catalog=restarted_catalog,
+        conversation_repository=repository,
         session_factory=restarted_factory,
         environ={
             "CONDA_DEFAULT_ENV": "app",
             "CONDA_PREFIX": "/conda/envs/app",
         },
     )
-    restarted._read_conversation_turns = lambda session_id, _include: [
-        TurnRecord(
-            turn.user_input,
-            turn.assistant_output,
-            turn_id=turn.turn_id,
-            timestamp=turn.timestamp,
-            persist_target="none",
-        )
-        for turn in persisted.get(session_id, [])
-    ]
 
     after_restart = asyncio.run(restarted.dispatch("project.list", {}))
     p1_after = asyncio.run(restarted.dispatch(
@@ -499,10 +577,66 @@ def test_coordinator_preserves_p1_p2_membership_order_across_restart(tmp_path):
     assert selected["turnCount"] == 1
     assert selected["thinkingMode"] == "normal"
     assert selected["planMode"] is False
+    assert restarted_factory.sessions[-1].turn_inputs == []
+
+
+def test_restart_discovers_completed_json_missing_from_catalog_without_replay(
+    tmp_path,
+):
+    service, catalog, _factory, repository = _seed_coordinator(tmp_path)
+    _append_completed_turn(
+        repository,
+        SESSION_D,
+        "p1",
+        display_input="saved before catalog registration",
+        assistant_output="already answered",
+    )
+    durable_path = repository.path_for(SESSION_D)
+    durable_before = durable_path.read_bytes()
+    assert catalog.project_for_session(SESSION_D) is None
+
+    restarted_catalog = DesktopProjectCatalog(service.config.persist_dir)
+    restarted_factory = _CoordinatorFactory()
+    restarted = DesktopService(
+        original_cwd=tmp_path,
+        config=service.config,
+        project_catalog=restarted_catalog,
+        conversation_repository=repository,
+        session_factory=restarted_factory,
+        environ={
+            "CONDA_DEFAULT_ENV": "app",
+            "CONDA_PREFIX": "/conda/envs/app",
+        },
+    )
+
+    sessions = asyncio.run(restarted.dispatch(
+        "session.list",
+        {"projectId": "p1", "offset": 0, "limit": 50},
+    ))
+    transcript = asyncio.run(restarted.dispatch(
+        "session.transcript",
+        {"projectId": "p1", "sessionId": SESSION_D, "limit": 20},
+    ))
+    selected = asyncio.run(restarted.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_D},
+    ))
+
+    assert [item["sessionId"] for item in sessions["items"]] == [
+        SESSION_A,
+        SESSION_B,
+        SESSION_D,
+    ]
+    assert restarted_catalog.project_for_session(SESSION_D) == "p1"
+    assert transcript["status"] == "ready"
+    assert transcript["items"][0]["assistantText"] == "already answered"
+    assert selected["turnCount"] == 1
+    assert restarted_factory.sessions[-1].turn_inputs == []
+    assert durable_path.read_bytes() == durable_before
 
 
 def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
-    service, _catalog, factory, _persisted = _seed_coordinator(
+    service, _catalog, factory, _repository = _seed_coordinator(
         tmp_path,
         new_ids=(SESSION_D,),
     )
@@ -519,7 +653,6 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
 
         assert await service.dispatch("session.shutdown", {}) == {
             "status": "stopped",
-            "flushed": True,
         }
         selected = await service.dispatch(
             "session.select",
@@ -528,13 +661,14 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
 
         assert selected["sessionId"] == SESSION_A
         assert factory.load_mcp_calls == [False, True]
+        assert all(session.flush_calls == 0 for session in factory.sessions)
 
     asyncio.run(run())
 
 
 def test_ready_conversation_and_transcript_pages_report_exact_boundaries(tmp_path):
-    service, _catalog, _factory, persisted = _seed_coordinator(tmp_path)
-    persisted[SESSION_A].append(_stored_turn(SESSION_A, 2))
+    service, _catalog, _factory, repository = _seed_coordinator(tmp_path)
+    _append_completed_turn(repository, SESSION_A, "p1", 2)
 
     sessions_first = asyncio.run(service.dispatch(
         "session.list",
@@ -568,7 +702,7 @@ def test_ready_conversation_and_transcript_pages_report_exact_boundaries(tmp_pat
 
 
 def test_transient_d_registers_once_only_after_first_normal_turn(tmp_path):
-    service, catalog, factory, _persisted = _seed_coordinator(
+    service, catalog, factory, repository = _seed_coordinator(
         tmp_path,
         new_ids=(SESSION_D,),
     )
@@ -585,29 +719,46 @@ def test_transient_d_registers_once_only_after_first_normal_turn(tmp_path):
         SESSION_B,
     ]
 
-    local = asyncio.run(service.dispatch("session.turn", {"text": "/status"}))
+    local = asyncio.run(service.dispatch("session.turn", {
+        "text": "/status",
+        "turnId": _logical_turn_id(211),
+    }))
     _assert_result("session.turn", local, 212)
     assert local["responseKind"] == "command"
     assert local["registrationStatus"] == "not_required"
     assert factory.sessions[-1].turn_inputs == []
     assert catalog.project_for_session(SESSION_D) is None
 
-    first = asyncio.run(service.dispatch("session.turn", {"text": "first"}))
-    second = asyncio.run(service.dispatch("session.turn", {"text": "second"}))
+    first = asyncio.run(service.dispatch("session.turn", {
+        "text": "first",
+        "turnId": _logical_turn_id(212),
+    }))
+    second = asyncio.run(service.dispatch("session.turn", {
+        "text": "second",
+        "turnId": _logical_turn_id(213),
+    }))
     _assert_result("session.turn", first, 213)
     _assert_result("session.turn", second, 214)
     assert first["registrationStatus"] == "registered"
     assert second["registrationStatus"] == "registered"
+    assert first["turnId"] == _logical_turn_id(212)
+    assert first["state"] == "completed"
+    assert first["accepted"] is True
+    assert first["persisted"] is True
     assert factory.sessions[-1].turn_inputs == ["first", "second"]
     assert catalog.snapshot()["projects"][0]["sessionIds"] == [
         SESSION_A,
         SESSION_B,
         SESSION_D,
     ]
+    assert [
+        turn.display_input
+        for turn in repository.load(SESSION_D).document.turns
+    ] == ["first", "second"]
 
 
-def test_select_a_b_a_isolates_context_counter_and_control_snapshot(tmp_path):
-    service, _catalog, factory, persisted = _seed_coordinator(tmp_path)
+def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
+    service, _catalog, factory, repository = _seed_coordinator(tmp_path)
 
     selected_a = asyncio.run(service.dispatch(
         "session.select",
@@ -618,17 +769,26 @@ def test_select_a_b_a_isolates_context_counter_and_control_snapshot(tmp_path):
         {"mode": "extended"},
     ))
     plan = asyncio.run(service.dispatch("session.set_mode", {"mode": "plan"}))
-    a_second = asyncio.run(service.dispatch("session.turn", {"text": "A second"}))
+    a_second = asyncio.run(service.dispatch("session.turn", {
+        "text": "A second",
+        "turnId": _logical_turn_id(221),
+    }))
     selected_b = asyncio.run(service.dispatch(
         "session.select",
         {"projectId": "p1", "sessionId": SESSION_B},
     ))
-    b_second = asyncio.run(service.dispatch("session.turn", {"text": "B second"}))
+    b_second = asyncio.run(service.dispatch("session.turn", {
+        "text": "B second",
+        "turnId": _logical_turn_id(222),
+    }))
     returned_a = asyncio.run(service.dispatch(
         "session.select",
         {"projectId": "p1", "sessionId": SESSION_A},
     ))
-    a_third = asyncio.run(service.dispatch("session.turn", {"text": "A third"}))
+    a_third = asyncio.run(service.dispatch("session.turn", {
+        "text": "A third",
+        "turnId": _logical_turn_id(223),
+    }))
 
     for suffix, method, result in (
         (221, "session.select", selected_a),
@@ -656,15 +816,23 @@ def test_select_a_b_a_isolates_context_counter_and_control_snapshot(tmp_path):
         f"{SESSION_A[:4]} question 1",
         "A second",
     ]
-    assert all("B second" not in turn.user_input for turn in persisted[SESSION_A])
-    assert [turn.turn_id for turn in persisted[SESSION_B]] == [1, 2]
+    durable_a = repository.load(SESSION_A).document.turns
+    durable_b = repository.load(SESSION_B).document.turns
+    assert all("B second" not in turn.display_input for turn in durable_a)
+    assert [turn.turn_number for turn in durable_b] == [1, 2]
+    assert [turn.state for turn in durable_a] == [
+        "completed",
+        "completed",
+        "completed",
+    ]
+    assert all(session.flush_calls == 0 for session in factory.sessions)
     assert a_third["registrationStatus"] == "registered"
 
 
 def test_control_snapshots_are_not_evicted_at_the_old_128_session_boundary(
     tmp_path,
 ):
-    service, _catalog, factory, _persisted = _seed_coordinator(tmp_path)
+    service, _catalog, factory, _repository = _seed_coordinator(tmp_path)
     asyncio.run(service.dispatch(
         "session.select",
         {"projectId": "p1", "sessionId": SESSION_A},
@@ -682,7 +850,7 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     tmp_path,
     monkeypatch,
 ):
-    service, catalog, factory, _persisted = _seed_coordinator(
+    service, catalog, factory, repository = _seed_coordinator(
         tmp_path,
         new_ids=(SESSION_D,),
     )
@@ -699,12 +867,19 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
         raise CatalogUnavailableError("simulated atomic replacement failure")
 
     monkeypatch.setattr(catalog, "_atomic_replace", fail_replace)
-    answer = asyncio.run(service.dispatch("session.turn", {"text": "record once"}))
+    turn_id = _logical_turn_id(231)
+    answer = asyncio.run(service.dispatch("session.turn", {
+        "text": "record once",
+        "turnId": turn_id,
+    }))
     _assert_result("session.turn", answer, 232)
     assert answer["registrationStatus"] == "pending"
     assert answer["text"] == f"answer:{SESSION_D[:4]}:record once"
     assert durable_path.read_bytes() == durable_before
     assert catalog.project_for_session(SESSION_D) is None
+    stored_before_retry = repository.load(SESSION_D)
+    assert stored_before_retry.document.turns[0].turn_id == turn_id
+    assert stored_before_retry.document.turns[0].state == "completed"
 
     monkeypatch.setattr(catalog, "_atomic_replace", atomic_replace)
     retry = asyncio.run(service.dispatch(
@@ -730,7 +905,67 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     assert transcript["items"][0]["assistantText"] == answer["text"]
 
 
-def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
+def test_select_imports_legacy_once_then_uses_canonical_transcript_and_context(
+    tmp_path,
+):
+    service, _catalog, factory, repository = _seed_coordinator(
+        tmp_path,
+        seeded_sessions=(SESSION_B, SESSION_C),
+    )
+    legacy_turn = TurnRecord(
+        user_input="legacy question",
+        assistant_output="legacy answer",
+        turn_id=1,
+        timestamp="2026-08-26T00:01:00+00:00",
+        persist_target="none",
+    )
+    read_calls = []
+
+    def read_legacy(session_id):
+        read_calls.append(session_id)
+        return [legacy_turn]
+
+    service._conversation_migrator = ConversationMigrator(
+        repository,
+        LegacyConversationReader(chroma_read=read_legacy),
+    )
+
+    selected = asyncio.run(service.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
+    transcript = asyncio.run(service.dispatch(
+        "session.transcript",
+        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+    ))
+    continued = asyncio.run(service.dispatch("session.turn", {
+        "text": "new canonical question",
+        "turnId": _logical_turn_id(241),
+    }))
+
+    durable = repository.load(SESSION_A).document.turns
+    assert selected["turnCount"] == 1
+    assert transcript["status"] == "ready"
+    assert transcript["items"][0]["userText"] == "legacy question"
+    assert transcript["items"][0]["assistantText"] == "legacy answer"
+    assert durable[0].kind == "display-only"
+    assert durable[0].context_eligible is False
+    assert durable[0].semantic_input is None
+    assert durable[1].kind == "conversational"
+    assert factory.sessions[-1].contexts[-1] == []
+    assert factory.sessions[-1].turn_inputs == ["new canonical question"]
+    assert continued["state"] == "completed"
+    assert read_calls == [SESSION_A, SESSION_A]
+
+    selected_again = asyncio.run(service.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
+    assert selected_again["turnCount"] == 2
+    assert read_calls == [SESSION_A, SESSION_A]
+
+
+def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     tmp_path,
     monkeypatch,
 ):
@@ -748,10 +983,7 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         persist_dir=str(persist_dir),
         plan_logs_dir="plans",
     )
-
-    class EmptyStoredHistory:
-        def read_session_turns(self, _session_id):
-            return []
+    repository = ConversationRepository(persist_dir)
 
     fake_tool_invocations: list[str] = []
     first_graph = make_astream_graph(
@@ -771,9 +1003,11 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         load_mcp,
         progress_cb,
         session_id=None,
-        restored_turns=None,
+        conversation_repository=None,
+        project_id=None,
     ):
         del load_mcp
+        assert conversation_repository is repository
         session = ChatSession(
             current_config,
             history_store=FakeHistoryStore(),
@@ -781,7 +1015,8 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
             loaded_skills=[],
             global_mcp_families=frozenset(),
             session_id=session_id or SESSION_D,
-            restored_turns=list(restored_turns or []),
+            conversation_repository=conversation_repository,
+            project_id=project_id,
         )
         session.graph = first_graph
         return session
@@ -790,13 +1025,13 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         original_cwd=tmp_path,
         config=config,
         project_catalog=catalog,
+        conversation_repository=repository,
         session_factory=first_factory,
         environ={
             "CONDA_DEFAULT_ENV": "app",
             "CONDA_PREFIX": "/conda/envs/app",
         },
     )
-    first._history_store = EmptyStoredHistory()
 
     async def run_first_process():
         created = await first.dispatch(
@@ -806,7 +1041,10 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         await first.dispatch("session.set_mode", {"mode": "plan"})
         answer = await first.dispatch(
             "session.turn",
-            {"text": "persist this tool turn"},
+            {
+                "text": "persist this tool turn",
+                "turnId": _logical_turn_id(251),
+            },
         )
         shutdown = await first.dispatch("session.shutdown", {})
         return created, answer, shutdown
@@ -814,7 +1052,9 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
     created, first_answer, first_shutdown = asyncio.run(run_first_process())
     assert created["sessionId"] == SESSION_D
     assert first_answer["text"] == "persisted final answer"
-    assert first_shutdown == {"status": "stopped", "flushed": True}
+    assert first_answer["turnId"] == _logical_turn_id(251)
+    assert first_answer["state"] == "completed"
+    assert first_shutdown == {"status": "stopped"}
     assert fake_tool_invocations == ["call-persisted"]
     assert catalog.project_for_session(SESSION_D) == "local"
 
@@ -826,9 +1066,11 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         load_mcp,
         progress_cb,
         session_id=None,
-        restored_turns=None,
+        conversation_repository=None,
+        project_id=None,
     ):
         del load_mcp
+        assert conversation_repository is repository
         session = ChatSession(
             current_config,
             history_store=FakeHistoryStore(),
@@ -836,7 +1078,8 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
             loaded_skills=[],
             global_mcp_families=frozenset(),
             session_id=session_id,
-            restored_turns=list(restored_turns or []),
+            conversation_repository=conversation_repository,
+            project_id=project_id,
         )
         session.graph = second_graph
         return session
@@ -845,13 +1088,13 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         original_cwd=tmp_path,
         config=config,
         project_catalog=DesktopProjectCatalog(persist_dir),
+        conversation_repository=repository,
         session_factory=second_factory,
         environ={
             "CONDA_DEFAULT_ENV": "app",
             "CONDA_PREFIX": "/conda/envs/app",
         },
     )
-    second._history_store = EmptyStoredHistory()
 
     async def run_second_process():
         transcript = await second.dispatch(
@@ -864,7 +1107,10 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         )
         continued = await second.dispatch(
             "session.turn",
-            {"text": "continue without replay"},
+            {
+                "text": "continue without replay",
+                "turnId": _logical_turn_id(252),
+            },
         )
         return transcript, selected, continued
 
@@ -882,10 +1128,10 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
         "toolActivities": [{
             "callId": "call-persisted",
             "name": "rag_search",
-            "arguments": '{"query":"persisted tool"}',
-            "result": "persisted tool result",
+            "arguments": "(not retained)",
+            "result": "Tool execution completed.",
             "status": "ok",
-            "promptEligible": True,
+            "promptEligible": False,
         }],
     }]
     prompt_messages = [
@@ -896,40 +1142,46 @@ def test_v2_plan_tool_restore_and_continue_never_replays_old_tool(
     assert [type(message) for message in prompt_messages] == [
         HumanMessage,
         AIMessage,
-        ToolMessage,
-        AIMessage,
         HumanMessage,
     ]
     assert prompt_messages[0].content == "persist this tool turn"
-    assert prompt_messages[1].tool_calls[0]["id"] == "call-persisted"
-    assert prompt_messages[2].tool_call_id == "call-persisted"
-    assert prompt_messages[2].content == "persisted tool result"
-    assert prompt_messages[3].content == "persisted final answer"
-    assert prompt_messages[4].content == "continue without replay"
+    assert prompt_messages[1].content == "persisted final answer"
+    assert prompt_messages[2].content == "continue without replay"
 
 
 def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
     tmp_path,
     monkeypatch,
 ):
-    service, _catalog, _factory, _persisted = _seed_coordinator(tmp_path)
+    service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
 
-    def activity(result: str, index: int = 1) -> ToolActivityRecord:
-        return ToolActivityRecord(
+    def activity(summary: str, index: int = 1) -> ToolActivitySummary:
+        return ToolActivitySummary(
             call_id=f"call-{index}",
             name="rag_search",
-            arguments='{"query":"bounded"}',
-            result=result,
             status="ok",
-            prompt_eligible=True,
+            summary=summary,
         )
 
-    oversized_field = _stored_turn(SESSION_A)
-    oversized_field.tool_activities = (activity("x" * 65_537),)
+    oversized_field = ConversationTurn(
+        turn_id=_logical_turn_id(301),
+        turn_number=1,
+        kind="conversational",
+        state="completed",
+        display_input="x" * 32_769,
+        semantic_input="bounded question",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at="2026-08-27T00:01:00Z",
+        finished_at="2026-08-27T00:01:00Z",
+        assistant_output="bounded answer",
+        tool_activities=(),
+        failure=None,
+    )
     monkeypatch.setattr(
         service,
         "_read_conversation_turns",
-        lambda _session_id, _include_current: [oversized_field],
+        lambda _session_id, _project_id: [oversized_field],
     )
     field_result = asyncio.run(service.dispatch(
         "session.transcript",
@@ -939,15 +1191,28 @@ def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
     assert field_result["items"] == []
     assert "oversized turn" in field_result["issue"]
 
-    page_turn = _stored_turn(SESSION_A)
-    page_turn.tool_activities = tuple(
-        activity("x" * 65_536, index)
-        for index in range(1, 17)
+    page_turn = ConversationTurn(
+        turn_id=_logical_turn_id(302),
+        turn_number=1,
+        kind="conversational",
+        state="completed",
+        display_input="bounded question",
+        semantic_input="bounded question",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at="2026-08-27T00:01:00Z",
+        finished_at="2026-08-27T00:01:00Z",
+        assistant_output="bounded answer",
+        tool_activities=tuple(
+            activity("x" * 65_536, index)
+            for index in range(1, 17)
+        ),
+        failure=None,
     )
     monkeypatch.setattr(
         service,
         "_read_conversation_turns",
-        lambda _session_id, _include_current: [page_turn],
+        lambda _session_id, _project_id: [page_turn],
     )
     page_result = asyncio.run(service.dispatch(
         "session.transcript",
@@ -958,38 +1223,36 @@ def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
     assert "page exceeds" in page_result["issue"]
 
 
-def test_flush_failure_retains_current_conversation_and_recent_turns(tmp_path):
-    service, _catalog, _factory, _persisted = _seed_coordinator(tmp_path)
+def test_duplicate_caller_turn_id_returns_saved_answer_without_model_replay(tmp_path):
+    service, _catalog, factory, repository = _seed_coordinator(tmp_path)
     selected = asyncio.run(service.dispatch(
         "session.select",
         {"projectId": "p1", "sessionId": SESSION_A},
     ))
-    answer = asyncio.run(service.dispatch("session.turn", {"text": "still here"}))
+    turn_id = _logical_turn_id(311)
+    first = asyncio.run(service.dispatch("session.turn", {
+        "text": "record exactly once",
+        "turnId": turn_id,
+    }))
+    duplicate = asyncio.run(service.dispatch("session.turn", {
+        "text": "record exactly once",
+        "turnId": turn_id,
+    }))
     _assert_result("session.select", selected, 241)
-    _assert_result("session.turn", answer, 242)
-    current = service.session
-    assert isinstance(current, _CoordinatorSession)
-    current.fail_flush = True
-    before = [(turn.turn_id, turn.user_input) for turn in current.recent_turns]
-
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(service.dispatch(
-            "session.select",
-            {"projectId": "p1", "sessionId": SESSION_B},
-        ))
-
-    assert raised.value.code == "CONVERSATION_FLUSH_FAILED"
-    assert raised.value.retryable is True
-    assert service.session is current
-    assert service.session.session_id == SESSION_A
-    assert [(turn.turn_id, turn.user_input) for turn in current.recent_turns] == before
+    _assert_result("session.turn", first, 242)
+    _assert_result("session.turn", duplicate, 243)
+    assert duplicate == first
+    assert factory.sessions[-1].turn_inputs == ["record exactly once"]
+    turns = repository.load(SESSION_A).document.turns
+    assert [turn.turn_id for turn in turns].count(turn_id) == 1
+    assert all(session.flush_calls == 0 for session in factory.sessions)
 
 
 def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     tmp_path,
     monkeypatch,
 ):
-    service, _catalog, _factory, _persisted = _seed_coordinator(tmp_path)
+    service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
     selected = asyncio.run(service.dispatch(
         "session.select",
         {"projectId": "p1", "sessionId": SESSION_A},
@@ -1008,8 +1271,8 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
             asyncio.run(service.dispatch(method, params))
         assert raised.value.code == "PROTOCOL_INVALID"
 
-    def degraded(_session_id, _include_current):
-        raise HistoryRestoreError("private malformed record detail")
+    def degraded(_session_id, _project_id):
+        raise ConversationUnavailableError("private malformed record detail")
 
     monkeypatch.setattr(service, "_read_conversation_turns", degraded)
     degraded_result = asyncio.run(service.dispatch(
@@ -1024,7 +1287,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     monkeypatch.setattr(
         service,
         "_read_conversation_turns",
-        lambda _session_id, _include_current: [],
+        lambda _session_id, _project_id: [],
     )
     unavailable = asyncio.run(service.dispatch(
         "session.transcript",
@@ -1053,7 +1316,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     malformed_service = DesktopService(
         original_cwd=tmp_path,
         config=AgentConfig(persist_dir=str(malformed_dir)),
-        session_factory=_CoordinatorFactory({}, new_ids=(SESSION_D,)),
+        session_factory=_CoordinatorFactory(new_ids=(SESSION_D,)),
         environ={},
     )
     unavailable_projects = asyncio.run(malformed_service.dispatch("project.list", {}))
