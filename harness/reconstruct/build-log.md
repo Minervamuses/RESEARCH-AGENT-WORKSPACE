@@ -272,3 +272,12 @@ Material implementation events append with this shape:
 - **Canonical root:** `ConversationRepository.root`是authority；Phase Green會從同一repository boundary輸出resolved、bounded、escaped path到dynamic system guidance與`/status`，但不新增filesystem權限或繞過Bash approval。
 - **Baseline verification:** 從`app/`執行Phase 06指定Python command，exit 0，`177 passed, 1 warning in 4.60s`；warning是既有LangGraph `allowed_objects` pending-deprecation。此基線未啟動Ollama。
 - **Blockers:** None；下一步提交focused Red tests，固定active history removal、migration-only reader、canonical root與approval-gated exact-text journey。
+
+## 2026-09-04 23:18 CST — Phase 06: history retirement contract Red
+
+- **Status:** `In progress`。
+- **Red changes:** 新增focused contracts，要求normal `ChatSession`不初始化、持有或注入conversation history store，不再暴露`_turn_store`/`flush_recent_turns`；base inventory與rendered prompt移除`recall_history`但保留三個document RAG tools、`read_file`與approval-gated `bash`；dynamic guidance與status顯示canonical archive root及exact fixed-string/no-RAG-fallback規則。
+- **Representative journey:** 使用real temporary canonical JSON、injected approval handler與real local `grep -lF` runner。精確prompt命中後由`read_file`讀回；paraphrase查找exit 1且不進任何semantic fallback。這個journey本身在Red已通過，證明既有Bash approval與read path足夠，不需要新增filesystem tool。
+- **Red verification:** `pytest tests/test_history_retirement.py tests/test_tool_inventory.py -q` exited 1 with `5 failed, 8 passed, 1 warning`。五個failure只對應仍存在的normal-session history factory call、inventory/prompt中的`recall_history`、以及缺少`conversation_root` status/guidance；無collection/setup error。Warning是既有LangGraph `allowed_objects` pending-deprecation。
+- **Evidence reference:** Red commit=`a74069c`。
+- **Blockers:** None；next remove consumers-to-producers，並把strict Chroma parser搬入migration-only namespace。
