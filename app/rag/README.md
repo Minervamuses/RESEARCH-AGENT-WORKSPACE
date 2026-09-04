@@ -61,8 +61,10 @@ to that namespace, so different roots may safely contain the same paths.
 
 The default `app/store/` is generated local state. The `store/` rule in
 `app/.gitignore` excludes the whole directory, so a normal fresh clone has no
-Chroma database, `raw.json`, `folder_meta.json`, or `chat_history/`. Branches
-and commits do not carry different copies of this state. A new user can run
+Chroma database, `raw.json`, `folder_meta.json`, canonical conversations, or
+legacy `chat_history/`. The RAG package never creates or reads conversation
+history; the legacy directory is preserved only for the agent migration reader.
+Branches and commits do not carry different copies of this state. A new user can run
 `/init`, `/ingest`, or the ingest CLI directly; there is no old database to
 migrate or rebuild first.
 

@@ -10,5 +10,5 @@ AGENTS.md
 # Legacy Plan logs (preserved as read-only migration input; never indexed by RAG)
 plan_logs/
 
-# Local RAG knowledge and chat-history state
+# Local canonical conversations, legacy inputs, and RAG state
 store/

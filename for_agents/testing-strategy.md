@@ -9,7 +9,7 @@ Run project commands under Ubuntu/WSL from the repository root unless the comman
 | cd app && conda run -n app poetry run pytest tests/test_state.py -q | Focused Agent state smoke | AGENTS.md | Installed app environment | Target module pass/fail |
 | cd app && conda run -n app poetry run pytest tests/rag/test_config.py -q | Focused RAG configuration | AGENTS.md | Installed app environment | Target module pass/fail |
 | cd app && conda run -n app poetry run pytest | Complete Python Agent/RAG suite | README.md; app/pyproject.toml | No live services should be assumed; may be broader than a focused change needs | One suite result |
-| `cd app && conda run -n app poetry run pytest tests/test_desktop_protocol_contract.py tests/test_desktop_service.py tests/test_slash_commands.py tests/test_desktop_conversations.py tests/test_desktop_answer_stream.py tests/test_history_rag_store.py tests/test_session_eviction.py tests/test_plan_mode.py -q` | Desktop protocol, conversation, restore, stream, thinking control, and legacy Plan import boundary | Completed GUI Phase 02 verification plus current migration contract | Installed `app` environment; fake/temp state | Focused cross-subsystem result |
+| `cd app && conda run -n app poetry run pytest tests/test_desktop_protocol_contract.py tests/test_desktop_service.py tests/test_slash_commands.py tests/test_desktop_conversations.py tests/test_desktop_answer_stream.py tests/test_conversation_migration.py tests/test_history_retirement.py tests/test_conversation_archive_access.py tests/test_session_persistence.py tests/test_plan_mode.py -q` | Desktop protocol, canonical conversation lifecycle, exact archive access, stream, thinking control, and strict legacy migration boundaries | Current canonical conversation and Phase 06 retirement contracts | Installed `app` environment; fake/temp state | Focused cross-subsystem result |
 | `cd app && conda run -n app poetry run pytest tests/test_desktop_server.py tests/test_desktop_fixture.py tests/test_bash_tool.py -q` | NDJSON server, exact fixture gate, and Bash approval seam | Current test modules and completed GUI plan | Isolated temporary roots; no real provider/shell | Server/fixture/trust result |
 | cd app/desktop && conda run -n app npm test | TypeScript shared protocol fixtures | app/desktop/package.json#scripts.test | Node from Conda app | Node test result |
 | cd app/desktop && conda run -n app npm run build | TypeScript check plus Vite build | app/desktop/package.json#scripts.build | Installed node_modules | Typecheck/build result |
@@ -40,13 +40,13 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 
 | Change type | Minimum focused checks | Broader checks | Manual or environment-specific evidence |
 |---|---|---|---|
-| Agent graph/session/turn lifecycle | Relevant test_state, test_graph_skill_loader, test_turn_finalizer, test_session_lifecycle, and test_session_eviction modules | Complete pytest once near completion when inexpensive | No live provider unless explicitly approved |
+| Agent graph/session/turn lifecycle | Relevant test_state, test_graph_skill_loader, test_turn_finalizer, test_session_lifecycle, and test_session_persistence modules | Complete pytest once near completion when inexpensive | No live provider unless explicitly approved |
 | Tool access, bash/read_file, MCP | test_tool_access, test_tool_access_matrix, test_policy_tool_node, implementation-specific module | Complete pytest | TTY approval path and MCP logs only when behavior changed |
 | Extended thinking | test_thinking, test_thinking_models, test_thinking_session | Complete pytest | Live paid/provider trial only under explicit bounded authorization |
 | RAG config/API/store/sync | Relevant app/tests/rag modules plus test_ingest/test_adapter_formatting | Complete pytest | Ollama/OpenRouter only for a concrete live integration need; isolate KMS_STORE_DIR |
 | Citation engine/session policy | Relevant test_citation modules and test_turn_finalizer | Complete pytest | Live provider calls only when cached/fake evidence cannot answer the question |
 | Skills/extensions | Relevant test_skill and test_extension modules | Complete pytest | Use temporary drop-in/state roots; never mutate real user extension state |
-| Desktop protocol/backend/conversations | Relevant Python desktop, history, legacy migration, Bash modules plus `npm test` | Cargo test and selected Python regression; Tauri no-bundle build when native/build surfaces change | Isolated real Tauri/Python journey for lifecycle/UI changes; never use real user stores |
+| Desktop protocol/backend/conversations | Relevant Python Desktop, canonical conversation, legacy migration, and Bash modules plus `npm test` | Cargo test and selected Python regression; Tauri no-bundle build when native/build surfaces change | Isolated real Tauri/Python journey for lifecycle/UI changes; never use real user stores |
 | Packaging/runtime/dependency change | Runtime tests, import smoke, poetry check --lock | poetry build and complete pytest | Dependency changes require prior user approval |
 | Documentation/for_agents only | infrastructure check, marker/search, ignore check, diff check | No application suite by default | Cross-document evidence audit |
 
@@ -64,12 +64,12 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 | INV-010 | citation storage/resolution/e2e/gate/finalizer suites | Strong offline coverage; ASM-014 remains model-behavior risk |
 | INV-011 | Shared fixtures plus Python protocol/server, TypeScript protocol, and Rust protocol/supervisor tests | Strong offline coverage; current build-log baseline passed all three language suites |
 | INV-015 | Rust lifecycle/source-launch tests, frontend bridge tests, capability/invoke inspection, isolated real-boundary journeys | Covered for supported source checkout; packaged topology intentionally uncovered |
-| INV-016 | Conversation/history/legacy Plan migration tests, including A→B→A, restart, target validation, and non-repersisting restores | Strong offline coverage; a real process-kill boundary remains unverified |
+| INV-016 | Canonical conversation lifecycle and legacy Chroma/Plan migration tests, including A→B→A, restart, crash-boundary, and target validation | Strong offline coverage; legacy inputs remain import-only |
 | INV-017 | Safe-content/URL tests, protocol forbidden-key tests, DTO bounds, Tauri capability inspection | Covered for current renderer/contract; no browser-engine security audit |
 | INV-018 | Prune preview, extension preview/binding, approval correlation/replay/timeout/crash tests | Strong per-process coverage; cross-process state remains uncovered |
 | FAIL-001 and FAIL-002 | Temporary deterministic probes | Reproduced; no regression tests |
 | FAIL-003 | Code/docs and JSON rollback tests | Partial; no Chroma mid-failure injection |
-| FAIL-004 | test_session_eviction.py | Covered |
+| FAIL-004 | test_history_retirement.py plus canonical lifecycle tests | Resolved; no active eviction, flush, or hard-cap path remains |
 | FAIL-005 | Focused tamper probe and issue reproduction | Reproduced; no regression test |
 | FAIL-006 | Control-flow proof and issue sequence | No multiprocessing regression |
 | FAIL-007 | Focused same-year probe | Reproduced; existing test covers different years only |
@@ -96,7 +96,7 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 - No failure-injection test spans RAG folder metadata, raw JSON, and Chroma; no concurrency test covers simultaneous ingest/prune/read.
 - No test verifies persistent-store schema migration, embedding-model compatibility, moved roots, default single-file PID collisions, or prefix-search completeness.
 - No explicit timeout test covers MCP get_tools; raised aggregator/reviewer/reviser provider exceptions are not comprehensively tested.
-- No test kills a real backend in the narrow window after first-turn catalog registration but before recent-turn flush. No multiprocessing test covers desktop catalog lost updates.
+- No multiprocessing test covers desktop catalog lost updates.
 - No integrated stress test enumerates every concurrent raw-protocol RAG read/write intersection. Direct `knowledge.init_workspace` and `knowledge.ingest_folder` remain deliberate failures even though the composer route works.
 - Per-conversation thinking/skill snapshots are tested in-process and intentionally reset to safe defaults after backend restart because current durable formats do not store them.
 - Desktop fixture selection remains a runtime environment gate in tracked code; tests prove exact selection, but no build-time mechanism excludes it from ordinary source runs.

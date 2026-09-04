@@ -117,7 +117,7 @@ description: Use when the user wants to ... [具體適用情境]
 
 工具模型是兩級的，manifest 只宣告「額外」需要什麼：
 
-- **全域工具**：local base tools（`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`）加上已載入的 Web Search MCP family。所有模式、每次 skill 工作都有，manifest 不需要（也無法）宣告或移除它們。
+- **全域工具**：local base tools（`rag_explore`、`rag_search`、`rag_get_context`、`read_file`、`bash`）加上已載入的 Web Search MCP family。所有模式、每次 skill 工作都有，manifest 不需要（也無法）宣告或移除它們。
 - **skill 工具**：其他所有工具（GitHub MCP family、`citation_workflow`、未來的 stateful tools）。只有該次所選 skill 的 manifest `tools` 區段明確要求時才存在。
 
 | 欄位 | 型別 | 說明 |
@@ -148,7 +148,7 @@ Pinned resources 會在執行該次 one-shot skill 工作時直接放進 context
 
 工具語義要精確：
 
-- `rag_explore` / `rag_search` / `rag_get_context` 查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料）；`recall_history` 查 persisted chat history（舊對話、較早 session、被 recent window eviction 的 turn）。兩者都是全域工具，skill 內文引導模型用對工具即可，不需要 manifest 宣告。
+- `rag_explore` / `rag_search` / `rag_get_context` 只查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料），不查 conversation JSON。Normal thinking下的較早對話查找，須在已知canonical root下把文字先依JSON規則escape，再以每次需批准的`bash`做exact `grep -F`；listing第21個命中代表文字太寬，必須零讀檔並請使用者縮小，否則最多用`read_file`檢查20檔、排除本輪pending prompt。Canonical JSON大檔依`next_offset`分段但總檔案上限8 MiB；exact miss不轉用document RAG/embeddings。Extended thinking沒有`bash`，不得宣稱能執行此流程。
 - `citation_workflow` 是 skill 專屬工具，保留給內建 citation skill，一般 skill 不應宣告。
 
 ## 三、Description 寫作指引

@@ -8,8 +8,8 @@
 |---|---|
 | `adapters/` | 將 framework-neutral RAG API 轉成 LangChain tools |
 | `cli/` | Interactive chat、slash command parsing 與 local command handling |
+| `conversations/` | Canonical JSON persistence、catalog-independent validation 與唯讀 legacy migration |
 | `extensions/` | Drop-in discovery、validation、registry、apply 與 startup loading |
-| `history_rag/` | 已溢出 recent window 的長期對話儲存與 recall tool |
 | `llm/` | App-layer model construction 與 text normalization |
 | `skills/` | Skill metadata、runtime、tool broker 與 agent integration policy |
 | `thinking/` | Optional extended-thinking workflow |
@@ -56,7 +56,7 @@ ChatSession.turn_outcome()  [session-wide async lock]
 - `turns/` 不擁有 session lock、thinking mode 或 active skill。
 - `thinking/` 只負責 extended mode，完成後仍回到 session 的單一 finalization path。
 - `tools/` 定義能力與強制 policy；tool implementation 不決定 session access。
-- `history_rag/` 擁有長期對話存取，不擁有 recent-turn ordering。
+- `conversations/` 是對話durability與legacy import的唯一authority；document RAG不儲存或搜尋對話。
 - Package `__init__.py` 應保持輕量，不 eager re-export 可形成 cycle 的 orchestrators/policies。
 
 ## Tests and related docs

@@ -35,9 +35,11 @@ The default store location is `<app project root>/store`. Set `KMS_STORE_DIR` to
 
 The default `app/store/` is generated local state and is excluded by the
 `store/` rule in `app/.gitignore`. A normal fresh clone therefore contains no
-Chroma database, `raw.json`, `folder_meta.json`, or `chat_history/`; none of
-these files move between branches or commits. First-time users can ingest
-directly and do not need a database migration or rebuild.
+Chroma database, `raw.json`, `folder_meta.json`, canonical conversations, or
+legacy `chat_history/`; none of these files move between branches or commits.
+The RAG API never creates or reads conversation history; `chat_history/` is
+preserved only as an input to the agent's non-destructive legacy migration.
+First-time users can ingest directly and do not need a database migration or rebuild.
 
 Store compatibility is relevant only when code is updated in a working copy
 that retains an older gitignored `app/store/`, or when `KMS_STORE_DIR` points

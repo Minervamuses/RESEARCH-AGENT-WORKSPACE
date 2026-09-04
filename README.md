@@ -59,7 +59,7 @@ Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用
 
 確認目前使用者對以下位置有寫入權限:
 
-- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json`、`folder_meta.json` 與 legacy chat history。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
+- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json` 與 `folder_meta.json`。舊版留下的 `chat_history/` 只作唯讀 conversation migration input；目前 runtime 不會建立、查詢、更新或刪除它。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
 
@@ -166,14 +166,15 @@ npm run tauri -- build --no-bundle
 
 ## 5. 知識庫與資料匯入
 
-RAG store 是程式執行後才建立的本機狀態。預設位置是 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置)，而 `app/.gitignore` 的 `store/` 會排除整個預設目錄。正常的 fresh clone 不包含 Chroma DB、`raw.json`、`folder_meta.json` 或 `chat_history/`；Git branch 與 commit 也不攜帶這些資料。第一次使用直接執行 `/init` 或 `/ingest` 即可，不需要先 migration 或重建舊 DB。
+RAG store 是程式執行後才建立的本機狀態。預設位置是 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置)，而 `app/.gitignore` 的 `store/` 會排除整個預設目錄。正常的 fresh clone 不包含 Chroma DB、`raw.json`、`folder_meta.json`、canonical conversation JSON 或舊版 `chat_history/`；Git branch 與 commit 也不攜帶這些資料。第一次使用直接執行 `/init` 或 `/ingest` 即可，不需要先 migration 或重建舊 DB。
 
 store 建立後可能包含:
 
 - **ChromaDB**:語意搜尋用。
 - **`raw.json`**:chunk 的 JSON 備份,`get_context`、`list_chunks`、sync/prune 讀它。
 - **`folder_meta.json`**:repo ingest 時由 LLM 產生的 folder tags 與 summaries。
-- **`chat_history/`**:被移出近期 prompt window 的對話記憶(也放在同一個 store 底下)。
+- **`conversations/*.json`**:每個對話一份的canonical transcript；最新10個completed、context-eligible turns會自動進入prompt。
+- **`chat_history/`**:舊版conversation Chroma，只供non-destructive migration reader從隔離複本讀取；normal runtime不再使用。
 
 ### 在 chat CLI 匯入(建議流程)
 
@@ -214,7 +215,7 @@ Legacy `plan_logs/` 由目錄規則直接略過，避免把舊對話誤收進知
 | Command | 用途 |
 |---|---|
 | `/help` | 顯示 slash commands |
-| `/status` | 顯示 session id、turn count、thinking mode、active skill、最近工具使用 |
+| `/status` | 顯示 session id、canonical conversation root、turn count、thinking mode 與最近工具使用 |
 | `/thinking [normal\|extended]` | 切換一般回答或 extended thinking |
 | `/skill [name\|none] [mode]` | 啟用/停用 skill;不帶參數出互動選單 |
 | `/citation [文字\|off]` | 啟用 citation skill(持續生效);帶文字時同時把該句話交給 agent;`off` 停用 |
@@ -274,15 +275,14 @@ Source checkout 的 drop-in root 是 `app/tool/`；wheel 安裝版使用平台 u
 | `rag_explore` | 看知識庫有哪些 categories、tags、folder summaries |
 | `rag_search` | 對已 ingest 的資料做語意搜尋 |
 | `rag_get_context` | 取某個 search hit 的前後文 |
-| `recall_history` | 搜尋已持久化的舊對話 turn |
 | `read_file` | 讀本機文字檔;單檔上限 1 MB;阻擋 `.env`、SSH key、secret/token/credential 類檔名 |
 | `bash` | 執行 shell command;互動 TTY 中需使用者批准,非互動環境自動拒絕 |
 
-`read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。
+`read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。單次最多讀 1 MiB；只有canonical conversation root內、UUID檔名且總大小不超過8 MiB的JSON可用`offset_bytes=0`與`next_offset`分段讀取，其他較大檔案仍拒絕。
 
 MCP 工具:Web Search MCP 預設載入,用於即時網路搜尋；GitHub MCP 是選配,用於遠端 repo、PR、issue、Actions；獲准的 drop-in MCP 會在下一次啟動加入。
 
-工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;問早先對話內容 → `recall_history`;問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
+工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;normal thinking下問早先對話的精確文字 → 從`/status`取得canonical conversation root，把文字依canonical JSON規則escape後，經每次approval-gated的`bash`執行`grep -F`。listing只取前21個路徑：若出現第21個就不讀檔並請使用者縮小文字；否則最多用`read_file`檢查20個命中且只接受較早的completed turn。本輪prompt已先寫成pending，不能把它的自我命中當成舊紀錄；canonical JSON大檔可依`next_offset`分段讀取至8 MiB總上限，exact miss不轉用document RAG/embeddings。Extended-thinking proposers沒有`bash`，需要舊對話時應切回normal。問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
 
 ## 8. MCP 設定
 
@@ -321,7 +321,7 @@ Skill 是手動啟用的工作模式,agent 不會自行決定啟用哪個 skill:
 內建 skills:
 
 - `citation`:對話式引用選擇與驗證保存(見第 11 節);只授權 skill 專屬的 `citation_workflow` 工具,啟用時自動切回 normal thinking。也可用 `/citation` 啟用。
-- `academic-paper-writing`:學術寫作、文獻回顧、段落/章節修訂、投稿支援。task modes:`revision`、`literature-review`、`drafting`、`submission-support`。允許檔案讀取、RAG、history search,選配 web search,禁止 `bash`。
+- `academic-paper-writing`:學術寫作、文獻回顧、段落/章節修訂、投稿支援。task modes:`revision`、`literature-review`、`drafting`、`submission-support`。允許檔案讀取與 document RAG,選配 web search,禁止 `bash`。
 - `_prompt-master`:extended thinking 內部 helper,一般使用者通常不需手動啟用。
 
 Skill 啟用後會影響:agent 看到的指令、可用工具 policy、task mode、pinned references 是否自動進 context。
@@ -358,7 +358,7 @@ Follow the user's inclusion and exclusion criteria...
 
 ### `manifest.yaml`
 
-工具模型是兩級的:**全域工具**(local base tools:`rag_explore`、`rag_search`、`rag_get_context`、`recall_history`、`read_file`、`bash`,加上已載入的 Web Search 與 scope=`global` drop-in MCP family)在普通模式與所有 skill 下永遠可用;其他工具(如 GitHub、scope=`skill` drop-in MCP family、`citation_workflow`)只有在 active skill 的 manifest `tools` 區段明確要求時才存在。
+工具模型是兩級的:**全域工具**(local base tools:`rag_explore`、`rag_search`、`rag_get_context`、`read_file`、`bash`,加上已載入的 Web Search 與 scope=`global` drop-in MCP family)在普通模式與所有 skill 下永遠可用;其他工具(如 GitHub、scope=`skill` drop-in MCP family、`citation_workflow`)只有在 active skill 的 manifest `tools` 區段明確要求時才存在。
 
 最小範例(沒有專屬工具的 skill 可完全省略 `tools`):
 
@@ -431,7 +431,7 @@ citation 是內建 skill(engine 位於 `app/skills/citation/`)。`/citation` 啟
 
 ```text
 /citation                      # 啟用 citation skill(不觸發網路);同時自動切回 normal thinking
-/citation 幫我尋找近5年內關於HPC的論文   # 啟用後立即把這句話交給 agent(進 history/trace)
+/citation 幫我尋找近5年內關於HPC的論文   # 啟用後立即把這句話交給 agent(進 canonical conversation/trace)
 /citation off                  # 停用(也可用 none / deactivate);/skill none 或切換其他 skill 亦會停用
 ```
 
@@ -462,7 +462,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 - **驗證**:DOI winner 必須由 doi.org refetch，BibTeX 經 pybtex canonical round-trip，identity-critical 衝突一律零寫入。trusted non-DOI 記錄由 authority adapter 提供 metadata，以 `authority_metadata_verified` 等級保存(BibTeX 同樣走 canonical round-trip)。
 - **保存**:schema v2 canonical identity bundle 使用 source-slot 跨程序鎖、staging+fsync+rename；v1 DOI bundle只驗證／重用，不背景重寫。
 - **Batch result**:tool content 與 strict artifact 都列出逐項 success/reused/ambiguity/not-found/failure；不攜 provider arbitrary prose。artifact 供 telemetry，content 供 agent 判斷下一步及回覆。
-- **範圍**:來源 registry 是 session 內、citation 模式內的狀態;turn record 與 Chroma history 不夾帶 SourceRef snapshot或額外 receipt metadata。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
+- **範圍**:來源 registry 是 session 內、citation 模式內的狀態;canonical turn 不夾帶 SourceRef snapshot或額外 receipt metadata。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
 
 ## 12. 疑難排解
 

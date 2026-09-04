@@ -50,7 +50,7 @@ Search 與 save 是不同階段；discovery result 不會因被找到就自動�
 - DOI identity winner 必須經 authority source 重新驗證，不把 discovery snippet 當成權威 metadata。
 - Identity-critical conflict 不得產生成功寫入。
 - Tool content、artifact、receipt 與 registry 必須反映同一個逐項真實結果。
-- Citation gate 必須在 answer 進入 plan log、recent turns 或 history store 前執行。
+- Citation gate 必須在 answer 寫入 canonical conversation terminal state 前執行。
 - `CitationSessionPolicy` 先以 trusted registry 執行 gate；renderer 只使用呼叫者提供的 resolver 產生輸出，不是獨立 trust boundary。
 - 使用者/模型授權規則以 `SKILL.md` 為準，README 不擴大操作範圍。
 

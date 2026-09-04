@@ -38,17 +38,15 @@
 - Evidence: app/rag/cli/ingest.py; app/rag/store/document_store.py; app/rag/store/json_store.py::deferred_save.
 - Status: Active
 
-### FAIL-004 — Persistent history failure eventually drops a turn
+### FAIL-004 — Legacy hard-cap history loss (resolved)
 
-- Symptom: old turns stay in recent memory after history write failures, then the oldest is dropped unrecorded after the hard cap.
-- Trigger / preconditions: ChatHistoryStore continues failing while recent_turns exceeds agent_recent_turns_window times three.
-- Affected components or users: long conversations and recall_history completeness.
-- Root cause: Confirmed — TurnStore bounds memory by deliberately removing the oldest turn at the hard cap.
-- Current handling / recovery: warnings/errors are logged; shutdown flush stops at the first failure and leaves remaining turns in memory.
-- Reproduction or detection: test_session_eviction.py::test_hard_cap_drops_oldest_after_persistent_failure.
-- Related invariants / assumptions: INV-005, ASM-001.
-- Evidence: app/agent/turns/store.py::evict_overflow and flush.
-- Status: Active
+- Former symptom: the retired TurnStore could drop the oldest in-memory turn after repeated Chroma history write failures reached its hard cap.
+- Resolution: canonical conversation JSON now retains every accepted pending/terminal turn; normal session creation no longer constructs, writes, queries, evicts, or flushes a conversation-history Chroma store.
+- Current handling / recovery: canonical compare-and-swap transitions fail explicitly; there is no secondary conversation writer or hard-cap drop path.
+- Verification: Phase 06 history-retirement, canonical lifecycle, migration, and Desktop conversation tests.
+- Related invariants / assumptions: INV-005, INV-006.
+- Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.
+- Status: Resolved in Phase 06
 
 ### FAIL-005 — Post-startup installed Skill tampering is activated
 
@@ -104,7 +102,7 @@
 - Trigger / preconditions: missing key/model/service, network failure, server crash, or hung startup.
 - Affected components or users: feature-specific operation.
 - Root cause: Confirmed operational dependency; MCP startup intentionally degrades to diagnostics, while normal provider exceptions can abort an unrecorded turn.
-- Current handling / recovery: configure/restart the dependency; prior turns are flushed by CLI. MCP failure does not prevent the base session.
+- Current handling / recovery: configure/restart the dependency; accepted prompts and terminal outcomes remain in canonical conversation JSON. MCP failure does not prevent the base session.
 - Reproduction or detection: test_mcp.py::test_session_create_survives_mcp_failure; README troubleshooting; no live provider run.
 - Related invariants / assumptions: ASM-001, ASM-013.
 - Evidence: app/agent/startup.py; app/agent/mcp.py; app/agent/cli/chat.py.
@@ -126,7 +124,7 @@
 
 ### FAIL-010 — Empty or tool-protocol model output
 
-- Symptom: blank reply, leaked tool syntax, or an unexecuted structured tool call would otherwise reach the user/history.
+- Symptom: blank reply, leaked tool syntax, or an unexecuted structured tool call would otherwise reach the user or canonical conversation record.
 - Trigger / preconditions: malformed or empty upstream model response.
 - Affected components or users: all agent turns.
 - Root cause: Confirmed external/model-output failure.
@@ -167,7 +165,7 @@
 | Explore shows deleted folder | Compare folder_meta.json inventory with root-scoped raw chunks | FAIL-001 |
 | Empty file still appears in search | list_chunks for its namespaced PID after re-ingest | FAIL-002 |
 | Search and list/context disagree | Inspect raw.json versus Chroma after the last failed ingest | FAIL-003 |
-| Missing recalled old turn | Check history eviction/flush warnings and recent-window hard cap | FAIL-004 |
+| Older exact wording is not found | Verify the `/status` conversation root and approved `grep -F` phrase; exact misses do not use semantic fallback | Expected exact-match limitation; FAIL-004 retired |
 | Applied Skill content changed mid-session | Hash installed bundle against registry and restart | FAIL-005 |
 | Applied extension disappears after concurrent work | Compare desired state, registry revision, and both process reports | FAIL-006 |
 | Earliest citation looks arbitrary | Compare candidate year/date/relation evidence, not provider rank | FAIL-007 |

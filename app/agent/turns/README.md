@@ -9,8 +9,8 @@ Owns:
 - graph execution 結果正規化
 - user-visible turn result models
 - final-response protocol safety helpers
-- recent-turn records 與 prompt assembly
-- process-local journal observability 與 legacy recent-history compatibility
+- canonical completed-turn view與legacy migration DTO
+- process-local journal observability
 - tool-call trace normalization
 
 Does not own:
@@ -35,9 +35,8 @@ Does not own:
 | `results.py` | `GraphTurnResult` 與 `TurnOutcome` |
 | `execution.py` | Stateless graph streaming、message/call collection 與 recovery metadata |
 | `safety.py` | User-visible response 與 tool-protocol artifact checks |
-| `memory.py` | `TurnRecord` 與 recent prompt history assembly |
-| `journal.py` | Process-local recent-turn、tool 與 diagnostic observation state |
-| `store.py` | Legacy recent-window overflow 與 shutdown flush compatibility |
+| `memory.py` | Legacy `TurnRecord` DTO 與 canonical completed-turn view |
+| `journal.py` | Process-local tool 與 diagnostic observation state |
 | `trace.py` | Tool-call extraction、grouping 與 count formatting |
 
 `trace.py` 是一般 turn tool trace；`thinking/trace.py` 處理 candidate/fusion evidence，`observability.py` 則是 telemetry。
@@ -59,8 +58,8 @@ ChatSession._begin_turn()
 
 - `ChatSession` 擁有整個 turn lock 與呼叫順序。
 - `execute_graph()` 無長期 mutable state，不 import `ChatSession`。
-- `TurnJournal` 是 recent turns、turn logs 與 last tool calls 的 process-local owner。
-- `TurnStore` 使用 Journal 建立的同一個 recent-turn list，不複製第二份狀態。
+- `TurnJournal`只擁有turn logs與last tool calls；不持久化transcript。
+- `ConversationRepository`是prompt、terminal response與configured latest-context window的唯一authority。
 - Accepted prompt 必須在 provider/tool 執行前成為 canonical pending turn。
 - Safety/citation finalization 必須在 canonical completed transition 前完成；完成寫入後才可回傳 terminal outcome。
 - Legacy Plan v1/v2 parser 位於 `agent.conversations` migration boundary，不由一般 turn execution import，且不寫回來源檔。

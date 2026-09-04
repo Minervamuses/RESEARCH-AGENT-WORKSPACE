@@ -4,7 +4,7 @@
 
 ## Three layers
 
-1. **Implementation**：`bash.py`、`read_file.py` 及 inventory 組裝的 local RAG/history tools。
+1. **Implementation**：`bash.py`、`read_file.py` 及 inventory 組裝的 document RAG tools。
 2. **Resolution**：`inventory.py` 定義 local base inventory；session 再合併 MCP、extra 與 citation workflow tools，`access.py` 依 normal/active-skill policy 算出 effective tools。
 3. **Enforcement**：`policy_node.py` 在執行當下重新檢查 call，拒絕 forged 或當前 mode 不可用的 tool。
 
@@ -13,7 +13,7 @@
 | Module | Responsibility |
 |---|---|
 | `bash.py` | 每次需使用者核准、以 app root 為預設 cwd 的 shell tool；不提供 filesystem sandbox |
-| `read_file.py` | Controlled local file reading tool |
+| `read_file.py` | Controlled local file reading tool with bounded 1 MiB chunks |
 | `inventory.py` | Base tool creation、names 與 system-prompt inventory |
 | `access.py` | Global/skill-scoped access resolution |
 | `policy_node.py` | LangGraph `ToolNode` execution-time enforcement |

@@ -174,17 +174,8 @@
 - Status: Under investigation
 - Confidence: Partially verified; complete intersection safety Unknown.
 
-### ASM-017 — Catalog registration is equivalent to durable conversation state
-
-- Assumption: after the first finalized normal answer registers a transient session, the backend reaches an eviction, switch, or graceful-shutdown flush before process loss.
-- Where relied on: sidebar membership can be written while the corresponding normal turn still resides only in `recent_turns`.
-- Failure if false: a cataloged conversation can reopen as unavailable because no history role pair or plan turn exists for it.
-- Detection or mitigation: graceful switch/shutdown refuses incomplete flush and transcript listing exposes `unavailable`; there is no first-turn write-through or crash-window regression.
-- Evidence: `app/agent/desktop/service.py::_session_turn`; `app/agent/turns/store.py`; conversation tests.
-- Status: Under investigation
-- Confidence: Inferred from confirmed ordering; abnormal-loss reproduction not run.
-
 ## Retired assumptions
 
 - issue/05: repository line endings no longer depend on global Git defaults; .gitattributes now owns LF policy.
 - issue/06: separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one AgentConfig graph fuse with early finalization governs the current graph.
+- ASM-017: catalog registration no longer depends on a later eviction or shutdown flush. The canonical repository writes an accepted prompt as `pending` before provider/tool execution and writes the terminal state directly; lifecycle, crash-boundary, restart, and Desktop conversation tests cover the ordering.

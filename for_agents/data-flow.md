@@ -5,16 +5,16 @@
 ### Flow: Interactive agent turn
 
 - Trigger / input: non-slash user text passed to ChatSession.turn_outcome.
-- Output / side effect: one finalized TurnOutcome plus plan-log or recent/history state; tools may have side effects before finalization.
+- Output / side effect: one finalized TurnOutcome plus canonical pending/terminal JSON; tools may have side effects before finalization.
 - Steps:
   1. CLI/session — validate runtime and serialize the turn with the session async lock.
-  2. Session — assemble system, recent-turn, active-skill, tool-availability, plan, and citation-source context.
+  2. Session — assemble system, latest canonical completed-turn, active-skill, tool-availability, conversation-root, and citation-source context.
   3. Normal graph or extended orchestrator — invoke OpenRouter, bind the effective tools, and execute allowed tool calls.
   4. turns.execution — normalize streamed messages, tool calls, trace events, answer, and recovery reason into GraphTurnResult.
-  5. ChatSession.finalize_and_record — reject tool-protocol artifacts, apply citation gate/render, collect safe metrics, then call TurnJournal.
-  6. TurnJournal — write plan markdown first or append a recent normal turn; TurnStore evicts overflow to chat-history Chroma.
-- State or ownership transitions: model draft becomes finalized text before journal ownership; normal recent turns later move to history_rag, while plan turns remain markdown-only.
-- Error / retry / rollback behavior: empty model output retries twice; invalid final output gets one repair then deterministic fallback. A raised normal graph/provider exception is printed by CLI and the new turn is not recorded. Tool side effects have no rollback. Failed plan append aborts journal advancement.
+  5. ChatSession.finalize_and_record — reject tool-protocol artifacts, apply citation gate/render, collect safe metrics, commit canonical completed JSON, then update TurnJournal diagnostics.
+  6. ConversationRepository — remains the sole transcript authority; the latest ten completed context-eligible turns are supplied automatically.
+- State or ownership transitions: accepted input becomes pending before provider/tool work; model draft becomes finalized text before the completed transition and terminal outcome.
+- Error / retry / rollback behavior: empty model output retries twice; invalid final output gets one repair then deterministic fallback. Raised graph/provider exceptions durably transition the accepted turn to failed; explicit same-ID retry is required. Tool side effects have no rollback.
 - Invariants involved: INV-004, INV-005, INV-006.
 - Evidence: app/agent/session.py; app/agent/graph.py; app/agent/turns; app/tests/test_turn_finalizer.py.
 - Confidence: Confirmed.
@@ -82,7 +82,7 @@
   2. Rust supervisor — require active Conda environment `app`, resolve the source checkout, and spawn `<CONDA_PREFIX>/bin/python -m agent.desktop.server` with repository cwd and `PYTHONPATH=app`.
   3. Python server — revalidate Linux/Conda, redirect incidental stdout to stderr, emit `backend.ready`, and accept bounded NDJSON lines.
   4. Rust pipe readers — enforce UTF-8/line size/origin/order, correlate events and one terminal result, and emit bounded Tauri events to React.
-  5. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, flushes recent turns, emits shutdown state, and exits. Rust reports graceful only when a flush-bearing result and process exit both occur; otherwise it kills and reports forced/unknown flush.
+  5. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, closes the session without a legacy transcript flush, emits shutdown state, and exits. Rust reports whether the child exited gracefully or was forced.
 - State or ownership transitions: Rust owns child/generation/pending-request state; Python owns session and stores; React owns presentation state and discards stale-generation events.
 - Error / retry / rollback behavior: wrong runtime degrades without a child; malformed output or timeouts fail pending requests and stop the generation; unexpected exit becomes crashed and requires explicit restart. Stderr content is drained but only counts are retained by Rust.
 - Invariants involved: INV-011, INV-015, INV-017.
@@ -94,17 +94,17 @@
 - Trigger / input: project/sidebar selection, new conversation, control change, or composer text.
 - Output / side effect: selected Python `ChatSession`, bounded transcript DTOs, a finalized answer/command result, and eventual durable conversation state.
 - Steps:
-  1. Catalog — `DesktopProjectCatalog` bootstraps one local project and stores only ordered session IDs.
-  2. Create/select — new sessions remain transient; selecting a saved session reads exact history role pairs and direct-answer plan logs, rejects ambiguous records, then materializes a session with contiguous restored turns.
-  3. Switch — flush current recent turns before replacement; retain the current session and reconstruct its prompt window if flush fails. In-process mode/thinking/skill/plan controls are snapshot-restored only while the backend lives.
-  4. Turn — Python parses allowlisted desktop slash commands or passes ordinary text unchanged to `ChatSession.turn_outcome`.
-  5. Finalize — Python finalizes the answer, validates the worst-case success envelope before the journal write, records the turn, then registers a transient session after its first normal answer.
+  1. Catalog — `DesktopProjectCatalog` bootstraps one local project, reconciles healthy canonical JSON summaries, and stores only ordered session IDs.
+  2. Create/select — selecting a saved session loads canonical JSON; only when it is absent may the strict legacy Chroma/Plan readers stage a non-destructive canonical import before materializing the session.
+  3. Switch — validate or import the target before replacing the current session; no conversation-history flush exists. In-process thinking/skill controls are snapshot-restored only while the backend lives.
+  4. Turn — Python writes the accepted original prompt as canonical pending before parsing an allowlisted display-only command or starting provider/tool execution.
+  5. Finalize — Python validates and finalizes the answer, commits the terminal canonical transition, then returns the authoritative result; first-prompt registration follows the durable pending write.
   6. Present — Python emits bounded `answer.chunk` events only after finalization (`streamKind=post_finalized`), then one authoritative result. React assembles provisional chunks and reconciles them against the exact final result.
-- State or ownership transitions: transient session becomes cataloged after the first normal answer; recent normal turns stay in memory until eviction/switch/shutdown; restored turns use `persist_target=none` so old content is not duplicated.
-- Error / retry / rollback behavior: malformed/unavailable transcripts degrade or block selection; catalog failure returns a pending registration that can be retried without replaying the model turn; provider failures preserve the frontend draft. A crash before recent-turn flush can leave catalog membership without a restorable transcript (ASM-017).
+- State or ownership transitions: original input moves from draft to durable pending, then to completed/failed/interrupted in the same canonical JSON. The latest ten completed context-eligible turns are derived at prompt time rather than moved between stores.
+- Error / retry / rollback behavior: malformed/unavailable transcripts degrade or block selection; catalog failure returns a pending registration that can be retried without replaying the model turn; provider failures retain a durable failed turn and require explicit same-ID retry. Restart marks leftover pending work interrupted rather than auto-replaying it.
 - Invariants involved: INV-005, INV-006, INV-016, INV-017.
-- Evidence: `app/agent/desktop/catalog.py`; `app/agent/desktop/service.py`; history/plan restore code; conversation/answer-stream tests.
-- Confidence: Confirmed, with crash-window durability Inferred.
+- Evidence: `app/agent/desktop/catalog.py`; `app/agent/desktop/service.py`; `app/agent/conversations`; conversation/lifecycle/answer-stream tests.
+- Confidence: Confirmed.
 
 ### Flow: Desktop Bash approval
 
@@ -137,18 +137,17 @@
 
 - Agent graph: two identical retries for truly empty upstream output; one tool-free repair for unsafe final content; deterministic fallback after exhaustion.
 - Extended thinking: candidate failures/timeouts can be isolated, malformed aggregation falls back, but raised aggregator/reviewer/reviser provider exceptions are not consistently contained.
-- History: failed eviction retains the oldest turn until recent memory exceeds three times the configured window, then drops it unrecorded; shutdown flush stops at first failure.
+- Conversations: the canonical repository writes accepted prompts before provider/tool execution and writes completed, failed, or interrupted terminal states directly. A leftover `pending` turn is exposed as interrupted on reopen; legacy Chroma and Plan records are read only at migration boundaries.
 - RAG: raw JSON writes are atomic and concurrent rewrites fail loudly; the three RAG persistence surfaces are not transactional. Re-run ingest is the documented recovery for partial writes.
 - Citation: network retries/rate limiting live in provider adapters; identity and storage conflicts fail closed; a batch reports each saved/reused/failed item.
 - Extensions: startup skips invalid entries and reports diagnostics; apply requires a new preview after stale state. Cross-process lost updates and post-startup Skill tampering are not recovered automatically.
-- Desktop: malformed child output or request timeout terminates the generation; frontend reducers reject stale-generation state. Shutdown/EOF make flush/cancellation visible and do not report a forced exit as successful persistence.
+- Desktop: malformed child output or request timeout terminates the generation; frontend reducers reject stale-generation state. Shutdown/EOF make cancellation visible and do not report a forced exit as successful persistence.
 - Desktop trust: unknown, reused, expired, cross-turn, unsafe, dismissed, crash/restart, or shutdown Bash decisions default to denial. Prune and extension previews are one-use and rechecked before mutation.
 
 ## Unverified flows
 
 - Live provider and real persistent-store paths were not run in this audit.
 - Multiple concurrently launched desktop applications sharing `persist_dir` or extension state were not exercised.
-- No failure-injection journey covers a finalized first desktop turn followed by process death before its recent-turn flush.
 - No integrated stress test covers all RAG read/write overlaps accepted by the concurrent protocol server.
 - Installer/wheel/bundled desktop asset lookup is unsupported and unverified; only Linux source checkout is documented.
 - No failure-injection test covers Chroma mid-batch failure, extension multiprocessing, or raised extended-thinking provider exceptions.

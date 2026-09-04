@@ -12,8 +12,8 @@ The repository also contains a tracked source-checkout desktop application. Reac
 |---|---|---|---|---|---|
 | Runtime and packaging | Single Linux application environment and distribution | app/pyproject.toml, app/env/env-app.yml, app/poetry.toml | Conda, Poetry, Python 3.12-3.13, Node, Rust | AGENTS.md; app/pyproject.toml | Confirmed |
 | Agent composition core | Session lifecycle, graph construction, configuration, startup, MCP, ingest adapter, telemetry | agent.ChatSession, agent.build_graph, python -m agent.cli.chat | LangGraph, OpenRouter, rag public API, skill runtime | app/agent/README.md; app/agent/session.py::ChatSession; app/agent/startup.py::load_session_startup | Confirmed |
-| Turn and thinking lifecycle | Normal and extended execution, finalization, recent memory, plan logging, long-term history | turns.execution.execute_graph, thinking.orchestrator.FusionOrchestrator | Agent graph, tool policy, history store | app/agent/turns/README.md; app/agent/thinking/README.md | Confirmed |
-| Tool and skill policy | Local tools, global versus skill-scoped access, runtime denial, skill context | tools.access.resolve_tool_access, PolicyToolNode, load_skill_runtime | RAG/history adapters, MCP tools, manifests | app/agent/tools/README.md; app/agent/tools/access.py | Confirmed |
+| Turn and thinking lifecycle | Normal and extended execution, finalization, canonical latest-context views, process-local diagnostics | turns.execution.execute_graph, thinking.orchestrator.FusionOrchestrator | Agent graph, tool policy, conversation repository | app/agent/turns/README.md; app/agent/thinking/README.md | Confirmed |
+| Tool and skill policy | Local tools, global versus skill-scoped access, runtime denial, skill context | tools.access.resolve_tool_access, PolicyToolNode, load_skill_runtime | RAG/file/shell adapters, MCP tools, manifests | app/agent/tools/README.md; app/agent/tools/access.py | Confirmed |
 | Extension runtime | Scan, validate, approve, copy, register, and load drop-in Skills/MCPs | /Extension-Management, ExtensionManager, load_extension_startup | Filesystem state, model-assisted preview, MCP loader | app/agent/extensions/README.md; app/agent/extensions | Confirmed |
 | Citation engine | Discover, resolve, authority-check, save, register, gate, and render citations | citation_workflow; CitationService; CitationSessionPolicy | Crossref, DataCite, doi.org, optional OpenAlex/arXiv, local cite directory | app/skills/citation/README.md; app/skills/citation | Confirmed |
 | RAG subsystem | Collect, tag, chunk, index, retrieve, inspect, sync, and prune research files | rag.search/explore/list_chunks/get_context; rag.cli.ingest | Ollama/Chroma, OpenRouter tagging, JSON filesystem state | app/rag/README.md; app/rag/api.py; app/rag/cli/ingest.py | Confirmed |
@@ -30,7 +30,7 @@ The repository also contains a tracked source-checkout desktop application. Reac
 |---|---|---|---|
 | OpenRouter | Main chat, extended-thinking roles, extension preview explanation, folder tagging | Missing key/model or provider errors fail the affected feature; normal turn exceptions are not recorded | app/agent/llm; app/rag/llm; README.md |
 | Ollama with bge-m3 | Ingest and semantic search embeddings | Ingest/search fail when service or model is absent; raw JSON inventory/context may still work | app/rag/embedder/ollama.py; README.md |
-| ChromaDB | Knowledge vectors and long-term chat history | Writes are not transactional with raw JSON; history failures retain turns until a hard cap | app/rag/store; app/agent/history_rag; app/agent/turns/store.py |
+| ChromaDB | Document knowledge vectors; legacy conversation data is read only from a disposable migration clone | RAG writes are not transactional with raw JSON; conversation create/turn execution does not initialize Chroma | app/rag/store; app/agent/conversations/legacy.py |
 | Web Search and optional GitHub MCP | External search and remote GitHub state | Missing/crashing servers are omitted with diagnostics; the session continues | app/agent/mcp.py; app/agent/startup.py |
 | Citation providers | Bibliographic discovery and authority metadata | Structured partial/all-provider failures; identity conflicts fail closed | app/skills/citation/providers; app/skills/citation/service.py |
 | Local filesystem | Stores, plan logs, bundles, extension registry, protocol pipes | Explicit atomic replacement exists for selected JSON/bundle writes, not for every multi-store flow | README.md; app/rag/store/json_store.py; app/skills/citation/storage.py; app/agent/extensions/registry.py |
@@ -45,7 +45,7 @@ The supported CLI topology is local Linux/WSL:
       -> load_session_startup
       -> ChatSession
           -> LangGraph normal turn or extended-thinking orchestrator
-          -> local/RAG/history/MCP/citation tools
+          -> local/RAG/MCP/citation tools
           -> one finalization and journal path
       -> terminal output
 
@@ -68,7 +68,7 @@ The supported desktop source-checkout topology is:
 
 The desktop is source-run only. `tauri.conf.json` has `bundle.active=false`; Python loads the protocol contract from `app/desktop/protocol/v1` through checkout-relative `find_app_root()`. There is no installer, bundled sidecar, remote service, queue, or cloud deployment.
 
-Durable local state is split by owner: `desktop-projects.json` maps projects to session IDs; Chroma chat history and plan logs carry restorable turns; RAG uses `raw.json`, `folder_meta.json`, and Chroma; citation bundles live under the configured citation root; extension desired/applied state lives under separate drop-in/managed roots.
+Durable local state is split by owner: `desktop-projects.json` maps projects to session IDs; canonical `conversations/*.json` carries accepted prompts and terminal turns; legacy Chroma chat history and Plan logs are read-only migration inputs; RAG uses `raw.json`, `folder_meta.json`, and Chroma; citation bundles live under the configured citation root; extension desired/applied state lives under separate drop-in/managed roots.
 
 ## Unverified areas
 

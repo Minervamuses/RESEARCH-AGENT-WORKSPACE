@@ -136,22 +136,11 @@
 - Related items: ASM-011.
 - Status: Blocked
 
-### BACKLOG-012 — Prove first-turn durability before catalog membership
-
-- Priority: Research
-- Problem: the first normal desktop answer registers its session after finalization, but ordinary recent turns are not durable until eviction, conversation switch, or graceful shutdown.
-- Evidence: `app/agent/desktop/service.py::_session_turn`; `app/agent/turns/store.py`; ASM-017. Existing tests cover flush failure and restart restoration, not abnormal loss in this exact window.
-- Why it matters: a sidebar entry may survive while its only finalized turn does not, making the conversation unavailable after a crash.
-- Suggested scope: add one deterministic crash-boundary test first; only then choose minimal write-through, delayed registration, or explicit pending-durability semantics if the risk reproduces.
-- Dependencies / blockers: distinguish a successfully finalized/recorded turn from a request that never reached terminal success; avoid changing existing persistent formats without approval.
-- Acceptance criteria: after the defined crash point, a registered session is restorable, or the session is not registered and the UI states the loss boundary honestly.
-- Related items: INV-016, ASM-017.
-- Status: Researching
-
 ## Recently resolved or removed
 
 - issue/05 is resolved: repository-owned .gitattributes enforces LF and prevents host Git defaults from governing text files.
 - issue/06 is resolved: separate tool quotas were removed; one validated graph recursion fuse with early finalization now governs turns.
+- BACKLOG-012 is resolved: canonical prompt-first and terminal write-through persistence removes the first-turn flush window, and catalog reconciliation plus crash-boundary/restart tests cover recovery.
 - FAIL-008 is resolved for the supported source checkout: commits `30f8b18` through `1e22f90` added Rust supervision, Python conversation/service wiring, React UI, knowledge commands, and trust flows; the completed build log records final Python/TypeScript/Rust/build evidence.
 - The desktop GUI completion plan is complete at the audited HEAD. It is historical execution evidence, not active backlog; source-only packaging and remaining gaps are recorded separately above.
 - Historical July citation research/benchmark proposals are not carried forward automatically; current code/tests and the active citation issues govern present work.
