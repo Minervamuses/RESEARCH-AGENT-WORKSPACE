@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -65,6 +66,35 @@ def _canonical_cli_session(monkeypatch, tmp_path):
         session_id=session_id,
     )
     return session, repository
+
+
+def _extension_preview(tmp_path):
+    return SimpleNamespace(
+        paths=SimpleNamespace(dropin_root=tmp_path / "dropins"),
+        registry=SimpleNamespace(revision=0),
+        diff=SimpleNamespace(
+            changes=(
+                SimpleNamespace(key="skill:writer", operation="add"),
+            ),
+            diagnostics=(),
+        ),
+        plan=SimpleNamespace(
+            items=(
+                SimpleNamespace(
+                    key="skill:writer",
+                    decision="apply",
+                    summary="Install the writer skill.",
+                    reason=None,
+                ),
+            ),
+        ),
+        mcp_candidates={},
+        host_blocks={},
+    )
+
+
+class _UncleanExit(BaseException):
+    """Simulate process loss without giving turn cleanup a catchable error."""
 
 
 def test_chat_cli_writes_each_turn_without_exit_flush(monkeypatch):
@@ -254,6 +284,73 @@ def test_chat_cli_slash_help_is_durable_display_only_before_handler(
     assert "canonical local help" in capsys.readouterr().out
 
 
+def test_chat_cli_extension_apply_stays_pending_through_confirmation(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    session, repository = _canonical_cli_session(monkeypatch, tmp_path)
+    preview = _extension_preview(tmp_path)
+    stages = []
+    approval = "yEs"
+
+    def observe(stage):
+        turn = repository.load(session.session_id).document.turns[-1]
+        stages.append((stage, turn.turn_id, turn.state, turn.kind))
+
+    class RecordingManager:
+        def preview(self):
+            observe("preview")
+            return preview
+
+        def apply(self, selected, *, approved_mcp_bindings):
+            observe("apply")
+            assert selected is preview
+            assert approved_mcp_bindings == set()
+            return SimpleNamespace(
+                previous_revision=0,
+                applied_revision=1,
+                restart_required=True,
+                items=(
+                    SimpleNamespace(
+                        key="skill:writer",
+                        outcome="added",
+                        detail="Installed the writer skill.",
+                    ),
+                ),
+                diagnostics=(),
+            )
+
+    def confirm(_prompt):
+        observe("confirmation")
+        return approval
+
+    session.extension_manager = RecordingManager()
+    monkeypatch.setattr("builtins.input", confirm)
+
+    _run_cli(monkeypatch, session, ["/Extension-Management", "q"])
+
+    snapshot = repository.load(session.session_id)
+    turn = snapshot.document.turns[-1]
+    assert [stage[0] for stage in stages] == [
+        "preview",
+        "confirmation",
+        "apply",
+    ]
+    assert {stage[1] for stage in stages} == {turn.turn_id}
+    assert {(stage[2], stage[3]) for stage in stages} == {
+        ("pending", "display-only")
+    }
+    assert len(snapshot.document.turns) == 1
+    assert turn.state == "completed"
+    assert turn.assistant_output is not None
+    assert "applied revision 0 -> 1" in turn.assistant_output
+    assert approval not in repository.path_for(session.session_id).read_text(
+        encoding="utf-8"
+    )
+    assert turn.assistant_output in capsys.readouterr().out
+
+
 def test_chat_cli_confirmed_prune_is_durable_before_side_effect(
     monkeypatch,
     tmp_path,
@@ -300,6 +397,74 @@ def test_chat_cli_confirmed_prune_is_durable_before_side_effect(
     assert "pruned 1 orphaned pid(s)" in turn.assistant_output
     assert repository.latest_context(snapshot) == ()
     assert turn.assistant_output in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command_kind", ["extension", "prune"])
+def test_chat_cli_unclean_local_command_recovers_without_replay(
+    monkeypatch,
+    tmp_path,
+    command_kind,
+):
+    from agent.cli import slash_commands
+
+    session, repository = _canonical_cli_session(monkeypatch, tmp_path)
+    calls = []
+
+    def crash_side_effect():
+        turn = repository.load(session.session_id).document.turns[-1]
+        calls.append((turn.turn_id, turn.state, turn.kind))
+        raise _UncleanExit("simulated process loss")
+
+    if command_kind == "extension":
+        preview = _extension_preview(tmp_path)
+
+        class CrashingManager:
+            def preview(self):
+                return preview
+
+            def apply(self, selected, *, approved_mcp_bindings):
+                assert selected is preview
+                assert approved_mcp_bindings == set()
+                crash_side_effect()
+
+        session.extension_manager = CrashingManager()
+        monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
+        command = "/Extension-Management"
+    else:
+        source = tmp_path / "source"
+        source.mkdir()
+
+        async def crashing_prune(target, _config):
+            assert target == source.resolve()
+            crash_side_effect()
+
+        monkeypatch.setattr(slash_commands, "prune_folder", crashing_prune)
+        command = f"/prune {source} --yes"
+
+    with pytest.raises(_UncleanExit, match="simulated process loss"):
+        _run_cli(monkeypatch, session, [command])
+
+    pending = repository.load(session.session_id).document.turns[-1]
+    assert calls == [(pending.turn_id, "pending", "display-only")]
+    assert pending.state == "pending"
+    assert pending.assistant_output is None
+
+    restored = ChatSession(
+        AgentConfig(persist_dir=str(tmp_path / "store")),
+        history_store=FakeHistoryStore(),
+        loaded_skills=[],
+        conversation_repository=repository,
+        project_id="local",
+        session_id=session.session_id,
+    )
+
+    recovered = repository.load(restored.session_id).document.turns[-1]
+    assert recovered.turn_id == pending.turn_id
+    assert recovered.state == "interrupted"
+    assert recovered.assistant_output is None
+    assert recovered.failure is not None
+    assert recovered.failure.code == "interrupted"
+    assert calls == [(pending.turn_id, "pending", "display-only")]
 
 
 def test_chat_cli_routes_dynamic_skill_with_exact_trailing_prompt(monkeypatch):
