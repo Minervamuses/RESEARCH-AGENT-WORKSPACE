@@ -12,9 +12,9 @@
   3. Normal graph or extended orchestrator — invoke OpenRouter, bind the effective tools, and execute allowed tool calls.
   4. turns.execution — normalize streamed messages, tool calls, trace events, answer, and recovery reason into GraphTurnResult.
   5. ChatSession.finalize_and_record — reject tool-protocol artifacts, apply citation gate/render, collect safe metrics, commit canonical completed JSON, then update TurnJournal diagnostics.
-  6. ConversationRepository — remains the sole transcript authority; the latest ten completed context-eligible turns are supplied automatically.
+  6. ConversationRepository — remains the sole transcript writer, with canonical JSON as the sole active authority; the latest ten completed context-eligible turns are supplied automatically.
 - State or ownership transitions: accepted input becomes pending before provider/tool work; model draft becomes finalized text before the completed transition and terminal outcome.
-- Error / retry / rollback behavior: empty model output retries twice; invalid final output gets one repair then deterministic fallback. Raised graph/provider exceptions durably transition the accepted turn to failed; explicit same-ID retry is required. Tool side effects have no rollback.
+- Error / retry / rollback behavior: empty model output retries twice; invalid final output gets one repair then deterministic fallback. Raised graph/provider exceptions first attempt to transition the accepted turn to failed; if that persistence attempt also fails, the original error is preserved and the canonical turn can remain pending until restart exposes it as interrupted. Neither state is replayed automatically, and rerunning requires an explicit same-ID retry. Tool side effects have no rollback.
 - Invariants involved: INV-004, INV-005, INV-006.
 - Evidence: app/agent/session.py; app/agent/graph.py; app/agent/turns; app/tests/test_turn_finalizer.py.
 - Confidence: Confirmed.
@@ -95,16 +95,18 @@
 - Output / side effect: selected Python `ChatSession`, bounded transcript DTOs, a finalized answer/command result, and eventual durable conversation state.
 - Steps:
   1. Catalog — `DesktopProjectCatalog` bootstraps one local project, reconciles healthy canonical JSON summaries, and stores only ordered session IDs.
-  2. Create/select — selecting a saved session loads canonical JSON; only when it is absent may the strict legacy Chroma/Plan readers stage a non-destructive canonical import before materializing the session.
+  2. Create/select — selecting a saved session loads canonical JSON; only when it is absent may the strict legacy Chroma/Plan readers stage a non-destructive canonical import before materializing the session. Imported turns are display-only and context-ineligible.
   3. Switch — validate or import the target before replacing the current session; no conversation-history flush exists. In-process thinking/skill controls are snapshot-restored only while the backend lives.
   4. Turn — Python writes the accepted original prompt as canonical pending before parsing an allowlisted display-only command or starting provider/tool execution.
   5. Finalize — Python validates and finalizes the answer, commits the terminal canonical transition, then returns the authoritative result; first-prompt registration follows the durable pending write.
   6. Present — Python emits bounded `answer.chunk` events only after finalization (`streamKind=post_finalized`), then one authoritative result. React assembles provisional chunks and reconciles them against the exact final result.
 - State or ownership transitions: original input moves from draft to durable pending, then to completed/failed/interrupted in the same canonical JSON. The latest ten completed context-eligible turns are derived at prompt time rather than moved between stores.
-- Error / retry / rollback behavior: malformed/unavailable transcripts degrade or block selection; catalog failure returns a pending registration that can be retried without replaying the model turn; provider failures retain a durable failed turn and require explicit same-ID retry. Restart marks leftover pending work interrupted rather than auto-replaying it.
+- Error / retry / rollback behavior: malformed/unavailable transcripts degrade or block selection; catalog failure returns a pending registration that can be retried without replaying the model turn. Provider failures attempt a durable failed transition and require explicit same-ID retry; if that transition cannot be published, restart converts the leftover pending turn to interrupted rather than auto-replaying it.
 - Invariants involved: INV-005, INV-006, INV-016, INV-017.
 - Evidence: `app/agent/desktop/catalog.py`; `app/agent/desktop/service.py`; `app/agent/conversations`; conversation/lifecycle/answer-stream tests.
 - Confidence: Confirmed.
+
+The catalog-wide migration path is deliberately separate from selection: it is internal and default-off, reuses one lazy immutable Chroma snapshot for missing fixture targets, and runs only when exact `phase02` fixture mode, its validated owned root, and `RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1` are all present. Normal production startup/list never invokes it.
 
 ### Flow: Desktop Bash approval
 
@@ -125,7 +127,7 @@
 
 | State | Owner while active | Transition | Durable destination |
 |---|---|---|---|
-| User/model turn | ChatSession and graph | pending JSON before execution; completed/failed JSON before terminal outcome | canonical conversation JSON |
+| User/model turn | ChatSession and graph | pending JSON before execution; completed JSON before success; failed transition attempted before error, with pending→interrupted fallback | canonical conversation JSON |
 | RAG source file | User filesystem | collect/tag/chunk/index | raw.json, Chroma, folder_meta.json |
 | Citation discovery record | Citation provider hub/tool call | authority verification and canonical save | cite bundle plus session SourceRegistry |
 | Extension drop-in | User drop-in root | validate/approve/install/restart | private managed copy and registry |
@@ -137,7 +139,7 @@
 
 - Agent graph: two identical retries for truly empty upstream output; one tool-free repair for unsafe final content; deterministic fallback after exhaustion.
 - Extended thinking: candidate failures/timeouts can be isolated, malformed aggregation falls back, but raised aggregator/reviewer/reviser provider exceptions are not consistently contained.
-- Conversations: the canonical repository writes accepted prompts before provider/tool execution and writes completed, failed, or interrupted terminal states directly. A leftover `pending` turn is exposed as interrupted on reopen; legacy Chroma and Plan records are read only at migration boundaries.
+- Conversations: the canonical repository is the sole active writer, writes accepted prompts before provider/tool execution, and makes completed state durable before success exposure. Provider failures attempt a failed transition; if that write also fails, the pending turn remains recoverable as interrupted on reopen. Neither failed nor interrupted work is replayed automatically; latest context is the fixed latest-ten completed eligible view, and legacy Chroma/Plan records are read only at migration boundaries.
 - RAG: raw JSON writes are atomic and concurrent rewrites fail loudly; the three RAG persistence surfaces are not transactional. Re-run ingest is the documented recovery for partial writes.
 - Citation: network retries/rate limiting live in provider adapters; identity and storage conflicts fail closed; a batch reports each saved/reused/failed item.
 - Extensions: startup skips invalid entries and reports diagnostics; apply requires a new preview after stale state. Cross-process lost updates and post-startup Skill tampering are not recovered automatically.
@@ -151,3 +153,4 @@
 - No integrated stress test covers all RAG read/write overlaps accepted by the concurrent protocol server.
 - Installer/wheel/bundled desktop asset lookup is unsupported and unverified; only Linux source checkout is documented.
 - No failure-injection test covers Chroma mid-batch failure, extension multiprocessing, or raised extended-thinking provider exceptions.
+- The current subprocess crash checks exercise the real Python NDJSON child with fixture-owned state, but do not replace the pending native Tauri manual inspection or prove live provider/user-store behavior.

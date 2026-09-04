@@ -26,7 +26,7 @@ Does not own:
 - `GraphTurnResult` 是 graph 或 extended execution 產生的內部結果；它可含 tool trace、recovery metadata 與 candidate traces。
 - `TurnOutcome` 是 response safety、citation gate/render 與 recording 完成後的 user-visible 結果。
 
-兩者不可互換；未 finalized 的 `GraphTurnResult.answer` 不得直接寫入 recent memory 或 persistence。
+兩者不可互換；未finalized的`GraphTurnResult.answer`不得寫入canonical completed state或作為terminal outcome回傳。
 
 ## Module map
 
@@ -59,9 +59,11 @@ ChatSession._begin_turn()
 - `ChatSession` 擁有整個 turn lock 與呼叫順序。
 - `execute_graph()` 無長期 mutable state，不 import `ChatSession`。
 - `TurnJournal`只擁有turn logs與last tool calls；不持久化transcript。
-- `ConversationRepository`是prompt、terminal response與固定latest-10 context window的唯一authority。
+- Canonical JSON是目前唯一active transcript authority，`ConversationRepository`是唯一writer；normal新回合、context與exact lookup不使用conversation Chroma。
+- 模型context只取最新10個completed、context-eligible conversational turns；display-only command與legacy import turn都不進context。
 - Accepted prompt 必須在 provider/tool 執行前成為 canonical pending turn。
 - Safety/citation finalization 必須在 canonical completed transition 前完成；完成寫入後才可回傳 terminal outcome。
+- 重啟會把遺留pending turn恢復成interrupted，且不自動重播provider/tool；failed或interrupted turn只有明確retry才重新執行，completed同ID則回復既有結果。
 - Legacy Plan v1/v2 parser 位於 `agent.conversations` migration boundary，不由一般 turn execution import，且不寫回來源檔。
 
 ## Related docs

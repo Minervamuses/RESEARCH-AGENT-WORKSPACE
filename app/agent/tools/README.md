@@ -39,6 +39,16 @@ local base inventory + session-loaded MCP/extra/skill tools
 
 完整 tool 清單與 MCP/skill 使用方式以根目錄 README 為準。
 
+## Conversation recall boundary
+
+`recall_history`已移除，conversation Chroma也不再是normal tool、context或fallback來源。Normal mode需要找先前對話的精確文字時，先從`/status`取得canonical conversation root；把查詢文字依JSON content規則escape，再作POSIX shell single-argument quoting，經每次approval-gated的`bash`執行：
+
+```text
+grep -lF -- <shell-quoted-escaped-phrase> <shell-quoted-root>/*.json | head -n 21
+```
+
+若出現第21個路徑就停止讀檔並請使用者縮小查詢；否則最多以`read_file`檢查20個命中，只接受較早的completed turn。本輪prompt已先成為pending，不能把自我命中當作歷史；模型平常的對話context則只來自canonical JSON中最新10個completed、eligible turns。Exact miss不轉用conversation Chroma、document RAG或embeddings。
+
 ## Related docs
 
 - [Agent architecture](../README.md)

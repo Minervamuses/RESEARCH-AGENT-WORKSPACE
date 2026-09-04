@@ -142,13 +142,13 @@
 - Status: Active
 - Confidence: Confirmed assumption from write ordering; no multiprocessing reproduction run.
 
-### ASM-018 — Production launches do not carry the exact fixture gate
+### ASM-018 — Production launches do not carry exact fixture-only gates
 
-- Assumption: normal users do not launch Tauri with both `RESEARCH_AGENT_DESKTOP_FIXTURE=phase02` and a valid fixture root.
-- Where relied on: `agent.desktop.server._build_runtime_service` selects the isolated fake service solely from that exact environment value.
-- Failure if false: the UI starts against deterministic fixture conversations/providers instead of the real `ChatSession`, while still using the real protocol/service shell.
-- Detection or mitigation: fixture root validation is strict and diagnostics/content are recognizable; all other gate values select production. There is no separate build-time exclusion.
-- Evidence: `app/agent/desktop/server.py`; `app/agent/desktop/fixture_session.py`; fixture tests.
+- Assumption: normal users do not launch Tauri with exact `RESEARCH_AGENT_DESKTOP_FIXTURE=phase02`, a valid owned fixture root, or its additional migration/crash checkpoint environment values.
+- Where relied on: `agent.desktop.server._build_runtime_service` selects the isolated fake service only from the exact primary gate; `fixture_session.py` additionally requires `RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1` before catalog batch import and exact checkpoint+turn fields before crash instrumentation.
+- Failure if false: the UI starts against deterministic fixture conversations/providers instead of the real `ChatSession`; the additional batch gate could import only that fixture catalog, or a checkpoint could intentionally block the fixture child.
+- Detection or mitigation: fixture-root validation is strict, batch migration is default-off and doubly gated, checkpoint names/turn IDs are allowlisted, and diagnostics/content are recognizable. Normal startup/list never invokes the catalog batch. There is no separate build-time exclusion.
+- Evidence: `app/agent/desktop/server.py`; `app/agent/desktop/fixture_session.py`; test_desktop_fixture.py; test_conversation_batch_migration.py; test_desktop_crash_recovery.py.
 - Status: Active
 - Confidence: Confirmed test seam and premise.
 
@@ -178,4 +178,4 @@
 
 - issue/05: repository line endings no longer depend on global Git defaults; .gitattributes now owns LF policy.
 - issue/06: separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one AgentConfig graph fuse with early finalization governs the current graph.
-- ASM-017: catalog registration no longer depends on a later eviction or shutdown flush. The canonical repository writes an accepted prompt as `pending` before provider/tool execution and writes the terminal state directly; lifecycle, crash-boundary, restart, and Desktop conversation tests cover the ordering.
+- ASM-017: catalog registration no longer depends on a later eviction or shutdown flush. Canonical JSON is the sole active transcript authority and `ConversationRepository` is its sole writer: accepted prompts become `pending` before provider/tool execution, terminal state precedes success exposure, and restart converts leftover pending work to interrupted without automatic replay. Repository, lifecycle, Desktop restart, and six subprocess crash-boundary tests cover this offline ordering.

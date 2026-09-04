@@ -140,7 +140,7 @@
 
 - issue/05 is resolved: repository-owned .gitattributes enforces LF and prevents host Git defaults from governing text files.
 - issue/06 is resolved: separate tool quotas were removed; one validated graph recursion fuse with early finalization now governs turns.
-- BACKLOG-012 is resolved: canonical prompt-first and terminal write-through persistence removes the first-turn flush window, and catalog reconciliation plus crash-boundary/restart tests cover recovery.
+- BACKLOG-012 is resolved for the supported offline source paths: canonical JSON is the sole active transcript authority and `ConversationRepository` its sole writer; prompt-first and terminal-before-success ordering remove the former flush window; repository temporary-write tests, catalog/restart tests, and six real Python-backend SIGKILL checkpoints cover interrupted/no-auto-replay recovery. This does not claim real user-store migration, live provider behavior, final broad checks, or the still-pending native Tauri manual journey.
 - FAIL-008 is resolved for the supported source checkout: commits `30f8b18` through `1e22f90` added Rust supervision, Python conversation/service wiring, React UI, knowledge commands, and trust flows; the completed build log records final Python/TypeScript/Rust/build evidence.
 - The desktop GUI completion plan is complete at the audited HEAD. It is historical execution evidence, not active backlog; source-only packaging and remaining gaps are recorded separately above.
 - Historical July citation research/benchmark proposals are not carried forward automatically; current code/tests and the active citation issues govern present work.

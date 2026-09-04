@@ -59,11 +59,11 @@ Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用
 
 確認目前使用者對以下位置有寫入權限:
 
-- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json` 與 `folder_meta.json`。舊版留下的 `chat_history/` 只作唯讀 conversation migration input；目前 runtime 不會建立、查詢、更新或刪除它。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
+- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json` 與 `folder_meta.json`。Canonical JSON 是目前唯一會被寫入的 transcript authority；normal 新回合、context 與 exact-text lookup 都不使用 conversation Chroma。舊版留下的 `chat_history/` 只會在明確 legacy import 邊界從隔離唯讀複本讀取，來源不會被建立、更新或刪除。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
 
-舊版留下的 `app/plan_logs/` 是唯讀 migration input；目前版本不會建立或更新這些檔案。
+舊版留下的 `app/plan_logs/` 是唯讀 migration input；目前版本不會建立或更新這些檔案。從 legacy Chroma／Plan log 匯入的 turn 只供 transcript 顯示，不會進入模型 context。
 
 ## 2. 安裝
 
@@ -173,8 +173,10 @@ store 建立後可能包含:
 - **ChromaDB**:語意搜尋用。
 - **`raw.json`**:chunk 的 JSON 備份,`get_context`、`list_chunks`、sync/prune 讀它。
 - **`folder_meta.json`**:repo ingest 時由 LLM 產生的 folder tags 與 summaries。
-- **`conversations/*.json`**:每個對話一份的canonical transcript；最新10個completed、context-eligible turns會自動進入prompt。
-- **`chat_history/`**:舊版conversation Chroma，只供non-destructive migration reader從隔離複本讀取；normal runtime不再使用。
+- **`conversations/*.json`**:每個對話一份的canonical transcript，也是目前唯一active transcript authority；`ConversationRepository`是唯一writer。最新10個completed、context-eligible turns會自動進入prompt。
+- **`chat_history/`**:舊版conversation Chroma。Desktop選取某個catalog session且canonical JSON不存在時，才會由non-destructive importer從一次性的隔離唯讀複本嘗試匯入；normal新回合、context與exact-text lookup不會使用它。
+
+Catalog-wide legacy batch不屬於正常production startup/list流程，預設不執行。目前只有通過direct `/tmp` root檢查的exact `phase02` isolated fixture，再明確設定`RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1`時才會呼叫；真實store沒有自動batch migration入口。所有legacy來源保持不變，匯入後的turn是display-only、context-ineligible。
 
 ### 在 chat CLI 匯入(建議流程)
 
@@ -206,7 +208,7 @@ Legacy `plan_logs/` 由目錄規則直接略過，避免把舊對話誤收進知
 
 - **更新已修改的檔案**:重新 `/ingest` 同一路徑即可。repo/folder ingest 是 upsert:先刪同 folder 這輪涉及的 pids,再加入新 chunks。
 - **刪掉已不存在檔案的 entries**:先 `/sync` 檢查,再 `/prune <folder> --yes`。
-- **不相容 schema 的維護／復原**:這個 student-owned local project 不維護 migration framework。先停止 chat CLI，把既有 generated store 備份或移到 workspace 外(預設操作 `app/store/`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local store，不是新使用者的安裝要求。
+- **不相容 RAG store schema 的維護／復原**:這個 student-owned local project 不維護通用 RAG schema migration framework。先停止 chat CLI，把既有 generated store 備份或移到 workspace 外(預設操作 `app/store/`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local RAG store，不是新使用者的安裝要求，也不否定上文限定邊界內的legacy conversation importer。
 
 ## 6. Slash Commands
 
@@ -282,7 +284,7 @@ Source checkout 的 drop-in root 是 `app/tool/`；wheel 安裝版使用平台 u
 
 MCP 工具:Web Search MCP 預設載入,用於即時網路搜尋；GitHub MCP 是選配,用於遠端 repo、PR、issue、Actions；獲准的 drop-in MCP 會在下一次啟動加入。
 
-工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;normal thinking下問早先對話的精確文字 → 從`/status`取得canonical conversation root，把文字依canonical JSON規則escape後，經每次approval-gated的`bash`執行`grep -F`。listing只取前21個路徑：若出現第21個就不讀檔並請使用者縮小文字；否則最多用`read_file`檢查20個命中且只接受較早的completed turn。本輪prompt已先寫成pending，不能把它的自我命中當成舊紀錄；canonical JSON大檔可依`next_offset`分段讀取至8 MiB總上限，exact miss不轉用document RAG/embeddings。Extended-thinking proposers沒有`bash`，需要舊對話時應切回normal。問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
+工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;normal thinking下問早先對話的精確文字 → 從`/status`取得canonical conversation root，把文字依canonical JSON規則escape後再作POSIX shell single-argument quoting，經每次approval-gated的`bash`執行`grep -lF -- <shell-quoted-escaped-phrase> <shell-quoted-root>/*.json | head -n 21`。若出現第21個路徑就不讀檔並請使用者縮小文字；否則最多用`read_file`檢查20個命中且只接受較早的completed turn。本輪prompt已先寫成pending，不能把它的自我命中當成舊紀錄；canonical JSON大檔可依`next_offset`分段讀取至8 MiB總上限。`recall_history`已移除；exact miss不轉用conversation Chroma、document RAG或embeddings。Extended-thinking proposers沒有`bash`，需要舊對話時應切回normal。問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
 
 ## 8. MCP 設定
 
@@ -473,7 +475,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 | ingest/search 失敗提到 Ollama/embeddings | 確認 Ollama 正在跑,且 `ollama pull bge-m3` 已完成 |
 | `/thinking extended` 切換即報錯 | 需要 OpenRouter key,且 config 設定的 reviewer/rewrite/repair/fusion 模型都要在 OpenRouter 可用;先完成設定再啟用 |
 | `/sync` 顯示大量磁碟上不存在的檔案 | 確認 sync 的 root 與當初 ingest 的 root 相同;`file_path` 是以 ingest root 為基準的相對路徑,root 不同會誤判 |
-| 舊版 Plan log 沒出現在 desktop 對話 | 選取對應 desktop 對話時由 legacy importer 讀取 `app/plan_logs/`;來源檔保持不變。若匯入失敗,先保留原檔並查看 migration 錯誤 |
+| 舊版 Plan log／conversation Chroma 沒出現在 desktop 對話 | 選取對應catalog session且canonical JSON不存在時，legacy importer才會從`app/plan_logs/`與隔離的唯讀Chroma複本嘗試匯入；來源保持不變，匯入內容只供顯示、不進模型context。若匯入失敗，先保留來源；Desktop目前只會顯示conversation unavailable／degraded類型的安全錯誤，不會暴露底層migration細節 |
 | Web Search 工具沒出現 | 確認標準路徑下有 built `dist/index.js`,且 `conda run -n app node --version` 成功；再查 `~/.cache/agent-mcp/` log |
 | GitHub 工具沒出現 | 確認 `app` Conda env vars 已啟用 MCP、command 可執行且 token 有效；再查 MCP log |
 

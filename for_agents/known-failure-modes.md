@@ -43,7 +43,7 @@
 - Former symptom: the retired TurnStore could drop the oldest in-memory turn after repeated Chroma history write failures reached its hard cap.
 - Resolution: canonical conversation JSON now retains every accepted pending/terminal turn; normal session creation no longer constructs, writes, queries, evicts, or flushes a conversation-history Chroma store.
 - Current handling / recovery: canonical compare-and-swap transitions fail explicitly; there is no secondary conversation writer or hard-cap drop path.
-- Verification: Phase 06 history-retirement, canonical lifecycle, migration, and Desktop conversation tests.
+- Verification: Phase 06 history-retirement and canonical lifecycle tests, plus the Phase 07 integrated fixture assertion that `store/chat_history` is never created.
 - Related invariants / assumptions: INV-005, INV-006.
 - Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.
 - Status: Resolved in Phase 06
@@ -101,11 +101,11 @@
 - Symptom: chat/extended/ingest/search/citation feature errors, or configured MCP tools are absent.
 - Trigger / preconditions: missing key/model/service, network failure, server crash, or hung startup.
 - Affected components or users: feature-specific operation.
-- Root cause: Confirmed operational dependency; MCP startup intentionally degrades to diagnostics, while normal provider exceptions can abort an unrecorded turn.
-- Current handling / recovery: configure/restart the dependency; accepted prompts and terminal outcomes remain in canonical conversation JSON. MCP failure does not prevent the base session.
-- Reproduction or detection: test_mcp.py::test_session_create_survives_mcp_failure; README troubleshooting; no live provider run.
+- Root cause: Confirmed operational dependency; MCP startup intentionally degrades to diagnostics, while provider exceptions fail the affected accepted turn.
+- Current handling / recovery: configure/restart the dependency. The prompt is canonical pending before provider/tool execution; a provider exception attempts a durable failed transition, but if that transition also fails the original error is preserved and restart converts the leftover pending work to interrupted. Neither state auto-replays. MCP failure does not prevent the base session.
+- Reproduction or detection: test_mcp.py::test_session_create_survives_mcp_failure; test_session_lifecycle.py; six test_desktop_crash_recovery.py subprocess boundaries; README troubleshooting. No live provider run.
 - Related invariants / assumptions: ASM-001, ASM-013.
-- Evidence: app/agent/startup.py; app/agent/mcp.py; app/agent/cli/chat.py.
+- Evidence: app/agent/startup.py; app/agent/mcp.py; app/agent/session.py; app/agent/conversations/repository.py.
 - Status: Active operational mode
 
 ## Mitigated but still relevant
