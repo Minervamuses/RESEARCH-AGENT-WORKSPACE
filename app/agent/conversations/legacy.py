@@ -15,12 +15,6 @@ from typing import Callable, Literal, Protocol
 
 from langchain_core.documents import Document
 
-from agent.history_rag.store import (
-    CHAT_HISTORY_COLLECTION,
-    CHAT_HISTORY_SUBDIR,
-    ChatHistoryStore,
-    HistoryRestoreError,
-)
 from agent.conversations.models import (
     MAX_CONVERSATION_BYTES,
     MAX_INPUT_BYTES,
@@ -41,10 +35,19 @@ LegacyRead = Callable[[str], list[TurnRecord]]
 _SOURCE_KINDS = frozenset({"chroma", "plan"})
 _FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}\Z")
 _TURN_ID_DOMAIN = b"agent.conversations.legacy-turn.v1\0"
+CHAT_HISTORY_COLLECTION = "chat_history"
+CHAT_HISTORY_SUBDIR = "chat_history"
+MAX_RESTORED_SESSION_TURNS = 4096
+MAX_RESTORED_TURN_CHARS = 131_072
+MAX_RESTORED_SESSION_CHARS = 8 * 1024 * 1024
 
 
 class LegacyReadError(RuntimeError):
     """A legacy source cannot be reduced to one safe immutable snapshot."""
+
+
+class _LegacyChromaRestoreError(RuntimeError):
+    """Raw legacy Chroma rows cannot form exact bounded role pairs."""
 
 
 class _RawChromaCollection(Protocol):
@@ -275,7 +278,7 @@ def _clone_chroma_source(root: Path, destination: Path) -> bool:
 
 
 class _RawChromaStore:
-    """Expose raw Chroma rows through the existing strict history parser."""
+    """Expose raw Chroma rows to the migration-only strict parser."""
 
     def __init__(self, collection: _RawChromaCollection) -> None:
         self._collection = collection
@@ -305,6 +308,111 @@ class _RawChromaStore:
         for content, metadata in zip(documents, metadatas, strict=True):
             restored.append(Document(page_content=content, metadata=metadata))
         return restored
+
+
+def _read_legacy_chroma_turns(
+    store: _RawChromaStore,
+    conversation_id: str,
+) -> list[TurnRecord]:
+    """Read one legacy session by metadata and require exact bounded pairs."""
+    max_documents = MAX_RESTORED_SESSION_TURNS * 2
+    try:
+        documents = store.get_where(
+            {"session_id": {"$eq": conversation_id}},
+            limit=max_documents + 1,
+        )
+    except Exception as exc:
+        raise _LegacyChromaRestoreError(
+            "legacy Chroma conversation is unavailable"
+        ) from exc
+    if len(documents) > max_documents:
+        raise _LegacyChromaRestoreError(
+            "legacy Chroma conversation exceeds the turn limit"
+        )
+
+    by_turn: dict[int, dict[str, tuple[str, str]]] = {}
+    total_chars = 0
+    for document in documents:
+        metadata = document.metadata
+        if not isinstance(metadata, dict):
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma metadata is malformed"
+            )
+        if metadata.get("session_id") != conversation_id:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains mismatched metadata"
+            )
+        role = metadata.get("role")
+        if role not in {"user", "assistant"}:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an unknown role"
+            )
+        turn_id = metadata.get("turn_id")
+        if type(turn_id) is not int or turn_id < 1:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an invalid turn_id"
+            )
+        timestamp = metadata.get("timestamp")
+        if not isinstance(timestamp, str) or not timestamp or len(timestamp) > 128:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an invalid timestamp"
+            )
+        try:
+            parsed_timestamp = datetime.fromisoformat(
+                timestamp.removesuffix("Z")
+                + ("+00:00" if timestamp.endswith("Z") else "")
+            )
+        except ValueError as exc:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an invalid timestamp"
+            ) from exc
+        if parsed_timestamp.tzinfo is None:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an invalid timestamp"
+            )
+        text = document.page_content
+        if not isinstance(text, str) or not text:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an empty turn side"
+            )
+        if len(text) > MAX_RESTORED_TURN_CHARS:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma turn exceeds the text limit"
+            )
+        total_chars += len(text)
+        if total_chars > MAX_RESTORED_SESSION_CHARS:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma conversation exceeds the text limit"
+            )
+
+        pair = by_turn.setdefault(turn_id, {})
+        if role in pair:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains a duplicate role"
+            )
+        pair[role] = (text, timestamp)
+
+    turns: list[TurnRecord] = []
+    for turn_id in sorted(by_turn):
+        pair = by_turn[turn_id]
+        if set(pair) != {"user", "assistant"}:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma contains an incomplete turn"
+            )
+        user_text, user_timestamp = pair["user"]
+        assistant_text, assistant_timestamp = pair["assistant"]
+        if user_timestamp != assistant_timestamp:
+            raise _LegacyChromaRestoreError(
+                "legacy Chroma turn timestamps do not match"
+            )
+        turns.append(TurnRecord(
+            user_input=user_text,
+            assistant_output=assistant_text,
+            turn_id=turn_id,
+            timestamp=user_timestamp,
+            persist_target="none",
+        ))
+    return turns
 
 
 class LegacyChromaReader:
@@ -352,13 +460,11 @@ class LegacyChromaReader:
                     name=CHAT_HISTORY_COLLECTION,
                     embedding_function=None,
                 )
-                strict_reader = ChatHistoryStore.__new__(ChatHistoryStore)
-                strict_reader._store = _RawChromaStore(collection)
-                result = ChatHistoryStore.read_session_turns(
-                    strict_reader,
+                result = _read_legacy_chroma_turns(
+                    _RawChromaStore(collection),
                     conversation_id,
                 )
-            except HistoryRestoreError:
+            except _LegacyChromaRestoreError:
                 problem = LegacyReadError(
                     "legacy Chroma conversation is malformed"
                 )

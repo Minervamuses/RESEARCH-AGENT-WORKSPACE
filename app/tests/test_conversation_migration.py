@@ -24,7 +24,6 @@ from agent.conversations.legacy import (
 )
 from agent.conversations.legacy_plan import LegacyPlanLogReader
 from agent.conversations.migration import ConversationMigrator
-from agent.history_rag.store import ChatHistoryStore
 from agent.turns.memory import ToolActivityRecord, TurnRecord
 
 
@@ -59,6 +58,37 @@ def _reader(
         chroma_read=lambda _conversation_id: list(chroma),
         plan_read=lambda _conversation_id: list(plan),
     )
+
+
+def _fake_chroma_reader(tmp_path, documents, observed=None) -> LegacyChromaReader:
+    persist_dir = tmp_path / "legacy"
+    source = persist_dir / "chat_history"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "marker.bin").write_bytes(b"legacy fixture")
+    observed = observed if observed is not None else {}
+    observed.setdefault("queries", [])
+    observed.setdefault("client_paths", [])
+    observed.setdefault("closed", 0)
+
+    class FakeCollection:
+        def get(self, **kwargs):
+            observed["queries"].append(kwargs)
+            return {
+                "documents": [document.page_content for document in documents],
+                "metadatas": [document.metadata for document in documents],
+            }
+
+    class FakeClient:
+        def __init__(self, clone_path):
+            observed["client_paths"].append(Path(clone_path))
+
+        def get_collection(self, **_kwargs):
+            return FakeCollection()
+
+        def close(self):
+            observed["closed"] += 1
+
+    return LegacyChromaReader(persist_dir, client_factory=FakeClient)
 
 
 def _v1_plan_log(session_id: str, turn: TurnRecord) -> str:
@@ -130,24 +160,12 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
         )
     ]
     before = copy.deepcopy(documents)
-
-    class FakeRawStore:
-        def __init__(self):
-            self.reads = 0
-
-        def get_where(self, where, *, limit=None):
-            self.reads += 1
-            assert where == {"session_id": {"$eq": SESSION_A}}
-            assert limit == 8193
-            return list(documents)
-
-    raw_store = FakeRawStore()
-    history = ChatHistoryStore.__new__(ChatHistoryStore)
-    history._store = raw_store
+    observed: dict[str, object] = {}
+    chroma_reader = _fake_chroma_reader(tmp_path, documents, observed)
     repository = ConversationRepository(tmp_path / "target")
     migrator = ConversationMigrator(
         repository,
-        LegacyConversationReader(chroma_read=history.read_session_turns),
+        LegacyConversationReader(chroma_read=chroma_reader),
     )
 
     result = migrator.import_conversation(SESSION_A, project_id="project-a")
@@ -156,7 +174,13 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     assert result.source_counts == (LegacySourceCount("chroma", 2),)
     assert result.turn_count == 2
     assert result.dropped_activity_count == 0
-    assert raw_store.reads == 2
+    assert len(observed["queries"]) == 2
+    assert all(query == {
+        "where": {"session_id": {"$eq": SESSION_A}},
+        "limit": 8193,
+        "include": ["documents", "metadatas"],
+    } for query in observed["queries"])
+    assert observed["closed"] == 2
     snapshot = repository.load(SESSION_A)
     assert snapshot.document.conversation_id == SESSION_A
     assert snapshot.document.project_id == "project-a"
@@ -186,7 +210,7 @@ def test_chroma_pairs_import_in_order_with_deterministic_identity(tmp_path):
     first_bytes = repository.path_for(SESSION_A).read_bytes()
     second = migrator.import_conversation(SESSION_A, project_id="project-a")
     assert second.status == "already_present"
-    assert raw_store.reads == 2
+    assert len(observed["queries"]) == 2
     assert repository.path_for(SESSION_A).read_bytes() == first_bytes
     assert len(repository.load(SESSION_A).document.turns) == 2
 
@@ -319,6 +343,87 @@ def test_chroma_migration_reader_does_not_create_a_missing_source(tmp_path):
 
     assert reader(SESSION_A) == []
     assert not (persist_dir / "chat_history").exists()
+
+
+@pytest.mark.parametrize("timestamp", ["not-a-timestamp", "2026-08-28T01:00:00"])
+def test_chroma_migration_reader_rejects_invalid_or_naive_timestamps(
+    tmp_path,
+    timestamp,
+):
+    documents = [
+        Document(
+            page_content=text,
+            metadata={
+                "role": role,
+                "turn_id": 1,
+                "session_id": SESSION_A,
+                "timestamp": timestamp,
+            },
+        )
+        for role, text in (("user", "question"), ("assistant", "answer"))
+    ]
+
+    with pytest.raises(LegacyReadError, match="malformed"):
+        _fake_chroma_reader(tmp_path, documents)(SESSION_A)
+
+
+@pytest.mark.parametrize(
+    "documents",
+    [
+        [Document(
+                page_content="question",
+                metadata={
+                    "role": "user",
+                    "turn_id": 1,
+                    "session_id": SESSION_A,
+                    "timestamp": "2026-08-28T01:00:00+00:00",
+                },
+            )],
+        [
+            Document(
+                page_content=text,
+                metadata={
+                    "role": "user",
+                    "turn_id": 1,
+                    "session_id": SESSION_A,
+                    "timestamp": "2026-08-28T01:00:00+00:00",
+                },
+            )
+            for text in ("question one", "question two")
+        ],
+    ],
+)
+def test_chroma_migration_reader_fails_closed_on_broken_role_pairs(
+    tmp_path,
+    documents,
+):
+    with pytest.raises(LegacyReadError, match="malformed"):
+        _fake_chroma_reader(tmp_path, documents)(SESSION_A)
+
+
+def test_chroma_migration_reader_keeps_the_raw_query_bounded(tmp_path):
+    documents = [
+        Document(
+            page_content="x",
+            metadata={
+                "role": "user",
+                "turn_id": number + 1,
+                "session_id": SESSION_A,
+                "timestamp": "2026-08-28T01:00:00+00:00",
+            },
+        )
+        for number in range(8193)
+    ]
+    observed: dict[str, object] = {}
+
+    with pytest.raises(LegacyReadError, match="malformed"):
+        _fake_chroma_reader(tmp_path, documents, observed)(SESSION_A)
+
+    assert observed["queries"] == [{
+        "where": {"session_id": {"$eq": SESSION_A}},
+        "limit": 8193,
+        "include": ["documents", "metadatas"],
+    }]
 
 
 @pytest.mark.parametrize("unsafe_kind", ["symlink", "fifo"])
