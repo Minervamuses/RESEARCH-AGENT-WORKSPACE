@@ -490,6 +490,77 @@ def test_extended_success_and_scripted_provider_errors_are_bounded(
     assert all(by_id[turn_id].assistant_output is None for turn_id in failed_turn_ids)
 
 
+def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
+    fixture_root: Path,
+) -> None:
+    first = _service(fixture_root)
+    normal_turn_id = "00000000000040008000000000002101"
+    extended_turn_id = "00000000000040008000000000002102"
+
+    async def run_first_process():
+        selected = await first.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        normal = await first.dispatch(
+            "session.turn",
+            _turn_params("normal before restart", turn_id=normal_turn_id),
+        )
+        extended = await first.dispatch(
+            "session.set_thinking",
+            {"mode": "extended"},
+        )
+        extended_turn = await first.dispatch(
+            "session.turn",
+            _turn_params("extended before restart", turn_id=extended_turn_id),
+        )
+        shutdown = await first.dispatch("session.shutdown", {})
+        return selected, normal, extended, extended_turn, shutdown
+
+    selected, normal, extended, extended_turn, shutdown = asyncio.run(
+        run_first_process()
+    )
+    assert selected["thinkingMode"] == "normal"
+    assert normal["text"].startswith("Fixture normal")
+    assert extended["thinkingMode"] == "extended"
+    assert extended_turn["text"].startswith("Fixture extended")
+    assert shutdown == {"status": "stopped"}
+
+    restarted = _service(fixture_root)
+
+    async def run_second_process():
+        restored = await restarted.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        transcript = await restarted.dispatch(
+            "session.transcript",
+            {
+                "projectId": "p1",
+                "sessionId": SESSION_A,
+                "offset": 0,
+                "limit": 20,
+            },
+        )
+        stopped = await restarted.dispatch("session.shutdown", {})
+        return restored, transcript, stopped
+
+    restored, transcript, stopped = asyncio.run(run_second_process())
+    assert restored["thinkingMode"] == "normal"
+    transcript_by_id = {
+        item["turnId"]: item for item in transcript["items"]
+    }
+    assert transcript_by_id[normal_turn_id]["state"] == "completed"
+    assert transcript_by_id[extended_turn_id]["state"] == "completed"
+    persisted = ConversationRepository(restarted.config.persist_dir).load(SESSION_A)
+    persisted_by_id = {
+        turn.turn_id: turn for turn in persisted.document.turns
+    }
+    assert persisted_by_id[normal_turn_id].thinking_mode == "normal"
+    assert persisted_by_id[extended_turn_id].thinking_mode == "extended"
+    assert stopped == {"status": "stopped"}
+
+
 def test_switch_and_shutdown_leave_legacy_plan_logs_unchanged(
     fixture_root: Path,
 ) -> None:
@@ -692,6 +763,8 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     phase07_fixture_root: Path,
 ) -> None:
     root = phase07_fixture_root
+    legacy_chat_history = root / "store" / "chat_history"
+    assert not legacy_chat_history.exists()
     first = _service(root)
 
     async def run_first_process():
@@ -986,6 +1059,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert legacy_sentinel not in repr(imported.document)
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
     assert final_shutdown == {"status": "stopped"}
+    assert not legacy_chat_history.exists()
 
 
 def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(

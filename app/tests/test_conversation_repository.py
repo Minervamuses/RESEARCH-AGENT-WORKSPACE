@@ -691,6 +691,63 @@ def test_external_rewrite_and_replace_failure_preserve_existing_bytes(
     assert updated.document.turns[-1].turn_number == 3
 
 
+@pytest.mark.parametrize("failure_stage", ["create", "write", "fsync"])
+def test_pre_replace_temp_failures_preserve_existing_bytes_and_leave_no_residue(
+    tmp_path,
+    monkeypatch,
+    failure_stage: str,
+):
+    repository = ConversationRepository(tmp_path)
+    repository.complete_turn(
+        _create(repository),
+        turn_id=_uuid4_hex(1),
+        assistant_output="one",
+        finished_at=_timestamp(2),
+    )
+    current = repository.load(CONVERSATION_ID)
+    path = repository.path_for(CONVERSATION_ID)
+    before = path.read_bytes()
+
+    if failure_stage == "create":
+        def fail_mkstemp(*_args, **_kwargs):
+            raise OSError("temporary creation failed")
+
+        monkeypatch.setattr(repository_module.tempfile, "mkstemp", fail_mkstemp)
+    elif failure_stage == "write":
+        real_mkstemp = repository_module.tempfile.mkstemp
+
+        def read_only_mkstemp(*args, **kwargs):
+            descriptor, raw_path = real_mkstemp(*args, **kwargs)
+            os.close(descriptor)
+            return os.open(raw_path, os.O_RDONLY), raw_path
+
+        monkeypatch.setattr(repository_module.tempfile, "mkstemp", read_only_mkstemp)
+    else:
+        def fail_fsync(_descriptor):
+            raise OSError("temporary fsync failed")
+
+        monkeypatch.setattr(repository_module.os, "fsync", fail_fsync)
+
+    def forbid_replace(_source, _destination):
+        raise AssertionError("replace must not run after a temporary-file failure")
+
+    monkeypatch.setattr(repository_module.os, "replace", forbid_replace)
+    with pytest.raises(ConversationUnavailableError):
+        repository.append_pending(
+            current,
+            turn_id=_uuid4_hex(2),
+            kind="conversational",
+            display_input="two",
+            semantic_input="two",
+            context_eligible=True,
+            thinking_mode="normal",
+            submitted_at=_timestamp(3),
+        )
+
+    assert path.read_bytes() == before
+    assert list(path.parent.glob("*.tmp")) == []
+
+
 def test_save_rejects_invalid_document_without_touching_disk(tmp_path):
     repository = ConversationRepository(tmp_path)
     snapshot = _create(repository)
