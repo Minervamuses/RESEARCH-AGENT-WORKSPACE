@@ -281,3 +281,17 @@ Material implementation events append with this shape:
 - **Red verification:** `pytest tests/test_history_retirement.py tests/test_tool_inventory.py -q` exited 1 with `5 failed, 8 passed, 1 warning`。五個failure只對應仍存在的normal-session history factory call、inventory/prompt中的`recall_history`、以及缺少`conversation_root` status/guidance；無collection/setup error。Warning是既有LangGraph `allowed_objects` pending-deprecation。
 - **Evidence reference:** Red commit=`a74069c`。
 - **Blockers:** None；next remove consumers-to-producers，並把strict Chroma parser搬入migration-only namespace。
+
+## 2026-09-05 00:13 CST — Phase 06: history retirement Green
+
+- **Status:** `In progress`；等待fresh final review後才可完成。
+- **Runtime removal:** normal `ChatSession`、graph、extended-thinking、tool inventory與shutdown/switch paths已不再construct、hold、query、persist或flush conversation-history Chroma；`recall_history`及dead `TurnStore`/eviction/flush surfaces已移除。Legacy strict role-pair reader移入`agent.conversations.legacy`，Desktop只在canonical JSON miss後lazy import migration factory；normal Desktop startup不載入legacy migration/Chroma modules。
+- **Stable-authority correction:** preflight暫留`agent_recent_turns_window`的推論與`GOALS.md`固定latest 10 turns的`JSON-INV-006`衝突，因此Green移除該config，CLI、Desktop fixture與model context都直接由`ConversationRepository.latest_context()`取得固定最近10個completed/context-eligible turns。
+- **Archive access:** validated、resolved、UTF-8 bounded canonical root顯示於normal system guidance與`/status`。Normal guidance只允許approval-gated `grep -lF -- <JSON-escaped exact phrase> <root>/*.json | head -n 21`；目前pending prompt的self-match不算歷史，超過20個舊候選時不讀檔並要求縮窄。`read_file`只對root直下canonical UUID `.json`提供UTF-8-safe chunk cursor，文件仍受8 MiB schema上限；其他檔案維持1 MiB單次拒絕。Paraphrase miss不呼叫document RAG/embedding。Extended fusion proposers沒有Bash，guidance明確要求改用normal mode，不擴大parallel approval能力。
+- **Preservation:** `app/rag/` production code與`pyproject.toml`/`poetry.lock`未變；document RAG所需`chromadb`、`langchain-chroma`、`langchain-ollama`保留。Bash approval、`grep`、一般`read_file`、Citation與Skills focused coverage仍通過；legacy `chat_history/`只讀來源未刪除。
+- **Verification:** Phase-required selector從`app/`執行，exit 0，`184 passed, 1 warning in 2.00s`。受影響Python聯集（35個Agent/Desktop/RAG modules）exit 0，`610 passed, 1 warning in 7.71s`；真實fixture `/status` focused set exit 0，`47 passed, 1 warning in 4.27s`。Warning皆為既有LangGraph `allowed_objects` pending-deprecation。較早、final review修正前曾跑完整Python suite，結果`969 passed, 1 warning`；此結果不作Phase 07 final broad evidence。
+- **Residue/docs checks:** `git diff --check` exit 0；exact residue只剩negative removal assertions。`chat_history`其餘active-tree命中為migration reader、synthetic fixtures與說明；RAG dependencies仍在manifest/lock。`manage_for_agents.py check`通過，只有9個既有tracked `for_agents/` paths受ignore規則影響的warning。
+- **Review corrections so far:** independent review發現並已修正lazy migration import、current pending self-match、JSON escaping、large canonical archive chunking、UTF-8 boundary、20-file fan-out、arbitrary-file cap、fixed latest-10與docs mismatch；最後一項fixture `/status`缺`conversation_root`已補focused regression。尚待另一個fresh reviewer確認無open P1/P2/P3。
+- **Evidence references:** migration extraction=`2f85804`；application/tests Green=`474a9b5`；active docs=`001b15a`。
+- **Limitations:** 未啟動live provider、Ollama、embedding、真實store或migration；未刪除legacy data。Phase 07的Desktop/npm/Cargo/Tauri broad checks與人工inspection尚未執行。
+- **Blockers:** None。
