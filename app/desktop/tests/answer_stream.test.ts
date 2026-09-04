@@ -99,6 +99,10 @@ test("a local slash command is one final-only inert conversation result", () => 
   const state = succeed(activeState("/sync /tmp/research"), {
     text: "Diff against /tmp/research:\n  (none)",
     responseKind: "command",
+    turnNumber: undefined,
+    state: null,
+    accepted: false,
+    persisted: false,
   });
 
   assert.deepEqual(state.latestAnswer, {
@@ -154,8 +158,15 @@ test("failure preserves the recoverable draft and never creates an assistant pre
   assert.equal(state.draft, "retry this");
   assert.equal(state.failure?.draftPreserved, true);
   assert.equal(state.failure?.retryable, true);
+  assert.equal(state.failure?.turnId, turnId);
   assert.equal(conversationInteractionState(state).createDisabled, false);
   assert.equal(conversationInteractionState(state).sendDisabled, false);
+
+  const edited = conversationReducer(state, {
+    type: "draft-changed",
+    draft: "retry this with changes",
+  });
+  assert.equal(edited.failure, null);
 });
 
 test("backend generation change drops stale selection, pending turn, answer, and failure", () => {

@@ -81,10 +81,8 @@ export const PROTOCOL_ERROR_CODES = [
   "EXTENSION_PREVIEW_FAILED",
   "EXTENSION_APPLY_FAILED",
   "APPROVAL_DENIED",
-  "CONVERSATION_FLUSH_FAILED",
   "PROVIDER_RATE_LIMITED",
   "PROVIDER_REQUEST_FAILED",
-  "SHUTDOWN_FLUSH_FAILED",
   "INTERNAL_ERROR",
 ] as const;
 
@@ -108,6 +106,7 @@ export interface FieldRule {
     | "stringArray"
     | "objectArray"
     | "requestId"
+    | "turnId"
     | "utcTimestamp";
   required: boolean;
   maxBytes?: number;
@@ -266,7 +265,11 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
   },
   "session.turn": {
     sessionId: { type: "string", required: true, maxBytes: 256 },
-    turnId: { type: "string", required: true, maxBytes: 256 },
+    turnId: { type: "turnId", required: true },
+    turnNumber: { type: "integer", required: false, minimum: 1, maximum: 4_096 },
+    state: { type: "nullableString", required: true, enum: ["completed"] },
+    accepted: { type: "boolean", required: true },
+    persisted: { type: "boolean", required: true },
     text: { type: "string", required: true, maxBytes: 2_097_152 },
     validationErrors: {
       type: "stringArray",
@@ -295,6 +298,12 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     },
     registrationIssue: { type: "nullableString", required: false, maxBytes: 4_096 },
     extensionAction: { type: "string", required: false, enum: ["status", "preview"] },
+  },
+  "session.shutdown": {
+    status: { type: "string", required: true, enum: ["stopped", "no_session"] },
+  },
+  "runtime.shutdown": {
+    status: { type: "string", required: true, enum: ["stopped", "no_session"] },
   },
   "project.list": {
     status: { type: "string", required: true, enum: ["ready", "unavailable"] },
@@ -491,6 +500,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "session.status": {},
   "session.turn": {
     text: { type: "string", required: true, maxBytes: 1_048_576 },
+    turnId: { type: "turnId", required: true },
   },
   "session.set_mode": {
     mode: { type: "string", required: true, enum: ["normal", "plan"] },
@@ -581,6 +591,10 @@ export interface ToolSummaryDto {
 export interface TurnCompletedDto {
   sessionId: string;
   turnId: string;
+  turnNumber?: number;
+  state: "completed" | null;
+  accepted: boolean;
+  persisted: boolean;
   text: string;
   validationErrors: string[];
   toolSummaries: ToolSummaryDto[];
@@ -810,6 +824,7 @@ export class ProtocolContractError extends Error {
 
 const encoder = new TextEncoder();
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const turnIdPattern = /^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 
 function invalid(message: string): never {
   throw new ProtocolContractError("PROTOCOL_INVALID", message);
@@ -860,6 +875,14 @@ function expectRequestId(value: unknown): string {
     invalid("requestId must be a canonical UUID");
   }
   return requestId;
+}
+
+function expectTurnId(value: unknown, field: string): string {
+  const turnId = expectString(value, field);
+  if (!turnIdPattern.test(turnId)) {
+    invalid(`${field} must be a canonical UUIDv4 hex value`);
+  }
+  return turnId;
 }
 
 const utcTimestampPattern =
@@ -949,6 +972,10 @@ function validateFieldRule(value: unknown, rule: FieldRule, field: string): void
   }
   if (rule.type === "requestId") {
     expectRequestId(value);
+    return;
+  }
+  if (rule.type === "turnId") {
+    expectTurnId(value, field);
     return;
   }
   const timestamp = expectString(value, field);
@@ -1241,6 +1268,7 @@ interface RequestTraceState {
   nextSequence: number;
   terminal: boolean;
   method: ProtocolMethod;
+  turnId: string | null;
 }
 
 export class ProtocolTraceValidator {
@@ -1255,6 +1283,7 @@ export class ProtocolTraceValidator {
         nextSequence: 1,
         terminal: false,
         method: message.method,
+        turnId: message.method === "session.turn" ? String(message.params.turnId) : null,
       });
       return;
     }
@@ -1282,6 +1311,9 @@ export class ProtocolTraceValidator {
       }
       if (message.ok) {
         validateResultData(state.method, message.data);
+        if (state.turnId !== null && message.data.turnId !== state.turnId) {
+          invalid("data.turnId must match params.turnId");
+        }
       }
       state.terminal = true;
     }

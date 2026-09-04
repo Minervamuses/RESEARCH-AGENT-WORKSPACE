@@ -16,12 +16,17 @@ export interface ConversationActivity {
 export interface ActiveConversationTurn extends ConversationSelection {
   backendGeneration: number;
   requestId: string;
+  turnId: string;
   activity: readonly ConversationActivity[];
 }
 
 export interface AuthoritativeTurnResult {
   sessionId: string;
   turnId: string;
+  turnNumber?: number;
+  state: "completed" | null;
+  accepted: boolean;
+  persisted: boolean;
   text: string;
   responseKind?: "answer" | "command";
   streamKind?: AnswerStreamKind;
@@ -38,6 +43,7 @@ export interface FinalConversationAnswer extends ConversationSelection {
 
 export interface ConversationFailure extends ConversationSelection {
   requestId: string;
+  turnId: string;
   message: string;
   retryable: boolean;
   draftPreserved: boolean;
@@ -56,7 +62,7 @@ export type ConversationAction =
   | { type: "backend-generation-changed"; generation: number }
   | ({ type: "conversation-selected"; generation: number } & ConversationSelection)
   | { type: "draft-changed"; draft: string }
-  | ({ type: "turn-started"; generation: number; requestId: string } & ConversationSelection)
+  | ({ type: "turn-started"; generation: number; requestId: string; turnId: string } & ConversationSelection)
   | ({
       type: "activity-received";
       generation: number;
@@ -105,6 +111,13 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function isCanonicalTurnId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(value)
+  );
 }
 
 function isValidSelection(value: ConversationSelection): boolean {
@@ -164,6 +177,21 @@ function finalizeTurn(
 ): ConversationState {
   const active = state.activeTurn;
   const result = action.result;
+  const responseKind = result.responseKind ?? "answer";
+  const answerLifecycleIsValid =
+    responseKind === "answer" &&
+    Number.isSafeInteger(result.turnNumber) &&
+    Number(result.turnNumber) >= 1 &&
+    Number(result.turnNumber) <= 4_096 &&
+    result.state === "completed" &&
+    result.accepted === true &&
+    result.persisted === true;
+  const commandLifecycleIsValid =
+    responseKind === "command" &&
+    result.turnNumber === undefined &&
+    result.state === null &&
+    result.accepted === false &&
+    result.persisted === false;
   if (
     active === null ||
     action.generation !== state.backendGeneration ||
@@ -171,7 +199,8 @@ function finalizeTurn(
     action.requestId !== active.requestId ||
     action.projectId !== active.projectId ||
     result.sessionId !== active.sessionId ||
-    !isNonEmptyString(result.turnId) ||
+    result.turnId !== active.turnId ||
+    (!answerLifecycleIsValid && !commandLifecycleIsValid) ||
     typeof result.text !== "string" ||
     (result.responseKind !== undefined &&
       result.responseKind !== "answer" &&
@@ -182,7 +211,6 @@ function finalizeTurn(
     return state;
   }
 
-  const responseKind = result.responseKind ?? "answer";
   const streamKind = result.streamKind ?? "final_only";
   return {
     ...state,
@@ -235,14 +263,21 @@ export function conversationReducer(
     };
   }
   if (action.type === "draft-changed") {
-    return typeof action.draft === "string" ? { ...state, draft: action.draft } : state;
+    return typeof action.draft === "string"
+      ? {
+          ...state,
+          draft: action.draft,
+          failure: action.draft === state.draft ? state.failure : null,
+        }
+      : state;
   }
   if (action.type === "turn-started") {
     if (
       state.activeTurn !== null ||
       action.generation !== state.backendGeneration ||
       !sameSelection(state.selected, action) ||
-      !isNonEmptyString(action.requestId)
+      !isNonEmptyString(action.requestId) ||
+      !isCanonicalTurnId(action.turnId)
     ) {
       return state;
     }
@@ -253,6 +288,7 @@ export function conversationReducer(
         projectId: action.projectId,
         sessionId: action.sessionId,
         requestId: action.requestId,
+        turnId: action.turnId,
         activity: [],
       },
       latestAnswer: null,
@@ -287,6 +323,7 @@ export function conversationReducer(
         projectId: active.projectId,
         sessionId: active.sessionId,
         requestId: active.requestId,
+        turnId: active.turnId,
         message: action.message.slice(0, 320),
         retryable: action.retryable,
         draftPreserved: state.draft.length > 0,

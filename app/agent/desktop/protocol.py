@@ -93,6 +93,23 @@ def validate_request_id(value: Any) -> str:
     return request_id
 
 
+def validate_turn_id(value: Any, field: str = "turnId") -> str:
+    """Return a canonical lowercase UUIDv4 hex logical turn ID."""
+    turn_id = _expect_string(value, field)
+    try:
+        parsed = UUID(turn_id)
+    except ValueError:
+        _invalid(f"{field} must be a canonical UUIDv4 hex value")
+    if (
+        len(turn_id) != 32
+        or parsed.hex != turn_id
+        or parsed.variant != RFC_4122
+        or parsed.version != 4
+    ):
+        _invalid(f"{field} must be a canonical UUIDv4 hex value")
+    return turn_id
+
+
 def _validate_field_rule(value: Any, rule: dict[str, Any], field: str) -> None:
     field_type = rule["type"]
     if field_type == "string":
@@ -150,6 +167,9 @@ def _validate_field_rule(value: Any, rule: dict[str, Any], field: str) -> None:
         return
     if field_type == "requestId":
         validate_request_id(value)
+        return
+    if field_type == "turnId":
+        validate_turn_id(value, field)
         return
     timestamp = _expect_string(value, field)
     if not _UTC_TIMESTAMP.fullmatch(timestamp):
@@ -476,7 +496,7 @@ class TraceValidator:
     """Validate request correlation, event order, and terminal results."""
 
     def __init__(self) -> None:
-        self._requests: dict[str, dict[str, int | bool | str]] = {}
+        self._requests: dict[str, dict[str, int | bool | str | None]] = {}
 
     def accept(self, message: dict[str, Any]) -> None:
         message_type = message["messageType"]
@@ -488,6 +508,11 @@ class TraceValidator:
                 "nextSequence": 1,
                 "terminal": False,
                 "method": message["method"],
+                "turnId": (
+                    message["params"]["turnId"]
+                    if message["method"] == "session.turn"
+                    else None
+                ),
             }
             return
         if message_type == "event" and "requestId" in message:
@@ -513,4 +538,10 @@ class TraceValidator:
                 _invalid(f"Duplicate terminal result: {request_id}")
             if message["ok"]:
                 validate_result_data(str(state["method"]), message["data"])
+                expected_turn_id = state["turnId"]
+                if (
+                    expected_turn_id is not None
+                    and message["data"].get("turnId") != expected_turn_id
+                ):
+                    _invalid("data.turnId must match params.turnId")
             state["terminal"] = True

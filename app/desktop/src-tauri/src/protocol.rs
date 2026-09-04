@@ -89,10 +89,8 @@ pub const PROTOCOL_ERROR_CODES: &[&str] = &[
     "EXTENSION_PREVIEW_FAILED",
     "EXTENSION_APPLY_FAILED",
     "APPROVAL_DENIED",
-    "CONVERSATION_FLUSH_FAILED",
     "PROVIDER_RATE_LIMITED",
     "PROVIDER_REQUEST_FAILED",
-    "SHUTDOWN_FLUSH_FAILED",
     "INTERNAL_ERROR",
 ];
 
@@ -265,7 +263,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
             Some(&["projectId", "sessionId"])
         }
         "session.status" => Some(&[]),
-        "session.turn" => Some(&["text"]),
+        "session.turn" => Some(&["text", "turnId"]),
         "session.set_mode" => Some(&["mode"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.shutdown" => Some(&[]),
@@ -303,7 +301,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.list" => Some(&["projectId", "offset", "limit"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
-        "session.turn" => Some(&["text"]),
+        "session.turn" => Some(&["text", "turnId"]),
         "session.set_mode" | "session.set_thinking" => Some(&["mode"]),
         "knowledge.search" => Some(&[
             "query",
@@ -373,6 +371,26 @@ fn validate_request_id(value: &str) -> Result<(), ProtocolViolation> {
         ));
     }
     Ok(())
+}
+
+fn is_canonical_turn_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 32
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        && bytes[12] == b'4'
+        && matches!(bytes[16], b'8' | b'9' | b'a' | b'b')
+}
+
+fn expect_turn_id<'a>(value: &'a Value, field: &str) -> Result<&'a str, ProtocolViolation> {
+    let turn_id = expect_non_empty_string(value, field)?;
+    if !is_canonical_turn_id(turn_id) {
+        return Err(ProtocolViolation::invalid(format!(
+            "{field} must be a canonical lowercase UUIDv4 hex value"
+        )));
+    }
+    Ok(turn_id)
 }
 
 fn expect_object<'a>(
@@ -494,6 +512,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         }
         "session.turn" => {
             expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
+            expect_turn_id(&params["turnId"], "params.turnId")?;
         }
         "session.set_mode" => {
             let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
@@ -1075,6 +1094,10 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "registrationStatus",
                     "registrationIssue",
                     "extensionAction",
+                    "turnNumber",
+                    "state",
+                    "accepted",
+                    "persisted",
                 ],
                 &[
                     "sessionId",
@@ -1082,10 +1105,13 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "text",
                     "validationErrors",
                     "toolSummaries",
+                    "state",
+                    "accepted",
+                    "persisted",
                 ],
             )?;
             expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-            expect_bounded_string(&data["turnId"], "data.turnId", 256)?;
+            expect_turn_id(&data["turnId"], "data.turnId")?;
             expect_bounded_string(&data["text"], "data.text", MAX_PROTOCOL_LINE_BYTES)?;
             validate_string_array(
                 &data["validationErrors"],
@@ -1156,6 +1182,23 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             if let Some(value) = data.get("extensionAction") {
                 validate_enum(value, "data.extensionAction", &["status", "preview"])?;
             }
+            if let Some(value) = data.get("turnNumber") {
+                expect_integer_range(value, "data.turnNumber", 1, 4_096)?;
+            }
+            if !data["state"].is_null() {
+                validate_enum(&data["state"], "data.state", &["completed"])?;
+            }
+            for field in ["accepted", "persisted"] {
+                if !data[field].is_boolean() {
+                    return Err(ProtocolViolation::invalid(format!(
+                        "data.{field} must be a boolean"
+                    )));
+                }
+            }
+        }
+        "session.shutdown" | "runtime.shutdown" => {
+            validate_exact_data_keys(data, &["status"])?;
+            validate_enum(&data["status"], "data.status", &["stopped", "no_session"])?;
         }
         "project.list" => {
             validate_exact_data_keys(
@@ -1801,6 +1844,7 @@ struct RequestTraceState {
     next_sequence: u64,
     terminal: bool,
     method: String,
+    turn_id: Option<String>,
 }
 
 impl ProtocolTraceValidator {
@@ -1813,12 +1857,22 @@ impl ProtocolTraceValidator {
                         request.request_id
                     )));
                 }
+                let turn_id = if request.method == "session.turn" {
+                    request
+                        .params
+                        .get("turnId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                } else {
+                    None
+                };
                 self.requests.insert(
                     request.request_id.clone(),
                     RequestTraceState {
                         next_sequence: 1,
                         terminal: false,
                         method: request.method.clone(),
+                        turn_id,
                     },
                 );
             }
@@ -1863,6 +1917,18 @@ impl ProtocolTraceValidator {
                         &state.method,
                         result.data.as_ref().expect("validated success result data"),
                     )?;
+                    if let Some(expected_turn_id) = state.turn_id.as_deref() {
+                        let actual_turn_id = result
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.get("turnId"))
+                            .and_then(Value::as_str);
+                        if actual_turn_id != Some(expected_turn_id) {
+                            return Err(ProtocolViolation::invalid(
+                                "data.turnId must match params.turnId",
+                            ));
+                        }
+                    }
                 }
                 state.terminal = true;
             }
@@ -1907,6 +1973,7 @@ mod tests {
                 Value::Array(vec![Value::Object(item)])
             }
             "requestId" => Value::String(request_id.to_owned()),
+            "turnId" => Value::String("123e4567e89b42d3a456426614174000".to_owned()),
             "utcTimestamp" => Value::String("2026-08-24T01:02:03Z".to_owned()),
             other => panic!("unknown field type: {other}"),
         }
@@ -1914,7 +1981,9 @@ mod tests {
 
     fn invalid_boundary_values(rule: &Value) -> Vec<Value> {
         let mut invalid_values = vec![match rule["type"].as_str().expect("field type") {
-            "string" | "nullableString" | "requestId" | "utcTimestamp" => Value::Bool(true),
+            "string" | "nullableString" | "requestId" | "turnId" | "utcTimestamp" => {
+                Value::Bool(true)
+            }
             "boolean" | "nullableBoolean" | "integer" => Value::String("wrong".to_owned()),
             "stringArray" | "objectArray" => Value::Bool(true),
             other => panic!("unknown field type: {other}"),
@@ -1947,6 +2016,14 @@ mod tests {
         }
         if rule["type"] == "requestId" {
             invalid_values.push(Value::String("not-a-uuid".to_owned()));
+        }
+        if rule["type"] == "turnId" {
+            invalid_values.extend([
+                Value::String("123e4567-e89b-42d3-a456-426614174000".to_owned()),
+                Value::String("123e4567e89b32d3a456426614174000".to_owned()),
+                Value::String("123e4567e89b42d3c456426614174000".to_owned()),
+                Value::String("123E4567E89B42D3A456426614174000".to_owned()),
+            ]);
         }
         invalid_values
     }
@@ -2090,6 +2167,34 @@ mod tests {
         ] {
             assert!(!PROTOCOL_METHODS.contains(&forbidden));
         }
+    }
+
+    #[test]
+    fn logical_turn_id_must_match_across_a_successful_trace() {
+        let error = validate_result_trace(
+            "session.turn",
+            serde_json::json!({
+                "text": "prompt",
+                "turnId": "123e4567e89b42d3a456426614174000",
+            }),
+            serde_json::json!({
+                "sessionId": "session-a",
+                "turnId": "223e4567e89b42d3a456426614174000",
+                "turnNumber": 1,
+                "state": "completed",
+                "accepted": true,
+                "persisted": true,
+                "text": "answer",
+                "validationErrors": [],
+                "toolSummaries": [],
+                "responseKind": "answer",
+                "streamKind": "final_only",
+                "chunkCount": 0,
+            }),
+        )
+        .expect_err("mismatched logical turn IDs must be rejected");
+
+        assert_eq!(error.code(), "PROTOCOL_INVALID");
     }
 
     #[test]

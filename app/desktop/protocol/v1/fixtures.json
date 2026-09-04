@@ -441,7 +441,25 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000033",
         "method": "session.turn",
-        "params": {"text": {"raw": "not text"}}
+        "params": {
+          "text": {"raw": "not text"},
+          "turnId": "00000000000040008000000000000033"
+        }
+      }
+    },
+    {
+      "name": "turn-id-not-canonical-uuid4-hex",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000091",
+        "method": "session.turn",
+        "params": {
+          "text": "請摘要",
+          "turnId": "00000000-0000-3000-8000-000000000091"
+        }
       }
     },
     {
@@ -770,7 +788,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000012",
           "method": "session.turn",
-          "params": {"text": "請摘要"}
+          "params": {
+            "text": "請摘要",
+            "turnId": "00000000000040008000000000000012"
+          }
         },
         {
           "protocolVersion": 1,
@@ -968,7 +989,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-00000000007c",
           "method": "session.turn",
-          "params": {"text": "請摘要"}
+          "params": {
+            "text": "請摘要",
+            "turnId": "0000000000004000800000000000007c"
+          }
         },
         {
           "protocolVersion": 1,
@@ -977,7 +1001,11 @@
           "ok": true,
           "data": {
             "sessionId": "0123456789abcdef0123456789abcdef",
-            "turnId": "turn-1",
+            "turnId": "0000000000004000800000000000007c",
+            "turnNumber": 1,
+            "state": "completed",
+            "accepted": true,
+            "persisted": true,
             "text": "完成。",
             "validationErrors": [],
             "toolSummaries": [],
@@ -1185,7 +1213,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000062",
           "method": "session.turn",
-          "params": {"text": "請摘要"}
+          "params": {
+            "text": "請摘要",
+            "turnId": "00000000000040008000000000000062"
+          }
         },
         {
           "protocolVersion": 1,
@@ -1194,7 +1225,11 @@
           "ok": true,
           "data": {
             "sessionId": "session-1",
-            "turnId": "turn-1",
+            "turnId": "00000000000040008000000000000062",
+            "turnNumber": 1,
+            "state": "completed",
+            "accepted": true,
+            "persisted": true,
             "text": "完成的安全答案。",
             "validationErrors": [],
             "toolSummaries": [
@@ -1215,7 +1250,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000063",
           "method": "session.turn",
-          "params": {"text": "請摘要"}
+          "params": {
+            "text": "請摘要",
+            "turnId": "00000000000040008000000000000063"
+          }
         },
         {
           "protocolVersion": 1,
@@ -1224,11 +1262,49 @@
           "ok": true,
           "data": {
             "sessionId": "session-1",
-            "turnId": "turn-2",
+            "turnId": "00000000000040008000000000000063",
+            "turnNumber": 2,
+            "state": "completed",
+            "accepted": true,
+            "persisted": true,
             "text": "完成的安全答案。",
             "validationErrors": [],
             "toolSummaries": [],
             "providerState": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-completed-rejects-mismatched-logical-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.turn",
+          "params": {
+            "text": "請摘要",
+            "turnId": "00000000000040008000000000000066"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnId": "00000000000040008000000000000067",
+            "turnNumber": 1,
+            "state": "completed",
+            "accepted": true,
+            "persisted": true,
+            "text": "完成的安全答案。",
+            "validationErrors": [],
+            "toolSummaries": []
           }
         }
       ]

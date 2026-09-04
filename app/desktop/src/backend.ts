@@ -35,7 +35,6 @@ export interface BridgeError {
 
 export interface ShutdownReport {
   kind: "graceful" | "forced" | "not_running";
-  flushed: boolean | null;
 }
 
 export interface BackendSnapshot {
@@ -176,14 +175,11 @@ function parseShutdownReport(value: unknown): ShutdownReport {
   if (!isObject(value)) {
     throw new Error("shutdown report must be an object");
   }
-  requireExactKeys(value, ["kind", "flushed"], "shutdown report");
+  requireExactKeys(value, ["kind"], "shutdown report");
   if (value.kind !== "graceful" && value.kind !== "forced" && value.kind !== "not_running") {
     throw new Error("shutdown report kind is invalid");
   }
-  if (value.flushed !== null && typeof value.flushed !== "boolean") {
-    throw new Error("shutdown report flushed must be a boolean or null");
-  }
-  return { kind: value.kind, flushed: value.flushed };
+  return { kind: value.kind };
 }
 
 export function parseBackendSnapshot(value: unknown): BackendSnapshot {

@@ -135,7 +135,11 @@
     },
     "session.turn": {
       "sessionId": {"type": "string", "required": true, "maxBytes": 256},
-      "turnId": {"type": "string", "required": true, "maxBytes": 256},
+      "turnId": {"type": "turnId", "required": true},
+      "turnNumber": {"type": "integer", "required": false, "minimum": 1, "maximum": 4096},
+      "state": {"type": "nullableString", "required": true, "enum": ["completed"]},
+      "accepted": {"type": "boolean", "required": true},
+      "persisted": {"type": "boolean", "required": true},
       "text": {"type": "string", "required": true, "maxBytes": 2097152},
       "validationErrors": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096},
       "toolSummaries": {
@@ -155,6 +159,12 @@
       "registrationStatus": {"type": "string", "required": false, "enum": ["registered", "pending", "not_required"]},
       "registrationIssue": {"type": "nullableString", "required": false, "maxBytes": 4096},
       "extensionAction": {"type": "string", "required": false, "enum": ["status", "preview"]}
+    },
+    "session.shutdown": {
+      "status": {"type": "string", "required": true, "enum": ["stopped", "no_session"]}
+    },
+    "runtime.shutdown": {
+      "status": {"type": "string", "required": true, "enum": ["stopped", "no_session"]}
     },
     "project.list": {
       "status": {"type": "string", "required": true, "enum": ["ready", "unavailable"]},
@@ -358,8 +368,11 @@
     {
       "name": "session.turn",
       "operation": "mutation",
-      "requiredParams": ["text"],
-      "params": {"text": {"type": "string", "required": true, "maxBytes": 1048576}}
+      "requiredParams": ["text", "turnId"],
+      "params": {
+        "text": {"type": "string", "required": true, "maxBytes": 1048576},
+        "turnId": {"type": "turnId", "required": true}
+      }
     },
     {
       "name": "session.set_mode",
@@ -489,10 +502,8 @@
     "EXTENSION_PREVIEW_FAILED",
     "EXTENSION_APPLY_FAILED",
     "APPROVAL_DENIED",
-    "CONVERSATION_FLUSH_FAILED",
     "PROVIDER_RATE_LIMITED",
     "PROVIDER_REQUEST_FAILED",
-    "SHUTDOWN_FLUSH_FAILED",
     "INTERNAL_ERROR"
   ]
 }

@@ -91,7 +91,6 @@ pub enum ShutdownKind {
 #[serde(rename_all = "camelCase")]
 pub struct ShutdownReport {
     pub kind: ShutdownKind,
-    pub flushed: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -536,7 +535,6 @@ impl BackendSupervisor {
                     .clone()
                     .unwrap_or(ShutdownReport {
                         kind: ShutdownKind::NotRunning,
-                        flushed: None,
                     });
             }
             if !state.snapshot.child_running || state.child.is_none() {
@@ -545,7 +543,6 @@ impl BackendSupervisor {
                 }
                 let report = ShutdownReport {
                     kind: ShutdownKind::NotRunning,
-                    flushed: None,
                 };
                 state.snapshot.lifecycle = BackendLifecycle::Stopped;
                 state.snapshot.child_running = false;
@@ -570,15 +567,16 @@ impl BackendSupervisor {
         });
         let graceful_result =
             self.submit_request(request, true, Some(self.timeouts.shutdown_response));
-        let flushed = graceful_result
+        let acknowledged = graceful_result
             .as_ref()
             .ok()
             .filter(|value| value.get("ok").and_then(Value::as_bool) == Some(true))
             .and_then(|value| value.get("data"))
-            .and_then(|data| data.get("flushed"))
-            .and_then(Value::as_bool);
-        let mut stopped = flushed.is_some() && self.wait_until_stopped(self.timeouts.shutdown_exit);
-        let graceful = flushed.is_some() && stopped;
+            .and_then(|data| data.get("status"))
+            .and_then(Value::as_str)
+            .is_some_and(|status| matches!(status, "stopped" | "no_session"));
+        let mut stopped = acknowledged && self.wait_until_stopped(self.timeouts.shutdown_exit);
+        let graceful = acknowledged && stopped;
         if !graceful {
             let child = lock_state(&self.core).child.clone();
             if let Some(child) = child {
@@ -593,7 +591,6 @@ impl BackendSupervisor {
             } else {
                 ShutdownKind::Forced
             },
-            flushed: if graceful { flushed } else { None },
         };
         let snapshot = {
             let mut state = lock_state(&self.core);
@@ -723,7 +720,6 @@ pub async fn backend_shutdown(app_handle: AppHandle) -> ShutdownReport {
         .await
         .unwrap_or(ShutdownReport {
             kind: ShutdownKind::Forced,
-            flushed: None,
         })
 }
 
@@ -1464,7 +1460,7 @@ for raw in sys.stdin:
         send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{}}}})
         continue
     send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
-    data = {{'status':'stopped','flushed':True}} if method == 'runtime.shutdown' else {{}}
+    data = {{'status':'stopped'}} if method == 'runtime.shutdown' else {{}}
     send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':data}})
     if method == 'runtime.shutdown':
         send({{'protocolVersion':1,'messageType':'event','event':'backend.shutting_down','data':{{'status':'shutting_down'}}}})
@@ -1527,7 +1523,6 @@ for raw in sys.stdin:
             supervisor.shutdown(),
             ShutdownReport {
                 kind: ShutdownKind::Graceful,
-                flushed: Some(true)
             }
         );
         assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
@@ -1740,7 +1735,6 @@ for raw in sys.stdin:
         assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
         let report = supervisor.shutdown();
         assert_eq!(report.kind, ShutdownKind::Forced);
-        assert_eq!(report.flushed, None);
     }
 
     #[test]
@@ -1856,10 +1850,9 @@ for raw in sys.stdin:
         assert!(snapshot.get("lastShutdown").is_some());
         let report = serde_json::to_value(ShutdownReport {
             kind: ShutdownKind::NotRunning,
-            flushed: None,
         })
         .expect("report");
         assert_eq!(report["kind"], "not_running");
-        assert!(report.get("flushed").is_some());
+        assert!(report.get("flushed").is_none());
     }
 }

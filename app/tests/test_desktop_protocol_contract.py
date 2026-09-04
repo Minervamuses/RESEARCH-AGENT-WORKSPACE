@@ -38,6 +38,8 @@ def test_protocol_manifest_safety_invariants() -> None:
         "session.retry_registration",
         "session.transcript",
         "session.turn",
+        "session.shutdown",
+        "runtime.shutdown",
         "extensions.status",
         "extensions.preview",
         "extensions.apply",

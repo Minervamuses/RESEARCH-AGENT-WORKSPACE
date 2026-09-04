@@ -126,12 +126,12 @@ test("lifecycle reducer keeps backend readiness, session readiness, and recovery
     snapshot: {
       ...stoppedSnapshot,
       generation: 2,
-      lastShutdown: { kind: "graceful", flushed: true },
+      lastShutdown: { kind: "graceful" },
     },
   });
   state = backendReducer(state, { type: "action-completed", action: "shutdown" });
   assert.equal(state.phase, "stopped");
-  assert.equal(state.snapshot?.lastShutdown?.flushed, true);
+  assert.equal(state.snapshot?.lastShutdown?.kind, "graceful");
 });
 
 test("request builder creates a canonical protocol-v1 request and validates params", () => {
@@ -223,7 +223,7 @@ test("lifecycle commands validate start/restart snapshots and snapshot after shu
   const shutdownSnapshot: BackendSnapshot = {
     ...stoppedSnapshot,
     generation: 2,
-    lastShutdown: { kind: "graceful", flushed: true },
+    lastShutdown: { kind: "graceful" },
   };
   const calls: string[] = [];
   const client = createBackendClient({
@@ -232,7 +232,7 @@ test("lifecycle commands validate start/restart snapshots and snapshot after shu
       if (command === "backend_start") return readySnapshot as T;
       if (command === "backend_restart") return restartedSnapshot as T;
       if (command === "backend_shutdown") {
-        return { kind: "graceful", flushed: true } as T;
+        return { kind: "graceful" } as T;
       }
       if (command === "backend_snapshot") return shutdownSnapshot as T;
       throw new Error(`Unexpected command: ${command}`);
@@ -251,7 +251,7 @@ test("lifecycle commands validate start/restart snapshots and snapshot after shu
 
   const invalidShutdown = createBackendClient({
     invoke: async <T>(command: string) => {
-      if (command === "backend_shutdown") return { kind: "graceful", flushed: "yes" } as T;
+      if (command === "backend_shutdown") return { kind: "graceful", flushed: true } as T;
       return shutdownSnapshot as T;
     },
   });

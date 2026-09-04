@@ -180,10 +180,12 @@ function shutdownSummary(snapshot: BackendSnapshot | null): string | null {
   const report = snapshot?.lastShutdown;
   if (report === null || report === undefined) return null;
   if (report.kind === "not_running") return "The backend was already stopped.";
-  if (report.kind === "forced") return "The backend was forced to stop; session flush is not confirmed.";
-  if (report.flushed === true) return "The backend stopped gracefully and recent state was flushed.";
-  if (report.flushed === false) return "The backend stopped gracefully, but recent state was not flushed.";
-  return "The backend stopped gracefully; flush status is unavailable.";
+  if (report.kind === "forced") return "The backend was forced to stop.";
+  return "The backend stopped gracefully.";
+}
+
+function newLogicalTurnId(): string {
+  return globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase();
 }
 
 function workspaceError(error: unknown): SafeUiError {
@@ -720,12 +722,13 @@ export default function App() {
     const draft = conversationRef.current.draft;
     if (selected === null || draft.trim().length === 0 || conversationRef.current.activeTurn !== null || workspaceOperation.current !== null || inFlight.current) return;
     let tracked;
-    try { tracked = backendClient.requestTracked("session.turn", { text: draft }); }
+    const turnId = conversationRef.current.failure?.turnId ?? newLogicalTurnId();
+    try { tracked = backendClient.requestTracked("session.turn", { text: draft, turnId }); }
     catch (error) { setWorkspaceIssue(workspaceError(error)); focusComposer(); return; }
     const generation = generationRef.current;
     setPendingUserText(draft);
     setWorkspaceIssue(null);
-    applyConversation({ type: "turn-started", generation, requestId: tracked.requestId, projectId: selected.projectId, sessionId: selected.sessionId });
+    applyConversation({ type: "turn-started", generation, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
     void tracked.result.then(async (data) => {
       const result = data as unknown as TurnCompletedDto;
       const next = applyConversation({ type: "turn-succeeded", generation, requestId: tracked.requestId, projectId: selected.projectId, result });
