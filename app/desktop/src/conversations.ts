@@ -1,3 +1,8 @@
+import type {
+  TranscriptTurnDto,
+  TurnLifecycleDetailsDto,
+} from "./protocol.ts";
+
 export const MAX_ACTIVITY_ITEMS = 32;
 
 export type AnswerStreamKind = "final_only";
@@ -24,7 +29,7 @@ export interface AuthoritativeTurnResult {
   sessionId: string;
   turnId: string;
   turnNumber?: number;
-  state: "completed" | null;
+  state: "completed";
   accepted: boolean;
   persisted: boolean;
   text: string;
@@ -42,11 +47,12 @@ export interface FinalConversationAnswer extends ConversationSelection {
 }
 
 export interface ConversationFailure extends ConversationSelection {
-  requestId: string;
+  requestId: string | null;
   turnId: string;
   message: string;
   retryable: boolean;
   draftPreserved: boolean;
+  turnLifecycle: TurnLifecycleDetailsDto | null;
 }
 
 export interface ConversationState {
@@ -85,7 +91,17 @@ export type ConversationAction =
       sessionId: string;
       message: string;
       retryable: boolean;
+      turnLifecycle?: TurnLifecycleDetailsDto | null;
     })
+  | ({
+      type: "retry-target-restored";
+      generation: number;
+      turnId: string;
+      userText: string;
+      state: "failed" | "interrupted";
+      message: string;
+      retryable: boolean;
+    } & ConversationSelection)
   | { type: "failure-cleared" };
 
 export interface ConversationInteractionState {
@@ -129,6 +145,26 @@ function sameSelection(
   right: ConversationSelection,
 ): boolean {
   return left !== null && left.projectId === right.projectId && left.sessionId === right.sessionId;
+}
+
+function validTurnLifecycle(
+  value: TurnLifecycleDetailsDto,
+  turnId: string,
+): boolean {
+  if (value.turnId !== turnId) {
+    return false;
+  }
+  if (value.state === null) {
+    return value.accepted === false && value.persisted === false;
+  }
+  return (
+    (value.state === "pending" ||
+      value.state === "completed" ||
+      value.state === "failed" ||
+      value.state === "interrupted") &&
+    value.accepted === true &&
+    value.persisted === true
+  );
 }
 
 function boundedActivity(activity: ConversationActivity): ConversationActivity | null {
@@ -178,20 +214,14 @@ function finalizeTurn(
   const active = state.activeTurn;
   const result = action.result;
   const responseKind = result.responseKind ?? "answer";
-  const answerLifecycleIsValid =
-    responseKind === "answer" &&
+  const lifecycleIsValid =
+    (responseKind === "answer" || responseKind === "command") &&
     Number.isSafeInteger(result.turnNumber) &&
     Number(result.turnNumber) >= 1 &&
     Number(result.turnNumber) <= 4_096 &&
     result.state === "completed" &&
     result.accepted === true &&
     result.persisted === true;
-  const commandLifecycleIsValid =
-    responseKind === "command" &&
-    result.turnNumber === undefined &&
-    result.state === null &&
-    result.accepted === false &&
-    result.persisted === false;
   if (
     active === null ||
     action.generation !== state.backendGeneration ||
@@ -200,7 +230,7 @@ function finalizeTurn(
     action.projectId !== active.projectId ||
     result.sessionId !== active.sessionId ||
     result.turnId !== active.turnId ||
-    (!answerLifecycleIsValid && !commandLifecycleIsValid) ||
+    !lifecycleIsValid ||
     typeof result.text !== "string" ||
     (result.responseKind !== undefined &&
       result.responseKind !== "answer" &&
@@ -303,6 +333,7 @@ export function conversationReducer(
   }
   if (action.type === "turn-failed") {
     const active = state.activeTurn;
+    const turnLifecycle = action.turnLifecycle ?? null;
     if (
       active === null ||
       action.generation !== state.backendGeneration ||
@@ -311,7 +342,8 @@ export function conversationReducer(
       action.projectId !== active.projectId ||
       action.sessionId !== active.sessionId ||
       typeof action.message !== "string" ||
-      typeof action.retryable !== "boolean"
+      typeof action.retryable !== "boolean" ||
+      (turnLifecycle !== null && !validTurnLifecycle(turnLifecycle, active.turnId))
     ) {
       return state;
     }
@@ -327,6 +359,42 @@ export function conversationReducer(
         message: action.message.slice(0, 320),
         retryable: action.retryable,
         draftPreserved: state.draft.length > 0,
+        turnLifecycle,
+      },
+    };
+  }
+  if (action.type === "retry-target-restored") {
+    if (
+      state.activeTurn !== null ||
+      action.generation !== state.backendGeneration ||
+      !sameSelection(state.selected, action) ||
+      !isCanonicalTurnId(action.turnId) ||
+      typeof action.userText !== "string" ||
+      action.userText.length === 0 ||
+      (action.state !== "failed" && action.state !== "interrupted") ||
+      typeof action.message !== "string" ||
+      typeof action.retryable !== "boolean"
+    ) {
+      return state;
+    }
+    return {
+      ...state,
+      draft: action.userText,
+      latestAnswer: null,
+      failure: {
+        projectId: action.projectId,
+        sessionId: action.sessionId,
+        requestId: null,
+        turnId: action.turnId,
+        message: action.message.slice(0, 320),
+        retryable: action.retryable,
+        draftPreserved: true,
+        turnLifecycle: {
+          turnId: action.turnId,
+          state: action.state,
+          accepted: true,
+          persisted: true,
+        },
       },
     };
   }
@@ -334,6 +402,42 @@ export function conversationReducer(
     return { ...state, failure: null };
   }
   return state;
+}
+
+export function nextTurnSubmission(
+  state: ConversationState,
+  idFactory: () => string,
+): { turnId: string; retry: boolean } {
+  if (state.failure !== null) {
+    return { turnId: state.failure.turnId, retry: true };
+  }
+  return { turnId: idFactory(), retry: false };
+}
+
+export function latestRetryableTranscriptTurn(
+  items: readonly TranscriptTurnDto[],
+): (TranscriptTurnDto & {
+  state: "failed" | "interrupted";
+  failureRetryable: true;
+}) | null {
+  return items.reduce<ReturnType<typeof latestRetryableTranscriptTurn>>(
+    (latest, item) => {
+      if (
+        (item.state !== "failed" && item.state !== "interrupted") ||
+        item.failureRetryable !== true
+      ) {
+        return latest;
+      }
+      if (latest !== null && latest.turnNumber > item.turnNumber) {
+        return latest;
+      }
+      return item as TranscriptTurnDto & {
+        state: "failed" | "interrupted";
+        failureRetryable: true;
+      };
+    },
+    null,
+  );
 }
 
 export function conversationInteractionState(

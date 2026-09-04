@@ -28,7 +28,10 @@ import {
   conversationInteractionState,
   conversationReducer,
   initialConversationState,
+  latestRetryableTranscriptTurn,
+  nextTurnSubmission,
   type ConversationAction,
+  type ConversationFailure,
   type ConversationSelection,
 } from "./conversations.ts";
 import type {
@@ -125,6 +128,7 @@ export function sidebarRowsForProject(
       sessionId: selected.sessionId,
       title: "New conversation",
       turnCount: 0,
+      createdAt: null,
       updatedAt: null,
       status: "ready",
       issue: null,
@@ -212,6 +216,15 @@ function mergeTranscriptItems(
   return [...byTurn.values()].sort((left, right) => left.turnNumber - right.turnNumber);
 }
 
+function failureLifecycleLabel(failure: ConversationFailure): string {
+  const lifecycle = failure.turnLifecycle;
+  if (lifecycle === null) return "Delivery status unknown";
+  if (lifecycle.state === null) return "Prompt was not accepted";
+  if (lifecycle.state === "completed") return "Answer saved locally";
+  if (lifecycle.state === "pending") return "Prompt saved · completion pending";
+  return `Prompt saved · ${lifecycle.state}`;
+}
+
 export function mergeSessionItems(
   current: readonly SessionSummaryDto[],
   next: readonly SessionSummaryDto[],
@@ -222,10 +235,13 @@ export function mergeSessionItems(
 }
 
 export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
+  const displayOnly = turn.kind === "display-only";
   return (
     <article className="turn-group">
       <div className="message user-message">
-        <p className="message-label">You · restored turn {turn.turnNumber}</p>
+        <p className="message-label">
+          You · restored turn {turn.turnNumber}{displayOnly ? " · display-only" : ""}
+        </p>
         <SafeContent content={turn.userText} />
       </div>
       {turn.toolActivities.map((activity, index) => (
@@ -247,10 +263,26 @@ export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
           </div>
         </section>
       ))}
-      <div className="message assistant-message">
-        <p className="message-label">Assistant · restored</p>
-        <SafeContent content={turn.assistantText} />
-      </div>
+      {turn.state === "completed" && turn.assistantText !== null ? (
+        <div className={`message ${displayOnly ? "system-message" : "assistant-message"}`}>
+          <p className="message-label">
+            {displayOnly ? "Local command output · restored · display-only" : "Assistant · restored"}
+          </p>
+          <SafeContent content={turn.assistantText} />
+        </div>
+      ) : turn.state === "pending" ? (
+        <div className="message system-message">
+          <p className="message-label">Pending · saved locally</p>
+          <p>This turn has not reached a terminal state and will not replay automatically.</p>
+        </div>
+      ) : (
+        <div className="message system-message">
+          <p className="message-label">
+            {turn.state === "failed" ? "Failed" : "Interrupted"} · saved locally
+          </p>
+          <SafeContent content={turn.failureMessage ?? "This turn did not complete."} />
+        </div>
+      )}
     </article>
   );
 }
@@ -638,6 +670,20 @@ export default function App() {
         throw protocolMismatch("The backend returned a transcript for a different conversation.");
       }
       setTranscript({ projectId, sessionId: session.sessionId, status: transcriptData.status, issue: transcriptData.issue, items: transcriptData.items, offset: transcriptData.offset, total: transcriptData.total, hasOlder: transcriptData.status === "ready" && transcriptData.offset > 0 });
+      const retryTarget = latestRetryableTranscriptTurn(transcriptData.items);
+      if (retryTarget !== null) {
+        applyConversation({
+          type: "retry-target-restored",
+          generation,
+          projectId,
+          sessionId: session.sessionId,
+          turnId: retryTarget.turnId,
+          userText: retryTarget.userText,
+          state: retryTarget.state,
+          message: retryTarget.failureMessage ?? "The saved turn did not complete.",
+          retryable: true,
+        });
+      }
       requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
       focusComposer();
     } catch (error) {
@@ -722,8 +768,15 @@ export default function App() {
     const draft = conversationRef.current.draft;
     if (selected === null || draft.trim().length === 0 || conversationRef.current.activeTurn !== null || workspaceOperation.current !== null || inFlight.current) return;
     let tracked;
-    const turnId = conversationRef.current.failure?.turnId ?? newLogicalTurnId();
-    try { tracked = backendClient.requestTracked("session.turn", { text: draft, turnId }); }
+    const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
+    const turnId = submission.turnId;
+    try {
+      tracked = backendClient.requestTracked("session.turn", {
+        text: draft,
+        turnId,
+        retry: submission.retry,
+      });
+    }
     catch (error) { setWorkspaceIssue(workspaceError(error)); focusComposer(); return; }
     const generation = generationRef.current;
     setPendingUserText(draft);
@@ -754,7 +807,7 @@ export default function App() {
       if (result.extensionAction === "preview") {
         setExtensionFlow(createExtensionFlow(result.turnId));
       }
-      if (state.session !== null && (result.responseKind ?? "answer") === "answer") {
+      if (state.session !== null) {
         dispatch({
           type: "session-created",
           session: {
@@ -775,7 +828,16 @@ export default function App() {
       focusComposer();
     }).catch((error: unknown) => {
       const safe = workspaceError(error);
-      const next = applyConversation({ type: "turn-failed", generation, requestId: tracked.requestId, projectId: selected.projectId, sessionId: selected.sessionId, message: safe.message, retryable: safe.retryable });
+      const next = applyConversation({
+        type: "turn-failed",
+        generation,
+        requestId: tracked.requestId,
+        projectId: selected.projectId,
+        sessionId: selected.sessionId,
+        message: safe.message,
+        retryable: safe.retryable,
+        turnLifecycle: safe.turnLifecycle ?? null,
+      });
       if (next.failure?.requestId !== tracked.requestId) return;
       setPendingUserText(null);
       pendingApprovalRef.current = null;
@@ -971,7 +1033,7 @@ export default function App() {
             onApply={applyExtensions}
             onRestart={restartForExtensions}
           />}
-          {(state.error !== null || workspaceIssue !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{(workspaceIssue ?? state.error)?.code}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{(workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={sendTurn} disabled={interaction.turnActive}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
+          {(state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={sendTurn} disabled={interaction.turnActive}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
           {registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
           {state.phase === "stopped" && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><p className="section-kicker">LOCAL · PRIVATE · ON THIS DEVICE</p><h3 id="stopped-title">Your research workspace is ready to connect</h3><p>Start the Linux backend, verify the local runtime, then create a conversation. No provider request is made by the runtime check.</p><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
           {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
@@ -988,7 +1050,7 @@ export default function App() {
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
               {(transcript?.items.length ?? 0) === 0 && liveTurns.length === 0 && pendingUserText === null && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
-              {transcript?.items.map((turn) => <RestoredTurn turn={turn} key={`restored-${turn.turnNumber}`} />)}
+              {transcript?.items.map((turn) => <RestoredTurn turn={turn} key={`restored-${turn.turnId}`} />)}
               {liveTurns.map((turn) => <article className="turn-group" key={turn.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={turn.userText} /></div><div className={`message ${turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={turn.assistantText} /></div></article>)}
               {pendingUserText !== null && <article className="turn-group pending-turn"><div className="message user-message"><p className="message-label">You · pending</p><SafeContent content={pendingUserText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{(conversation.activeTurn?.activity.length ?? 0) > 0 && <ul className="activity-list">{conversation.activeTurn?.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>}
               <div ref={transcriptEndRef} />

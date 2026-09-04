@@ -7,6 +7,7 @@ import {
   conversationInteractionState,
   conversationReducer,
   initialConversationState,
+  latestRetryableTranscriptTurn,
   type AuthoritativeTurnResult,
   type ConversationAction,
   type ConversationState,
@@ -327,6 +328,40 @@ test("restart transcript can restore an interrupted same-ID retry target", () =>
   });
   assert.equal(state.draft, "question");
   assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId, retry: true });
+});
+
+test("a later completed display-only turn does not hide a retryable restored turn", () => {
+  const retryTarget = latestRetryableTranscriptTurn([
+    {
+      turnId,
+      turnNumber: 1,
+      kind: "conversational",
+      state: "failed",
+      timestamp: "2026-09-04T00:00:00Z",
+      userText: "question",
+      assistantText: null,
+      failureCode: "execution_failed",
+      failureMessage: "failed",
+      failureRetryable: true,
+      toolActivities: [],
+    },
+    {
+      turnId: otherTurnId,
+      turnNumber: 2,
+      kind: "display-only",
+      state: "completed",
+      timestamp: "2026-09-04T00:00:01Z",
+      userText: "/help",
+      assistantText: "help",
+      failureCode: null,
+      failureMessage: null,
+      failureRetryable: null,
+      toolActivities: [],
+    },
+  ]);
+
+  assert.equal(retryTarget?.turnId, turnId);
+  assert.equal(retryTarget?.state, "failed");
 });
 
 test("backend generation change drops stale selection, pending turn, answer, and failure", () => {

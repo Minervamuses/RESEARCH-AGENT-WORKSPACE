@@ -120,6 +120,17 @@ export interface FieldRule {
 
 export type FieldSchema = Record<string, FieldRule>;
 
+export const TURN_ERROR_DETAILS_SCHEMA: FieldSchema = {
+  turnId: { type: "turnId", required: true },
+  state: {
+    type: "nullableString",
+    required: true,
+    enum: ["pending", "completed", "failed", "interrupted"],
+  },
+  accepted: { type: "boolean", required: true },
+  persisted: { type: "boolean", required: true },
+};
+
 export const PROCESS_EVENT_ORIGINS: Record<ProcessEvent, readonly ProtocolOrigin[]> = {
   "backend.ready": ["python"],
   "backend.crashed": ["rust"],
@@ -266,8 +277,8 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
   "session.turn": {
     sessionId: { type: "string", required: true, maxBytes: 256 },
     turnId: { type: "turnId", required: true },
-    turnNumber: { type: "integer", required: false, minimum: 1, maximum: 4_096 },
-    state: { type: "nullableString", required: true, enum: ["completed"] },
+    turnNumber: { type: "integer", required: true, minimum: 1, maximum: 4_096 },
+    state: { type: "string", required: true, enum: ["completed"] },
     accepted: { type: "boolean", required: true },
     persisted: { type: "boolean", required: true },
     text: { type: "string", required: true, maxBytes: 2_097_152 },
@@ -333,6 +344,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
         sessionId: { type: "string", required: true, maxBytes: 32 },
         title: { type: "string", required: true, maxBytes: 256 },
         turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
+        createdAt: { type: "nullableString", required: true, maxBytes: 64 },
         updatedAt: { type: "nullableString", required: true, maxBytes: 64 },
         status: { type: "string", required: true, enum: ["ready", "degraded", "unavailable"] },
         issue: { type: "nullableString", required: true, maxBytes: 4_096 },
@@ -373,10 +385,29 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
       required: true,
       maxItems: 20,
       items: {
+        turnId: { type: "turnId", required: true },
         turnNumber: { type: "integer", required: true, minimum: 1, maximum: 0xffff_ffff },
-        timestamp: { type: "string", required: true, maxBytes: 64 },
+        kind: {
+          type: "string",
+          required: true,
+          enum: ["conversational", "display-only"],
+        },
+        state: {
+          type: "string",
+          required: true,
+          enum: ["pending", "completed", "failed", "interrupted"],
+        },
+        timestamp: { type: "utcTimestamp", required: true },
         userText: { type: "string", required: true, maxBytes: 32_768 },
-        assistantText: { type: "string", required: true, maxBytes: 32_768 },
+        assistantText: { type: "nullableString", required: true, maxBytes: 32_768 },
+        failureCode: {
+          type: "nullableString",
+          required: true,
+          maxBytes: 256,
+          enum: ["execution_failed", "persistence_failed", "interrupted", "cancelled"],
+        },
+        failureMessage: { type: "nullableString", required: true, maxBytes: 4_096 },
+        failureRetryable: { type: "nullableBoolean", required: true },
         toolActivities: {
           type: "objectArray",
           required: true,
@@ -501,6 +532,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "session.turn": {
     text: { type: "string", required: true, maxBytes: 1_048_576 },
     turnId: { type: "turnId", required: true },
+    retry: { type: "boolean", required: true },
   },
   "session.set_mode": {
     mode: { type: "string", required: true, enum: ["normal", "plan"] },
@@ -581,6 +613,13 @@ export interface ProtocolErrorDto {
   details: JsonObject;
 }
 
+export interface TurnLifecycleDetailsDto {
+  turnId: string;
+  state: "pending" | "completed" | "failed" | "interrupted" | null;
+  accepted: boolean;
+  persisted: boolean;
+}
+
 export interface ToolSummaryDto {
   name: string;
   status: "ok" | "failed" | "denied";
@@ -591,8 +630,8 @@ export interface ToolSummaryDto {
 export interface TurnCompletedDto {
   sessionId: string;
   turnId: string;
-  turnNumber?: number;
-  state: "completed" | null;
+  turnNumber: number;
+  state: "completed";
   accepted: boolean;
   persisted: boolean;
   text: string;
@@ -639,6 +678,7 @@ export interface SessionSummaryDto {
   sessionId: string;
   title: string;
   turnCount: number;
+  createdAt: string | null;
   updatedAt: string | null;
   status: "ready" | "degraded" | "unavailable";
   issue: string | null;
@@ -677,10 +717,16 @@ export interface ToolActivityDto {
 }
 
 export interface TranscriptTurnDto {
+  turnId: string;
   turnNumber: number;
+  kind: "conversational" | "display-only";
+  state: "pending" | "completed" | "failed" | "interrupted";
   timestamp: string;
   userText: string;
-  assistantText: string;
+  assistantText: string | null;
+  failureCode: "execution_failed" | "persistence_failed" | "interrupted" | "cancelled" | null;
+  failureMessage: string | null;
+  failureRetryable: boolean | null;
   toolActivities: ToolActivityDto[];
 }
 
@@ -997,6 +1043,25 @@ function validateObjectSchema(value: JsonObject, schema: FieldSchema, field: str
   }
 }
 
+export function parseTurnLifecycleDetails(value: unknown): TurnLifecycleDetailsDto {
+  const details = expectObject(value, "error.details");
+  validateObjectSchema(details, TURN_ERROR_DETAILS_SCHEMA, "error.details");
+  const parsed: TurnLifecycleDetailsDto = {
+    turnId: details.turnId as string,
+    state: details.state as TurnLifecycleDetailsDto["state"],
+    accepted: details.accepted as boolean,
+    persisted: details.persisted as boolean,
+  };
+  if (parsed.state === null) {
+    if (parsed.accepted || parsed.persisted) {
+      invalid("a null turn error state must not be accepted or persisted");
+    }
+  } else if (!parsed.accepted || !parsed.persisted) {
+    invalid("a durable turn error state must be accepted and persisted");
+  }
+  return parsed;
+}
+
 function normalizeDataKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -1043,6 +1108,58 @@ export function validateResultData(method: ProtocolMethod, data: JsonObject): vo
   const schema = RESULT_DATA_SCHEMAS[method];
   if (schema !== undefined) {
     validateObjectSchema(data, schema, "data");
+  }
+  if (
+    method === "session.turn" &&
+    (data.state !== "completed" || data.accepted !== true || data.persisted !== true)
+  ) {
+    invalid("session.turn success must be durably completed");
+  }
+  if (method === "session.transcript") {
+    (data.items as JsonObject[]).forEach((item) => {
+      const failureValues = [
+        item.failureCode,
+        item.failureMessage,
+        item.failureRetryable,
+      ];
+      if (item.state === "completed") {
+        if (item.assistantText === null || failureValues.some((value) => value !== null)) {
+          invalid("completed transcript turn has invalid lifecycle fields");
+        }
+        return;
+      }
+      if (item.state === "pending") {
+        if (
+          item.assistantText !== null ||
+          failureValues.some((value) => value !== null) ||
+          (item.toolActivities as unknown[]).length > 0
+        ) {
+          invalid("pending transcript turn has invalid lifecycle fields");
+        }
+        return;
+      }
+      if (
+        item.assistantText !== null ||
+        failureValues.some((value) => value === null) ||
+        (item.toolActivities as unknown[]).length > 0
+      ) {
+        invalid(`${String(item.state)} transcript turn has invalid lifecycle fields`);
+      }
+      if (
+        item.state === "failed" &&
+        item.failureCode !== "execution_failed" &&
+        item.failureCode !== "persistence_failed"
+      ) {
+        invalid("failed transcript turn has an invalid failure code");
+      }
+      if (
+        item.state === "interrupted" &&
+        item.failureCode !== "interrupted" &&
+        item.failureCode !== "cancelled"
+      ) {
+        invalid("interrupted transcript turn has an invalid failure code");
+      }
+    });
   }
 }
 
@@ -1164,7 +1281,11 @@ function parseError(value: unknown): ProtocolErrorDto {
   }
   const details = expectObject(error.details, "error.details");
   validateSafeData(details, "error.details");
-  if (code === "INTERNAL_ERROR" && Object.keys(details).length > 0) {
+  const hasTurnLifecycleField = Object.keys(TURN_ERROR_DETAILS_SCHEMA)
+    .some((key) => key in details);
+  if (hasTurnLifecycleField) {
+    parseTurnLifecycleDetails(details);
+  } else if (code === "INTERNAL_ERROR" && Object.keys(details).length > 0) {
     invalid("INTERNAL_ERROR details must be empty");
   }
   return {
@@ -1313,6 +1434,11 @@ export class ProtocolTraceValidator {
         validateResultData(state.method, message.data);
         if (state.turnId !== null && message.data.turnId !== state.turnId) {
           invalid("data.turnId must match params.turnId");
+        }
+      } else if (state.turnId !== null) {
+        const details = parseTurnLifecycleDetails(message.error.details);
+        if (details.turnId !== state.turnId) {
+          invalid("error.details.turnId must match params.turnId");
         }
       }
       state.terminal = true;

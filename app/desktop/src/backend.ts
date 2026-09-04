@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  ProtocolTraceValidator,
   type JsonObject,
   type ProcessEventEnvelope,
   type ProtocolMessage,
@@ -8,8 +9,10 @@ import {
   type RequestEnvelope,
   type RuntimeDiagnosticsDto,
   type SessionCreatedDto,
+  type TurnLifecycleDetailsDto,
   parseProtocolMessage,
   parseProtocolMessageFromOrigin,
+  parseTurnLifecycleDetails,
   validateResultData,
 } from "./protocol.ts";
 
@@ -50,6 +53,7 @@ export interface BackendSnapshot {
 
 export interface SafeUiError extends BridgeError {
   source: "transport" | "business" | "protocol" | "lifecycle" | "preview";
+  turnLifecycle?: TurnLifecycleDetailsDto;
 }
 
 export interface BoundedRuntimeDiagnostics {
@@ -490,6 +494,20 @@ function asClientError(value: unknown, source: SafeUiError["source"]): BackendCl
   return new BackendClientError(normalizeUiError(value, source));
 }
 
+function normalizeBusinessError(
+  error: { code: string; message: string; retryable: boolean; details: JsonObject },
+  method: ProtocolMethod,
+): SafeUiError {
+  const normalized = normalizeUiError(error, "business");
+  if (method !== "session.turn") {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    turnLifecycle: parseTurnLifecycleDetails(error.details),
+  };
+}
+
 export function createBackendClient(options: {
   invoke: InvokeCommand;
   idFactory?: () => string;
@@ -523,8 +541,11 @@ export function createBackendClient(options: {
 
   function requestTracked(method: ProtocolMethod, params: JsonObject): TrackedBackendRequest {
     let request: RequestEnvelope;
+    let traceValidator: ProtocolTraceValidator;
     try {
       request = buildProtocolRequest(method, params, idFactory);
+      traceValidator = new ProtocolTraceValidator();
+      traceValidator.accept(request);
     } catch (error) {
       throw asClientError(error, "protocol");
     }
@@ -543,8 +564,9 @@ export function createBackendClient(options: {
           if (message.messageType !== "result" || message.requestId !== request.requestId) {
             throw new Error("Backend returned an uncorrelated response.");
           }
+          traceValidator.accept(message);
           if (!message.ok) {
-            throw new BackendClientError(normalizeUiError(message.error, "business"));
+            throw new BackendClientError(normalizeBusinessError(message.error, method));
           }
           validateResultData(method, message.data);
           return message.data;
