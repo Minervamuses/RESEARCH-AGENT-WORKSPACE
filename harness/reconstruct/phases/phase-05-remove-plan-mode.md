@@ -1,6 +1,6 @@
 # Phase 05 — 移除產品 Plan Mode
 
-Status: In progress
+Status: Complete
 
 ## Objective
 
@@ -106,12 +106,12 @@ conda run -n app cargo test --manifest-path src-tauri/Cargo.toml protocol::tests
 
 ## Acceptance Criteria
 
-- [ ] UI、CLI、Python protocol、TS/Rust bridge、session runtime 都不再提供 Plan Mode。
-- [ ] 新執行不寫 Plan logs；normal execution 不 import migration-only parser。
-- [ ] Legacy Plan v1/v2 importer tests 仍通過，舊檔未被刪除或改寫。
-- [ ] Normal 與 extended thinking 都可執行、持久化與重啟恢復。
-- [ ] Skills、Citation、普通規劃提示與 `/thinking` 未被誤刪。
-- [ ] Residue search 的每個剩餘精確 Plan Mode reference 都有 migration/historical/harness 理由。
+- [x] UI、CLI、Python protocol、TS/Rust bridge、session runtime 都不再提供 Plan Mode。
+- [x] 新執行不寫 Plan logs；normal execution 不 import migration-only parser。
+- [x] Legacy Plan v1/v2 importer tests 仍通過，舊檔未被刪除或改寫。
+- [x] Normal 與 extended thinking 都可執行、持久化與重啟恢復。
+- [x] Skills、Citation、普通規劃提示與 `/thinking` 未被誤刪。
+- [x] Residue search 的每個剩餘精確 Plan Mode reference 都有 migration/historical/harness 理由。
 
 ## Evidence to record
 

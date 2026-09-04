@@ -229,6 +229,22 @@
 - **Evidence reference:** Red commit=`d7bb592`。
 - **Blockers:** None；next implement consumer-to-producer removal while preserving raw legacy v1/v2 parser coverage.
 
+## 2026-09-04 23:04 CST — Phase 05: Product Plan Mode removal complete
+
+- **Status:** `In progress` → `Complete`。
+- **Changes:** React controls、CLI `/mode`、Python/TypeScript/Rust protocol fields與`session.set_mode`、session/journal Plan state/hints、writer branches、`TurnRecord.log_path`及Plan-only tests均已移除。原`turns/plan_log.py`收斂為`conversations/legacy_plan.py`，只保留bounded strict v1/v2 reader；normal execution不import它，Desktop只在explicit legacy migration boundary使用。`/thinking`、`thinkingMode`與normal/extended orchestration保留。
+- **Legacy/non-destruction:** migration tests全部使用`tmp_path` synthetic files，逐檔bytes-before/after assertion仍通過；沒有讀寫、移動或刪除真實`app/plan_logs/`或user store。`.gitignore`繼續保護legacy目錄，current runtime不再建立或append Plan log。
+- **Verification (Python):** 從`app/`執行Phase-required selector加`test_plan_mode_removal.py`、`test_conversation_migration.py`、`test_memory.py`、`test_history_recall_routing.py`、`test_turn_finalizer.py`與Desktop conversation coverage，exit 0，`438 passed, 1 warning in 4.85s`。先前純required+direct affected集合亦為`430 passed, 1 warning in 5.61s`；warning均是既有LangGraph `allowed_objects` pending-deprecation。
+- **Verification (Desktop):** 從`app/desktop/`執行`node --test --experimental-strip-types tests/protocol.test.ts tests/conversations.test.ts`，exit 0，`108 passed`；`./node_modules/.bin/tsc --noEmit` exit 0；`cargo test --manifest-path src-tauri/Cargo.toml protocol::tests` exit 0，`11 passed`。舊`session.set_mode` fixture現在明確得到`PROTOCOL_INVALID`，不是映射成thinking mode。
+- **Residue audit:** tracked與`--untracked` exact search覆蓋`plan mode|plan_mode|session.set_mode|/mode|planLog|plan_log_path|enter/resume/exit_plan_mode`。剩餘app source只在`conversations/legacy_plan.py`、synthetic migration fixtures及negative removal tests；active docs只把`plan_logs`標成唯讀migration input。`harness/`、歷史`issue/`/`note/`與extension manager的普通planning model名稱依allowlist保留。
+- **Documentation:** root operation guide、Skills guide、agent/turn lifecycle docs、`.gitignore`與`for_agents`已移除產品模式說明並改述canonical pending/completed JSON順序。`manage_for_agents.py check` exit 0（僅提示九個已tracked files受ignore規則影響）；`git diff --check` exit 0。
+- **Review:** independent read-only review先找到obsolete `TurnRecord.log_path`與現行history-routing test中的Plan-only說法，兩項均修正並重跑focused checks；最終確認active runtime無Plan surface、legacy reader無writer API、thinking route保留，沒有未解blocking finding。詳見`code_review/phase-05-remove-plan-mode-review.md`。
+- **Acceptance mapping:** public surface removal由Python/TS/Rust protocol negative tests、CLI registry與React source assertions覆蓋；no-new-log與migration-only import由API/residue inspection及v1/v2 parser tests覆蓋；normal/extended、Skills、Citation與canonical lifecycle由438-test集合覆蓋；legacy preservation由temporary source byte assertions覆蓋。
+- **Evidence references:** start=`090472e`；Red=`d7bb592`；Red log=`0c04dd6`；Green=`e4f4107`；active docs=`e37bce5`。
+- **Limitations:** 未使用live provider、Ollama、credentials、真實legacy資料、full npm/Cargo suite或Tauri build；final broad matrix仍是Phase 07 scope。
+- **Blockers:** None。
+- **Next action:** reread durable authority and begin Phase 06 retirement of conversation-history Chroma and `recall_history`, while preserving document RAG Chroma/Ollama.
+
 <!--
 Material implementation events append with this shape:
 
