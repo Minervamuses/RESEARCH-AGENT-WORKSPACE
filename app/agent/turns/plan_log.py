@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 import uuid
 from collections import Counter, defaultdict, deque
 from dataclasses import replace
@@ -66,6 +68,58 @@ _CITATION_TOOL_NAME = "citation_workflow"
 
 class PlanLogRestoreError(RuntimeError):
     """A Plan log cannot be safely reduced to restorable turns."""
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(value: str) -> object:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _load_strict_json(value: str) -> object:
+    return json.loads(
+        value,
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_json_constant,
+    )
+
+
+def _read_bounded_regular_file(path: Path) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            file_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise PlanLogRestoreError(
+                    "plan log is unavailable or not UTF-8"
+                )
+            chunks: list[bytes] = []
+            remaining = MAX_PLAN_RESTORE_FILE_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            return b"".join(chunks)
+        finally:
+            os.close(descriptor)
+    except PlanLogRestoreError:
+        raise
+    except OSError as exc:
+        raise PlanLogRestoreError(
+            "plan log is unavailable or not UTF-8"
+        ) from exc
 
 
 def _canonical_uuid4(value: str) -> bool:
@@ -215,8 +269,7 @@ class PlanLog:
         total_bytes = 0
         for path in paths:
             try:
-                with path.open("rb") as handle:
-                    raw = handle.read(MAX_PLAN_RESTORE_FILE_BYTES + 1)
+                raw = _read_bounded_regular_file(path)
                 if len(raw) > MAX_PLAN_RESTORE_FILE_BYTES:
                     raise PlanLogRestoreError("plan log exceeds the file limit")
                 total_bytes += len(raw)
@@ -280,8 +333,8 @@ class PlanLog:
             if len(block.encode("utf-8")) > MAX_PLAN_RESTORE_FILE_BYTES:
                 raise PlanLogRestoreError("plan log turn exceeds the byte limit")
             try:
-                payload = json.loads(match.group("payload"))
-            except json.JSONDecodeError as exc:
+                payload = _load_strict_json(match.group("payload"))
+            except (json.JSONDecodeError, ValueError) as exc:
                 raise PlanLogRestoreError("plan log v2 payload is malformed") from exc
             if not isinstance(payload, dict) or set(payload) != {
                 "format_version",
@@ -402,8 +455,8 @@ class PlanLog:
             MAX_PLAN_TOOL_ARGUMENT_BYTES,
         )
         try:
-            parsed_arguments = json.loads(arguments)
-        except (json.JSONDecodeError, TypeError):
+            parsed_arguments = _load_strict_json(arguments)
+        except (json.JSONDecodeError, TypeError, ValueError):
             parsed_arguments = None
         arguments_valid = (
             isinstance(raw_arguments, str)

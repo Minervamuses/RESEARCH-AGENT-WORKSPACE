@@ -1,6 +1,7 @@
 """Tests for plan-mode markdown persistence."""
 
 import asyncio
+import os
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -531,6 +532,41 @@ def test_v2_on_disk_prompt_flag_is_malformed_display_only_not_authority(tmp_path
     assert turn.tool_activities[0].prompt_eligible is False
 
 
+@pytest.mark.parametrize(
+    "original,replacement",
+    [
+        ('"scope":"normal"', '"scope":"normal","scope":"citation"'),
+        ('"turn_id":1', '"turn_id":NaN'),
+    ],
+)
+def test_v2_reader_rejects_non_strict_json(
+    tmp_path,
+    original,
+    replacement,
+):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    path = plan_log.new_log_file()
+    block = plan_log.render_block(
+        turn_id=1,
+        timestamp="2026-08-28T01:00:00+00:00",
+        user_input="strict JSON",
+        answer="must reject malformed JSON",
+        new_messages=[],
+        tool_calls=[],
+    )
+    assert original in block
+    plan_log.append_block(str(path), block.replace(original, replacement))
+
+    with pytest.raises(PlanLogRestoreError, match="payload is malformed"):
+        plan_log.read_direct_answer_turns()
+
+
 def test_unknown_v2_header_version_fails_reader_and_resume(tmp_path):
     session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
     config = AgentConfig(persist_dir=str(tmp_path / "persist"))
@@ -741,6 +777,31 @@ def test_direct_answer_reader_rejects_oversize_file(tmp_path):
     plan_log.append_block(str(path), "x" * (1024 * 1024))
 
     with pytest.raises(PlanLogRestoreError, match="file limit"):
+        plan_log.read_direct_answer_turns()
+
+
+@pytest.mark.parametrize("source_kind", ["symlink", "fifo"])
+def test_direct_answer_reader_rejects_nonregular_source_without_following(
+    tmp_path,
+    source_kind,
+):
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    config = AgentConfig(persist_dir=str(tmp_path / "persist"))
+    plan_log = PlanLog(
+        config,
+        session_id=session_id,
+        app_root_resolver=lambda: tmp_path,
+    )
+    source = plan_log.new_log_file()
+    if source_kind == "symlink":
+        target = source.with_name("valid-target.md")
+        source.rename(target)
+        source.symlink_to(target)
+    else:
+        source.unlink()
+        os.mkfifo(source)
+
+    with pytest.raises(PlanLogRestoreError, match="unavailable or not UTF-8"):
         plan_log.read_direct_answer_turns()
 
 
