@@ -19,8 +19,6 @@ from agent.conversations import (
     FailureInfo,
     ToolActivitySummary,
 )
-from agent.conversations.legacy import LegacyConversationReader
-from agent.conversations.migration import ConversationMigrator
 from agent.desktop.catalog import (
     CATALOG_FILENAME,
     CATALOG_MAX_BYTES,
@@ -33,7 +31,6 @@ from agent.desktop.catalog import (
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.session import ChatSession
-from agent.turns.memory import TurnRecord
 from agent.turns.results import TurnOutcome
 
 SESSION_A = "28b222e0cc6543aa8d7bbdc423de99a7"
@@ -731,6 +728,10 @@ def test_catalog_only_missing_json_stays_unavailable_without_fake_transcript(
     )
     missing_path = repository.path_for(SESSION_B)
 
+    selected = asyncio.run(service.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
     sessions = asyncio.run(service.dispatch(
         "session.list",
         {"projectId": "p1", "offset": 0, "limit": 50},
@@ -742,7 +743,13 @@ def test_catalog_only_missing_json_stays_unavailable_without_fake_transcript(
     missing_summary = next(
         item for item in sessions["items"] if item["sessionId"] == SESSION_B
     )
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_B},
+        ))
 
+    assert selected["sessionId"] == SESSION_A
     assert missing_summary["status"] == "unavailable"
     assert missing_summary["turnCount"] == 0
     assert transcript == {
@@ -756,6 +763,9 @@ def test_catalog_only_missing_json_stays_unavailable_without_fake_transcript(
         "limit": 20,
         "hasMore": False,
     }
+    assert raised.value.code == "SESSION_NOT_READY"
+    assert service.session is not None
+    assert service.session.session_id == SESSION_A
     assert catalog.project_for_session(SESSION_B) == "p1"
     assert not missing_path.exists()
 
@@ -1175,6 +1185,87 @@ def test_fifty_turn_transcript_pages_preserve_every_lifecycle_record(tmp_path):
     ] is None
 
 
+def test_long_transcript_survives_switch_back_and_backend_recreation(tmp_path):
+    persist_dir = tmp_path / "long-transcript-store"
+    persist_dir.mkdir()
+    (persist_dir / CATALOG_FILENAME).write_text(json.dumps({
+        "projects": [{
+            "projectId": "p1",
+            "name": "Project One",
+            "sessionIds": [SESSION_A, SESSION_B],
+        }]
+    }), encoding="utf-8")
+    repository = ConversationRepository(persist_dir)
+    first_answer = '中文🙂\n"quoted"\\path\n' + "a" * 40_000
+    second_answer = "b" * 1_100_000
+    _append_completed_turn(
+        repository,
+        SESSION_A,
+        "p1",
+        assistant_output=first_answer,
+    )
+    _append_completed_turn(
+        repository,
+        SESSION_A,
+        "p1",
+        turn_number=2,
+        assistant_output=second_answer,
+    )
+    _append_completed_turn(repository, SESSION_B, "p1")
+
+    def make_service() -> DesktopService:
+        return DesktopService(
+            original_cwd=tmp_path,
+            config=AgentConfig(persist_dir=str(persist_dir)),
+            project_catalog=DesktopProjectCatalog(persist_dir),
+            conversation_repository=ConversationRepository(persist_dir),
+            session_factory=_CoordinatorFactory(),
+            environ={},
+        )
+
+    first = make_service()
+    asyncio.run(first.dispatch(
+        "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+    ))
+    initial = asyncio.run(first.dispatch("session.transcript", {
+        "projectId": "p1",
+        "sessionId": SESSION_A,
+        "offset": 0,
+        "limit": 20,
+    }))
+    asyncio.run(first.dispatch(
+        "session.select", {"projectId": "p1", "sessionId": SESSION_B}
+    ))
+    asyncio.run(first.dispatch(
+        "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+    ))
+    switched = asyncio.run(first.dispatch("session.transcript", {
+        "projectId": "p1",
+        "sessionId": SESSION_A,
+        "offset": 0,
+        "limit": 20,
+    }))
+
+    restarted = make_service()
+    selected = asyncio.run(restarted.dispatch(
+        "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+    ))
+    restored = asyncio.run(restarted.dispatch("session.transcript", {
+        "projectId": "p1",
+        "sessionId": SESSION_A,
+        "offset": 0,
+        "limit": 20,
+    }))
+
+    for transcript in (initial, switched, restored):
+        assert transcript["status"] == "ready"
+        assert [item["assistantText"] for item in transcript["items"]] == [
+            first_answer,
+            second_answer,
+        ]
+    assert selected["turnCount"] == 2
+
+
 def test_transient_d_registers_once_after_first_durable_turn(tmp_path):
     service, catalog, factory, repository = _seed_coordinator(
         tmp_path,
@@ -1467,66 +1558,6 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     assert transcript["items"][0]["assistantText"] == answer["text"]
 
 
-def test_select_imports_legacy_once_then_uses_canonical_transcript_and_context(
-    tmp_path,
-):
-    service, _catalog, factory, repository = _seed_coordinator(
-        tmp_path,
-        seeded_sessions=(SESSION_B, SESSION_C),
-    )
-    legacy_turn = TurnRecord(
-        user_input="legacy question",
-        assistant_output="legacy answer",
-        turn_id=1,
-        timestamp="2026-08-26T00:01:00+00:00",
-    )
-    read_calls = []
-
-    def read_legacy(session_id):
-        read_calls.append(session_id)
-        return [legacy_turn]
-
-    service._conversation_migrator = ConversationMigrator(
-        repository,
-        LegacyConversationReader(chroma_read=read_legacy),
-    )
-
-    selected = asyncio.run(service.dispatch(
-        "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
-    ))
-    transcript = asyncio.run(service.dispatch(
-        "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
-    ))
-    continued = asyncio.run(service.dispatch("session.turn", {
-        "text": "new canonical question",
-        "turnId": _logical_turn_id(241),
-        "retry": False,
-    }))
-
-    durable = repository.load(SESSION_A).document.turns
-    assert selected["turnCount"] == 1
-    assert transcript["status"] == "ready"
-    assert transcript["items"][0]["userText"] == "legacy question"
-    assert transcript["items"][0]["assistantText"] == "legacy answer"
-    assert durable[0].kind == "display-only"
-    assert durable[0].context_eligible is False
-    assert durable[0].semantic_input is None
-    assert durable[1].kind == "conversational"
-    assert factory.sessions[-1].contexts[-1] == []
-    assert factory.sessions[-1].turn_inputs == ["new canonical question"]
-    assert continued["state"] == "completed"
-    assert read_calls == [SESSION_A, SESSION_A]
-
-    selected_again = asyncio.run(service.dispatch(
-        "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
-    ))
-    assert selected_again["turnCount"] == 2
-    assert read_calls == [SESSION_A, SESSION_A]
-
-
 def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     tmp_path,
     monkeypatch,
@@ -1716,7 +1747,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     assert prompt_messages[2].content == "continue without replay"
 
 
-def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
+def test_transcript_complete_text_and_bounded_tool_page_are_returned_whole(
     tmp_path,
     monkeypatch,
 ):
@@ -1730,7 +1761,8 @@ def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
             summary=summary,
         )
 
-    oversized_field = ConversationTurn(
+    long_answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + "界" * 400_000 + "\nEND"
+    long_text_turn = ConversationTurn(
         turn_id=_logical_turn_id(301),
         turn_number=1,
         kind="conversational",
@@ -1741,22 +1773,22 @@ def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
         thinking_mode="normal",
         submitted_at="2026-08-27T00:01:00Z",
         finished_at="2026-08-27T00:01:00Z",
-        assistant_output="bounded answer",
+        assistant_output=long_answer,
         tool_activities=(),
         failure=None,
     )
     monkeypatch.setattr(
         service,
         "_read_conversation_turns",
-        lambda _session_id, _project_id: [oversized_field],
+        lambda _session_id, _project_id: [long_text_turn],
     )
     field_result = asyncio.run(service.dispatch(
         "session.transcript",
         {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
     ))
-    assert field_result["status"] == "degraded"
-    assert field_result["items"] == []
-    assert "oversized turn" in field_result["issue"]
+    assert field_result["status"] == "ready"
+    assert field_result["items"][0]["userText"] == "x" * 32_769
+    assert field_result["items"][0]["assistantText"] == long_answer
 
     page_turn = ConversationTurn(
         turn_id=_logical_turn_id(302),
@@ -1785,9 +1817,9 @@ def test_transcript_tool_activity_field_and_page_byte_limits_degrade_safely(
         "session.transcript",
         {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
     ))
-    assert page_result["status"] == "degraded"
-    assert page_result["items"] == []
-    assert "page exceeds" in page_result["issue"]
+    assert page_result["status"] == "ready"
+    assert len(page_result["items"][0]["toolActivities"]) == 16
+    assert page_result["items"][0]["toolActivities"][-1]["result"] == "x" * 65_536
 
 
 def test_duplicate_caller_turn_id_returns_saved_answer_without_model_replay(tmp_path):

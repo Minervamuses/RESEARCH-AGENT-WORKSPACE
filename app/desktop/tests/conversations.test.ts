@@ -232,6 +232,37 @@ test("restored turns render tools between user and assistant without raw HTML", 
   assert.match(html, /&lt;script&gt;/);
 });
 
+test("restored turns render a complete multi-megabyte answer from first marker to last", async () => {
+  const { RestoredTurn } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const answer = 'BEGIN 中文🙂\n"quoted"\\path\n<script>unsafe()</script>\n'
+    + "界".repeat(750_000)
+    + "\nEND";
+  const html = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: {
+      turnId: "123e4567e89b42d3a456426614174001",
+      turnNumber: 1,
+      kind: "conversational",
+      state: "completed",
+      timestamp: "2026-09-05T00:00:00Z",
+      userText: "question",
+      assistantText: answer,
+      failureCode: null,
+      failureMessage: null,
+      failureRetryable: null,
+      toolActivities: [],
+    },
+  }));
+
+  assert.ok(html.indexOf("BEGIN 中文🙂") < html.lastIndexOf("END"));
+  assert.match(html, /quoted/);
+  assert.match(html, /\\path/);
+  assert.doesNotMatch(html, /<script>/i);
+  assert.match(html, /&lt;script&gt;/);
+  assert.ok(html.length > answer.length);
+});
+
 test("restored transcript renders durable non-completed and display-only states without a fake answer", async () => {
   const { RestoredTurn } = await loadAppHelpers();
   const { renderToStaticMarkup } = await import("react-dom/server");

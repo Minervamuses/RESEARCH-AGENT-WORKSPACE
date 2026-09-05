@@ -29,10 +29,14 @@ import {
   conversationReducer,
   initialConversationState,
   latestRetryableTranscriptTurn,
+  mergeConversationTurns,
   nextTurnSubmission,
+  reconciledTurnCount,
+  upsertLiveTurn,
   type ConversationAction,
   type ConversationFailure,
   type ConversationSelection,
+  type LiveTurn,
 } from "./conversations.ts";
 import type {
   ApprovalRequiredDto,
@@ -105,13 +109,6 @@ interface TranscriptView {
   offset: number;
   total: number;
   hasOlder: boolean;
-}
-
-interface LiveTurn {
-  key: string;
-  userText: string;
-  assistantText: string;
-  responseKind: "answer" | "command";
 }
 
 export function sidebarRowsForProject(
@@ -807,7 +804,15 @@ export default function App() {
         }
         return;
       }
-      setLiveTurns((turns) => [...turns, { key: answer.turnId, userText: draft, assistantText: answer.text, responseKind: answer.responseKind }]);
+      setLiveTurns((turns) => upsertLiveTurn(turns, {
+        sessionId: answer.sessionId,
+        turnId: answer.turnId,
+        turnNumber: answer.turnNumber,
+        userText: draft,
+        assistantText: answer.text,
+        responseKind: answer.responseKind,
+        streamKind: answer.streamKind,
+      }));
       setPendingUserText(null);
       pendingApprovalRef.current = null;
       approvalResolvingRef.current = false;
@@ -822,7 +827,7 @@ export default function App() {
           session: {
             ...state.session,
             registered: result.registrationStatus === "registered" ? true : state.session.registered,
-            turnCount: state.session.turnCount + 1,
+            turnCount: reconciledTurnCount(state.session.turnCount, answer.turnNumber),
           },
         });
       }
@@ -902,8 +907,11 @@ export default function App() {
         throw protocolMismatch("The backend returned an apply result for a different conversation turn.");
       }
       const alreadyVisible =
-        (transcript?.items.some((turn) => turn.turnId === report.turnId) ?? false) ||
-        liveTurns.some((turn) => turn.key === report.turnId);
+        (transcript?.sessionId === report.sessionId &&
+          transcript.items.some((turn) => turn.turnId === report.turnId)) ||
+        liveTurns.some((turn) =>
+          turn.sessionId === report.sessionId && turn.turnId === report.turnId
+        );
       setExtensionFlow((current) => {
         if (current?.triggerTurnId !== flow.triggerTurnId || current.applyRequest?.turnId !== request.turnId) return current;
         return observeExtensionRevision(
@@ -912,17 +920,23 @@ export default function App() {
         );
       });
       if (!alreadyVisible) {
-        setLiveTurns((turns) => [...turns, {
-          key: report.turnId,
+        setLiveTurns((turns) => upsertLiveTurn(turns, {
+          sessionId: report.sessionId,
+          turnId: report.turnId,
+          turnNumber: report.turnNumber,
           userText: report.displayInput,
           assistantText: report.text,
           responseKind: "command",
-        }]);
+          streamKind: "final_only",
+        }));
       }
       if (state.session !== null && !alreadyVisible) {
         dispatch({
           type: "session-created",
-          session: { ...state.session, turnCount: state.session.turnCount + 1 },
+          session: {
+            ...state.session,
+            turnCount: reconciledTurnCount(state.session.turnCount, report.turnNumber),
+          },
         });
       }
       requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
@@ -1017,6 +1031,12 @@ export default function App() {
     if (selected === null) return null;
     return sessionLists[selected.projectId]?.items.find((item) => item.sessionId === selected.sessionId) ?? null;
   }, [conversation.selected, sessionLists]);
+  const visibleTurns = useMemo(() => mergeConversationTurns(
+    transcript === null
+      ? []
+      : transcript.items.map((turn) => ({ sessionId: transcript.sessionId, turn })),
+    liveTurns,
+  ), [liveTurns, transcript]);
   const renderConversation = state.phase === "session-ready" && state.session !== null && conversation.selected !== null;
   const activeSession = renderConversation ? state.session : null;
 
@@ -1078,9 +1098,10 @@ export default function App() {
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
-              {(transcript?.items.length ?? 0) === 0 && liveTurns.length === 0 && pendingUserText === null && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
-              {transcript?.items.map((turn) => <RestoredTurn turn={turn} key={`restored-${turn.turnId}`} />)}
-              {liveTurns.map((turn) => <article className="turn-group" key={turn.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={turn.userText} /></div><div className={`message ${turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={turn.assistantText} /></div></article>)}
+              {visibleTurns.length === 0 && pendingUserText === null && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
+              {visibleTurns.map((item) => item.source === "restored"
+                ? <RestoredTurn turn={item.turn} key={item.key} />
+                : <article className="turn-group" key={item.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={item.turn.userText} /></div><div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={item.turn.assistantText} /></div></article>)}
               {pendingUserText !== null && <article className="turn-group pending-turn"><div className="message user-message"><p className="message-label">You · pending</p><SafeContent content={pendingUserText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{(conversation.activeTurn?.activity.length ?? 0) > 0 && <ul className="activity-list">{conversation.activeTurn?.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>}
               <div ref={transcriptEndRef} />
             </div>

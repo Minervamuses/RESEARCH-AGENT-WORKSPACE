@@ -128,7 +128,7 @@
 
 - Former symptom: the retired TurnStore could drop the oldest in-memory turn after repeated Chroma history write failures reached its hard cap.
 - Resolution: canonical conversation JSON now retains every accepted pending/terminal turn; normal session creation no longer constructs, writes, queries, evicts, or flushes a conversation-history Chroma store.
-- Current handling / recovery: canonical fingerprint-prechecked atomic replacements fail explicitly; there is no secondary conversation writer or hard-cap data-loss path. Canonical limit rejection is a separate explicit behavior tracked by ASM-024.
+- Current handling / recovery: canonical fingerprint-prechecked atomic replacements fail explicitly; there is no secondary conversation writer or answer/document-size hard-cap data-loss path. Complete answer/document/wire/transcript text has no numeric bytes ceiling; the remaining turn-count and catalog-scan item limits are tracked separately by ASM-024.
 - Verification: Phase 06 history-retirement and canonical lifecycle tests, plus the Phase 07 integrated fixture assertion that `store/chat_history` is never created.
 - Related invariants / assumptions: INV-005, INV-006.
 - Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.

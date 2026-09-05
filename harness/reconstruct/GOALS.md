@@ -1,5 +1,18 @@
 # Canonical Conversation JSON 與 Plan Mode 退場 — Goals
 
+## 2026-09-05 使用者更正（目前有效）
+
+本節是對下方原始計畫的局部取代，不改寫當時的規劃或證據。下文凡要求 legacy Chroma／Plan log importer、migration 驗收，或以固定 bytes 上限拒絕完整合法回答、整份 canonical JSON、`session.turn` 成功結果、transcript 文字或 transcript page，均已由本次使用者決定取代，不再是目前產品或完成條件。驗收使用的 40,000 bytes、超過 2 MiB 與累積超過 8 MiB 都只是跨越舊門檻的 probes，不是新上限。
+
+目前有效契約如下：
+
+- Agent 產生且通過既有 safety/citation finalization 的完整正式回答，必須逐字通過 canonical JSON、terminal result、GUI 顯示、A→B→A 與 backend restart 後恢復；已合法提交並保存的 user text 也須完整重載。實際 I/O 或資源耗盡可以如實失敗，但不得用另一個應用程式自訂數字拒絕、截短、隱藏或降級合法對話文字。
+- Normal 維持 authoritative final-only delivery：完成 finalization 與 persistence 後只交付一次完整答案，`streamKind=final_only`、`chunkCount=0`；不得加入 live token、`answer.chunk`、preview 或模擬串流。
+- `session.turn` 的 1 MiB 提交輸入上限，以及 tool/event/failure、schema、identity、UTF-8、path、SafeContent、URL、approval、stderr/provider/raw payload 等既有安全界線保留；放寬只涵蓋已驗證的完整對話文字通路。
+- Canonical JSON 仍是唯一 transcript authority。一般 create/list/select/restore/restart/continue 不讀取或匯入舊 conversation Chroma／Plan logs；catalog-only ID 缺少 canonical JSON 時維持 unavailable，不建立假 transcript，也不刪除或改寫任何舊來源。
+- Normal retry 以 `(conversationId, turnId)` 合併同一 logical turn，沿用 canonical `turnNumber`；failed/interrupted 只在使用者明確 retry 後重跑，completed 同-ID retry 只重播已保存結果。GUI、sidebar count、A→B→A 與 restart 都只顯示／計數一次。
+- Fusion／Extended Thinking retry、thinking-mode 跨 restart、Citation redesign 與其他鄰近 backlog 仍延後。本次只允許共用 storage/transport/rendering 所需的機械調整，不得把這些延後項記成已修復。
+
 ## 目的與背景
 
 本計畫以 `GUI` 分支 `b145b040f014560157ef9444544f4102b81e485e`（2026-09-03）為基準，把目前分散於 Python 記憶體 `recent_turns`、conversation `chat_history` Chroma、Plan Mode Markdown log 與 desktop catalog 的對話狀態，收斂成單一、可立即持久化、可獨立恢復的本機紀錄。

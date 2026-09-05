@@ -8,7 +8,7 @@
 |---|---|
 | `adapters/` | 將 framework-neutral RAG API 轉成 LangChain tools |
 | `cli/` | Interactive chat、slash command parsing 與 local command handling |
-| `conversations/` | Canonical JSON transcript authority、catalog-independent validation 與唯讀 legacy migration |
+| `conversations/` | Canonical JSON transcript authority、catalog-independent validation 與 lifecycle transitions |
 | `desktop/` | Python desktop protocol/service、catalog coordination 與 isolated fixture seams |
 | `extensions/` | Drop-in discovery、validation、registry、apply 與 startup loading |
 | `llm/` | App-layer model construction 與 text normalization |
@@ -60,13 +60,13 @@ ChatSession.turn_outcome()  [session-wide async lock]
 - Canonical JSON是唯一active transcript authority，`ConversationRepository`是唯一writer；normal新回合、context與exact lookup不讀寫conversation Chroma，document RAG也不儲存或搜尋對話。
 - Package `__init__.py` 應保持輕量，不 eager re-export 可形成 cycle 的 orchestrators/policies。
 
-## Persistence and legacy boundary
+## Persistence boundary
 
 - Accepted prompt會先以canonical pending JSON提交，才可呼叫provider／tool；finalization完成後再原子轉成completed並回傳terminal outcome。
 - Process重啟時遺留的pending turn會成為interrupted，不會自動重播provider或tool；只有使用相同logical turn ID的明確retry才重新執行。已completed的同ID request直接回復既有結果。
-- Desktop只有在使用者選取catalog session、且canonical JSON lookup miss時，才lazy-load legacy importer；Chroma只從一次性隔離唯讀clone讀取，legacy來源不會被改寫。
-- Catalog-wide batch預設關閉，且沒有production protocol/startup/list入口；目前只有已通過direct `/tmp` root驗證的exact `phase02` fixture，再設定`RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1`才會呼叫。
-- Legacy匯入內容一律標成display-only、context-ineligible；模型context固定只取canonical JSON中最新10個completed、eligible conversational turns。
+- Canonical JSON是唯一支援的transcript source。Desktop選取catalog session時若對應JSON不存在，會回報conversation unavailable，並保留目前已選取的session。
+- 舊Plan logs與conversation Chroma不會被讀取、匯入、改寫或刪除；catalog與isolated fixture都沒有batch migration入口。
+- 模型context固定只取canonical JSON中最新10個completed、eligible conversational turns。
 
 ## Tests and related docs
 

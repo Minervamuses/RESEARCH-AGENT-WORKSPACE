@@ -9,7 +9,7 @@ Owns:
 - graph execution 結果正規化
 - user-visible turn result models
 - final-response protocol safety helpers
-- canonical completed-turn view與legacy migration DTO
+- canonical completed-turn view
 - process-local journal observability
 - tool-call trace normalization
 
@@ -35,7 +35,7 @@ Does not own:
 | `results.py` | `GraphTurnResult` 與 `TurnOutcome` |
 | `execution.py` | Stateless graph streaming、message/call collection 與 recovery metadata |
 | `safety.py` | User-visible response 與 tool-protocol artifact checks |
-| `memory.py` | Legacy `TurnRecord` DTO 與 canonical completed-turn view |
+| `memory.py` | Canonical completed-turn view |
 | `journal.py` | Process-local tool 與 diagnostic observation state |
 | `trace.py` | Tool-call extraction、grouping 與 count formatting |
 
@@ -60,11 +60,11 @@ ChatSession._begin_turn()
 - `execute_graph()` 無長期 mutable state，不 import `ChatSession`。
 - `TurnJournal`只擁有turn logs與last tool calls；不持久化transcript。
 - Canonical JSON是目前唯一active transcript authority，`ConversationRepository`是唯一writer；normal新回合、context與exact lookup不使用conversation Chroma。
-- 模型context只取最新10個completed、context-eligible conversational turns；display-only command與legacy import turn都不進context。
+- 模型context只取最新10個completed、context-eligible conversational turns；display-only command turn不進context。
 - Accepted prompt 必須在 provider/tool 執行前成為 canonical pending turn。
 - Safety/citation finalization 必須在 canonical completed transition 前完成；完成寫入後才可回傳 terminal outcome。
 - 重啟會把遺留pending turn恢復成interrupted，且不自動重播provider/tool；failed或interrupted turn只有明確retry才重新執行，completed同ID則回復既有結果。
-- Legacy Plan v1/v2 parser 位於 `agent.conversations` migration boundary，不由一般 turn execution import，且不寫回來源檔。
+- Canonical JSON是唯一支援的transcript source；舊Plan logs與conversation Chroma不由turn execution或Desktop selection讀取或匯入，來源保持不變。
 
 ## Related docs
 

@@ -484,7 +484,7 @@ class _InvalidResultService:
                 "state": "completed",
                 "accepted": True,
                 "persisted": True,
-                "text": "x" * (2 * 1024 * 1024),
+                "text": "shape-invalid result",
                 "validationErrors": [],
                 "toolSummaries": [],
             }
@@ -528,6 +528,120 @@ def test_invalid_success_payload_becomes_exactly_one_failure_result(
     assert len(results) == 1
     assert results[0]["ok"] is False
     assert results[0]["error"]["code"] == "PROTOCOL_INVALID"
+
+
+class _LargeAnswerService:
+    def __init__(self, answer: str) -> None:
+        self.lifecycle = "ready"
+        self.answer = answer
+
+    async def dispatch(self, method, params, *, event_sink=None):
+        if method == "session.turn":
+            return {
+                "sessionId": "session-1",
+                "turnId": params["turnId"],
+                "turnNumber": 1,
+                "state": "completed",
+                "accepted": True,
+                "persisted": True,
+                "text": self.answer,
+                "validationErrors": [],
+                "toolSummaries": [],
+                "streamKind": "final_only",
+                "chunkCount": 0,
+            }
+        if method == "session.transcript":
+            return {
+                "projectId": params["projectId"],
+                "sessionId": params["sessionId"],
+                "status": "ready",
+                "issue": None,
+                "items": [{
+                    "turnId": "00000000000040008000000000000218",
+                    "turnNumber": 1,
+                    "kind": "conversational",
+                    "state": "completed",
+                    "timestamp": "2026-09-05T00:00:00Z",
+                    "userText": "question",
+                    "assistantText": self.answer,
+                    "failureCode": None,
+                    "failureMessage": None,
+                    "failureRetryable": None,
+                    "toolActivities": [],
+                }],
+                "total": 1,
+                "offset": params.get("offset", 0),
+                "limit": params.get("limit", 20),
+                "hasMore": False,
+            }
+        if method == "runtime.shutdown":
+            self.lifecycle = "stopped"
+            return {"status": "stopped"}
+        raise AssertionError(method)
+
+
+def test_large_complete_answer_is_written_as_one_final_only_result() -> None:
+    request_id = "00000000-0000-4000-8000-000000000218"
+    answer = "完整 Unicode 回答🙂\n" + "界" * 750_000
+
+    async def run() -> list[dict[str, Any]]:
+        output = io.StringIO()
+        server = DesktopServer(_LargeAnswerService(answer), ProtocolWriter(output))
+        assert await server.run(
+            _reader(
+                _request(
+                    request_id,
+                    "session.turn",
+                    _turn_params("large answer", request_id),
+                )
+            )
+        ) == 0
+        lines = output.getvalue().splitlines()
+        assert lines
+        return [json.loads(line) for line in lines]
+
+    messages = asyncio.run(run())
+    result = next(
+        message
+        for message in messages
+        if message.get("requestId") == request_id
+        and message.get("messageType") == "result"
+    )
+    assert result["ok"] is True
+    assert result["data"]["text"] == answer
+    assert result["data"]["streamKind"] == "final_only"
+    assert result["data"]["chunkCount"] == 0
+
+
+def test_large_transcript_answer_is_written_whole() -> None:
+    request_id = "00000000-0000-4000-8000-000000000219"
+    session_id = "28b222e0cc6543aa8d7bbdc423de99a7"
+    answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + "界" * 750_000 + "\nEND"
+
+    async def run() -> list[dict[str, Any]]:
+        output = io.StringIO()
+        server = DesktopServer(_LargeAnswerService(answer), ProtocolWriter(output))
+        assert await server.run(_reader(_request(
+            request_id,
+            "session.transcript",
+            {
+                "projectId": "p1",
+                "sessionId": session_id,
+                "offset": 0,
+                "limit": 20,
+            },
+        ))) == 0
+        return [json.loads(line) for line in output.getvalue().splitlines()]
+
+    messages = asyncio.run(run())
+    result = next(
+        message
+        for message in messages
+        if message.get("requestId") == request_id
+        and message.get("messageType") == "result"
+    )
+    assert result["ok"] is True
+    assert result["data"]["items"][0]["assistantText"] == answer
 
 
 class _ShutdownFailureService:

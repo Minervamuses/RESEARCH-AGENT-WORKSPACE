@@ -1,5 +1,21 @@
 # Canonical Conversation JSON 與 Plan Mode 退場 — Execution Plan
 
+## 2026-09-05 correction overlay（目前有效）
+
+這個 overlay 取代下方 roadmap 中與固定 answer/document/wire/transcript byte 拒絕及 legacy importer/migration 有關的工作與完成條件；原始 phases、估時與驗證紀錄保留為歷史，不能再當作目前功能要求。這次修正的狀態與實測只由 `build-log.md` 新增段落記錄。
+
+目前只執行三個直接工作流：
+
+1. 移除完整合法 assistant answer、整份 canonical JSON、`session.turn` 成功 result、transcript text/page 上的任意固定容量拒絕，讓同一全文可保存、final-only 交付、切換與重啟恢復。不得把舊數字換成另一個新數字；1 MiB submit input 與 tool/event/failure/security bounds 保留。
+2. 移除正常 create/list/select/restore/restart/continue 對 legacy Chroma／Plan logs importer 的呼叫與 importer-only code/tests/fixtures/current docs。舊來源保持原樣；canonical JSON 流程與 catalog-only unavailable 行為保留。
+3. 讓 React 以 `(conversationId, turnId)` 合併 retry 結果，採 canonical `turnNumber`／count；failed/interrupted 明確 retry 成功、completed replay、duplicate delivery、A→B→A 與 restart 都不得多一筆或多計一次。
+
+Focused acceptance 必須覆蓋 40,000-byte 與 Unicode 正式回答、超過舊 2 MiB 單筆與累積超過舊 8 MiB 文件、50 turns／多頁／latest-10 context、final-only 與寫入失敗、無 legacy source／catalog-only ID、retry/replay dedupe，以及 Python／TypeScript／Rust lockstep。這些測試大小只是證明舊門檻已退場，不定義新 ceiling。原生 Tauri journey 與自動測試分開；無法取得 native surface 時須記為未驗證，不可用 build 或 headless 證據代替。
+
+Fusion、Extended Thinking restart/retry、thinking-mode persistence、Citation redesign、document RAG、provider/model 選擇及其他 backlog 不在本輪範圍。Normal 仍為 `final_only`／`chunkCount=0`，Python 仍是唯一 durable writer，prompt-first、response-before-success、no automatic replay、latest-ten context、Bash approval、SafeContent 與 single-active-turn 仍是必要 gates。
+
+本 correction 不新增 dependency，不修改 lockfile／environment definition，不操作真實使用者資料，不呼叫 live/paid provider，也不授權 commit、push、branch/worktree 或其他破壞性 Git 操作。
+
 ## 快速執行卡
 
 **下一步（約 2 分鐘）：** 準備開始實作時，複製 `PROMPTS.md` 的「Start or Resume End-to-End Execution」完整 block，作為一則新訊息送出；在那之前不要把本 bundle 當成 implementation authorization。

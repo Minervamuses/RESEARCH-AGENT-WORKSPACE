@@ -1,5 +1,13 @@
 # Canonical Conversation JSON 與 Plan Mode 退場 — Reusable Prompts
 
+## 2026-09-05 supersession note（目前有效）
+
+下方原始 prompts 保留為歷史施工紀錄，但其中「建立 legacy importer／執行 migration 驗收」以及任何固定 answer、conversation document、successful wire result 或 transcript text/page bytes 拒絕，已被 2026-09-05 使用者更正取代。不得原樣複製舊 launch block 來恢復已取消的功能。
+
+執行或審查目前更正時，先讀本機適用的 `AGENTS.md`，再按 `harness/plans/2026-08-24-desktop-gui-completion/` → `harness/fix_plans/` → `harness/reconstruct/` 理解決策繼承，並完整讀 `harness/fix_plans/user-decisions.md`。唯讀 preflight 後只做以下事項：完整合法回答與已保存輸入可跨 JSON／terminal／Rust／TypeScript／React／切換／重啟逐字還原；Normal 保持 `final_only`／`chunkCount=0`；正常 runtime 不讀或匯入 legacy Chroma／Plan logs，catalog-only 缺檔維持 unavailable；Normal retry 以 `(conversationId, turnId)` 與 canonical `turnNumber` 去重並計數。保留 1 MiB submit input、tool/event/failure/security bounds、prompt-first、response-before-success、latest-ten context 與 no automatic replay。
+
+本輪不得實作 Fusion／Extended Thinking restart-retry、thinking-mode persistence、Citation redesign、舊格式 migration UI/CLI/framework、document-RAG 變更或任何鄰近重構。測試中的 40,000 bytes、超過 2 MiB、累積超過 8 MiB 與 50 turns 是 regression probes，不是新的產品上限；native Tauri surface 不可用時必須如實保留未驗證。此 correction 不授權 dependency／lockfile／environment 變更、真實使用者資料、live/paid provider、commit、push、branch/worktree 或破壞性 Git 操作；下方舊 prompt 中較寬的授權不適用於本輪。
+
 ## Start or Resume End-to-End Execution
 
 `PROMPTS.md` 不會像 `AGENTS.md` 自動載入。要正式啟動實作，請把以下完整 block 當成一則新訊息送給 coding agent；只說「開始下一階段」不等同於這份明確授權。

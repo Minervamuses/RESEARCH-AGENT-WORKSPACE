@@ -1,7 +1,6 @@
 """Phase 05 contract tests for retiring Product Plan Mode."""
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
@@ -12,8 +11,6 @@ from agent.cli.slash_commands import (
     execute_slash_command,
     parse_slash_command,
 )
-from agent.config import AgentConfig
-from agent.conversations.legacy_plan import LegacyPlanLogReader
 from agent.desktop.protocol import CONTRACT, METHODS
 from agent.session import ChatSession
 
@@ -45,24 +42,6 @@ def test_session_retires_product_plan_api() -> None:
     ):
         assert not hasattr(ChatSession, name)
     assert hasattr(ChatSession, "set_thinking_mode")
-
-
-def test_legacy_plan_reader_has_no_writer_surface(tmp_path: Path) -> None:
-    reader = LegacyPlanLogReader(
-        AgentConfig(plan_logs_dir=str(tmp_path / "legacy-plan-logs")),
-        session_id="0123456789ab4def8123456789abcdef",
-        app_root_resolver=lambda: Path("/"),
-    )
-
-    assert callable(reader.read_direct_answer_turns)
-    for name in (
-        "new_log_file",
-        "resume_log_file",
-        "build_tool_activities",
-        "render_block",
-        "append_block",
-    ):
-        assert not hasattr(reader, name)
 
 
 def test_protocol_retires_plan_surface_but_keeps_extended_thinking() -> None:

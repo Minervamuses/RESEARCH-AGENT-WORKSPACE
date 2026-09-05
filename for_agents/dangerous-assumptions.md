@@ -144,11 +144,11 @@
 
 ### ASM-018 — Production launches do not carry exact fixture-only gates
 
-- Assumption: normal users do not launch Tauri with exact `RESEARCH_AGENT_DESKTOP_FIXTURE=phase02`, a valid owned fixture root, or its additional migration/crash checkpoint environment values.
-- Where relied on: `agent.desktop.server._build_runtime_service` selects the isolated fake service only from the exact primary gate; `fixture_session.py` additionally requires `RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1` before catalog batch import and exact checkpoint+turn fields before crash instrumentation.
-- Failure if false: the UI starts against deterministic fixture conversations/providers instead of the real `ChatSession`; the additional batch gate could import only that fixture catalog, or a checkpoint could intentionally block the fixture child.
-- Detection or mitigation: fixture-root validation is strict, batch migration is default-off and doubly gated, checkpoint names/turn IDs are allowlisted, and diagnostics/content are recognizable. Normal startup/list never invokes the catalog batch. There is no separate build-time exclusion.
-- Evidence: `app/agent/desktop/server.py`; `app/agent/desktop/fixture_session.py`; test_desktop_fixture.py; test_conversation_batch_migration.py; test_desktop_crash_recovery.py.
+- Assumption: normal users do not launch Tauri with exact `RESEARCH_AGENT_DESKTOP_FIXTURE=phase02`, a valid owned fixture root, or its crash-checkpoint environment values.
+- Where relied on: `agent.desktop.server._build_runtime_service` selects the isolated fake service only from the exact primary gate; `fixture_session.py` additionally requires exact checkpoint and turn fields before crash instrumentation.
+- Failure if false: the UI starts against deterministic canonical fixture conversations/providers instead of the real `ChatSession`, or a checkpoint could intentionally block the fixture child.
+- Detection or mitigation: fixture-root validation is strict, checkpoint names/turn IDs are allowlisted, and diagnostics/content are recognizable. The fixture does not open or import legacy conversation sources. There is no separate build-time exclusion.
+- Evidence: `app/agent/desktop/server.py`; `app/agent/desktop/fixture_session.py`; test_desktop_fixture.py; test_desktop_crash_recovery.py.
 - Status: Active
 - Confidence: Confirmed test seam and premise.
 
@@ -192,25 +192,15 @@
 - Status: Active
 - Confidence: Inferred cross-process race from the write ordering; not reproduced.
 
-### ASM-023 — Legacy Chroma trees are small enough to clone safely
+### ASM-024 — Canonical turn-count and catalog scan limits need no rollover path
 
-- Assumption: the migration-only `chat_history` tree fits available time and temporary disk when cloned for staging and confirmation.
-- Where relied on: legacy conversation discovery/import from Chroma.
-- Failure if false: migration can consume excessive time or disk before bounded record parsing begins.
-- Detection or mitigation: source links and concurrent changes are rejected, and parsed records have field/session bounds; the recursive clone itself has no byte, file-count, or depth cap.
-- Evidence: `app/agent/conversations/legacy.py::_clone_chroma_source`; migration tests use controlled fixtures.
+- Assumption: 4,096 turns per conversation and a 4,096-file catalog scan are sufficient for local use, or users can manually start/manage another conversation when either item-count limit is reached.
+- Where relied on: canonical turn-list validation and sidebar scanning.
+- Failure if false: a later prompt fails before provider execution or additional files are omitted from the bounded scan; there is no automatic rollover/archival workflow.
+- Detection or mitigation: validators fail before accepting a prompt beyond the turn-count bound and scan results include a limit issue. The former 8 MiB canonical-document limit is retired and must not be replaced with another arbitrary answer/document/wire/transcript byte ceiling.
+- Evidence: `app/agent/conversations/models.py::MAX_TURNS`; `MAX_CONVERSATION_FILES`; `app/agent/conversations/repository.py::scan`.
 - Status: Active
-- Confidence: Confirmed missing clone bound; real large-store behavior Unknown.
-
-### ASM-024 — Canonical conversation hard limits need no rollover path
-
-- Assumption: 4,096 turns, an 8 MiB document, and a 4,096-file scan are sufficient for local use, or users can manually start/manage another conversation when a limit is reached.
-- Where relied on: canonical conversation validation and sidebar scanning.
-- Failure if false: further writes fail explicitly or additional files are omitted from a bounded scan; there is no automatic rollover/archival workflow.
-- Detection or mitigation: validators fail before publishing an invalid document and scan results include a limit issue; focused bounds tests cover rejection rather than long-term UX.
-- Evidence: `app/agent/conversations/models.py::MAX_TURNS`; `MAX_CONVERSATION_BYTES`; `app/agent/conversations/repository.py::scan`.
-- Status: Active
-- Confidence: Confirmed hard limits; adequacy for real long-lived stores Unknown.
+- Confidence: Confirmed item-count limits; adequacy for real long-lived stores Unknown.
 
 ## Assumptions under investigation
 
@@ -235,6 +225,10 @@
 - Confidence: Partially verified; complete intersection safety Unknown.
 
 ## Retired assumptions
+
+### ASM-023 — Legacy conversation staging is no longer a runtime assumption
+
+- The former assumption covered the resource cost of recursively cloning legacy conversation Chroma for import. The importer and its staging clone have been removed; old `chat_history` and Plan-log sources are now left untouched and are not runtime inputs.
 
 - issue/05: repository line endings no longer depend on global Git defaults; .gitattributes now owns LF policy.
 - issue/06: separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one AgentConfig graph fuse with early finalization governs the current graph.

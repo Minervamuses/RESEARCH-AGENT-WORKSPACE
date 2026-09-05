@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import importlib.util
 import inspect
+import json
 import shlex
 import subprocess
-import sys
 import uuid
 
 import pytest
@@ -83,29 +83,18 @@ def test_session_creation_has_no_active_history_store_surface(monkeypatch, tmp_p
     )) == "offline answer"
 
 
-def test_desktop_startup_does_not_load_legacy_migration_modules(tmp_path):
-    script = "\n".join([
-        "import sys",
-        "from agent.config import AgentConfig",
-        "from agent.desktop.service import DesktopService",
-        f"DesktopService(config=AgentConfig(persist_dir={str(tmp_path)!r}))",
-        "legacy = {",
-        "    'agent.conversations.legacy',",
-        "    'agent.conversations.legacy_plan',",
-        "    'agent.conversations.migration',",
-        "}",
-        "loaded = sorted(legacy.intersection(sys.modules))",
-        "assert loaded == [], loaded",
-    ])
-
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stderr
+@pytest.mark.parametrize(
+    "module_name",
+    (
+        "agent.conversations.legacy",
+        "agent.conversations.legacy_plan",
+        "agent.conversations.migration",
+    ),
+)
+def test_legacy_conversation_import_modules_are_not_shipped(
+    module_name: str,
+) -> None:
+    assert importlib.util.find_spec(module_name) is None
 
 
 def test_inventory_and_prompt_retire_recall_but_keep_document_rag_and_filesystem_tools():

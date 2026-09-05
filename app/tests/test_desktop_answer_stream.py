@@ -121,7 +121,29 @@ def test_unicode_answer_is_returned_whole_without_answer_events(tmp_path: Path) 
     assert result["chunkCount"] == 0
 
 
-def test_failed_or_oversized_answer_emits_no_answer_events(tmp_path: Path) -> None:
+def test_answer_past_the_old_single_item_limit_is_returned_whole_and_final_only(
+    tmp_path: Path,
+) -> None:
+    text = '中文🙂\n"quoted"\\path\n' + "x" * 2_100_000
+    session = _AnswerSession(text)
+    service = _service(tmp_path, session)
+    events: list[tuple[str, dict]] = []
+
+    result = asyncio.run(
+        service.dispatch(
+            "session.turn",
+            _turn_params("question"),
+            event_sink=lambda name, data: events.append((name, data)),
+        )
+    )
+
+    assert result["text"] == text
+    assert result["streamKind"] == "final_only"
+    assert result["chunkCount"] == 0
+    assert events == []
+
+
+def test_failed_answer_emits_no_answer_events(tmp_path: Path) -> None:
     failing = _AnswerSession("unused")
     failing.error = RuntimeError("provider payload must stay private")
     failing_service = _service(tmp_path, failing)
@@ -139,20 +161,6 @@ def test_failed_or_oversized_answer_emits_no_answer_events(tmp_path: Path) -> No
     assert failed_events == []
     assert "provider payload" not in str(raised.value)
 
-    oversized = _AnswerSession("x" * (2_097_152 + 1))
-    oversized_service = _service(tmp_path, oversized)
-    oversized_events: list[tuple[str, dict]] = []
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(
-            oversized_service.dispatch(
-                "session.turn",
-                _turn_params("question"),
-                event_sink=lambda name, data: oversized_events.append((name, data)),
-            )
-        )
-    assert raised.value.code == "INTERNAL_ERROR"
-    assert oversized_events == []
-
 
 @pytest.mark.parametrize(
     ("text", "validation_errors"),
@@ -162,7 +170,7 @@ def test_failed_or_oversized_answer_emits_no_answer_events(tmp_path: Path) -> No
         ("x" * 1_600_000, ["e" * 4_096] * 128),
     ],
 )
-def test_complete_success_envelope_is_budgeted_before_delivery(
+def test_complete_success_preserves_escaped_text_and_bounded_metadata(
     tmp_path: Path,
     text: str,
     validation_errors: list[str],
@@ -172,17 +180,18 @@ def test_complete_success_envelope_is_budgeted_before_delivery(
     service = _service(tmp_path, session)
     events: list[tuple[str, dict]] = []
 
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(
-            service.dispatch(
-                "session.turn",
-                _turn_params("question"),
-                event_sink=lambda name, data: events.append((name, data)),
-            )
+    result = asyncio.run(
+        service.dispatch(
+            "session.turn",
+            _turn_params("question"),
+            event_sink=lambda name, data: events.append((name, data)),
         )
+    )
 
-    assert raised.value.code == "INTERNAL_ERROR"
-    assert "response limit" in str(raised.value)
+    assert result["text"] == text
+    assert result["validationErrors"] == validation_errors
+    assert result["streamKind"] == "final_only"
+    assert result["chunkCount"] == 0
     assert events == []
 
 

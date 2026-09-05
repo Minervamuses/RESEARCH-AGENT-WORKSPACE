@@ -8,10 +8,15 @@ import {
   conversationReducer,
   initialConversationState,
   latestRetryableTranscriptTurn,
+  mergeConversationTurns,
+  reconciledTurnCount,
+  upsertLiveTurn,
   type AuthoritativeTurnResult,
   type ConversationAction,
   type ConversationState,
+  type LiveTurn,
 } from "../src/conversations.ts";
+import type { TranscriptTurnDto } from "../src/protocol.ts";
 
 const projectId = "local";
 const sessionId = "123e4567e89b42d3a456426614174000";
@@ -101,6 +106,7 @@ test("one final-only result creates one complete authoritative answer", () => {
     sessionId,
     requestId,
     turnId,
+    turnNumber: 1,
     text: "complete answer",
     responseKind: "answer",
     streamKind: "final_only",
@@ -126,6 +132,7 @@ test("a local slash command is one durable final-only display result", () => {
     sessionId,
     requestId,
     turnId,
+    turnNumber: 1,
     text: "Diff against /tmp/research:\n  (none)",
     responseKind: "command",
     streamKind: "final_only",
@@ -139,6 +146,7 @@ test("post-finalized, nonzero-chunk, cross-session, and malformed results fail c
     { chunkCount: 1 },
     { sessionId: otherSessionId },
     { turnId: "" },
+    { turnNumber: undefined } as unknown as Partial<AuthoritativeTurnResult>,
     { text: null } as unknown as Partial<AuthoritativeTurnResult>,
     { responseKind: "other" } as unknown as Partial<AuthoritativeTurnResult>,
   ];
@@ -362,6 +370,105 @@ test("a later completed display-only turn does not hide a retryable restored tur
 
   assert.equal(retryTarget?.turnId, turnId);
   assert.equal(retryTarget?.state, "failed");
+});
+
+function transcriptTurn(
+  number: number,
+  id: string,
+  state: TranscriptTurnDto["state"],
+): TranscriptTurnDto {
+  return {
+    turnId: id,
+    turnNumber: number,
+    kind: "conversational",
+    state,
+    timestamp: `2026-09-04T00:00:0${number}Z`,
+    userText: `question ${number}`,
+    assistantText: state === "completed" ? `answer ${number}` : null,
+    failureCode: state === "failed" ? "execution_failed" : state === "interrupted" ? "interrupted" : null,
+    failureMessage: state === "completed" || state === "pending" ? null : `${state} turn`,
+    failureRetryable: state === "failed" || state === "interrupted" ? true : null,
+    toolActivities: [],
+  };
+}
+
+function liveTurn(
+  targetSessionId: string,
+  number: number,
+  id: string,
+  text = `retried answer ${number}`,
+): LiveTurn {
+  return {
+    sessionId: targetSessionId,
+    turnId: id,
+    turnNumber: number,
+    userText: `question ${number}`,
+    assistantText: text,
+    responseKind: "answer",
+    streamKind: "final_only",
+  };
+}
+
+test("failed and interrupted retries replace one restored card without inflating the count", () => {
+  for (const state of ["failed", "interrupted"] as const) {
+    const visible = mergeConversationTurns(
+      [{ sessionId, turn: transcriptTurn(4, turnId, state) }],
+      [liveTurn(sessionId, 4, turnId)],
+    );
+
+    assert.equal(visible.length, 1, state);
+    assert.equal(visible[0]?.source, "live", state);
+    assert.equal(visible[0]?.turnId, turnId, state);
+    assert.equal(reconciledTurnCount(4, 4), 4, state);
+  }
+});
+
+test("completed duplicate replay upserts one final-only live card", () => {
+  let live: LiveTurn[] = [];
+  live = upsertLiveTurn(live, liveTurn(sessionId, 4, turnId, "saved answer"));
+  live = upsertLiveTurn(live, liveTurn(sessionId, 4, turnId, "replayed saved answer"));
+  const visible = mergeConversationTurns(
+    [{ sessionId, turn: transcriptTurn(4, turnId, "completed") }],
+    live,
+  );
+
+  assert.equal(live.length, 1);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0]?.source, "live");
+  assert.equal(visible[0]?.turn.streamKind, "final_only");
+  assert.equal(visible[0]?.turn.assistantText, "replayed saved answer");
+  assert.equal(reconciledTurnCount(4, 4), 4);
+});
+
+test("a new turn increases the canonical count", () => {
+  const live = upsertLiveTurn([], liveTurn(sessionId, 5, otherTurnId));
+
+  assert.equal(live[0]?.turnNumber, 5);
+  assert.equal(reconciledTurnCount(4, 5), 5);
+});
+
+test("logical turn identity includes the session and older retries keep canonical order", () => {
+  const sameIdOtherSession = liveTurn(otherSessionId, 1, turnId, "other session");
+  const crossSession = mergeConversationTurns(
+    [{ sessionId, turn: transcriptTurn(1, turnId, "failed") }],
+    [sameIdOtherSession],
+  );
+  assert.equal(crossSession.length, 2);
+
+  const ordered = mergeConversationTurns(
+    [
+      { sessionId, turn: transcriptTurn(1, turnId, "failed") },
+      { sessionId, turn: transcriptTurn(2, otherTurnId, "completed") },
+    ],
+    [liveTurn(sessionId, 1, turnId)],
+  );
+  assert.deepEqual(
+    ordered.map(({ source, turnNumber }) => ({ source, turnNumber })),
+    [
+      { source: "live", turnNumber: 1 },
+      { source: "restored", turnNumber: 2 },
+    ],
+  );
 });
 
 test("backend generation change drops stale selection, pending turn, answer, and failure", () => {

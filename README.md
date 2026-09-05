@@ -59,11 +59,11 @@ Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用
 
 確認目前使用者對以下位置有寫入權限:
 
-- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json` 與 `folder_meta.json`。Canonical JSON 是目前唯一會被寫入的 transcript authority；normal 新回合、context 與 exact-text lookup 都不使用 conversation Chroma。舊版留下的 `chat_history/` 只會在明確 legacy import 邊界從隔離唯讀複本讀取，來源不會被建立、更新或刪除。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
+- `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json` 與 `folder_meta.json`。Canonical JSON 是唯一支援的 transcript source，也是 `ConversationRepository` 唯一會寫入的對話格式；normal 新回合、context 與 exact-text lookup 都不使用 conversation Chroma。舊版留下的 `chat_history/` 不會被讀取、匯入、建立、更新或刪除。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
 
-舊版留下的 `app/plan_logs/` 是唯讀 migration input；目前版本不會建立或更新這些檔案。從 legacy Chroma／Plan log 匯入的 turn 只供 transcript 顯示，不會進入模型 context。
+舊版留下的 `app/plan_logs/` 不再是 migration input；目前版本不會讀取、匯入、建立、更新或刪除這些檔案。舊來源會原樣保留，但不會出現在目前的 transcript 或模型 context。
 
 ## 2. 安裝
 
@@ -164,6 +164,10 @@ npm run tauri -- build --no-bundle
 
 最後一個命令會透過 Tauri 的 `beforeBuildCommand` 執行 `npm run build`。目前 `src-tauri/tauri.conf.json` 設定 `bundle.active = false`；`--no-bundle` 只驗證 Linux source checkout 可建置，不會產生 installer 或可攜式 standalone bundle。
 
+Desktop 的 Normal 回答維持 final-only：Python 完成 safety/citation finalization 與 canonical persistence 後，才以一個 `streamKind=final_only`、`chunkCount=0` 的 terminal result 交付完整文字；沒有 answer preview、token chunk 或完成後的模擬串流。合法完成的回答、整份 conversation JSON、成功的 `session.turn` result 與 transcript text/page 不另設固定 bytes ceiling，因此切換對話及 backend restart 會讀回同一份全文；實際 I/O 或資源耗盡仍會如實失敗，不會保存 partial answer 為 completed。
+
+GUI 的新輸入提交仍受 1 MiB 上限約束；tool/event/failure payload、schema、identity、UTF-8、path、SafeContent、URL 與 approval 等既有界線也不變。Normal failed/interrupted turn 只能由使用者明確 retry，並沿用 `(conversationId, turnId)` 與 canonical `turnNumber`；成功後 transcript 與 sidebar count 只保留一個 logical turn。這次更正不包含 Fusion、Extended Thinking 的 restart/retry 或 Citation redesign。
+
 ## 5. 知識庫與資料匯入
 
 RAG store 是程式執行後才建立的本機狀態。預設位置是 `app/store/`(可用 `export KMS_STORE_DIR=/path/to/store` 改位置)，而 `app/.gitignore` 的 `store/` 會排除整個預設目錄。正常的 fresh clone 不包含 Chroma DB、`raw.json`、`folder_meta.json`、canonical conversation JSON 或舊版 `chat_history/`；Git branch 與 commit 也不攜帶這些資料。第一次使用直接執行 `/init` 或 `/ingest` 即可，不需要先 migration 或重建舊 DB。
@@ -174,9 +178,9 @@ store 建立後可能包含:
 - **`raw.json`**:chunk 的 JSON 備份,`get_context`、`list_chunks`、sync/prune 讀它。
 - **`folder_meta.json`**:repo ingest 時由 LLM 產生的 folder tags 與 summaries。
 - **`conversations/*.json`**:每個對話一份的canonical transcript，也是目前唯一active transcript authority；`ConversationRepository`是唯一writer。最新10個completed、context-eligible turns會自動進入prompt。
-- **`chat_history/`**:舊版conversation Chroma。Desktop選取某個catalog session且canonical JSON不存在時，才會由non-destructive importer從一次性的隔離唯讀複本嘗試匯入；normal新回合、context與exact-text lookup不會使用它。
+- **`chat_history/`**:舊版conversation Chroma；目前版本不讀取或匯入，既有內容會原樣保留。
 
-Catalog-wide legacy batch不屬於正常production startup/list流程，預設不執行。目前只有通過direct `/tmp` root檢查的exact `phase02` isolated fixture，再明確設定`RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1`時才會呼叫；真實store沒有自動batch migration入口。所有legacy來源保持不變，匯入後的turn是display-only、context-ineligible。
+Desktop catalog只保存對話成員關係，不是 transcript store。選取catalog session時若對應canonical JSON不存在，該對話會回報unavailable；不會從Plan log或conversation Chroma補做匯入。舊來源保持不變。
 
 ### 在 chat CLI 匯入(建議流程)
 
@@ -208,7 +212,7 @@ Legacy `plan_logs/` 由目錄規則直接略過，避免把舊對話誤收進知
 
 - **更新已修改的檔案**:重新 `/ingest` 同一路徑即可。repo/folder ingest 是 upsert:先刪同 folder 這輪涉及的 pids,再加入新 chunks。
 - **刪掉已不存在檔案的 entries**:先 `/sync` 檢查,再 `/prune <folder> --yes`。
-- **不相容 RAG store schema 的維護／復原**:這個 student-owned local project 不維護通用 RAG schema migration framework。先停止 chat CLI，把既有 generated store 備份或移到 workspace 外(預設操作 `app/store/`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local RAG store，不是新使用者的安裝要求，也不否定上文限定邊界內的legacy conversation importer。
+- **不相容 RAG store schema 的維護／復原**:這個 student-owned local project 不維護通用 RAG schema migration framework。先停止 chat CLI，把既有 generated store 備份或移到 workspace 外(預設操作 `app/store/`；有設 `KMS_STORE_DIR` 就操作該目錄)，再重新 `/init` 或 `/ingest`。這種完全重建只處理保留下來的舊 local RAG store，不是新使用者的安裝要求，也與不再支援匯入的舊對話來源無關。
 
 ## 6. Slash Commands
 
@@ -277,14 +281,14 @@ Source checkout 的 drop-in root 是 `app/tool/`；wheel 安裝版使用平台 u
 | `rag_explore` | 看知識庫有哪些 categories、tags、folder summaries |
 | `rag_search` | 對已 ingest 的資料做語意搜尋 |
 | `rag_get_context` | 取某個 search hit 的前後文 |
-| `read_file` | 讀本機文字檔;單檔上限 1 MB;阻擋 `.env`、SSH key、secret/token/credential 類檔名 |
+| `read_file` | 讀本機文字檔；單次最多 1 MiB，canonical conversation JSON 可分段讀完整檔；阻擋 `.env`、SSH key、secret/token/credential 類檔名 |
 | `bash` | 執行 shell command;互動 TTY 中需使用者批准,非互動環境自動拒絕 |
 
-`read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。單次最多讀 1 MiB；只有canonical conversation root內、UUID檔名且總大小不超過8 MiB的JSON可用`offset_bytes=0`與`next_offset`分段讀取，其他較大檔案仍拒絕。
+`read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。單次最多讀 1 MiB；只有canonical conversation root內、UUID檔名的JSON可用`offset_bytes=0`與`next_offset`分段讀取至完整檔案，沒有另設總檔案bytes上限；其他較大檔案仍拒絕。
 
 MCP 工具:Web Search MCP 預設載入,用於即時網路搜尋；GitHub MCP 是選配,用於遠端 repo、PR、issue、Actions；獲准的 drop-in MCP 會在下一次啟動加入。
 
-工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;normal thinking下問早先對話的精確文字 → 從`/status`取得canonical conversation root，把文字依canonical JSON規則escape後再作POSIX shell single-argument quoting，經每次approval-gated的`bash`執行`grep -lF -- <shell-quoted-escaped-phrase> <shell-quoted-root>/*.json | head -n 21`。若出現第21個路徑就不讀檔並請使用者縮小文字；否則最多用`read_file`檢查20個命中且只接受較早的completed turn。本輪prompt已先寫成pending，不能把它的自我命中當成舊紀錄；canonical JSON大檔可依`next_offset`分段讀取至8 MiB總上限。`recall_history`已移除；exact miss不轉用conversation Chroma、document RAG或embeddings。Extended-thinking proposers沒有`bash`，需要舊對話時應切回normal。問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
+工具選擇原則:問已匯入的研究/專案資料 → 先用 RAG;normal thinking下問早先對話的精確文字 → 從`/status`取得canonical conversation root，把文字依canonical JSON規則escape後再作POSIX shell single-argument quoting，經每次approval-gated的`bash`執行`grep -lF -- <shell-quoted-escaped-phrase> <shell-quoted-root>/*.json | head -n 21`。若出現第21個路徑就不讀檔並請使用者縮小文字；否則最多用`read_file`檢查20個命中且只接受較早的completed turn。本輪prompt已先寫成pending，不能把它的自我命中當成舊紀錄；canonical JSON大檔可依`next_offset`分段讀取至完整檔案。`recall_history`已移除；exact miss不轉用conversation Chroma、document RAG或embeddings。Extended-thinking proposers沒有`bash`，需要舊對話時應切回normal。問本地具體檔案 → `read_file`;問即時外部資訊 → Web Search MCP;問遠端 GitHub 狀態 → GitHub MCP。
 
 ## 8. MCP 設定
 
@@ -475,7 +479,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 | ingest/search 失敗提到 Ollama/embeddings | 確認 Ollama 正在跑,且 `ollama pull bge-m3` 已完成 |
 | `/thinking extended` 切換即報錯 | 需要 OpenRouter key,且 config 設定的 reviewer/rewrite/repair/fusion 模型都要在 OpenRouter 可用;先完成設定再啟用 |
 | `/sync` 顯示大量磁碟上不存在的檔案 | 確認 sync 的 root 與當初 ingest 的 root 相同;`file_path` 是以 ingest root 為基準的相對路徑,root 不同會誤判 |
-| 舊版 Plan log／conversation Chroma 沒出現在 desktop 對話 | 選取對應catalog session且canonical JSON不存在時，legacy importer才會從`app/plan_logs/`與隔離的唯讀Chroma複本嘗試匯入；來源保持不變，匯入內容只供顯示、不進模型context。若匯入失敗，先保留來源；Desktop目前只會顯示conversation unavailable／degraded類型的安全錯誤，不會暴露底層migration細節 |
+| 舊版 Plan log／conversation Chroma 沒出現在 desktop 對話 | 這些舊來源不再支援匯入，且會原樣保留。Desktop只讀canonical conversation JSON；catalog session缺少對應JSON時會顯示conversation unavailable，不會嘗試從舊來源重建 |
 | Web Search 工具沒出現 | 確認標準路徑下有 built `dist/index.js`,且 `conda run -n app node --version` 成功；再查 `~/.cache/agent-mcp/` log |
 | GitHub 工具沒出現 | 確認 `app` Conda env vars 已啟用 MCP、command 可執行且 token 有效；再查 MCP log |
 

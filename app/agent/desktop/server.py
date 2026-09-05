@@ -16,12 +16,12 @@ from agent.desktop.protocol import (
     ProtocolError,
     bounded_error_message,
     encode_message,
+    encode_success_result,
     failure_result,
     parse_line,
     process_event,
     request_event,
     request_id_from_invalid_line,
-    success_result,
 )
 from agent.paths import find_app_root
 
@@ -144,7 +144,7 @@ class RequestContext:
     async def success(self, data: dict[str, Any]) -> None:
         if self._terminal:
             raise ProtocolError("PROTOCOL_INVALID", "Duplicate terminal result.")
-        line = encode_message(success_result(self.request_id, self.method, data))
+        line = encode_success_result(self.request_id, self.method, data)
         self._terminal = True
         await self._writer.send_line(line)
 

@@ -1,4 +1,4 @@
-"""Durable, bounded storage for canonical conversation documents."""
+"""Durable storage for strictly validated canonical conversation documents."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from typing import Any
 
 from agent.conversations.models import (
     LATEST_CONTEXT_TURNS,
-    MAX_CONVERSATION_BYTES,
     MAX_CONVERSATION_FILES,
     MAX_TITLE_BYTES,
     SCHEMA_VERSION,
@@ -23,7 +22,6 @@ from agent.conversations.models import (
     ConversationDocument,
     ConversationMalformedError,
     ConversationSummary,
-    ConversationTooLargeError,
     ConversationTurn,
     ConversationUnavailableError,
     ConversationValidationError,
@@ -295,10 +293,6 @@ def _encode_document(document: ConversationDocument) -> bytes:
         raise ConversationValidationError(
             "document cannot be encoded as canonical UTF-8 JSON"
         ) from exc
-    if len(payload) > MAX_CONVERSATION_BYTES:
-        raise ConversationTooLargeError(
-            f"conversation exceeds the {MAX_CONVERSATION_BYTES}-byte limit"
-        )
     try:
         decoded = _document_from_json(payload, document.conversation_id)
     except ConversationMalformedError as exc:
@@ -772,13 +766,6 @@ class ConversationRepository:
             try:
                 snapshot = self.load(conversation_id)
                 summaries.append(self.summary(snapshot))
-            except ConversationTooLargeError:
-                issues.append(ConversationScanIssue(
-                    conversation_id=conversation_id,
-                    path=path,
-                    code="oversized",
-                    message="conversation file exceeds the configured size limit",
-                ))
             except _ClassifiedMalformedError as exc:
                 issues.append(ConversationScanIssue(
                     conversation_id=conversation_id,
@@ -961,13 +948,11 @@ class ConversationRepository:
                     "conversation path must be a regular file"
                 )
             chunks: list[bytes] = []
-            remaining = MAX_CONVERSATION_BYTES + 1
-            while remaining:
-                chunk = os.read(descriptor, min(_READ_CHUNK_BYTES, remaining))
+            while True:
+                chunk = os.read(descriptor, _READ_CHUNK_BYTES)
                 if not chunk:
                     break
                 chunks.append(chunk)
-                remaining -= len(chunk)
             data = b"".join(chunks)
         except ConversationUnavailableError:
             raise
@@ -977,10 +962,6 @@ class ConversationRepository:
             ) from exc
         finally:
             os.close(descriptor)
-        if len(data) > MAX_CONVERSATION_BYTES:
-            raise ConversationTooLargeError(
-                f"conversation exceeds the {MAX_CONVERSATION_BYTES}-byte limit"
-            )
         return data
 
     def _write_validated_temp(
@@ -1015,7 +996,7 @@ class ConversationRepository:
                 )
             succeeded = True
             return temporary
-        except (ConversationMalformedError, ConversationTooLargeError) as exc:
+        except ConversationMalformedError as exc:
             raise ConversationUnavailableError(
                 "temporary conversation failed publish validation"
             ) from exc
@@ -1038,10 +1019,8 @@ class ConversationRepository:
     ) -> None:
         try:
             current = self._read_regular_file(target)
-        except (ConversationTooLargeError, ConversationUnavailableError) as exc:
-            if isinstance(exc, ConversationUnavailableError) and not isinstance(
-                exc.__cause__, FileNotFoundError
-            ):
+        except ConversationUnavailableError as exc:
+            if not isinstance(exc.__cause__, FileNotFoundError):
                 raise
             raise ConversationConflictError(
                 "conversation was modified or removed after it was loaded"

@@ -1,6 +1,7 @@
 {
   "protocolVersion": 1,
   "maxLineBytes": 2097152,
+  "fullTextResultMethods": ["session.turn", "session.transcript"],
   "requestIdMaxBytes": 128,
   "errorMessageMaxBytes": 4096,
   "messageTypes": ["request", "event", "result"],
@@ -138,7 +139,7 @@
       "state": {"type": "string", "required": true, "enum": ["completed"]},
       "accepted": {"type": "boolean", "required": true},
       "persisted": {"type": "boolean", "required": true},
-      "text": {"type": "string", "required": true, "maxBytes": 2097152},
+      "text": {"type": "string", "required": true},
       "validationErrors": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096},
       "toolSummaries": {
         "type": "objectArray",
@@ -236,8 +237,8 @@
           "kind": {"type": "string", "required": true, "enum": ["conversational", "display-only"]},
           "state": {"type": "string", "required": true, "enum": ["pending", "completed", "failed", "interrupted"]},
           "timestamp": {"type": "utcTimestamp", "required": true},
-          "userText": {"type": "string", "required": true, "maxBytes": 32768},
-          "assistantText": {"type": "nullableString", "required": true, "maxBytes": 32768},
+          "userText": {"type": "string", "required": true},
+          "assistantText": {"type": "nullableString", "required": true},
           "failureCode": {"type": "nullableString", "required": true, "maxBytes": 256, "enum": ["execution_failed", "persistence_failed", "interrupted", "cancelled"]},
           "failureMessage": {"type": "nullableString", "required": true, "maxBytes": 4096},
           "failureRetryable": {"type": "nullableBoolean", "required": true},

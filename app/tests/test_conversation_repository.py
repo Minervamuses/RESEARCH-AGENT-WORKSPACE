@@ -11,16 +11,13 @@ import pytest
 import agent.conversations.repository as repository_module
 from agent.conversations import (
     LATEST_CONTEXT_TURNS,
-    MAX_CONVERSATION_BYTES,
     MAX_FAILURE_MESSAGE_BYTES,
     MAX_INPUT_BYTES,
-    MAX_OUTPUT_BYTES,
     MAX_TOOL_ACTIVITIES,
     MAX_TOOL_SUMMARY_BYTES,
     ConversationConflictError,
     ConversationMalformedError,
     ConversationRepository,
-    ConversationTooLargeError,
     ConversationUnavailableError,
     ConversationValidationError,
     FailureInfo,
@@ -164,6 +161,48 @@ def test_pending_completed_round_trip_is_strict_utf8_and_stable(
         "status",
         "summary",
     }
+
+
+def test_complete_answers_round_trip_past_the_old_item_and_document_limits(
+    tmp_path,
+):
+    repository = ConversationRepository(tmp_path)
+    prefix = '中文🙂\n"quoted"\\path\n'
+    answers = [f"{prefix}{number}:" + "x" * 2_100_000 for number in range(1, 5)]
+    snapshot = _create(repository)
+
+    snapshot = repository.complete_turn(
+        snapshot,
+        turn_id=_uuid4_hex(1),
+        assistant_output=answers[0],
+        finished_at=_timestamp(2),
+    )
+    for number, answer in enumerate(answers[1:], start=2):
+        pending = repository.append_pending(
+            snapshot,
+            turn_id=_uuid4_hex(number),
+            kind="conversational",
+            display_input=f"display {number}",
+            semantic_input=f"semantic {number}",
+            context_eligible=True,
+            thinking_mode="normal",
+            submitted_at=_timestamp(number + 1),
+        )
+        snapshot = repository.complete_turn(
+            pending,
+            turn_id=_uuid4_hex(number),
+            assistant_output=answer,
+            finished_at=_timestamp(number + 2),
+        )
+
+    path = repository.path_for(CONVERSATION_ID)
+    assert path.stat().st_size > 8 * 1024 * 1024
+    loaded = repository.load(CONVERSATION_ID)
+    assert [turn.assistant_output for turn in loaded.document.turns] == answers
+    assert [turn.assistant_output for turn in repository.latest_context(loaded)] == answers
+    raw = path.read_text(encoding="utf-8")
+    assert '\\"quoted\\"' in raw
+    assert "\\\\path" in raw
 
 
 @pytest.mark.parametrize(
@@ -407,11 +446,10 @@ def test_title_uses_first_valid_conversational_prompt_and_stays_stable(tmp_path)
     assert repository.path_for(CONVERSATION_ID).read_bytes() == before
 
 
-def test_field_and_document_bounds_fail_before_publish(tmp_path):
+def test_bounded_non_answer_fields_fail_before_publish(tmp_path):
     repository = ConversationRepository(tmp_path)
     maximum_input = "輸" * (MAX_INPUT_BYTES // len("輸".encode("utf-8")))
     maximum_input += "x" * (MAX_INPUT_BYTES - len(maximum_input.encode("utf-8")))
-    maximum_output = "a" * MAX_OUTPUT_BYTES
     snapshot = _create(
         repository,
         display_input=maximum_input,
@@ -420,7 +458,7 @@ def test_field_and_document_bounds_fail_before_publish(tmp_path):
     snapshot = repository.complete_turn(
         snapshot,
         turn_id=_uuid4_hex(1),
-        assistant_output=maximum_output,
+        assistant_output="answer",
         finished_at=_timestamp(2),
     )
     assert repository.load(CONVERSATION_ID).document == snapshot.document
@@ -437,15 +475,6 @@ def test_field_and_document_bounds_fail_before_publish(tmp_path):
 
     pending_id = _uuid4_hex(91)
     pending = _create(repository, conversation_id=pending_id)
-    before = repository.path_for(pending_id).read_bytes()
-    with pytest.raises(ConversationValidationError, match="assistantOutput"):
-        repository.complete_turn(
-            pending,
-            turn_id=_uuid4_hex(1),
-            assistant_output="x" * (MAX_OUTPUT_BYTES + 1),
-            finished_at=_timestamp(2),
-        )
-    assert repository.path_for(pending_id).read_bytes() == before
 
     with pytest.raises(ConversationValidationError, match="summary"):
         ToolActivitySummary(
@@ -477,29 +506,6 @@ def test_field_and_document_bounds_fail_before_publish(tmp_path):
             tool_activities=activities,
             finished_at=_timestamp(2),
         )
-
-    second_pending = repository.append_pending(
-        snapshot,
-        turn_id=_uuid4_hex(2),
-        kind="conversational",
-        display_input=maximum_input,
-        semantic_input=maximum_input,
-        context_eligible=True,
-        thinking_mode="normal",
-        submitted_at=_timestamp(3),
-    )
-    before_document_overflow = repository.path_for(CONVERSATION_ID).read_bytes()
-    with pytest.raises(ConversationTooLargeError):
-        repository.complete_turn(
-            second_pending,
-            turn_id=_uuid4_hex(2),
-            assistant_output=maximum_output,
-            finished_at=_timestamp(4),
-        )
-    assert (
-        repository.path_for(CONVERSATION_ID).read_bytes()
-        == before_document_overflow
-    )
 
 
 @pytest.mark.parametrize(
@@ -572,7 +578,7 @@ def test_closed_schema_rejects_hidden_or_untyped_payloads(
     assert not repository.path_for(object_id).exists()
 
 
-def test_scan_isolates_malformed_unknown_oversized_and_identity_mismatch(tmp_path):
+def test_scan_isolates_malformed_unknown_large_and_identity_mismatch(tmp_path):
     repository = ConversationRepository(tmp_path)
     good = repository.complete_turn(
         _create(repository),
@@ -589,8 +595,10 @@ def test_scan_isolates_malformed_unknown_oversized_and_identity_mismatch(tmp_pat
     version_raw = {**good_raw, "conversationId": version_id, "schemaVersion": 2}
     repository.path_for(version_id).write_text(json.dumps(version_raw), "utf-8")
 
-    oversized_id = _uuid4_hex(52)
-    repository.path_for(oversized_id).write_bytes(b"x" * (MAX_CONVERSATION_BYTES + 1))
+    large_malformed_id = _uuid4_hex(52)
+    repository.path_for(large_malformed_id).write_bytes(
+        b"x" * (8 * 1024 * 1024 + 1)
+    )
 
     mismatch_id = _uuid4_hex(53)
     repository.path_for(mismatch_id).write_text(json.dumps(good_raw), "utf-8")
@@ -600,10 +608,10 @@ def test_scan_isolates_malformed_unknown_oversized_and_identity_mismatch(tmp_pat
     assert [item.conversation_id for item in scan.summaries] == [CONVERSATION_ID]
     assert scan.summaries[0].turn_count == 1
     assert scan.summaries[0].title == "display prompt"
+    assert len(scan.issues) == 4
     assert {issue.code for issue in scan.issues} == {
         "identity_mismatch",
         "malformed",
-        "oversized",
         "unsupported_version",
     }
     assert all("healthy answer" not in issue.message for issue in scan.issues)
@@ -791,14 +799,16 @@ def test_nonregular_conversation_path_is_rejected_without_blocking(tmp_path):
     assert issue.code == "unavailable"
 
 
-def test_document_limit_error_type_is_distinct_from_schema_errors(tmp_path):
+def test_large_malformed_document_is_distinct_from_model_schema_errors(tmp_path):
     repository = ConversationRepository(tmp_path)
-    oversized_id = _uuid4_hex(70)
+    malformed_id = _uuid4_hex(70)
     repository.root.mkdir(parents=True, exist_ok=True)
-    repository.path_for(oversized_id).write_bytes(b"x" * (MAX_CONVERSATION_BYTES + 1))
+    repository.path_for(malformed_id).write_bytes(
+        b"x" * (8 * 1024 * 1024 + 1)
+    )
 
-    with pytest.raises(ConversationTooLargeError):
-        repository.load(oversized_id)
+    with pytest.raises(ConversationMalformedError):
+        repository.load(malformed_id)
     with pytest.raises(ConversationValidationError):
         FailureInfo(
             code="not_allowlisted",

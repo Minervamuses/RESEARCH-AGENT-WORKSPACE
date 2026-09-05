@@ -148,7 +148,7 @@ Pinned resources 會在執行該次 one-shot skill 工作時直接放進 context
 
 工具語義要精確：
 
-- `rag_explore` / `rag_search` / `rag_get_context` 只查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料），不查 conversation JSON。Normal thinking下的較早對話查找，須在已知canonical root下把文字先依JSON規則escape，再以每次需批准的`bash`做exact `grep -F`；listing第21個命中代表文字太寬，必須零讀檔並請使用者縮小，否則最多用`read_file`檢查20檔、排除本輪pending prompt。Canonical JSON大檔依`next_offset`分段但總檔案上限8 MiB；exact miss不轉用document RAG/embeddings。Extended thinking沒有`bash`，不得宣稱能執行此流程。
+- `rag_explore` / `rag_search` / `rag_get_context` 只查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料），不查 conversation JSON。Normal thinking下的較早對話查找，須在已知canonical root下把文字先依JSON規則escape，再以每次需批准的`bash`做exact `grep -F`；listing第21個命中代表文字太寬，必須零讀檔並請使用者縮小，否則最多用`read_file`檢查20檔、排除本輪pending prompt。Canonical JSON大檔可依`next_offset`分段讀至完整檔案，不另設總檔案bytes上限；exact miss不轉用document RAG/embeddings。Extended thinking沒有`bash`，不得宣稱能執行此流程。
 - `citation_workflow` 是 skill 專屬工具，保留給內建 citation skill，一般 skill 不應宣告。
 
 ## 三、Description 寫作指引

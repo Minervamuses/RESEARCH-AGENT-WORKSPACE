@@ -17,10 +17,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import Field
 
 from agent.config import AgentConfig
-from agent.conversations.models import (
-    MAX_CONVERSATION_BYTES,
-    is_canonical_uuid4_hex,
-)
+from agent.conversations.models import is_canonical_uuid4_hex
 
 TOOL_NAME = "read_file"
 TOOL_DESCRIPTION = (
@@ -29,8 +26,8 @@ TOOL_DESCRIPTION = (
     "starting with references/, assets/, or scripts/ are resolved only against "
     "the active skill root and do not fall back to the working directory. "
     "Other relative paths are resolved from the working directory. Reads at "
-    "most 1 MB per call. Canonical conversation JSON files, bounded to 8 MiB "
-    "total, may be read in chunks with an explicit `offset_bytes` (start at 0 "
+    "most 1 MB per call. Canonical conversation JSON files may be read in "
+    "chunks with an explicit `offset_bytes` (start at 0 "
     "and follow `next_offset`). Returns a JSON "
     "object with `path`, `size`, and `content`; chunked reads also include "
     "`offset_bytes` and `next_offset`. On failure returns a JSON object with "
@@ -132,11 +129,6 @@ def _read_resolved_file(
     ):
         return _error(
             "chunked reads are limited to canonical conversation JSON files"
-        )
-    if size > MAX_CONVERSATION_BYTES:
-        return _error(
-            f"file too large for chunked reading: {size} bytes "
-            f"(total limit {MAX_CONVERSATION_BYTES})"
         )
     if offset_bytes > size:
         return _error(

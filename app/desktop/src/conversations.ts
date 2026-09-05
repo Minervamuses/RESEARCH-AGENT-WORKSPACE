@@ -28,7 +28,7 @@ export interface ActiveConversationTurn extends ConversationSelection {
 export interface AuthoritativeTurnResult {
   sessionId: string;
   turnId: string;
-  turnNumber?: number;
+  turnNumber: number;
   state: "completed";
   accepted: boolean;
   persisted: boolean;
@@ -41,10 +41,44 @@ export interface AuthoritativeTurnResult {
 export interface FinalConversationAnswer extends ConversationSelection {
   requestId: string;
   turnId: string;
+  turnNumber: number;
   text: string;
   responseKind: "answer" | "command";
   streamKind: AnswerStreamKind;
 }
+
+export interface LiveTurn {
+  sessionId: string;
+  turnId: string;
+  turnNumber: number;
+  userText: string;
+  assistantText: string;
+  responseKind: "answer" | "command";
+  streamKind: AnswerStreamKind;
+}
+
+export interface RestoredConversationTurn {
+  sessionId: string;
+  turn: TranscriptTurnDto;
+}
+
+export type VisibleConversationTurn =
+  | {
+      source: "restored";
+      key: string;
+      sessionId: string;
+      turnId: string;
+      turnNumber: number;
+      turn: TranscriptTurnDto;
+    }
+  | {
+      source: "live";
+      key: string;
+      sessionId: string;
+      turnId: string;
+      turnNumber: number;
+      turn: LiveTurn;
+    };
 
 export interface ConversationFailure extends ConversationSelection {
   requestId: string | null;
@@ -145,6 +179,70 @@ function sameSelection(
   right: ConversationSelection,
 ): boolean {
   return left !== null && left.projectId === right.projectId && left.sessionId === right.sessionId;
+}
+
+function logicalTurnKey(sessionId: string, turnId: string): string {
+  return `${sessionId}:${turnId}`;
+}
+
+function compareCanonicalTurns(
+  left: { sessionId: string; turnId: string; turnNumber: number },
+  right: { sessionId: string; turnId: string; turnNumber: number },
+): number {
+  return (
+    left.turnNumber - right.turnNumber ||
+    left.sessionId.localeCompare(right.sessionId) ||
+    left.turnId.localeCompare(right.turnId)
+  );
+}
+
+export function upsertLiveTurn(
+  current: readonly LiveTurn[],
+  next: LiveTurn,
+): LiveTurn[] {
+  const byLogicalTurn = new Map<string, LiveTurn>();
+  for (const turn of current) {
+    byLogicalTurn.set(logicalTurnKey(turn.sessionId, turn.turnId), turn);
+  }
+  byLogicalTurn.set(logicalTurnKey(next.sessionId, next.turnId), next);
+  return [...byLogicalTurn.values()].sort(compareCanonicalTurns);
+}
+
+export function mergeConversationTurns(
+  restored: readonly RestoredConversationTurn[],
+  live: readonly LiveTurn[],
+): VisibleConversationTurn[] {
+  const byLogicalTurn = new Map<string, VisibleConversationTurn>();
+  for (const item of restored) {
+    const key = logicalTurnKey(item.sessionId, item.turn.turnId);
+    byLogicalTurn.set(key, {
+      source: "restored",
+      key,
+      sessionId: item.sessionId,
+      turnId: item.turn.turnId,
+      turnNumber: item.turn.turnNumber,
+      turn: item.turn,
+    });
+  }
+  for (const turn of live) {
+    const key = logicalTurnKey(turn.sessionId, turn.turnId);
+    byLogicalTurn.set(key, {
+      source: "live",
+      key,
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      turnNumber: turn.turnNumber,
+      turn,
+    });
+  }
+  return [...byLogicalTurn.values()].sort(compareCanonicalTurns);
+}
+
+export function reconciledTurnCount(
+  current: number,
+  returnedTurnNumber: number,
+): number {
+  return Math.max(current, returnedTurnNumber);
 }
 
 function validTurnLifecycle(
@@ -251,6 +349,7 @@ function finalizeTurn(
       sessionId: active.sessionId,
       requestId: active.requestId,
       turnId: result.turnId,
+      turnNumber: result.turnNumber,
       text: result.text,
       responseKind,
       streamKind,

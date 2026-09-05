@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
@@ -54,7 +54,6 @@ from agent.desktop.catalog import (
 from agent.desktop.protocol import (
     PROTOCOL_VERSION,
     ProtocolError,
-    encode_message,
     success_result,
 )
 from agent.extensions.manager import (
@@ -79,10 +78,6 @@ from agent.turns.safety import content_text
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.storage import resolve_output_dir
-
-if TYPE_CHECKING:
-    from agent.conversations.migration import ConversationMigrator
-
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +116,7 @@ _DESKTOP_SLASH_COMMANDS = frozenset({
     _DESKTOP_EXTENSION_COMMAND,
     *_DESKTOP_KNOWLEDGE_COMMANDS,
 })
-_MAX_ANSWER_BYTES = 2_097_152
 _MAX_LOCAL_COMMAND_BYTES = 65_536
-_MAX_TRANSCRIPT_PAGE_BYTES = 1_048_576
 _MAX_TRANSCRIPT_TOOL_ACTIVITIES = 128
 _MAX_TRANSCRIPT_TOOL_CALL_ID_BYTES = 256
 _MAX_TRANSCRIPT_TOOL_NAME_BYTES = 256
@@ -206,7 +199,6 @@ class DesktopService:
         slash_registry: SlashCommandRegistry | None = None,
         project_catalog: DesktopProjectCatalog | None = None,
         conversation_repository: ConversationRepository | None = None,
-        conversation_migrator: ConversationMigrator | None = None,
         knowledge_operations: DesktopKnowledgeOperations | None = None,
         bash_command_runner: Callable[..., Any] | None = None,
         approval_timeout_seconds: float = 60.0,
@@ -238,7 +230,6 @@ class DesktopService:
         self._conversation_repository = (
             conversation_repository or ConversationRepository(self.config.persist_dir)
         )
-        self._conversation_migrator = conversation_migrator
         self._catalog: DesktopProjectCatalog | None = project_catalog
         self._catalog_issue: str | None = None
         if self._catalog is None:
@@ -738,15 +729,19 @@ class DesktopService:
             }
 
         try:
-            await asyncio.to_thread(
-                self._load_or_import_conversation,
+            snapshot = await asyncio.to_thread(
+                self._load_conversation,
                 session_id,
                 project["projectId"],
             )
+            if snapshot is None:
+                raise ConversationUnavailableError(
+                    "canonical conversation is unavailable"
+                )
         except ConversationError as exc:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
-                "The stored conversation is degraded and cannot be selected.",
+                "The stored conversation is unavailable and cannot be selected.",
             ) from exc
 
         self._session_creating = True
@@ -899,18 +894,6 @@ class DesktopService:
                 limit=limit,
                 total=len(turns),
             )
-        page_bytes = sum(self._transcript_turn_bytes(turn) for turn in page)
-        if page_bytes > _MAX_TRANSCRIPT_PAGE_BYTES:
-            return self._transcript_result(
-                project["projectId"],
-                session_id,
-                status="degraded",
-                issue="The requested transcript page exceeds the desktop limit.",
-                turns=[],
-                offset=offset,
-                limit=limit,
-                total=len(turns),
-            )
         return self._transcript_result(
             project["projectId"],
             session_id,
@@ -1008,40 +991,6 @@ class DesktopService:
             )
         return snapshot
 
-    def _load_or_import_conversation(
-        self,
-        session_id: str,
-        project_id: str,
-    ) -> ConversationSnapshot:
-        snapshot = self._load_conversation(session_id, project_id)
-        if snapshot is not None:
-            return snapshot
-        migration = self._get_conversation_migrator().import_conversation(
-            session_id,
-            project_id,
-        )
-        if migration.status not in {"created", "already_present"}:
-            raise ConversationUnavailableError(
-                "legacy conversation could not be imported"
-            )
-        snapshot = self._load_conversation(session_id, project_id)
-        if snapshot is None:
-            raise ConversationUnavailableError(
-                "canonical conversation is unavailable after import"
-            )
-        return snapshot
-
-    def _get_conversation_migrator(self) -> ConversationMigrator:
-        """Load legacy migration code only after canonical lookup misses."""
-        if self._conversation_migrator is None:
-            from agent.conversations.migration import create_legacy_migrator
-
-            self._conversation_migrator = create_legacy_migrator(
-                self.config,
-                self._conversation_repository,
-            )
-        return self._conversation_migrator
-
     def _read_conversation_turns(
         self,
         session_id: str,
@@ -1066,12 +1015,7 @@ class DesktopService:
     @classmethod
     def _transcript_turn_is_bounded(cls, turn: ConversationTurn) -> bool:
         if (
-            len(turn.display_input.encode("utf-8")) > 32_768
-            or len(turn.submitted_at.encode("utf-8")) > 64
-            or (
-                turn.assistant_output is not None
-                and len(turn.assistant_output.encode("utf-8")) > 32_768
-            )
+            len(turn.submitted_at.encode("utf-8")) > 64
             or (
                 turn.failure is not None
                 and len(turn.failure.message.encode("utf-8")) > 4_096
@@ -1101,25 +1045,6 @@ class DesktopService:
             ):
                 return False
         return True
-
-    @staticmethod
-    def _transcript_turn_bytes(turn: ConversationTurn) -> int:
-        total = (
-            len(turn.display_input.encode("utf-8"))
-            + len((turn.assistant_output or "").encode("utf-8"))
-            + len(turn.submitted_at.encode("utf-8"))
-            + len((turn.failure.message if turn.failure else "").encode("utf-8"))
-        )
-        for activity in turn.tool_activities:
-            total += (
-                len((activity.call_id or "").encode("utf-8"))
-                + len(activity.name.encode("utf-8"))
-                + len("(not retained)".encode("utf-8"))
-                + len((activity.summary or "(no summary)").encode("utf-8"))
-                + len(activity.status.encode("utf-8"))
-                + 1
-            )
-        return total
 
     @staticmethod
     def _transcript_result(
@@ -1322,7 +1247,7 @@ class DesktopService:
             if str(item)
         ]
 
-    def _ensure_turn_result_fits_wire(
+    def _validate_turn_result_shape(
         self,
         *,
         session_id: str,
@@ -1330,7 +1255,7 @@ class DesktopService:
         validation_errors: list[str],
         tool_summaries: list[dict[str, str]],
     ) -> None:
-        """Budget the complete worst-case success line before side effects."""
+        """Validate the complete terminal result shape before persistence."""
         candidate = {
             "sessionId": session_id,
             "turnId": _WIRE_BUDGET_TURN_ID,
@@ -1348,15 +1273,15 @@ class DesktopService:
             "registrationIssue": "\u0000" * 4_096,
         }
         try:
-            encode_message(success_result(
+            success_result(
                 _WIRE_BUDGET_REQUEST_ID,
                 "session.turn",
                 candidate,
-            ))
+            )
         except ProtocolError as exc:
             raise DesktopServiceError(
                 "INTERNAL_ERROR",
-                "The finalized answer exceeded the desktop response limit.",
+                "The finalized answer did not match the desktop response schema.",
             ) from exc
 
     def _validate_final_text_before_record(
@@ -1365,7 +1290,7 @@ class DesktopService:
         text: str,
         errors: list[str],
     ) -> None:
-        self._ensure_turn_result_fits_wire(
+        self._validate_turn_result_shape(
             session_id=session_id,
             text=text,
             validation_errors=self._validation_error_dtos(errors),
@@ -1997,15 +1922,11 @@ class DesktopService:
                 raise DesktopServiceError(
                     "INTERNAL_ERROR", "The session returned no displayable answer."
                 )
-            if len(outcome.text.encode("utf-8")) > _MAX_ANSWER_BYTES:
-                raise DesktopServiceError(
-                    "INTERNAL_ERROR", "The session answer exceeded the desktop limit."
-                )
             validation_errors = self._validation_error_dtos(
                 outcome.validation_errors
             )
             tool_summaries = list(self._tool_summaries.values())[:512]
-            self._ensure_turn_result_fits_wire(
+            self._validate_turn_result_shape(
                 session_id=session.session_id,
                 text=outcome.text,
                 validation_errors=validation_errors,

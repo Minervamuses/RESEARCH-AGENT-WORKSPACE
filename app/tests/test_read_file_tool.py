@@ -85,6 +85,44 @@ def test_read_file_reads_oversize_text_in_bounded_chunks(tmp_path):
     assert first["content"] + second["content"] == expected
 
 
+def test_read_file_chunks_a_canonical_conversation_past_the_old_total_limit(
+    tmp_path,
+):
+    target = tmp_path / "conversations" / f"{uuid.uuid4().hex}.json"
+    target.parent.mkdir()
+    expected = json.dumps(
+        {
+            "schemaVersion": 1,
+            "marker": '中文🙂\n"quoted"\\path',
+            "padding": "x" * (8 * 1024 * 1024),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ) + "\n"
+    target.write_text(expected, encoding="utf-8")
+    tool = _make_tool(tmp_path)
+
+    chunks = []
+    offset = 0
+    while True:
+        payload = json.loads(tool.invoke({
+            "path": str(target),
+            "offset_bytes": offset,
+        }))
+        assert payload["offset_bytes"] == offset
+        chunks.append(payload["content"])
+        next_offset = payload["next_offset"]
+        if next_offset is None:
+            break
+        assert next_offset > offset
+        offset = next_offset
+
+    observed = "".join(chunks)
+    assert target.stat().st_size > 8 * 1024 * 1024
+    assert observed == expected
+    assert json.loads(observed)["marker"] == '中文🙂\n"quoted"\\path'
+
+
 def test_read_file_does_not_chunk_arbitrary_oversize_files(tmp_path):
     target = tmp_path / "large.txt"
     target.write_bytes(b"x" * (MAX_BYTES + 1))

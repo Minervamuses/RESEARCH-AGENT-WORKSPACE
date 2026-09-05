@@ -14,8 +14,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::protocol::{
-    parse_protocol_line_from_origin, parse_protocol_value, validate_result_data, ProtocolMessage,
-    ProtocolOrigin, RequestEnvelope, MAX_PROTOCOL_LINE_BYTES, PROTOCOL_VERSION,
+    parse_protocol_value, parse_protocol_value_from_origin, validate_result_data, ProtocolMessage,
+    ProtocolOrigin, RequestEnvelope, FULL_TEXT_RESULT_METHODS, MAX_PROTOCOL_LINE_BYTES,
+    PROTOCOL_VERSION,
 };
 
 pub const BACKEND_EVENT_NAME: &str = "research-agent://backend-event";
@@ -976,7 +977,7 @@ fn spawn_stdout_reader(
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
-            match read_bounded_line(&mut reader) {
+            match read_protocol_line(&mut reader, &core, generation) {
                 Ok(Some(bytes)) => {
                     let Ok(line) = std::str::from_utf8(&bytes) else {
                         fatal_generation(&core, generation, BridgeError::protocol(), true);
@@ -1067,32 +1068,57 @@ enum ReadLineError {
     Io,
 }
 
-fn read_bounded_line<R: BufRead>(reader: &mut R) -> Result<Option<Vec<u8>>, ReadLineError> {
+fn read_protocol_line<R: BufRead>(
+    reader: &mut R,
+    core: &SupervisorCore,
+    generation: u64,
+) -> Result<Option<Vec<u8>>, ReadLineError> {
     let mut line = Vec::new();
-    loop {
-        let available = reader.fill_buf().map_err(|_| ReadLineError::Io)?;
-        if available.is_empty() {
-            return if line.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(line))
-            };
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let take = newline.map_or(available.len(), |index| index + 1);
-        if line.len().saturating_add(take) > MAX_PROTOCOL_LINE_BYTES + 1 {
+    let read = reader
+        .take((MAX_PROTOCOL_LINE_BYTES + 2) as u64)
+        .read_until(b'\n', &mut line)
+        .map_err(|_| ReadLineError::Io)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    let bounded_line_ended = line.last() == Some(&b'\n');
+    let bounded_content_len = line.len().saturating_sub(usize::from(bounded_line_ended));
+    if bounded_content_len > MAX_PROTOCOL_LINE_BYTES {
+        if !allows_oversized_success_prefix(core, generation, &line) {
             return Err(ReadLineError::Oversized);
         }
-        line.extend_from_slice(&available[..take]);
-        reader.consume(take);
-        if newline.is_some() {
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            return Ok(Some(line));
+        if !bounded_line_ended {
+            reader
+                .read_until(b'\n', &mut line)
+                .map_err(|_| ReadLineError::Io)?;
         }
     }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    Ok(Some(line))
+}
+
+fn allows_oversized_success_prefix(core: &SupervisorCore, generation: u64, prefix: &[u8]) -> bool {
+    let state = lock_state(core);
+    if state.snapshot.generation != generation {
+        return false;
+    }
+    state.pending.iter().any(|(request_id, pending)| {
+        if !FULL_TEXT_RESULT_METHODS.contains(&pending.method.as_str()) {
+            return false;
+        }
+        let request_id = serde_json::to_string(request_id)
+            .expect("canonical request IDs always serialize as JSON strings");
+        let expected = format!(
+            r#"{{"protocolVersion":{},"messageType":"result","requestId":{},"ok":true,"data":{{"#,
+            PROTOCOL_VERSION, request_id
+        );
+        prefix.starts_with(expected.as_bytes())
+    })
 }
 
 fn handle_python_line(
@@ -1100,9 +1126,27 @@ fn handle_python_line(
     generation: u64,
     line: &str,
 ) -> Result<(), BridgeError> {
-    let parsed = parse_protocol_line_from_origin(line, ProtocolOrigin::Python)
-        .map_err(bridge_protocol_violation)?;
     let value: Value = serde_json::from_str(line).map_err(|_| BridgeError::protocol())?;
+    let parsed = parse_protocol_value_from_origin(value.clone(), ProtocolOrigin::Python)
+        .map_err(bridge_protocol_violation)?;
+    if line.len() > MAX_PROTOCOL_LINE_BYTES {
+        let full_text_result = match &parsed {
+            ProtocolMessage::Result(result) if result.ok => {
+                let state = lock_state(core);
+                state.snapshot.generation == generation
+                    && state
+                        .pending
+                        .get(&result.request_id)
+                        .is_some_and(|pending| {
+                            FULL_TEXT_RESULT_METHODS.contains(&pending.method.as_str())
+                        })
+            }
+            _ => false,
+        };
+        if !full_text_result {
+            return Err(BridgeError::protocol());
+        }
+    }
     match parsed {
         ProtocolMessage::Request(_) => return Err(BridgeError::protocol()),
         ProtocolMessage::Event(event) => {
@@ -1359,6 +1403,7 @@ fn kill_child(child: &ChildControl) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Cursor, Seek};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1433,6 +1478,19 @@ for raw in sys.stdin:
         print('x' * (2 * 1024 * 1024 + 1), flush=True)
         time.sleep(5)
         continue
+    if MODE in ('oversized_no_newline', 'oversized_malformed', 'oversized_event', 'oversized_failure'):
+        if MODE == 'oversized_no_newline':
+            output = 'x' * (2 * 1024 * 1024 + 4096)
+        elif MODE == 'oversized_malformed':
+            output = '{{"protocolVersion":1,' + ('x' * (2 * 1024 * 1024 + 4096))
+        elif MODE == 'oversized_event':
+            output = json.dumps({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.progress','data':{{'stage':'x' * (2 * 1024 * 1024 + 4096)}}}}, separators=(',', ':'))
+        else:
+            output = json.dumps({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':False,'error':{{'code':'FAIL','message':'x' * (2 * 1024 * 1024 + 4096),'retryable':False,'details':{{}}}}}}, separators=(',', ':'))
+        sys.stdout.write(output)
+        sys.stdout.flush()
+        time.sleep(5)
+        continue
     if MODE == 'output_close':
         os.close(sys.stdout.fileno())
         time.sleep(5)
@@ -1440,6 +1498,17 @@ for raw in sys.stdin:
     if MODE == 'wrong_id':
         send({{'protocolVersion':1,'messageType':'result','requestId':'123e4567-e89b-42d3-a456-426614174001','ok':True,'data':{{}}}})
         time.sleep(5)
+        continue
+    if MODE == 'large_turn' and method == 'session.turn':
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
+        answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + ('界' * 750000) + '\nEND'
+        send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{'sessionId':'28b222e0cc6543aa8d7bbdc423de99a7','turnId':request['params']['turnId'],'turnNumber':1,'state':'completed','accepted':True,'persisted':True,'text':answer,'validationErrors':[],'toolSummaries':[],'responseKind':'answer','streamKind':'final_only','chunkCount':0}}}})
+        continue
+    if MODE == 'large_transcript' and method == 'session.transcript':
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
+        answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + ('界' * 750000) + '\nEND'
+        item = {{'turnId':'123e4567e89b42d3a456426614174000','turnNumber':1,'kind':'conversational','state':'completed','timestamp':'2026-09-05T00:00:00Z','userText':'question','assistantText':answer,'failureCode':None,'failureMessage':None,'failureRetryable':None,'toolActivities':[]}}
+        send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{'projectId':request['params']['projectId'],'sessionId':request['params']['sessionId'],'status':'ready','issue':None,'items':[item],'total':1,'offset':request['params'].get('offset',0),'limit':request['params'].get('limit',20),'hasMore':False}}}})
         continue
     if MODE == 'blocked_request' and method != 'runtime.shutdown':
         send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
@@ -1525,6 +1594,66 @@ for raw in sys.stdin:
                 kind: ShutdownKind::Graceful,
             }
         );
+        assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
+    }
+
+    #[test]
+    fn complete_large_turn_crosses_python_stdout_without_truncation() {
+        let (supervisor, _script, _events) = supervisor("large_turn");
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+        let turn_id = "123e4567e89b42d3a456426614174000";
+        let result = supervisor
+            .request(json!({
+                "protocolVersion": 1,
+                "messageType": "request",
+                "requestId": REQUEST_ID,
+                "method": "session.turn",
+                "params": {
+                    "text": "prompt",
+                    "turnId": turn_id,
+                    "retry": false,
+                },
+            }))
+            .expect("large final-only result");
+        let expected = format!(
+            "BEGIN 中文🙂\n\"quoted\"\\path\n{}\nEND",
+            "界".repeat(750_000)
+        );
+        assert_eq!(result["data"]["text"].as_str(), Some(expected.as_str()));
+        assert_eq!(result["data"]["streamKind"], "final_only");
+        assert_eq!(result["data"]["chunkCount"], 0);
+        assert_eq!(supervisor.snapshot().lifecycle, BackendLifecycle::Ready);
+        assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
+    }
+
+    #[test]
+    fn complete_large_transcript_crosses_python_stdout_without_truncation() {
+        let (supervisor, _script, _events) = supervisor("large_transcript");
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+        let session_id = "28b222e0cc6543aa8d7bbdc423de99a7";
+        let result = supervisor
+            .request(json!({
+                "protocolVersion": 1,
+                "messageType": "request",
+                "requestId": REQUEST_ID,
+                "method": "session.transcript",
+                "params": {
+                    "projectId": "p1",
+                    "sessionId": session_id,
+                    "offset": 0,
+                    "limit": 20,
+                },
+            }))
+            .expect("large transcript result");
+        let expected = format!(
+            "BEGIN 中文🙂\n\"quoted\"\\path\n{}\nEND",
+            "界".repeat(750_000)
+        );
+        assert_eq!(
+            result["data"]["items"][0]["assistantText"].as_str(),
+            Some(expected.as_str())
+        );
+        assert_eq!(supervisor.snapshot().lifecycle, BackendLifecycle::Ready);
         assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
     }
 
@@ -1695,6 +1824,59 @@ for raw in sys.stdin:
             assert_eq!(error.code, "PROTOCOL_INVALID");
             assert_eq!(supervisor.snapshot().pending_requests, 0);
             assert!(supervisor.wait_until_stopped(Duration::from_secs(1)));
+        }
+    }
+
+    #[test]
+    fn ordinary_no_newline_input_stops_after_the_bounded_prefix() {
+        let supervisor = BackendSupervisor::new(Arc::new(|_| {}));
+        let input = vec![b'x'; MAX_PROTOCOL_LINE_BYTES + 16_384];
+        let mut reader = BufReader::new(Cursor::new(input));
+
+        assert!(matches!(
+            read_protocol_line(&mut reader, &supervisor.core, 0),
+            Err(ReadLineError::Oversized)
+        ));
+        assert_eq!(
+            reader.stream_position().expect("reader position") as usize,
+            MAX_PROTOCOL_LINE_BYTES + 2
+        );
+    }
+
+    #[test]
+    fn oversized_non_success_stdout_fails_at_the_bounded_framing_limit() {
+        for mode in [
+            "oversized_no_newline",
+            "oversized_malformed",
+            "oversized_event",
+            "oversized_failure",
+        ] {
+            let (supervisor, _script, _events) = supervisor(mode);
+            assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+            let started = Instant::now();
+            let error = supervisor
+                .request(json!({
+                    "protocolVersion": 1,
+                    "messageType": "request",
+                    "requestId": REQUEST_ID,
+                    "method": "session.turn",
+                    "params": {
+                        "text": "prompt",
+                        "turnId": "123e4567e89b42d3a456426614174000",
+                        "retry": false,
+                    },
+                }))
+                .expect_err(mode);
+            assert_eq!(error.code, "PROTOCOL_INVALID", "{mode}");
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "{mode} waited for the backend's five-second sleep"
+            );
+            assert_eq!(supervisor.snapshot().pending_requests, 0, "{mode}");
+            assert!(
+                supervisor.wait_until_stopped(Duration::from_secs(1)),
+                "{mode}"
+            );
         }
     }
 

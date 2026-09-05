@@ -25,6 +25,10 @@ FIXTURES = json.loads((PROTOCOL_DIR / "fixtures.json").read_text(encoding="utf-8
 def test_protocol_manifest_safety_invariants() -> None:
     assert CONTRACT["protocolVersion"] == 1
     assert CONTRACT["maxLineBytes"] == 2 * 1024 * 1024
+    assert CONTRACT["fullTextResultMethods"] == [
+        "session.turn",
+        "session.transcript",
+    ]
     assert set(CONTRACT["processEventOrigins"]) == set(CONTRACT["processEvents"])
     assert all(
         set(origins) <= {"python", "rust"}
@@ -109,6 +113,12 @@ def test_normal_answers_use_only_the_final_terminal_result() -> None:
         "minimum": 0,
         "maximum": 0,
     }
+    assert "maxBytes" not in turn["text"]
+    transcript_turn = CONTRACT["resultDataSchemas"]["session.transcript"][
+        "items"
+    ]["items"]
+    assert "maxBytes" not in transcript_turn["userText"]
+    assert "maxBytes" not in transcript_turn["assistantText"]
 
 
 def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
@@ -311,10 +321,10 @@ def test_session_summary_and_transcript_expose_complete_durable_lifecycle() -> N
         "required": True,
         "enum": ["pending", "completed", "failed", "interrupted"],
     }
+    assert turn["userText"] == {"type": "string", "required": True}
     assert turn["assistantText"] == {
         "type": "nullableString",
         "required": True,
-        "maxBytes": 32_768,
     }
     assert turn["failureCode"] == {
         "type": "nullableString",

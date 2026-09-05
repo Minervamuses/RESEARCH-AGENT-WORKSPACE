@@ -137,6 +137,42 @@ def test_pending_write_failure_prevents_graph_or_provider_work(
     assert repository.load_optional(session_id) is None
 
 
+def test_final_write_failure_never_returns_success_or_completed_partial(
+    monkeypatch,
+    tmp_path,
+):
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    turn_id = _id()
+    graph = make_astream_graph(answer="complete answer that must not leak")
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=graph,
+        session_id=session_id,
+    )
+
+    def reject_final(*_args, **_kwargs):
+        raise ConversationUnavailableError("injected final write failure")
+
+    monkeypatch.setattr(repository, "complete_turn", reject_final)
+
+    with pytest.raises(ConversationUnavailableError, match="final write"):
+        asyncio.run(session.turn_outcome(
+            "persist before success",
+            display_input="persist before success",
+            turn_id=turn_id,
+        ))
+
+    turn = repository.load(session_id).document.turns[-1]
+    assert turn.turn_id == turn_id
+    assert turn.state == "failed"
+    assert turn.assistant_output is None
+    assert turn.failure is not None
+    assert turn.failure.code == "persistence_failed"
+
+
 def test_provider_failure_commits_failed_terminal_state(monkeypatch, tmp_path):
     repository = ConversationRepository(tmp_path)
     session_id = _id()

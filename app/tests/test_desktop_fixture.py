@@ -19,7 +19,9 @@ from agent.desktop.fixture_session import (
     FIXTURE_BASH_DENY,
     FIXTURE_CHANGED_ORPHAN_MARKER,
     FIXTURE_DELAYED_FINAL,
+    FIXTURE_FAIL_ONCE,
     FIXTURE_KNOWLEDGE_DIRNAME,
+    FIXTURE_LONG_FINAL,
     FIXTURE_MODE,
     FIXTURE_MODE_ENV,
     FIXTURE_RAG_QUESTION,
@@ -160,9 +162,13 @@ def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     ))
     assert transcripts["status"] == "ready"
     assert transcripts["items"][0]["userText"] == "A seed question"
-    assert ConversationRepository(second.config.persist_dir).path_for(
-        SESSION_A
-    ).is_file()
+    repository = ConversationRepository(second.config.persist_dir)
+    assert repository.path_for(SESSION_A).is_file()
+    seeded = repository.load(SESSION_A).document.turns[0]
+    assert seeded.kind == "display-only"
+    assert seeded.context_eligible is False
+    assert seeded.semantic_input is None
+    assert not Path(second.config.plan_logs_dir).exists()
 
 
 def test_fixture_status_reports_canonical_conversation_root(
@@ -268,6 +274,139 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
         )
     )
     assert reopened["turnCount"] == 3
+
+
+def test_fixture_long_answer_survives_switch_and_backend_restart(
+    fixture_root: Path,
+) -> None:
+    service = _service(fixture_root)
+    turn_id = "00000000000040008000000000001011"
+    events: list[tuple[str, dict]] = []
+
+    async def run_first():
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        result = await service.dispatch(
+            "session.turn",
+            _turn_params(FIXTURE_LONG_FINAL, turn_id=turn_id),
+            event_sink=lambda event, data: events.append((event, data)),
+        )
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_B},
+        )
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        switched = await service.dispatch(
+            "session.transcript",
+            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        )
+        await service.dispatch("runtime.shutdown", {})
+        return result, switched
+
+    result, switched = asyncio.run(run_first())
+    expected = (
+        'BEGIN 中文🙂\n"quoted"\\path\n'
+        + "界" * 750_000
+        + "\nEND"
+    )
+    assert len(expected.encode("utf-8")) > 2 * 1024 * 1024
+    assert result["text"] == expected
+    assert result["streamKind"] == "final_only"
+    assert result["chunkCount"] == 0
+    assert all(event != "answer.chunk" for event, _data in events)
+    assert expected not in repr(events)
+    assert switched["status"] == "ready"
+    assert switched["items"][-1]["assistantText"] == expected
+
+    persisted = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    assert persisted.document.turns[-1].assistant_output == expected
+    restarted = _service(fixture_root)
+    asyncio.run(restarted.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
+    restored = asyncio.run(restarted.dispatch(
+        "session.transcript",
+        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+    ))
+    assert restored["items"][-1]["assistantText"] == expected
+
+
+def test_fixture_fail_once_retry_reuses_one_canonical_turn(
+    fixture_root: Path,
+) -> None:
+    environ = _environ(fixture_root)
+    environ["RESEARCH_AGENT_DESKTOP_FIXTURE_SIDE_EFFECT_SENTINEL"] = "1"
+    service = build_phase02_fixture_service(
+        original_cwd=fixture_root,
+        environ=environ,
+    )
+    turn_id = "00000000000040008000000000001012"
+
+    async def run():
+        await service.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        with pytest.raises(DesktopServiceError) as first:
+            await service.dispatch(
+                "session.turn",
+                _turn_params(FIXTURE_FAIL_ONCE, turn_id=turn_id),
+            )
+        retry = await service.dispatch(
+            "session.turn",
+            {
+                "text": FIXTURE_FAIL_ONCE,
+                "turnId": turn_id,
+                "retry": True,
+            },
+        )
+        replay = await service.dispatch(
+            "session.turn",
+            {
+                "text": FIXTURE_FAIL_ONCE,
+                "turnId": turn_id,
+                "retry": True,
+            },
+        )
+        transcript = await service.dispatch(
+            "session.transcript",
+            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        )
+        sessions = await service.dispatch(
+            "session.list",
+            {"projectId": "p1", "offset": 0, "limit": 50},
+        )
+        return first.value, retry, replay, transcript, sessions
+
+    first_error, retry, replay, transcript, sessions = asyncio.run(run())
+    assert first_error.code == "PROVIDER_REQUEST_FAILED"
+    assert retry["turnId"] == replay["turnId"] == turn_id
+    assert retry["turnNumber"] == replay["turnNumber"] == 2
+    assert retry["text"] == replay["text"]
+    assert retry["streamKind"] == replay["streamKind"] == "final_only"
+    assert retry["chunkCount"] == replay["chunkCount"] == 0
+    matching = [item for item in transcript["items"] if item["turnId"] == turn_id]
+    assert len(matching) == 1
+    assert matching[0]["state"] == "completed"
+    assert matching[0]["turnNumber"] == 2
+    summary = next(item for item in sessions["items"] if item["sessionId"] == SESSION_A)
+    assert summary["turnCount"] == 2
+    effects = [
+        json.loads(line)
+        for line in (fixture_root / ".fixture-side-effects.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert effects == [
+        {"effect": "provider", "turnId": turn_id},
+        {"effect": "provider", "turnId": turn_id},
+    ]
 
 
 def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes(
@@ -561,15 +700,16 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
     assert stopped == {"status": "stopped"}
 
 
-def test_switch_and_shutdown_leave_legacy_plan_logs_unchanged(
+def test_switch_and_shutdown_leave_existing_plan_logs_untouched(
     fixture_root: Path,
 ) -> None:
+    plan_dir = fixture_root / "plan_logs"
+    plan_dir.mkdir()
+    legacy_source = plan_dir / "plan-existing-user-source.md"
+    legacy_source.write_text("existing user data\n", encoding="utf-8")
+    legacy_before = legacy_source.read_bytes()
     service = _service(fixture_root)
-    plan_dir = Path(service.config.plan_logs_dir)
-    legacy_before = {
-        path: path.read_bytes()
-        for path in plan_dir.glob("*.md")
-    }
+    assert Path(service.config.plan_logs_dir) == plan_dir
 
     async def run():
         await service.dispatch(
@@ -590,10 +730,7 @@ def test_switch_and_shutdown_leave_legacy_plan_logs_unchanged(
     selected, shutdown = asyncio.run(run())
     assert selected["sessionId"] == SESSION_B
     assert shutdown == {"status": "stopped"}
-    assert {
-        path: path.read_bytes()
-        for path in plan_dir.glob("*.md")
-    } == legacy_before
+    assert legacy_source.read_bytes() == legacy_before
     canonical = ConversationRepository(service.config.persist_dir).load(SESSION_A)
     assert canonical.document.turns[-1].display_input == "canonical before switch"
     assert canonical.document.turns[-1].state == "completed"
@@ -954,27 +1091,6 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert tool_turn["toolActivities"][0]["arguments"] == "(not retained)"
     assert second_shutdown == {"status": "stopped"}
 
-    plan_dir = root / "plan_logs"
-    for path in plan_dir.glob(f"plan-{SESSION_B}-*.md"):
-        path.unlink()
-    legacy_sentinel = "phase07 legacy tool sentinel"
-    (plan_dir / f"plan-{SESSION_B}-20990101T000000Z.md").write_text(
-        "---\n"
-        "generated_by: agent.plan_mode\n"
-        f"session_id: {SESSION_B}\n"
-        "created_at: 2099-01-01T00:00:00+00:00\n"
-        "---\n\n"
-        "# Plan log\n\n"
-        "## Turn 1 - 2099-01-01T00:00:01+00:00\n\n"
-        "**User:**\n\nlegacy question\n\n"
-        "### Tool: rag_search\n\n```json\n"
-        '{"query": "legacy"}\n'
-        "```\n\n**Result:**\n\n```\n"
-        f"{legacy_sentinel}\n"
-        "```\n\n**Assistant:**\n\nlegacy answer\n\n---\n",
-        encoding="utf-8",
-    )
-
     third = _service(root)
     third._session_factory._search_handler = counting_search
 
@@ -999,11 +1115,11 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             _turn_params("continue after restore"),
             event_sink=lambda event, data: continued_events.append((event, data)),
         )
-        legacy_selected = await third.dispatch(
+        seed_selected = await third.dispatch(
             "session.select",
             {"projectId": "p1", "sessionId": SESSION_B},
         )
-        legacy = await third.dispatch(
+        seed_transcript = await third.dispatch(
             "session.transcript",
             {"projectId": "p1", "sessionId": SESSION_B, "limit": 20},
         )
@@ -1014,8 +1130,8 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             selected,
             continued_events,
             continued,
-            legacy,
-            legacy_selected,
+            seed_transcript,
+            seed_selected,
             shutdown,
         )
 
@@ -1025,8 +1141,8 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         selected,
         continued_events,
         continued,
-        legacy,
-        legacy_selected,
+        seed_transcript,
+        seed_selected,
         final_shutdown,
     ) = asyncio.run(run_third_process())
     assert final_diagnostics["mcpEnabled"] is True
@@ -1049,14 +1165,13 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert continued["chunkCount"] == 0
     assert all(event != "answer.chunk" for event, _data in continued_events)
     assert continued["text"] not in repr(continued_events)
-    assert legacy_selected["turnCount"] == 1
-    assert legacy["items"][0]["toolActivities"] == []
-    imported = ConversationRepository(third.config.persist_dir).load(SESSION_B)
-    assert imported.document.turns[0].display_input == "legacy question"
-    assert imported.document.turns[0].kind == "display-only"
-    assert imported.document.turns[0].semantic_input is None
-    assert imported.document.turns[0].tool_activities == ()
-    assert legacy_sentinel not in repr(imported.document)
+    assert seed_selected["turnCount"] == 1
+    assert seed_transcript["items"][0]["userText"] == "B seed question"
+    assert seed_transcript["items"][0]["assistantText"] == "B seed answer"
+    assert seed_transcript["items"][0]["toolActivities"] == []
+    seeded = ConversationRepository(third.config.persist_dir).load(SESSION_B)
+    assert seeded.document.turns[0].kind == "display-only"
+    assert seeded.document.turns[0].semantic_input is None
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
     assert final_shutdown == {"status": "stopped"}
     assert not legacy_chat_history.exists()
@@ -1167,8 +1282,12 @@ def test_malformed_existing_catalog_is_rebuilt_from_canonical_conversations(
 
     assert path.read_bytes() != original
     assert projects["status"] == "ready"
-    assert projects["projects"] == [{
-        "projectId": "local",
-        "name": "Local research",
-        "sessionCount": 0,
-    }]
+    assert projects["projects"] == [
+        {
+            "projectId": "local",
+            "name": "Local research",
+            "sessionCount": 0,
+        },
+        {"projectId": "p1", "name": "p1", "sessionCount": 2},
+        {"projectId": "p2", "name": "p2", "sessionCount": 1},
+    ]

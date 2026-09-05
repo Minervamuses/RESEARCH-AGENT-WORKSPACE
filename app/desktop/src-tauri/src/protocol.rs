@@ -10,6 +10,7 @@ pub const PROTOCOL_VERSION: u64 = 1;
 pub const MAX_PROTOCOL_LINE_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_REQUEST_ID_BYTES: usize = 128;
 pub const MAX_ERROR_MESSAGE_BYTES: usize = 4096;
+pub const FULL_TEXT_RESULT_METHODS: &[&str] = &["session.turn", "session.transcript"];
 
 pub const PROTOCOL_METHODS: &[&str] = &[
     "runtime.diagnostics",
@@ -718,13 +719,17 @@ fn is_durable_turn_method(method: &str) -> bool {
 fn validate_completed_turn_fields(
     data: &Map<String, Value>,
     method: &str,
-    text_max_bytes: usize,
+    text_max_bytes: Option<usize>,
 ) -> Result<(), ProtocolViolation> {
     expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
     expect_turn_id(&data["turnId"], "data.turnId")?;
     expect_integer_range(&data["turnNumber"], "data.turnNumber", 1, 4_096)?;
     validate_enum(&data["state"], "data.state", &["completed"])?;
-    expect_bounded_string(&data["text"], "data.text", text_max_bytes)?;
+    if let Some(max_bytes) = text_max_bytes {
+        expect_bounded_string(&data["text"], "data.text", max_bytes)?;
+    } else {
+        expect_non_empty_string(&data["text"], "data.text")?;
+    }
     for field in ["accepted", "persisted"] {
         if !data[field].is_boolean() {
             return Err(ProtocolViolation::invalid(format!(
@@ -1161,7 +1166,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "toolSummaries",
                 ],
             )?;
-            validate_completed_turn_fields(data, "session.turn", MAX_PROTOCOL_LINE_BYTES)?;
+            validate_completed_turn_fields(data, "session.turn", None)?;
             validate_string_array(
                 &data["validationErrors"],
                 "data.validationErrors",
@@ -1444,19 +1449,22 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                         "data.items[{index}].timestamp must be a UTC ISO 8601 timestamp"
                     )));
                 }
-                expect_bounded_string(
+                expect_non_empty_string(
                     &item["userText"],
                     &format!("data.items[{index}].userText"),
-                    32_768,
                 )?;
-                for (field, max_bytes) in [("assistantText", 32_768), ("failureMessage", 4_096)] {
-                    if !item[field].is_null() {
-                        expect_bounded_string(
-                            &item[field],
-                            &format!("data.items[{index}].{field}"),
-                            max_bytes,
-                        )?;
-                    }
+                if !item["assistantText"].is_null() {
+                    expect_non_empty_string(
+                        &item["assistantText"],
+                        &format!("data.items[{index}].assistantText"),
+                    )?;
+                }
+                if !item["failureMessage"].is_null() {
+                    expect_bounded_string(
+                        &item["failureMessage"],
+                        &format!("data.items[{index}].failureMessage"),
+                        4_096,
+                    )?;
                 }
                 if !item["failureCode"].is_null() {
                     validate_enum(
@@ -1722,7 +1730,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "diagnostics",
                 ],
             )?;
-            validate_completed_turn_fields(data, "extensions.apply", 65_536)?;
+            validate_completed_turn_fields(data, "extensions.apply", Some(65_536))?;
             expect_bounded_string(&data["displayInput"], "data.displayInput", 256)?;
             for field in ["previousRevision", "appliedRevision"] {
                 expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
@@ -1816,6 +1824,21 @@ pub fn parse_protocol_line_from_origin(
     origin: ProtocolOrigin,
 ) -> Result<ProtocolMessage, ProtocolViolation> {
     let message = parse_protocol_line(line)?;
+    validate_message_origin(message, origin)
+}
+
+pub fn parse_protocol_value_from_origin(
+    value: Value,
+    origin: ProtocolOrigin,
+) -> Result<ProtocolMessage, ProtocolViolation> {
+    let message = parse_protocol_value(value)?;
+    validate_message_origin(message, origin)
+}
+
+fn validate_message_origin(
+    message: ProtocolMessage,
+    origin: ProtocolOrigin,
+) -> Result<ProtocolMessage, ProtocolViolation> {
     if let ProtocolMessage::Event(event) = &message {
         if event.request_id.is_none() {
             validate_process_event_origin(&event.event, origin)?;
@@ -2245,6 +2268,13 @@ mod tests {
             contract["errorMessageMaxBytes"].as_u64(),
             Some(MAX_ERROR_MESSAGE_BYTES as u64)
         );
+        let full_text_methods = contract["fullTextResultMethods"]
+            .as_array()
+            .expect("full text result methods")
+            .iter()
+            .map(|method| method.as_str().expect("full text result method"))
+            .collect::<Vec<_>>();
+        assert_eq!(full_text_methods, FULL_TEXT_RESULT_METHODS);
 
         let methods = contract["methods"]
             .as_array()
@@ -2361,6 +2391,71 @@ mod tests {
         .expect_err("mismatched logical turn IDs must be rejected");
 
         assert_eq!(error.code(), "PROTOCOL_INVALID");
+    }
+
+    #[test]
+    fn complete_answer_and_transcript_text_have_no_capacity_rejection() {
+        let answer = format!(
+            "BEGIN 中文🙂\\n\\\"quoted\\\"\\\\path\\n{}\\nEND",
+            "界".repeat(750_000)
+        );
+        validate_result_trace(
+            "session.turn",
+            serde_json::json!({
+                "text": "prompt",
+                "turnId": "123e4567e89b42d3a456426614174000",
+                "retry": false,
+            }),
+            serde_json::json!({
+                "sessionId": "session-a",
+                "turnId": "123e4567e89b42d3a456426614174000",
+                "turnNumber": 1,
+                "state": "completed",
+                "accepted": true,
+                "persisted": true,
+                "text": answer.clone(),
+                "validationErrors": [],
+                "toolSummaries": [],
+                "responseKind": "answer",
+                "streamKind": "final_only",
+                "chunkCount": 0,
+            }),
+        )
+        .expect("large complete answer must validate");
+
+        validate_result_trace(
+            "session.transcript",
+            serde_json::json!({
+                "projectId": "p1",
+                "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+                "offset": 0,
+                "limit": 20,
+            }),
+            serde_json::json!({
+                "projectId": "p1",
+                "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+                "status": "ready",
+                "issue": null,
+                "items": [{
+                    "turnId": "123e4567e89b42d3a456426614174000",
+                    "turnNumber": 1,
+                    "kind": "conversational",
+                    "state": "completed",
+                    "timestamp": "2026-09-05T00:00:00Z",
+                    "userText": "u".repeat(40_000),
+                    "assistantText": answer,
+                    "failureCode": null,
+                    "failureMessage": null,
+                    "failureRetryable": null,
+                    "toolActivities": [],
+                }],
+                "total": 1,
+                "offset": 0,
+                "limit": 20,
+                "hasMore": false,
+            }),
+        )
+        .expect("large transcript text must validate");
     }
 
     #[test]

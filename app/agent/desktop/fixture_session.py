@@ -27,7 +27,6 @@ from agent.conversations import (
     ToolActivitySummary,
     is_canonical_uuid4_hex,
 )
-from agent.conversations.migration import migrate_legacy_targets
 from agent.desktop.catalog import (
     CATALOG_FILENAME,
     CatalogMalformedError,
@@ -45,7 +44,6 @@ from agent.turns.results import TurnOutcome
 
 FIXTURE_MODE_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE"
 FIXTURE_ROOT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT"
-FIXTURE_CATALOG_MIGRATION_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG"
 FIXTURE_MODE = "phase02"
 FIXTURE_ROOT_PREFIX = "research-agent-desktop-phase02-"
 FIXTURE_KNOWLEDGE_DIRNAME = "knowledge-source"
@@ -54,6 +52,8 @@ FIXTURE_CHANGED_ORPHAN_MARKER = ".fixture-changed-orphans"
 FIXTURE_LONG_OUTPUT_MARKER = ".fixture-long-output"
 FIXTURE_RAG_QUESTION = "What does the fixture knowledge say?"
 FIXTURE_DELAYED_FINAL = "[[fixture:delayed-final]]"
+FIXTURE_LONG_FINAL = "[[fixture:long-final]]"
+FIXTURE_FAIL_ONCE = "[[fixture:fail-once]]"
 FIXTURE_BASH_APPROVE = "[[fixture:bash-approve]]"
 FIXTURE_BASH_DENY = "[[fixture:bash-deny]]"
 FIXTURE_PRIVATE_SKILL_DIRNAME = "fixture-extension-management"
@@ -92,9 +92,9 @@ SESSION_B = "f2ddf2369f994905afa0b85d8cca79b1"
 SESSION_C = "7a9708991f8f420bbdadc3e430a78c10"
 
 _SEED_TURNS = {
-    SESSION_A: ("A seed question", "A seed answer"),
-    SESSION_B: ("B seed question", "B seed answer"),
-    SESSION_C: ("C seed question", "C seed answer"),
+    SESSION_A: ("p1", "A seed question", "A seed answer"),
+    SESSION_B: ("p1", "B seed question", "B seed answer"),
+    SESSION_C: ("p2", "C seed question", "C seed answer"),
 }
 _FIXTURE_TIMESTAMP = datetime(2026, 8, 28, 2, 30, tzinfo=timezone.utc)
 _MAX_CONTEXT_CHARS = 2_048
@@ -405,40 +405,36 @@ def _timestamp(turn_id: int) -> str:
     ).isoformat().replace("+00:00", "Z")
 
 
-def _seed_plan_turn(config: AgentConfig, session_id: str, user: str, answer: str) -> None:
-    """Seed one synthetic legacy v2 source for migration-only coverage."""
-    log_dir = Path(config.plan_logs_dir)
-    if any(log_dir.glob(f"plan-{session_id}-*.md")):
+def _seed_canonical_turn(
+    repository: ConversationRepository,
+    *,
+    index: int,
+    session_id: str,
+    project_id: str,
+    user: str,
+    answer: str,
+) -> None:
+    """Seed one deterministic canonical display-only transcript turn."""
+    if repository.load_optional(session_id) is not None:
         return
-    created_at = _FIXTURE_TIMESTAMP.isoformat().replace("+00:00", "Z")
     timestamp = _timestamp(1)
-    payload = json.dumps(
-        {
-            "format_version": 2,
-            "turn_id": 1,
-            "timestamp": timestamp,
-            "user": user,
-            "assistant": answer,
-            "scope": "normal",
-            "tool_activities": [],
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
+    turn_id = _fixture_session_id(index + 100)
+    pending = repository.create(
+        conversation_id=session_id,
+        project_id=project_id,
+        turn_id=turn_id,
+        kind="display-only",
+        display_input=user,
+        semantic_input=None,
+        context_eligible=False,
+        thinking_mode=None,
+        submitted_at=timestamp,
     )
-    path = log_dir / f"plan-{session_id}-20260828T023000Z.md"
-    path.write_text(
-        "---\n"
-        "generated_by: agent.plan_mode\n"
-        "format_version: 2\n"
-        f"session_id: {session_id}\n"
-        f"created_at: {created_at}\n"
-        "---\n\n"
-        "# Plan log\n\n"
-        f"## Turn 1 - {timestamp}\n\n"
-        "**Turn data v2 (JSON):**\n\n"
-        f"{payload}\n\n"
-        "---\n",
-        encoding="utf-8",
+    repository.complete_turn(
+        pending,
+        turn_id=turn_id,
+        assistant_output=answer,
+        finished_at=timestamp,
     )
 
 
@@ -501,7 +497,7 @@ def _seed_fixture_extensions(root: Path) -> Path:
 
 
 def seed_fixture_root(root: Path) -> AgentConfig:
-    """Seed only the production catalog and canonical plan-log formats."""
+    """Seed only the production catalog and canonical transcript formats."""
     persist_dir = root / "store"
     plan_logs_dir = root / "plan_logs"
     guarded_paths = (
@@ -519,7 +515,6 @@ def seed_fixture_root(root: Path) -> AgentConfig:
     if any(path.is_symlink() for path in guarded_paths):
         raise FixtureConfigurationError("fixture child roots must not be symlinks")
     persist_dir.mkdir(exist_ok=True)
-    plan_logs_dir.mkdir(exist_ok=True)
     knowledge_source = root / FIXTURE_KNOWLEDGE_DIRNAME
     knowledge_source.mkdir(exist_ok=True)
     knowledge_document = knowledge_source / "fixture-notes.md"
@@ -531,8 +526,9 @@ def seed_fixture_root(root: Path) -> AgentConfig:
             encoding="utf-8",
         )
     catalog_path = persist_dir / CATALOG_FILENAME
-    if catalog_path.is_symlink() or any(
-        path.is_symlink() for path in plan_logs_dir.iterdir()
+    if catalog_path.is_symlink() or (
+        plan_logs_dir.is_dir()
+        and any(path.is_symlink() for path in plan_logs_dir.iterdir())
     ):
         raise FixtureConfigurationError("fixture persistence files must not be symlinks")
     if not catalog_path.exists():
@@ -562,8 +558,18 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         citation_output_dir=str(root / "citations"),
     )
     _seed_fixture_extensions(root)
-    for session_id, (user, answer) in _SEED_TURNS.items():
-        _seed_plan_turn(config, session_id, user, answer)
+    repository = ConversationRepository(persist_dir)
+    for index, (session_id, (project_id, user, answer)) in enumerate(
+        _SEED_TURNS.items()
+    ):
+        _seed_canonical_turn(
+            repository,
+            index=index,
+            session_id=session_id,
+            project_id=project_id,
+            user=user,
+            answer=answer,
+        )
     return config
 
 
@@ -930,6 +936,8 @@ class FixtureSession:
                 raise FixtureProviderError(429)
             if text == "[[fixture:provider-error]]":
                 raise FixtureProviderError(503)
+            if text == FIXTURE_FAIL_ONCE and not retry:
+                raise FixtureProviderError(503)
             if text == FIXTURE_DELAYED_FINAL:
                 await asyncio.sleep(0.05)
                 if self._progress_cb is not None:
@@ -1072,6 +1080,14 @@ class FixtureSession:
                     "Fixture content: <script>unsafe()</script> "
                     "[safe](https://example.com) [unsafe](file:///etc/passwd)"
                 )
+            elif text == FIXTURE_LONG_FINAL:
+                answer = (
+                    'BEGIN 中文🙂\n"quoted"\\path\n'
+                    + "界" * 750_000
+                    + "\nEND"
+                )
+            elif text == FIXTURE_FAIL_ONCE:
+                answer = "Fixture explicit retry completed on the original turn."
             else:
                 mode = "extended" if self.thinking_mode == "extended" else "normal"
                 if skill_name is None:
@@ -1310,17 +1326,6 @@ def build_phase02_fixture_service(
             config.persist_dir,
             crash_control,
         )
-    if (
-        environ.get(FIXTURE_MODE_ENV) == FIXTURE_MODE
-        and environ.get(FIXTURE_CATALOG_MIGRATION_ENV) == "1"
-        and catalog is not None
-    ):
-        targets = tuple(
-            (session_id, project["projectId"])
-            for project in catalog.snapshot()["projects"]
-            for session_id in project["sessionIds"]
-        )
-        migrate_legacy_targets(config, conversation_repository, targets)
     sanitized_environ = {
         key: environ[key]
         for key in ("CONDA_DEFAULT_ENV", "CONDA_PREFIX")

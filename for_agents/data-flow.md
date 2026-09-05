@@ -98,7 +98,7 @@
   2. Rust supervisor — require active Conda environment `app`, resolve the source checkout, and spawn `<CONDA_PREFIX>/bin/python -m agent.desktop.server` with repository cwd and `PYTHONPATH=app`.
   3. Python server — revalidate Linux/Conda, redirect incidental stdout to stderr, emit `backend.ready`, and accept bounded NDJSON lines. New sessions load MCP by default unless the request explicitly opts out; React omits the field to delegate that default.
   4. Rust pipe readers — enforce UTF-8/line size/origin/order, correlate events and one terminal result, and emit bounded Tauri events to React. Normal requests wait on channel completion without a fixed elapsed-time deadline; startup and shutdown retain bounded waits.
-  5. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, closes the session without a legacy transcript flush, emits shutdown state, and exits. Rust reports whether the child exited gracefully or was forced.
+  5. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, closes the session without a transcript-flush lifecycle, emits shutdown state, and exits. Rust reports whether the child exited gracefully or was forced.
 - State or ownership transitions: Rust owns child/generation/pending-request state; Python owns session and stores; React owns presentation state and discards stale-generation events.
 - Error / retry / rollback behavior: wrong runtime or startup timeout degrades without a child; malformed output, pipe/channel closure, child exit, or bounded shutdown failure clears pending work and stops the generation. A live child that neither responds nor closes its output has no automatic normal-request timeout and requires user-driven shutdown/restart. Stderr content is drained but only counts are retained by Rust.
 - Invariants involved: INV-011, INV-015, INV-017, INV-020.
@@ -108,21 +108,19 @@
 ### Flow: Desktop conversation creation, turn presentation, and restoration
 
 - Trigger / input: project/sidebar selection, new conversation, control change, or composer text.
-- Output / side effect: selected Python `ChatSession`, bounded transcript DTOs, a finalized answer/command result, and eventual durable conversation state.
+- Output / side effect: selected Python `ChatSession`, schema-validated complete transcript DTOs, a finalized answer/command result, and eventual durable conversation state.
 - Steps:
   1. Catalog — `DesktopProjectCatalog` bootstraps one local project, reconciles healthy canonical JSON summaries, and stores only ordered session IDs.
-  2. Create/select — selecting a saved session loads canonical JSON; only when it is absent may the strict legacy Chroma/Plan readers stage a non-destructive canonical import before materializing the session. Imported turns are display-only and context-ineligible.
-  3. Switch — validate or import the target before replacing the current session; no conversation-history flush exists. Only the in-process thinking control is snapshot-restored while the backend lives; generic persistent Skill controls were removed.
+  2. Create/select — selecting a saved session loads canonical JSON. If the catalog entry has no corresponding canonical file, selection returns conversation unavailable; old Chroma/Plan sources are not read or imported.
+  3. Switch — validate the canonical target before replacing the current session; no conversation-history flush exists. Only the in-process thinking control is snapshot-restored while the backend lives; generic persistent Skill controls were removed.
   4. Turn — Python first parses and validates composer routing; after acceptance it writes the original prompt as canonical pending before executing an allowlisted display-only command or starting provider/tool work.
   5. Finalize — Python validates and finalizes the answer, commits the terminal canonical transition, then returns the authoritative result; first-prompt registration follows the durable pending write.
   6. Present — while work is pending, Python may emit bounded stage/tool/trust events without answer text. After finalization and canonical completion, it returns one authoritative result with `streamKind=final_only` and `chunkCount=0`; React displays that complete result and never assembles an answer preview.
 - State or ownership transitions: original input moves from draft to durable pending, then to completed/failed/interrupted in the same canonical JSON. The latest ten completed context-eligible turns are derived at prompt time rather than moved between stores.
-- Error / retry / rollback behavior: malformed/unavailable transcripts degrade or block selection; catalog failure returns a pending registration that can be retried without replaying the model turn. Provider failures attempt a durable failed transition and require explicit same-ID retry; if that transition cannot be published, restart converts the leftover pending turn to interrupted rather than auto-replaying it.
+- Error / retry / rollback behavior: malformed or missing canonical transcripts block selection and retain the current session; catalog failure returns a pending registration that can be retried without replaying the model turn. Provider failures attempt a durable failed transition and require explicit same-ID retry; if that transition cannot be published, restart converts the leftover pending turn to interrupted rather than auto-replaying it. React merges restored and terminal records by `(conversationId, turnId)` and derives ordering/count from canonical `turnNumber`, so success replay replaces the failed/interrupted presentation instead of appending a second turn.
 - Invariants involved: INV-005, INV-006, INV-016, INV-017.
 - Evidence: `app/agent/desktop/catalog.py`; `app/agent/desktop/service.py`; `app/agent/conversations`; conversation/lifecycle/answer-stream tests.
 - Confidence: Confirmed.
-
-The catalog-wide migration path is deliberately separate from selection: it is internal and default-off, reuses one lazy immutable Chroma snapshot for missing fixture targets, and runs only when exact `phase02` fixture mode, its validated owned root, and `RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1` are all present. Normal production startup/list never invokes it.
 
 ### Flow: Desktop Bash approval
 
@@ -150,13 +148,13 @@ The catalog-wide migration path is deliberately separate from selection: it is i
 | Non-Citation Skill runtime | Immutable startup catalog | load for one command, expose during one turn, identity-clear in `finally` | Not durable; instructions/resources remain in the catalog bundle |
 | Desktop child/request | Rust supervisor and Python `RequestContext` | ordered events then one result | wire only; underlying Python side effects persist separately |
 | Desktop conversation membership | `DesktopProjectCatalog` | first durable pending prompt or later reconciliation retry | `desktop-projects.json` |
-| Desktop conversation content | Python session/repository | write-through pending and terminal transitions | canonical conversation JSON; legacy Chroma/Plan sources are import-only |
+| Desktop conversation content | Python session/repository | write-through pending and terminal transitions | canonical conversation JSON only; old Chroma/Plan sources are ignored and left untouched |
 
 ## Error, retry, and recovery paths
 
 - Agent graph: two identical retries for truly empty upstream output; one tool-free repair for unsafe final content; deterministic fallback after exhaustion.
 - Extended thinking: candidate failures/timeouts can be isolated, malformed aggregation falls back, but raised aggregator/reviewer/reviser provider exceptions are not consistently contained.
-- Conversations: the canonical repository is the sole active writer, writes accepted prompts before provider/tool execution, and makes completed state durable before success exposure. Provider failures attempt a failed transition; if that write also fails, the pending turn remains recoverable as interrupted on reopen. Neither failed nor interrupted work is replayed automatically; latest context is the fixed latest-ten completed eligible view, and legacy Chroma/Plan records are read only at migration boundaries.
+- Conversations: the canonical repository is the sole active writer, writes accepted prompts before provider/tool execution, and makes completed state durable before success exposure. Provider failures attempt a failed transition; if that write also fails, the pending turn remains recoverable as interrupted on reopen. Neither failed nor interrupted work is replayed automatically; latest context is the fixed latest-ten completed eligible view. Old Chroma/Plan records are not read or imported.
 - RAG: raw JSON writes are atomic and fingerprint-changing concurrent rewrites fail loudly; the three RAG persistence surfaces are not transactional. Re-run ingest is the documented recovery for partial writes.
 - Citation: network retries/rate limiting live in provider adapters; identity and storage conflicts fail closed; a batch reports each saved/reused/failed item.
 - Extensions: startup skips invalid entries and reports diagnostics; apply requires a new preview after stale state. Cross-process lost updates and post-startup Skill tampering are not recovered automatically.

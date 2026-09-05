@@ -17,6 +17,7 @@ CONTRACT = json.loads((PROTOCOL_DIR / "contract.json").read_text(encoding="utf-8
 METHODS = {item["name"]: item for item in CONTRACT["methods"]}
 PROTOCOL_VERSION = int(CONTRACT["protocolVersion"])
 MAX_PROTOCOL_LINE_BYTES = int(CONTRACT["maxLineBytes"])
+FULL_TEXT_RESULT_METHODS = frozenset(CONTRACT["fullTextResultMethods"])
 
 _UTC_TIMESTAMP = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
@@ -539,6 +540,27 @@ def bounded_error_message(message: str) -> str:
 
 def encode_message(message: dict[str, Any]) -> str:
     """Serialize a validated envelope to one newline-terminated JSON line."""
+    return _encode_message(message, enforce_line_limit=True)
+
+
+def encode_success_result(
+    request_id: str,
+    method: str,
+    data: dict[str, Any],
+) -> str:
+    """Serialize a method-correlated success, preserving complete trusted text."""
+    message = success_result(request_id, method, data)
+    return _encode_message(
+        message,
+        enforce_line_limit=method not in FULL_TEXT_RESULT_METHODS,
+    )
+
+
+def _encode_message(
+    message: dict[str, Any],
+    *,
+    enforce_line_limit: bool,
+) -> str:
     validate_message(message)
     try:
         encoded = json.dumps(
@@ -547,11 +569,12 @@ def encode_message(message: dict[str, Any]) -> str:
             allow_nan=False,
             separators=(",", ":"),
         )
-    except (RecursionError, TypeError, ValueError) as exc:
+        encoded_bytes = encoded.encode("utf-8", errors="strict")
+    except (RecursionError, TypeError, UnicodeEncodeError, ValueError) as exc:
         raise ProtocolError(
             "PROTOCOL_INVALID", "Protocol message is not strict JSON."
         ) from exc
-    if len(encoded.encode("utf-8")) > MAX_PROTOCOL_LINE_BYTES:
+    if enforce_line_limit and len(encoded_bytes) > MAX_PROTOCOL_LINE_BYTES:
         _invalid("Protocol line exceeds the 2 MiB limit")
     return encoded + "\n"
 

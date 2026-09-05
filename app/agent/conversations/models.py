@@ -14,9 +14,7 @@ LATEST_CONTEXT_TURNS = 10
 
 MAX_TURNS = 4_096
 MAX_CONVERSATION_FILES = 4_096
-MAX_CONVERSATION_BYTES = 8 * 1024 * 1024
 MAX_INPUT_BYTES = 1024 * 1024
-MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_TOOL_ACTIVITIES = 128
 MAX_IDENTIFIER_BYTES = 256
 MAX_TOOL_SUMMARY_BYTES = 64 * 1024
@@ -75,10 +73,6 @@ class ConversationMalformedError(ConversationError):
     """Existing conversation content is not valid canonical JSON."""
 
 
-class ConversationTooLargeError(ConversationError):
-    """A durable conversation exceeds its bounded document size."""
-
-
 class ConversationUnavailableError(ConversationError):
     """Conversation persistence is unavailable."""
 
@@ -101,7 +95,7 @@ def _utf8_size(value: str, field: str) -> int:
 def _validate_text(
     value: object,
     field: str,
-    maximum_bytes: int,
+    maximum_bytes: int | None,
     *,
     nonblank: bool = False,
 ) -> str:
@@ -110,7 +104,8 @@ def _validate_text(
     assert isinstance(value, str)
     if nonblank and not value.strip():
         _invalid(f"{field} must be nonblank")
-    if _utf8_size(value, field) > maximum_bytes:
+    size = _utf8_size(value, field)
+    if maximum_bytes is not None and size > maximum_bytes:
         _invalid(f"{field} exceeds the {maximum_bytes}-byte limit")
     return value
 
@@ -118,7 +113,7 @@ def _validate_text(
 def _validate_optional_text(
     value: object,
     field: str,
-    maximum_bytes: int,
+    maximum_bytes: int | None,
     *,
     nonblank: bool = False,
 ) -> str | None:
@@ -348,7 +343,7 @@ class ContextTurn:
         _validate_text(
             self.assistant_output,
             "assistantOutput",
-            MAX_OUTPUT_BYTES,
+            None,
             nonblank=True,
         )
 
@@ -425,7 +420,7 @@ def validate_turn(turn: ConversationTurn) -> ConversationTurn:
         _validate_text(
             turn.assistant_output,
             "assistantOutput",
-            MAX_OUTPUT_BYTES,
+            None,
             nonblank=True,
         )
         if turn.failure is not None:
@@ -480,12 +475,10 @@ __all__ = [
     "CONVERSATION_STATES",
     "FAILURE_CODES",
     "LATEST_CONTEXT_TURNS",
-    "MAX_CONVERSATION_BYTES",
     "MAX_CONVERSATION_FILES",
     "MAX_FAILURE_MESSAGE_BYTES",
     "MAX_IDENTIFIER_BYTES",
     "MAX_INPUT_BYTES",
-    "MAX_OUTPUT_BYTES",
     "MAX_TIMESTAMP_BYTES",
     "MAX_TITLE_BYTES",
     "MAX_TOOL_ACTIVITIES",
@@ -502,7 +495,6 @@ __all__ = [
     "ConversationMalformedError",
     "ConversationState",
     "ConversationSummary",
-    "ConversationTooLargeError",
     "ConversationTurn",
     "ConversationUnavailableError",
     "ConversationValidationError",

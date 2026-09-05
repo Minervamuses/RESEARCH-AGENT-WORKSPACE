@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   EVENT_DATA_SCHEMAS,
   FORBIDDEN_DATA_KEY_FRAGMENTS,
+  FULL_TEXT_RESULT_METHODS,
   MAX_ERROR_MESSAGE_BYTES,
   MAX_PROTOCOL_LINE_BYTES,
   MAX_REQUEST_ID_BYTES,
@@ -25,6 +26,7 @@ import {
   parseProtocolMessage,
   parseProtocolMessageFromOrigin,
   validateProcessEventOrigin,
+  validateResultData,
 } from "../src/protocol.ts";
 
 interface ContractFieldRule {
@@ -49,6 +51,7 @@ interface ContractMethod {
 interface ContractDocument {
   protocolVersion: number;
   maxLineBytes: number;
+  fullTextResultMethods: string[];
   requestIdMaxBytes: number;
   errorMessageMaxBytes: number;
   requestEvents: string[];
@@ -118,6 +121,7 @@ test("language-neutral manifest matches TypeScript constants", async () => {
   ).TURN_ERROR_DETAILS_SCHEMA;
   assert.equal(contract.protocolVersion, PROTOCOL_VERSION);
   assert.equal(contract.maxLineBytes, MAX_PROTOCOL_LINE_BYTES);
+  assert.deepEqual(contract.fullTextResultMethods, [...FULL_TEXT_RESULT_METHODS]);
   assert.equal(contract.requestIdMaxBytes, MAX_REQUEST_ID_BYTES);
   assert.equal(contract.errorMessageMaxBytes, MAX_ERROR_MESSAGE_BYTES);
   assert.deepEqual(contract.methods.map(({ name }) => name), [...PROTOCOL_METHODS]);
@@ -204,6 +208,49 @@ test("normal answers use only the final terminal result", () => {
     minimum: 0,
     maximum: 0,
   });
+  assert.equal("maxBytes" in RESULT_DATA_SCHEMAS["session.turn"].text, false);
+});
+
+test("complete answer and transcript text have no protocol capacity rejection", () => {
+  const answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + "界".repeat(750_000) + "\nEND";
+  assert.doesNotThrow(() => validateResultData("session.turn", {
+    sessionId: "session-a",
+    turnId: "123e4567e89b42d3a456426614174000",
+    turnNumber: 1,
+    state: "completed",
+    accepted: true,
+    persisted: true,
+    text: answer,
+    validationErrors: [],
+    toolSummaries: [],
+    responseKind: "answer",
+    streamKind: "final_only",
+    chunkCount: 0,
+  }));
+
+  assert.doesNotThrow(() => validateResultData("session.transcript", {
+    projectId: "p1",
+    sessionId: "28b222e0cc6543aa8d7bbdc423de99a7",
+    status: "ready",
+    issue: null,
+    items: [{
+      turnId: "123e4567e89b42d3a456426614174000",
+      turnNumber: 1,
+      kind: "conversational",
+      state: "completed",
+      timestamp: "2026-09-05T00:00:00Z",
+      userText: "u".repeat(40_000),
+      assistantText: answer,
+      failureCode: null,
+      failureMessage: null,
+      failureRetryable: null,
+      toolActivities: [],
+    }],
+    total: 1,
+    offset: 0,
+    limit: 20,
+    hasMore: false,
+  }));
 });
 
 test("session turn carries one canonical logical identity and durable lifecycle", () => {
@@ -308,8 +355,8 @@ test("session summaries and transcripts expose canonical lifecycle state", () =>
   assert.deepEqual(turn?.assistantText, {
     type: "nullableString",
     required: true,
-    maxBytes: 32_768,
   });
+  assert.deepEqual(turn?.userText, { type: "string", required: true });
   assert.deepEqual(turn?.failureCode, {
     type: "nullableString",
     required: true,

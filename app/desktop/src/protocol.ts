@@ -2,6 +2,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export const MAX_PROTOCOL_LINE_BYTES = 2 * 1024 * 1024;
 export const MAX_REQUEST_ID_BYTES = 128;
 export const MAX_ERROR_MESSAGE_BYTES = 4096;
+export const FULL_TEXT_RESULT_METHODS = ["session.turn", "session.transcript"] as const;
 
 export const PROTOCOL_METHODS = [
   "runtime.diagnostics",
@@ -278,7 +279,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     state: { type: "string", required: true, enum: ["completed"] },
     accepted: { type: "boolean", required: true },
     persisted: { type: "boolean", required: true },
-    text: { type: "string", required: true, maxBytes: 2_097_152 },
+    text: { type: "string", required: true },
     validationErrors: {
       type: "stringArray",
       required: true,
@@ -393,8 +394,8 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
           enum: ["pending", "completed", "failed", "interrupted"],
         },
         timestamp: { type: "utcTimestamp", required: true },
-        userText: { type: "string", required: true, maxBytes: 32_768 },
-        assistantText: { type: "nullableString", required: true, maxBytes: 32_768 },
+        userText: { type: "string", required: true },
+        assistantText: { type: "nullableString", required: true },
         failureCode: {
           type: "nullableString",
           required: true,
