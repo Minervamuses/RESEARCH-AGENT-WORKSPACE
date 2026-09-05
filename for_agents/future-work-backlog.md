@@ -30,7 +30,7 @@
 
 - Priority: P1
 - Problem: activation rereads mutable managed files after startup verification.
-- Evidence: focused probe post_startup_tamper_loaded=True; issue/02; FAIL-005.
+- Evidence: focused probe post_startup_tamper_loaded=True; issue/02 (historical command wording, current trust defect); FAIL-005.
 - Why it matters: apply-and-restart is the extension trust boundary.
 - Suggested scope: either retain source_hash and revalidate at activation or load an immutable startup snapshot; cover instructions, manifest, and pinned resources once.
 - Dependencies / blockers: choose hash-on-activation versus memory snapshot based on existing size/lazy-loading constraints.
@@ -74,18 +74,6 @@
 - Related items: INV-008, INV-012, ASM-003, FAIL-003.
 - Status: Not started
 
-### BACKLOG-007 — Reject undeclared Skill task modes consistently
-
-- Priority: P2
-- Problem: _validate_task_mode accepts any supplied mode when a manifest declares no task_modes.
-- Evidence: app/agent/skills/runtime.py::_validate_task_mode; no covering test.
-- Why it matters: active Skill context can claim an unsupported mode.
-- Suggested scope: define no-list semantics and add one focused activation test; do not redesign manifests.
-- Dependencies / blockers: confirm whether no declared modes means no explicit mode or free-form mode.
-- Acceptance criteria: the chosen rule is enforced by runtime, CLI error, and one regression test.
-- Related items: skill runtime boundary.
-- Status: Not started
-
 ### BACKLOG-008 — Verify user-facing citation save reporting against mixed outcomes
 
 - Priority: P2
@@ -122,6 +110,66 @@
 - Related items: INV-015, INV-018, FAIL-013.
 - Status: Not started
 
+### BACKLOG-013 — Align user-facing Skill and timeout records with the live runtime
+
+- Priority: P2
+- Problem: the root README still advertises retired persistent `/skill` selection and `task_modes`, while issue/08 still presents the retired 600-second Desktop request deadline as open/current behavior.
+- Evidence: `app/agent/cli/slash_commands.py::_project_skill_commands`; `_RETIRED_SKILL_COMMANDS`; `app/agent/session.py::_run_one_shot_skill_turn`; `app/desktop/src-tauri/src/backend.rs::request`; FAIL-014; FAIL-016.
+- Why it matters: contributors can implement or troubleshoot against interfaces that the runtime deliberately removed.
+- Suggested scope: update only the stale README Skill sections and issue/08 status/current-behavior summary while retaining their historical evidence.
+- Dependencies / blockers: none; do not change runtime behavior as part of this documentation item.
+- Acceptance criteria: user-facing docs describe `/<skill-name> <prompt>` as one-shot, identify Citation as the only persistent CLI Skill path, omit `task_modes`, and record that normal Desktop requests have no absolute deadline.
+- Related items: INV-019, FAIL-014, FAIL-016.
+- Status: Not started
+
+### BACKLOG-015 — Preserve `/init` exclusions in later sync scans
+
+- Priority: P2
+- Problem: `init_workspace` excludes the top-level `app/` tree, but `diff_folder` does not pass that exclusion to `list_diff`, so a later `/sync <host-root>` can classify intentionally omitted files as missing from the store.
+- Evidence: `app/agent/ingest.py::init_workspace`; `app/agent/ingest.py::diff_folder`; `app/rag/sync.py::list_diff`; ASM-020. This audit did not run a live ingest reproduction.
+- Why it matters: noisy sync output can hide actual corpus drift and steer users toward indexing application code that `/init` intentionally excluded.
+- Suggested scope: carry the same explicit exclusion into comparison/prune previews, or persist one narrowly defined workspace policy; add one deterministic path-level regression.
+- Dependencies / blockers: define whether callers can override the default workspace exclusion without adding a generic policy framework.
+- Acceptance criteria: after no-argument `/init`, `/sync <host-root>` for its returned host root omits excluded `app/` paths while still reporting a genuinely new allowed file.
+- Related items: ASM-020.
+- Status: Not started
+
+### BACKLOG-016 — Make folder-prefix search complete or explicitly bounded
+
+- Priority: P2
+- Problem: `rag.search` retrieves only the global top `3 * k` results before applying `folder_prefix`, which can omit qualifying chunks ranked below unrelated global hits.
+- Evidence: `app/rag/api.py::search`; ASM-021. No live embedding reproduction was run.
+- Why it matters: a scoped search can look authoritative while returning fewer than the best available scoped matches.
+- Suggested scope: query within the prefix scope before limiting, or expose and test a deliberate bounded-search contract without redesigning retrieval.
+- Dependencies / blockers: confirm the smallest Chroma-supported filter that preserves existing source/folder normalization.
+- Acceptance criteria: a focused deterministic test proves the top `k` prefix-matching results are returned despite more than `3 * k` higher-ranked out-of-prefix chunks, or the API explicitly reports its bound.
+- Related items: ASM-021.
+- Status: Not started
+
+### BACKLOG-017 — Serialize canonical conversation writes across processes
+
+- Priority: P2
+- Problem: conversation save verifies a fingerprint and then atomically replaces the file, but no interprocess lock or filesystem compare-and-swap closes the interval between those operations.
+- Evidence: `app/agent/conversations/repository.py::save`; `app/agent/session.py::_recover_interrupted_turn`; ASM-022. No multiprocessing reproduction was run.
+- Why it matters: two application processes sharing one conversation can lose a successful transition, and a second opener can classify live pending work as interrupted.
+- Suggested scope: add one narrow per-conversation Linux/WSL lock or equivalent guarded replace plus a multiprocessing regression; preserve the existing JSON format and single-process lifecycle.
+- Dependencies / blockers: define bounded lock/lease behavior for crashed writers without adding a database or generic concurrency framework.
+- Acceptance criteria: concurrent transitions cannot both report success while losing one result, and opening a genuinely active pending turn does not recover it prematurely.
+- Related items: INV-006, ASM-022.
+- Status: Not started
+
+### BACKLOG-018 — Bound legacy Chroma migration staging
+
+- Priority: P2
+- Problem: migration recursively clones the full legacy `chat_history` tree during staging and confirmation before bounded record parsing, with no byte, file-count, or depth limit.
+- Evidence: `app/agent/conversations/legacy.py::_clone_chroma_source`; ASM-023; current tests use controlled fixture trees.
+- Why it matters: a large or adversarial legacy store can exhaust temporary disk or make migration unexpectedly long.
+- Suggested scope: enforce one explicit staging budget and return a safe actionable migration error; do not redesign the legacy reader.
+- Dependencies / blockers: choose local-use limits that accommodate known stores and keep source revalidation intact.
+- Acceptance criteria: an oversized/deep fixture fails before unbounded cloning, leaves source/canonical state unchanged, and removes temporary staging output.
+- Related items: INV-016, ASM-023.
+- Status: Not started
+
 ## Blocked or research items
 
 ### BACKLOG-009 — Decide whether academic Skill bash prohibition is policy or guidance
@@ -136,10 +184,23 @@
 - Related items: ASM-011.
 - Status: Blocked
 
+### BACKLOG-014 — Define Citation lifecycle consistently across CLI and Desktop
+
+- Priority: Research
+- Problem: Citation is the sole persistent Skill lifecycle in the CLI, but Desktop rejects `/citation <prompt>` and exposes no equivalent activation/clear path.
+- Evidence: `app/agent/cli/slash_commands.py`; `app/agent/skills/citation/session_policy.py`; `app/agent/desktop/service.py`; issue/09; FAIL-015.
+- Why it matters: the same Python session model has different citation capabilities depending on its frontend, and a naïve fix could accidentally create persistent generic Skill state or replay work.
+- Suggested scope: make one product decision on persistent versus one-shot Citation semantics, then align Python-owned session state, CLI/Desktop routing, registry finalization, and focused tests.
+- Dependencies / blockers: user decision on whether Desktop should support multi-turn Citation sessions or a one-shot citation command.
+- Acceptance criteria: CLI and Desktop document and enforce one deliberate Citation contract; activation, terminal cleanup, restart, and thinking interactions are covered without persisting generic Skill selection.
+- Related items: INV-010, INV-019, FAIL-015.
+- Status: Blocked
+
 ## Recently resolved or removed
 
 - issue/05 is resolved: repository-owned .gitattributes enforces LF and prevents host Git defaults from governing text files.
 - issue/06 is resolved: separate tool quotas were removed; one validated graph recursion fuse with early finalization now governs turns.
+- BACKLOG-007 is resolved/removed: persistent generic Skill selection and task modes were retired in `78589e9`; legacy manifests containing `task_modes` are rejected, `/skill` is reserved but unregistered, and non-Citation Skills use one-shot commands with focused tests.
 - BACKLOG-012 is resolved for the supported offline source paths: canonical JSON is the sole active transcript authority and `ConversationRepository` its sole writer; prompt-first and terminal-before-success ordering remove the former flush window; repository temporary-write tests, catalog/restart tests, six real Python-backend SIGKILL checkpoints, final broad suites/build, and the native Tauri behavioral journey cover interrupted/no-auto-replay recovery. This does not claim real user-store migration or live provider behavior; exact native `720×560` and 200% zoom layout evidence remains unavailable/not passed and blocks Phase 07 completion.
 - FAIL-008 is resolved for the supported source checkout: commits `30f8b18` through `1e22f90` added Rust supervision, Python conversation/service wiring, React UI, knowledge commands, and trust flows; the completed build log records final Python/TypeScript/Rust/build evidence.
 - The desktop GUI completion plan is complete at the audited HEAD. It is historical execution evidence, not active backlog; source-only packaging and remaining gaps are recorded separately above.

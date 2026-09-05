@@ -8,7 +8,7 @@
 - Output / side effect: one finalized TurnOutcome plus canonical pending/terminal JSON; tools may have side effects before finalization.
 - Steps:
   1. CLI/session — validate runtime and serialize the turn with the session async lock.
-  2. Session — assemble system, latest canonical completed-turn, active-skill, tool-availability, conversation-root, and citation-source context.
+  2. Session — assemble system, latest canonical completed-turn, current transient-or-Citation Skill, tool-availability, conversation-root, and citation-source context.
   3. Normal graph or extended orchestrator — invoke OpenRouter, bind the effective tools, and execute allowed tool calls.
   4. turns.execution — normalize streamed messages, tool calls, trace events, answer, and recovery reason into GraphTurnResult.
   5. ChatSession.finalize_and_record — reject tool-protocol artifacts, apply citation gate/render, collect safe metrics, commit canonical completed JSON, then update TurnJournal diagnostics.
@@ -33,14 +33,30 @@
   7. list_diff/prune_orphans — compare presence for the same root namespace and delete orphan PIDs from Chroma/raw JSON.
   8. Desktop composer — route the four maintenance commands through injected Python-owned operations with absolute Linux path, protected-root, and preview checks; raw protocol reads remain separate.
 - State or ownership transitions: source files remain external and immutable; derived chunks are owned by the local store. raw.json owns full-content enumeration, Chroma owns semantic lookup, and folder_meta.json owns inventory.
-- Error / retry / rollback behavior: hard tagger failures abort before metadata/chunks; malformed tag text falls back. Later Chroma failures can leave partial vector state while raw JSON rolls back and folder metadata remains. Re-run ingest is documented recovery. Prune and empty re-ingest have confirmed stale-state bugs. Direct `knowledge.init_workspace` and `knowledge.ingest_folder` protocol methods deliberately fail; the supported GUI path is the composer command route (FAIL-013).
+- Error / retry / rollback behavior: hard tagger failures abort before metadata/chunks; malformed tag text falls back. `folder_meta.json` is directly truncated/rewritten, and a malformed/unreadable read falls back to `{}` before the next write. Later Chroma failures can leave partial vector state while raw JSON uses atomic replacement and rolls back its local deferred batch. Re-run ingest is documented recovery. Prune and empty re-ingest have confirmed stale-state bugs. Direct `knowledge.init_workspace` and `knowledge.ingest_folder` protocol methods deliberately fail; the supported GUI path is the composer command route (FAIL-013).
 - Invariants involved: INV-003, INV-007, INV-008, candidate INV-012, and INV-018 for prune confirmation.
 - Evidence: app/rag/cli/ingest.py; app/rag/api.py; app/rag/store; app/rag/sync.py; app/tests/rag.
 - Confidence: Confirmed, including focused offline reproductions for FAIL-001 and FAIL-002.
 
+### Flow: One-shot non-Citation Skill invocation
+
+- Trigger / input: CLI or Desktop composer receives a validated `/<skill-name> <natural-language prompt>` command projected from the immutable session startup catalog.
+- Output / side effect: one ordinary finalized/persisted answer turn whose display input retains the original slash command while semantic model input is the trailing prompt; no generic Skill state remains afterward.
+- Steps:
+  1. `build_default_registry` — combine static commands with valid, unique, non-reserved catalog Skill names; omit collisions and malformed names with bounded diagnostics. Citation stays owned by its static handler.
+  2. `_one_shot_skill_handler` — require a non-empty trailing prompt and preserve its internal spacing/quotes.
+  3. CLI or `DesktopService._session_turn` — pass the prompt plus explicit `skill_name` into `ChatSession.turn_outcome`; Desktop keeps the original command as `display_input` and classifies the result as an answer.
+  4. `ChatSession` — create the canonical pending turn, load the Skill runtime from the startup catalog, make it active inside the existing turn lock, and execute the normal/extended turn path with its instructions and tool resolution.
+  5. Finalization — validate and persist the answer through the common chokepoint, then identity-clear the transient runtime in `finally` on success, error, or cancellation.
+- State or ownership transitions: the catalog entry remains immutable; a loaded runtime is process-local and transient. Invoking a valid non-Citation Skill while Citation is active tears down the Citation registry and does not restore it after the one-shot turn.
+- Error / retry / rollback behavior: unknown, empty, duplicate, invalid, and reserved commands fail before model execution. Runtime-load failure does not arm Skill state. Once a canonical turn is accepted, later execution errors use the normal failed/interrupted lifecycle; the Skill runtime is still cleared.
+- Invariants involved: INV-004, INV-005, INV-006, INV-019.
+- Evidence: `app/agent/cli/slash_commands.py::_project_skill_commands`; `app/agent/session.py::_run_one_shot_skill_turn`; `app/agent/desktop/service.py::_session_turn`; one-shot Skill tests.
+- Confidence: Confirmed.
+
 ### Flow: Citation discovery, verified save, and rendering
 
-- Trigger / input: active citation Skill invokes citation_workflow search/save/sources/source/explain.
+- Trigger / input: the dedicated CLI `/citation` handler persistently activates Citation, after which `citation_workflow` performs search/save/sources/source/explain. Desktop currently rejects `/citation` and has no activation control.
 - Output / side effect: discovery ToolMessage, per-item SaveBatchOutcome, canonical citation bundle, session SourceRegistry entry, and rendered citations/bibliography.
 - Steps:
   1. CitationSessionPolicy — lazily creates a session-scoped service and registry; activation forces normal thinking.
@@ -62,15 +78,15 @@
 - Steps:
   1. discovery — scan regular files, validate metadata/descriptors, enforce limits/containment, and hash the bundle.
   2. manager preview — compare desired state with registry and ask the private management Skill/model for an explanation; host validates the plan.
-  3. confirmation/apply — recheck preview/registry/source, require exact MCP binding approvals, copy content-addressed bundles, and atomically replace registry JSON.
+  3. confirmation/apply — recheck preview/registry/source, require exact MCP binding approvals, copy content-addressed bundles, and atomically replace registry JSON. Desktop performs this inside a prompt-first durable display-only turn whose stored input is a sanitized digest.
   4. restart — load_extension_startup revalidates registry, installed hash, descriptors, and built-in collisions.
   5. session startup — merge built-in/applied Skills, load available MCP tools, and record diagnostics.
-  6. activation — load Skill instructions/manifest/resources from the catalog path and resolve required/optional tools.
+  6. invocation — load Skill instructions/manifest/resources from the catalog path and resolve required/optional tools for a later one-shot non-Citation command; Citation retains its separate persistent CLI lifecycle.
   7. desktop trust UI — require an explicit decision for every exact MCP binding hash, consume the preview once, and restart the Rust-owned child before observing the applied revision.
 - State or ownership transitions: untrusted drop-in becomes scanned desired state, then approved managed state, then a loaded runtime only in a new session.
-- Error / retry / rollback behavior: invalid/rebound roots disable deletion; stale preview or changed source aborts apply; individual failures are reported. A process-local lock serializes one process only. Installed Skill content is not re-hashed at activation.
-- Invariants involved: INV-004, INV-009, INV-018, candidate INV-013.
-- Evidence: app/agent/extensions; app/agent/startup.py; app/agent/skills/runtime.py; issue/02 and issue/04.
+- Error / retry / rollback behavior: invalid/rebound roots disable deletion; stale preview or changed source aborts apply; individual failures are reported. Desktop parses and verifies the durable result, replays a completed same-turn result after restart without reapplying, and restores a crash-pending apply as non-retryable interrupted. A process-local lock serializes one process only. Installed Skill content is not re-hashed at activation.
+- Invariants involved: INV-004, INV-006, INV-009, INV-018, candidate INV-013.
+- Evidence: app/agent/extensions; app/agent/startup.py; app/agent/skills/runtime.py; `app/agent/desktop/service.py::_extensions_apply`; extension apply/crash tests; issue/02 and issue/04.
 - Confidence: Confirmed, including focused tamper reproduction for FAIL-005.
 
 ### Flow: Desktop backend startup, requests, and shutdown
@@ -80,12 +96,12 @@
 - Steps:
   1. React `BackendClient` — validate/build a protocol-v1 request and invoke Tauri.
   2. Rust supervisor — require active Conda environment `app`, resolve the source checkout, and spawn `<CONDA_PREFIX>/bin/python -m agent.desktop.server` with repository cwd and `PYTHONPATH=app`.
-  3. Python server — revalidate Linux/Conda, redirect incidental stdout to stderr, emit `backend.ready`, and accept bounded NDJSON lines.
-  4. Rust pipe readers — enforce UTF-8/line size/origin/order, correlate events and one terminal result, and emit bounded Tauri events to React.
+  3. Python server — revalidate Linux/Conda, redirect incidental stdout to stderr, emit `backend.ready`, and accept bounded NDJSON lines. New sessions load MCP by default unless the request explicitly opts out; React omits the field to delegate that default.
+  4. Rust pipe readers — enforce UTF-8/line size/origin/order, correlate events and one terminal result, and emit bounded Tauri events to React. Normal requests wait on channel completion without a fixed elapsed-time deadline; startup and shutdown retain bounded waits.
   5. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, closes the session without a legacy transcript flush, emits shutdown state, and exits. Rust reports whether the child exited gracefully or was forced.
 - State or ownership transitions: Rust owns child/generation/pending-request state; Python owns session and stores; React owns presentation state and discards stale-generation events.
-- Error / retry / rollback behavior: wrong runtime degrades without a child; malformed output or timeouts fail pending requests and stop the generation; unexpected exit becomes crashed and requires explicit restart. Stderr content is drained but only counts are retained by Rust.
-- Invariants involved: INV-011, INV-015, INV-017.
+- Error / retry / rollback behavior: wrong runtime or startup timeout degrades without a child; malformed output, pipe/channel closure, child exit, or bounded shutdown failure clears pending work and stops the generation. A live child that neither responds nor closes its output has no automatic normal-request timeout and requires user-driven shutdown/restart. Stderr content is drained but only counts are retained by Rust.
+- Invariants involved: INV-011, INV-015, INV-017, INV-020.
 - Evidence: `app/desktop/src-tauri/src/backend.rs`; `app/agent/desktop/server.py`; `app/desktop/src/backend.ts`; lifecycle tests.
 - Confidence: Confirmed for source checkout; installer/bundle behavior Unknown.
 
@@ -96,10 +112,10 @@
 - Steps:
   1. Catalog — `DesktopProjectCatalog` bootstraps one local project, reconciles healthy canonical JSON summaries, and stores only ordered session IDs.
   2. Create/select — selecting a saved session loads canonical JSON; only when it is absent may the strict legacy Chroma/Plan readers stage a non-destructive canonical import before materializing the session. Imported turns are display-only and context-ineligible.
-  3. Switch — validate or import the target before replacing the current session; no conversation-history flush exists. In-process thinking/skill controls are snapshot-restored only while the backend lives.
-  4. Turn — Python writes the accepted original prompt as canonical pending before parsing an allowlisted display-only command or starting provider/tool execution.
+  3. Switch — validate or import the target before replacing the current session; no conversation-history flush exists. Only the in-process thinking control is snapshot-restored while the backend lives; generic persistent Skill controls were removed.
+  4. Turn — Python first parses and validates composer routing; after acceptance it writes the original prompt as canonical pending before executing an allowlisted display-only command or starting provider/tool work.
   5. Finalize — Python validates and finalizes the answer, commits the terminal canonical transition, then returns the authoritative result; first-prompt registration follows the durable pending write.
-  6. Present — Python emits bounded `answer.chunk` events only after finalization (`streamKind=post_finalized`), then one authoritative result. React assembles provisional chunks and reconciles them against the exact final result.
+  6. Present — while work is pending, Python may emit bounded stage/tool/trust events without answer text. After finalization and canonical completion, it returns one authoritative result with `streamKind=final_only` and `chunkCount=0`; React displays that complete result and never assembles an answer preview.
 - State or ownership transitions: original input moves from draft to durable pending, then to completed/failed/interrupted in the same canonical JSON. The latest ten completed context-eligible turns are derived at prompt time rather than moved between stores.
 - Error / retry / rollback behavior: malformed/unavailable transcripts degrade or block selection; catalog failure returns a pending registration that can be retried without replaying the model turn. Provider failures attempt a durable failed transition and require explicit same-ID retry; if that transition cannot be published, restart converts the leftover pending turn to interrupted rather than auto-replaying it.
 - Invariants involved: INV-005, INV-006, INV-016, INV-017.
@@ -131,6 +147,7 @@ The catalog-wide migration path is deliberately separate from selection: it is i
 | RAG source file | User filesystem | collect/tag/chunk/index | raw.json, Chroma, folder_meta.json |
 | Citation discovery record | Citation provider hub/tool call | authority verification and canonical save | cite bundle plus session SourceRegistry |
 | Extension drop-in | User drop-in root | validate/approve/install/restart | private managed copy and registry |
+| Non-Citation Skill runtime | Immutable startup catalog | load for one command, expose during one turn, identity-clear in `finally` | Not durable; instructions/resources remain in the catalog bundle |
 | Desktop child/request | Rust supervisor and Python `RequestContext` | ordered events then one result | wire only; underlying Python side effects persist separately |
 | Desktop conversation membership | `DesktopProjectCatalog` | first durable pending prompt or later reconciliation retry | `desktop-projects.json` |
 | Desktop conversation content | Python session/repository | write-through pending and terminal transitions | canonical conversation JSON; legacy Chroma/Plan sources are import-only |
@@ -140,17 +157,18 @@ The catalog-wide migration path is deliberately separate from selection: it is i
 - Agent graph: two identical retries for truly empty upstream output; one tool-free repair for unsafe final content; deterministic fallback after exhaustion.
 - Extended thinking: candidate failures/timeouts can be isolated, malformed aggregation falls back, but raised aggregator/reviewer/reviser provider exceptions are not consistently contained.
 - Conversations: the canonical repository is the sole active writer, writes accepted prompts before provider/tool execution, and makes completed state durable before success exposure. Provider failures attempt a failed transition; if that write also fails, the pending turn remains recoverable as interrupted on reopen. Neither failed nor interrupted work is replayed automatically; latest context is the fixed latest-ten completed eligible view, and legacy Chroma/Plan records are read only at migration boundaries.
-- RAG: raw JSON writes are atomic and concurrent rewrites fail loudly; the three RAG persistence surfaces are not transactional. Re-run ingest is the documented recovery for partial writes.
+- RAG: raw JSON writes are atomic and fingerprint-changing concurrent rewrites fail loudly; the three RAG persistence surfaces are not transactional. Re-run ingest is the documented recovery for partial writes.
 - Citation: network retries/rate limiting live in provider adapters; identity and storage conflicts fail closed; a batch reports each saved/reused/failed item.
 - Extensions: startup skips invalid entries and reports diagnostics; apply requires a new preview after stale state. Cross-process lost updates and post-startup Skill tampering are not recovered automatically.
-- Desktop: malformed child output or request timeout terminates the generation; frontend reducers reject stale-generation state. Shutdown/EOF make cancellation visible and do not report a forced exit as successful persistence.
+- Desktop: malformed child output, pipe/channel closure, or child exit terminates the generation; frontend reducers reject stale-generation state. Normal requests have no elapsed-time deadline, while shutdown retains a bounded acknowledgment/exit path that can fail pending work. Shutdown/EOF make cancellation visible and do not report a forced exit as successful persistence.
 - Desktop trust: unknown, reused, expired, cross-turn, unsafe, dismissed, crash/restart, or shutdown Bash decisions default to denial. Prune and extension previews are one-use and rechecked before mutation.
 
 ## Unverified flows
 
 - Live provider and real persistent-store paths were not run in this audit.
-- Multiple concurrently launched desktop applications sharing `persist_dir` or extension state were not exercised.
+- Multiple concurrently launched desktop applications sharing `persist_dir`, canonical conversation files, or extension state were not exercised.
+- A permanently live but non-responsive Python request has no automatic inactivity detector; only explicit shutdown/restart and transport/process failure paths are covered.
 - No integrated stress test covers all RAG read/write overlaps accepted by the concurrent protocol server.
 - Installer/wheel/bundled desktop asset lookup is unsupported and unverified; only Linux source checkout is documented.
 - No failure-injection test covers Chroma mid-batch failure, extension multiprocessing, or raised extended-thinking provider exceptions.
-- The current subprocess crash checks exercise the real Python NDJSON child with fixture-owned state, but do not replace the pending native Tauri manual inspection or prove live provider/user-store behavior.
+- The current subprocess crash checks exercise the real Python NDJSON child with fixture-owned state, but do not prove exact native `720x560`/200% zoom layout or live provider/user-store behavior. The broader native behavioral journey is recorded as passed separately.

@@ -27,7 +27,7 @@
 - Assumption: No competing process mutates folder metadata/raw JSON/Chroma during ingest or prune, and failures do not interrupt the ordered multi-store writes.
 - Where relied on: ingest_repo, DocumentStore, prune_orphans.
 - Failure if false: partial or stale corpus surfaces; see FAIL-001 through FAIL-003.
-- Detection or mitigation: raw JSON fingerprint detects only one class of concurrent rewrite; rerun ingest is the recovery.
+- Detection or mitigation: raw JSON detects only mtime/size fingerprint changes and replaces atomically. `folder_meta.json` is directly truncated and rewritten, and a read-time JSON/OSError fallback to `{}` can let a later write discard unrelated-root metadata. Rerun ingest is the documented recovery.
 - Evidence: app/rag/cli/ingest.py; app/rag/store/document_store.py; app/rag/sync.py.
 - Status: Active
 - Confidence: Confirmed assumption.
@@ -65,8 +65,8 @@
 ### ASM-007 — Managed Skill files cannot change after startup
 
 - Assumption: Private installed copies remain immutable for the lifetime of a session.
-- Where relied on: SkillMetadata path catalog and later load_skill_runtime activation.
-- Failure if false: unapproved instructions, manifest permissions, or pinned resources can become active without apply/restart.
+- Where relied on: SkillMetadata path catalog and later `load_skill_runtime` during a one-shot command or Citation activation.
+- Failure if false: unapproved instructions, manifest tool permissions, or pinned resources can become active without apply/restart.
 - Detection or mitigation: startup hash validation only; focused probe reproduced FAIL-005.
 - Evidence: app/agent/extensions/startup.py; app/agent/skills/runtime.py; issue/02.
 - Status: Active
@@ -152,6 +152,66 @@
 - Status: Active
 - Confidence: Confirmed test seam and premise.
 
+### ASM-019 — A live desktop request eventually returns or loses its transport
+
+- Assumption: a normal Python backend request eventually produces a terminal result, exits, or closes its protocol channel; elapsed runtime alone is not treated as failure.
+- Where relied on: `BackendSupervisor.request` calls `submit_request(..., None)` and waits on the response channel without an absolute or inactivity deadline.
+- Failure if false: a live but deadlocked/non-responsive child can leave the request waiting indefinitely until the user explicitly shuts down or restarts the backend.
+- Detection or mitigation: process/pipe/protocol failures fail the generation, startup and shutdown remain bounded, and shutdown can fail an in-flight request. There is no automatic heartbeat/inactivity detector.
+- Evidence: `app/desktop/src-tauri/src/backend.rs::request`; `progressing_request_can_outlive_the_prior_absolute_deadline`; `shutdown_bounds_an_in_flight_request`; issue/08 records the retired absolute-deadline behavior.
+- Status: Active
+- Confidence: Confirmed current liveness premise; an actual indefinite hang was not reproduced.
+
+### ASM-020 — Workspace exclusions survive later sync scans
+
+- Assumption: paths intentionally omitted by `/init`, especially the top-level `app/` directory, remain outside later `/sync` comparison and prune previews for the same host root.
+- Where relied on: the documented no-argument `/init` followed by `/sync <host-root>` for the returned host root.
+- Failure if false: `/sync` can report intentionally excluded application files as `missing_from_store`, obscuring real drift and inviting unnecessary ingestion.
+- Detection or mitigation: none in the current API boundary; `init_workspace` passes `skip_rel_paths={app}` to ingest, while `diff_folder` calls `list_diff` without the same exclusion. Prune still requires confirmation and only deletes stored paths missing from disk.
+- Evidence: `app/agent/ingest.py::init_workspace`; `app/agent/ingest.py::diff_folder`; `app/rag/sync.py::list_diff`.
+- Status: Active
+- Confidence: Inferred from the mismatched call paths; no end-to-end reproduction was run.
+
+### ASM-021 — Three-times oversampling is enough for folder-prefix search
+
+- Assumption: retrieving the global top `3 * k` semantic hits before applying `folder_prefix` always contains the desired prefix-scoped top `k`.
+- Where relied on: `rag.search(query, k, folder_prefix=...)` and Agent search scoped to a folder.
+- Failure if false: the API returns too few or zero scoped hits even though relevant matching chunks rank below unrelated global hits.
+- Detection or mitigation: callers can broaden or retry, but the API does not report truncation and no completeness regression covers this ranking shape.
+- Evidence: `app/rag/api.py::search`.
+- Status: Active
+- Confidence: Inferred algorithmic limitation; no live embedding reproduction was run.
+
+### ASM-022 — One process owns each canonical conversation file
+
+- Assumption: two `ConversationRepository` instances do not write the same conversation concurrently, and a second session does not recover a legitimately active pending turn.
+- Where relied on: prompt-first and terminal conversation transitions. Each writer verifies a content fingerprint before `os.replace`, but there is no interprocess lock or atomic filesystem compare-and-swap spanning both operations.
+- Failure if false: both writers can pass the precheck and one can overwrite a successful transition; a second opener can convert live pending work to interrupted.
+- Detection or mitigation: one session serializes its own turns and Rust owns one child per Desktop process. Conflicts visible before the precheck fail explicitly; no multiprocessing/lease test covers the race window.
+- Evidence: `app/agent/conversations/repository.py::save`; `app/agent/session.py::_recover_interrupted_turn`.
+- Status: Active
+- Confidence: Inferred cross-process race from the write ordering; not reproduced.
+
+### ASM-023 — Legacy Chroma trees are small enough to clone safely
+
+- Assumption: the migration-only `chat_history` tree fits available time and temporary disk when cloned for staging and confirmation.
+- Where relied on: legacy conversation discovery/import from Chroma.
+- Failure if false: migration can consume excessive time or disk before bounded record parsing begins.
+- Detection or mitigation: source links and concurrent changes are rejected, and parsed records have field/session bounds; the recursive clone itself has no byte, file-count, or depth cap.
+- Evidence: `app/agent/conversations/legacy.py::_clone_chroma_source`; migration tests use controlled fixtures.
+- Status: Active
+- Confidence: Confirmed missing clone bound; real large-store behavior Unknown.
+
+### ASM-024 — Canonical conversation hard limits need no rollover path
+
+- Assumption: 4,096 turns, an 8 MiB document, and a 4,096-file scan are sufficient for local use, or users can manually start/manage another conversation when a limit is reached.
+- Where relied on: canonical conversation validation and sidebar scanning.
+- Failure if false: further writes fail explicitly or additional files are omitted from a bounded scan; there is no automatic rollover/archival workflow.
+- Detection or mitigation: validators fail before publishing an invalid document and scan results include a limit issue; focused bounds tests cover rejection rather than long-term UX.
+- Evidence: `app/agent/conversations/models.py::MAX_TURNS`; `MAX_CONVERSATION_BYTES`; `app/agent/conversations/repository.py::scan`.
+- Status: Active
+- Confidence: Confirmed hard limits; adequacy for real long-lived stores Unknown.
+
 ## Assumptions under investigation
 
 ### ASM-014 — Model prose truthfully reflects citation save outcomes
@@ -179,3 +239,5 @@
 - issue/05: repository line endings no longer depend on global Git defaults; .gitattributes now owns LF policy.
 - issue/06: separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one AgentConfig graph fuse with early finalization governs the current graph.
 - ASM-017: catalog registration no longer depends on a later eviction or shutdown flush. Canonical JSON is the sole active transcript authority and `ConversationRepository` is its sole writer: accepted prompts become `pending` before provider/tool execution, terminal state precedes success exposure, and restart converts leftover pending work to interrupted without automatic replay. Repository, lifecycle, Desktop restart, and six subprocess crash-boundary tests cover this offline ordering.
+- Generic Skill task-mode/persistent-selection assumptions are retired: `task_modes` is no longer a valid manifest field, `/skill` is reserved but unregistered, and non-Citation Skills run once from `/<skill-name> <prompt>`.
+- The former assumption that every Desktop request must finish within 600 seconds is retired. Current Rust code has no normal absolute request deadline; only startup/shutdown and actual transport/process failure paths remain bounded.

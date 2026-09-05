@@ -12,6 +12,8 @@ Run project commands under Ubuntu/WSL from the repository root unless the comman
 | `cd app && conda run -n app poetry run pytest tests/test_conversation_batch_migration.py tests/test_desktop_crash_recovery.py tests/test_conversation_repository.py tests/test_session_lifecycle.py tests/test_desktop_conversations.py tests/test_desktop_fixture.py tests/test_history_retirement.py -q` | Fixture-only catalog batch, six Python-child crash/restart boundaries, prompt/terminal repository ordering, latest-ten context, restart restore, and no active conversation Chroma | Current Phase 03/06/07 canonical contracts | Installed `app` environment; owned temporary fixture roots; no real provider/store | Focused persistence/recovery result |
 | `cd app && conda run -n app poetry run pytest tests/test_desktop_protocol_contract.py tests/test_desktop_service.py tests/test_slash_commands.py tests/test_desktop_answer_stream.py tests/test_conversation_migration.py tests/test_conversation_archive_access.py tests/test_session_persistence.py tests/test_plan_mode.py -q` | Desktop protocol, selected-session migration, exact archive access, stream, thinking control, and canonical persistence | Current canonical conversation and Phase 06 retirement contracts | Installed `app` environment; fake/temp state | Focused cross-subsystem result |
 | `cd app && conda run -n app poetry run pytest tests/test_desktop_server.py tests/test_desktop_fixture.py tests/test_bash_tool.py -q` | NDJSON server, exact fixture gate, no-chat-history journey, and Bash approval seam | Current test modules and active Phase 07 plan | Isolated temporary roots; no real provider/shell | Server/fixture/trust result |
+| `cd app && conda run -n app poetry run pytest tests/test_slash_commands.py tests/test_skills.py tests/test_skill_adherence.py tests/test_extension_skill_startup.py -q` | One-shot non-Citation Skill projection/lifecycle, cleanup, and rejection of legacy task-mode manifests | Current Skill runtime and corrective build log | Installed app environment; temporary Skill roots | Dynamic command and lifecycle result |
+| `cd app && conda run -n app poetry run pytest tests/test_desktop_answer_stream.py tests/test_desktop_service.py tests/test_desktop_fixture.py -q` | Final-only Desktop answers, dynamic Skill composer routing, service policy, and integrated fixture behavior | Protocol contract and current Desktop tests | Isolated fake/temp state; no live provider | No answer events, durable terminal result, and service/fixture result |
 | cd app/desktop && conda run -n app npm test | TypeScript shared protocol fixtures | app/desktop/package.json#scripts.test | Node from Conda app | Node test result |
 | cd app/desktop && conda run -n app npm run build | TypeScript check plus Vite build when run alone | app/desktop/package.json#scripts.build | Installed node_modules | Typecheck/build result; do not run separately when the Tauri build below already invokes it through `beforeBuildCommand` |
 | cd app/desktop && conda run -n app cargo test --manifest-path src-tauri/Cargo.toml | Rust protocol/unit tests | Cargo manifest and current test module | Rust 1.97.1; may compile Tauri dependencies | Cargo test result |
@@ -19,9 +21,9 @@ Run project commands under Ubuntu/WSL from the repository root unless the comman
 | cd app && conda run -n app poetry check --lock | Manifest/lock consistency | README.md | Installed Poetry | Lock validation |
 | cd app && conda run -n app poetry build | Wheel and sdist | README.md | Writable generated dist; packaging-only check | Built artifacts in app/dist |
 | cd app && conda run -n app python -c "import agent, skills.citation, rag; print('app ok')" | Distribution import smoke | README.md | Installed project | app ok |
-| `python3 /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root /home/minervamuses/research-agent-workspace` | `for_agents` structure and ignore rule | Infrastructure skill | WSL system Python and local skill path | Validator result |
+| `conda run -n app python /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root /home/minervamuses/research-agent-workspace` | `for_agents` structure and ignore rule | Infrastructure skill | WSL Conda/Skill path available | Validator result plus the expected tracked-and-ignored warning |
 
-Current Phase 07 evidence (automated broad checks and the native behavioral journey are observed; the exact layout gate remains):
+Current `harness/reconstruct/build-log.md` Phase 07 evidence (automated broad checks and the native behavioral journey are observed; the exact layout gate remains):
 
 | Check | Result | Evidence source |
 |---|---|---|
@@ -40,6 +42,8 @@ Current Phase 07 evidence (automated broad checks and the native behavioral jour
 
 The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 and FAIL-002 using temporary data and deterministic doubles. Their relevant production paths did not change, but the probes were not repeated now.
 
+The original GUI plan is Complete. The separate corrective plan records Phases 01-06 Complete and Phase 07 Blocked after one older broad Python failure and one older Cargo failure were repaired only by focused checks under a no-rerun rule. Later canonical-conversation Phase 07 evidence above applies to the current application code, but it does not silently change the corrective plan's own status. This infrastructure audit did not rerun application tests or builds.
+
 ## Change-type verification matrix
 
 | Change type | Minimum focused checks | Broader checks | Manual or environment-specific evidence |
@@ -49,7 +53,8 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 | Extended thinking | test_thinking, test_thinking_models, test_thinking_session | Complete pytest | Live paid/provider trial only under explicit bounded authorization |
 | RAG config/API/store/sync | Relevant app/tests/rag modules plus test_ingest/test_adapter_formatting | Complete pytest | Ollama/OpenRouter only for a concrete live integration need; isolate KMS_STORE_DIR |
 | Citation engine/session policy | Relevant test_citation modules and test_turn_finalizer | Complete pytest | Live provider calls only when cached/fake evidence cannot answer the question |
-| Skills/extensions | Relevant test_skill and test_extension modules | Complete pytest | Use temporary drop-in/state roots; never mutate real user extension state |
+| Skill invocation/manifest | test_slash_commands, test_skills, test_skill_adherence, and test_extension_skill_startup | Complete pytest | Verify one-shot cleanup and legacy-field diagnostics with temporary Skill roots |
+| Extension apply/startup | Relevant test_extension modules | Complete pytest | Use temporary drop-in/state roots; never mutate real user extension state |
 | Desktop protocol/backend/conversations | Relevant Python Desktop, canonical conversation, legacy migration, and Bash modules plus `npm test` | Cargo test and selected Python regression; Tauri no-bundle build when native/build surfaces change | Isolated real Tauri/Python journey for lifecycle/UI changes; never use real user stores |
 | Packaging/runtime/dependency change | Runtime tests, import smoke, poetry check --lock | poetry build and complete pytest | Dependency changes require prior user approval |
 | Documentation/for_agents only | infrastructure check, marker/search, ignore check, diff check | No application suite by default | Cross-document evidence audit |
@@ -71,16 +76,21 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 | INV-016 | test_desktop_conversations.py, test_conversation_migration.py, and test_conversation_batch_migration.py cover A→B→A, restart, selected-session import, display-only turns, source immutability, default-off doubly gated batch, shared snapshot, and target validation | Strong offline coverage; real user-store migration remains unverified |
 | INV-017 | Safe-content/URL tests, protocol forbidden-key tests, DTO bounds, Tauri capability inspection | Covered for current renderer/contract; no browser-engine security audit |
 | INV-018 | Prune preview, extension preview/binding, approval correlation/replay/timeout/crash tests | Strong per-process coverage; cross-process state remains uncovered |
+| INV-019 | test_slash_commands.py, test_skills.py, test_skill_adherence.py, test_desktop_service.py, and fixture journey | Strong one-shot success/error/cancel and CLI/Desktop coverage; persistent Citation remains a separate CLI-only contract |
+| INV-020 | CLI/Desktop service MCP-default tests plus TypeScript creation-parameter test | Covered offline for default-on and explicit opt-out |
 | FAIL-001 and FAIL-002 | Temporary deterministic probes | Reproduced; no regression tests |
 | FAIL-003 | Code/docs and JSON rollback tests | Partial; no Chroma mid-failure injection |
-| FAIL-004 | test_history_retirement.py plus canonical lifecycle and integrated fixture no-`store/chat_history` assertions | Resolved in the supported paths exercised offline; no active recall, eviction, flush, or hard-cap path remains |
+| FAIL-004 | test_history_retirement.py plus canonical lifecycle and integrated fixture no-`store/chat_history` assertions | Resolved in the supported paths exercised offline; no active recall, eviction, flush, or hard-cap data-loss path remains. Explicit canonical limit rejection is ASM-024 |
 | FAIL-005 | Focused tamper probe and issue reproduction | Reproduced; no regression test |
 | FAIL-006 | Control-flow proof and issue sequence | No multiprocessing regression |
 | FAIL-007 | Focused same-year probe | Reproduced; existing test covers different years only |
 | FAIL-008 | Git history, integrated desktop journeys, Python/TypeScript/Rust tests | Historical disconnected shell is mitigated |
-| FAIL-009 | MCP/fake-provider tests plus test_session_lifecycle.py and test_desktop_crash_recovery.py | Accepted provider failures are durably terminal and pending restarts do not auto-replay; no live dependency verification |
+| FAIL-009 | MCP/fake-provider tests plus test_session_lifecycle.py and test_desktop_crash_recovery.py | Provider failures attempt a durable failed transition; if that write also fails, restart converts pending to interrupted. Neither state auto-replays; no live dependency verification |
 | FAIL-010 through FAIL-012 | Focused regression tests/attributes/current code | Mitigations covered |
 | FAIL-013 | Direct-handler source/tests plus supported composer routing tests | Limitation confirmed; raw direct folder methods remain intentionally disabled |
+| FAIL-014 | retired-command and legacy-manifest tests plus root README comparison | Runtime behavior covered; user-facing root documentation remains stale |
+| FAIL-015 | Desktop disallowed-command test and App.tsx CLI-only notice | Gap confirmed; Citation lifecycle/product decision remains deferred |
+| FAIL-016 | Rust long-request, output-close, and shutdown tests | Former 600-second absolute deadline mitigated; issue/08 text remains stale and indefinite live-child liveness is ASM-019 |
 
 ## Test-data, fixture, and environment constraints
 
@@ -91,19 +101,22 @@ The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 a
 - Default app/store, cite, extension state, MCP logs, node_modules, dist, and Rust target are generated/local. Legacy `plan_logs` are user migration input and must remain read-only. Tests should isolate write roots and avoid user data.
 - `app/agent/desktop`, the React/Tauri implementation, and their tests are tracked. The exact `phase02` fixture gate must use a caller-owned, validated temporary root and fake providers/runners; catalog batch migration additionally requires exact `RESEARCH_AGENT_DESKTOP_FIXTURE_MIGRATE_CATALOG=1`. Neither gate may touch user stores or credentials.
 - Desktop Python protocol reads `app/desktop/protocol/v1` from the source tree; installed-wheel behavior is unverified and Tauri bundling is disabled.
-- Shared protocol fixtures cover Python/TypeScript/Rust source contracts. Phase 07 final cross-language/build reruns and native manual inspection are not yet claimed here.
+- Shared protocol fixtures cover Python/TypeScript/Rust source contracts. Current cross-language suites/build and the native behavioral journey are recorded in `harness/reconstruct/build-log.md`; exact native `720x560` and 200% zoom remain unavailable/not passed.
 - No formatter, linter, coverage threshold, or CI configuration is present.
 
 ## Known gaps and unreliable checks
 
 - No regression tests exist for stale folder metadata, empty/unreadable re-ingest, post-startup Skill tampering, extension cross-process lost update, or same-year earliest ambiguity.
 - No failure-injection test spans RAG folder metadata, raw JSON, and Chroma; no concurrency test covers simultaneous ingest/prune/read.
-- No test verifies persistent-store schema migration, embedding-model compatibility, moved roots, default single-file PID collisions, or prefix-search completeness.
+- No test verifies persistent-store schema migration, embedding-model compatibility, moved roots, default single-file PID collisions, preservation of `/init` exclusions during `/sync`, or prefix-search completeness.
 - No explicit timeout test covers MCP get_tools; raised aggregator/reviewer/reviser provider exceptions are not comprehensively tested.
-- No multiprocessing test covers desktop catalog lost updates. The fixture-only batch migration assumes its owned offline phase is not concurrently edited; it is not a production startup migration.
+- No multiprocessing test covers desktop catalog lost updates or canonical conversation writers. The fixture-only batch migration assumes its owned offline phase is not concurrently edited; it is not a production startup migration.
+- Legacy Chroma migration bounds parsed records but not recursive clone size/depth, and canonical hard-limit tests prove rejection rather than a rollover workflow.
 - No integrated stress test enumerates every concurrent raw-protocol RAG read/write intersection. Direct `knowledge.init_workspace` and `knowledge.ingest_folder` remain deliberate failures even though the composer route works.
-- Per-conversation thinking/skill snapshots are tested in-process and intentionally reset to safe defaults after backend restart because current durable formats do not store them.
+- Per-conversation thinking snapshots are tested in-process and intentionally reset to safe defaults after backend restart because current durable formats do not store them. Generic Skill selection is one-shot rather than a conversation snapshot.
 - Desktop fixture selection remains a runtime environment gate in tracked code; tests prove exact selection, but no build-time mechanism excludes it from ordinary source runs.
 - Installer, wheel protocol-asset lookup, bundled sidecar, signing, and cross-platform desktop checks do not exist by design.
+- Root README.md still describes retired `/skill`/`task_modes` behavior, and issue/08 still describes the removed absolute request deadline as open. Current code/tests and `app/SKILLS_GUIDE.md` govern until those records are updated.
+- Desktop has no Citation activation path; issue/09 defers the required single-turn versus multi-turn lifecycle decision.
 - Historical test counts in issue/note files do not establish current checkout health.
 - Current Phase 07 focused checks, final broad Python/npm/Cargo/Tauri checks, release build, and native behavioral journey passed as listed above. Exact native `720×560` and 200% zoom layout remains unavailable/not passed and blocks completion; live providers, real migration, and real user-state behavior remain unclaimed or Unknown.

@@ -31,31 +31,21 @@
 - Symptom: folder inventory, raw JSON, and Chroma can describe different partial states after an ingest/prune error.
 - Trigger / preconditions: Chroma/Ollama/filesystem failure after folder metadata or some Chroma mutations but before deferred raw JSON commit.
 - Affected components or users: semantic search versus list/context/explore results.
-- Root cause: Confirmed — the three stores are updated in order without one transaction; JSON-before-Chroma operations can also fail between writes.
-- Current handling / recovery: error propagates; rerun the idempotent ingest, or back up/move the generated store and rebuild.
+- Root cause: Confirmed — the three stores are updated in order without one transaction; JSON-before-Chroma operations can also fail between writes. `ingest_repo` directly truncates/rewrites folder_meta.json and treats a JSON decode or OS read failure as an empty mapping before the next write. Only raw.json uses atomic replacement, with mtime/size conflict detection.
+- Current handling / recovery: error propagates; rerun the idempotent ingest, or back up/move the generated store and rebuild. If a malformed/unreadable folder metadata read preceded a write, re-ingest any unrelated roots whose inventory was discarded.
 - Reproduction or detection: code-defined failure semantics; raw JSON rollback tests exist, but no cross-store failure-injection test.
 - Related invariants / assumptions: INV-008, INV-012, ASM-002, ASM-003.
 - Evidence: app/rag/cli/ingest.py; app/rag/store/document_store.py; app/rag/store/json_store.py::deferred_save.
 - Status: Active
 
-### FAIL-004 — Legacy hard-cap history loss (resolved)
-
-- Former symptom: the retired TurnStore could drop the oldest in-memory turn after repeated Chroma history write failures reached its hard cap.
-- Resolution: canonical conversation JSON now retains every accepted pending/terminal turn; normal session creation no longer constructs, writes, queries, evicts, or flushes a conversation-history Chroma store.
-- Current handling / recovery: canonical compare-and-swap transitions fail explicitly; there is no secondary conversation writer or hard-cap drop path.
-- Verification: Phase 06 history-retirement and canonical lifecycle tests, plus the Phase 07 integrated fixture assertion that `store/chat_history` is never created.
-- Related invariants / assumptions: INV-005, INV-006.
-- Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.
-- Status: Resolved in Phase 06
-
 ### FAIL-005 — Post-startup installed Skill tampering is activated
 
-- Symptom: modifying the private installed SKILL.md after startup changes the instructions loaded by a later /skill activation without apply/restart.
+- Symptom: modifying the private installed SKILL.md after startup changes the instructions loaded by a later one-shot command or Citation activation without apply/restart.
 - Trigger / preconditions: another same-user process or manual action mutates the managed installed bundle during a live session.
-- Affected components or users: Skill instructions, task modes, pinned resources, and requested tool permissions.
+- Affected components or users: Skill instructions, pinned resources, and requested tool permissions.
 - Root cause: Confirmed — startup validates source_hash, but SkillMetadata retains only the path and load_skill_runtime rereads disk without comparing the hash.
 - Current handling / recovery: restart will revalidate and skip a bad bundle; the live session has no activation-time guard.
-- Reproduction or detection: focused probe observed post_startup_tamper_loaded=True.
+- Reproduction or detection: focused probe observed post_startup_tamper_loaded=True. issue/02's `/skill`/task-mode command sequence is historical, but the unchanged activation-time path reread also serves current one-shot/Citation loading.
 - Related invariants / assumptions: INV-009, INV-013, ASM-007.
 - Evidence: issue/02-extension-skill-post-startup-integrity.md; app/agent/extensions/startup.py; app/agent/skills/runtime.py.
 - Status: Active
@@ -96,6 +86,30 @@
 - Evidence: `app/agent/desktop/service.py::_knowledge_init_workspace`, `_knowledge_ingest_folder`, and `_execute_desktop_knowledge_command`; protocol contract/tests.
 - Status: Active compatibility limitation
 
+### FAIL-014 — Workspace README advertises the retired generic Skill interface
+
+- Symptom: following root README.md leads to an unknown `/skill` command or a rejected manifest containing `task_modes`, and implies generic Skill state persists when the implementation clears it after one turn.
+- Trigger / preconditions: a user follows README.md sections 6/9 instead of current `app/SKILLS_GUIDE.md`, runtime help, or live tests.
+- Affected components or users: Skill authors and CLI/Desktop users.
+- Root cause: Confirmed — the runtime changed to dynamic one-shot commands and removed task modes, but the workspace README retained the older interface.
+- Current handling / recovery: invoke `/<skill-name> <prompt>` for non-Citation Skills; use `/citation` only in the CLI for the persistent Citation workflow; remove `task_modes` from manifests.
+- Reproduction or detection: `test_retired_persistent_skill_command_is_unknown` and `test_startup_reports_legacy_task_modes_manifest_as_unavailable` enforce behavior opposite to the stale README text.
+- Related invariants / assumptions: INV-019.
+- Evidence: README.md#Slash-Commands and #Skills; `app/agent/cli/slash_commands.py`; `app/agent/skills/manifest_schema.py`; `app/SKILLS_GUIDE.md`.
+- Status: Active documentation failure
+
+### FAIL-015 — Desktop has no Citation activation path
+
+- Symptom: `/citation <prompt>` is rejected in the Desktop composer, and the removed generic Skill controls provide no alternate Citation entry even though the CLI supports a persistent Citation workflow.
+- Trigger / preconditions: a Desktop user tries to start Citation mode.
+- Affected components or users: Desktop citation users; Citation engine/CLI behavior itself remains available.
+- Root cause: Confirmed product gap — Citation was deliberately excluded from the generic one-shot Skill conversion because it owns session-scoped registry/finalization state, and its cross-interface lifecycle decision was deferred.
+- Current handling / recovery: use the CLI `/citation` workflow; do not treat a normal Desktop answer as Citation mode.
+- Reproduction or detection: `test_composer_rejects_invalid_or_disallowed_commands_before_model` includes `/citation prompt`; App.tsx states that Citation mode is CLI-only.
+- Related invariants / assumptions: INV-010, INV-019.
+- Evidence: issue/09-citation-skill-flow-deferred.md; `app/agent/desktop/service.py::_session_turn`; `app/desktop/src/App.tsx`.
+- Status: Active compatibility limitation
+
 ### FAIL-009 — Provider or MCP failure degrades or aborts the affected path
 
 - Symptom: chat/extended/ingest/search/citation feature errors, or configured MCP tools are absent.
@@ -109,6 +123,26 @@
 - Status: Active operational mode
 
 ## Mitigated but still relevant
+
+### FAIL-004 — Legacy hard-cap history loss
+
+- Former symptom: the retired TurnStore could drop the oldest in-memory turn after repeated Chroma history write failures reached its hard cap.
+- Resolution: canonical conversation JSON now retains every accepted pending/terminal turn; normal session creation no longer constructs, writes, queries, evicts, or flushes a conversation-history Chroma store.
+- Current handling / recovery: canonical fingerprint-prechecked atomic replacements fail explicitly; there is no secondary conversation writer or hard-cap data-loss path. Canonical limit rejection is a separate explicit behavior tracked by ASM-024.
+- Verification: Phase 06 history-retirement and canonical lifecycle tests, plus the Phase 07 integrated fixture assertion that `store/chat_history` is never created.
+- Related invariants / assumptions: INV-005, INV-006.
+- Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.
+- Status: Resolved in Phase 06
+
+### FAIL-016 — Fixed absolute Desktop request deadline remains marked open in issue/08
+
+- Former symptom: the Rust supervisor killed an otherwise healthy normal request after 600 total seconds, regardless of progress.
+- Resolution: `BackendSupervisor.request` now submits normal requests with no timeout; response-channel closure, child exit, protocol failure, and bounded startup/shutdown paths still fail visibly.
+- Current handling / recovery: user-driven shutdown/restart handles a genuinely stuck live child; there is no replacement normal inactivity detector (ASM-019).
+- Verification: `progressing_request_can_outlive_the_prior_absolute_deadline` crosses the old shortened boundary and completes; `stdout_pipe_close_fails_the_pending_request_without_a_deadline` and `shutdown_bounds_an_in_flight_request` preserve terminal failure paths.
+- Related invariants / assumptions: INV-011, ASM-019.
+- Evidence: commit `45d446d`; `app/desktop/src-tauri/src/backend.rs`; `harness/fix_plans/build-log.md`. issue/08 still says Open and describes the pre-fix source, so current code/tests govern.
+- Status: Mitigated; source issue record stale
 
 ### FAIL-008 — Desktop shell was disconnected from the Python backend
 
@@ -170,6 +204,9 @@
 | Applied extension disappears after concurrent work | Compare desired state, registry revision, and both process reports | FAIL-006 |
 | Earliest citation looks arbitrary | Compare candidate year/date/relation evidence, not provider rank | FAIL-007 |
 | Raw desktop folder ingest says not enabled | Use the selected conversation's `/init` or `/ingest` route; inspect direct-method caller | FAIL-013 |
+| `/skill` is unknown or `task_modes` is rejected | Use `/<skill-name> <prompt>` and the current `app/SKILLS_GUIDE.md` contract | FAIL-014 |
+| `/citation` is rejected in Desktop | Use the CLI Citation workflow; consult the deferred product decision | FAIL-015 |
+| A long request is no longer killed at 600 seconds | Confirm current Rust source/test, then use explicit shutdown/restart only if it is actually stuck | FAIL-016 / ASM-019 |
 | Old checkout shows only a disabled desktop shell | Compare checkout to the current desktop commits and use the current source-run instructions | FAIL-008 |
 | Tool family missing | Session /status diagnostics and MCP stderr log | FAIL-009 |
 | Safe fallback instead of answer | Redaction-safe recovery reason/telemetry, not model content logs | FAIL-010 |
