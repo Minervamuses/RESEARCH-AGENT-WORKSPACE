@@ -45,9 +45,9 @@
 - Affected components or users: Skill instructions, pinned resources, and requested tool permissions.
 - Root cause: Confirmed — startup validates source_hash, but SkillMetadata retains only the path and load_skill_runtime rereads disk without comparing the hash.
 - Current handling / recovery: restart will revalidate and skip a bad bundle; the live session has no activation-time guard.
-- Reproduction or detection: focused probe observed post_startup_tamper_loaded=True. issue/02's `/skill`/task-mode command sequence is historical, but the unchanged activation-time path reread also serves current one-shot/Citation loading.
+- Reproduction or detection: focused probe observed post_startup_tamper_loaded=True. The `/skill`/task-mode command sequence in `issue/06-extension-skill-post-startup-integrity.md` is historical, but the unchanged activation-time path reread also serves current one-shot/Citation loading.
 - Related invariants / assumptions: INV-009, INV-013, ASM-007.
-- Evidence: issue/02-extension-skill-post-startup-integrity.md; app/agent/extensions/startup.py; app/agent/skills/runtime.py.
+- Evidence: issue/06-extension-skill-post-startup-integrity.md; app/agent/extensions/startup.py; app/agent/skills/runtime.py.
 - Status: Active
 
 ### FAIL-006 — Concurrent extension applies can lose an update
@@ -57,9 +57,9 @@
 - Affected components or users: applied Skill/MCP registry and managed-state expectations.
 - Root cause: Confirmed from control flow — _APPLY_LOCK is process-local; atomic replace prevents torn JSON but is not interprocess compare-and-swap.
 - Current handling / recovery: inspect status and re-apply missing desired state; no cross-process lock or regression test.
-- Reproduction or detection: deterministic race sequence documented in issue/04; multiprocessing reproduction not run in this audit.
+- Reproduction or detection: deterministic race sequence documented in `issue/07-extension-apply-cross-process-race.md`; multiprocessing reproduction not run in this audit.
 - Related invariants / assumptions: INV-009, ASM-008.
-- Evidence: app/agent/extensions/manager.py::_APPLY_LOCK; app/agent/extensions/registry.py::write_registry; issue/04.
+- Evidence: app/agent/extensions/manager.py::_APPLY_LOCK; app/agent/extensions/registry.py::write_registry; `issue/07-extension-apply-cross-process-race.md`.
 - Status: Active
 
 ### FAIL-007 — Same-year earliest citation can select the wrong version
@@ -71,7 +71,7 @@
 - Current handling / recovery: agent/user must inspect alternatives or request a specific version; no fail-closed tie rule exists.
 - Reproduction or detection: focused probe observed same_year_earliest=eligible:fixture:pub.
 - Related invariants / assumptions: INV-014, ASM-009.
-- Evidence: app/skills/citation/resolution.py::decide_resolution; issue/03; test_citation_resolution.py covers only different years.
+- Evidence: app/skills/citation/resolution.py::decide_resolution; `issue/04-citation-earliest-version-ambiguity.md`; test_citation_resolution.py covers only different years.
 - Status: Active
 
 ### FAIL-013 — Raw desktop folder-ingest methods are declared but disabled
@@ -107,7 +107,7 @@
 - Current handling / recovery: use the CLI `/citation` workflow; do not treat a normal Desktop answer as Citation mode.
 - Reproduction or detection: `test_composer_rejects_invalid_or_disallowed_commands_before_model` includes `/citation prompt`; App.tsx states that Citation mode is CLI-only.
 - Related invariants / assumptions: INV-010, INV-019.
-- Evidence: issue/09-citation-skill-flow-deferred.md; `app/agent/desktop/service.py::_session_turn`; `app/desktop/src/App.tsx`.
+- Evidence: issue/08-citation-skill-flow-deferred.md; `app/agent/desktop/service.py::_session_turn`; `app/desktop/src/App.tsx`.
 - Status: Active compatibility limitation
 
 ### FAIL-009 — Provider or MCP failure degrades or aborts the affected path

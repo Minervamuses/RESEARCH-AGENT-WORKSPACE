@@ -5,6 +5,7 @@
 - 類型：引用版本選擇正確性。
 - 優先度：低；仍是 active backlog，不因歷史延後決定而視為 resolved。
 - 狀態：Open；現行 `decide_resolution()` 仍會以非時間證據打破同年／缺日期平手。
+- 排序理由：必須先於 Citation save 結果回報驗證，讓後者使用正確的 resolver outcome。
 
 ## 專案背景
 

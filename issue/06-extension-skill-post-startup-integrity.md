@@ -5,6 +5,7 @@
 - 類型：完整性邊界缺口。
 - 優先度：中。
 - 狀態：Open；startup hash 驗證存在，但 live session 啟用 Skill 時仍會重新讀取磁碟而不再比對 hash。
+- 排序理由：排在 Citation 正確性與回報工作之後、較低優先的跨 process apply 競態之前。
 - 主要適用情境：同一個 session 存活期間，installed bundle 被其他程序或手動操作修改。
 
 ## 專案背景

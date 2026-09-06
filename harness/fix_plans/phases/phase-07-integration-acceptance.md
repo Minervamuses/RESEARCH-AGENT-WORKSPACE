@@ -85,8 +85,8 @@ On broad failure，do not immediately rerun。Isolate with the smallest owning-p
 
 - Map every GOALS success checkbox to build-log evidence/command/journey step。
 - Search for forbidden residue：normal `loadMcp:false` caller、normal request absolute deadline、Task mode/general persistent `/skill` controls、current `answer.chunk`/`post_finalized` contract或producer/consumer、Tool/Result concatenation into user role。
-- Confirm Citation `/citation` remains reserved/static，issue 09 remains open/deferred，and no GUI replacement is claimed。
-- Confirm Fusion/Extended code/acceptance and issue 07 deferral were not expanded。
+- Confirm Citation `/citation` remains reserved/static，`issue/08-citation-skill-flow-deferred.md` remains open/deferred，and no GUI replacement is claimed。
+- Confirm Fusion/Extended code/acceptance and the then-existing `issue/07-gui-first-turn-durability-deferred.md` deferral were not expanded。
 - Inspect `git diff --stat`、`git diff --name-status`、`git diff` and manifests/lockfiles；every changed file maps to an owning phase，no dependency/real data/generated output。
 - Confirm temporary root processes stopped，then validate exact owned path and remove only that root；record cleanup/absence。
 - If local commits were authorized，verify each phase commit scope/hash。Do not push。

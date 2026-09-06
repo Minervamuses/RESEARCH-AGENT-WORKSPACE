@@ -15,7 +15,7 @@ None.
 ## Confirmed Cause and Evidence Boundary
 
 - `app/desktop/src-tauri/src/backend.rs` 定義 `REQUEST_TIMEOUT = 600s`，放入 `SupervisorTimeouts.request`，並在等待 response 時以 timeout 產生 fatal error/kill。
-- Issue 08 與 source 證明存在 absolute limit；尚未等待真實 600 秒重現使用者回合。因此本 phase 用 deterministic shortened test 證明 causal behavior，不浪費十分鐘或呼叫 provider。
+- 歷史檔 `issue/08-desktop-absolute-request-timeout.md` 與 source 證明存在 absolute limit；尚未等待真實 600 秒重現使用者回合。因此本 phase 用 deterministic shortened test 證明 causal behavior，不浪費十分鐘或呼叫 provider。
 
 ## Causal Scope
 

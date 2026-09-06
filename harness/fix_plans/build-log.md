@@ -30,7 +30,7 @@
 - Runtime selected: WSL/Linux；commands 必須用 Linux Git/toolchain，Python 使用 Conda environment `app`。
 - Branch/upstream observed: `GUI` / `origin/GUI`。
 - Initial HEAD observed: `fa24b086e8dcf5bdae1a8db228b4337e9798df65`。
-- Initial user-owned untracked inputs observed: `harness/fix_plans/user-decisions.md`、`issue/07-gui-first-turn-durability-deferred.md`、`issue/08-desktop-absolute-request-timeout.md`；本 plan 又依使用者批註加入 issue 09 與 bundle files。
+- Initial user-owned untracked inputs observed: `harness/fix_plans/user-decisions.md`、`issue/07-gui-first-turn-durability-deferred.md`、`issue/08-desktop-absolute-request-timeout.md`；本 plan 又依使用者批註加入現稱 `issue/08-citation-skill-flow-deferred.md` 的 Citation issue 與 bundle files。
 - No application test、build、provider、MCP、Ollama、live GUI journey 或 persistent-data mutation was run as implementation evidence during authoring。
 
 ## Shared Safety Counters
@@ -309,7 +309,7 @@
 - Shared resolver regression command/result: `cd app && /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest tests/test_slash_commands.py -q` exited `0`；`29 passed, 1 warning in 0.14s`。
 - Diff/scope/safety audit: tracked production removal search returned no matches；only explicit negative tests retain retired method/field strings。`git diff --check` exited `0` with no output；React slash-parser search returned no matches；no dependency manifest or lockfile changed。Changed paths are exactly the 12 Phase 04 code/contract/test paths plus this log；CSS、Python protocol owner、backend Rust process code and all non-goals remained untouched。
 - Commit disposition/hash: Phase 04 implementation committed locally as `6fe0d165ca58cd835ed5c2e281e58c74eb4bd50d` (`fix(desktop): run dynamic skills once`)；the tree was clean immediately after commit。
-- Blockers or deferred issues: none for Phase 04。Citation GUI access remains deliberately deferred under issue 09/non-goal；live answer delta remains Phase 05。
+- Blockers or deferred issues: none for Phase 04。Citation GUI access remains deliberately deferred under `issue/08-citation-skill-flow-deferred.md`／non-goal；live answer delta remains Phase 05。
 - Next eligible action: create the authorized Phase 04-only local commit, record its hash, verify clean tree, then load Phase 05 as the next dependency-eligible phase without running broader suites。
 
 ## 2026-09-01 01:20 CST — Phase 04: implementation hash record
@@ -619,7 +619,7 @@
 - Exact final whitespace command/result: repository root `git diff --check` → exit `0`, no output. This is the single planned repository-wide Phase 07 diff check; the later cached check is commit-scope validation only.
 - Forbidden-residue audit: production search across Python、React/TypeScript、Rust and the shared contract returned no `answer.chunk`、`post_finalized`、`provisionalText`、Task-mode/active-Skill field or retired Skill RPC. Independent timeout searches returned no `request_timeout`、`normal_request_timeout` or `600` literal in `backend.rs`. `loadMcp` remains only the Python `params.get(..., True)` default and optional protocol validators; no production false default remains.
 - Audit-command nonpass: one attempted combined host-shell regex search was parsed as shell pipelines and returned command-not-found for its alternatives, so it is not evidence. The independent literal searches immediately above are the corrected evidence and made no writes.
-- Deferred-boundary audit: `/citation` remains the reserved persistent CLI special case; issue 09 and issue 07 files remain present. No Fusion/Extended、Citation product redesign、first-turn durability or multi-GUI implementation changed. The Phase 06 follow-up only suppresses an unmatched Citation receipt from Plan content.
+- Deferred-boundary audit: `/citation` remains the reserved persistent CLI special case; the then-named `issue/09-citation-skill-flow-deferred.md` and `issue/07-gui-first-turn-durability-deferred.md` files remained present at that checkpoint. No Fusion/Extended、Citation product redesign、first-turn durability or multi-GUI implementation changed. The Phase 06 follow-up only suppresses an unmatched Citation receipt from Plan content.
 - Manifest/lock audit: diff query over `app/pyproject.toml`、`poetry.lock`、`app/env`、Desktop `package.json`/lock、Cargo manifest/lock and `AGENTS.md` returned no path. `git status --short --untracked-files=all` listed exactly the five declared Phase 07 checkpoint paths; build `dist/`/`target/` remain ignored generated outputs, not commit candidates.
 - Final Phase 07 checkpoint paths: fixture-only `app/agent/desktop/fixture_session.py`、direct integration `app/tests/test_desktop_fixture.py`、`harness/fix_plans/GOALS.md`、this log and `phases/phase-07-integration-acceptance.md`. Pre-final-log stat was `468 insertions, 35 deletions`; all changes map to delayed fake observation、integrated acceptance evidence/status or success-condition mapping.
 - Safety counters: live/paid provider `0`、real MCP/Ollama `0`、real store/credential `0`、dependency/lockfile `0`、remote push `0`. One exact temporary root and one native process were removed/stopped and verified absent.

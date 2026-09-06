@@ -75,7 +75,7 @@ Phase 04不得修改 general Skill/Citation core semantics established by Phase 
 ## Citation Deferred Boundary
 
 - `/citation` 仍是保留 static name，dynamic resolver不能接管。
-- 本 phase 移除通用 GUI Skill controls後不新增 Citation button、alias或hidden RPC；GUI Citation暫時無入口是 issue 09 已明記的deferred gap。
+- 本 phase 移除通用 GUI Skill controls後不新增 Citation button、alias或hidden RPC；GUI Citation暫時無入口是 `issue/08-citation-skill-flow-deferred.md` 已明記的deferred gap。
 - 不刪/改 Citation CLI handler、registry/finalizer/thinking lifecycle；focused tests只證明 Desktop generic cleanup沒有從protocol側誤觸它。
 
 ## Acceptance Criteria

@@ -5,6 +5,7 @@
 - 類型：併發狀態一致性。
 - 優先度：低至中。
 - 狀態：Open；現行 `_APPLY_LOCK` 仍只在單一 Python process 內有效。
+- 排序理由：排在同屬 Extension 的 session 完整性問題之後，兩者可分開修正。
 - 成立條件：兩個獨立 CLI 或 Desktop backend process 對同一個 extension state root 幾乎同時 apply。
 
 ## 專案背景

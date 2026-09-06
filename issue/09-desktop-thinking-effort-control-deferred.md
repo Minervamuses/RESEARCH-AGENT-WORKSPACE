@@ -5,6 +5,7 @@
 - 類型：Desktop session control／thinking product contract。
 - 優先度：Deferred。
 - 狀態：Open；目前只記錄產品意圖，不指定實作方法。
+- 排序理由：段位、映射與 persistence 都尚未決定，因此放在目前 backlog 最後。
 
 ## 使用者需求
 

@@ -5,7 +5,8 @@
 - 類型：Desktop composer discovery／keyboard interaction。
 - 優先度：高。
 - 狀態：Open。
-- 關聯：這是通用 GUI command-discovery 基礎；Citation 是否能在 Desktop 執行仍由 [`09-citation-skill-flow-deferred.md`](09-citation-skill-flow-deferred.md) 另行決定。
+- 排序理由：這是高優先的 GUI 操作缺口，也是後續 Citation GUI lifecycle 的前置工作。
+- 關聯：這是通用 GUI command-discovery 基礎；Citation 是否能在 Desktop 執行仍由 [`08-citation-skill-flow-deferred.md`](08-citation-skill-flow-deferred.md) 另行決定。
 
 ## 使用者需求
 
@@ -30,7 +31,7 @@
 ## 與 Citation 的執行順序
 
 1. 先完成一般 built-in 與 one-shot Skill commands 的 catalog／menu。
-2. [`09-citation-skill-flow-deferred.md`](09-citation-skill-flow-deferred.md) 先決定 Citation 的 one-shot／multi-turn lifecycle、cleanup 與 thinking 契約。
+2. [`08-citation-skill-flow-deferred.md`](08-citation-skill-flow-deferred.md) 先決定 Citation 的 one-shot／multi-turn lifecycle、cleanup 與 thinking 契約。
 3. 只有 backend 宣告 Citation 可供該 Desktop session 使用時，menu 才能列出它。把 `/citation` 字樣放進清單本身不算完成 Citation 支援。
 
 ## 驗收條件

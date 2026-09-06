@@ -5,8 +5,9 @@
 - 類型：Skill invocation／session lifecycle／GUI access 契約尚未統一。
 - 優先度：Deferred。
 - 狀態：Open；使用者於 2026-08-31 明確延後 Citation Skill 的跨介面 lifecycle 決策。非 Citation Skill 的一次性 slash-command 修復已完成。
+- 排序理由：先完成通用 Desktop slash-command menu，再處理 Citation 特有的 lifecycle 決策。
 - 本次處理：只記錄現況、已知落差、未決產品選擇與後續驗收，不修改 Citation 實作。
-- 執行順序：先完成 [`13-desktop-slash-command-menu.md`](13-desktop-slash-command-menu.md) 的通用 GUI command catalog／鍵盤清單；Citation command 是否能列出與執行，仍須等本 issue 的 lifecycle 決策完成。
+- 執行順序：先完成 [`02-desktop-slash-command-menu.md`](02-desktop-slash-command-menu.md) 的通用 GUI command catalog／鍵盤清單；Citation command 是否能列出與執行，仍須等本 issue 的 lifecycle 決策完成。
 
 ## 使用者決定
 

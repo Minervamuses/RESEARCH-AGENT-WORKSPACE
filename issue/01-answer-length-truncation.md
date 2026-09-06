@@ -5,6 +5,7 @@
 - 類型：Final answer completeness／模型輸出上限。
 - 優先度：高。
 - 狀態：Open；使用者已多次觀察到回答被截斷，但本輪尚未保存一個含 provider `finish_reason` 的代表案例，因此根因仍需用實際回合確認。
+- 排序理由：直接影響主聊天回答完整性，列為第一個處理項目。
 - 主要範圍：一般 Normal answer。Extended Thinking 或 Citation 只有在同樣症狀被重現後才納入，不先假設所有模式都有同一個原因。
 
 ## 使用者觀察

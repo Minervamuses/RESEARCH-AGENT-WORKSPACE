@@ -96,7 +96,7 @@ Phases 01、02、03 可依 numeric order 獨立開始。04 必須建立在 03 �
 - 新增 production dependency、改 package manager/environment definition/lockfile。
 - Public API、protocol major version、unrelated persistent format、second store/service/queue/worker/cache、generic framework 或 broad graph rewrite。
 - Live/paid provider、真實 MCP endpoint、Ollama、full dataset、GPU/model sweep、真實 user store/root 或 credential value access。
-- Fusion、Extended Thinking、Citation redesign、first-turn abnormal-loss durability、多 GUI process、issue 02 或其他 non-goal。
+- Fusion、Extended Thinking、Citation redesign、first-turn abnormal-loss durability、多 GUI process、`issue/06-extension-skill-post-startup-integrity.md` 或其他 non-goal。
 - Command 預估超過約十分鐘、重跑 full suite、第二次 full build，除非新 evidence 說明為何必要。
 - Branch/worktree change、rebase、merge、remote push、release/deployment；local commit 也只有在 launch prompt 明確授權時才可做。
 

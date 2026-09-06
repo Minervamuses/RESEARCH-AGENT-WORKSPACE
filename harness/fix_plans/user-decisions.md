@@ -37,7 +37,7 @@
 - 不更動第一個 normal answer 完成後的 catalog registration 與 recent-turn persistence 順序。
 - 這表示「sidebar 已列出對話，但第一批問題與回答仍只在 backend 記憶體」的風險仍然存在；此決定是延後修正，不代表現況已安全。
 - 尚未執行真實 backend abnormal-loss boundary test，因此紀錄必須區分「寫入順序已由 source 證實」與「SIGKILL 後的具體失敗尚未重現」。
-- 後續處理另見 [`issue/07-gui-first-turn-durability-deferred.md`](../../issue/07-gui-first-turn-durability-deferred.md)。
+- 後續處理的歷史追蹤檔為 `issue/07-gui-first-turn-durability-deferred.md`；問題解決後已移除。
 
 ## USER DECISION 004 — 取消 Desktop 的固定十分鐘總時限
 
@@ -49,7 +49,7 @@
 - 一個仍在正常研究、使用工具或回報進度的回合，不得只因總經過時間超過十分鐘就被終止。
 - 不把 600 秒直接換成另一個任意的較大總時限；backend 啟動、關閉與真正失去回應的偵測可以有各自界線，但不能再混成同一個長回合 absolute deadline。
 - 本決定不授權修改 Fusion 或 Extended Thinking 路徑。
-- 問題與後續驗收另見 [`issue/08-desktop-absolute-request-timeout.md`](../../issue/08-desktop-absolute-request-timeout.md)。
+- 問題與後續驗收的歷史追蹤檔為 `issue/08-desktop-absolute-request-timeout.md`；問題解決後已移除。
 
 ## USER DECISION 005 — 移除 Task mode 與 GUI Skill 控制，改由 slash command 啟動 Skill
 
@@ -232,7 +232,7 @@ LangGraph 的 message stream 可能同時包含工具呼叫、empty retry、repa
 - 移除 GUI 的通用 Active skill control 後，本輪不新增替代的 GUI Citation 啟動流程。這是已知延後缺口，不代表 Citation 已不需要 GUI 路徑。
 - 移除共用 Task mode 欄位時，只能做維持共用 runtime/schema 一致性所需的機械調整；不得藉此重設 Citation 的 registry 生命週期、thinking 限制、持續期間或恢復語意。
 - 目前 CLI Citation 的既有行為應以 focused regression 保護，避免一般 Skill 修復意外破壞；產品流程的正式改造另案處理。
-- 後續問題、未決產品選擇與驗收方向見 [`issue/09-citation-skill-flow-deferred.md`](../../issue/09-citation-skill-flow-deferred.md)。
+- 後續問題、未決產品選擇與驗收方向見 [`issue/08-citation-skill-flow-deferred.md`](../../issue/08-citation-skill-flow-deferred.md)。
 
 ## USER DECISION 014 — Normal answer 改為 authoritative final-only delivery
 

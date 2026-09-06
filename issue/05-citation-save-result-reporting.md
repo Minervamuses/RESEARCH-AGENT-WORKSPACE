@@ -5,7 +5,7 @@
 - 類型：Citation save 結果的使用者可見回報驗證。
 - 優先度：中。
 - 狀態：Open；結構化 ToolMessage 通道已存在，但仍缺少 mixed success／failure 代表流程對最終使用者回報的驗證。
-- 建議順序：若與 Citation resolution 一起處理，先完成 [`03-citation-earliest-version-ambiguity.md`](03-citation-earliest-version-ambiguity.md)，再以正確 resolver outcome 驗證本 issue；兩者不是同一個修正。
+- 建議順序：先完成 [`04-citation-earliest-version-ambiguity.md`](04-citation-earliest-version-ambiguity.md)，再以正確 resolver outcome 驗證本 issue；兩者不是同一個修正。
 - 重要限制：不要恢復舊版以 host finalizer 全面攔截、解析並覆寫模型回覆的架構。
 
 ## 專案背景

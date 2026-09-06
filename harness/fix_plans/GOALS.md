@@ -15,7 +15,7 @@
 - 非 Citation Skill 由 CLI 與 GUI 共用的 Python-owned `/<skill-name> <自然語言 prompt>` 契約啟動，且只作用於該命令所建立的一次工作；成功、失敗、取消或關閉後都不得殘留 Active Skill 或 Task mode。
 - Normal answer 只有在 Python 完成 generation、repair、finalization、validation 與 persistence 後才交付；Desktop 一次顯示完整 authoritative final answer，不發送 `answer.chunk`，也不以完成後切塊模擬串流。
 - Sidebar 能載入並接續含工具活動的 Plan conversation：歷史 user、tool activity/result、final assistant 分開顯示，舊 tool call 永不因 restore 而重跑，可靠的新格式資料才能以 tool role 加入後續 prompt。
-- Citation 的專用流程本次不重設；它保留為 built-in `/citation` 例外，已知 GUI 入口缺口另由 [`issue/09-citation-skill-flow-deferred.md`](../../issue/09-citation-skill-flow-deferred.md) 追蹤。
+- Citation 的專用流程本次不重設；它保留為 built-in `/citation` 例外，已知 GUI 入口缺口另由 [`issue/08-citation-skill-flow-deferred.md`](../../issue/08-citation-skill-flow-deferred.md) 追蹤。
 
 ## Success Conditions
 
@@ -76,7 +76,7 @@
 
 - Fusion 或 Extended Thinking 的串流、Skill 相容性、模型選擇或其他修復。
 - Citation handler、Citation source registry、citation gate/renderer、thinking 限制、持續期間、重啟語意或 GUI 替代入口的產品重設。
-- 第一個 normal answer 完成後、catalog registration 前的 abnormal-loss durability；另見 [`issue/07-gui-first-turn-durability-deferred.md`](../../issue/07-gui-first-turn-durability-deferred.md)。
+- 第一個 normal answer 完成後、catalog registration 前的 abnormal-loss durability；歷史追蹤檔為 `issue/07-gui-first-turn-durability-deferred.md`，問題解決後已移除。
 - 同一 local state root 同時執行兩個 GUI process。
 - Extension Skill integrity、Fusion、其他 `issue/` 或 `note/` 中未被本計劃列入的問題。
 - 任意 inactivity framework、heartbeat service、queue、worker、database、第二套 persistence、generic command router 或 broad architecture rewrite。
@@ -101,8 +101,8 @@
 
 - MCP default：[`user-decisions.md`](user-decisions.md) USER DECISION 001。
 - Fusion/Extended Thinking 排除：USER SCOPE DECISION 002。
-- First-turn durability 延後：USER SCOPE DECISION 003 與 issue 07。
-- 取消 600 秒總時限：USER DECISION 004 與 issue 08。
+- First-turn durability 延後：USER SCOPE DECISION 003 與歷史檔 `issue/07-gui-first-turn-durability-deferred.md`。
+- 取消 600 秒總時限：USER DECISION 004 與歷史檔 `issue/08-desktop-absolute-request-timeout.md`。
 - 移除 Task mode／GUI Skill control：USER DECISION 005。
 - Normal OpenRouter live streaming 的歷史要求：USER DECISION 006；已由 USER DECISION 014 明確 supersede。
 - Normal authoritative final-only delivery：USER DECISION 014。
@@ -111,7 +111,7 @@
 - GUI 接受 Skill command：USER DECISION 010。
 - Sidebar tool-aware restore/continue：USER DECISION 011。
 - Dynamic Skill canonical syntax：USER DECISION 012。
-- Citation 延後：USER SCOPE DECISION 013 與 issue 09。
+- Citation 延後：USER SCOPE DECISION 013 與 [`issue/08-citation-skill-flow-deferred.md`](../../issue/08-citation-skill-flow-deferred.md)。
 
 ## Known Engineering Unknowns / 工程未知
 
@@ -122,5 +122,5 @@ None currently identified for the Phase 05 product boundary. Phase 05 attempt 1 
 - [`user-decisions.md`](user-decisions.md) 中截至 2026-09-01 的使用者決策、USER DECISION 006 歷史蒐證與 superseding USER DECISION 014。
 - Repository root `AGENTS.md` 與 live Git/runtime/toolchain evidence。
 - 既有完成 bundle：`harness/plans/2026-08-24-desktop-gui-completion/`。
-- [`issue/07-gui-first-turn-durability-deferred.md`](../../issue/07-gui-first-turn-durability-deferred.md)、[`issue/08-desktop-absolute-request-timeout.md`](../../issue/08-desktop-absolute-request-timeout.md)、[`issue/09-citation-skill-flow-deferred.md`](../../issue/09-citation-skill-flow-deferred.md)。
+- Authoring 當時使用、後來於問題解決後移除的 `issue/07-gui-first-turn-durability-deferred.md`、`issue/08-desktop-absolute-request-timeout.md`，以及目前的 [`issue/08-citation-skill-flow-deferred.md`](../../issue/08-citation-skill-flow-deferred.md)。
 - Live Python、React/TypeScript、Rust、protocol contract、fixture 與 tests；執行 phase 時必須重新讀取，不能只信本計劃中的 dated paths。

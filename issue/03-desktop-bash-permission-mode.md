@@ -5,6 +5,7 @@
 - 類型：Desktop trust UX／Bash execution policy。
 - 優先度：高。
 - 狀態：Open；實作前仍需由使用者決定 permission mode 的生命週期。
+- 排序理由：屬高優先 GUI 控制，但開始實作前仍需先固定設定生命週期。
 - 範圍：只處理 Bash tool 的逐次批准模式；不改變 Extension apply、MCP binding 或其他信任流程。
 
 ## 使用者需求
