@@ -192,6 +192,50 @@
 - Evidence: .gitattributes; issue/05-cross-platform-line-endings.md.
 - Status: Mitigated
 
+### FAIL-017 — Persisted first-turn failure disappeared from the sidebar
+
+- Former symptom: after the first prompt was durably accepted but provider execution failed, creating another conversation could leave the failed conversation absent from the sidebar or unavailable for reselection.
+- Root cause: the frontend error path showed the failure but did not refresh the project catalog and selected canonical transcript after Python reported a persisted turn lifecycle.
+- Resolution: `reconcilePersistedTurnFailure` refreshes catalog and transcript only when lifecycle metadata says the turn was both accepted and persisted, with generation, project, and session guards against stale async results.
+- Current handling / recovery: if reconciliation itself fails, the original error remains and an additional saved-but-refresh-failed notice is shown; later reselection/refresh can recover from canonical state.
+- Verification: TypeScript regression `durable first-turn failure remains selectable after creating another conversation`; Python `test_first_prompt_registers_catalog_before_provider_failure` covers the durable backend premise.
+- Related invariants / assumptions: INV-006, INV-011, ASM-015.
+- Evidence: commit `9992913`; `app/desktop/src/App.tsx`; `app/agent/desktop/service.py`; corresponding Python/TypeScript tests.
+- Status: Mitigated
+
+### FAIL-018 — A pending retry duplicated its stale failure card
+
+- Former symptom: retrying a restored failed or interrupted turn could render both the old terminal card and a new pending card, temporarily inflating the visible turn count.
+- Root cause: pending turns were appended outside the restored/live logical-turn merge.
+- Resolution: pending records now participate in `mergeConversationTurns` under `(sessionId, turnId)` identity, overlaying the stale failure until the authoritative terminal result replaces them.
+- Current handling / recovery: a genuinely new pending turn receives provisional ordering after the loaded session's current maximum; terminal `turnNumber` remains authoritative.
+- Verification: pending failed/interrupted overlay, new-pending append, and unresolved-retry single-prompt TypeScript regressions.
+- Related invariants / assumptions: INV-011, ASM-015.
+- Evidence: commit `e3dfdbe`; `app/desktop/src/conversations.ts`; `app/desktop/src/App.tsx`; Desktop TypeScript tests.
+- Status: Mitigated
+
+### FAIL-019 — Large Markdown exceeded JavaScript's variadic argument capacity
+
+- Former symptom: sufficiently large inline, list, or block Markdown content could fail while React elements were created with spread dynamic children.
+- Root cause: content-sized arrays were expanded into function arguments, inheriting the JavaScript engine's finite call-argument capacity.
+- Resolution: `SafeContent` passes dynamic child collections as array children.
+- Current handling / recovery: structural regressions exercise 140,000 inline, list-item, and paragraph children. This is an evidence point, not a product ceiling or native-WebView performance guarantee.
+- Verification: three large-content TypeScript regressions in `conversations.test.ts`.
+- Related invariants / assumptions: INV-017, ASM-025.
+- Evidence: commit `8dee300`; `app/desktop/src/SafeContent.tsx`; `app/desktop/tests/conversations.test.ts`.
+- Status: Mitigated
+
+### FAIL-020 — Maximized Desktop window retained compact typography
+
+- Former symptom: maximizing or using a wide Desktop window increased whitespace while text remained at the same small scale.
+- Root cause: the root had no width-responsive font size while component typography used `rem` values, so wider windows did not alter the inherited scale.
+- Resolution: the root font uses a bounded viewport-responsive clamp: it preserves the 1rem baseline at the initial 1080px width, grows on wider windows, and caps at 1.3125rem.
+- Current handling / recovery: the source contract and representative-width arithmetic are tested; pre-maintenance headless-Chrome observations covered 720, 1080, 1920, and 2560 widths. Native maximized/fullscreen Tauri, DPI, and human visual acceptance remain unverified.
+- Verification: `styles.test.ts`, `npm test` (151 passing before this documentation pass at the same HEAD), `npm run build`, and headless layout observations.
+- Related invariants / assumptions: INV-021, ASM-025.
+- Evidence: commit `743aaaf`; `app/desktop/src/styles.css`; `app/desktop/tests/styles.test.ts`.
+- Status: Mitigated; native visual evidence remains a testing gap
+
 ## Diagnostic index
 
 | Symptom | First safe check | Likely item |
@@ -210,3 +254,7 @@
 | Old checkout shows only a disabled desktop shell | Compare checkout to the current desktop commits and use the current source-run instructions | FAIL-008 |
 | Tool family missing | Session /status diagnostics and MCP stderr log | FAIL-009 |
 | Safe fallback instead of answer | Redaction-safe recovery reason/telemetry, not model content logs | FAIL-010 |
+| Saved first-turn failure is missing from the sidebar | Check lifecycle `accepted`/`persisted` flags, then catalog/transcript refresh errors | FAIL-017 |
+| Retry shows both pending and stale failed cards | Inspect the logical `(sessionId, turnId)` merge across restored/live/pending sources | FAIL-018 |
+| Huge Markdown throws or disappears | Inspect `SafeContent` for variadic dynamic-child spreads; distinguish correctness from native performance | FAIL-019 / ASM-025 |
+| Text stays tiny after maximizing | Inspect the root typography clamp and computed root size; then perform a native visual check | FAIL-020 / INV-021 |

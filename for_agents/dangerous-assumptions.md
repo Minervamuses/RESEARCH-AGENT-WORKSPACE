@@ -4,11 +4,11 @@
 
 ### ASM-001 — External model and embedding services are available
 
-- Assumption: Configured OpenRouter models, Ollama, bge-m3, and optional MCP/citation providers are reachable and compatible when their features run.
+- Assumption: Configured OpenRouter models, including the current main default `google/gemini-3.8-flash`, Ollama, bge-m3, and optional MCP/citation providers are reachable and compatible when their features run.
 - Where relied on: chat, extended thinking, extension preview, folder tagging, ingest/search, web/GitHub tools, citation discovery.
 - Failure if false: feature-specific startup/turn/ingest/save failure or missing tool family; no offline semantic fallback.
-- Detection or mitigation: fail-fast checks, provider errors, MCP diagnostics, deterministic fake-provider tests.
-- Evidence: README.md; app/agent/startup.py; app/rag/embedder/ollama.py.
+- Detection or mitigation: fail-fast checks, provider errors, MCP diagnostics, deterministic fake-provider tests, and an offline test of the main-model configuration value. That test does not establish provider-side model availability.
+- Evidence: README.md; `app/agent/config.py`; `app/agent/llm/openrouter.py`; `app/tests/test_openrouter_model.py`; app/agent/startup.py; app/rag/embedder/ollama.py.
 - Status: Active
 - Confidence: Confirmed dependency; live availability Unknown.
 
@@ -112,13 +112,13 @@
 - Status: Active
 - Confidence: Confirmed documentation/runtime mismatch.
 
-### ASM-012 — Desktop remains a valid source checkout and contract copies stay aligned
+### ASM-012 — Desktop remains a valid source checkout, launch environment, and aligned contract set
 
-- Assumption: Rust can derive the repository/app roots from its Cargo manifest, the Conda `app` interpreter remains at `<CONDA_PREFIX>/bin/python`, Python can read `app/desktop/protocol/v1`, and the manually maintained Python/TypeScript/Rust validators remain synchronized.
+- Assumption: Rust can derive the repository/app roots from its Cargo manifest, the Conda `app` interpreter remains at `<CONDA_PREFIX>/bin/python`, Python can read `app/desktop/protocol/v1`, and the manually maintained Python/TypeScript/Rust validators remain synchronized. When root `main.py` is used, the caller already has `npm` on `PATH` and installed Desktop dependencies; the launcher does not activate or validate Conda itself.
 - Where relied on: every supported desktop startup and protocol request.
 - Failure if false: startup degrades, installed-wheel/relocated-binary use fails, or one language rejects/accepts a shape differently.
 - Detection or mitigation: strict source/Conda checks, shared contract/fixtures, three-language tests, and explicit source-only README guidance. `pyproject.toml` still does not package the desktop contract and Tauri bundling is disabled.
-- Evidence: `app/desktop/src-tauri/src/backend.rs::source_conda_launch`; `app/agent/desktop/protocol.py`; protocol fixtures; manifests.
+- Evidence: root `main.py`; `app/desktop/src-tauri/src/backend.rs::source_conda_launch`; `app/agent/desktop/protocol.py`; protocol fixtures; manifests.
 - Status: Active
 - Confidence: Confirmed source-checkout dependency; any packaged topology Unknown.
 
@@ -202,6 +202,16 @@
 - Status: Active
 - Confidence: Confirmed item-count limits; adequacy for real long-lived stores Unknown.
 
+### ASM-025 — Structural renderer tests approximate native large-content behavior
+
+- Assumption: avoiding variadic React children is sufficient for useful rendering of extremely large Markdown in the native WebView, and the bounded root typography scale remains visually usable across platform DPI and fullscreen states.
+- Where relied on: `SafeContent` presentation and responsive Desktop CSS.
+- Failure if false: JavaScript no longer throws on argument count, but the native UI can still consume excessive memory, become sluggish, overflow, or look poorly scaled.
+- Detection or mitigation: array-valued child construction, 140,000-child server-render regressions, CSS arithmetic checks, and pre-maintenance headless-Chrome observations. No product content ceiling or native-WebKit performance/layout claim is made.
+- Evidence: `app/desktop/src/SafeContent.tsx`; `app/desktop/tests/conversations.test.ts`; `app/desktop/src/styles.css`; `app/desktop/tests/styles.test.ts`.
+- Status: Active
+- Confidence: Source mitigation Confirmed; native resource and visual behavior Unknown.
+
 ## Assumptions under investigation
 
 ### ASM-014 — Model prose truthfully reflects citation save outcomes
@@ -226,12 +236,15 @@
 
 ## Retired assumptions
 
+### ASM-017 — Deferred catalog registration through flush is no longer assumed
+
+Canonical JSON is the sole active transcript authority and `ConversationRepository` is its sole writer. Accepted prompts become pending before provider/tool execution, terminal state precedes success exposure, and restart converts leftover pending work to interrupted without automatic replay. Repository, lifecycle, Desktop restart, and subprocess crash-boundary tests cover this offline ordering.
+
 ### ASM-023 — Legacy conversation staging is no longer a runtime assumption
 
 - The former assumption covered the resource cost of recursively cloning legacy conversation Chroma for import. The importer and its staging clone have been removed; old `chat_history` and Plan-log sources are now left untouched and are not runtime inputs.
 
 - issue/05: repository line endings no longer depend on global Git defaults; .gitattributes now owns LF policy.
 - issue/06: separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one AgentConfig graph fuse with early finalization governs the current graph.
-- ASM-017: catalog registration no longer depends on a later eviction or shutdown flush. Canonical JSON is the sole active transcript authority and `ConversationRepository` is its sole writer: accepted prompts become `pending` before provider/tool execution, terminal state precedes success exposure, and restart converts leftover pending work to interrupted without automatic replay. Repository, lifecycle, Desktop restart, and six subprocess crash-boundary tests cover this offline ordering.
 - Generic Skill task-mode/persistent-selection assumptions are retired: `task_modes` is no longer a valid manifest field, `/skill` is reserved but unregistered, and non-Citation Skills run once from `/<skill-name> <prompt>`.
 - The former assumption that every Desktop request must finish within 600 seconds is retired. Current Rust code has no normal absolute request deadline; only startup/shutdown and actual transport/process failure paths remain bounded.

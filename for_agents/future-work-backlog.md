@@ -188,8 +188,15 @@
 
 - issue/05 is resolved: repository-owned .gitattributes enforces LF and prevents host Git defaults from governing text files.
 - issue/06 is resolved: separate tool quotas were removed; one validated graph recursion fuse with early finalization now governs turns.
-- BACKLOG-007 is resolved/removed: persistent generic Skill selection and task modes were retired in `78589e9`; legacy manifests containing `task_modes` are rejected, `/skill` is reserved but unregistered, and non-Citation Skills use one-shot commands with focused tests.
-- BACKLOG-012 is resolved for the supported offline source paths: canonical JSON is the sole active transcript authority and `ConversationRepository` its sole writer; prompt-first and terminal-before-success ordering remove the former flush window; repository temporary-write tests, catalog/restart tests, six real Python-backend SIGKILL checkpoints, final broad suites/build, and the native Tauri behavioral journey cover interrupted/no-auto-replay recovery. This does not claim live provider or real user-state behavior; exact native `720×560` and 200% zoom layout evidence remains unavailable/not passed and blocks Phase 07 completion.
+
+### BACKLOG-007 — Persistent generic Skill selection and task modes removed
+
+Resolved/removed in `78589e9`: legacy manifests containing `task_modes` are rejected, `/skill` is reserved but unregistered, and non-Citation Skills use one-shot commands with focused tests.
+
+### BACKLOG-012 — Canonical prompt-first conversation lifecycle replaced flush repair
+
+Resolved for the supported offline source paths: canonical JSON is the sole active transcript authority and `ConversationRepository` its sole writer. Prompt-first and terminal-before-success ordering remove the former flush window; repository temporary-write tests, catalog/restart tests, six real Python-backend SIGKILL checkpoints, final broad suites/build, and the native Tauri behavioral journey cover interrupted/no-auto-replay recovery. This does not claim live-provider or real-user-state behavior; exact native `720×560` and 200% zoom evidence remains unavailable/not passed.
+
 ### BACKLOG-018 — Legacy conversation staging removed with the importer
 
 This item is resolved/removed with the legacy conversation importer itself: no current path clones or stages old `chat_history`, and old Chroma/Plan-log sources are left untouched rather than converted.

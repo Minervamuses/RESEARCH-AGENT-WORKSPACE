@@ -4,6 +4,8 @@
 
 This is a student-owned Linux/WSL local research application. One Poetry distribution rooted at `app/` packages three Python namespaces: `agent` for the stateful LangGraph application, `rag` for framework-neutral ingest/retrieval, and `skills` for built-in workflows. Conda owns the Python/Node/Rust runtime; Poetry installs into the active `app` environment without creating a virtual environment. Local stores, citation bundles, extension state, desktop catalog, and MCP logs are runtime artifacts rather than repository source. Old Plan logs may remain on disk but are not read or imported by the current runtime.
 
+The repository-root `main.py` is a source-checkout convenience launcher only: it runs `npm run tauri dev` with `app/desktop` as the working directory and returns that process's exit code. It does not activate Conda, install dependencies, or introduce another backend.
+
 The repository also contains a tracked source-checkout desktop application. React presents projects, conversations, thinking controls, trust prompts, and complete finalized output. Tauri/Rust owns the native window, five allowlisted commands, one supervised Python child, NDJSON correlation, crash/restart state, and graceful-versus-forced shutdown reporting. The Python `agent.desktop` backend owns protocol validation, project/catalog coordination, conversation restoration, slash-command routing, RAG/extension adapters, Bash approval correlation, and all domain writes. Normal answers are exposed only by one terminal `final_only` result after finalization and persistence; progress/tool events never carry answer text.
 
 ## Components and boundaries
@@ -11,6 +13,7 @@ The repository also contains a tracked source-checkout desktop application. Reac
 | Component | Purpose | Entry points / interfaces | Depends on | Evidence | Confidence |
 |---|---|---|---|---|---|
 | Runtime and packaging | Single Linux application environment and distribution | app/pyproject.toml, app/env/env-app.yml, app/poetry.toml | Conda, Poetry, Python 3.12-3.13, Node, Rust | AGENTS.md; app/pyproject.toml | Confirmed |
+| Root desktop launcher | Thin source-checkout delegation to the existing Tauri development path | `python main.py` | `npm` on `PATH`, installed Desktop dependencies, `app/desktop` checkout | `main.py`; source inspection at `743aaaf` | Confirmed source behavior |
 | Agent composition core | Session lifecycle, graph construction, configuration, startup, MCP, ingest adapter, telemetry | agent.ChatSession, agent.build_graph, python -m agent.cli.chat | LangGraph, OpenRouter, rag public API, skill runtime | app/agent/README.md; app/agent/session.py::ChatSession; app/agent/startup.py::load_session_startup | Confirmed |
 | Turn and thinking lifecycle | Normal and extended execution, finalization, fixed latest-ten canonical context, process-local diagnostics | turns.execution.execute_graph, thinking.orchestrator.FusionOrchestrator | Agent graph, tool policy, conversation repository | app/agent/turns/README.md; app/agent/thinking/README.md | Confirmed |
 | Tool and Skill policy | Local tools, global versus Skill-scoped access, runtime denial, one-shot non-Citation Skill commands, and the persistent Citation exception | tools.access.resolve_tool_access, PolicyToolNode, build_default_registry, load_skill_runtime | RAG/file/shell adapters, MCP tools, strict manifests | app/agent/tools/README.md; app/agent/cli/slash_commands.py; app/agent/session.py | Confirmed |
@@ -20,7 +23,7 @@ The repository also contains a tracked source-checkout desktop application. Reac
 | Desktop protocol | Versioned schema-checked request/event/result contract; requests, events, failures, and non-conversation results remain bounded, while validated `session.turn`/`session.transcript` success text has no numeric bytes ceiling | `app/desktop/protocol/v1/contract.json` and `fixtures.json` | Manual language implementations and shared fixtures | Python/TypeScript/Rust protocol sources and tests | Confirmed |
 | Python desktop backend | NDJSON server, safe DTO/domain adapter, durable project catalog, canonical conversation restore, dynamic one-shot Skill/composer routing, final-only results, catalog-only unavailable handling, and exact fixture seams | `python -m agent.desktop.server` | Agent/RAG/extension/citation public boundaries and local state | `app/agent/desktop`; `app/tests/test_desktop_*.py` | Confirmed tracked source |
 | Rust/Tauri host | Validate source checkout/Conda, supervise one Python child, correlate requests, wait without a normal absolute request deadline, drain stderr, and synthesize lifecycle failures | `backend_start`, `backend_snapshot`, `backend_request`, `backend_shutdown`, `backend_restart` | Tauri, OS pipes/processes, protocol v1 | `app/desktop/src-tauri/src/backend.rs`; `lib.rs` | Confirmed |
-| React desktop client | Project/sidebar UI, transcript/composer, thinking control, final-only answer presentation, trust dialogs, and safe rendering | `App`; `BackendClient`; reducers and panels | Five Tauri commands and one event channel | `app/desktop/src`; TypeScript tests | Confirmed |
+| React desktop client | Project/sidebar UI, restored/live/pending transcript projection, persisted-failure reconciliation, composer keyboard policy, thinking control, final-only answer presentation, trust dialogs, safe large-content rendering, and responsive typography | `App`; `BackendClient`; reducers, renderer, and CSS | Five Tauri commands and one event channel | `app/desktop/src`; TypeScript tests; source inspection at `743aaaf` | Confirmed source behavior |
 | Test suite | One pytest suite plus desktop TypeScript/Rust tests and isolated fixture journeys | `app/tests`; `npm test`; `cargo test` | Fake providers and temporary roots for most checks | Manifests; current tests; completed build log | Confirmed |
 | Plans and records | Historical evidence, decisions, and plan-specific status for the original GUI, corrective fixes, and canonical-conversation cutover | `issue`, `note`, `harness/plans`, `harness/fix_plans`, `harness/reconstruct` | Live code remains authoritative | Tracked records and each bundle's build-log status | Confirmed non-runtime |
 
@@ -53,6 +56,10 @@ RAG and citation state are local generated files. No service, database server, w
 
 The supported desktop source-checkout topology is:
 
+    optional python main.py launcher
+      -> npm run tauri dev
+      -> Tauri beforeDevCommand starts Vite
+
     React App
       -> five allowlisted Tauri invoke commands
       -> Rust BackendSupervisor
@@ -80,7 +87,8 @@ Conversation restore is canonical-only. Selecting a catalog session whose canoni
 
 ## Unverified areas
 
-- Unknown: live OpenRouter, Ollama, MCP, citation-provider, and real persistent-store behavior at this commit; no credentials or user data were inspected.
+- Unknown: live OpenRouter, Ollama, MCP, citation-provider, and real persistent-store behavior at this commit; no credentials or user data were inspected. The configured main-model default is `google/gemini-3.8-flash`, but its offline configuration test does not prove present OpenRouter availability.
+- Unknown: native WebKit layout and resource behavior for the new responsive typography and extremely large Markdown trees. TypeScript structural tests and headless-Chrome layout observations are narrower than a maximized native Tauri visual check.
 - Unknown: concurrent use by multiple desktop application processes. The Rust supervisor and Python operation gates are per process, while canonical conversation files, the project catalog, and the extension registry lack a shared cross-process transaction.
 - Unknown: resource behavior for very large canonical documents at actual platform exhaustion, and for long-lived stores approaching the remaining turn-count or catalog-scan item limits. Complete answer/document/wire/transcript text has no numeric bytes ceiling.
 - Unknown: wheel-installed `agent.desktop` protocol asset lookup and any installer/standalone bundle. Current manifests and README support source checkout only.

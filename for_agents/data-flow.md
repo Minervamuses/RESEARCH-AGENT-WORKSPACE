@@ -91,14 +91,15 @@
 
 ### Flow: Desktop backend startup, requests, and shutdown
 
-- Trigger / input: React calls one of the five Tauri backend commands.
+- Trigger / input: a user may run root `python main.py`, which delegates to `npm run tauri dev`; the resulting React client calls one of the five Tauri backend commands.
 - Output / side effect: one Rust-managed Python child generation, correlated protocol events/results, and a truthful lifecycle snapshot or shutdown report.
 - Steps:
-  1. React `BackendClient` — validate/build a protocol-v1 request and invoke Tauri.
-  2. Rust supervisor — require active Conda environment `app`, resolve the source checkout, and spawn `<CONDA_PREFIX>/bin/python -m agent.desktop.server` with repository cwd and `PYTHONPATH=app`.
-  3. Python server — revalidate Linux/Conda, redirect incidental stdout to stderr, emit `backend.ready`, and accept bounded NDJSON lines. New sessions load MCP by default unless the request explicitly opts out; React omits the field to delegate that default.
-  4. Rust pipe readers — enforce UTF-8/line size/origin/order, correlate events and one terminal result, and emit bounded Tauri events to React. Normal requests wait on channel completion without a fixed elapsed-time deadline; startup and shutdown retain bounded waits.
-  5. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, closes the session without a transcript-flush lifecycle, emits shutdown state, and exits. Rust reports whether the child exited gracefully or was forced.
+  1. Source launcher — optional root `main.py` changes only the child working directory to `app/desktop` and starts the existing Tauri development command; Tauri's configured development command starts Vite.
+  2. React `BackendClient` — validate/build a protocol-v1 request and invoke Tauri.
+  3. Rust supervisor — require active Conda environment `app`, resolve the source checkout, and spawn `<CONDA_PREFIX>/bin/python -m agent.desktop.server` with repository cwd and `PYTHONPATH=app`.
+  4. Python server — revalidate Linux/Conda, redirect incidental stdout to stderr, emit `backend.ready`, and accept bounded NDJSON lines. New sessions load MCP by default unless the request explicitly opts out; React omits the field to delegate that default.
+  5. Rust pipe readers — enforce UTF-8/line size/origin/order, correlate events and one terminal result, and emit bounded Tauri events to React. Normal requests wait on channel completion without a fixed elapsed-time deadline; startup and shutdown retain bounded waits.
+  6. Shutdown — Rust sends `runtime.shutdown`; Python refuses while unsafe work is active, closes the session without a transcript-flush lifecycle, emits shutdown state, and exits. Rust reports whether the child exited gracefully or was forced.
 - State or ownership transitions: Rust owns child/generation/pending-request state; Python owns session and stores; React owns presentation state and discards stale-generation events.
 - Error / retry / rollback behavior: wrong runtime or startup timeout degrades without a child; malformed output, pipe/channel closure, child exit, or bounded shutdown failure clears pending work and stops the generation. A live child that neither responds nor closes its output has no automatic normal-request timeout and requires user-driven shutdown/restart. Stderr content is drained but only counts are retained by Rust.
 - Invariants involved: INV-011, INV-015, INV-017, INV-020.
@@ -107,7 +108,7 @@
 
 ### Flow: Desktop conversation creation, turn presentation, and restoration
 
-- Trigger / input: project/sidebar selection, new conversation, control change, or composer text.
+- Trigger / input: project/sidebar selection, new conversation, control change, or composer text. Plain Enter submits; Shift+Enter inserts a newline; IME-composing Enter is ignored by submission logic.
 - Output / side effect: selected Python `ChatSession`, schema-validated complete transcript DTOs, a finalized answer/command result, and eventual durable conversation state.
 - Steps:
   1. Catalog — `DesktopProjectCatalog` bootstraps one local project, reconciles healthy canonical JSON summaries, and stores only ordered session IDs.
@@ -115,11 +116,11 @@
   3. Switch — validate the canonical target before replacing the current session; no conversation-history flush exists. Only the in-process thinking control is snapshot-restored while the backend lives; generic persistent Skill controls were removed.
   4. Turn — Python first parses and validates composer routing; after acceptance it writes the original prompt as canonical pending before executing an allowlisted display-only command or starting provider/tool work.
   5. Finalize — Python validates and finalizes the answer, commits the terminal canonical transition, then returns the authoritative result; first-prompt registration follows the durable pending write.
-  6. Present — while work is pending, Python may emit bounded stage/tool/trust events without answer text. After finalization and canonical completion, it returns one authoritative result with `streamKind=final_only` and `chunkCount=0`; React displays that complete result and never assembles an answer preview.
+  6. Present — while work is pending, Python may emit bounded stage/tool/trust events without answer text. React merges restored, live, and pending records by logical session/turn identity; a same-ID pending retry replaces a stale failed/interrupted card. After finalization and canonical completion, Python returns one authoritative result with `streamKind=final_only` and `chunkCount=0`; React replaces the pending projection and never assembles an answer preview.
 - State or ownership transitions: original input moves from draft to durable pending, then to completed/failed/interrupted in the same canonical JSON. The latest ten completed context-eligible turns are derived at prompt time rather than moved between stores.
-- Error / retry / rollback behavior: malformed or missing canonical transcripts block selection and retain the current session; catalog failure returns a pending registration that can be retried without replaying the model turn. Provider failures attempt a durable failed transition and require explicit same-ID retry; if that transition cannot be published, restart converts the leftover pending turn to interrupted rather than auto-replaying it. React merges restored and terminal records by `(conversationId, turnId)` and derives ordering/count from canonical `turnNumber`, so success replay replaces the failed/interrupted presentation instead of appending a second turn.
-- Invariants involved: INV-005, INV-006, INV-016, INV-017.
-- Evidence: `app/agent/desktop/catalog.py`; `app/agent/desktop/service.py`; `app/agent/conversations`; conversation/lifecycle/answer-stream tests.
+- Error / retry / rollback behavior: malformed or missing canonical transcripts block selection and retain the current session; catalog failure returns a pending registration that can be retried without replaying the model turn. When a backend failure reports both `accepted=true` and `persisted=true`, React reloads the catalog and, under project/session/generation guards, the selected transcript so a durable first-turn failure remains visible/selectable. If that refresh fails, the original error remains and the UI adds a saved-but-refresh-failed notice. Unconfirmed persistence does not trigger the refresh. Provider failures require explicit same-ID retry; if a failed transition cannot be published, restart converts the leftover pending turn to interrupted rather than auto-replaying it.
+- Invariants involved: INV-005, INV-006, INV-011, INV-016, INV-017, INV-022.
+- Evidence: `app/agent/desktop/catalog.py`; `app/agent/desktop/service.py::_with_turn_lifecycle`; `app/agent/conversations`; `app/desktop/src/App.tsx::reconcilePersistedTurnFailure`; `app/desktop/src/conversations.ts::mergeConversationTurns`; conversation/lifecycle/answer-stream tests.
 - Confidence: Confirmed.
 
 ### Flow: Desktop Bash approval
