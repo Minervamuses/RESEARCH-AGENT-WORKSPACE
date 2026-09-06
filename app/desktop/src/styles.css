@@ -1,5 +1,7 @@
 :root {
   font-family: Inter, "Noto Sans TC", "Noto Sans", system-ui, sans-serif;
+  /* Let the rem-based reading layout grow with desktop viewing distance. */
+  font-size: clamp(1rem, calc(0.75rem + 0.35vw), 1.3125rem);
   color: #23272f;
   background: #f7f7f5;
   font-synthesis: none;
