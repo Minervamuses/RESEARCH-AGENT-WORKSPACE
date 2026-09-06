@@ -2431,3 +2431,223 @@ def test_conversation_replacement_or_shutdown_denies_pending_bash(
         assert runner_calls == 0
 
     asyncio.run(run())
+
+
+def test_desktop_bash_permission_mode_defaults_to_ask_and_rejects_busy_turn(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        factory = _DesktopBashFactory()
+        service = _service(
+            tmp_path,
+            session_factory=factory,
+            bash_command_runner=lambda *_args, **_kwargs: None,
+            approval_timeout_seconds=1,
+        )
+        created = await service.dispatch("session.create", {"loadMcp": False})
+        assert created["bashPermissionMode"] == "ask"
+
+        with pytest.raises(DesktopServiceError) as invalid_mode:
+            await service.dispatch("session.set_bash_permission", {"mode": "invalid"})
+        assert invalid_mode.value.code == "PROTOCOL_INVALID"
+
+        sink = _CorrelatedEventSink(
+            "00000000-0000-4000-8000-000000000311"
+        )
+        turn = asyncio.create_task(service.dispatch(
+            "session.turn", _turn_params("bash"), event_sink=sink
+        ))
+        await sink.approval_ready.wait()
+
+        with pytest.raises(DesktopServiceError) as busy:
+            await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        assert busy.value.code == "BUSY_TURN"
+
+        event = next(
+            data for name, data in sink.events if name == "approval.required"
+        )
+        await service.dispatch("approval.resolve", {
+            "approvalId": event["approvalId"],
+            "parentRequestId": event["parentRequestId"],
+            "turnId": event["turnId"],
+            "approved": False,
+        })
+        await turn
+
+    asyncio.run(run())
+
+
+def test_desktop_bash_permission_mode_idle_setter_and_fake_runner_bypass(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        runner_calls: list[tuple[tuple, dict]] = []
+
+        class _Done:
+            returncode = 0
+            stdout = "bypass output\n"
+            stderr = ""
+
+        def runner(*args, **kwargs):
+            runner_calls.append((args, kwargs))
+            return _Done()
+
+        factory = _DesktopBashFactory()
+        service = _service(
+            tmp_path,
+            session_factory=factory,
+            bash_command_runner=runner,
+            approval_timeout_seconds=1,
+        )
+        created = await service.dispatch("session.create", {"loadMcp": False})
+        session_id = created["sessionId"]
+
+        ack = await service.dispatch(
+            "session.set_bash_permission",
+            {"mode": "bypass"},
+        )
+        assert ack == {
+            "sessionId": session_id,
+            "bashPermissionMode": "bypass",
+        }
+
+        sink1 = _CorrelatedEventSink(
+            "00000000-0000-4000-8000-000000000312"
+        )
+        result1 = await service.dispatch(
+            "session.turn",
+            _turn_params("bash", turn_id="00000000000040008000000000000312"),
+            event_sink=sink1,
+        )
+        payload1 = json.loads(result1["text"])
+        assert not any(name == "approval.required" for name, _ in sink1.events)
+        assert payload1["approved"] is True
+        assert payload1["stdout"] == "bypass output\n"
+        assert len(runner_calls) == 1
+
+        sink2 = _CorrelatedEventSink(
+            "00000000-0000-4000-8000-000000000313"
+        )
+        result2 = await service.dispatch(
+            "session.turn",
+            _turn_params("bash", turn_id="00000000000040008000000000000313"),
+            event_sink=sink2,
+        )
+        payload2 = json.loads(result2["text"])
+        assert not any(name == "approval.required" for name, _ in sink2.events)
+        assert payload2["approved"] is True
+        assert len(runner_calls) == 2
+
+    asyncio.run(run())
+
+
+def test_desktop_bash_permission_mode_switching_back_to_ask_restores_approval(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        runner_calls: list[tuple[tuple, dict]] = []
+
+        class _Done:
+            returncode = 0
+            stdout = "switched output\n"
+            stderr = ""
+
+        def runner(*args, **kwargs):
+            runner_calls.append((args, kwargs))
+            return _Done()
+
+        factory = _DesktopBashFactory()
+        service = _service(
+            tmp_path,
+            session_factory=factory,
+            bash_command_runner=runner,
+            approval_timeout_seconds=1,
+        )
+        created = await service.dispatch("session.create", {"loadMcp": False})
+        session_id = created["sessionId"]
+
+        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        sink1 = _CorrelatedEventSink(
+            "00000000-0000-4000-8000-000000000314"
+        )
+        await service.dispatch(
+            "session.turn",
+            _turn_params("bash", turn_id="00000000000040008000000000000314"),
+            event_sink=sink1,
+        )
+        assert len(runner_calls) == 1
+
+        ack_ask = await service.dispatch(
+            "session.set_bash_permission",
+            {"mode": "ask"},
+        )
+        assert ack_ask == {
+            "sessionId": session_id,
+            "bashPermissionMode": "ask",
+        }
+
+        sink2 = _CorrelatedEventSink(
+            "00000000-0000-4000-8000-000000000315"
+        )
+        turn2 = asyncio.create_task(service.dispatch(
+            "session.turn",
+            _turn_params("bash", turn_id="00000000000040008000000000000315"),
+            event_sink=sink2,
+        ))
+        await sink2.approval_ready.wait()
+        event = next(data for name, data in sink2.events if name == "approval.required")
+
+        await service.dispatch("approval.resolve", {
+            "approvalId": event["approvalId"],
+            "parentRequestId": event["parentRequestId"],
+            "turnId": event["turnId"],
+            "approved": True,
+        })
+        result2 = await turn2
+        payload2 = json.loads(result2["text"])
+        assert payload2["approved"] is True
+        assert len(runner_calls) == 2
+
+    asyncio.run(run())
+
+
+def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_without_events(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        runner_calls: list[tuple[tuple, dict]] = []
+
+        class _Done:
+            returncode = 0
+            stdout = "secret fixture output\n"
+            stderr = ""
+
+        def runner(*args, **kwargs):
+            runner_calls.append((args, kwargs))
+            return _Done()
+
+        factory = _DesktopBashFactory()
+        service = _service(
+            tmp_path,
+            session_factory=factory,
+            bash_command_runner=runner,
+            approval_timeout_seconds=1,
+        )
+        await service.dispatch("session.create", {"loadMcp": False})
+        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+
+        sink = _CorrelatedEventSink(
+            "00000000-0000-4000-8000-000000000316"
+        )
+        result = await service.dispatch(
+            "session.turn",
+            _turn_params("bash-secret", turn_id="00000000000040008000000000000316"),
+            event_sink=sink,
+        )
+        payload = json.loads(result["text"])
+        assert not any(name == "approval.required" for name, _ in sink.events)
+        assert payload["approved"] is True
+        assert payload["stdout"] == "secret fixture output\n"
+        assert len(runner_calls) == 1
+
+    asyncio.run(run())

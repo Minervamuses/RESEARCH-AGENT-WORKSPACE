@@ -49,6 +49,7 @@ def test_protocol_manifest_safety_invariants() -> None:
         "extensions.preview",
         "extensions.apply",
         "approval.resolve",
+        "session.set_bash_permission",
     }
     assert len(METHODS) == len(CONTRACT["methods"])
     assert not {
@@ -498,3 +499,60 @@ def test_deeply_nested_json_is_a_bounded_protocol_failure() -> None:
         parse_line(line)
 
     assert raised.value.code == "PROTOCOL_INVALID"
+
+
+def test_bash_permission_mode_protocol_contract() -> None:
+    method = METHODS["session.set_bash_permission"]
+    assert method["requiredParams"] == ["mode"]
+    assert method["params"]["mode"] == {
+        "type": "string",
+        "required": True,
+        "enum": ["ask", "bypass"],
+    }
+
+    validate_message({
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000091",
+        "method": "session.set_bash_permission",
+        "params": {"mode": "bypass"},
+    })
+
+    with pytest.raises(ProtocolError) as invalid_mode:
+        validate_message({
+            "protocolVersion": 1,
+            "messageType": "request",
+            "requestId": "00000000-0000-4000-8000-000000000092",
+            "method": "session.set_bash_permission",
+            "params": {"mode": "invalid_mode"},
+        })
+    assert invalid_mode.value.code == "PROTOCOL_INVALID"
+
+    validate_result_data("session.set_bash_permission", {
+        "sessionId": "0123456789abcdef0123456789abcdef",
+        "bashPermissionMode": "bypass",
+    })
+
+    with pytest.raises(ProtocolError):
+        validate_result_data("session.set_bash_permission", {
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "bashPermissionMode": "bypass",
+            "extraKey": "forbidden",
+        })
+
+    with pytest.raises(ProtocolError):
+        validate_result_data("session.set_bash_permission", {
+            "sessionId": "0123456789abcdef0123456789abcdef",
+            "bashPermissionMode": "invalid",
+        })
+
+    assert CONTRACT["resultDataSchemas"]["session.create"]["bashPermissionMode"] == {
+        "type": "string",
+        "required": True,
+        "enum": ["ask", "bypass"],
+    }
+    assert CONTRACT["resultDataSchemas"]["session.select"]["bashPermissionMode"] == {
+        "type": "string",
+        "required": True,
+        "enum": ["ask", "bypass"],
+    }

@@ -1944,3 +1944,33 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
             "sessionIds": [],
         }]
     }
+
+
+def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversations(
+    tmp_path: Path,
+) -> None:
+    service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
+
+    selected_a = asyncio.run(service.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
+    assert selected_a["bashPermissionMode"] == "ask"
+
+    ack_bypass = asyncio.run(service.dispatch(
+        "session.set_bash_permission",
+        {"mode": "bypass"},
+    ))
+    assert ack_bypass["bashPermissionMode"] == "bypass"
+
+    selected_b = asyncio.run(service.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_B},
+    ))
+    assert selected_b["bashPermissionMode"] == "ask"
+
+    returned_a = asyncio.run(service.dispatch(
+        "session.select",
+        {"projectId": "p1", "sessionId": SESSION_A},
+    ))
+    assert returned_a["bashPermissionMode"] == "bypass"

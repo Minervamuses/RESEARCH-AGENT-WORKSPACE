@@ -700,6 +700,43 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
     assert stopped == {"status": "stopped"}
 
 
+def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
+    fixture_root: Path,
+) -> None:
+    first = _service(fixture_root)
+
+    async def run_first_process():
+        selected = await first.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        bypassed = await first.dispatch(
+            "session.set_bash_permission",
+            {"mode": "bypass"},
+        )
+        shutdown = await first.dispatch("session.shutdown", {})
+        return selected, bypassed, shutdown
+
+    selected, bypassed, shutdown = asyncio.run(run_first_process())
+    assert selected["bashPermissionMode"] == "ask"
+    assert bypassed["bashPermissionMode"] == "bypass"
+    assert shutdown == {"status": "stopped"}
+
+    restarted = _service(fixture_root)
+
+    async def run_second_process():
+        restored = await restarted.dispatch(
+            "session.select",
+            {"projectId": "p1", "sessionId": SESSION_A},
+        )
+        stopped = await restarted.dispatch("session.shutdown", {})
+        return restored, stopped
+
+    restored, stopped = asyncio.run(run_second_process())
+    assert restored["bashPermissionMode"] == "ask"
+    assert stopped == {"status": "stopped"}
+
+
 def test_switch_and_shutdown_leave_existing_plan_logs_untouched(
     fixture_root: Path,
 ) -> None:
