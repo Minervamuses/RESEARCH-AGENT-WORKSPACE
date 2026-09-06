@@ -150,6 +150,14 @@ export function sessionCreateParams(projectId: string): JsonObject {
   return { projectId };
 }
 
+export function shouldSubmitComposerKey(
+  key: string,
+  shiftKey: boolean,
+  isComposing: boolean,
+): boolean {
+  return key === "Enter" && !shiftKey && !isComposing;
+}
+
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -1103,7 +1111,10 @@ export default function App() {
   }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
   const onComposerKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendTurn(); }
+    if (shouldSubmitComposerKey(event.key, event.shiftKey, event.nativeEvent.isComposing)) {
+      event.preventDefault();
+      sendTurn();
+    }
   }, [sendTurn]);
 
   useEffect(() => { if (workspaceIssue !== null) focusComposer(); }, [focusComposer, workspaceIssue]);
@@ -1199,11 +1210,11 @@ export default function App() {
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
-              {visibleTurns.length === 0 && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
+              {visibleTurns.length === 0 && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Enter sends. Shift+Enter adds a new line.</p></div>}
               <ConversationTurns turns={visibleTurns} />
               <div ref={transcriptEndRef} />
             </div>
-            <form className="composer" onSubmit={(event) => { event.preventDefault(); sendTurn(); }}><label htmlFor="conversation-draft">Message</label><textarea id="conversation-draft" ref={composerRef} value={conversation.draft} onChange={(event) => applyConversation({ type: "draft-changed", draft: event.target.value })} onKeyDown={onComposerKeyDown} rows={4} placeholder="Ask about your research…" disabled={conversation.selected === null || interaction.turnActive} /><div className="composer-footer"><span>Ctrl/⌘ + Enter to send</span><button className="primary-button" type="submit" disabled={interaction.sendDisabled || workspaceBusy !== null}>Send</button></div></form>
+            <form className="composer" onSubmit={(event) => { event.preventDefault(); sendTurn(); }}><label htmlFor="conversation-draft">Message</label><textarea id="conversation-draft" ref={composerRef} value={conversation.draft} onChange={(event) => applyConversation({ type: "draft-changed", draft: event.target.value })} onKeyDown={onComposerKeyDown} rows={4} placeholder="Ask about your research…" disabled={conversation.selected === null || interaction.turnActive} /><div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button className="primary-button" type="submit" disabled={interaction.sendDisabled || workspaceBusy !== null}>Send</button></div></form>
             <p className="session-meta">Session {activeSession.sessionId} · {activeSession.turnCount} turns · {selectedRegistered ? "cataloged" : "transient"} · Citation output {state.diagnostics?.citationOutputPath ?? "unavailable"}</p>
           </section>}
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}

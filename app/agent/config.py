@@ -22,7 +22,7 @@ class AgentConfig(RAGConfig):
     """Runtime settings for the agent graph, CLI, and local extensions."""
 
     # Core runtime
-    llm_model: str = "google/gemma-4-26b-a4b-it:free"  # Main chat model.
+    llm_model: str = "google/gemini-3.8-flash"  # Main chat model.
     llm_max_tokens: int = 4_096  # Main response token cap.
     llm_max_retries: int = 10  # OpenRouter retry count.
     graph_recursion_limit: int = 64  # Per-graph superstep limit.

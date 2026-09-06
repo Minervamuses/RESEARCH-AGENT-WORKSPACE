@@ -48,6 +48,11 @@ interface AppHelpersModule {
     selected: { projectId: string; sessionId: string } | null,
     selectedRegistered: boolean,
   ) => Array<SessionSummary & { transient: boolean }>;
+  shouldSubmitComposerKey: (
+    key: string,
+    shiftKey: boolean,
+    isComposing: boolean,
+  ) => boolean;
   reconcilePersistedTurnFailure: (
     failure: ConversationFailure | null,
     operations: {
@@ -209,6 +214,15 @@ test("sidebar rows expose a transient selected conversation without cataloging i
   ]);
   assert.equal(rows[0].createdAt, null);
   assert.equal(saved.length, 1, "the catalog DTO remains unchanged");
+});
+
+test("composer sends with Enter while preserving Shift+Enter and IME composition", async () => {
+  const { shouldSubmitComposerKey } = await loadAppHelpers();
+
+  assert.equal(shouldSubmitComposerKey("Enter", false, false), true);
+  assert.equal(shouldSubmitComposerKey("Enter", true, false), false);
+  assert.equal(shouldSubmitComposerKey("Enter", false, true), false);
+  assert.equal(shouldSubmitComposerKey("a", false, false), false);
 });
 
 test("sidebar rows never duplicate a registered or already-listed conversation", async () => {
