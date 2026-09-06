@@ -6,7 +6,7 @@ from agent.llm.openrouter import get_chat_model, get_openrouter_chat_model
 from agent.llm.text import invoke_text
 
 
-def test_default_main_model_is_gemini_3_8_flash(tmp_path):
+def test_default_main_model_is_pinned(tmp_path):
     cfg = AgentConfig(persist_dir=str(tmp_path))
 
     assert cfg.llm_model == "google/gemini-3.8-flash"
