@@ -134,15 +134,15 @@
 - Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.
 - Status: Resolved in Phase 06
 
-### FAIL-016 — Fixed absolute Desktop request deadline remains marked open in issue/08
+### FAIL-016 — Fixed absolute Desktop request deadline
 
 - Former symptom: the Rust supervisor killed an otherwise healthy normal request after 600 total seconds, regardless of progress.
 - Resolution: `BackendSupervisor.request` now submits normal requests with no timeout; response-channel closure, child exit, protocol failure, and bounded startup/shutdown paths still fail visibly.
 - Current handling / recovery: user-driven shutdown/restart handles a genuinely stuck live child; there is no replacement normal inactivity detector (ASM-019).
 - Verification: `progressing_request_can_outlive_the_prior_absolute_deadline` crosses the old shortened boundary and completes; `stdout_pipe_close_fails_the_pending_request_without_a_deadline` and `shutdown_bounds_an_in_flight_request` preserve terminal failure paths.
 - Related invariants / assumptions: INV-011, ASM-019.
-- Evidence: commit `45d446d`; `app/desktop/src-tauri/src/backend.rs`; `harness/fix_plans/build-log.md`. issue/08 still says Open and describes the pre-fix source, so current code/tests govern.
-- Status: Mitigated; source issue record stale
+- Evidence: commit `45d446d`; `app/desktop/src-tauri/src/backend.rs`; `harness/fix_plans/build-log.md`.
+- Status: Mitigated; obsolete source issue record removed
 
 ### FAIL-008 — Desktop shell was disconnected from the Python backend
 
@@ -175,9 +175,9 @@
 - Affected components or users: historical citation/long tool turns.
 - Root cause: Confirmed historical configuration mismatch.
 - Current handling / recovery: separate quotas removed; one validated graph_recursion_limit defaults to 64 and forces tool-free finalization near the fuse.
-- Reproduction or detection: current graph tests; historical issue record.
+- Reproduction or detection: current graph tests; the historical decision and verification are retained in `note/20260820/agent_loop_guardrail_consolidation.md`.
 - Related invariants / assumptions: INV-005.
-- Evidence: issue/06-citation-tool-budget-recursion-limit.md; app/agent/config.py; app/agent/graph.py.
+- Evidence: `note/20260820/agent_loop_guardrail_consolidation.md`; app/agent/config.py; app/agent/graph.py.
 - Status: Mitigated
 
 ### FAIL-012 — Cross-platform line-ending churn
@@ -187,9 +187,9 @@
 - Affected components or users: repository review/merge hygiene.
 - Root cause: Confirmed historical absence of repository-owned attributes.
 - Current handling / recovery: .gitattributes enforces LF with batch/cmd exceptions.
-- Reproduction or detection: git attributes and issue/05 evidence.
+- Reproduction or detection: Git attributes and commit `3ac4f8b`.
 - Related invariants / assumptions: INV-002.
-- Evidence: .gitattributes; issue/05-cross-platform-line-endings.md.
+- Evidence: `.gitattributes`; commit `3ac4f8b`.
 - Status: Mitigated
 
 ### FAIL-017 — Persisted first-turn failure disappeared from the sidebar

@@ -131,7 +131,7 @@ Tests must isolate write roots (`KMS_STORE_DIR`, temporary citation/extension ro
 
 ## Known open gaps
 
-Recorded in `for_agents/known-failure-modes.md` and `dangerous-assumptions.md`. The recurring ones: no cross-store transaction across RAG's three surfaces; no interprocess lock on the desktop catalog, canonical conversations, or the extension registry (concurrent desktop processes can race); post-startup skill tampering is undetected; exact native `720×560` and 200% zoom layout is unverified. Root `README.md` and `issue/08` contain stale prose.
+Recorded in `for_agents/known-failure-modes.md` and `dangerous-assumptions.md`. The recurring ones: no cross-store transaction across RAG's three surfaces; no interprocess lock on the desktop catalog, canonical conversations, or the extension registry (concurrent desktop processes can race); post-startup skill tampering is undetected; exact native `720×560` and 200% zoom layout is unverified. Root `README.md` still contains stale Skill prose; the obsolete timeout issue record has been removed.
 
 ## Commits
 

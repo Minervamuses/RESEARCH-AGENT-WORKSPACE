@@ -4,8 +4,8 @@
 
 - 類型：併發狀態一致性。
 - 優先度：低至中。
-- 整併判定：不阻擋將 `repair` fast-forward 至 `main`；跨 process 併發修正保留為後續技術債。
-- 成立條件：兩個獨立 CLI process 對同一個 extension state root 幾乎同時 apply。
+- 狀態：Open；現行 `_APPLY_LOCK` 仍只在單一 Python process 內有效。
+- 成立條件：兩個獨立 CLI 或 Desktop backend process 對同一個 extension state root 幾乎同時 apply。
 
 ## 專案背景
 
@@ -27,7 +27,7 @@ Apply 流程位於 `app/agent/extensions/manager.py`：
 
 ## 白話問題描述
 
-兩個獨立終端中的 CLI 不共享 Python `threading.Lock`，因此可能發生：
+兩個獨立的 CLI／Desktop backend process 不共享 Python `threading.Lock`，因此可能發生：
 
 1. CLI A 讀到 registry revision 5，準備加入 Skill A。
 2. CLI B 也讀到 revision 5，準備加入 MCP B。
@@ -45,14 +45,14 @@ Apply 流程位於 `app/agent/extensions/manager.py`：
 - Registry temporary file、fsync 與 atomic replace。
 - Source hash 與 preview signature recheck。
 
-缺少的是跨 process critical section：從最後一次讀取 revision、套用變更到 replace 完成，必須對所有 CLI 互斥。
+缺少的是跨 process critical section：從最後一次讀取 revision、套用變更到 replace 完成，必須對所有共享同一 state root 的 process 互斥。
 
 ## 風險邊界
 
 - 單一 CLI 依序操作不會遇到。
 - 一個 CLI 的兩個 thread 會被現有鎖擋住。
-- 只有共享同一 state root 的不同 process 才有問題。
-- 因目前主要使用情境是單人操作，這不是 branch 整併阻斷項。
+- 只有共享同一 state root 的不同 process 才有問題，不限於 CLI 或 Desktop 入口。
+- 因目前主要使用情境是單人本機依序操作，此項維持低至中優先度。
 
 ## 建議修法
 
@@ -60,10 +60,9 @@ Apply 流程位於 `app/agent/extensions/manager.py`：
 
 在 state root 建立固定 lock file，從 apply 最後一次 revision check 前開始持鎖，直到 registry replace 與 directory fsync 完成才釋放。
 
-需考慮：
+Linux／WSL runtime 需考慮：
 
-- Linux/WSL 的 `flock` 或跨平台 lock library。
-- Native Windows 的檔案鎖語意。
+- `flock` 等既有系統鎖定方式是否足夠；本 issue 不新增 native Windows 支援。
 - Process crash 後鎖能否自動釋放。
 - Lock timeout 與使用者可理解的錯誤訊息。
 
@@ -75,7 +74,7 @@ Apply 流程位於 `app/agent/extensions/manager.py`：
 
 ## 重現測試建議
 
-使用 multiprocessing 建立兩個 process，共用 temporary state root：
+使用 Linux multiprocessing 建立兩個 process，共用 temporary state root：
 
 1. 兩者都完成 revision N preview。
 2. 以 barrier 讓兩者同時進入最後 revision check。

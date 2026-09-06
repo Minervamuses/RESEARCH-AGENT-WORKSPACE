@@ -110,16 +110,16 @@
 - Related items: INV-015, INV-018, FAIL-013.
 - Status: Not started
 
-### BACKLOG-013 — Align user-facing Skill and timeout records with the live runtime
+### BACKLOG-013 — Align user-facing Skill records with the live runtime
 
 - Priority: P2
-- Problem: the root README still advertises retired persistent `/skill` selection and `task_modes`, while issue/08 still presents the retired 600-second Desktop request deadline as open/current behavior.
-- Evidence: `app/agent/cli/slash_commands.py::_project_skill_commands`; `_RETIRED_SKILL_COMMANDS`; `app/agent/session.py::_run_one_shot_skill_turn`; `app/desktop/src-tauri/src/backend.rs::request`; FAIL-014; FAIL-016.
+- Problem: the root README still advertises retired persistent `/skill` selection and `task_modes`.
+- Evidence: `app/agent/cli/slash_commands.py::_project_skill_commands`; `_RETIRED_SKILL_COMMANDS`; `app/agent/session.py::_run_one_shot_skill_turn`; FAIL-014.
 - Why it matters: contributors can implement or troubleshoot against interfaces that the runtime deliberately removed.
-- Suggested scope: update only the stale README Skill sections and issue/08 status/current-behavior summary while retaining their historical evidence.
+- Suggested scope: update only the stale README Skill sections; the obsolete timeout issue record has already been removed while historical plan evidence remains.
 - Dependencies / blockers: none; do not change runtime behavior as part of this documentation item.
-- Acceptance criteria: user-facing docs describe `/<skill-name> <prompt>` as one-shot, identify Citation as the only persistent CLI Skill path, omit `task_modes`, and record that normal Desktop requests have no absolute deadline.
-- Related items: INV-019, FAIL-014, FAIL-016.
+- Acceptance criteria: user-facing docs describe `/<skill-name> <prompt>` as one-shot, identify Citation as the only persistent CLI Skill path, and omit `task_modes`.
+- Related items: INV-019, FAIL-014.
 - Status: Not started
 
 ### BACKLOG-015 — Preserve `/init` exclusions in later sync scans
@@ -186,8 +186,8 @@
 
 ## Recently resolved or removed
 
-- issue/05 is resolved: repository-owned .gitattributes enforces LF and prevents host Git defaults from governing text files.
-- issue/06 is resolved: separate tool quotas were removed; one validated graph recursion fuse with early finalization now governs turns.
+- The resolved line-ending issue record was removed; repository-owned `.gitattributes` enforces LF and prevents host Git defaults from governing text files.
+- The resolved graph-budget issue record was removed; separate tool quotas are gone and one validated graph recursion fuse with early finalization governs turns.
 
 ### BACKLOG-007 — Persistent generic Skill selection and task modes removed
 

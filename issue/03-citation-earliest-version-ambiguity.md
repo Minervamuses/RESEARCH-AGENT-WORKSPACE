@@ -3,8 +3,8 @@
 ## Issue 定位
 
 - 類型：引用版本選擇正確性。
-- 優先度：後。
-- 是否阻擋 `repair` branch 整併：否；使用者已決定整併後再處理。
+- 優先度：低；仍是 active backlog，不因歷史延後決定而視為 resolved。
+- 狀態：Open；現行 `decide_resolution()` 仍會以非時間證據打破同年／缺日期平手。
 
 ## 專案背景
 
@@ -67,9 +67,13 @@ Citation Skill 使用 `WorkIntent` 描述 agent 從對話中選定的作品。`W
 - 最早候選無法唯一判定時應回傳 `ambiguous`，並提供 alternatives 讓 agent 詢問使用者或補查。
 - Provider rank、搜尋 relevance 或預設 primary location 不得單獨作為 earliest 證據。
 
-## 後續設計問題
+## 第一版修正範圍
 
-接手 Agent 需先決定哪些日期可互相比較：
+目前資料模型沒有足夠證據可靠比較同年候選，因此最小修正是：同一最小 year 有兩個以上不同 canonical identities 時回傳 `ambiguous`；所有候選都缺 year 時也不得靜默選擇。這一版不擴充 provider 日期模型或 manifestation relation。
+
+## 後續擴充問題（不阻擋第一版）
+
+若未來要在同年候選中可靠選出最早版本，再決定哪些日期可互相比較：
 
 - Crossref published-online／published-print。
 - DataCite created／published／registered。
@@ -77,16 +81,15 @@ Citation Skill 使用 `WorkIntent` 描述 agent 從對話中選定的作品。`W
 - OpenAlex location／version metadata。
 - 關係欄位，例如 `is-preprint-of`、`is-version-of`。
 
-如果資料模型暫時不擴充完整日期，最安全的第一步是：同一最小 year 有兩個以上不同 canonical identities 時 fail closed 為 ambiguity。
+這些 provider-specific 日期與 relation 支援不屬於第一版驗收；應在有代表資料與明確語意後另行擴充。
 
 ## 驗收條件
 
 - 不同年份候選仍選較小年份。
 - 同年、不同 DOI 且沒有更細時間證據時回傳 ambiguity。
 - 所有候選都缺年份時不得靜默選擇。
-- 有可靠完整日期時能選出較早者。
-- 有明確 manifestation relation 時，選擇遵守 relation 與日期證據。
 - Alternatives 保留足夠 title、year、version kind 與 identifier 供 agent 說明。
+- 第一版不宣稱支援完整日期或 manifestation relation；若日後新增，必須另有 provider-specific 語意與測試。
 
 ## 主要參考檔案
 

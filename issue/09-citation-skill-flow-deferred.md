@@ -3,15 +3,16 @@
 ## Issue 定位
 
 - 類型：Skill invocation／session lifecycle／GUI access 契約尚未統一。
-- 優先度：Open／deferred；不阻擋目前非 Citation Skill 的一次性 slash-command 修復。
-- 狀態：使用者於 2026-08-31 明確決定本輪不處理 Citation Skill。
+- 優先度：Deferred。
+- 狀態：Open；使用者於 2026-08-31 明確延後 Citation Skill 的跨介面 lifecycle 決策。非 Citation Skill 的一次性 slash-command 修復已完成。
 - 本次處理：只記錄現況、已知落差、未決產品選擇與後續驗收，不修改 Citation 實作。
+- 執行順序：先完成 [`13-desktop-slash-command-menu.md`](13-desktop-slash-command-menu.md) 的通用 GUI command catalog／鍵盤清單；Citation command 是否能列出與執行，仍須等本 issue 的 lifecycle 決策完成。
 
 ## 使用者決定
 
 > 「本次不處理citation這個skill。然後去issue裡面追加一份文件，寫清楚citation skill的流程需要處理」
 
-因此目前 GUI 修復計劃會把一般 Skill 改成 `/<skill-name> <自然語言 prompt>` 的一次性工作，但不把 Citation 強行套入同一流程。決策來源見 [`harness/fix_plans/user-decisions.md`](../harness/fix_plans/user-decisions.md)。
+一般 Skill 現已使用 `/<skill-name> <自然語言 prompt>` 的一次性工作，但 Citation 沒有被強行套入同一流程。決策來源見 [`harness/fix_plans/user-decisions.md`](../harness/fix_plans/user-decisions.md)。
 
 ## 現行 CLI 流程（Source 已確認）
 
@@ -53,13 +54,13 @@ Citation Skill 擁有一般 Skill 沒有的 session-scoped state：
 
 ## 現行 GUI 落差
 
-Desktop composer 的 Python allowlist 目前不接受 `/citation`。現行 GUI 只能透過通用 Active skill dropdown 與 `session.activate_skill`／`session.deactivate_skill` RPC 改變 Citation active state；React 並不擁有 Citation policy。
+Desktop composer 的 Python allowlist 目前不接受 `/citation`。舊的通用 Active Skill dropdown 與 `session.activate_skill`／`session.deactivate_skill` RPC 已被移除；一般非 Citation Skill 改由 Python-owned one-shot slash command 執行。React 現在明確顯示 Citation mode 為 CLI-only，沒有替代的 GUI Citation 入口。
 
-目前非 Citation Skill 修復會依使用者決定移除這組 GUI Skill control 與 RPC。由於本 issue 明確延後 Citation 流程，本輪不會新增替代 GUI Citation command。結果是：
+因此現況是：
 
 - CLI 的既有 `/citation` 流程暫時保留。
 - `/citation` 保留為 built-in slash-command 名稱，動態 Skill command 不得覆寫它。
-- GUI 暫時沒有新的 Citation 啟動入口；這是已知 deferred gap，不得被描述為已解決或不再需要。
+- GUI 沒有 Citation 啟動入口；這是已知 deferred gap，不得被描述為已解決或不再需要。
 - Backend restart 後 Citation 是否應恢復、重新開始或要求新 command，仍待後續產品決定。
 
 主要來源：

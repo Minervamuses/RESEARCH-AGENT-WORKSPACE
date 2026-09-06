@@ -158,7 +158,7 @@
 - Where relied on: `BackendSupervisor.request` calls `submit_request(..., None)` and waits on the response channel without an absolute or inactivity deadline.
 - Failure if false: a live but deadlocked/non-responsive child can leave the request waiting indefinitely until the user explicitly shuts down or restarts the backend.
 - Detection or mitigation: process/pipe/protocol failures fail the generation, startup and shutdown remain bounded, and shutdown can fail an in-flight request. There is no automatic heartbeat/inactivity detector.
-- Evidence: `app/desktop/src-tauri/src/backend.rs::request`; `progressing_request_can_outlive_the_prior_absolute_deadline`; `shutdown_bounds_an_in_flight_request`; issue/08 records the retired absolute-deadline behavior.
+- Evidence: `app/desktop/src-tauri/src/backend.rs::request`; `progressing_request_can_outlive_the_prior_absolute_deadline`; `shutdown_bounds_an_in_flight_request`; commit `45d446d`; `harness/fix_plans/build-log.md` retains the historical deadline record.
 - Status: Active
 - Confidence: Confirmed current liveness premise; an actual indefinite hang was not reproduced.
 
@@ -244,7 +244,7 @@ Canonical JSON is the sole active transcript authority and `ConversationReposito
 
 - The former assumption covered the resource cost of recursively cloning legacy conversation Chroma for import. The importer and its staging clone have been removed; old `chat_history` and Plan-log sources are now left untouched and are not runtime inputs.
 
-- issue/05: repository line endings no longer depend on global Git defaults; .gitattributes now owns LF policy.
-- issue/06: separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one AgentConfig graph fuse with early finalization governs the current graph.
+- Repository line endings no longer depend on global Git defaults; `.gitattributes` and commit `3ac4f8b` own the LF policy. The resolved issue record has been removed.
+- Separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one `AgentConfig` graph fuse with early finalization governs the current graph. The resolved issue record has been removed; `note/20260820/agent_loop_guardrail_consolidation.md` retains the decision evidence.
 - Generic Skill task-mode/persistent-selection assumptions are retired: `task_modes` is no longer a valid manifest field, `/skill` is reserved but unregistered, and non-Citation Skills run once from `/<skill-name> <prompt>`.
 - The former assumption that every Desktop request must finish within 600 seconds is retired. Current Rust code has no normal absolute request deadline; only startup/shutdown and actual transport/process failure paths remain bounded.

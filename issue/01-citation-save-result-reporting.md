@@ -2,9 +2,10 @@
 
 ## Issue 定位
 
-- 類型：架構決策紀錄與後續驗證。
+- 類型：Citation save 結果的使用者可見回報驗證。
 - 優先度：中。
-- 整併判定：不阻擋將 `repair` fast-forward 至 `main`；本 issue 保留作後續驗證。
+- 狀態：Open；結構化 ToolMessage 通道已存在，但仍缺少 mixed success／failure 代表流程對最終使用者回報的驗證。
+- 建議順序：若與 Citation resolution 一起處理，先完成 [`03-citation-earliest-version-ambiguity.md`](03-citation-earliest-version-ambiguity.md)，再以正確 resolver outcome 驗證本 issue；兩者不是同一個修正。
 - 重要限制：不要恢復舊版以 host finalizer 全面攔截、解析並覆寫模型回覆的架構。
 
 ## 專案背景
@@ -29,7 +30,7 @@
 
 舊 `repair` 實作曾在 `session.py` 建立一套 host-side finalizer：重新解析 tool artifact、判斷可信 receipt，然後用固定格式取代模型全文。這套機制原意是避免模型宣稱假成功，但它同時複製了 citation workflow 已有的驗證邏輯，並導致正常保存流程經常被額外政策攔截或改寫。
 
-`repair` 現行架構在 commit `5918387`（`refactor(citations): trust agent-selected save intent`）移除了這個複雜覆寫層。這是刻意的架構方向，不是需要回復的 regression。
+Commit `5918387`（`refactor(citations): trust agent-selected save intent`）移除了這個複雜覆寫層。這是刻意的現行架構方向，不是需要回復的 regression；本 issue 追蹤的是該架構下仍待完成的 user-facing 驗證。
 
 ## 原 annotation
 

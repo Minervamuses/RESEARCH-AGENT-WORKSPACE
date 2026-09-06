@@ -4,12 +4,12 @@
 
 - 類型：完整性邊界缺口。
 - 優先度：中。
-- 整併判定：不阻擋將 `repair` fast-forward 至 `main`；此完整性缺口保留為後續技術債。
+- 狀態：Open；startup hash 驗證存在，但 live session 啟用 Skill 時仍會重新讀取磁碟而不再比對 hash。
 - 主要適用情境：同一個 session 存活期間，installed bundle 被其他程序或手動操作修改。
 
 ## 專案背景
 
-Extension Management 允許使用者把 Skill bundle 放到 drop-in 目錄，再經過 preview、確認與 apply，於下一次 CLI 啟動時載入。
+Extension Management 允許使用者把 Skill bundle 放到 drop-in 目錄，再經過 preview、確認與 apply，於下一次 CLI 啟動或 Desktop backend restart 時載入。
 
 主要資料位置：
 
@@ -23,7 +23,7 @@ Extension Management 允許使用者把 Skill bundle 放到 drop-in 目錄，再
 - `app/agent/extensions/discovery.py`：掃描 bundle、拒絕 symlink／特殊檔案並計算 source hash。
 - `app/agent/extensions/registry.py`：把核准 bundle 複製到 installed state，並原子寫入 registry。
 - `app/agent/extensions/startup.py`：CLI 啟動時重新檢查 installed copy 的 hash，再建立 `SkillMetadata` catalog。
-- `app/agent/session.py`：把 startup catalog 保存在 session，處理 `/skill` 啟用。
+- `app/agent/session.py`：把 startup catalog 保存在 session，處理 one-shot Skill turn 與 Citation activation。
 - `app/agent/skills/runtime.py`：啟用 Skill 時讀取 `SKILL.md`、`manifest.yaml` 與 pinned resources，產生 `SkillRuntime`。
 
 設計承諾是：drop-in 的增改刪經過 apply 後，只在下一次 restart 生效；當前 session 不熱切換 extension。
@@ -39,11 +39,11 @@ Extension Management 允許使用者把 Skill bundle 放到 drop-in 目錄，再
 1. Apply 把 Skill 安裝到 content-addressed installed path。
 2. CLI 啟動時，`startup.py` 計算 hash 並確認 installed copy 等於 registry 記錄。
 3. 驗證通過後，session catalog 主要保留 Skill 名稱、描述與 `SKILL.md` 路徑。
-4. 使用者稍後輸入 `/skill <name>`。
+4. 使用者稍後以 `/<skill-name> <prompt>` 執行一次性 Skill，或以 `/citation` 啟用 Citation。
 5. `runtime.py` 依該路徑重新讀取目前磁碟上的 Skill、manifest 和 references。
 6. 啟用階段沒有再次比較 registry `source_hash`。
 
-因此，若 CLI 已啟動後 installed copy 被修改，下一次 `/skill` 可能直接讀到新內容。這個內容沒有重新 apply，也沒有 restart。
+因此，若 session 已啟動後 installed copy 被修改，下一次 one-shot Skill command 或 Citation activation 可能直接讀到新內容。這個內容沒有重新 apply，也沒有 restart。
 
 注意：修改原始 drop-in bundle 不會直接觸發此問題；問題目標是 private `state_root/installed/...` copy。
 
@@ -62,14 +62,14 @@ Extension Management 允許使用者把 Skill bundle 放到 drop-in 目錄，再
 1. 使用測試用 Skill 執行 apply，讓 registry 指向 installed copy A。
 2. 建立新 session，確認 startup 載入 A 並記錄 revision。
 3. Session 保持存活，直接修改 installed A 的 `SKILL.md` 指令文字。
-4. 呼叫 `session.activate_skill(<id>)` 或透過 CLI 執行 `/skill <id>`。
+4. 透過 `session.turn(..., skill_name=<id>)`／`/<skill-name> <prompt>` 執行一次性 Skill；Citation 則另測 `session.activate_citation_skill()`／`/citation`。
 5. 檢查 active `SkillRuntime.instructions`。
 
 現況預期：會看到修改後文字，而非啟動時驗證的文字。
 
 也應分別測試修改：
 
-- `manifest.yaml` 的工具權限或 task mode。
+- `manifest.yaml` 的工具權限或 resource 宣告。
 - pinned reference 的內容。
 
 ## 可選修法

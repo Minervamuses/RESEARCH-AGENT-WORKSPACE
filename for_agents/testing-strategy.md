@@ -102,7 +102,7 @@ The original GUI plan is Complete. The separate corrective plan records Phases 0
 | Coverage for FAIL-013 | Direct-handler source/tests plus supported composer routing tests | Limitation confirmed; raw direct folder methods remain intentionally disabled |
 | Coverage for FAIL-014 | Retired-command and legacy-manifest tests plus root README comparison | Runtime behavior covered; user-facing root documentation remains stale |
 | Coverage for FAIL-015 | Desktop disallowed-command test and App.tsx CLI-only notice | Gap confirmed; Citation lifecycle/product decision remains deferred |
-| Coverage for FAIL-016 | Rust long-request, output-close, and shutdown tests | Former deadline mitigated; issue/08 remains stale and indefinite liveness is ASM-019 |
+| Coverage for FAIL-016 | Rust long-request, output-close, and shutdown tests | Former deadline mitigated; indefinite liveness remains ASM-019 |
 | Coverage for FAIL-017 | Persisted-failure reconciliation TypeScript regression plus Python durable-first-prompt test | Frontend test ran at same HEAD; Python supporting test defined but not rerun in this pass |
 | Coverage for FAIL-018 | Pending failed/interrupted retry overlay, new-pending append, and unresolved-retry regressions | Same-HEAD TypeScript suite passed; no native interaction |
 | Coverage for FAIL-019 | Three 140,000-child server-render regressions | Avoids variadic-call failure at tested points; no native performance ceiling |
@@ -135,7 +135,7 @@ The original GUI plan is Complete. The separate corrective plan records Phases 0
 - Per-conversation thinking snapshots are tested in-process and intentionally reset to safe defaults after backend restart because current durable formats do not store them. Generic Skill selection is one-shot rather than a conversation snapshot.
 - Desktop fixture selection remains a runtime environment gate in tracked code; tests prove exact selection, but no build-time mechanism excludes it from ordinary source runs.
 - Installer, wheel protocol-asset lookup, bundled sidecar, signing, and cross-platform desktop checks do not exist by design.
-- Root README.md still describes retired `/skill`/`task_modes` behavior, and issue/08 still describes the removed absolute request deadline as open. Current code/tests and `app/SKILLS_GUIDE.md` govern until those records are updated.
+- Root README.md still describes retired `/skill`/`task_modes` behavior. Current code/tests and `app/SKILLS_GUIDE.md` govern until that record is updated; the obsolete timeout issue has been removed.
 - Desktop has no Citation activation path; issue/09 defers the required single-turn versus multi-turn lifecycle decision.
 - Historical test counts in issue/note files do not establish current checkout health.
 - The historical Phase 07 focused checks, final broad Python/npm/Cargo/Tauri checks, release build, and native behavioral journey passed as listed above. Exact native `720×560` and 200% zoom layout remains unavailable/not passed and blocks completion; live providers and real user-state behavior remain unclaimed or Unknown. Retired migration counts do not establish current importer behavior because no importer is supported.
