@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -732,6 +733,7 @@ def test_catalog_only_missing_json_stays_unavailable_without_fake_transcript(
         "session.select",
         {"projectId": "p1", "sessionId": SESSION_A},
     ))
+    asyncio.run(service.dispatch("session.set_bash_permission", {"mode": "bypass"}))
     sessions = asyncio.run(service.dispatch(
         "session.list",
         {"projectId": "p1", "offset": 0, "limit": 50},
@@ -768,6 +770,11 @@ def test_catalog_only_missing_json_stays_unavailable_without_fake_transcript(
     assert service.session.session_id == SESSION_A
     assert catalog.project_for_session(SESSION_B) == "p1"
     assert not missing_path.exists()
+    controls = asyncio.run(service.dispatch(
+        "session.set_thinking", {"mode": "extended"}
+    ))
+    assert controls["sessionId"] == SESSION_A
+    assert controls["bashPermissionMode"] == "bypass"
 
 
 def test_malformed_conversation_is_isolated_while_healthy_session_lists_and_selects(
@@ -1974,3 +1981,53 @@ def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversati
         {"projectId": "p1", "sessionId": SESSION_A},
     ))
     assert returned_a["bashPermissionMode"] == "bypass"
+
+
+def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
+    async def run():
+        service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
+        await service.dispatch(
+            "session.select", {"projectId": "p1", "sessionId": SESSION_B}
+        )
+        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        selected_a = await service.dispatch(
+            "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+        )
+        assert selected_a["bashPermissionMode"] == "ask"
+        original_session = service.session
+        original_load = service._load_conversation
+        read_started = asyncio.Event()
+        resume_read = threading.Event()
+        loop = asyncio.get_running_loop()
+
+        def paused_load(session_id, project_id):
+            loop.call_soon_threadsafe(read_started.set)
+            assert resume_read.wait(timeout=5), "conversation read was not released"
+            return original_load(session_id, project_id)
+
+        monkeypatch.setattr(service, "_load_conversation", paused_load)
+        selection = asyncio.create_task(service.dispatch(
+            "session.select", {"projectId": "p1", "sessionId": SESSION_B}
+        ))
+        try:
+            await asyncio.wait_for(read_started.wait(), timeout=5)
+            with pytest.raises(DesktopServiceError) as raised:
+                await service.dispatch("session.turn", {
+                    "text": "prompt while selecting",
+                    "turnId": _logical_turn_id(99),
+                    "retry": False,
+                })
+            assert raised.value.code == "SESSION_NOT_READY"
+            assert original_session.turn_inputs == []
+        finally:
+            resume_read.set()
+            selected_b = await asyncio.wait_for(selection, timeout=5)
+
+        assert selected_b["sessionId"] == SESSION_B
+        assert selected_b["bashPermissionMode"] == "bypass"
+        returned_a = await service.dispatch(
+            "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+        )
+        assert returned_a["bashPermissionMode"] == "ask"
+
+    asyncio.run(run())

@@ -735,28 +735,28 @@ class DesktopService:
                 "registered": True,
             }
 
-        try:
-            snapshot = await asyncio.to_thread(
-                self._load_conversation,
-                session_id,
-                project["projectId"],
-            )
-            if snapshot is None:
-                raise ConversationUnavailableError(
-                    "canonical conversation is unavailable"
-                )
-        except ConversationError as exc:
-            raise DesktopServiceError(
-                "SESSION_NOT_READY",
-                "The stored conversation is unavailable and cannot be selected.",
-            ) from exc
-
         self._session_creating = True
-        current = self.session
-        saved_controls: _ConversationControlSnapshot | None = None
-        if current is not None:
-            saved_controls = self._capture_controls(current)
         try:
+            try:
+                snapshot = await asyncio.to_thread(
+                    self._load_conversation,
+                    session_id,
+                    project["projectId"],
+                )
+                if snapshot is None:
+                    raise ConversationUnavailableError(
+                        "canonical conversation is unavailable"
+                    )
+            except ConversationError as exc:
+                raise DesktopServiceError(
+                    "SESSION_NOT_READY",
+                    "The stored conversation is unavailable and cannot be selected.",
+                ) from exc
+
+            current = self.session
+            saved_controls: _ConversationControlSnapshot | None = None
+            if current is not None:
+                saved_controls = self._capture_controls(current)
             target = await self._materialize_session(
                 self.config,
                 load_mcp=self._load_mcp,
