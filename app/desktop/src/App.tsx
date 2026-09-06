@@ -32,6 +32,7 @@ import {
   mergeConversationTurns,
   nextTurnSubmission,
   reconciledTurnCount,
+  sameSelection,
   upsertLiveTurn,
   type ConversationAction,
   type ConversationFailure,
@@ -101,6 +102,9 @@ interface SidebarSessionRow extends SessionSummaryDto {
   transient: boolean;
 }
 
+// One transcript page: the tail window restored on select and after a durable failure.
+const TRANSCRIPT_PAGE_SIZE = 20;
+
 interface TranscriptView {
   projectId: string;
   sessionId: string;
@@ -110,13 +114,6 @@ interface TranscriptView {
   offset: number;
   total: number;
   hasOlder: boolean;
-}
-
-interface PersistedTurnReconciliation {
-  begin: () => symbol | null;
-  refreshCatalog: () => Promise<void>;
-  refreshSelectedSession: () => Promise<void>;
-  finish: (operation: symbol) => void;
 }
 
 export function sidebarRowsForProject(
@@ -241,21 +238,49 @@ function failureLifecycleLabel(failure: ConversationFailure): string {
   return `Prompt saved · ${lifecycle.state}`;
 }
 
-export async function reconcilePersistedTurnFailure(
-  failure: ConversationFailure | null,
-  operations: PersistedTurnReconciliation,
-): Promise<boolean> {
+export function isPersistedTurnFailure(failure: ConversationFailure | null): boolean {
   const lifecycle = failure?.turnLifecycle;
-  if (lifecycle?.accepted !== true || lifecycle.persisted !== true) return false;
-  const operation = operations.begin();
-  if (operation === null) return false;
-  try {
-    await operations.refreshCatalog();
-    await operations.refreshSelectedSession();
-    return true;
-  } finally {
-    operations.finish(operation);
+  return lifecycle?.accepted === true && lifecycle.persisted === true;
+}
+
+function transcriptTailOffset(total: number): number {
+  return Math.max(0, total - TRANSCRIPT_PAGE_SIZE);
+}
+
+async function fetchTranscriptPage(
+  projectId: string,
+  sessionId: string,
+  offset: number,
+  limit: number,
+  mismatchMessage = "The backend returned a transcript for a different conversation.",
+): Promise<SessionTranscriptDto> {
+  const data = await backendClient.request("session.transcript", {
+    projectId,
+    sessionId,
+    offset,
+    limit,
+  }) as unknown as SessionTranscriptDto;
+  if (data.projectId !== projectId || data.sessionId !== sessionId) {
+    throw protocolMismatch(mismatchMessage);
   }
+  return data;
+}
+
+function transcriptViewFrom(
+  projectId: string,
+  sessionId: string,
+  data: SessionTranscriptDto,
+): TranscriptView {
+  return {
+    projectId,
+    sessionId,
+    status: data.status,
+    issue: data.issue,
+    items: data.items,
+    offset: data.offset,
+    total: data.total,
+    hasOlder: data.status === "ready" && data.offset > 0,
+  };
 }
 
 export function mergeSessionItems(
@@ -714,13 +739,9 @@ export default function App() {
       setLiveTurns([]);
       setPendingUserText(null);
       setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: "Loading saved transcript…", items: [], offset: 0, total: selected.turnCount, hasOlder: false });
-      const offset = Math.max(0, selected.turnCount - 20);
-      const transcriptData = await backendClient.request("session.transcript", { projectId, sessionId: session.sessionId, offset, limit: 20 }) as unknown as SessionTranscriptDto;
+      const transcriptData = await fetchTranscriptPage(projectId, session.sessionId, transcriptTailOffset(selected.turnCount), TRANSCRIPT_PAGE_SIZE);
       if (generationRef.current !== generation) return;
-      if (transcriptData.projectId !== projectId || transcriptData.sessionId !== session.sessionId) {
-        throw protocolMismatch("The backend returned a transcript for a different conversation.");
-      }
-      setTranscript({ projectId, sessionId: session.sessionId, status: transcriptData.status, issue: transcriptData.issue, items: transcriptData.items, offset: transcriptData.offset, total: transcriptData.total, hasOlder: transcriptData.status === "ready" && transcriptData.offset > 0 });
+      setTranscript(transcriptViewFrom(projectId, session.sessionId, transcriptData));
       const retryTarget = latestRetryableTranscriptTurn(transcriptData.items);
       if (retryTarget !== null) {
         applyConversation({
@@ -796,15 +817,12 @@ export default function App() {
     const container = transcriptRef.current;
     const previousHeight = container?.scrollHeight ?? 0;
     const previousTop = container?.scrollTop ?? 0;
-    const limit = Math.min(20, current.offset);
+    const limit = Math.min(TRANSCRIPT_PAGE_SIZE, current.offset);
     const offset = current.offset - limit;
     void (async () => {
       try {
-        const data = await backendClient.request("session.transcript", { projectId: current.projectId, sessionId: current.sessionId, offset, limit }) as unknown as SessionTranscriptDto;
+        const data = await fetchTranscriptPage(current.projectId, current.sessionId, offset, limit, "The backend returned older turns for a different conversation.");
         if (generationRef.current !== generation) return;
-        if (data.projectId !== current.projectId || data.sessionId !== current.sessionId) {
-          throw protocolMismatch("The backend returned older turns for a different conversation.");
-        }
         setTranscript((value) => value === null || value.projectId !== current.projectId || value.sessionId !== current.sessionId ? value : { ...value, status: data.status, issue: data.issue, items: mergeTranscriptItems(data.items, value.items), offset: data.offset, total: data.total, hasOlder: data.status === "ready" && data.offset > 0 });
         requestAnimationFrame(() => { if (container !== null) container.scrollTop = previousTop + container.scrollHeight - previousHeight; });
       } catch (error) {
@@ -905,19 +923,17 @@ export default function App() {
       setApprovalResolving(false);
       setWorkspaceIssue(safe);
       focusComposer();
+      if (!isPersistedTurnFailure(next.failure)) return;
+      const operation = beginWorkspaceOperation("Refreshing saved conversation");
+      if (operation === null) return;
+      // beginWorkspaceOperation clears the banner for user gestures; this refresh is not one.
+      setWorkspaceIssue(safe);
       const selectionIsCurrent = () => (
-        generationRef.current === generation &&
-        conversationRef.current.selected?.projectId === selected.projectId &&
-        conversationRef.current.selected.sessionId === selected.sessionId
+        generationRef.current === generation && sameSelection(conversationRef.current.selected, selected)
       );
-      void reconcilePersistedTurnFailure(next.failure, {
-        begin: () => {
-          const operation = beginWorkspaceOperation("Refreshing saved conversation");
-          if (operation !== null) setWorkspaceIssue(safe);
-          return operation;
-        },
-        refreshCatalog: () => loadCatalog(generation),
-        refreshSelectedSession: async () => {
+      void (async () => {
+        try {
+          await loadCatalog(generation);
           const currentSession = state.session;
           if (
             !selectionIsCurrent() ||
@@ -925,42 +941,30 @@ export default function App() {
             currentSession.sessionId !== selected.sessionId
           ) return;
           // A new durable failure adds one turn; a same-ID retry updates the last one.
-          const offset = Math.max(0, currentSession.turnCount - 19);
-          const data = await backendClient.request("session.transcript", {
-            projectId: selected.projectId,
-            sessionId: selected.sessionId,
-            offset,
-            limit: 20,
-          }) as unknown as SessionTranscriptDto;
+          const data = await fetchTranscriptPage(
+            selected.projectId,
+            selected.sessionId,
+            transcriptTailOffset(currentSession.turnCount + 1),
+            TRANSCRIPT_PAGE_SIZE,
+          );
           if (!selectionIsCurrent()) return;
-          if (data.projectId !== selected.projectId || data.sessionId !== selected.sessionId) {
-            throw protocolMismatch("The backend returned a transcript for a different conversation.");
-          }
           dispatch({
             type: "session-created",
             session: { ...currentSession, registered: true, turnCount: data.total },
           });
-          setTranscript({
-            projectId: selected.projectId,
-            sessionId: selected.sessionId,
-            status: data.status,
-            issue: data.issue,
-            items: data.items,
-            offset: data.offset,
-            total: data.total,
-            hasOlder: data.status === "ready" && data.offset > 0,
-          });
+          setTranscript(transcriptViewFrom(selected.projectId, selected.sessionId, data));
           setLiveTurns([]);
           setRegistrationIssue(null);
           requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
-        },
-        finish: finishWorkspaceOperation,
-      }).catch((reconciliationError: unknown) => {
-        if (!selectionIsCurrent()) return;
-        const issue = workspaceError(reconciliationError);
-        setWorkspaceIssue(safe);
-        setRegistrationIssue(`The prompt is saved, but the conversation state could not be refreshed. ${issue.message}`);
-      });
+        } catch (reconciliationError: unknown) {
+          if (!selectionIsCurrent()) return;
+          const issue = workspaceError(reconciliationError);
+          setWorkspaceIssue(safe);
+          setRegistrationIssue(`The prompt is saved, but the conversation state could not be refreshed. ${issue.message}`);
+        } finally {
+          finishWorkspaceOperation(operation);
+        }
+      })();
     });
   }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 

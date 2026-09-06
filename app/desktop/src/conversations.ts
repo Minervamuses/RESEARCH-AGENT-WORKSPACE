@@ -190,7 +190,7 @@ function isValidSelection(value: ConversationSelection): boolean {
   return isNonEmptyString(value.projectId) && isNonEmptyString(value.sessionId);
 }
 
-function sameSelection(
+export function sameSelection(
   left: ConversationSelection | null,
   right: ConversationSelection,
 ): boolean {
@@ -255,18 +255,20 @@ export function mergeConversationTurns(
   if (pending !== null) {
     const key = logicalTurnKey(pending.sessionId, pending.turnId);
     const existing = byLogicalTurn.get(key);
-    const latestTurnNumber = [...byLogicalTurn.values()].reduce(
-      (latest, item) => item.sessionId === pending.sessionId
-        ? Math.max(latest, item.turnNumber)
-        : latest,
-      0,
-    );
+    let turnNumber = existing?.turnNumber;
+    if (turnNumber === undefined) {
+      let latest = 0;
+      for (const item of byLogicalTurn.values()) {
+        if (item.sessionId === pending.sessionId) latest = Math.max(latest, item.turnNumber);
+      }
+      turnNumber = latest + 1;
+    }
     byLogicalTurn.set(key, {
       source: "pending",
       key,
       sessionId: pending.sessionId,
       turnId: pending.turnId,
-      turnNumber: existing?.turnNumber ?? latestTurnNumber + 1,
+      turnNumber,
       retrying: existing !== undefined,
       turn: pending,
     });

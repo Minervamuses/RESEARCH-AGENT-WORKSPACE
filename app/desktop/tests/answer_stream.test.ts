@@ -499,6 +499,24 @@ test("logical turn identity includes the session and older retries keep canonica
   );
   assert.equal(crossSession.length, 2);
 
+  const pendingOtherSession = mergeConversationTurns(
+    [
+      { sessionId, turn: transcriptTurn(99, turnId, "completed") },
+      { sessionId: otherSessionId, turn: transcriptTurn(2, otherTurnId, "completed") },
+    ],
+    [],
+    {
+      sessionId: otherSessionId,
+      turnId: "323e4567e89b42d3a456426614174001",
+      userText: "other session question 3",
+      activity: [],
+    },
+  );
+  assert.equal(
+    pendingOtherSession.find(({ source }) => source === "pending")?.turnNumber,
+    3,
+  );
+
   const ordered = mergeConversationTurns(
     [
       { sessionId, turn: transcriptTurn(1, turnId, "failed") },
