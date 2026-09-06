@@ -9,13 +9,9 @@ build/
 *.sqlite3
 *:Zone.Identifier
 /cite/
-/AGENTS.md
 /app/tool/skill/*
 !/app/tool/skill/.gitkeep
 /app/tool/mcp/*
 !/app/tool/mcp/.gitkeep
 /app/tool/local/*
 !/app/tool/local/README.md
-
-# Local agent-maintained repository knowledge
-/for_agents/
