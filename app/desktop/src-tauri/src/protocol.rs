@@ -23,6 +23,7 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "session.status",
     "session.turn",
     "session.set_thinking",
+    "session.set_bash_permission",
     "session.shutdown",
     "knowledge.overview",
     "knowledge.search",
@@ -266,6 +267,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "session.status" => Some(&[]),
         "session.turn" => Some(&["text", "turnId", "retry"]),
         "session.set_thinking" => Some(&["mode"]),
+        "session.set_bash_permission" => Some(&["mode"]),
         "session.shutdown" => Some(&[]),
         "knowledge.overview" => Some(&[]),
         "knowledge.search" => Some(&["query"]),
@@ -303,6 +305,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "session.turn" => Some(&["text", "turnId", "retry"]),
         "session.set_thinking" => Some(&["mode"]),
+        "session.set_bash_permission" => Some(&["mode"]),
         "knowledge.search" => Some(&[
             "query",
             "k",
@@ -520,6 +523,14 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         "session.set_thinking" => {
             let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
             if !["normal", "extended"].contains(&mode) {
+                return Err(ProtocolViolation::invalid(format!(
+                    "params.mode contains an unknown enum value: {mode}"
+                )));
+            }
+        }
+        "session.set_bash_permission" => {
+            let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
+            if !["ask", "bypass"].contains(&mode) {
                 return Err(ProtocolViolation::invalid(format!(
                     "params.mode contains an unknown enum value: {mode}"
                 )));
@@ -1000,6 +1011,7 @@ fn validate_session_snapshot(
         "turnCount",
         "graphRecursionLimit",
         "thinkingMode",
+        "bashPermissionMode",
         "loadedSkills",
         "mcpFamilies",
         "startupDiagnostics",
@@ -1010,6 +1022,7 @@ fn validate_session_snapshot(
         "turnCount",
         "graphRecursionLimit",
         "thinkingMode",
+        "bashPermissionMode",
         "loadedSkills",
         "mcpFamilies",
         "startupDiagnostics",
@@ -1035,6 +1048,11 @@ fn validate_session_snapshot(
         &data["thinkingMode"],
         "data.thinkingMode",
         &["normal", "extended"],
+    )?;
+    validate_enum(
+        &data["bashPermissionMode"],
+        "data.bashPermissionMode",
+        &["ask", "bypass"],
     )?;
     validate_string_array(&data["loadedSkills"], "data.loadedSkills", 512, 256)?;
     validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
@@ -1784,6 +1802,15 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "data.approved must be a boolean",
                 ));
             }
+        }
+        "session.set_bash_permission" => {
+            validate_exact_data_keys(data, &["sessionId", "bashPermissionMode"])?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
+            validate_enum(
+                &data["bashPermissionMode"],
+                "data.bashPermissionMode",
+                &["ask", "bypass"],
+            )?;
         }
         _ => {}
     }

@@ -15,6 +15,7 @@ export const PROTOCOL_METHODS = [
   "session.status",
   "session.turn",
   "session.set_thinking",
+  "session.set_bash_permission",
   "session.shutdown",
   "knowledge.overview",
   "knowledge.search",
@@ -245,6 +246,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
       maximum: 0xffff_ffff,
     },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
+    bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
     loadedSkills: {
       type: "stringArray",
       required: true,
@@ -358,6 +360,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
     graphRecursionLimit: { type: "integer", required: true, minimum: 3, maximum: 0xffff_ffff },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
+    bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
     loadedSkills: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     mcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     startupDiagnostics: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 4_096 },
@@ -498,6 +501,10 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     approvalId: { type: "string", required: true, maxBytes: 256 },
     approved: { type: "boolean", required: true },
   },
+  "session.set_bash_permission": {
+    sessionId: { type: "string", required: true, maxBytes: 256 },
+    bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
+  },
 };
 
 export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
@@ -540,6 +547,9 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "session.set_thinking": {
     mode: { type: "string", required: true, enum: ["normal", "extended"] },
+  },
+  "session.set_bash_permission": {
+    mode: { type: "string", required: true, enum: ["ask", "bypass"] },
   },
   "session.shutdown": {},
   "knowledge.overview": {},
@@ -648,11 +658,14 @@ export interface TurnCompletedDto {
   extensionAction?: "status" | "preview";
 }
 
+export type BashPermissionMode = "ask" | "bypass";
+
 export interface SessionCreatedDto {
   sessionId: string;
   turnCount: number;
   graphRecursionLimit: number;
   thinkingMode: "normal" | "extended";
+  bashPermissionMode: BashPermissionMode;
   loadedSkills: string[];
   mcpFamilies: string[];
   startupDiagnostics: string[];
@@ -820,6 +833,11 @@ export interface ApprovalRequiredDto {
 export interface ApprovalResolvedDto {
   approvalId: string;
   approved: boolean;
+}
+
+export interface SessionBashPermissionSetDto {
+  sessionId: string;
+  bashPermissionMode: BashPermissionMode;
 }
 
 interface EnvelopeBase {

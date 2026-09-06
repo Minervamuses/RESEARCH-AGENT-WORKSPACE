@@ -448,6 +448,29 @@
       }
     },
     {
+      "name": "session-set-bash-permission-bypass",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000083",
+        "method": "session.set_bash_permission",
+        "params": {"mode": "bypass"}
+      }
+    },
+    {
+      "name": "session-set-bash-permission-invalid-mode",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000084",
+        "method": "session.set_bash_permission",
+        "params": {"mode": "auto"}
+      }
+    },
+    {
       "name": "turn-text-wrong-type",
       "valid": false,
       "errorCode": "PROTOCOL_INVALID",
@@ -1085,6 +1108,7 @@
             "turnCount": 4,
             "graphRecursionLimit": 64,
             "thinkingMode": "extended",
+            "bashPermissionMode": "ask",
             "loadedSkills": [],
             "mcpFamilies": [],
             "startupDiagnostics": [],
@@ -1302,6 +1326,7 @@
             "turnCount": 0,
             "graphRecursionLimit": 64,
             "thinkingMode": "normal",
+            "bashPermissionMode": "ask",
             "loadedSkills": ["literature-review"],
             "mcpFamilies": [],
             "startupDiagnostics": [],
