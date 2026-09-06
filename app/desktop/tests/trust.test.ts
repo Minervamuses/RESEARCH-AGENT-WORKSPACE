@@ -42,6 +42,17 @@ interface TrustModule {
   observeExtensionRevision: (flow: unknown, revision: number) => unknown;
   receiveExtensionApply: (flow: unknown, report: ExtensionApplyDto) => unknown;
   receiveExtensionPreview: (flow: unknown, preview: ExtensionPreviewDto) => unknown;
+  BashPermissionControl?: (props: {
+    mode: "ask" | "bypass";
+    disabled: boolean;
+    onChange: (mode: "ask" | "bypass") => void;
+  }) => unknown;
+  reconcileBashPermissionAck?: (
+    generation: number,
+    activeGeneration: number,
+    selectedSessionId: string,
+    ack: { sessionId: string; bashPermissionMode: "ask" | "bypass" },
+  ) => ("ask" | "bypass") | null;
 }
 
 async function loadTrust(): Promise<TrustModule> {
@@ -235,4 +246,70 @@ test("Bash approval renders inert context with exactly Deny and Approve actions"
   assert.match(html, />Approve<\/button>/);
   assert.doesNotMatch(html, /<script\b|<img\b/i);
   assert.match(html, /&lt;script&gt;inert\(\)&lt;\/script&gt;/);
+});
+
+test("Bash permission control renders two mutually exclusive options with bypass warning", async () => {
+  const trust = await loadTrust();
+  assert.ok(trust.BashPermissionControl, "BashPermissionControl component must be exported");
+
+  const askHtml = renderToStaticMarkup(createElement(trust.BashPermissionControl, {
+    mode: "ask",
+    disabled: false,
+    onChange: () => undefined,
+  }));
+  assert.match(askHtml, /<select\b/);
+  assert.doesNotMatch(askHtml, /disabled/);
+  assert.equal((askHtml.match(/<option\b/g) ?? []).length, 2);
+  assert.match(askHtml, /value="ask"[^>]*selected/);
+  assert.match(askHtml, /逐次詢問/);
+  assert.match(askHtml, /ByPassPermission/);
+  assert.match(askHtml, /不再逐次詢問/);
+
+  const disabledHtml = renderToStaticMarkup(createElement(trust.BashPermissionControl, {
+    mode: "bypass",
+    disabled: true,
+    onChange: () => undefined,
+  }));
+  assert.match(disabledHtml, /<select\b[^>]*disabled/);
+  assert.match(disabledHtml, /value="bypass"[^>]*selected/);
+});
+
+test("Bash permission ACK reconciles only for same-generation and same-session", async () => {
+  const { reconcileBashPermissionAck } = await loadTrust();
+  assert.ok(reconcileBashPermissionAck, "reconcileBashPermissionAck must be exported");
+
+  assert.equal(
+    reconcileBashPermissionAck(1, 1, "session-1", {
+      sessionId: "session-1",
+      bashPermissionMode: "bypass",
+    }),
+    "bypass",
+  );
+
+  // Mismatched generation (stale ACK from earlier generation)
+  assert.equal(
+    reconcileBashPermissionAck(1, 2, "session-1", {
+      sessionId: "session-1",
+      bashPermissionMode: "bypass",
+    }),
+    null,
+  );
+
+  // Mismatched session (stale ACK from earlier conversation)
+  assert.equal(
+    reconcileBashPermissionAck(1, 1, "session-1", {
+      sessionId: "session-2",
+      bashPermissionMode: "bypass",
+    }),
+    null,
+  );
+
+  // Invalid enum
+  assert.equal(
+    reconcileBashPermissionAck(1, 1, "session-1", {
+      sessionId: "session-1",
+      bashPermissionMode: "invalid" as unknown as "ask",
+    }),
+    null,
+  );
 });
