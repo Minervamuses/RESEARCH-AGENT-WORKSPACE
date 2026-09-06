@@ -43,6 +43,7 @@ import {
 import type {
   ApprovalRequiredDto,
   ApprovalResolvedDto,
+  BashPermissionMode,
   ExtensionApplyDto,
   ExtensionPreviewDto,
   JsonObject,
@@ -50,6 +51,7 @@ import type {
   ProjectSummaryDto,
   RegistrationRetryDto,
   RuntimeDiagnosticsDto,
+  SessionBashPermissionSetDto,
   SessionCreatedDto,
   SessionListDto,
   SessionSelectedDto,
@@ -61,6 +63,7 @@ import type {
 import { SafeContent } from "./SafeContent.tsx";
 import {
   ApprovalDialog,
+  BashPermissionControl,
   ExtensionPanel,
   acceptApprovalEvent,
   beginExtensionApply,
@@ -77,6 +80,7 @@ import {
   observeExtensionRevision,
   receiveExtensionApply,
   receiveExtensionPreview,
+  reconcileBashPermissionAck,
   type ExtensionBindingDecision,
   type ExtensionFlow,
   type PendingApproval,
@@ -1114,6 +1118,53 @@ export default function App() {
     finally { finishWorkspaceOperation(operation); }
   }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
+  const updateBashPermissionMode = useCallback(async (
+    mode: BashPermissionMode,
+  ) => {
+    const selected = conversationRef.current.selected;
+    if (selected === null || conversationRef.current.activeTurn !== null) return;
+    const operation = beginWorkspaceOperation("Updating session controls");
+    if (operation === null) return;
+    const generation = generationRef.current;
+    try {
+      const data = (await backendClient.request("session.set_bash_permission", { mode })) as unknown as SessionBashPermissionSetDto;
+      const updatedMode = reconcileBashPermissionAck(
+        generation,
+        generationRef.current,
+        selected.sessionId,
+        data,
+      );
+      if (updatedMode === null) {
+        if (generationRef.current !== generation) return;
+        throw protocolMismatch("The backend returned controls for a different conversation.");
+      }
+      dispatch({
+        type: "session-created",
+        session: state.session === null
+          ? {
+              sessionId: selected.sessionId,
+              turnCount: 0,
+              graphRecursionLimit: 64,
+              thinkingMode: "normal",
+              bashPermissionMode: updatedMode,
+              loadedSkills: [],
+              mcpFamilies: [],
+              startupDiagnostics: [],
+              extensionRevision: 0,
+            }
+          : { ...state.session, bashPermissionMode: updatedMode },
+      });
+      focusComposer();
+    } catch (error) {
+      if (generationRef.current === generation) {
+        setWorkspaceIssue(workspaceError(error));
+        focusComposer();
+      }
+    } finally {
+      finishWorkspaceOperation(operation);
+    }
+  }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
+
   const onComposerKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (shouldSubmitComposerKey(event.key, event.shiftKey, event.nativeEvent.isComposing)) {
       event.preventDefault();
@@ -1209,6 +1260,11 @@ export default function App() {
           {activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
             <div className="session-controls" aria-label="Session controls">
               <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateThinkingMode(event.target.value as "normal" | "extended")}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
+              <BashPermissionControl
+                mode={activeSession.bashPermissionMode}
+                disabled={interaction.controlDisabled || workspaceBusy !== null}
+                onChange={(mode) => void updateBashPermissionMode(mode)}
+              />
               <p className="control-state">Skills run once with /&lt;skill-name&gt; &lt;prompt&gt;. Citation mode is currently CLI-only.</p>
             </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">

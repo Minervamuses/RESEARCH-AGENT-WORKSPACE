@@ -7,6 +7,7 @@ import {
 
 import type {
   ApprovalRequiredDto,
+  BashPermissionMode,
   ExtensionApplyDto,
   ExtensionPreviewDto,
   JsonObject,
@@ -332,6 +333,45 @@ export function ApprovalDialog({
       </div>
     </div>
   );
+}
+
+export interface BashPermissionControlProps {
+  mode: BashPermissionMode;
+  disabled: boolean;
+  onChange: (mode: BashPermissionMode) => void;
+}
+
+export function BashPermissionControl({
+  mode,
+  disabled,
+  onChange,
+}: BashPermissionControlProps) {
+  return (
+    <label className="bash-permission-control">
+      Bash permission
+      <select
+        aria-label="Bash permission"
+        value={mode}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as BashPermissionMode)}
+      >
+        <option value="ask">逐次詢問（預設）</option>
+        <option value="bypass">ByPassPermission（不再逐次詢問）</option>
+      </select>
+    </label>
+  );
+}
+
+export function reconcileBashPermissionAck(
+  generation: number,
+  activeGeneration: number,
+  selectedSessionId: string,
+  ack: { sessionId: string; bashPermissionMode: BashPermissionMode },
+): BashPermissionMode | null {
+  if (generation !== activeGeneration) return null;
+  if (ack.sessionId !== selectedSessionId) return null;
+  if (ack.bashPermissionMode !== "ask" && ack.bashPermissionMode !== "bypass") return null;
+  return ack.bashPermissionMode;
 }
 
 interface ExtensionPanelProps {

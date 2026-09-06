@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Backend policy and contract | Complete | 2026-09-07T00:15:51+08:00 | 2026-09-07T00:31:23+08:00 | Python service, contract, conversation, fixture, TS & Rust tests pass | None |
-| 02 — Desktop permission control | Not started | — | — | — | Depends on Phase 01 |
+| 02 — Desktop permission control | Complete | 2026-09-07T00:31:23+08:00 | 2026-09-07T00:36:06+08:00 | Desktop UI control rendered, ACK reconciliation tested, build clean | None |
 | 03 — Integration and trust verification | Not started | — | — | — | Depends on Phases 01 and 02 |
 
 允許的 status：
@@ -85,6 +85,28 @@ phase 標為 `Complete`。
   - `conda run -n app cargo test --manifest-path src-tauri/Cargo.toml protocol::tests`: pass (12 passed)
 - **Blockers:** None
 - **Next action:** Proceed immediately to Phase 02 — Desktop permission control.
+
+## 2026-09-07T00:36:06+08:00 — Phase 02: Implementation and verification complete
+
+- **Status:** In progress → Complete
+- **Authorized scope:** `phase-02-desktop-permission-control.md`
+- **Exact write set:**
+  - `app/desktop/src/App.tsx`
+  - `app/desktop/src/trust.tsx`
+  - `app/desktop/tests/trust.test.ts`
+- **Changes:**
+  - Implemented `BashPermissionControl` component in `trust.tsx` with two mutually exclusive options ("逐次詢問（預設）" and "ByPassPermission（不再逐次詢問）").
+  - Implemented `reconcileBashPermissionAck` helper ensuring same-generation, same-session, valid-enum merge.
+  - Added `updateBashPermissionMode` callback in `App.tsx` with workspace operation wrapping, generation correlation, and error handling.
+  - Mounted `BashPermissionControl` in `.session-controls` bound to `activeSession.bashPermissionMode` and disabled during busy/turn states.
+  - Verified responsive styling without needing `.session-controls` CSS modifications.
+- **Verification:**
+  - `conda run -n app node --test --experimental-strip-types tests/trust.test.ts`: pass (8 passed)
+  - `conda run -n app node --test --experimental-strip-types tests/protocol.test.ts tests/backend.test.ts tests/conversations.test.ts tests/answer_stream.test.ts tests/trust.test.ts`: pass (154 passed)
+  - `conda run -n app node --test --experimental-strip-types tests/styles.test.ts`: pass (1 passed)
+  - `conda run -n app npm run build`: pass (`tsc --noEmit && vite build` built in 128ms)
+- **Blockers:** None
+- **Next action:** Proceed immediately to Phase 03 — Integration and trust verification.
 
 <!-- 實作時僅 append material event，格式如下：
 
