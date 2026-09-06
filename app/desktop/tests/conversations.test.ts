@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "vite";
 
-import type { ConversationFailure } from "../src/conversations.ts";
+import {
+  mergeConversationTurns,
+  type ConversationFailure,
+  type VisibleConversationTurn,
+} from "../src/conversations.ts";
 import type { TranscriptTurnDto } from "../src/protocol.ts";
 
 interface SafeContentModule {
@@ -55,6 +59,7 @@ interface AppHelpersModule {
   ) => Promise<boolean>;
   sessionCreateParams: (projectId: string) => Record<string, unknown>;
   RestoredTurn: (props: { turn: TranscriptTurnDto }) => unknown;
+  ConversationTurns: (props: { turns: readonly VisibleConversationTurn[] }) => unknown;
 }
 
 async function loadSafeContent(): Promise<SafeContentModule> {
@@ -330,6 +335,49 @@ test("durable first-turn failure remains selectable after creating another conve
     finish: () => ignoredCalls.push("finish"),
   }), false);
   assert.deepEqual(ignoredCalls, []);
+});
+
+test("an unresolved retry renders one prompt without a stale failure card", async () => {
+  const { ConversationTurns } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const sessionId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const turnId = "123e4567e89b42d3a456426614174001";
+  const prompt = "retry this saved prompt";
+
+  for (const state of ["failed", "interrupted"] as const) {
+    const turns = mergeConversationTurns(
+      [{
+        sessionId,
+        turn: {
+          turnId,
+          turnNumber: 1,
+          kind: "conversational",
+          state,
+          timestamp: "2026-09-06T00:00:01Z",
+          userText: prompt,
+          assistantText: null,
+          failureCode: state === "failed" ? "execution_failed" : "interrupted",
+          failureMessage: `stale ${state} state`,
+          failureRetryable: true,
+          toolActivities: [],
+        },
+      }],
+      [],
+      {
+        sessionId,
+        turnId,
+        userText: prompt,
+        activity: [],
+      },
+    );
+    const html = renderToStaticMarkup(createElement(ConversationTurns, { turns }));
+
+    assert.equal(html.match(/retry this saved prompt/g)?.length, 1, state);
+    assert.match(html, /You · retrying/, state);
+    assert.match(html, /Assistant · working/, state);
+    assert.doesNotMatch(html, /Failed · saved locally|Interrupted · saved locally/, state);
+  }
 });
 
 test("new conversations delegate the MCP default to the backend", async () => {

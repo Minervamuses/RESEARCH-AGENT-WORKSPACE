@@ -423,6 +423,50 @@ test("failed and interrupted retries replace one restored card without inflating
   }
 });
 
+test("pending failed and interrupted retries replace the restored card before completion", () => {
+  for (const state of ["failed", "interrupted"] as const) {
+    const visible = mergeConversationTurns(
+      [{ sessionId, turn: transcriptTurn(4, turnId, state) }],
+      [],
+      {
+        sessionId,
+        turnId,
+        userText: "question 4",
+        activity: [{ kind: "stage", label: "Researching", status: null }],
+      },
+    );
+
+    assert.equal(visible.length, 1, state);
+    assert.equal(visible[0]?.source, "pending", state);
+    if (visible[0]?.source !== "pending") assert.fail(state);
+    assert.equal(visible[0].retrying, true, state);
+    assert.equal(visible[0].turnNumber, 4, state);
+    assert.equal(visible[0].turn.userText, "question 4", state);
+  }
+});
+
+test("a pending new turn remains appended after restored turns", () => {
+  const visible = mergeConversationTurns(
+    [{ sessionId, turn: transcriptTurn(4, turnId, "completed") }],
+    [],
+    {
+      sessionId,
+      turnId: otherTurnId,
+      userText: "question 5",
+      activity: [],
+    },
+  );
+
+  assert.deepEqual(
+    visible.map(({ source, turnNumber }) => ({ source, turnNumber })),
+    [
+      { source: "restored", turnNumber: 4 },
+      { source: "pending", turnNumber: 5 },
+    ],
+  );
+  assert.equal(visible[1]?.source === "pending" && visible[1].retrying, false);
+});
+
 test("completed duplicate replay upserts one final-only live card", () => {
   let live: LiveTurn[] = [];
   live = upsertLiveTurn(live, liveTurn(sessionId, 4, turnId, "saved answer"));

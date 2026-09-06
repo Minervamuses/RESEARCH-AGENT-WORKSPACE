@@ -62,6 +62,13 @@ export interface RestoredConversationTurn {
   turn: TranscriptTurnDto;
 }
 
+export interface PendingConversationTurn {
+  sessionId: string;
+  turnId: string;
+  userText: string;
+  activity: readonly ConversationActivity[];
+}
+
 export type VisibleConversationTurn =
   | {
       source: "restored";
@@ -78,6 +85,15 @@ export type VisibleConversationTurn =
       turnId: string;
       turnNumber: number;
       turn: LiveTurn;
+    }
+  | {
+      source: "pending";
+      key: string;
+      sessionId: string;
+      turnId: string;
+      turnNumber: number;
+      retrying: boolean;
+      turn: PendingConversationTurn;
     };
 
 export interface ConversationFailure extends ConversationSelection {
@@ -211,6 +227,7 @@ export function upsertLiveTurn(
 export function mergeConversationTurns(
   restored: readonly RestoredConversationTurn[],
   live: readonly LiveTurn[],
+  pending: PendingConversationTurn | null = null,
 ): VisibleConversationTurn[] {
   const byLogicalTurn = new Map<string, VisibleConversationTurn>();
   for (const item of restored) {
@@ -233,6 +250,25 @@ export function mergeConversationTurns(
       turnId: turn.turnId,
       turnNumber: turn.turnNumber,
       turn,
+    });
+  }
+  if (pending !== null) {
+    const key = logicalTurnKey(pending.sessionId, pending.turnId);
+    const existing = byLogicalTurn.get(key);
+    const latestTurnNumber = [...byLogicalTurn.values()].reduce(
+      (latest, item) => item.sessionId === pending.sessionId
+        ? Math.max(latest, item.turnNumber)
+        : latest,
+      0,
+    );
+    byLogicalTurn.set(key, {
+      source: "pending",
+      key,
+      sessionId: pending.sessionId,
+      turnId: pending.turnId,
+      turnNumber: existing?.turnNumber ?? latestTurnNumber + 1,
+      retrying: existing !== undefined,
+      turn: pending,
     });
   }
   return [...byLogicalTurn.values()].sort(compareCanonicalTurns);

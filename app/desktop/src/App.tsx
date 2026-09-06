@@ -37,6 +37,7 @@ import {
   type ConversationFailure,
   type ConversationSelection,
   type LiveTurn,
+  type VisibleConversationTurn,
 } from "./conversations.ts";
 import type {
   ApprovalRequiredDto,
@@ -309,6 +310,18 @@ export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
       )}
     </article>
   );
+}
+
+export function ConversationTurns({ turns }: { turns: readonly VisibleConversationTurn[] }) {
+  return turns.map((item) => {
+    if (item.source === "restored") {
+      return <RestoredTurn turn={item.turn} key={item.key} />;
+    }
+    if (item.source === "live") {
+      return <article className="turn-group" key={item.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={item.turn.userText} /></div><div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={item.turn.assistantText} /></div></article>;
+    }
+    return <article className="turn-group pending-turn" key={item.key}><div className="message user-message"><p className="message-label">You · {item.retrying ? "retrying" : "pending"}</p><SafeContent content={item.turn.userText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{item.turn.activity.length > 0 && <ul className="activity-list">{item.turn.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>;
+  });
 }
 
 export default function App() {
@@ -1116,7 +1129,15 @@ export default function App() {
       ? []
       : transcript.items.map((turn) => ({ sessionId: transcript.sessionId, turn })),
     liveTurns,
-  ), [liveTurns, transcript]);
+    pendingUserText === null || conversation.activeTurn === null
+      ? null
+      : {
+          sessionId: conversation.activeTurn.sessionId,
+          turnId: conversation.activeTurn.turnId,
+          userText: pendingUserText,
+          activity: conversation.activeTurn.activity,
+        },
+  ), [conversation.activeTurn, liveTurns, pendingUserText, transcript]);
   const renderConversation = state.phase === "session-ready" && state.session !== null && conversation.selected !== null;
   const activeSession = renderConversation ? state.session : null;
 
@@ -1178,11 +1199,8 @@ export default function App() {
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
-              {visibleTurns.length === 0 && pendingUserText === null && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
-              {visibleTurns.map((item) => item.source === "restored"
-                ? <RestoredTurn turn={item.turn} key={item.key} />
-                : <article className="turn-group" key={item.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={item.turn.userText} /></div><div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={item.turn.assistantText} /></div></article>)}
-              {pendingUserText !== null && <article className="turn-group pending-turn"><div className="message user-message"><p className="message-label">You · pending</p><SafeContent content={pendingUserText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{(conversation.activeTurn?.activity.length ?? 0) > 0 && <ul className="activity-list">{conversation.activeTurn?.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>}
+              {visibleTurns.length === 0 && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Ctrl+Enter or Command+Enter sends. Enter adds a new line.</p></div>}
+              <ConversationTurns turns={visibleTurns} />
               <div ref={transcriptEndRef} />
             </div>
             <form className="composer" onSubmit={(event) => { event.preventDefault(); sendTurn(); }}><label htmlFor="conversation-draft">Message</label><textarea id="conversation-draft" ref={composerRef} value={conversation.draft} onChange={(event) => applyConversation({ type: "draft-changed", draft: event.target.value })} onKeyDown={onComposerKeyDown} rows={4} placeholder="Ask about your research…" disabled={conversation.selected === null || interaction.turnActive} /><div className="composer-footer"><span>Ctrl/⌘ + Enter to send</span><button className="primary-button" type="submit" disabled={interaction.sendDisabled || workspaceBusy !== null}>Send</button></div></form>
