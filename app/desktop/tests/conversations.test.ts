@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { createServer } from "vite";
+import test, { after } from "node:test";
+import { createServer, type ViteDevServer } from "vite";
 
 import {
   mergeConversationTurns,
@@ -25,6 +25,15 @@ function elementChildren(element: unknown): unknown[] {
   const children = (element as ReactElementLike).props.children;
   if (children === undefined) return [];
   return Array.isArray(children) ? children : [children];
+}
+
+// Content-sized collections must reach createElement as one array, never spread
+// variadically. Asserting that directly keeps the guard independent of whatever
+// argument-count limit the running engine happens to have.
+function contentChildren(element: unknown): unknown[] {
+  const children = (element as ReactElementLike).props.children;
+  assert.ok(Array.isArray(children), "expected an array-valued children collection");
+  return children;
 }
 
 interface SessionSummary {
@@ -59,33 +68,33 @@ interface AppHelpersModule {
   ConversationTurns: (props: { turns: readonly VisibleConversationTurn[] }) => unknown;
 }
 
-async function loadSafeContent(): Promise<SafeContentModule> {
-  const server = await createServer({
+// One dev server and one SSR load per module, reused across this file's tests.
+let devServer: Promise<ViteDevServer> | undefined;
+let safeContentModule: Promise<SafeContentModule> | undefined;
+let appHelpersModule: Promise<AppHelpersModule> | undefined;
+
+function ssrLoad<T>(path: string): Promise<T> {
+  devServer ??= createServer({
     configFile: false,
     root: new URL("..", import.meta.url).pathname,
-    server: { middlewareMode: true },
+    // SSR-only loads need no HMR socket, and binding one collides with sibling test files.
+    server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
   });
-  try {
-    return await server.ssrLoadModule("/src/SafeContent.tsx") as SafeContentModule;
-  } finally {
-    await server.close();
-  }
+  return devServer.then((server) => server.ssrLoadModule(path) as Promise<T>);
 }
 
-async function loadAppHelpers(): Promise<AppHelpersModule> {
-  const server = await createServer({
-    configFile: false,
-    root: new URL("..", import.meta.url).pathname,
-    server: { middlewareMode: true },
-    appType: "custom",
-  });
-  try {
-    return await server.ssrLoadModule("/src/App.tsx") as AppHelpersModule;
-  } finally {
-    await server.close();
-  }
+function loadSafeContent(): Promise<SafeContentModule> {
+  return (safeContentModule ??= ssrLoad<SafeContentModule>("/src/SafeContent.tsx"));
 }
+
+function loadAppHelpers(): Promise<AppHelpersModule> {
+  return (appHelpersModule ??= ssrLoad<AppHelpersModule>("/src/App.tsx"));
+}
+
+after(async () => {
+  if (devServer !== undefined) await (await devServer).close();
+});
 
 test("safe content accepts only credential-free absolute HTTP(S) URLs", async () => {
   const { safeExternalUrl } = await loadSafeContent();
@@ -134,8 +143,8 @@ test("safe content preserves a large array of Markdown list items", async () => 
     { length: LARGE_DYNAMIC_CHILD_COUNT },
     (_, index) => `- item ${index}`,
   ).join("\n");
-  const [list] = elementChildren(SafeContent({ content }));
-  const items = elementChildren(list);
+  const [list] = contentChildren(SafeContent({ content }));
+  const items = contentChildren(list);
   const [lastInlineContent] = elementChildren(items.at(-1));
 
   assert.equal(items.length, LARGE_DYNAMIC_CHILD_COUNT);
@@ -151,7 +160,7 @@ test("safe content preserves a large array of Markdown paragraph blocks", async 
     { length: LARGE_DYNAMIC_CHILD_COUNT },
     (_, index) => `paragraph ${index}`,
   ).join("\n\n");
-  const paragraphs = elementChildren(SafeContent({ content }));
+  const paragraphs = contentChildren(SafeContent({ content }));
   const [lastInlineContent] = elementChildren(paragraphs.at(-1));
 
   assert.equal(paragraphs.length, LARGE_DYNAMIC_CHILD_COUNT);
