@@ -158,7 +158,7 @@
 - Where relied on: `BackendSupervisor.request` calls `submit_request(..., None)` and waits on the response channel without an absolute or inactivity deadline.
 - Failure if false: a live but deadlocked/non-responsive child can leave the request waiting indefinitely until the user explicitly shuts down or restarts the backend.
 - Detection or mitigation: process/pipe/protocol failures fail the generation, startup and shutdown remain bounded, and shutdown can fail an in-flight request. There is no automatic heartbeat/inactivity detector.
-- Evidence: `app/desktop/src-tauri/src/backend.rs::request`; `progressing_request_can_outlive_the_prior_absolute_deadline`; `shutdown_bounds_an_in_flight_request`; commit `45d446d`; `harness/fix_plans/build-log.md` retains the historical deadline record.
+- Evidence: `app/desktop/src-tauri/src/backend.rs::request`; `progressing_request_can_outlive_the_prior_absolute_deadline`; `shutdown_bounds_an_in_flight_request`; commit `45d446d`.
 - Status: Active
 - Confidence: Confirmed current liveness premise; an actual indefinite hang was not reproduced.
 

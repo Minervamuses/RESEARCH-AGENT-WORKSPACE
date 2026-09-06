@@ -131,7 +131,7 @@
 - Current handling / recovery: canonical fingerprint-prechecked atomic replacements fail explicitly; there is no secondary conversation writer or answer/document-size hard-cap data-loss path. Complete answer/document/wire/transcript text has no numeric bytes ceiling; the remaining turn-count and catalog-scan item limits are tracked separately by ASM-024.
 - Verification: Phase 06 history-retirement and canonical lifecycle tests, plus the Phase 07 integrated fixture assertion that `store/chat_history` is never created.
 - Related invariants / assumptions: INV-005, INV-006.
-- Evidence: app/agent/session.py; app/agent/conversations/repository.py; harness/reconstruct/build-log.md.
+- Evidence: app/agent/session.py; app/agent/conversations/repository.py; current canonical-conversation tests.
 - Status: Resolved in Phase 06
 
 ### FAIL-016 — Fixed absolute Desktop request deadline
@@ -141,7 +141,7 @@
 - Current handling / recovery: user-driven shutdown/restart handles a genuinely stuck live child; there is no replacement normal inactivity detector (ASM-019).
 - Verification: `progressing_request_can_outlive_the_prior_absolute_deadline` crosses the old shortened boundary and completes; `stdout_pipe_close_fails_the_pending_request_without_a_deadline` and `shutdown_bounds_an_in_flight_request` preserve terminal failure paths.
 - Related invariants / assumptions: INV-011, ASM-019.
-- Evidence: commit `45d446d`; `app/desktop/src-tauri/src/backend.rs`; `harness/fix_plans/build-log.md`.
+- Evidence: commit `45d446d`; `app/desktop/src-tauri/src/backend.rs`; current Rust regression tests.
 - Status: Mitigated; obsolete source issue record removed
 
 ### FAIL-008 — Desktop shell was disconnected from the Python backend

@@ -32,20 +32,7 @@ Same-HEAD evidence produced before this documentation-only maintenance pass:
 | Desktop TypeScript/Vite build | Exit 0 at `743aaaf` | Compile/bundle only |
 | Headless-Chrome responsive layout observations | Widths 720, 1080, 1920, and 2560; root font stayed 16px at 1080 and was 18.72px at 1920 | Browser proxy only; not Tauri/WebKit, DPI, 200% zoom, or human acceptance |
 
-Historical `harness/reconstruct/build-log.md` Phase 07 baseline (automated broad checks and the native behavioral journey were observed before the legacy importer was removed; the exact layout gate remained):
-
-| Check | Result | Evidence source |
-|---|---|---|
-| Retired `test_conversation_batch_migration.py` | `7 passed, 1 warning` | Historical Phase 07 build log; this count is preserved as past evidence and is not a current supported path |
-| `test_desktop_crash_recovery.py` | `6 passed, 1 warning` | Phase 07 build log; six real `python -m agent.desktop.server` SIGKILL/restart checkpoints |
-| Fixture/repository/server selector | `51 passed, 1 warning` | Phase 07 build log; repository and fixture recovery coverage |
-| Repository temp-failure + restart-control + no-chat-history gap selector | `5 passed, 1 warning` | Phase 07 build log; current focused additions |
-| Retired migration + fixture + server + normal-startup selector | `69 passed, 1 warning` | Historical Phase 07 build log; importer coverage was later removed with the feature |
-| Full Python suite | `993 passed, 1 warning` | Phase 07 build log; one final broad run |
-| Desktop TypeScript suite | `136 passed, 0 failed` | Phase 07 build log; one final broad run |
-| Rust suite | Library `31 passed`; binary/doc targets passed with 0 tests | Phase 07 build log; one final broad run |
-| Tauri no-bundle release build | Exit 0; `beforeBuildCommand` supplied the only production TypeScript/Vite build | Phase 07 build log; release binary exercised by the native journey |
-| Native Tauri behavioral journey | Passed keyboard create/select/send/retry, pending/final-only, A→B→A, restart/continue, normal→extended, tool separation, inert content, focus, and scroll | Phase 07 build log; production release window and isolated fixture root |
+Historical GUI and migration plan bundles were deliberately removed. Their former test counts and native-journey observations are no longer repository evidence; rerun the smallest relevant current checks when those claims matter.
 | Exact native `720×560` and 200% zoom layout | Unavailable/not passed and blocking | WSLg geometry cannot be set reliably and WebKit ignores zoom; browser/headless substitution is forbidden |
 | Live providers, Ollama, and real user stores | Not run | Outside the authorized fixture-only validation scope |
 
@@ -117,7 +104,7 @@ The original GUI plan is Complete. The separate corrective plan records Phases 0
 - Default app/store, cite, extension state, MCP logs, node_modules, dist, and Rust target are generated/local. Old `plan_logs` and conversation Chroma are unsupported transcript sources; tests must leave them untouched, isolate write roots, and avoid user data.
 - `app/agent/desktop`, the React/Tauri implementation, and their tests are tracked. The exact `phase02` fixture gate must use a caller-owned, validated temporary root, deterministic canonical JSON, and fake providers/runners. The gate may not touch user stores or credentials.
 - Desktop Python protocol reads `app/desktop/protocol/v1` from the source tree; installed-wheel behavior is unverified and Tauri bundling is disabled.
-- Shared protocol fixtures cover Python/TypeScript/Rust source contracts. Current cross-language suites/build and the native behavioral journey are recorded in `harness/reconstruct/build-log.md`; exact native `720x560` and 200% zoom remain unavailable/not passed.
+- Shared protocol fixtures cover Python/TypeScript/Rust source contracts. Exact native `720x560`, 200% zoom, and current native WebKit behavior remain unavailable/not passed.
 - No formatter, linter, coverage threshold, or CI configuration is present.
 
 ## Known gaps and unreliable checks

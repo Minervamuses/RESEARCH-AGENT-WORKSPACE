@@ -8,11 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `for_agents/` holds tracked agent-maintained repository knowledge (architecture map, invariants, module responsibilities, data flow, dangerous assumptions, known failure modes, testing strategy, backlog). It is **not** auto-loaded — read `for_agents/README.md` explicitly before broad or cross-subsystem changes. It is managed by the external `$infrastructure` skill; treat it as evidence with confidence labels, not as authority to change behavior.
 
-Precedence when documents disagree: live code and tests > `AGENTS.md` / `app/SKILLS_GUIDE.md` > `for_agents/` > root `README.md` > `issue/`, `note/`, `harness/` records.
+Precedence when documents disagree: live code and tests > `AGENTS.md` / `app/SKILLS_GUIDE.md` > `for_agents/` > root `README.md` > `issue/` and `note/` records.
 
 ## Project scope
 
-Student-owned, local-use research application. Prioritize correct research workflows, reproducibility, short feedback loops, and debuggability. Do **not** add enterprise hardening, HA/multi-tenancy, compatibility layers, or speculative abstractions unless explicitly requested or a demonstrated problem requires them. Records in `issue/`, `note/`, and `harness/` are context, not implementation scope.
+Student-owned, local-use research application. Prioritize correct research workflows, reproducibility, short feedback loops, and debuggability. Do **not** add enterprise hardening, HA/multi-tenancy, compatibility layers, or speculative abstractions unless explicitly requested or a demonstrated problem requires them. Records in `issue/` and `note/` are context, not implementation scope.
 
 Linux/WSL is the only supported runtime. The tree may be edited from Windows through WSL tooling, but all commands and runtime behavior target Linux. Preserve LF line endings (`.gitattributes`).
 

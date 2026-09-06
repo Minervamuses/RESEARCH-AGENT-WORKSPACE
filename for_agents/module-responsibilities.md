@@ -27,7 +27,7 @@
 | `app/desktop/src/backend.ts`, `protocol.ts`, `conversations.ts` | Browser-side validation, bridge client, lifecycle reducers, restored/live/pending logical-turn merge, and authoritative `final_only` result acceptance | Persistence, answer preview synthesis, or domain authorization | Typed frontend state/client functions | TypeScript sources/tests | Confirmed |
 | `app/desktop/src/App.tsx`, `trust.tsx`, `SafeContent.tsx`, `styles.css` | UI composition, persisted-failure catalog/transcript reconciliation, composer keyboard policy, thinking control, exact trust decisions, final-only presentation, safe array-based large-content rendering, URL activation, and bounded responsive typography | Parsing Skill/domain commands, executing shell, writing stores, or claiming native visual proof from structural tests | React application | Frontend sources/tests; capabilities; commits `9992913`, `8dee300`, `871c95d`, `743aaaf` | Confirmed source behavior |
 | app/tests and app/desktop/tests | Regression evidence using fake providers/temp roots; shared protocol checks | Runtime truth by themselves | pytest, node test, Rust unit tests | app/pyproject.toml; app/desktop/package.json | Confirmed |
-| issue, note, harness/plans, harness/fix_plans, harness/reconstruct | Decisions, incidents, research, and plan-specific execution evidence | Current runtime authority | Human/agent records | Repository guidance; individual records and build logs | Confirmed |
+| issue, note | Decisions, incidents, and research context | Current runtime authority | Human/agent records | Repository guidance and individual records | Confirmed |
 
 ## Boundary rules
 

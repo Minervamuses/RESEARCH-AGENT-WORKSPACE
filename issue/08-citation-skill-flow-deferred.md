@@ -13,7 +13,7 @@
 
 > 「本次不處理citation這個skill。然後去issue裡面追加一份文件，寫清楚citation skill的流程需要處理」
 
-一般 Skill 現已使用 `/<skill-name> <自然語言 prompt>` 的一次性工作，但 Citation 沒有被強行套入同一流程。決策來源見 [`harness/fix_plans/user-decisions.md`](../harness/fix_plans/user-decisions.md)。
+一般 Skill 現已使用 `/<skill-name> <自然語言 prompt>` 的一次性工作，但 Citation 沒有被強行套入同一流程。原 plan bundle 已依使用者要求刪除；這項延後決策由本 issue 直接保留。
 
 ## 現行 CLI 流程（Source 已確認）
 
@@ -105,7 +105,6 @@ Desktop composer 的 Python allowlist 目前不接受 `/citation`。舊的通用
 
 ## 主要參考檔案
 
-- `harness/fix_plans/user-decisions.md`
 - `app/agent/cli/slash_commands.py`
 - `app/agent/cli/chat.py`
 - `app/agent/session.py`
