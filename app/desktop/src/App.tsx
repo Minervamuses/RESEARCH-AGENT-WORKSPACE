@@ -111,6 +111,13 @@ interface TranscriptView {
   hasOlder: boolean;
 }
 
+interface PersistedTurnReconciliation {
+  begin: () => symbol | null;
+  refreshCatalog: () => Promise<void>;
+  refreshSelectedSession: () => Promise<void>;
+  finish: (operation: symbol) => void;
+}
+
 export function sidebarRowsForProject(
   projectId: string,
   sessions: readonly SessionSummaryDto[],
@@ -223,6 +230,23 @@ function failureLifecycleLabel(failure: ConversationFailure): string {
   if (lifecycle.state === "completed") return "Answer saved locally";
   if (lifecycle.state === "pending") return "Prompt saved · completion pending";
   return `Prompt saved · ${lifecycle.state}`;
+}
+
+export async function reconcilePersistedTurnFailure(
+  failure: ConversationFailure | null,
+  operations: PersistedTurnReconciliation,
+): Promise<boolean> {
+  const lifecycle = failure?.turnLifecycle;
+  if (lifecycle?.accepted !== true || lifecycle.persisted !== true) return false;
+  const operation = operations.begin();
+  if (operation === null) return false;
+  try {
+    await operations.refreshCatalog();
+    await operations.refreshSelectedSession();
+    return true;
+  } finally {
+    operations.finish(operation);
+  }
 }
 
 export function mergeSessionItems(
@@ -860,8 +884,64 @@ export default function App() {
       setApprovalResolving(false);
       setWorkspaceIssue(safe);
       focusComposer();
+      const selectionIsCurrent = () => (
+        generationRef.current === generation &&
+        conversationRef.current.selected?.projectId === selected.projectId &&
+        conversationRef.current.selected.sessionId === selected.sessionId
+      );
+      void reconcilePersistedTurnFailure(next.failure, {
+        begin: () => {
+          const operation = beginWorkspaceOperation("Refreshing saved conversation");
+          if (operation !== null) setWorkspaceIssue(safe);
+          return operation;
+        },
+        refreshCatalog: () => loadCatalog(generation),
+        refreshSelectedSession: async () => {
+          const currentSession = state.session;
+          if (
+            !selectionIsCurrent() ||
+            currentSession === null ||
+            currentSession.sessionId !== selected.sessionId
+          ) return;
+          // A new durable failure adds one turn; a same-ID retry updates the last one.
+          const offset = Math.max(0, currentSession.turnCount - 19);
+          const data = await backendClient.request("session.transcript", {
+            projectId: selected.projectId,
+            sessionId: selected.sessionId,
+            offset,
+            limit: 20,
+          }) as unknown as SessionTranscriptDto;
+          if (!selectionIsCurrent()) return;
+          if (data.projectId !== selected.projectId || data.sessionId !== selected.sessionId) {
+            throw protocolMismatch("The backend returned a transcript for a different conversation.");
+          }
+          dispatch({
+            type: "session-created",
+            session: { ...currentSession, registered: true, turnCount: data.total },
+          });
+          setTranscript({
+            projectId: selected.projectId,
+            sessionId: selected.sessionId,
+            status: data.status,
+            issue: data.issue,
+            items: data.items,
+            offset: data.offset,
+            total: data.total,
+            hasOlder: data.status === "ready" && data.offset > 0,
+          });
+          setLiveTurns([]);
+          setRegistrationIssue(null);
+          requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+        },
+        finish: finishWorkspaceOperation,
+      }).catch((reconciliationError: unknown) => {
+        if (!selectionIsCurrent()) return;
+        const issue = workspaceError(reconciliationError);
+        setWorkspaceIssue(safe);
+        setRegistrationIssue(`The prompt is saved, but the conversation state could not be refreshed. ${issue.message}`);
+      });
     });
-  }, [applyConversation, focusComposer, loadCatalog, state.session]);
+  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 
   const previewExtensions = useCallback(() => {
     const flow = extensionFlow;
@@ -1058,7 +1138,7 @@ export default function App() {
               {list?.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
               {rows.length === 0 && list?.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
                 const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === project.projectId;
-                return <li key={session.sessionId}><button type="button" className="session-link" aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not listed until first saved answer" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
+                return <li key={session.sessionId}><button type="button" className="session-link" aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
               {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || workspaceBusy !== null}>Load more conversations</button>}
             </div>;

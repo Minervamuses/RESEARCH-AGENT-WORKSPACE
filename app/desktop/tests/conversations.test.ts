@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "vite";
 
+import type { ConversationFailure } from "../src/conversations.ts";
+import type { TranscriptTurnDto } from "../src/protocol.ts";
+
 interface SafeContentModule {
   SafeContent: (props: { content: string; openExternal?: (url: string) => void | Promise<void> }) => unknown;
   safeExternalUrl: (value: string) => string | null;
@@ -29,27 +32,17 @@ interface AppHelpersModule {
     selected: { projectId: string; sessionId: string } | null,
     selectedRegistered: boolean,
   ) => Array<SessionSummary & { transient: boolean }>;
+  reconcilePersistedTurnFailure: (
+    failure: ConversationFailure | null,
+    operations: {
+      begin: () => symbol | null;
+      refreshCatalog: () => Promise<void>;
+      refreshSelectedSession: () => Promise<void>;
+      finish: (operation: symbol) => void;
+    },
+  ) => Promise<boolean>;
   sessionCreateParams: (projectId: string) => Record<string, unknown>;
-  RestoredTurn: (props: { turn: {
-    turnId: string;
-    turnNumber: number;
-    kind: "conversational" | "display-only";
-    state: "pending" | "completed" | "failed" | "interrupted";
-    timestamp: string;
-    userText: string;
-    assistantText: string | null;
-    failureCode: "execution_failed" | "persistence_failed" | "interrupted" | "cancelled" | null;
-    failureMessage: string | null;
-    failureRetryable: boolean | null;
-    toolActivities: Array<{
-      callId: string | null;
-      name: string;
-      arguments: string;
-      result: string;
-      status: "ok" | "failed" | "denied" | "incomplete";
-      promptEligible: boolean;
-    }>;
-  } }) => unknown;
+  RestoredTurn: (props: { turn: TranscriptTurnDto }) => unknown;
 }
 
 async function loadSafeContent(): Promise<SafeContentModule> {
@@ -185,6 +178,101 @@ test("sidebar rows never duplicate a registered or already-listed conversation",
     ).length,
     1,
   );
+});
+
+test("durable first-turn failure remains selectable after creating another conversation", async () => {
+  const {
+    RestoredTurn,
+    reconcilePersistedTurnFailure,
+    sidebarRowsForProject,
+  } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const projectId = "local";
+  const sessionA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const sessionB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const turnId = "123e4567e89b42d3a456426614174001";
+  const calls: string[] = [];
+  let savedSessions: SessionSummary[] = [];
+  let restoredTurn: TranscriptTurnDto | null = null;
+  const failure: ConversationFailure = {
+    projectId,
+    sessionId: sessionA,
+    requestId: "123e4567-e89b-42d3-a456-426614174000",
+    turnId,
+    message: "The provider request failed.",
+    retryable: true,
+    draftPreserved: true,
+    turnLifecycle: { turnId, state: "failed" as const, accepted: true, persisted: true },
+  };
+
+  assert.equal(await reconcilePersistedTurnFailure(failure, {
+    begin: () => {
+      calls.push("begin");
+      return Symbol("refresh");
+    },
+    refreshCatalog: async () => {
+      calls.push("catalog");
+      savedSessions = [{
+        sessionId: sessionA,
+        title: "persist before provider",
+        turnCount: 1,
+        createdAt: "2026-09-06T00:00:00Z",
+        updatedAt: "2026-09-06T00:00:01Z",
+        status: "ready",
+        issue: null,
+      }];
+    },
+    refreshSelectedSession: async () => {
+      calls.push("session");
+      restoredTurn = {
+        turnId,
+        turnNumber: 1,
+        kind: "conversational",
+        state: "failed",
+        timestamp: "2026-09-06T00:00:01Z",
+        userText: "persist before provider",
+        assistantText: null,
+        failureCode: "execution_failed",
+        failureMessage: "The provider request failed.",
+        failureRetryable: true,
+        toolActivities: [],
+      };
+    },
+    finish: () => calls.push("finish"),
+  }), true);
+  assert.deepEqual(calls, ["begin", "catalog", "session", "finish"]);
+
+  const rows = sidebarRowsForProject(
+    projectId,
+    savedSessions,
+    { projectId, sessionId: sessionB },
+    false,
+  );
+  assert.deepEqual(rows.map(({ sessionId, transient }) => ({ sessionId, transient })), [
+    { sessionId: sessionB, transient: true },
+    { sessionId: sessionA, transient: false },
+  ]);
+  assert.notEqual(restoredTurn, null);
+  const html = renderToStaticMarkup(createElement(RestoredTurn, { turn: restoredTurn! }));
+  assert.match(html, /persist before provider/);
+  assert.match(html, /Failed · saved locally/);
+  assert.doesNotMatch(html, /Assistant · restored/);
+
+  const ignoredCalls: string[] = [];
+  assert.equal(await reconcilePersistedTurnFailure({
+    ...failure,
+    turnLifecycle: { turnId, state: null, accepted: false, persisted: false },
+  }, {
+    begin: () => {
+      ignoredCalls.push("begin");
+      return Symbol("unexpected");
+    },
+    refreshCatalog: async () => { ignoredCalls.push("catalog"); },
+    refreshSelectedSession: async () => { ignoredCalls.push("session"); },
+    finish: () => ignoredCalls.push("finish"),
+  }), false);
+  assert.deepEqual(ignoredCalls, []);
 });
 
 test("new conversations delegate the MCP default to the backend", async () => {
