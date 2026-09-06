@@ -152,7 +152,7 @@ function InlineContent({ value, openExternal }: { value: string; openExternal: E
       children.push(token.text);
     }
   }
-  return createElement(Fragment, null, ...children);
+  return createElement(Fragment, null, children);
 }
 
 function paragraph(lines: string[], key: string, openExternal: ExternalUrlOpener): ReactNode {
@@ -223,7 +223,7 @@ export function SafeContent({ content, openExternal = defaultOpenExternal }: Saf
         );
         index += 1;
       }
-      blocks.push(createElement(isOrdered ? "ol" : "ul", { key: `list-${index}` }, ...items));
+      blocks.push(createElement(isOrdered ? "ol" : "ul", { key: `list-${index}` }, items));
       continue;
     }
 
@@ -243,5 +243,5 @@ export function SafeContent({ content, openExternal = defaultOpenExternal }: Saf
     blocks.push(paragraph(paragraphLines, `paragraph-${index}`, openExternal));
   }
 
-  return createElement("div", { className: "safe-content" }, ...blocks);
+  return createElement("div", { className: "safe-content" }, blocks);
 }

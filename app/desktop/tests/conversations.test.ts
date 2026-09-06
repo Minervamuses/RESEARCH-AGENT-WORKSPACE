@@ -11,6 +11,18 @@ interface SafeContentModule {
   openSafeExternalUrl: (value: string, opener: (url: string) => void | Promise<void>) => Promise<boolean>;
 }
 
+interface ReactElementLike {
+  props: Record<string, unknown>;
+}
+
+const LARGE_DYNAMIC_CHILD_COUNT = 140_000;
+
+function elementChildren(element: unknown): unknown[] {
+  const children = (element as ReactElementLike).props.children;
+  if (children === undefined) return [];
+  return Array.isArray(children) ? children : [children];
+}
+
 interface SessionSummary {
   sessionId: string;
   title: string;
@@ -100,6 +112,51 @@ test("safe content treats raw HTML and Markdown images as inert text", async () 
   assert.doesNotMatch(html, /<img\b/i);
   assert.match(html, /&lt;img/);
   assert.match(html, /!\[alt\]/);
+});
+
+test("safe content preserves a large array of inline Markdown children", async () => {
+  const { SafeContent } = await loadSafeContent();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const repetitions = LARGE_DYNAMIC_CHILD_COUNT / 2;
+  const html = renderToStaticMarkup(
+    createElement(SafeContent, { content: "`x` ".repeat(repetitions) }),
+  );
+
+  assert.equal(html.match(/<code>x<\/code>/g)?.length, repetitions);
+});
+
+test("safe content preserves a large array of Markdown list items", async () => {
+  const { SafeContent } = await loadSafeContent();
+  const content = Array.from(
+    { length: LARGE_DYNAMIC_CHILD_COUNT },
+    (_, index) => `- item ${index}`,
+  ).join("\n");
+  const [list] = elementChildren(SafeContent({ content }));
+  const items = elementChildren(list);
+  const [lastInlineContent] = elementChildren(items.at(-1));
+
+  assert.equal(items.length, LARGE_DYNAMIC_CHILD_COUNT);
+  assert.equal(
+    (lastInlineContent as ReactElementLike).props.value,
+    `item ${LARGE_DYNAMIC_CHILD_COUNT - 1}`,
+  );
+});
+
+test("safe content preserves a large array of Markdown paragraph blocks", async () => {
+  const { SafeContent } = await loadSafeContent();
+  const content = Array.from(
+    { length: LARGE_DYNAMIC_CHILD_COUNT },
+    (_, index) => `paragraph ${index}`,
+  ).join("\n\n");
+  const paragraphs = elementChildren(SafeContent({ content }));
+  const [lastInlineContent] = elementChildren(paragraphs.at(-1));
+
+  assert.equal(paragraphs.length, LARGE_DYNAMIC_CHILD_COUNT);
+  assert.equal(
+    (lastInlineContent as ReactElementLike).props.value,
+    `paragraph ${LARGE_DYNAMIC_CHILD_COUNT - 1}`,
+  );
 });
 
 test("markdown link activation reparses the URL before calling the injected opener", async () => {
