@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — Backend policy and contract | Complete | 2026-09-07T00:15:51+08:00 | 2026-09-07T00:31:23+08:00 | Python service, contract, conversation, fixture, TS & Rust tests pass | None |
 | 02 — Desktop permission control | Complete | 2026-09-07T00:31:23+08:00 | 2026-09-07T00:36:06+08:00 | Desktop UI control rendered, ACK reconciliation tested, build clean | None |
-| 03 — Integration and trust verification | Not started | — | — | — | Depends on Phases 01 and 02 |
+| 03 — Integration and trust verification | Complete | 2026-09-07T00:36:06+08:00 | 2026-09-07T00:41:25+08:00 | Full Python suite (957), Node (155), Rust (36), Tauri build, review sign-off | None |
 
 允許的 status：
 
@@ -107,6 +107,31 @@ phase 標為 `Complete`。
   - `conda run -n app npm run build`: pass (`tsc --noEmit && vite build` built in 128ms)
 - **Blockers:** None
 - **Next action:** Proceed immediately to Phase 03 — Integration and trust verification.
+
+## 2026-09-07T00:41:25+08:00 — Phase 03: Integration, build, and trust review complete
+
+- **Status:** In progress → Complete
+- **Authorized scope:** `phase-03-integration-and-trust-verification.md`
+- **Exact write set:**
+  - `issue/issue_03/code_review/phase-03-integration-and-trust-verification-review.md`
+  - `issue/issue_03/build-log.md`
+- **Changes:**
+  - Executed full cross-subsystem integration regressions and the complete repository pytest suite.
+  - Executed all Node unit/integration tests and production Vite build.
+  - Executed all Rust desktop tests and Linux Tauri source build (`tauri build --no-bundle`).
+  - Completed independent trust-boundary code review against `GOALS.md` invariants.
+- **Verification:**
+  - `conda run -n app poetry run pytest tests/test_bash_tool.py tests/test_tool_inventory.py tests/test_tool_access_matrix.py tests/test_desktop_protocol_contract.py tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_fixture.py tests/test_desktop_server.py tests/test_extension_mcp.py -q`: pass (272 passed in 4.93s)
+  - `conda run -n app poetry run pytest`: pass (957 passed in 24.30s)
+  - `conda run -n app npm test`: pass (155 passed in 4.43s)
+  - `conda run -n app npm run build`: pass (`tsc --noEmit && vite build` built in 106ms)
+  - `conda run -n app cargo test --manifest-path src-tauri/Cargo.toml`: pass (36 passed in 0.22s)
+  - `conda run -n app npm run tauri -- build --no-bundle`: pass (built binary at `app/desktop/src-tauri/target/release/research-agent-desktop` in 1m 14s)
+  - `git diff --check`: pass (clean, 0 errors)
+- **Review:** Independent sign-off recorded in `issue/issue_03/code_review/phase-03-integration-and-trust-verification-review.md`.
+- **Limitations:** Interactive live-model GUI runs are mocked/deterministic by design; automated tests cover all states.
+- **Blockers:** None
+- **Next action:** All phases complete. Deliver final report to user.
 
 <!-- 實作時僅 append material event，格式如下：
 
