@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `AGENTS.md` (repo root) is the authoritative contributor contract — scope, style, testing, and commit rules. Read it before changing anything.
 
-`for_agents/` holds agent-maintained repository knowledge (architecture map, invariants, module responsibilities, data flow, dangerous assumptions, known failure modes, testing strategy, backlog). It is gitignored-by-rule but tracked, and it is **not** auto-loaded — read `for_agents/README.md` explicitly before broad or cross-subsystem changes. It is managed by the external `$infrastructure` skill; treat it as evidence with confidence labels, not as authority to change behavior.
+`for_agents/` holds tracked agent-maintained repository knowledge (architecture map, invariants, module responsibilities, data flow, dangerous assumptions, known failure modes, testing strategy, backlog). It is **not** auto-loaded — read `for_agents/README.md` explicitly before broad or cross-subsystem changes. It is managed by the external `$infrastructure` skill; treat it as evidence with confidence labels, not as authority to change behavior.
 
 Precedence when documents disagree: live code and tests > `AGENTS.md` / `app/SKILLS_GUIDE.md` > `for_agents/` > root `README.md` > `issue/`, `note/`, `harness/` records.
 
