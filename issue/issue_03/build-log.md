@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Backend policy and contract | In progress | 2026-09-07T00:15:51+08:00 | — | Preflight baseline tests pass (Python, TS, Rust) | None |
+| 01 — Backend policy and contract | Complete | 2026-09-07T00:15:51+08:00 | 2026-09-07T00:31:23+08:00 | Python service, contract, conversation, fixture, TS & Rust tests pass | None |
 | 02 — Desktop permission control | Not started | — | — | — | Depends on Phase 01 |
 | 03 — Integration and trust verification | Not started | — | — | — | Depends on Phases 01 and 02 |
 
@@ -50,6 +50,41 @@ phase 標為 `Complete`。
   - `conda run -n app cargo test --manifest-path src-tauri/Cargo.toml protocol::tests`: pass (12 passed)
 - **Blockers:** None
 - **Next action:** Implement Red test cases and schema updates across Python, contract JSON, TypeScript, and Rust.
+
+## 2026-09-07T00:31:23+08:00 — Phase 01: Implementation and verification complete
+
+- **Status:** In progress → Complete
+- **Authorized scope:** `phase-01-backend-policy-and-contract.md`
+- **Exact write set:**
+  - `app/desktop/protocol/v1/contract.json`
+  - `app/desktop/protocol/v1/fixtures.json`
+  - `app/desktop/src/protocol.ts`
+  - `app/desktop/src-tauri/src/protocol.rs`
+  - `app/agent/tools/bash.py`
+  - `app/agent/tools/inventory.py`
+  - `app/agent/desktop/service.py`
+  - `app/tests/test_desktop_protocol_contract.py`
+  - `app/tests/test_desktop_service.py`
+  - `app/tests/test_desktop_conversations.py`
+  - `app/tests/test_desktop_fixture.py`
+- **Changes:**
+  - Implemented `session.set_bash_permission` method with required `mode: "ask" | "bypass"`.
+  - Added `bashPermissionMode` to session snapshots for `session.create` and `session.select`.
+  - Added per-conversation in-memory lifecycle with `_ConversationControlSnapshot` preserving A→B→A and resetting to `ask` on shutdown/restart.
+  - Implemented idle check (`BUSY_TURN` on active turn or pending approval) and mode validation (`PROTOCOL_INVALID`).
+  - Implemented bypass routing in `_desktop_bash_approval` with active ownership check and zero approval event emission.
+  - Updated model-facing prompt copy in `bash.py` and `inventory.py`.
+  - Synchronized JSON contract, fixtures, TypeScript definitions, and Rust mirrors.
+- **Verification:**
+  - `conda run -n app poetry run pytest tests/test_desktop_service.py -k "desktop_bash or bash_permission or conversation_replacement_or_shutdown_denies_pending_bash" -q`: pass (9 passed, 49 deselected)
+  - `conda run -n app poetry run pytest tests/test_desktop_conversations.py -k "select_a_b_a or bash_permission" -q`: pass (2 passed, 30 deselected)
+  - `conda run -n app poetry run pytest tests/test_desktop_fixture.py -k "bash_permission or thinking_mode_resets or fixture_bash" -q`: pass (3 passed, 17 deselected)
+  - `conda run -n app poetry run pytest tests/test_desktop_protocol_contract.py -q`: pass (108 passed)
+  - `conda run -n app poetry run pytest tests/test_bash_tool.py tests/test_tool_inventory.py -q`: pass (23 passed)
+  - `conda run -n app node --test --experimental-strip-types tests/protocol.test.ts`: pass (102 passed)
+  - `conda run -n app cargo test --manifest-path src-tauri/Cargo.toml protocol::tests`: pass (12 passed)
+- **Blockers:** None
+- **Next action:** Proceed immediately to Phase 02 — Desktop permission control.
 
 <!-- 實作時僅 append material event，格式如下：
 

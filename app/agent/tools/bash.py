@@ -21,8 +21,8 @@ from agent.paths import find_app_root
 
 TOOL_NAME = "bash"
 TOOL_DESCRIPTION = (
-    "Execute a shell command. EVERY CALL PROMPTS THE USER FOR APPROVAL "
-    "before execution; the user reads `description` to decide. Use only "
+    "Execute a shell command. Execution is governed by the active runtime permission policy "
+    "(prompting for user approval when required); the user reads `description` to decide. Use only "
     "when no narrower tool fits (e.g., listing/finding files when path is "
     "unknown, or quick disk inspection like ls/find/wc). Prefer read_file "
     "or rag_search whenever they apply. Always include a `description` "

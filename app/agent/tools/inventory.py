@@ -82,12 +82,11 @@ BASE_TOOL_DOCS: tuple[BaseToolDoc, ...] = (
     BaseToolDoc(
         name="bash",
         family="shell",
-        section="Shell tool (always available, but every call is gated):",
+        section="Shell tool (always available, but governed by runtime permission policy):",
         description=(
-            "Execute a shell command. EVERY CALL PROMPTS THE USER FOR APPROVAL "
-            "before\n"
-            "   execution; the user reads the `description` you supply to decide "
-            "whether to allow it.\n"
+            "Execute a shell command. Governed by the active runtime permission policy\n"
+            "   (prompting for approval when required); the user reads the `description` you supply to decide\n"
+            "   whether to allow it.\n"
             "   Use only when no narrower tool fits — for example, listing or "
             "finding files when the\n"
             "   path is unknown (`ls`, `find`), quick disk inspection (`wc`, "

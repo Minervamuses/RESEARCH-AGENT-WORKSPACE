@@ -183,6 +183,7 @@ class _PendingApproval:
 @dataclass(frozen=True)
 class _ConversationControlSnapshot:
     thinking_mode: str
+    bash_permission_mode: str = "ask"
 
 
 class DesktopService:
@@ -259,6 +260,7 @@ class DesktopService:
         self._session_registered = False
         self._pending_registration: tuple[str, str] | None = None
         self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
+        self._bash_permission_mode: str = "ask"
         self._load_mcp = True
         self._session_creating = False
         self._turn_active = False
@@ -275,6 +277,10 @@ class DesktopService:
         self._extension_previews: dict[str, ExtensionPreview] = {}
         self._prune_previews: dict[str, _PrunePreview] = {}
         self._composer_prune_preview: tuple[str, _PrunePreview] | None = None
+
+    @property
+    def bash_permission_mode(self) -> str:
+        return self._bash_permission_mode
 
     async def dispatch(
         self,
@@ -295,6 +301,7 @@ class DesktopService:
             "session.status": self._session_status,
             "session.turn": self._session_turn,
             "session.set_thinking": self._session_set_thinking,
+            "session.set_bash_permission": self._session_set_bash_permission,
             "session.shutdown": self._session_shutdown,
             "knowledge.overview": self._knowledge_overview,
             "knowledge.search": self._knowledge_search,
@@ -778,6 +785,12 @@ class DesktopService:
         self._selected_project_id = project["projectId"]
         self._session_registered = True
         self._pending_registration = None
+        target_snapshot = self._control_snapshots.get(session_id)
+        self._bash_permission_mode = (
+            target_snapshot.bash_permission_mode
+            if target_snapshot is not None
+            else "ask"
+        )
         return {
             **self._session_snapshot(target),
             "projectId": project["projectId"],
@@ -1137,10 +1150,10 @@ class DesktopService:
             )
         return session
 
-    @staticmethod
-    def _capture_controls(session: ChatSession) -> _ConversationControlSnapshot:
+    def _capture_controls(self, session: ChatSession) -> _ConversationControlSnapshot:
         return _ConversationControlSnapshot(
             thinking_mode=str(session.thinking_mode),
+            bash_permission_mode=self._bash_permission_mode,
         )
 
     async def _apply_controls(
@@ -1227,6 +1240,7 @@ class DesktopService:
         self._selected_project_id = project_id
         self._session_registered = False
         self._pending_registration = None
+        self._bash_permission_mode = "ask"
         return {
             **self._session_snapshot(session),
             "projectId": project_id,
@@ -1968,6 +1982,22 @@ class DesktopService:
         session.set_thinking_mode(params["mode"])
         return self._session_snapshot(session)
 
+    async def _session_set_bash_permission(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        session = self._require_idle_session()
+        mode = params.get("mode")
+        if mode not in ("ask", "bypass"):
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID",
+                f"Unknown bash permission mode: {mode}",
+            )
+        self._bash_permission_mode = str(mode)
+        return {
+            "sessionId": session.session_id,
+            "bashPermissionMode": self._bash_permission_mode,
+        }
+
     async def _session_shutdown(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -2057,6 +2087,7 @@ class DesktopService:
         self._pending_registration = None
         self._control_snapshots.clear()
         self._clear_session_caches()
+        self._bash_permission_mode = "ask"
         return {"status": "stopped"}
 
     def _clear_session_caches(self) -> None:
@@ -2083,7 +2114,7 @@ class DesktopService:
         return self.session
 
     def _require_idle_session(self) -> ChatSession:
-        if self._turn_active:
+        if self._turn_active or self._pending_approval is not None:
             raise DesktopServiceError(
                 "BUSY_TURN", "A session turn is still active.", retryable=True
             )
@@ -2102,6 +2133,7 @@ class DesktopService:
             "turnCount": int(status.get("turn_count", 0)),
             "graphRecursionLimit": int(session.config.graph_recursion_limit),
             "thinkingMode": session.thinking_mode,
+            "bashPermissionMode": self._bash_permission_mode,
             "loadedSkills": [
                 self._bounded_text(skill.name, 256)
                 for skill in session.loaded_skills[:512]
@@ -2554,6 +2586,15 @@ class DesktopService:
         loop = self._turn_loop
         if loop is None or loop.is_closed():
             return False
+        if (
+            not self._turn_active
+            or self._turn_event_sink is None
+            or self._active_parent_request_id is None
+            or self._active_turn_id is None
+        ):
+            return False
+        if self._bash_permission_mode == "bypass":
+            return True
         staged = asyncio.run_coroutine_threadsafe(
             self._stage_bash_approval(
                 command,
