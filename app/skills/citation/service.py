@@ -186,54 +186,36 @@ class CitationService:
                     provenance=f"authoritative:{record.provider}", schema_version=2,
                     canonical_identity=identity,
                 )
-                sidecar = {
-                    "source_ref": ref.to_persisted_dict(),
-                    "creation_evidence": {
-                        "batch_id": batch_id,
-                        "request_index": index,
-                        "agent_intent": self._intent_evidence(intent),
-                    },
-                    "resolution": {"record_source": record.provider, "provider_record_ids": [identity.key], "version_kind": "preprint" if record.provider == "arxiv" else "published", "decision_reason_codes": [resolution_reason]},
-                }
+                provider_record_ids = [identity.key]
+                version_kind = "preprint" if record.provider == "arxiv" else "published"
+            else:
                 try:
-                    bundle = await asyncio.to_thread(write_identity_bundle, self.output_dir, identity=identity, title=ref.title, bibtex_text=canonical.text, sidecar=sidecar)
-                    receipt = SaveReceipt(
-                        sid, identity, None, ref.title, ref.year, ref.work_type,
-                        str(bundle.bundle_dir), ref.verification_level,
-                        f"[[cite:{sid}]]",
-                        "preprint" if record.provider == "arxiv" else "published",
-                    )
-                    self.registry.register(ref, receipt=receipt)
-                except (StorageError, ValueError) as exc:
-                    outcomes[index] = SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
+                    raw = await self.hub.doi_org.fetch_bibtex(record.doi)
+                    canonical = parse_canonical_bibtex(raw)
+                    if canonical.doi is None:
+                        canonical = inject_doi(canonical, record.doi)
+                    elif not doi_equal(canonical.doi, record.doi):
+                        raise BibtexValidationError("bibtex_doi_mismatch", "DOI mismatch")
+                except (ProviderError, BibtexValidationError) as exc:
+                    code = getattr(exc, "code", "bibtex_lookup_failed")
+                    outcomes[index] = SaveItemOutcome(index, intent.requested_label, "verification_failed", code)
                     continue
-                outcomes[index] = SaveItemOutcome(index, intent.requested_label, "reused" if bundle.reused else "saved", "reused_existing" if bundle.reused else "saved_new", receipt)
-                continue
-            try:
-                raw = await self.hub.doi_org.fetch_bibtex(record.doi)
-                canonical = parse_canonical_bibtex(raw)
-                if canonical.doi is None:
-                    canonical = inject_doi(canonical, record.doi)
-                elif not doi_equal(canonical.doi, record.doi):
-                    raise BibtexValidationError("bibtex_doi_mismatch", "DOI mismatch")
-            except (ProviderError, BibtexValidationError) as exc:
-                code = getattr(exc, "code", "bibtex_lookup_failed")
-                outcomes[index] = SaveItemOutcome(index, intent.requested_label, "verification_failed", code)
-                continue
-            identity = CanonicalIdentity("doi", record.doi)
-            sid = source_id_for(identity)
-            ref = SourceRef(
-                sid, identity.value, record.title or canonical.title,
-                authors=list(record.authors) or list(canonical.authors),
-                year=record.year if record.year is not None else canonical.year,
-                venue=record.venue or canonical.venue,
-                work_type=record.work_type,
-                url=record.url or f"https://doi.org/{identity.value}",
-                verification_level="doi_identity_verified",
-                provenance="fresh-resolution+doi.org-csl+bibtex",
-                schema_version=2,
-                canonical_identity=identity,
-            )
+                identity = CanonicalIdentity("doi", record.doi)
+                sid = source_id_for(identity)
+                ref = SourceRef(
+                    sid, identity.value, record.title or canonical.title,
+                    authors=list(record.authors) or list(canonical.authors),
+                    year=record.year if record.year is not None else canonical.year,
+                    venue=record.venue or canonical.venue,
+                    work_type=record.work_type,
+                    url=record.url or f"https://doi.org/{identity.value}",
+                    verification_level="doi_identity_verified",
+                    provenance="fresh-resolution+doi.org-csl+bibtex",
+                    schema_version=2,
+                    canonical_identity=identity,
+                )
+                provider_record_ids = [record.provider_id]
+                version_kind = infer_version_kind(record)
             sidecar = {
                 "source_ref": ref.to_persisted_dict(),
                 "creation_evidence": {
@@ -243,8 +225,8 @@ class CitationService:
                 },
                 "resolution": {
                     "record_source": record.provider,
-                    "provider_record_ids": [record.provider_id],
-                    "version_kind": infer_version_kind(record),
+                    "provider_record_ids": provider_record_ids,
+                    "version_kind": version_kind,
                     "decision_reason_codes": [resolution_reason],
                 },
             }
@@ -258,9 +240,9 @@ class CitationService:
                     sidecar=sidecar,
                 )
                 receipt = SaveReceipt(
-                    sid, identity, identity.value, ref.title, ref.year,
+                    sid, identity, ref.doi, ref.title, ref.year,
                     ref.work_type, str(bundle.bundle_dir), ref.verification_level,
-                    f"[[cite:{sid}]]", infer_version_kind(record),
+                    f"[[cite:{sid}]]", version_kind,
                 )
                 self.registry.register(ref, receipt=receipt)
             except (StorageError, ValueError) as exc:
