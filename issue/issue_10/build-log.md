@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Scoped installation | Complete | 2026-09-11 | 2026-09-11 | Red and green evidence below | None |
-| 02 — Conversational installer | In progress | 2026-09-12 | — | Preflight and red below | None |
+| 02 — Conversational installer | Complete | 2026-09-12 | 2026-09-12 | Host/session/helper/Desktop checks below | None |
 | 03 — Acceptance and documentation | Not started | — | — | — | None |
 
 只使用 `Not started`、`In progress`、`Blocked`、`Complete`。
@@ -141,3 +141,52 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
   integration. Both subagents ran `git diff --check`: PASS.
 - Commit this red host test and already-verified helper/Desktop work as one bounded
   change step; shared session/skill action integration still pending.
+
+
+### 2026-09-12 — Phase 02 integration and completion
+
+- Shared ChatSession now exposes `skill_install` through existing skill tools,
+  recognizes explicit Chinese/English installer requests, retains one pending
+  selection/update transaction, enforces active session/turn identity and restores
+  the previous mode. Plain mentions remain ordinary conversation. Slash discovery
+  needs no changed CLI routing. Runtime context supplies absolute skill_root and
+  relative-resource guidance without changing bash cwd/read_file behavior.
+- Public SKILL.md + existing-format manifest instruct ordinary bash preparation;
+  existing manager module owns source/selection/update/preview binding, staging,
+  scoped apply and conditional rollback. No dependency/protocol/schema changes.
+  User-visible installation text is rendered from host outcomes, including failures.
+- Host initial green attempt: **3 passed, 3 failed**; failures exposed ZIP filename
+  mistaken for candidate selection and overwritten builtin rejection detail. Both
+  corrected; original six then passed. Remaining direct regressions cover late
+  user-provided ZIP, invalid ZIP, source/revision staleness, cancellation, wrong
+  session/replayed token, planner refusal and registry-written-then-error receipt.
+- Actual independent read-only host review found three issues: `update` inside ZIP
+  path granting update intent; pre-existing matching registry hash mistaken for
+  this apply's success; skill-parent symlink replacement during clarification.
+  All corrected with regressions. Final host command `poetry run pytest
+  tests/test_extension_manager.py -q`: **40 passed**, 1 warning, 0.56s.
+- `poetry run pytest tests/test_skill_adherence.py -q`: first **10 passed**,
+  0.31s, then **15 passed**, 0.69s after real tool-loop integration was added.
+  Actual calls: skill_install/status → bash (first-party ZIP helper via active
+  Conda Python) → skill_install/preview → skill_install/apply → model final.
+  Natural and actual slash entry both install original SKILL/forms/script bytes;
+  denied shell leaves no install; multi-candidate `第二個` installs writer only;
+  `取消` clears memory. Initial extended mode returns after completion/cancel.
+  All graph/management models deterministic; no downloaded code executed.
+- `poetry run pytest tests/test_skill_adherence.py -q -k installer_cancellation`:
+  **1 passed, 15 deselected**, 0.20s; real CancelledError clears pending identity
+  and restores extended mode without install-state writes.
+- Required focused command (updated phase file includes existing host test module):
+  `poetry run pytest tests/test_skill_adherence.py tests/test_skill_runtime.py
+  tests/test_skill_broker.py tests/test_slash_commands.py tests/test_desktop_service.py
+  tests/test_extension_manager.py -q`: initially **168 passed**, 1.70s; after final
+  host fixes/cancellation regression **173 passed**, 2 warnings, 1.79s.
+- Required broader: `poetry run pytest tests/test_graph_skill_loader.py
+  tests/test_tool_access.py tests/test_tool_access_matrix.py tests/test_tool_inventory.py
+  tests/test_read_file_tool.py tests/test_bash_tool.py tests/test_citation_skill_activation.py
+  tests/test_thinking_session.py -q`: **107 passed**, 1 warning, 1.10s. Existing
+  citation/one-shot/global tool and extended-mode restrictions pass.
+- PASS `git diff --check`. Phase 02 Complete. Scope intentionally handles one chosen
+  skill per transaction; another skill starts a new explicit request. All evidence
+  uses temporary test data and deterministic models. Phase 03 remains responsible
+  for full Desktop graph + real fixed-upstream archive/startup/wheel acceptance.

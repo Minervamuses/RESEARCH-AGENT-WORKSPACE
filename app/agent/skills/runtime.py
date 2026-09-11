@@ -47,6 +47,10 @@ class SkillRuntime:
         lines = [
             "[Active skill]",
             f"name: {self.name}",
+            f"skill_root: {self.root.resolve()}",
+            "Resolve relative resource references (including root-level files such as "
+            "forms.md) against this absolute skill_root and pass the absolute path to "
+            "ordinary file/shell tools. The shell working directory is unchanged.",
         ]
         lines.extend([
             "",

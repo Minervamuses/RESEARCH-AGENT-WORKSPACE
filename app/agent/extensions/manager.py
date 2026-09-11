@@ -5,17 +5,28 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import tempfile
 import threading
+import uuid
+import zipfile
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Collection, Literal
 
 import yaml
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent.config import AgentConfig
-from agent.extensions.discovery import build_diff, scan_extensions
+from agent.extensions.discovery import (
+    _bundle_fingerprint,
+    _frontmatter,
+    build_diff,
+    inspect_bundle,
+    scan_extensions,
+)
 from agent.extensions.mcp_manifest import (
     MCPLaunchCandidate,
     MCPManifestError,
@@ -675,3 +686,411 @@ class ExtensionManager:
             diagnostics=tuple(diagnostics),
             running_mcp_families=tuple(sorted(set(running_mcp_families))),
         )
+
+
+class SkillInstaller:
+    """One conversation's authorized ZIP selection and existing-manager preview."""
+
+    _ZIP_PATH_RE = re.compile(
+        r'''["'](/[^"'\n]+\.[zZ][iI][pP])["']|(/[^\s"'<>，。；]+\.[zZ][iI][pP])'''
+    )
+
+    def __init__(
+        self,
+        config: AgentConfig,
+        *,
+        manager_factory: Callable[[], ExtensionManager],
+        builtin_names: Collection[str],
+    ) -> None:
+        self.config = config
+        self.manager_factory = manager_factory
+        self.builtin_names = {name.casefold() for name in builtin_names}
+        self.pending = False
+        self.last_result: dict[str, Any] | None = None
+        self._temporary: Path | None = None
+        self._staged_hash: str | None = None
+        self._did_stage = False
+        self._preview: ExtensionPreview | None = None
+        self._preview_id = ""
+
+    @classmethod
+    def _update_intent(cls, text: str) -> bool:
+        text = cls._ZIP_PATH_RE.sub("", text)
+        return bool(re.search(r"更新|覆寫|覆盖|\b(?:update|overwrite|replace)\b", text, re.I)) and not bool(
+            re.search(r"不要|不更新|不覆寫|不覆盖|\b(?:no|not|never|don't)\b", text, re.I)
+        )
+
+    @staticmethod
+    def _choice(text: str, choices: list[str]) -> int | None:
+        if re.search(r"不要|不是|取消|\b(?:no|not|cancel|don't)\b", text, re.I):
+            return None
+        reply = text.strip().rstrip("。.!！")
+        ordinals = {"第一個": 0, "第二個": 1, "第三個": 2, "first": 0, "second": 1, "third": 2}
+        if reply.casefold() in ordinals:
+            index = ordinals[reply.casefold()]
+            return index if index < len(choices) else None
+        if reply.isdecimal():
+            index = int(reply) - 1
+            return index if 0 <= index < len(choices) else None
+        matches = [
+            index for index, name in enumerate(choices)
+            if re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", reply, re.I)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _result(self, status: str, message: str, **values: Any) -> dict[str, Any]:
+        result = {"status": status, "message": message, "detail": message, **values}
+        self.last_result = result
+        return result
+
+    def begin(self, user_input: str, session_id: str) -> dict[str, Any]:
+        """Bind a host-recognized installation request, never model-authored approval."""
+        cleanup = self.clear()
+        if cleanup.get("cleanup_conflict"):
+            return cleanup
+        self.paths = resolve_extension_paths(self.config)
+        self._session_id = session_id
+        self._request = user_input
+        self._allow_update = self._update_intent(user_input)
+        self._revision = load_registry(self.paths.state_root).revision
+        self._source_options: list[dict[str, str]] = []
+        self._archive: Path | None = None
+        self._archive_hash = ""
+        self._candidates: list[dict[str, str]] = []
+        self._candidate: dict[str, str] | None = None
+        self._source: Path | None = None
+        self._source_hash: str | None = None
+        self._original_entry_hash: str | None = None
+        self._waiting_update = False
+        self._manager: ExtensionManager | None = None
+        self._apply_attempted = False
+        self._apply_succeeded = False
+        self.pending = True
+        try:
+            # Quoting makes paths with spaces unambiguous; bare Linux paths remain supported.
+            specified = [first or second for first, second in self._ZIP_PATH_RE.findall(user_input)]
+            self._selection_request = self._ZIP_PATH_RE.sub("", user_input).replace("skill-installer", "")
+            if specified:
+                sources = [Path(path) for path in dict.fromkeys(specified)]
+            elif ".zip" not in user_input.casefold():
+                skill_root = self.paths.dropin_root / "skill"
+                sources = sorted(
+                    (path for path in skill_root.iterdir() if path.suffix.lower() == ".zip"),
+                    key=lambda path: path.name,
+                ) if skill_root.is_dir() and not skill_root.is_symlink() else []
+            else:
+                sources = []
+            for source in sources:
+                if source.is_symlink() or not source.is_file():
+                    raise ManagementError(f"ZIP must be a regular local file: {source}")
+                source = source.resolve()
+                self._source_options.append({"path": str(source), "sha256": self._archive_fingerprint(source)})
+            if len(self._source_options) == 1:
+                self._select_archive(0)
+            return self._status()
+        except (OSError, ValueError, RegistryError, ManagementError, yaml.YAMLError, zipfile.BadZipFile) as exc:
+            return self._fail(str(exc))
+
+    def _archive_fingerprint(self, archive: Path) -> str:
+        if archive.is_symlink() or not archive.is_file():
+            raise ManagementError("source ZIP changed or is not a regular file")
+        with archive.open("rb") as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
+
+    @property
+    def _limits(self) -> dict[str, int]:
+        return {
+            "max_file_bytes": self.config.extension_max_file_bytes,
+            "max_files": self.config.extension_max_files,
+            "max_bundle_bytes": self.config.extension_max_bundle_bytes,
+        }
+
+    def _select_archive(self, index: int) -> None:
+        selected = self._source_options[index]
+        self._archive = Path(selected["path"])
+        self._archive_hash = selected["sha256"]
+        if self._archive_fingerprint(self._archive) != self._archive_hash:
+            raise ManagementError("source ZIP changed; start a new installation request")
+        helper = import_module("skills.skill-installer.zip_bundle")
+        candidates = helper.inspect_archive(self._archive, **self._limits)
+        for candidate in candidates:
+            metadata = _frontmatter(candidate["skill_md"], self._archive)
+            name = metadata.get("name")
+            description = metadata.get("description")
+            if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?", name):
+                raise ManagementError(f"invalid skill name in {candidate['root']}")
+            if not isinstance(description, str) or not description.strip():
+                raise ManagementError(f"missing skill description in {candidate['root']}")
+            self._candidates.append({"root": candidate["root"], "name": name})
+        self._candidates.sort(key=lambda candidate: candidate["root"])
+        if not self._candidates:
+            raise ManagementError("ZIP contains no SKILL.md candidate")
+        index = 0 if len(self._candidates) == 1 else self._choice(
+            self._selection_request, [candidate["name"] for candidate in self._candidates]
+        )
+        if index is not None:
+            self._select_candidate(index)
+
+    def _source_fingerprint(self) -> str | None:
+        assert self._source is not None
+        self._check_source_parent()
+        if not self._source.exists() and not self._source.is_symlink():
+            return None
+        return _bundle_fingerprint(self._source, config=self.config)[0]
+
+    def _check_source_parent(self) -> None:
+        assert self._source is not None
+        parent = self._source.parent
+        if parent.is_symlink() or parent.resolve() != parent:
+            raise ManagementError("drop-in skill parent changed or is a symlink")
+
+    def _select_candidate(self, index: int) -> None:
+        self._candidate = self._candidates[index]
+        name = self._candidate["name"]
+        if name.casefold() in self.builtin_names or name == _PRIVATE_NAME:
+            raise ManagementError(f"builtin or private skill name cannot be overwritten: {name}")
+        kind_root = self.paths.dropin_root / "skill"
+        if kind_root.is_symlink():
+            raise ManagementError("drop-in skill directory must not be a symlink")
+        if kind_root.is_dir():
+            for source in kind_root.iterdir():
+                if source.name.casefold() == name.casefold() and source.name != name:
+                    raise ManagementError(f"drop-in name collision: {source.name}")
+        self._source = kind_root / name
+        self._source_hash = self._source_fingerprint()
+        applied = load_registry(self.paths.state_root).extensions.get(f"skill:{name}")
+        self._original_entry_hash = applied.source_hash if applied else None
+
+    def _check_current(self) -> None:
+        if load_registry(self.paths.state_root).revision != self._revision:
+            raise ManagementError("registry changed; start a new installation request")
+        if self._archive is not None and self._archive_fingerprint(self._archive) != self._archive_hash:
+            raise ManagementError("source ZIP changed; start a new installation request")
+        if self._source is not None:
+            expected = self._staged_hash if self._did_stage else self._source_hash
+            if self._source_fingerprint() != expected:
+                raise ManagementError("skill source changed; start a new installation request")
+
+    def continue_request(self, user_input: str, session_id: str) -> dict[str, Any]:
+        if not self.pending or session_id != self._session_id:
+            return self._fail("installer request is inactive or belongs to another conversation")
+        declined_update = self._waiting_update and user_input.strip().casefold() in {
+            "no", "不要", "不更新", "不要更新", "不用了",
+        }
+        if declined_update or re.search(r"取消|不要安裝|停止|\b(?:cancel|stop)\b", user_input, re.I):
+            return self.run("cancel")
+        try:
+            self._check_current()
+            if self._archive is None:
+                if self._ZIP_PATH_RE.search(user_input):
+                    allow_update = self._allow_update
+                    result = self.begin(user_input, session_id)
+                    self._allow_update = self._allow_update or allow_update
+                    return result
+                index = self._choice(user_input, [Path(item["path"]).name for item in self._source_options])
+                if index is not None:
+                    self._select_archive(index)
+            elif self._candidate is None:
+                index = self._choice(user_input, [candidate["name"] for candidate in self._candidates])
+                if index is not None:
+                    self._select_candidate(index)
+            elif self._waiting_update:
+                affirmative = user_input.strip().casefold().rstrip("。.!！") in {
+                    "yes", "y", "ok", "同意", "是", "好", "確認", "可以",
+                }
+                if self._update_intent(user_input) or affirmative:
+                    self._allow_update = True
+                    self._waiting_update = False
+            return self._status()
+        except (OSError, ValueError, RegistryError, ManagementError, yaml.YAMLError, zipfile.BadZipFile) as exc:
+            return self._fail(str(exc))
+
+    def _status(self) -> dict[str, Any]:
+        common = {"source_zip": str(self._archive) if self._archive else None,
+                  "dropin_root": str(self.paths.dropin_root), "limits": self._limits}
+        if self._archive is None:
+            return self._result(
+                "needs_source", "請選擇要安裝的 ZIP，或提供 backend 可讀的 Linux 絕對 ZIP 路徑。",
+                sources=[{"number": index + 1, "path": option["path"]} for index, option in enumerate(self._source_options)],
+                **common,
+            )
+        if self._candidate is None:
+            return self._result("needs_selection", "請選擇本次要安裝的一個 skill。",
+                                candidates=self._candidates, **common)
+        common.update({"name": self._candidate["name"], "candidate_root": self._candidate["root"],
+                       "source_path": str(self._source)})
+        if self._waiting_update:
+            return self._result("needs_update_approval", "已有同名不同內容的 skill；請明確同意更新或取消。", **common)
+        if self._preview is not None:
+            return self._result("preview_ready", "已驗證選定 skill，preview 已綁定本次使用者請求。",
+                                preview_id=self._preview_id, **common)
+        return self._result("needs_preparation", "請用 skill helper 將選定候選解壓到新的隔離暫存目錄，再提供 prepared_path。", **common)
+
+    def run(
+        self,
+        action: str,
+        source_zip: str = "",
+        candidate_root: str = "",
+        prepared_path: str = "",
+        preview_id: str = "",
+    ) -> dict[str, Any]:
+        """Run only over selection and authority recorded from real user messages."""
+        if not self.pending:
+            if self.last_result and (action == "status" or self.last_result["status"] == "blocked"):
+                return self.last_result
+            return self._result("blocked", "installer request is inactive")
+        if action == "cancel":
+            cleanup = self.clear()
+            return self._result("cancelled", "已取消 skill 安裝。", **cleanup)
+        try:
+            self._check_current()
+            if action == "status":
+                return self._status()
+            if action not in {"preview", "apply"}:
+                raise ManagementError(f"unsupported installer action: {action}")
+            if self._archive is None or self._candidate is None:
+                return self._status()
+            if source_zip and Path(source_zip).expanduser().resolve() != self._archive:
+                raise ManagementError("source ZIP is outside the user's selected request")
+            if candidate_root and candidate_root != self._candidate["root"]:
+                raise ManagementError("candidate is outside the user's selected scope")
+            if action == "apply":
+                if self._preview is None or preview_id != self._preview_id:
+                    return self._result("blocked", "no matching authorized preview; run preview first")
+                assert self._manager is not None
+                self._apply_attempted = True
+                report = self._manager.apply(self._preview)
+                return self._finish(report)
+            if self._preview is not None or not prepared_path:
+                return self._status()
+            return self._prepare(Path(prepared_path))
+        except Exception as exc:
+            # Provider/planner failures must also release staged data and conversation authority.
+            return self._fail(str(exc))
+
+    def _prepare(self, prepared: Path) -> dict[str, Any]:
+        assert self._archive is not None and self._candidate is not None and self._source is not None
+        helper = import_module("skills.skill-installer.zip_bundle")
+        helper.verify_prepared(self._archive, self._candidate["root"], prepared, **self._limits)
+        desired = inspect_bundle("skill", self._candidate["name"], prepared, config=self.config)
+        if not desired.valid:
+            raise ManagementError("; ".join(desired.errors))
+        key = desired.key
+        applied = load_registry(self.paths.state_root).extensions.get(key)
+        requires_update = (self._source_hash is not None and self._source_hash != desired.source_hash) or (
+            applied is not None and applied.source_hash != desired.source_hash
+        )
+        if requires_update and not self._allow_update:
+            self._waiting_update = True
+            return self._status()
+        self._check_current()
+        if self._source_hash != desired.source_hash:
+            self._source.parent.mkdir(parents=True, exist_ok=True)
+            self._temporary = Path(tempfile.mkdtemp(prefix=".skill-installer-", dir=self._source.parent))
+            incoming = self._temporary / "incoming"
+            shutil.copytree(prepared, incoming, symlinks=True)
+            helper.verify_prepared(self._archive, self._candidate["root"], incoming, **self._limits)
+            self._check_current()
+            if self._source_hash is not None:
+                self._source.rename(self._temporary / "previous")
+            self._staged_hash = desired.source_hash
+            self._did_stage = True
+            incoming.rename(self._source)
+        else:
+            self._staged_hash = desired.source_hash
+        self._manager = self.manager_factory()
+        self._preview = self._manager.preview(selected_skill_keys={key})
+        self._check_current()
+        self._preview_id = uuid.uuid4().hex
+        return self._status()
+
+    def _finish(self, report: ApplyReport) -> dict[str, Any]:
+        assert self._candidate is not None
+        registry = load_registry(self.paths.state_root)
+        items = []
+        for item in report.items:
+            applied = registry.extensions.get(item.key)
+            items.append({"key": item.key, "outcome": item.outcome, "detail": item.detail,
+                          "installed_path": str(self.paths.state_root / applied.installed_relpath) if applied else None})
+        success = all(item.outcome in {"added", "updated", "unchanged"} for item in report.items)
+        self._apply_succeeded = success and bool(report.items)
+        source_zip, source_path, name = str(self._archive), str(self._source), self._candidate["name"]
+        cleanup = self.clear()
+        return self._result(
+            "complete" if success and not cleanup.get("cleanup_conflict") else "blocked",
+            "; ".join(f"{item.key}: {item.outcome} ({item.detail})" for item in report.items),
+            outcomes=items, restart_required=report.restart_required,
+            source_zip=source_zip, source_path=source_path, name=name,
+            applied_revision=report.applied_revision, diagnostics=list(report.diagnostics), **cleanup,
+        )
+
+    def _fail(self, detail: str) -> dict[str, Any]:
+        observed: dict[str, Any] = {}
+        if self._staged_hash is not None and self._candidate is not None:
+            try:
+                registry = load_registry(self.paths.state_root)
+                key = f"skill:{self._candidate['name']}"
+                applied = registry.extensions.get(key)
+                if self._confirmed_applied(registry):
+                    assert applied is not None
+                    outcome = "unchanged" if self._original_entry_hash == applied.source_hash else (
+                        "updated" if self._original_entry_hash is not None else "added"
+                    )
+                    observed = {
+                        "outcomes": [{"key": key, "outcome": outcome,
+                                      "detail": "registry confirms this source was applied despite the action error",
+                                      "installed_path": str(self.paths.state_root / applied.installed_relpath)}],
+                        "source_zip": str(self._archive), "source_path": str(self._source),
+                        "restart_required": registry.revision != self._revision,
+                    }
+            except (OSError, RegistryError) as exc:
+                detail += f"; cannot determine apply result: {exc}"
+        cleanup = self.clear()
+        return self._result("blocked", detail, **observed, **cleanup)
+
+    def _confirmed_applied(self, registry: ExtensionRegistry) -> bool:
+        assert self._candidate is not None
+        applied = registry.extensions.get(f"skill:{self._candidate['name']}")
+        if applied is None or applied.source_hash != self._staged_hash:
+            return False
+        return self._apply_succeeded or (
+            self._apply_attempted
+            and registry.revision > self._revision
+            and self._original_entry_hash != self._staged_hash
+        )
+
+    def clear(self) -> dict[str, Any]:
+        """Restore only this request's unapplied, still-unmodified staged source."""
+        cleanup: dict[str, Any] = {}
+        if self._did_stage:
+            try:
+                assert self._source is not None and self._candidate is not None
+                self._check_source_parent()
+                registry = load_registry(self.paths.state_root)
+                if not self._confirmed_applied(registry):
+                    current = self._source_fingerprint()
+                    incomplete_move = current is None and self._temporary is not None and (self._temporary / "incoming").exists()
+                    if current != self._staged_hash and not incomplete_move:
+                        raise ManagementError("staged source changed; preserving user changes and backup")
+                    if current is not None:
+                        shutil.rmtree(self._source)
+                    if self._temporary is not None and (self._temporary / "previous").exists():
+                        (self._temporary / "previous").rename(self._source)
+                        if self._source_fingerprint() != self._source_hash:
+                            raise ManagementError("restored source does not match the saved original")
+            except (OSError, ValueError, RegistryError, ManagementError) as exc:
+                cleanup = {"cleanup_conflict": True, "cleanup_detail": str(exc),
+                           "backup_path": str(self._temporary) if self._temporary else None}
+        if self._temporary is not None and not cleanup.get("cleanup_conflict"):
+            try:
+                self._check_source_parent()
+                shutil.rmtree(self._temporary)
+            except (OSError, ManagementError) as exc:
+                cleanup = {"cleanup_conflict": True, "cleanup_detail": str(exc), "backup_path": str(self._temporary)}
+        self._temporary = None
+        self._staged_hash = None
+        self._did_stage = False
+        self._preview = None
+        self._preview_id = ""
+        self.pending = False
+        return cleanup

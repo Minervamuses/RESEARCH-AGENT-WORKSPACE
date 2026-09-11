@@ -235,6 +235,153 @@ def test_installer_rejects_builtin_collision_before_dropin_write(tmp_path, name)
     assert not Path(config.extension_dropin_dir).exists()
 
 
+def test_installer_accepts_real_followup_path_but_not_tool_source(tmp_path):
+    config = _config(tmp_path)
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    assert installer.begin("請用 skill-installer 安裝 ZIP", "a")["status"] == "needs_source"
+    assert installer.run("preview", source_zip=str(archive), prepared_path=str(prepared))["status"] == "needs_source"
+    assert not Path(config.extension_dropin_dir).exists()
+    resumed = installer.continue_request(f'"{archive}"', "a")
+    assert resumed["status"] == "needs_preparation"
+    assert resumed["limits"]["max_files"] == config.extension_max_files
+    ready = installer.run("preview", prepared_path=str(prepared))
+    assert ready["status"] == "preview_ready"
+    installer.clear()
+
+
+@pytest.mark.parametrize("changed", ["archive", "registry"])
+def test_installer_pending_approval_rejects_stale_binding(tmp_path, changed):
+    config = _config(tmp_path)
+    source = _write_skill(config)
+    original = (source / "SKILL.md").read_bytes()
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"安裝 {archive}", "a")
+    assert installer.run("preview", prepared_path=str(prepared))["status"] == "needs_update_approval"
+    if changed == "archive":
+        with zipfile.ZipFile(archive, "a") as handle:
+            handle.writestr("wrapper/writer/extra.txt", "changed ZIP")
+    else:
+        write_registry(Path(config.extension_state_dir), ExtensionRegistry(revision=1))
+    result = installer.continue_request("是，更新", "a")
+    assert result["status"] == "blocked"
+    assert installer.pending is False
+    assert (source / "SKILL.md").read_bytes() == original
+
+
+def test_installer_blocked_apply_restores_existing_source(tmp_path):
+    config = _config(tmp_path)
+    source = _write_skill(config)
+    original = (source / "SKILL.md").read_bytes()
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config, decision="block")
+    installer.begin(f"更新 {archive}", "a")
+    ready = installer.run("preview", prepared_path=str(prepared))
+    result = installer.run("apply", preview_id=ready["preview_id"])
+    assert result["status"] == "blocked"
+    assert result["outcomes"][0]["outcome"] == "blocked"
+    assert (source / "SKILL.md").read_bytes() == original
+    assert not (source / "forms.md").exists()
+    assert not load_registry(Path(config.extension_state_dir)).extensions
+
+
+def test_installer_apply_exception_checks_registry_before_cleanup(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    archive, prepared, files = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"安裝 {archive}", "a")
+    ready = installer.run("preview", prepared_path=str(prepared))
+    actual_apply = installer._manager.apply
+
+    def apply_then_raise(preview):
+        actual_apply(preview)
+        raise RuntimeError("receipt failed after registry write")
+
+    monkeypatch.setattr(installer._manager, "apply", apply_then_raise)
+    result = installer.run("apply", preview_id=ready["preview_id"])
+    assert result["status"] == "blocked"
+    assert result["outcomes"][0]["outcome"] == "added"
+    assert result["restart_required"] is True
+    assert "receipt failed" in result["message"]
+    assert (Path(config.extension_dropin_dir) / "skill/writer/SKILL.md").read_bytes() == files["SKILL.md"]
+    assert installer.pending is False
+
+
+def test_installer_invalid_zip_and_other_session_clear_authority(tmp_path):
+    config = _config(tmp_path)
+    invalid = tmp_path / "invalid.zip"
+    invalid.write_bytes(b"not a ZIP")
+    installer = _installer(tmp_path, config)
+    assert installer.begin(f"安裝 {invalid}", "a")["status"] == "blocked"
+    assert installer.pending is False
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer.begin(f"安裝 {archive}", "a")
+    ready = installer.run("preview", prepared_path=str(prepared))
+    assert installer.continue_request("yes", "b")["status"] == "blocked"
+    assert installer.run("apply", preview_id=ready["preview_id"])["status"] == "blocked"
+    assert not (Path(config.extension_dropin_dir) / "skill/writer").exists()
+
+
+def test_installer_update_word_in_zip_path_does_not_authorize_overwrite(tmp_path):
+    config = _config(tmp_path)
+    source = _write_skill(config)
+    original = (source / "SKILL.md").read_bytes()
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    renamed = archive.with_name("update.zip")
+    archive.rename(renamed)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"Install {renamed}", "a")
+    assert installer.run("preview", prepared_path=str(prepared))["status"] == "needs_update_approval"
+    assert (source / "SKILL.md").read_bytes() == original
+    installer.clear()
+
+
+@pytest.mark.parametrize("failure", ["cancel", "preview"])
+def test_installer_old_matching_registry_does_not_discard_pending_source(tmp_path, monkeypatch, failure):
+    config = _config(tmp_path)
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"安裝 {archive}", "a")
+    ready = installer.run("preview", prepared_path=str(prepared))
+    assert installer.run("apply", preview_id=ready["preview_id"])["status"] == "complete"
+    source = _write_skill(config, description="Unapplied user source modification")
+    original = (source / "SKILL.md").read_bytes()
+    installer = _installer(tmp_path, config)
+    installer.begin(f"更新 {archive}", "a")
+    if failure == "preview":
+        def fail_preview(**kwargs):
+            raise RuntimeError("preview failed")
+        monkeypatch.setattr(installer.manager_factory(), "preview", fail_preview)
+    result = installer.run("preview", prepared_path=str(prepared))
+    if failure == "cancel":
+        assert result["status"] == "preview_ready"
+        result = installer.run("cancel")
+    else:
+        assert result["status"] == "blocked"
+        assert not result.get("outcomes")
+    assert (source / "SKILL.md").read_bytes() == original
+    assert installer.pending is False
+
+
+def test_installer_rejects_parent_symlink_replacement_before_staging(tmp_path):
+    config = _config(tmp_path)
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    kind_root = Path(config.extension_dropin_dir) / "skill"
+    kind_root.mkdir(parents=True)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"安裝 {archive}", "a")
+    kind_root.rmdir()
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("user data", encoding="utf-8")
+    kind_root.symlink_to(outside, target_is_directory=True)
+    result = installer.run("preview", prepared_path=str(prepared))
+    assert result["status"] == "blocked"
+    assert "parent changed" in result["detail"]
+    assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+
+
 def test_preview_fresh_loads_private_skill_and_writes_nothing(tmp_path):
     config = _config(tmp_path)
     _write_skill(config)

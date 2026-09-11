@@ -106,11 +106,12 @@ Phase 01 必須 Complete。確認 manager scope 及 registry 不變式已有證�
 
 ```bash
 cd app
-conda run -n app poetry run pytest tests/test_skill_adherence.py tests/test_skill_runtime.py tests/test_skill_broker.py tests/test_slash_commands.py tests/test_desktop_service.py -q
+conda run -n app poetry run pytest tests/test_skill_adherence.py tests/test_skill_runtime.py tests/test_skill_broker.py tests/test_slash_commands.py tests/test_desktop_service.py tests/test_extension_manager.py -q
 conda run -n app poetry run pytest tests/test_graph_skill_loader.py tests/test_tool_access.py tests/test_tool_access_matrix.py tests/test_tool_inventory.py tests/test_read_file_tool.py tests/test_bash_tool.py tests/test_citation_skill_activation.py tests/test_thinking_session.py -q
 ```
 
-第一組 focused，第二組 broader。使用 tmp_path ZIP 加真正 stdlib 解壓／檔案
+第一組 focused，第二組 broader。實作觀察：host action 沿用 manager.py，
+其最小 host regressions 同置 test_extension_manager.py，故納入第一組。使用 tmp_path ZIP 加真正 stdlib 解壓／檔案
 操作驗證 bytes 與範圍；model 以既有 fake 回傳工具呼叫，不做 live provider call。
 若追加必要 focused test file，把其 exact command 更新到此 phase 再執行。
 

@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 
 from skills.citation import SKILL_NAME as CITATION_SKILL_NAME
 from agent.turns.results import GraphTurnResult, TurnOutcome
@@ -17,6 +20,7 @@ from agent.turns.safety import (
 )
 
 from agent.config import AgentConfig
+from agent.extensions.manager import ExtensionManager, SkillInstaller
 from agent.conversations import (
     MAX_IDENTIFIER_BYTES,
     MAX_TOOL_ACTIVITIES,
@@ -79,7 +83,7 @@ GitHub MCP tools (skill-scoped):
 Local skills (user-selected, one turn at a time):
 - Skill bundles live under `skills/<name>/`. The user selects one with `/<skill-name> <prompt>`; the slash wrapper is removed before the prompt reaches you, and you cannot self-select a skill.
 - For that one turn, the selected skill's instructions and tool availability arrive as ephemeral system messages — follow them. They do not persist into the next ordinary turn.
-- Citation is the sole persistent exception and is controlled by the dedicated `/citation` command.
+- Citation is controlled by `/citation`. Explicit skill-installer installation requests use normal tools and may continue only while the host is awaiting installation clarification.
 - If the user asks what skills are available, discover the bundle names by listing `skills/` via `bash`.
 
 Language policy:
@@ -154,6 +158,25 @@ class ChatSession:
         self._turn_journal = TurnJournal()
         self._citation_policy = CitationSessionPolicy(config)
         self.citation_workflow_tool = self._citation_policy.workflow_tool
+        self.extension_manager = ExtensionManager(config)
+        self._skill_installer = SkillInstaller(
+            config,
+            manager_factory=lambda: self.extension_manager,
+            builtin_names={skill.name for skill in discover_skills(config)},
+        )
+        self._installer_previous_mode: str | None = None
+        self._installer_session_id: str | None = None
+        self._installer_action_used = False
+        self._installer_context: dict = {}
+        self.skill_install_tool = StructuredTool.from_function(
+            coroutine=self._skill_install_action,
+            name="skill_install",
+            description=("Host management for the active skill-installer request only. "
+                         "status shows the bound source/choices/limits; preview validates "
+                         "an original ZIP bundle prepared using bash; apply consumes its "
+                         "preview_id. User replies, never model claims, authorize choices "
+                         "and updates. cancel abandons the pending installation."),
+        )
         bash_tool_options = {}
         if bash_approval_handler is not None:
             bash_tool_options["bash_approval_handler"] = bash_approval_handler
@@ -163,7 +186,7 @@ class ChatSession:
             config,
             extra_tools=extra_tools,
             skill_runtime_getter=lambda: self.active_skill_runtime,
-            skill_tools=[self.citation_workflow_tool],
+            skill_tools=[self.citation_workflow_tool, self.skill_install_tool],
             mcp_families=self.mcp_families,
             global_mcp_families=self.global_mcp_families,
             **bash_tool_options,
@@ -328,13 +351,14 @@ class ChatSession:
         display_input: str,
         turn_id: str,
         retry: bool,
+        thinking_mode: str | None = None,
     ):
         return await self._begin_persisted_turn(
             kind="conversational",
             display_input=display_input,
             semantic_input=semantic_input,
             context_eligible=True,
-            thinking_mode=self.thinking_mode,
+            thinking_mode=thinking_mode or self.thinking_mode,
             turn_id=turn_id,
             retry=retry,
         )
@@ -563,7 +587,12 @@ class ChatSession:
     def _build_active_skill_hint(self) -> SystemMessage | None:
         if self.active_skill_runtime is None:
             return None
-        return SystemMessage(content=self.active_skill_runtime.context_block())
+        content = self.active_skill_runtime.context_block()
+        if self.active_skill_runtime.name == "skill-installer":
+            content += "\n\n[Installer request]\n" + json.dumps(
+                self._installer_context, ensure_ascii=False, default=str
+            )
+        return SystemMessage(content=content)
 
     def _active_skill_context_block(self) -> str:
         if self.active_skill_runtime is None:
@@ -678,6 +707,9 @@ class ChatSession:
             action == "save"
             for action, _status in completed_citation_calls(new_messages)
         )
+        if (self.active_skill_runtime is not None
+                and self.active_skill_runtime.name == "skill-installer"):
+            answer = self._installer_result_text()
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
         if self._final_text_validator is not None:
             self._final_text_validator(final_text, errors)
@@ -726,6 +758,8 @@ class ChatSession:
         normalized = mode.strip().lower()
         if normalized not in {"normal", "extended"}:
             raise ValueError(f"unknown thinking mode: {mode}")
+        if normalized == "extended" and self._skill_installer.pending:
+            raise ValueError("finish or cancel the skill installation before extended thinking")
         if normalized == "extended" and self.citation_skill_active:
             raise ValueError(
                 "extended thinking is unavailable while the citation skill "
@@ -762,6 +796,7 @@ class ChatSession:
     def activate_citation_skill(self) -> SkillRuntime:
         """Activate the sole persistent Skill and force normal thinking."""
         runtime = self._load_skill_runtime(CITATION_SKILL_NAME)
+        self.clear_skill_installer()
         self.active_skill_runtime = runtime
         self.thinking_mode = "normal"
         return runtime
@@ -772,6 +807,91 @@ class ChatSession:
             return
         self.active_skill_runtime = None
         self._teardown_citation_session_state()
+
+    @staticmethod
+    def _requests_skill_installer(text: str) -> bool:
+        return bool(re.match(
+            r"^\s*(?:請\s*)?(?:用|使用)\s*`?skill-installer`?\s*(?:幫我\s*)?(?:安裝|更新)"
+            r"|^\s*(?:please\s+)?use\s+`?skill-installer`?\s+(?:to\s+)?(?:install|update)\b",
+            text, re.IGNORECASE,
+        ))
+
+    def clear_skill_installer(self) -> None:
+        """Discard installation authority and restore the mode before installation."""
+        self._skill_installer.clear()
+        if self._installer_previous_mode is not None:
+            self.thinking_mode = self._installer_previous_mode
+        self._installer_previous_mode = None
+        self._installer_session_id = None
+        self._installer_context = {}
+        if (self.active_skill_runtime is not None
+                and self.active_skill_runtime.name == "skill-installer"):
+            self.active_skill_runtime = None
+
+    async def _skill_install_action(
+        self,
+        action: Literal["status", "preview", "apply", "cancel"],
+        source_zip: str = "",
+        candidate_root: str = "",
+        prepared_path: str = "",
+        preview_id: str = "",
+    ) -> str:
+        runtime = self.active_skill_runtime
+        if (runtime is None or runtime.name != "skill-installer"
+                or self._active_turn_id is None
+                or self._installer_session_id != self.session_id):
+            return json.dumps({"status": "error", "message": "No active installer request"})
+        self._installer_action_used = True
+        result = self._skill_installer.run(
+            action, source_zip=source_zip, candidate_root=candidate_root,
+            prepared_path=prepared_path, preview_id=preview_id,
+        )
+        self._installer_context = result
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    def _installer_result_text(self) -> str:
+        result = self._skill_installer.last_result if self._installer_action_used else None
+        if not result:
+            return "尚未完成 skill 安裝；沒有可確認的 host 安裝結果。"
+        lines = [str(result.get("message") or result.get("status") or "未完成安裝")]
+        for key in ("source_zip", "name", "source_path", "installed_path", "restart_required", "cleanup_detail", "backup_path"):
+            if key in result:
+                lines.append(f"{key}: {result[key]}")
+        for key in ("sources", "candidates", "outcomes"):
+            for index, item in enumerate(result.get(key) or (), 1):
+                if key == "candidates":
+                    lines.append(f"{index}. {item['name']} ({item['root']})")
+                elif key == "sources":
+                    lines.append(f"{index}. {item['path']}")
+                else:
+                    lines.append(f"{item['key']}: {item['outcome']}; {item.get('installed_path') or item.get('detail', '')}")
+        if self._installer_previous_mode == "extended":
+            lines.append("安裝使用 normal 工具模式；結束後恢復 extended。")
+        return "\n".join(lines)
+
+    async def _run_installer_turn(self, user_input: str, *, new_request: bool) -> TurnOutcome:
+        runtime = self._load_skill_runtime("skill-installer")
+        if new_request:
+            self.clear_skill_installer()
+            self._installer_previous_mode = self.thinking_mode
+            self._installer_session_id = self.session_id
+            self._installer_context = self._skill_installer.begin(user_input, self.session_id)
+        else:
+            self._installer_context = self._skill_installer.continue_request(user_input, self.session_id)
+        if self.citation_skill_active:
+            self._teardown_citation_session_state()
+        self.active_skill_runtime = runtime
+        self.thinking_mode = "normal"
+        self._installer_action_used = False
+        try:
+            return await self._run_turn(user_input)
+        except BaseException:
+            self.clear_skill_installer()
+            raise
+        finally:
+            self.active_skill_runtime = None
+            if not self._skill_installer.pending or not self._installer_action_used:
+                self.clear_skill_installer()
 
     async def _run_one_shot_skill_turn(
         self,
@@ -807,6 +927,7 @@ class ChatSession:
         return [
             *tool_inventory.base_tool_names(extra_tools=self.extra_tools),
             self.citation_workflow_tool.name,
+            self.skill_install_tool.name,
         ]
 
     def _visible_context_text(self) -> str:
@@ -1022,11 +1143,15 @@ class ChatSession:
         """Core entry point: one finalized turn with text, errors, and trace."""
         async with self._turn_execution_lock:
             logical_turn_id = turn_id or uuid.uuid4().hex
+            installer_request = (skill_name == "skill-installer"
+                                 or (skill_name is None and self._requests_skill_installer(user_input)))
+            installer_turn = installer_request or (skill_name is None and self._skill_installer.pending)
             snapshot, turn, duplicate = await self._begin_turn(
                 semantic_input=user_input,
                 display_input=display_input if display_input is not None else user_input,
                 turn_id=logical_turn_id,
                 retry=retry,
+                thinking_mode="normal" if installer_turn else None,
             )
             self._conversation_snapshot = snapshot
             if duplicate:
@@ -1042,7 +1167,10 @@ class ChatSession:
             self._active_turn_snapshot = snapshot
             self._active_turn_id = logical_turn_id
             try:
+                if installer_turn:
+                    return await self._run_installer_turn(user_input, new_request=installer_request)
                 if skill_name is not None:
+                    self.clear_skill_installer()
                     return await self._run_one_shot_skill_turn(
                         user_input,
                         skill_name,
