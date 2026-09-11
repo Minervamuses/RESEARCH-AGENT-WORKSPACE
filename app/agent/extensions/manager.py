@@ -94,6 +94,7 @@ class ExtensionPreview:
     private_skill_hash: str
     mcp_candidates: dict[str, MCPLaunchCandidate]
     host_blocks: dict[str, str]
+    selected_skill_keys: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,28 @@ def _change_payload(change: ExtensionChange) -> dict[str, Any]:
 def _plan_changes(diff: ExtensionDiff) -> tuple[ExtensionChange, ...]:
     return tuple(
         change for change in diff.changes if change.operation != "unchanged"
+    )
+
+
+def _selected_skill_diff(
+    diff: ExtensionDiff,
+    selected_skill_keys: set[str] | frozenset[str] | None,
+) -> ExtensionDiff:
+    if selected_skill_keys is None:
+        return diff
+    if not isinstance(selected_skill_keys, (set, frozenset)) or not selected_skill_keys:
+        raise ManagementError("selected skill keys must be a non-empty set")
+    by_key = {change.key: change for change in diff.changes}
+    for key in selected_skill_keys:
+        if not isinstance(key, str) or not key.startswith("skill:"):
+            raise ManagementError("selected keys must contain only skill keys")
+        change = by_key.get(key)
+        if change is None or change.desired is None:
+            raise ManagementError(f"selected skill source is absent: {key}")
+    return ExtensionDiff(
+        changes=tuple(change for change in diff.changes if change.key in selected_skill_keys),
+        delete_enabled=False,
+        diagnostics=diff.diagnostics,
     )
 
 
@@ -349,19 +372,27 @@ class ExtensionManager:
         self.private_skill_path = private_skill_path
         self.model_factory = model_factory
 
-    def preview(self) -> ExtensionPreview:
+    def preview(
+        self,
+        *,
+        selected_skill_keys: set[str] | frozenset[str] | None = None,
+    ) -> ExtensionPreview:
         try:
-            return self._preview()
+            return self._preview(selected_skill_keys=selected_skill_keys)
         except ManagementError:
             raise
         except Exception as exc:
             raise ManagementError(f"extension preview failed: {exc}") from exc
 
-    def _preview(self) -> ExtensionPreview:
+    def _preview(
+        self,
+        *,
+        selected_skill_keys: set[str] | frozenset[str] | None = None,
+    ) -> ExtensionPreview:
         paths = resolve_extension_paths(self.config)
         registry = load_registry(paths.state_root)
         scan = scan_extensions(paths.dropin_root, config=self.config)
-        diff = build_diff(scan, registry)
+        diff = _selected_skill_diff(build_diff(scan, registry), selected_skill_keys)
         private = load_private_skill(self.private_skill_path)
         changes = _plan_changes(diff)
         if changes:
@@ -406,6 +437,9 @@ class ExtensionManager:
             private_skill_hash=private.sha256,
             mcp_candidates=mcp_candidates,
             host_blocks=host_blocks,
+            selected_skill_keys=(
+                frozenset(selected_skill_keys) if selected_skill_keys is not None else None
+            ),
         )
 
     def apply(
@@ -444,10 +478,13 @@ class ExtensionManager:
         if private.sha256 != preview.private_skill_hash:
             raise ManagementError("private Skill changed; run preview again")
         scan = scan_extensions(preview.paths.dropin_root, config=self.config)
-        diff = build_diff(scan, latest)
+        diff = _selected_skill_diff(
+            build_diff(scan, latest), preview.selected_skill_keys
+        )
         if _diff_signature(diff) != _diff_signature(preview.diff):
             raise ManagementError("drop-in contents changed; run preview again")
 
+        _validate_plan(preview.plan, diff)
         plan_by_key = {item.key: item for item in preview.plan.items}
         extensions = dict(latest.extensions)
         results: list[ApplyItemResult] = []

@@ -200,6 +200,13 @@ def scan_extensions(root: Path, *, config: AgentConfig) -> ScanResult:
         for bundle in children:
             if bundle.name.startswith("."):
                 continue
+            if (
+                kind == "skill"
+                and bundle.suffix.lower() == ".zip"
+                and not bundle.is_symlink()
+                and bundle.is_file()
+            ):
+                continue
             item = inspect_bundle(kind, bundle.name, bundle, config=config)
             items[item.key] = item
             observed_ids[item.id.casefold()].append(item.key)

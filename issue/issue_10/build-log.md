@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Scoped installation | In progress | 2026-09-11 | — | Preflight and red below | None |
+| 01 — Scoped installation | Complete | 2026-09-11 | 2026-09-11 | Red and green evidence below | None |
 | 02 — Conversational installer | Not started | — | — | — | None |
 | 03 — Acceptance and documentation | Not started | — | — | — | None |
 
@@ -62,3 +62,23 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
 - Current conversation explicitly requests a commit for each change step. Commit
   this red/test step separately; no push, branch change, or AGENTS edit authorized.
   Phase 02 remains Not started until Phase 01 required checks pass.
+
+
+### 2026-09-11 — Phase 01 green and completion
+
+- Red/test commit: `67f8046`. Production changes are limited to
+  `app/agent/extensions/manager.py` and `discovery.py`: optional non-empty set of
+  selected skill keys, frozen in preview, scoped authoritative planning and
+  rescanning/signature verification, plan revalidation at apply; regular skill ZIP
+  files are skipped while malformed files/directories/symlinks retain diagnostics.
+  Registry entries still merge from existing state; no persistent format change.
+- PASS `poetry run pytest tests/test_extension_manager.py
+  tests/test_extension_baseline.py -q`: **27 passed**, 1 warning, 0.38s.
+- PASS `poetry run pytest tests/test_extension_registry.py tests/test_extension_mcp.py
+  tests/test_extension_skill_startup.py -q`: **24 passed**, 1 warning, 0.30s.
+  Same Linux/Conda/cwd procedure as above. Existing MCP exact-binding approval and
+  full manager semantics pass. Selected source/revision stale rejection, unchanged
+  unselected entries/bytes, source retention and scanner acceptance all observed.
+- PASS `git diff --check`. No independent refactor was required. All Phase 01
+  acceptance criteria have offline evidence; Phase 01 Complete, Phase 02 eligible.
+  Limits: no live-model autonomy claim, no real user installation state touched.
