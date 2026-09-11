@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — Scoped installation | Complete | 2026-09-11 | 2026-09-11 | Red and green evidence below | None |
 | 02 — Conversational installer | Complete | 2026-09-12 | 2026-09-12 | Host/session/helper/Desktop checks below | None |
-| 03 — Acceptance and documentation | In progress | 2026-09-12 | — | Preflight and review below | Review fixes before acceptance |
+| 03 — Acceptance and documentation | Complete | 2026-09-12 | 2026-09-12 | Real ZIP, suite, wheel and final review below | None |
 
 只使用 `Not started`、`In progress`、`Blocked`、`Complete`。
 Required acceptance 與 checks 有觀察證據後才能標 Complete。
@@ -312,3 +312,144 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
   this read-only check failed, then the actual phase file was read. No state change.
 - `git diff --check`: PASS before committing this acceptance/docs step.
   Full suite, build, wheel checks and final review record remain pending.
+
+
+### 2026-09-12 — Phase 03 final verification and completion
+
+- Final required focused group passed as recorded above; acceptance/docs committed
+  as `92b4a07`. Only one full suite was invoked in this launch:
+  `timeout 600s poetry run pytest -q`, from app with Conda app active.
+  PASS: **1031 passed**, 2 warnings, **27.57s**. Warnings: existing LangGraph
+  allowed_objects deprecation and the intentionally duplicate ZIP-member fixture.
+  No failed/skipped tests. Full suite uses the synthetic offline ZIP fixture;
+  real fixed-upstream acceptance is the separate two-pass procedure above.
+- `poetry build`: PASS, built `app/dist/agent-0.1.0.tar.gz` and
+  `app/dist/agent-0.1.0-py3-none-any.whl`; no install, dependency or manifest
+  change. Wheel SHA256:
+  `9b7c76223ed895cde898f56fb050ef74ba485ff7a5593367f3b7e9d5535d7deb`.
+- Wheel inspection below: PASS. All three public installer resources and the
+  existing private-management/local resources match source bytes. Isolated
+  `python -I -B` imports the unpacked wheel, outside the source checkout;
+  catalog discovers installer, private skill stays private, runtime skill root is
+  absolute and readable, config overrides and Linux XDG fallback both pass.
+  Temp root observed: `/tmp/issue10-wheel-vbfyaxww` (automatically removed).
+  One existing LangGraph deprecation warning. No package installed or downloaded
+  script run. Exact command, from app with Conda app active:
+
+```bash
+python - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import zipfile
+
+app_root = Path.cwd().resolve()
+wheel = app_root / "dist/agent-0.1.0-py3-none-any.whl"
+required = [
+    "skills/skill-installer/SKILL.md",
+    "skills/skill-installer/manifest.yaml",
+    "skills/skill-installer/zip_bundle.py",
+    "tool/_internal/extension-management/SKILL.md",
+    "tool/local/README.md",
+]
+with tempfile.TemporaryDirectory(prefix="issue10-wheel-") as temporary:
+    temp_root = Path(temporary)
+    unpacked = temp_root / "unpacked"
+    with zipfile.ZipFile(wheel) as archive:
+        for name in required:
+            assert archive.read(name) == (app_root / name).read_bytes(), name
+        archive.extractall(unpacked)
+    code = r'''
+import hashlib
+import json
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+unpacked, temp_root = (Path(arg).resolve() for arg in sys.argv[1:])
+sys.path.insert(0, str(unpacked))
+import agent
+from agent.config import AgentConfig
+from agent.extensions.manager import default_private_skill_path, load_private_skill
+from agent.extensions.paths import resolve_extension_paths
+from agent.paths import find_app_root
+from agent.skills.metadata import discover_skills
+from agent.skills.runtime import load_skill_runtime
+assert Path(agent.__file__).resolve() == unpacked / "agent/__init__.py"
+try:
+    find_app_root()
+except RuntimeError:
+    pass
+else:
+    raise AssertionError("wheel unexpectedly resolved a source checkout")
+env = {"XDG_DATA_HOME": str(temp_root / "data"), "XDG_STATE_HOME": str(temp_root / "state")}
+paths = resolve_extension_paths(AgentConfig(), env=env)
+dropin = temp_root / "data/research-agent/tool"
+workspace_id = hashlib.sha256(str(dropin).encode()).hexdigest()[:16]
+assert paths.dropin_root == dropin
+assert paths.state_root == temp_root / "state/research-agent/extensions" / workspace_id
+override = resolve_extension_paths(AgentConfig(
+    extension_dropin_dir=str(temp_root / "custom-dropin"),
+    extension_state_dir=str(temp_root / "custom-state")), env=env)
+assert override.dropin_root == temp_root / "custom-dropin"
+assert override.state_root == temp_root / "custom-state"
+config = AgentConfig()
+catalog = discover_skills(config)
+assert "skill-installer" in {skill.name for skill in catalog}
+assert "extension-management" not in {skill.name for skill in catalog}
+runtime = load_skill_runtime("skill-installer", config=config, catalog=catalog,
+    all_tools=[SimpleNamespace(name=name) for name in ("skill_install", "read_file", "bash")])
+expected_root = unpacked / "skills/skill-installer"
+assert runtime.root == expected_root
+assert f"skill_root: {expected_root}" in runtime.context_block()
+assert runtime.read_skill_resource("zip_bundle.py") == (expected_root / "zip_bundle.py").read_text(encoding="utf-8")
+assert default_private_skill_path() == unpacked / "tool/_internal/extension-management/SKILL.md"
+load_private_skill()
+print(json.dumps({"wheel_import": str(Path(agent.__file__).resolve()),
+    "skill_root": str(runtime.root), "default_dropin": str(paths.dropin_root),
+    "default_state": str(paths.state_root), "explicit_overrides": "passed", "private_skill": "passed"}))
+'''
+    subprocess.run([sys.executable, "-I", "-B", "-c", code, str(unpacked), str(temp_root)],
+                   cwd=temp_root, check=True)
+print(json.dumps({"wheel": str(wheel),
+    "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+    "required_resources": required, "source_resource_bytes": "identical"}))
+PY
+```
+
+- Actual independent review recorded in
+  [code_review/final-review.md](code_review/final-review.md). All substantive
+  findings corrected and independently rechecked; final reviewer reports none
+  remaining. Wheel procedure separately received a read-only path/API preflight.
+- `git diff --check 66b0e5e..HEAD`: PASS; `git status --short` was empty after
+  acceptance/docs commit and build. Final log/review edits checked with
+  `git diff --check` before their local completion commit. No AGENTS, dependency,
+  environment, lockfile, persistent schema or Desktop protocol changed.
+- Phase 03 **Complete**; no blocker or further eligible phase. All required checks
+  passed. SKIPPED by authorization/non-goals: live/paid inference, execution of
+  downloaded scripts, dependency installation, real user installation, push,
+  branch/worktree changes, deployment/publishing.
+- Launch authorizes a local commit for each change step; prior steps are
+  `67f8046`, `adf1917`, `b04314a`, `89149e3`, `8c16924`, `7ab177b`,
+  `2523062`, `92b4a07`. This final evidence/review step is also locally committed.
+  Initial user worktree was clean; no pre-existing user edits were overwritten.
+
+### Success-condition evidence map (GOALS order)
+
+| # | Observed evidence |
+|---|---|
+| 1 — Single ZIP, ordinary agent loop | Phase02 natural/slash scripted graph tools; phase03 actual CLI input reader and Desktop session.turn |
+| 2 — Original standard bundle and wrapper | Fixed upstream pdf: 12 files / 58,692 bytes, no custom manifest, source and managed copies exactly match selected original ZIP files |
+| 3 — Selection/update/lifecycle | Manager explicit update and deferred-consent regressions; Desktop two-turn candidate reply; session cancellation, completion and replacement tests |
+| 4 — Preserve unselected changes | Phase01 selected add/update with unselected skill/MCP add/update/delete entries and bytes; phase03 pending source preservation |
+| 5 — Failures/stale/builtin/source retention | Manager stale/replay/refusal/partial receipt/builtin/rollback tests; actual denied shell and cleanup conflict regressions; original ZIP/source bytes preserved |
+| 6 — Both entrances/new catalog | Real-archive CLI and Desktop acceptance each passed; old catalog unchanged, fresh startup discovers/selects pdf |
+| 7 — True root and original resource | Runtime context plus actual read_file ToolMessage from forms.md; existing bash/read_file tests and full suite pass |
+| 8 — Real archive vs model inference | Fixed commit/archive SHA256/license/procedure above; all inference deterministic and no claim of live-model autonomy |
+
+Full suite/build/wheel evidence and the independent review satisfy the overall
+completion criteria. GOALS/PLANS checkboxes remain authored criteria; this log is
+their designated runtime status owner. No stable intent or roadmap revision was
+required. Stop after final commit and read-only clean-tree verification.
