@@ -19,7 +19,13 @@ from agent.extensions.manager import (
     ManagementError,
     load_private_skill,
 )
-from agent.extensions.registry import load_registry
+from agent.extensions.discovery import scan_extensions
+from agent.extensions.models import ExtensionRegistry
+from agent.extensions.registry import (
+    install_scanned_extension,
+    load_registry,
+    write_registry,
+)
 
 
 class _PlanModel:
@@ -66,13 +72,15 @@ def _write_private(tmp_path: Path, *, suffix: str = "") -> Path:
     return path
 
 
-def _write_skill(config: AgentConfig, description: str = "Example") -> Path:
+def _write_skill(
+    config: AgentConfig, description: str = "Example", *, name: str = "writer"
+) -> Path:
     root = Path(config.extension_dropin_dir)
-    bundle = root / "skill" / "writer"
-    bundle.mkdir(parents=True)
+    bundle = root / "skill" / name
+    bundle.mkdir(parents=True, exist_ok=True)
     (bundle / "SKILL.md").write_text(
         "---\n"
-        "name: writer\n"
+        f"name: {name}\n"
         f"description: {description}\n"
         "---\n\n"
         "Write clearly.\n",
@@ -276,3 +284,181 @@ def test_apply_slash_command_confirms_and_reports_restart(
     assert "revision 0 -> 1" in result.message
     assert "restart_required: true" in result.message
     assert session.turn_calls == []
+
+
+@pytest.mark.parametrize("operation", ["add", "update"])
+def test_selected_skill_apply_preserves_other_pending_changes(tmp_path, operation):
+    config = _config(tmp_path)
+    root = Path(config.extension_dropin_dir)
+    state = Path(config.extension_state_dir)
+    if operation == "update":
+        _write_skill(config, "Original selected skill")
+    for name in ("other-update", "other-delete"):
+        _write_skill(config, name=name)
+    for name in ("mcp-update", "mcp-delete"):
+        bundle = root / "mcp" / name
+        bundle.mkdir(parents=True)
+        (bundle / "server.py").write_text("# original\n", encoding="utf-8")
+    initial = scan_extensions(root, config=config)
+    entries = {
+        key: install_scanned_extension(item, state_root=state, config=config)
+        for key, item in initial.items.items()
+    }
+    write_registry(
+        state,
+        ExtensionRegistry(revision=1, source_root=str(root), extensions=entries),
+    )
+    for kind, name in (("skill", "other-delete"), ("mcp", "mcp-delete")):
+        bundle = root / kind / name
+        for path in bundle.iterdir():
+            path.unlink()
+        bundle.rmdir()
+    selected = _write_skill(config, "Requested version")
+    _write_skill(config, "Unselected new version", name="other-update")
+    _write_skill(config, name="other-add")
+    (root / "mcp" / "mcp-update" / "server.py").write_text(
+        "# unselected new version\n", encoding="utf-8"
+    )
+    added_mcp = root / "mcp" / "mcp-add"
+    added_mcp.mkdir()
+    (added_mcp / "server.py").write_text("# unselected new MCP\n", encoding="utf-8")
+    sources_before = {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    }
+    managed_before = {
+        path.relative_to(state): path.read_bytes()
+        for path in (state / "installed").rglob("*") if path.is_file()
+    }
+    model = _PlanModel([_plan_item(operation=operation)])
+    manager = _manager(config, _write_private(tmp_path), model)
+    scope = {"skill:writer"}
+
+    preview = manager.preview(selected_skill_keys=scope)
+    scope.add("skill:other-add")
+    report = manager.apply(preview)
+    registry = load_registry(state)
+
+    assert preview.selected_skill_keys == frozenset({"skill:writer"})
+    assert [(change.key, change.operation) for change in preview.diff.changes] == [
+        ("skill:writer", operation)
+    ]
+    payload = json.loads(model.calls[0][1].content.split("\n\n", 1)[1])
+    assert [item["key"] for item in payload["authoritative_changes"]] == ["skill:writer"]
+    assert [(item.key, item.outcome) for item in report.items] == [
+        ("skill:writer", "added" if operation == "add" else "updated")
+    ]
+    assert registry.revision == 2
+    assert set(registry.extensions) == set(entries) | {"skill:writer"}
+    for key, entry in entries.items():
+        if key != "skill:writer":
+            assert registry.extensions[key] == entry
+    for relative, content in managed_before.items():
+        assert (state / relative).read_bytes() == content
+    assert {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    } == sources_before
+    installed = state / registry.extensions["skill:writer"].installed_relpath
+    assert (installed / "SKILL.md").read_bytes() == (selected / "SKILL.md").read_bytes()
+    repeat = manager.preview(selected_skill_keys={"skill:writer"})
+    assert [(change.key, change.operation) for change in repeat.diff.changes] == [
+        ("skill:writer", "unchanged")
+    ]
+    assert repeat.plan.items == []
+    assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [set(), {"mcp:clock"}, {"writer"}, {"skill:../writer"}, {"skill:missing"},
+     {"skill:writer", "mcp:clock"}, ["skill:writer"], "skill:writer"],
+)
+def test_selected_skill_scope_rejects_invalid_selection_before_planning(tmp_path, scope):
+    config = _config(tmp_path)
+    _write_skill(config)
+    model = _PlanModel([_plan_item()])
+    manager = _manager(config, _write_private(tmp_path), model)
+
+    with pytest.raises(ManagementError) as error:
+        manager.preview(selected_skill_keys=scope)
+
+    assert str(error.value)
+    assert model.calls == []
+    assert not Path(config.extension_state_dir).exists()
+
+
+def test_selected_skill_scope_rejects_pending_delete(tmp_path):
+    config = _config(tmp_path)
+    bundle = _write_skill(config)
+    model = _PlanModel([_plan_item()])
+    manager = _manager(config, _write_private(tmp_path), model)
+    manager.apply(manager.preview())
+    state = Path(config.extension_state_dir)
+    registry_before = (state / "registry.json").read_bytes()
+    (bundle / "SKILL.md").unlink()
+    bundle.rmdir()
+
+    with pytest.raises(ManagementError):
+        manager.preview(selected_skill_keys={"skill:writer"})
+
+    assert (state / "registry.json").read_bytes() == registry_before
+    assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize("changed", ["source", "registry"])
+def test_selected_skill_apply_rejects_stale_preview(tmp_path, changed):
+    config = _config(tmp_path)
+    bundle = _write_skill(config)
+    manager = _manager(config, _write_private(tmp_path), _PlanModel([_plan_item()]))
+    preview = manager.preview(selected_skill_keys={"skill:writer"})
+    state = Path(config.extension_state_dir)
+    if changed == "source":
+        (bundle / "SKILL.md").write_text("User changed source\n", encoding="utf-8")
+        expected_message = "drop-in contents changed"
+    else:
+        write_registry(state, ExtensionRegistry(revision=1))
+        expected_message = "registry changed"
+    before = load_registry(state)
+    source_before = (bundle / "SKILL.md").read_bytes()
+
+    with pytest.raises(ManagementError, match=expected_message):
+        manager.apply(preview)
+
+    assert load_registry(state) == before
+    assert (bundle / "SKILL.md").read_bytes() == source_before
+    assert not (state / "installed").exists()
+
+
+def test_selected_skill_scope_rejects_model_added_item(tmp_path):
+    config = _config(tmp_path)
+    _write_skill(config)
+    _write_skill(config, name="other")
+    extra = dict(_plan_item(), key="skill:other")
+    model = _PlanModel([_plan_item(), extra])
+    manager = _manager(config, _write_private(tmp_path), model)
+
+    with pytest.raises(ManagementError, match="coverage mismatch"):
+        manager.preview(selected_skill_keys={"skill:writer"})
+
+    assert not Path(config.extension_state_dir).exists()
+
+
+def test_selected_skill_scope_preserves_cross_kind_collision_check(tmp_path):
+    config = _config(tmp_path)
+    _write_skill(config)
+    mcp = Path(config.extension_dropin_dir) / "mcp" / "writer"
+    mcp.mkdir(parents=True)
+    (mcp / "server.py").write_text("# inert\n", encoding="utf-8")
+    model = _PlanModel([_plan_item(operation="blocked", decision="block")])
+    manager = _manager(config, _write_private(tmp_path), model)
+
+    preview = manager.preview(selected_skill_keys={"skill:writer"})
+    report = manager.apply(preview)
+
+    assert preview.diff.changes[0].operation == "blocked"
+    assert "collides across kinds" in preview.diff.changes[0].reason
+    assert [(item.key, item.outcome) for item in report.items] == [
+        ("skill:writer", "blocked")
+    ]
+    assert load_registry(Path(config.extension_state_dir)).extensions == {}
