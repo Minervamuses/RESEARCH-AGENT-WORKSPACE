@@ -3,6 +3,8 @@
 import asyncio
 import json
 
+import pytest
+
 from langchain_core.messages import AIMessage
 
 from agent.cli.slash_commands import (
@@ -157,3 +159,52 @@ def test_no_skill_turn_keeps_skill_state_empty(tmp_path, monkeypatch):
     assert answer == "ok"
     assert session.active_skill_runtime is None
     assert "active_skill" not in captured["state"]
+
+
+@pytest.mark.parametrize("slash", [False, True])
+def test_installer_explicit_request_uses_normal_skill_turn(tmp_path, monkeypatch, slash):
+    captured = {}
+    monkeypatch.setattr(
+        "agent.session.build_graph",
+        lambda _cfg, **kwargs: _CaptureGraph(captured),
+    )
+    session = ChatSession(AgentConfig(
+        persist_dir=str(tmp_path / "history"),
+        extension_dropin_dir=str(tmp_path / "dropins"),
+        extension_state_dir=str(tmp_path / "state"),
+    ))
+    session.set_thinking_mode("extended")
+    async def unexpected_extended(_text):
+        raise AssertionError("installer must use normal tools")
+    monkeypatch.setattr(session._fusion, "run_extended_turn", unexpected_extended)
+    text = "install /tmp/example.zip" if slash else "請用 skill-installer 安裝 /tmp/example.zip"
+    asyncio.run(session.turn(text, skill_name="skill-installer" if slash else None))
+
+    assert captured["state"]["active_skill"] == "skill-installer"
+    assert "skill_install" in captured["state"]["effective_tools"]
+    assert session.active_skill_runtime is None
+    assert session.thinking_mode == "extended"
+
+
+@pytest.mark.parametrize("text", [
+    "skill-installer 是什麼", '文件範例是「請用 skill-installer 安裝 /tmp/example.zip」',
+])
+def test_installer_mention_does_not_select_skill(tmp_path, monkeypatch, text):
+    captured = {}
+    session = _make_session(tmp_path, monkeypatch, captured)
+    asyncio.run(session.turn(text))
+    assert "active_skill" not in captured["state"]
+
+
+def test_active_skill_context_exposes_absolute_root_for_root_document(tmp_path, monkeypatch):
+    captured = {}
+    session = _make_session(tmp_path, monkeypatch, captured)
+    root = tmp_path / "skills" / "academic-paper-writing"
+    (root / "forms.md").write_text("Root-level original forms", encoding="utf-8")
+    asyncio.run(session.turn("read forms.md", skill_name="academic-paper-writing"))
+    prompt = "\n".join(message.content for message in captured["state"]["messages"])
+
+    assert f"skill_root: {root.resolve()}" in prompt
+    assert "relative" in prompt.lower()
+    result = json.loads(_read_file(str(root / "forms.md")))
+    assert result["content"] == "Root-level original forms"

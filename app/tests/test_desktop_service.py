@@ -1686,6 +1686,56 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
     asyncio.run(run())
 
 
+def test_conversation_replacement_clears_installer_before_saving_controls(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        factory, sessions = _canonical_session_factory(monkeypatch)
+        service = _service(tmp_path, session_factory=factory)
+        await service.dispatch("session.create", {"loadMcp": False})
+        first = sessions[-1]
+        await service.dispatch("session.turn", _turn_params("/help"))
+        pending: set[str] = set()
+
+        def begin_installer(session: ChatSession) -> None:
+            pending.add(session.session_id)
+            session.set_thinking_mode("normal")
+
+            def clear() -> None:
+                pending.discard(session.session_id)
+                session.set_thinking_mode("extended")
+
+            monkeypatch.setattr(session, "clear_skill_installer", clear, raising=False)
+
+        begin_installer(first)
+        await service.dispatch("session.select", {
+            "projectId": "local",
+            "sessionId": first.session_id,
+        })
+        assert pending == {first.session_id}
+
+        await service.dispatch("session.create", {"loadMcp": False})
+        second = sessions[-1]
+        assert first.session_id not in pending
+        assert first.thinking_mode == "extended"
+        assert service._control_snapshots[first.session_id].thinking_mode == "extended"
+        await service.dispatch("session.turn", _turn_params("/help"))
+        begin_installer(second)
+
+        selected = await service.dispatch("session.select", {
+            "projectId": "local",
+            "sessionId": first.session_id,
+        })
+
+        assert pending == set()
+        assert second.thinking_mode == "extended"
+        assert service._control_snapshots[second.session_id].thinking_mode == "extended"
+        assert selected["thinkingMode"] == "extended"
+
+    asyncio.run(run())
+
+
 def test_session_shutdown_clears_active_session(
     tmp_path: Path,
 ) -> None:
@@ -1695,6 +1745,13 @@ def test_session_shutdown_clears_active_session(
         await service.dispatch("session.create", {})
         session = factory.created
         assert session is not None
+        pending_installer = True
+
+        def clear_skill_installer() -> None:
+            nonlocal pending_installer
+            pending_installer = False
+
+        session.clear_skill_installer = clear_skill_installer
 
         result = await asyncio.wait_for(
             service.dispatch("session.shutdown", {}),
@@ -1703,6 +1760,7 @@ def test_session_shutdown_clears_active_session(
 
         assert result == {"status": "stopped"}
         assert service.session is None
+        assert pending_installer is False
 
     asyncio.run(run())
 

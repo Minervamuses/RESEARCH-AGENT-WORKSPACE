@@ -350,3 +350,132 @@ def test_render_tool_availability_block_keeps_empty_resolution_semantics():
 
     assert "available_tools: (none)" in block
     assert "unavailable_tools: (none)" in block
+
+
+
+def _zip_helper():
+    from importlib import import_module
+
+    return import_module("skills.skill-installer.zip_bundle")
+
+
+def _skill_zip(path, members):
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data, mode in members:
+            info = zipfile.ZipInfo(name)
+            info.external_attr = mode << 16
+            archive.writestr(info, data)
+    return path
+
+
+def test_installer_zip_preserves_selected_bundle_and_original_archive(tmp_path):
+    helper = _zip_helper()
+    skill_text = b"---\nname: chosen\ndescription: Original\n---\nSee forms.md\n"
+    archive = _skill_zip(tmp_path / "repo.zip", [
+        ("repo/skills/chosen/SKILL.md", skill_text, 0o100644),
+        ("repo/skills/chosen/forms.md", b"original\r\nforms\n", 0o100644),
+        ("repo/skills/chosen/scripts/run.sh", b"#!/bin/sh\nexit 0\n", 0o100755),
+        ("repo/skills/chosen/assets/raw.bin", b"\x00\xff", 0o100644),
+        ("repo/skills/other/SKILL.md", b"other skill", 0o100644),
+        ("repo/skills/other/large.bin", b"x" * 4096, 0o100644),
+    ])
+    original = archive.read_bytes()
+    limits = dict(max_file_bytes=100, max_files=4, max_bundle_bytes=200)
+
+    candidates = helper.inspect_archive(archive, **limits)
+    assert candidates == [
+        {"root": "repo/skills/chosen", "skill_md": skill_text.decode()},
+        {"root": "repo/skills/other", "skill_md": "other skill"},
+    ]
+    prepared = helper.extract_archive(
+        archive, "repo/skills/chosen", tmp_path / "prepared", **limits,
+    )
+    assert prepared == tmp_path / "prepared"
+    assert (prepared / "SKILL.md").read_bytes() == skill_text
+    assert (prepared / "forms.md").read_bytes() == b"original\r\nforms\n"
+    assert (prepared / "scripts/run.sh").stat().st_mode & 0o111
+    assert (prepared / "assets/raw.bin").read_bytes() == b"\x00\xff"
+    assert not (prepared / "other").exists()
+    helper.verify_prepared(archive, "repo/skills/chosen", prepared, **limits)
+    assert archive.read_bytes() == original
+
+
+@pytest.mark.parametrize("member,mode", [
+    ("../outside.txt", 0o100644),
+    ("/absolute.txt", 0o100644),
+    ("C:/outside.txt", 0o100644),
+    ("skill\\outside.txt", 0o100644),
+    ("skill/link", 0o120777),
+    ("skill/pipe", 0o010644),
+    ("skill/SKILL.md", 0o100644),
+    ("skill/SKILL.md/child", 0o100644),
+])
+def test_installer_zip_rejects_unsafe_members_without_extracting(tmp_path, member, mode):
+    helper = _zip_helper()
+    archive = _skill_zip(tmp_path / "unsafe.zip", [
+        ("skill/SKILL.md", b"original", 0o100644),
+        (member, b"unsafe", mode),
+    ])
+    destination = tmp_path / "prepared"
+    with pytest.raises(ValueError):
+        helper.inspect_archive(archive)
+    with pytest.raises(ValueError):
+        helper.extract_archive(archive, "skill", destination)
+    assert not destination.exists()
+    assert not (tmp_path / "outside.txt").exists()
+
+
+@pytest.mark.parametrize("limits", [
+    {"max_file_bytes": 4},
+    {"max_files": 1},
+    {"max_bundle_bytes": 9},
+])
+def test_installer_zip_applies_limits_to_selected_bundle(tmp_path, limits):
+    helper = _zip_helper()
+    archive = _skill_zip(tmp_path / "skill.zip", [
+        ("SKILL.md", b"skill", 0o100644),
+        ("forms.md", b"forms", 0o100644),
+    ])
+    destination = tmp_path / "prepared"
+    with pytest.raises(ValueError, match="limit"):
+        helper.extract_archive(archive, ".", destination, **limits)
+    assert not destination.exists()
+
+
+def test_installer_zip_requires_true_skill_root_and_new_destination(tmp_path):
+    helper = _zip_helper()
+    archive = _skill_zip(tmp_path / "skill.zip", [
+        ("repo/skill/SKILL.md", b"original", 0o100644),
+    ])
+    with pytest.raises(ValueError, match="SKILL.md"):
+        helper.extract_archive(archive, "repo", tmp_path / "prepared")
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    marker = existing / "keep.txt"
+    marker.write_bytes(b"keep")
+    with pytest.raises((ValueError, FileExistsError)):
+        helper.extract_archive(archive, "repo/skill", existing)
+    assert marker.read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize("mutation", ["content", "executable", "extra", "symlink"])
+def test_installer_zip_verification_rejects_modified_prepared_bundle(tmp_path, mutation):
+    helper = _zip_helper()
+    archive = _skill_zip(tmp_path / "skill.zip", [
+        ("SKILL.md", b"original", 0o100644),
+        ("script.sh", b"shell bytes", 0o100755),
+    ])
+    prepared = helper.extract_archive(archive, ".", tmp_path / "prepared")
+    helper.verify_prepared(archive, ".", prepared)
+    if mutation == "content":
+        (prepared / "SKILL.md").write_bytes(b"rewritten")
+    elif mutation == "executable":
+        (prepared / "script.sh").chmod(0o644)
+    elif mutation == "extra":
+        (prepared / "extra.txt").write_bytes(b"extra")
+    else:
+        (prepared / "link").symlink_to(tmp_path)
+    with pytest.raises(ValueError):
+        helper.verify_prepared(archive, ".", prepared)

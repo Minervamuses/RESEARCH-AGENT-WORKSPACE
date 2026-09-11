@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Scoped installation | Complete | 2026-09-11 | 2026-09-11 | Red and green evidence below | None |
-| 02 — Conversational installer | Not started | — | — | — | None |
+| 02 — Conversational installer | In progress | 2026-09-12 | — | Preflight and red below | None |
 | 03 — Acceptance and documentation | Not started | — | — | — | None |
 
 只使用 `Not started`、`In progress`、`Blocked`、`Complete`。
@@ -82,3 +82,36 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
 - PASS `git diff --check`. No independent refactor was required. All Phase 01
   acceptance criteria have offline evidence; Phase 01 Complete, Phase 02 eligible.
   Limits: no live-model autonomy claim, no real user installation state touched.
+
+
+### 2026-09-12 — Phase 02 preflight and initial red
+
+- Phase 01 complete (`adf1917`); live session/graph/tool policy, skill metadata,
+  runtime, CLI and Desktop entry/lifecycle code inspected before implementation.
+  Common session accepts both entries. Existing skill tool injection avoids any
+  Desktop RPC reentry. The only new file-operation helper stays in the public
+  installer skill; no new service, dependency, persistent format or protocol.
+- In-memory host state belongs to the existing manager module and current
+  ChatSession. Exact source, user candidate/update replies and preview token bind
+  the action; model-supplied approval is not an input. Source preparation uses
+  ordinary bash + the first-party stdlib helper, never downloaded scripts.
+- Planned checks remain both Phase 02 command groups. Stop on missing required
+  evidence or the plan's authority boundaries; Phase 03 remains Not started.
+- RED `poetry run pytest tests/test_skill_adherence.py -q -k 'installer or
+  root_document'`: **3 failed, 2 passed, 5 deselected**, 1 warning, 0.32s:
+  natural request lacks installer activation, slash skill absent, root missing.
+  Added an explicit failing extended-workflow stub to this new test afterwards
+  so verification cannot leave the fake normal-graph seam.
+- RED (helper subagent) `poetry run pytest tests/test_skill_runtime.py -q -k
+  installer_zip`: **17 failed, 17 deselected**, 1 warning, 0.45s; helper absent.
+  Tests cover original bundle bytes, selected-only size limits, ZIP path/type
+  rejection and prepared-content verification.
+- RED (Desktop subagent) `poetry run pytest tests/test_desktop_service.py -q -k
+  'conversation_replacement_clears_installer_before_saving_controls or
+  session_shutdown_clears_active_session'`: **2 failed, 57 deselected**, 1 warning,
+  0.36s; pending state not cleared before replacement/shutdown.
+- Commands use the same root/app, Linux Conda activation recorded above. Desktop
+  subagent equivalent dispatch was `wsl.exe -d Ubuntu-24.04 --cd
+  /home/minervamuses/research-agent-workspace/app
+  /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest ...`.
+  Isolated temp filesystem, fake models; red is expected, not phase completion.
