@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from agent.extensions.registry import (
     load_registry,
     write_registry,
 )
+from agent.extensions import manager as manager_module
 
 
 class _PlanModel:
@@ -106,6 +108,131 @@ def _manager(config, private_path, model):
         private_skill_path=private_path,
         model_factory=lambda _config: model,
     )
+
+
+def _installer_bundle(tmp_path, *, name="writer", description="ZIP writer"):
+    prepared = tmp_path / f"prepared-{name}"
+    prepared.mkdir()
+    files = {
+        "SKILL.md": (
+            f"---\nname: {name}\ndescription: {description}\n---\nOriginal instructions.\n"
+        ).encode(),
+        "forms.md": b"Original root resource\n",
+        "scripts/example.py": b"raise RuntimeError('must never run')\n",
+    }
+    archive = tmp_path / f"{name}.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        for relative, raw in files.items():
+            handle.writestr(f"wrapper/{name}/{relative}", raw)
+            target = prepared / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+    return archive, prepared, files
+
+
+def _installer(tmp_path, config, *, operation="add", decision="apply"):
+    manager = _manager(
+        config, _write_private(tmp_path), _PlanModel([_plan_item(operation, decision)])
+    )
+    return manager_module.SkillInstaller(
+        config, manager_factory=lambda: manager, builtin_names={"citation", "skill-installer"}
+    )
+
+
+def test_installer_prepared_bundle_installs_only_authorized_skill(tmp_path):
+    config = _config(tmp_path)
+    unselected = _write_skill(config, name="untouched")
+    unselected_raw = (unselected / "SKILL.md").read_bytes()
+    archive, prepared, files = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"請用 skill-installer 安裝 {archive}", "conversation-a")
+
+    ready = installer.run("preview", source_zip=str(archive), prepared_path=str(prepared))
+    assert ready["status"] == "preview_ready"
+    report = installer.run("apply", preview_id=ready["preview_id"])
+
+    assert report["status"] == "complete"
+    assert report["outcomes"][0]["outcome"] == "added"
+    assert report["restart_required"] is True
+    assert installer.pending is False
+    registry = load_registry(Path(config.extension_state_dir))
+    assert set(registry.extensions) == {"skill:writer"}
+    managed = Path(config.extension_state_dir) / registry.extensions["skill:writer"].installed_relpath
+    for relative, raw in files.items():
+        assert (managed / relative).read_bytes() == raw
+        assert (Path(config.extension_dropin_dir) / "skill/writer" / relative).read_bytes() == raw
+    assert archive.is_file()
+    assert (unselected / "SKILL.md").read_bytes() == unselected_raw
+    assert installer.run("apply", preview_id=ready["preview_id"])["status"] == "blocked"
+
+
+def test_installer_requires_real_update_reply_before_staging(tmp_path):
+    config = _config(tmp_path)
+    source = _write_skill(config, description="Existing user source")
+    original = (source / "SKILL.md").read_bytes()
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"請用 skill-installer 安裝 {archive}", "conversation-a")
+
+    waiting = installer.run("preview", prepared_path=str(prepared))
+    assert waiting["status"] == "needs_update_approval"
+    assert (source / "SKILL.md").read_bytes() == original
+    assert installer.run("apply", preview_id="model-approved")["status"] == "blocked"
+    installer.continue_request("是，更新", "conversation-a")
+    ready = installer.run("preview", prepared_path=str(prepared))
+    assert ready["status"] == "preview_ready"
+    installer.clear()
+    assert (source / "SKILL.md").read_bytes() == original
+    assert installer.pending is False
+
+
+def test_installer_multi_candidate_selection_is_bound_to_user_reply(tmp_path):
+    config = _config(tmp_path)
+    archive, prepared, files = _installer_bundle(tmp_path)
+    with zipfile.ZipFile(archive, "a") as handle:
+        handle.writestr("wrapper/alpha/SKILL.md", "---\nname: alpha\ndescription: Alpha\n---\n")
+    installer = _installer(tmp_path, config)
+    installer.begin(f"請用 skill-installer 安裝 {archive}", "conversation-a")
+
+    waiting = installer.run("preview", candidate_root="wrapper/writer", prepared_path=str(prepared))
+    assert waiting["status"] == "needs_selection"
+    assert [choice["name"] for choice in waiting["candidates"]] == ["alpha", "writer"]
+    assert not (Path(config.extension_dropin_dir) / "skill/writer").exists()
+    installer.continue_request("第二個", "conversation-a")
+    ready = installer.run("preview", candidate_root="wrapper/writer", prepared_path=str(prepared))
+    assert ready["status"] == "preview_ready"
+    installer.clear()
+
+
+def test_installer_stale_source_preserves_user_changes(tmp_path):
+    config = _config(tmp_path)
+    source = _write_skill(config, description="Existing user source")
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"請用 skill-installer 更新 {archive}", "conversation-a")
+    ready = installer.run("preview", prepared_path=str(prepared))
+    assert ready["status"] == "preview_ready"
+    (source / "forms.md").write_text("new user modification", encoding="utf-8")
+
+    result = installer.run("apply", preview_id=ready["preview_id"])
+    assert result["status"] == "blocked"
+    assert result["cleanup_conflict"] is True
+    assert (source / "forms.md").read_text() == "new user modification"
+    assert installer.pending is False
+    assert not load_registry(Path(config.extension_state_dir)).extensions
+
+
+@pytest.mark.parametrize("name", ["citation", "skill-installer"])
+def test_installer_rejects_builtin_collision_before_dropin_write(tmp_path, name):
+    config = _config(tmp_path)
+    archive, prepared, _ = _installer_bundle(tmp_path, name=name)
+    installer = _installer(tmp_path, config)
+    installer.begin(f"請用 skill-installer 安裝 {archive}", "conversation-a")
+
+    result = installer.run("preview", prepared_path=str(prepared))
+    assert result["status"] == "blocked"
+    assert "builtin" in result["detail"]
+    assert not Path(config.extension_dropin_dir).exists()
 
 
 def test_preview_fresh_loads_private_skill_and_writes_nothing(tmp_path):

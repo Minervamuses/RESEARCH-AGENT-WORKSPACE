@@ -754,9 +754,6 @@ class DesktopService:
                 ) from exc
 
             current = self.session
-            saved_controls: _ConversationControlSnapshot | None = None
-            if current is not None:
-                saved_controls = self._capture_controls(current)
             target = await self._materialize_session(
                 self.config,
                 load_mcp=self._load_mcp,
@@ -775,6 +772,12 @@ class DesktopService:
         finally:
             self._session_creating = False
 
+        saved_controls: _ConversationControlSnapshot | None = None
+        if current is not None:
+            clear_installer = getattr(current, "clear_skill_installer", None)
+            if callable(clear_installer):
+                clear_installer()
+            saved_controls = self._capture_controls(current)
         if (
             current is not None
             and saved_controls is not None
@@ -1212,9 +1215,6 @@ class DesktopService:
         )
         self._session_creating = True
         current = self.session
-        saved_controls: _ConversationControlSnapshot | None = None
-        if current is not None:
-            saved_controls = self._capture_controls(current)
         try:
             session = await self._materialize_session(
                 config,
@@ -1228,6 +1228,12 @@ class DesktopService:
                 )
         finally:
             self._session_creating = False
+        saved_controls: _ConversationControlSnapshot | None = None
+        if current is not None:
+            clear_installer = getattr(current, "clear_skill_installer", None)
+            if callable(clear_installer):
+                clear_installer()
+            saved_controls = self._capture_controls(current)
         if (
             current is not None
             and saved_controls is not None
@@ -2079,6 +2085,9 @@ class DesktopService:
             return {"status": "no_session"}
         self._session_closing = True
         try:
+            clear_installer = getattr(session, "clear_skill_installer", None)
+            if callable(clear_installer):
+                clear_installer()
             self.session = None
         finally:
             self._session_closing = False

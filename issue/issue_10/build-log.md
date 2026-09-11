@@ -115,3 +115,29 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
   /home/minervamuses/research-agent-workspace/app
   /home/minervamuses/miniconda3/bin/conda run -n app poetry run pytest ...`.
   Isolated temp filesystem, fake models; red is expected, not phase completion.
+
+
+### 2026-09-12 — Phase 02 host red; helper/Desktop green
+
+- Initial Phase 02 red commit: `b04314a`.
+- Host RED `poetry run pytest tests/test_extension_manager.py -q -k installer`:
+  **6 failed, 24 deselected**, 0.26s, missing `SkillInstaller`. These use real temp
+  ZIP/prepared bytes with the existing fake management model, not a helper stub.
+- Helper GREEN `poetry run pytest tests/test_skill_runtime.py -q -k installer_zip`:
+  **17 passed, 17 deselected**, 2 warnings, 0.17s. Entire existing module:
+  `poetry run pytest tests/test_skill_runtime.py -q`: **34 passed**, 2 warnings,
+  0.19s. Warnings: upstream deprecation and intentional duplicate ZIP construction.
+  `zip_bundle.py` uses stdlib, rejects unsafe members and verifies exact prepared
+  file bytes/executable flags; selected-bundle limits exclude unrelated ZIP skills.
+- Helper subagent isolated CLI smoke: in `TemporaryDirectory(prefix='issue10-zip-cli-')`,
+  create ZIP members `repo/sample/SKILL.md` and root `forms.md` with CRLF; invoke
+  `[sys.executable, helper_path, 'inspect', archive]` then
+  `[sys.executable, helper_path, 'extract', archive, '--root', 'repo/sample',
+  '--destination', tmp/'prepared']`; `verify_prepared` passes and original archive
+  SHA256 and forms bytes are unchanged. No downloaded script executed.
+- Desktop GREEN, same two-test command recorded above: **2 passed, 57 deselected**,
+  1 warning, 0.22s. Three existing lifecycle points now clear installer state before
+  capturing restored mode. This is lifecycle-seam evidence, not complete graph
+  integration. Both subagents ran `git diff --check`: PASS.
+- Commit this red host test and already-verified helper/Desktop work as one bounded
+  change step; shared session/skill action integration still pending.
