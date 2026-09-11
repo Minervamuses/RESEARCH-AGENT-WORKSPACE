@@ -40,6 +40,8 @@ Retain the ZIP and successful expanded source. Clean only temporary directories 
 created; never remove drop-in/state files with bash. The host handles safe restoration
 of an unsuccessful staged source and preserves later user edits. Report the original
 name, ZIP source, installed location and restart requirement. A fresh startup catalog
-is required to use newly installed skills; changing conversations does not reload it.
+is required to use newly installed skills. Restart the CLI; in Desktop, create a new
+conversation or switch to a different conversation. Selecting the current conversation
+does not reload its catalog.
 Installation does not prove third-party scripts work or that their dependencies exist.
 Do not call extension management CLI/Desktop RPCs from this active turn.

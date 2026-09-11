@@ -290,3 +290,25 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
   All models and approvals are deterministic test seams; downloaded scripts were
   preserved as data and never executed. No live-model autonomy or PDF business
   capability is claimed. Full-suite/build evidence still pending.
+
+
+### 2026-09-12 — Phase 03 final focused group
+
+- Required command `poetry run pytest tests/test_extension_user_journey.py
+  tests/test_extension_skill_startup.py tests/test_extension_packaging.py
+  tests/test_skill_adherence.py tests/test_desktop_service.py -q` initially:
+  **90 passed, 2 failed**, 1 warning, 3.01s. The new root-resource assertion
+  compared read_file's existing LF text rendering to the synthetic fixture's CRLF
+  original bytes. Real-upstream forms.md uses LF, so its previous acceptance
+  result remains valid. This was a test expectation error, not byte corruption:
+  archive/source/managed byte comparisons remain separate and exact.
+- Corrected only the displayed-text assertion's expected CRLF normalization.
+  Same command GREEN: **92 passed**, 1 warning, 2.52s. No production edit.
+- README, SKILLS_GUIDE and public installer instructions now describe local ZIP
+  paths, explicit/slash use, one-candidate clarification, explicit update consent,
+  source preservation and CLI restart / Desktop new-or-different-session catalog
+  reload. Third-party dependencies/tools and downloaded scripts are not validated.
+- Recovery after context compaction tried a nonexistent phase filename with sed;
+  this read-only check failed, then the actual phase file was read. No state change.
+- `git diff --check`: PASS before committing this acceptance/docs step.
+  Full suite, build, wheel checks and final review record remain pending.

@@ -225,6 +225,7 @@ Legacy `plan_logs/` 由目錄規則直接略過，避免把舊對話誤收進知
 | `/thinking [normal\|extended]` | 切換一般回答或 extended thinking |
 | `/skill [name\|none] [mode]` | 啟用/停用 skill;不帶參數出互動選單 |
 | `/citation [文字\|off]` | 啟用 citation skill(持續生效);帶文字時同時把該句話交給 agent;`off` 停用 |
+| `/skill-installer install <本機 ZIP 路徑>` | 對話安裝一個選定 Skill；支援候選選擇與更新確認 |
 | `/Extension-Management [--dry-run\|status]` | 掃描並套用 drop-in Skill/MCP；重啟後生效 |
 | `/init` | ingest host workspace,排除 `app/` |
 | `/ingest <file-or-folder>` | upsert 單檔或資料夾到 RAG store |
@@ -238,9 +239,33 @@ Legacy `plan_logs/` 由目錄規則直接略過，避免把舊對話誤收進知
 - **normal**(預設):直接的 agent flow。
 - **extended**:啟用較重流程——prompt rewrite、候選回答、review/revise、final validation。適合嚴謹推理、寫作、長文本修訂,但較慢,且依賴 OpenRouter key 與 config 中 reviewer/rewrite/repair/fusion 模型的可用性。模型 slug 不會預先驗證;key 缺失或模型不可用時,切換當下會直接報錯(fail-fast 設計),請先完成設定。
 
+### 對話安裝本機 Skill ZIP
+
+在 CLI 或 Desktop 的一般對話輸入：
+
+```text
+請用 skill-installer 安裝 /tmp/example.zip
+```
+
+也可使用明確的 slash 入口：
+
+```text
+/skill-installer install /tmp/example.zip
+```
+
+ZIP 可放在任意可讀的 Linux 本機路徑，或和已展開的 skills 一起放在 drop-in 的 `skill/` 下。Source checkout 預設是 `app/tool/skill/`；明確設定 `AgentConfig.extension_dropin_dir` 時則是 `<extension_dropin_dir>/skill/`。沒有 checkout 的 wheel 安裝使用 `${XDG_DATA_HOME:-~/.local/share}/research-agent/tool/skill/`，以 `/Extension-Management status` 顯示的路徑為準。不要把下載內容放進 built-in 的 `app/skills/`。若 ZIP 已放在 drop-in，亦可輸入「請用 skill-installer 安裝」讓它從該目錄尋找 ZIP；多個來源時會請你選擇。放入 ZIP 本身不會自動安裝。
+
+一包有多個 skill 時，依列出的名稱或順序回覆，例如 `pdf` 或 `第二個`；每次請求只安裝一個 skill。遇到同名但內容不同的 source 或已安裝項目，若本次尚未明確授權更新，會等待你回覆「更新」；與 built-in 同名則拒絕。選擇與更新授權來自實際使用者回覆，shell 批准不會代替更新授權。待澄清時可回覆「取消」；結束、取消或切換對話會清除暫存安裝狀態。安裝期間暫用 normal 工具模式，完成或取消後恢復原 thinking mode，既有 shell permission 仍照常生效。
+
+安裝會找出含 `SKILL.md` 的真正 skill 根目錄，保留該目錄的原始文件與支援檔 bytes，包括根層 reference 和 `scripts/`；不要求自訂 manifest，也不會把 ZIP 外層包裝目錄裝成 skill。`SKILL.md` 需為 UTF-8，frontmatter 必須有合法 `name` 與非空 `description`。原 ZIP 與成功展開的 source 都會保留，其他未選 Skill/MCP 的待處理變更不會被套用。成功回報包含名稱、來源、安裝位置及啟用提示；解壓成功本身不算安裝完成。
+
+安裝後，**CLI 要關閉並重新啟動**。**Desktop 可建立新對話，或切換到另一份已儲存對話**；這些操作會重新載入 startup catalog。重啟 Desktop backend 後建立／選取對話也可以。繼續目前對話、再次選取目前對話都不會更新其 catalog。新 catalog 載入後，可用 `/<skill-name> <prompt>` 明確選用新 skill。
+
+此流程不執行下載 skill 的腳本，也不安裝依賴；安裝完成不代表第三方私有工具或業務功能已通過測試。遠端 URL 安裝、GUI 拖曳／上傳與 hot reload 尚未提供。離線 deterministic-model 整合驗證僅證明 host 與檔案流程，不能當作真實模型自主安裝能力的證明。
+
 ### `/Extension-Management`
 
-使用者下載新的 Skill 或 ready-to-run stdio MCP 後，不必修改 Python：
+這是既有的全量 drop-in Skill/MCP 管理流程；需要對話中只安裝選定 ZIP skill 時，使用上面的 `skill-installer`。已準備好完整 Skill 資料夾或 ready-to-run stdio MCP 時，不必修改 Python：
 
 1. 把整個資料夾放進 `app/tool/skill/<id>/` 或 `app/tool/mcp/<id>/`。
 2. 用 `/Extension-Management --dry-run` 查看完整增、改、刪與 MCP 啟動命令。
@@ -284,7 +309,7 @@ Source checkout 的 drop-in root 是 `app/tool/`；wheel 安裝版使用平台 u
 | `read_file` | 讀本機文字檔；單次最多 1 MiB，canonical conversation JSON 可分段讀完整檔；阻擋 `.env`、SSH key、secret/token/credential 類檔名 |
 | `bash` | 執行 shell command;互動 TTY 中需使用者批准,非互動環境自動拒絕 |
 
-`read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。單次最多讀 1 MiB；只有canonical conversation root內、UUID檔名的JSON可用`offset_bytes=0`與`next_offset`分段讀取至完整檔案，沒有另設總檔案bytes上限；其他較大檔案仍拒絕。
+`read_file` 可讀絕對路徑或工作目錄相對路徑;active skill 下 `references/`、`assets/`、`scripts/` 的相對路徑會被限制在 skill root。Skill context 提供真實絕對 `skill_root`；讀取根層 `forms.md` 等資源時，使用 `<skill_root>/forms.md`。`bash` 的 cwd 仍是 app root，不會因選用 skill 而改變。單次最多讀 1 MiB；只有canonical conversation root內、UUID檔名的JSON可用`offset_bytes=0`與`next_offset`分段讀取至完整檔案，沒有另設總檔案bytes上限；其他較大檔案仍拒絕。
 
 MCP 工具:Web Search MCP 預設載入,用於即時網路搜尋；GitHub MCP 是選配,用於遠端 repo、PR、issue、Actions；獲准的 drop-in MCP 會在下一次啟動加入。
 

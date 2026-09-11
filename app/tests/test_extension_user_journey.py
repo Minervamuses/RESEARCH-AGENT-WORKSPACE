@@ -6,6 +6,12 @@ import json
 import os
 import shutil
 import sys
+import argparse
+import shlex
+import uuid
+import zipfile
+
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -329,3 +335,158 @@ def test_user_dropin_apply_restart_use_update_delete(monkeypatch, tmp_path):
     assert restarted_v3.skills == ()
     assert len(restarted_v3.mcp_specs) == 1
     assert set(load_registry(state_root).extensions) == {"mcp:sandbox"}
+
+
+@pytest.mark.parametrize("entry", ["cli", "desktop"])
+def test_conversational_zip_acceptance(entry, tmp_path, monkeypatch, capsys):
+    """Optional local upstream archive; never fetch from the network in pytest."""
+    from agent.cli import chat
+    from agent.desktop.service import DesktopService, DesktopServiceError
+    from agent.session import ChatSession
+    from test_skill_adherence import _InstallerScriptModel, _installer_apply_step
+
+    config = AgentConfig(
+        persist_dir=str(tmp_path / "store"),
+        extension_dropin_dir=str(tmp_path / "dropins"),
+        extension_state_dir=str(tmp_path / "state"),
+        plan_logs_dir=str(tmp_path / "plans"),
+    )
+    root = Path(config.extension_dropin_dir)
+    (root / "skill").mkdir(parents=True)
+    archive = root / "skill" / "original.zip"
+    provided = os.environ.get("ISSUE10_ACCEPTANCE_ZIP")
+    if provided:
+        shutil.copyfile(provided, archive)
+    else:
+        with zipfile.ZipFile(archive, "w") as handle:
+            for name in ("alpha", "pdf"):
+                handle.writestr(f"fixture/skills/{name}/SKILL.md", f"---\nname: {name}\ndescription: Local fixture\n---\nRead forms.md.\n")
+                handle.writestr(f"fixture/skills/{name}/forms.md", b"Original root forms\r\n")
+                handle.writestr(f"fixture/skills/{name}/scripts/never.py", b"raise RuntimeError('never execute')\n")
+    archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+    with zipfile.ZipFile(archive) as handle:
+        selected_root = next(name.rsplit("/", 1)[0] for name in handle.namelist()
+                             if name.endswith("/skills/pdf/SKILL.md"))
+        prefix = selected_root + "/"
+        expected = {info.filename[len(prefix):]: handle.read(info) for info in handle.infolist()
+                    if info.filename.startswith(prefix) and not info.is_dir()}
+    other = root / "skill" / "untouched"
+    other.mkdir()
+    (other / "SKILL.md").write_text("---\nname: untouched\ndescription: Pending\n---\n", encoding="utf-8")
+    pending_mcp = root / "mcp" / "untouched-mcp"
+    pending_mcp.mkdir(parents=True)
+    (pending_mcp / "server.py").write_bytes(b"# unselected, never execute\n")
+    untouched = {path: path.read_bytes() for folder in (other, pending_mcp) for path in folder.rglob("*") if path.is_file()}
+    prepared = tmp_path / "prepared-pdf"
+    helper = Path(__file__).resolve().parents[1] / "skills/skill-installer/zip_bundle.py"
+    command = shlex.join([sys.executable, str(helper), "extract", str(archive),
+                          "--root", selected_root, "--destination", str(prepared)])
+
+    def read_root(messages):
+        root_line = next(line for message in messages if message.type == "system"
+                         for line in str(message.content).splitlines() if line.startswith("skill_root: "))
+        return "read_file", {"path": str(Path(root_line.removeprefix("skill_root: ")) / "forms.md")}
+
+    def confirm_root_read(messages):
+        result = next(json.loads(message.content) for message in reversed(messages)
+                      if message.type == "tool" and message.name == "read_file")
+        assert result.get("content")
+        assert expected["forms.md"].decode("utf-8").replace("\r\n", "\n").startswith(result["content"])
+        assert result["path"].endswith("/forms.md")
+        return "Read the original root resource"
+
+    steps = [("skill_install", {"action": "status"})]
+    if entry == "desktop":
+        steps += ["Choose a candidate", ("skill_install", {"action": "status"})]
+    steps += [
+        ("bash", {"command": command, "description": "Extract the authorized skill into isolated test temp"}),
+        ("skill_install", {"action": "preview", "prepared_path": str(prepared)}),
+        _installer_apply_step,
+        "MODEL CLAIM MUST NOT BE TRUSTED",
+        read_root, confirm_root_read,
+    ]
+    model = _InstallerScriptModel(steps)
+    manager = ExtensionManager(config, model_factory=lambda _cfg: _DeterministicManagementModel())
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
+    monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _cfg: [])
+    monkeypatch.setattr("agent.session.ExtensionManager", lambda _cfg: manager)
+    real_create = ChatSession.create
+    sessions = []
+
+    async def create(cls, cfg, **kwargs):
+        kwargs.setdefault("bash_approval_handler", lambda *_args: True)
+        session = await real_create(cfg, **kwargs)
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(ChatSession, "create", classmethod(create))
+    answers = []
+    events = []
+    approval_tasks = []
+
+    async def scenario():
+        if entry == "cli":
+            monkeypatch.setattr(chat, "AgentConfig", lambda **_kwargs: config)
+            inputs = iter([f'請用 skill-installer 安裝 "{archive}" 中的 pdf', "exit"])
+            async def reader(_prompt):
+                return next(inputs)
+            await chat._run(argparse.Namespace(max_graph_steps=80, no_mcp=True), read_line=reader)
+            answers.append(capsys.readouterr().out)
+            fresh = await ChatSession.create(config, load_mcp=False)
+            assert "pdf" in {skill.name for skill in fresh.loaded_skills}
+            await fresh.turn("Read forms.md only, do not execute scripts", skill_name="pdf")
+        else:
+            service = DesktopService(config=config, original_cwd=tmp_path, environ={}, approval_timeout_seconds=3.0)
+            await service.dispatch("session.create", {"loadMcp": False})
+            class Sink:
+                request_id = uuid.uuid4().hex
+                def __call__(self, method, payload):
+                    events.append((method, payload))
+                    if method == "approval.required":
+                        async def approve():
+                            with pytest.raises(DesktopServiceError) as busy:
+                                await service.dispatch("extensions.preview", {})
+                            assert busy.value.code == "BUSY_EXTENSION_OPERATION"
+                            await service.dispatch("approval.resolve", {
+                                "approvalId": payload["approvalId"], "parentRequestId": payload["parentRequestId"],
+                                "turnId": payload["turnId"], "approved": True,
+                            })
+                        approval_tasks.append(asyncio.create_task(approve()))
+            async def turn(text):
+                return await service.dispatch("session.turn", {
+                    "text": text, "turnId": uuid.uuid4().hex, "retry": False,
+                }, event_sink=Sink())
+            first = await turn(f'請用 skill-installer 安裝 "{archive}"')
+            assert "pdf" in first["text"] and service.session._skill_installer.pending
+            result = await turn("pdf")
+            if approval_tasks:
+                await asyncio.gather(*approval_tasks)
+            answers.append(result["text"])
+            assert result["responseKind"] == "answer"
+            snapshot = service.session._conversation_snapshot
+            assert len(snapshot.document.turns) == 2
+            assert all(item.kind == "conversational" for item in snapshot.document.turns)
+            await service.dispatch("session.create", {"loadMcp": False})
+            assert "pdf" in {skill.name for skill in service.session.loaded_skills}
+            await turn("/pdf Read forms.md only, do not execute scripts")
+            await service.dispatch("session.shutdown", {})
+
+    asyncio.run(scenario())
+    registry = load_registry(Path(config.extension_state_dir))
+    assert set(registry.extensions) == {"skill:pdf"}
+    installed = Path(config.extension_state_dir) / registry.extensions["skill:pdf"].installed_relpath
+    for folder in (root / "skill/pdf", installed):
+        actual = {path.relative_to(folder).as_posix(): path.read_bytes() for path in folder.rglob("*") if path.is_file()}
+        assert actual == expected
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == archive_hash
+    assert all(path.read_bytes() == raw for path, raw in untouched.items())
+    assert "pdf" not in {skill.name for skill in sessions[0].loaded_skills}
+    assert str(installed) in answers[0] and "added" in answers[0]
+    assert "MODEL CLAIM" not in answers[0]
+    assert model.calls[-1] == ("read_file", {"path": str(installed / "forms.md")})
+    if entry == "desktop":
+        assert len([event for event in events if event[0] == "approval.required"]) == 1
+    print(json.dumps({"entry": entry, "upstream": bool(provided), "archive_sha256": archive_hash,
+                      "selected_root": selected_root, "files_verified": len(expected),
+                      "bundle_bytes": sum(map(len, expected.values())),
+                      "installed": str(installed), "calls": [name for name, _args in model.calls]}, sort_keys=True))

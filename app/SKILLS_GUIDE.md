@@ -13,7 +13,7 @@ Skills 有一份開放標準（Agent Skills），但各家 runtime（特別是 C
 - 使用了非標準欄位（如 `arguments: [...]`、`context: fork`），讓 skill 失去可攜性
 - 在 SKILL.md 內文使用 `` !`command` ``、`$ARGUMENTS` 等 Claude Code 專屬語法，在其他 runtime 變成字面字串
 
-**本專案以 Agent Skills 標準為準。** 任何標準之外的欄位或語法，除非在本文件中明確列為「本專案實作的擴充」，否則一律不使用。
+**本專案以 Agent Skills 標準為準。** 撰寫本專案 skill 時，標準之外的欄位或語法，除非在本文件中明確列為「本專案實作的擴充」，否則不使用。安裝外部 skill 則保留原始文件，不為符合本文件而改寫；保留 metadata 不代表 runtime 實作其行為或授予額外權限。
 
 ---
 
@@ -28,7 +28,7 @@ Skill 是一個資料夾，至少包含一個 `SKILL.md` 檔案。`SKILL.md` 包
 Skill 採用**漸進式揭露（progressive disclosure）**：
 
 - **啟動時**：agent 不把 skill 清單、frontmatter 或 description 自動塞進 system prompt
-- **執行時**：只有使用者透過 `/<skill-name> <自然語言 prompt>` 明確選擇，runtime 才為該次工作載入完整 `SKILL.md`
+- **執行時**：一般 skill 由使用者透過 `/<skill-name> <自然語言 prompt>` 明確選擇，runtime 才為該次工作載入完整 `SKILL.md`；公開 `skill-installer` 另支援下述明確自然語言安裝入口
 - **延伸時**：`SKILL.md` 可引用同目錄的其他檔案；該次 skill 工作中，`references/`、`assets/`、`scripts/` 開頭的路徑會被限制在 skill bundle 內
 
 這個機制讓我們可以維持可預期的手動、一次性選擇路徑，避免 agent 自行掃描、判斷或自動啟用 skills。
@@ -47,6 +47,18 @@ Skill 採用**漸進式揭露（progressive disclosure）**：
 2. **session 隔離副作用**：啟用時強制切回 normal thinking；停用或切換到另一個 one-shot skill 時清除來源 registry。搜尋本身不建立 candidate pool，會直接回傳可供後續 save 使用的 metadata 與穩定 identifier；同輪多次 save 由工具序列化，不設 one-shot turn guard。
 
 `/citation` 是它的專屬 persistent 啟用入口；`/citation off` 才會停用。它不會投影成一般 dynamic command。新增一般 skill 不需要、也不應該仿照這種 host 深度整合；請以 `academic-paper-writing` 為範本。
+
+### Built-in skill：`skill-installer`
+
+`skills/skill-installer/` 是公開的本機 ZIP 安裝 skill。CLI 與 Desktop 的一般對話可輸入「請用 skill-installer 安裝 /tmp/example.zip」，或 `/skill-installer install /tmp/example.zip`。這是明確選用的入口，不是依 description 自動推薦技能。
+
+- **來源路徑**：使用可讀的 Linux 本機 ZIP 絕對路徑；亦可放在 drop-in 的 `skill/` 下，再要求「請用 skill-installer 安裝」。Source checkout 預設為 `app/tool/skill/`；`AgentConfig.extension_dropin_dir` 可覆寫 drop-in root；沒有 checkout 的 wheel 安裝使用 `${XDG_DATA_HOME:-~/.local/share}/research-agent/tool/skill/`。以 `/Extension-Management status` 顯示的實際路徑為準。ZIP 與已展開目錄可共存，ZIP 不會自動成為 catalog 項目。
+- **一次選一個**：ZIP 內有多個含 `SKILL.md` 的候選時，依清單回覆 skill 名稱或 `第二個` 等順序。另裝其他候選需提出新請求。同名但內容不同的 source 或既有安裝需要明確更新意圖；未授權時會等待實際使用者回覆「更新」。Builtin 同名衝突會拒絕。
+- **有限續接**：來源、候選、更新澄清與待套用 preview 只保留於目前會話的記憶體；回覆「取消」、完成或切換對話都會清除。安裝暫用 normal 工具模式，結束後恢復原 thinking mode。`skill_install` 是此 installer 專屬的 host 工具，既有 shell permission 與選定項目的安裝授權仍各自有效。
+- **原始 bundle**：保留原 `SKILL.md`、根層 reference、`scripts/` 等全部支援檔的相對結構與 bytes；不要求自訂 manifest。只安裝選定 skill，保留原 ZIP 與成功展開的 source，不套用其他 Skill/MCP 的 pending changes。下載內容只作安裝資料，不執行其腳本或安裝依賴；`allowed-tools` 等外部 metadata 不會擴張 host 權限。
+- **何時可用**：成功回報包含名稱、來源、安裝位置及啟用提示。CLI 需關閉後重新啟動；Desktop 建立新對話或切換到另一份已儲存對話會建立新 startup catalog，也可重啟 backend 後建立／選取對話。繼續或再次選取目前對話不會重新載入。新 catalog 載入後，才可用 `/<skill-name> <prompt>` 選用。
+
+此流程目前不提供遠端 URL 安裝、GUI 拖曳／上傳或 hot reload。第三方私有工具、依賴與腳本的業務能力需要另行驗證；離線 deterministic-model 整合只能證明 host 與檔案流程，不能證明真實模型必然能自主完成安裝。
 
 ---
 
@@ -149,11 +161,11 @@ Pinned resources 會在執行該次 one-shot skill 工作時直接放進 context
 工具語義要精確：
 
 - `rag_explore` / `rag_search` / `rag_get_context` 只查 indexed KB（知識庫文件、研究筆記、已 ingest 的資料），不查 conversation JSON。Normal thinking下的較早對話查找，須在已知canonical root下把文字先依JSON規則escape，再以每次需批准的`bash`做exact `grep -F`；listing第21個命中代表文字太寬，必須零讀檔並請使用者縮小，否則最多用`read_file`檢查20檔、排除本輪pending prompt。Canonical JSON大檔可依`next_offset`分段讀至完整檔案，不另設總檔案bytes上限；exact miss不轉用document RAG/embeddings。Extended thinking沒有`bash`，不得宣稱能執行此流程。
-- `citation_workflow` 是 skill 專屬工具，保留給內建 citation skill，一般 skill 不應宣告。
+- `citation_workflow` 與 `skill_install` 是 skill 專屬工具，分別保留給內建 citation 與 skill-installer，一般 skill 不應宣告。
 
 ## 三、Description 寫作指引
 
-`description` 不會讓 agent 自動選擇 skill。本專案只允許使用者透過 `/<skill-name> <prompt>` 明確選擇；description 的作用是讓 help/completion 中的 command 容易辨認，也讓人類維護者快速理解用途。
+`description` 不會讓 agent 自動選擇 skill。一般 skill 使用 `/<skill-name> <prompt>` 明確選擇；skill-installer 的明確自然語言入口由 host 識別安裝意圖，不依賴 description 路由。Description 的作用是讓 help/completion 中的 command 容易辨認，也讓人類維護者快速理解用途。
 
 ### 公式
 
@@ -268,7 +280,7 @@ thinking_repair_model: str = "openai/gpt-5-mini"
 - 一般文字抽取 → 繼續看下面
 ```
 
-子檔案路徑是相對於 SKILL.md 所在目錄。
+子檔案路徑是相對於 SKILL.md 所在目錄。Runtime context 會提供真實絕對 `skill_root`；例如用 `read_file` 讀取 `<skill_root>/forms.md`。`read_file` 對一般相對路徑仍以 cwd 解讀，`bash` 的 cwd 仍是 app root；不要因 skill 已啟用就直接假定 `forms.md` 或 `python scripts/example.py` 會指向 bundle。Shell 命令應使用經 POSIX quoting 的絕對資源路徑。
 
 ### 多領域組織
 
@@ -289,7 +301,7 @@ SKILL.md 裡寫清楚「使用者提到 AWS → 讀 references/aws.md」。
 
 ## 五、⚠️ 不在標準裡的東西
 
-下列項目經常出現在 Claude Code 文件或網路教學中，但**不是 Agent Skills 標準的一部分**。本專案不使用，看到請改寫。
+下列項目經常出現在 Claude Code 文件或網路教學中，但**不是 Agent Skills 標準的一部分**。撰寫本專案 skill 時不使用；安裝外部 bundle 時保留原文並如實說明 runtime 不支援的行為。
 
 ### Claude Code 專屬 Frontmatter 欄位（不要用）
 
@@ -431,7 +443,8 @@ Group findings by severity:
 
 先分清楚用途：
 
-- **使用者下載的外部 Skill**：放到 `tool/skill/<skill-name>/`，執行 `/Extension-Management`，確認後重啟。不要修改 host Python，也不要搬進 `skills/`。
+- **使用者下載的外部 Skill ZIP**：依第一節的 `skill-installer` 對話流程安裝一個選定 skill，保留原始 bundle；不要修改 host Python，也不要搬進 `skills/`。
+- **已展開的外部 Skill／MCP 全量管理**：仍可放到 `tool/skill/<skill-name>/` 或 `tool/mcp/<id>/`，先執行 `/Extension-Management --dry-run` 檢查全部增、改、刪，再 apply。這個管理流程會處理所有 pending changes，與對話 installer 的 selected-only 範圍不同。
 - **隨專案版本控管的 built-in Skill**：才直接建立 `skills/<skill-name>/` 並提交程式庫。
 - `tool/_internal/extension-management/` 是 package 內的私有管理規則；每次管理操作都會重新讀取，但不會投影成 dynamic Skill command，也不得拿使用者 drop-in 覆蓋。
 
@@ -461,7 +474,7 @@ Group findings by severity:
    - 控制在 500 行以內
 
 6. **本地驗證**
-   - 外部 Skill 先跑 `/Extension-Management --dry-run`、apply 並重啟；built-in Skill 直接重啟
+   - 外部 Skill ZIP 先完成 `skill-installer` 安裝；已展開的全量管理仍可用 `/Extension-Management --dry-run`、apply。CLI 重啟或 Desktop 建立新對話後，再驗證新 catalog；built-in Skill 修改後也需重新載入
    - 用 `/<skill-name> <自然語言 prompt>` 明確執行一次；空 prompt 應被 CLI 拒絕
    - 確認載入時沒有 manifest validation / tool resolution 錯誤
    - 確認 agent 真的有讀 `SKILL.md` 並照做
@@ -483,7 +496,7 @@ Group findings by severity:
 - [ ] `description` 用英文撰寫
 - [ ] 若有 `manifest.yaml`，欄位符合本文件列出的 schema，沒有未知 top-level key
 - [ ] `tools.required` 中的工具名 / MCP family 名確實存在（拼錯會直接讓啟用失敗）
-- [ ] 沒有把全域工具（base tools、Web Search）寫進 `tools`；也沒有宣告保留給 citation skill 的 `citation_workflow`
+- [ ] 沒有把全域工具（base tools、Web Search）寫進 `tools`；一般 skill 也沒有宣告保留給 citation 的 `citation_workflow` 或 skill-installer 的 `skill_install`
 - [ ] `resources[].pinned` 使用真正 bool，不使用 `"yes"` / `"no"` 字串
 - [ ] `references/`、`assets/`、`scripts/` 內的檔案只依賴 skill bundle 內路徑，不假設會 fallback 到 cwd
 - [ ] 內文不含第五節列出的 Claude Code 專屬語法
