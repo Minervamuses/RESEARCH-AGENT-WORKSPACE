@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — Scoped installation | Complete | 2026-09-11 | 2026-09-11 | Red and green evidence below | None |
 | 02 — Conversational installer | Complete | 2026-09-12 | 2026-09-12 | Host/session/helper/Desktop checks below | None |
-| 03 — Acceptance and documentation | Not started | — | — | — | None |
+| 03 — Acceptance and documentation | In progress | 2026-09-12 | — | Preflight and review below | Review fixes before acceptance |
 
 只使用 `Not started`、`In progress`、`Blocked`、`Complete`。
 Required acceptance 與 checks 有觀察證據後才能標 Complete。
@@ -190,3 +190,44 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
   skill per transaction; another skill starts a new explicit request. All evidence
   uses temporary test data and deterministic models. Phase 03 remains responsible
   for full Desktop graph + real fixed-upstream archive/startup/wheel acceptance.
+
+
+### 2026-09-12 — Phase 03 preflight, review corrections
+
+- Phase 01/02 required checks completed before entry. Read phase03, live journey,
+  packaging/startup tests and actual CLI/Desktop construction. No full-suite/build
+  run yet. Additional read-only review found acceptance-path defects; archive
+  installation acceptance is paused until their focused regressions pass.
+- Public source lookup: GitHub API returned fixed commit
+  `34040c9c568585f6929bedeaad110ad08f079624` (2026-09-10T19:44:08Z).
+  Downloaded only this archive via Conda Python urllib (30s request timeout,
+  64 MiB bound):
+  `https://codeload.github.com/anthropics/skills/zip/34040c9c568585f6929bedeaad110ad08f079624`.
+  Path `/tmp/issue10-acceptance-zp4klrv9/skills-34040c9c568585f6929bedeaad110ad08f079624.zip`;
+  4,025,030 bytes; SHA256
+  `0f6f85e64804481e2011668121c0567796629345a760e491a34db2d1f5c6d3f5`.
+  Public browser API open failed; direct API read succeeded. No provider calls.
+- Archive inspect found 20 SKILL.md candidates. Selected fixed prefix
+  `skills-34040c9c568585f6929bedeaad110ad08f079624/skills/pdf`; 12 files,
+  including original SKILL.md, LICENSE.txt, forms.md, reference.md and scripts.
+  Per-file byte sizes/SHA256 recorded in the sibling temporary `provenance.json`.
+  License inspected: proprietary/source-available, ©2025 Anthropic; retain license
+  with temporary bundle and do not redistribute archive/bundle in this repository.
+- CORRECTION to Phase 02 skill documentation assumption: Desktop production's
+  default factory is ChatSession.create, and each new/different selected session
+  calls load_session_startup. New/select-other reloads catalog; same-current select
+  does not. CLI loads once per process. Update public instructions/docs and verify
+  the actual Desktop lifecycle in Phase03; previous test evidence is not rewritten.
+- Fresh-context independent review: P1 conditional `更新前先問我` / `ask me before
+  update` was interpreted as update authorization. New RED command
+  `poetry run pytest tests/test_extension_manager.py -q -k deferred_update_request`:
+  **2 failed, 40 deselected**, 1 warning, 0.26s. Earlier collection error from pytest's
+  reserved parameter name `request` was corrected before valid red. Narrowed update
+  intent to complete explicit command/affirmative reply. GREEN
+  `poetry run pytest tests/test_extension_manager.py -q`: **42 passed**, 1 warning,
+  0.54s. `git diff --check`: PASS. No original source write before real update reply.
+- Review also found: synchronous host planning blocks the Desktop event loop;
+  status→denied bash→final leaves stale pending; session cleanup discards a source
+  conflict receipt before a new request. These direct acceptance-path issues are
+  being corrected under Phase03's explicit application-fix scope. Preserve all prior
+  green evidence; do not count it as proof for these newly observed cases.

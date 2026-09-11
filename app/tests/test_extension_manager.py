@@ -337,6 +337,28 @@ def test_installer_update_word_in_zip_path_does_not_authorize_overwrite(tmp_path
     installer.clear()
 
 
+@pytest.mark.parametrize("user_request", [
+    "請用 skill-installer 安裝 {archive}，更新前先問我",
+    "use skill-installer to install {archive}; ask me before update",
+])
+def test_installer_deferred_update_request_requires_real_approval(tmp_path, user_request):
+    config = _config(tmp_path)
+    source = _write_skill(config)
+    original = (source / "SKILL.md").read_bytes()
+    archive, prepared, _ = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config)
+    installer.begin(user_request.format(archive=archive), "a")
+
+    result = installer.run("preview", prepared_path=str(prepared))
+
+    assert result["status"] == "needs_update_approval"
+    assert (source / "SKILL.md").read_bytes() == original
+    assert not load_registry(Path(config.extension_state_dir)).extensions
+    installer.continue_request("是，更新", "a")
+    assert installer.run("preview", prepared_path=str(prepared))["status"] == "preview_ready"
+    installer.clear()
+
+
 @pytest.mark.parametrize("failure", ["cancel", "preview"])
 def test_installer_old_matching_registry_does_not_discard_pending_source(tmp_path, monkeypatch, failure):
     config = _config(tmp_path)

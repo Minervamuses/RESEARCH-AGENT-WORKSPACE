@@ -715,10 +715,21 @@ class SkillInstaller:
 
     @classmethod
     def _update_intent(cls, text: str) -> bool:
-        text = cls._ZIP_PATH_RE.sub("", text)
-        return bool(re.search(r"更新|覆寫|覆盖|\b(?:update|overwrite|replace)\b", text, re.I)) and not bool(
-            re.search(r"不要|不更新|不覆寫|不覆盖|\b(?:no|not|never|don't)\b", text, re.I)
+        text = cls._ZIP_PATH_RE.sub("", text).strip()
+        # An update word elsewhere in an installation request is not permission.
+        text = re.sub(r"^(?:是|同意|好|可以|yes|ok)[，,：:\s]*", "", text, flags=re.I)
+        text = re.sub(r"^(?:請(?:幫我)?\s*|please\s+)", "", text, flags=re.I)
+        text = re.sub(
+            r"^(?:(?:用|使用)\s*skill-installer\s*|use\s+skill-installer\s+(?:to\s+)?)",
+            "", text, flags=re.I,
         )
+        return bool(re.fullmatch(
+            r"(?:更新|覆寫|覆蓋|覆盖|update|overwrite|replace)"
+            r"(?:\s*(?:它|這個\s*skill|现有\s*skill|現有\s*skill|"
+            r"it|this\s+skill|the\s+(?:existing\s+)?skill|existing\s+skill|ZIP))?"
+            r"(?:\s*(?:現在|立即|now))?[\s。.!！]*",
+            text, re.I,
+        ))
 
     @staticmethod
     def _choice(text: str, choices: list[str]) -> int | None:
