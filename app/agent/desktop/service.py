@@ -774,9 +774,7 @@ class DesktopService:
 
         saved_controls: _ConversationControlSnapshot | None = None
         if current is not None:
-            clear_installer = getattr(current, "clear_skill_installer", None)
-            if callable(clear_installer):
-                clear_installer()
+            self._clear_installer_for_replacement(current)
             saved_controls = self._capture_controls(current)
         if (
             current is not None
@@ -1153,6 +1151,18 @@ class DesktopService:
             )
         return session
 
+    def _clear_installer_for_replacement(self, session: ChatSession) -> None:
+        clear_installer = getattr(session, "clear_skill_installer", None)
+        cleanup = clear_installer() if callable(clear_installer) else None
+        if isinstance(cleanup, dict) and cleanup.get("cleanup_conflict"):
+            raise DesktopServiceError(
+                "SESSION_NOT_READY",
+                self._bounded_text(
+                    f"Installation cleanup stopped: {cleanup.get('cleanup_detail')}. "
+                    f"Preserved backup: {cleanup.get('backup_path')}", 4_096,
+                ),
+            )
+
     def _capture_controls(self, session: ChatSession) -> _ConversationControlSnapshot:
         return _ConversationControlSnapshot(
             thinking_mode=str(session.thinking_mode),
@@ -1230,9 +1240,7 @@ class DesktopService:
             self._session_creating = False
         saved_controls: _ConversationControlSnapshot | None = None
         if current is not None:
-            clear_installer = getattr(current, "clear_skill_installer", None)
-            if callable(clear_installer):
-                clear_installer()
+            self._clear_installer_for_replacement(current)
             saved_controls = self._capture_controls(current)
         if (
             current is not None
@@ -2085,9 +2093,7 @@ class DesktopService:
             return {"status": "no_session"}
         self._session_closing = True
         try:
-            clear_installer = getattr(session, "clear_skill_installer", None)
-            if callable(clear_installer):
-                clear_installer()
+            self._clear_installer_for_replacement(session)
             self.session = None
         finally:
             self._session_closing = False

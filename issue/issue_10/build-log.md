@@ -231,3 +231,62 @@ planned application checks 尚未執行，不將計畫驗證或先前研究測�
   conflict receipt before a new request. These direct acceptance-path issues are
   being corrected under Phase03's explicit application-fix scope. Preserve all prior
   green evidence; do not count it as proof for these newly observed cases.
+
+
+### 2026-09-12 — Phase 03 session review fixes and real ZIP acceptance
+
+- New session regression command: `poetry run pytest tests/test_skill_adherence.py
+  -q -k 'shell_denial_before_final or slow_preview_keeps_loop or
+  new_request_reports_cleanup_conflict'`: RED **3 failed, 16 deselected**, 1 warning,
+  1.42s → GREEN **3 passed**, 0.41s. Host planning now uses the existing asyncio
+  shared worker facility, with shielding/settlement before cancellation cleanup
+  and rejection of concurrent installer actions; no new pool/service/lock.
+  Actual declined shell result terminates pending work and restores original mode.
+  A new request stops on cleanup conflict and reports the preserved backup.
+- Desktop conflict RED `poetry run pytest tests/test_desktop_service.py -q -k
+  installer_cleanup_conflict`: **2 failed, 59 deselected**, 0.37s. Existing
+  replacement hooks now propagate cleanup failures through existing
+  SESSION_NOT_READY errors. GREEN `poetry run pytest tests/test_desktop_service.py
+  -q -k 'installer_cleanup_conflict or conversation_replacement_clears_installer
+  or session_shutdown_clears_active_session'`: **4 passed, 57 deselected**, 0.25s.
+- `poetry run pytest tests/test_skill_adherence.py tests/test_desktop_service.py -q`:
+  **80 passed**, 1 warning, 1.40s before the final denial sequence extension.
+- Independent recheck exposed a remaining denial sequence: successful temp cleanup
+  after denied extraction hid the earlier denial. Extended existing parameterized
+  regression: `poetry run pytest tests/test_skill_adherence.py -q -k
+  shell_denial_before_final`: RED **1 failed, 1 passed, 18 deselected**, 0.33s.
+  Finalization now ignores successful cleanup while looking for an unhandled shell
+  failure, stopping at a subsequent verified host preview. Same three-name command
+  above GREEN **4 passed, 16 deselected**, 1 warning, 0.36s. No new scope.
+- Preliminary synthetic CLI/Desktop procedure command `poetry run pytest
+  tests/test_extension_user_journey.py -q -k conversational_zip_acceptance -s`:
+  **1 passed, 1 failed**, 58.95s because the new test expected BUSY_TURN instead of
+  existing BUSY_EXTENSION_OPERATION, leaving the approval unresolved until timeout.
+  Corrected this test DTO expectation and responseKind (`answer`), and bounded the
+  test's approval timeout to 3s. No application change for that harness failure.
+  Rerun: **2 passed, 1 deselected**, 0.55s, explicitly synthetic.
+- REAL upstream procedure (same archived bytes fetched once):
+  `ISSUE10_ACCEPTANCE_ZIP=/tmp/issue10-acceptance-zp4klrv9/skills-34040c9c568585f6929bedeaad110ad08f079624.zip
+  poetry run pytest tests/test_extension_user_journey.py -q -k
+  conversational_zip_acceptance -s`: **2 passed, 1 deselected**, 1 warning, 0.63s.
+  Tests never download; without this environment variable the tiny local synthetic
+  fixture is used and identified as such in output.
+- Observed CLI input goes through actual `chat._run` line reader: explicit install
+  of the quoted temp drop-in ZIP with `中的 pdf`. Actual Desktop session.turn first
+  lists 20 candidates, then real user reply `pdf` continues the same transaction.
+  Desktop event sink approves the actual shell command via approval.resolve while
+  a concurrent management RPC is rejected BUSY_EXTENSION_OPERATION. Exactly two
+  conversational turns, no extra display-only management turn.
+- CLI calls: skill_install/status → bash/helper → skill_install/preview →
+  skill_install/apply → new ChatSession.create → read_file. Desktop adds a second
+  status for the selection reply and uses actual session.create to reload catalog.
+  Both retain old catalog unchanged, discover/select pdf in the new catalog, and
+  validate the read_file ToolMessage contains original root forms.md content.
+- Both independent temp workspaces compare all **12 original files / 58,692 bytes**
+  against expanded source and managed copy; ZIP SHA256 unchanged; unrelated pending
+  skill/MCP source bytes and registry scope unchanged. Bundle fingerprint:
+  `b1e813fdc7a0e8cc9dba8753485b7015fc77c4921e8730ecb8c9a224168fbd43`.
+  Installed paths were under `/tmp/pytest-of-minervamuses/pytest-34/` test roots.
+  All models and approvals are deterministic test seams; downloaded scripts were
+  preserved as data and never executed. No live-model autonomy or PDF business
+  capability is claimed. Full-suite/build evidence still pending.

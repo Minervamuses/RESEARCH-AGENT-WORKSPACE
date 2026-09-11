@@ -167,6 +167,7 @@ class ChatSession:
         self._installer_previous_mode: str | None = None
         self._installer_session_id: str | None = None
         self._installer_action_used = False
+        self._installer_action_task: asyncio.Task | None = None
         self._installer_context: dict = {}
         self.skill_install_tool = StructuredTool.from_function(
             coroutine=self._skill_install_action,
@@ -709,6 +710,31 @@ class ChatSession:
         )
         if (self.active_skill_runtime is not None
                 and self.active_skill_runtime.name == "skill-installer"):
+            for message in reversed(new_messages):
+                if not isinstance(message, ToolMessage) or message.name not in {"bash", "skill_install"}:
+                    continue
+                try:
+                    shell_result = json.loads(message.content)
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if message.name == "skill_install":
+                    if (isinstance(shell_result, dict) and shell_result.get("status")
+                            in {"preview_ready", "complete", "needs_update_approval"}):
+                        break
+                    continue
+                if (self._skill_installer.pending and isinstance(shell_result, dict)
+                        and (shell_result.get("approved") is False
+                             or shell_result.get("error")
+                             or shell_result.get("exit_code", 0) != 0)):
+                    cleanup = self._skill_installer.clear()
+                    self._installer_context = {
+                        "status": "blocked",
+                        "message": shell_result.get("error") or "ZIP preparation command failed; installation stopped.",
+                        **cleanup,
+                    }
+                    self._skill_installer.last_result = self._installer_context
+                    self._installer_action_used = True
+                    break
             answer = self._installer_result_text()
         final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
         if self._final_text_validator is not None:
@@ -816,17 +842,23 @@ class ChatSession:
             text, re.IGNORECASE,
         ))
 
-    def clear_skill_installer(self) -> None:
+    def clear_skill_installer(self) -> dict:
         """Discard installation authority and restore the mode before installation."""
-        self._skill_installer.clear()
+        cleanup = self._skill_installer.clear()
         if self._installer_previous_mode is not None:
             self.thinking_mode = self._installer_previous_mode
         self._installer_previous_mode = None
         self._installer_session_id = None
         self._installer_context = {}
+        if cleanup.get("cleanup_conflict"):
+            self._installer_context = {
+                "status": "blocked", "message": "Installation stopped: source cleanup conflict.", **cleanup,
+            }
+            self._skill_installer.last_result = self._installer_context
         if (self.active_skill_runtime is not None
                 and self.active_skill_runtime.name == "skill-installer"):
             self.active_skill_runtime = None
+        return cleanup
 
     async def _skill_install_action(
         self,
@@ -841,16 +873,30 @@ class ChatSession:
                 or self._active_turn_id is None
                 or self._installer_session_id != self.session_id):
             return json.dumps({"status": "error", "message": "No active installer request"})
+        if self._installer_action_task is not None:
+            return json.dumps({"status": "blocked", "message": "An installer action is already running"})
         self._installer_action_used = True
-        result = self._skill_installer.run(
+        task = asyncio.create_task(asyncio.to_thread(
+            self._skill_installer.run,
             action, source_zip=source_zip, candidate_root=candidate_root,
             prepared_path=prepared_path, preview_id=preview_id,
-        )
-        self._installer_context = result
-        return json.dumps(result, ensure_ascii=False, default=str)
+        ))
+        self._installer_action_task = task
+        try:
+            try:
+                result = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # The host must settle before cancellation can restore its staged source.
+                await asyncio.shield(task)
+                raise
+            self._installer_context = result
+            return json.dumps(result, ensure_ascii=False, default=str)
+        finally:
+            if task.done() and self._installer_action_task is task:
+                self._installer_action_task = None
 
     def _installer_result_text(self) -> str:
-        result = self._skill_installer.last_result if self._installer_action_used else None
+        result = self._installer_context if self._installer_action_used else None
         if not result:
             return "尚未完成 skill 安裝；沒有可確認的 host 安裝結果。"
         lines = [str(result.get("message") or result.get("status") or "未完成安裝")]
@@ -872,7 +918,17 @@ class ChatSession:
     async def _run_installer_turn(self, user_input: str, *, new_request: bool) -> TurnOutcome:
         runtime = self._load_skill_runtime("skill-installer")
         if new_request:
-            self.clear_skill_installer()
+            cleanup = self.clear_skill_installer()
+            if cleanup.get("cleanup_conflict"):
+                self.active_skill_runtime = runtime
+                self._installer_action_used = True
+                try:
+                    return await self.finalize_and_record(
+                        user_input=user_input, answer="", new_messages=[],
+                        tool_calls=[], trace_events=[],
+                    )
+                finally:
+                    self.active_skill_runtime = None
             self._installer_previous_mode = self.thinking_mode
             self._installer_session_id = self.session_id
             self._installer_context = self._skill_installer.begin(user_input, self.session_id)
@@ -886,6 +942,10 @@ class ChatSession:
         try:
             return await self._run_turn(user_input)
         except BaseException:
+            task = self._installer_action_task
+            if task is not None:
+                await asyncio.shield(task)
+                self._installer_action_task = None
             self.clear_skill_installer()
             raise
         finally:

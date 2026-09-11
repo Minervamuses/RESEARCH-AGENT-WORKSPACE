@@ -2709,3 +2709,20 @@ def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_with
         assert len(runner_calls) == 1
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("method", ["session.create", "session.shutdown"])
+def test_installer_cleanup_conflict_is_visible_before_session_replacement(tmp_path, monkeypatch, method):
+    factory, _sessions = _canonical_session_factory(monkeypatch)
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    current = service.session
+    backup = str(tmp_path / "retained-backup")
+    monkeypatch.setattr(current, "clear_skill_installer", lambda: {
+        "cleanup_conflict": True, "cleanup_detail": "source changed", "backup_path": backup,
+    })
+    with pytest.raises(DesktopServiceError) as error:
+        asyncio.run(service.dispatch(method, {"loadMcp": False} if method == "session.create" else {}))
+    assert error.value.code == "SESSION_NOT_READY"
+    assert backup in str(error.value)
+    assert service.session is current

@@ -4,6 +4,7 @@ import asyncio
 import json
 import shlex
 import sys
+import threading
 import zipfile
 from pathlib import Path
 
@@ -267,7 +268,7 @@ def _real_installer_session(tmp_path, monkeypatch, steps, *, approve=True):
         extension_dropin_dir=str(tmp_path / "dropins"),
         extension_state_dir=str(tmp_path / "state"),
     )
-    session = ChatSession(config, bash_approval_handler=lambda *_args: approve)
+    session = ChatSession(config, bash_approval_handler=approve if callable(approve) else lambda *_args: approve)
     session.extension_manager = ExtensionManager(config, model_factory=lambda _cfg: _InstallerPlanModel())
     return session, model
 
@@ -381,4 +382,134 @@ def test_installer_cancellation_clears_pending_authority_and_restores_mode(tmp_p
     assert not session._skill_installer.pending
     assert session.active_skill_runtime is None
     assert session.thinking_mode == "extended"
+    assert not Path(session.config.extension_state_dir).exists()
+
+
+
+@pytest.mark.parametrize("cleanup", [False, True])
+def test_installer_shell_denial_before_final_clears_pending_and_reports_denial(tmp_path, monkeypatch, cleanup):
+    archive = _installer_test_archive(tmp_path)
+    prepared = tmp_path / "prepared"
+    session, model = _real_installer_session(tmp_path, monkeypatch, [
+        ("skill_install", {"action": "status"}),
+        _installer_extract_step(archive, prepared),
+        *([("bash", {"command": "true", "description": "Represent successful cleanup of owned temp"})] if cleanup else []),
+        "The user denied the shell operation, so I stopped.",
+    ], approve=lambda command, *_args: command == "true")
+    session.set_thinking_mode("extended")
+
+    answer = asyncio.run(session.turn(f'請用 skill-installer 安裝 "{archive}"'))
+
+    assert "denied" in answer.lower() or "拒絕" in answer
+    assert not session._skill_installer.pending
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    assert [name for name, _args in model.calls] == ["skill_install", "bash"] + (["bash"] if cleanup else [])
+    assert not prepared.exists()
+    assert not (Path(session.config.extension_dropin_dir) / "skill/writer").exists()
+    assert not Path(session.config.extension_state_dir).exists()
+
+
+def test_installer_slow_preview_keeps_loop_responsive_and_cancellation_waits_for_cleanup(tmp_path, monkeypatch):
+    archive = _installer_test_archive(tmp_path)
+    prepared = tmp_path / "prepared"
+    session, _model = _real_installer_session(tmp_path, monkeypatch, [
+        ("skill_install", {"action": "status"}),
+        _installer_extract_step(archive, prepared),
+        ("skill_install", {"action": "preview", "prepared_path": str(prepared)}),
+        "Preview complete",
+    ])
+    session.set_thinking_mode("extended")
+    preview_entered = threading.Event()
+    preview_finished = threading.Event()
+    release_preview = threading.Event()
+    original_preview = session.extension_manager.preview
+
+    def held_preview(*args, **kwargs):
+        preview_entered.set()
+        try:
+            release_preview.wait(timeout=1.0)
+            return original_preview(*args, **kwargs)
+        finally:
+            preview_finished.set()
+
+    monkeypatch.setattr(session.extension_manager, "preview", held_preview)
+
+    async def cancel_during_preview():
+        task = asyncio.create_task(session.turn(f'請用 skill-installer 安裝 "{archive}"'))
+        responsive = False
+        waited_for_worker = False
+        try:
+            async with asyncio.timeout(3):
+                while not preview_entered.is_set():
+                    await asyncio.sleep(0.001)
+                responsive = not preview_finished.is_set() and not release_preview.is_set()
+                task.cancel()
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                waited_for_worker = not task.done()
+        finally:
+            release_preview.set()
+            if not task.done() and not task.cancelling():
+                task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=3)
+        assert responsive, "slow host preview blocked the event-loop heartbeat"
+        assert waited_for_worker, "cancellation returned while host work was still running"
+
+    asyncio.run(cancel_during_preview())
+
+    assert preview_finished.is_set()
+    assert not session._skill_installer.pending
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    skill_root = Path(session.config.extension_dropin_dir) / "skill"
+    assert not (skill_root / "writer").exists()
+    assert not list(skill_root.glob(".skill-installer-*"))
+    assert not Path(session.config.extension_state_dir).exists()
+
+
+def test_installer_new_request_reports_cleanup_conflict_without_replacing_transaction(tmp_path, monkeypatch):
+    archive = _installer_test_archive(tmp_path)
+    prepared = tmp_path / "prepared"
+    next_source = tmp_path / "next-request"
+    next_source.mkdir()
+    next_archive = _installer_test_archive(next_source, names=("alpha",))
+    session, _model = _real_installer_session(tmp_path, monkeypatch, [
+        ("skill_install", {"action": "status"}),
+        _installer_extract_step(archive, prepared),
+        ("skill_install", {"action": "preview", "prepared_path": str(prepared)}),
+        "Preview complete",
+        ("skill_install", {"action": "status"}),
+        "Next request",
+    ])
+    session.set_thinking_mode("extended")
+    source = Path(session.config.extension_dropin_dir) / "skill/writer"
+    source.mkdir(parents=True)
+    original_skill = b"---\nname: writer\ndescription: Existing skill\n---\nOriginal instructions\n"
+    (source / "SKILL.md").write_bytes(original_skill)
+    (source / "forms.md").write_bytes(b"Existing source reference")
+    first_request = f'請用 skill-installer 更新 "{archive}"'
+    asyncio.run(session.turn(first_request))
+    assert session._skill_installer.pending
+    backup = session._skill_installer._temporary
+    assert backup is not None
+    assert (backup / "previous/SKILL.md").read_bytes() == original_skill
+    (source / "forms.md").write_bytes(b"User modification after preview")
+
+    answer = asyncio.run(session.turn(f'請用 skill-installer 安裝 "{next_archive}"'))
+
+    result = session._skill_installer.last_result
+    assert result["status"] == "blocked"
+    assert result["cleanup_conflict"] is True
+    assert str(backup) in answer
+    assert "cleanup" in answer.lower() or "保留" in answer
+    assert session._skill_installer._request == first_request
+    assert not session._skill_installer.pending
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    assert (source / "forms.md").read_bytes() == b"User modification after preview"
+    assert (backup / "previous/SKILL.md").read_bytes() == original_skill
+    assert (backup / "previous/forms.md").read_bytes() == b"Existing source reference"
+    assert not (source.parent / "alpha").exists()
     assert not Path(session.config.extension_state_dir).exists()
