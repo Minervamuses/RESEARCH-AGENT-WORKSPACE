@@ -3,7 +3,7 @@
 ## 計畫概況與資訊所有權
 
 - Plan root：issue/final_check；Application / medium。風險集中在 cleanup／canonical identity／mode 時序與原生證據缺口，非 production service 強化。
-- Execution mode：Autonomous within authorization envelope；只有使用者另行要求啟動實作後生效。本次僅建立計畫。
+- Execution mode：Autonomous within authorization envelope；使用者已明確啟動執行，來源見 build-log。當前範圍依 GOALS，延期項目不自動恢復。
 - 採 repo 既有 phases/ 格式；根 .gitignore 忽略 build/，不修改 ignore 規則。
 
 | 資訊 | 唯一 owner |
@@ -49,7 +49,7 @@ cd /home/minervamuses/research-agent-workspace/app
 
 使用者明確要求執行本計畫後，可自主完成當前 phase 的直接局部修正、最少既有測試擴充、短離線檢查、自有 tmp fixtures 與可用的安全原生驗收。可更新本 bundle 的 log、重大 context、真實 review 和受新證據影響的未開始計畫；不逐步索權。
 Phase 01/02 預期 production 只涉及 session.py 與 desktop/service.py；manager.py 已有正確保留機制，沒有新反例就不改。Phase 03 以驗收為主，若發現直接既有缺陷，只提出一個最小因果修補並遵守下列範圍限制。
-Phase 04/05 須先滿足 GOALS 的三項產品答案與具體實作授權，不以「執行全部」代替未定 API/schema 授權。原 issue_09 的歷史 Git 授權不適用本輪。
+Phase 04/05 依 GOALS 的 Issue 09 延期決定不列本輪例行範圍；只有使用者明確恢復，並滿足三項產品答案與具體實作授權，才可修訂路線後執行。不以「執行全部」代替恢復決定或未定 API/schema 授權。原 issue_09 的歷史 Git 授權不適用本輪。
 
 ### 需要新授權或停止的條件
 
@@ -68,17 +68,17 @@ Focused implementation 兩次嘗試失敗就停下，保存因果證據與最小
 | 01 — Installer Skill switch | 衝突阻擋新工作、正常切換 mode 與 durable metadata 一致 | 無 | [phase-01](phases/phase-01-installer-skill-switch.md) |
 | 02 — Completed Citation replay | Desktop 精確重送讀舊答案，runtime 失效仍不擋讀回 | 01 | [phase-02](phases/phase-02-desktop-completed-replay.md) |
 | 03 — Native Desktop acceptance | Issue 02／08 各自原生互動有足夠證據 | 01、02 | [phase-03](phases/phase-03-native-desktop-acceptance.md) |
-| 04 — Thinking contract/runtime | 定案的段位對下一回合真正生效，資料／wire 契約一致 | 01、02；產品與具體 scope 門檻 | [phase-04](phases/phase-04-thinking-contract-runtime.md) |
-| 05 — Thinking Desktop acceptance | 定案 UI、狀態生命週期與原生操作可驗收 | 04 | [phase-05](phases/phase-05-thinking-desktop-acceptance.md) |
-| 06 — Regression and closure | 當前 diff 一次整合回歸及逐 Issue 結論有證據 | 01–05 | [phase-06](phases/phase-06-regression-and-closure.md) |
+| 04 — Thinking contract/runtime | 延期保留路線：定案段位生效、資料／wire 契約一致 | 明確恢復範圍後：01、02；產品與具體 scope 門檻 | [phase-04](phases/phase-04-thinking-contract-runtime.md) |
+| 05 — Thinking Desktop acceptance | 延期保留路線：定案 UI 與原生操作可驗收 | 明確恢復範圍後：04 | [phase-05](phases/phase-05-thinking-desktop-acceptance.md) |
+| 06 — Regression and closure | 當前 diff 一次整合回歸及逐 Issue 結論有證據，09 明確記延期 | 01、02、03；04/05 依 GOALS 延期，不列本輪前置 | [phase-06](phases/phase-06-regression-and-closure.md) |
 
-01/02 共用 canonical/mode 邊界，依序實作以避免同檔衝突。03 與 04 不互為技術前置；03 因 UI 環境 Blocked 時，04 若決策與授權已齊可繼續；反之缺產品決策不得先寫 09。05 若用到 03 同一不可用原生環境，該限制仍成立。
-選第一個 dependencies Complete 的未完成 phase；Blocked 的外部條件沒有變化就不重試，可前進其他獨立且已獲准的 eligible phase。沒有可執行 phase 就彙報具體 blocker 並停止；06 不得繞過未驗收依賴。
+本輪 required 路線為 01 → 02 → 03 → 06。01/02 共用 canonical/mode 邊界，依序實作；04/05 的未來條件式內容保留，但延期期間不選取、不追問其產品答案，也不標功能 Complete。未來若恢復 09，須先依新決定與當時 live code 修訂 roadmap、各 phase 和回歸範圍。
+僅在 GOALS／本 roadmap 的本輪範圍內，選第一個 dependencies Complete 的未完成 phase；Blocked 的外部條件沒有變化就不重試，可前進其他獨立且已獲准的 eligible phase。沒有可執行 phase 就彙報具體 blocker 並停止；06 仍不得繞過 03 未驗收依賴。
 
 ## 驗證成本安排
 
 開發只跑直接 focused checks；所有階段自己的 required evidence 完成才能交接。Phase 06 擁有本輪唯一完整 Python suite、完整 Node suite、完整 Rust suite 與 Tauri source build。前段只跑需要的模組、protocol 子集或 tsc；不機械重複現有 evidence。
-若因明確延期 09 要先收尾 01/02/03，先依使用者決定修訂 GOALS 與未開始 roadmap，不在隱藏假設下跳階段。若 full suite 已跑後又有必要 production 修正，先跑最小受影響 check，第二次完整 suite 依使用者成本門檻辦理。
+依 GOALS 的 09 延期決定，本輪只驗當前實際 diff 與保留行為，不執行未開始的 04/05 planned checks；既有 Normal／Extended 相容性仍由相關既有回歸保護。若 full suite 已跑後又有必要 production 修正，先跑最小受影響 check，第二次完整 suite 依使用者成本門檻辦理。
 
 ## 計畫維護與恢復
 
@@ -90,7 +90,7 @@ Focused implementation 兩次嘗試失敗就停下，保存因果證據與最小
 
 ## 整體完成標準
 
-- [ ] build-log 中所有當前 required phases Complete，每項 acceptance 有 observed evidence。
+- [ ] build-log 中本輪 required phases 01、02、03、06 Complete，每項 acceptance 有 observed evidence；04/05 依 GOALS 保留延期，不當成已完成功能。
 - [ ] GOALS 的三個 P2、原生互動、定案 09 或明確延期、逐 Issue 處置均被覆蓋。
 - [ ] 最終代表案例與適用回歸對應同一實際 code diff；歷史計數不當成最新結果。
 - [ ] Issue 01 限縮不被改寫；02/08 各自缺口與 09 功能狀態清楚；無 evidence 的功能不結案。
@@ -98,5 +98,5 @@ Focused implementation 兩次嘗試失敗就停下，保存因果證據與最小
 
 ## Authoring write set
 
-本次只新增四個 core Markdown 與上表六個 phase files，共十檔。初始全部 Not started。
+初始 authoring 只新增四個 core Markdown 與上表六個 phase files，共十檔，當時全部 Not started；後續授權修改與實際 write set 見 build-log。
 不修改既有 Issue bundle、AGENTS、application/tests、manifest、依賴、Git branch/index 或生成假 context/review。

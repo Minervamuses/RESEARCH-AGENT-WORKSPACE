@@ -3,7 +3,7 @@
 ## 目標與來源
 
 對最終實際 diff 執行一次適度回歸，給 Issue 01–10 明確且不誇大的處置與 evidence。把「程式補救完成」「限縮接受」「功能延期」「仍缺原生證據」分清。
-來源：[GOALS](../GOALS.md)、[PLANS](../PLANS.md)、[build-log](../build-log.md)、前五個 phase 的 actual evidence，及 issue_01、02、03(fin)、04、05、06、07、08、09、10(fin) 原有 logs。
+來源：[GOALS](../GOALS.md)、[PLANS](../PLANS.md)、[build-log](../build-log.md)、本輪 required phases 的 actual evidence，及 issue_01、02、03(fin)、04、05、06、07、08、09、10(fin) 原有 logs。
 
 ## 範圍與非目標
 
@@ -12,7 +12,7 @@
 
 ## 依賴與 preflight
 
-Phase 01–05 Complete，或 GOALS 已有明確使用者延期/限縮決策、PLANS 與未開始路線已正式修訂。未做功能不能靠最終表格變成 Complete。
+本輪須 Phase 01、02、03 Complete；04/05 依 GOALS 的 Issue 09 明確延期決定不列前置。Issue 02／08 剩餘原生門檻仍保留，不能藉 09 延期繞過 03。未做功能只記延期，不能靠最終表格變成 Complete。
 核對 git status／diff、final code revision 及未提交檔案指紋；有未提交修改時，HEAD 相同不代表相同 code。證據須對應目前實際 code，不要求為此 commit。
 先盤點已跑 checks 及成本；cached offline Cargo/Tauri 不足或預估超十分鐘，按 PLANS 先處理授權。新資料與模型一律 tmp/offline。
 
@@ -53,7 +53,7 @@ cwd repo root：git diff --check。若最後才改自己的少量文件，補文
 | 02、08 | 各自 native checklist 的實際證據／明確限縮；08 再連 Phase 02 重送修正。 |
 | 03、04、05 | 對照既有 permission／earliest ambiguity／save reporting 證據及本次相關 regression；區分歷史與新執行。 |
 | 06、07、10 | integrity／apply-lock／ZIP 主流程歷史證據保留，直接 diff 回歸有對照；10 補 Phase 01 切換邊界。 |
-| 09 | 三決策與功能驗收，或明確延期來源；不能把現有 Normal／Extended 當多段位完成。 |
+| 09 | 引用 GOALS 的本輪明確延期來源；04/05 未實作／未驗收，不能把現有 Normal／Extended 當多段位完成，也不再要求本輪回答三項產品決策。 |
 
 ## 驗收條件
 

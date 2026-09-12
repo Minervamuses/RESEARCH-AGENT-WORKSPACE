@@ -1,5 +1,7 @@
 # Phase 04 — 定案後的 Thinking Effort 後端
 
+本 phase 依 [GOALS 的 Issue 09 延期決定](../GOALS.md) 不列本輪範圍；以下僅保留未來條件式路線與 planned checks。使用者明確恢復後，須先核對當時 live code、定案產品與必要授權並修訂 PLANS，才可開始；延期期間不執行本檔步驟，也不標功能 Complete。實際狀態只見 build-log。
+
 ## 目標與來源
 
 GOALS 三項產品決策定案後，核准段位確實影響下一回合，且現有 cached model／workflow、偏好生命週期及跨語言契約一致。

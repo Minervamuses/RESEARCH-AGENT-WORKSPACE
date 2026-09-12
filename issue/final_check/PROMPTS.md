@@ -6,7 +6,8 @@
 執行 issue/final_check 的補救與驗收計畫。
 先讀根及適用 AGENTS.md、issue/final_check/GOALS.md、issue/final_check/PLANS.md、
 issue/final_check/build-log.md，
-再按 PLANS 依賴順序找第一個未 Complete、且所有前置 Complete 的 phase，讀取其 phases/ 檔案、
+先依 GOALS／PLANS 排除明確延期、不列本輪範圍的 phases，再按 PLANS 依賴順序
+找第一個未 Complete、且所有前置 Complete 的 phase，讀取其 phases/ 檔案、
 已有相關 context/ 和 code_review/，以及該階段 live code/tests。不要依賴本對話或硬編碼 current phase。
 
 在修改前完成 read-only runtime/worktree preflight：使用既定 Linux Conda app 工具，確認既有 diff、
@@ -31,7 +32,8 @@ issue/final_check/build-log.md，
 
 ```text
 只執行 issue/final_check 中我指定的單一 phase。
-依本文件 Start/Resume 的相同讀取與 preflight 次序，從 build-log／PLANS 核對前置完成，
+依本文件 Start/Resume 的相同讀取與 preflight 次序，從 GOALS／PLANS 核對本輪範圍、
+從 build-log 核對前置完成與尚缺的具體授權，
 讀該 phases/ 檔案及 live code；若沒指定 phase，依 roadmap 選第一個 eligible phase。
 遵守授權、驗證及 evidence 規則。完成該階段或遇停止條件即停，不接續後面的 phase。
 ```
@@ -62,7 +64,8 @@ issue/final_check/build-log.md，
 
 ```text
 執行 issue/final_check/phases/phase-06-regression-and-closure.md。
-先按 Start/Resume 讀 durable sources；其依賴尚未 Complete 就不得宣稱完成。
+先按 Start/Resume 讀 durable sources，依 PLANS 核對當前 required 前置；
+尚未 Complete 就不得開始，不把明確延期 phase 當已完成或自動恢復。
 按當前實際 diff 和已跑 evidence 去重 required checks；完整 suite 次數遵守 PLANS。
 在 build-log 建立逐 Issue 接受／限縮／延期／阻塞與證據對照，區分新的觀察與歷史結果。
 沒有 evidence 的 required 行為保持未完成；不要修改舊 Issue logs 來製造整批結案。

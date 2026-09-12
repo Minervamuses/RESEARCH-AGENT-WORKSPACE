@@ -10,13 +10,13 @@
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
 | 03 — Native Desktop acceptance | Blocked | 2026-09-12 | — | 下方 native launch / screenshot evidence | 輸入法已准 skipped；仍缺 menu／可及性／真 Citation 原生證據及安全入口 |
-| 04 — Thinking contract/runtime | Blocked | 2026-09-12（僅 gate） | — | 下方產品 gate 核對 | 三項產品答案及精確實作授權未定 |
-| 05 — Thinking Desktop acceptance | Not started | — | — | — | 前置 04 未 Complete |
-| 06 — Regression and closure | Not started | — | — | — | 前置 03–05 未 Complete；未跑完整 suites/build |
+| 04 — Thinking contract/runtime | Not started | 2026-09-12（僅 gate） | — | 下方產品 gate 歷史與 Issue 09 明確延期紀錄 | 已延期，不列本輪 required；無功能完成證據 |
+| 05 — Thinking Desktop acceptance | Not started | — | — | 下方 Issue 09 明確延期紀錄 | 已延期，不列本輪 required；無功能完成證據 |
+| 06 — Regression and closure | Not started | — | — | — | 前置 03 未 Complete；04/05 明確延期；未跑完整 suites/build |
 
 狀態只使用 Not started、In progress、Blocked、Complete。
 必要前置與待決事項見 GOALS／各 phase；開始 preflight 後才把實際阻塞寫入本表。
-Complete 需要 acceptance→observed evidence；explicit deferral 依 PLANS 修訂範圍，不能把未做功能標完成。
+Complete 需要 acceptance→observed evidence；explicit deferral 依 GOALS／PLANS 排除本輪範圍，狀態保留 Not started 並明示延期，不把未做功能標完成。
 
 ## 證據規則
 
@@ -201,3 +201,17 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 
 - 規劃檔案檢查（Linux Conda app，cwd root）：python /mnt/c/Users/garyc/.codex/skills/long-horizon-plan-author/scripts/validate_harness.py --repo /home/minervamuses/research-agent-workspace --plan-root issue/final_check --project-shape application --risk medium --harness-only --strict --json --proposed-path issue/final_check/GOALS.md --allowed-path issue/final_check/GOALS.md --proposed-path issue/final_check/PLANS.md --allowed-path issue/final_check/PLANS.md --proposed-path issue/final_check/phases/phase-03-native-desktop-acceptance.md --allowed-path issue/final_check/phases/phase-03-native-desktop-acceptance.md --proposed-path issue/final_check/build-log.md --allowed-path issue/final_check/build-log.md → valid=true，0 errors / 0 warnings；git diff --check → passed。此為文件檢查，不是 application acceptance。
 - 交接核對：PROMPTS 仍從 build-log/PLANS 計算 eligible phase，沒有硬編碼 current phase；GOALS 唯一保存輸入法限縮，03 移除 IME 門檻，05 引用03且沒有另設IME條件，06 引用GOALS的核准限縮。原生其餘門檻、產品決策及依賴順序不變。
+
+## 2026-09-12（Asia/Taipei）— Issue 09 明確延期與剩餘路線（ca7efa7）
+
+- User decision：使用者在列出全部待決事項後表示「除了extended thinking沒有其他東西了嗎?這個我打算再擱置」。穩定決定保存於 GOALS：延期的是 Issue 09 Thinking Effort 多段位新增功能，既有 Normal／Extended 保留。本輪不再追問段位／映射／保存三項答案或其實作授權；輸入法限縮照舊，其他 native 項目未豁免。
+- Read-only runtime/worktree preflight：WSL Ubuntu-24.04，cwd /home/minervamuses/research-agent-workspace；source /home/minervamuses/miniconda3/etc/profile.d/conda.sh && conda activate app；pwd、command -v git python poetry、python --version、git status --short、git branch --show-current、git rev-parse --short HEAD → root 正確，Git /usr/bin/git，Python/Poetry 皆 Conda app/bin，Python 3.13.14，GUI / ca7efa7，初始工作樹乾淨。根 AGENTS 與 find issue -name AGENTS.md 核對：issue 下無其他適用檔。
+- 已重讀 GOALS、PLANS、PROMPTS、build-log、phases 04–06，沿用本輪已核對的 phase03 native 缺項與 live code；context/、code_review/ 尚不存在。本次沒有新的 application 因果發現或實際 code review，不建立額外文件。
+- Exact edit operation：以 Linux Conda app python - 從 stdin 對七個已凍結 Markdown 做唯一匹配斷言後替換並以 UTF-8/LF 寫回。GOALS 保存決定；PLANS 將本輪 required 路線收斂為 01→02→03→06；PROMPTS 依動態範圍排除延期 phases；04/05 保留未來條件式計畫但不執行；06 移除04/05前置並保留03；本 log 更新狀態表、追加紀錄。未覆寫任何歷史 failed/passed/unavailable evidence，未修改其他 Issue bundle。
+- Phase 04：Blocked（僅 gate，無功能實作）→ Not started／明確延期；Phase 05 保留 Not started／明確延期。這只反映範圍決定，沒有 application acceptance passed。
+- Phase 01/02 已有 Complete evidence 保留。Phase 03 仍缺 menu 鍵鼠／焦點／caret／零送出與生命週期、可及性、真 Citation 原生流程及完整安全入口，保持 Blocked；沒有新的可操作原生 surface 或豁免證據，不重複啟動 App。Phase 06 的本輪前置改為01/02/03，因03未完成仍 Not started。
+- Acceptance→evidence：Issue09 有明確延期處置 → 使用者原話與 GOALS；恢復不誤啟延期功能 → PLANS／PROMPTS 範圍篩選與04/05前置說明；原生門檻未被誤免 → phase06仍要求03、log保留具體缺項。沒有其他已識別的本輪產品決策；原生工具／操作證據是驗收阻塞。
+- 沿用使用者「每一步改動皆必須commit」授權，此次為一個計畫修訂步驟。無 production/tests/API/schema/依賴/環境變更；無 tests/full suites/build/GUI/provider 呼叫；不 push、不切 branch/worktree。
+
+- 規劃檔案驗證（Linux Conda app，cwd root）：`python /mnt/c/Users/garyc/.codex/skills/long-horizon-plan-author/scripts/validate_harness.py --repo /home/minervamuses/research-agent-workspace --plan-root issue/final_check --project-shape application --risk medium --harness-only --strict --json --proposed-path issue/final_check/GOALS.md --allowed-path issue/final_check/GOALS.md --proposed-path issue/final_check/PLANS.md --allowed-path issue/final_check/PLANS.md --proposed-path issue/final_check/PROMPTS.md --allowed-path issue/final_check/PROMPTS.md --proposed-path issue/final_check/build-log.md --allowed-path issue/final_check/build-log.md --proposed-path issue/final_check/phases/phase-04-thinking-contract-runtime.md --allowed-path issue/final_check/phases/phase-04-thinking-contract-runtime.md --proposed-path issue/final_check/phases/phase-05-thinking-desktop-acceptance.md --allowed-path issue/final_check/phases/phase-05-thinking-desktop-acceptance.md --proposed-path issue/final_check/phases/phase-06-regression-and-closure.md --allowed-path issue/final_check/phases/phase-06-regression-and-closure.md` → valid=true，0 errors / 0 warnings；`git diff --check` → passed；`git diff --stat` 與逐檔 diff 確認僅上述七個 Markdown。此為文件驗證，非 application acceptance。
+- 從 PROMPTS 做恢復核對：由 GOALS 排除延期04/05，再由 PLANS 和 log 選03；外部 blocker 未變即停止，06仍不得開始。產品答案及必要具體 scope 只在未來恢復09後收斂；延期不自動產生新實作權限。

@@ -1,5 +1,7 @@
 # Phase 05 — Thinking Effort Desktop 操作與生命週期
 
+本 phase 依 [GOALS 的 Issue 09 延期決定](../GOALS.md) 不列本輪範圍；以下僅保留未來條件式路線與 planned checks。使用者明確恢復後，須先核對當時 live code、定案產品與必要授權並修訂 PLANS，才可開始；延期期間不執行本檔步驟，也不標功能 Complete。實際狀態只見 build-log。
+
 ## 目標與來源
 
 核准的 Thinking Effort 控件可由鍵鼠選擇，顯示 authoritative 有效值，下一回合及 new／A→B→A／restart 符合 GOALS 產品契約。
@@ -52,4 +54,4 @@ timeout 300s poetry run pytest tests/test_desktop_fixture.py tests/test_desktop_
 
 失敗保留 authoritative 舊值及資料，僅修自己直接 diff；不以清空歷史／偏好或重啟系統掩蓋問題。
 在 ../build-log.md 記 UI操作→backend/routing/JSON 對照、exact commands、實際改動與限制；若 earlier phase evidence 已過時，明示新的補驗範圍。
-Phase 03 與本 phase required evidence 都到齊後才可進 Phase 06；無原生工具保持 Blocked，不能以 offline 通過結案。
+若未來恢復本 phase，其原生 evidence 仍是功能驗收門檻；無原生工具不能以 offline 通過結案。本輪 Phase 06 前置依 PLANS 的延期後路線，不要求本 phase 完成。
