@@ -1,5 +1,7 @@
 # Module Responsibilities
 
+Freshness: current source/contract/test-definition inspection on 2026-09-13 at `a88d44d` covers session/installer, extension manager/runtime, Citation and Desktop producer/consumer ownership. Other claims retain 2026-09-05 (`9745fd1`) evidence, or 2026-09-06 (`743aaaf`) for unchanged Desktop/canonical presentation claims. No application checks were rerun; see [audit coverage](README.md#audit-coverage).
+
 ## Responsibility map
 
 | Module / component | Owns | Must not own | Public boundary | Evidence | Confidence |
@@ -13,13 +15,13 @@
 | app/agent/thinking | Optional rewrite/proposer/aggregate/review/revise workflow and candidate evidence | Final persistence, citation registry, general tool policy | FusionOrchestrator | app/agent/thinking/README.md | Confirmed |
 | app/agent/tools | Local tool implementations, inventory, access resolution, execution-time enforcement | Session policy selection or tool business-domain rules | resolve_tool_access, PolicyToolNode | app/agent/tools/README.md | Confirmed |
 | app/agent/skills | Skill discovery, metadata, strict tools/resources manifest validation, context loading, and tool brokerage | Built-in Skill domain behavior, persistent generic selection, or task modes | SkillMetadata, SkillRuntime | app/SKILLS_GUIDE.md; app/agent/skills | Confirmed |
-| app/agent/extensions | Drop-in scan/validation, managed copies, registry, preview/apply/status, startup conversion | Installing/building dependencies, hot-reloading current sessions, executing source drop-ins | ExtensionManager, ExtensionStartup | app/agent/extensions/README.md | Confirmed |
+| app/agent/extensions | Full or selected-Skill preview/apply; Linux apply lock; ZIP request authority, staging/cleanup and registry outcome | Executing downloaded scripts, installing dependencies, hot reload, or trusting model-authored approval | `ExtensionManager` / `SkillInstaller` | `manager.py`, discovery/startup and tests; current source | Confirmed |
 | app/rag | Framework-neutral collection, tagging, chunking, storage, retrieval, sync/prune, tool schemas | Agent, CLI-session, skill, or desktop policy | rag public functions and dispatch | app/rag/README.md; app/rag/docs/API.md | Confirmed |
 | app/skills/citation | Citation provider, identity, resolution, persistence, registry, gate, renderer | Session lifecycle or generic tool access | CitationService and citation_workflow domain | app/skills/citation/README.md | Confirmed |
-| app/agent/skills/citation | Session-scoped citation integration and finalization policy | Provider/resolution/storage implementations | CitationSessionPolicy | app/agent/skills/citation/session_policy.py | Confirmed |
+| app/agent/skills/citation | Citation service/registry scope and finalization gate/render | Provider/storage logic or frontend lifecycle selection | `CitationSessionPolicy` | `session_policy.py`, `ChatSession._run_one_shot_skill_turn` | Confirmed; one-shot entry points clear the policy |
 | `app/agent/desktop/catalog.py` | Strict project-to-session catalog schema and atomic single-process mutations | Conversation text, model state, or project discovery | `DesktopProjectCatalog` | Catalog source/tests | Confirmed |
 | `app/agent/desktop/protocol.py` and `server.py` | Python contract validation, bounded NDJSON input/output, per-request ordering, exactly one terminal result, EOF cleanup | Domain policy or native process supervision | `python -m agent.desktop.server` | Server/protocol sources/tests | Confirmed |
-| `app/agent/desktop/service.py` | Safe desktop DTOs, operation gates, conversation coordination, one-shot Skill/static slash routing, final-only results, RAG/extension adapters, Bash approval correlation | Native child lifecycle, React presentation, provider internals, or Citation lifecycle redesign | Protocol method dispatcher | Service source/tests | Confirmed |
+| `app/agent/desktop/service.py` | Safe desktop DTOs, operation gates, conversation coordination, one-shot Skill/Citation, installer and static slash routing, final-only results, RAG/extension adapters, Bash approval correlation | Native child lifecycle, React presentation, provider internals, or Citation lifecycle redesign | Protocol method dispatcher | Service source/tests | Confirmed |
 | `app/agent/desktop/fixture_session.py` | Exact opt-in isolated acceptance/crash fixture with deterministic canonical conversations | Normal production session semantics, real provider/store use, or any legacy migration fallback | Exact `RESEARCH_AGENT_DESKTOP_FIXTURE=phase02` plus validated fixture root | Server gate; fixture and crash-recovery tests | Confirmed test-only seam |
 | `app/desktop/protocol/v1` | Language-neutral method/event/result vocabulary, limits, schemas, shared fixtures | Runtime transport or business logic | `contract.json`, `fixtures.json` | Three language implementations/tests | Confirmed |
 | `app/desktop/src-tauri/src/backend.rs` | One child generation, pipe threads, request correlation, bounded stderr counts, lifecycle/restart/shutdown truth | Agent/RAG/extension business rules | Five Tauri commands and one event channel | Rust source/tests | Confirmed |
@@ -29,11 +31,18 @@
 | app/tests and app/desktop/tests | Regression evidence using fake providers/temp roots; shared protocol checks | Runtime truth by themselves | pytest, node test, Rust unit tests | app/pyproject.toml; app/desktop/package.json | Confirmed |
 | issue, note | Decisions, incidents, and research context | Current runtime authority | Human/agent records | Repository guidance and individual records | Confirmed |
 
+| Module / component | Owns | Must not own | Public boundary | Evidence | Confidence |
+|---|---|---|---|---|---|
+| `app/skills/skill-installer/zip_bundle.py` | Safe ZIP member inspection, extraction into a new target, original bytes/executable-bit verification | User selection/update authority, registry writes, downloaded code execution | `inspect_archive` / `extract_archive` / `verify_prepared` | Source + `test_skill_runtime.py` definitions at `a88d44d` | Confirmed |
+| Desktop catalog/permission presentation | Python derives eligible commands and ask/bypass state; React inserts strings and accepts only current ACK/catalog | Client-owned command authorization, shell execution, persistent permission preference | `slashCommands`, `session.set_bash_permission` | JSON/Python/TS/Rust contract, service, `App.tsx`/`trust.tsx` | Confirmed source contract |
+
+The existing session facade owns installer task serialization, cancellation settlement and effective thinking-mode metadata; `SkillInstaller` owns source/preview authority and safe cleanup. Third-party resource references use the absolute `skill_root` exposed by `SkillRuntime.context_block`; Bash cwd remains the app root.
+
 ## Boundary rules
 
 - agent may import rag public boundaries; rag must not import agent or skill/application code. Current import search found no reverse dependency.
 - ChatSession coordinates order and owns the session lock; it delegates graph execution, thinking, citation policy, canonical repository transitions, and journal observability rather than duplicating those implementations.
-- The session startup catalog is immutable. CLI and Desktop project validated non-Citation entries into one-shot slash commands; `ChatSession` loads and clears the selected runtime inside the existing turn lock. Citation alone retains a persistent session policy behind the dedicated CLI `/citation` handler.
+- The session startup catalog is immutable. CLI and Desktop project validated non-Citation entries into one-shot slash commands; `ChatSession` loads and clears the selected runtime inside the existing turn lock. Citation uses a fresh one-turn registry through shared CLI/Desktop `/citation`; the installer alone may retain bounded pending clarification/preview state.
 - MCP startup defaults on at the CLI and Python Desktop session boundary; an explicit opt-out is preserved, and React delegates rather than redefining the default.
 - Tool existence and tool authorization are separate. tools.access resolves the set, graph binding exposes it, and PolicyToolNode rechecks it at execution.
 - app/skills/citation owns citation truth; app/agent/skills/citation owns session integration only.
@@ -43,9 +52,9 @@
 - The desktop protocol owns cross-language shapes, limits, origin rules, and request ordering. All three implementations reject incompatible messages instead of adapting them silently.
 - Conversation project membership is catalog-owned, while conversation text is canonical JSON under the conversation repository. The catalog is not the transcript store.
 - Canonical JSON is the sole active transcript authority and `ConversationRepository` its sole writer. Accepted prompts are pending before provider/tools; terminal state precedes success exposure; restart surfaces leftover pending work as interrupted without automatic replay. No active conversation Chroma, `recall_history`, eviction, or flush lifecycle remains.
-- Desktop composer commands are parsed and executed in Python. React sends the original text and does not infer Skill, knowledge, extension, or Citation policy. Static `/citation` is currently rejected in Desktop while dynamic non-Citation Skill commands are accepted.
+- Desktop composer commands are parsed and executed in Python. React sends the original text and does not infer Skill, knowledge, extension, or Citation policy. Static `/citation` is eligible only when its runtime and `citation_workflow` tool are available; completed canonical replay may defer that eligibility check without bypassing identity validation.
 - Desktop progress and tool events may describe activity but never carry answer text. React accepts one completed/persisted terminal `final_only` result and does not assemble provisional answer chunks.
-- React uses one `(sessionId, turnId)` projection across restored, live, and pending records. A retry pending with an existing key overlays the stale failure card; a terminal result supplies authoritative ordering. A backend failure marked both accepted and persisted triggers guarded catalog/transcript refresh rather than another persistence path.
+- React uses one `(sessionId, turnId)` projection across restored, live, and pending records. A retry pending with an existing key overlays the stale failure card; a terminal result supplies authoritative ordering. A backend failure recognized by `isPersistedTurnFailure` as both accepted and persisted triggers guarded catalog/transcript refresh rather than another persistence path.
 - Untrusted assistant/tool text is rendered through `SafeContent`; content-sized child collections stay array-valued, only credential-free absolute HTTP(S) URLs may reach the native opener, and Tauri capabilities grant the WebView no shell or filesystem access.
 - Generated store, cite, dist, node_modules, Rust target, caches, and user extension state are not source modules. Old `plan_logs` may remain as user data, but they are neither runtime input nor output and are not imported or modified.
 
@@ -61,7 +70,5 @@
 - Canonical conversation replacement uses a fingerprint precheck followed by `os.replace`, not an interprocess compare-and-swap. A second process can race the check or recover another live process's pending turn.
 - RAG corpus state is split across three persistence surfaces. DocumentStore orders JSON before Chroma, while repo ingest writes folder metadata before chunks; failure recovery is rerun-based rather than transactional.
 - Skill tool policy says base tools are global, but README.md describes academic-paper-writing as forbidding bash. Runtime access and prose instructions currently express different meanings.
-- Root README.md still describes the retired persistent `/skill` command and `task_modes` manifest field. Live code, `app/SKILLS_GUIDE.md`, and current tests govern instead; `app/agent/README.md` now correctly lists the tracked `desktop/` package.
-- The persistent Citation lifecycle is a deliberate exception to one-shot Skills. CLI owns `/citation`; Desktop advertises that Citation is CLI-only and rejects the static command, leaving the cross-interface product contract deferred in [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md).
-- The completed desktop plan contains historical baseline prose and unchecked intent checkboxes; `build-log.md` owns completion status, while live source/tests remain stronger evidence.
-- Plan status is bundle-specific: the original GUI bundle is Complete, the corrective bundle's Phase 07 is Blocked under its own rerun authority, and the canonical-conversation bundle's Phase 07 is In progress only on native layout evidence. None is runtime authority.
+- Root README retains retired `/skill`/`task_modes` and persistent Citation; `app/SKILLS_GUIDE.md` is current for generic commands/installer but its Citation paragraph is also stale. Use the later `app/skills/citation/SKILL.md` and explicit archived Issue08 decisions for that contract.
+- Citation routing is shared by CLI/Desktop, with session-owned Normal mode and registry cleanup. The installer owns its distinct pending-clarification lifecycle; neither is a second persistence implementation.

@@ -1,128 +1,100 @@
 # Testing Strategy
 
+Freshness: source/definition and fixed-revision record inspection on 2026-09-13 at `a88d44d`. No application suite, build, import smoke, native journey or live provider was executed during this maintenance. Historical observations retain the date and scope below.
+
 ## Available verification commands
 
-Run project commands under Ubuntu/WSL from the repository root unless the command changes directory. Conda environment app is mandatory.
+Use Linux Conda `app`. From the indicated directory, commands below are defined by `AGENTS.md`, current manifests or the named tracked test files. Listing a command does not imply it was run.
 
-| Command | Scope / environment | Definition source | Preconditions / known side effects | Execution and result / not-run reason | Evidence limits |
-|---|---|---|---|---|---|
-| `cd app && conda run -n app poetry run pytest tests/test_state.py -q` | Focused Agent state smoke; WSL/Linux Conda `app` | `AGENTS.md` | Installed project; temporary/cache writes may occur | Not run during documentation maintenance; unaffected Agent internals carried forward | One module only |
-| `cd app && conda run -n app poetry run pytest tests/rag/test_config.py -q` | Focused RAG configuration; WSL/Linux Conda `app` | `AGENTS.md` | Installed project | Not run; RAG was outside the changed Desktop scope | Configuration only, no Ollama integration |
-| `cd app && conda run -n app poetry run pytest` | Complete Python Agent/RAG suite | `AGENTS.md`; `app/pyproject.toml` | Broad suite; writes only isolated test artifacts when tests behave as defined | Not run because `$infrastructure` permits only read-only verification outside `for_agents/` | Offline suite does not prove live services |
-| `cd app && conda run -n app poetry run pytest tests/test_desktop_crash_recovery.py tests/test_conversation_repository.py tests/test_session_lifecycle.py tests/test_desktop_conversations.py tests/test_desktop_fixture.py tests/test_history_retirement.py -q` | Canonical persistence, crash/restart, selection, and history retirement | Current test modules and canonical contracts | Owned temporary fixture roots; no real provider/store | Not run during maintenance; definitions and affected source anchors inspected | Python boundary only; native UI absent |
-| `cd app && conda run -n app poetry run pytest tests/test_desktop_protocol_contract.py tests/test_desktop_service.py tests/test_slash_commands.py tests/test_desktop_answer_stream.py tests/test_conversation_archive_access.py tests/test_session_persistence.py -q` | Desktop protocol, service, final-only, Skill routing, and archive access | Current test modules and protocol contract | Fake/temp state | Not run during maintenance | No Rust/WebView or live provider |
-| `cd app && conda run -n app poetry run pytest tests/test_desktop_server.py tests/test_desktop_fixture.py tests/test_bash_tool.py -q` | NDJSON server, exact fixture gate, and Bash approval seam | Current test modules | Isolated roots; no real provider/shell | Not run during maintenance | Does not prove native Tauri interaction |
-| `cd app && conda run -n app poetry run pytest tests/test_slash_commands.py tests/test_skills.py tests/test_skill_adherence.py tests/test_extension_skill_startup.py -q` | One-shot non-Citation Skill lifecycle | Current test modules and Skill runtime | Temporary Skill roots | Not run; unchanged scope carried forward | Citation remains a separate lifecycle |
-| `cd app && conda run -n app poetry run pytest tests/test_desktop_answer_stream.py tests/test_desktop_service.py tests/test_desktop_fixture.py -q` | Final-only Desktop answers, composer routing, and fixture behavior | Current test modules and protocol contract | Fake/temp state | Not run during maintenance | No React/native presentation |
-| `cd app && conda run -n app poetry run pytest tests/test_openrouter_model.py -q` | Default main-model configuration and adapter forwarding | Current focused Python test | No live provider required | Not run during maintenance; test definition and production call site inspected at `743aaaf` | Does not prove `google/gemini-3.8-flash` exists or is reachable on OpenRouter |
-| `cd app/desktop && conda run -n app npm test` | TypeScript protocol, bridge/reducer, conversation/retry, safe-content, composer-key, and CSS-contract tests | `app/desktop/package.json#scripts.test`; `tests/*.test.ts` | Conda Node and installed `node_modules`; normal test caches only | Pre-maintenance at the same `743aaaf` HEAD: 151 passed, 0 failed; not rerun during documentation maintenance | Structural/unit/server-render evidence; no native WebKit, DPI, or human visual proof |
-| `cd app/desktop && conda run -n app npm run build` | TypeScript check plus Vite production build | `app/desktop/package.json#scripts.build` | Installed `node_modules`; rewrites generated `dist` | Pre-maintenance at the same `743aaaf` HEAD: exit 0; not rerun during documentation maintenance | Build success does not prove runtime/native behavior |
-| `cd app/desktop && conda run -n app cargo test --manifest-path src-tauri/Cargo.toml` | Rust protocol/supervisor unit tests | Cargo manifest and Rust tests | Rust toolchain; may compile/update `target` | Not run during maintenance; historical Phase 07 result retained below | No Python provider or WebView presentation |
-| `cd app/desktop && conda run -n app npm run tauri -- build --no-bundle` | Supported Linux source-checkout Tauri release build | Root README; `tauri.conf.json#build.beforeBuildCommand` | Conda toolchain and Linux Tauri libraries; writes frontend/Rust build output | Not run during maintenance; historical Phase 07 result retained below | No installer; successful build is not a visual journey |
-| `cd app && conda run -n app poetry check --lock` | Manifest/lock consistency | `AGENTS.md`; Poetry metadata | Installed Poetry | Not run; dependency metadata was unchanged | Packaging metadata only |
-| `cd app && conda run -n app poetry build` | Wheel and sdist | `AGENTS.md`; Poetry metadata | Writes generated `app/dist` | Not run; documentation-only scope and no packaging change | Desktop contract assets remain source-checkout-only |
-| `cd app && conda run -n app python -c "import agent, skills.citation, rag; print('app ok')"` | Distribution import smoke | Root README | Installed project | Not run; no Python implementation change in maintenance | Importability only |
-| `/home/minervamuses/miniconda3/bin/conda run -n app python /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root /home/minervamuses/research-agent-workspace` | `for_agents` structure, paths, links, stable IDs, headings, and ignore state | `$infrastructure` helper | WSL skill path and repository available; read-only | Run during maintenance: initial check exposed 29 errors; post-update check passed | Deterministic structure only, not semantic correctness |
+| Command | Scope / definition source | Preconditions / effects | Execution this pass and limits |
+|---|---|---|---|
+| `cd app && poetry run pytest tests/test_state.py -q` | Agent state; AGENTS | Active Conda, installed project; pytest/cache writes | Not run: unchanged state path; one-module evidence only |
+| `cd app && poetry run pytest tests/rag/test_config.py -q` | RAG config; AGENTS | Active Conda; possible cache writes | Not run: no config changes; no live semantic evidence |
+| `cd app && poetry run pytest` | Complete Agent/RAG; pyproject pytest testpaths | Tests write temporary stores/files, spawn fixtures/processes, and may cache imports | Not run: writes outside maintenance boundary; prior run below |
+| `cd app && poetry run pytest tests/test_skill_runtime.py tests/test_extension_skill_startup.py tests/test_extension_manager.py tests/test_skill_adherence.py -q` | Current Skill/installer/extension tests | Temporary bundles/registries, ZIP extraction and multiprocessing | Not run: effectful fixtures outside `for_agents/`; inspected definitions establish intended assertions only |
+| `cd app && poetry run pytest tests/test_citation_resolution.py tests/test_citation_authority.py tests/test_citation_e2e.py tests/test_citation_slash_command.py tests/test_citation_skill_activation.py -q` | Current Citation tests | Fake provider/model paths, temporary bundles/canonical JSON | Not run: effectful fixtures; no arbitrary live-model claim |
+| `cd app && poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py -q` | Current routing/control/replay/contract tests | Temporary canonical/catalog state, fake runners/providers | Not run: fixtures outside boundary; native GUI not covered |
+| `cd app && poetry run pytest tests/test_desktop_crash_recovery.py tests/test_conversation_repository.py tests/test_session_lifecycle.py tests/test_history_retirement.py -q` | Canonical lifecycle and real child crash fixtures | Owned temporary state and processes | Not run: unchanged broad lifecycle evidence carried forward |
+| `cd app && poetry run pytest tests/test_openrouter_model.py -q` | Main default and max-token forwarding test | Fake client; import/cache effects possible | Not run: definition inspected; model availability/output acceptance unproven |
+| `cd app/desktop && npm test` | package.json: Node test runner with TypeScript stripping | Installed Conda Node/dependencies; tests render React and read source/contracts | Not run in documentation scope; historical result below |
+| `cd app/desktop && npm run build` | package.json: `tsc --noEmit && vite build` | Writes frontend `dist` | Not run: outside write boundary |
+| `cd app/desktop && cargo test --offline --manifest-path src-tauri/Cargo.toml` | Current Cargo/Rust tests; archived exact command | Compiles/writes `target`; supervisor tests spawn child processes | Not run: outside boundary; historical full red and focused green stay distinct |
+| `cd app/desktop && npm run tauri -- build --no-bundle` | README; Tauri beforeBuildCommand runs npm build | Frontend and Rust release writes; requires system native libraries | Not run: source-only build, no installer/native interaction proof |
+| `cd app && poetry build` | AGENTS/pyproject | Writes `app/dist` | Not run: no packaging change |
+| `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py preflight --root .` | Loaded infrastructure helper; repo cwd | Read-only paths, permissions and Git tracking/ignore checks | Executed before knowledge writes; passed |
+| `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py bootstrap --root .` | Loaded helper | Creates missing knowledge files only | Executed; all nine preserved, none created |
+| `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root .` | Loaded helper | Read-only structural/path/ID checks | Executed: Structural validation passed (exit 0); certifies structure only |
+| `git --no-optional-locks diff --no-ext-diff --no-textconv --check` | Git diff validation | Read-only | Executed: passed (exit 0); no application correctness claim |
 
-Same-HEAD evidence produced before this documentation-only maintenance pass:
+### Historical verification with retrievable provenance
 
-| Check | Result | Evidence limit |
+The [archived results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-check-results.json), [Python/Node output tails](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-python-node-results.txt) and [final review](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/code_review/phase-06-regression-and-closure-review.md) were read from local Git this pass. They are historical execution evidence, not reruns or independent review.
+
+| Check / execution date | Baseline / actual result | Evidence limit |
 |---|---|---|
-| Desktop TypeScript suite | 151 passed, 0 failed at `743aaaf` | Covers current test definitions, including recent GUI regressions; no native WebKit |
-| Desktop TypeScript/Vite build | Exit 0 at `743aaaf` | Compile/bundle only |
-| Headless-Chrome responsive layout observations | Widths 720, 1080, 1920, and 2560; root font stayed 16px at 1080 and was 18.72px at 1920 | Browser proxy only; not Tauri/WebKit, DPI, 200% zoom, or human acceptance |
+| Full Python, 2026-09-13 | `ec9175f`: 1,138 passed, 2 warnings; exit 0, wrapper 44.359 s | Fake/offline scope; warnings are LangChain pending default and intentional duplicate ZIP member |
+| Node, 2026-09-13 | `ec9175f`: 165 passed, 0 failed; exit 0, wrapper 6.285 s | No fresh browser engine/native interaction |
+| Full Rust, 2026-09-13 | `ec9175f`: 35 passed, 1 failed; exit 101 | `a_new_generation_cannot_reuse_the_prior_shutdown_report` observed Degraded instead of Crashed |
+| Focused Rust after correction | `cf3183b`: exact shutdown-report target passed, 35 filtered; exit 0, wrapper 5.167 s | Test setup now kill/waits under child mutex; full suite was not rerun or declared green |
+| Tauri no-bundle build | `cf3183b`: exit 0, 79.553 s, offline Cargo; includes TypeScript/Vite build | Linux source release only; no installer or additional native journey |
+| Native menu and Citation, archived final-check Phase03 | Keyboard/mouse insertion, caret/focus, Linux AT-SPI exposure, zero-request insertion, new catalog, real session/Citation tool/save/output plus A/B/restart/failure/interruption observed | Model/fetch seams were fake; no screen-reader speech claim, IME skipped, no dedicated GUI task-cancel entry |
+| Prior typography account, 2026-09-06 | `743aaaf`: 151 Node tests/build and headless Chrome at 720/1080/1920/2560 reported in prior knowledge | Retained historical account, not a new native layout result |
 
-Historical GUI and migration plan bundles were deliberately removed. Their former test counts and native-journey observations are no longer repository evidence; rerun the smallest relevant current checks when those claims matter.
-| Exact native `720×560` and 200% zoom layout | Unavailable/not passed and blocking | WSLg geometry cannot be set reliably and WebKit ignores zoom; browser/headless substitution is forbidden |
-| Live providers, Ollama, and real user stores | Not run | Outside the authorized fixture-only validation scope |
+The `ec9175f..a88d44d` app diff contains only the Rust test setup correction; Python/Node production/tests remain the recorded source. No application source changed in this maintenance. A prior failure cannot be rewritten as a full passing run even when its one target later passes.
 
-The earlier focused RAG probes recorded in the prior audit reproduced FAIL-001 and FAIL-002 using temporary data and deterministic doubles. Their relevant production paths did not change, but the probes were not repeated now.
-
-The original GUI plan is Complete. The separate corrective plan records Phases 01-06 Complete and Phase 07 Blocked after one older broad Python failure and one older Cargo failure were repaired only by focused checks under a no-rerun rule. Later canonical-conversation Phase 07 evidence above applies to the current application code, but it does not silently change the corrective plan's own status. This infrastructure audit did not run application tests or builds; the three current-HEAD frontend observations above predate the documentation pass.
+The older RAG stale-inventory and empty-file probes (FAIL-001/002) remain the 2026-09-05 account at `9745fd1`. Only named current prune/search anchors were checked; no new reproduction was made. Removed plans have no active status here; exact geometry/zoom and restarted IME are evidence gaps, not an instruction to reopen an old blocked plan.
 
 ## Change-type verification matrix
 
-| Change type | Minimum focused checks | Broader checks | Manual or environment-specific evidence |
-|---|---|---|---|
-| Agent graph/session/turn lifecycle | Relevant test_state, test_graph_skill_loader, test_turn_finalizer, test_session_lifecycle, and test_session_persistence modules | Complete pytest once near completion when inexpensive | No live provider unless explicitly approved |
-| Tool access, bash/read_file, MCP | test_tool_access, test_tool_access_matrix, test_policy_tool_node, implementation-specific module | Complete pytest | TTY approval path and MCP logs only when behavior changed |
-| Extended thinking | test_thinking, test_thinking_models, test_thinking_session | Complete pytest | Live paid/provider trial only under explicit bounded authorization |
-| RAG config/API/store/sync | Relevant app/tests/rag modules plus test_ingest/test_adapter_formatting | Complete pytest | Ollama/OpenRouter only for a concrete live integration need; isolate KMS_STORE_DIR |
-| Citation engine/session policy | Relevant test_citation modules and test_turn_finalizer | Complete pytest | Live provider calls only when cached/fake evidence cannot answer the question |
-| Skill invocation/manifest | test_slash_commands, test_skills, test_skill_adherence, and test_extension_skill_startup | Complete pytest | Verify one-shot cleanup and legacy-field diagnostics with temporary Skill roots |
-| Extension apply/startup | Relevant test_extension modules | Complete pytest | Use temporary drop-in/state roots; never mutate real user extension state |
-| Desktop protocol/backend/conversations | Relevant Python Desktop, canonical conversation, catalog-only missing-file, persisted-failure, pending-retry, safe-content, composer-key, and Bash modules plus `npm test` | Cargo test and selected Python regressions; Tauri no-bundle build when native/build surfaces change | Isolated real Tauri/Python journey for lifecycle/UI changes; never use real user stores |
-| Desktop React/CSS visual behavior | `npm test` plus `npm run build`; inspect root/rem interaction and overflow-sensitive containers | Relevant Python/Rust checks only when protocol or host boundaries also changed | Compare initial and maximized native Tauri windows at representative DPI; keyboard/IME behavior needs native interaction, and browser screenshots are proxy evidence only |
-| Packaging/runtime/dependency change | Runtime tests, import smoke, poetry check --lock | poetry build and complete pytest | Dependency changes require prior user approval |
-| Documentation/for_agents only | infrastructure check, marker/search, ignore check, diff check | No application suite by default | Cross-document evidence audit |
+| Change type | Minimum relevant checks | Broader / environment evidence |
+|---|---|---|
+| Graph/session/finalization | State, graph, turn-finalizer, session lifecycle/persistence modules | One reasonably inexpensive full pytest near completion under project rules; live calls require authorization |
+| Canonical replay/persistence | Conversation repository, Desktop conversations/service, crash recovery and history retirement | Verify user-visible saved/replayed output and unchanged bytes; do not infer interprocess safety |
+| Tool/Bash/MCP | Access/policy-node, Bash, MCP and Desktop trust/service tests | Test ask and bypass separately; injected runner does not prove live shell/provider operation |
+| Skill/Citation/installer | Runtime/startup, adherence, manager, Citation activation/e2e/slash/resolution/authority | Cleanup, true effective mode, no extra model/save on completed replay, preserved source/backup bytes |
+| Extension apply | Existing manager multiprocessing and scoped preview tests | Use temporary roots; stable local lock inode, not arbitrary shared/network-FS safety |
+| RAG ingest/sync/store/search | Relevant `tests/rag` plus ingest/adapters | Small deterministic case first; live Ollama/OpenRouter only for an authorized integration need |
+| Desktop catalog/menu/permissions | Python service/protocol, Node conversations/trust, shared JSON/TS/Rust fixtures | Native key/mouse/ARIA checks when affected; stale generation/session and zero-effect insertion |
+| Desktop rendering/CSS | Node safe-content/styles tests and frontend build | Native WebKit/DPI/IME evidence is narrower and distinct from headless Chrome |
+| Runtime/packaging | Runtime/manifest/import checks; build only as needed | Respect Conda/Poetry, no dependency or environment edits without approval |
+| Knowledge only | Helper preflight/check, local links/IDs, diff and scope/index comparison | Static evidence sufficient; no application suite by default |
 
 ## Invariant and failure-mode coverage
 
-| Item | Current verification | Coverage status |
+These are mappings to existing checks, not fresh passing claims.
+
+| Subject | Anchors / scope | Remaining limitation |
 |---|---|---|
-| Coverage for INV-001 | test_runtime_env.py; observed Python/Conda paths | Covered |
-| Coverage for INV-002 | .gitattributes and Git attribute/diff checks | Covered policy; full corpus not rescanned |
-| Coverage for INV-003 | RAG/adapter tests and import search | Covered |
-| Coverage for INV-004 | test_policy_tool_node.py; test_tool_access_matrix.py | Covered except duplicate/empty tool-call IDs |
-| Coverage for INV-005 and INV-006 | test_turn_finalizer.py, test_thinking_session.py, test_session_lifecycle.py, test_conversation_repository.py, test_desktop_crash_recovery.py | Strong offline coverage for prompt-first, terminal-before-success, latest-ten, interrupted/no-auto-replay, and six kill boundaries; live providers remain unverified |
-| Coverage for INV-007 and INV-008 | test_root_identity.py, test_component_flow.py, test_json_store.py | Covered for successful/JSON-conflict paths |
-| Coverage for INV-009 | test_extension_registry, manager, MCP, startup, user journey | Covered at apply/startup; FAIL-005/FAIL-006 uncovered |
-| Coverage for INV-010 | citation storage/resolution/e2e/gate/finalizer suites | Strong offline coverage; ASM-014 remains model-behavior risk |
-| Coverage for INV-011 | Shared fixtures plus Python protocol/server, TypeScript pending/retry/reconciliation tests, and Rust protocol/supervisor tests | Strong offline coverage; same-HEAD TypeScript run passed, while Python/Rust suites were not rerun this pass |
-| Coverage for INV-015 | Rust lifecycle/source-launch tests, frontend bridge tests, capability/invoke inspection, isolated real-boundary journeys | Covered for supported source checkout; packaged topology intentionally uncovered |
-| Coverage for INV-016 | test_desktop_conversations.py and test_desktop_fixture.py cover A→B→A, restart, canonical restore, catalog-only missing-file rejection, current-session retention, and deterministic canonical fixture data | Strong offline coverage; old Plan/Chroma sources are deliberately unsupported and untouched |
-| Coverage for INV-017 | Safe-content/URL tests, three 140,000-child regressions, protocol forbidden-key tests, DTO bounds, and Tauri capability inspection | Covered at tested structural limits; no native browser-engine resource/security audit |
-| Coverage for INV-018 | Prune preview, extension preview/binding, approval correlation/replay/timeout/crash tests | Strong per-process coverage; cross-process state remains uncovered |
-| Coverage for INV-019 | test_slash_commands.py, test_skills.py, test_skill_adherence.py, test_desktop_service.py, and fixture journey | Strong one-shot success/error/cancel and CLI/Desktop coverage; persistent Citation remains a separate CLI-only contract |
-| Coverage for INV-020 | CLI/Desktop service MCP-default tests plus TypeScript creation-parameter test | Covered offline for default-on and explicit opt-out |
-| Coverage for INV-021 | `styles.test.ts`, same-HEAD `npm test`, build, and headless representative-width observations | CSS contract and browser proxy covered; native maximized/fullscreen, DPI, zoom, and human acceptance unverified |
-| Coverage for INV-022 | `shouldSubmitComposerKey` pure-function test and handler source inspection | Enter/Shift+Enter/IME predicate covered; no native DOM dispatch or IME journey at current HEAD |
-| Coverage for FAIL-001 and FAIL-002 | Temporary deterministic probes | Reproduced; no regression tests |
-| Coverage for FAIL-003 | Code/docs and JSON rollback tests | Partial; no Chroma mid-failure injection |
-| Coverage for FAIL-004 | test_history_retirement.py plus canonical lifecycle and integrated fixture no-`store/chat_history` assertions | Resolved in the supported paths exercised offline; remaining turn-count and catalog-scan limits are ASM-024 |
-| Coverage for FAIL-005 | Focused tamper probe and issue reproduction | Reproduced; no regression test |
-| Coverage for FAIL-006 | Control-flow proof and issue sequence | No multiprocessing regression |
-| Coverage for FAIL-007 | Focused same-year probe | Reproduced; existing test covers different years only |
-| Coverage for FAIL-008 | Git history, integrated desktop journeys, Python/TypeScript/Rust tests | Historical disconnected shell is mitigated |
-| Coverage for FAIL-009 | MCP/fake-provider tests plus lifecycle/crash-recovery tests | Durable failure/no-auto-replay covered offline; no live dependency verification |
-| Coverage for FAIL-010 through FAIL-012 | Focused regression tests, attributes, and current code | Mitigations covered |
-| Coverage for FAIL-013 | Direct-handler source/tests plus supported composer routing tests | Limitation confirmed; raw direct folder methods remain intentionally disabled |
-| Coverage for FAIL-014 | Retired-command and legacy-manifest tests plus root README comparison | Runtime behavior covered; user-facing root documentation remains stale |
-| Coverage for FAIL-015 | Desktop disallowed-command test and App.tsx CLI-only notice | Gap confirmed; Citation lifecycle/product decision remains deferred |
-| Coverage for FAIL-016 | Rust long-request, output-close, and shutdown tests | Former deadline mitigated; indefinite liveness remains ASM-019 |
-| Coverage for FAIL-017 | Persisted-failure reconciliation TypeScript regression plus Python durable-first-prompt test | Frontend test ran at same HEAD; Python supporting test defined but not rerun in this pass |
-| Coverage for FAIL-018 | Pending failed/interrupted retry overlay, new-pending append, and unresolved-retry regressions | Same-HEAD TypeScript suite passed; no native interaction |
-| Coverage for FAIL-019 | Three 140,000-child server-render regressions | Avoids variadic-call failure at tested points; no native performance ceiling |
-| Coverage for FAIL-020 | CSS-contract test, same-HEAD build, and headless width observations | Mitigation covered as source/browser proxy; native visual acceptance remains open |
+| Runtime/text/dependency (INV-001/002/003) | Runtime guard/config, .gitattributes, RAG adapter tests; current environment paths verified | Full dependency/import audit carried forward |
+| Tools/finalization (INV-004/005/010; FAIL-009/010/011) | Access matrix, policy node, turn finalizer, Citation gate/e2e | Duplicate tool IDs and raised extended-stage exceptions not comprehensively covered; live dependencies unknown |
+| Canonical authority (INV-006/016; FAIL-004/017/018) | Repository, lifecycle/crash, catalog restore and frontend logical-turn merge | Multi-process writers/catalog remain ASM-016/022 |
+| RAG identity/state (INV-007/008/012; FAIL-001/002/003) | Root identity, JSON conflict/rollback, historical probes and current prune source | No unified Chroma/raw/meta failure-injection proof; stale inventory/empty re-ingest remain |
+| Extension trust (INV-009/013; FAIL-005/006) | Changed-bundle startup/activation tests; manager multiprocessing/fsync/crash/exception tests | Activation check-to-read race and noncooperating writers remain |
+| Earliest resolution (INV-014; FAIL-007) | Same-year/all-missing ambiguity, DOI dedupe, unique known minimum with undated alternatives; authority/workflow propagation | Year precision only |
+| Desktop wire/trust (INV-011/015/017/018/023) | Shared fixtures, Python/TS/Rust validators, ask/bypass busy/ACK/trust tests, safe renderer | Source checkout only; no new native engine or cross-process test |
+| Skill lifecycle and installer (INV-019/024; FAIL-015) | Citation terminal cleanup/late save, installer authority/bytes/cancel/cleanup conflict/mode and completed replay tests | Fake model quality not a live-model guarantee; host pending state is not durable |
+| MCP defaults (INV-020) | CLI/Desktop default-on/opt-out tests | Live MCP availability not checked |
+| Typography/composer (INV-021/022; FAIL-019/020) | Source CSS tests, array-child regressions, current menu key predicate and archived native menu | Exact native geometry/zoom, fresh IME and resource exhaustion unproven |
+| Save reporting (ASM-014) | Strict ToolMessage statuses and four outcome journeys; archived scoped characterization | Model prose remains model-governed; no automatic new backlog |
+| Documentation drift (FAIL-014) | Root README / Skill-guide comparison against shared handler/current Citation Skill | Still outside this maintenance's write scope |
 
 ## Test-data, fixture, and environment constraints
 
-- Conda environment app owns Python, Node, npm, Rust, and Cargo. Poetry virtualenv creation is disabled.
-- Most tests use fake models/providers, monkeypatches, and temporary stores/roots; they do not prove live OpenRouter/Ollama/MCP/provider availability.
-- Semantic search and real ingest require Ollama with bge-m3. Folder/repo tagging requires OpenRouter.
-- Citation live tests would touch network providers and potentially local citation output; use temporary output and explicit authorization.
-- Default app/store, cite, extension state, MCP logs, node_modules, dist, and Rust target are generated/local. Old `plan_logs` and conversation Chroma are unsupported transcript sources; tests must leave them untouched, isolate write roots, and avoid user data.
-- `app/agent/desktop`, the React/Tauri implementation, and their tests are tracked. The exact `phase02` fixture gate must use a caller-owned, validated temporary root, deterministic canonical JSON, and fake providers/runners. The gate may not touch user stores or credentials.
-- Desktop Python protocol reads `app/desktop/protocol/v1` from the source tree; installed-wheel behavior is unverified and Tauri bundling is disabled.
-- Shared protocol fixtures cover Python/TypeScript/Rust source contracts. Exact native `720x560`, 200% zoom, and current native WebKit behavior remain unavailable/not passed.
-- No formatter, linter, coverage threshold, or CI configuration is present.
+- Conda `app` owns Python/Node/Rust; Poetry creates no separate virtualenv. Use repository LF policy.
+- Application tests visibly create temporary archives, stores, registries and child processes. They were inspected statically; none was run to evade the knowledge-only write boundary.
+- Do not use user stores, secrets, extension state, generated citation bundles or caches as fresh fixtures. The exact Desktop `phase02` fixture gate requires an owned root; it is not the production Citation model path.
+- Offline fake model/fetch results prove deterministic host behavior only. Real tagging/chat may contact OpenRouter; embedding requires Ollama/bge-m3.
+- Protocol assets are source-checkout-relative and Tauri bundling is disabled. The active protocol requires matching command catalog/permission fields across JSON/Python/TS/Rust.
+- New sessions/restart default to Normal/ask; same-process conversation controls are memory snapshots. Canonical historical thinking metadata is not a persisted next-turn preference.
+- No formatter/linter/coverage threshold or CI workflow was identified in the prior account; no new CI execution was inspected.
 
 ## Known gaps and unreliable checks
 
-- No regression tests exist for stale folder metadata, empty/unreadable re-ingest, post-startup Skill tampering, extension cross-process lost update, or same-year earliest ambiguity.
-- No failure-injection test spans RAG folder metadata, raw JSON, and Chroma; no concurrency test covers simultaneous ingest/prune/read.
-- No test verifies persistent-store schema migration, embedding-model compatibility, moved roots, default single-file PID collisions, preservation of `/init` exclusions during `/sync`, or prefix-search completeness.
-- No explicit timeout test covers MCP get_tools; raised aggregator/reviewer/reviser provider exceptions are not comprehensively tested.
-- No multiprocessing test covers desktop catalog lost updates or canonical conversation writers.
-- Long-content regressions use values beyond the retired answer/document/transcript thresholds only as evidence points; they do not define a new product ceiling. Real I/O or memory exhaustion behavior remains platform-dependent.
-- Safe-content large-child regressions use React server rendering, not native WebKit. They distinguish the variadic-argument failure from correctness but do not prove acceptable native memory or interaction performance.
-- Composer keyboard coverage tests the pure predicate; it does not dispatch real textarea events or exercise an IME in the native application.
-- Responsive typography coverage checks source arithmetic and headless-Chrome layouts. It does not establish native maximized/fullscreen readability, platform DPI behavior, 200% zoom, or human visual acceptance.
-- No integrated stress test enumerates every concurrent raw-protocol RAG read/write intersection. Direct `knowledge.init_workspace` and `knowledge.ingest_folder` remain deliberate failures even though the composer route works.
-- Per-conversation thinking snapshots are tested in-process and intentionally reset to safe defaults after backend restart because current durable formats do not store them. Generic Skill selection is one-shot rather than a conversation snapshot.
-- Desktop fixture selection remains a runtime environment gate in tracked code; tests prove exact selection, but no build-time mechanism excludes it from ordinary source runs.
-- Installer, wheel protocol-asset lookup, bundled sidecar, signing, and cross-platform desktop checks do not exist by design.
-- Root README.md still describes retired `/skill`/`task_modes` behavior. Current code/tests and `app/SKILLS_GUIDE.md` govern until that record is updated; the obsolete timeout issue has been removed.
-- Desktop has no Citation activation path; [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md) defers the required single-turn versus multi-turn lifecycle decision.
-- Historical test counts in issue/note files do not establish current checkout health.
-- The historical Phase 07 focused checks, final broad Python/npm/Cargo/Tauri checks, release build, and native behavioral journey passed as listed above. Exact native `720×560` and 200% zoom layout remains unavailable/not passed and blocks completion; live providers and real user-state behavior remain unclaimed or Unknown. Retired migration counts do not establish current importer behavior because no importer is supported.
+- RAG partial-store writes, empty/unreadable re-ingest and stale folder metadata lack the targeted regression/failure-injection evidence described in the retained backlog.
+- Broader unversioned-store/embedding compatibility, root moves, filename-stem PID collisions, init/sync exclusions and prefix search completeness remain carried-forward gaps.
+- Desktop catalog and canonical conversation interprocess writes remain unproven; extension apply tests do not cover those stores.
+- Managed Skill activation validation is a precheck, not a lock/snapshot for all subsequent reads.
+- The Rust full-suite result is still 35 passed / 1 failed historically, followed by one focused pass after its test-only fix. No new full-suite run occurred.
+- Native menu/Citation acceptance does not prove screen-reader speech, live-model quality, exact 720x560/200% zoom, all DPI configurations, or restarted IME. The user accepted skipping restart-dependent IME work; do not turn that evidence gap into new scope.
+- Multi-level Thinking Effort remains explicitly [deferred](../issue/09-desktop-thinking-effort-control-deferred.md), not implemented by current Normal/Extended tests.
+- Structural validation can check Markdown/paths/IDs; it cannot establish claim accuracy, runtime correctness, or automatic future-agent loading.

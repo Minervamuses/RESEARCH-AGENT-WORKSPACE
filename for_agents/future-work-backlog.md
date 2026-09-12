@@ -1,5 +1,7 @@
 # Future-Work Backlog
 
+Freshness: 2026-09-13 source/contract/test-definition inspection at `a88d44d` covers completed extension/earliest/Citation/save-reporting candidates and the explicit Thinking Effort deferral. Other claims retain the 2026-09-05 (`9745fd1`) or unchanged Desktop 2026-09-06 (`743aaaf`) basis; historical probes were not rerun. See [audit coverage](README.md#audit-coverage).
+
 ## Active backlog
 
 ### BACKLOG-001 — Remove pruned folders from RAG inventory
@@ -26,42 +28,6 @@
 - Related items: INV-012, ASM-003, FAIL-002.
 - Status: Not started
 
-### BACKLOG-003 — Preserve applied Skill integrity for the whole session
-
-- Priority: P1
-- Problem: activation rereads mutable managed files after startup verification.
-- Evidence: focused probe post_startup_tamper_loaded=True; [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md) (historical command wording, current trust defect); FAIL-005.
-- Why it matters: apply-and-restart is the extension trust boundary.
-- Suggested scope: either retain source_hash and revalidate at activation or load an immutable startup snapshot; cover instructions, manifest, and pinned resources once.
-- Dependencies / blockers: choose hash-on-activation versus memory snapshot based on existing size/lazy-loading constraints.
-- Acceptance criteria: modifying installed content after startup never changes or successfully activates the live-session Skill; normal apply, restart, activate still works.
-- Related items: INV-009, INV-013, ASM-007, FAIL-005.
-- Status: Not started
-
-### BACKLOG-004 — Make unsupported earliest citation ties ambiguous
-
-- Priority: P2
-- Problem: same-year or undated distinct manifestations can be selected by relevance/rank without temporal proof.
-- Evidence: focused probe same_year_earliest=eligible:fixture:pub; [historical Issue 04](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/04-citation-earliest-version-ambiguity.md); FAIL-007.
-- Why it matters: the saved version can contradict the user's earliest request.
-- Suggested scope: fail closed for tied minimum year identities unless finer date or explicit relation evidence establishes order.
-- Dependencies / blockers: decide comparable date fields/relations if support goes beyond the minimal tie guard.
-- Acceptance criteria: different years still choose the older record; same-year/undated unresolved identities return ambiguity with useful alternatives.
-- Related items: INV-014, ASM-009, FAIL-007.
-- Status: Not started
-
-### BACKLOG-005 — Serialize extension apply across processes
-
-- Priority: P2
-- Problem: two processes can commit different revision N+1 registries from the same revision N.
-- Evidence: process-local _APPLY_LOCK and atomic replace without interprocess CAS; [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md); FAIL-006.
-- Why it matters: a reported successful extension can disappear.
-- Suggested scope: one Linux/WSL file lock or real compare-and-swap around final revision read through durable replace, plus a multiprocessing regression.
-- Dependencies / blockers: define timeout/crash behavior without adding a broad concurrency framework.
-- Acceptance criteria: at most one concurrent apply commits; the other reports a retryable stale/lock conflict; registry remains valid and no successful update is lost.
-- Related items: INV-009, ASM-008, FAIL-006.
-- Status: Not started
-
 ### BACKLOG-006 — Add focused RAG partial-write failure evidence
 
 - Priority: P2
@@ -72,18 +38,6 @@
 - Dependencies / blockers: avoid introducing a transaction/migration framework for this local project.
 - Acceptance criteria: tests show exact resulting surfaces and prove that the documented rerun or explicit recovery restores consistency.
 - Related items: INV-008, INV-012, ASM-003, FAIL-003.
-- Status: Not started
-
-### BACKLOG-008 — Verify user-facing citation save reporting against mixed outcomes
-
-- Priority: P2
-- Problem: structured ToolMessage outcomes are authoritative, but final prose truthfulness remains model-governed.
-- Evidence: [historical Issue 05](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/05-citation-save-result-reporting.md); ASM-014; current finalizer intentionally does not overwrite model prose.
-- Why it matters: a mixed/failed batch can be described incorrectly even though artifacts and telemetry are correct.
-- Suggested scope: deterministic fake-model journey for all-success, all-failure, mixed, and retry-success; add a separate human-readable status block only if evidence shows it is needed.
-- Dependencies / blockers: preserve the decision not to reintroduce a host renderer that replaces the full answer.
-- Acceptance criteria: final responses are demonstrably based on prior ToolMessage outcomes, and any independent CLI status derives from the same SaveBatchOutcome.
-- Related items: INV-010, ASM-014.
 - Status: Not started
 
 ### BACKLOG-010 — Prevent desktop catalog lost updates across processes
@@ -113,12 +67,12 @@
 ### BACKLOG-013 — Align user-facing Skill records with the live runtime
 
 - Priority: P2
-- Problem: the root README still advertises retired persistent `/skill` selection and `task_modes`.
+- Problem: root README still advertises retired `/skill`/`task_modes` and persistent Citation; `app/SKILLS_GUIDE.md` retains persistent Citation too.
 - Evidence: `app/agent/cli/slash_commands.py::_project_skill_commands`; `_RETIRED_SKILL_COMMANDS`; `app/agent/session.py::_run_one_shot_skill_turn`; FAIL-014.
 - Why it matters: contributors can implement or troubleshoot against interfaces that the runtime deliberately removed.
-- Suggested scope: update only the stale README Skill sections; the obsolete timeout issue record has already been removed while historical plan evidence remains.
+- Suggested scope: align the stale README/Skill-guide paragraphs with the current single-turn Citation contract, installer exception and Desktop ask/bypass policy; no runtime change.
 - Dependencies / blockers: none; do not change runtime behavior as part of this documentation item.
-- Acceptance criteria: user-facing docs describe `/<skill-name> <prompt>` as one-shot, identify Citation as the only persistent CLI Skill path, and omit `task_modes`.
+- Acceptance criteria: user-facing docs describe `/<skill-name> <prompt>` as one-shot, describe Citation as single-turn in CLI/Desktop, explain bounded installer continuation, and omit retired `task_modes`.
 - Related items: INV-019, FAIL-014.
 - Status: Not started
 
@@ -158,12 +112,16 @@
 - Related items: INV-006, ASM-022.
 - Status: Not started
 
+The unchanged RAG/catalog/conversation candidates below retain their prior evidence dates from [audit coverage](README.md#audit-coverage). A candidate is not authorization to implement it.
+
 ## Blocked or research items
+
+The sole retained issue card is [multi-level Thinking Effort](../issue/09-desktop-thinking-effort-control-deferred.md). The user explicitly deferred it: do not infer tiers, mappings, persistence policy or implementation authority. Current Normal/Extended behavior and Citation/installer Normal boundaries stay in place. No new backlog item or plan duplicates that card.
 
 ### BACKLOG-009 — Decide whether academic Skill bash prohibition is policy or guidance
 
 - Priority: Research
-- Problem: README says academic-paper-writing forbids bash, while runtime keeps every base tool, including bash, globally available with approval.
+- Problem: README says academic-paper-writing forbids bash, while runtime keeps every base tool, including bash, globally available under runtime permission policy (Desktop ask/bypass).
 - Evidence: app/agent/tools/access.py; test_tool_access_matrix.py::test_skill_switch_does_not_change_bash_permission_mode; README.md.
 - Why it matters: users and agents can misread a prose restriction as enforced access control.
 - Suggested scope: make one explicit product decision, then align README/Skill manifest/runtime test without changing unrelated tool architecture.
@@ -172,19 +130,37 @@
 - Related items: ASM-011.
 - Status: Blocked
 
-### BACKLOG-014 — Define Citation lifecycle consistently across CLI and Desktop
-
-- Priority: Research
-- Problem: Citation is the sole persistent Skill lifecycle in the CLI, but Desktop rejects `/citation <prompt>` and exposes no equivalent activation/clear path.
-- Evidence: `app/agent/cli/slash_commands.py`; `app/agent/skills/citation/session_policy.py`; `app/agent/desktop/service.py`; [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md); FAIL-015.
-- Why it matters: the same Python session model has different citation capabilities depending on its frontend, and a naïve fix could accidentally create persistent generic Skill state or replay work.
-- Suggested scope: make one product decision on persistent versus one-shot Citation semantics, then align Python-owned session state, CLI/Desktop routing, registry finalization, and focused tests.
-- Dependencies / blockers: user decision on whether Desktop should support multi-turn Citation sessions or a one-shot citation command.
-- Acceptance criteria: CLI and Desktop document and enforce one deliberate Citation contract; activation, terminal cleanup, restart, and thinking interactions are covered without persisting generic Skill selection.
-- Related items: INV-010, INV-019, FAIL-015.
-- Status: Blocked
-
 ## Recently resolved or removed
+
+### BACKLOG-003 — Resolved in the inspected source
+
+Activation now retains/rechecks the applied hash before loading instructions, manifest and resources. INV-013 / FAIL-005 retain the accepted precheck scope and TOCTOU limit. Evidence: runtime/startup source and current activation tests at `a88d44d`.
+
+Status: Resolved; evidence rechecked 2026-09-13, no new runtime execution.
+
+### BACKLOG-004 — Resolved in the inspected source
+
+Missing/tied-year ambiguity is implemented and preserved through authority fallback. INV-014 / FAIL-007 retain the year-only limit and tested handling of undated alternatives. Evidence: current resolution/service/authority tests and source at `a88d44d`.
+
+Status: Resolved; evidence rechecked 2026-09-13, no new runtime execution.
+
+### BACKLOG-005 — Resolved in the inspected source
+
+Linux state-root flock now covers cooperating apply transactions; busy/stale paths and multiprocessing regressions exist. FAIL-006 records the boundary. Evidence: `ExtensionManager.apply` and current manager tests at `a88d44d`.
+
+Status: Resolved; evidence rechecked 2026-09-13, no new runtime execution.
+
+### BACKLOG-008 — Resolved in the inspected source
+
+The requested save-reporting characterization is complete: strict tool outcomes and real-graph fake-model success/failure/mixed/retry journeys, with archived final-check evidence. No forced host Citation answer layer was required. Arbitrary live-model prose remains ASM-014, not automatic follow-on implementation.
+
+Status: Resolved; evidence rechecked 2026-09-13, no new runtime execution.
+
+### BACKLOG-014 — Resolved in the inspected source
+
+CLI/Desktop Citation now follows one explicit single-turn contract, with Normal-mode execution/restore, registry cleanup, exact completed replay and archived native acceptance. See INV-019 / FAIL-015. The separate Thinking Effort card is still deferred.
+
+Status: Resolved; evidence rechecked 2026-09-13, no new runtime execution.
 
 - The resolved line-ending issue record was removed; repository-owned `.gitattributes` enforces LF and prevents host Git defaults from governing text files.
 - The resolved graph-budget issue record was removed; separate tool quotas are gone and one validated graph recursion fuse with early finalization governs turns.
@@ -201,6 +177,6 @@ Resolved for the supported offline source paths: canonical JSON is the sole acti
 
 This item is resolved/removed with the legacy conversation importer itself: no current path clones or stages old `chat_history`, and old Chroma/Plan-log sources are left untouched rather than converted.
 
-- FAIL-008 is resolved for the supported source checkout: commits `30f8b18` through `1e22f90` added Rust supervision, Python conversation/service wiring, React UI, knowledge commands, and trust flows; the completed build log records final Python/TypeScript/Rust/build evidence.
-- The desktop GUI completion plan is complete at the audited HEAD. It is historical execution evidence, not active backlog; source-only packaging and remaining gaps are recorded separately above.
-- Historical July citation research/benchmark proposals are not carried forward automatically; current code/tests and the active citation issues govern present work.
+- FAIL-008 is resolved for the supported source checkout: commits `30f8b18` through `1e22f90` added Rust supervision, Python conversation/service wiring, React UI, knowledge commands, and trust flows; historical fixed-revision records retain scoped verification; [testing](testing-strategy.md) preserves the later Rust full-suite failure and focused correction.
+- Removed GUI/corrective/reconstruction plans are historical evidence, not current execution authority. Source-only packaging and remaining gaps are recorded separately; no stale plan status restarts work.
+- Historical July citation research/benchmark proposals are not carried forward automatically; current contracts/code and the retained deferred card govern present work.

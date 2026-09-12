@@ -1,5 +1,7 @@
 # Dangerous Assumptions
 
+Freshness: 2026-09-13 source/contract/test-definition inspection at `a88d44d` covers extension integrity/locking, earliest-year resolution, save reporting, Desktop runtime policy, and resource limits; RAG search/prune anchors received a focused check. Other claims retain the 2026-09-05 (`9745fd1`) or unchanged Desktop 2026-09-06 (`743aaaf`) basis; historical probes were not rerun. See [audit coverage](README.md#audit-coverage).
+
 ## Active dangerous assumptions
 
 ### ASM-001 — External model and embedding services are available
@@ -7,7 +9,7 @@
 - Assumption: Configured OpenRouter models, including the current main default `google/gemini-3.8-flash`, Ollama, bge-m3, and optional MCP/citation providers are reachable and compatible when their features run.
 - Where relied on: chat, extended thinking, extension preview, folder tagging, ingest/search, web/GitHub tools, citation discovery.
 - Failure if false: feature-specific startup/turn/ingest/save failure or missing tool family; no offline semantic fallback.
-- Detection or mitigation: fail-fast checks, provider errors, MCP diagnostics, deterministic fake-provider tests, and an offline test of the main-model configuration value. That test does not establish provider-side model availability.
+- Detection or mitigation: fail-fast checks, provider errors, MCP diagnostics, deterministic fake-provider tests, and an offline test of the main-model configuration value. The configured `llm_max_tokens=65_536` is a request setting, not evidence that the provider accepts or emits that many tokens. That test does not establish provider-side model availability.
 - Evidence: README.md; `app/agent/config.py`; `app/agent/llm/openrouter.py`; `app/tests/test_openrouter_model.py`; app/agent/startup.py; app/rag/embedder/ollama.py.
 - Status: Active
 - Confidence: Confirmed dependency; live availability Unknown.
@@ -62,36 +64,6 @@
 - Status: Active
 - Confidence: Confirmed data boundary.
 
-### ASM-007 — Managed Skill files cannot change after startup
-
-- Assumption: Private installed copies remain immutable for the lifetime of a session.
-- Where relied on: SkillMetadata path catalog and later `load_skill_runtime` during a one-shot command or Citation activation.
-- Failure if false: unapproved instructions, manifest tool permissions, or pinned resources can become active without apply/restart.
-- Detection or mitigation: startup hash validation only; focused probe reproduced FAIL-005.
-- Evidence: app/agent/extensions/startup.py; app/agent/skills/runtime.py; [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md).
-- Status: Active
-- Confidence: Confirmed false premise under same-user mutation.
-
-### ASM-008 — Only one process applies extensions to a state root
-
-- Assumption: The process-local apply lock covers every writer.
-- Where relied on: registry revision check and atomic replacement.
-- Failure if false: two successful N-to-N+1 updates can overwrite one another; see FAIL-006.
-- Detection or mitigation: none across processes; status/restart may reveal missing entries.
-- Evidence: app/agent/extensions/manager.py::_APPLY_LOCK; app/agent/extensions/registry.py; [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md).
-- Status: Active
-- Confidence: Confirmed assumption.
-
-### ASM-009 — Year and search rank can prove the earliest citation version
-
-- Assumption: For earliest, a minimum year plus score/rank/provider ordering is sufficient when finer dates are absent.
-- Where relied on: citation resolution tie-breaking.
-- Failure if false: a published version may be selected over an earlier preprint from the same year.
-- Detection or mitigation: no same-year ambiguity test; focused probe reproduced FAIL-007.
-- Evidence: app/skills/citation/resolution.py::decide_resolution; [historical Issue 04](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/04-citation-earliest-version-ambiguity.md).
-- Status: Active
-- Confidence: Confirmed unsafe assumption.
-
 ### ASM-010 — Tool call IDs are unique and later failure needs no rollback
 
 - Assumption: Tool-call IDs are non-empty/unique within an execution, and side effects remain acceptable if finalization or persistence later fails.
@@ -106,7 +78,7 @@
 
 - Assumption: A Skill instruction saying not to use bash is equivalent to enforced unavailability.
 - Where relied on: README description of academic-paper-writing.
-- Failure if false: the model can still call globally bound bash after its normal approval gate.
+- Failure if false: the model can still call globally bound bash under its configured runtime permission policy (Desktop can explicitly bypass individual prompts).
 - Detection or mitigation: runtime availability block exposes the true set; resolve_tool_access keeps base tools global.
 - Evidence: README.md; app/agent/tools/access.py; test_tool_access_matrix.py::test_skill_switch_does_not_change_bash_permission_mode.
 - Status: Active
@@ -219,10 +191,10 @@
 - Assumption: The model follows the Skill and model-visible SaveBatchOutcome when describing saved/reused/failed items.
 - Where relied on: final citation response; host intentionally does not replace model prose.
 - Failure if false: user-facing prose can claim success after a failed tool outcome even though artifact/telemetry is correct.
-- Detection or mitigation: strict tool content/artifact and existing deterministic tests; optional separate human status block remains future work.
+- Detection or mitigation: strict tool content/artifact and existing deterministic tests; the accepted scoped characterization now includes strict 11-status tool content/artifact coverage and real-graph fake-model journeys for all-success, all-failure, mixed and retry-success. No independent status-rendering layer was required.
 - Evidence: [historical Issue 05](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/05-citation-save-result-reporting.md); app/skills/citation/tool.py; app/agent/session.py.
 - Status: Under investigation
-- Confidence: Inferred model-behavior risk, not a reproduced current incident.
+- Confidence: Inferred live-model risk, not a reproduced current incident. Current test definitions and archived Issue05/final-check evidence close the bounded characterization task; they do not guarantee arbitrary model prose. Freshness: 2026-09-13 source/archived evidence at `a88d44d` / `bc2c94d`.
 
 ### ASM-015 — Desktop operation gates cover every unsafe overlap
 
@@ -236,6 +208,18 @@
 
 ## Retired assumptions
 
+### ASM-007 — Startup-only managed Skill verification retired
+
+The old premise that startup verification alone protects later activation is retired. Startup now carries `applied_source_hash` and `load_skill_runtime` checks the full bundle before loading; changed instructions/manifest/resources are rejected. A writer changing content between the check and subsequent reads remains outside this precheck guarantee (INV-013, FAIL-005). Evidence: runtime/startup source and `test_runtime_rejects_applied_bundle_changed_after_startup`; Confirmed source at `a88d44d`, no fresh runtime probe. Status: Retired startup-only premise.
+
+### ASM-008 — Process-local-only extension apply serialization retired
+
+`ExtensionManager.apply` retains the in-process guard and adds Linux nonblocking flock on the state-root `.apply.lock` inode, spanning revision reread through registry publication. Cooperating callers receive busy or stale-preview errors. Current multiprocessing tests cover lost-update prevention, fsync lifetime, crash/exception release and separate roots. This assumes a stable cooperating local filesystem; arbitrary writers and other stores are not locked. Evidence: manager source / `test_extension_manager.py` definitions at `a88d44d`; FAIL-006 mitigated. Status: Retired process-local-only premise.
+
+### ASM-009 — Search ranking as proof of earliest-year ties retired
+
+The resolver now reports missing/tied-year ambiguity instead of using rank/relevance; authority fallback preserves that decision. It still chooses a unique minimum known year even with undated alternatives, as `test_earliest_unique_known_minimum_survives_later_ties_and_unknown_years` explicitly asserts. This establishes the accepted year-only rule, not globally proven chronology or sub-year ordering. Evidence: `resolution.py::decide_resolution`, `service.py::save` and tests at `a88d44d`; INV-014 / FAIL-007. Status: Retired tie-ranking premise.
+
 ### ASM-017 — Deferred catalog registration through flush is no longer assumed
 
 Canonical JSON is the sole active transcript authority and `ConversationRepository` is its sole writer. Accepted prompts become pending before provider/tool execution, terminal state precedes success exposure, and restart converts leftover pending work to interrupted without automatic replay. Repository, lifecycle, Desktop restart, and subprocess crash-boundary tests cover this offline ordering.
@@ -246,5 +230,5 @@ Canonical JSON is the sole active transcript authority and `ConversationReposito
 
 - Repository line endings no longer depend on global Git defaults; `.gitattributes` and commit `3ac4f8b` own the LF policy. The resolved issue record has been removed.
 - Separate citation/tool quotas no longer need to align with a smaller graph recursion constant; one `AgentConfig` graph fuse with early finalization governs the current graph. The resolved issue record has been removed; `note/20260820/agent_loop_guardrail_consolidation.md` retains the decision evidence.
-- Generic Skill task-mode/persistent-selection assumptions are retired: `task_modes` is no longer a valid manifest field, `/skill` is reserved but unregistered, and non-Citation Skills run once from `/<skill-name> <prompt>`.
+- Generic Skill task-mode/persistent-selection assumptions are retired: `task_modes` is rejected and `/skill` unregistered. Citation also runs once through its dedicated CLI/Desktop command. Installer pending clarification is a separately bounded host scope (INV-019, INV-024).
 - The former assumption that every Desktop request must finish within 600 seconds is retired. Current Rust code has no normal absolute request deadline; only startup/shutdown and actual transport/process failure paths remain bounded.

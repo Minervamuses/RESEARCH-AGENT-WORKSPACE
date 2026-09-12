@@ -1,5 +1,7 @@
 # Known Failure Modes
 
+Freshness: 2026-09-13 source/contract/test-definition inspection at `a88d44d` covers mitigated extension/earliest/Citation failures, stale Skill documentation, and current frontend reconciliation. Other claims retain the 2026-09-05 (`9745fd1`) or unchanged Desktop 2026-09-06 (`743aaaf`) basis; historical probes were not rerun. See [audit coverage](README.md#audit-coverage).
+
 ## Active failure modes
 
 ### FAIL-001 — Prune leaves stale folder inventory
@@ -38,42 +40,6 @@
 - Evidence: app/rag/cli/ingest.py; app/rag/store/document_store.py; app/rag/store/json_store.py::deferred_save.
 - Status: Active
 
-### FAIL-005 — Post-startup installed Skill tampering is activated
-
-- Symptom: modifying the private installed SKILL.md after startup changes the instructions loaded by a later one-shot command or Citation activation without apply/restart.
-- Trigger / preconditions: another same-user process or manual action mutates the managed installed bundle during a live session.
-- Affected components or users: Skill instructions, pinned resources, and requested tool permissions.
-- Root cause: Confirmed — startup validates source_hash, but SkillMetadata retains only the path and load_skill_runtime rereads disk without comparing the hash.
-- Current handling / recovery: restart will revalidate and skip a bad bundle; the live session has no activation-time guard.
-- Reproduction or detection: focused probe observed post_startup_tamper_loaded=True. The `/skill`/task-mode command sequence in [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md) is historical, but the unchanged activation-time path reread also serves current one-shot/Citation loading.
-- Related invariants / assumptions: INV-009, INV-013, ASM-007.
-- Evidence: [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md); app/agent/extensions/startup.py; app/agent/skills/runtime.py.
-- Status: Active
-
-### FAIL-006 — Concurrent extension applies can lose an update
-
-- Symptom: two CLI processes both report revision N+1 success, but the later registry replace omits the other process's change.
-- Trigger / preconditions: separate processes apply different changes to the same extension state root concurrently.
-- Affected components or users: applied Skill/MCP registry and managed-state expectations.
-- Root cause: Confirmed from control flow — _APPLY_LOCK is process-local; atomic replace prevents torn JSON but is not interprocess compare-and-swap.
-- Current handling / recovery: inspect status and re-apply missing desired state; no cross-process lock or regression test.
-- Reproduction or detection: deterministic race sequence documented in [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md); multiprocessing reproduction not run in this audit.
-- Related invariants / assumptions: INV-009, ASM-008.
-- Evidence: app/agent/extensions/manager.py::_APPLY_LOCK; app/agent/extensions/registry.py::write_registry; [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md).
-- Status: Active
-
-### FAIL-007 — Same-year earliest citation can select the wrong version
-
-- Symptom: version_kind=earliest returns eligible instead of ambiguous for distinct same-year or undated manifestations.
-- Trigger / preconditions: multiple identity-compatible candidates share the minimum year and lack finer temporal/relation evidence.
-- Affected components or users: citation version selection and saved bibliography identity.
-- Root cause: Confirmed — decide_resolution breaks equal-year ties with score/rank/provider.
-- Current handling / recovery: agent/user must inspect alternatives or request a specific version; no fail-closed tie rule exists.
-- Reproduction or detection: focused probe observed same_year_earliest=eligible:fixture:pub.
-- Related invariants / assumptions: INV-014, ASM-009.
-- Evidence: app/skills/citation/resolution.py::decide_resolution; [historical Issue 04](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/04-citation-earliest-version-ambiguity.md); test_citation_resolution.py covers only different years.
-- Status: Active
-
 ### FAIL-013 — Raw desktop folder-ingest methods are declared but disabled
 
 - Symptom: direct protocol calls to `knowledge.init_workspace` or `knowledge.ingest_folder` return `RAG_WRITE_FAILED` even though the GUI can run `/init` and directory `/ingest` through the composer.
@@ -86,29 +52,15 @@
 - Evidence: `app/agent/desktop/service.py::_knowledge_init_workspace`, `_knowledge_ingest_folder`, and `_execute_desktop_knowledge_command`; protocol contract/tests.
 - Status: Active compatibility limitation
 
-### FAIL-014 — Workspace README advertises the retired generic Skill interface
+### FAIL-014 — User-facing Skill documentation retains retired contracts
 
-- Symptom: following root README.md leads to an unknown `/skill` command or a rejected manifest containing `task_modes`, and implies generic Skill state persists when the implementation clears it after one turn.
-- Trigger / preconditions: a user follows README.md sections 6/9 instead of current `app/SKILLS_GUIDE.md`, runtime help, or live tests.
-- Affected components or users: Skill authors and CLI/Desktop users.
-- Root cause: Confirmed — the runtime changed to dynamic one-shot commands and removed task modes, but the workspace README retained the older interface.
-- Current handling / recovery: invoke `/<skill-name> <prompt>` for non-Citation Skills; use `/citation` only in the CLI for the persistent Citation workflow; remove `task_modes` from manifests.
-- Reproduction or detection: `test_retired_persistent_skill_command_is_unknown` and `test_startup_reports_legacy_task_modes_manifest_as_unavailable` enforce behavior opposite to the stale README text.
-- Related invariants / assumptions: INV-019.
-- Evidence: README.md#Slash-Commands and #Skills; `app/agent/cli/slash_commands.py`; `app/agent/skills/manifest_schema.py`; `app/SKILLS_GUIDE.md`.
-- Status: Active documentation failure
-
-### FAIL-015 — Desktop has no Citation activation path
-
-- Symptom: `/citation <prompt>` is rejected in the Desktop composer, and the removed generic Skill controls provide no alternate Citation entry even though the CLI supports a persistent Citation workflow.
-- Trigger / preconditions: a Desktop user tries to start Citation mode.
-- Affected components or users: Desktop citation users; Citation engine/CLI behavior itself remains available.
-- Root cause: Confirmed product gap — Citation was deliberately excluded from the generic one-shot Skill conversion because it owns session-scoped registry/finalization state, and its cross-interface lifecycle decision was deferred.
-- Current handling / recovery: use the CLI `/citation` workflow; do not treat a normal Desktop answer as Citation mode.
-- Reproduction or detection: `test_composer_rejects_invalid_or_disallowed_commands_before_model` includes `/citation prompt`; App.tsx states that Citation mode is CLI-only.
-- Related invariants / assumptions: INV-010, INV-019.
-- Evidence: [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md); `app/agent/desktop/service.py::_session_turn`; `app/desktop/src/App.tsx`.
-- Status: Active compatibility limitation
+- Symptom: root README still advertises `/skill`, `task_modes` and persistent `/citation ... off`; `app/SKILLS_GUIDE.md` also retains persistent Citation wording. Its generic one-shot/installer material is useful, but it is not uniformly current.
+- Trigger: following those obsolete paragraphs instead of the current Citation Skill and shared command implementation.
+- Root cause: Confirmed documentation drift; both pages were inspected at `a88d44d`.
+- Current handling: generic `/<skill-name> <prompt>` and `/citation <prompt>` are single-turn; bare/deactivation Citation commands return guidance rather than enabling persistent mode. Installer continuation follows its separate host scope.
+- Evidence: root README slash table/Skills; `app/SKILLS_GUIDE.md` Citation paragraph; `app/skills/citation/SKILL.md`; `_handle_citation`; strict manifest and slash tests. This maintenance leaves non-knowledge documentation unchanged.
+- Related: INV-019, ASM-011.
+- Status: Active documentation conflict.
 
 ### FAIL-009 — Provider or MCP failure degrades or aborts the affected path
 
@@ -123,6 +75,46 @@
 - Status: Active operational mode
 
 ## Mitigated but still relevant
+
+### FAIL-005 — Post-startup applied Skill tampering is rejected before activation
+
+- Former symptom: the prior startup-only path loaded changed installed instructions without another approval. The 2026-09-05 probe belongs to that older path.
+- Resolution: startup retains approved `applied_source_hash`; runtime re-inspects the managed bundle and raises `applied bundle changed; restart or re-apply required` before loading changed files.
+- Detection/recovery: activation/startup tests cover instructions, manifest, resources and unsafe paths; restore approved content or re-apply and materialize a fresh session.
+- Limits: precheck-to-read TOCTOU remains; neither source inspection nor the tests prove immutable files against a continuous writer.
+- Evidence: `app/agent/extensions/startup.py::_load_skill`, `app/agent/skills/runtime.py::load_skill_runtime`, `test_runtime_rejects_applied_bundle_changed_after_startup`. Confirmed current source/test definitions at `a88d44d`; no reproduction run this pass.
+- Related: INV-009, INV-013, ASM-007.
+- Status: Mitigated for the accepted activation-precheck scope.
+
+### FAIL-006 — Cooperating extension apply writers are serialized across processes
+
+- Former symptom: process-local-only apply could lose a reported successful registry update.
+- Resolution: a stable state-root `.apply.lock` receives nonblocking exclusive Linux flock before latest revision read and remains held through `_apply_locked`/durable publication. Busy callers fail visibly; stale previews require regeneration.
+- Detection/recovery: `test_cross_process_apply_preserves_successful_update` checks one success, busy rejection, later stale rejection, then fresh-preview success preserving both Skills. Adjacent tests cover fsync lifetime and crash/exception release.
+- Limits: local cooperating writers only; installer staging, catalog/conversations, network filesystems, uncooperative writers and power-loss behavior are not covered by this lock.
+- Evidence: `ExtensionManager.apply` / `_apply_locked` and `app/tests/test_extension_manager.py`; Confirmed source/definitions at `a88d44d`, not a new multiprocessing run.
+- Related: INV-009, ASM-008.
+- Status: Mitigated.
+
+### FAIL-007 — Earliest-year ties now fail ambiguous
+
+- Former symptom: same-year or wholly undated eligible versions could be chosen by relevance/rank.
+- Resolution: deduplicate canonical identities, reject all-missing years with `earliest_year_missing` and tied known minima with `earliest_year_tie`. `CitationService.save` does not override those decisions with authority fallback.
+- Detection/recovery: resolution, resolver, service/authority and tool tests check ambiguity propagation and no save for the ambiguous cases. User can supply a specific target.
+- Limits: accepted scope compares years only; unique known minimum selection still tolerates undated alternatives. The historical wrong-selection probe is not current behavior.
+- Evidence: `resolution.py::decide_resolution`, `service.py::save`, `test_citation_resolution.py` and authority/work-resolver definitions; Confirmed source at `a88d44d`.
+- Related: INV-014, ASM-009.
+- Status: Mitigated for year-only ambiguity.
+
+### FAIL-015 — Desktop Citation entry and lifecycle are implemented
+
+- Former symptom: Desktop rejected `/citation` and exposed no Citation entry.
+- Resolution: shared CLI/Desktop `/citation <prompt>` runs one Normal task, then releases citation scope and restores prior thinking mode. Desktop's Python catalog includes it only when runtime/tool eligibility holds.
+- Detection/recovery: current service/e2e tests cover fresh runtime gating, cleanup and exact completed replay without another model/fetch/save. Failed/interrupted work still needs an eligible runtime.
+- Evidence: `_handle_citation`, `ChatSession._run_one_shot_skill_turn`, `DesktopService._desktop_command_eligible`; [archived native final-check](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/build-log.md) records menu/tool/final-output and A/B/restart/failure/interruption paths using real session/Citation code with fake model/fetch seams.
+- Limits: no fresh native/provider run; no general GUI per-task cancellation entry was established by the archive.
+- Related: INV-010, INV-019.
+- Status: Mitigated; former deferred Citation decision is resolved, distinct from still-deferred Thinking Effort.
 
 ### FAIL-004 — Legacy hard-cap history loss
 
@@ -151,9 +143,9 @@
 - Affected components or users: historical desktop implementation only.
 - Root cause: Confirmed historical absence of Rust supervision/commands and React bridge state.
 - Current handling / recovery: tracked Rust supervision, Python service/catalog, React conversations/trust UI, and protocol tests now implement the source-checkout path. Remaining direct-method and source-only limits are tracked separately as FAIL-013 and ASM-012.
-- Reproduction or detection: compare `af5b76f` with commits `30f8b18` through `1e22f90`; current build log records integrated journeys and final checks.
+- Reproduction or detection: compare `af5b76f` with commits `30f8b18` through `1e22f90`; fixed-revision final-check evidence records later integrated journeys/checks; see [testing](testing-strategy.md).
 - Related invariants / assumptions: INV-011, INV-015, ASM-012.
-- Evidence: Git history; `app/desktop`; `app/agent/desktop`; completed GUI build log.
+- Evidence: Git history; `app/desktop`; `app/agent/desktop`; historical Git records; later evidence is scoped in [testing](testing-strategy.md).
 - Status: Mitigated
 
 ### FAIL-010 — Empty or tool-protocol model output
@@ -196,7 +188,7 @@
 
 - Former symptom: after the first prompt was durably accepted but provider execution failed, creating another conversation could leave the failed conversation absent from the sidebar or unavailable for reselection.
 - Root cause: the frontend error path showed the failure but did not refresh the project catalog and selected canonical transcript after Python reported a persisted turn lifecycle.
-- Resolution: `reconcilePersistedTurnFailure` refreshes catalog and transcript only when lifecycle metadata says the turn was both accepted and persisted, with generation, project, and session guards against stale async results.
+- Resolution: `isPersistedTurnFailure` and the guarded `sendTurn` error path refreshes catalog and transcript only when lifecycle metadata says the turn was both accepted and persisted, with generation, project, and session guards against stale async results.
 - Current handling / recovery: if reconciliation itself fails, the original error remains and an additional saved-but-refresh-failed notice is shown; later reselection/refresh can recover from canonical state.
 - Verification: TypeScript regression `durable first-turn failure remains selectable after creating another conversation`; Python `test_first_prompt_registers_catalog_before_provider_failure` covers the durable backend premise.
 - Related invariants / assumptions: INV-006, INV-011, ASM-015.
@@ -231,7 +223,7 @@
 - Root cause: the root had no width-responsive font size while component typography used `rem` values, so wider windows did not alter the inherited scale.
 - Resolution: the root font uses a bounded viewport-responsive clamp: it preserves the 1rem baseline at the initial 1080px width, grows on wider windows, and caps at 1.3125rem.
 - Current handling / recovery: the source contract and representative-width arithmetic are tested; pre-maintenance headless-Chrome observations covered 720, 1080, 1920, and 2560 widths. Native maximized/fullscreen Tauri, DPI, and human visual acceptance remain unverified.
-- Verification: `styles.test.ts`, `npm test` (151 passing before this documentation pass at the same HEAD), `npm run build`, and headless layout observations.
+- Verification: `styles.test.ts`, `npm test` (151 passing in the prior 2026-09-06 account at `743aaaf`, not a current-pass run), `npm run build`, and headless layout observations.
 - Related invariants / assumptions: INV-021, ASM-025.
 - Evidence: commit `743aaaf`; `app/desktop/src/styles.css`; `app/desktop/tests/styles.test.ts`.
 - Status: Mitigated; native visual evidence remains a testing gap
@@ -244,12 +236,12 @@
 | Empty file still appears in search | list_chunks for its namespaced PID after re-ingest | FAIL-002 |
 | Search and list/context disagree | Inspect raw.json versus Chroma after the last failed ingest | FAIL-003 |
 | Older exact wording is not found | Verify the `/status` conversation root and approved `grep -F` phrase; exact misses do not use semantic fallback | Expected exact-match limitation; FAIL-004 retired |
-| Applied Skill content changed mid-session | Hash installed bundle against registry and restart | FAIL-005 |
-| Applied extension disappears after concurrent work | Compare desired state, registry revision, and both process reports | FAIL-006 |
-| Earliest citation looks arbitrary | Compare candidate year/date/relation evidence, not provider rank | FAIL-007 |
+| Applied Skill content changed mid-session | Read activation hash diagnostics; re-apply/restore approved bytes and reload | FAIL-005 |
+| Extension apply reports busy or stale preview | Check busy/stale-preview reports and the stable state-root apply lock | FAIL-006 |
+| Earliest citation returns ambiguity | Compare candidate year/date/relation evidence, not provider rank | FAIL-007 |
 | Raw desktop folder ingest says not enabled | Use the selected conversation's `/init` or `/ingest` route; inspect direct-method caller | FAIL-013 |
 | `/skill` is unknown or `task_modes` is rejected | Use `/<skill-name> <prompt>` and the current `app/SKILLS_GUIDE.md` contract | FAIL-014 |
-| `/citation` is rejected in Desktop | Use the CLI Citation workflow; consult the deferred product decision | FAIL-015 |
+| `/citation` is rejected in Desktop | Check runtime/tool eligibility for the single-turn command; completed replay has separate canonical checks | FAIL-015 |
 | A long request is no longer killed at 600 seconds | Confirm current Rust source/test, then use explicit shutdown/restart only if it is actually stuck | FAIL-016 / ASM-019 |
 | Old checkout shows only a disabled desktop shell | Compare checkout to the current desktop commits and use the current source-run instructions | FAIL-008 |
 | Tool family missing | Session /status diagnostics and MCP stderr log | FAIL-009 |

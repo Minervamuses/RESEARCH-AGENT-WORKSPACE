@@ -1,34 +1,34 @@
 # Agent Repository Knowledge
 
-> Managed by `$infrastructure`. Verify current behavior against live evidence and requirements against applicable instructions and contracts. This folder grants no authority to change either.
-
-## Issue archive (2026-09-13)
-
-The issue cleanup preserves the completed and accepted-scope records in [Git history](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/build-log.md). Issue 09 remains deferred in the [Thinking Effort card](../issue/09-desktop-thinking-effort-control-deferred.md). Historical issue references below and in companion documents now point to that archived revision.
-
-This cleanup does not revalidate the 2026-09-06 audit below or its other backlog items. Its older Issue 02/04/05/06/07/08 findings must be read with the later closure evidence, not treated as newly confirmed failures.
+> Managed by `$infrastructure`. Current implementation and scoped observations describe behavior; applicable instructions and explicit contracts govern requirements. This folder grants no implementation authority.
 
 ## Current audit
 
-- Latest maintenance: 2026-09-06T16:30:41+08:00; scope is recorded below, not a blanket revalidation date.
-- Repository baseline: branch `GUI` at `743aaaf1b57cde12e7b5c179226233df523ee1e2`; the existing local tracking ref `origin/GUI` was `88d137c` at audit start. No network fetch was performed during maintenance.
-- Working-tree state reviewed: tracked worktree and index were clean at audit start. The index fingerprint was retained for the final comparison. All nine required files were tracked.
-- Areas inspected: root `AGENTS.md`; the complete prior `for_agents/` set; changed-path history from the previous knowledge baseline `9745fd1` through current HEAD; root desktop launcher; main-model configuration and adapter call site; canonical conversation removal and reconstruction boundaries; React persisted-failure reconciliation, pending-retry merge, safe-content rendering, composer keyboard behavior, and responsive CSS; relevant Python and TypeScript test definitions; npm and Tauri manifests; Git tracking and ignore policy.
-- Known coverage gaps: RAG, Citation, Extension, MCP, extended-thinking, and unchanged Agent internals retain their 2026-09-05 evidence unless a scoped row says otherwise. No Python, Cargo, Tauri, live-provider, Ollama, MCP, citation-provider, real-user-store, or native-WebKit run was executed during this documentation pass. Pre-maintenance verification at the same HEAD recorded `npm test` with 151 passing tests, `npm run build` exit 0, and headless-Chrome layout checks; those observations do not prove native Tauri geometry, 200% zoom, or live dependencies. Generated stores, bundles, logs, `node_modules`, `dist`, Rust `target`, caches, and large artifacts were not inspected.
-- Git policy: all nine required files match the root `/for_agents/` ignore rule when tracking is disregarded, but all are already tracked, so none is effectively ignored. Maintenance did not change `.gitignore` or tracked state.
+- Latest maintenance: 2026-09-13T00:48:49+08:00; this timestamps the pass, not every retained claim.
+- Repository: `/home/minervamuses/research-agent-workspace`; branch `GUI` at `a88d44d35f7e1438f23a6dfd595157248847e382`.
+- Runtime verified: Windows-hosted agent delegates commands to Ubuntu-24.04 WSL; Linux Git, Conda `app` Python 3.13.14, Poetry 2.4.1, and Node 24.18.0. Repository instructions expressly permit this setup.
+- Working-tree state reviewed: clean at entry, no staged or untracked work; compared changes since the prior audit at `743aaaf`. All nine knowledge files already existed and were read. Initial index SHA-256: `5392745031e4b9b677eab104edf62bca3acbdb94eeb46f61b14be434e4b2c34e`.
+- Areas inspected: root instructions/manifests; changed session, Skill, extension, Citation, Desktop protocol/Python/React/Rust paths and relevant regression definitions; selected unchanged RAG anchors; archived final-check outputs/review at `bc2c94d`. No application modules were imported.
+- Significant corrections: Citation is single-turn in CLI/Desktop; installer has bounded conversational continuation; extension activation rechecks hashes and apply uses a Linux file lock; earliest-year ties fail ambiguous; Desktop advertises its dispatchable command catalog and supports explicit Bash ask/bypass.
+- Evidence gaps: no application tests, builds, native UI, live providers, MCP/Ollama, user stores, or generated artifacts were run/inspected in this pass. Historical native menu/Citation evidence uses fake model/fetch seams; fresh IME across restart and exact geometry/zoom remain unproven. Multi-level Thinking Effort remains deferred.
+- Git policy: all nine files tracked; no ignore-rule matches (0/9), no effective ignore (0/9). The old `/for_agents/` ignore statement was stale. Ignore files stay unchanged. Maintenance preserves index bytes until the user's separately authorized commit/push step.
+- Historical evidence: [final-check log](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/build-log.md) and [check results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-check-results.json) remain readable from local Git despite issue-folder cleanup. Their scope/results are recorded in [testing strategy](testing-strategy.md); removed plans are not active work.
 
 ## Audit coverage
 
-| Document | Mode | This pass scope and anchors | Last substantive validation or source baseline | Gaps |
+| Document | Mode | This pass scope / anchors | Last substantive validation / source baseline | Gaps |
 |---|---|---|---|---|
-| `architecture-map.md` | Revalidated | Root launcher, desktop source topology, React presentation, current model configuration, and changed entry points | 2026-09-06 at `743aaaf` | Native Tauri and packaged topology plus unchanged non-Desktop internals were not rerun |
-| `invariants.md` | Revalidated and carried forward | Desktop protocol, presentation, conversation, keyboard, and wide-window typography contracts; other invariants checked only for changed dependencies | Desktop scope: 2026-09-06 at `743aaaf`; other claims: 2026-09-05 at `9745fd1` | No current Python, Cargo, or native execution; RAG, Citation, and Extension enforcement was not re-probed |
-| `module-responsibilities.md` | Revalidated | Root launcher, Agent model-configuration boundary, canonical conversation ownership, and React, Tauri, and Python desktop ownership | 2026-09-06 at `743aaaf` | Unchanged modules retain 2026-09-05 source evidence |
-| `data-flow.md` | Revalidated and carried forward | Desktop launch plus failed, pending, retry, keyboard, and terminal presentation flow | Desktop scope: 2026-09-06 at `743aaaf`; non-Desktop flows: 2026-09-05 at `9745fd1` | No live backend, provider, or native-UI journey in this pass |
-| `dangerous-assumptions.md` | Focused check | External default-model availability, source-checkout launcher and runtime inheritance, large-content rendering, and Desktop conversation-concurrency assumptions | 2026-09-06 at `743aaaf`; untouched assumptions retain 2026-09-05 evidence | No live model lookup, multi-process test, native stress test, or packaged launch |
-| `known-failure-modes.md` | Revalidated and carried forward | Recent Desktop reconstruction, persisted-failure refresh, retry, renderer, and maximized-window typography fixes | Desktop scope: 2026-09-06 at `743aaaf`; other failures: 2026-09-05 at `9745fd1` | No reproduction of active RAG, Citation, or Extension failures this pass |
-| `testing-strategy.md` | Revalidated | Current manifests, changed test definitions, pre-maintenance frontend results, side effects, and structural-validator requirements | 2026-09-06 at `743aaaf` | Application suites were not executed during maintenance; native WebKit visual automation is absent |
-| `future-work-backlog.md` | Focused check | Existing Desktop-related candidates and recently resolved canonical and GUI work | 2026-09-06 at `743aaaf`; unrelated candidates retain 2026-09-05 evidence | No backlog implementation or external issue refresh |
+| architecture-map.md | Revalidated | Session/installer, extension and Desktop boundaries; configuration/manifests | 2026-09-13 source at `a88d44d` | No runtime topology launch |
+| invariants.md | Revalidated | INV-009/013/014/018/019/022/023/024, completed replay under INV-006/011 | 2026-09-13 source/contracts/tests at `a88d44d` | Test definitions are not fresh runs; activation TOCTOU remains |
+| module-responsibilities.md | Revalidated | Session/manager/Citation/desktop ownership and protocol consumers | 2026-09-13 at `a88d44d` | Other subsystem owners retained below |
+| data-flow.md | Revalidated | One-shot Citation, installer cleanup/mode, extension lock/hash, desktop menu/permission/replay | 2026-09-13 at `a88d44d` | No effects executed |
+| dangerous-assumptions.md | Revalidated | ASM-007/008/009 retired premises; ASM-014 characterization and runtime constraints | 2026-09-13 at `a88d44d` | Continuous writers and live model behavior unproven |
+| known-failure-modes.md | Revalidated | FAIL-005/006/007/015 mitigations; FAIL-014 documentation conflict; FAIL-017 source symbol | 2026-09-13 at `a88d44d` | Historical reproductions were not rerun |
+| testing-strategy.md | Revalidated | Current definitions, archived 1138/165 results, Rust red then focused green, build/native scope | 2026-09-13 source + records at `bc2c94d` | Only documentation validator executed now |
+| future-work-backlog.md | Revalidated | BACKLOG-003/004/005/008/014 resolved; explicit issue09 deferral | 2026-09-13 at `a88d44d` | No new implementation authorized |
+| RAG claims across architecture, ownership, flows, assumptions, failures and backlog | Focused check | `prune_orphans` and `rag.search`; unchanged-path comparison | Anchors checked 2026-09-13; broader evidence 2026-09-05 at `9745fd1` | Prior stale-inventory/empty-file probes inherited, not rerun |
+| Other Agent/RAG/MCP/thinking claims across subject files | Carried forward | Prior account retained; no changed dependency requiring expanded inspection identified | 2026-09-05 at `9745fd1` | No new enforcement/runtime claims |
+| Unchanged canonical history, final-only/large-content/CSS claims | Carried forward | Retained where recent changes did not alter their anchors | 2026-09-06 at `743aaaf` (older history evidence 2026-09-05) | Native resource/geometry, multi-process catalog/conversation safety not revalidated |
 
 ## Documents
 
@@ -43,19 +43,20 @@ This cleanup does not revalidate the 2026-09-06 audit below or its other backlog
 
 ## Task navigation
 
-| Task | Start here | Then verify |
-|---|---|---|
-| Change canonical conversation persistence or reconstruction | `invariants.md` (`INV-006`, `INV-011`, `INV-016`), `data-flow.md` | `module-responsibilities.md`, `testing-strategy.md`, `known-failure-modes.md` |
-| Adjust Desktop GUI behavior, rendering, or typography | `invariants.md` (`INV-017`, `INV-021`, `INV-022`), `module-responsibilities.md` | `data-flow.md`, `testing-strategy.md`, `known-failure-modes.md` |
-| Diagnose startup, provider, or external-service behavior | `architecture-map.md`, `dangerous-assumptions.md` | `known-failure-modes.md`, `testing-strategy.md` |
-| Change RAG, Citation, Skill, or Extension behavior | `architecture-map.md`, `invariants.md` | `data-flow.md`, `module-responsibilities.md`, `dangerous-assumptions.md` |
+| Task | Read first |
+|---|---|
+| Change persistence or replay | [Invariants](invariants.md), [data flow](data-flow.md), [testing](testing-strategy.md) |
+| Change Skills, ZIP installation or Citation | [Responsibilities](module-responsibilities.md), [flows](data-flow.md), [invariants](invariants.md) |
+| Change Desktop menu or permissions | [Architecture](architecture-map.md), [invariants](invariants.md), [testing](testing-strategy.md) |
+| Diagnose a failure / select optional work | [Failures](known-failure-modes.md), [assumptions](dangerous-assumptions.md), [backlog](future-work-backlog.md) |
 
 ## Evidence labels
 
-- **Confirmed**: directly supported by current code, tests, configuration, authoritative docs, or observed command output.
-- **Inferred**: strongly suggested by current evidence but not guaranteed or fully enforced.
-- **Unknown**: material evidence is missing, contradictory, inaccessible, or not inspected.
+- **Confirmed**: directly supported within the identified source/type/scope; source/test-definition inspection is not execution.
+- **Inferred**: supported interpretation, not an established guarantee.
+- **Unknown**: material evidence missing or uninspected.
+- Confidence, normative authority, and freshness are separate; use the coverage rows and claim-level limits.
 
 ## Usage
 
-Read this index and the relevant subject files before broad changes. Verify claims against live code and tests before acting. Invoke `$infrastructure` again after structural or contract changes. Ordinary or ignored Markdown is not automatically loaded by future agents; explicitly read this directory.
+Read this index and relevant subjects explicitly before broad changes. Check current code for behavior and applicable instructions/contracts for obligations. Invoke `$infrastructure` after structural drift. These files are not automatically loaded by future agents. Backlog entries are candidates, and archived plans do not authorize work.
