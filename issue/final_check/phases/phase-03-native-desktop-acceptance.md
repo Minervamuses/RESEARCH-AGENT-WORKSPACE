@@ -14,6 +14,7 @@
 ## 依賴與兩個前置門檻
 
 Phase 01、02 Complete。開始先確認 Linux native 控制／顯示可用；若有 xdotool，可做 timeout 3s xdotool getdisplaygeometry 等短唯讀 query，記工具、display、IME／輔助工具結果。歷史 timeout 只作參考。
+先分別記使用者的 App 顯示／輸入觀察與代理工具能否操作該視窗。若使用者回報 Windows 輸入法（例如華碩智慧輸入法），先查明 Windows→WSLg→GTK/WebKit 的輸入鏈與 Linux IME 狀態；不能把 Shift 或 menu composition handler 當成預設根因，也不能用啟用 Linux 注音當成已修復 Windows 輸入法相容性。
 沒有可操作原生 surface 就記 Blocked 並停止重複啟動。需要 restart／安裝／環境修復依 PLANS 辦理；使用者可另提供具體原生操作證據或限縮，但未回覆不等於豁免。
 
 第二門檻是安全 Citation 入口：RESEARCH_AGENT_DESKTOP_FIXTURE=phase02 的 FixtureSessionFactory 不執行真 ChatSession，test_desktop_fixture.py 也明確禁止該 factory 呼叫 ChatSession.create。

@@ -39,6 +39,8 @@ conda activate app
 cd /home/minervamuses/research-agent-workspace/app
 ```
 
+原生 preflight 須區分使用者可見的 WSLg App 與代理的 X11 觀察能力，並先辨識 Windows 輸入法或 Linux IBus/Fcitx。X11 root 全黑不能推論 App 黑屏；Linux IBus 未啟動也不能推論使用者沒有 Windows 輸入法。具體新證據與未解問題只記 build-log；不因環境推論加入 rendering／keyboard workaround。
+
 下文 Python 命令 cwd 為 app/；Node／Cargo／Tauri 為 app/desktop/；其餘特別標示。timeout 是時間上限，不是獲准啟動昂貴命令的替代。preflight 預估超約十分鐘就先處理授權；不安裝缺少的工具或依賴。
 
 ## 執行授權與停止條件

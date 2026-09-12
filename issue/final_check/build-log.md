@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
-| 03 — Native Desktop acceptance | Blocked | 2026-09-12 | — | 下方 native launch / screenshot evidence | App 原生 surface 不可觀察／控制；IBus / Orca unavailable；真 Citation UI 入口未驗證 |
+| 03 — Native Desktop acceptance | Blocked | 2026-09-12 | — | 下方 native launch / screenshot evidence | 使用者回報 App 顯示正常但華碩輸入法失效；代理尚無該視窗操作證據；真 Citation UI 入口未驗證 |
 | 04 — Thinking contract/runtime | Blocked | 2026-09-12（僅 gate） | — | 下方產品 gate 核對 | 三項產品答案及精確實作授權未定 |
 | 05 — Thinking Desktop acceptance | Not started | — | — | — | 前置 04 未 Complete |
 | 06 — Regression and closure | Not started | — | — | — | 前置 03–05 未 Complete；未跑完整 suites/build |
@@ -168,3 +168,23 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - 無其他前置完整且授權齊全的 phase。路線／穩定目標未變，無須改寫 PLANS 或未開始 phase；沒有新增猜測性 context/review，既有 Issue logs 保持歷史。Issue 01 已准略過的矩陣完全未重做。
 - 恢復所需：能操作並觀察 App 的 Linux native surface、Issue 02 所需 IME/輔助工具證據，以及真 ChatSession + offline provider + tmp store 的 Citation UI 安全入口；或使用者明確接受具體限縮。獨立 Phase 04 需上述三項產品答案及必要精確 scope 授權。
 - 本輪 production write set：app/agent/session.py、app/agent/desktop/service.py；tests：test_skill_adherence.py、test_desktop_service.py；其餘為本 plan baseline、build-log 及真實 screenshot evidence。無 AGENTS、依賴、API/schema、branch/worktree 變更，無 push。
+
+## 2026-09-12 — Phase 03 使用者更正與輸入法唯讀調查（364c48c）
+
+- User-reported：使用者自己執行 python main.py 能正常顯示 App，沒有全黑；进入 App 後無法如平常切換中英文。輸入法為華碩輸入法，平時可用 Shift，且多數情況本就支援中英混合輸入、不必切換。此為使用者提供的真實觀察，不冒充代理操作證據。
+- Correction：先前 screenshot 是代理 X11 root 的全黑畫面，不能稱為 App 黑屏或 App 無法啟動。Phase 03 的應用輸入問題現聚焦在華碩 Windows 輸入法與 Linux 視窗之間的輸入鏈；代理 GUI 觀察限制仍獨立存在。歷史 EGL 訊息尚不能建立渲染根因。
+- Runtime/worktree read-only gate：root /home/minervamuses/research-agent-workspace；Linux Git /usr/bin/git、Python/Poetry 為 Conda app；branch GUI、HEAD 364c48c；開始時 git status --short 空。重新讀根 AGENTS、PLANS、build-log、main.py、SlashComposer 與 Tauri lib.rs，無子層 AGENTS。
+- Exact read-only commands / operations：
+  - wsl.exe --version：WSL 2.5.7.0 / WSLg 1.0.66（工具輸出有 UTF-16 顯示問題）；cat /mnt/wslg/versions.txt 獨立確認 WSLg 1.0.66+1。
+  - dpkg-query -W ibus ibus-chewing ibus-libpinyin fcitx5 fcitx5-chewing fcitx5-chinese-addons im-config libgtk-3-0t64 libwebkit2gtk-4.1-0：ibus 1.5.29-2、ibus-chewing 2.0.0-1build2、GTK 3.24.41、WebKitGTK 2.52.6；Fcitx5/ibus-libpinyin 不存在，整體 exit 1，後接 && xwininfo 未執行。
+  - Conda app Python 掃 /proc，只對 comm=ibus*/fcitx* 或 executable 結尾 research-agent-desktop 的程序輸出指定 display/IME/Conda keys：此時無符合程序；未檢視其他程序資料、user store 或輸入內容。
+  - timeout 3s ibus engine → exit 1，No engine is set；gsettings get org.freedesktop.ibus.general preload-engines → @as []；gsettings get org.freedesktop.ibus.general.hotkey triggers → ['<Super>space']（只是未啟動 Linux IBus 的設定，不是使用者華碩快捷鍵）。
+  - timeout 3s xwininfo -root -tree → exit 0，仍只有 Weston WM 等三個 root children；此時沒有運作中的 App，不能用來否定使用者先前觀察。
+  - 唯讀檢查 ~/.profile、~/.bashrc、/etc/environment 中 GTK_IM_MODULE/QT_IM_MODULE/XMODIFIERS/ibus-daemon/fcitx 行：無匹配。未改設定。
+  - grep -RnE 'preventDefault|stopPropagation|keydown|keyup|globalShortcut' app/desktop/src app/desktop/src-tauri/src/lib.rs；grep -Rn shouldSubmitComposerKey app/desktop/src；讀 App.tsx 與 trust.tsx 對應 handlers、conversations.test.ts 既有 IME 測試：composer 沒有攔截 Shift；組字時先 return，menu 只對指定 arrows/Escape/Enter preventDefault；approval 只處理 Escape/Tab。沒有證據支持修改前端鍵盤行為。
+- Primary-source research：
+  - [ASUS 官方](https://www.asus.com/tw/support/faq/1048621/) 確認華碩智慧輸入法支援注音／英文混合、不需每次 Shift，列出的系統支援是 Windows 10/11。
+  - [WSLg IME 支援追蹤 #9](https://github.com/microsoft/wslg/issues/9) 本次讀取仍為 Open，描述沿用 Windows IME 的待補整合與可配置 Linux IBus 的替代；[Windows input-method #955](https://github.com/microsoft/wslg/issues/955) 記錄同類 Windows 輸入法無法在 WSL GUI 組字的回報。
+- Inference（尚未 end-to-end 證實）：Windows 華碩輸入法與 WSLg Linux GTK/WebKit 間未接通組字最符合目前證據；本機 Linux IBus/Chewing 已安裝但未啟用，沒有可用的 Linux 組字引擎。不能宣稱已修復華碩相容性，也不把啟用 Linux 注音等同於保留華碩的混合輸入體驗。
+- 因新證據修正 preflight 判斷路線，先同步 PLANS 與本 phase 的 Windows/Linux IME 辨識規則；GOALS／required outcomes 不變，Phase 03 保持 Blocked，沒有重做 Issue 01 矩陣。
+- 本次僅改三個計畫／證據檔；未改 production/tests，未啟動／重啟 App、IBus、WSL 或服務，未安裝依賴、未執行 suites/build。後續涉及 IME 啟用／設定或 Windows 前端路線，須依既有 scope/環境授權門檻處理。
