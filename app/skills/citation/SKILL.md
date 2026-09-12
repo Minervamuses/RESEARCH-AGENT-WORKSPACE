@@ -11,6 +11,12 @@ the conversational decision about which work/version the user requested and
 whether they authorized a write; the tool owns metadata retrieval, BibTeX,
 storage, and the factual save outcome.
 
+`/citation <prompt>` starts one task, which may use multiple tool calls.
+The host uses normal thinking for this task and restores the session's mode
+afterward. Its source registry is released after finalization or failure.
+To continue selecting or saving in a later turn, start another `/citation`
+task; visible prior conversation still supplies metadata and authorization.
+
 ## Search and present
 
 - `search` is stateless. Pass a natural-language topic/title in `query` and
@@ -59,8 +65,11 @@ storage, and the factual save outcome.
   number a saved source, and `[[citation-needed]]` for its placeholder.
   Ordinary DOI links, numeric citations, author-year prose, or a handwritten
   bibliography are allowed, but do not present invented bibliographic facts.
-- `sources` lists session sources and `source` accepts only a stable
+- `sources` lists this task's sources and `source` accepts only a stable
   `source_id`. `explain` gives the public verification/storage contract.
+- A later task must save or reuse a bundle through the tool to obtain a
+  receipt trusted by its own registry. Historical markers or receipts alone
+  do not make a source citable in the new task. Cleanup keeps saved bundles.
 - Each save's tool content contains the actual per-item status and any receipt.
   Base your response on that result and preserve ambiguity/failure honestly;
   no finalizer will replace your prose with a deterministic save summary.

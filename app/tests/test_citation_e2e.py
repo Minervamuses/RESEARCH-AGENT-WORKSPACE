@@ -3,13 +3,16 @@
 import asyncio
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
+import uuid
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
 from agent.config import AgentConfig
+from agent.conversations import ConversationUnavailableError
 from agent.session import ChatSession
 from skills.citation.hub import CitationProviderHub
 from skills.citation.providers.net import FetchResponse
@@ -104,15 +107,26 @@ class _SearchSaveModel:
 
     def __init__(self):
         self.bound_tool_names: list[list[str]] = []
+        self.invoked_tool_names: list[list[str]] = []
+        self.invocations = []
         self.search_message: ToolMessage | None = None
         self.save_message: ToolMessage | None = None
         self.receipt = None
 
     def bind_tools(self, tools):
-        self.bound_tool_names.append([tool.name for tool in tools])
-        return self
+        names = [tool.name for tool in tools]
+        self.bound_tool_names.append(names)
+
+        def invoke(messages):
+            self.invoked_tool_names.append(names)
+            return self.invoke(messages)
+
+        return SimpleNamespace(invoke=invoke)
 
     def invoke(self, messages):
+        self.invocations.append([message.model_copy(deep=True) for message in messages])
+        if "citation_workflow" not in self.invoked_tool_names[-1]:
+            return AIMessage(content="ordinary answer")
         results = _workflow_results(messages)
         if not results:
             return _workflow_call(
@@ -288,6 +302,22 @@ def _seed_fixture_service(session, tmp_path, fetcher=None):
     return service
 
 
+def _fixture_services(monkeypatch, tmp_path, fetcher=None):
+    """Keep lazy per-task service construction real with offline I/O boundaries."""
+    hub = CitationProviderHub(env={}, fetcher=fetcher or RoutingFetcher())
+    services = []
+
+    def create(provider_hub, *, config):
+        assert provider_hub is hub
+        service = CitationService(hub, output_dir=tmp_path / "cite")
+        services.append(service)
+        return service
+
+    monkeypatch.setattr("skills.citation.hub.get_provider_hub", lambda: hub)
+    monkeypatch.setattr("skills.citation.service.CitationService", create)
+    return services
+
+
 class _SaveReportingModel:
     """Generate each attempt's report from content and its matching tool call."""
 
@@ -375,6 +405,7 @@ def test_save_reporting_reaches_model_history_and_cli(
         0 if scenario == "all_success" else 1, transient=scenario == "retry",
     )
     service = _seed_fixture_service(session, tmp_path, fetcher=fetcher)
+    services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
     prior_files = {}
     if scenario == "all_success":
         intent = CitationWorkflowInput.model_validate({"action": "save", "works": works[:1]})
@@ -416,11 +447,18 @@ def test_save_reporting_reaches_model_history_and_cli(
         assert output.endswith(f"\n{answer}\n\n")
         assert output.count(answer) == 1
     else:
-        session.activate_citation_skill()
         answer = asyncio.run(session.turn(
             "保存並逐項回報：" + json.dumps(selected, ensure_ascii=False)
-            + ("；若失敗可重試一次" if scenario == "retry" else "")
+            + ("；若失敗可重試一次" if scenario == "retry" else ""),
+            skill_name="citation",
         ))
+
+    assert len(services) == 1
+    service = services[0]
+    assert session.active_skill_runtime is None
+    assert session._citation_service is None
+    assert session._build_sources_hint() is None
+    assert "citation_workflow" not in session.tool_access_resolution().effective_tools
 
     assert answer == model.answer == session.recent_turns[-1].assistant_output
     persisted = session.conversation_repository.load(session.session_id)
@@ -554,10 +592,11 @@ def test_search_selection_journey_stops_when_search_is_empty(
     model = _EmptySearchAwareModel()
     fetcher = _EmptyFetcher()
     session = _make_session(monkeypatch, tmp_path, model)
-    session.activate_citation_skill()
-    service = _seed_fixture_service(session, tmp_path, fetcher=fetcher)
+    services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
+    session.thinking_mode = "extended"
 
-    answer = asyncio.run(session.turn("搜尋並保存不存在的論文"))
+    answer = asyncio.run(session.turn("搜尋並保存不存在的論文", skill_name="citation"))
+    service = services[0]
 
     assert model.search_message is not None
     assert answer == "搜尋沒有 bibliographic records，因此未保存任何來源。"
@@ -567,6 +606,18 @@ def test_search_selection_journey_stops_when_search_is_empty(
     assert service.registry.list() == []
     assert list((tmp_path / "cite").glob("*/reference.bib")) == []
     assert len(fetcher.calls) == 2
+    assert session._citation_service is None
+    assert session.active_skill_runtime is None
+    assert session.thinking_mode == "extended"
+
+    def ordinary(messages):
+        assert "citation_workflow" not in session.tool_access_resolution().effective_tools
+        assert not any("[Citable sources]" in m.content for m in messages if isinstance(m, SystemMessage))
+        return AIMessage(content="ordinary answer")
+
+    monkeypatch.setattr(model, "invoke", ordinary)
+    monkeypatch.setattr(session._fusion, "run_extended_turn", session._run_normal_turn)
+    assert asyncio.run(session.turn("ordinary question")) == "ordinary answer"
 
 
 def test_search_selection_journey_rejects_malformed_save_receipt(
@@ -594,3 +645,225 @@ def test_search_selection_journey_rejects_malformed_save_receipt(
     ]
     assert service.registry.list() == []
     assert list((tmp_path / "cite").glob("*/reference.bib")) == []
+
+
+def test_one_shot_cli_cites_then_runs_ordinary_turn(monkeypatch, tmp_path, capsys):
+    from agent.cli import chat
+
+    model = _SearchSaveModel()
+    session = _make_session(monkeypatch, tmp_path, model)
+    services = _fixture_services(monkeypatch, tmp_path)
+    prompt = "搜尋 Paper A，選擇 2021 年正式記錄，保存並引用"
+
+    async def create(*_args, **kwargs):
+        assert kwargs["load_mcp"] is False
+        return session
+
+    inputs = iter([f"/citation {prompt}", "ordinary question", "q"])
+
+    async def read_line(_prompt):
+        value = next(inputs)
+        if value == "ordinary question":
+            assert session.active_skill_runtime is None
+            assert session._citation_service is None
+        return value
+
+    monkeypatch.setattr(chat.ChatSession, "create", create)
+    asyncio.run(chat._run(SimpleNamespace(no_mcp=True, max_graph_steps=None), read_line=read_line))
+    output = capsys.readouterr().out
+    turns = session.conversation_repository.load(session.session_id).document.turns
+    assert len(turns) == 2
+    answer = turns[0].assistant_output
+    assert "已保存並引用來源 [1]。" in answer
+    assert "Sources:" in answer and f"DOI: {DOI_A}" in answer
+    assert answer in output and "ordinary answer" in output and "normal" in output
+    assert turns[0].display_input == f"/citation {prompt}"
+    assert turns[0].semantic_input == prompt
+    assert turns[1].assistant_output == "ordinary answer"
+    assert len(model.invocations) == 4
+    assert model.invocations[0][-1].content == prompt
+    assert len(services) == 1
+    assert services[0].registry.trusted_receipt(model.receipt.source_id) == model.receipt
+    assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+    assert "citation_workflow" not in model.invoked_tool_names[-1]
+    assert not any("[Citable sources]" in m.content for m in model.invocations[-1] if isinstance(m, SystemMessage))
+
+
+@pytest.mark.parametrize("terminal", ["success", "gate", "provider", "persistence"])
+def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
+    monkeypatch, tmp_path, terminal,
+):
+    class Model(_SearchSaveModel):
+        def invoke(self, messages):
+            answer = super().invoke(messages)
+            if len(_workflow_results(messages)) == 2:
+                if terminal == "provider":
+                    raise RuntimeError("fixture provider failed after save")
+                if terminal == "gate":
+                    return AIMessage(content="Untrusted [[cite:src-forged]]")
+            return answer
+
+    model = Model()
+    session = _make_session(monkeypatch, tmp_path, model)
+    services = _fixture_services(monkeypatch, tmp_path)
+    session.thinking_mode = "extended"
+    if terminal == "success":
+        # Simulate the existing installer's temporary mode awaiting cleanup.
+        session._installer_previous_mode = "extended"
+        session.thinking_mode = "normal"
+    complete = session.conversation_repository.complete_turn
+
+    def check_completion(*args, **kwargs):
+        assert session.citation_skill_active
+        assert session.thinking_mode == "normal"
+        assert session._citation_service is services[0]
+        assert services[0].registry.trusted_receipt(model.receipt.source_id) == model.receipt
+        if terminal == "persistence":
+            raise ConversationUnavailableError("fixture final write failed")
+        return complete(*args, **kwargs)
+
+    monkeypatch.setattr(session.conversation_repository, "complete_turn", check_completion)
+    turn_id = uuid.uuid4().hex
+    request = "搜尋 Paper A，保存並正式引用"
+    if terminal in {"provider", "persistence"}:
+        error = RuntimeError if terminal == "provider" else ConversationUnavailableError
+        with pytest.raises(error, match="fixture"):
+            asyncio.run(session.turn_outcome(request, skill_name="citation", turn_id=turn_id))
+    else:
+        outcome = asyncio.run(session.turn_outcome(request, skill_name="citation", turn_id=turn_id))
+        assert bool(outcome.validation_errors) == (terminal == "gate")
+        if terminal == "gate":
+            assert "已被封鎖" in outcome.text
+            assert not outcome.text.startswith("Untrusted")
+        else:
+            assert "[[cite:" not in outcome.text
+        assert ("Sources:" in outcome.text) == (terminal == "success")
+
+    turn = session.conversation_repository.load(session.session_id).document.turns[-1]
+    assert turn.state == ("failed" if terminal in {"provider", "persistence"} else "completed")
+    assert turn.thinking_mode == "normal"
+    if turn.state == "failed":
+        assert turn.assistant_output is None
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    assert session._citation_service is None
+    assert session._build_sources_hint() is None
+    assert "citation_workflow" not in session.tool_access_resolution().effective_tools
+    assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+
+    if terminal == "success":
+        count = len(model.invocations)
+        with monkeypatch.context() as patch:
+            def no_load(_name):
+                raise AssertionError("completed duplicate must not load a runtime")
+            patch.setattr(session, "_load_skill_runtime", no_load)
+            duplicate = asyncio.run(session.turn_outcome(request, skill_name="citation", turn_id=turn_id))
+        assert duplicate.text == turn.assistant_output
+        assert len(model.invocations) == count and len(services) == 1
+
+    monkeypatch.setattr(session.conversation_repository, "complete_turn", complete)
+    # Exercise the next ordinary graph without invoking live Fusion models.
+    monkeypatch.setattr(session._fusion, "run_extended_turn", session._run_normal_turn)
+    assert asyncio.run(session.turn("ordinary question")) == "ordinary answer"
+    assert session.thinking_mode == "extended"
+    assert "citation_workflow" not in model.invoked_tool_names[-1]
+    assert not any("[Citable sources]" in m.content for m in model.invocations[-1] if isinstance(m, SystemMessage))
+
+
+def test_later_citation_requires_new_receipt_and_reuses_saved_bundle(monkeypatch, tmp_path):
+    model = _SearchSaveModel()
+    session = _make_session(monkeypatch, tmp_path, model)
+    services = _fixture_services(monkeypatch, tmp_path)
+    first = asyncio.run(session.turn("搜尋 Paper A，保存並引用", skill_name="citation"))
+    receipt = model.receipt
+    bundle = Path(receipt.bundle_path)
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bundle.iterdir()}
+    invoke = model.invoke
+
+    def cite_old(messages):
+        assert any(isinstance(m, AIMessage) and m.content == first for m in messages)
+        assert session.citation_service.registry.list() == []
+        return AIMessage(content=f"Old marker {receipt.cite_marker}")
+
+    monkeypatch.setattr(model, "invoke", cite_old)
+    rejected = asyncio.run(session.turn_outcome("引用先前選擇", skill_name="citation"))
+    assert rejected.validation_errors and "已被封鎖" in rejected.text
+    assert "Sources:" not in rejected.text
+    assert session._citation_service is None
+    monkeypatch.setattr(model, "invoke", invoke)
+    assert asyncio.run(session.turn("重用先前選擇並保存引用", skill_name="citation")) == first
+    assert len(services) == 3
+    assert len({id(service) for service in services}) == 3
+    assert _save_content(model.save_message).items[0].status == "reused"
+    assert services[-1].registry.trusted_receipt(receipt.source_id) == model.receipt
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bundle.iterdir()} == before
+
+
+def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, tmp_path):
+    from skills.citation import service as citation_service
+
+    model = _SearchSaveModel()
+    session = _make_session(monkeypatch, tmp_path, model)
+    services = _fixture_services(monkeypatch, tmp_path)
+    session.thinking_mode = "extended"
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    write = citation_service.write_identity_bundle
+
+    def delayed_write(*args, **kwargs):
+        entered.set()
+        try:
+            assert release.wait(5), "test must release writer"
+            return write(*args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(citation_service, "write_identity_bundle", delayed_write)
+
+    async def scenario():
+        task = asyncio.create_task(session.turn("搜尋 Paper A，保存並引用", skill_name="citation"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            old = services[0]
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert session._citation_service is None
+            assert session.active_skill_runtime is None
+            assert session.thinking_mode == "extended"
+            assert session.conversation_repository.load(session.session_id).document.turns[-1].state == "interrupted"
+
+            def next_task(messages):
+                assert session.citation_service is not old
+                release.set()
+                assert finished.wait(5)
+                assert old.registry.list() == []
+                assert session.citation_service.registry.list() == []
+                return AIMessage(content="晚到的磁碟寫入沒有本次可信 receipt。")
+
+            monkeypatch.setattr(model, "invoke", next_task)
+            answer = await session.turn("檢查來源", skill_name="citation")
+            assert "沒有本次可信 receipt" in answer
+            assert session._citation_service is None
+            assert session.thinking_mode == "extended"
+            assert list((tmp_path / "cite").glob("*/reference.bib"))
+
+            def ordinary(messages):
+                assert session._citation_service is None
+                assert "citation_workflow" not in session.tool_access_resolution().effective_tools
+                assert not any("[Citable sources]" in m.content for m in messages if isinstance(m, SystemMessage))
+                return AIMessage(content="ordinary answer")
+
+            monkeypatch.setattr(model, "invoke", ordinary)
+            monkeypatch.setattr(session._fusion, "run_extended_turn", session._run_normal_turn)
+            assert await session.turn("ordinary question") == "ordinary answer"
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            if entered.is_set():
+                assert await asyncio.to_thread(finished.wait, 5)
+
+    asyncio.run(scenario())

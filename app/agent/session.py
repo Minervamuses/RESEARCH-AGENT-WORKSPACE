@@ -958,23 +958,29 @@ class ChatSession:
         user_input: str,
         skill_name: str,
     ) -> TurnOutcome:
-        """Load, run, and clear one non-Citation Skill under the turn lock."""
+        """Load, run, and clear one Skill under the turn lock."""
         if not user_input.strip():
             raise ValueError("skill prompt cannot be empty")
-        if skill_name.casefold() == CITATION_SKILL_NAME.casefold():
-            raise ValueError("citation must be controlled with /citation")
+        citation_turn = skill_name.casefold() == CITATION_SKILL_NAME
 
         # Loading and validation happen before any active session state changes.
-        runtime = self._load_skill_runtime(skill_name)
+        runtime = self._load_skill_runtime(CITATION_SKILL_NAME if citation_turn else skill_name)
+        self.clear_skill_installer()
         previous = self.active_skill_runtime
+        previous_mode = self.thinking_mode
         self.active_skill_runtime = runtime
         try:
-            if previous is not None and previous.name == CITATION_SKILL_NAME:
+            if citation_turn or (previous is not None and previous.name == CITATION_SKILL_NAME):
                 self._teardown_citation_session_state()
+            if citation_turn:
+                self.thinking_mode = "normal"
             return await self._run_turn(user_input)
         finally:
             if self.active_skill_runtime is runtime:
                 self.active_skill_runtime = None
+            if citation_turn:
+                self._teardown_citation_session_state()
+                self.thinking_mode = previous_mode
 
     def _tool_universe_refs(self) -> list[str]:
         """Every tool that actually exists in this session, global or skill.
@@ -1206,12 +1212,13 @@ class ChatSession:
             installer_request = (skill_name == "skill-installer"
                                  or (skill_name is None and self._requests_skill_installer(user_input)))
             installer_turn = installer_request or (skill_name is None and self._skill_installer.pending)
+            citation_turn = skill_name is not None and skill_name.casefold() == CITATION_SKILL_NAME
             snapshot, turn, duplicate = await self._begin_turn(
                 semantic_input=user_input,
                 display_input=display_input if display_input is not None else user_input,
                 turn_id=logical_turn_id,
                 retry=retry,
-                thinking_mode="normal" if installer_turn else None,
+                thinking_mode="normal" if installer_turn or citation_turn else None,
             )
             self._conversation_snapshot = snapshot
             if duplicate:
@@ -1230,7 +1237,6 @@ class ChatSession:
                 if installer_turn:
                     return await self._run_installer_turn(user_input, new_request=installer_request)
                 if skill_name is not None:
-                    self.clear_skill_installer()
                     return await self._run_one_shot_skill_turn(
                         user_input,
                         skill_name,

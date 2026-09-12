@@ -102,7 +102,7 @@ def _command_feeds_agent(
     return (
         command.name.casefold() == "citation"
         and bool(parsed.args)
-        and parsed.args[0].casefold() not in _CITATION_STOP_ARGUMENTS
+        and not (len(parsed.args) == 1 and parsed.args[0].casefold() in _CITATION_STOP_ARGUMENTS)
     )
 
 

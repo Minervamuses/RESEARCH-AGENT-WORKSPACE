@@ -8,8 +8,6 @@ import re
 import shlex
 from typing import Awaitable, Callable, Sequence
 
-import yaml
-
 from agent.ingest import (
     diff_folder,
     ingest_file,
@@ -23,9 +21,6 @@ from agent.skills import SkillMetadata
 
 class SlashCommandError(ValueError):
     """Raised when CLI slash command input is invalid."""
-
-
-_SKILL_USER_ERRORS = (KeyError, ValueError, OSError, yaml.YAMLError)
 
 
 @dataclass(frozen=True)
@@ -199,9 +194,8 @@ def build_default_registry(session: object | None = None) -> SlashCommandRegistr
             SlashCommand(
                 name="citation",
                 description=(
-                    "Activate the citation skill (persists until /citation "
-                    "off). Optional trailing text is sent to the agent as a "
-                    "normal message."
+                    "Run one citation task with /citation <prompt> in normal "
+                    "thinking, then restore the session's thinking mode."
                 ),
                 handler=_handle_citation,
             ),
@@ -469,59 +463,30 @@ async def _handle_thinking(
     return SlashCommandResult(message=f"thinking -> {target}")
 
 
-def _skill_command_error(exc: Exception) -> SlashCommandError:
-    return SlashCommandError(f"failed to activate skill: {exc}")
-
-
 _CITATION_SKILL = "citation"
 _CITATION_OFF_TOKENS = frozenset({"off", "none", "deactivate"})
-
-
-def _citation_skill_active(session: object) -> bool:
-    runtime = getattr(session, "active_skill_runtime", None)
-    return runtime is not None and getattr(runtime, "name", "") == _CITATION_SKILL
 
 
 async def _handle_citation(
     context: SlashCommandContext,
     parsed: ParsedSlashCommand,
 ) -> SlashCommandResult:
-    """Persistent citation mode.
-
-    ``/citation`` activates the citation skill (no network is touched);
-    ``/citation <natural language>`` activates it and then feeds the text
-    through a normal agent turn; ``/citation off|none|deactivate`` ends the
-    mode. Activation replaces any currently active skill; deactivation only
-    ever touches the citation skill.
-    """
-    session = context.session
-
-    if len(parsed.args) == 1 and parsed.args[0].strip().lower() in _CITATION_OFF_TOKENS:
-        if not _citation_skill_active(session):
-            raise SlashCommandError(
-                "citation skill is not active; nothing to deactivate"
-            )
-        session.deactivate_citation_skill()
-        return SlashCommandResult(message="citation skill deactivated")
-
-    if _citation_skill_active(session):
-        message = "citation skill already active"
-    else:
-        try:
-            session.activate_citation_skill()
-        except _SKILL_USER_ERRORS as exc:
-            raise _skill_command_error(exc) from exc
-        message = (
-            "citation skill activated (thinking -> normal). Describe what "
-            "you want to cite in natural language; /citation off to end."
-        )
-
-    followup = ""
-    if parsed.args:
-        # Recover the raw text after the command name: natural language must
-        # reach the agent verbatim, not shlex-mangled.
-        followup = parsed.raw_text[1 + len(parsed.name):].strip()
-    return SlashCommandResult(message=message, followup_input=followup or None)
+    """Return Citation intent; the session owns activation under its turn lock."""
+    del context
+    if len(parsed.args) == 1 and parsed.args[0].casefold() in _CITATION_OFF_TOKENS:
+        return SlashCommandResult(message=(
+            "Citation now runs as a single-turn task; use /citation <prompt>."
+        ))
+    # Preserve natural language instead of reconstructing shlex tokens.
+    followup = parsed.raw_text[1 + len(parsed.name):].strip()
+    if not followup:
+        return SlashCommandResult(message="Usage: /citation <prompt>")
+    return SlashCommandResult(
+        message=("Citation runs once in normal thinking; your session's "
+                 "thinking mode is restored after this task."),
+        followup_input=followup,
+        skill_name=_CITATION_SKILL,
+    )
 
 
 async def _handle_clear(

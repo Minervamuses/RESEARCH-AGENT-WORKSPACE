@@ -195,6 +195,45 @@ def test_non_citation_skills_unaffected_by_teardown_logic(make_session):
     assert session.active_skill_runtime is None
 
 
+def test_citation_turn_scope_restores_mode_and_records_actual_normal(make_session):
+    session = make_session()
+    session.thinking_mode = "extended"
+    observed = []
+
+    def inspect(_state):
+        assert session.citation_skill_active
+        assert session.thinking_mode == "normal"
+        assert "citation_workflow" in session.tool_access_resolution().effective_tools
+        observed.append(session.conversation_repository.load(session.session_id).document.turns[-1])
+
+    session.graph = make_astream_graph(on_state=inspect)
+    outcome = asyncio.run(session.turn_outcome("find Paper A", skill_name="citation"))
+    assert outcome.text == "ok"
+    assert observed[0].thinking_mode == "normal"
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    assert session._citation_service is None
+    assert session._build_sources_hint() is None
+    assert "citation_workflow" not in session.tool_access_resolution().effective_tools
+
+
+def test_citation_turn_replaces_legacy_service_under_lock(make_session):
+    session = make_session()
+    session.activate_citation_skill()
+    legacy = session.citation_service
+
+    def inspect(_state):
+        assert session._turn_execution_lock.locked()
+        assert session.citation_skill_active
+        assert session._citation_service is None
+
+    session.graph = make_astream_graph(on_state=inspect)
+    assert asyncio.run(session.turn("find Paper A", skill_name="CITATION")) == "ok"
+    assert session._citation_service is None
+    assert session.active_skill_runtime is None
+    assert legacy.registry.list() == []
+
+
 def _applied_session(tmp_path, monkeypatch, name):
     from agent.extensions.startup import load_extension_startup
     from test_extension_skill_startup import _config, _write_skill, _apply_skill
@@ -275,13 +314,13 @@ def test_tampered_applied_citation_activation_preserves_state(tmp_path, monkeypa
     marker = "PRIVATE_CITATION_TEST_CONTENT"
     (installed / "manifest.yaml").write_text(f"tools: [{marker}\n", encoding="utf-8")
 
-    expected_error = ValueError if entry == "direct" else SlashCommandError
-    with pytest.raises(expected_error) as caught:
+    with pytest.raises(ValueError) as caught:
         if entry == "direct":
             session.activate_citation_skill()
         else:
             context = SlashCommandContext(session=session, registry=build_default_registry(session))
-            asyncio.run(execute_slash_command(parse_slash_command("/citation"), context))
+            result = asyncio.run(execute_slash_command(parse_slash_command("/citation find Paper A"), context))
+            asyncio.run(session.turn(result.followup_input, skill_name=result.skill_name))
 
     assert "applied bundle changed; restart or re-apply required" in str(caught.value)
     assert graph.states == []

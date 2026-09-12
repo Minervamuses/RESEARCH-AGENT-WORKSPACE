@@ -1,12 +1,13 @@
-"""The /citation slash command: persistent activation, followup, off."""
+"""The /citation slash command returns a turn intent without activating it."""
 
 import asyncio
 
 import pytest
 
+from conftest import FakeChatSession
+
 from agent.cli.slash_commands import (
     SlashCommandContext,
-    SlashCommandError,
     build_default_registry,
     execute_slash_command,
     parse_slash_command,
@@ -54,19 +55,22 @@ def test_registry_has_citation_but_no_cite_alias():
     assert registry.get("cite") is None
 
 
-def test_bare_citation_activates_persistently_without_followup():
+@pytest.mark.parametrize("raw", ["/citation", "/citation   "])
+def test_bare_citation_returns_usage_without_activation(raw):
     session = StubSession()
-    result = _run(session, "/citation")
-    assert session.calls == ["activate:citation"]
-    assert "activated" in result.message
-    assert "normal" in result.message  # thinking hint shown
+    result = _run(session, raw)
+    assert session.calls == []
+    assert "Usage: /citation <prompt>" in result.message
     assert result.followup_input is None
+    assert result.skill_name is None
 
 
-def test_citation_with_text_activates_and_forwards_raw_text():
+def test_citation_with_text_forwards_intent_without_activation():
     session = StubSession()
     result = _run(session, "/citation 幫我尋找近5年內關於HPC的論文")
-    assert session.calls == ["activate:citation"]
+    assert session.calls == []
+    assert result.skill_name == "citation"
+    assert "normal" in result.message
     assert result.followup_input == "幫我尋找近5年內關於HPC的論文"
 
 
@@ -76,62 +80,39 @@ def test_citation_natural_language_survives_apostrophes():
     assert result.followup_input == "find papers on Bell's theorem"
 
 
-def test_second_citation_call_reports_already_active_but_still_forwards():
+def test_citation_parser_leaves_legacy_active_state_for_turn_scope():
     session = StubSession(active="citation")
     result = _run(session, "/citation show me more candidates")
-    assert session.calls == []  # no re-activation
-    assert "already active" in result.message
+    assert session.calls == []
+    assert session.active_skill_runtime.name == "citation"
+    assert result.skill_name == "citation"
     assert result.followup_input == "show me more candidates"
 
 
-def test_citation_off_deactivates_only_when_active():
-    session = StubSession(active="citation")
-    for token in ("off", "none", "deactivate"):
-        session.active_skill_runtime = StubRuntime("citation")
-        result = _run(session, f"/citation {token}")
-        assert "deactivated" in result.message
-    assert session.calls.count("deactivate") == 3
-
-
-def test_citation_off_never_touches_other_skills():
-    session = StubSession(active="academic-paper-writing")
-    with pytest.raises(SlashCommandError, match="not active"):
-        _run(session, "/citation off")
+@pytest.mark.parametrize("token", ["off", "NONE", "deactivate"])
+@pytest.mark.parametrize("active", [None, "citation", "academic-paper-writing"])
+def test_legacy_off_returns_migration_hint_without_mutation(token, active):
+    session = StubSession(active=active)
+    previous = session.active_skill_runtime
+    result = _run(session, f"/citation {token}")
+    assert "single-turn" in result.message
+    assert "/citation <prompt>" in result.message
+    assert "deactivated" not in result.message
+    assert result.followup_input is None
     assert session.calls == []
-    assert session.active_skill_runtime.name == "academic-paper-writing"
-
-    idle = StubSession()
-    with pytest.raises(SlashCommandError, match="not active"):
-        _run(idle, "/citation off")
+    assert session.active_skill_runtime is previous
 
 
-def test_failed_activation_is_a_cli_error_and_keeps_prior_skill():
-    session = StubSession(active=None, fail_activation=True)
-    with pytest.raises(SlashCommandError, match="failed to activate"):
-        _run(session, "/citation")
-    assert session.active_skill_runtime is None
-
-
-def test_activation_replaces_current_skill_without_restoration_stack():
-    session = StubSession(active="academic-paper-writing")
-    _run(session, "/citation")
-    assert session.active_skill_runtime.name == "citation"
-    # Turning citation off leaves no skill (no restoration of the old one).
-    _run(session, "/citation off")
-    assert session.active_skill_runtime is None
-
-
-def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
+def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch, capsys):
     """/citation <text> reaches session.turn like a normal user message."""
     import argparse
 
     from agent.cli import chat
 
-    class LoopSession(StubSession):
+    class LoopSession(FakeChatSession):
         def __init__(self):
             super().__init__()
-            self.turns: list[str] = []
-            self.display_inputs: list[str] = []
+            self.active_skill_runtime = None
 
         async def turn(
             self,
@@ -142,17 +123,20 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
             skill_name=None,
         ):
             assert turn_id is not None
-            assert skill_name is None
-            self.turns.append(user_input)
-            self.display_inputs.append(display_input)
-            return "answer"
+            return await super().turn(
+                user_input, display_input=display_input,
+                turn_id=turn_id, skill_name=skill_name,
+            )
 
     session = LoopSession()
 
     async def fake_create(*args, **kwargs):
         return session
 
-    inputs = iter(["/citation 幫我找 HPC 論文", "q"])
+    inputs = iter([
+        "/CiTaTiOn 幫我找 HPC 論文", "/citation off topic",
+        "/citation off", "/citation", "ordinary question", "q",
+    ])
 
     async def fake_read_line(_prompt):
         return next(inputs)
@@ -161,6 +145,25 @@ def test_followup_text_runs_as_agent_turn_via_chat_loop(monkeypatch):
     args = argparse.Namespace(max_graph_steps=None, no_mcp=True)
     asyncio.run(chat._run(args, read_line=fake_read_line))
 
-    assert session.calls[0] == "activate:citation"
-    assert session.turns == ["幫我找 HPC 論文"]
-    assert session.display_inputs == ["/citation 幫我找 HPC 論文"]
+    assert [r["user_input"] for r in session.turn_requests] == [
+        "幫我找 HPC 論文", "off topic", "ordinary question",
+    ]
+    assert [r["skill_name"] for r in session.turn_requests] == ["citation", "citation", None]
+    assert session.turn_requests[0]["display_input"] == "/CiTaTiOn 幫我找 HPC 論文"
+    output = capsys.readouterr().out
+    assert "normal" in output
+    assert "Usage: /citation <prompt>" in output
+    assert "cli error" not in output
+
+
+def test_citation_stays_reserved_against_dynamic_collision(tmp_path):
+    from agent.skills import SkillMetadata
+
+    session = StubSession()
+    session.loaded_skills = [SkillMetadata(
+        name="citation", description="dynamic collision", path=tmp_path / "SKILL.md",
+    )]
+    registry = build_default_registry(session)
+    commands = [command for command in registry.all_commands() if command.name == "citation"]
+    assert len(commands) == 1
+    assert commands[0].description != "dynamic collision"
