@@ -12,7 +12,7 @@
 | 03 — Native Desktop acceptance | Complete | 2026-09-12 | 2026-09-13 | 下方Phase03完整native表、audit/AX/screenshot/磁碟核對 | IME按決定skipped；其餘required完成 |
 | 04 — Thinking contract/runtime | Not started | 2026-09-12（僅 gate） | — | 下方產品 gate 歷史與 Issue 09 明確延期紀錄 | 已延期，不列本輪 required；無功能完成證據 |
 | 05 — Thinking Desktop acceptance | Not started | — | — | 下方 Issue 09 明確延期紀錄 | 已延期，不列本輪 required；無功能完成證據 |
-| 06 — Regression and closure | In progress | 2026-09-13 | — | 03已Complete，開始最終read-only gate與一次回歸 | suites/build/review待執行；04/05延期 |
+| 06 — Regression and closure | Complete | 2026-09-13 | 2026-09-13 | 下方一次suites/build、Rust red→target green、actual review、逐Issue對照 | 無required blocker；04/05延期 |
 
 狀態只使用 Not started、In progress、Blocked、Complete。
 必要前置與待決事項見 GOALS／各 phase；開始 preflight 後才把實際阻塞寫入本表。
@@ -276,3 +276,41 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - f8e12ec + backend.rs 的既有 cfg(test) setup 局部修改：同一 child mutex 下 kill/wait，沒有放寬 assertion，沒有 production lifecycle 或 API 變更。
 - Exact command（cwd app/desktop/，Linux Conda app）：timeout 120s cargo test --offline --manifest-path src-tauri/Cargo.toml backend::tests::a_new_generation_cannot_reuse_the_prior_shutdown_report -- --exact → PASS1，35filtered，test0.05s／compile5.09s／wrapper5.167s，exit0。binary test target 0 tests。
 - 一次實作嘗試 green：真 child process 退出，snapshot Crashed，shutdown NotRunning，確認沒有重用舊 generation Graceful report。35個其他案例已在唯一完整 run 通過；不將原35／1 red改寫為完整36 passed。原始 focused output 見 evidence/phase-06-rust-target-green.txt。
+
+## 2026-09-13 — Phase06 final verification / Complete
+
+- Final code revision cf3183b；git diff 40b843c HEAD -- app 核對：production 僅 app/agent/session.py、app/agent/desktop/service.py；tests 為 app/tests/test_skill_adherence.py、app/tests/test_desktop_service.py，以及 backend.rs cfg(test) 的 shutdown fixture 同步。累積5檔359insertions／8deletions；没有 dependency/schema/AGENTS/runtime entry 變更。
+- Exact build（cwd app/desktop/，source Conda app）：CARGO_NET_OFFLINE=true timeout 540s npm run tauri -- build --no-bundle → PASS，exit0，wrapper79.553s；內含 tsc --noEmit + Vite（25modules，167ms）與 Cargo release（1m16s），生成 target/release/research-agent-desktop。未重跑 npm run build，未另做下載／安裝／provider／GPU／完整資料命令。原始 build 見 evidence/phase-06-tauri-build.txt。
+- Python1138／Node165的 actual result tails 與警告見 evidence/phase-06-python-node-results.txt；五個 exact argv、runtime、exit及原output SHA256見 evidence/phase-06-check-results.json。Rust red 和 target green 各自保留，未把唯一完整run的失敗抹掉；除此沒有failed/unavailable required check。所有本輪 suites/build 各只跑一次，Rust只補1個必要 target。
+- 已做 actual bounded source review：code_review/phase-06-regression-and-closure-review.md。逐行核對兩個 production diff、canonical／cleanup／mode call paths、全部新增 regression assertions，另查 Rust test setup 的 lock/exit 時序；無剩餘 required findings。由同一執行代理 review，不稱另派獨立 reviewer。
+- 逐Issue只記本次結論；舊logs不回填今日狀態：
+
+| Issue | 本次處置與 evidence | 保留限制／歷史界線 |
+|---|---|---|
+| 01 | 已接受限縮；原 issue_01 log 的2026-09-12使用者「跳過需要重啟的部分」仍有效。 | 舊Bopomofo／canonical native observations屬歷史；restart-dependent matrix及本輪ASUS/WSLg IME skipped，不改passed、不重做。 |
+| 02 | 原 command catalogue/composer 實作歷史保留；缺的鍵鼠、caret/focus、ARIA exposure、零request insertion、session ownership/new catalogue/restart 原生門檻由本輪Phase03補齊；最終Node165/Rust/Tauri回歸如上。 | 不聲稱screen-reader朗讀；IME依GOALS明確skip。舊log Blocked是當時資訊，本表+Phase03為新證據。 |
+| 03 | issue_03(fin) permission control/ACK/trust歷史Complete；今日Python full中的bash、Desktop service/protocol/conversation及Node trust、Rust protocol回歸通過。 | 未新跑live-provider permission campaign；不將9/7的957/155/36計數作今日結果。 |
+| 04 | issue_04 的earliest同年／全缺年份ambiguity與real resolver/service/tool歷史Complete；今日完整Python包含resolution/work_resolver/authority/workflow tests，無回歸。 | 只比較年份；未知年份／更細時間證據未擴張，1061為當時歷史數。 |
+| 05 | issue_05 的11狀態ToolMessage、真graph四種save outcome與CLI/history一致性歷史Complete；今日workflow/e2e/finalization相關tests包含於1138全套；Phase03新native真Citation存PaperA答案和實際bundle一致。 | 原成果是characterization，不需要新production覆寫層；fake model不保證真LLM永不誤報，1075為歷史。 |
+| 06 | issue_06 startup identity/activation revalidation歷史Complete；今日相關runtime/startup tests全套通過。Phase02加completed Citation runtime失效時只讀回舊答案，新的工作仍拒絕tampered bundle。 | 保留activation precheck後的TOCTOU限制，不宣稱immutable filesystem或對抗持續writer；1092為歷史。 |
+| 07 | issue_07跨程序apply lock、BUSY入口與lifecycle歷史Complete；今日extension manager/service tests隨完整Python通過。 | 不擴張network FS／非合作writer／power loss；1102為歷史。 |
+| 08 | 原CLI/ChatSession one-shot Citation與Desktop backend歷史證據保留；Phase02補completed exact replay，Phase03完成原生menu→tool activity→正式答案→普通下一回合→A/B/restart/failure/interrupted recovery。 | 不依舊fixture冒充真Citation；新journey真ChatSession/CitationService，只在model/fetch用既有離線seams。舊Blocked不被偷偷改passed。 |
+| 09 | 使用者明確延期：04/05未實作/未驗收。將原09計畫與final_check GOALS的必要未決事項收斂至唯一09問題卡後刪舊計畫。 | 新段位、映射、保存政策均未決；保留現有Normal/Extended；不以cleanup或本輪全套代表新功能完成。 |
+| 10 | issue_10(fin)真ZIP CLI/Desktop安裝、選擇範圍、source保留、fresh catalogue歷史Complete；Phase01補cleanup conflict公開回報、新graph/model零呼叫及effective mode/canonical metadata一致，今日完整Python回歸通過。 | 舊真archive/mocked inference界線保留；本輪無下載、新dependency、user installation或模型自主安裝品質主張。 |
+
+### Acceptance → evidence（GOALS順序）
+
+| Required outcome | Observed evidence |
+|---|---|
+| Installer switch safety/mode | Phase01五個最小regression的red→green，公開cleanup_detail/backup_path、source/backup bytes、real Fusion roles和durable mode；今日1138全套再次包含。 |
+| Completed Citation replay | Phase02兩種runtime失效的exact resend（含retry）原answer/canonical/bundle bytes+mtime／零effects；八種identity mismatch與兩種unfinished cases拒絕；今日全套包含。 |
+| Native Desktop | Phase03 native acceptance表及16張screenshots、request/model/save audit、LinuxAT-SPI tree、canonical/磁碟assertions；輸入法依決定skipped。 |
+| Thinking Effort disposition | GOALS的2026-09-12明確延期來源；只保留單一09卡，無實作/多段位驗收宣稱。 |
+| Traceable final conclusion | 本表分歷史／今日／限縮／延期；tests/build actual outputs、actual review、各步commit；清理前先commit evidence，清理後可由Git歷史還原。 |
+
+- Required phases01/02/03/06現為Complete；04/05維持Not started/延期。沒有尚待產品決策的本輪實作或外部Blocker。接續只有已明確授權的資料夾清理與普通push。
+- 清理manifest先列出當前tracked issue檔（evidence/phase-06-cleanup-manifest.txt），最後新增的本次evidence亦屬final_check將一併清除；唯一存留為09卡。git ls-files '*AGENTS.md'只見根AGENTS；issue沒有ignored files，note沒有issue references。README與for_agents有舊issue引用，cleanup時改固定Git歷史連結；不藉此重啟for_agents舊audit或其他未列本輪scope的backlog。
+
+- Final owned-tmp cleanup PASS：先保留上述證據，Linux Conda app Python確認 /tmp/research-agent-desktop-phase02-final-6e7ayl45 為exact resolved path、direct /tmp、非symlink、本UID，/proc environ exact fixture-root tag無live processes，app/sitecustomize.py不存在，才 shutil.rmtree 該自有root；刪後不存在。沒有刪除真實使用者store/source/conflict backup。
+
+- 最後文件檢查（Linux Conda app，cwd repo root）：python /mnt/c/Users/garyc/.codex/skills/long-horizon-plan-author/scripts/validate_harness.py --repo /home/minervamuses/research-agent-workspace --plan-root issue/final_check --project-shape application --risk medium --harness-only --strict --json --proposed-path issue/final_check/build-log.md --allowed-path issue/final_check/build-log.md --proposed-path issue/final_check/PLANS.md --allowed-path issue/final_check/PLANS.md --proposed-path issue/final_check/phases/phase-06-regression-and-closure.md --allowed-path issue/final_check/phases/phase-06-regression-and-closure.md --proposed-path issue/final_check/code_review/phase-06-regression-and-closure-review.md --allowed-path issue/final_check/code_review/phase-06-regression-and-closure-review.md → PASS valid=true, errors=0, warnings=0, exit0；git diff --check PASS。新增JSON以json.loads讀回，文字維持LF；之後只有docs/cleanup，不重跑application suites。

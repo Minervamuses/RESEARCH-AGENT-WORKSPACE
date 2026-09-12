@@ -1,0 +1,23 @@
+
+> research-agent-desktop@0.1.0 tauri
+> tauri build --no-bundle
+
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build`
+
+> research-agent-desktop@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 25 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.45 kB │ gzip:  0.29 kB
+dist/assets/index-PfZopxV6.css   15.94 kB │ gzip:  4.31 kB
+dist/assets/index-drV_rK8M.js   283.53 kB │ gzip: 82.90 kB
+
+✓ built in 167ms
+   Compiling research-agent-desktop v0.1.0 (/home/minervamuses/research-agent-workspace/app/desktop/src-tauri)
+    Finished `release` profile [optimized] target(s) in 1m 16s
+       Built application at: /home/minervamuses/research-agent-workspace/app/desktop/src-tauri/target/release/research-agent-desktop

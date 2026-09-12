@@ -1,0 +1,30 @@
+python
+tests/test_tool_access.py ............                                   [ 95%]
+tests/test_tool_access_matrix.py ......                                  [ 95%]
+tests/test_tool_inventory.py .........                                   [ 96%]
+tests/test_turn_finalizer.py .......................................     [100%]
+
+=============================== warnings summary ===============================
+../../miniconda3/envs/app/lib/python3.13/site-packages/langgraph/cache/base/__init__.py:8
+  /home/minervamuses/miniconda3/envs/app/lib/python3.13/site-packages/langgraph/cache/base/__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+tests/test_skill_runtime.py::test_installer_zip_rejects_unsafe_members_without_extracting[skill/SKILL.md-33188]
+  /home/minervamuses/miniconda3/envs/app/lib/python3.13/zipfile/__init__.py:1661: UserWarning: Duplicate name: 'skill/SKILL.md'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 1138 passed, 2 warnings in 41.16s =======================
+
+node
+✔ Bash approval renders inert context with exactly Deny and Approve actions (55.214008ms)
+✔ Bash permission control renders two mutually exclusive options with bypass warning (54.470395ms)
+✔ Bash permission ACK reconciles only for same-generation and same-session (52.999075ms)
+ℹ tests 165
+ℹ suites 0
+ℹ pass 165
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5997.740858
