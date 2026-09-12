@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Activation integrity | In progress | 2026-09-12 | — | 下列 preflight 與 baseline | 無 |
+| 01 — Activation integrity | Complete | 2026-09-12 | 2026-09-12 | 下列 Red/Green、驗收矩陣、full suite 與獨立 review | 無 |
 
 可用狀態：Not started、In progress、Blocked、Complete。
 只有 acceptance 與 required verification 均有 evidence 才可 Complete。
@@ -44,7 +44,7 @@ exact verification/result、review findings、limitations/blockers、next action
   Git `/usr/bin/git`，branch `GUI`，HEAD `931684f`，初始 `git status --short`
   為空。`rg` 可用。Python 為 Conda app 的 3.13.14。
 - PATH 預設 Poetry 是 Linux pipx 的 2.3.4；Conda app 另有 Poetry 2.4.1。
-  後续命令明確用 `/home/minervamuses/miniconda3/envs/app/bin/poetry`，
+  後續命令明確用 `/home/minervamuses/miniconda3/envs/app/bin/poetry`，
   以 `conda run -n app` 保持應用程式在 Conda app 執行。
 - 未改 production 時，在 `app/` 執行：
   `source /home/minervamuses/miniconda3/etc/profile.d/conda.sh`、`conda activate app`、
@@ -113,5 +113,41 @@ exact verification/result、review findings、limitations/blockers、next action
 
 - 更正計劃的測試盤點：live tree 沒有獨立的 extension fingerprint limits test；
   因此按 phase 所允許新增單一 1 KiB limit 案例，未展開 limits matrix。
-  runtime 直接重用原 fingerprint，所以沒有改其檔案数/總大小/hash 規則。
+  runtime 直接重用原 fingerprint，所以沒有改其檔案數/總大小/hash 規則。
 - `git diff --check` 通過。下一步為計劃要求的獨立 diff review 與一次 full suite。
+
+### 2026-09-12（Asia/Taipei）— 完整 suite
+
+- 在 `app/`、相同 Linux/Conda runtime 執行最後且唯一一次 full suite：
+
+  ```bash
+  conda run -n app --no-capture-output timeout 600s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest -q
+  ```
+
+  **1092 passed, 2 warnings in 23.64s**，exit 0；無 failed/skipped/unavailable。
+  兩個 warnings 均為 baseline 已有的 LangChain pending deprecation 與 ZIP
+  duplicate-name fixture。未重跑完整 suite，沒有 provider/model/GPU workload。
+- `git diff 931684f..HEAD --check` 通過；當時 HEAD `38bc4b7`、工作樹乾淨。
+  累積 production diff 只有 metadata/startup/runtime；tests 只有兩個核准檔。
+- 步驟 commits：`e417242` preflight/baseline、`d0516cf` Red、`5a47d4e`
+  三檔 Green、`38bc4b7` 代表驗收/broader。剩餘為獨立 review 結論與完成紀錄。
+
+### 2026-09-12（Asia/Taipei）— 獨立 review / Complete
+
+- 依 phase 的 fresh-agent review 要求，由獨立 context reviewer
+  `/root/issue06_review` 唯讀審查 `931684f..38bc4b7` 真實 diff、相關 live code
+  與驗收 evidence，結論 **無 required findings**。Reviewer 獨立執行兩種 import
+  順序及 diff check；沒有重跑 application/full suite 或修改檔案。
+  詳見 [review 紀錄](code_review/phase-01-activation-integrity-review.md)。
+- Required acceptance 全部有直接證據，Phase 01 從 In progress → Complete；
+  沒有未解 failures、blocked dependency 或需要擴大 scope 的 finding。
+- 最終改檔：三個 production 檔、`test_extension_skill_startup.py`、
+  `test_citation_skill_activation.py`、本 log 與實際 review 紀錄。
+  AGENTS、依賴、registry schema、其他 issue 及真實 installed state 均未修改。
+- 保證只涵蓋 activation 開始前已完成的 bundle 異動；仍有 precheck 後重新讀取
+  的 TOCTOU 視窗。普通 file/shell resource reads 不因此成為 immutable snapshot；
+  沒有驗證對抗性持續 writer、live provider 或全部 GUI rendering。
+  Restart 可排除損毀的 installed copy；unchanged re-apply 不保證修好同 hash 目錄。
+- 沒有做 refactor、性能宣稱或後續 issue。所有授權工作完成後停止。
+- 最終 repository checks：`git diff --check`、`git diff 931684f --check` 通過；
+  `git diff 931684f --stat` 與 `git status --short` 核對只含前述必要檔案。
