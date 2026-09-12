@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
-| 02 — Completed Citation replay | In progress | 2026-09-12 | — | 下方 Phase 02 red | — |
+| 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
 | 03 — Native Desktop acceptance | Not started | — | — | — | — |
 | 04 — Thinking contract/runtime | Not started | — | — | — | — |
 | 05 — Thinking Desktop acceptance | Not started | — | — | — | — |
@@ -81,3 +81,27 @@ acceptance 對應、必要 review、限制、blocker、下一個 eligible 行動
 - Exact command（Linux Conda app，cwd app）：timeout 120s poetry run pytest tests/test_desktop_service.py -k composer_citation -q --tb=short → 2 failed / 68 deselected，0.65s。
 - 兩例先經真 Desktop dispatch / ChatSession / graph / offline RoutingFetcher 完成搜尋→save→正式回答「已保存並引用來源 [1]。」；model=3、scope=1、save=1。之後分別讓 loader ValueError、真 tmp applied Citation SKILL.md 完整性失效。相同 params 重送在 service.py eligibility 拋 That slash command is not available in the desktop composer.（PROTOCOL_INVALID），未到 canonical duplicate。
 - 已保存 assertions：原 params / durable text / JSON 與 bundle bytes+mtime / model-provider-scope-save 計數；green 必須驗證 retry=false/true 不增加任何呼叫，以及 identity/unfinished/new-work 對照。只操作自有 tmp，無 provider 網路呼叫。
+
+## 2026-09-12 — Phase 02 green / Complete（c1bfcb1 + service.py / test_desktop_service.py）
+
+- Production 僅 desktop/service.py：bounded repository read 只辨識 completed Citation 候選以延後 runtime eligibility；沒有在 service 直接回答案。原 slash parser/handler、Session turn_outcome lock、project check、append_pending 的完整 logical-input 與 fingerprint 核對仍是必經路徑。新回合與 unfinished retry 保留原 eligibility；catalog 不變；無 session canonical/API/schema 修改。
+- Exact commands（Linux Conda app，cwd app，前置同上；依序 observed）：
+  1. timeout 120s poetry run pytest tests/test_desktop_service.py -k composer_citation -q --tb=short → 2 passed / 68 deselected，0.43s（production 一次 focused 嘗試 green）。
+  2. timeout 120s poetry run pytest tests/test_desktop_service.py -k citation -q --tb=short → 11 passed / 2 failed / 67 deselected，0.70s：新增 unfinished fixture 使用未知 failure code=fixture，尚未 dispatch；屬測試 setup 錯誤，不是產品 red。
+  3. 同命令 → 12 passed / 1 failed / 67 deselected，0.66s：改 execution_failed 後 failed 對照通過，interrupted fixture 必須使用 interrupted/cancelled，仍為 setup 錯誤。
+  4. timeout 300s poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py -q → 229 passed / 1 failed，2.60s，同一 interrupted fixture setup；未進 dependent phase。
+  5. timeout 300s poetry run pytest tests/test_citation_e2e.py -k 'terminal_cleanup or one_shot' -q → 5 passed / 11 deselected，0.50s。
+  6. 修正 fixture 成 interrupted / execution_failed 對應後：timeout 120s poetry run pytest tests/test_desktop_service.py -k unfinished_citation -q --tb=short → 2 passed / 78 deselected，0.29s。
+  7. 上述第 4 個 required focused command 因 fixture 修正重跑 → 230 passed，2.46s。未改 production 因果解法，沒有第三次 implementation 嘗試。
+  8. root：git diff -- app/agent/desktop/service.py；git diff --stat；git diff --check → passed。
+- 限制：單一既有 LangChain deprecation warning；無 Node/Rust/全 Python suite/build，皆留 Phase 06。上述 230 為指定三個模組，不是完整 suite；Phase 01 checks 未機械重跑。
+
+| Acceptance | Observed evidence |
+|---|---|
+| 失效 runtime 的 completed Desktop replay | loader ValueError 與真 tmp applied SKILL.md hash 失效兩例，原 /CiTaTiOn off topic: 搜尋並保存 Paper A 的相同 params 回原 durable answer 與 turnNumber；retry=false/true 皆 completed/final_only/chunkCount=0，protocol success_result 驗證通過。 |
+| 零重執行／重寫 | 初次 model=3/scope=1/save=1；重送 model/fetcher/scope/save 計數均不增加，loader calls=[]；JSON 與所有既有 Citation bundle 檔案 bytes/mtime_ns 相等。 |
+| 完整 identity 與 snapshot | display、semantic、kind、context eligibility、mode、project、session 八類（含 fingerprint concurrent byte change）拒絕；graph 零呼叫、沒有 Citation scope，canonical bytes 除測試主動注入的 fingerprint 換行外不變。 |
+| 新工作與未完成 retry | 兩種失效 runtime 下新 turnId 返回 PROTOCOL_INVALID；failed/interrupted 各 retry=false/true 都拒絕，原 canonical bytes 不變、graph/scope 零執行。 |
+| 相容回歸 | 230 個 Desktop service/conversation/protocol focused checks 與 5 個 Citation terminal/one-shot checks 通過，覆蓋 catalog、一般對話、restore/retry、final-only 與 cleanup。 |
+
+下一 eligible phase：03 的短 native preflight。若原生外部阻塞，04 僅在三項產品決策及具體授權齊全時可執行；06 仍不得繞過 03–05。

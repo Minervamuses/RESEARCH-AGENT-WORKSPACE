@@ -2907,3 +2907,108 @@ def test_installer_cleanup_conflict_is_visible_before_session_replacement(tmp_pa
     assert error.value.code == "SESSION_NOT_READY"
     assert backup in str(error.value)
     assert service.session is current
+
+
+@pytest.mark.parametrize("mismatch", [
+    "display", "semantic", "kind", "context", "mode", "project", "session", "fingerprint",
+])
+def test_completed_citation_replay_keeps_canonical_identity(monkeypatch, tmp_path, mismatch):
+    from conftest import make_astream_graph
+
+    graph = make_astream_graph()
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: graph)
+    service = _service(tmp_path)
+    session = ChatSession(service.config)
+    service.session = session
+    repository = session.conversation_repository
+    params = _turn_params("/citation find Paper A")
+    values = dict(
+        conversation_id=session.session_id, project_id=session.project_id,
+        turn_id=params["turnId"], kind="conversational",
+        display_input=params["text"], semantic_input="find Paper A",
+        context_eligible=True, thinking_mode="normal",
+        submitted_at="2026-09-12T00:00:00Z",
+    )
+    if mismatch == "display":
+        values["display_input"] = "/CiTaTiOn find Paper A"
+    elif mismatch == "semantic":
+        values["semantic_input"] = "find Paper B"
+    elif mismatch == "kind":
+        values.update(kind="display-only", semantic_input=None,
+                      context_eligible=False, thinking_mode=None)
+    elif mismatch == "context":
+        values["context_eligible"] = False
+    elif mismatch == "mode":
+        values["thinking_mode"] = "extended"
+    elif mismatch == "project":
+        values["project_id"] = "another-project"
+    elif mismatch == "session":
+        values["conversation_id"] = uuid.uuid4().hex
+    snapshot = repository.create(**values)
+    repository.complete_turn(
+        snapshot, turn_id=params["turnId"], assistant_output="Do not replay this answer",
+        finished_at="2026-09-12T00:00:01Z",
+    )
+    path = repository.path_for(values["conversation_id"])
+    before = path.read_bytes()
+
+    def unavailable(_name):
+        raise ValueError("fixture runtime unavailable")
+
+    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    if mismatch == "fingerprint":
+        append = repository.append_pending
+
+        def changed_snapshot(snapshot, **kwargs):
+            # Simulate a concurrent byte change after Session loads its snapshot.
+            path.write_bytes(before + b"\n")
+            return append(snapshot, **kwargs)
+
+        monkeypatch.setattr(repository, "append_pending", changed_snapshot)
+    with pytest.raises(DesktopServiceError):
+        asyncio.run(service.dispatch("session.turn", params))
+    assert graph.states == []
+    assert path.read_bytes() == before + (b"\n" if mismatch == "fingerprint" else b"")
+    assert session._citation_service is None and session.active_skill_runtime is None
+
+
+@pytest.mark.parametrize("terminal", ["failed", "interrupted"])
+def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch, tmp_path, terminal):
+    from agent.conversations import FailureInfo
+    from conftest import make_astream_graph
+
+    graph = make_astream_graph()
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: graph)
+    service = _service(tmp_path)
+    session = ChatSession(service.config)
+    service.session = session
+    params = _turn_params("/citation find Paper A")
+    repository = session.conversation_repository
+    snapshot = repository.create(
+        conversation_id=session.session_id, project_id=session.project_id,
+        turn_id=params["turnId"], kind="conversational",
+        display_input=params["text"], semantic_input="find Paper A",
+        context_eligible=True, thinking_mode="normal",
+        submitted_at="2026-09-12T00:00:00Z",
+    )
+    repository.fail_turn(
+        snapshot, turn_id=params["turnId"], state=terminal,
+        failure=FailureInfo(
+            code="interrupted" if terminal == "interrupted" else "execution_failed",
+            message="Offline failure", retryable=True,
+        ),
+        finished_at="2026-09-12T00:00:01Z",
+    )
+    path = repository.path_for(session.session_id)
+    before = path.read_bytes()
+
+    def unavailable(_name):
+        raise ValueError("fixture runtime unavailable")
+
+    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    for retry in (False, True):
+        with pytest.raises(DesktopServiceError) as caught:
+            asyncio.run(service.dispatch("session.turn", {**params, "retry": retry}))
+        assert caught.value.code == "PROTOCOL_INVALID"
+    assert graph.states == [] and path.read_bytes() == before
+    assert session._citation_service is None and session.active_skill_runtime is None

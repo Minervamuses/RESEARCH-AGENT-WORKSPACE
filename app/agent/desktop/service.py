@@ -1773,9 +1773,21 @@ class DesktopService:
                         "PROTOCOL_INVALID",
                         f"Unknown slash command: /{self._bounded_text(parsed.name, 256)}",
                     )
+                completed_citation = False
+                if command.name == "citation":
+                    snapshot = await asyncio.to_thread(
+                        self._conversation_repository.load_optional, session.session_id,
+                    )
+                    completed_citation = snapshot is not None and any(
+                        turn.turn_id == turn_id and turn.state == "completed"
+                        for turn in snapshot.document.turns
+                    )
+                # A candidate only defers runtime eligibility. turn_outcome still
+                # checks the full canonical identity and fingerprint under its lock.
                 if (
                     parsed.name.casefold() != command.name.casefold()
-                    or not self._desktop_command_eligible(command, session)
+                    or (not completed_citation
+                        and not self._desktop_command_eligible(command, session))
                 ):
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
