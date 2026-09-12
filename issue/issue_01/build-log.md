@@ -7,7 +7,7 @@
 
 | Phase | 狀態 | 開始 | 完成 | 證據 | 阻塞 |
 |---|---|---|---|---|---|
-| 01 — 重現與分流 | In progress | 2026-09-12 | — | Native Unicode baseline and focused tests below | — |
+| 01 — 重現與分流 | Complete | 2026-09-12 | 2026-09-12 | Native Unicode baseline; engine and next experiment approved below | — |
 | 02 — 最小修正 | Not started | — | — | — | — |
 | 03 — 完整驗收 | Not started | — | — | — | — |
 
@@ -149,3 +149,21 @@ apt-get --print-uris --assume-no --no-install-recommends install ibus ibus-chewi
   https://github.com/microsoft/wslg/issues/9 (still Open; Linux IME requires setup);
   https://packages.ubuntu.com/noble/ibus-chewing (package/version/dependencies).
   Ubuntu manpages web lookup failed; installed help will be used after approval.
+
+### 2026-09-12 +08:00 — Phase 01 completed; Phase 02 authorized
+
+- User approved the proposed Traditional Chinese Bopomofo / IBus Chewing option,
+  package installation, session-local daemon and acceptance work, and explicitly
+  granted all additional approvals required within issue_01. Do not repeat these
+  requests. Authorization remains scoped to issue_01.
+- Phase 01 criteria: native absent-engine physical-key attempt and clipboard /
+  persistence comparison are recorded above; environment/control availability,
+  input preference and both focused checks are established. Same-engine controls
+  are deferred under Phase 01's explicit missing-IME exception to Phase 02.
+- Next experiment: install ibus, ibus-chewing, ibus-gtk3; compare existing GTK /
+  WebKit controls with the actual composer in the same session. No app patch is
+  justified by the present evidence.
+- Resume preflight: same Linux / Conda app toolchain and GUI branch; clean tree
+  at 7d9a9e8. No research-agent or IME process found. sudo -n true reports a
+  password is required; use WSL's authorized root invocation for OS installation,
+  while project commands and IME/Desktop stay under minervamuses.
