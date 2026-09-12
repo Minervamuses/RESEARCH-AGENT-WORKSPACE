@@ -2015,7 +2015,12 @@ for raw in sys.stdin:
         assert_eq!(restarted.last_shutdown, None);
 
         let child = lock_state(&supervisor.core).child.clone().expect("child");
-        kill_child(&child);
+        {
+            // Both exit observers must see a reaped child, not a transient stdout-only close.
+            let mut process = child.child.lock().expect("child process");
+            process.kill().expect("kill restarted child");
+            process.wait().expect("reap restarted child");
+        }
         let deadline = Instant::now() + Duration::from_secs(1);
         while supervisor.snapshot().child_running && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));

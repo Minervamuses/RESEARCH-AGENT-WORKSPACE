@@ -270,3 +270,9 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - cwd app/desktop/: timeout 540s cargo test --offline --manifest-path src-tauri/Cargo.toml → FAIL35passed／1failed，test0.25s／wrapper1.297s，exit101。失敗 backend::tests::a_new_generation_cannot_reuse_the_prior_shutdown_report，backend.rs:2023，observed Degraded / expected Crashed。未重跑完整 suite。原始輸出見 evidence/phase-06-rust-red.txt。
 - 直接查因：kill_child 只送 kill；stdout reader 的 EOF 可早於 try_wait 可見退出，stdout_closed 因而用 BACKEND_OUTPUT_CLOSED／Degraded，child_exited 保留該終態；exit monitor 先觀察則為 Crashed。原測試欲驗證新 generation 不重用舊 Graceful report，kill-only setup 卻依賴兩條 thread 排序。
 - 先修 PLANS／Phase06 的路線：只讓該既有測試在 child mutex 下 kill＋wait 完成，再交由兩條既有監看 thread 處理；保留原 Crashed 與 NotRunning 斷言，不修改 production、不新增框架／依賴。此完整 run 是最小實際 red；下一步一次 focused green，若失敗不跳過。
+
+## 2026-09-13 — Phase06 Rust focused green
+
+- f8e12ec + backend.rs 的既有 cfg(test) setup 局部修改：同一 child mutex 下 kill/wait，沒有放寬 assertion，沒有 production lifecycle 或 API 變更。
+- Exact command（cwd app/desktop/，Linux Conda app）：timeout 120s cargo test --offline --manifest-path src-tauri/Cargo.toml backend::tests::a_new_generation_cannot_reuse_the_prior_shutdown_report -- --exact → PASS1，35filtered，test0.05s／compile5.09s／wrapper5.167s，exit0。binary test target 0 tests。
+- 一次實作嘗試 green：真 child process 退出，snapshot Crashed，shutdown NotRunning，確認沒有重用舊 generation Graceful report。35個其他案例已在唯一完整 run 通過；不將原35／1 red改寫為完整36 passed。原始 focused output 見 evidence/phase-06-rust-target-green.txt。
