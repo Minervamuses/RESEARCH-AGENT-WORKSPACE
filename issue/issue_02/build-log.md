@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Command catalog | Complete | 2026-09-12 | 2026-09-12 | Phase 01 evidence below | — |
-| 02 — Composer menu | Not started | — | — | — | — |
+| 02 — Composer menu | Blocked | 2026-09-12 | — | Phase 02 evidence below | Required native Linux UI journey unavailable |
 | 03 — Integration acceptance | Not started | — | — | — | — |
 
 只使用 `Not started`、`In progress`、`Blocked`、`Complete`。
@@ -67,3 +67,53 @@ GUI 操作與各 phase planned verification 都尚未作為本計劃實作證據
   當前 catalog。既有 dynamic skill one-shot routing tests 通過。
 - Bounds decision: [context/phase-01-context.md](context/phase-01-context.md)。
 - `git diff --check` passed；未新增依賴、未操作 live provider/user store。
+
+
+### 2026-09-12 — Phase 02 implementation verified offline; Blocked on native UI
+
+- Phase 01 committed as `b0ef3c7` (`feat(desktop): expose session slash command catalog`).
+  Phase 02 preflight confirmed Phase 01 Complete, clean worktree, same Linux/Conda app
+  toolchain and cached Node dependencies. No production changes outside App.tsx/styles.css.
+- Changed: `app/desktop/src/App.tsx` adds local slash composer/list helpers and session
+  catalog ownership gating; `styles.css` styles bounded scrollable list; existing
+  `tests/conversations.test.ts` adds prefix/key-action/ownership/markup checks.
+  No backend.ts/conversations.ts production edits, new modules, dependencies or stores.
+- Catalog stays in the validated backend session DTO. Local ownership records only
+  generation/project/session identity, invalidated at create/select/lifecycle start.
+  Failed switching cannot restore the prior catalog. Composer remounts on session/generation
+  changes; workspace operations and non-ready backend suppress selectable commands.
+- Interaction implementation: focused single-token slash prefix, leading horizontal
+  whitespace preserved, case-insensitive prefix matching, cyclic arrow navigation,
+  Enter insertion followed by layout-effect focus/caret placement, Escape suppression
+  until editing, blur close, pointer default suppression to preserve focus, inert descriptions,
+  named listbox/options with active-descendant. Composition guard precedes all key actions;
+  Shift+Enter/Tab retain defaults. The existing sendTurn path is unchanged.
+- Red (cwd app/desktop, Conda app):
+  `node --test --experimental-strip-types --test-name-pattern 'slash menu|menu Enter' tests/conversations.test.ts`
+  → 2 failed because new helper functions did not yet exist.
+- First green focused command:
+  `node --test --experimental-strip-types tests/conversations.test.ts tests/backend.test.ts tests/trust.test.ts`
+  → 36 passed. `npm run build` initially failed TS2345: nullable selection passed to
+  sameSelection. Added the explicit null guard, then added ownership and markup assertions.
+- Final same focused Node command → **38 passed**, 0 failed (~4.2 s).
+  `npm run build` → **passed** (TypeScript and Vite). `git diff --check` → passed.
+  Key-handler callback assertions observe selection request count 0, then explicit next
+  Enter count 1; native request dispatch/focus/caret remain unobserved. SSR proves escaped
+  description text and ARIA relationships only; no claim of screen-reader operation.
+- Required UI preflight (read-only): DISPLAY=:0, WAYLAND_DISPLAY=wayland-0; X11 and WSLg
+  Wayland socket paths exist. `timeout 3 xdotool getdisplaygeometry` → **124 timeout**;
+  an earlier unbounded query was interrupted without GUI operations. `timeout 3 ibus engine`
+  → **1**, IBUS_IS_BUS assertion / “No engine is set.” `command -v orca` found no executable;
+  process-name scan found no local ibus/fcitx/orca/Xwayland/weston process. Environment variables
+  and socket existence are not evidence that native UI is operable from this agent.
+- No functioning native GUI operation tool is available in this session. No fixture GUI
+  journey was claimed or run; no input-method/system package installation attempted.
+  Required /, /sta, arrows, Enter, /ingest argument editing, Escape, blur, mouse, Shift+Enter,
+  actual caret/focus and zero-request observations must be supplied on an operable Linux Desktop.
+  Native IME/screen-reader evidence also remains unavailable for Phase 03.
+- Per PLANS “必要檢查無法取得” stop condition, Phase 02 is **Blocked**, not Complete;
+  Phase 03 stays Not started. Full pytest, full npm/Rust suites and Tauri source build are
+  reserved for Phase 03 and have **not** been run. Resume after native UI evidence/environment
+  is provided, or the user explicitly revises the required acceptance criteria.
+- Phase 02 implementation and this truthful blocker record are committed together per
+  the user's per-step commit instruction. No push/branch/worktree operation performed.

@@ -3,11 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
   type KeyboardEvent,
+  type RefObject,
 } from "react";
 
 import {
@@ -157,6 +159,165 @@ export function shouldSubmitComposerKey(
   isComposing: boolean,
 ): boolean {
   return key === "Enter" && !shiftKey && !isComposing;
+}
+
+type SlashCommands = SessionCreatedDto["slashCommands"];
+type SlashCatalogOwner = ConversationSelection & { generation: number };
+const NO_SLASH_COMMANDS: SlashCommands = [];
+
+export function composerSlashCommands(
+  session: SessionCreatedDto | null,
+  selected: ConversationSelection | null,
+  generation: number | undefined,
+  owner: SlashCatalogOwner | null,
+  interactive: boolean,
+): SlashCommands {
+  if (!interactive || owner === null || selected === null || owner.generation !== generation ||
+      !sameSelection(owner, selected) || session?.sessionId !== owner.sessionId ||
+      (session.projectId !== undefined && session.projectId !== owner.projectId)) {
+    return NO_SLASH_COMMANDS;
+  }
+  return session.slashCommands;
+}
+
+export function slashPrefix(draft: string, start: number, end: number): string | null {
+  if (start !== end || end !== draft.length) return null;
+  return /^[^\S\r\n]*\/([^\s/]*)$/.exec(draft)?.[1] ?? null;
+}
+
+export function filterSlashCommands(commands: SlashCommands, prefix: string): SlashCommands {
+  return commands.filter((command) => command.name.toLowerCase().startsWith(prefix.toLowerCase()));
+}
+
+export function insertSlashCommand(draft: string, name: string): string {
+  return `${/^[^\S\r\n]*/.exec(draft)?.[0] ?? ""}/${name} `;
+}
+
+export function handleComposerKey(
+  event: { key: string; shiftKey: boolean; isComposing: boolean; preventDefault: () => void },
+  menu: { open: boolean; count: number; active: number },
+  actions: { select: (index: number) => void; move: (index: number) => void; close: () => void; submit: () => void },
+): void {
+  if (event.isComposing) return;
+  if (menu.open) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      actions.close();
+      return;
+    }
+    if (menu.count > 0) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        actions.move((menu.active + (event.key === "ArrowDown" ? 1 : menu.count - 1)) % menu.count);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        actions.select(menu.active);
+        return;
+      }
+    }
+  }
+  if (shouldSubmitComposerKey(event.key, event.shiftKey, event.isComposing)) {
+    event.preventDefault();
+    actions.submit();
+  }
+}
+
+export function SlashCommandList({ commands, active, onSelect }: {
+  commands: SlashCommands; active: number; onSelect: (index: number) => void;
+}) {
+  return <ul id="composer-slash-commands" className="slash-command-list" role="listbox" aria-label="Slash commands">
+    {commands.map((command, index) => <li
+      key={command.name} id={`composer-slash-option-${index}`} role="option"
+      aria-selected={index === active}
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={() => onSelect(index)}
+    ><strong>/{command.name}</strong><span>{command.description}</span></li>)}
+  </ul>;
+}
+
+function SlashComposer({ draft, commands, textareaRef, disabled, sendDisabled, onChange, onSubmit }: {
+  draft: string; commands: SlashCommands; textareaRef: RefObject<HTMLTextAreaElement | null>;
+  disabled: boolean; sendDisabled: boolean; onChange: (draft: string) => void; onSubmit: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [cursor, setCursor] = useState({ start: 0, end: 0 });
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
+  const composingRef = useRef(false);
+  const insertion = useRef<string | null>(null);
+  const [selection, setSelection] = useState({ draft, commands, index: 0 });
+  const prefix = slashPrefix(draft, cursor.start, cursor.end);
+  const matches = useMemo(() => filterSlashCommands(commands, prefix ?? ""), [commands, prefix]);
+  const open = focused && !disabled && !composing && commands.length > 0 &&
+    dismissed !== draft && prefix !== null;
+  const active = selection.draft === draft && selection.commands === commands
+    ? Math.min(selection.index, Math.max(0, matches.length - 1)) : 0;
+
+  useLayoutEffect(() => {
+    if (insertion.current !== draft) return;
+    insertion.current = null;
+    textareaRef.current?.focus();
+    textareaRef.current?.setSelectionRange(draft.length, draft.length);
+    setCursor({ start: draft.length, end: draft.length });
+  }, [draft, textareaRef]);
+
+  useEffect(() => {
+    if (open) document.getElementById(`composer-slash-option-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, open, matches]);
+
+  const select = (index: number) => {
+    if (!open || composingRef.current || matches[index] === undefined) return;
+    const value = insertSlashCommand(draft, matches[index].name);
+    insertion.current = value;
+    setDismissed(value);
+    onChange(value);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    handleComposerKey({
+      key: event.key, shiftKey: event.shiftKey,
+      isComposing: event.nativeEvent.isComposing || composingRef.current,
+      preventDefault: () => event.preventDefault(),
+    }, { open, count: matches.length, active }, {
+      select,
+      move: (index) => setSelection({ draft, commands, index }),
+      close: () => setDismissed(draft),
+      submit: onSubmit,
+    });
+  };
+
+  return <form className="composer" onSubmit={(event) => {
+    event.preventDefault();
+    if (!composingRef.current) onSubmit();
+  }}>
+    <label htmlFor="conversation-draft">Message</label>
+    {open && <>
+      <SlashCommandList commands={matches} active={active} onSelect={select} />
+      <span className="slash-command-status" role="status">{matches.length === 0 ? "No matching commands" : `${matches.length} commands · ↑↓ to move · Enter to insert · Esc to close`}</span>
+    </>}
+    <textarea id="conversation-draft" ref={textareaRef} value={draft}
+      onChange={(event) => {
+        setDismissed(null);
+        setCursor({ start: event.target.selectionStart, end: event.target.selectionEnd });
+        onChange(event.target.value);
+      }}
+      onSelect={(event) => setCursor({ start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd })}
+      onFocus={(event) => {
+        setFocused(true);
+        setCursor({ start: event.target.selectionStart, end: event.target.selectionEnd });
+      }}
+      onBlur={() => setFocused(false)}
+      onCompositionStart={() => { composingRef.current = true; setComposing(true); }}
+      onCompositionEnd={() => { composingRef.current = false; setComposing(false); }}
+      onKeyDown={onKeyDown}
+      aria-autocomplete="list" aria-haspopup="listbox"
+      aria-controls={open ? "composer-slash-commands" : undefined}
+      aria-activedescendant={open && matches.length > 0 ? `composer-slash-option-${active}` : undefined}
+      rows={4} placeholder="Ask about your research…" disabled={disabled}
+    />
+    <div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button className="primary-button" type="submit" disabled={sendDisabled}>Send</button></div>
+  </form>;
 }
 
 function isTauriRuntime(): boolean {
@@ -366,6 +527,7 @@ export default function App() {
   const [conversation, conversationDispatch] = useReducer(conversationReducer, initialConversationState);
   const [catalog, setCatalog] = useState<ProjectListDto | null>(null);
   const [sessionLists, setSessionLists] = useState<Record<string, SessionListDto>>({});
+  const [slashCatalogOwner, setSlashCatalogOwner] = useState<SlashCatalogOwner | null>(null);
   const [catalogGeneration, setCatalogGeneration] = useState<number | null>(null);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<SafeUiError | null>(null);
@@ -429,6 +591,7 @@ export default function App() {
             if (event.type === "lifecycle") {
               const generationChanged = generationRef.current !== event.snapshot.generation;
               if (generationChanged || event.snapshot.lifecycle !== "ready") {
+                setSlashCatalogOwner(null);
                 pendingApprovalRef.current = null;
                 approvalResolvingRef.current = false;
                 setPendingApproval(null);
@@ -511,6 +674,7 @@ export default function App() {
         if (!disposed) {
           const generationChanged = generationRef.current !== snapshot.generation;
           if (generationChanged || snapshot.lifecycle !== "ready") {
+            setSlashCatalogOwner(null);
             pendingApprovalRef.current = null;
             approvalResolvingRef.current = false;
             setPendingApproval(null);
@@ -551,6 +715,7 @@ export default function App() {
 
   const runLifecycle = useCallback((action: "start" | "restart" | "shutdown") => {
     if (workspaceOperation.current !== null) return;
+    setSlashCatalogOwner(null);
     if (action === "restart") {
       setExtensionFlow((current) => current === null ? null : markExtensionRestarting(current));
     }
@@ -726,6 +891,7 @@ export default function App() {
     if (conversationRef.current.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Selecting conversation");
     if (operation === null) return;
+    setSlashCatalogOwner(null);
     const generation = generationRef.current;
     let selectionApplied = false;
     try {
@@ -735,6 +901,7 @@ export default function App() {
       if (selected.projectId !== projectId || selected.sessionId !== session.sessionId) {
         throw protocolMismatch("The backend returned a different conversation than requested.");
       }
+      setSlashCatalogOwner({ generation, projectId, sessionId: selected.sessionId });
       dispatch({ type: "session-created", session: selected });
       setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
       applyConversation({ type: "conversation-selected", generation: generationRef.current, projectId, sessionId: session.sessionId });
@@ -787,6 +954,7 @@ export default function App() {
     if (activeProjectId === null || conversationRef.current.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Creating conversation");
     if (operation === null) return;
+    setSlashCatalogOwner(null);
     const generation = generationRef.current;
     void (async () => {
       try {
@@ -796,6 +964,7 @@ export default function App() {
         if (session.projectId !== undefined && session.projectId !== activeProjectId) {
           throw protocolMismatch("The backend created a conversation in a different project.");
         }
+        setSlashCatalogOwner({ generation, projectId: activeProjectId, sessionId: session.sessionId });
         dispatch({ type: "session-created", session });
         setExtensionFlow((current) => observeExtensionRevision(current, session.extensionRevision));
         applyConversation({ type: "conversation-selected", generation, projectId: activeProjectId, sessionId: session.sessionId });
@@ -1166,13 +1335,6 @@ export default function App() {
     }
   }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
-  const onComposerKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (shouldSubmitComposerKey(event.key, event.shiftKey, event.nativeEvent.isComposing)) {
-      event.preventDefault();
-      sendTurn();
-    }
-  }, [sendTurn]);
-
   useEffect(() => { if (workspaceIssue !== null) focusComposer(); }, [focusComposer, workspaceIssue]);
   useEffect(() => {
     if (pendingUserText !== null) transcriptEndRef.current?.scrollIntoView({ block: "end" });
@@ -1275,7 +1437,16 @@ export default function App() {
               <ConversationTurns turns={visibleTurns} />
               <div ref={transcriptEndRef} />
             </div>
-            <form className="composer" onSubmit={(event) => { event.preventDefault(); sendTurn(); }}><label htmlFor="conversation-draft">Message</label><textarea id="conversation-draft" ref={composerRef} value={conversation.draft} onChange={(event) => applyConversation({ type: "draft-changed", draft: event.target.value })} onKeyDown={onComposerKeyDown} rows={4} placeholder="Ask about your research…" disabled={conversation.selected === null || interaction.turnActive} /><div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button className="primary-button" type="submit" disabled={interaction.sendDisabled || workspaceBusy !== null}>Send</button></div></form>
+            <SlashComposer
+              key={`${state.snapshot?.generation}:${conversation.selected?.projectId}:${conversation.selected?.sessionId}`}
+              draft={conversation.draft} textareaRef={composerRef}
+              commands={composerSlashCommands(state.session, conversation.selected, state.snapshot?.generation, slashCatalogOwner,
+                state.snapshot?.lifecycle === "ready" && state.phase === "session-ready" && idle)}
+              disabled={conversation.selected === null || interaction.turnActive}
+              sendDisabled={interaction.sendDisabled || workspaceBusy !== null}
+              onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
+              onSubmit={sendTurn}
+            />
             <p className="session-meta">Session {activeSession.sessionId} · {activeSession.turnCount} turns · {selectedRegistered ? "cataloged" : "transient"} · Citation output {state.diagnostics?.citationOutputPath ?? "unavailable"}</p>
           </section>}
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}

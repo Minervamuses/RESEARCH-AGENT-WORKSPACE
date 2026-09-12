@@ -7,7 +7,7 @@ import {
   type ConversationFailure,
   type VisibleConversationTurn,
 } from "../src/conversations.ts";
-import type { TranscriptTurnDto } from "../src/protocol.ts";
+import type { SessionCreatedDto, TranscriptTurnDto } from "../src/protocol.ts";
 
 interface SafeContentModule {
   SafeContent: (props: { content: string; openExternal?: (url: string) => void | Promise<void> }) => unknown;
@@ -47,6 +47,24 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  composerSlashCommands: (
+    session: SessionCreatedDto | null,
+    selected: { projectId: string; sessionId: string } | null,
+    generation: number | undefined,
+    owner: { generation: number; projectId: string; sessionId: string } | null,
+    interactive: boolean,
+  ) => SessionCreatedDto["slashCommands"];
+  SlashCommandList: (props: {
+    commands: SessionCreatedDto["slashCommands"]; active: number; onSelect: (index: number) => void;
+  }) => unknown;
+  slashPrefix: (draft: string, start: number, end: number) => string | null;
+  filterSlashCommands: (commands: { name: string; description: string }[], prefix: string) => { name: string; description: string }[];
+  insertSlashCommand: (draft: string, name: string) => string;
+  handleComposerKey: (
+    event: { key: string; shiftKey: boolean; isComposing: boolean; preventDefault: () => void },
+    menu: { open: boolean; count: number; active: number },
+    actions: { select: (index: number) => void; move: (index: number) => void; close: () => void; submit: () => void },
+  ) => void;
   mergeSessionItems: (
     current: readonly SessionSummary[],
     next: readonly SessionSummary[],
@@ -94,6 +112,99 @@ function loadAppHelpers(): Promise<AppHelpersModule> {
 
 after(async () => {
   if (devServer !== undefined) await (await devServer).close();
+});
+
+test("slash menu filters backend names only at a complete command prefix", async () => {
+  const { slashPrefix, filterSlashCommands, insertSlashCommand } = await loadAppHelpers();
+  const commands = [
+    { name: "status", description: "Status" },
+    { name: "arbitrary-skill", description: "Custom skill" },
+  ];
+  assert.equal(slashPrefix("  /STA", 6, 6), "STA");
+  assert.deepEqual(filterSlashCommands(commands, ""), commands);
+  assert.deepEqual(filterSlashCommands(commands, "STA"), [commands[0]]);
+  assert.deepEqual(filterSlashCommands(commands, "arbitrary"), [commands[1]]);
+  assert.deepEqual(filterSlashCommands(commands, "unknown"), []);
+  for (const draft of ["", "text /sta", "/status ", "/status arg", "/sta\n", "\n/sta"]) {
+    assert.equal(slashPrefix(draft, draft.length, draft.length), null, draft);
+  }
+  assert.equal(slashPrefix("/sta", 2, 2), null);
+  assert.equal(slashPrefix("/sta", 0, 4), null);
+  assert.equal(insertSlashCommand("  /ar", "arbitrary-skill"), "  /arbitrary-skill ");
+});
+
+test("menu Enter selects with zero requests; later Enter submits once", async () => {
+  const { handleComposerKey } = await loadAppHelpers();
+  let requests = 0;
+  let selected = -1;
+  let prevented = 0;
+  let closed = 0;
+  let active = 0;
+  const actions = {
+    select: (index: number) => { selected = index; },
+    move: (index: number) => { active = index; },
+    close: () => { closed++; },
+    submit: () => { requests++; },
+  };
+  const event = { key: "Enter", shiftKey: false, isComposing: false, preventDefault: () => { prevented++; } };
+  const menu = { open: true, count: 2, active: 0 };
+  handleComposerKey({ ...event, isComposing: true }, menu, actions);
+  handleComposerKey({ ...event, shiftKey: true }, menu, actions);
+  assert.equal(selected, -1);
+  assert.equal(requests, 0);
+  assert.equal(prevented, 0);
+  handleComposerKey(event, menu, actions);
+  assert.equal(selected, 0);
+  assert.equal(prevented, 1);
+  assert.equal(requests, 0);
+  handleComposerKey(event, { ...menu, open: false }, actions);
+  assert.equal(requests, 1);
+  handleComposerKey({ ...event, key: "ArrowUp" }, menu, actions);
+  assert.equal(active, 1);
+  handleComposerKey({ ...event, key: "ArrowDown" }, { ...menu, active: 1 }, actions);
+  assert.equal(active, 0);
+  handleComposerKey({ ...event, key: "Escape" }, menu, actions);
+  assert.equal(closed, 1);
+  const beforeTab = prevented;
+  handleComposerKey({ ...event, key: "Tab" }, menu, actions);
+  assert.equal(prevented, beforeTab);
+  handleComposerKey(event, { ...menu, count: 0 }, actions);
+  assert.equal(requests, 2); // An explicit unknown command still reaches the parser.
+});
+
+test("catalog requires a verified current session owner after switch or restart", async () => {
+  const { composerSlashCommands } = await loadAppHelpers();
+  const selected = { projectId: "p1", sessionId: "a" };
+  const owner = { ...selected, generation: 1 };
+  const session: SessionCreatedDto = {
+    ...selected, turnCount: 0, graphRecursionLimit: 64, thinkingMode: "normal",
+    bashPermissionMode: "ask", slashCommands: [{ name: "skill-a", description: "A" }],
+    loadedSkills: ["unverified-skill"], mcpFamilies: [], startupDiagnostics: [], extensionRevision: 1,
+  };
+  assert.equal(composerSlashCommands(session, selected, 1, owner, true), session.slashCommands);
+  assert.deepEqual(composerSlashCommands(session, selected, 1, null, true), []); // Failed/in-flight selection.
+  assert.deepEqual(composerSlashCommands(session, selected, 2, owner, true), []); // Restart, same ID.
+  assert.deepEqual(composerSlashCommands(session, { ...selected, sessionId: "b" }, 1, owner, true), []);
+  assert.deepEqual(composerSlashCommands(session, { ...selected, projectId: "p2" }, 1, owner, true), []);
+  assert.deepEqual(composerSlashCommands(session, selected, 1, owner, false), []); // Busy/not ready.
+  assert.deepEqual(composerSlashCommands(null, selected, 1, owner, true), []);
+  const fresh = { ...session, slashCommands: [{ name: "new-skill-a", description: "New A" }] };
+  assert.equal(composerSlashCommands(fresh, selected, 2, { ...owner, generation: 2 }, true), fresh.slashCommands);
+});
+
+test("slash list exposes named options and renders descriptions as text", async () => {
+  const { SlashCommandList } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const html = renderToStaticMarkup(createElement(SlashCommandList, {
+    commands: [{ name: "arbitrary-skill", description: '<img src="x">' }],
+    active: 0, onSelect: () => assert.fail("Rendering must not select"),
+  }));
+  assert.match(html, /role="listbox" aria-label="Slash commands"/);
+  assert.match(html, /id="composer-slash-option-0" role="option" aria-selected="true"/);
+  assert.match(html, /\/arbitrary-skill/);
+  assert.match(html, /&lt;img/);
+  assert.doesNotMatch(html, /<img/);
 });
 
 test("safe content accepts only credential-free absolute HTTP(S) URLs", async () => {
