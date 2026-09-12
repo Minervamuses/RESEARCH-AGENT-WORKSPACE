@@ -1,8 +1,12 @@
 """Tests for the private planner and host-owned apply path."""
 
 import asyncio
+import errno
+import fcntl
 import json
 import multiprocessing
+import os
+import signal
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,6 +16,7 @@ from langchain_core.messages import AIMessage
 
 from agent.cli.slash_commands import (
     SlashCommandContext,
+    SlashCommandError,
     build_default_registry,
     execute_slash_command,
     parse_slash_command,
@@ -25,11 +30,13 @@ from agent.extensions.manager import (
 from agent.extensions.discovery import scan_extensions
 from agent.extensions.models import ExtensionRegistry
 from agent.extensions.registry import (
+    RegistryError,
     install_scanned_extension,
     load_registry,
     write_registry,
 )
 from agent.extensions import manager as manager_module
+from agent.extensions import registry as registry_module
 
 
 class _PlanModel:
@@ -121,21 +128,38 @@ def _apply_process(root, name, connection, pause):
         preview = manager.preview(selected_skill_keys={item["key"]})
         connection.send((name, "ready", preview.registry.revision))
         with pytest.MonkeyPatch.context() as patch:
-            if pause == "before_write":
-                original_write = manager_module.write_registry
+            if pause:
+                module, attribute = {
+                    "before_write": (manager_module, "write_registry"),
+                    "before_read": (manager_module, "load_registry"),
+                    "directory_fsync": (registry_module, "fsync_directory"),
+                }[pause]
+                original = getattr(module, attribute)
 
-                def paused_write(*args, **kwargs):
-                    connection.send((name, "paused", "before_write"))
-                    assert connection.poll(10), "writer release timed out"
+                def paused_call(*args, **kwargs):
+                    if pause == "directory_fsync" and args[0] != preview.paths.state_root:
+                        return original(*args, **kwargs)
+                    connection.send((name, "paused", pause))
+                    assert connection.poll(10), "apply release timed out"
                     assert connection.recv() == "release"
-                    return original_write(*args, **kwargs)
+                    return original(*args, **kwargs)
 
-                patch.setattr(manager_module, "write_registry", paused_write)
+                patch.setattr(module, attribute, paused_call)
             while True:
                 assert connection.poll(10), "child command timed out"
                 command = connection.recv()
                 if command == "quit":
                     return
+                if command == "probe":
+                    with (preview.paths.state_root / ".apply.lock").open("rb") as handle:
+                        try:
+                            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            outcome = "locked"
+                        else:
+                            outcome = "available"
+                    connection.send((name, "probe", outcome))
+                    continue
                 if command == "preview":
                     preview = manager.preview(selected_skill_keys={item["key"]})
                     connection.send((name, "ready", preview.registry.revision))
@@ -152,7 +176,7 @@ def _apply_process(root, name, connection, pause):
 
 
 @contextmanager
-def _apply_processes(*specs):
+def _apply_processes(*specs, terminated=()):
     context = multiprocessing.get_context("spawn")
     children = []
     try:
@@ -168,9 +192,9 @@ def _apply_processes(*specs):
         for process, connection in children:
             if process.is_alive():
                 connection.send("quit")
-        for process, _ in children:
+        for index, (process, _) in enumerate(children):
             process.join(10)
-            assert process.exitcode == 0
+            assert process.exitcode == (-signal.SIGTERM if index in terminated else 0)
             print(f"child {process.pid}: exit={process.exitcode}")
     finally:
         for process, connection in children:
@@ -223,6 +247,198 @@ def test_cross_process_apply_preserves_successful_update(tmp_path):
             sources["alpha"] / "SKILL.md"
         ).read_bytes()
         assert not (state / "installed/skill/beta").exists()
+
+        b.send("apply")
+        assert _process_message(b) == (
+            "beta", "error", "extension registry changed; run preview again"
+        )
+        assert not (state / "installed/skill/beta").exists()
+        b.send("preview")
+        assert _process_message(b) == ("beta", "ready", 1)
+        b.send("apply")
+        assert _process_message(b) == ("beta", "success", 2)
+        registry = load_registry(state)
+        assert registry.revision == 2
+        assert set(registry.extensions) == {"skill:alpha", "skill:beta"}
+        for name, source in sources.items():
+            installed = registry.extensions[f"skill:{name}"]
+            assert installed.source_hash == scan.items[f"skill:{name}"].source_hash
+            assert (state / installed.installed_relpath / "SKILL.md").read_bytes() == (
+                source / "SKILL.md"
+            ).read_bytes()
+
+
+def test_cross_process_lock_covers_directory_fsync(tmp_path):
+    config = _config(tmp_path)
+    _write_private(tmp_path)
+    _write_skill(config, name="alpha")
+    _write_skill(config, name="beta")
+    state = Path(config.extension_state_dir)
+    with _apply_processes(
+        (tmp_path, "alpha", "directory_fsync"), (tmp_path, "beta", None)
+    ) as children:
+        (_, a), (_, b) = children
+        assert _process_message(a) == ("alpha", "ready", 0)
+        assert _process_message(b) == ("beta", "ready", 0)
+        a.send("apply")
+        assert _process_message(a) == ("alpha", "paused", "directory_fsync")
+        assert load_registry(state).revision == 1
+        lock_file = state / ".apply.lock"
+        inode = lock_file.stat().st_ino
+        assert lock_file.stat().st_mode & 0o777 == 0o600
+        assert lock_file.read_bytes() == b""
+        b.send("probe")
+        assert _process_message(b) == ("beta", "probe", "locked")
+        a.send("release")
+        assert _process_message(a) == ("alpha", "success", 1)
+        b.send("probe")
+        assert _process_message(b) == ("beta", "probe", "available")
+        assert lock_file.stat().st_ino == inode
+
+
+def test_cross_process_crash_releases_lock_before_revision_read(tmp_path):
+    config = _config(tmp_path)
+    _write_private(tmp_path)
+    _write_skill(config, name="alpha")
+    source = _write_skill(config, name="beta")
+    state = Path(config.extension_state_dir)
+    with _apply_processes(
+        (tmp_path, "alpha", "before_read"), (tmp_path, "beta", None), terminated=(0,)
+    ) as children:
+        (process_a, a), (_, b) = children
+        assert _process_message(a) == ("alpha", "ready", 0)
+        assert _process_message(b) == ("beta", "ready", 0)
+        a.send("apply")
+        assert _process_message(a) == ("alpha", "paused", "before_read")
+        lock_file = state / ".apply.lock"
+        inode = lock_file.stat().st_ino
+        b.send("probe")
+        assert _process_message(b) == ("beta", "probe", "locked")
+        assert not (state / "registry.json").exists()
+        assert not (state / "installed").exists()
+        process_a.terminate()
+        process_a.join(10)
+        assert process_a.exitcode == -signal.SIGTERM
+        b.send("apply")
+        assert _process_message(b) == ("beta", "success", 1)
+        registry = load_registry(state)
+        assert registry.revision == 1
+        assert set(registry.extensions) == {"skill:beta"}
+        installed = registry.extensions["skill:beta"]
+        assert (state / installed.installed_relpath / "SKILL.md").read_bytes() == (
+            source / "SKILL.md"
+        ).read_bytes()
+        assert lock_file.stat().st_ino == inode
+
+
+def test_cross_process_apply_uses_separate_state_root_locks(tmp_path):
+    roots = [tmp_path / name for name in ("x", "y")]
+    for root, name in zip(roots, ("alpha", "beta")):
+        root.mkdir()
+        _write_private(root)
+        _write_skill(_config(root), name=name)
+    with _apply_processes(
+        (roots[0], "alpha", "before_write"), (roots[1], "beta", None)
+    ) as children:
+        (_, a), (_, b) = children
+        assert _process_message(a) == ("alpha", "ready", 0)
+        assert _process_message(b) == ("beta", "ready", 0)
+        a.send("apply")
+        assert _process_message(a) == ("alpha", "paused", "before_write")
+        b.send("apply")
+        assert _process_message(b) == ("beta", "success", 1)
+        a.send("release")
+        assert _process_message(a) == ("alpha", "success", 1)
+        for root, name in zip(roots, ("alpha", "beta")):
+            registry = load_registry(root / "state")
+            assert registry.revision == 1
+            assert set(registry.extensions) == {f"skill:{name}"}
+
+
+@pytest.mark.parametrize("failure", ["read", "write"])
+def test_cross_process_apply_exception_releases_locks(monkeypatch, tmp_path, failure):
+    config = _config(tmp_path)
+    private = _write_private(tmp_path)
+    _write_skill(config, name="alpha")
+    _write_skill(config, name="beta")
+    state = Path(config.extension_state_dir)
+    write_registry(state, ExtensionRegistry(revision=7))
+    original_bytes = (state / "registry.json").read_bytes()
+    manager = _manager(config, private, _PlanModel([dict(_plan_item(), key="skill:alpha")]))
+    preview = manager.preview(selected_skill_keys={"skill:alpha"})
+
+    with _apply_processes((tmp_path, "beta", None)) as children:
+        (_, b), = children
+        assert _process_message(b) == ("beta", "ready", 7)
+
+        def fail(*_args, **_kwargs):
+            if failure == "read":
+                raise OSError("injected revision read failure")
+            raise RegistryError("injected writer failure before replace")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                manager_module, "load_registry" if failure == "read" else "write_registry", fail
+            )
+            with pytest.raises(ManagementError, match="extension apply failed: injected"):
+                manager.apply(preview)
+        assert (state / "registry.json").read_bytes() == original_bytes
+        assert manager.apply(preview).applied_revision == 8
+        b.send("preview")
+        assert _process_message(b) == ("beta", "ready", 8)
+        b.send("apply")
+        assert _process_message(b) == ("beta", "success", 9)
+        registry = load_registry(state)
+        assert registry.revision == 9
+        assert set(registry.extensions) == {"skill:alpha", "skill:beta"}
+
+
+@pytest.mark.parametrize("failure", ["open", "flock"])
+def test_apply_lock_io_failure_does_not_enter_transaction(monkeypatch, tmp_path, failure):
+    config = _config(tmp_path)
+    _write_skill(config)
+    manager = _manager(config, _write_private(tmp_path), _PlanModel([_plan_item()]))
+    preview = manager.preview()
+
+    def fail(*_args, **_kwargs):
+        raise OSError(errno.EIO, "injected lock I/O failure")
+
+    def unexpected_transaction(*_args, **_kwargs):
+        pytest.fail("lock failure entered apply transaction")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(manager, "_apply_locked", unexpected_transaction)
+        if failure == "open":
+            patch.setattr(manager_module.os, "open", fail)
+        else:
+            patch.setattr(manager_module.fcntl, "flock", fail)
+        with pytest.raises(ManagementError, match="extension apply failed:.*injected lock I/O"):
+            manager.apply(preview)
+    assert not (preview.paths.state_root / "registry.json").exists()
+    assert not (preview.paths.state_root / "installed").exists()
+    assert manager.apply(preview).applied_revision == 1
+
+
+def test_apply_lock_busy_is_slash_command_error(monkeypatch, tmp_path):
+    config = _config(tmp_path)
+    _write_skill(config)
+    manager = _manager(config, _write_private(tmp_path), _PlanModel([_plan_item()]))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
+    state = Path(config.extension_state_dir)
+    state.mkdir()
+    fd = os.open(state / ".apply.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(SlashCommandError, match="another extension apply is already running"):
+            asyncio.run(execute_slash_command(
+                parse_slash_command("/extension-management"),
+                SlashCommandContext(session=_Session(config, manager), registry=build_default_registry()),
+            ))
+        assert not (state / "registry.json").exists()
+        assert not (state / "installed").exists()
+    finally:
+        os.close(fd)
+    assert manager.apply(manager.preview()).applied_revision == 1
 
 
 def _installer_bundle(tmp_path, *, name="writer", description="ZIP writer"):

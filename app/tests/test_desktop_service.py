@@ -23,7 +23,7 @@ from agent.conversations import ConversationRepository
 from agent.desktop.catalog import DesktopProjectCatalog
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
-from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus
+from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus, ManagementError
 from agent.session import ChatSession
 from agent.skills import SkillMetadata
 from agent.turns.results import TurnOutcome
@@ -2030,6 +2030,29 @@ def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(
         "extensions.apply",
         applied,
     )
+
+
+def test_extension_apply_maps_manager_lock_conflict_to_busy(monkeypatch, tmp_path):
+    manager = _FakeExtensionManager(tmp_path)
+    service = _service(tmp_path, extension_manager=manager, session_factory=_SessionFactory())
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    preview = asyncio.run(service.dispatch("extensions.preview", {}))
+
+    def busy(*_args, **_kwargs):
+        raise ManagementError("another extension apply is already running")
+
+    monkeypatch.setattr(manager, "apply", busy)
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(service.dispatch("extensions.apply", {
+            "previewId": preview["previewId"],
+            "approvedBindingHashes": ["a" * 64],
+            "turnId": uuid.uuid4().hex,
+            "retry": False,
+        }))
+    assert raised.value.code == "BUSY_EXTENSION_OPERATION"
+    assert raised.value.retryable is True
+    assert str(raised.value) == "The extension operation could not be completed."
+    assert manager.applied_preview is None
 
 
 def test_extension_apply_is_prompt_first_and_replays_completed_report_after_restart(

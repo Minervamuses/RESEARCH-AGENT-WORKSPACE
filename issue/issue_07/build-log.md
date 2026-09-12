@@ -81,3 +81,43 @@
   beta installed 目錄不存在。A/B 正常 exit 0，handles 全部 close。
 - 第一個 focused implementation attempt 通過原 Red。尚未宣告 phase Complete；
   下一步補舊 preview/重新核准、fsync 邊界、exception/open-error、crash、root 隔離與入口。
+
+### 2026-09-12（Asia/Taipei）— Lifecycle 與入口驗收
+
+- 補充僅修改既有 manager/desktop service test files。共新增 10 個 pytest cases
+  （manager 9，含原 Red；Desktop 1），沿用 fake planner、tmp_path 與 spawn/Pipe。
+  每個 poll/join 上限 10 秒，無 sleep，正常 child exit 必須 0；僅 crash A 預期 -15。
+- 以下在 app cwd、Linux/Conda app 執行，無 skipped/unavailable：
+
+  ```bash
+  conda run -n app --no-capture-output timeout 180s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_manager.py tests/test_extension_registry.py -q -s
+  conda run -n app --no-capture-output timeout 180s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_user_journey.py tests/test_extension_mcp.py tests/test_extension_skill_startup.py -q
+  conda run -n app --no-capture-output timeout 180s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_desktop_service.py tests/test_desktop_protocol_contract.py -q -k extension
+  ```
+
+- Manager/registry：**60 passed, 1 warning in 7.60s**。
+- Journey/MCP/startup：**32 passed, 1 warning in 1.45s**。已讀 live fake model 與
+  temporary stdio MCP server，沒有 live provider；重用既有 dry-run/apply/restart/update/delete。
+- Desktop 第一次：**1 failed, 15 passed, 165 deselected in 0.41s**。
+  新 test 錯誤假設會原樣傳出 busy 文字；code 與 retryable 已通過。
+  核對 service.py 原有 mapping，實際刻意回傳通用文字
+  `The extension operation could not be completed.`。只更正 test 的原契約斷言，
+  無 production 變更；同命令再跑 **16 passed, 165 deselected, 1 warning in 0.33s**。
+  這是驗收測試假設修正，不是修改既有 Desktop message。
+
+| 必要案例 | Observed evidence |
+|---|---|
+| 同 revision 競爭與恢復 | `test_cross_process_apply_preserves_successful_update`：alpha/beta ready 0；beta busy，alpha success 1；beta 舊 preview registry-changed，重新 preview ready 1 後 success 2。Registry 1 只有 alpha，beta 無 installed 副本；registry 2 有兩者，各 source hash 與 SKILL bytes 相符；A/B exit 0 |
+| Directory fsync 邊界 | `test_cross_process_lock_covers_directory_fsync`：alpha paused directory_fsync 時 JSON 已 revision 1，但獨立 beta fd probe 為 locked；alpha success 1 後 probe available。固定 lock inode 不變、空 bytes、0600；A/B exit 0 |
+| Crash 釋鎖 | `test_cross_process_crash_releases_lock_before_revision_read`：alpha 在首個 apply revision read 前持真鎖暫停，beta probe locked；無 registry/installed。終止 alpha 並 join → exit -15，beta 原 revision 0 preview success 1、exit 0，JSON/installed bytes 正確；未 unlink，inode 保持 |
+| Root 隔離 | `test_cross_process_apply_uses_separate_state_root_locks`：A 持 X 等待 writer，B 對 Y success 1，才放行 A success 1；各 registry 僅自身 skill；A/B exit 0 |
+| Read/writer exceptions | `test_cross_process_apply_exception_releases_locks[read/write]`：注入 OSError/RegistryError，兩例均 ManagementError，原 revision 7 JSON bytes 不變；同 process 重新 apply success 8，beta 重新 preview ready 8、success 9、exit 0，兩 entry 保留。Writer failure 不宣稱回滾 installed 副本 |
+| Open/non-busy flock I/O | `test_apply_lock_io_failure_does_not_enter_transaction[open/flock]`：EIO 走 ManagementError，未進 `_apply_locked`、無 registry/installed；去掉 patch 後同 manager success 1 |
+| CLI busy | `test_apply_lock_busy_is_slash_command_error`：真固定 fd 持鎖，slash command 回 SlashCommandError/busy，無 registry/installed；release 後 success 1 |
+| Desktop busy | `test_extension_apply_maps_manager_lock_conflict_to_busy`：正式 dispatch 將 fake manager 的真 ManagementError 映射為 BUSY_EXTENSION_OPERATION/retryable=True、既有通用文字，無 applied_preview；成功/durable-result/protocol 既有 tests 亦通過 |
+
+- 所有自身 children 均有界 join、關閉 Pipe/Process handles；無殘留 child assertion failure。
+  `git diff 4d7d8a5 --check` 與 `git diff --check` 通過。
+- 下一步為唯一一次 full suite 與 actual diff review。近期 issue 06 的同 runtime
+  full suite 為 1092 tests / 23.64 秒，本次新增 focused 7.60 秒且僅本機離線資料，
+  仍適合計劃的 540 秒上限；不啟動 provider/GPU/外部資料工作。
