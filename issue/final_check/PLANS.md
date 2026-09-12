@@ -104,3 +104,5 @@ Focused implementation 兩次嘗試失敗就停下，保存因果證據與最小
 ## 使用者指定的最終清理與 push
 
 使用者已明確要求完成剩餘工作、commit 所有變更，清理 issue/ 最後只保留 issue/09-desktop-thinking-effort-control-deferred.md，並在全數完成後 push。完成 required 驗收與回歸後，先提交 final_check 的真實證據，再刪除已完成／已接受限縮的問題卡與計畫，以及已收斂到單一問題卡的09計畫；Git歷史保留完整記錄。清理 commit 後核對只剩該卡、工作樹乾淨，才對既有 origin/GUI 做普通 push 並核對遠端HEAD；不 force push、不切 branch。若 required 工作仍 Blocked，不刪除其活動記錄或宣稱全數完成。
+
+Phase03 現場入口核對：App 無 cancel 按鈕／request cancellation RPC，故用自有 fixture backend 中斷與既有 restart／canonical recovery 驗證 interrupted 原生結果；task cancellation cleanup 仍用既有測試。此為驗收入口具體化，不新增功能、不豁免恢復／不自動重跑門檻。

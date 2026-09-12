@@ -226,3 +226,8 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - Read-only AT-SPI操作：gdbus call --address unix:path=/run/user/1000/at-spi/bus --dest <實際GetChildren回傳bus> --object-path <實際path> --method org.a11y.atspi.Accessible.GetChildren／GetRoleName／GetState／GetAttributes，或org.freedesktop.DBus.Properties.GetAll org.a11y.atspi.Accessible／Text。僅沿此自有App subtree，最多120nodes，實際79nodes、queue清空。AX暫存ax-menu.json，真/status結果截圖menu-status-result.png在owned root。GetText 0 -1一次被CLI選項解析拒絕，未当passed；關閉選單後舊optionpath UnknownMethod是已移除節點，後續需重新發現。
 - 第一次540s到期LAUNCH_EXIT=124；下一次A→B click遇foreground window did not report a process id，立即停止舊handle並list_windows確認App已關閉。這是自設互動期限，不是App功能失敗；尚未驗的切換／restart／apply／Citation不記passed。後續啟動同owned root，記增量啟動成本與互動時間分開，只停止自有程序。
 - 真Citation入口因果核對：Tauri source_conda_launch固定Conda app Python -m agent.desktop.server，PYTHONPATH=app；stock phase02僅FixtureSessionFactory。按03既有DI與temporary launcher範圍，用精確root/opt-in條件的臨時app/sitecustomize.py啟動接縫，替換fixture service的session_factory為真ChatSession及既有offline model/fetcher，記request/model/save/scope，完成即移除；不修改正式API/schema或新增持久module/framework。
+
+## 2026-09-13 — 原生中斷入口核對
+- 已實際取得真 ChatSession Citation 搜尋/save/正式答案、普通下一回合、menu/AT-SPI、A/B、extension apply/rematerialization/removal、restart、failure證據，完整對照與artifact待本phase結束附錄。
+- App.tsx 無cancel控件，server沒有cancel RPC；首個 [[native:cancel]] 只延遲6秒/模型步，實際完成，僅計入busy/tool evidence，不能記取消passed。依live入口先具體化PLANS/03為自有backend中斷後restart觀察interrupted；沒有新增控件或縮減恢復/不自動重跑要求。既有test_citation_e2e保留task.cancel cleanup直接證據。
+- tmp registry移除成功revision2；一次變更delay的唯一匹配assert失敗，因原碼為多行，未改hook，不冒充已延長。普通restart後真Session僅citation，models/fetch/scopes皆0，bundle SHA256與mtime完全相同。後續保留6秒delay，在首個model等待時停止精確owned backend PID。

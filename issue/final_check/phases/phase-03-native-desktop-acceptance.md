@@ -49,7 +49,7 @@ menu 的 Shift+Enter 等一般鍵鼠互動仍需驗收；輸入法另依 GOALS �
 
 1. 經 menu 選 Citation，補 fixture 文獻需求：選取本身零送出；送出後 busy／Normal 說明、真工具活動、一份經 gate/render 的正式答案，且與 tmp canonical JSON／save bundle 一致。
 2. 完成後送一般問題：無 Citation scope/tool；selector 與 backend 原模式相同。A→B→A 和 backend restart 只讀相同歷史，model/provider/save/scope 計數不增加、bundle 保留。
-3. 用可控離線 failure／cancel 見到恢復可操作、failed/interrupted 不自行重跑。嚴格 duplicate/identity 以 Phase 02 跨層測試為主要證據，不另加 GUI 控件。
+3. 用可控離線 failure／中斷見到恢復可操作、failed/interrupted 不自行重跑。現有 App 沒有取消按鈕；原生中斷以停止已核對的自有 fixture backend PID、UI restart 後讀回 interrupted 驗證，task cancellation cleanup 由既有直接測試覆蓋，不新增 UI 或協定。嚴格 duplicate/identity 以 Phase 02 跨層測試為主要證據，不另加 GUI 控件。
 
 ### 支援檢查與 failure gate
 
