@@ -261,3 +261,12 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - 支援focused checks為conditional：沒有正式UI/fixture code變更，既有Python/Node直接證據仍適用；本phase不重跑full suites/build，交由06統一。
 - 點UI Shut down觀察Backend stopped/gracefully；核對/proc/10638精確root及getpgid==10638後killpg(SIGTERM)，只停止自有launcher/Vite/Tauri。確認app/sitecustomize.py為指到ownedroot/sitecustomize.py的symlink後unlink，僅移除自有app/__pycache__/sitecustomize.*.pyc。截圖及去敏audit/AX/recipe已保存；root暫留至最終證據驗證，不再有會啟動hook的repo入口。
 - Phase03 Complete：Issue02與08分別取得直接native evidence；IME明確skipped；無production/tests修改、無新增依賴/API/schema/持久module、無新的功能缺陷。既有先前unavailable/timeout保留歷史。下一eligible為06，04/05明確延期。
+
+## 2026-09-13 — Phase06 once-only suites / Rust red and route correction
+
+- Baseline ec9175f；Linux Conda app runtime／Git 重新核對，working tree clean，GUI ahead13 origin/GUI。自有 native App 已停止、app/sitecustomize.py 與其編譯快取已移除，以下 suite 沒有 fixture hook。三套 independent suites 各只執行一次。
+- cwd app/: timeout 540s poetry run pytest → PASS 1138 passed, 2 warnings，pytest41.16s／wrapper44.359s，exit0。警告為 LangChain allowed_objects 未來預設與既有 ZIP duplicate member 測試。
+- cwd app/desktop/: timeout 300s npm test → PASS165，0fail，Node5997.740858ms／wrapper6.285s，exit0。
+- cwd app/desktop/: timeout 540s cargo test --offline --manifest-path src-tauri/Cargo.toml → FAIL35passed／1failed，test0.25s／wrapper1.297s，exit101。失敗 backend::tests::a_new_generation_cannot_reuse_the_prior_shutdown_report，backend.rs:2023，observed Degraded / expected Crashed。未重跑完整 suite。原始輸出見 evidence/phase-06-rust-red.txt。
+- 直接查因：kill_child 只送 kill；stdout reader 的 EOF 可早於 try_wait 可見退出，stdout_closed 因而用 BACKEND_OUTPUT_CLOSED／Degraded，child_exited 保留該終態；exit monitor 先觀察則為 Crashed。原測試欲驗證新 generation 不重用舊 Graceful report，kill-only setup 卻依賴兩條 thread 排序。
+- 先修 PLANS／Phase06 的路線：只讓該既有測試在 child mutex 下 kill＋wait 完成，再交由兩條既有監看 thread 處理；保留原 Crashed 與 NotRunning 斷言，不修改 production、不新增框架／依賴。此完整 run 是最小實際 red；下一步一次 focused green，若失敗不跳過。

@@ -72,3 +72,7 @@ cwd repo root：git diff --check。若最後才改自己的少量文件，補文
 ## 本輪已授權的 Git／issue 收尾
 
 完成上述驗收、回歸與 review 後，依 PLANS 的使用者清理指示先 commit 真實 evidence，再清理 issue/ 至僅保留09問題卡，commit清理並 push origin/GUI。清理前核對 completed／限縮／延期處置與精確刪除清單；清理後核對存留卡包含09延期意圖、必要未決事項與live paths，並查 active repo文件是否因刪除產生需處理的失效連結。歴史 evidence 由清理前commit保存。全部完成後核對遠端HEAD與本地一致；不以刪除計畫替代未完成驗收。
+
+## 2026-09-13 observed check correction
+
+完整 Rust suite 的35 passed／1 failed 保留為實際 red；最後的 shutdown-report 測試使用 kill-only fixture，stdout_closed 可在 OS exit 可觀察前走 Degraded。這是測試 setup 的同步缺口，未證實 production regression。範圍限於 backend.rs 的既有 cfg(test) 案例：在既有 child lock 下 kill 並 wait，讓 exit callbacks 觀察已退出程序，保留原 Crashed／NotRunning oracle。既有完整 run 加修正後 targeted green 作最後證據；不聲稱重跑完整36 passed。若 target 仍失敗，保留 In progress 並遵守嘗試上限。
