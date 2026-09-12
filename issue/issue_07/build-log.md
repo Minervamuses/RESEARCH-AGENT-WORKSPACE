@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Cross-process apply lock | In progress | 2026-09-12 | — | 下列 preflight / baseline | 無 |
+| 01 — Cross-process apply lock | Complete | 2026-09-12 | 2026-09-12 | 下列 Red/Green、lifecycle、full suite 與 actual diff review | 無 |
 
 狀態只用 `Not started`、`In progress`、`Blocked`、`Complete`。
 只有 phase acceptance 與 required checks 都有實際 evidence 才能標為 Complete。
@@ -121,3 +121,31 @@
 - 下一步為唯一一次 full suite 與 actual diff review。近期 issue 06 的同 runtime
   full suite 為 1092 tests / 23.64 秒，本次新增 focused 7.60 秒且僅本機離線資料，
   仍適合計劃的 540 秒上限；不啟動 provider/GPU/外部資料工作。
+
+### 2026-09-12（Asia/Taipei）— Full suite / actual diff review / Complete
+
+- 在 app cwd、同 Linux/Conda runtime 執行唯一一次完整 suite：
+
+  ```bash
+  conda run -n app --no-capture-output timeout 540s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest -q
+  ```
+
+  → **1102 passed, 2 warnings in 30.08s**，exit 0，無 failed/skipped/unavailable。
+  兩 warnings 是既有 LangChain pending deprecation 與 ZIP duplicate-name fixture。
+  完整 suite 未重跑，沒有尚未處理的 test failure。
+- 對 `4d7d8a5..9f9efc6` 累積 diff、live `_apply_locked`/writer/入口及全部新增
+  regression assertions 做 fresh review；**無 required findings**。
+  詳見 [actual diff review](code_review/phase-01-cross-process-apply-lock-review.md)。
+  本 phase 不要求獨立 sub-agent，故由執行 agent 審查，不稱為獨立 review。
+- `git diff 4d7d8a5..HEAD --check`、`git diff --check` 通過；累積 code diff 僅
+  manager.py（23 additions / 5 deletions）、test_extension_manager.py、
+  test_desktop_service.py；另有本 log/review。原有工作保留，無 dependency、
+  writer、schema、AGENTS、其他 issue 或真實 state 變更。
+- 各 acceptance 已由上表及 required checks 支持，Phase 01 → Complete；
+  GOALS/PLANS 的 checkbox 為目標定義，runtime status 僅在本 log 更新。
+- 已完成步驟 commits：`078aabe` preflight、`4eebac0` Red、`acaf2d8` Green、
+  `9f9efc6` lifecycle/入口；本次最終驗收 log 與 review 另作 completion commit。
+- 已驗證範圍是本機 temporary filesystem、fake model/sandbox MCP、正式 manager
+  多 process 與 CLI/desktop backend 契約。未做真 GUI rendering、network filesystem、
+  live provider、所有 crash points 或 power-loss rollback；不保證非合作 writer 安全。
+  沒有未解 blocker 或需擴張 scope 的發現，完成後停止。
