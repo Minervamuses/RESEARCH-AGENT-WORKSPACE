@@ -14,11 +14,11 @@
 ## 依賴與兩個前置門檻
 
 Phase 01、02 Complete。開始先確認 Linux native 控制／顯示可用；若有 xdotool，可做 timeout 3s xdotool getdisplaygeometry 等短唯讀 query，記工具、display、輔助工具結果；輸入法依 GOALS 已核准限縮跳過。歷史 timeout 只作參考。
-先分別記使用者的 App 顯示觀察與代理工具能否操作該視窗。依 GOALS「輸入法限縮」，不再調查／處置 Windows 或 Linux 輸入法，也不以其不可用作為本階段 blocker；一般鍵鼠、可及性與 Citation 原生證據仍保留。
+先分別記使用者的 App 顯示觀察與代理工具能否操作該視窗。既有 Windows Computer Use 可用時，以真 WSLg 視窗截圖／鍵鼠加 Linux AT-SPI 只讀 name/state/text/caret 觀察驗收；Windows UIA 只見 msrdc 外層不代表 Linux 可及性不存在。依 GOALS「輸入法限縮」，不再調查／處置 Windows 或 Linux 輸入法，也不以其不可用作為本階段 blocker；一般鍵鼠、可及性與 Citation 原生證據仍保留。
 沒有可操作原生 surface 就記 Blocked 並停止重複啟動。需要 restart／安裝／環境修復依 PLANS 辦理；使用者可另提供具體原生操作證據或限縮，但未回覆不等於豁免。
 
 第二門檻是安全 Citation 入口：RESEARCH_AGENT_DESKTOP_FIXTURE=phase02 的 FixtureSessionFactory 不執行真 ChatSession，test_desktop_fixture.py 也明確禁止該 factory 呼叫 ChatSession.create。
-**尚未確認的命令：** 真 Citation UI 的完整 isolated launch recipe。先讀 server._build_runtime_service、現有 Desktop Citation tests／_fixture_services，核對是否能用既有 dependency-injection 及一個自有 temporary launcher 接真 ChatSession、offline model/fetcher、tmp history/citation/extension paths；確認零外部 provider 與零 user store 觸及，再開始 UI。
+**尚未確認的命令：** 真 Citation UI 的完整 isolated launch recipe。先讀 server._build_runtime_service、現有 Desktop Citation tests／_fixture_services，核對是否能用既有 dependency-injection 及一個自有 temporary launcher 接真 ChatSession、offline model/fetcher、tmp history/citation/extension paths；確認零外部 provider 與零 user store 觸及，再開始 UI。Tauri 的 source_conda_launch 固定 app PYTHONPATH 與 agent.desktop.server 時，可用僅匹配本次精確 fixture root／opt-in 的臨時 sitecustomize 啟動接縫，把現有 build_phase02_fixture_service 的 session_factory 換成真 ChatSession，加既有 _SearchSaveModel／RoutingFetcher／_fixture_services 與自有 tmp 的 request 記錄；不改正式 server 或新增持久 fixture framework，完成後移除臨時啟動檔。
 若既有接縫不足，先呈現具體最小必要的 local fixture 改動、檔案／測試／成本；涉及新持久 module/framework 或超出 scope 的變動須取得新授權。不得默認普通 python main.py 是安全替代。
 
 ## 計畫操作與驗證

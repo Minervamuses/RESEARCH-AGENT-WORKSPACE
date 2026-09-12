@@ -68,3 +68,7 @@ cwd repo root：git diff --check。若最後才改自己的少量文件，補文
 將 exact commands、runtime、diff fingerprint／revision、實際 counts/time、native artifact、逐 Issue 表、review 結論和限制記 ../build-log.md；不用複製整份輸出。
 必要失敗／原生缺證據保持 Blocked 或 In progress，明確指出最小下一行動；不要修改舊 logs 製造結案。
 全部 current required outcomes 成立才標 Complete，報告實際 changed files／checks 與保留限縮後停止；不自動 commit/push、部署或開始新改善。
+
+## 本輪已授權的 Git／issue 收尾
+
+完成上述驗收、回歸與 review 後，依 PLANS 的使用者清理指示先 commit 真實 evidence，再清理 issue/ 至僅保留09問題卡，commit清理並 push origin/GUI。清理前核對 completed／限縮／延期處置與精確刪除清單；清理後核對存留卡包含09延期意圖、必要未決事項與live paths，並查 active repo文件是否因刪除產生需處理的失效連結。歴史 evidence 由清理前commit保存。全部完成後核對遠端HEAD與本地一致；不以刪除計畫替代未完成驗收。

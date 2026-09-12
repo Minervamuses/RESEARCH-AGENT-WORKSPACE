@@ -39,7 +39,7 @@ conda activate app
 cd /home/minervamuses/research-agent-workspace/app
 ```
 
-原生 preflight 須區分使用者可見的 WSLg App 與代理的 X11 觀察能力；X11 root 全黑不能推論 App 黑屏。輸入法依 GOALS「輸入法限縮」跳過，不再安排 IME 診斷／環境處置或以它阻擋階段；其餘 native／可及性與安全 Citation 入口仍須驗證。具體證據與未解問題只記 build-log；不因環境推論加入 rendering／keyboard workaround。
+原生 preflight 須區分使用者可見的 WSLg App 與代理的 X11 觀察能力；X11 root 全黑不能推論 App 黑屏。可用 Windows Computer Use 觀察／輸入 WSLg 原生視窗，Linux AT-SPI／既有協定與磁碟輸出補充只讀證據；App、Git、Python、npm、Cargo 仍使用 Linux Conda app。輸入法依 GOALS「輸入法限縮」跳過，不再安排 IME 診斷／環境處置或以它阻擋階段；其餘 native／可及性與安全 Citation 入口仍須驗證。具體證據與未解問題只記 build-log；不因環境推論加入 rendering／keyboard workaround。
 
 下文 Python 命令 cwd 為 app/；Node／Cargo／Tauri 為 app/desktop/；其餘特別標示。timeout 是時間上限，不是獲准啟動昂貴命令的替代。preflight 預估超約十分鐘就先處理授權；不安裝缺少的工具或依賴。
 
@@ -100,3 +100,7 @@ Focused implementation 兩次嘗試失敗就停下，保存因果證據與最小
 
 初始 authoring 只新增四個 core Markdown 與上表六個 phase files，共十檔，當時全部 Not started；後續授權修改與實際 write set 見 build-log。
 不修改既有 Issue bundle、AGENTS、application/tests、manifest、依賴、Git branch/index 或生成假 context/review。
+
+## 使用者指定的最終清理與 push
+
+使用者已明確要求完成剩餘工作、commit 所有變更，清理 issue/ 最後只保留 issue/09-desktop-thinking-effort-control-deferred.md，並在全數完成後 push。完成 required 驗收與回歸後，先提交 final_check 的真實證據，再刪除已完成／已接受限縮的問題卡與計畫，以及已收斂到單一問題卡的09計畫；Git歷史保留完整記錄。清理 commit 後核對只剩該卡、工作樹乾淨，才對既有 origin/GUI 做普通 push 並核對遠端HEAD；不 force push、不切 branch。若 required 工作仍 Blocked，不刪除其活動記錄或宣稱全數完成。
