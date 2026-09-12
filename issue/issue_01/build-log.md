@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — 重現與分流 | Complete | 2026-09-12 | 2026-09-12 | Native Unicode baseline; engine and next experiment approved below | — |
 | 02 — 最小修正 | Complete | 2026-09-12 | 2026-09-12 | X11 native composition/candidate/turn acceptance below | — |
-| 03 — 完整驗收 | In progress | 2026-09-12 | — | Saved Chinese restored; automated checks pass; host failure below | WSLg recovery and remaining native acceptance |
+| 03 — 完整驗收 | Complete | 2026-09-12 | 2026-09-12 | Limited acceptance explicitly approved below; required available checks passed | Restart-dependent checks waived by user, not passed |
 
 只使用 Not started、In progress、Blocked、Complete。
 只有該階段所有必要驗收均有觀察證據才標 Complete。
@@ -346,3 +346,29 @@ Host context references (local logs above are the actual evidence):
 - https://github.com/microsoft/wslg — WSLGd supervision of Weston/Xwayland.
 - https://github.com/microsoft/wslg/issues/1483 — another reported unkillable
   compositor/kernel wait; not proof this host has the identical root cause.
+
+### 2026-09-12T17:20:20+08:00 — User-approved limited acceptance / final scope
+
+- User explicitly answered: 「跳過需要重啟的部分，如實記錄即可」.
+  This supersedes the prior pending restart decision and the requirement to finish
+  native checks that depend on restoring the failed WSLg session. No whole-WSL
+  or Windows restart was performed. GOALS/PLANS record this user-driven scope
+  change; Phase 03 Complete means this limited deliverable, not full original
+  matrix success. No Blocked status is used.
+- Accepted skip / still unverified: post-restart new composition and submission,
+  target-sentence switch-away/back, native English IME test 123, mixed punctuation
+  and non-composition Shift+Enter. All now require graphical-service recovery;
+  they are not substituted by the 155 passing Node tests or fixture test.
+- Confirmed evidence remains: real Bopomofo target sentence, visible candidates,
+  candidate/commit Enter delta=0, later Enter delta=1, exact canonical Chinese,
+  baseline Unicode paste/switch/reload, and saved target sentence visibly restored
+  after Desktop restart before the host failure. App code remained unchanged.
+- Available final checks already passed on this source: npm test (155), focused
+  Python fixture test (1; existing warning), canonical integrity assertions.
+  Documentation-only final edits do not justify rerunning those suites.
+- README/original issue explicitly state the limited verification. Installed OS
+  IME prerequisites remain; no custom autostart or shell profile edits were made.
+  Prior fixture retention instruction is superseded by the user's decision to end
+  this run: remove only this task's owned temporary fixture after retaining the
+  exact relevant evidence above. No generated fixture data is committed.
+- Final cleanup passed: resolved /tmp/research-agent-desktop-phase02-GrASHQ, verified exact name/direct /tmp parent/non-symlink/current owner, then removed it with Linux Conda app Python shutil.rmtree. No user store was touched.

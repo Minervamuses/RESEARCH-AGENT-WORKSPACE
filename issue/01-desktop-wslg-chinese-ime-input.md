@@ -4,7 +4,7 @@
 
 - 類型：Desktop input／CJK IME integration。
 - 優先度：高。
-- 狀態：In progress；Linux IBus Chewing／X11 的原生組字、候選 Enter 零送出與後續單次送出已通過；完整重啟驗收受到本機 WSLg 圖形服務故障中斷。
+- 狀態：已交付（環境修正／有限驗收）；Linux IBus Chewing／X11 的原生組字、候選 Enter 零送出與後續單次送出已通過。使用者授權略過 WSLg 故障後需要重啟 WSL 的驗收，這些項目仍屬未驗證。
 - 排序理由：直接阻止中文使用者以主要語言和 agent 對話，列為第一個處理項目。
 - 主要範圍：從 WSL/Linux 專案根目錄執行 `python main.py` 後開啟的 Tauri Desktop composer。CLI、模型回覆語言與其他原生 Windows 應用程式不先納入。
 
@@ -69,4 +69,8 @@
 - 隔離 fixture 的 canonical `displayInput` 與 `semanticInput` 逐字等於該句；Desktop 重啟後曾在 transcript 讀回該已保存句子。使用既有 deterministic fixture，沒有模型呼叫或真實使用者 store 寫入。
 - 新啟動後的再次組字及剩餘英文／Shift+Enter 等原生回歸仍未完成：WSLg Xwayland 日誌出現 `request could not be marshaled: can't send file descriptor`，Xwayland 成為 zombie，Weston 隨後卡在核心 D 狀態；局部 compositor 復原未成功。這不是已確認的 React 或 persistence regression。
 - Desktop `npm test` 155 passed；既有 Python fixture round-trip test 1 passed（1 個既有 LangChain deprecation warning）。測試不能替代未完成的原生驗收。
-- 重現命令、turn ID、授權、失敗與復原紀錄集中於 [issue_01/build-log.md](issue_01/build-log.md)；目前保持未結案。
+- 重現命令、turn ID、授權、失敗與復原紀錄集中於 [issue_01/build-log.md](issue_01/build-log.md)；依使用者接受的有限範圍結束本次工作，未宣告原始完整驗收全部通過。
+
+### 使用者接受的驗收限制
+
+2026-09-12 使用者明確要求「跳過需要重啟的部分，如實記錄即可」。因此不重啟 WSL，也不再執行依賴圖形服務恢復的剩餘原生檢查；略過清單與已通過證據保留在執行紀錄。若日後要求完整矩陣驗收，再另行啟動工作。
