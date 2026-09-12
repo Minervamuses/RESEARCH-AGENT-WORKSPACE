@@ -123,6 +123,6 @@ The original GUI plan is Complete. The separate corrective plan records Phases 0
 - Desktop fixture selection remains a runtime environment gate in tracked code; tests prove exact selection, but no build-time mechanism excludes it from ordinary source runs.
 - Installer, wheel protocol-asset lookup, bundled sidecar, signing, and cross-platform desktop checks do not exist by design.
 - Root README.md still describes retired `/skill`/`task_modes` behavior. Current code/tests and `app/SKILLS_GUIDE.md` govern until that record is updated; the obsolete timeout issue has been removed.
-- Desktop has no Citation activation path; `issue/08-citation-skill-flow-deferred.md` defers the required single-turn versus multi-turn lifecycle decision.
+- Desktop has no Citation activation path; [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md) defers the required single-turn versus multi-turn lifecycle decision.
 - Historical test counts in issue/note files do not establish current checkout health.
 - The historical Phase 07 focused checks, final broad Python/npm/Cargo/Tauri checks, release build, and native behavioral journey passed as listed above. Exact native `720×560` and 200% zoom layout remains unavailable/not passed and blocks completion; live providers and real user-state behavior remain unclaimed or Unknown. Retired migration counts do not establish current importer behavior because no importer is supported.

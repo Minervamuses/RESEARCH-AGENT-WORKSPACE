@@ -31,8 +31,8 @@ The IDs above preserve continuity with older audits, but their former meanings a
 | ID | Rule | Scope | Current evidence | Missing enforcement / verification | Confidence |
 |---|---|---|---|---|---|
 | INV-012 | Chroma, raw.json, and folder_meta.json should describe the same current knowledge corpus after every completed operation. | RAG persistence | Architecture/docs treat them as one store | FAIL-001, FAIL-002, and FAIL-003 show gaps; no cross-store transaction | Inferred contract, currently violated |
-| INV-013 | An applied Skill accepted at session startup should remain byte-identical for that session. | Extension trust | Apply-and-restart model in extension README and `issue/06-extension-skill-post-startup-integrity.md` | Activation rereads paths without source-hash validation; see FAIL-005 | Intended, currently violated |
-| INV-014 | version_kind=earliest should be selected only from temporal or explicit relation evidence. | Citation resolution | `issue/04-citation-earliest-version-ambiguity.md` and user-facing meaning | Same-year/undated ties use relevance/rank; see FAIL-007 | Intended, currently violated |
+| INV-013 | An applied Skill accepted at session startup should remain byte-identical for that session. | Extension trust | Apply-and-restart model in extension README and [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md) | Activation rereads paths without source-hash validation; see FAIL-005 | Intended, currently violated |
+| INV-014 | version_kind=earliest should be selected only from temporal or explicit relation evidence. | Citation resolution | [historical Issue 04](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/04-citation-earliest-version-ambiguity.md) and user-facing meaning | Same-year/undated ties use relevance/rank; see FAIL-007 | Intended, currently violated |
 
 ## Enforcement gaps
 
@@ -42,7 +42,7 @@ The IDs above preserve continuity with older audits, but their former meanings a
 - INV-014: resolution records usually carry only year, and decide_resolution breaks ties with score/rank/provider.
 - INV-015: the enforced topology is source-checkout-only. Wheel/installer asset lookup and standalone bundling are outside the current contract and unverified.
 - INV-018: preview/approval state is process-local. It does not make the desktop catalog or extension registry safe for multiple concurrently launched application processes.
-- INV-019: the Desktop composer supports non-Citation dynamic Skill commands, but the persistent Citation command is deliberately rejected there and has no replacement GUI entry; see `issue/08-citation-skill-flow-deferred.md` and `known-failure-modes.md`.
+- INV-019: the Desktop composer supports non-Citation dynamic Skill commands, but the persistent Citation command is deliberately rejected there and has no replacement GUI entry; see [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md) and `known-failure-modes.md`.
 - INV-006: fingerprint verification and atomic replacement do not form an interprocess compare-and-swap; concurrent writers to one conversation remain an inferred race (ASM-022).
 - INV-004: PolicyToolNode and trace grouping assume non-empty unique tool-call IDs; duplicate-ID rejection is not directly enforced.
 - INV-005: raised provider exceptions in some extended-thinking stages can bypass the common finalizer; tests cover malformed outputs more than raised exceptions.

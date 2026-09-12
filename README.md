@@ -182,7 +182,7 @@ python main.py
 
 上述環境變數只影響目前 shell 與子程序。結束測試時關閉 Desktop；若 IBus 是自己在本次 session 手動啟動的，可用 `ibus exit` 停止，再 `unset GDK_BACKEND`。本流程沒有新增 shell startup 或自訂開機服務。
 
-目前主機的 WSLg 1.0.66 在後續重啟驗收時發生 Xwayland 圖形服務故障。依使用者決定，略過須重啟 WSL 才能繼續的驗收；完整跨重啟的新組字及其餘原生輸入回歸仍未驗證。詳見 [Issue 01 執行紀錄](issue/issue_01/build-log.md)；本次結果不代表所有 WSLg／Wayland 配置均已驗證。
+目前主機的 WSLg 1.0.66 在後續重啟驗收時發生 Xwayland 圖形服務故障。依使用者決定，略過須重啟 WSL 才能繼續的驗收；完整跨重啟的新組字及其餘原生輸入回歸仍未驗證。詳見 [Issue 01 執行紀錄](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/issue_01/build-log.md)；本次結果不代表所有 WSLg／Wayland 配置均已驗證。
 
 在 `app/desktop/` 驗證 desktop source checkout：
 

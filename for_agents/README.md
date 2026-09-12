@@ -2,6 +2,12 @@
 
 > Managed by `$infrastructure`. Verify current behavior against live evidence and requirements against applicable instructions and contracts. This folder grants no authority to change either.
 
+## Issue archive (2026-09-13)
+
+The issue cleanup preserves the completed and accepted-scope records in [Git history](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/build-log.md). Issue 09 remains deferred in the [Thinking Effort card](../issue/09-desktop-thinking-effort-control-deferred.md). Historical issue references below and in companion documents now point to that archived revision.
+
+This cleanup does not revalidate the 2026-09-06 audit below or its other backlog items. Its older Issue 02/04/05/06/07/08 findings must be read with the later closure evidence, not treated as newly confirmed failures.
+
 ## Current audit
 
 - Latest maintenance: 2026-09-06T16:30:41+08:00; scope is recorded below, not a blanket revalidation date.

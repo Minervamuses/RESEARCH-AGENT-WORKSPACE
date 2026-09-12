@@ -30,7 +30,7 @@
 
 - Priority: P1
 - Problem: activation rereads mutable managed files after startup verification.
-- Evidence: focused probe post_startup_tamper_loaded=True; `issue/06-extension-skill-post-startup-integrity.md` (historical command wording, current trust defect); FAIL-005.
+- Evidence: focused probe post_startup_tamper_loaded=True; [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md) (historical command wording, current trust defect); FAIL-005.
 - Why it matters: apply-and-restart is the extension trust boundary.
 - Suggested scope: either retain source_hash and revalidate at activation or load an immutable startup snapshot; cover instructions, manifest, and pinned resources once.
 - Dependencies / blockers: choose hash-on-activation versus memory snapshot based on existing size/lazy-loading constraints.
@@ -42,7 +42,7 @@
 
 - Priority: P2
 - Problem: same-year or undated distinct manifestations can be selected by relevance/rank without temporal proof.
-- Evidence: focused probe same_year_earliest=eligible:fixture:pub; `issue/04-citation-earliest-version-ambiguity.md`; FAIL-007.
+- Evidence: focused probe same_year_earliest=eligible:fixture:pub; [historical Issue 04](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/04-citation-earliest-version-ambiguity.md); FAIL-007.
 - Why it matters: the saved version can contradict the user's earliest request.
 - Suggested scope: fail closed for tied minimum year identities unless finer date or explicit relation evidence establishes order.
 - Dependencies / blockers: decide comparable date fields/relations if support goes beyond the minimal tie guard.
@@ -54,7 +54,7 @@
 
 - Priority: P2
 - Problem: two processes can commit different revision N+1 registries from the same revision N.
-- Evidence: process-local _APPLY_LOCK and atomic replace without interprocess CAS; `issue/07-extension-apply-cross-process-race.md`; FAIL-006.
+- Evidence: process-local _APPLY_LOCK and atomic replace without interprocess CAS; [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md); FAIL-006.
 - Why it matters: a reported successful extension can disappear.
 - Suggested scope: one Linux/WSL file lock or real compare-and-swap around final revision read through durable replace, plus a multiprocessing regression.
 - Dependencies / blockers: define timeout/crash behavior without adding a broad concurrency framework.
@@ -78,7 +78,7 @@
 
 - Priority: P2
 - Problem: structured ToolMessage outcomes are authoritative, but final prose truthfulness remains model-governed.
-- Evidence: `issue/05-citation-save-result-reporting.md`; ASM-014; current finalizer intentionally does not overwrite model prose.
+- Evidence: [historical Issue 05](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/05-citation-save-result-reporting.md); ASM-014; current finalizer intentionally does not overwrite model prose.
 - Why it matters: a mixed/failed batch can be described incorrectly even though artifacts and telemetry are correct.
 - Suggested scope: deterministic fake-model journey for all-success, all-failure, mixed, and retry-success; add a separate human-readable status block only if evidence shows it is needed.
 - Dependencies / blockers: preserve the decision not to reintroduce a host renderer that replaces the full answer.
@@ -176,7 +176,7 @@
 
 - Priority: Research
 - Problem: Citation is the sole persistent Skill lifecycle in the CLI, but Desktop rejects `/citation <prompt>` and exposes no equivalent activation/clear path.
-- Evidence: `app/agent/cli/slash_commands.py`; `app/agent/skills/citation/session_policy.py`; `app/agent/desktop/service.py`; `issue/08-citation-skill-flow-deferred.md`; FAIL-015.
+- Evidence: `app/agent/cli/slash_commands.py`; `app/agent/skills/citation/session_policy.py`; `app/agent/desktop/service.py`; [historical Issue 08](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/08-citation-skill-flow-deferred.md); FAIL-015.
 - Why it matters: the same Python session model has different citation capabilities depending on its frontend, and a naïve fix could accidentally create persistent generic Skill state or replay work.
 - Suggested scope: make one product decision on persistent versus one-shot Citation semantics, then align Python-owned session state, CLI/Desktop routing, registry finalization, and focused tests.
 - Dependencies / blockers: user decision on whether Desktop should support multi-turn Citation sessions or a one-shot citation command.

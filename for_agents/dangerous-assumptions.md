@@ -68,7 +68,7 @@
 - Where relied on: SkillMetadata path catalog and later `load_skill_runtime` during a one-shot command or Citation activation.
 - Failure if false: unapproved instructions, manifest tool permissions, or pinned resources can become active without apply/restart.
 - Detection or mitigation: startup hash validation only; focused probe reproduced FAIL-005.
-- Evidence: app/agent/extensions/startup.py; app/agent/skills/runtime.py; `issue/06-extension-skill-post-startup-integrity.md`.
+- Evidence: app/agent/extensions/startup.py; app/agent/skills/runtime.py; [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md).
 - Status: Active
 - Confidence: Confirmed false premise under same-user mutation.
 
@@ -78,7 +78,7 @@
 - Where relied on: registry revision check and atomic replacement.
 - Failure if false: two successful N-to-N+1 updates can overwrite one another; see FAIL-006.
 - Detection or mitigation: none across processes; status/restart may reveal missing entries.
-- Evidence: app/agent/extensions/manager.py::_APPLY_LOCK; app/agent/extensions/registry.py; `issue/07-extension-apply-cross-process-race.md`.
+- Evidence: app/agent/extensions/manager.py::_APPLY_LOCK; app/agent/extensions/registry.py; [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md).
 - Status: Active
 - Confidence: Confirmed assumption.
 
@@ -88,7 +88,7 @@
 - Where relied on: citation resolution tie-breaking.
 - Failure if false: a published version may be selected over an earlier preprint from the same year.
 - Detection or mitigation: no same-year ambiguity test; focused probe reproduced FAIL-007.
-- Evidence: app/skills/citation/resolution.py::decide_resolution; `issue/04-citation-earliest-version-ambiguity.md`.
+- Evidence: app/skills/citation/resolution.py::decide_resolution; [historical Issue 04](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/04-citation-earliest-version-ambiguity.md).
 - Status: Active
 - Confidence: Confirmed unsafe assumption.
 
@@ -220,7 +220,7 @@
 - Where relied on: final citation response; host intentionally does not replace model prose.
 - Failure if false: user-facing prose can claim success after a failed tool outcome even though artifact/telemetry is correct.
 - Detection or mitigation: strict tool content/artifact and existing deterministic tests; optional separate human status block remains future work.
-- Evidence: issue/05-citation-save-result-reporting.md; app/skills/citation/tool.py; app/agent/session.py.
+- Evidence: [historical Issue 05](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/05-citation-save-result-reporting.md); app/skills/citation/tool.py; app/agent/session.py.
 - Status: Under investigation
 - Confidence: Inferred model-behavior risk, not a reproduced current incident.
 

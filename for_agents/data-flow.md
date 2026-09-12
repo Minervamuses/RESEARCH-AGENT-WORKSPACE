@@ -86,7 +86,7 @@
 - State or ownership transitions: untrusted drop-in becomes scanned desired state, then approved managed state, then a loaded runtime only in a new session.
 - Error / retry / rollback behavior: invalid/rebound roots disable deletion; stale preview or changed source aborts apply; individual failures are reported. Desktop parses and verifies the durable result, replays a completed same-turn result after restart without reapplying, and restores a crash-pending apply as non-retryable interrupted. A process-local lock serializes one process only. Installed Skill content is not re-hashed at activation.
 - Invariants involved: INV-004, INV-006, INV-009, INV-018, candidate INV-013.
-- Evidence: app/agent/extensions; app/agent/startup.py; app/agent/skills/runtime.py; `app/agent/desktop/service.py::_extensions_apply`; extension apply/crash tests; `issue/06-extension-skill-post-startup-integrity.md` and `issue/07-extension-apply-cross-process-race.md`.
+- Evidence: app/agent/extensions; app/agent/startup.py; app/agent/skills/runtime.py; `app/agent/desktop/service.py::_extensions_apply`; extension apply/crash tests; [historical Issue 06](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/06-extension-skill-post-startup-integrity.md) and [historical Issue 07](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/07-extension-apply-cross-process-race.md).
 - Confidence: Confirmed, including focused tamper reproduction for FAIL-005.
 
 ### Flow: Desktop backend startup, requests, and shutdown
