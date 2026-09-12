@@ -83,3 +83,35 @@ exact verification/result、review findings、limitations/blockers、next action
   原三個 Red 案例轉綠，既有 50 案例保持。
 - 下一步補齊計劃指定的失敗代表、session/slash 入口與 A/B 版本驗收，
   再做 broader、獨立 review 及唯一一次完整 suite。沒有新增 refactor。
+
+### 2026-09-12（Asia/Taipei）— 代表驗收 / broader
+
+- 僅補兩個核准 test 檔，未改第四個 production 檔，也未改既有 user journey。
+  新增 17 個 pytest cases（含先前 3 個 Red），重用 tmp_path、真 install/startup、
+  真 ChatSession 與現有 fake graph／deterministic manager model。
+- 首次新增驗收 focused run：**1 failed, 66 passed, 2 warnings in 0.63s**。
+  唯一失敗為測試誤假設 `ConversationDocument` 有 `model_dump_json()`；
+  gate、graph count、狀態、traceback/log 斷言此前已通過。改成
+  `conversation_repository.path_for(session_id).read_text()` 驗證實際保存檔，
+  沒有改 production 或降低 acceptance。
+- 完成後，在 `app/` 執行
+  `conda run -n app /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_skill_startup.py tests/test_skill_runtime.py tests/test_citation_skill_activation.py -q`：
+  **67 passed, 2 warnings in 0.52s**，無 skipped/unavailable。
+- Broader exact command（同 cwd/runtime）：
+  `conda run -n app /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_user_journey.py tests/test_citation_slash_command.py tests/test_skills.py tests/test_skill_adherence.py -q`：
+  **42 passed, 1 warning in 2.13s**。包含現有 tmp MCP subprocess 與 CLI/desktop
+  本機 ZIP 旅程；`ISSUE10_ACCEPTANCE_ZIP` 未設定，無使用者 archive/live provider。
+
+| Acceptance | 實際 evidence |
+|---|---|
+| 三種 activation 前異動 | `test_runtime_rejects_applied_bundle_changed_after_startup` 的 SKILL.md、manifest.yaml（tools 與 resources 一起改）、reference.md；全部固定 ValueError；仍損毀時 restart catalog 排除該 Skill |
+| 缺檔／invalid YAML／symlink／fingerprint | `test_applied_activation_failure_is_safe` 九例：缺 SKILL/manifest/reference、含 marker 的 invalid YAML、同 bytes 的 root/file symlink、1 KiB file limit、executable bit、Linux chmod 0 讀取失敗；錯誤與 traceback/caplog 無 marker，registry/drop-in bytes 保持 |
+| 真 one-shot + generic slash | `test_tampered_one_shot_slash_preserves_citation_before_graph`：handler 先回 followup，再進真 session.turn；graph.states 為空，原 Citation runtime/service/thinking/tools 不變，active context 與實際保存檔無 marker |
+| Applied Citation 兩入口 | `test_tampered_applied_citation_activation_preserves_state[direct/slash]`：排除 builtin 的真 applied catalog；direct 保留先前 runtime/service；slash 在 inactive/extended 狀態拋安全 SlashCommandError，不切 normal、不改工具權限 |
+| 正常啟用與 A/B 邊界 | `test_applied_revision_stays_pinned_until_restart`：runtime 的 instructions/pinned/tool_access/root、startup hash/revision 直接比對；drop-in B 未 apply 時新舊 startup 都用 A，真 manager.apply 後舊 catalog 仍可 load A，新 startup 使用 B；損毀舊 A 時不偷換最新 registry B |
+| 相容性 | `test_legacy_metadata_constructor_has_no_applied_identity` 保持三參數建構；原 built-in/custom/manifest/tools/pinned/total limits tests 及 Citation activation/deactivation/normal thinking tests 全數通過 |
+
+- 更正計劃的測試盤點：live tree 沒有獨立的 extension fingerprint limits test；
+  因此按 phase 所允許新增單一 1 KiB limit 案例，未展開 limits matrix。
+  runtime 直接重用原 fingerprint，所以沒有改其檔案数/總大小/hash 規則。
+- `git diff --check` 通過。下一步為計劃要求的獨立 diff review 與一次 full suite。

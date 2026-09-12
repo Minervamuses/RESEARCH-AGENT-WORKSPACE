@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+import traceback
 
 import pytest
 
@@ -192,3 +193,101 @@ def test_non_citation_skills_unaffected_by_teardown_logic(make_session):
     ))
     assert answer == "ok"
     assert session.active_skill_runtime is None
+
+
+def _applied_session(tmp_path, monkeypatch, name):
+    from agent.extensions.startup import load_extension_startup
+    from test_extension_skill_startup import _config, _write_skill, _apply_skill
+
+    config = _config(tmp_path)
+    config.persist_dir = str(tmp_path / "persist")
+    if name == "citation":
+        # An isolated catalog exercises applied Citation without a built-in collision.
+        config.skills_dir = str(tmp_path / "empty-skills")
+    builtins = discover_skills(config)
+    if name == "citation":
+        assert builtins == []
+    _write_skill(Path(config.extension_dropin_dir), name)
+    _apply_skill(config, name)
+    startup = load_extension_startup(config, builtin_skills=builtins)
+    assert startup.diagnostics == ()
+    assert [skill.name for skill in startup.skills] == [name]
+    graph = make_astream_graph()
+    monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: graph)
+    session = ChatSession(
+        config, loaded_skills=[*builtins, *startup.skills],
+        running_extension_revision=startup.revision,
+    )
+    return session, startup.skills[0].path.parent, graph
+
+
+def test_tampered_one_shot_slash_preserves_citation_before_graph(tmp_path, monkeypatch, caplog):
+    from agent.cli.slash_commands import (
+        SlashCommandContext, build_default_registry, execute_slash_command, parse_slash_command,
+    )
+
+    session, installed, graph = _applied_session(tmp_path, monkeypatch, "writer")
+    previous = session.activate_citation_skill()
+    service = session.citation_service
+    thinking = session.thinking_mode
+    tools = session.tool_access_resolution()
+    marker = "PRIVATE_ONE_SHOT_TEST_CONTENT"
+    with (installed / "SKILL.md").open("a", encoding="utf-8") as handle:
+        handle.write(marker)
+    context = SlashCommandContext(session=session, registry=build_default_registry(session))
+    result = asyncio.run(execute_slash_command(parse_slash_command("/writer draft"), context))
+    assert result.skill_name == "writer"
+    assert result.followup_input == "draft"
+
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(session.turn(result.followup_input, skill_name=result.skill_name))
+
+    assert str(caught.value) == "applied bundle changed; restart or re-apply required"
+    assert graph.states == []
+    assert session.active_skill_runtime is previous
+    assert session._citation_service is service
+    assert session.thinking_mode == thinking
+    assert session.tool_access_resolution() == tools
+    assert marker not in session._active_skill_context_block()
+    assert marker not in caplog.text
+    assert marker not in "".join(traceback.format_exception(caught.value))
+    conversation_path = session.conversation_repository.path_for(session.session_id)
+    assert marker not in conversation_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("entry", ["direct", "slash"])
+def test_tampered_applied_citation_activation_preserves_state(tmp_path, monkeypatch, caplog, entry):
+    from agent.cli.slash_commands import (
+        SlashCommandContext, SlashCommandError, build_default_registry,
+        execute_slash_command, parse_slash_command,
+    )
+
+    session, installed, graph = _applied_session(tmp_path, monkeypatch, "citation")
+    if entry == "direct":
+        session.activate_citation_skill()
+    else:
+        session.set_thinking_mode("extended")
+    previous = session.active_skill_runtime
+    service = session.citation_service
+    thinking = session.thinking_mode
+    tools = session.tool_access_resolution()
+    marker = "PRIVATE_CITATION_TEST_CONTENT"
+    (installed / "manifest.yaml").write_text(f"tools: [{marker}\n", encoding="utf-8")
+
+    expected_error = ValueError if entry == "direct" else SlashCommandError
+    with pytest.raises(expected_error) as caught:
+        if entry == "direct":
+            session.activate_citation_skill()
+        else:
+            context = SlashCommandContext(session=session, registry=build_default_registry(session))
+            asyncio.run(execute_slash_command(parse_slash_command("/citation"), context))
+
+    assert "applied bundle changed; restart or re-apply required" in str(caught.value)
+    assert graph.states == []
+    assert session.active_skill_runtime is previous
+    assert session._citation_service is service
+    assert session.thinking_mode == thinking
+    assert session.tool_access_resolution() == tools
+    assert marker not in caplog.text
+    assert marker not in "".join(traceback.format_exception(caught.value))
