@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Save result reporting | In progress | 2026-09-12 | — | Preflight / baseline below | None |
+| 01 — Save result reporting | Complete | 2026-09-12 | 2026-09-12 | Tool characterization, four E2E scenarios, regressions and full suite below | None |
 
 使用 `Not started`、`In progress`、`Blocked`、`Complete`。
 必要 acceptance 與 verification 均有實際證據才可標 Complete。
@@ -158,3 +158,52 @@
 - Preserved tests 涵蓋 save artifact 不覆寫 prose、marker gate/render、
   inactive skill、metrics 與 history。`git diff --check` 通過，已讀新增 e2e diff。
   Phase 維持 In progress，尚待最後一次完整 suite 與最終驗收。
+
+### 2026-09-12（Asia/Taipei）— Final integration / Complete
+
+- E2E / plan correction commit `4da6e10`。共同 runtime/cwd 下，最後且唯一一次
+ 完整 suite exact command：
+
+  ```bash
+  timeout 600s poetry run pytest -q
+  ```
+
+  **1075 passed, 2 warnings in 23.80s**（exit 0）。無 failed/skipped/unavailable。
+  Warnings 為既有 LangChain allowed_objects pending deprecation，及
+  test_installer_zip_rejects_unsafe_members_without_extracting 刻意產生的
+  duplicate ZIP member warning。未重跑完整 suite。
+- Repository root 實際執行：
+
+  ```bash
+  git diff 6b6d8a5 --check
+  git diff 6b6d8a5 --stat
+  git diff 6b6d8a5 -- app/tests/test_citation_workflow_tool.py
+  git status --short
+  git log -4 --oneline
+  ```
+
+  Whitespace check 通過；兩個測試 diff 已逐一檢視，未發現需追加修改。
+  最終 log 更新前工作樹乾淨。最終 log 亦經 diff check 後 commit。
+
+#### GOALS / phase acceptance 對應
+
+| 成功條件 | 實際 evidence |
+|---|---|
+| 11 狀態 content/artifact/outcome 完整且有序 | 參數化 real tool-call test：11 組，每批兩項，index/label/status/reason/receipt/alternatives strict round trip |
+| 四類真 graph，model 從 content 收結果後才回答 | 新 e2e 四組、invoke deep snapshots、matching call 在 result 之前、[0,1] / [0,1,2] 時序；既有成功 journey 亦改讀 content |
+| 保存、重用、失敗與實際作品相符 | 前節四組結果、trusted receipt、BibTeX/sidecar/registry、重用 bytes/mtime 不變、0/1/2 唯一 bundle；retry 同 DOI/intent 不依跨批 index 合併 |
+| CLI/session/history 一致 | Mixed 真 chat._run print 擷取，委派真 session.turn，對照模型答案、recent_turns、磁碟重載 assistant_output；文字見前節 |
+| finalization/citation gate/render/telemetry/history preserved | 指定 87 項回歸及完整 1075 tests 通過；未新增保存全文覆寫層或第二資料通道 |
+| 所有 required checks 與外部 prerequisite | issue 04 live 核對、focused 35、regression 87、唯一 full suite 1075、整體 diff check 均通過 |
+
+- 實際修改僅：`app/tests/test_citation_workflow_tool.py`、
+  `app/tests/test_citation_e2e.py`、`issue/issue_05/build-log.md`、
+  `issue/issue_05/PLANS.md`、`issue/issue_05/phases/phase-01-save-result-reporting.md`、
+  `issue/issue_05/context/phase-01-save-result-reporting-context.md`。
+  Production、Skill、schema、dependencies、AGENTS 與其他 issue 均未修改。
+- 保留第一次 retry fixture 失敗證據；最後 green 是既有行為 characterization。
+  未呼叫 live/paid provider、真 LLM/GPU；所有 bundle/history 均限 tmp_path。
+  Fake model 證明可見性、時序及整合，不保證真實 LLM 永不誤報；HTTP 200
+  錯 DOI 的立即 retry 仍受既有 cache 影響，本次不擴張處理。
+- Required acceptance 完整取得證據，In progress → Complete，無 blocker。
+  最終驗證紀錄 commit 後停止，不啟動其他 issue。
