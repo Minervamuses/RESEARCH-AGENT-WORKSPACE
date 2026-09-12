@@ -57,3 +57,16 @@ exact verification/result、review findings、limitations/blockers、next action
 - Live code 證實 metadata 丟失 startup hash；兩種 activation 先完成共用 load
   才換 active runtime。採 applied branch 內 import discovery，維持三檔 scope。
   下一步：以真 install/startup 加最小三案例，先觀察 activation 接受異動的 Red。
+
+### 2026-09-12（Asia/Taipei）— Red
+
+- 新增 `test_runtime_rejects_applied_bundle_changed_after_startup`，使用既有
+  `_write_skill` / `_apply_skill`，真實 install → startup 後再修改 installed
+  SKILL.md、manifest tools/resources、pinned reference；未改 production。
+- 在 `app/` 執行
+  `conda run -n app /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_skill_startup.py -k changed_after_startup -q`：
+  **3 failed, 6 deselected, 1 warning in 0.27s**，三者均為
+  `DID NOT RAISE ValueError`；不是 import、fixture 或 parser 錯誤。
+- 同一 Conda/Poetry 命令的 `env info --executable` 已在 `app/` 證實使用
+  `/home/minervamuses/miniconda3/envs/app/bin/python`。
+- 這是預期 bug 重現，不是失敗的 implementation attempt。下一步只改計劃三檔。

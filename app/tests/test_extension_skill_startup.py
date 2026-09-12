@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from agent.config import AgentConfig
 from agent.extensions.discovery import scan_extensions
 from agent.extensions.models import ExtensionRegistry
@@ -58,6 +60,32 @@ def _apply_skill(config: AgentConfig, name: str) -> ExtensionRegistry:
     )
     write_registry(Path(config.extension_state_dir), registry)
     return registry
+
+
+def _add_pinned_reference(bundle: Path) -> None:
+    (bundle / "reference.md").write_text("Approved reference A\n", encoding="utf-8")
+    with (bundle / "manifest.yaml").open("a", encoding="utf-8") as handle:
+        handle.write("resources:\n  - path: reference.md\n    pinned: true\n")
+
+
+@pytest.mark.parametrize("changed_file", ["SKILL.md", "manifest.yaml", "reference.md"])
+def test_runtime_rejects_applied_bundle_changed_after_startup(tmp_path, changed_file):
+    config = _config(tmp_path)
+    raw = _write_skill(Path(config.extension_dropin_dir), "writer")
+    _add_pinned_reference(raw)
+    _apply_skill(config, "writer")
+    startup = load_extension_startup(config)
+    assert startup.diagnostics == ()
+    installed = startup.skills[0].path.parent
+    path = installed / changed_file
+    if changed_file == "manifest.yaml":
+        path.write_text("tools:\n  optional:\n    local: [bash]\n", encoding="utf-8")
+    else:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("UNAPPROVED_CONTENT\n")
+
+    with pytest.raises(ValueError, match="applied bundle changed; restart or re-apply required"):
+        load_skill_runtime("writer", config=config, all_tools=[_Tool()], catalog=startup.skills)
 
 
 def test_startup_loads_verified_applied_skill(tmp_path):
