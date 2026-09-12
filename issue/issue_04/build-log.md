@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Earliest ambiguity | In progress | 2026-09-12 | — | Preflight/baseline below | None |
+| 01 — Earliest ambiguity | Complete | 2026-09-12 | 2026-09-12 | Red, green, representative tool, full suite and acceptance mapping below | None |
 
 狀態只用 `Not started`、`In progress`、`Blocked`、`Complete`。
 只有 phase 的必要驗收與驗證都有實際證據，才可標 Complete。
@@ -115,3 +115,55 @@
   Service fallback 兩種歧義保持原 alternatives；正常 no_provider_records
   fallback 仍 saved 且 receipt trusted，exact arXiv 與 exact DOI 既有測試通過。
 - Phase 維持 In progress，待最後一次 broader suite 與最終 diff 檢查。
+
+### 2026-09-12（Asia/Taipei）— Phase 01 final verification / Complete
+
+- Green commit `359669b`。Working directory/runtime 同 preflight，最後且唯一
+  一次 full-suite exact command：
+
+  ```bash
+  timeout 600s poetry run pytest -q
+  ```
+
+  實際 **1061 passed, 2 warnings in 26.98s**（exit 0），沒有 failed、skipped
+  或 unavailable。Warnings：同 baseline 的 LangChain pending deprecation，
+  以及既有 `test_installer_zip_rejects_unsafe_members_without_extracting`
+  刻意建立重複 ZIP member 所觸發的 duplicate-name warning。
+- 從 repository root 實際執行：
+
+  ```bash
+  git diff 92e602b --check
+  git diff 92e602b --stat
+  git status --short
+  git diff 92e602b -- app/tests/test_citation_resolution.py app/tests/test_citation_work_resolver.py app/tests/test_citation_authority.py
+  ```
+
+  整體 whitespace check 通過，當時工作樹乾淨。已檢視 production diff
+  （green commit 前）及完整測試 diff；無越界修改或需追加修正的發現。
+  本次最終 log 更新亦以 `git diff --check` 與整體 diff check 檢查後 commit。
+
+#### Acceptance evidence（GOALS 順序）
+
+| 條件 | 實際通過的證據 |
+|---|---|
+| 2020 published/preprint 不同 DOI 同年 ambiguous、無 winner | `test_earliest_year_tie_cannot_be_resolved_by_nontemporal_ranking[original]` |
+| 順序、rank/provider、score 不消除平手且 identity 合格 | 同測試的 reversed、rank_provider、score 參數；先驗證兩筆 eligible，score 變體確有差異 |
+| 全缺年份含單一 identity 都 ambiguous | `test_earliest_without_any_year_is_ambiguous_even_for_one_identity[1/2]` |
+| 2020/2022 選 2020、較晚平手不影響、已知/未知保留既有語意 | 既有 `test_earliest_selection_chooses_oldest_dated_manifestation`；新增 `test_earliest_unique_known_minimum_survives_later_ties_and_unknown_years` |
+| canonical DOI 重複不誤判；不同 DOI 不因同標題合併 | `test_earliest_deduplicates_canonical_doi_before_comparing_years` 與同年不同 DOI 測試；`test_earliest_alternatives_only_include_eligible_minimum_identities_and_cap_at_five` 另驗證排除不合格/較晚候選、去重和五筆上限 |
+| alternatives 欄位與缺值如實保留、無 earliest 觀測種類 | `test_earliest_real_resolver_service_tool_returns_ambiguity_without_saving` 兩組參數逐欄檢查 title/authors/year/venue/version_kind/doi/arxiv，content 與 artifact 相同 |
+| 真實 resolver/service/tool 歧義不 refetch、不保存、不被 authority 覆寫 | 上述 tool 測試兩組；`test_earliest_ambiguity_returns_before_doi_refetch` 兩組；`test_earliest_authority_fallback_preserves_year_ambiguity_only` 的兩組 ambiguity 及正常保存 control |
+| preserved behaviors 與 broader regression | 72 focused tests 含既有指定版本/未指定版本、exact DOI/arXiv、provider failure、DOI/BibTeX/save 邊界；完整 suite 1061 passed |
+
+- Changed files（全部）：
+  `app/skills/citation/resolution.py`、`app/skills/citation/service.py`、
+  `app/tests/test_citation_resolution.py`、`app/tests/test_citation_work_resolver.py`、
+  `app/tests/test_citation_authority.py`、`issue/issue_04/build-log.md`。
+- 沒有擴張 provider 日期/relations、identity 規則、exact lane、public schema、
+  dependencies、儲存層或 issue 05；AGENTS 與其他 issue 未修改。未建立
+  context/review 文件，必要 fallback 證據已完整記於本 log。
+- 未執行 live/paid provider、model/GPU、真實 citation store、wheel build。
+  本證據僅涵蓋離線真實 application path，不證明 live metadata 完整性或
+  模型追問行為。仍只比較年份；混合未知年份只能選已知年份中的最早者。
+- 所有 required checks 與代表驗收皆取得實際成功證據，In progress → Complete。
+  無剩餘 blocker；完成後停止，不接續其他 issue。
