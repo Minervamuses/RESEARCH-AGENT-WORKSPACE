@@ -168,6 +168,21 @@ def load_skill_runtime(
     if metadata is None:
         raise KeyError(f"unknown skill: {name}")
 
+    if metadata.applied_source_hash is not None:
+        # Discovery imports skills; keep this import local to avoid a cycle.
+        from agent.extensions.discovery import inspect_bundle
+
+        error = "applied bundle changed; restart or re-apply required"
+        try:
+            # Inspect before resolving so a replaced bundle-root symlink is rejected.
+            scanned = inspect_bundle(
+                "skill", metadata.name, metadata.path.parent, config=config,
+            )
+        except (OSError, ValueError):
+            raise ValueError(error) from None
+        if not scanned.valid or scanned.source_hash != metadata.applied_source_hash:
+            raise ValueError(error)
+
     root = metadata.path.parent.resolve()
     manifest = load_skill_manifest(root)
 

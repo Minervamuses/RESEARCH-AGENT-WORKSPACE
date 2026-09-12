@@ -70,3 +70,16 @@ exact verification/result、review findings、limitations/blockers、next action
 - 同一 Conda/Poetry 命令的 `env info --executable` 已在 `app/` 證實使用
   `/home/minervamuses/miniconda3/envs/app/bin/python`。
 - 這是預期 bug 重現，不是失敗的 implementation attempt。下一步只改計劃三檔。
+
+### 2026-09-12（Asia/Taipei）— Green / 三檔修正
+
+- `metadata.py` 新增預設 None 的欄位；`startup.py` 以 dataclasses.replace
+  保存該 registry entry 的已驗證 hash；`runtime.py` 在 resolve/load/工具解析前
+  重用 inspect_bundle，拒絕 invalid/hash mismatch/I/O failure，只回固定 ValueError。
+  不回傳 parser errors，也不 chain 原始 I/O exception。
+- 在 `app/` 執行
+  `conda run -n app /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_skill_startup.py tests/test_skill_runtime.py tests/test_citation_skill_activation.py -q`：
+  **53 passed, 2 warnings in 0.35s**。第一次 focused implementation attempt 成功；
+  原三個 Red 案例轉綠，既有 50 案例保持。
+- 下一步補齊計劃指定的失敗代表、session/slash 入口與 A/B 版本驗收，
+  再做 broader、獨立 review 及唯一一次完整 suite。沒有新增 refactor。

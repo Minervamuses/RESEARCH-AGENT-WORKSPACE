@@ -23,6 +23,7 @@ class SkillMetadata:
     name: str
     description: str
     path: Path
+    applied_source_hash: str | None = None
 
 
 def resolve_skills_dir(config: AgentConfig | None = None) -> Path:

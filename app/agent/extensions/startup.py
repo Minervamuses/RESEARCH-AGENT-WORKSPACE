@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -67,7 +67,10 @@ def _load_skill(
         raise ValueError("; ".join(scanned.errors))
     if scanned.source_hash != entry.source_hash:
         raise ValueError("installed Skill hash differs from registry")
-    return read_skill_metadata(bundle / "SKILL.md")
+    return replace(
+        read_skill_metadata(bundle / "SKILL.md"),
+        applied_source_hash=entry.source_hash,
+    )
 
 
 def _load_mcp(
