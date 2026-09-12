@@ -55,3 +55,15 @@
 - 範圍：僅 manager.py production、既有 test 檔與本 bundle 紀錄；不改 registry writer、
   schema、依賴、其他 issue。下一步依序 Red、Green、必要 lifecycle/入口驗證、一次 full suite，
   各步 commit。必要 checks 失敗先診斷；超出 envelope 或兩次修正失敗按 PLANS 停止。
+
+### 2026-09-12（Asia/Taipei）— Red：雙成功與 lost update
+
+- 僅在既有 `test_extension_manager.py` 加 spawn child、bounded Pipe helper 與一個 regression。
+  A/B 均先 preview revision 0；A 在真 writer 前暫停，B 完成後才放行 A，無 sleep/barrier。
+- app cwd：`conda run -n app timeout 120s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_manager.py -q -k cross_process`
+  → **1 failed, 42 deselected, 1 warning in 1.25s**，exit 1（預期 Red）。
+- 實際 child outcomes：beta success 1、alpha success 1；最終 registry revision 1
+  僅 `skill:alpha`。斷言「恰好一成功」因 2 != 1 失敗，直接證明 beta 更新遺失。
+  無 child import/通信 timeout/cleanup failure；finally terminate/join 並關閉自身 handles。
+  Red 的 exception 路徑沒有輸出 child exit 數值，不將其稱為正常 exit 0。
+- Production 尚未修改。下一步只在 manager 的既有 threading lock 內加固定檔案鎖。

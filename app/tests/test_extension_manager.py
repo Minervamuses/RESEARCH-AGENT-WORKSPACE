@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import multiprocessing
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -108,6 +110,119 @@ def _manager(config, private_path, model):
         private_skill_path=private_path,
         model_factory=lambda _config: model,
     )
+
+
+def _apply_process(root, name, connection, pause):
+    """Run a real manager with a child-local fake planner and bounded IPC."""
+    try:
+        config = _config(root)
+        item = dict(_plan_item(), key=f"skill:{name}")
+        manager = _manager(config, root / "private/SKILL.md", _PlanModel([item]))
+        preview = manager.preview(selected_skill_keys={item["key"]})
+        connection.send((name, "ready", preview.registry.revision))
+        with pytest.MonkeyPatch.context() as patch:
+            if pause == "before_write":
+                original_write = manager_module.write_registry
+
+                def paused_write(*args, **kwargs):
+                    connection.send((name, "paused", "before_write"))
+                    assert connection.poll(10), "writer release timed out"
+                    assert connection.recv() == "release"
+                    return original_write(*args, **kwargs)
+
+                patch.setattr(manager_module, "write_registry", paused_write)
+            while True:
+                assert connection.poll(10), "child command timed out"
+                command = connection.recv()
+                if command == "quit":
+                    return
+                if command == "preview":
+                    preview = manager.preview(selected_skill_keys={item["key"]})
+                    connection.send((name, "ready", preview.registry.revision))
+                    continue
+                assert command == "apply"
+                try:
+                    report = manager.apply(preview)
+                except ManagementError as exc:
+                    connection.send((name, "error", str(exc)))
+                else:
+                    connection.send((name, "success", report.applied_revision))
+    finally:
+        connection.close()
+
+
+@contextmanager
+def _apply_processes(*specs):
+    context = multiprocessing.get_context("spawn")
+    children = []
+    try:
+        for root, name, pause in specs:
+            parent, child = context.Pipe()
+            process = context.Process(
+                target=_apply_process, args=(root, name, child, pause)
+            )
+            process.start()
+            child.close()
+            children.append((process, parent))
+        yield children
+        for process, connection in children:
+            if process.is_alive():
+                connection.send("quit")
+        for process, _ in children:
+            process.join(10)
+            assert process.exitcode == 0
+            print(f"child {process.pid}: exit={process.exitcode}")
+    finally:
+        for process, connection in children:
+            if process.is_alive():
+                process.terminate()
+            process.join(10)
+            assert not process.is_alive(), "test child did not exit"
+            connection.close()
+            process.close()
+
+
+def _process_message(connection):
+    assert connection.poll(10), "child response timed out"
+    result = connection.recv()
+    print(f"child outcome: {result}")
+    return result
+
+
+def test_cross_process_apply_preserves_successful_update(tmp_path):
+    config = _config(tmp_path)
+    _write_private(tmp_path)
+    sources = {name: _write_skill(config, name=name) for name in ("alpha", "beta")}
+    state = Path(config.extension_state_dir)
+    scan = scan_extensions(Path(config.extension_dropin_dir), config=config)
+
+    with _apply_processes(
+        (tmp_path, "alpha", "before_write"), (tmp_path, "beta", None)
+    ) as children:
+        (_, a), (_, b) = children
+        assert _process_message(a) == ("alpha", "ready", 0)
+        assert _process_message(b) == ("beta", "ready", 0)
+        assert not state.exists()
+        a.send("apply")
+        assert _process_message(a) == ("alpha", "paused", "before_write")
+        b.send("apply")
+        result_b = _process_message(b)
+        a.send("release")
+        result_a = _process_message(a)
+        registry = load_registry(state)
+        print(f"registry: revision={registry.revision}, keys={sorted(registry.extensions)}")
+
+        assert sum(result[1] == "success" for result in (result_a, result_b)) == 1
+        assert result_a == ("alpha", "success", 1)
+        assert result_b == ("beta", "error", "another extension apply is already running")
+        assert registry.revision == 1
+        assert set(registry.extensions) == {"skill:alpha"}
+        installed = registry.extensions["skill:alpha"]
+        assert installed.source_hash == scan.items["skill:alpha"].source_hash
+        assert (state / installed.installed_relpath / "SKILL.md").read_bytes() == (
+            sources["alpha"] / "SKILL.md"
+        ).read_bytes()
+        assert not (state / "installed/skill/beta").exists()
 
 
 def _installer_bundle(tmp_path, *, name="writer", description="ZIP writer"):
