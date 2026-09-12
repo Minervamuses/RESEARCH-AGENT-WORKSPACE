@@ -85,3 +85,33 @@
   阻止 winner refetch；沒有實際網路。下一步以同一案例確認無 fetch、無保存。
 - 去重、唯一最小年、較晚平手、已知/未知混合的 characterization 通過。
   Phase 維持 In progress；baseline commit `4da5b23`。
+
+### 2026-09-12（Asia/Taipei）— Phase 01 green / representative verification
+
+- Red commit `6fff496`。Production 只改 `resolution.py` 與 `service.py`：
+  既有 identity/dedup 後，全缺年份回 `earliest_year_missing`；最小已知年
+  多 identity 回 `earliest_year_tie`，兩者都是 ambiguous、record=None。
+  alternatives 依現有候選順序保留最多五筆，順序不表示時間先後。
+  唯一最小已知年份回傳原 decision/evidence；非 earliest 排序保留。
+- Service guard 僅排除以上兩個 ambiguous reason 的 authority fallback，
+  走既有 SaveAlternative/status 轉換。不改 WorkResolver refetch、tool、
+  provider、types、schema、dependency 或儲存格式。
+- Working directory/runtime 同 preflight。Exact command：
+
+  ```bash
+  poetry run pytest tests/test_citation_resolution.py tests/test_citation_work_resolver.py tests/test_citation_authority.py tests/test_citation_workflow_tool.py -q
+  ```
+
+  實際 **72 passed, 1 warning in 0.47s**，第一次 focused implementation green。
+  Warning 同 baseline。新增 18 個案例（含參數展開）皆通過。
+- 代表 tool 案例使用真實 WorkResolver、CitationService、StructuredTool，
+  只在 provider search/fetch seam 注入離線 fake。2017 同年與全缺年份兩者的
+  ToolMessage content JSON == artifact，item status=ambiguous、reason 分別
+  為上述兩碼、receipt=None。兩 alternatives 保留 title、year（含 None）、
+  實際 published/preprint、DOI_A/DOI_B、arXiv 1706.03762 與空缺欄位；
+  無 earliest 觀測種類。Crossref/DataCite 各一次 fake search、fetcher calls=[]、
+  registry.list()=[]、output_dir 不存在。
+- 真實 resolver unit 案例保留 crossref/datacite 的 ok states，DOI calls=[]。
+  Service fallback 兩種歧義保持原 alternatives；正常 no_provider_records
+  fallback 仍 saved 且 receipt trusted，exact arXiv 與 exact DOI 既有測試通過。
+- Phase 維持 In progress，待最後一次 broader suite 與最終 diff 檢查。

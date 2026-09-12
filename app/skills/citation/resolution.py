@@ -365,20 +365,27 @@ def decide_resolution(
     eligible = list(unique.values())
 
     if intent.version_kind == "earliest":
-        eligible.sort(key=lambda decision: (
-            decision.record.year is None,
-            decision.record.year or 9999,
-            -decision.evidence.score,
-            decision.record.rank,
-            decision.record.provider,
-        ))
-    else:
-        eligible.sort(key=lambda decision: (
-            -decision.evidence.score,
-            decision.record.rank,
-            decision.record.provider,
-            decision.record.provider_id,
-        ))
+        dated = [decision for decision in eligible if decision.record.year is not None]
+        if not dated:
+            return ResolutionDecision(
+                "ambiguous", "earliest_year_missing",
+                alternatives=tuple(decision.record for decision in eligible[:5]),
+            )
+        earliest_year = min(decision.record.year for decision in dated)
+        earliest = [decision for decision in dated if decision.record.year == earliest_year]
+        if len(earliest) > 1:
+            return ResolutionDecision(
+                "ambiguous", "earliest_year_tie",
+                alternatives=tuple(decision.record for decision in earliest[:5]),
+            )
+        return earliest[0]
+
+    eligible.sort(key=lambda decision: (
+        -decision.evidence.score,
+        decision.record.rank,
+        decision.record.provider,
+        decision.record.provider_id,
+    ))
     return eligible[0]
 
 

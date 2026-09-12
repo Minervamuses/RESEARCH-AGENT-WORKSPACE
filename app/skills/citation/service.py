@@ -93,10 +93,15 @@ class CitationService:
             has_exact_doi = any(
                 identifier.kind == "doi" for identifier in intent.identifiers
             )
+            # An authority match cannot settle missing or tied year evidence.
+            earliest_ambiguity = decision.status == "ambiguous" and decision.reason_code in {
+                "earliest_year_missing", "earliest_year_tie",
+            }
             authority = None
             if (
                 not has_exact_doi
                 and decision.reason_code != "multiple_exact_identifiers"
+                and not earliest_ambiguity
             ):
                 try:
                     authority = await self.authorities.resolve(intent)
