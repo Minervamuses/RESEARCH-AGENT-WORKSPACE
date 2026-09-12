@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — 重現與分流 | Complete | 2026-09-12 | 2026-09-12 | Native Unicode baseline; engine and next experiment approved below | — |
 | 02 — 最小修正 | Complete | 2026-09-12 | 2026-09-12 | X11 native composition/candidate/turn acceptance below | — |
-| 03 — 完整驗收 | Not started | — | — | — | — |
+| 03 — 完整驗收 | In progress | 2026-09-12 | — | Saved Chinese restored; automated checks pass; host failure below | WSLg recovery and remaining native acceptance |
 
 只使用 Not started、In progress、Blocked、Complete。
 只有該階段所有必要驗收均有觀察證據才標 Complete。
@@ -259,3 +259,90 @@ apt-get --print-uris --assume-no --no-install-recommends install ibus ibus-chewi
   delta=1; exact persisted Chinese pass. No production/test/schema changes.
   Phase 03 receives the same fixture root and X11/IBus recipe for fresh-shell
   restart, retained conversation and remaining input regressions.
+
+### 2026-09-12 17:08–17:18 +08:00 — Phase 03 restart / host-failure checkpoint
+
+- Closed owned X11 Desktop/controls 7207/7430/7517, and stopped owned daemon
+  6968 with ibus exit. In separate fresh WSL invocations, ran:
+  `GDK_BACKEND=x11 ibus-daemon --daemonize --emoji-extension=disable`,
+  `ibus engine chewing`, `ibus engine` (chewing), then the recorded fixture
+  standard main.py launch with GDK_BACKEND=x11. Daemon 8090, Desktop 8318;
+  dev compilation 0.72 s. No inherited shell-only recipe was assumed.
+- Started fixture backend, selected p1 conversation 28b222e0cc6543aa8d7bbdc423de99a7.
+  Native screenshot displayed restored turn 3 with the exact accepted Chinese
+  sentence. This is positive Desktop-restart persistence evidence.
+- A subsequent native fu/3 attempt did not complete as expected. Tried one slower
+  key sequence after clearing preedit; no turn was submitted. Later screenshots
+  were residual Windows surfaces: /proc showed Desktop 8318, its WebKit processes,
+  IBus panel and Chewing engine had exited. xdotool commands hung in do_sys_poll.
+  Owned waiting xdotool PIDs 8751/8757 were stopped (kill -TERM).
+- Corrected the initial process-lifetime hypothesis using host evidence:
+  `free -m` showed about 27 GB available; dmesg had no OOM/segfault record.
+  `/mnt/wslg/stderr.log` ended with Xwayland fatal error:
+  `request could not be marshaled: can't send file descriptor`.
+  `wsl -d Ubuntu-24.04 --system -- ps -eo pid,ppid,stat,comm` showed
+  Xwayland PID 24 as Zs/defunct, parent Weston PID 11; xprop -root timed out.
+  Thus later input observations cannot be counted as app/IME regression evidence.
+- To capture startup diagnostics, launched one owned session-local daemon with
+  Conda app Python subprocess.Popen(['ibus-daemon','--emoji-extension=disable'],
+  env including GDK_BACKEND=x11, stdin=DEVNULL, stdout/stderr redirected to
+  fixture root / ime-daemon.log, start_new_session=True), PID 8912.
+  This did not restore the already failed X server; it is not a new launcher,
+  persistent module or required product recipe. No replacement app was launched.
+- WSLg-only recovery, within the authorized environment repair, without terminating
+  Ubuntu or its other Codex/background jobs:
+  `wsl -d Ubuntu-24.04 --system -u root -- kill -TERM 11` did not exit Weston;
+  `wsl -d Ubuntu-24.04 --system -u root -- kill -KILL 11` also did not recover it.
+  Subsequent /proc/11/status showed D (disk sleep), Xwayland still zombie.
+  Do not repeat these signals or claim compositor restart succeeded.
+  WSLGd normally supervises/restarts Weston per the official repository;
+  this kernel wait prevents normal recovery. Whole-WSL restart timing was asked
+  separately because it interrupts other active work and is outside the plan's
+  ordinary GUI-session restart scope; no wsl --shutdown was run.
+- Cleanup: `timeout 3 ibus exit` stopped owned daemon 8912 and its children;
+  no live Desktop/control/IME/xdotool process remained in the inspected user
+  namespace (a reparented ibus-portal zombie remained). No user processes were
+  deliberately stopped. The temporary fixture/control files remain for resuming
+  acceptance; deleting them before acceptance is complete would lose the baseline.
+- Post-failure Conda Python/json assertions: exactly three canonical turns remain;
+  turn 326aad8f319543d4a0ff58b603955fa7 still has exact matching displayInput /
+  semanticInput 請幫我整理這篇論文的研究方法。. No provider or real-store writes.
+
+Automated checks (same application source, Linux Conda app):
+
+```bash
+cd /home/minervamuses/research-agent-workspace/app/desktop
+npm test
+# PASS: 155 tests, 0 failed, 0 skipped; 5041.64 ms test duration.
+cd /home/minervamuses/research-agent-workspace/app
+poetry run pytest tests/test_desktop_fixture.py::test_real_service_round_trip_registration_restore_and_final_only_answer -q
+# PASS: 1 passed, 1 existing LangChainPendingDeprecationWarning; 0.31 s.
+```
+
+Python full suite, npm build and Rust release/test build were not run: this is
+an environment/documentation change with unchanged application/tests/Rust source;
+Phase 03 explicitly permits focused checks for this path. No stricter gates or
+new test framework were introduced.
+
+| Required acceptance | Evidence / remaining work |
+|---|---|
+| Native target sentence from keyboard | Pass, Phase 02 X11 physical Bopomofo keys |
+| Candidate/commit Enter zero turns, next Enter one | Pass, Phase 02 counts 2 -> 2 -> 3 |
+| Exact canonical Chinese and rendered user text | Pass, Phase 02 and post-failure assertions |
+| Switch away/back | Pass for 中文測試 baseline; repeat for target sentence still pending |
+| Desktop restart reads saved target sentence | Pass, native restored turn 3 in fresh launch |
+| Fresh-launch new composition/submission | Pending after WSLg host failure |
+| English IME test 123, mixed punctuation, Shift+Enter | Native acceptance pending; existing predicate test passes |
+| Unicode clipboard | Pass, Phase 01 native copy/clear/paste/send/reload |
+| Reproducible final recipe and overall closure | README records successful X11 recipe plus explicit host limitation; not yet closed |
+
+README.md and the original Issue 01 now reflect exactly this scope and limitation.
+Phase 03 stays In progress; no success criterion was relaxed or skipped as passed.
+After WSL recovery, reuse the same fixture root, verify live process IDs before
+input, finish only the pending native rows, update docs/log, and commit that step.
+Do not repeat package installation or already-passing suites without a new reason.
+
+Host context references (local logs above are the actual evidence):
+- https://github.com/microsoft/wslg — WSLGd supervision of Weston/Xwayland.
+- https://github.com/microsoft/wslg/issues/1483 — another reported unkillable
+  compositor/kernel wait; not proof this host has the identical root cause.

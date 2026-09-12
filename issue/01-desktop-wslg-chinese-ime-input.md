@@ -4,7 +4,7 @@
 
 - 類型：Desktop input／CJK IME integration。
 - 優先度：高。
-- 狀態：Open；使用者已在目前的 WSLg Desktop 實際觀察到只能輸入英文，但尚未完成 Linux GUI 對照測試或配置 Linux IME 後的重測。
+- 狀態：In progress；Linux IBus Chewing／X11 的原生組字、候選 Enter 零送出與後續單次送出已通過；完整重啟驗收受到本機 WSLg 圖形服務故障中斷。
 - 排序理由：直接阻止中文使用者以主要語言和 agent 對話，列為第一個處理項目。
 - 主要範圍：從 WSL/Linux 專案根目錄執行 `python main.py` 後開啟的 Tauri Desktop composer。CLI、模型回覆語言與其他原生 Windows 應用程式不先納入。
 
@@ -61,3 +61,12 @@
 - `app/desktop/src-tauri/src/backend.rs`
 - `app/desktop/src-tauri/src/lib.rs`
 - `app/agent/desktop/service.py`
+
+## 2026-09-12 實作與驗收進度
+
+- 已依使用者授權安裝 `ibus ibus-chewing ibus-gtk3 x11-xkb-utils`，採用 session-local `GDK_BACKEND=x11`，啟動 IBus 並選取 chewing；未修改 application code、dependency manifest 或儲存格式。
+- 同 session 的原生 GTK、最小 WebKit 與 Desktop 均可用注音按鍵組字；X11 下實際看見候選清單。組出「請幫我整理這篇論文的研究方法。」後，候選確認／組字確認 Enter 的 turn delta 均為 0，之後 Enter 的 delta 為 1。
+- 隔離 fixture 的 canonical `displayInput` 與 `semanticInput` 逐字等於該句；Desktop 重啟後曾在 transcript 讀回該已保存句子。使用既有 deterministic fixture，沒有模型呼叫或真實使用者 store 寫入。
+- 新啟動後的再次組字及剩餘英文／Shift+Enter 等原生回歸仍未完成：WSLg Xwayland 日誌出現 `request could not be marshaled: can't send file descriptor`，Xwayland 成為 zombie，Weston 隨後卡在核心 D 狀態；局部 compositor 復原未成功。這不是已確認的 React 或 persistence regression。
+- Desktop `npm test` 155 passed；既有 Python fixture round-trip test 1 passed（1 個既有 LangChain deprecation warning）。測試不能替代未完成的原生驗收。
+- 重現命令、turn ID、授權、失敗與復原紀錄集中於 [issue_01/build-log.md](issue_01/build-log.md)；目前保持未結案。

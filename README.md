@@ -154,6 +154,36 @@ npm run tauri dev
 
 啟動視窗與本機 backend runtime check 不需要 `OPENROUTER_API_KEY`，也不會發出 provider 請求；建立對話後的正常 chat、extended thinking 與 folder ingest 仍需符合「各功能入口需求對照」列出的 provider/Ollama 條件。缺少設定時，GUI 會保留 lifecycle controls 並顯示可操作的本機診斷。
 
+#### WSLg 繁體中文輸入（IBus Chewing）
+
+本機 Ubuntu 24.04 已以 IBus 1.5.29、Chewing 2.0.0、GTK 3.24.41、WebKitGTK 2.52.6 的 X11 路徑驗證原生注音組字、候選選字、Enter 單次送出及中文保存。這是 Linux 輸入法；Windows 中文輸入法不會自動配置此環境。初次安裝：
+
+```bash
+sudo apt-get install --no-install-recommends ibus ibus-chewing ibus-gtk3 x11-xkb-utils
+```
+
+從新的 WSL shell 啟用 `conda activate app`，回到 workspace 根目錄。此次驗證使用 X11，讓 IBus 的組字／候選窗可見：
+
+```bash
+export GDK_BACKEND=x11
+# 此 WSL session 尚未啟動自己的 IBus daemon 時，執行一次。
+ibus-daemon --daemonize --emoji-extension=disable
+```
+
+若同一 session 已有 IBus，沿用既有 daemon，不要用 `--replace` 接管它。待 daemon 啟動後選取引擎並啟動 Desktop：
+
+```bash
+ibus engine chewing
+ibus engine  # 應顯示 chewing；若 bus 尚未就緒，稍後重試上一行。
+python main.py
+```
+
+使用標準注音鍵盤組字，按 Down 開啟候選清單、以數字鍵或 Enter 確認候選；Enter 確認整段組字後，文字才進入 composer，再按 Enter 送出。`Shift+.` 可輸入「。」。此操作不需要修改 `main.py`、React composer、GTK_IM_MODULE 或 XMODIFIERS。
+
+上述環境變數只影響目前 shell 與子程序。結束測試時關閉 Desktop；若 IBus 是自己在本次 session 手動啟動的，可用 `ibus exit` 停止，再 `unset GDK_BACKEND`。本流程沒有新增 shell startup 或自訂開機服務。
+
+目前主機的 WSLg 1.0.66 在後續重啟驗收時發生 Xwayland 圖形服務故障，完整跨重啟與其餘原生輸入回歸尚待完成；詳見 [Issue 01 執行紀錄](issue/issue_01/build-log.md)。不要把前述單次成功解讀為已驗證所有 WSLg／Wayland 配置。
+
 在 `app/desktop/` 驗證 desktop source checkout：
 
 ```bash
