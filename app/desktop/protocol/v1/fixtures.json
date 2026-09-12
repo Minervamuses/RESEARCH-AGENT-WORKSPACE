@@ -1109,6 +1109,7 @@
             "graphRecursionLimit": 64,
             "thinkingMode": "extended",
             "bashPermissionMode": "ask",
+            "slashCommands": [],
             "loadedSkills": [],
             "mcpFamilies": [],
             "startupDiagnostics": [],
@@ -1327,6 +1328,7 @@
             "graphRecursionLimit": 64,
             "thinkingMode": "normal",
             "bashPermissionMode": "ask",
+            "slashCommands": [{"name": "literature-review", "description": "Review literature."}],
             "loadedSkills": ["literature-review"],
             "mcpFamilies": [],
             "startupDiagnostics": [],
@@ -1714,6 +1716,206 @@
           }
         }
       ]
+    },
+    {
+      "name": "session-catalog-rejects-missing",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.create",
+          "params": {
+            "loadMcp": false,
+            "graphRecursionLimit": 64
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnCount": 0,
+            "graphRecursionLimit": 64,
+            "thinkingMode": "normal",
+            "bashPermissionMode": "ask",
+            "loadedSkills": [
+              "literature-review"
+            ],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-catalog-rejects-wrong-type",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.create",
+          "params": {
+            "loadMcp": false,
+            "graphRecursionLimit": 64
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnCount": 0,
+            "graphRecursionLimit": 64,
+            "thinkingMode": "normal",
+            "bashPermissionMode": "ask",
+            "slashCommands": true,
+            "loadedSkills": [
+              "literature-review"
+            ],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-catalog-rejects-nested-key",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.create",
+          "params": {
+            "loadMcp": false,
+            "graphRecursionLimit": 64
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnCount": 0,
+            "graphRecursionLimit": 64,
+            "thinkingMode": "normal",
+            "bashPermissionMode": "ask",
+            "slashCommands": [
+              {
+                "name": "status",
+                "description": "Status",
+                "handler": "private"
+              }
+            ],
+            "loadedSkills": [
+              "literature-review"
+            ],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-catalog-rejects-name-too-long",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.create",
+          "params": {
+            "loadMcp": false,
+            "graphRecursionLimit": 64
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnCount": 0,
+            "graphRecursionLimit": 64,
+            "thinkingMode": "normal",
+            "bashPermissionMode": "ask",
+            "slashCommands": [
+              {
+                "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "description": "Status"
+              }
+            ],
+            "loadedSkills": [
+              "literature-review"
+            ],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-catalog-rejects-description-too-long",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "method": "session.create",
+          "params": {
+            "loadMcp": false,
+            "graphRecursionLimit": 64
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000066",
+          "ok": true,
+          "data": {
+            "sessionId": "session-1",
+            "turnCount": 0,
+            "graphRecursionLimit": 64,
+            "thinkingMode": "normal",
+            "bashPermissionMode": "ask",
+            "slashCommands": [
+              {
+                "name": "status",
+                "description": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"
+              }
+            ],
+            "loadedSkills": [
+              "literature-review"
+            ],
+            "mcpFamilies": [],
+            "startupDiagnostics": [],
+            "extensionRevision": 2
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
     }
   ]
 }

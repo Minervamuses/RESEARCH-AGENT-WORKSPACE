@@ -247,6 +247,13 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
     bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
+    slashCommands: {
+      type: "objectArray", required: true, maxItems: 512,
+      items: {
+        name: { type: "string", required: true, maxBytes: 64 },
+        description: { type: "string", required: true, maxBytes: 1_024 },
+      },
+    },
     loadedSkills: {
       type: "stringArray",
       required: true,
@@ -361,6 +368,13 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     graphRecursionLimit: { type: "integer", required: true, minimum: 3, maximum: 0xffff_ffff },
     thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
     bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
+    slashCommands: {
+      type: "objectArray", required: true, maxItems: 512,
+      items: {
+        name: { type: "string", required: true, maxBytes: 64 },
+        description: { type: "string", required: true, maxBytes: 1_024 },
+      },
+    },
     loadedSkills: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     mcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
     startupDiagnostics: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 4_096 },
@@ -666,6 +680,7 @@ export interface SessionCreatedDto {
   graphRecursionLimit: number;
   thinkingMode: "normal" | "extended";
   bashPermissionMode: BashPermissionMode;
+  slashCommands: { name: string; description: string }[];
   loadedSkills: string[];
   mcpFamilies: string[];
   startupDiagnostics: string[];

@@ -1147,6 +1147,7 @@ export default function App() {
               graphRecursionLimit: 64,
               thinkingMode: "normal",
               bashPermissionMode: updatedMode,
+              slashCommands: [],
               loadedSkills: [],
               mcpFamilies: [],
               startupDiagnostics: [],

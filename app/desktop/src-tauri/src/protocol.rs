@@ -1012,6 +1012,7 @@ fn validate_session_snapshot(
         "graphRecursionLimit",
         "thinkingMode",
         "bashPermissionMode",
+        "slashCommands",
         "loadedSkills",
         "mcpFamilies",
         "startupDiagnostics",
@@ -1023,6 +1024,7 @@ fn validate_session_snapshot(
         "graphRecursionLimit",
         "thinkingMode",
         "bashPermissionMode",
+        "slashCommands",
         "loadedSkills",
         "mcpFamilies",
         "startupDiagnostics",
@@ -1054,6 +1056,18 @@ fn validate_session_snapshot(
         "data.bashPermissionMode",
         &["ask", "bypass"],
     )?;
+    let commands = data["slashCommands"].as_array().ok_or_else(|| {
+        ProtocolViolation::invalid("data.slashCommands must be an array")
+    })?;
+    if commands.len() > 512 {
+        return Err(ProtocolViolation::invalid("data.slashCommands has too many items"));
+    }
+    for command in commands {
+        let command = expect_object(command, "data.slashCommands item")?;
+        validate_data_keys(command, &["name", "description"], &["name", "description"])?;
+        expect_bounded_string(&command["name"], "slashCommands.name", 64)?;
+        expect_bounded_string(&command["description"], "slashCommands.description", 1_024)?;
+    }
     validate_string_array(&data["loadedSkills"], "data.loadedSkills", 512, 256)?;
     validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
     validate_string_array(

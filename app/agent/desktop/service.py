@@ -35,6 +35,7 @@ from agent.conversations import (
 )
 from agent.cli.slash_commands import (
     ParsedSlashCommand,
+    SlashCommand,
     SlashCommandContext,
     SlashCommandError,
     SlashCommandRegistry,
@@ -1764,17 +1765,17 @@ class DesktopService:
                 ) from exc
 
             if parsed is not None:
-                registry = (
-                    self._slash_registry_override
-                    or build_default_registry(session)
-                )
+                registry = self._session_slash_registry(session)
                 command = registry.get(parsed.name)
                 if command is None:
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
                         f"Unknown slash command: /{self._bounded_text(parsed.name, 256)}",
                     )
-                if parsed.name.casefold() != command.name.casefold():
+                if (
+                    parsed.name.casefold() != command.name.casefold()
+                    or not self._desktop_command_eligible(command)
+                ):
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
                         "That slash command is not available in the desktop composer.",
@@ -1806,11 +1807,6 @@ class DesktopService:
                         )
                     turn_text = result.followup_input
                     turn_skill_name = result.skill_name
-                elif command.name not in _DESKTOP_SLASH_COMMANDS:
-                    raise DesktopServiceError(
-                        "PROTOCOL_INVALID",
-                        "That slash command is not available in the desktop composer.",
-                    )
                 else:
                     extension_action: str | None = (
                         (
@@ -2141,14 +2137,35 @@ class DesktopService:
             )
         return self._require_session()
 
+    def _session_slash_registry(self, session: ChatSession) -> SlashCommandRegistry:
+        return self._slash_registry_override or build_default_registry(session)
+
+    @staticmethod
+    def _desktop_command_eligible(command: SlashCommand) -> bool:
+        return command.skill_name is not None or command.name in _DESKTOP_SLASH_COMMANDS
+
     def _session_snapshot(self, session: ChatSession) -> dict[str, Any]:
         status = session.status_snapshot()
+        commands = [
+            command for command in self._session_slash_registry(session).all_commands()
+            if self._desktop_command_eligible(command)
+        ]
+        if len(commands) > 512 or any(
+            len(command.name.encode("utf-8")) > 64 for command in commands
+        ):
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID", "Session slash command catalog exceeds protocol limits.",
+            )
         return {
             "sessionId": session.session_id,
             "turnCount": int(status.get("turn_count", 0)),
             "graphRecursionLimit": int(session.config.graph_recursion_limit),
             "thinkingMode": session.thinking_mode,
             "bashPermissionMode": self._bash_permission_mode,
+            "slashCommands": [
+                {"name": command.name, "description": self._bounded_text(command.description, 1_024)}
+                for command in commands
+            ],
             "loadedSkills": [
                 self._bounded_text(skill.name, 256)
                 for skill in session.loaded_skills[:512]

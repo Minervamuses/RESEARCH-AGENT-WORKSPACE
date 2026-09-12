@@ -509,6 +509,40 @@ def _assert_result(method, data, suffix):
     )
 
 
+def test_catalog_follows_materialized_session_and_same_session_select(tmp_path):
+    from agent.skills import SkillMetadata
+
+    service, _catalog, factory, _repository = _seed_coordinator(tmp_path)
+    original_factory = service._session_factory
+    desired = {SESSION_A: "writer", SESSION_B: "reviewer"}
+
+    async def with_skills(*args, **kwargs):
+        session = await original_factory(*args, **kwargs)
+        session.loaded_skills = [SkillMetadata(
+            desired[session.session_id], "Session skill", Path(__file__),
+        )]
+        return session
+
+    service._session_factory = with_skills
+
+    async def select(session_id):
+        snapshot = await service.dispatch("session.select", {
+            "projectId": "p1", "sessionId": session_id,
+        })
+        _assert_result("session.select", snapshot, 910)
+        return snapshot["slashCommands"][-1]["name"]
+
+    assert asyncio.run(select(SESSION_A)) == "writer"
+    desired[SESSION_A] = "new-writer"
+    assert asyncio.run(select(SESSION_A)) == "writer"
+    assert len(factory.sessions) == 1
+    assert asyncio.run(select(SESSION_B)) == "reviewer"
+    assert asyncio.run(select(SESSION_A)) == "new-writer"
+    asyncio.run(service.dispatch("session.shutdown", {}))
+    desired[SESSION_A] = "restarted-writer"
+    assert asyncio.run(select(SESSION_A)) == "restarted-writer"
+
+
 def test_catalog_bootstraps_only_the_exact_default_schema(tmp_path):
     catalog = DesktopProjectCatalog(tmp_path)
 

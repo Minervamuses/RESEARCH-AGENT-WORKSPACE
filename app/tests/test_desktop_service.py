@@ -523,6 +523,43 @@ def test_session_create_failure_keeps_backend_retryable(tmp_path: Path) -> None:
     )
 
 
+def test_session_catalog_projects_only_dispatchable_canonical_commands(tmp_path: Path) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    assert created["slashCommands"][-1] == {
+        "name": "research", "description": "Research local material.",
+    }
+    session = factory.created
+    session.loaded_skills = [
+        SkillMetadata(name, "中文" * 1000, Path(__file__))
+        for name in ["writer", "_prompt-master", "duplicate", "duplicate",
+                     "status", "exit", "skill", "Bad_Name", "citation"]
+    ]
+    catalog = service._session_snapshot(session)["slashCommands"]
+    assert [item["name"] for item in catalog] == [
+        "help", "status", "extension-management", "init", "ingest", "sync",
+        "prune", "writer", "_prompt-master",
+    ]
+    assert len(catalog[-1]["description"].encode("utf-8")) <= 1024
+    assert all(set(item) == {"name", "description"} for item in catalog)
+
+
+def test_session_catalog_fails_explicitly_instead_of_truncating(tmp_path: Path) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session = factory.created
+    session.loaded_skills = [
+        SkillMetadata(f"skill-{index}", "Description", Path(__file__))
+        for index in range(505)
+    ]
+    assert len(service._session_snapshot(session)["slashCommands"]) == 512
+    session.loaded_skills.append(SkillMetadata("overflow", "Description", Path(__file__)))
+    with pytest.raises(DesktopServiceError, match="catalog exceeds"):
+        service._session_snapshot(session)
+
+
 def test_session_create_is_single_flight_and_blocks_shutdown(tmp_path: Path) -> None:
     async def run() -> None:
         create_started = asyncio.Event()
@@ -1055,7 +1092,8 @@ def test_session_list_reconciles_json_created_after_service_start(
 
 @pytest.mark.parametrize(
     "text",
-    ["/", "/unknown", "/mode normal", "/research", "/citation prompt"],
+    ["/", "/unknown", "/mode normal", "/research", "/citation prompt",
+     "/quit", "/exit", "/clear", "/thinking normal"],
 )
 def test_composer_rejects_invalid_or_disallowed_commands_before_model(
     tmp_path: Path,
@@ -1941,6 +1979,7 @@ def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(
         session_factory=factory,
     )
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    catalog_before = service._session_snapshot(factory.created)["slashCommands"]
 
     preview = asyncio.run(service.dispatch("extensions.preview", {}))
 
@@ -1978,6 +2017,7 @@ def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(
         )
     )
     assert manager.applied_preview is manager.preview_object
+    assert service._session_snapshot(factory.created)["slashCommands"] == catalog_before
     assert applied["appliedRevision"] == 1
     assert applied["state"] == "completed"
     assert applied["accepted"] is True

@@ -126,6 +126,13 @@
       "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
       "bashPermissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]},
+      "slashCommands": {
+        "type": "objectArray", "required": true, "maxItems": 512,
+        "items": {
+          "name": {"type": "string", "required": true, "maxBytes": 64},
+          "description": {"type": "string", "required": true, "maxBytes": 1024}
+        }
+      },
       "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "startupDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096},
@@ -211,6 +218,13 @@
       "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
       "bashPermissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]},
+      "slashCommands": {
+        "type": "objectArray", "required": true, "maxItems": 512,
+        "items": {
+          "name": {"type": "string", "required": true, "maxBytes": 64},
+          "description": {"type": "string", "required": true, "maxBytes": 1024}
+        }
+      },
       "loadedSkills": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "startupDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096},
