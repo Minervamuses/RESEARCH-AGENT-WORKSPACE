@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
-| 03 — Native Desktop acceptance | Not started | — | — | — | — |
+| 03 — Native Desktop acceptance | In progress | 2026-09-12 | — | 下方 native preflight | IBus 引擎 / Orca unavailable；其餘待直接觀察 |
 | 04 — Thinking contract/runtime | Not started | — | — | — | — |
 | 05 — Thinking Desktop acceptance | Not started | — | — | — | — |
 | 06 — Regression and closure | Not started | — | — | — | — |
@@ -105,3 +105,18 @@ acceptance 對應、必要 review、限制、blocker、下一個 eligible 行動
 | 相容回歸 | 230 個 Desktop service/conversation/protocol focused checks 與 5 個 Citation terminal/one-shot checks 通過，覆蓋 catalog、一般對話、restore/retry、final-only 與 cleanup。 |
 
 下一 eligible phase：03 的短 native preflight。若原生外部阻塞，04 僅在三項產品決策及具體授權齊全時可執行；06 仍不得繞過 03–05。
+
+## 2026-09-12 — Phase 03 native preflight（8743c52；worktree clean）
+
+- 已讀本 phase、Issue 02 menu/integration 與 Issue 08 Desktop phase / 歷史 logs，核對 main.py、server._build_runtime_service、fixture_session.py、test_desktop_fixture.py、SlashComposer / conversations tests。
+- Exact read-only commands（Linux Conda app，cwd root）：
+  - command -v python poetry git node npm cargo xdotool xdpyinfo wayland-info fcitx5-remote ibus orca gdbus busctl → Python/Poetry/Node/npm/Cargo 全在 Conda app，Git /usr/bin/git；xdotool/xdpyinfo/ibus/gdbus/busctl 可用；wayland-info/fcitx5-remote/orca 不存在。
+  - printenv DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS GTK_IM_MODULE QT_IM_MODULE XMODIFIERS → :0、wayland-0、/run/user/1000/、unix:path=/run/user/1000/bus；最後三項未設定（printenv exit 1）。
+  - timeout 3s xdotool getdisplaygeometry → passed，2560 1600。此為今日新 evidence，歷史 timeout 仍保留，不沿用為今日阻塞。
+  - timeout 3s ibus engine → unavailable，exit 1，IBUS_IS_BUS assertion / No engine is set.；未重啟或安裝。
+  - command -v ffmpeg gst-launch-1.0 gnome-screenshot scrot → /usr/bin/ffmpeg、/usr/bin/scrot；timeout 3s xwininfo -root -tree → passed，只有 Weston WM 等三個 root children，尚未啟動 App。
+  - ls -l app/desktop/node_modules/.bin/tauri app/desktop/node_modules/.bin/vite app/desktop/src-tauri/target/debug/research-agent-desktop → 現有 Linux npm dependencies 與 Sep 7 debug binary 存在。
+- 原生觀察可走既有 xdotool + scrot；暫不宣稱互動通過。Linux IME / Orca 必要 evidence 仍 unavailable。
+- Issue 02 安全入口已確認：phase02 fixture opt-in + require_fixture_root，全部 store/citations/extensions/knowledge 指向 caller-owned /tmp；FixtureSessionFactory / offline extension model，test_fixture_never_uses_chat_session_factory_or_exposes_credentials 明示禁止真 ChatSession.create。
+- 使用既有 main.py / npm tauri dev、CARGO_NET_OFFLINE=true、timeout 540s 上限嘗試原生 fixture；不執行完整 suite/source build、不安裝依賴。現有 Rust cache + dev Vite，預期啟動低於十分鐘；觀察 startup 後再操作。
+- 真 Citation 第二門檻仍未驗證：phase02 fixture 不是真 Citation；必須另外確認自有 tmp launcher 的既有 dependency injection，不能用一般 python main.py 接真 user store。
