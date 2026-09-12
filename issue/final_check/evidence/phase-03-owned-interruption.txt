@@ -1,0 +1,13 @@
+from pathlib import Path
+import os,signal,json
+r=Path("/tmp/research-agent-desktop-phase02-final-6e7ayl45")
+pid=14395
+env=Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+assert ("RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT="+str(r)).encode() in env
+assert b"RESEARCH_AGENT_DESKTOP_NATIVE_AUDIT=final-check-9489e8e" in env
+args=Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+assert b"agent.desktop.server" in args,args
+a=[json.loads(l) for l in (r/"native-audit.jsonl").read_text().splitlines()]
+assert a[-1]["pid"]==pid and a[-1]["kind"]=="model",a[-1]
+os.kill(pid,signal.SIGTERM)
+print("Stopped owned backend PID",pid,"during first offline model invocation")

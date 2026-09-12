@@ -9,10 +9,10 @@
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
-| 03 — Native Desktop acceptance | In progress | 2026-09-12 | — | 下方 native launch / screenshot evidence | 輸入法已准 skipped；仍缺 menu／可及性／真 Citation 原生證據及安全入口 |
+| 03 — Native Desktop acceptance | Complete | 2026-09-12 | 2026-09-13 | 下方Phase03完整native表、audit/AX/screenshot/磁碟核對 | IME按決定skipped；其餘required完成 |
 | 04 — Thinking contract/runtime | Not started | 2026-09-12（僅 gate） | — | 下方產品 gate 歷史與 Issue 09 明確延期紀錄 | 已延期，不列本輪 required；無功能完成證據 |
 | 05 — Thinking Desktop acceptance | Not started | — | — | 下方 Issue 09 明確延期紀錄 | 已延期，不列本輪 required；無功能完成證據 |
-| 06 — Regression and closure | Not started | — | — | — | 前置 03 未 Complete；04/05 明確延期；未跑完整 suites/build |
+| 06 — Regression and closure | In progress | 2026-09-13 | — | 03已Complete，開始最終read-only gate與一次回歸 | suites/build/review待執行；04/05延期 |
 
 狀態只使用 Not started、In progress、Blocked、Complete。
 必要前置與待決事項見 GOALS／各 phase；開始 preflight 後才把實際阻塞寫入本表。
@@ -231,3 +231,33 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - 已實際取得真 ChatSession Citation 搜尋/save/正式答案、普通下一回合、menu/AT-SPI、A/B、extension apply/rematerialization/removal、restart、failure證據，完整對照與artifact待本phase結束附錄。
 - App.tsx 無cancel控件，server沒有cancel RPC；首個 [[native:cancel]] 只延遲6秒/模型步，實際完成，僅計入busy/tool evidence，不能記取消passed。依live入口先具體化PLANS/03為自有backend中斷後restart觀察interrupted；沒有新增控件或縮減恢復/不自動重跑要求。既有test_citation_e2e保留task.cancel cleanup直接證據。
 - tmp registry移除成功revision2；一次變更delay的唯一匹配assert失敗，因原碼為多行，未改hook，不冒充已延長。普通restart後真Session僅citation，models/fetch/scopes皆0，bundle SHA256與mtime完全相同。後續保留6秒delay，在首個model等待時停止精確owned backend PID。
+
+## 2026-09-13 — Phase03 原生驗收完成（d3647c5；production與前兩phase相同）
+
+### Runtime / exact temporary launch
+- Windows @oai/sky 操作真正 WSLg Research Agent視窗；Linux Conda app執行App/backend/Git。window5112398，msrdc；Linux AT-SPI只讀。第二個launcher啟動UTC 2026-09-12 15:48:42，完成互動16:06:37（17m55s人工互動）；Vite ready243ms，Cargo增量0.79s。沒有長編譯/模型/資料命令，沒有付費或網路provider。
+- 既有main.py source launcher，Linux Conda app python -：env={RESEARCH_AGENT_DESKTOP_FIXTURE:phase02, RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT:/tmp/research-agent-desktop-phase02-final-6e7ayl45, RESEARCH_AGENT_DESKTOP_NATIVE_AUDIT:final-check-9489e8e, CARGO_NET_OFFLINE:true}；subprocess.Popen([sys.executable,"main.py"],cwd=repo,env=env,stdout=owned native-dev.log,stderr=STDOUT,start_new_session=True)，PGID10638。自有root/skills/citation複製既有app/skills/citation，不含cache。
+- Exact bootstrap保存為[evidence/phase-03-temporary-launcher.txt](evidence/phase-03-temporary-launcher.txt)。app/sitecustomize.py只是一個指到自有root的臨時symlink；僅上述exactroot/opt-in且agent.desktop.server -m進程生效。真ChatSession.create強制load_mcp=False（原UI傳true另記），AgentConfig由既有fixture隔離，real CitationService使用_SearchSaveModel、RoutingFetcher、_fixture_services；save/request僅旁路記錄，不偽造正式答覆或持久JSON。零userstore/外部provider。
+- 原生操作全部使用sky.click/press_key/type_text/scroll，每次一個action後立即get_window_state(include_screenshot:false,include_text:true)，再600ms取得新真截圖。下表按實際操作次序；所有 session.turn 請求保存於[evidence/phase-03-native-audit.jsonl](evidence/phase-03-native-audit.jsonl)。
+
+### Acceptance → observed evidence
+| Acceptance | Exact actions / actual result |
+|---|---|
+| /status補命令不送出 | A input /sta→Return，插入/status空白，before/after session.turn=0，models/fetch/scopes=0；再Return恰一個session.turn，完成local output、turnNumber3。前次AT-SPI CharacterCount/CaretOffset8/8，mouse /ingest+fixture-notes.md置尾已有上節實測。 |
+| 一般鍵鼠 / focus / closure | 既有上節 /→Down→Up→Escape、滑鼠/ingest、ShiftReturn/Tab保留；本次 /→Up 環繞到最後/citation，active item自動捲入；Tab關menu且Send焦點框，ShiftTab回composer；Ctrl+A/BackSpace清空；再/→ShiftReturn成兩行且menu消失，turns仍5。首次BackSpace在caret0沒清掉/，觀察後用全選清空，非功能修補。 |
+| 可及性 | Linux gdbus沿實際App GetChildren，Properties.GetAll Accessible/Text、GetAttributes/GetState。Slash commands computed-role=listbox，Message textbox/haspopup=listbox；選/help時state1132468480、未選/status1124073728；Up後/citation state1132468480，/help1090519296且不在可見區；截圖顯示最後option可見。AX兩次各107nodes且queue清空，檔案ax-current/ax-citation-selected；關閉由實際UI確認。IME按使用者決定skipped，未聲稱screen reader朗讀。 |
+| 真Citation與正式輸出 | /cit→Return→Search and save Paper A，仍僅前一個/status請求；Return後真search/save兩個citation_workflow摘要ok，model3/fetch4/scope1/save1，final_only/chunkCount0。一份正式答案「已保存並引用來源 [1]。」及Ada Lovelace/2021/Paper A/DOI10.1234/paper-a；canonical第4turn與response逐字相同，mode normal。screenshots citation-complete/citation-live-tools/citation-busy；UI工作時控件disabled、Normal說明保留。 |
+| 後續普通問題 | ordinary question→Return，ordinary answer；增量model1，fetch/save/scope零，模型tools沒有citation_workflow，selector Normal。citation-ordinary-next截圖。 |
+| A→B→A及catalog隔離 | A的多行/草稿→click B（空draft，只有B seed）；B /nat可見native-writer→click A（空draft，不混B草稿或selection）；A讀回Citation與ordinary歷史，model4/fetch4/scope1/save1保持。citation-restored-tools截圖可見兩筆真工具歷史。 |
+| apply/rematerialization | 使用既有test_extension_skill_startup._write_skill/_apply_skill及AgentConfig，把native-writer套用到自有extensions/desired/state、revision1；running A的/仍8commands，重新載入B/A才loadedSkills含native-writer、revision1。A輸入/native-writer explain→Return，真one-shot回ordinary answer，僅一次model、無Citationscope。 |
+| 移除/restart/拒絕 | 用既有write_registry(ExtensionRegistry(revision=2,source_root=owned/desired,extensions={}))移除自有applied entry；click Restart→重新選A，generation2，loadedSkills僅citation、revision2，model/fetch/scope全零；failed草稿可讀、未重試。手打/native-writer explain→Return，Unknown slash command；/thinking normal→Return，not available in desktop composer。兩者未增canonical turn或model，截圖removed-skill-rejected/cli-command-rejected。 |
+| failure | /citation [[native:fail]]→Return，模型刻意RuntimeError，真canonical state failed、UI Prompt saved/Failed且可編輯；重啟仍同failed，不自行重跑。第一次model記錄9次但base model.invocations8，差額是此刻意失敗，不能把8當實際呼叫數。 |
+| 中斷/recovery | 初次/citation [[native:cancel]]僅每步delay6s，最後完成，提供busy及真tool活動而非cancel證據；第二次/citation [[native:cancel]] interrupted check→Return，核對PID14395的/proc environ精確root/opt-in、cmdline含agent.desktop.server，audit最後為此PID第一個model，再os.kill(pid,SIGTERM)。UI立即Backend crashed，不自動重送。click Restart backend→generation3→選A：Prompt saved/Interrupted、Retry saved draft、canonical第9turn interrupted，新process model/fetch/scope皆0。修改成ordinary recovery question→Return完成ordinary answer；截圖citation-interrupted-restored/citation-recovered-next。task.cancel cleanup仍由既有直接tests在06執行。 |
+| 磁碟/隔離 | Citation bundle僅一份Paper_A--df54325721de（citation.json1427bytes、reference.bib114bytes），兩次成功save第二次重用；初次保存後至切換/兩次restart/失敗/中斷所有bundle SHA256及mtime_ns相同，見bundle-before-lifecycle指紋。沒有commit store或bundle。 |
+
+### Exact evidence checks / cleanup / handoff
+- Conda app python - 執行[evidence/phase-03-native-assertions.txt](evidence/phase-03-native-assertions.txt)：實際canonical/final text、normal metadata、search/save toolActivities、catalog0→1→2、3rdprocess restore零effects、bundle SHA256+mtime、failed/interrupted/completed尾端狀態、10筆UI session.turn（含2次拒絕）皆通過，1.45s。初次check最後一項誤用params.message KeyError；讀actual DTO確認text後修觀察script重跑，非application失敗或重做native旅程。
+- AT-SPI exact只讀遍歷script另存phase-03-accessibility-reader.txt；native中斷PID安全檢查script存phase-03-owned-interruption.txt。
+- 支援focused checks為conditional：沒有正式UI/fixture code變更，既有Python/Node直接證據仍適用；本phase不重跑full suites/build，交由06統一。
+- 點UI Shut down觀察Backend stopped/gracefully；核對/proc/10638精確root及getpgid==10638後killpg(SIGTERM)，只停止自有launcher/Vite/Tauri。確認app/sitecustomize.py為指到ownedroot/sitecustomize.py的symlink後unlink，僅移除自有app/__pycache__/sitecustomize.*.pyc。截圖及去敏audit/AX/recipe已保存；root暫留至最終證據驗證，不再有會啟動hook的repo入口。
+- Phase03 Complete：Issue02與08分別取得直接native evidence；IME明確skipped；無production/tests修改、無新增依賴/API/schema/持久module、無新的功能缺陷。既有先前unavailable/timeout保留歷史。下一eligible為06，04/05明確延期。

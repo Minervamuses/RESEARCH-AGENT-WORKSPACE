@@ -1,0 +1,65 @@
+"""Temporary final_check launcher: active only for the exact owned fixture root."""
+import os
+if os.environ.get("RESEARCH_AGENT_DESKTOP_NATIVE_AUDIT") == "final-check-9489e8e" and os.environ.get("RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT") == "/tmp/research-agent-desktop-phase02-final-6e7ayl45":
+    from pathlib import Path
+    import sys
+    root = Path("/tmp/research-agent-desktop-phase02-final-6e7ayl45")
+    assert root.resolve() == root and root.is_dir()
+    if "-m" in sys.orig_argv and "agent.desktop.server" in sys.orig_argv:
+        import json, time, threading
+        import pytest
+        from langchain_core.messages import HumanMessage
+        sys.path.insert(0, "/home/minervamuses/research-agent-workspace/app/tests")
+        from test_citation_e2e import _SearchSaveModel, _fixture_services, _rag_search
+        from tests.citation_fixtures import RoutingFetcher
+        from agent.session import ChatSession
+        from agent.desktop import fixture_session
+        from skills.citation.service import CitationService
+        patch = pytest.MonkeyPatch()
+        lock = threading.Lock()
+        def record(kind, **values):
+            with lock, (root / "native-audit.jsonl").open("a",encoding="utf-8") as stream:
+                stream.write(json.dumps(dict(kind=kind,pid=os.getpid(),**values),ensure_ascii=False,default=str)+"\n")
+        class NativeModel(_SearchSaveModel):
+            def invoke(self, messages):
+                human = next((str(m.content) for m in reversed(messages) if isinstance(m,HumanMessage)), "")
+                record("model", tools=self.invoked_tool_names[-1])
+                if "[[native:fail]]" in human:
+                    raise RuntimeError("Intentional offline native acceptance failure")
+                if "[[native:cancel]]" in human:
+                    time.sleep(6)
+                return super().invoke(messages)
+        model=NativeModel()
+        fetcher=RoutingFetcher()
+        patch.setattr("agent.graph.get_chat_model",lambda config:model)
+        patch.setattr("agent.tools.inventory.create_rag_tools",lambda config:[_rag_search])
+        original_save=CitationService.save
+        async def save(self,*args,**kwargs):
+            record("save")
+            return await original_save(self,*args,**kwargs)
+        patch.setattr(CitationService,"save",save)
+        services=_fixture_services(patch,root,fetcher=fetcher)
+        original_build=fixture_session.build_phase02_fixture_service
+        def build(*,original_cwd,environ):
+            service=original_build(original_cwd=original_cwd,environ=environ)
+            service.config.citation_output_dir=str(root/"cite")
+            async def factory(config,*,load_mcp,**kwargs):
+                record("mcp_disabled_for_fixture", requested=load_mcp)
+                session=await ChatSession.create(config,load_mcp=False,**kwargs)
+                record("session",session_id=session.session_id,type=type(session).__name__,persist_dir=config.persist_dir,citation_output_dir=config.citation_output_dir,skills=[s.name for s in session.loaded_skills])
+                return session
+            service._session_factory=factory
+            original_dispatch=service.dispatch
+            async def dispatch(method,params,*,event_sink=None):
+                record("request",method=method,params=params)
+                try:
+                    result=await original_dispatch(method,params,event_sink=event_sink)
+                except BaseException as exc:
+                    record("request_error",method=method,error=type(exc).__name__,detail=str(exc)[:300])
+                    raise
+                record("result",method=method,result=result,model_calls=len(model.invocations),fetch_calls=len(fetcher.calls),scopes=len(services))
+                return result
+            service.dispatch=dispatch
+            record("ready",fixture_root=str(root),real_session_factory=True)
+            return service
+        patch.setattr(fixture_session,"build_phase02_fixture_service",build)

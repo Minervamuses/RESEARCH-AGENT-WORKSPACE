@@ -1,0 +1,27 @@
+import subprocess,re,json
+from pathlib import Path
+def call(dest,path,method,*args):
+    p=subprocess.run(["gdbus","call","--address","unix:path=/run/user/1000/at-spi/bus","--dest",dest,"--object-path",path,"--method",method,*args],capture_output=True,text=True,timeout=3)
+    return p.stdout.strip() if p.returncode==0 else p.stderr.strip()
+def children(d,p):
+    return re.findall(r"\('([^']+)', (?:objectpath )?'([^']+)'\)",call(d,p,"org.a11y.atspi.Accessible.GetChildren"))
+roots=children("org.a11y.atspi.Registry","/org/a11y/atspi/accessible/root")
+apps=[(d,p) for d,p in roots if "research-agent-desktop" in call(d,p,"org.freedesktop.DBus.Properties.GetAll","org.a11y.atspi.Accessible")]
+assert len(apps)==1,apps
+q=list(apps);seen=set();rows=[]
+while q and len(seen)<160:
+    d,p=q.pop(0)
+    if (d,p) in seen:continue
+    seen.add((d,p))
+    props=call(d,p,"org.freedesktop.DBus.Properties.GetAll","org.a11y.atspi.Accessible")
+    attrs=call(d,p,"org.a11y.atspi.Accessible.GetAttributes")
+    row=dict(dest=d,path=p,properties=props,attributes=attrs)
+    if any(x in props for x in ("Slash commands","Message","/help","/citation","/status","/ingest")):
+        row["state"]=call(d,p,"org.a11y.atspi.Accessible.GetState")
+        if "'Message'" in props:
+            row["text"]=call(d,p,"org.freedesktop.DBus.Properties.GetAll","org.a11y.atspi.Text")
+        print(json.dumps(row))
+    rows.append(row);q.extend(children(d,p))
+assert not q,"AX limit reached"
+print("nodes",len(rows))
+Path("/tmp/research-agent-desktop-phase02-final-6e7ayl45/ax-current.json").write_text(json.dumps(rows,indent=2))

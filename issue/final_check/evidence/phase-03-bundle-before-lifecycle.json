@@ -1,0 +1,14 @@
+{
+  "cite/.locks/a7c8d0fcff23b687ea6217c00c6fe041d81d552b3858ea2efd630c30a9115c7c": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mtime_ns": 1789228504039798655
+  },
+  "cite/Paper_A--df54325721de/citation.json": {
+    "sha256": "09cd21a6c25da110774f8529fb21d510aee44d8664744b6cfde1020c016e28cd",
+    "mtime_ns": 1789228504043572510
+  },
+  "cite/Paper_A--df54325721de/reference.bib": {
+    "sha256": "0e1cbf1bd732afc1ba44924cb16a8b7f4f45b434a265789b71067a7d4dda9bb5",
+    "mtime_ns": 1789228504039798655
+  }
+}
