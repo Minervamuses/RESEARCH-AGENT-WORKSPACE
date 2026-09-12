@@ -8,7 +8,7 @@
 | Phase | 狀態 | 開始 | 完成 | 證據 | 阻塞 |
 |---|---|---|---|---|---|
 | 01 — 重現與分流 | Complete | 2026-09-12 | 2026-09-12 | Native Unicode baseline; engine and next experiment approved below | — |
-| 02 — 最小修正 | In progress | 2026-09-12 | — | Installation and native control checks below | — |
+| 02 — 最小修正 | Complete | 2026-09-12 | 2026-09-12 | X11 native composition/candidate/turn acceptance below | — |
 | 03 — 完整驗收 | Not started | — | — | — | — |
 
 只使用 Not started、In progress、Blocked、Complete。
@@ -205,3 +205,57 @@ apt-get --print-uris --assume-no --no-install-recommends install ibus ibus-chewi
   Down (GTK) / space (WebKit) did not expose a visible candidate popup in the
   returned window captures; this remains to be resolved/observed. App sentence,
   candidate Enter and final submit checks have not yet been completed.
+
+### 2026-09-12 16:59–17:06 +08:00 — Phase 02 native acceptance (Complete)
+
+- Wayland observations were insufficient for candidate/preedit UI acceptance:
+  GTK/WebKit conversion worked, but no candidate list was visible in captures;
+  the app showed committed 請 only after confirmation. No turn was submitted.
+  Did not infer a React event defect or add a workaround.
+- Compared an explicit X11 recipe. Closed only owned Desktop/control PIDs
+  5979/6355/6396, and `ibus exit` stopped this task's daemon 5750.
+  `xdotool` was already installed (3.20160805.1); no automation package added.
+  Installed the missing keyboard-layout utility under existing authorization:
+  `wsl -d Ubuntu-24.04 -u root -- apt-get install -y --no-install-recommends x11-xkb-utils`.
+  170 kB download, +500 kB; 4.77 s. This removes the observed ibus engine CLI
+  failure when it tries to invoke setxkbmap, without changing keyboard settings.
+- Started `GDK_BACKEND=x11 ibus-daemon --daemonize --emoji-extension=disable`
+  as minervamuses (PID 6968). After readiness, `ibus engine chewing` and
+  `ibus engine` both succeeded. No GTK_IM_MODULE, XMODIFIERS or QT_IM_MODULE
+  override was needed. No user gsettings values or shell startup files changed.
+- Restarted main.py with the same fixture variables plus GDK_BACKEND=x11
+  (Desktop PID 7207; cached dev compilation 0.64 s). Both temporary controls
+  were also restarted with GDK_BACKEND=x11 (GTK 7430, MiniBrowser 7517).
+  `xdotool search --onlyvisible --name '^Research Agent$'` returned 10485763;
+  GTK 14680067, WebKit 16777234. ss -xnp confirms actual Desktop X11 sockets
+  to /tmp/.X11-unix/X0, including fd 12 inode 28166 -> peer 31030.
+- Control comparison: xdotool native XTEST key events c,l,3 displayed 好;
+  Down exposed the numbered candidate list in both GTK and WebKit; 1,Return
+  selected and committed the character. This uses the real installed IBus
+  engine; no DOM dispatch, literal Chinese insertion or paste stands in for IME.
+- App selected same p1 conversation (initial 2 turns). Native keys fu/3
+  produced 請 preedit; Down exposed candidate list; Return confirmed candidate
+  and closed that list. Canonical count remained 2, last input 中文測試.
+- First punctuation shortcut Ctrl+period opened GTK's emoji popup. Dismissed it
+  with Escape and cleared the pending preedit; no turn was submitted. Consulted
+  installed docs and upstream Chewing usage; used Shift+period for 。 instead.
+  This was an input-sequence correction, not a production-code change.
+- Final exact physical-key sequence in focused composer:
+  `xdotool type --clearmodifiers --delay 120 'fu/31; ji35/3xu35k4qu0 xjp4jp62k7u06ru.4z; z83'`
+  then `xdotool key shift+period`.
+  Preedit showed 請幫我整理這篇論文的研究方法。 (standard Bopomofo).
+  `xdotool key Return` committed the composition into draft; screenshot retained
+  draft and canonical count remained 2. Subsequent `xdotool key Return` cleared
+  the composer and added exactly one completed logical turn (count 3).
+- Conda app Python/json assertions passed: third turn
+  326aad8f319543d4a0ff58b603955fa7 has displayInput == semanticInput ==
+  請幫我整理這篇論文的研究方法。, state completed; UI user transcript matches.
+- This establishes an environment-only working recipe on this host. It does not
+  prove every Wayland setup is broken, or isolate the Windows capture/activation
+  tool's contribution to the earlier missing popup. No app patch is needed for
+  the demonstrated successful path. Phase 01 code checks remain applicable.
+- Phase 02 criteria: matching X11 controls and app composition pass; visible
+  candidate confirmation delta=0; composition commit delta=0; final Enter
+  delta=1; exact persisted Chinese pass. No production/test/schema changes.
+  Phase 03 receives the same fixture root and X11/IBus recipe for fresh-shell
+  restart, retained conversation and remaining input regressions.
