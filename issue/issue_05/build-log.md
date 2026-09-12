@@ -93,3 +93,68 @@
   新測試直接 green，屬 characterization；未改 production，未虛構 red。
   此證據只涵蓋 serialization channel，不宣稱逐一觸發 provider failure。
   四種真 service/graph 流程及 required completion checks 尚待執行。
+
+### 2026-09-12（Asia/Taipei）— E2E first attempt / plan correction
+
+- Tool characterization commit `16fe747`。既有成功及 malformed-receipt fake
+  改讀 content；新增四種代表案例，真 graph/service/CLI，模型快照與磁碟 history
+  對照。第一次 exact command（共同 runtime/cwd）：
+
+  ```bash
+  poetry run pytest tests/test_citation_workflow_tool.py tests/test_citation_e2e.py -q
+  ```
+
+  **1 failed, 34 passed, 1 warning in 0.67s**（exit 1）。Retry 預期第二批 saved，
+  實際仍 verification_failed；其餘三种情境通過。Warning 同 baseline。
+  此為第一次 focused attempt 失敗，尚未 Complete。
+- 唯讀 trace 確認 DoiOrgClient.fetch_bibtex 在 service 驗證前快取 HTTP 200
+  原始文字 24 小時，推翻原 retry fixture 假設。未發現結果傳遞缺陷。
+  修訂 PLANS 與 active phase 的 fixture 安排：retry 首次 HTTP 503（不快取），
+  第二次正確 fixture；保留錯 DOI mixed/all-failure，不變更 GOALS/acceptance。
+  重大發現見 [context](context/phase-01-save-result-reporting-context.md)。
+  不授權擴張 provider/cache 修正；下一次 focused 仍失敗即依上限停止。
+
+### 2026-09-12（Asia/Taipei）— E2E green / preserved regressions
+
+- 第二次 focused attempt：只調整測試 fetcher，retry 首次 HTTP 503；
+  production diff 仍為零。Exact commands（共同 runtime/cwd）：
+
+  ```bash
+  poetry run pytest tests/test_citation_workflow_tool.py tests/test_citation_e2e.py -q
+  poetry run pytest tests/test_citation_save_outcomes.py tests/test_turn_finalizer.py tests/test_chat_cli.py tests/test_citation_skill_activation.py -q
+  ```
+
+  分別 **35 passed, 1 warning in 0.60s**、**87 passed, 1 warning in 0.88s**。
+  Warning 同 baseline，無 failed/skipped/unavailable。整合測試只是補齊現有
+  行為證據，未修復 production bug。
+- `_SaveReportingModel.invoke` 每次保存 deep message snapshot；無結果時才
+  發初次 call；回覆前 `_save_content` 解析 ToolMessage.content JSON，依
+  matching tool_call_id 找先前 AI call 的作品／identifier，逐項產生答案。
+  模型不讀 artifact、service、expected status 表或預寫完整答案。
+  一般流程快照結果數 [0,1]，retry [0,1,2]；artifact 僅作測試 oracle 對照。
+- `test_save_reporting_reaches_model_history_and_cli` 四組實際結果：
+
+  | 情境 | decoded outcome / answer | filesystem / history |
+  |---|---|---|
+  | all_success | A reused/reused_existing；B saved/saved_new，分清重用／新保存 | 兩個 DOI registry/bundle；A 既有所有 bundle files bytes 與 mtime_ns 不变；receipt trusted；答案等於磁碟 history |
+  | all_failure | B verification_failed/bibtex_doi_mismatch，答案無新保存／重用 | registry/bundle 均零；答案等於磁碟 history |
+  | mixed | A saved/saved_new；B verification_failed/bibtex_doi_mismatch | 僅 A registry/bundle；真 CLI、session.turn、fake prose、recent_turns 與重載磁碟 history 一致 |
+  | retry | B verification_failed/bibtex_lookup_failed → saved/saved_new，答案保留兩次及先失敗後成功 | 兩個 call_id/batch_id；兩個 request_index 都為 0，但 calls 明確同 DOI/intent；兩次 BibTeX fetch，僅一個 B bundle；答案等於磁碟 history |
+
+- 成功 receipt 逐項對照 registry、reference.bib DOI、citation.json source_ref；
+  新 bundle creation_evidence 的 batch_id/request_index 與當次 outcome 相等。
+  未改 telemetry attempt 計數，不把兩次 retry 說成保存兩個作品。
+- Mixed 經 `chat._run` 真 print，capsys 驗證末段只印一次完整 session.turn
+  回覆。實際文字（亦從該次 pytest-9 的 fixture conversation JSON 核對）：
+
+  ```text
+  第 1 次保存：
+  Paper A (10.1234/paper-a)：新保存（saved_new）。
+  Paper B (10.1234/paper-b)：失敗（bibtex_doi_mismatch）。
+  ```
+
+  輸入 `/citation 保存 A 與 B 並逐項回報`；只替換 create、reader，turn wrapper
+  委派真 turn 並記錄回傳，未模擬 graph/service/finalization/print。
+- Preserved tests 涵蓋 save artifact 不覆寫 prose、marker gate/render、
+  inactive skill、metrics 與 history。`git diff --check` 通過，已讀新增 e2e diff。
+  Phase 維持 In progress，尚待最後一次完整 suite 與最終驗收。

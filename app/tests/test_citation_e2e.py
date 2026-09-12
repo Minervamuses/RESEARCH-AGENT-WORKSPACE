@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -12,12 +14,13 @@ from agent.session import ChatSession
 from skills.citation.hub import CitationProviderHub
 from skills.citation.providers.net import FetchResponse
 from skills.citation.service import CitationService
+from skills.citation.tool import CitationWorkflowInput
 from skills.citation.types import (
     SAVE_BATCH_KIND,
     SAVE_BATCH_SCHEMA_VERSION,
     SaveBatchOutcome,
 )
-from tests.citation_fixtures import DOI_A, RoutingFetcher
+from tests.citation_fixtures import DOI_A, DOI_B, RoutingFetcher
 
 
 @tool("rag_search")
@@ -45,6 +48,12 @@ def _workflow_results(messages) -> list[ToolMessage]:
         if isinstance(message, ToolMessage)
         and message.name == "citation_workflow"
     ]
+
+
+def _save_content(message: ToolMessage) -> SaveBatchOutcome:
+    prefix = "Actual citation save result:\n"
+    assert message.content.startswith(prefix)
+    return SaveBatchOutcome.from_artifact(json.loads(message.content.removeprefix(prefix)))
 
 
 def _save_call_from_search_result(
@@ -120,7 +129,7 @@ class _SearchSaveModel:
             return _save_call_from_search_result(results[0], call_id="save-1")
         if len(results) == 2:
             self.save_message = results[1]
-            batch = SaveBatchOutcome.from_artifact(results[1].artifact)
+            batch = _save_content(results[1])
             if len(batch.items) != 1:
                 raise AssertionError("expected one production save outcome")
             item = batch.items[0]
@@ -186,7 +195,7 @@ class _EmptySearchAwareModel:
 
 
 class _RejectingReceiptModel:
-    """Reject a save result unless its ToolMessage artifact decodes strictly."""
+    """Reject a save result unless its model-visible content decodes strictly."""
 
     def __init__(self):
         self.save_message: ToolMessage | None = None
@@ -210,7 +219,7 @@ class _RejectingReceiptModel:
         save_message = results[-1]
         self.save_message = save_message
         try:
-            SaveBatchOutcome.from_artifact(save_message.artifact)
+            _save_content(save_message)
         except (TypeError, ValueError) as exc:
             self.decode_error = str(exc)
             return AIMessage(content="保存失敗：save receipt 無法驗證。")
@@ -277,6 +286,201 @@ def _seed_fixture_service(session, tmp_path, fetcher=None):
     service = CitationService(hub, output_dir=tmp_path / "cite")
     session._citation_service = service
     return service
+
+
+class _SaveReportingModel:
+    """Generate each attempt's report from content and its matching tool call."""
+
+    def __init__(self, works, *, retry=False):
+        self.works = works
+        self.retry = retry
+        self.invocations = []
+        self.answer = None
+
+    def bind_tools(self, _tools):
+        return self
+
+    def invoke(self, messages):
+        self.invocations.append([message.model_copy(deep=True) for message in messages])
+        results = _workflow_results(messages)
+        if not results:
+            assert len(self.invocations) == 1
+            return _workflow_call({"action": "save", "works": self.works}, "save-1")
+
+        lines = []
+        retry_works = []
+        for attempt, message in enumerate(results, start=1):
+            assert message.status == "success"
+            calls = [
+                call for prior in messages[:messages.index(message)]
+                if isinstance(prior, AIMessage)
+                for call in prior.tool_calls
+                if call["id"] == message.tool_call_id
+            ]
+            assert len(calls) == 1 and calls[0]["args"]["action"] == "save"
+            batch = _save_content(message)
+            lines.append(f"第 {attempt} 次保存：")
+            for item in batch.items:
+                work = calls[0]["args"]["works"][item.request_index]
+                assert item.requested_label == work["requested_label"]
+                doi = next(value["value"] for value in work["identifiers"] if value["kind"] == "doi")
+                if item.status in {"saved", "reused"}:
+                    assert item.receipt is not None and item.receipt.doi == doi
+                    result = "新保存" if item.status == "saved" else "重用"
+                else:
+                    result = "失敗"
+                    retry_works.append(work)
+                lines.append(f"{item.requested_label} ({doi})：{result}（{item.reason_code}）。")
+        if self.retry and len(results) == 1 and retry_works:
+            assert self.answer is None
+            return _workflow_call({"action": "save", "works": retry_works}, "save-2")
+        self.answer = "\n".join(lines)
+        return AIMessage(content=self.answer)
+
+
+class _SaveResultFetcher(RoutingFetcher):
+    """Fail B's first BibTeX request with a wrong DOI or uncached HTTP error."""
+
+    def __init__(self, failures, *, transient=False):
+        super().__init__()
+        self.failures = failures
+        self.transient = transient
+        self.bibtex_b_calls = 0
+
+    async def __call__(self, url, headers):
+        if url == f"https://doi.org/{DOI_B}" and "x-bibtex" in headers.get("Accept", ""):
+            self.bibtex_b_calls += 1
+            if self.bibtex_b_calls <= self.failures:
+                self.calls.append((url, headers["Accept"]))
+                if self.transient:
+                    return FetchResponse(503)
+                return FetchResponse(200, body=(
+                    f"@article{{b, title={{Paper B}}, year={{2020}}, doi={{{DOI_A}}}}}"
+                ).encode())
+        return await super().__call__(url, headers)
+
+
+@pytest.mark.parametrize("scenario", ["all_success", "all_failure", "mixed", "retry"])
+def test_save_reporting_reaches_model_history_and_cli(
+    monkeypatch, tmp_path, capsys, scenario,
+):
+    works = [
+        {"requested_label": title, "identifiers": [{"kind": "doi", "value": doi}]}
+        for title, doi in (("Paper A", DOI_A), ("Paper B", DOI_B))
+    ]
+    selected = works if scenario in {"all_success", "mixed"} else works[1:]
+    model = _SaveReportingModel(selected, retry=scenario == "retry")
+    session = _make_session(monkeypatch, tmp_path, model)
+    fetcher = _SaveResultFetcher(
+        0 if scenario == "all_success" else 1, transient=scenario == "retry",
+    )
+    service = _seed_fixture_service(session, tmp_path, fetcher=fetcher)
+    prior_files = {}
+    if scenario == "all_success":
+        intent = CitationWorkflowInput.model_validate({"action": "save", "works": works[:1]})
+        prepared = asyncio.run(service.save(tuple(work.to_domain() for work in intent.works)))
+        assert prepared.items[0].status == "saved"
+        prior_files = {
+            path: (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in Path(prepared.items[0].receipt.bundle_path).iterdir()
+        }
+
+    turn_answers = []
+    if scenario == "mixed":
+        from agent.cli import chat
+
+        async def create(_config, **kwargs):
+            assert kwargs["load_mcp"] is False
+            return session
+
+        inputs = iter(["/citation 保存 A 與 B 並逐項回報", "q"])
+
+        async def read_line(_prompt):
+            return next(inputs)
+
+        real_turn = session.turn
+
+        async def record_turn(*args, **kwargs):
+            answer = await real_turn(*args, **kwargs)
+            turn_answers.append(answer)
+            return answer
+
+        monkeypatch.setattr(chat.ChatSession, "create", create)
+        monkeypatch.setattr(session, "turn", record_turn)
+        asyncio.run(chat._run(
+            SimpleNamespace(no_mcp=True, max_graph_steps=None), read_line=read_line,
+        ))
+        output = capsys.readouterr().out
+        assert len(turn_answers) == 1
+        answer = turn_answers[0]
+        assert output.endswith(f"\n{answer}\n\n")
+        assert output.count(answer) == 1
+    else:
+        session.activate_citation_skill()
+        answer = asyncio.run(session.turn(
+            "保存並逐項回報：" + json.dumps(selected, ensure_ascii=False)
+            + ("；若失敗可重試一次" if scenario == "retry" else "")
+        ))
+
+    assert answer == model.answer == session.recent_turns[-1].assistant_output
+    persisted = session.conversation_repository.load(session.session_id)
+    assert persisted.document.turns[-1].assistant_output == answer
+    assert _workflow_results(model.invocations[0]) == []
+    assert [len(_workflow_results(snapshot)) for snapshot in model.invocations] == (
+        [0, 1, 2] if scenario == "retry" else [0, 1]
+    )
+    results = _workflow_results(model.invocations[-1])
+    batches = [_save_content(message) for message in results]
+    assert [message.tool_call_id for message in results] == (
+        ["save-1", "save-2"] if scenario == "retry" else ["save-1"]
+    )
+    assert len({batch.batch_id for batch in batches}) == len(batches)
+    for message, batch in zip(results, batches, strict=True):
+        assert batch.to_artifact() == message.artifact
+    expected = {
+        "all_success": [["reused", "saved"]],
+        "all_failure": [["verification_failed"]],
+        "mixed": [["saved", "verification_failed"]],
+        "retry": [["verification_failed"], ["saved"]],
+    }[scenario]
+    assert [[item.status for item in batch.items] for batch in batches] == expected
+    for batch in batches:
+        for item in batch.items:
+            if item.receipt is None:
+                assert item.reason_code == (
+                    "bibtex_lookup_failed" if scenario == "retry" else "bibtex_doi_mismatch"
+                )
+                assert f"：失敗（{item.reason_code}）。" in answer
+            else:
+                receipt = item.receipt
+                assert service.registry.trusted_receipt(receipt.source_id) == receipt
+                bundle = Path(receipt.bundle_path)
+                assert receipt.doi in (bundle / "reference.bib").read_text(encoding="utf-8")
+                sidecar = json.loads((bundle / "citation.json").read_text(encoding="utf-8"))
+                assert sidecar["source_ref"]["doi"] == receipt.doi
+                if item.status == "saved":
+                    assert sidecar["creation_evidence"]["batch_id"] == batch.batch_id
+                    assert sidecar["creation_evidence"]["request_index"] == item.request_index
+                result = "重用" if item.status == "reused" else "新保存"
+                assert f"{item.requested_label} ({receipt.doi})：{result}（{item.reason_code}）。" in answer
+
+    expected_dois = {
+        "all_success": {DOI_A, DOI_B}, "all_failure": set(),
+        "mixed": {DOI_A}, "retry": {DOI_B},
+    }[scenario]
+    assert {source.doi for source in service.registry.list()} == expected_dois
+    assert len(list(service.output_dir.glob("*/reference.bib"))) == len(expected_dois)
+    for path, original in prior_files.items():
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == original
+    if scenario == "all_failure":
+        assert "新保存" not in answer and "重用" not in answer
+    if scenario == "retry":
+        assert fetcher.bibtex_b_calls == 2
+        calls = [call for message in model.invocations[-1] if isinstance(message, AIMessage)
+                 for call in message.tool_calls]
+        assert calls[0]["args"]["works"] == calls[1]["args"]["works"] == works[1:]
+        assert [batch.items[0].request_index for batch in batches] == [0, 0]
+        assert answer.index("失敗") < answer.index("新保存")
 
 
 def test_search_selection_save_bundle_journey_reads_tool_messages(

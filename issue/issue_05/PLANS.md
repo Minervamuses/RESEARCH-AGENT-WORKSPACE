@@ -63,6 +63,10 @@
 - `tests/citation_fixtures.py:RoutingFetcher` 可離線走正式 providers。
   DOI_B 的 BibTeX 缺 DOI 會被 `service.py:195–196` 補入，
   不能用這點當 failure；需明確錯誤 DOI 等可辨識的 fixture 回應。
+  執行時另確認 HTTP 200 的錯誤 DOI BibTeX 會先被 doi.org client 快取，
+  同 turn 直接 retry 不會 refetch。Retry 代表案例改用首次 HTTP 503、
+  再回正確 fixture；mixed/all-failure 仍用錯 DOI。保留 production 快取語意，
+  實際失敗與修訂證據見 build-log / context。
 - `app/pyproject.toml` 使用 pytest，無 formatter/linter 設定。
   `issue/issue_10/build-log.md` 曾記錄完整 suite 約 28 秒；
   僅用於估計一次有時間上限的檢查可行，不代表當前 suite 已通過。

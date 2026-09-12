@@ -105,11 +105,15 @@ provider hub 用 `env={}` 並注入 fetcher。未知 URL 立即拒絕，不 fall
 | 全成功含 reused | 先在同一 service 以 fixture 保存 A 作準備，再以 A、B 執行受測批次，得到 A reused、B saved | 回覆分清重用／新保存；兩項 receipt 對應既有／新 bundle；A 的內容不改寫，唯一 bundles 為 2 |
 | 全失敗 | 真 save 呼叫至少一項；以穩定錯誤 DOI 的 BibTeX 觸發 verification_failed，或既有有界 failed intent | 模型收到正常 ToolMessage 的失敗 item／原因；答案不宣稱成功；registry／bundle 不增加 |
 | 混合成功／失敗 | 同批 A 正常，B 的 BibTeX 回錯誤 DOI，得到 saved＋verification_failed | 逐項回覆 A 已保存、B 失敗原因；只生成 A 的 bundle；以真 CLI 輸出驗收 |
-| 同 turn retry 成功 | B 第一次 BibTeX 回錯 DOI，下一次同作品 save 回正確 fixture；由收到失敗的 fake 發出第二次 call | 第二次 call 發生在第一次結果之後；保留兩個不同 call_id／batch_id，答案說明先前失敗、後續成功；唯一 bundle 為 1 |
+| 同 turn retry 成功 | B 第一次 BibTeX 回 HTTP 503，下一次同作品 save 回正確 fixture；由收到失敗的 fake 發出第二次 call | 第二次 call 發生在第一次結果之後；保留兩個不同 call_id／batch_id，答案說明先前失敗、後續成功；唯一 bundle 為 1 |
 
 DOI_B 既有 BibTeX 僅缺 DOI，production 會 `inject_doi`，
 因此不能直接當成失敗樣本。用錯誤 DOI 可讓失敗跨過 provider retry
 並清楚落在 `verification_failed`，避免引入等待或 live network。
+但 HTTP 200 的原始 BibTeX 會先被 provider 快取 24 小時；故 retry 案例
+用不被快取的 HTTP 503，service 回 verification_failed / bibtex_lookup_failed，
+下一次才取得正確 fixture。不清快取、不改 provider，不將此證據描述成
+錯 DOI 可立即重試成功（執行發現見 build-log）。
 
 同 turn retry 案例內明確使用同一作品的相同 DOI／intent；
 不可只靠跨 batch 的 request_index 或文字 label 相同來識別。
