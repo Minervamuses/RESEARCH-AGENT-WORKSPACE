@@ -960,22 +960,47 @@ def test_composer_routes_dynamic_skill_once_as_answer(tmp_path: Path) -> None:
     ]
 
 
-def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch, tmp_path):
+@pytest.mark.parametrize("unavailable_kind", ["loader", "applied"])
+def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch, tmp_path, unavailable_kind):
     from agent.cli.slash_commands import (
         SlashCommandContext, build_default_registry, execute_slash_command, parse_slash_command,
     )
     from test_citation_e2e import _SearchSaveModel, _fixture_services, _rag_search
+    from tests.citation_fixtures import RoutingFetcher
+    from skills.citation.service import CitationService
 
+    save_calls = []
+    original_save = CitationService.save
+
+    async def counted_save(self, *args, **kwargs):
+        save_calls.append(args)
+        return await original_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(CitationService, "save", counted_save)
     model = _SearchSaveModel()
     monkeypatch.setattr("agent.graph.get_chat_model", lambda _config: model)
     monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [_rag_search])
-    services = _fixture_services(monkeypatch, tmp_path)
+    fetcher = RoutingFetcher()
+    services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
+    applied_skills = None
 
     async def factory(config, *, load_mcp, **kwargs):
         assert load_mcp is False
-        return ChatSession(config, **kwargs)
+        return ChatSession(config, loaded_skills=applied_skills, **kwargs)
 
     service = _service(tmp_path, session_factory=factory)
+    if unavailable_kind == "applied":
+        import shutil
+        from agent.extensions.startup import load_extension_startup
+        from test_extension_skill_startup import _apply_skill
+
+        service.config.skills_dir = str(tmp_path / "empty-skills")
+        target = Path(service.config.extension_dropin_dir) / "skill/citation"
+        shutil.copytree(Path(__file__).resolve().parents[1] / "skills/citation", target)
+        _apply_skill(service.config, "citation")
+        startup = load_extension_startup(service.config)
+        assert startup.diagnostics == ()
+        applied_skills = list(startup.skills)
     created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     catalog = created["slashCommands"]
     assert len([command for command in catalog if command["name"] == "citation"]) == 1
@@ -1013,9 +1038,40 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     def unavailable(_name):
         raise ValueError("fixture unavailable Citation")
 
-    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    if unavailable_kind == "loader":
+        monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    else:
+        installed = applied_skills[0].path.parent
+        with (installed / "SKILL.md").open("a") as handle:
+            handle.write("\nFixture integrity damage\n")
+        with pytest.raises(ValueError, match="applied bundle changed"):
+            session._load_skill_runtime("citation")
     assert "citation" not in [c["name"] for c in service._session_snapshot(session)["slashCommands"]]
     count = len(model.invocations)
+    counts = (count, len(fetcher.calls), len(services), len(save_calls))
+    assert count == 3 and len(services) == len(save_calls) == 1
+    canonical = session.conversation_repository.path_for(session.session_id)
+    paths = [canonical, *(path for path in (tmp_path / "cite").rglob("*") if path.is_file())]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    # After catalog validation, a duplicate must never consult the loader again.
+    loader = session._load_skill_runtime
+    loads = []
+
+    def observe_load(name):
+        loads.append(name)
+        return loader(name)
+
+    monkeypatch.setattr(session, "_load_skill_runtime", observe_load)
+    for retry in (False, True):
+        duplicate = asyncio.run(service.dispatch("session.turn", {**params, "retry": retry}))
+        assert duplicate["text"] == result["text"]
+        assert duplicate["turnNumber"] == result["turnNumber"]
+        assert duplicate["state"] == "completed"
+        assert duplicate["streamKind"] == "final_only" and duplicate["chunkCount"] == 0
+        success_result("00000000-0000-4000-8000-000000000102", "session.turn", duplicate)
+    assert loads == []
+    assert (len(model.invocations), len(fetcher.calls), len(services), len(save_calls)) == counts
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths} == before
     with pytest.raises(DesktopServiceError) as caught:
         asyncio.run(service.dispatch("session.turn", _turn_params("/citation save")))
     assert caught.value.code == "PROTOCOL_INVALID"

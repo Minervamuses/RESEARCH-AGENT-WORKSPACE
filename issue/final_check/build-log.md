@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
-| 02 — Completed Citation replay | Not started | — | — | — | — |
+| 02 — Completed Citation replay | In progress | 2026-09-12 | — | 下方 Phase 02 red | — |
 | 03 — Native Desktop acceptance | Not started | — | — | — | — |
 | 04 — Thinking contract/runtime | Not started | — | — | — | — |
 | 05 — Thinking Desktop acceptance | Not started | — | — | — | — |
@@ -73,3 +73,11 @@ acceptance 對應、必要 review、限制、blocker、下一個 eligible 行動
 | 原狀態與既有流程 | completed installer duplicate retry=true 零 loader；runtime failure 保留 pending/preview_id/runtime/mode/source/backup；40+29 focused checks 覆蓋下一 installer request、cancel、Citation teardown、durability 與 Fusion 行為。 |
 
 下一 eligible phase：02，依檔案路線執行；09 的三項產品決策依然未定。
+
+## 2026-09-12 — Phase 02 preflight / red（d52101a + test_desktop_service.py）
+
+- Phase 01 Complete 後讀 phase-02、live Desktop service / Session / repository identity/fingerprint、Citation e2e、applied-integrity 與 Desktop tests。未有相關 context/code_review；runtime / branch 不變，既有 diff 僅本 phase 測試。
+- Scope：service.py 的 Citation eligibility 時序；canonical 回讀必須繼續走 Session turn lock + _begin_persisted_turn / append_pending，不能直接回傳 load_optional 的答案。無 API/schema 變更。
+- Exact command（Linux Conda app，cwd app）：timeout 120s poetry run pytest tests/test_desktop_service.py -k composer_citation -q --tb=short → 2 failed / 68 deselected，0.65s。
+- 兩例先經真 Desktop dispatch / ChatSession / graph / offline RoutingFetcher 完成搜尋→save→正式回答「已保存並引用來源 [1]。」；model=3、scope=1、save=1。之後分別讓 loader ValueError、真 tmp applied Citation SKILL.md 完整性失效。相同 params 重送在 service.py eligibility 拋 That slash command is not available in the desktop composer.（PROTOCOL_INVALID），未到 canonical duplicate。
+- 已保存 assertions：原 params / durable text / JSON 與 bundle bytes+mtime / model-provider-scope-save 計數；green 必須驗證 retry=false/true 不增加任何呼叫，以及 identity/unfinished/new-work 對照。只操作自有 tmp，無 provider 網路呼叫。
