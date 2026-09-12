@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -463,12 +465,28 @@ class ExtensionManager:
             raise ManagementError("another extension apply is already running")
         try:
             try:
-                return self._apply_locked(
-                    preview,
-                    approved_mcp_bindings=frozenset(
-                        approved_mcp_bindings or ()
-                    ),
+                preview.paths.state_root.mkdir(parents=True, exist_ok=True)
+                # Keep a stable inode: registry.json is replaced by the writer.
+                fd = os.open(
+                    preview.paths.state_root / ".apply.lock",
+                    os.O_CREAT | os.O_RDWR | os.O_CLOEXEC,
+                    0o600,
                 )
+                try:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError as exc:
+                        raise ManagementError(
+                            "another extension apply is already running"
+                        ) from exc
+                    return self._apply_locked(
+                        preview,
+                        approved_mcp_bindings=frozenset(
+                            approved_mcp_bindings or ()
+                        ),
+                    )
+                finally:
+                    os.close(fd)
             except ManagementError:
                 raise
             except (OSError, RegistryError, ValueError) as exc:

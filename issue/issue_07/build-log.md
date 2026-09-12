@@ -67,3 +67,17 @@
   無 child import/通信 timeout/cleanup failure；finally terminate/join 並關閉自身 handles。
   Red 的 exception 路徑沒有輸出 child exit 數值，不將其稱為正常 exit 0。
 - Production 尚未修改。下一步只在 manager 的既有 threading lock 內加固定檔案鎖。
+
+### 2026-09-12（Asia/Taipei）— Green：完整 apply critical section
+
+- 唯一 production 改動為 manager.py：外層保留非阻塞 threading lock，開啟固定
+  `.apply.lock`（非截斷、0600、O_CLOEXEC），取得 `LOCK_EX | LOCK_NB` 後才呼叫
+  `_apply_locked`；finally close fd，再 release thread lock。Busy 沿用原訊息；
+  其他 OSError 走原 ManagementError，沒有無鎖 fallback 或 retry。
+- app cwd：`conda run -n app timeout 120s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_manager.py -q -s -k cross_process`
+  → **1 passed, 42 deselected, 1 warning in 1.37s**，exit 0。
+- A/B 均 ready revision 0；A 暫停 writer 時 B 回報 busy error（無 applied revision），
+  A 成功 revision 1；最終 JSON 只有 alpha，hash 與 installed SKILL bytes 相符，
+  beta installed 目錄不存在。A/B 正常 exit 0，handles 全部 close。
+- 第一個 focused implementation attempt 通過原 Red。尚未宣告 phase Complete；
+  下一步補舊 preview/重新核准、fsync 邊界、exception/open-error、crash、root 隔離與入口。
