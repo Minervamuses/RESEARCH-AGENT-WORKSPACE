@@ -74,3 +74,22 @@
   timeout 600s full suite 與 diff check。既有 fetcher/模型/embedding fixtures
   可離線使用，issue 04 full suite 歷史約 27 秒，未發現成本門檻變更。
   必要檢查缺證據、範圍外 production 修正或兩次 focused attempt 失敗即停止。
+
+### 2026-09-12（Asia/Taipei）— Tool content characterization
+
+- Preflight commit `60197f7`。只擴充既有 workflow tool envelope test，依
+  SaveItemStatus 參數化全部 11 狀態，每批兩項，未超過 works 1–10 限制。
+  真 StructuredTool 以 injected service outcome 回傳；content JSON == artifact
+  == 原 outcome，strict decode 還原完整 dataclass。驗證 Unicode label、
+  非排序 index [1, 0]、reason、成功 receipt、兩筆 alternatives（含缺值）。
+  每個 failure 都在 transport success 下保留原 failure status。
+- Exact command（共同 runtime/cwd）：
+
+  ```bash
+  poetry run pytest tests/test_citation_workflow_tool.py -q
+  ```
+
+  **26 passed in 0.16s**，無 warning/failed/skipped/unavailable。
+  新測試直接 green，屬 characterization；未改 production，未虛構 red。
+  此證據只涵蓋 serialization channel，不宣稱逐一觸發 provider failure。
+  四種真 service/graph 流程及 required completion checks 尚待執行。

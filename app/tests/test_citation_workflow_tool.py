@@ -10,7 +10,14 @@ from pydantic import ValidationError
 
 from skills.citation.providers.base import ProviderRecord
 from skills.citation.tool import CitationWorkflowInput, TOOL_NAME, create_citation_workflow_tool
-from skills.citation.types import SaveBatchOutcome, SaveItemOutcome
+from skills.citation.types import (
+    CanonicalIdentity,
+    SaveAlternative,
+    SaveBatchOutcome,
+    SaveItemOutcome,
+    SaveItemStatus,
+    SaveReceipt,
+)
 
 
 class FakeService:
@@ -182,24 +189,56 @@ def test_save_needs_no_current_turn_context_and_returns_actual_outcome_content()
     assert outcome.items[0].reason_code == "no_provider_records"
 
 
-def test_real_tool_call_returns_content_json_identical_to_message_artifact():
-    service = FakeService()
+@pytest.mark.parametrize("status", SaveItemStatus.__args__)
+def test_real_tool_call_returns_content_json_identical_to_message_artifact(status):
+    receipt = SaveReceipt(
+        "src-example", CanonicalIdentity("doi", "10.1234/example"),
+        "10.1234/example", "範例作品", 2020, "journal-article", "/tmp/cite/example",
+        "doi_identity_verified", "[[cite:src-example]]", "published",
+    ) if status in {"saved", "reused"} else None
+    outcome = SaveBatchOutcome("batch-all-fields", (
+        SaveItemOutcome(1, "第二項", status, f"reason_{status}", receipt, (
+            SaveAlternative(
+                "Alternative", ("Ada Author",), 2019, "Venue", "preprint",
+                "10.1234/alternative", "1901.00001",
+            ),
+            SaveAlternative("缺值候選"),
+        )),
+        SaveItemOutcome(0, "第一項", "not_found", "no_provider_records"),
+    ))
+
+    class OutcomeService(FakeService):
+        async def save(self, intents):
+            self.saved_intents.append(intents)
+            return outcome
+
+    service = OutcomeService()
     tool = create_citation_workflow_tool(service_getter=lambda: service)
     call = {
         "type": "tool_call",
         "name": TOOL_NAME,
         "id": "save-call",
-        "args": args("paper", version_kind="published"),
+        "args": {
+            "action": "save",
+            "works": [{"requested_label": label} for label in ("第一項", "第二項")],
+        },
     }
 
     message = asyncio.run(tool.ainvoke(call))
 
     assert isinstance(message, ToolMessage)
+    assert message.tool_call_id == "save-call"
+    assert message.status == "success"  # Transport success includes failed items.
+    assert [intent.requested_label for intent in service.saved_intents[0]] == [
+        "第一項", "第二項",
+    ]
     prefix = "Actual citation save result:\n"
     assert str(message.content).startswith(prefix)
     content_artifact = json.loads(str(message.content).removeprefix(prefix))
-    assert content_artifact == message.artifact
-    assert SaveBatchOutcome.from_artifact(content_artifact).items[0].status == "not_found"
+    assert content_artifact == message.artifact == outcome.to_artifact()
+    assert SaveBatchOutcome.from_artifact(content_artifact) == outcome
+    assert [item["request_index"] for item in content_artifact["items"]] == [1, 0]
+    assert [item["status"] for item in content_artifact["items"]] == [status, "not_found"]
 
 
 def test_multiple_save_calls_in_one_turn_are_allowed():
