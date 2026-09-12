@@ -513,3 +513,165 @@ def test_installer_new_request_reports_cleanup_conflict_without_replacing_transa
     assert (backup / "previous/forms.md").read_bytes() == b"Existing source reference"
     assert not (source.parent / "alpha").exists()
     assert not Path(session.config.extension_state_dir).exists()
+
+
+def _previewed_installer(tmp_path, monkeypatch):
+    archive = _installer_test_archive(tmp_path)
+    prepared = tmp_path / "prepared"
+    session, model = _real_installer_session(tmp_path, monkeypatch, [
+        ("skill_install", {"action": "status"}),
+        _installer_extract_step(archive, prepared),
+        ("skill_install", {"action": "preview", "prepared_path": str(prepared)}),
+        "Preview complete",
+    ])
+    source = Path(session.config.extension_dropin_dir) / "skill/writer"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_bytes(b"---\nname: writer\ndescription: Existing\n---\nOriginal\n")
+    (source / "forms.md").write_bytes(b"Existing reference")
+    session.set_thinking_mode("extended")
+    asyncio.run(session.turn(f'請用 skill-installer 更新 "{archive}"'))
+    assert session._skill_installer.pending
+    backup = session._skill_installer._temporary
+    assert backup is not None
+    return session, model, source, backup
+
+
+@pytest.mark.parametrize("skill_name", ["citation", "academic-paper-writing"])
+def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
+    tmp_path, monkeypatch, skill_name,
+):
+    from conftest import make_astream_graph
+    from test_desktop_service import _service, _turn_params
+    from test_thinking_session import _Factory, _default_models
+
+    models = _default_models()
+    monkeypatch.setattr("agent.session.get_chat_model_for_role", lambda _cfg, *, role: models[role])
+    monkeypatch.setattr("agent.session.get_fusion_aggregator_model", lambda _cfg: models["aggregator"])
+    session, model, source, backup = _previewed_installer(tmp_path, monkeypatch)
+    factory = _Factory()
+    session._fusion._graph_builder = factory
+    session._prompt_master_skill_text_cache = "prompt-master skill"
+    (source / "forms.md").write_bytes(b"User modification after preview")
+    before = {
+        path: path.read_bytes()
+        for root in (source, backup) for path in root.rglob("*") if path.is_file()
+    }
+    graph = make_astream_graph(answer="New skill ran despite cleanup conflict")
+    session.graph = graph
+    runs = []
+    original_run = session._run_turn
+
+    async def observe_run(text):
+        runs.append(text)
+        return await original_run(text)
+
+    monkeypatch.setattr(session, "_run_turn", observe_run)
+    calls_before = list(model.calls)
+    service = _service(tmp_path, config=session.config)
+    service.session = session
+    response = asyncio.run(service.dispatch(
+        "session.turn", _turn_params(f"/{skill_name} draft"),
+    ))
+    assert "source cleanup conflict" in response["text"]
+    assert "staged source changed; preserving user changes and backup" in response["text"]
+    assert f"backup_path: {backup}" in response["text"]
+    assert response["state"] == "completed"
+    assert response["streamKind"] == "final_only" and response["chunkCount"] == 0
+    assert runs == [] and graph.states == [] and model.calls == calls_before
+    assert factory.calls == [] and all(not model.calls for model in models.values())
+    assert before == {
+        path: path.read_bytes()
+        for root in (source, backup) for path in root.rglob("*") if path.is_file()
+    }
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    turn = session.conversation_repository.load(session.session_id).document.turns[-1]
+    assert turn.assistant_output == response["text"]
+
+
+@pytest.mark.parametrize("skill_name", ["academic-paper-writing", "citation"])
+def test_installer_skill_switch_persists_effective_mode(tmp_path, monkeypatch, skill_name):
+    from conftest import make_astream_graph
+    from test_thinking_session import _Factory, _default_models
+
+    factory = _Factory()
+    models = _default_models()
+    # Keep real Fusion orchestration; only its graph/model boundaries are scripted.
+    monkeypatch.setattr("agent.session.get_chat_model_for_role", lambda _cfg, *, role: models[role])
+    monkeypatch.setattr("agent.session.get_fusion_aggregator_model", lambda _cfg: models["aggregator"])
+    archive = _installer_test_archive(tmp_path, names=("alpha", "writer"))
+    session, _model = _real_installer_session(tmp_path, monkeypatch, [
+        ("skill_install", {"action": "status"}), "Choose one",
+    ])
+    session.config.thinking_fusion_proposer_models = ("p1", "p2", "p3")
+    session.config.thinking_rewrite_model = "rewrite"
+    session.config.thinking_reviewer_model = "reviewer"
+    session.config.thinking_repair_model = "repair"
+    session.config.thinking_fusion_aggregator_model = "aggregator"
+    session._fusion._graph_builder = factory
+    session._prompt_master_skill_text_cache = "prompt-master skill"
+    session.set_thinking_mode("extended")
+    asyncio.run(session.turn(f'請用 skill-installer 安裝 "{archive}"'))
+    assert session._skill_installer.pending and session.thinking_mode == "normal"
+    pending_modes = []
+    graph = make_astream_graph(on_state=lambda _state: pending_modes.append(
+        session.conversation_repository.load(session.session_id).document.turns[-1].thinking_mode
+    ))
+    session.graph = graph
+    parsed = parse_slash_command(f"/{skill_name} draft")
+    selected = asyncio.run(execute_slash_command(
+        parsed, SlashCommandContext(session=session, registry=build_default_registry(session)),
+    ))
+    answer = asyncio.run(session.turn(
+        selected.followup_input, display_input=parsed.raw_text, skill_name=selected.skill_name,
+    ))
+    if skill_name == "academic-paper-writing":
+        assert answer == "fused"
+        assert {call["model_id"] for call in factory.calls} == {"p1", "p2", "p3"}
+        assert len(models["aggregator"].calls) == len(models["reviewer"].calls) == 1
+        assert graph.states == []
+    else:
+        assert answer == "ok" and pending_modes == ["normal"]
+        assert factory.calls == [] and models["aggregator"].calls == models["reviewer"].calls == []
+    expected = "normal" if skill_name == "citation" else "extended"
+    snapshot = session.conversation_repository.load(session.session_id)
+    saved = json.loads(session.conversation_repository.path_for(session.session_id).read_text())
+    assert snapshot.document.turns[-1].thinking_mode == expected
+    assert saved["turns"][-1]["thinkingMode"] == expected
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None and not session._skill_installer.pending
+
+
+def test_installer_skill_switch_load_failure_and_duplicate_preserve_pending(tmp_path, monkeypatch):
+    session, model, source, backup = _previewed_installer(tmp_path, monkeypatch)
+    snapshot = session.conversation_repository.load(session.session_id)
+    original_turn = snapshot.document.turns[-1]
+    before = {path: path.read_bytes()
+              for root in (source, backup) for path in root.rglob("*") if path.is_file()}
+    runtime = session.active_skill_runtime
+    mode = session.thinking_mode
+    transaction = session._skill_installer._preview_id
+    calls = list(model.calls)
+    loads = []
+
+    def unavailable(name):
+        loads.append(name)
+        raise ValueError("fixture runtime unavailable")
+
+    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    # A completed installer duplicate must return before loading or cleanup.
+    duplicate = asyncio.run(session.turn(
+        original_turn.semantic_input, display_input=original_turn.display_input,
+        turn_id=original_turn.turn_id, skill_name="skill-installer", retry=True,
+    ))
+    assert duplicate == original_turn.assistant_output and loads == []
+    with pytest.raises(ValueError, match="fixture runtime unavailable"):
+        asyncio.run(session.turn("draft", skill_name="academic-paper-writing"))
+    assert loads == ["academic-paper-writing"]
+    assert session.active_skill_runtime is runtime and session.thinking_mode == mode
+    assert session._skill_installer.pending
+    assert session._skill_installer._preview_id == transaction
+    assert session._skill_installer._temporary == backup
+    assert model.calls == calls
+    assert before == {path: path.read_bytes()
+                      for root in (source, backup) for path in root.rglob("*") if path.is_file()}
