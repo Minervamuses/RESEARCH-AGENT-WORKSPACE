@@ -35,8 +35,8 @@ schema、持久 registry、取消交易機制或內部 legacy API。沒有獨立
 ## 依賴與前置
 
 - 使用者已確認 GOALS 待決產品契約並核准 PLANS 的實作範圍。
-- issue 02 依原 issue 指定順序完成，有 live catalog／menu 和可核對 evidence；
-  不由本 phase 代做。
+- issue 02 已有 live catalog／menu；2026-09-12 使用者批准在其原生 GUI
+  驗收未完成時繼續本 issue。不由本 phase 代做 issue 02 或宣稱其完成。
 - Linux／Conda app 工具吻合，initial worktree snapshot 已記錄。
 - **待解技術點：** snapshot thinking 的時機須在既有 installer cleanup 恢復後、
   Citation 暫用 normal 前；_begin_turn 也需記 normal。Preflight 直接核對

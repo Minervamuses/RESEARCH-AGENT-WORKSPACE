@@ -6,8 +6,8 @@
 - **Purpose:** 見 [GOALS.md](GOALS.md)。先讓 CLI 與 turn lifecycle 成為一致的
   單次工作，再完成 Desktop dispatch／catalog 接入和跨介面恢復驗收。
 - **Execution mode:** Autonomous within authorization envelope。
-  只在使用者日後明確啟動、確認 GOALS 待決契約並核准下列具體範圍後生效；
-  本次僅 authoring，不授權實作。
+  2026-09-12 使用者已明確啟動並批准 GOALS 契約、下列六檔範圍，
+  以及 issue 02 原生 GUI 驗收未完成時繼續 issue 08；每一步完成後 commit。
 - **Repository shape / risk:** Application / medium。跨 CLI、session、
   Desktop 與可信引用邊界，但使用既有機制和離線小型驗證，不遷移資料。
 - **Layout:** 沿用 issue/issue_XX/phases/；根 .gitignore 忽略任意 build/。
@@ -115,7 +115,8 @@ turn／turn_outcome 的 skill_name 路徑接受 citation。預計不新增 RPC�
 ### Stop and obtain fresh authority
 
 - GOALS 待決尚未確認、上述具體範圍尚未核准，或 issue 02 缺完成證據。
-  保留待辦，不自行執行另一個 issue。
+  保留待辦，不自行執行另一個 issue。2026-09-12 上述契約／範圍已批准，
+  且使用者明確豁免 issue 02 完成門檻；不等於 issue 02 驗收已通過。
 - 需改目標、成功條件、保留行為，或接受必要驗證缺失。
 - 需超出六個預估 production files；尤其 policy、protocol／DTO、
   reducer、storage 若有缺口先提交直接因果證據與最小 proposed diff。
@@ -127,7 +128,8 @@ turn／turn_outcome 的 skill_name 路徑接受 citation。預計不新增 RPC�
   credentials、外部寫入、真實使用者資料、full-dataset replay 或 sweep。
 - 命令預期超過約十分鐘、第二次完整 suite／昂貴重跑，或 necessary UI evidence
   unavailable 且沒有已核准替代。
-- 需 commit、push、merge、rebase、切 branch、修改 worktree、deploy 或破壞性操作。
+- 需 push、merge、rebase、切 branch、修改 worktree、deploy 或破壞性操作。
+  Commit 已由使用者「每一步皆需 commit」明確授權。
 
 以上來自使用者的 Personal Engineering Defaults，計劃不豁免。
 兩次 focused implementation attempts 失敗後停止；一次昂貴嘗試無效後不自行再跑。
@@ -137,12 +139,21 @@ turn／turn_outcome 的 skill_name 路徑接受 citation。預計不新增 RPC�
 
 | Phase | 可觀察結果 | Depends on | Phase file |
 |---|---|---|---|
-| 01 — Citation turn lifecycle | CLI 完成單次可信 Citation；terminal 後釋放來源並恢復 thinking | issue 02 完成且可核對；GOALS 契約與實作範圍已批准 | [phase-01-citation-turn-lifecycle.md](phases/phase-01-citation-turn-lifecycle.md) |
+| 01 — Citation turn lifecycle | CLI 完成單次可信 Citation；terminal 後釋放來源並恢復 thinking | GOALS 契約與六檔範圍已批准；issue 02 完成門檻已明確豁免 | [phase-01-citation-turn-lifecycle.md](phases/phase-01-citation-turn-lifecycle.md) |
 | 02 — Desktop integration | 同一 command 可由 GUI 發現與執行；switch／restore／restart 不重播 | Phase 01 完成及其驗證；issue 02 的 live catalog／menu 可用 | [phase-02-desktop-integration.md](phases/phase-02-desktop-integration.md) |
 
 沿用 issue 08 指定的 issue 02 前置順序。此次 authoring 可先完成全路線提案，
 不表示 implementation prerequisites 已滿足。Phase 01 自己驗證 cleanup／gate；
 Phase 02 加上跨介面代表驗收與最後回歸，不延後 Phase 01 的必要檢查。
+
+### 2026-09-12 啟動 correction
+
+前述 authoring baseline 為歷史：本次 HEAD `73faa76`、branch `GUI`、worktree clean，
+Linux 已有 rg。Issue 02 的 Python `_session_slash_registry`／
+`_desktop_command_eligible`／snapshot `slashCommands` 與 React `SlashComposer`
+已存在；其 Phase 01 Complete、Phase 02 Blocked（native UI unavailable）、
+Phase 03 Not started。使用者明確允許依這個現況繼續 issue 08。
+Issue 08 自身的 required native UI evidence 仍依 Phase 02 如實驗收，不視為已豁免。
 
 ## 共用驗證環境
 

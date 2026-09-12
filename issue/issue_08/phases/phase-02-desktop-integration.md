@@ -37,7 +37,9 @@ bundle browser、auto-resume、parallel command parser 或 React Skill policy。
 
 - Phase 01 在 build-log Complete，required evidence 足夠，正式產品契約沒有待決。
 - issue 02 的可執行 Python catalog 與 menu 已存在；讀取其實際 helper／DTO／tests。
-  本次 authoring 無法命名尚未存在的 helper，不使用臆造函式名。
+  2026-09-12 live helper 為 `_session_slash_registry`、`_desktop_command_eligible`、
+  snapshot `slashCommands` 與 React `SlashComposer`。使用者已批准越過 issue 02
+  尚缺原生 GUI 驗收的前置門檻；本 phase 自身驗收要求仍保留。
 - 先確認現有 node_modules 可用，npm／node 是 Conda app 的 Linux 工具。
   不自動 npm install／npm ci，也不動 package-lock。
 - **Unresolved：** 原生 Linux Desktop 接 fake provider／temporary store 的

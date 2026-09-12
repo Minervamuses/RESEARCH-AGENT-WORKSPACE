@@ -7,10 +7,15 @@ Citation 目前是持續啟用的 CLI command，與一般一次性 Skill 不同�
 Desktop 拒絕 /citation，也沒有替代入口。本計劃處理這個跨介面流程缺口，
 保留可信 save receipt、citation gate、renderer 與既有 bundle。
 
-**本文件是建議版，不是已核准的產品決策。** 2026-09-12 使用者要求讀取
+**Authoring 歷史：** 2026-09-12 使用者要求讀取
 AGENTS.md 後為 issue 08 撰寫計劃；已詢問工作週期與 thinking 選擇，
 authoring 時尚未收到回答。以下採最小單次方案供審閱；實作前須確認
 「待決事項」，不能因文件存在就視為允許改變 CLI／API 行為。
+
+**2026-09-12 決定：** 使用者在明列契約、六檔範圍及 issue 02 前置缺口的
+確認問題後回答「我同意授權」。下列單次契約、terminal／retention／restore 表
+與工作內暫用 normal、結束恢復原 mode 均正式批准；不納入 extended Citation。
+歷史上的「建議／待決」措辭保留為提案來源，以本決定為準。
 
 ## 預期成果
 
