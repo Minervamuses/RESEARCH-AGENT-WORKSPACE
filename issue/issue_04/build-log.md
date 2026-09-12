@@ -61,3 +61,27 @@
   `allowed_objects` pending deprecation；這是 baseline，不是修正驗收。
 - 現場仍有 earliest 非時間排序與 authority fallback 覆寫風險；下一步加入
   最小 red/characterization。所有 provider 使用離線 injection，寫入限 tmp_path。
+
+### 2026-09-12（Asia/Taipei）— Phase 01 red / fallback characterization
+
+- 在三個計劃指定的既有測試檔加入回歸案例，未改 production。重用
+  manifestation、SearchProvider、DoiProvider、tmp_path 與 fetcher injection。
+- Working directory/runtime 同 preflight。Exact command：
+
+  ```bash
+  poetry run pytest tests/test_citation_resolution.py tests/test_citation_work_resolver.py tests/test_citation_authority.py tests/test_citation_workflow_tool.py -q -k earliest --tb=short
+  ```
+
+  實際 **14 failed, 6 passed, 52 deselected, 1 warning in 0.49s**（exit 1）。
+  此為預定 red，不是 implementation attempt 失敗。
+- Unit/resolver 的 10 個失敗皆為應 ambiguous 卻 eligible；score 差異案例
+  已先斷言兩筆都通過 identity，且 scores 確實不同。
+- 兩個 service 邊界失敗明確觀察到 `saved` 取代原本的
+  `earliest_year_tie` / `earliest_year_missing` ambiguity。真實 NeurIPS
+  allowlist 能解析該 intent；正常 `not_found` fallback 保存的 control 通過。
+  此反例證實 service guard 必要，符合既有 conditional production scope。
+- 兩個真實 resolver → service → tool 案例在 DOI CSL refetch seam 被
+  `AssertionError` 阻止（`https://doi.org/10.1234/paper-a`），證實歧義尚未
+  阻止 winner refetch；沒有實際網路。下一步以同一案例確認無 fetch、無保存。
+- 去重、唯一最小年、較晚平手、已知/未知混合的 characterization 通過。
+  Phase 維持 In progress；baseline commit `4da5b23`。

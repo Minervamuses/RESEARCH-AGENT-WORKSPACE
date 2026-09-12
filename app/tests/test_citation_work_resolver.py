@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from skills.citation.providers.base import BibliographicQuery, ProviderRecord
 from skills.citation.providers.doi_org import StructuredRecord
 from skills.citation.providers.net import ProviderError
@@ -94,6 +96,30 @@ def test_same_title_different_versions_use_model_selection_before_refetch():
     assert outcome.decision.record.doi == "10.1000/pre"
     assert outcome.decision.record.version_kind == "preprint"
     assert resolver._doi_org.calls == ["10.1000/pre"]
+
+
+@pytest.mark.parametrize("year,reason", [(2020, "earliest_year_tie"), (None, "earliest_year_missing")])
+def test_earliest_ambiguity_returns_before_doi_refetch(year, reason):
+    published = record("crossref", "10.1000/pub")
+    preprint = record("datacite", "10.1000/pre", version="preprint")
+    published.year = preprint.year = year
+    doi_org = DoiProvider(csl("10.1000/pub"))
+    resolver = WorkResolver(
+        crossref=SearchProvider([published]),
+        datacite=SearchProvider([preprint]),
+        doi_org=doi_org,
+    )
+
+    outcome = run(resolver, WorkIntent("earliest", title="A Work", version_kind="earliest"))
+
+    assert outcome.decision.status == "ambiguous"
+    assert outcome.decision.reason_code == reason
+    assert outcome.decision.record is None
+    assert outcome.decision.alternatives == (published, preprint)
+    assert [(state.provider, state.status) for state in outcome.provider_states] == [
+        ("crossref", "ok"), ("datacite", "ok"),
+    ]
+    assert doi_org.calls == []
 
 
 def test_exact_doi_refetch_uses_authoritative_metadata_without_semantic_veto():

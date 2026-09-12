@@ -2,9 +2,13 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+from langchain_core.messages import ToolMessage
+
 from skills.citation import service as service_module
 from skills.citation.authority import AuthorityRegistry, export_bibtex
 from skills.citation.hub import CitationProviderHub
+from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import FetchResponse, ProviderError
 from skills.citation.resolution import (
     ResolutionDecision,
@@ -14,7 +18,10 @@ from skills.citation.resolution import (
 )
 from skills.citation.service import CitationService
 from skills.citation.storage import StorageError
+from skills.citation.tool import TOOL_NAME, create_citation_workflow_tool
+from skills.citation.types import SaveBatchOutcome
 from tests.citation_fixtures import DOI_A, DOI_B, RoutingFetcher
+from tests.test_citation_work_resolver import SearchProvider
 
 
 ATOM = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2001.00001v1</id><title>A Preprint</title><published>2020-01-02T00:00:00Z</published><author><name>Ada Author</name></author></entry></feed>'''
@@ -58,6 +65,114 @@ def test_untrusted_or_unknown_venue_abstains():
         raise AssertionError
     registry = AuthorityRegistry(fetcher=no_fetch)
     assert asyncio.run(registry.resolve(WorkIntent("x", title="Unknown", year=2020, venue="example.com"))) is None
+
+
+@pytest.fixture
+def earliest_authority_case(tmp_path):
+    intent = WorkIntent(
+        "earliest attention", title="Attention Is All You Need", year=2017,
+        venue="Advances in Neural Information Processing Systems 30",
+        version_kind="earliest",
+    )
+    records = [
+        ProviderRecord(
+            "crossref", "crossref:published", 0, title=intent.title, year=2017,
+            venue=intent.venue, doi=DOI_A, version_kind="published",
+        ),
+        ProviderRecord(
+            "datacite", "datacite:preprint", 1, title=intent.title, year=2017,
+            doi=DOI_B, version_kind="preprint", identifiers={"arxiv": "1706.03762"},
+        ),
+    ]
+    calls = []
+
+    async def no_fetch(url, headers):
+        calls.append((url, headers.get("Accept", "")))
+        raise AssertionError(f"unexpected network request: {url}")
+
+    service = CitationService(
+        CitationProviderHub(env={}, fetcher=no_fetch), output_dir=tmp_path / "cite",
+    )
+    return intent, records, service, calls
+
+
+@pytest.mark.parametrize("year,status,reason", [
+    (2017, "ambiguous", "earliest_year_tie"),
+    (None, "ambiguous", "earliest_year_missing"),
+    (2017, "not_found", "no_provider_records"),
+])
+def test_earliest_authority_fallback_preserves_year_ambiguity_only(
+    earliest_authority_case, year, status, reason,
+):
+    intent, records, service, calls = earliest_authority_case
+    for record in records:
+        record.year = year
+
+    class Resolver:
+        async def resolve(self, _intent):
+            return WorkResolution(
+                ResolutionDecision(status, reason, alternatives=tuple(records)), (),
+            )
+
+    service.resolver = Resolver()
+    assert asyncio.run(service.authorities.resolve(intent)) is not None
+
+    item = asyncio.run(service.save((intent,))).items[0]
+
+    if status == "not_found":
+        assert item.status == "saved"
+        assert item.receipt.canonical_identity.key == "venue:neurips:2017:7181"
+        assert service.registry.receipt_is_trusted(item.receipt)
+        assert (Path(item.receipt.bundle_path) / "reference.bib").is_file()
+    else:
+        assert item.status == "ambiguous"
+        assert item.reason_code == reason
+        assert item.receipt is None
+        assert [(alternative.doi, alternative.year) for alternative in item.alternatives] == [
+            (DOI_A, year), (DOI_B, year),
+        ]
+        assert service.registry.list() == []
+        assert not service.output_dir.exists()
+    assert calls == []
+
+
+@pytest.mark.parametrize("year,reason", [(2017, "earliest_year_tie"), (None, "earliest_year_missing")])
+def test_earliest_real_resolver_service_tool_returns_ambiguity_without_saving(
+    earliest_authority_case, monkeypatch, year, reason,
+):
+    intent, records, service, calls = earliest_authority_case
+    for record in records:
+        record.year = year
+    crossref, datacite = SearchProvider(records[:1]), SearchProvider(records[1:])
+    monkeypatch.setattr(service.hub.crossref, "search_work", crossref.search_work)
+    monkeypatch.setattr(service.hub.datacite, "search_work", datacite.search_work)
+    tool = create_citation_workflow_tool(service_getter=lambda: service)
+
+    message = asyncio.run(tool.ainvoke({
+        "type": "tool_call", "name": TOOL_NAME, "id": "earliest-save",
+        "args": {"action": "save", "works": [{
+            "requested_label": intent.requested_label, "title": intent.title,
+            "year": intent.year, "venue": intent.venue, "version_kind": "earliest",
+        }]},
+    }))
+
+    assert isinstance(message, ToolMessage)
+    content = json.loads(str(message.content).removeprefix("Actual citation save result:\n"))
+    assert content == message.artifact
+    item = SaveBatchOutcome.from_artifact(content).items[0]
+    assert item.status == "ambiguous"
+    assert item.reason_code == reason
+    assert item.receipt is None
+    assert [alternative.to_artifact() for alternative in item.alternatives] == [
+        {"title": intent.title, "authors": [], "year": year, "venue": intent.venue,
+         "version_kind": "published", "doi": DOI_A, "arxiv": None},
+        {"title": intent.title, "authors": [], "year": year, "venue": "",
+         "version_kind": "preprint", "doi": DOI_B, "arxiv": "1706.03762"},
+    ]
+    assert len(crossref.calls) == len(datacite.calls) == 1
+    assert calls == []
+    assert service.registry.list() == []
+    assert not service.output_dir.exists()
 
 
 def test_exact_arxiv_selection_uses_authoritative_metadata_when_saving(tmp_path: Path):
