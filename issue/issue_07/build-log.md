@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Cross-process apply lock | Not started | — | — | — | 尚未啟動；實作授權條件見 PLANS.md |
+| 01 — Cross-process apply lock | In progress | 2026-09-12 | — | 下列 preflight / baseline | 無 |
 
 狀態只用 `Not started`、`In progress`、`Blocked`、`Complete`。
 只有 phase acceptance 與 required checks 都有實際 evidence 才能標為 Complete。
@@ -31,3 +31,27 @@
 
 實作開始後，每筆重要紀錄包含時間與時區、phase/status 變化、授權範圍、
 必要修改、精確驗證與觀察、限制／blocker、下個 eligible action，以及需要的 evidence link。
+
+### 2026-09-12（Asia/Taipei）— 啟動 / preflight / baseline
+
+- 使用者要求「執行 issue/issue_07，入口在 PROMPTS.md。每一步皆需 commit」，
+  本次按指定 Start / Resume 執行固定 `.apply.lock`、Linux 非阻塞 flock 方案；
+  同時明確授權各步 commit。舊 authoring-only 記錄是歷史，不是本次 runtime status。
+- 已依序閱讀根 AGENTS、GOALS、PLANS、log、唯一 phase、原 issue 與 live code/tests；
+  無其他 applicable AGENTS，無既有 context/review。初始 HEAD `4d7d8a5`、branch `GUI`，
+  `git status --short` 為空；不依 authoring 的舊 HEAD/dirty 狀態推斷現況。
+- Root `/home/minervamuses/research-agent-workspace`，project `app/`；Linux bash
+  `/usr/bin/bash`、Git `/usr/bin/git`，Conda app Python 3.13.14、Poetry 2.4.1。
+  PATH 原先選到 pipx Poetry 2.3.4，後續明確指定 Conda 內 Poetry；無環境檔變更。
+  在 workspace root 執行 `poetry env info` 因無 pyproject 失敗，切至 app/ 後確認
+  Python 與 virtualenv 均為 `/home/minervamuses/miniconda3/envs/app`、Valid True。
+  `stat -f -c '%T' /tmp /home/minervamuses/research-agent-workspace` 均為 ext2/ext3。
+- Live apply 仍只有 threading lock；revision read、installation、write_registry
+  均在 `_apply_locked`，writer 的 fsync/replace/directory fsync 順序與計劃相符。
+  CLI/desktop 原 busy message mapping 可沿用，尚缺 apply-lock 的入口 regression。
+- Baseline（app cwd）：
+  `conda run -n app timeout 120s /home/minervamuses/miniconda3/envs/app/bin/poetry run pytest tests/test_extension_manager.py tests/test_extension_registry.py -q`
+  → **51 passed, 1 warning in 0.49s**，exit 0，既有 LangChain pending deprecation。
+- 範圍：僅 manager.py production、既有 test 檔與本 bundle 紀錄；不改 registry writer、
+  schema、依賴、其他 issue。下一步依序 Red、Green、必要 lifecycle/入口驗證、一次 full suite，
+  各步 commit。必要 checks 失敗先診斷；超出 envelope 或兩次修正失敗按 PLANS 停止。
