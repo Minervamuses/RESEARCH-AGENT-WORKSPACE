@@ -7,7 +7,7 @@
 
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
-| 01 — Installer Skill switch | In progress | 2026-09-12 | — | 本輪 preflight；待 red/green | — |
+| 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Not started | — | — | — | — |
 | 03 — Native Desktop acceptance | Not started | — | — | — | — |
 | 04 — Thinking contract/runtime | Not started | — | — | — | — |
@@ -53,3 +53,23 @@ acceptance 對應、必要 review、限制、blocker、下一個 eligible 行動
 - Confirmed red：Citation Desktop 回答 New skill ran despite cleanup conflict；一般 Skill 回答 fused，兩者未公開 source cleanup conflict。一般 Skill 澄清後真 Fusion p1/p2/p3、aggregator、reviewer 已跑且回答 fused，但 repository thinking_mode=normal，預期 extended。
 - Protection controls passed：Citation normal routing 與回復 extended；完成 installer duplicate（含 retry=true）在 loader 前返回，之後 runtime load failure 保留 pending transaction、runtime、mode、全 source/backup bytes。
 - 新測試沿用真 ZIP/tool loop、tmp_path 與既有 Desktop service、Fusion seams；未新增 framework。Red commit 刻意保存上述三項失敗，下一步只修 session.py 因果路徑。
+
+## 2026-09-12 — Phase 01 green / Complete（62ff20c + session.py）
+
+- Production 僅 session.py：load 之後檢查 cleanup conflict，沿用 host 結果文字與 finalize_and_record 回傳；未啟用新 Skill。begin 前純計算 effective_mode，一般 Skill 使用 installer 原模式；runtime load failure 前不做 cleanup 或 mode mutation；duplicate 仍在 load/cleanup/execution 前。
+- Exact commands（Linux Conda app，cwd app，前置同上）：
+  - timeout 120s poetry run pytest tests/test_skill_adherence.py -k installer_skill_switch -q --tb=short → 5 passed / 20 deselected，0.52s。
+  - timeout 300s poetry run pytest tests/test_skill_adherence.py tests/test_citation_skill_activation.py -q → 40 passed，1.32s。
+  - timeout 300s poetry run pytest tests/test_session_persistence.py tests/test_thinking_session.py -q → 29 passed，0.68s。
+  - root：git diff -- app/agent/session.py；git diff --check → passed。
+- 一次 focused production 嘗試即 green；只有既有 LangChainPendingDeprecationWarning，未變依賴。未執行完整 suites/build、真模型或原生 UI。
+
+| Acceptance | Observed evidence |
+|---|---|
+| Citation / 一般 Skill conflict 對外阻擋 | Desktop dispatch 兩例 text 包含 Installation stopped: source cleanup conflict.、cleanup_detail: staged source changed; preserving user changes and backup、正確 backup_path；completed/final_only/chunkCount=0；canonical answer 等於回傳文字。 |
+| 新工作零呼叫 | 兩例 _run_turn runs=[]、normal graph.states=[]、Fusion factory.calls=[]、所有 role model calls=[]，installer model.calls 未增加。 |
+| source / 全備份完整 | source 與 backup 遞迴所有檔案 path→bytes map 完全相等，包含 preview 後的 User modification after preview；沒有重新安裝／刪除。 |
+| mode 與 routing | 真兩候選 ZIP 澄清讓 session 暫 normal；slash academic-paper-writing 後 p1/p2/p3、aggregator/reviewer 執行，answer=fused；repository 與磁碟 JSON thinkingMode=extended；session 恢復 extended。Citation 對照 graph 執行時 pending mode=normal，磁碟/repository=normal，結束 extended。 |
+| 原狀態與既有流程 | completed installer duplicate retry=true 零 loader；runtime failure 保留 pending/preview_id/runtime/mode/source/backup；40+29 focused checks 覆蓋下一 installer request、cancel、Citation teardown、durability 與 Fusion 行為。 |
+
+下一 eligible phase：02，依檔案路線執行；09 的三項產品決策依然未定。

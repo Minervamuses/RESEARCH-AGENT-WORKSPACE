@@ -965,7 +965,13 @@ class ChatSession:
 
         # Loading and validation happen before any active session state changes.
         runtime = self._load_skill_runtime(CITATION_SKILL_NAME if citation_turn else skill_name)
-        self.clear_skill_installer()
+        cleanup = self.clear_skill_installer()
+        if cleanup.get("cleanup_conflict"):
+            self._installer_action_used = True
+            return await self.finalize_and_record(
+                user_input=user_input, answer=self._installer_result_text(),
+                new_messages=[], tool_calls=[], trace_events=[],
+            )
         previous = self.active_skill_runtime
         previous_mode = self.thinking_mode
         self.active_skill_runtime = runtime
@@ -1213,12 +1219,17 @@ class ChatSession:
                                  or (skill_name is None and self._requests_skill_installer(user_input)))
             installer_turn = installer_request or (skill_name is None and self._skill_installer.pending)
             citation_turn = skill_name is not None and skill_name.casefold() == CITATION_SKILL_NAME
+            effective_mode = self.thinking_mode
+            if installer_turn or citation_turn:
+                effective_mode = "normal"
+            elif skill_name is not None and self._installer_previous_mode is not None:
+                effective_mode = self._installer_previous_mode
             snapshot, turn, duplicate = await self._begin_turn(
                 semantic_input=user_input,
                 display_input=display_input if display_input is not None else user_input,
                 turn_id=logical_turn_id,
                 retry=retry,
-                thinking_mode="normal" if installer_turn or citation_turn else None,
+                thinking_mode=effective_mode,
             )
             self._conversation_snapshot = snapshot
             if duplicate:
