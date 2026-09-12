@@ -8,7 +8,7 @@
 | Phase | 狀態 | 開始 | 完成 | 證據 | 阻塞 |
 |---|---|---|---|---|---|
 | 01 — 重現與分流 | Complete | 2026-09-12 | 2026-09-12 | Native Unicode baseline; engine and next experiment approved below | — |
-| 02 — 最小修正 | Not started | — | — | — | — |
+| 02 — 最小修正 | In progress | 2026-09-12 | — | Installation and native control checks below | — |
 | 03 — 完整驗收 | Not started | — | — | — | — |
 
 只使用 Not started、In progress、Blocked、Complete。
@@ -167,3 +167,41 @@ apt-get --print-uris --assume-no --no-install-recommends install ibus ibus-chewi
   at 7d9a9e8. No research-agent or IME process found. sudo -n true reports a
   password is required; use WSL's authorized root invocation for OS installation,
   while project commands and IME/Desktop stay under minervamuses.
+
+### 2026-09-12 16:49–16:56 +08:00 — Phase 02 installation / control checkpoint
+
+- Executed authorized OS installation from Windows:
+  `wsl -d Ubuntu-24.04 -u root -- apt-get install -y --no-install-recommends ibus ibus-chewing ibus-gtk3`.
+  Pass, 8.98 s total; fetched 21.4 MB in 4 s. 14 new packages, 3 dconf upgrades,
+  +165 MB as estimated; no autoremove or unrelated upgrade.
+  Versions: ibus/ibus-gtk3 1.5.29-2, ibus-chewing 2.0.0-1build2.
+  Package post-install automatically created the standard GNOME-session user-unit
+  dependency under /etc/systemd/user/gnome-session.target.wants/; apt warned that
+  gnome-session.target is absent. No custom startup or service was configured.
+- Read `ibus-daemon --help`, `ibus help`, chewing.xml, and engine help.
+  Existing `preload-engines` / `engines-order` were both @as []; no gsettings
+  values changed. Started owned daemon as minervamuses:
+  `ibus-daemon --daemonize --emoji-extension=disable` (PID 5750).
+  Immediate `ibus engine chewing` raced bus startup and failed; retried after
+  daemon readiness. It selected chewing, with a missing-setxkbmap warning and
+  nonzero status. A subsequent `ibus engine` confirmed chewing; `ibus im-module`
+  returned ibus. Do not treat the CLI warning as proof composition fails.
+- Restarted fixture using the literal-env standard main.py command above;
+  dev compilation 0.70 s, Desktop PID 5979. Started backend and selected original
+  p1 conversation. Real source/transport/fixture unchanged.
+- `grep im-ibus /proc/5979/maps` confirms actual Desktop loaded im-ibus.so.
+  `ss -xnp` maps Desktop fd 4 inode 16252 to peer 17048 at
+  /mnt/wslg/runtime-dir/wayland-0: actual Wayland connection established.
+  No GTK_IM_MODULE or GDK_BACKEND override was applied.
+- Created two temporary controls only inside the owned fixture root:
+  ime-control.ui (GtkWindow with GtkEntry), ime-control.html (plain textarea).
+  Launched `gtk-builder-tool preview /tmp/research-agent-desktop-phase02-GrASHQ/ime-control.ui`
+  (PID 6355), and
+  `/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/MiniBrowser file:///tmp/research-agent-desktop-phase02-GrASHQ/ime-control.html`
+  (PID 6396). GTK fd 3 inode 20057 connects to Wayland peer 20925.
+- Native sky.press_key c, l, 3 (standard Bopomofo hao3) displayed phonetic preedit
+  and converted 好 in both controls; Return committed it. No literal Chinese
+  insertion or clipboard operation was used for these composition observations.
+  Down (GTK) / space (WebKit) did not expose a visible candidate popup in the
+  returned window captures; this remains to be resolved/observed. App sentence,
+  candidate Enter and final submit checks have not yet been completed.
