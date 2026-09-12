@@ -9,10 +9,10 @@
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
-| 03 — Native Desktop acceptance | In progress | 2026-09-12 | — | 下方 native preflight | IBus 引擎 / Orca unavailable；其餘待直接觀察 |
-| 04 — Thinking contract/runtime | Not started | — | — | — | — |
-| 05 — Thinking Desktop acceptance | Not started | — | — | — | — |
-| 06 — Regression and closure | Not started | — | — | — | — |
+| 03 — Native Desktop acceptance | Blocked | 2026-09-12 | — | 下方 native launch / screenshot evidence | App 原生 surface 不可觀察／控制；IBus / Orca unavailable；真 Citation UI 入口未驗證 |
+| 04 — Thinking contract/runtime | Blocked | 2026-09-12（僅 gate） | — | 下方產品 gate 核對 | 三項產品答案及精確實作授權未定 |
+| 05 — Thinking Desktop acceptance | Not started | — | — | — | 前置 04 未 Complete |
+| 06 — Regression and closure | Not started | — | — | — | 前置 03–05 未 Complete；未跑完整 suites/build |
 
 狀態只使用 Not started、In progress、Blocked、Complete。
 必要前置與待決事項見 GOALS／各 phase；開始 preflight 後才把實際阻塞寫入本表。
@@ -120,3 +120,51 @@ acceptance 對應、必要 review、限制、blocker、下一個 eligible 行動
 - Issue 02 安全入口已確認：phase02 fixture opt-in + require_fixture_root，全部 store/citations/extensions/knowledge 指向 caller-owned /tmp；FixtureSessionFactory / offline extension model，test_fixture_never_uses_chat_session_factory_or_exposes_credentials 明示禁止真 ChatSession.create。
 - 使用既有 main.py / npm tauri dev、CARGO_NET_OFFLINE=true、timeout 540s 上限嘗試原生 fixture；不執行完整 suite/source build、不安裝依賴。現有 Rust cache + dev Vite，預期啟動低於十分鐘；觀察 startup 後再操作。
 - 真 Citation 第二門檻仍未驗證：phase02 fixture 不是真 Citation；必須另外確認自有 tmp launcher 的既有 dependency injection，不能用一般 python main.py 接真 user store。
+
+## 2026-09-12 — Phase 03 原生嘗試 / Blocked（1929acf；未改 application/tests）
+
+### Exact launch / observations
+
+下列 Python launcher 經 /home/minervamuses/miniconda3/bin/conda run --no-capture-output -n app python - 執行；stdin 由 PowerShell literal here-string 傳入 wsl.exe -d Ubuntu-24.04（Windows 僅 launcher）：
+
+~~~python
+import os, subprocess, sys, tempfile
+from pathlib import Path
+root = Path(tempfile.mkdtemp(prefix="research-agent-desktop-phase02-slash-menu-", dir="/tmp"))
+print("FIXTURE_ROOT=" + str(root), flush=True)
+os.environ.update(RESEARCH_AGENT_DESKTOP_FIXTURE="phase02", RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT=str(root), CARGO_NET_OFFLINE="true")
+os.chdir("/home/minervamuses/research-agent-workspace")
+result = subprocess.run(["timeout", "540s", sys.executable, "main.py"])
+print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
+~~~
+
+- Owned tmp root：/tmp/research-agent-desktop-phase02-slash-menu-a4d2wp3s。Observed 啟動：Vite v8.2.2 ready 277ms；cargo dev profile finished 3.65s，target/debug/research-agent-desktop 已執行。這是 dev launcher 的增量編譯，不是 Phase 06 的完整 suites / Tauri source build。
+- stderr：libEGL failed to retrieve device information / MESA ZINK failed to choose pdev / egl failed to create dri2 screen。這是 observed 訊息；是否為 UI 不可見的根因尚未確認，不以猜測修改 rendering 或系統。
+- Native queries（root cwd）：
+  - timeout 3s xwininfo -root -tree → exit 0，仍僅 Weston WM 與兩個 unnamed X11 root children，沒有 App window。
+  - timeout 3s xdotool search --name Research → exit 1，沒有可操作的匹配 window id；串接的 scrot 因 && 未執行，未誤記為有截圖。
+  - 另執行 timeout 3s scrot /tmp/research-agent-desktop-phase02-slash-menu-a4d2wp3s/native-start.png → exit 0；view_image 實際查看 2560×1600 全黑 X11 root 畫面，沒有 menu 或 App 內容。
+- [原生 root 截圖](evidence/phase-03-native-root.png)，SHA256 f16b1f3806b329eaa287434ed37cafd23930008a34ab771706a59d15073bf939。這只證明本操作 surface 未呈現可觀察內容，不能推論其他 display surface 也沒有視窗，更不是 UI acceptance passed。
+- Linux /proc 以精確 RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT 篩選（未輸出其他 env），確認自行啟動的 timeout / python main.py / npm / Vite / Tauri / WebKit processes 都在 pgid=6464。沒有 backend readiness / fixture store materialization 證據；停止前 tmp 只有 native-start.png。
+- 無可觀察／控制 App surface 後依 phase stop gate 停止，不再換 rendering 參數或反覆啟動。未執行 xdotool key/type/click，未聲稱 keyboard/mouse/focus/caret/request checks 通過。
+
+### Owned cleanup
+
+- 透過 Conda app Python 檢查 /proc/6464/environ 包含上述精確 tmp root、cmdline 前兩欄為 timeout / 540s、os.getpgid(6464)==6464 後，執行 os.killpg(6464, signal.SIGTERM)，只停止本次自行啟動的 process group；launcher 回報 LAUNCH_EXIT=-15（主動停止，非 passed）。
+- 再檢查 /proc 精確 fixture env 沒有任何存活程序；將 screenshot 複製至上方 evidence path 後，驗證 fixture.resolve()==fixture、parent=/tmp、完整名稱完全相同且非 symlink，才 shutil.rmtree(fixture)。已確認 tmp 不存在。沒有停止 compositor、WSL、IBus 或使用者服務。
+
+| Acceptance | 本輪狀態與具體缺口 |
+|---|---|
+| Issue 02 menu 原生操作 | Unavailable：尚無 /、/sta、arrows、Enter/zero request、mouse、Escape/blur、Shift+Enter/Tab、focus/caret、A→B→A/restart/apply 的直接原生證據。Dev compile/readiness 不能取代它。 |
+| Issue 02 IME / accessibility | Unavailable：ibus engine exit 1 / No engine is set；Orca 未安裝；未做系統配置或重啟。 |
+| Issue 08 真 Citation UI | Unavailable：沒有可操作的 native surface，且 phase02 FixtureSessionFactory 不是真 ChatSession/Citation。第二門檻的完整 isolated Citation UI launcher 未驗證，沒有為繞過 blocker 建新 fixture module。Phase 02 的真服務離線 evidence 保留為不同層。 |
+| 隔離與成本 | Passed 僅指啟動配置：caller-owned tmp、明確 fixture opt-in、offline Cargo、無 dependency install / paid provider / user store 操作；沒有把這些當成原生驗收。 |
+
+### Phase 04 gate / 最終停止條件
+
+- Phase 01/02 Complete，故檢查與 Phase 03 不互為前置的 Phase 04。已讀本 phase、原 issue_09 phase-01；唯讀核對 live session.set_thinking_mode、slash /thinking、Desktop controls 與 thinking/slash tests。現有 normal/extended 不能代替新段位的使用者決定。
+- GOALS 的唯一決策表仍無答案：①段位數量/名稱/穩定值/順序/預設及與 Normal/Extended 關係；②workflow/model/provider effort 映射、角色、不支援與 CLI 相容；③new/A→B→A/restart 的保存範圍、metadata。精確必要 production paths / API / schema 授權須於產品答案後收斂；本啟動與 commit 授權不代答上述事項。
+- Phase 04 為 Blocked（僅授權/產品 gate，沒有實作或新增 tests）；未自行延期 Issue 09。Phase 05/06 前置未完成，保持 Not started。
+- 無其他前置完整且授權齊全的 phase。路線／穩定目標未變，無須改寫 PLANS 或未開始 phase；沒有新增猜測性 context/review，既有 Issue logs 保持歷史。Issue 01 已准略過的矩陣完全未重做。
+- 恢復所需：能操作並觀察 App 的 Linux native surface、Issue 02 所需 IME/輔助工具證據，以及真 ChatSession + offline provider + tmp store 的 Citation UI 安全入口；或使用者明確接受具體限縮。獨立 Phase 04 需上述三項產品答案及必要精確 scope 授權。
+- 本輪 production write set：app/agent/session.py、app/agent/desktop/service.py；tests：test_skill_adherence.py、test_desktop_service.py；其餘為本 plan baseline、build-log 及真實 screenshot evidence。無 AGENTS、依賴、API/schema、branch/worktree 變更，無 push。
