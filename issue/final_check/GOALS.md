@@ -35,7 +35,9 @@ Issue 10 原有 ZIP 主流程證據保留，新增的是切換邊界驗證。
 2. **順序。** completed duplicate 先返回，不載入 Skill、不 cleanup、不重新保存；completed 加 retry=true 仍返回原答案。只有可重試的 failed/interrupted 明確 retry 才能開始新工作。新工作 runtime 驗證失敗前不清理原 installer／Citation 狀態。
 3. **模式與權限。** Citation／installer 使用 Normal；installer 結束恢復原選擇。Extended 是多角色 workflow，不等同 provider reasoning effort。保留 busy／approval、final-only、cancel/retry 及 Skill tool scope。
 4. **Runtime 與資源。** 根 AGENTS 與使用者 Personal Engineering Defaults 為權威：Linux、Conda app、Poetry、LF；Windows 只作 WSL launcher。最小直接修改、既有測試接縫、短命令；不自行安裝、升級、GPU／全資料掃描或呼叫付費 provider。
-5. **證據與既有授權。** Issue 01 的 2026-09-12「跳過需要重啟的部分，如實記錄即可」保留。Issue 02 menu 自己的 IME／Shift+Enter 驗收仍可做，不能藉此重新要求 Issue 01 整套測試。Issue 08 沒有獲豁免自身原生驗收。
+5. **證據與既有授權。** Issue 01 的 2026-09-12「跳過需要重啟的部分，如實記錄即可」保留。Issue 02 menu 的 Shift+Enter 等一般鍵鼠驗收保留，不能藉此重新要求 Issue 01 整套測試；本輪輸入法範圍依下項限縮。Issue 08 沒有獲豁免自身原生驗收。
+
+6. **輸入法限縮（2026-09-12 使用者決定）。** 使用者明確要求「跳過輸入法的部分」。本輪略過華碩／Windows→WSLg 輸入法相容性、中英文切換、中文組字／候選字、IME composition/commit 的原生驗收及環境處置，記為 skipped／明確接受限縮，不記 passed。保留既有 IME 保護程式與已存在測試；這不豁免一般鍵鼠（含 Shift+Enter）、可及性、menu、Citation 原生流程或 Thinking Effort 的產品決策。
 
 ## 未知與使用者待決事項
 
@@ -55,7 +57,7 @@ Issue 10 原有 ZIP 主流程證據保留，新增的是切換邊界驗證。
 
 ### 技術／驗收未知
 
-- Linux Desktop／IME／輔助工具能否操作：由原生驗收階段的短 read-only preflight 查證。歷史 timeout 不表示今日一定失敗；不得自行重啟 WSLg／WSL 或安裝工具。
+- Linux Desktop／輔助工具能否操作（輸入法依已核准限縮跳過）：由原生驗收階段的短 read-only preflight 查證。歷史 timeout 不表示今日一定失敗；不得自行重啟 WSLg／WSL 或安裝工具。
 - 現有 phase02 GUI FixtureSession 不是真 Citation。原生 Citation 必須有真 ChatSession、既有 offline fetcher/model、tmp store 的安全入口；目前沒有已確認的完整啟動命令，由該階段查明最小接縫。
 - 原生或 provider 必要證據仍不可得時，由使用者決定修復環境、提供操作證據或明確限縮；時間經過不等於豁免。
 

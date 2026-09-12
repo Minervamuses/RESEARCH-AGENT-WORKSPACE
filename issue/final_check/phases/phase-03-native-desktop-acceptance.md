@@ -13,8 +13,8 @@
 
 ## 依賴與兩個前置門檻
 
-Phase 01、02 Complete。開始先確認 Linux native 控制／顯示可用；若有 xdotool，可做 timeout 3s xdotool getdisplaygeometry 等短唯讀 query，記工具、display、IME／輔助工具結果。歷史 timeout 只作參考。
-先分別記使用者的 App 顯示／輸入觀察與代理工具能否操作該視窗。若使用者回報 Windows 輸入法（例如華碩智慧輸入法），先查明 Windows→WSLg→GTK/WebKit 的輸入鏈與 Linux IME 狀態；不能把 Shift 或 menu composition handler 當成預設根因，也不能用啟用 Linux 注音當成已修復 Windows 輸入法相容性。
+Phase 01、02 Complete。開始先確認 Linux native 控制／顯示可用；若有 xdotool，可做 timeout 3s xdotool getdisplaygeometry 等短唯讀 query，記工具、display、輔助工具結果；輸入法依 GOALS 已核准限縮跳過。歷史 timeout 只作參考。
+先分別記使用者的 App 顯示觀察與代理工具能否操作該視窗。依 GOALS「輸入法限縮」，不再調查／處置 Windows 或 Linux 輸入法，也不以其不可用作為本階段 blocker；一般鍵鼠、可及性與 Citation 原生證據仍保留。
 沒有可操作原生 surface 就記 Blocked 並停止重複啟動。需要 restart／安裝／環境修復依 PLANS 辦理；使用者可另提供具體原生操作證據或限縮，但未回覆不等於豁免。
 
 第二門檻是安全 Citation 入口：RESEARCH_AGENT_DESKTOP_FIXTURE=phase02 的 FixtureSessionFactory 不執行真 ChatSession，test_desktop_fixture.py 也明確禁止該 factory 呼叫 ChatSession.create。
@@ -40,10 +40,10 @@ RESEARCH_AGENT_DESKTOP_FIXTURE=phase02 RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT="$SLA
 |---|---|
 | `/`、`/sta`、上下鍵、Enter 選 /status | 篩選與選取正確；插入 `/status `，focus 在 composer、caret 尾端、request delta=0；再 Enter 恰一次 local request，無 LLM。 |
 | /ingest 參數、mouse、Escape／blur／清空／多行、Shift+Enter／Tab | 補命令不自執行；滑鼠選取不被 blur 吞掉、active option 可見；關閉規則、換行及焦點移動符合原計畫。 |
-| 可用 Linux IME／輔助工具 | menu 情境 composition/commit Enter 不誤選或送出；下一 Enter 才做指定動作；可觀察清單名稱、active option 與關閉狀態。缺工具逐項 unavailable。 |
+| 可用輔助工具 | 可觀察清單名稱、active option 與關閉狀態。缺工具逐項 unavailable；輸入法依 GOALS 記 skipped，不作此列門檻。 |
 | A→B→A、restart、tmp extension apply | catalog、draft、selection/generation 正確；current catalog 不因 apply 偷換，新 session/restart 才反映；未知／CLI-only 命令拒絕。 |
 
-menu 的 IME／Shift+Enter 是 Issue 02 自己的互動條件，不延伸為重跑 Issue 01 已豁免資料。
+menu 的 Shift+Enter 等一般鍵鼠互動仍需驗收；輸入法另依 GOALS 跳過，兩者不混同，也不重跑 Issue 01 已豁免資料。
 
 ### Issue 08 真 Citation checklist
 

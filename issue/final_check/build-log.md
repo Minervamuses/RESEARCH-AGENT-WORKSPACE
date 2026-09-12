@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 01 — Installer Skill switch | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 01 red/green 與 acceptance 表 | — |
 | 02 — Completed Citation replay | Complete | 2026-09-12 | 2026-09-12 | 下方 Phase 02 red/green 與 acceptance 表 | — |
-| 03 — Native Desktop acceptance | Blocked | 2026-09-12 | — | 下方 native launch / screenshot evidence | 使用者回報 App 顯示正常但華碩輸入法失效；代理尚無該視窗操作證據；真 Citation UI 入口未驗證 |
+| 03 — Native Desktop acceptance | Blocked | 2026-09-12 | — | 下方 native launch / screenshot evidence | 輸入法已准 skipped；仍缺 menu／可及性／真 Citation 原生證據及安全入口 |
 | 04 — Thinking contract/runtime | Blocked | 2026-09-12（僅 gate） | — | 下方產品 gate 核對 | 三項產品答案及精確實作授權未定 |
 | 05 — Thinking Desktop acceptance | Not started | — | — | — | 前置 04 未 Complete |
 | 06 — Regression and closure | Not started | — | — | — | 前置 03–05 未 Complete；未跑完整 suites/build |
@@ -188,3 +188,16 @@ print("LAUNCH_EXIT=" + str(result.returncode), flush=True)
 - Inference（尚未 end-to-end 證實）：Windows 華碩輸入法與 WSLg Linux GTK/WebKit 間未接通組字最符合目前證據；本機 Linux IBus/Chewing 已安裝但未啟用，沒有可用的 Linux 組字引擎。不能宣稱已修復華碩相容性，也不把啟用 Linux 注音等同於保留華碩的混合輸入體驗。
 - 因新證據修正 preflight 判斷路線，先同步 PLANS 與本 phase 的 Windows/Linux IME 辨識規則；GOALS／required outcomes 不變，Phase 03 保持 Blocked，沒有重做 Issue 01 矩陣。
 - 本次僅改三個計畫／證據檔；未改 production/tests，未啟動／重啟 App、IBus、WSL 或服務，未安裝依賴、未執行 suites/build。後續涉及 IME 啟用／設定或 Windows 前端路線，須依既有 scope/環境授權門檻處理。
+
+## 2026-09-12（Asia/Taipei）— 使用者略過輸入法；核對剩餘工作（b8f440a）
+
+- 新授權來源：使用者「跳過輸入法的部分，後面還有什麼問題」。已在 GOALS 保存精確限縮，同步 PLANS / phase-03；輸入法記 skipped / accepted limitation，沒有改為 passed，也沒有豁免其他 native 項目或代答 Issue 09。
+- Read-only gate：root /home/minervamuses/research-agent-workspace，Linux Conda app；command -v git python poetry 為 /usr/bin/git 與 Conda app/bin；branch GUI、HEAD b8f440a；git status --short 空。重新讀根 AGENTS、GOALS、PLANS、build-log、phases 03–06。
+- 01/02：既有三個 P2 補救及本輪 required focused evidence 維持 Complete；沒有新的 production diff 或已確認功能缺陷。
+- 03：使用者回報 App 能正常顯示，仍欠 menu 的鍵鼠/focus/caret/零送出、A→B→A/restart/apply、輔助工具，以及真 ChatSession 的 Citation 原生搜尋→保存→正式回答／後續普通回合／取消失敗等證據；完整安全 Citation UI 啟動入口尚未驗證。輸入法不再是 blocker，但上述其餘缺口仍存在，故保持 Blocked。
+- 04：Thinking Effort 三項產品答案（段位／行為映射／保存範圍）及其後精確實作授權仍缺；保持 Blocked。05 依賴 04，保持 Not started。
+- 06：待當前 required 前置完成後，才執行一次完整 Python/Node/Rust suites、Tauri source build、bounded review 與逐 Issue 結案；保持 Not started。此次詢問未執行 tests/build/GUI。
+- 修改限 GOALS.md、PLANS.md、phases/phase-03-native-desktop-acceptance.md、build-log.md；原始失敗／輸入法調查紀錄保留為歷史。沿用本輪每一步 commit 授權；無 production/tests、環境、依賴或 Git branch/worktree 變更。
+
+- 規劃檔案檢查（Linux Conda app，cwd root）：python /mnt/c/Users/garyc/.codex/skills/long-horizon-plan-author/scripts/validate_harness.py --repo /home/minervamuses/research-agent-workspace --plan-root issue/final_check --project-shape application --risk medium --harness-only --strict --json --proposed-path issue/final_check/GOALS.md --allowed-path issue/final_check/GOALS.md --proposed-path issue/final_check/PLANS.md --allowed-path issue/final_check/PLANS.md --proposed-path issue/final_check/phases/phase-03-native-desktop-acceptance.md --allowed-path issue/final_check/phases/phase-03-native-desktop-acceptance.md --proposed-path issue/final_check/build-log.md --allowed-path issue/final_check/build-log.md → valid=true，0 errors / 0 warnings；git diff --check → passed。此為文件檢查，不是 application acceptance。
+- 交接核對：PROMPTS 仍從 build-log/PLANS 計算 eligible phase，沒有硬編碼 current phase；GOALS 唯一保存輸入法限縮，03 移除 IME 門檻，05 引用03且沒有另設IME條件，06 引用GOALS的核准限縮。原生其餘門檻、產品決策及依賴順序不變。
