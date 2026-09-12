@@ -2065,3 +2065,189 @@ def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
         assert returned_a["bashPermissionMode"] == "ask"
 
     asyncio.run(run())
+
+
+def _citation_desktop(monkeypatch, tmp_path):
+    from test_citation_e2e import _SearchSaveModel, _fixture_services, _rag_search
+    from test_desktop_service import _service
+    from tests.citation_fixtures import RoutingFetcher
+
+    model = _SearchSaveModel()
+    fetcher = RoutingFetcher()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _config: model)
+    monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [_rag_search])
+    services = _fixture_services(monkeypatch, tmp_path, fetcher)
+    sessions = []
+
+    async def factory(config, *, load_mcp, **kwargs):
+        assert load_mcp is False
+        session = ChatSession(config, **kwargs)
+        sessions.append(session)
+        return session
+
+    return _service(tmp_path, session_factory=factory), model, fetcher, services, sessions
+
+
+def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(monkeypatch, tmp_path):
+    from test_desktop_service import _service, _turn_params
+
+    service, model, fetcher, services, sessions = _citation_desktop(monkeypatch, tmp_path)
+    created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session_a = service.session
+    selected = {"projectId": "local", "sessionId": created["sessionId"]}
+    asyncio.run(service.dispatch("session.set_thinking", {"mode": "extended"}))
+    params = _turn_params("/citation 搜尋 Paper A，保存並正式引用")
+    events = []
+    result = asyncio.run(service.dispatch("session.turn", params, event_sink=lambda event, data: events.append((event, data))))
+    assert result["responseKind"] == "answer" and result["streamKind"] == "final_only"
+    assert "已保存並引用來源 [1]。" in result["text"]
+    assert [event for event, _data in events].count("tool.started") == 2
+    assert [event for event, _data in events].count("tool.finished") == 2
+    assert [item["name"] for item in result["toolSummaries"]] == ["citation_workflow", "citation_workflow"]
+    assert session_a.thinking_mode == "extended"
+    assert session_a.active_skill_runtime is None and session_a._citation_service is None
+    _assert_result("session.turn", result, 280)
+    counts = (len(model.invocations), len(fetcher.calls), len(services))
+
+    duplicate = asyncio.run(service.dispatch("session.turn", params))
+    assert duplicate["text"] == result["text"]
+    assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
+    transcript = asyncio.run(service.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
+    turn = transcript["items"][0]
+    assert turn["assistantText"] == result["text"]
+    assert turn["userText"] == params["text"]
+    assert len(turn["toolActivities"]) == 2
+    assert all(activity["name"] == "citation_workflow" for activity in turn["toolActivities"])
+    _assert_result("session.transcript", transcript, 281)
+
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    session_b = service.session
+    assert session_b is not session_a and session_b._citation_service is None
+    returned = asyncio.run(service.dispatch("session.select", selected))
+    assert returned["thinkingMode"] == "extended"
+    assert service.session is not session_a
+    assert service.session.active_skill_runtime is None and service.session._citation_service is None
+    again = asyncio.run(service.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
+    assert again == transcript
+    assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
+
+    # Recreate the backend against only this temporary canonical store.
+    restarted = _service(tmp_path, session_factory=service._session_factory)
+    asyncio.run(restarted.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(restarted.dispatch("session.select", selected))
+    restored = asyncio.run(restarted.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
+    assert restored == transcript
+    assert asyncio.run(restarted.dispatch("session.turn", params))["text"] == result["text"]
+    assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
+    assert restarted.session.active_skill_runtime is None and restarted.session._citation_service is None
+    assert all(session._citation_service is None for session in sessions)
+    assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+
+    ordinary = asyncio.run(restarted.dispatch("session.turn", _turn_params("ordinary question")))
+    assert ordinary["text"] == "ordinary answer"
+    assert "citation_workflow" not in model.invoked_tool_names[-1]
+    assert len(services) == 1
+
+    # An unclean restart leaves a canonical pending turn, never permission to replay it.
+    pending = _turn_params("/citation 尚未完成的保存需求")
+    asyncio.run(restarted.session._begin_turn(
+        semantic_input="尚未完成的保存需求", display_input=pending["text"],
+        turn_id=pending["turnId"], retry=False, thinking_mode="normal",
+    ))
+    counts = (len(model.invocations), len(fetcher.calls), len(services))
+    recovered = _service(tmp_path, session_factory=service._session_factory)
+    asyncio.run(recovered.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(recovered.dispatch("session.select", selected))
+    interrupted = asyncio.run(recovered.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
+    assert interrupted["items"][-1]["state"] == "interrupted"
+    assert interrupted["items"][-1]["assistantText"] is None
+    assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
+    assert recovered.session._citation_service is None
+
+
+@pytest.mark.parametrize("terminal", ["provider", "cancel"])
+def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tmp_path, terminal):
+    from test_citation_e2e import _workflow_results, _save_content
+    from test_desktop_service import _service, _turn_params
+
+    service, model, fetcher, services, _sessions = _citation_desktop(monkeypatch, tmp_path)
+
+    async def scenario():
+        created = await service.dispatch("session.create", {"loadMcp": False})
+        session = service.session
+        session.set_thinking_mode("extended")
+        params = _turn_params("/citation 搜尋 Paper A，保存並正式引用")
+        selected = {"projectId": "local", "sessionId": created["sessionId"]}
+        original_invoke = model.invoke
+        finalize = session.finalize_and_record
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        def fail_after_save(messages):
+            answer = original_invoke(messages)
+            if len(_workflow_results(messages)) == 2:
+                raise RuntimeError("fixture provider failed after save")
+            return answer
+
+        async def hold_final(**kwargs):
+            entered.set()
+            await release.wait()
+            return await finalize(**kwargs)
+
+        if terminal == "provider":
+            monkeypatch.setattr(model, "invoke", fail_after_save)
+            with pytest.raises(DesktopServiceError) as caught:
+                await service.dispatch("session.turn", params)
+            assert caught.value.details["state"] == "failed"
+            assert caught.value.details["persisted"] is True
+        else:
+            monkeypatch.setattr(session, "finalize_and_record", hold_final)
+            task = asyncio.create_task(service.dispatch("session.turn", params))
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=3)
+                assert session.citation_skill_active and session._citation_service is services[0]
+                for method, values in (
+                    ("session.select", selected),
+                    ("session.shutdown", {}),
+                    ("runtime.shutdown", {}),
+                ):
+                    with pytest.raises(DesktopServiceError) as busy:
+                        await service.dispatch(method, values)
+                    assert busy.value.code == "BUSY_TURN"
+                    assert session._citation_service is services[0]
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+        expected_state = "failed" if terminal == "provider" else "interrupted"
+        assert session.conversation_repository.load(session.session_id).document.turns[-1].state == expected_state
+        assert session.thinking_mode == "extended"
+        assert session.active_skill_runtime is None and session._citation_service is None
+        assert service._turn_active is False
+        assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+        monkeypatch.setattr(model, "invoke", original_invoke)
+        counts = (len(model.invocations), len(fetcher.calls), len(services))
+        restarted = _service(tmp_path, session_factory=service._session_factory)
+        await restarted.dispatch("session.create", {"loadMcp": False})
+        await restarted.dispatch("session.select", selected)
+        transcript = await restarted.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20})
+        assert transcript["items"][-1]["state"] == expected_state
+        assert transcript["items"][-1]["assistantText"] is None
+        assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
+        with pytest.raises(DesktopServiceError):
+            await restarted.dispatch("session.turn", params)
+        assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
+        retried = await restarted.dispatch("session.turn", {**params, "retry": True})
+        assert "已保存並引用來源 [1]。" in retried["text"]
+        assert retried["turnNumber"] == 1
+        assert len(services) == 2 and services[0] is not services[1]
+        assert _save_content(model.save_message).items[0].status == "reused"
+        assert restarted.session._citation_service is None and restarted._turn_active is False
+        assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+
+    asyncio.run(scenario())

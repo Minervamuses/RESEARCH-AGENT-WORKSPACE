@@ -960,6 +960,68 @@ def test_composer_routes_dynamic_skill_once_as_answer(tmp_path: Path) -> None:
     ]
 
 
+def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch, tmp_path):
+    from agent.cli.slash_commands import (
+        SlashCommandContext, build_default_registry, execute_slash_command, parse_slash_command,
+    )
+    from test_citation_e2e import _SearchSaveModel, _fixture_services, _rag_search
+
+    model = _SearchSaveModel()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _config: model)
+    monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [_rag_search])
+    services = _fixture_services(monkeypatch, tmp_path)
+
+    async def factory(config, *, load_mcp, **kwargs):
+        assert load_mcp is False
+        return ChatSession(config, **kwargs)
+
+    service = _service(tmp_path, session_factory=factory)
+    created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    catalog = created["slashCommands"]
+    assert len([command for command in catalog if command["name"] == "citation"]) == 1
+    assert services == []
+    session = service.session
+    assert session.active_skill_runtime is None
+    session.set_thinking_mode("extended")
+    context = SlashCommandContext(session=session, registry=build_default_registry(session))
+    for raw in ("/citation", "/citation   ", "/citation OFF", "/citation none", "/citation deactivate"):
+        expected = asyncio.run(execute_slash_command(parse_slash_command(raw), context))
+        with pytest.raises(DesktopServiceError) as caught:
+            asyncio.run(service.dispatch("session.turn", _turn_params(raw)))
+        assert caught.value.code == "PROTOCOL_INVALID"
+        assert str(caught.value) == expected.message
+    assert model.invocations == []
+    assert services == []
+    assert session.thinking_mode == "extended"
+
+    raw = "/CiTaTiOn off topic: 搜尋並保存 Paper A"
+    params = _turn_params(raw)
+    result = asyncio.run(service.dispatch("session.turn", params))
+    assert result["responseKind"] == "answer"
+    assert result["streamKind"] == "final_only" and result["chunkCount"] == 0
+    assert "已保存並引用來源 [1]。" in result["text"]
+    assert session._citation_service is None and session.active_skill_runtime is None
+    assert session.thinking_mode == "extended"
+    assert service._session_snapshot(session)["thinkingMode"] == "extended"
+    turn = session.conversation_repository.load(session.session_id).document.turns[-1]
+    assert turn.display_input == raw
+    assert turn.semantic_input == "off topic: 搜尋並保存 Paper A"
+    assert turn.thinking_mode == "normal" and turn.assistant_output == result["text"]
+    success_result("00000000-0000-4000-8000-000000000102", "session.turn", result)
+
+    # Missing or invalid Citation stays absent from the executable catalog.
+    def unavailable(_name):
+        raise ValueError("fixture unavailable Citation")
+
+    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    assert "citation" not in [c["name"] for c in service._session_snapshot(session)["slashCommands"]]
+    count = len(model.invocations)
+    with pytest.raises(DesktopServiceError) as caught:
+        asyncio.run(service.dispatch("session.turn", _turn_params("/citation save")))
+    assert caught.value.code == "PROTOCOL_INVALID"
+    assert len(model.invocations) == count
+
+
 def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     tmp_path: Path,
 ) -> None:

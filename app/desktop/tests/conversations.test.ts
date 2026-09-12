@@ -510,6 +510,30 @@ test("restored turns render a complete multi-megabyte answer from first marker t
   assert.ok(html.length > answer.length);
 });
 
+test("citation menu inserts a task and restore displays its saved answer and tool activity", async () => {
+  const { filterSlashCommands, insertSlashCommand, RestoredTurn } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const commands = [{ name: "citation", description: "One citation task in normal thinking" }];
+  assert.deepEqual(filterSlashCommands(commands, "CIT"), commands);
+  assert.equal(insertSlashCommand("/cit", commands[0].name), "/citation ");
+  const saved = "已保存並引用來源 [1]。\n\nSources:\n[1] Paper A. DOI: 10.1234/paper-a.";
+  const html = renderToStaticMarkup(createElement(RestoredTurn, { turn: {
+    turnId: "123e4567e89b42d3a456426614174001", turnNumber: 1,
+    kind: "conversational", state: "completed", timestamp: "2026-09-12T00:00:00Z",
+    userText: "/citation 保存 Paper A 並引用", assistantText: saved,
+    failureCode: null, failureMessage: null, failureRetryable: null,
+    toolActivities: [{
+      callId: "save-1", name: "citation_workflow", arguments: "save Paper A",
+      result: "Saved Paper A", status: "ok", promptEligible: false,
+    }],
+  } }));
+  assert.match(html, /已保存並引用來源 \[1\]/);
+  assert.match(html, /10\.1234\/paper-a/);
+  assert.match(html, /Tool activity · citation_workflow · ok · display only/);
+  assert.ok(html.indexOf("Tool result · citation_workflow") < html.indexOf("Assistant · restored"));
+});
+
 test("restored transcript renders durable non-completed and display-only states without a fake answer", async () => {
   const { RestoredTurn } = await loadAppHelpers();
   const { renderToStaticMarkup } = await import("react-dom/server");

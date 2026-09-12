@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
@@ -1774,13 +1775,13 @@ class DesktopService:
                     )
                 if (
                     parsed.name.casefold() != command.name.casefold()
-                    or not self._desktop_command_eligible(command)
+                    or not self._desktop_command_eligible(command, session)
                 ):
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
                         "That slash command is not available in the desktop composer.",
                     )
-                if command.skill_name is not None:
+                if command.skill_name is not None or command.name == "citation":
                     try:
                         result = await execute_slash_command(
                             parsed,
@@ -1794,12 +1795,16 @@ class DesktopService:
                             "PROTOCOL_INVALID",
                             self._bounded_text(str(exc), 4_096),
                         ) from exc
+                    if command.name == "citation" and result.followup_input is None:
+                        raise DesktopServiceError(
+                            "PROTOCOL_INVALID", self._bounded_text(result.message, 4_096),
+                        )
                     if (
                         result.should_exit
                         or result.clear_screen
                         or not isinstance(result.followup_input, str)
                         or not result.followup_input.strip()
-                        or result.skill_name != command.skill_name
+                        or result.skill_name != (command.skill_name or "citation")
                     ):
                         raise DesktopServiceError(
                             "PROTOCOL_INVALID",
@@ -2141,14 +2146,24 @@ class DesktopService:
         return self._slash_registry_override or build_default_registry(session)
 
     @staticmethod
-    def _desktop_command_eligible(command: SlashCommand) -> bool:
+    def _desktop_command_eligible(command: SlashCommand, session: ChatSession) -> bool:
+        if command.name == "citation":
+            loader = getattr(session, "_load_skill_runtime", None)
+            if loader is None:
+                return False
+            try:
+                runtime = loader("citation")
+            except (KeyError, ValueError, OSError, yaml.YAMLError):
+                return False
+            return (runtime.name == "citation"
+                    and "citation_workflow" in runtime.tool_access.effective_tools)
         return command.skill_name is not None or command.name in _DESKTOP_SLASH_COMMANDS
 
     def _session_snapshot(self, session: ChatSession) -> dict[str, Any]:
         status = session.status_snapshot()
         commands = [
             command for command in self._session_slash_registry(session).all_commands()
-            if self._desktop_command_eligible(command)
+            if self._desktop_command_eligible(command, session)
         ]
         if len(commands) > 512 or any(
             len(command.name.encode("utf-8")) > 64 for command in commands

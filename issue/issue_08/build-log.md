@@ -8,7 +8,7 @@
 | Phase | Status | Started | Completed | Evidence | Blockers |
 |---|---|---|---|---|---|
 | 01 — Citation turn lifecycle | Complete | 2026-09-12 | 2026-09-12 | Phase 01 evidence below | — |
-| 02 — Desktop integration | Not started | — | — | — | 依 PLANS 前置順序 |
+| 02 — Desktop integration | Blocked | 2026-09-12 | — | Phase 02 offline evidence below | Required native Citation UI journey unavailable |
 
 只使用 Not started、In progress、Blocked、Complete。
 必要 acceptance 有 observed evidence 才可 Complete。
@@ -101,3 +101,75 @@ build／UI 操作與各 phase planned verification 均未作為本計劃實作�
 - 限制：全部 provider/model 為離線 scripted boundary，env={}、RoutingFetcher、tmp_path；
   extended 後的 ordinary graph 以 monkeypatch 替代 Fusion orchestrator，不證明 Fusion
   或真模型品質。原生 GUI 尚未驗收，屬 Phase 02。
+
+### 2026-09-12 — Phase 02 preflight
+
+- Phase 01 committed `5b138ad`，worktree clean。Conda app Node v24.18.0、npm 11.16.0，
+  既有 node_modules／TypeScript 可用；不安裝依賴。
+- 重用 service `_session_slash_registry`／`_desktop_command_eligible`、
+  snapshot `slashCommands` 與 `SlashComposer`；production 預期只改 service.py、App.tsx。
+  真 ChatSession factory、既有 citation fixtures 可在 pytest temporary paths 跑完整 dispatch。
+- 原生入口存在 `server._build_runtime_service` 的 `RESEARCH_AGENT_DESKTOP_FIXTURE=phase02`，
+  但其 `FixtureSession` 是 coordinator fixture，並非真 Citation graph/service journey。
+  沒有直接可用的 Citation UI fixture；不改第七個 production file 或接 user store。
+- `timeout 3s xdotool getdisplaygeometry` → exit **124**，無輸出；工具清單沒有原生
+  computer/browser 操作工具，Xvfb/weston/orca 查無命令。只做唯讀 UI preflight，
+  未啟動一般 Desktop。繼續完成已授權離線實作/checks，再如實記 required UI 缺口。
+
+### 2026-09-12 — Phase 02 implementation verified offline; Blocked on native UI
+
+- Production 只改 `app/agent/desktop/service.py`、`app/desktop/src/App.tsx`。
+  既有 eligibility helper 以無 mutation 的 runtime load／workflow tool availability
+  決定 Citation catalog 和 dispatch；缺失／無法 load 的 Citation 不列出也不啟動 model。
+  Citation 和 dynamic Skill 共用 followup→`session.turn_outcome`，空 command／off tokens
+  使用共同 Python handler 的原文，封裝既有 PROTOCOL_INVALID；不新增 DTO/RPC。
+  App 以單次工作／normal／恢復原 mode 說明取代 CLI-only。
+- Tests 只延伸 `test_desktop_service.py`、`test_desktop_conversations.py` 與
+  `desktop/tests/conversations.test.ts`；沿用 real ChatSession、既有 model/fetcher
+  與 temporary service/repository 接縫，不建立新 fixture framework/module。
+- Red check 命令（cwd app、Conda app）：
+  `timeout 300s poetry run pytest tests/test_desktop_service.py::test_composer_citation_uses_shared_command_and_available_catalog -q --tb=short`。
+  前兩次於 collection 發現新測試的 `]` 遺漏，exit 4，未執行 application。
+  修正測試後，以 `git show HEAD:app/agent/desktop/service.py` 暫時重現 Phase 01 的
+  service（使用 mktemp 保存自己的 patch，EXIT trap 恢復並清理；未切 branch/worktree），
+  同命令 → **1 failed**：catalog 中 Citation 數量 0，期望 1。
+  恢復實作後同命令 → **1 passed**（0.23 s）。
+- Required Python focused check：
+  `timeout 300s poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py -q --tb=short`
+  → **219 passed**（2.17 s）。隨後整理新測試插入位置，將其移至既有 test function
+  結束之後，保留原檢查的歸屬；最終完整 suite 覆蓋該位置。
+- Desktop cwd：`timeout 300s npm test` → **165 passed**（4.29 s）；
+  `timeout 300s npm run build` → **passed**（TypeScript、Vite）。
+  Node 新檢查觀察 `/cit` filter/insert 及 restored Citation answer／tool activity 的
+  SSR markup；只證明 helper/rendering，不冒充原生鍵鼠、focus、caret 或 IME 操作。
+- 全計劃唯一完整 Python suite（cwd app）：`timeout 540s poetry run pytest`
+  → **1122 passed**（31.29 s），2 warnings：既有 LangChain pending-deprecation 與
+  unsafe ZIP test 的 duplicate member warning。沒有重跑完整 suite。
+  `git diff --check` passed，無 dependency/lockfile/schema/generated-output 變更。
+- Observable command：`/CiTaTiOn off topic: 搜尋並保存 Paper A` 保留 display 原文、
+  semantic input 為原自然語言；執行時 normal、結束 backend snapshot 仍為 extended。
+  空參數／三種 off tokens 與 CLI Python result 的文字逐項相同且 model/service count 0。
+  成功結果為 `responseKind=answer`、`streamKind=final_only`、`chunkCount=0`，
+  真 gate/render 產生 `[1]`、Sources、DOI；canonical assistant text 等於 Desktop text。
+- Journey 觀察 2 個 `tool.started`、2 個 `tool.finished`、2 個 citation_workflow summaries；
+  transcript 保存原 command、同一份 answer 和 2 個 bounded tool activities。
+  A→B→A rematerialization、backend recreation、completed duplicate 之後，
+  model/provider/service counters 均不增加；session runtime/registry 空，temp bundle 保留。
+  普通下一回合沒有 Citation tool，沒有新增 Citation service。
+- Provider failure 與取消已完成 save／尚未 final 的 task 分別留下 failed／interrupted，
+  不偽造答案。Active switch／session shutdown／runtime shutdown 回 BUSY_TURN，
+  原 service 不被提早丟掉；cancel 後 busy flag 釋放、mode 恢復。
+  Restart restore 不重播，未明確 retry 的重送被拒絕；`retry=true` 以新 service
+  完成原 turnNumber，save outcome 為 reused，原 bundle 保留。
+- Unclean-restart Citation 專屬檢查以真 repository 的 canonical pending record 模擬
+  未完成工作，再重建 backend；恢復為 interrupted、assistantText=None、counter 不變。
+  這是離線狀態邊界驗證，非原生 GUI kill/relaunch 操作。
+- **Remaining blocker：** Phase 02 要求原生 `/` menu 選 Citation、補 prompt、送出、
+  工具活動／正式答案、下一普通回合、mode selector、切換／restart／failure 操作證據。
+  本次 `xdotool` read-only query 仍 timeout，且既有 native fixture 不跑真 Citation。
+  使用者先前授權豁免的是 issue 02 完成門檻，未豁免 issue 08 自身 native UI acceptance。
+  Phase 02 保持 **Blocked**；需可操作 Linux Desktop 的安全 Citation journey 證據，
+  或使用者明確接受本次 backend + Node + build 作替代，才可標 Complete。
+- 所有已授權離線工作完成，依逐步 commit 要求將本 phase code/tests/log 一起提交。
+  未操作 credentials／live provider／真實 user store，未新增原生 UI fixture、
+  第七個 production file 或其他 issue 工作。

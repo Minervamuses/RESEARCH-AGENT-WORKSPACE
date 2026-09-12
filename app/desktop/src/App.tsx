@@ -1428,7 +1428,7 @@ export default function App() {
                 disabled={interaction.controlDisabled || workspaceBusy !== null}
                 onChange={(mode) => void updateBashPermissionMode(mode)}
               />
-              <p className="control-state">Skills run once with /&lt;skill-name&gt; &lt;prompt&gt;. Citation mode is currently CLI-only.</p>
+              <p className="control-state">Skills run once with /&lt;skill-name&gt; &lt;prompt&gt;. Use /citation &lt;prompt&gt; for one citation task in normal thinking; your selected thinking mode is restored afterward. Available commands appear in the / menu.</p>
             </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
