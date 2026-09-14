@@ -442,23 +442,16 @@ class FusionOrchestrator:
                     tool_availability=proposer_availability,
                 )
             except ThinkingOutputError as exc:
-                chosen = successful[0]
-                return (
-                    chosen.answer,
-                    FusionAggregateResult(
-                        draft=chosen.answer,
-                        selected_candidate_ids=[chosen.candidate_id],
-                        reliability_tier="fallback",
-                        aggregator_error=f"aggregator_failure: {exc}",
-                    ),
-                    None,
+                aggregator_error = f"aggregator_failure: {exc}"
+            else:
+                aggregate.reliability_tier = (
+                    "full_panel" if len(successful) == len(candidates) else "partial_panel"
                 )
-            aggregate.reliability_tier = (
-                "full_panel" if len(successful) == len(candidates) else "partial_panel"
-            )
-            return aggregate.draft, aggregate, None
+                return aggregate.draft, aggregate, None
+        else:
+            aggregator_error = "quorum_not_met"
 
-        # More than one success but below quorum: deterministic fallback.
+        # Invalid aggregation or unmet quorum: use the first successful candidate.
         chosen = successful[0]
         return (
             chosen.answer,
@@ -466,7 +459,7 @@ class FusionOrchestrator:
                 draft=chosen.answer,
                 selected_candidate_ids=[chosen.candidate_id],
                 reliability_tier="fallback",
-                aggregator_error="quorum_not_met",
+                aggregator_error=aggregator_error,
             ),
             None,
         )
