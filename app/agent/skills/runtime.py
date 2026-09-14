@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Collection, Mapping, Sequence
 
@@ -207,14 +207,7 @@ def load_skill_runtime(
         pinned_references=pinned_references,
         config=config,
     )
-    return SkillRuntime(
-        name=runtime.name,
-        root=runtime.root,
-        instructions=runtime.instructions,
-        manifest=runtime.manifest,
-        pinned_references=pinned_references,
-        tool_access=runtime.tool_access,
-    )
+    return replace(runtime, pinned_references=pinned_references)
 
 
 def find_skill_metadata(
