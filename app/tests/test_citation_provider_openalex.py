@@ -297,10 +297,34 @@ def test_search_work_relaxes_date_conditionally_then_stops():
     assert len(calls) == 2
     assert "from_publication_date" in _params(calls[0][0])["filter"][0]
     assert "from_publication_date" not in _params(calls[1][0])["filter"][0]
-    assert {record.title for record in records} == {
+    assert [record.title for record in records] == [
         "A Different Paper",
         "A Structured Work",
+    ]
+
+
+def test_search_work_keeps_first_seen_order_when_a_later_pass_improves_rank():
+    stale = {**NORMAL_WORK, "display_name": "Stale title"}
+    trailing = {
+        **DOILESS_WORK,
+        "id": "https://openalex.org/W8888888888",
+        "display_name": "Trailing work",
     }
+    client, calls = _client([
+        _body([DOILESS_WORK, stale, trailing]),
+        _body([NORMAL_WORK]),
+    ])
+
+    records = asyncio.run(client.search_work(BibliographicQuery(
+        "A Structured Work", authors=("Ada Author",), year=2020,
+    )))
+
+    assert len(calls) == 2
+    assert [record.title for record in records] == [
+        "Unregistered preprint", "A Structured Work", "Trailing work",
+    ]
+    assert records[1].rank == 0
+    assert records[1].doi == "10.1234/example"
 
 
 def test_search_work_never_exceeds_three_conditional_passes():
@@ -329,11 +353,16 @@ def test_mixed_location_year_drift_expands_each_doi_without_swallowing():
     records = asyncio.run(client.search_work(query))
 
     assert len(calls) == 3  # relaxed result still has a top-level 2025 year
-    assert {record.doi for record in records} == {
+    expected_dois = [
         "10.65215/2q58a426",
         "10.65215/r5bs2d54",
         "10.48550/arxiv.1706.03762",
-    }
+    ]
+    assert [record.doi for record in records] == expected_dois
+    assert all(
+        [item.identifier for item in record.manifestations] == expected_dois
+        for record in records
+    )
     by_doi = {record.doi: record for record in records}
     assert by_doi["10.65215/2q58a426"].version_kind == "repository"
     assert by_doi["10.48550/arxiv.1706.03762"].version_kind == "preprint"

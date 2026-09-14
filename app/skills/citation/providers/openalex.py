@@ -196,7 +196,6 @@ def _parse_manifestations(result: dict, top_level_doi: str | None) -> tuple[Mani
     # The primary location is commonly repeated in ``locations``.  Merge that
     # exact duplicate by OR-ing the primary flag, but preserve distinct URLs or
     # version claims for the same DOI as separate evidence.
-    order: list[tuple] = []
     manifestations: dict[tuple, Manifestation] = {}
     for location, is_primary in locations:
         doi = _location_doi(location)
@@ -229,7 +228,6 @@ def _parse_manifestations(result: dict, top_level_doi: str | None) -> tuple[Mani
         )
         current = manifestations.get(key)
         if current is None:
-            order.append(key)
             manifestations[key] = manifestation
         elif is_primary and not current.is_primary:
             manifestations[key] = replace(current, is_primary=True)
@@ -262,9 +260,8 @@ def _parse_manifestations(result: dict, top_level_doi: str | None) -> tuple[Mani
             synthetic.is_accepted,
             synthetic.is_published,
         )
-        order.append(key)
         manifestations[key] = synthetic
-    return tuple(manifestations[key] for key in order)
+    return tuple(manifestations.values())
 
 
 def parse_work(result: dict, rank: int) -> ProviderRecord:
@@ -377,7 +374,6 @@ def _merge_records(
     by_doi: bool,
 ) -> list[ProviderRecord]:
     merged: dict[tuple[str, str], ProviderRecord] = {}
-    order: list[tuple[str, str]] = []
     for record in records:
         key = (
             ("doi", record.doi)
@@ -386,7 +382,6 @@ def _merge_records(
         )
         current = merged.get(key)
         if current is None:
-            order.append(key)
             merged[key] = record
             continue
         preferred, other = (
@@ -403,7 +398,7 @@ def _merge_records(
                 **preferred.field_provenance,
             },
         )
-    return [merged[key] for key in order]
+    return list(merged.values())
 
 
 def _expanded_version_kind(
@@ -429,7 +424,6 @@ def _expanded_version_kind(
 
 def _expand_manifestations(record: ProviderRecord) -> list[ProviderRecord]:
     by_doi: dict[str, list[Manifestation]] = {}
-    doi_order: list[str] = []
     for manifestation in record.manifestations:
         if manifestation.identifier_type != "doi":
             continue
@@ -438,17 +432,14 @@ def _expand_manifestations(record: ProviderRecord) -> list[ProviderRecord]:
             continue
         if doi not in by_doi:
             by_doi[doi] = []
-            doi_order.append(doi)
         by_doi[doi].append(manifestation)
     if record.doi and record.doi not in by_doi:
         by_doi[record.doi] = []
-        doi_order.append(record.doi)
-    if not doi_order:
+    if not by_doi:
         return [record]
 
     expanded: list[ProviderRecord] = []
-    for doi in doi_order:
-        evidence = by_doi[doi]
+    for doi, evidence in by_doi.items():
         primary = next((item for item in evidence if item.is_primary), None)
         chosen = primary or (evidence[0] if evidence else None)
         expanded.append(
