@@ -1,6 +1,6 @@
 # Testing Strategy
 
-Freshness: source/definition and fixed-revision record inspection on 2026-09-13 at `a88d44d`. No application suite, build, import smoke, native journey or live provider was executed during this maintenance. Historical observations retain the date and scope below.
+Freshness: focused source/test-definition inspection on 2026-09-14 at `5a0fa7c` covers the five recent refactors and three changed test files. Other definitions and fixed-revision execution records retain the 2026-09-13 inspection at `a88d44d`. No application suite, build, import smoke, native journey or live provider was executed during this maintenance. Historical observations retain the date and scope below.
 
 ## Available verification commands
 
@@ -12,11 +12,11 @@ Use Linux Conda `app`. From the indicated directory, commands below are defined 
 | `cd app && poetry run pytest tests/rag/test_config.py -q` | RAG config; AGENTS | Active Conda; possible cache writes | Not run: no config changes; no live semantic evidence |
 | `cd app && poetry run pytest` | Complete Agent/RAG; pyproject pytest testpaths | Tests write temporary stores/files, spawn fixtures/processes, and may cache imports | Not run: writes outside maintenance boundary; prior run below |
 | `cd app && poetry run pytest tests/test_skill_runtime.py tests/test_extension_skill_startup.py tests/test_extension_manager.py tests/test_skill_adherence.py -q` | Current Skill/installer/extension tests | Temporary bundles/registries, ZIP extraction and multiprocessing | Not run: effectful fixtures outside `for_agents/`; inspected definitions establish intended assertions only |
-| `cd app && poetry run pytest tests/test_citation_resolution.py tests/test_citation_authority.py tests/test_citation_e2e.py tests/test_citation_slash_command.py tests/test_citation_skill_activation.py -q` | Current Citation tests | Fake provider/model paths, temporary bundles/canonical JSON | Not run: effectful fixtures; no arbitrary live-model claim |
+| `cd app && poetry run pytest tests/test_citation_provider_openalex.py tests/test_citation_resolution.py tests/test_citation_authority.py tests/test_citation_e2e.py tests/test_citation_slash_command.py tests/test_citation_skill_activation.py -q` | Current Citation tests | Fake provider/model paths, temporary bundles/canonical JSON | Not run: effectful fixtures; no arbitrary live-model claim |
 | `cd app && poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py -q` | Current routing/control/replay/contract tests | Temporary canonical/catalog state, fake runners/providers | Not run: fixtures outside boundary; native GUI not covered |
 | `cd app && poetry run pytest tests/test_desktop_crash_recovery.py tests/test_conversation_repository.py tests/test_session_lifecycle.py tests/test_history_retirement.py -q` | Canonical lifecycle and real child crash fixtures | Owned temporary state and processes | Not run: unchanged broad lifecycle evidence carried forward |
 | `cd app && poetry run pytest tests/test_openrouter_model.py -q` | Main default and max-token forwarding test | Fake client; import/cache effects possible | Not run: definition inspected; model availability/output acceptance unproven |
-| `cd app/desktop && npm test` | package.json: Node test runner with TypeScript stripping | Installed Conda Node/dependencies; tests render React and read source/contracts | Not run in documentation scope; historical result below |
+| `cd app/desktop && npm test` | package.json: Node test runner with TypeScript stripping | Installed Conda Node/dependencies; conversations tests create a Vite SSR server and transform/import React source, with possible cache effects | Not run: effects beyond knowledge-only scope; source/SSR assertions do not prove native WebKit behavior |
 | `cd app/desktop && npm run build` | package.json: `tsc --noEmit && vite build` | Writes frontend `dist` | Not run: outside write boundary |
 | `cd app/desktop && cargo test --offline --manifest-path src-tauri/Cargo.toml` | Current Cargo/Rust tests; archived exact command | Compiles/writes `target`; supervisor tests spawn child processes | Not run: outside boundary; historical full red and focused green stay distinct |
 | `cd app/desktop && npm run tauri -- build --no-bundle` | README; Tauri beforeBuildCommand runs npm build | Frontend and Rust release writes; requires system native libraries | Not run: source-only build, no installer/native interaction proof |
@@ -26,9 +26,21 @@ Use Linux Conda `app`. From the indicated directory, commands below are defined 
 | `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root .` | Loaded helper | Read-only structural/path/ID checks | Executed: Structural validation passed (exit 0); certifies structure only |
 | `git --no-optional-locks diff --no-ext-diff --no-textconv --check` | Git diff validation | Read-only | Executed: passed (exit 0); no application correctness claim |
 
+### Focused regression definitions inspected this pass
+
+All entries below are Confirmed test-definition evidence at `5a0fa7c` on 2026-09-14, not test executions. Use the repository's pytest invocation with the named module, or the existing Desktop `npm test` command.
+
+| Area / test source | What the assertions establish if they pass | Evidence limit |
+|---|---|---|
+| `app/tests/rag/test_json_store.py::test_failed_write_restores_memory_to_previous_file` | Both immediate and deferred writes: injected `os.replace` failure leaves previous disk and memory content, removes temporary files, and permits a later successful add | Expanded parameter coverage; temporary writes outside this maintenance boundary; no Chroma/folder-meta rollback or power-loss proof |
+| `app/tests/test_citation_provider_openalex.py::test_search_work_keeps_first_seen_order_when_a_later_pass_improves_rank`; conditional-pass and mixed-location tests | Later better rank updates the first-seen record without moving its position; provider records and DOI manifestations preserve expected ordering | New/strengthened assertions with synthetic fetch data; no global citation-ranking or live-service guarantee; imports not executed |
+| `app/desktop/tests/conversations.test.ts`: safe content preserves inline formatting and unmatched delimiters | Code, strong/emphasis and an unmatched backtick survive server rendering; existing HTML/URL and array-child tests remain relevant | New definition; SSR/Vite effects not run; native layout/resource limits remain ASM-025 |
+| `app/tests/test_skill_runtime.py` and `test_extension_skill_startup.py` | Existing resource/pinned-reference, post-startup tamper rejection and applied-revision-until-restart checks cover the unchanged load contract | Existing definitions only; temporary bundles/files; activation check-to-read race remains |
+| `app/tests/test_thinking_session.py`: invalid JSON/schema aggregation and quorum fallback tests | Existing assertions choose the first successful candidate, retain the correct diagnostic and continue review | Existing fake-provider/temp-root definitions; do not cover arbitrary raised aggregator/reviewer/reviser exceptions (ASM-013) |
+
 ### Historical verification with retrievable provenance
 
-The [archived results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-check-results.json), [Python/Node output tails](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-python-node-results.txt) and [final review](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/code_review/phase-06-regression-and-closure-review.md) were read from local Git this pass. They are historical execution evidence, not reruns or independent review.
+The [archived results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-check-results.json), [Python/Node output tails](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-python-node-results.txt) and [final review](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/code_review/phase-06-regression-and-closure-review.md) were read from local Git during the 2026-09-13 pass and carried forward here without rereading. They are historical execution evidence, not current reruns or independent review.
 
 | Check / execution date | Baseline / actual result | Evidence limit |
 |---|---|---|
@@ -40,9 +52,9 @@ The [archived results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/
 | Native menu and Citation, archived final-check Phase03 | Keyboard/mouse insertion, caret/focus, Linux AT-SPI exposure, zero-request insertion, new catalog, real session/Citation tool/save/output plus A/B/restart/failure/interruption observed | Model/fetch seams were fake; no screen-reader speech claim, IME skipped, no dedicated GUI task-cancel entry |
 | Prior typography account, 2026-09-06 | `743aaaf`: 151 Node tests/build and headless Chrome at 720/1080/1920/2560 reported in prior knowledge | Retained historical account, not a new native layout result |
 
-The `ec9175f..a88d44d` app diff contains only the Rust test setup correction; Python/Node production/tests remain the recorded source. No application source changed in this maintenance. A prior failure cannot be rewritten as a full passing run even when its one target later passes.
+The prior `ec9175f..a88d44d` comparison contained only the Rust test setup correction; its Python/Node source-equivalence statement ended at `a88d44d`. Five later refactors change Skill loading, fusion fallback, JSON save, OpenAlex ordering and SafeContent, with three test files changed. The historical counts above therefore do not establish passing results at `5a0fa7c`. This maintenance changes knowledge only; no new application test result was obtained. A prior failure cannot be rewritten as a full passing run even when its one target later passes.
 
-The older RAG stale-inventory and empty-file probes (FAIL-001/002) remain the 2026-09-05 account at `9745fd1`. Only named current prune/search anchors were checked; no new reproduction was made. Removed plans have no active status here; exact geometry/zoom and restarted IME are evidence gaps, not an instruction to reopen an old blocked plan.
+The older RAG stale-inventory and empty-file probes (FAIL-001/002) remain the 2026-09-05 account at `9745fd1`. Prune/search anchors were checked during the 2026-09-13 pass; current RAG inspection covers JSON save and its ingest/DocumentStore callers. No new reproduction was made. Removed plans have no active status here; exact geometry/zoom and restarted IME are evidence gaps, not an instruction to reopen an old blocked plan.
 
 ## Change-type verification matrix
 
@@ -68,10 +80,10 @@ These are mappings to existing checks, not fresh passing claims.
 | Runtime/text/dependency (INV-001/002/003) | Runtime guard/config, .gitattributes, RAG adapter tests; current environment paths verified | Full dependency/import audit carried forward |
 | Tools/finalization (INV-004/005/010; FAIL-009/010/011) | Access matrix, policy node, turn finalizer, Citation gate/e2e | Duplicate tool IDs and raised extended-stage exceptions not comprehensively covered; live dependencies unknown |
 | Canonical authority (INV-006/016; FAIL-004/017/018) | Repository, lifecycle/crash, catalog restore and frontend logical-turn merge | Multi-process writers/catalog remain ASM-016/022 |
-| RAG identity/state (INV-007/008/012; FAIL-001/002/003) | Root identity, JSON conflict/rollback, historical probes and current prune source | No unified Chroma/raw/meta failure-injection proof; stale inventory/empty re-ingest remain |
+| RAG identity/state (INV-007/008/012; FAIL-001/002/003) | Root identity, historical probes/prune source; current JSON immediate/deferred rollback definition above | No unified Chroma/raw/meta failure-injection proof; stale inventory/empty re-ingest remain |
 | Extension trust (INV-009/013; FAIL-005/006) | Changed-bundle startup/activation tests; manager multiprocessing/fsync/crash/exception tests | Activation check-to-read race and noncooperating writers remain |
 | Earliest resolution (INV-014; FAIL-007) | Same-year/all-missing ambiguity, DOI dedupe, unique known minimum with undated alternatives; authority/workflow propagation | Year precision only |
-| Desktop wire/trust (INV-011/015/017/018/023) | Shared fixtures, Python/TS/Rust validators, ask/bypass busy/ACK/trust tests, safe renderer | Source checkout only; no new native engine or cross-process test |
+| Desktop wire/trust (INV-011/015/017/018/023) | Shared fixtures, Python/TS/Rust validators, ask/bypass busy/ACK/trust tests; current inline-formatting and existing safe-renderer definitions | Source checkout only; no new native engine or cross-process test |
 | Skill lifecycle and installer (INV-019/024; FAIL-015) | Citation terminal cleanup/late save, installer authority/bytes/cancel/cleanup conflict/mode and completed replay tests | Fake model quality not a live-model guarantee; host pending state is not durable |
 | MCP defaults (INV-020) | CLI/Desktop default-on/opt-out tests | Live MCP availability not checked |
 | Typography/composer (INV-021/022; FAIL-019/020) | Source CSS tests, array-child regressions, current menu key predicate and archived native menu | Exact native geometry/zoom, fresh IME and resource exhaustion unproven |
