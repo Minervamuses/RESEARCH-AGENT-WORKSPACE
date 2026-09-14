@@ -1,6 +1,7 @@
 """Tests for JSONStore durability: fingerprint reload, atomic + deferred writes."""
 
 import json
+from contextlib import nullcontext
 
 import pytest
 from langchain_core.documents import Document
@@ -95,7 +96,8 @@ def test_exception_inside_deferred_batch_writes_nothing(tmp_path):
     ]
 
 
-def test_failed_write_restores_memory_to_previous_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize("deferred", [False, True])
+def test_failed_write_restores_memory_to_previous_file(tmp_path, monkeypatch, deferred):
     path = tmp_path / "raw.json"
     store = JSONStore(str(path))
     store.add([_doc("stable")])
@@ -107,7 +109,8 @@ def test_failed_write_restores_memory_to_previous_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(json_store_module.os, "replace", fail_replace)
     with pytest.raises(OSError, match="replace failed"):
-        store.add([_doc("failed")])
+        with store.deferred_save() if deferred else nullcontext():
+            store.add([_doc("failed")])
 
     # The atomic replace never happened, and the live instance rolls back too.
     assert [d["metadata"]["pid"] for d in _read_raw(path)] == ["stable"]

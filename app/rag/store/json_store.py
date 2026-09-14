@@ -122,11 +122,7 @@ class JSONStore(BaseStore):
                 "deferred_save batch; this batch's JSON updates were discarded. "
                 "Re-run the ingest (upserts are idempotent)."
             )
-        try:
-            self._write_out()
-        except BaseException:
-            self._load()
-            raise
+        self._save()
 
     # --- Store API ------------------------------------------------------------
 
