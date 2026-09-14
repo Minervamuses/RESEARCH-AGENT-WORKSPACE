@@ -48,18 +48,10 @@ export async function openSafeExternalUrl(
   return true;
 }
 
-function findClosing(value: string, marker: string, from: number): number {
-  const index = value.indexOf(marker, from);
-  return index;
-}
-
 function parseInline(value: string): TextToken[] {
   const tokens: TextToken[] = [];
   let text = "";
   let index = 0;
-  const appendText = (part: string) => {
-    text += part;
-  };
   const flushText = () => {
     if (text) tokens.push({ kind: "text", text });
     text = "";
@@ -67,7 +59,7 @@ function parseInline(value: string): TextToken[] {
 
   while (index < value.length) {
     if (value[index] === "`") {
-      const end = findClosing(value, "`", index + 1);
+      const end = value.indexOf("`", index + 1);
       if (end !== -1) {
         flushText();
         tokens.push({ kind: "code", text: value.slice(index + 1, end) });
@@ -99,7 +91,7 @@ function parseInline(value: string): TextToken[] {
         ? value[index]
         : null;
     if (marker) {
-      const end = findClosing(value, marker, index + marker.length);
+      const end = value.indexOf(marker, index + marker.length);
       if (end !== -1 && end > index + marker.length) {
         flushText();
         tokens.push({
@@ -111,7 +103,7 @@ function parseInline(value: string): TextToken[] {
       }
     }
 
-    appendText(value[index]);
+    text += value[index];
     index += 1;
   }
   flushText();

@@ -236,6 +236,22 @@ test("safe content treats raw HTML and Markdown images as inert text", async () 
   assert.match(html, /!\[alt\]/);
 });
 
+test("safe content preserves inline formatting and unmatched delimiters", async () => {
+  const { SafeContent } = await loadSafeContent();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const html = renderToStaticMarkup(
+    createElement(SafeContent, {
+      content: "before `code` **bold** __strong__ *italic* _emphasis_ after unmatched `",
+    }),
+  );
+
+  assert.match(
+    html,
+    /before <code>code<\/code> <strong>bold<\/strong> <strong>strong<\/strong> <em>italic<\/em> <em>emphasis<\/em> after unmatched `/,
+  );
+});
+
 test("safe content preserves a large array of inline Markdown children", async () => {
   const { SafeContent } = await loadSafeContent();
   const { renderToStaticMarkup } = await import("react-dom/server");
