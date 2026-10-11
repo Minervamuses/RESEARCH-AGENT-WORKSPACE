@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -25,6 +25,8 @@ const WRITER_QUEUE_CAPACITY: usize = MAX_PENDING_REQUESTS + 2;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
+const STDERR_LOG_NAME: &str = "desktop-backend.stderr.log";
+const STDERR_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -162,6 +164,7 @@ struct SupervisorState {
     pending: HashMap<String, PendingRequest>,
     seen_request_ids: HashSet<String>,
     internal_request_counter: u64,
+    stderr_log: Option<PathBuf>,
 }
 
 impl Default for SupervisorState {
@@ -172,6 +175,7 @@ impl Default for SupervisorState {
             pending: HashMap::new(),
             seen_request_ids: HashSet::new(),
             internal_request_counter: 0,
+            stderr_log: None,
         }
     }
 }
@@ -190,6 +194,8 @@ struct LaunchConfig {
     current_dir: PathBuf,
     python_path: Option<PathBuf>,
     conda_prefix: Option<PathBuf>,
+    /// Local file that receives the child's raw stderr; None disables it.
+    stderr_log: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy)]
@@ -297,6 +303,7 @@ impl BackendSupervisor {
             state.snapshot.last_shutdown = None;
             state.pending.clear();
             state.seen_request_ids.clear();
+            state.stderr_log = launch.stderr_log.clone();
             state.snapshot.generation
         };
         emit_lifecycle(&self.core, self.snapshot());
@@ -826,7 +833,75 @@ fn source_conda_launch() -> Result<LaunchConfig, BridgeError> {
         current_dir: repo_root,
         python_path: Some(app_root),
         conda_prefix: Some(PathBuf::from(prefix)),
+        stderr_log: diagnostic_log_dir(|name| std::env::var_os(name))
+            .map(|directory| directory.join(STDERR_LOG_NAME)),
     })
+}
+
+/// Resolve the diagnostic log directory exactly like Python's
+/// `agent.diagnostics.diagnostic_log_dir`: `AGENT_LOG_DIR`, then
+/// `$XDG_STATE_HOME/research-agent/logs`, then
+/// `~/.local/state/research-agent/logs`.
+fn diagnostic_log_dir(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let home = var("HOME").filter(|value| !value.is_empty()).map(PathBuf::from);
+    let expand = |raw: OsString| -> Option<PathBuf> {
+        let text = raw.to_string_lossy().trim().to_owned();
+        if text.is_empty() {
+            return None;
+        }
+        if text == "~" {
+            return home.clone();
+        }
+        if let Some(rest) = text.strip_prefix("~/") {
+            return home.as_ref().map(|path| path.join(rest));
+        }
+        Some(PathBuf::from(text))
+    };
+    if let Some(directory) = var("AGENT_LOG_DIR").and_then(&expand) {
+        return Some(directory);
+    }
+    let state_root = var("XDG_STATE_HOME")
+        .and_then(&expand)
+        .or_else(|| home.as_ref().map(|path| path.join(".local").join("state")))?;
+    Some(state_root.join("research-agent").join("logs"))
+}
+
+/// Open (rotating once at `max_bytes`) the owner-only stderr log for one
+/// child generation and write its header. Logging is best-effort: any
+/// failure disables persistence for that generation, never the backend.
+fn open_stderr_log(path: &Path, generation: u64, max_bytes: u64) -> Option<fs::File> {
+    let parent = path.parent()?;
+    let mut directory = fs::DirBuilder::new();
+    directory.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory.mode(0o700);
+    }
+    directory.create(parent).ok()?;
+    if fs::metadata(path).map(|meta| meta.len() >= max_bytes).unwrap_or(false) {
+        let mut rotated = path.as_os_str().to_owned();
+        rotated.push(".1");
+        let _ = fs::rename(path, PathBuf::from(rotated));
+    }
+    let mut options = fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).ok()?;
+    let started = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    writeln!(
+        file,
+        "=== desktop backend generation {generation} started (unix time {started}) ==="
+    )
+    .ok()?;
+    Some(file)
 }
 
 fn validate_conda_identity(
@@ -939,7 +1014,11 @@ fn spawn_child(
 
     spawn_writer(core.clone(), generation, receiver, stdin);
     spawn_stdout_reader(core.clone(), generation, stdout);
-    spawn_stderr_reader(core.clone(), generation, stderr);
+    let stderr_log = launch
+        .stderr_log
+        .as_deref()
+        .and_then(|path| open_stderr_log(path, generation, STDERR_LOG_MAX_BYTES));
+    spawn_stderr_reader(core.clone(), generation, stderr, stderr_log);
     spawn_exit_monitor(core, control);
     Ok(())
 }
@@ -1001,10 +1080,13 @@ fn spawn_stdout_reader(
     });
 }
 
+/// Drain the child's stderr. Raw bytes go only to the local log file; the
+/// snapshot (and therefore the WebView) only ever sees line/byte counts.
 fn spawn_stderr_reader(
     core: Arc<SupervisorCore>,
     generation: u64,
     mut stderr: impl Read + Send + 'static,
+    mut log: Option<fs::File>,
 ) {
     thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
@@ -1022,6 +1104,11 @@ fn spawn_stderr_reader(
                     return;
                 }
                 Ok(count) => {
+                    if let Some(file) = log.as_mut() {
+                        if file.write_all(&buffer[..count]).is_err() {
+                            log = None;
+                        }
+                    }
                     let newline_count = buffer[..count]
                         .iter()
                         .filter(|byte| **byte == b'\n')
@@ -1364,11 +1451,15 @@ fn child_exited(core: &SupervisorCore, generation: u64) {
         state.child = None;
         if unexpected {
             state.snapshot.lifecycle = BackendLifecycle::Crashed;
-            state.snapshot.last_error = Some(BridgeError::new(
-                "BACKEND_CRASHED",
-                "The desktop backend process exited unexpectedly.",
-                true,
-            ));
+            let message = match state.stderr_log.as_deref().and_then(Path::parent) {
+                Some(directory) => format!(
+                    "The desktop backend process exited unexpectedly. \
+                     Diagnostic logs are in {}.",
+                    directory.display()
+                ),
+                None => "The desktop backend process exited unexpectedly.".to_owned(),
+            };
+            state.snapshot.last_error = Some(BridgeError::new("BACKEND_CRASHED", &message, true));
         }
         let pending = state
             .pending
@@ -1555,6 +1646,7 @@ for raw in sys.stdin:
             current_dir: script.directory.clone(),
             python_path: None,
             conda_prefix: None,
+            stderr_log: Some(script.directory.join("logs").join(STDERR_LOG_NAME)),
         };
         (
             BackendSupervisor::for_test(launch, sink, timeouts()),
@@ -1895,8 +1987,8 @@ for raw in sys.stdin:
     }
 
     #[test]
-    fn stderr_is_drained_but_only_counts_are_retained() {
-        let (supervisor, _script, _events) = supervisor("stderr");
+    fn stderr_is_persisted_locally_but_only_counts_reach_the_snapshot() {
+        let (supervisor, script, _events) = supervisor("stderr");
         assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
         let deadline = Instant::now() + Duration::from_secs(1);
         while supervisor.snapshot().stderr_bytes < 43 && Instant::now() < deadline {
@@ -1908,6 +2000,64 @@ for raw in sys.stdin:
         let serialized = serde_json::to_string(&snapshot).expect("serialize snapshot");
         assert!(!serialized.contains("diagnostic"));
         supervisor.shutdown();
+
+        let log_path = script.directory.join("logs").join(STDERR_LOG_NAME);
+        let logged = fs::read_to_string(&log_path).expect("stderr log");
+        assert!(logged.starts_with("=== desktop backend generation 1 started"));
+        assert!(logged.ends_with("first diagnostic\nsecond diagnostic\ntrailing"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&log_path).expect("log metadata").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn stderr_log_rotates_once_and_appends_generation_headers() {
+        let script = TempScript::new("");
+        let path = script.directory.join("nested").join(STDERR_LOG_NAME);
+        let mut first = open_stderr_log(&path, 1, 64).expect("first log");
+        first.write_all(&[b'x'; 80]).expect("fill log");
+        drop(first);
+        let second = open_stderr_log(&path, 2, 64).expect("second log");
+        drop(second);
+
+        let rotated = fs::read_to_string(path.with_file_name(format!("{STDERR_LOG_NAME}.1")))
+            .expect("rotated log");
+        assert!(rotated.starts_with("=== desktop backend generation 1 started"));
+        let current = fs::read_to_string(&path).expect("current log");
+        assert!(current.starts_with("=== desktop backend generation 2 started"));
+        assert!(!current.contains("xxxx"));
+    }
+
+    #[test]
+    fn diagnostic_log_dir_matches_python_precedence() {
+        let lookup = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| OsString::from(value))
+            }
+        };
+        assert_eq!(
+            diagnostic_log_dir(lookup(&[("AGENT_LOG_DIR", "/x/logs"), ("HOME", "/h")])),
+            Some(PathBuf::from("/x/logs"))
+        );
+        assert_eq!(
+            diagnostic_log_dir(lookup(&[("AGENT_LOG_DIR", "~/logs"), ("HOME", "/h")])),
+            Some(PathBuf::from("/h/logs"))
+        );
+        assert_eq!(
+            diagnostic_log_dir(lookup(&[("XDG_STATE_HOME", "/s"), ("HOME", "/h")])),
+            Some(PathBuf::from("/s/research-agent/logs"))
+        );
+        assert_eq!(
+            diagnostic_log_dir(lookup(&[("AGENT_LOG_DIR", "  "), ("HOME", "/h")])),
+            Some(PathBuf::from("/h/.local/state/research-agent/logs"))
+        );
+        assert_eq!(diagnostic_log_dir(lookup(&[])), None);
     }
 
     #[test]
@@ -1982,12 +2132,19 @@ for raw in sys.stdin:
 
     #[test]
     fn child_crash_fails_pending_and_restart_is_user_driven() {
-        let (crashing, _script, _events) = supervisor("crash");
+        let (crashing, crash_script, _events) = supervisor("crash");
         assert_eq!(crashing.start().lifecycle, BackendLifecycle::Ready);
         let error = crashing
             .request(request(REQUEST_ID))
             .expect_err("crash failure");
         assert_eq!(error.code, "BACKEND_CRASHED");
+        assert_eq!(
+            error.message,
+            format!(
+                "The desktop backend process exited unexpectedly. Diagnostic logs are in {}.",
+                crash_script.directory.join("logs").display()
+            )
+        );
         assert_eq!(crashing.snapshot().lifecycle, BackendLifecycle::Crashed);
 
         let (healthy, _healthy_script, _events) = supervisor("normal");

@@ -62,7 +62,7 @@ Poetry 不會建立或採用 `.venv`，`poetry install` 直接裝進目前啟用
 - `app/store/`(或 `KMS_STORE_DIR` 指向的位置):canonical `conversations/*.json`、RAG Chroma、`raw.json` 與 `folder_meta.json`。Canonical JSON 是唯一支援的 transcript source，也是 `ConversationRepository` 唯一會寫入的對話格式；normal 新回合、context 與 exact-text lookup 都不使用 conversation Chroma。舊版留下的 `chat_history/` 不會被讀取、匯入、建立、更新或刪除。預設的 `app/store/` 已由 `app/.gitignore` 的 `store/` 排除，不會隨 clone、branch 或 commit 傳遞。
 - workspace 根目錄的 `cite/`(預設;bundle 是本機產物,整個目錄由 Git 忽略),或 `CITATION_OUTPUT_DIR` / `AgentConfig.citation_output_dir` 指向的位置:citation bundle 輸出(`<title>--<identity-hash>/reference.bib` + `citation.json`;DOI 記錄的 hash 取自 canonical DOI,trusted non-DOI 記錄取自 canonical identity)。只有 wheel 安裝且 cwd/package 都不在 git workspace 時才 fallback 到平台 user-data 目錄。
 - `~/.cache/agent-mcp/`(或 `$XDG_CACHE_HOME/agent-mcp/`):MCP stderr logs。
-- `~/.local/state/research-agent/logs/`(或 `$XDG_STATE_HOME/research-agent/logs/`、`AGENT_LOG_DIR` 指向的位置):本機診斷 log(`cli.log`、`desktop-backend.log`;5 MiB 輪替保留 3 份、權限 0600)。記錄 `agent`/`skills`/`rag` 的 INFO 以上事件與第三方套件 WARNING 以上事件；API key、token、`mailto` 等憑證會先遮蔽，不寫入對話內容。
+- `~/.local/state/research-agent/logs/`(或 `$XDG_STATE_HOME/research-agent/logs/`、`AGENT_LOG_DIR` 指向的位置):本機診斷 log(`cli.log`、`desktop-backend.log`;5 MiB 輪替保留 3 份、權限 0600)。記錄 `agent`/`skills`/`rag` 的 INFO 以上事件與第三方套件 WARNING 以上事件；API key、token、`mailto` 等憑證會先遮蔽，不寫入對話內容。Desktop 的 Rust supervisor 另把 Python 子程序的原始 stderr(例如 logging 啟動前的 crash)寫入 `desktop-backend.stderr.log`(5 MiB 輪替一份),內容只存本機，不送進 WebView。
 
 舊版留下的 `app/plan_logs/` 不再是 migration input；目前版本不會讀取、匯入、建立、更新或刪除這些檔案。舊來源會原樣保留，但不會出現在目前的 transcript 或模型 context。
 
