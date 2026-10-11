@@ -18,11 +18,19 @@ import contextlib
 from dataclasses import dataclass, field, replace
 
 import pybtex.errors
-from pybtex.database import parse_string
+from pybtex.database.input.bibtex import Parser, month_names
 
 from skills.citation.normalize import strip_latex
 
 MAX_BIBTEX_BYTES = 1 * 1024 * 1024
+
+# BibTeX predefines only ``jan``..``dec``; doi.org content negotiation emits
+# bare full month names (``month=July``). Accept both spellings (pybtex
+# macro lookup is case-insensitive); any other undefined macro still fails.
+_MONTH_MACROS = {
+    **month_names,
+    **{name.lower(): name for name in month_names.values()},
+}
 
 
 class BibtexValidationError(ValueError):
@@ -61,6 +69,10 @@ def _strict_pybtex():
         pybtex.errors.set_strict_mode(previous)
 
 
+def _parse(text: str):
+    return Parser(macros=_MONTH_MACROS).parse_string(text)
+
+
 def _extract_year(raw: str | None) -> int | None:
     if not raw:
         return None
@@ -89,7 +101,7 @@ def parse_canonical_bibtex(payload: str | None) -> CanonicalBibtex:
 
     try:
         with _strict_pybtex():
-            data = parse_string(payload, "bibtex")
+            data = _parse(payload)
     except Exception as exc:  # noqa: BLE001 - every pybtex failure is one outcome
         raise BibtexValidationError(
             "parse_failed", f"pybtex could not parse payload: {exc}"
@@ -148,7 +160,7 @@ def inject_doi(canonical: CanonicalBibtex, doi: str) -> CanonicalBibtex:
             "refusing to inject a DOI into an entry that already has one",
         )
     with _strict_pybtex():
-        data = parse_string(canonical.text, "bibtex")
+        data = _parse(canonical.text)
     entry = data.entries[canonical.entry_key]
     entry.fields["doi"] = doi
     text = data.to_string("bibtex")

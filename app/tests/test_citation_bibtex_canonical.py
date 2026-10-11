@@ -113,3 +113,49 @@ def test_year_extraction_is_tolerant_of_wrappers():
         "@article{k,\n  title = {T},\n  year = {c. 2020},\n}\n"
     )
     assert result.year == 2020
+
+
+# Verbatim shape of doi.org's BibTeX for 10.1038/s41586-021-03819-2
+# (fetched 2026-10-12): a bare full month name, not a jan..dec macro.
+_DOI_ORG_FULL_MONTH = (
+    " @article{Jumper_2021, title={Highly accurate protein structure prediction "
+    "with AlphaFold}, volume={596}, ISSN={1476-4687}, "
+    "url={http://dx.doi.org/10.1038/s41586-021-03819-2}, "
+    "DOI={10.1038/s41586-021-03819-2}, number={7873}, journal={Nature}, "
+    "author={Jumper, John and Žídek, Augustin}, year={2021}, month=July, "
+    "pages={583–589} }\n"
+)
+
+
+def test_doi_org_full_month_name_parses_and_survives_round_trip():
+    from pybtex.database import parse_string
+
+    canonical = parse_canonical_bibtex(_DOI_ORG_FULL_MONTH)
+
+    assert canonical.doi == "10.1038/s41586-021-03819-2"
+    assert canonical.year == 2021
+    reparsed = parse_string(canonical.text, "bibtex")
+    assert reparsed.entries["Jumper_2021"].fields["month"] == "July"
+
+
+@pytest.mark.parametrize("month", ["jul", "JUL", "July", "july", "September"])
+def test_standard_and_full_month_macros_are_accepted(month):
+    canonical = parse_canonical_bibtex(
+        f"@article{{k, title={{T}}, year={{2020}}, month={month}}}"
+    )
+    assert canonical.entry_key == "k"
+
+
+def test_other_undefined_macros_still_fail():
+    with pytest.raises(BibtexValidationError) as exc:
+        parse_canonical_bibtex("@article{k, title={T}, year={2020}, month=Julyish}")
+    assert exc.value.code == "parse_failed"
+
+
+def test_inject_doi_round_trips_full_month_entries():
+    canonical = parse_canonical_bibtex(
+        "@article{k, title={T}, year={2020}, month=July}"
+    )
+    injected = inject_doi(canonical, "10.1234/x")
+    assert injected.doi == "10.1234/x"
+    assert "July" in injected.text
