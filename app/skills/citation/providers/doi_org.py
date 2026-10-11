@@ -71,8 +71,9 @@ def _authors_from_csl(raw: list | None) -> list[str]:
 def parse_csl(doi: str, payload: dict) -> StructuredRecord:
     """Normalize a CSL JSON body into a StructuredRecord."""
     year = None
-    parts = (payload.get("issued") or {}).get("date-parts") or []
-    if parts and parts[0]:
+    issued = payload.get("issued")
+    parts = (issued.get("date-parts") if isinstance(issued, dict) else None) or []
+    if isinstance(parts, list) and parts and isinstance(parts[0], list) and parts[0]:
         try:
             year = int(parts[0][0])
         except (TypeError, ValueError):
@@ -139,6 +140,10 @@ class DoiOrgClient:
             raise ProviderError(
                 PROVIDER_NAME, f"CSL response for {canonical} is not JSON"
             ) from exc
+        if not isinstance(payload, dict):
+            raise ProviderError(
+                PROVIDER_NAME, f"CSL response for {canonical} is not a JSON object"
+            )
         record = parse_csl(canonical, payload)
         self._cache.put(cache_key, record, DOI_TTL_SECONDS)
         return record

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from skills.citation.types import (
     SaveReceipt,
     SourceRef,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CitationService:
@@ -63,6 +66,14 @@ class CitationService:
                 ), f"{name}:ok"
             except ProviderError:
                 return [], f"{name}:error"
+            except Exception as exc:
+                logger.error(
+                    "citation search provider %s failed unexpectedly: %s",
+                    name,
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+                return [], f"{name}:internal_error"
 
         results = await asyncio.gather(*(call(name, provider) for name, provider in providers))
         states = [state for _records, state in results]
@@ -77,111 +88,146 @@ class CitationService:
         return ordered[:rows], states
 
     async def save(self, intents: tuple[WorkIntent, ...]) -> SaveBatchOutcome:
+        """Resolve, verify, and persist each intent with per-item isolation.
+
+        An unexpected exception in one item becomes that item's
+        ``internal_error`` outcome (logged with batch ID, index, stage, and
+        traceback) instead of discarding every other item's result.
+        """
         batch_id = uuid.uuid4().hex
-        resolutions = await asyncio.gather(*(self.resolver.resolve(intent) for intent in intents))
-        outcomes: list[SaveItemOutcome] = []
+        resolutions = await asyncio.gather(
+            *(self.resolver.resolve(intent) for intent in intents),
+            return_exceptions=True,
+        )
+        outcomes: list[SaveItemOutcome | None] = []
         eligible: list[tuple[int, WorkIntent, object, str]] = []
         for index, (intent, resolution) in enumerate(zip(intents, resolutions, strict=True)):
-            decision = resolution.decision
-            if decision.status == "eligible" and decision.record is not None:
-                eligible.append((index, intent, decision.record, decision.reason_code))
-                outcomes.append(None)  # type: ignore[arg-type]
+            try:
+                if isinstance(resolution, BaseException):
+                    raise resolution
+                planned = await self._plan_item(index, intent, resolution)
+            except Exception as exc:
+                planned = self._internal_failure(batch_id, index, intent, "resolution", exc)
+            if isinstance(planned, SaveItemOutcome):
+                outcomes.append(planned)
                 continue
-            # An exact DOI is the selected target. Never replace a failed DOI
-            # lookup (or conflicting identifier set) with a different
-            # authority identity merely because descriptive fields resemble it.
-            has_exact_doi = any(
-                identifier.kind == "doi" for identifier in intent.identifiers
-            )
-            # An authority match cannot settle missing or tied year evidence.
-            earliest_ambiguity = decision.status == "ambiguous" and decision.reason_code in {
-                "earliest_year_missing", "earliest_year_tie",
-            }
-            authority = None
-            if (
-                not has_exact_doi
-                and decision.reason_code != "multiple_exact_identifiers"
-                and not earliest_ambiguity
-            ):
-                try:
-                    authority = await self.authorities.resolve(intent)
-                except ProviderError:
-                    outcomes.append(SaveItemOutcome(
-                        index,
-                        intent.requested_label,
-                        "provider_failed",
-                        "authority_lookup_failed",
-                    ))
-                    continue
-            if authority is not None:
-                authority_record = ProviderRecord(
-                    provider=authority.provider,
-                    provider_id=f"{authority.provider}:{authority.identity.key}",
-                    rank=0,
-                    title=authority.title,
-                    authors=list(authority.authors),
-                    year=authority.year,
-                    venue=authority.venue,
-                    work_type=authority.work_type,
-                    url=authority.url,
-                    identifiers={authority.identity.kind: authority.identity.value},
-                    version_kind=(
-                        "preprint" if authority.provider == "arxiv" else "published"
-                    ),
-                    field_provenance={
-                        field: f"authoritative:{authority.provider}"
-                        for field in (
-                            "title",
-                            "authors",
-                            "year",
-                            "venue",
-                            "work_type",
-                            "url",
-                        )
-                    },
-                )
-                authority_decision = evaluate_record(intent, authority_record)
-                if authority_decision.status == "eligible":
-                    eligible.append((index, intent, authority, "authoritative_exact_record"))
-                    outcomes.append(None)  # type: ignore[arg-type]
-                    continue
-                decision = authority_decision
-            elif decision.reason_code == "exact_arxiv_requires_authority":
-                outcomes.append(SaveItemOutcome(
-                    index,
-                    intent.requested_label,
-                    "not_found",
-                    "exact_arxiv_not_found",
-                ))
-                continue
-            status_map = {"unsupported": "unsupported_no_doi"}
-            status = status_map.get(decision.status, decision.status)
-            alternatives = tuple(
-                SaveAlternative(
-                    record.title, tuple(record.authors), record.year, record.venue,
-                    infer_version_kind(record), canonicalize_doi(record.doi),
-                    record.identifiers.get("arxiv") or None,
-                )
-                for record in decision.alternatives[:5]
-            )
-            outcomes.append(SaveItemOutcome(
-                index, intent.requested_label, status, decision.reason_code,
-                alternatives=alternatives,
-            ))
+            record, resolution_reason = planned
+            eligible.append((index, intent, record, resolution_reason))
+            outcomes.append(None)
 
         # All resolution/provider verification completes before the first write.
         for index, intent, record, resolution_reason in eligible:
+            outcomes[index] = await self._persist_item(
+                batch_id, index, intent, record, resolution_reason
+            )
+        return SaveBatchOutcome(batch_id, tuple(outcomes))
+
+    async def _plan_item(
+        self, index: int, intent: WorkIntent, resolution
+    ) -> SaveItemOutcome | tuple[object, str]:
+        """Return an eligible ``(record, reason)`` pair or a failure outcome."""
+        decision = resolution.decision
+        if decision.status == "eligible" and decision.record is not None:
+            return decision.record, decision.reason_code
+        # An exact DOI is the selected target. Never replace a failed DOI
+        # lookup (or conflicting identifier set) with a different
+        # authority identity merely because descriptive fields resemble it.
+        has_exact_doi = any(
+            identifier.kind == "doi" for identifier in intent.identifiers
+        )
+        # An authority match cannot settle missing or tied year evidence.
+        earliest_ambiguity = decision.status == "ambiguous" and decision.reason_code in {
+            "earliest_year_missing", "earliest_year_tie",
+        }
+        authority = None
+        if (
+            not has_exact_doi
+            and decision.reason_code != "multiple_exact_identifiers"
+            and not earliest_ambiguity
+        ):
+            try:
+                authority = await self.authorities.resolve(intent)
+            except ProviderError:
+                return SaveItemOutcome(
+                    index,
+                    intent.requested_label,
+                    "provider_failed",
+                    "authority_lookup_failed",
+                )
+        if authority is not None:
+            authority_record = ProviderRecord(
+                provider=authority.provider,
+                provider_id=f"{authority.provider}:{authority.identity.key}",
+                rank=0,
+                title=authority.title,
+                authors=list(authority.authors),
+                year=authority.year,
+                venue=authority.venue,
+                work_type=authority.work_type,
+                url=authority.url,
+                identifiers={authority.identity.kind: authority.identity.value},
+                version_kind=(
+                    "preprint" if authority.provider == "arxiv" else "published"
+                ),
+                field_provenance={
+                    field: f"authoritative:{authority.provider}"
+                    for field in (
+                        "title",
+                        "authors",
+                        "year",
+                        "venue",
+                        "work_type",
+                        "url",
+                    )
+                },
+            )
+            authority_decision = evaluate_record(intent, authority_record)
+            if authority_decision.status == "eligible":
+                return authority, "authoritative_exact_record"
+            decision = authority_decision
+        elif decision.reason_code == "exact_arxiv_requires_authority":
+            return SaveItemOutcome(
+                index,
+                intent.requested_label,
+                "not_found",
+                "exact_arxiv_not_found",
+            )
+        status_map = {"unsupported": "unsupported_no_doi"}
+        status = status_map.get(decision.status, decision.status)
+        alternatives = tuple(
+            SaveAlternative(
+                record.title, tuple(record.authors), record.year, record.venue,
+                infer_version_kind(record), canonicalize_doi(record.doi),
+                record.identifiers.get("arxiv") or None,
+            )
+            for record in decision.alternatives[:5]
+        )
+        return SaveItemOutcome(
+            index, intent.requested_label, status, decision.reason_code,
+            alternatives=alternatives,
+        )
+
+    async def _persist_item(
+        self,
+        batch_id: str,
+        index: int,
+        intent: WorkIntent,
+        record,
+        resolution_reason: str,
+    ) -> SaveItemOutcome:
+        """Fetch/validate BibTeX, then write the bundle and register it."""
+        stage = "verification"
+        try:
             if isinstance(record, AuthorityRecord):
                 try:
                     canonical = export_bibtex(record)
                 except BibtexValidationError as exc:
-                    outcomes[index] = SaveItemOutcome(
+                    return SaveItemOutcome(
                         index,
                         intent.requested_label,
                         "verification_failed",
                         getattr(exc, "code", "authority_bibtex_invalid"),
                     )
-                    continue
                 identity = record.identity
                 sid = source_id_for(identity)
                 ref = SourceRef(
@@ -203,8 +249,7 @@ class CitationService:
                         raise BibtexValidationError("bibtex_doi_mismatch", "DOI mismatch")
                 except (ProviderError, BibtexValidationError) as exc:
                     code = getattr(exc, "code", "bibtex_lookup_failed")
-                    outcomes[index] = SaveItemOutcome(index, intent.requested_label, "verification_failed", code)
-                    continue
+                    return SaveItemOutcome(index, intent.requested_label, "verification_failed", code)
                 identity = CanonicalIdentity("doi", record.doi)
                 sid = source_id_for(identity)
                 ref = SourceRef(
@@ -235,6 +280,7 @@ class CitationService:
                     "decision_reason_codes": [resolution_reason],
                 },
             }
+            stage = "storage"
             try:
                 bundle = await asyncio.to_thread(
                     write_identity_bundle,
@@ -251,13 +297,34 @@ class CitationService:
                 )
                 self.registry.register(ref, receipt=receipt)
             except (StorageError, ValueError) as exc:
-                outcomes[index] = SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
-                continue
-            outcomes[index] = SaveItemOutcome(
+                return SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
+            return SaveItemOutcome(
                 index, intent.requested_label, "reused" if bundle.reused else "saved",
                 "reused_existing" if bundle.reused else "saved_new", receipt,
             )
-        return SaveBatchOutcome(batch_id, tuple(outcomes))
+        except Exception as exc:
+            return self._internal_failure(batch_id, index, intent, stage, exc)
+
+    @staticmethod
+    def _internal_failure(
+        batch_id: str,
+        index: int,
+        intent: WorkIntent,
+        stage: str,
+        exc: Exception,
+    ) -> SaveItemOutcome:
+        """Log an unexpected per-item exception and report it for that item."""
+        logger.error(
+            "citation save batch %s item %d failed unexpectedly during %s: %s",
+            batch_id,
+            index,
+            stage,
+            type(exc).__name__,
+            exc_info=exc,
+        )
+        return SaveItemOutcome(
+            index, intent.requested_label, "internal_error", f"{stage}_internal_error",
+        )
 
     @staticmethod
     def _intent_evidence(intent: WorkIntent) -> dict:

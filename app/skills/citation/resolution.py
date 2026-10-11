@@ -9,6 +9,7 @@ a best-match fallback for records without a stable identifier.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -42,6 +43,8 @@ DecisionStatus = Literal[
     "provider_failed",
     "verification_failed",
 ]
+
+logger = logging.getLogger(__name__)
 
 MAX_REQUESTED_LABEL = 160
 MAX_TITLE = 512
@@ -533,6 +536,14 @@ class WorkResolver:
                 return [], ProviderState(name, "timeout")
             except ProviderError:
                 return [], ProviderState(name, "error")
+            except Exception as exc:
+                logger.error(
+                    "citation resolver provider %s failed unexpectedly: %s",
+                    name,
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+                return [], ProviderState(name, "error", f"internal:{type(exc).__name__}")
 
         results = await asyncio.gather(*(
             call(name, provider) for name, provider in self._providers

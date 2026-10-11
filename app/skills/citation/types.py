@@ -150,7 +150,7 @@ def is_citable_source(ref: SourceRef):
     return ref.verification_level == "authority_metadata_verified" and ref.schema_version == 2 and identity.kind != "doi" and ref.doi is None
 
 
-SaveItemStatus = Literal["saved", "reused", "insufficient_intent", "ambiguous", "not_found", "identity_conflict", "unsupported_identifier", "unsupported_no_doi", "provider_failed", "verification_failed", "storage_failed"]
+SaveItemStatus = Literal["saved", "reused", "insufficient_intent", "ambiguous", "not_found", "identity_conflict", "unsupported_identifier", "unsupported_no_doi", "provider_failed", "verification_failed", "storage_failed", "internal_error"]
 
 
 def _strict_fields(value, fields, label):
