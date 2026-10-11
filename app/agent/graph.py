@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from agent.config import AgentConfig
+from agent.diagnostics import attach_incident, incident_reference
 
 from agent.llm.openrouter import get_chat_model
 from agent.observability import (
@@ -25,6 +28,8 @@ from agent.turns.safety import (
     has_tool_results,
     last_user_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Immediate same-request retries after a truly empty upstream reply, before
@@ -304,7 +309,15 @@ def build_graph(
         )]}
 
     def _tool_error_to_message(exc: Exception) -> str:
-        return f"Tool error: {type(exc).__name__}: {exc}"
+        incident, _new = attach_incident(exc)
+        logger.error(
+            "Tool call failed (incident %s): %s",
+            incident,
+            type(exc).__name__,
+            exc_info=exc,
+        )
+        reference = incident_reference(incident, with_log_path=False)
+        return f"Tool error: {type(exc).__name__}: {exc} {reference}"
 
     def skill_loader_node(state: AgentState):
         if state.get("skill_instructions"):

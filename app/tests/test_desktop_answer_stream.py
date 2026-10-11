@@ -283,3 +283,81 @@ def test_provider_http_failures_are_safe_and_bounded(
     assert raised.value.retryable is retryable
     assert "raw provider" not in str(raised.value)
     assert events == []
+
+
+def test_unexpected_turn_failure_reports_a_logged_incident(
+    tmp_path: Path, caplog,
+) -> None:
+    import logging
+    import re
+
+    from agent import diagnostics
+
+    failing = _AnswerSession("unused")
+    failing.error = AttributeError("private provider payload")
+    service = _service(tmp_path, failing)
+    diagnostics.install_diagnostic_log(
+        "desktop-backend", echo_stderr=False,
+        env={"AGENT_LOG_DIR": str(tmp_path / "logs")},
+    )
+    try:
+        with caplog.at_level(logging.ERROR, logger="agent.desktop.service"):
+            with pytest.raises(DesktopServiceError) as raised:
+                asyncio.run(service.dispatch(
+                    "session.turn", _turn_params("question"), event_sink=None,
+                ))
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        log_text = (tmp_path / "logs" / "desktop-backend.log").read_text("utf-8")
+    finally:
+        diagnostics.uninstall_diagnostic_log()
+
+    message = str(raised.value)
+    match = re.fullmatch(
+        r"The desktop backend encountered an internal error\. "
+        r"\(incident ([0-9a-f]{8}); AttributeError; details in (.+)\)",
+        message,
+    )
+    assert match is not None
+    assert match.group(2) == str(tmp_path / "logs" / "desktop-backend.log")
+    assert "private provider payload" not in message
+    assert raised.value.code == "INTERNAL_ERROR"
+    assert f"incident {match.group(1)}" in log_text and "Traceback" in log_text
+
+
+def test_desktop_reuses_an_incident_the_session_already_logged(
+    tmp_path: Path, caplog,
+) -> None:
+    import logging
+
+    from agent.diagnostics import attach_incident
+
+    error = RuntimeError("already logged by the session")
+    incident, _new = attach_incident(error)
+    failing = _AnswerSession("unused")
+    failing.error = error
+    service = _service(tmp_path, failing)
+
+    with caplog.at_level(logging.WARNING, logger="agent.desktop.service"):
+        with pytest.raises(DesktopServiceError) as raised:
+            asyncio.run(service.dispatch(
+                "session.turn", _turn_params("question"), event_sink=None,
+            ))
+
+    assert f"(incident {incident}; RuntimeError)" in str(raised.value)
+    records = [r for r in caplog.records if incident in r.getMessage()]
+    assert len(records) == 1 and records[0].exc_info is None
+
+
+def test_self_explanatory_failures_carry_no_incident(tmp_path: Path) -> None:
+    failing = _AnswerSession("unused")
+    failing.error = RuntimeError("OPENROUTER_API_KEY is not set")
+    service = _service(tmp_path, failing)
+
+    with pytest.raises(DesktopServiceError) as raised:
+        asyncio.run(service.dispatch(
+            "session.turn", _turn_params("question"), event_sink=None,
+        ))
+
+    assert raised.value.code == "OPENROUTER_NOT_CONFIGURED"
+    assert str(raised.value) == "OpenRouter is not configured."

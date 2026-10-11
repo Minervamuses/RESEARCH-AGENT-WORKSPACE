@@ -45,6 +45,7 @@ from agent.cli.slash_commands import (
     execute_slash_command,
     parse_slash_command,
 )
+from agent.diagnostics import attach_incident, incident_reference
 from agent.desktop.catalog import (
     CATALOG_MAX_SESSIONS,
     DEFAULT_PROJECT_ID,
@@ -82,6 +83,15 @@ from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.storage import resolve_output_dir
 
 logger = logging.getLogger(__name__)
+
+# Mapped failures whose message already names the cause and its fix; every
+# other exception-derived failure carries an incident reference to the log.
+_SELF_EXPLANATORY_FAILURE_CODES = frozenset({
+    "BUSY_EXTENSION_OPERATION",
+    "GRAPH_LIMIT_REACHED",
+    "INVALID_PATH",
+    "OPENROUTER_NOT_CONFIGURED",
+})
 
 EventSink = Callable[[str, dict[str, Any]], None]
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -352,18 +362,30 @@ class DesktopService:
             raise
         except Exception as exc:
             mapped = self._map_exception(method, exc)
-            if mapped.code == "INTERNAL_ERROR":
-                logger.exception(
-                    "Desktop method %s failed with %s",
-                    method,
-                    type(exc).__name__,
-                )
-            else:
+            if mapped.code in _SELF_EXPLANATORY_FAILURE_CODES:
                 logger.warning(
                     "Desktop method %s returned %s (%s)",
                     method,
                     mapped.code,
                     type(exc).__name__,
+                )
+            else:
+                # Reuse the session's incident when it already logged the
+                # traceback; otherwise this is the first layer to see it.
+                incident, is_new = attach_incident(exc)
+                (logger.error if mapped.code == "INTERNAL_ERROR" else logger.warning)(
+                    "Desktop method %s returned %s (incident %s): %s",
+                    method,
+                    mapped.code,
+                    incident,
+                    type(exc).__name__,
+                    exc_info=exc if is_new else None,
+                )
+                mapped = DesktopServiceError(
+                    mapped.code,
+                    f"{mapped} {incident_reference(incident, exc)}",
+                    retryable=mapped.retryable,
+                    details=mapped.details,
                 )
             if method in {"session.turn", "extensions.apply"}:
                 mapped = self._with_turn_lifecycle(mapped, method, params)

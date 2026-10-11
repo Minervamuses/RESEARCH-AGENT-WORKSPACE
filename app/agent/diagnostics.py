@@ -47,6 +47,8 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)\b(mailto[:=])[^\s&\"')]+"),
 )
 
+_INCIDENT_ATTR = "agent_incident_id"
+
 _installed: tuple[Path | None, list[logging.Handler]] | None = None
 
 
@@ -62,6 +64,40 @@ def diagnostic_log_dir(env: Mapping[str, str] | None = None) -> Path:
 def new_incident_id() -> str:
     """Return a short reference shared by a user-facing error and its log record."""
     return uuid.uuid4().hex[:8]
+
+
+def attach_incident(exc: BaseException) -> tuple[str, bool]:
+    """Return ``(incident_id, is_new)`` for ``exc``, attaching one if absent.
+
+    The first layer that handles a failure (session, tool node, desktop
+    service, CLI) logs the traceback under a new ID; outer layers reuse the
+    same ID so one failure keeps one reference end to end.
+    """
+    existing = getattr(exc, _INCIDENT_ATTR, None)
+    if isinstance(existing, str):
+        return existing, False
+    incident = new_incident_id()
+    try:
+        setattr(exc, _INCIDENT_ATTR, incident)
+    except (AttributeError, TypeError):
+        pass
+    return incident, True
+
+
+def incident_reference(
+    incident: str,
+    exc: BaseException | None = None,
+    *,
+    with_log_path: bool = True,
+) -> str:
+    """Return a parenthesized user-facing reference to a logged incident."""
+    parts = [f"incident {incident}"]
+    if exc is not None:
+        parts.append(type(exc).__name__)
+    path = current_log_path() if with_log_path else None
+    if path is not None:
+        parts.append(f"details in {path}")
+    return "(" + "; ".join(parts) + ")"
 
 
 def current_log_path() -> Path | None:

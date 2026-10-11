@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import logging
 import unicodedata
 import uuid
 
@@ -20,9 +21,15 @@ from agent.cli.slash_commands import (
     parse_slash_command,
 )
 from agent.config import AgentConfig, validate_graph_recursion_limit
-from agent.diagnostics import install_diagnostic_log
+from agent.diagnostics import (
+    attach_incident,
+    incident_reference,
+    install_diagnostic_log,
+)
 from agent.session import ChatSession
 from agent.turns.safety import build_recovery_message
+
+logger = logging.getLogger(__name__)
 
 _EXIT_COMMANDS = {"q", "quit", "exit"}
 _CITATION_STOP_ARGUMENTS = {"off", "none", "deactivate"}
@@ -239,7 +246,18 @@ async def _run(
                 "Try rephrasing or narrowing the question.)"
             )
         except Exception as exc:
-            response = f"(agent error: {type(exc).__name__}: {exc})"
+            incident, is_new = attach_incident(exc)
+            if is_new:
+                logger.error(
+                    "CLI turn failed (incident %s): %s",
+                    incident,
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+            response = (
+                f"(agent error: {type(exc).__name__}: {exc}) "
+                + incident_reference(incident)
+            )
         if not str(response).strip():
             response = build_recovery_message(
                 user_input=user_input,

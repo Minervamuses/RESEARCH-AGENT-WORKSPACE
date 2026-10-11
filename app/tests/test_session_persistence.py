@@ -202,6 +202,38 @@ def test_provider_failure_commits_failed_terminal_state(monkeypatch, tmp_path):
     assert turn.failure.code == "execution_failed"
 
 
+def test_failed_turn_records_one_incident_in_log_and_transcript(
+    monkeypatch, tmp_path, caplog,
+):
+    import logging
+    import re
+
+    from agent.diagnostics import attach_incident
+
+    repository = ConversationRepository(tmp_path)
+    session_id = _id()
+    session = _session(
+        monkeypatch,
+        tmp_path,
+        repository=repository,
+        graph=FailingGraph(),
+        session_id=session_id,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="agent.session"):
+        with pytest.raises(RuntimeError) as raised:
+            asyncio.run(session.turn_outcome("x", display_input="x", turn_id=_id()))
+
+    incident, is_new = attach_incident(raised.value)
+    assert is_new is False  # outer layers reuse the session's reference
+    message = repository.load(session_id).document.turns[-1].failure.message
+    assert message.startswith("The turn could not be completed. ")
+    assert re.search(rf"\(incident {incident}; RuntimeError(; details in .+)?\)$", message)
+    assert "provider unavailable" not in message
+    records = [r for r in caplog.records if incident in r.getMessage()]
+    assert len(records) == 1 and records[0].exc_info is not None
+
+
 def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path):
     repository = ConversationRepository(tmp_path)
     session_id = _id()

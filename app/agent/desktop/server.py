@@ -23,7 +23,11 @@ from agent.desktop.protocol import (
     request_event,
     request_id_from_invalid_line,
 )
-from agent.diagnostics import install_diagnostic_log
+from agent.diagnostics import (
+    attach_incident,
+    incident_reference,
+    install_diagnostic_log,
+)
 from agent.paths import find_app_root
 
 
@@ -305,13 +309,18 @@ class DesktopServer:
             await context.failure(exc)
             return
         except Exception as exc:
-            logger.exception(
-                "Unhandled desktop request failure: %s", type(exc).__name__
+            incident, is_new = attach_incident(exc)
+            logger.error(
+                "Unhandled desktop request failure (incident %s): %s",
+                incident,
+                type(exc).__name__,
+                exc_info=exc if is_new else None,
             )
             await context.failure(
                 ProtocolError(
                     "INTERNAL_ERROR",
-                    "The desktop backend encountered an internal error.",
+                    "The desktop backend encountered an internal error. "
+                    + incident_reference(incident, exc),
                 )
             )
             return

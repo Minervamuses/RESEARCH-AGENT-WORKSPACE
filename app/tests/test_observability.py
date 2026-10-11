@@ -363,3 +363,49 @@ def test_graph_logs_tool_call_round_without_budget_fields(
     assert any("graph_steps_remaining=6" in line for line in lines)
     assert any("graph_steps_remaining=4" in line for line in lines)
     assert not any("budget_remaining" in line for line in lines)
+
+
+def test_tool_exception_is_logged_with_an_incident_shown_to_the_model(
+    monkeypatch, tmp_path, caplog
+):
+    import re
+
+    from langchain_core.tools import tool
+
+    @tool("rag_search")
+    def _broken_search(query: str) -> str:
+        """Search."""
+        raise ConnectionResetError("peer reset")
+
+    class ToolThenAnswerModel:
+        def bind_tools(self, _tools):
+            class Bound:
+                def invoke(_self, messages):
+                    if any(isinstance(m, ToolMessage) for m in messages):
+                        return AIMessage(content="The search tool failed.")
+                    return AIMessage(content="", tool_calls=[{
+                        "name": "rag_search", "args": {"query": "x"},
+                        "id": "call-1", "type": "tool_call",
+                    }])
+            return Bound()
+
+        def invoke(self, _messages):
+            return AIMessage(content="unused")
+
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: ToolThenAnswerModel())
+    monkeypatch.setattr(
+        "agent.tools.inventory.create_rag_tools", lambda _cfg: [_broken_search],
+    )
+    graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+
+    with caplog.at_level(logging.ERROR, logger="agent.graph"):
+        result = graph.invoke({"messages": [HumanMessage(content="hi")]})
+
+    tool_message = next(m for m in result["messages"] if isinstance(m, ToolMessage))
+    match = re.fullmatch(
+        r"Tool error: ConnectionResetError: peer reset \(incident ([0-9a-f]{8})\)",
+        tool_message.content,
+    )
+    assert match is not None
+    record = next(r for r in caplog.records if match.group(1) in r.getMessage())
+    assert record.exc_info is not None and record.exc_info[0] is ConnectionResetError

@@ -539,6 +539,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 | 舊版 Plan log／conversation Chroma 沒出現在 desktop 對話 | 這些舊來源不再支援匯入，且會原樣保留。Desktop只讀canonical conversation JSON；catalog session缺少對應JSON時會顯示conversation unavailable，不會嘗試從舊來源重建 |
 | Web Search 工具沒出現 | 確認標準路徑下有 built `dist/index.js`,且 `conda run -n app node --version` 成功；再查 `~/.cache/agent-mcp/` log |
 | GitHub 工具沒出現 | 確認 `app` Conda env vars 已啟用 MCP、command 可執行且 token 有效；再查 MCP log |
+| 錯誤訊息帶有 `(incident 1a2b3c4d; …)`，或偶發錯誤重跑就正常 | 同一個 incident ID 會出現在 GUI/CLI 訊息、失敗回合的 transcript 與診斷 log;用 `grep 1a2b3c4d ~/.local/state/research-agent/logs/*.log` 找到 traceback 與發生階段(model/graph、tool、desktop method)。Citation 逐項失敗可用結果中的 `batch_id` 搜尋 |
 
 ## 13. 開發者驗證
 

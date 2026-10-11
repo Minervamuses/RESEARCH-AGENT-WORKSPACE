@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,7 @@ from agent.turns.safety import (
 )
 
 from agent.config import AgentConfig
+from agent.diagnostics import attach_incident, incident_reference
 from agent.extensions.manager import ExtensionManager, SkillInstaller
 from agent.conversations import (
     MAX_IDENTIFIER_BYTES,
@@ -62,6 +64,8 @@ from agent.thinking import FusionCandidateTrace
 from agent.turns.journal import TurnJournal
 from agent.turns.memory import CanonicalTurnView
 from agent.paths import find_app_root
+
+logger = logging.getLogger(__name__)
 
 # The base tool inventory, its selection policy, and the base workflow are
 # owned by agent.tools.inventory (single source of truth). Only the optional
@@ -1266,8 +1270,21 @@ class ChatSession:
                     message="The final response could not be saved.",
                 )
                 raise
-            except Exception:
-                await self._fail_active_turn()
+            except Exception as exc:
+                incident, _new = attach_incident(exc)
+                logger.error(
+                    "Turn %s failed (incident %s): %s",
+                    logical_turn_id,
+                    incident,
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+                await self._fail_active_turn(
+                    message=(
+                        "The turn could not be completed. "
+                        + incident_reference(incident, exc)
+                    ),
+                )
                 raise
             finally:
                 self._active_turn_snapshot = None

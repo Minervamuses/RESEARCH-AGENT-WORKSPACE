@@ -543,3 +543,21 @@ def test_chat_cli_main_installs_the_diagnostic_log(monkeypatch):
     chat.main()
 
     assert calls == [("cli", True), ("run", True)]
+
+
+def test_chat_cli_turn_error_shows_an_incident_reference(monkeypatch, capsys, caplog):
+    import logging
+    import re
+
+    session = FakeChatSession(turn_error=RuntimeError("upstream exploded"))
+    with caplog.at_level(logging.ERROR, logger="agent.cli.chat"):
+        _run_cli(monkeypatch, session, ["hello", "q"])
+
+    out = capsys.readouterr().out
+    match = re.search(
+        r"\(agent error: RuntimeError: upstream exploded\) \(incident ([0-9a-f]{8})\)",
+        out,
+    )
+    assert match is not None
+    record = next(r for r in caplog.records if match.group(1) in r.getMessage())
+    assert record.exc_info is not None
