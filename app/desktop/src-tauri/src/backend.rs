@@ -1080,6 +1080,30 @@ fn spawn_stdout_reader(
     });
 }
 
+/// Record one supervisor-side event for the current generation in the local
+/// stderr log, so protocol rejections and exits can be correlated with the
+/// child's own output. Best-effort; never surfaced to the WebView.
+fn log_supervisor_event(core: &SupervisorCore, generation: u64, event: &str) {
+    let path = {
+        let state = lock_state(core);
+        if state.snapshot.generation != generation {
+            return;
+        }
+        state.stderr_log.clone()
+    };
+    append_supervisor_event(path.as_deref(), generation, event);
+}
+
+fn append_supervisor_event(path: Option<&Path>, generation: u64, event: &str) {
+    let Some(path) = path else {
+        return;
+    };
+    // Append to the file created by open_stderr_log; never create it here.
+    if let Ok(mut file) = fs::OpenOptions::new().append(true).open(path) {
+        let _ = writeln!(file, "\n=== supervisor: generation {generation}: {event} ===");
+    }
+}
+
 /// Drain the child's stderr. Raw bytes go only to the local log file; the
 /// snapshot (and therefore the WebView) only ever sees line/byte counts.
 fn spawn_stderr_reader(
@@ -1137,7 +1161,14 @@ fn spawn_exit_monitor(core: Arc<SupervisorCore>, control: Arc<ChildControl>) {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             match child.try_wait() {
-                Ok(Some(_)) => true,
+                Ok(Some(status)) => {
+                    log_supervisor_event(
+                        &core,
+                        control.generation,
+                        &format!("process ended with {status}"),
+                    );
+                    true
+                }
                 Ok(None) => false,
                 Err(_) => true,
             }
@@ -1213,9 +1244,27 @@ fn handle_python_line(
     generation: u64,
     line: &str,
 ) -> Result<(), BridgeError> {
-    let value: Value = serde_json::from_str(line).map_err(|_| BridgeError::protocol())?;
+    let value: Value = serde_json::from_str(line).map_err(|error| {
+        log_supervisor_event(
+            core,
+            generation,
+            &format!("rejected backend output that is not JSON: {error}"),
+        );
+        BridgeError::protocol()
+    })?;
     let parsed = parse_protocol_value_from_origin(value.clone(), ProtocolOrigin::Python)
-        .map_err(bridge_protocol_violation)?;
+        .map_err(|violation| {
+            log_supervisor_event(
+                core,
+                generation,
+                &format!(
+                    "rejected backend message: {} ({})",
+                    violation.code(),
+                    violation.message()
+                ),
+            );
+            bridge_protocol_violation(violation)
+        })?;
     if line.len() > MAX_PROTOCOL_LINE_BYTES {
         let full_text_result = match &parsed {
             ProtocolMessage::Result(result) if result.ok => {
@@ -1397,6 +1446,11 @@ fn fatal_generation(core: &SupervisorCore, generation: u64, error: BridgeError, 
         if state.snapshot.generation != generation || !state.snapshot.child_running {
             return;
         }
+        append_supervisor_event(
+            state.stderr_log.as_deref(),
+            generation,
+            &format!("stopping generation: {} ({})", error.code, error.message),
+        );
         state.snapshot.lifecycle = BackendLifecycle::Degraded;
         state.snapshot.last_error = Some(error.clone());
         let child = state.child.clone();
@@ -2004,13 +2058,38 @@ for raw in sys.stdin:
         let log_path = script.directory.join("logs").join(STDERR_LOG_NAME);
         let logged = fs::read_to_string(&log_path).expect("stderr log");
         assert!(logged.starts_with("=== desktop backend generation 1 started"));
-        assert!(logged.ends_with("first diagnostic\nsecond diagnostic\ntrailing"));
+        assert!(logged.contains("first diagnostic\nsecond diagnostic\ntrailing"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = fs::metadata(&log_path).expect("log metadata").permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn protocol_rejection_and_exit_are_recorded_in_the_stderr_log() {
+        let (supervisor, script, _events) = supervisor("malformed");
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+        let error = supervisor
+            .request(request(REQUEST_ID))
+            .expect_err("malformed output");
+        assert_eq!(error.code, "PROTOCOL_INVALID");
+        let log_path = script.directory.join("logs").join(STDERR_LOG_NAME);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut logged = String::new();
+        while Instant::now() < deadline {
+            logged = fs::read_to_string(&log_path).unwrap_or_default();
+            if logged.contains("process ended with") {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(logged.contains("supervisor: generation 1: rejected backend output that is not JSON"));
+        assert!(logged.contains("supervisor: generation 1: stopping generation: PROTOCOL_INVALID"));
+        assert!(logged.contains("supervisor: generation 1: process ended with"));
+        let serialized = serde_json::to_string(&supervisor.snapshot()).expect("snapshot");
+        assert!(!serialized.contains("not JSON"));
     }
 
     #[test]

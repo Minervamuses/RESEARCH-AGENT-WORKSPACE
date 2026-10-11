@@ -232,6 +232,10 @@ impl ProtocolViolation {
         self.code
     }
 
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     fn invalid(message: impl Into<String>) -> Self {
         Self {
             code: "PROTOCOL_INVALID",
