@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from skills.citation.doi import canonicalize_doi
+from skills.citation.providers.crossref import version_kind_from_metadata
 from skills.citation.providers.net import (
     DOI_TTL_SECONDS,
     AsyncRateLimiter,
@@ -53,6 +54,7 @@ class StructuredRecord:
     work_type: str = ""
     url: str | None = None
     registration_agency: str = ""
+    version_kind: str = "unknown"
 
 
 def _authors_from_csl(raw: list | None) -> list[str]:
@@ -94,6 +96,7 @@ def parse_csl(doi: str, payload: dict) -> StructuredRecord:
         venue=_csl_text(payload.get("container-title")),
         work_type=_csl_text(payload.get("type")),
         url=payload.get("URL") or None,
+        version_kind=version_kind_from_metadata(payload),
     )
 
 

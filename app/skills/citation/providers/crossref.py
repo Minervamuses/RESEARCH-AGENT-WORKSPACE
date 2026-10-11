@@ -239,6 +239,17 @@ def _version_kind(item: dict, relations: dict[str, list[str]]) -> str:
     return "unknown"
 
 
+def version_kind_from_metadata(item: dict) -> str:
+    """Classify a Crossref-shaped record (works item or doi.org CSL JSON).
+
+    doi.org content negotiation for Crossref DOIs keeps Crossref's ``type``,
+    ``subtype``, and ``relation`` fields, so search and exact-DOI saves
+    derive the same version label from the same evidence.
+    """
+    relations, _edges = _parse_relations(item)
+    return _version_kind(item, relations)
+
+
 def parse_work_item(item: dict, rank: int) -> ProviderRecord | None:
     """Normalize one Crossref ``works`` item; None when it has no DOI."""
     doi = canonicalize_doi(item.get("DOI"))

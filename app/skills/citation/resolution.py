@@ -484,7 +484,15 @@ class WorkResolver:
             doi=csl.doi,
             url=csl.url,
             work_type=csl.work_type,
-            version_kind=("preprint" if "arxiv" in identifiers else ""),
+            # Same evidence the search result used; "unknown" falls back to
+            # infer_version_kind's descriptive heuristics.
+            version_kind=(
+                "preprint"
+                if "arxiv" in identifiers
+                else csl.version_kind
+                if csl.version_kind in {"published", "preprint"}
+                else ""
+            ),
             identifiers=identifiers,
             aliases=(doi,) if csl.doi != doi else (),
             field_provenance={
