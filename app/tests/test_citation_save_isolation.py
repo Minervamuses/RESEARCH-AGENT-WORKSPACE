@@ -1,14 +1,21 @@
-"""Fault injection: one item's unexpected exception never sinks the batch."""
+"""Fault injection: isolated per-item failures and classified provider errors."""
 
 import asyncio
 import json
 import logging
 from pathlib import Path
 
+import pytest
+
 from skills.citation import service as service_module
 from skills.citation.hub import CitationProviderHub
 from skills.citation.providers.base import BibliographicQuery
-from skills.citation.providers.net import FetchResponse, ProviderError
+from skills.citation.providers.net import (
+    FetchResponse,
+    ProviderError,
+    ProviderTimeout,
+    TransportFailure,
+)
 from skills.citation.resolution import WorkIdentifier, WorkIntent, WorkResolver
 from skills.citation.service import CitationService
 from tests.citation_fixtures import CSL, DOI_A, DOI_B, RoutingFetcher
@@ -166,7 +173,7 @@ def test_search_isolates_an_unexpected_provider_exception(tmp_path, caplog):
         records, states = asyncio.run(service.search("paper"))
 
     assert [record.doi for record in records] == [DOI_A, DOI_B]
-    assert states == ["crossref:ok", "datacite:internal_error"]
+    assert states == ["crossref:ok", "datacite:internal_error(TypeError)"]
     assert any(record.exc_info for record in caplog.records)
 
 
@@ -223,3 +230,127 @@ def test_non_object_csl_payload_is_a_provider_error(tmp_path):
         (_intent("A", DOI_A),)
     ))
     assert _statuses(outcome) == [("verification_failed", "doi_refetch_failed")]
+
+
+class _FaultyDoiFetcher(_ThreePaperFetcher):
+    """Serve scripted outcomes for one DOI and media type; others normally."""
+
+    def __init__(self, doi, accept_marker, outcomes):
+        super().__init__()
+        self.target = (f"https://doi.org/{doi}", accept_marker)
+        self.outcomes = list(outcomes)
+
+    async def __call__(self, url, headers):
+        if url == self.target[0] and self.target[1] in headers["Accept"]:
+            outcome = self.outcomes.pop(0) if self.outcomes else FetchResponse(500)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+        return await super().__call__(url, headers)
+
+
+def _refused():
+    return TransportFailure("ConnectError", "connection refused", retryable=True)
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "expected"),
+    [
+        ([_refused() for _ in range(3)], ("provider_failed", "doi_refetch_network_error")),
+        ([FetchResponse(503)] * 3, ("provider_failed", "doi_refetch_server_error")),
+        ([FetchResponse(429)] * 3, ("provider_failed", "doi_refetch_rate_limited")),
+        ([FetchResponse(403)], ("verification_failed", "doi_refetch_failed")),
+        ([FetchResponse(404)], ("not_found", "exact_doi_not_found")),
+    ],
+)
+def test_exact_doi_lookup_failures_are_classified(
+    tmp_path, no_citation_backoff, outcomes, expected,
+):
+    fetcher = _FaultyDoiFetcher(DOI_B, "csl+json", outcomes)
+    service = _service(tmp_path, fetcher)
+
+    outcome = asyncio.run(service.save((_intent("A", DOI_A), _intent("B", DOI_B))))
+
+    assert _statuses(outcome) == [("saved", "saved_new"), expected]
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "expected"),
+    [
+        ([_refused() for _ in range(3)], ("provider_failed", "bibtex_lookup_network_error")),
+        (
+            [asyncio.TimeoutError("slow"), asyncio.TimeoutError("slow")],
+            ("provider_failed", "bibtex_lookup_timeout"),
+        ),
+        ([FetchResponse(404)], ("verification_failed", "bibtex_lookup_failed")),
+        (
+            [FetchResponse(200, body=b"not bibtex")],
+            ("verification_failed", "not_exactly_one_entry"),
+        ),
+    ],
+)
+def test_bibtex_failures_are_classified(tmp_path, no_citation_backoff, outcomes, expected):
+    fetcher = _FaultyDoiFetcher(DOI_A, "x-bibtex", outcomes)
+    service = _service(tmp_path, fetcher)
+
+    outcome = asyncio.run(service.save((_intent("A", DOI_A), _intent("C", DOI_C))))
+
+    assert _statuses(outcome) == [expected, ("saved", "saved_new")]
+
+
+def test_transient_authority_failure_is_classified(tmp_path):
+    service = _service(tmp_path, _ThreePaperFetcher())
+
+    class Authority:
+        async def resolve(self, _intent):
+            raise ProviderTimeout("arxiv", "slow")
+
+    service.authorities = Authority()
+    outcome = asyncio.run(service.save((WorkIntent(
+        "preprint", identifiers=(WorkIdentifier("arxiv", "2001.00001"),),
+    ),)))
+
+    assert _statuses(outcome) == [("provider_failed", "authority_lookup_timeout")]
+
+
+def test_search_states_name_the_failing_provider_and_cause(tmp_path, no_citation_backoff):
+    import httpx
+
+    from tests.test_citation_hub import _hub_with_transport
+
+    def handler(request):
+        if request.url.host == "api.crossref.org":
+            return httpx.Response(503)
+        raise httpx.ConnectError("connection refused", request=request)
+
+    async def scenario():
+        hub = _hub_with_transport(handler)
+        try:
+            service = CitationService(hub, output_dir=tmp_path / "cite")
+            return await service.search("paper")
+        finally:
+            await hub.aclose()
+
+    records, states = asyncio.run(scenario())
+
+    assert records == []
+    assert states == [
+        "crossref:server_error(503)",
+        "datacite:network_error(ConnectError)",
+    ]
+
+
+def test_search_tool_does_not_present_total_failure_as_no_results(tmp_path):
+    from skills.citation.tool import create_citation_workflow_tool
+
+    class Service:
+        async def search(self, _query, *, date_filter=None):
+            return [], ["crossref:timeout", "datacite:server_error(502)"]
+
+    tool = create_citation_workflow_tool(service_getter=Service)
+    content = asyncio.run(tool.ainvoke({"action": "search", "query": "paper"}))
+
+    assert content.startswith("Search failed: no provider answered successfully")
+    assert "crossref:timeout; datacite:server_error(502)" in content
+    assert "not evidence that the work does not exist" in content
+    assert "No bibliographic records found" not in content

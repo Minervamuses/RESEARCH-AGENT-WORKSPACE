@@ -12,7 +12,12 @@ from skills.citation.authority import AuthorityRecord, AuthorityRegistry, export
 from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
 from skills.citation.doi import canonicalize_doi, doi_equal
 from skills.citation.providers.base import ProviderRecord
-from skills.citation.providers.net import ProviderError
+from skills.citation.providers.net import (
+    TRANSIENT_FAILURE_KINDS,
+    ProviderError,
+    describe_failure,
+    failure_kind,
+)
 from skills.citation.resolution import (
     WorkIntent,
     WorkResolver,
@@ -64,8 +69,13 @@ class CitationService:
                     rows=min(rows, 20),
                     date_filter=date_filter,
                 ), f"{name}:ok"
-            except ProviderError:
-                return [], f"{name}:error"
+            except ProviderError as exc:
+                logger.warning(
+                    "citation search provider %s failed: %s",
+                    name,
+                    describe_failure(exc),
+                )
+                return [], f"{name}:{describe_failure(exc)}"
             except Exception as exc:
                 logger.error(
                     "citation search provider %s failed unexpectedly: %s",
@@ -73,7 +83,7 @@ class CitationService:
                     type(exc).__name__,
                     exc_info=exc,
                 )
-                return [], f"{name}:internal_error"
+                return [], f"{name}:internal_error({type(exc).__name__})"
 
         results = await asyncio.gather(*(call(name, provider) for name, provider in providers))
         states = [state for _records, state in results]
@@ -120,6 +130,14 @@ class CitationService:
             outcomes[index] = await self._persist_item(
                 batch_id, index, intent, record, resolution_reason
             )
+        for item in outcomes:
+            logger.info(
+                "citation save batch %s item %d: %s/%s",
+                batch_id,
+                item.request_index,
+                item.status,
+                item.reason_code,
+            )
         return SaveBatchOutcome(batch_id, tuple(outcomes))
 
     async def _plan_item(
@@ -129,6 +147,18 @@ class CitationService:
         decision = resolution.decision
         if decision.status == "eligible" and decision.record is not None:
             return decision.record, decision.reason_code
+        if resolution.provider_states:
+            logger.info(
+                "citation resolution item %d: %s/%s providers=%s",
+                index,
+                decision.status,
+                decision.reason_code,
+                ", ".join(
+                    f"{state.provider}:{state.status}"
+                    + (f"({state.detail})" if state.detail else "")
+                    for state in resolution.provider_states
+                ),
+            )
         # An exact DOI is the selected target. Never replace a failed DOI
         # lookup (or conflicting identifier set) with a different
         # authority identity merely because descriptive fields resemble it.
@@ -147,12 +177,20 @@ class CitationService:
         ):
             try:
                 authority = await self.authorities.resolve(intent)
-            except ProviderError:
+            except ProviderError as exc:
+                kind = failure_kind(exc)
+                logger.warning(
+                    "citation authority lookup via %s failed: %s",
+                    exc.provider,
+                    describe_failure(exc),
+                )
                 return SaveItemOutcome(
                     index,
                     intent.requested_label,
                     "provider_failed",
-                    "authority_lookup_failed",
+                    f"authority_lookup_{kind}"
+                    if kind in TRANSIENT_FAILURE_KINDS
+                    else "authority_lookup_failed",
                 )
         if authority is not None:
             authority_record = ProviderRecord(
@@ -247,9 +285,26 @@ class CitationService:
                         canonical = inject_doi(canonical, record.doi)
                     elif not doi_equal(canonical.doi, record.doi):
                         raise BibtexValidationError("bibtex_doi_mismatch", "DOI mismatch")
-                except (ProviderError, BibtexValidationError) as exc:
-                    code = getattr(exc, "code", "bibtex_lookup_failed")
-                    return SaveItemOutcome(index, intent.requested_label, "verification_failed", code)
+                except ProviderError as exc:
+                    kind = failure_kind(exc)
+                    logger.warning(
+                        "citation BibTeX lookup via doi.org failed: %s",
+                        describe_failure(exc),
+                    )
+                    if kind in TRANSIENT_FAILURE_KINDS:
+                        return SaveItemOutcome(
+                            index, intent.requested_label,
+                            "provider_failed", f"bibtex_lookup_{kind}",
+                        )
+                    return SaveItemOutcome(
+                        index, intent.requested_label,
+                        "verification_failed", "bibtex_lookup_failed",
+                    )
+                except BibtexValidationError as exc:
+                    logger.warning("citation BibTeX validation failed: %s", exc.code)
+                    return SaveItemOutcome(
+                        index, intent.requested_label, "verification_failed", exc.code,
+                    )
                 identity = CanonicalIdentity("doi", record.doi)
                 sid = source_id_for(identity)
                 ref = SourceRef(

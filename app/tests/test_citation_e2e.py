@@ -482,14 +482,16 @@ def test_save_reporting_reaches_model_history_and_cli(
         "all_success": [["reused", "saved"]],
         "all_failure": [["verification_failed"]],
         "mixed": [["saved", "verification_failed"]],
-        "retry": [["verification_failed"], ["saved"]],
+        "retry": [["provider_failed"], ["saved"]],
     }[scenario]
     assert [[item.status for item in batch.items] for batch in batches] == expected
     for batch in batches:
         for item in batch.items:
             if item.receipt is None:
                 assert item.reason_code == (
-                    "bibtex_lookup_failed" if scenario == "retry" else "bibtex_doi_mismatch"
+                    "bibtex_lookup_server_error"
+                    if scenario == "retry"
+                    else "bibtex_doi_mismatch"
                 )
                 assert f"：失敗（{item.reason_code}）。" in answer
             else:

@@ -420,3 +420,40 @@ def test_default_backoff_sleep_is_a_patchable_module_seam(monkeypatch):
     _run(fetch_with_retries(fetch, provider="crossref", limiter=_limiter()))
 
     assert len(slept) == 1
+
+
+def test_failure_kind_separates_transient_from_deterministic_failures():
+    from skills.citation.providers.net import (
+        TRANSIENT_FAILURE_KINDS,
+        ProviderDisabled,
+        ProviderError,
+        describe_failure,
+        failure_kind,
+    )
+
+    cases = [
+        (ProviderRateLimited("crossref", "429"), "rate_limited", "rate_limited"),
+        (ProviderTimeout("crossref", "slow"), "timeout", "timeout"),
+        (
+            ProviderNetworkError("doi.org", "refused", exc_type="ConnectError"),
+            "network_error",
+            "network_error(ConnectError)",
+        ),
+        (
+            ProviderNetworkError(
+                "doi.org", "loop", exc_type="TooManyRedirects", retryable=False,
+            ),
+            "transport_error",
+            "transport_error(TooManyRedirects)",
+        ),
+        (ProviderHTTPError("datacite", 503), "server_error", "server_error(503)"),
+        (ProviderHTTPError("datacite", 403), "http_error", "http_error(403)"),
+        (ProviderDisabled("openalex", "no key"), "disabled", "disabled"),
+        (ProviderError("crossref", "unparseable"), "error", "error"),
+    ]
+    for exc, kind, description in cases:
+        assert failure_kind(exc) == kind
+        assert describe_failure(exc) == description
+    assert TRANSIENT_FAILURE_KINDS == {
+        "rate_limited", "timeout", "network_error", "server_error",
+    }

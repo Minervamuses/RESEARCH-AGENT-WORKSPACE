@@ -173,6 +173,13 @@ def _error(message: str) -> str:
 
 def _format_records(records, states) -> str:
     if not records:
+        if states and not any(state.endswith(":ok") for state in states):
+            return (
+                "Search failed: no provider answered successfully ("
+                + "; ".join(states)
+                + "). This is not evidence that the work does not exist; "
+                "retry the search later."
+            )
         return "No bibliographic records found. " + "; ".join(states)
     lines = [f"Found {len(records)} bibliographic record(s):"]
     for record in records:

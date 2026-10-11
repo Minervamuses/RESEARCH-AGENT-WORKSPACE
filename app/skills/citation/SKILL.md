@@ -55,6 +55,14 @@ task; visible prior conversation still supplies metadata and authorization.
 - Multiple save calls are allowed in one user turn and are serialized. Use
   another search or save when the returned outcome gives a concrete reason to
   correct or retry; never claim success before the tool reports it.
+- The workflow already retries transient provider trouble. `provider_failed`
+  (reason codes ending in `_timeout`, `_network_error`, `_server_error`, or
+  `_rate_limited`) means a provider stayed unavailable; retry that item at
+  most once, otherwise say it can be retried later. `internal_error` is an
+  unexpected local failure: report it with the batch's `batch_id` instead of
+  retrying. Other failures are not fixed by repeating the same request.
+- A search result that starts with `Search failed` means no provider
+  answered; it is not evidence that the work does not exist.
 - Prefer an exact visible DOI/arXiv identifier. Without one, provide enough
   descriptive fields for a best match. The workflow still verifies the chosen
   provider record against authoritative metadata before persistence.

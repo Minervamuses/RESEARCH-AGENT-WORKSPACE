@@ -21,10 +21,11 @@ from skills.citation.normalize import normalize_title
 from skills.citation.providers.base import BibliographicQuery, ProviderRecord
 from skills.citation.providers.doi_org import DoiNotFound
 from skills.citation.providers.net import (
+    TRANSIENT_FAILURE_KINDS,
     ProviderDisabled,
     ProviderError,
-    ProviderRateLimited,
-    ProviderTimeout,
+    describe_failure,
+    failure_kind,
 )
 from skills.citation.types import ProviderState
 
@@ -392,6 +393,20 @@ def decide_resolution(
     return eligible[0]
 
 
+def _provider_state(provider: str, exc: ProviderError) -> ProviderState:
+    kind = failure_kind(exc)
+    status = kind if kind in {"rate_limited", "timeout", "disabled"} else "error"
+    return ProviderState(provider, status, describe_failure(exc))
+
+
+def _refetch_failure(exc: ProviderError) -> ResolutionDecision:
+    """Transient doi.org failures are provider failures; others fail verification."""
+    kind = failure_kind(exc)
+    if kind in TRANSIENT_FAILURE_KINDS:
+        return ResolutionDecision("provider_failed", f"doi_refetch_{kind}")
+    return ResolutionDecision("verification_failed", "doi_refetch_failed")
+
+
 class WorkResolver:
     """Resolve exact identifiers or perform bounded descriptive discovery."""
 
@@ -444,20 +459,12 @@ class WorkResolver:
                 ResolutionDecision("not_found", "exact_doi_not_found"),
                 (ProviderState("doi.org", "empty"),),
             )
-        except ProviderRateLimited:
-            return WorkResolution(
-                ResolutionDecision("provider_failed", "doi_refetch_rate_limited"),
-                (ProviderState("doi.org", "rate_limited"),),
+        except ProviderError as exc:
+            logger.warning(
+                "citation DOI lookup via doi.org failed: %s", describe_failure(exc)
             )
-        except ProviderTimeout:
             return WorkResolution(
-                ResolutionDecision("provider_failed", "doi_refetch_timeout"),
-                (ProviderState("doi.org", "timeout"),),
-            )
-        except ProviderError:
-            return WorkResolution(
-                ResolutionDecision("verification_failed", "doi_refetch_failed"),
-                (ProviderState("doi.org", "error"),),
+                _refetch_failure(exc), (_provider_state("doi.org", exc),),
             )
         identifiers = {"doi": csl.doi}
         arxiv_match = re.fullmatch(r"10\.48550/arxiv\.(.+)", doi, re.IGNORECASE)
@@ -530,12 +537,13 @@ class WorkResolver:
                 return records, ProviderState(name, "ok" if records else "empty")
             except ProviderDisabled:
                 return [], ProviderState(name, "disabled")
-            except ProviderRateLimited:
-                return [], ProviderState(name, "rate_limited")
-            except ProviderTimeout:
-                return [], ProviderState(name, "timeout")
-            except ProviderError:
-                return [], ProviderState(name, "error")
+            except ProviderError as exc:
+                logger.warning(
+                    "citation resolver provider %s failed: %s",
+                    name,
+                    describe_failure(exc),
+                )
+                return [], _provider_state(name, exc)
             except Exception as exc:
                 logger.error(
                     "citation resolver provider %s failed unexpectedly: %s",
@@ -581,20 +589,13 @@ class WorkResolver:
 
         try:
             csl = await self._doi_org.fetch_structured(winner.doi)
-        except ProviderRateLimited:
-            return WorkResolution(
-                ResolutionDecision("provider_failed", "doi_refetch_rate_limited"),
-                states + (ProviderState("doi.org", "rate_limited"),),
+        except ProviderError as exc:
+            logger.warning(
+                "citation DOI refetch via doi.org failed: %s", describe_failure(exc)
             )
-        except ProviderTimeout:
             return WorkResolution(
-                ResolutionDecision("provider_failed", "doi_refetch_timeout"),
-                states + (ProviderState("doi.org", "timeout"),),
-            )
-        except ProviderError:
-            return WorkResolution(
-                ResolutionDecision("verification_failed", "doi_refetch_failed"),
-                states + (ProviderState("doi.org", "error"),),
+                _refetch_failure(exc),
+                states + (_provider_state("doi.org", exc),),
             )
 
         # Verify the discovery provider's DOI/title pair, not the model's

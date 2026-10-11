@@ -103,6 +103,43 @@ class TransportFailure(Exception):
         self.retryable = retryable
 
 
+TRANSIENT_FAILURE_KINDS = frozenset({
+    "rate_limited", "timeout", "network_error", "server_error",
+})
+
+
+def failure_kind(exc: ProviderError) -> str:
+    """Return a stable, free-text-free category for a provider failure.
+
+    ``rate_limited``, ``timeout``, ``network_error`` (retryable transport),
+    and ``server_error`` (HTTP 5xx) are transient: retries were already
+    exhausted, but the same request may succeed later. ``http_error`` (4xx),
+    ``transport_error`` (non-retryable transport), ``disabled``, and
+    ``error`` (unparseable or invalid responses) are not.
+    """
+    if isinstance(exc, ProviderRateLimited):
+        return "rate_limited"
+    if isinstance(exc, ProviderTimeout):
+        return "timeout"
+    if isinstance(exc, ProviderNetworkError):
+        return "network_error" if exc.retryable else "transport_error"
+    if isinstance(exc, ProviderDisabled):
+        return "disabled"
+    if isinstance(exc, ProviderHTTPError):
+        return "server_error" if exc.status >= 500 else "http_error"
+    return "error"
+
+
+def describe_failure(exc: ProviderError) -> str:
+    """``failure_kind`` plus the HTTP status or exception type, for diagnostics."""
+    kind = failure_kind(exc)
+    if isinstance(exc, ProviderHTTPError):
+        return f"{kind}({exc.status})"
+    if isinstance(exc, ProviderNetworkError) and exc.exc_type:
+        return f"{kind}({exc.exc_type})"
+    return kind
+
+
 def redact(text: str, *secrets: str | None) -> str:
     """Blank out every secret occurrence in ``text`` (for traces/logs)."""
     out = text
