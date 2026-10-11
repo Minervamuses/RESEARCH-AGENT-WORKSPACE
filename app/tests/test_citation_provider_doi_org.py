@@ -143,3 +143,18 @@ def test_parse_csl_missing_fields_are_empty_never_guessed():
     assert record.title == ""
     assert record.authors == []
     assert record.year is None
+
+
+def test_parse_csl_reads_list_valued_title_and_container_title():
+    record = parse_csl("10.1101/2020.03.22.002386", {
+        "DOI": "10.1101/2020.03.22.002386",
+        "title": ["A bioRxiv Preprint"],
+        "container-title": [],
+        "type": "posted-content",
+    })
+    assert record.title == "A bioRxiv Preprint"
+    assert record.venue == ""
+
+    journal = parse_csl("10.1234/x", {"title": "T", "container-title": ["Journal X", "J. X"]})
+    assert journal.venue == "Journal X"
+    assert "[" not in journal.venue

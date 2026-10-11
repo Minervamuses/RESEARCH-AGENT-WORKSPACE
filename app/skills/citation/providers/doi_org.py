@@ -68,6 +68,13 @@ def _authors_from_csl(raw: list | None) -> list[str]:
     return authors
 
 
+def _csl_text(value: object) -> str:
+    """CSL text fields may be a string or a list of strings (first wins)."""
+    if isinstance(value, list):
+        value = next((item for item in value if isinstance(item, str) and item), "")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def parse_csl(doi: str, payload: dict) -> StructuredRecord:
     """Normalize a CSL JSON body into a StructuredRecord."""
     year = None
@@ -81,11 +88,11 @@ def parse_csl(doi: str, payload: dict) -> StructuredRecord:
     record_doi = canonicalize_doi(payload.get("DOI")) or doi
     return StructuredRecord(
         doi=record_doi,
-        title=str(payload.get("title", "") or ""),
+        title=_csl_text(payload.get("title")),
         authors=_authors_from_csl(payload.get("author")),
         year=year,
-        venue=str(payload.get("container-title", "") or ""),
-        work_type=str(payload.get("type", "") or ""),
+        venue=_csl_text(payload.get("container-title")),
+        work_type=_csl_text(payload.get("type")),
         url=payload.get("URL") or None,
     )
 
