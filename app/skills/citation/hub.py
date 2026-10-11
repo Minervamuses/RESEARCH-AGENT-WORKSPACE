@@ -19,10 +19,34 @@ import threading
 from skills.citation.providers.crossref import CrossrefClient
 from skills.citation.providers.datacite import DataCiteClient, MAX_RESPONSE_BYTES
 from skills.citation.providers.doi_org import DoiOrgClient
-from skills.citation.providers.net import AsyncRateLimiter, FetchResponse, TTLCache
+from skills.citation.providers.net import (
+    AsyncRateLimiter,
+    FetchResponse,
+    TransportFailure,
+    TTLCache,
+)
 from skills.citation.providers.openalex import OpenAlexClient
 
 _HTTP_TIMEOUT_SECONDS = 25.0
+
+
+def _normalize_httpx_error(exc: Exception) -> Exception:
+    """Map an httpx failure to the provider-neutral transport contract.
+
+    Timeouts keep their existing ``asyncio.TimeoutError`` route. Connection
+    refusal/reset and server disconnects are transient; redirect loops,
+    content-decoding failures, and local protocol misuse are deterministic.
+    """
+    import httpx
+
+    if isinstance(exc, httpx.TimeoutException):
+        return asyncio.TimeoutError(str(exc))
+    retryable = isinstance(exc, (httpx.NetworkError, httpx.RemoteProtocolError))
+    return TransportFailure(
+        type(exc).__name__,
+        str(exc) or type(exc).__name__,
+        retryable=retryable,
+    )
 
 
 class CitationProviderHub:
@@ -115,9 +139,9 @@ class CitationProviderHub:
         client = self._get_http_client()
         try:
             response = await client.get(url, headers=headers)
-        except httpx.TimeoutException as exc:
-            # Normalized so fetch_with_retries maps it to ProviderTimeout.
-            raise asyncio.TimeoutError(str(exc)) from exc
+        except httpx.HTTPError as exc:
+            # Normalized so fetch_with_retries maps it to a ProviderError.
+            raise _normalize_httpx_error(exc) from exc
         return FetchResponse(
             status=response.status_code,
             headers=dict(response.headers),
@@ -150,8 +174,8 @@ class CitationProviderHub:
                     headers=dict(response.headers),
                     body=b"".join(chunks),
                 )
-        except httpx.TimeoutException as exc:
-            raise asyncio.TimeoutError(str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise _normalize_httpx_error(exc) from exc
 
     async def aclose(self) -> None:
         if self._http_client is not None:

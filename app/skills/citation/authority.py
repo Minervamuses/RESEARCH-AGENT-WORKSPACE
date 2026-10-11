@@ -15,7 +15,9 @@ from skills.citation.normalize import normalize_title
 from skills.citation.providers.net import (
     ProviderError,
     ProviderHTTPError,
+    ProviderNetworkError,
     ProviderTimeout,
+    TransportFailure,
 )
 from skills.citation.resolution import WorkIntent, normalize_arxiv
 from skills.citation.types import CanonicalIdentity
@@ -74,6 +76,10 @@ class AuthorityRegistry:
             raise
         except (asyncio.TimeoutError, TimeoutError) as exc:
             raise ProviderTimeout("arxiv", "request timed out") from exc
+        except TransportFailure as exc:
+            raise ProviderNetworkError(
+                "arxiv", exc.detail, exc_type=exc.exc_type, retryable=exc.retryable
+            ) from exc
         if response.status >= 400:
             if response.status == 404:
                 return None

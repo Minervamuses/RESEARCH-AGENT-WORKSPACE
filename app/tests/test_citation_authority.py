@@ -51,6 +51,22 @@ def test_arxiv_authority_rejects_a_mismatched_returned_identifier():
     assert record is None
 
 
+def test_arxiv_transport_failure_becomes_a_provider_network_error():
+    from skills.citation.providers.net import ProviderNetworkError, TransportFailure
+
+    async def fetch(_url, _headers):
+        raise TransportFailure("ConnectError", "connection refused", retryable=True)
+
+    registry = AuthorityRegistry(fetcher=fetch)
+    with pytest.raises(ProviderNetworkError) as exc:
+        asyncio.run(registry.resolve(WorkIntent(
+            "x", identifiers=(WorkIdentifier("arxiv", "2001.00001"),),
+        )))
+
+    assert exc.value.provider == "arxiv"
+    assert exc.value.exc_type == "ConnectError"
+
+
 def test_neurips_adapter_is_exact_allowlisted_metadata():
     async def no_fetch(url, headers):
         raise AssertionError("network not expected")

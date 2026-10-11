@@ -58,6 +58,38 @@ class ProviderDisabled(ProviderError):
     pass
 
 
+class ProviderNetworkError(ProviderError):
+    """The request failed below HTTP: connect, reset, or protocol breakage."""
+
+    def __init__(
+        self,
+        provider: str,
+        detail: str,
+        *,
+        exc_type: str = "",
+        retryable: bool = True,
+    ):
+        super().__init__(provider, detail)
+        self.exc_type = exc_type
+        self.retryable = retryable
+
+
+class TransportFailure(Exception):
+    """Provider-neutral transport failure raised by an injected fetcher.
+
+    Fetchers are shared across providers, so they cannot name the provider;
+    :func:`fetch_with_retries` maps this to :class:`ProviderNetworkError`.
+    ``retryable`` marks transient breakage (connection refused/reset, server
+    disconnect) as opposed to deterministic failures such as redirect loops.
+    """
+
+    def __init__(self, exc_type: str, detail: str, *, retryable: bool):
+        super().__init__(f"{exc_type}: {detail}")
+        self.exc_type = exc_type
+        self.detail = detail
+        self.retryable = retryable
+
+
 def redact(text: str, *secrets: str | None) -> str:
     """Blank out every secret occurrence in ``text`` (for traces/logs)."""
     out = text
@@ -224,7 +256,8 @@ async def fetch_with_retries(
 
     Retries at most ``max_retries`` times with jitter; any other non-2xx
     status raises :class:`ProviderHTTPError`, timeouts raise
-    :class:`ProviderTimeout`. Callers cache only successful results.
+    :class:`ProviderTimeout`, and transport failures raise
+    :class:`ProviderNetworkError`. Callers cache only successful results.
     """
     rng = rng or random.Random()
     attempt = 0
@@ -234,6 +267,13 @@ async def fetch_with_retries(
                 response = await fetch()
             except (asyncio.TimeoutError, TimeoutError) as exc:
                 raise ProviderTimeout(provider, f"request timed out: {exc}") from exc
+            except TransportFailure as exc:
+                raise ProviderNetworkError(
+                    provider,
+                    exc.detail,
+                    exc_type=exc.exc_type,
+                    retryable=exc.retryable,
+                ) from exc
         limiter.update_from_headers(response.headers)
         if response.status == 429:
             retry_after = _parse_retry_after(response.headers)
