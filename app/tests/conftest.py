@@ -213,6 +213,15 @@ def offline_rag_config(monkeypatch):
     rag_cache_module._json_store_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_diagnostic_log_dir(monkeypatch, tmp_path_factory):
+    """Keep diagnostic logs written by entry points or child backends out of
+    the real user state directory."""
+    monkeypatch.setenv(
+        "AGENT_LOG_DIR", str(tmp_path_factory.getbasetemp() / "agent-logs")
+    )
+
+
 @pytest.fixture
 def no_citation_backoff(monkeypatch):
     """Skip real retry backoff sleeps in citation provider calls."""

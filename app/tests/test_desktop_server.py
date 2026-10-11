@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -831,3 +832,30 @@ def test_exact_fixture_gate_refuses_startup_without_caller_root(
 
     with pytest.raises(FixtureConfigurationError, match="is required"):
         _build_runtime_service(tmp_path)
+
+
+def test_bootstrap_failure_is_recorded_in_the_diagnostic_log(
+    monkeypatch, tmp_path, capsys,
+):
+    from agent import diagnostics
+    from agent.desktop import server
+
+    monkeypatch.setenv("AGENT_LOG_DIR", str(tmp_path))
+
+    def broken_runtime(_name):
+        raise RuntimeError("bootstrap exploded")
+
+    monkeypatch.setattr(server, "require_conda_runtime", broken_runtime)
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            server.main()
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        text = (tmp_path / "desktop-backend.log").read_text(encoding="utf-8")
+    finally:
+        diagnostics.uninstall_diagnostic_log()
+
+    assert exc_info.value.code == 1
+    assert "Desktop backend bootstrap failed" in text
+    assert "RuntimeError: bootstrap exploded" in text
+    assert '"code":"INTERNAL_ERROR"' in capsys.readouterr().out

@@ -522,3 +522,24 @@ def test_chat_cli_slash_quit_exits_without_agent_turn(monkeypatch):
     _run_cli(monkeypatch, session, ["/quit"])
 
     assert session.calls == []
+
+
+def test_chat_cli_main_installs_the_diagnostic_log(monkeypatch):
+    from agent.cli import chat
+
+    calls = []
+    monkeypatch.setattr("sys.argv", ["chat", "--no-mcp"])
+    monkeypatch.setattr(chat, "require_conda_runtime", lambda _name: None)
+    monkeypatch.setattr(
+        chat,
+        "install_diagnostic_log",
+        lambda component, *, echo_stderr: calls.append((component, echo_stderr)),
+    )
+
+    async def fake_run(args):
+        calls.append(("run", args.no_mcp))
+
+    monkeypatch.setattr(chat, "_run", fake_run)
+    chat.main()
+
+    assert calls == [("cli", True), ("run", True)]

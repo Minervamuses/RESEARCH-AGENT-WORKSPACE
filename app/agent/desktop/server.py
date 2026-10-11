@@ -23,6 +23,7 @@ from agent.desktop.protocol import (
     request_event,
     request_id_from_invalid_line,
 )
+from agent.diagnostics import install_diagnostic_log
 from agent.paths import find_app_root
 
 
@@ -425,6 +426,9 @@ def main() -> None:
     protocol_stdout = sys.stdout
     protocol_stdin = sys.stdin.buffer
     sys.stdout = sys.stderr
+    # Records go to the diagnostic log file; the Rust supervisor persists any
+    # raw stderr (crashes before or outside logging) separately.
+    install_diagnostic_log("desktop-backend", echo_stderr=False)
     original_cwd = Path.cwd().resolve()
     try:
         require_conda_runtime("app")

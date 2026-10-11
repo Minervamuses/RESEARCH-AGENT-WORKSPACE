@@ -20,6 +20,7 @@ from agent.cli.slash_commands import (
     parse_slash_command,
 )
 from agent.config import AgentConfig, validate_graph_recursion_limit
+from agent.diagnostics import install_diagnostic_log
 from agent.session import ChatSession
 from agent.turns.safety import build_recovery_message
 
@@ -268,6 +269,7 @@ def main():
         require_conda_runtime("app")
     except CondaRuntimeError as exc:
         parser.error(str(exc))
+    install_diagnostic_log("cli", echo_stderr=True)
     asyncio.run(_run(args))
 
 
