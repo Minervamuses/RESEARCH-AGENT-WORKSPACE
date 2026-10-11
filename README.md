@@ -504,11 +504,11 @@ citation 是內建 skill(engine 位於 `app/skills/citation/`)。`/citation` 啟
 - 停用/切換 skill 立即清除 session 來源 registry(已寫入磁碟的 bundle 保留);citation hint、renderer 與工具同時消失。
 - `citation_workflow` 是 skill 專屬工具:普通模式與其他 skills 完全綁不到,偽造的 tool call 也會被執行層(PolicyToolNode)拒絕。
 - 每個 `save(works=[...])` 可帶 1–10 個 WorkIntent；同一 user turn 可以依工具結果再搜尋、修正或重試，多個 save 會序列化執行，不再有 one-shot mutation guard。
-- 搜尋結果沒有 cX/mX 或持久 candidate pool，但會顯示完整 title/authors/year/venue/type/version 及 DOI/arXiv。模型可理解對話中的「1」「第一篇」「正式版」等指稱，再用可見 metadata/identifier 建立 WorkIntent。
+- 搜尋結果沒有 cX/mX 或持久 candidate pool；每筆記錄是一個編號區塊，title/authors/year/venue/type/version 與該記錄自己的 DOI/arXiv 綁在一起。模型可理解對話中的「1」「第一篇」「正式版」等指稱，對應到該區塊後採 **DOI-first**:WorkIntent 只需 `requested_label` 加上該記錄的 DOI/arXiv,不必重組書目欄位；只有完全沒有 identifier 的作品才分欄傳入 metadata。
 - 作品、版本與寫入授權由 agent 依完整可見對話判斷；host 不再只掃描當前一句，也不再用 regex/provenance/binder 覆蓋模型的理解。確有歧義時仍由 agent 自然詢問。
 - Actions 僅有 `search`、`save`、`sources`、`source`、`explain`。`save` 的真實逐項結果與 receipt 直接出現在 tool content，供 agent 如實回覆。
 
-`search` 是探索式搜尋，可帶 `year_from`/`year_to`；年份限制會先送入 Crossref、DataCite 與可用的 OpenAlex，再做本地防禦性過濾。`save` 才執行 agent 已選定的目標：WorkIntent 的 title/authors/year/venue/type/version 分欄傳入，各 provider adapter 自行產生適合的 query plan，而不是共用一串關鍵字。明確 DOI 直接走 doi.org exact lookup；明確 arXiv ID 直接走 export.arxiv.org，兩者都不先做模糊搜尋。
+`search` 是探索式搜尋，可帶 `year_from`/`year_to`；年份限制會先送入 Crossref、DataCite 與可用的 OpenAlex，再做本地防禦性過濾。`save` 才執行 agent 已選定的目標：明確 DOI 直接走 doi.org exact lookup(CSL JSON + BibTeX);明確 arXiv ID 直接走 export.arxiv.org,兩者都不先做模糊搜尋，保存的 version 與搜尋時同一筆記錄的 Crossref type/subtype 判定一致。沒有 identifier 時,WorkIntent 的 title/authors/year/venue/type/version 分欄傳入，各 provider adapter 自行產生適合的 query plan,而不是共用一串關鍵字。
 
 Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bibliographic citation lookup；DataCite 使用 title/creator/publicationYear 欄位查詢並逐步放寬年份；OpenAlex 使用 exact phrase、author/date filters，再條件式放寬。descriptive save 會依 agent 提交的欄位與 `version_kind` 選擇最佳相符記錄；程式不再充當第二個語意授權裁判。選中的 DOI 仍由 doi.org CSL/BibTeX 重新驗證，無 DOI 的作品若命中 trusted authority 仍可保存。`source` 只接受 stable `source_id`。
 
@@ -525,6 +525,7 @@ Crossref 先以 title/author 與寬鬆年份範圍查詢，必要時才退回 bi
 - **驗證**:DOI winner 必須由 doi.org refetch，BibTeX 經 pybtex canonical round-trip，identity-critical 衝突一律零寫入。trusted non-DOI 記錄由 authority adapter 提供 metadata，以 `authority_metadata_verified` 等級保存(BibTeX 同樣走 canonical round-trip)。
 - **保存**:schema v2 canonical identity bundle 使用 source-slot 跨程序鎖、staging+fsync+rename；v1 DOI bundle只驗證／重用，不背景重寫。
 - **Batch result**:tool content 與 strict artifact 都列出逐項 success/reused/ambiguity/not-found/failure；不攜 provider arbitrary prose。artifact 供 telemetry，content 供 agent 判斷下一步及回覆。
+- **網路與失敗隔離**:HTTP 429、502/503/504、可恢復的連線錯誤與 timeout 會有限重試(exponential backoff + jitter,每次重試仍經過該 provider 的限流器);4xx、500、解析或驗證失敗不重試。重試耗盡回報 `provider_failed` 與 `<stage>_<kind>` reason(如 `bibtex_lookup_network_error`);搜尋的 provider 狀態寫明原因(如 `crossref:server_error(503)`),全部失敗時明說「Search failed」而非「找不到」。單篇非預期例外只讓該項成為 `internal_error`(`resolution_`/`verification_`/`storage_internal_error`),其他篇照常保存，traceback 以 `batch_id` 記在本機診斷 log。
 - **範圍**:來源 registry 是 session 內、citation 模式內的狀態;canonical turn 不夾帶 SourceRef snapshot或額外 receipt metadata。停用 citation 仍會清除 registry,不會從磁碟 bundle 自動 rehydrate。
 
 ## 12. 疑難排解

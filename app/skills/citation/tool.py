@@ -245,14 +245,16 @@ def _format_source(ref: SourceRef) -> str:
 
 def format_explain(output_dir) -> str:
     return (
-        "search is stateless and returns full metadata plus stable DOI/arXiv "
-        "identifiers without cX/mX IDs. "
-        "save accepts 1–10 self-contained WorkIntent objects, resolves each "
-        "through provider-specific Crossref, DataCite, and optional OpenAlex "
-        "queries when no exact identifier is supplied, verifies authoritative "
-        "metadata and BibTeX before persistence, and returns the actual result "
-        "for every requested item. The agent owns conversational target and "
-        "authorization decisions; bundles are written atomically under "
+        "search is stateless and returns numbered record blocks with full "
+        "metadata plus stable DOI/arXiv identifiers, without cX/mX IDs. "
+        "save accepts 1–10 WorkIntent objects. A DOI goes straight to doi.org "
+        "verification (CSL JSON and BibTeX) without another search; only a "
+        "work without any identifier is resolved through provider-specific "
+        "Crossref, DataCite, and optional OpenAlex queries. Authoritative "
+        "metadata and BibTeX are verified before persistence, and save returns "
+        "the actual result for every requested item. The agent owns "
+        "conversational target and authorization decisions; bundles are "
+        "written atomically under "
         + str(output_dir)
     )
 
