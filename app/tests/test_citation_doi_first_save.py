@@ -111,3 +111,82 @@ def test_doi_only_save_keeps_the_search_records_version(tmp_path, doi, version):
         (tmp_path / "cite").joinpath(receipt.bundle_path, "citation.json").read_text()
     )
     assert sidecar["resolution"]["version_kind"] == version
+
+
+def test_two_turn_selection_saves_the_chosen_record_by_doi_only(monkeypatch, tmp_path):
+    """Turn 1 searches and lists records; turn 2's "第 2 篇" is resolved from
+    the visible list and saved with only its DOI: no fuzzy provider search,
+    and the receipt matches the second listed record."""
+    import re
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from tests.test_citation_e2e import (
+        _fixture_services,
+        _make_session,
+        _save_content,
+        _workflow_call,
+        _workflow_results,
+    )
+
+    class SelectionModel:
+        def __init__(self):
+            self.save_args = None
+            self.receipt = None
+
+        def bind_tools(self, _tools):
+            return self
+
+        def invoke(self, messages):
+            request = [m for m in messages if isinstance(m, HumanMessage)][-1].content
+            results = _workflow_results(messages)
+            if "搜尋" in request:
+                if not results:
+                    return _workflow_call({"action": "search", "query": "paper"}, "search-1")
+                # Present the record blocks verbatim, DOIs included.
+                listing = results[-1].content.split("\nProvider states:")[0]
+                return AIMessage(content="搜尋結果：\n" + listing.split("\n", 1)[1])
+            if not results:
+                prior = next(
+                    m.content for m in reversed(messages)
+                    if isinstance(m, AIMessage) and m.content.startswith("搜尋結果")
+                )
+                block = prior.split("\n2. ", 1)[1].split("\n3. ", 1)[0]
+                doi = re.search(r"DOI: (\S+)", block).group(1)
+                self.save_args = {
+                    "action": "save",
+                    "works": [{
+                        "requested_label": "第 2 篇",
+                        "identifiers": [{"kind": "doi", "value": doi}],
+                    }],
+                }
+                return _workflow_call(self.save_args, "save-1")
+            item = _save_content(results[-1]).items[0]
+            self.receipt = item.receipt
+            return AIMessage(content=f"已保存：{item.status}")
+
+    model = SelectionModel()
+    session = _make_session(monkeypatch, tmp_path, model)
+    fetcher = Fetcher()
+    _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
+
+    asyncio.run(session.turn("/citation 搜尋 paper", skill_name="citation"))
+    listing = session.recent_turns[-1].assistant_output
+    second_block = listing.split("\n2. ", 1)[1].split("\n3. ", 1)[0]
+    calls_before_save = len(fetcher.calls)
+
+    answer = asyncio.run(session.turn("保存第 2 篇", skill_name="citation"))
+
+    save_calls = fetcher.calls[calls_before_save:]
+    assert answer == "已保存：saved"
+    assert all(url.startswith("https://doi.org/") for url, _accept in save_calls)
+    assert sorted(accept for _url, accept in save_calls) == [
+        "application/vnd.citationstyles.csl+json", "application/x-bibtex",
+    ]
+    work = model.save_args["works"][0]
+    assert set(work) == {"requested_label", "identifiers"}
+    receipt = model.receipt
+    assert f"DOI: {receipt.doi}" in second_block
+    assert receipt.title in second_block.splitlines()[0]
+    assert f"year: {receipt.year};" in second_block
+    assert f"version: {receipt.version_kind}" in second_block
