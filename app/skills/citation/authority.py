@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -13,11 +12,11 @@ from pybtex.database import BibliographyData, Entry, Person
 from skills.citation.bibtex_canonical import parse_canonical_bibtex
 from skills.citation.normalize import normalize_title
 from skills.citation.providers.net import (
+    AsyncRateLimiter,
+    FetchResponse,
     ProviderError,
     ProviderHTTPError,
-    ProviderNetworkError,
-    ProviderTimeout,
-    TransportFailure,
+    fetch_with_retries,
 )
 from skills.citation.resolution import WorkIntent, normalize_arxiv
 from skills.citation.types import CanonicalIdentity
@@ -51,8 +50,9 @@ _NEURIPS = {
 
 
 class AuthorityRegistry:
-    def __init__(self, *, fetcher):
+    def __init__(self, *, fetcher, limiter: AsyncRateLimiter | None = None):
         self._fetcher = fetcher
+        self._limiter = limiter or AsyncRateLimiter(max_concurrency=1)
 
     async def resolve(self, intent: WorkIntent) -> AuthorityRecord | None:
         arxiv = next((item.value for item in intent.identifiers if item.kind == "arxiv"), None)
@@ -68,22 +68,18 @@ class AuthorityRegistry:
 
     async def _arxiv(self, arxiv_id: str) -> AuthorityRecord | None:
         url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode({"id_list": arxiv_id})
+
+        async def _fetch() -> FetchResponse:
+            return await self._fetcher(url, {"Accept": "application/atom+xml"})
+
         try:
-            response = await self._fetcher(
-                url, {"Accept": "application/atom+xml"}
+            response = await fetch_with_retries(
+                _fetch, provider="arxiv", limiter=self._limiter
             )
-        except ProviderError:
-            raise
-        except (asyncio.TimeoutError, TimeoutError) as exc:
-            raise ProviderTimeout("arxiv", "request timed out") from exc
-        except TransportFailure as exc:
-            raise ProviderNetworkError(
-                "arxiv", exc.detail, exc_type=exc.exc_type, retryable=exc.retryable
-            ) from exc
-        if response.status >= 400:
-            if response.status == 404:
+        except ProviderHTTPError as exc:
+            if exc.status == 404:
                 return None
-            raise ProviderHTTPError("arxiv", response.status)
+            raise
         if len(response.body) > MAX_AUTHORITY_BYTES:
             raise ProviderError("arxiv", "response payload exceeds limit")
         if not response.body:

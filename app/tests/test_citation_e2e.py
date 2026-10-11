@@ -369,7 +369,7 @@ class _SaveReportingModel:
 
 
 class _SaveResultFetcher(RoutingFetcher):
-    """Fail B's first BibTeX request with a wrong DOI or uncached HTTP error."""
+    """Fail B's first BibTeX requests with a wrong DOI or uncached HTTP error."""
 
     def __init__(self, failures, *, transient=False):
         super().__init__()
@@ -392,7 +392,7 @@ class _SaveResultFetcher(RoutingFetcher):
 
 @pytest.mark.parametrize("scenario", ["all_success", "all_failure", "mixed", "retry"])
 def test_save_reporting_reaches_model_history_and_cli(
-    monkeypatch, tmp_path, capsys, scenario,
+    monkeypatch, tmp_path, capsys, scenario, no_citation_backoff,
 ):
     works = [
         {"requested_label": title, "identifiers": [{"kind": "doi", "value": doi}]}
@@ -401,8 +401,11 @@ def test_save_reporting_reaches_model_history_and_cli(
     selected = works if scenario in {"all_success", "mixed"} else works[1:]
     model = _SaveReportingModel(selected, retry=scenario == "retry")
     session = _make_session(monkeypatch, tmp_path, model)
+    # A transient 503 is retried inside the provider call; three consecutive
+    # failures exhaust that budget so the agent-level retry is exercised.
     fetcher = _SaveResultFetcher(
-        0 if scenario == "all_success" else 1, transient=scenario == "retry",
+        {"all_success": 0, "retry": 3}.get(scenario, 1),
+        transient=scenario == "retry",
     )
     service = _seed_fixture_service(session, tmp_path, fetcher=fetcher)
     services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
@@ -513,7 +516,8 @@ def test_save_reporting_reaches_model_history_and_cli(
     if scenario == "all_failure":
         assert "新保存" not in answer and "重用" not in answer
     if scenario == "retry":
-        assert fetcher.bibtex_b_calls == 2
+        assert fetcher.bibtex_b_calls == 4
+        assert len(no_citation_backoff) == 2
         calls = [call for message in model.invocations[-1] if isinstance(message, AIMessage)
                  for call in message.tool_calls]
         assert calls[0]["args"]["works"] == calls[1]["args"]["works"] == works[1:]

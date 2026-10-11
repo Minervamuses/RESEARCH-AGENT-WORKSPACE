@@ -51,10 +51,13 @@ def test_arxiv_authority_rejects_a_mismatched_returned_identifier():
     assert record is None
 
 
-def test_arxiv_transport_failure_becomes_a_provider_network_error():
+def test_arxiv_transport_failure_is_retried_then_reported(no_citation_backoff):
     from skills.citation.providers.net import ProviderNetworkError, TransportFailure
 
+    calls = []
+
     async def fetch(_url, _headers):
+        calls.append(1)
         raise TransportFailure("ConnectError", "connection refused", retryable=True)
 
     registry = AuthorityRegistry(fetcher=fetch)
@@ -65,6 +68,25 @@ def test_arxiv_transport_failure_becomes_a_provider_network_error():
 
     assert exc.value.provider == "arxiv"
     assert exc.value.exc_type == "ConnectError"
+    assert len(calls) == 3
+
+
+def test_arxiv_transient_status_recovers_and_missing_record_abstains(
+    no_citation_backoff,
+):
+    responses = [FetchResponse(503), FetchResponse(200, body=ATOM), FetchResponse(404)]
+
+    async def fetch(_url, _headers):
+        return responses.pop(0)
+
+    registry = AuthorityRegistry(fetcher=fetch)
+    intent = WorkIntent("x", identifiers=(WorkIdentifier("arxiv", "2001.00001"),))
+    record = asyncio.run(registry.resolve(intent))
+    missing = asyncio.run(registry.resolve(intent))
+
+    assert record.identity.key == "arxiv:2001.00001"
+    assert missing is None
+    assert len(no_citation_backoff) == 1
 
 
 def test_neurips_adapter_is_exact_allowlisted_metadata():

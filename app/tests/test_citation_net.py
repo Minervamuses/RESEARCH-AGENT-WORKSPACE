@@ -9,8 +9,10 @@ from skills.citation.providers.net import (
     AsyncRateLimiter,
     FetchResponse,
     ProviderHTTPError,
+    ProviderNetworkError,
     ProviderRateLimited,
     ProviderTimeout,
+    TransportFailure,
     TTLCache,
     fetch_with_retries,
     redact,
@@ -176,8 +178,13 @@ def test_http_error_and_timeout_are_distinct():
     async def fetch_timeout():
         raise asyncio.TimeoutError("deadline")
 
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
     with pytest.raises(ProviderTimeout):
-        _run(fetch_with_retries(fetch_timeout, provider="crossref", limiter=_limiter()))
+        _run(fetch_with_retries(
+            fetch_timeout, provider="crossref", limiter=_limiter(), sleep=no_sleep,
+        ))
 
 
 def test_success_headers_feed_limiter_adaptation():
@@ -198,3 +205,218 @@ def test_redact_blanks_every_secret_occurrence():
     assert redact(text, "sk-123", None, "") == (
         "GET https://api.openalex.org/works?api_key=[redacted]&q=x [redacted]"
     )
+
+
+def _scripted(outcomes):
+    """Return a fetch callable replaying responses/exceptions, plus call log."""
+    calls: list[int] = []
+
+    async def fetch():
+        calls.append(len(calls))
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return fetch, calls
+
+
+def _recording_sleep():
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    return sleep, slept
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_transient_server_status_is_retried_with_backoff_and_jitter(status):
+    fetch, calls = _scripted([
+        FetchResponse(status=status),
+        FetchResponse(status=200, body=b"ok"),
+    ])
+    sleep, slept = _recording_sleep()
+
+    result = _run(fetch_with_retries(
+        fetch, provider="crossref", limiter=_limiter(), sleep=sleep,
+        rng=random.Random(7),
+    ))
+
+    assert result.status == 200
+    assert len(calls) == 2
+    assert len(slept) == 1 and 1.0 <= slept[0] < 2.0
+
+
+def test_transient_status_exhaustion_reports_attempts():
+    fetch, calls = _scripted([
+        FetchResponse(status=503),
+        FetchResponse(status=502),
+        FetchResponse(status=504),
+    ])
+    sleep, slept = _recording_sleep()
+
+    with pytest.raises(ProviderHTTPError) as exc:
+        _run(fetch_with_retries(
+            fetch, provider="datacite", limiter=_limiter(), sleep=sleep,
+            rng=random.Random(7),
+        ))
+
+    assert exc.value.status == 504
+    assert "after 3 attempts" in str(exc.value)
+    assert len(calls) == 3
+    assert 1.0 <= slept[0] < 2.0 and 2.0 <= slept[1] < 3.0  # exponential
+
+
+def test_transient_status_honors_retry_after():
+    fetch, _calls = _scripted([
+        FetchResponse(status=503, headers={"Retry-After": "4"}),
+        FetchResponse(status=200),
+    ])
+    sleep, slept = _recording_sleep()
+
+    _run(fetch_with_retries(
+        fetch, provider="crossref", limiter=_limiter(), sleep=sleep,
+    ))
+
+    assert 4.0 <= slept[0] < 5.0
+
+
+@pytest.mark.parametrize("status", [400, 404, 500])
+def test_deterministic_http_errors_are_not_retried(status):
+    fetch, calls = _scripted([FetchResponse(status=status)])
+    sleep, slept = _recording_sleep()
+
+    with pytest.raises(ProviderHTTPError) as exc:
+        _run(fetch_with_retries(
+            fetch, provider="crossref", limiter=_limiter(), sleep=sleep,
+        ))
+
+    assert exc.value.status == status
+    assert str(exc.value) == f"crossref: HTTP {status}"
+    assert len(calls) == 1 and slept == []
+
+
+def test_retryable_transport_failure_recovers_within_budget():
+    fetch, calls = _scripted([
+        TransportFailure("ConnectError", "connection refused", retryable=True),
+        TransportFailure("RemoteProtocolError", "server disconnected", retryable=True),
+        FetchResponse(status=200),
+    ])
+    sleep, slept = _recording_sleep()
+
+    result = _run(fetch_with_retries(
+        fetch, provider="doi.org", limiter=_limiter(), sleep=sleep,
+    ))
+
+    assert result.status == 200
+    assert len(calls) == 3 and len(slept) == 2
+
+
+def test_retryable_transport_failure_exhaustion_raises_network_error():
+    fetch, calls = _scripted([
+        TransportFailure("ConnectError", "refused", retryable=True)
+        for _ in range(3)
+    ])
+    sleep, _slept = _recording_sleep()
+
+    with pytest.raises(ProviderNetworkError) as exc:
+        _run(fetch_with_retries(
+            fetch, provider="doi.org", limiter=_limiter(), sleep=sleep,
+        ))
+
+    assert exc.value.exc_type == "ConnectError"
+    assert len(calls) == 3
+
+
+def test_non_retryable_transport_failure_fails_immediately():
+    fetch, calls = _scripted([
+        TransportFailure("TooManyRedirects", "redirect loop", retryable=False),
+    ])
+    sleep, slept = _recording_sleep()
+
+    with pytest.raises(ProviderNetworkError) as exc:
+        _run(fetch_with_retries(
+            fetch, provider="doi.org", limiter=_limiter(), sleep=sleep,
+        ))
+
+    assert exc.value.retryable is False
+    assert len(calls) == 1 and slept == []
+
+
+def test_timeout_is_retried_once():
+    fetch, calls = _scripted([
+        asyncio.TimeoutError("deadline"),
+        asyncio.TimeoutError("deadline"),
+        FetchResponse(status=200),
+    ])
+    sleep, slept = _recording_sleep()
+
+    with pytest.raises(ProviderTimeout):
+        _run(fetch_with_retries(
+            fetch, provider="openalex", limiter=_limiter(), sleep=sleep,
+        ))
+
+    assert len(calls) == 2 and len(slept) == 1
+
+
+def test_rate_limit_and_transient_budgets_are_independent():
+    fetch, calls = _scripted([
+        FetchResponse(status=429, headers={"Retry-After": "0"}),
+        FetchResponse(status=503),
+        FetchResponse(status=429, headers={"Retry-After": "0"}),
+        TransportFailure("ReadError", "reset", retryable=True),
+        FetchResponse(status=200),
+    ])
+    sleep, _slept = _recording_sleep()
+
+    result = _run(fetch_with_retries(
+        fetch, provider="crossref", limiter=_limiter(), sleep=sleep,
+    ))
+
+    assert result.status == 200
+    assert len(calls) == 5
+
+
+def test_every_retry_reenters_the_rate_limiter():
+    clock = FakeClock()
+    limiter_sleeps: list[float] = []
+
+    async def limiter_sleep(seconds: float) -> None:
+        limiter_sleeps.append(seconds)
+        clock.now += seconds
+
+    limiter = AsyncRateLimiter(
+        max_concurrency=1, min_interval=5.0, clock=clock, sleep=limiter_sleep,
+    )
+    fetch, calls = _scripted([
+        FetchResponse(status=503),
+        TransportFailure("ConnectError", "refused", retryable=True),
+        FetchResponse(status=200),
+    ])
+
+    async def backoff_sleep(_seconds: float) -> None:
+        return None  # backoff does not advance the fake clock
+
+    _run(fetch_with_retries(
+        fetch, provider="crossref", limiter=limiter, sleep=backoff_sleep,
+    ))
+
+    assert len(calls) == 3
+    assert limiter_sleeps == [5.0, 5.0]  # second and third starts are spaced
+
+
+def test_default_backoff_sleep_is_a_patchable_module_seam(monkeypatch):
+    from skills.citation.providers import net
+
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(net, "_retry_sleep", fake_sleep)
+    fetch, _calls = _scripted([FetchResponse(status=503), FetchResponse(status=200)])
+
+    _run(fetch_with_retries(fetch, provider="crossref", limiter=_limiter()))
+
+    assert len(slept) == 1

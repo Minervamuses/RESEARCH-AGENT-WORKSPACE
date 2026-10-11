@@ -100,7 +100,7 @@ def test_other_http_errors_stay_http_errors_and_are_not_cached():
     cache = TTLCache()
     client, calls = _client(
         [
-            FetchResponse(status=503),
+            FetchResponse(status=500),
             FetchResponse(status=200, body=json.dumps(CSL_BODY).encode()),
         ],
         cache=cache,

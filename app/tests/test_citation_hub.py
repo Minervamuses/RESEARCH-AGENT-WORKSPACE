@@ -2,6 +2,8 @@ import pytest
 
 from skills.citation.hub import CitationProviderHub
 
+pytestmark = pytest.mark.usefixtures("no_citation_backoff")
+
 
 def test_hub_starts_inside_public_provider_rate_limits():
     hub = CitationProviderHub(env={})
@@ -36,6 +38,8 @@ def _hub_with_transport(handler) -> CitationProviderHub:
     hub._http_client = httpx.AsyncClient(  # noqa: SLF001 - transport seam
         transport=httpx.MockTransport(handler)
     )
+    for limiter in (hub.crossref_limiter, hub.datacite_limiter, hub.doi_org_limiter):
+        limiter.update(min_interval=0.0)  # retries still enter the limiter
     return hub
 
 

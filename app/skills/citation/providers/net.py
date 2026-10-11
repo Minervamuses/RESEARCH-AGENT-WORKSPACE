@@ -7,6 +7,11 @@ CitationService shares them. Policy constants:
   * search results cached 15 minutes, DOI lookups 24 hours;
   * errors are never cached;
   * HTTP 429 honors ``Retry-After`` with jitter, at most two retries;
+  * transient failures (HTTP 502/503/504, retryable transport errors, and
+    timeouts) share a separate budget of two retries with exponential
+    backoff plus jitter; a timeout is retried at most once because each
+    attempt may already have waited the full client timeout;
+  * every retry re-enters the provider's rate limiter;
   * Crossref concurrency/spacing adjusts to its rate-limit response headers.
 """
 
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import random
 import re
 import threading
@@ -25,8 +31,15 @@ SEARCH_TTL_SECONDS = 15 * 60
 DOI_TTL_SECONDS = 24 * 60 * 60
 
 MAX_RATE_LIMIT_RETRIES = 2
+MAX_TRANSIENT_RETRIES = 2
+MAX_TIMEOUT_RETRIES = 1
+RETRYABLE_HTTP_STATUSES = frozenset({502, 503, 504})
 _DEFAULT_RETRY_AFTER_SECONDS = 2.0
 _MAX_RETRY_AFTER_SECONDS = 30.0
+_BACKOFF_BASE_SECONDS = 1.0
+_MAX_BACKOFF_SECONDS = 8.0
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -243,52 +256,128 @@ def _parse_retry_after(headers: Mapping[str, str]) -> float | None:
         return None  # HTTP-date form: fall back to default backoff
 
 
+# Module-level so offline tests can skip real backoff without patching asyncio.
+_retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+
+
+def _backoff_seconds(retry: int) -> float:
+    return min(_BACKOFF_BASE_SECONDS * 2 ** (retry - 1), _MAX_BACKOFF_SECONDS)
+
+
+async def _attempt(
+    fetch: Callable[[], Awaitable[FetchResponse]],
+    *,
+    provider: str,
+    limiter: AsyncRateLimiter,
+) -> FetchResponse:
+    async with limiter.slot():
+        try:
+            return await fetch()
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            raise ProviderTimeout(provider, f"request timed out: {exc}") from exc
+        except TransportFailure as exc:
+            raise ProviderNetworkError(
+                provider,
+                exc.detail,
+                exc_type=exc.exc_type,
+                retryable=exc.retryable,
+            ) from exc
+
+
 async def fetch_with_retries(
     fetch: Callable[[], Awaitable[FetchResponse]],
     *,
     provider: str,
     limiter: AsyncRateLimiter,
     max_retries: int = MAX_RATE_LIMIT_RETRIES,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    max_transient_retries: int = MAX_TRANSIENT_RETRIES,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
     rng: random.Random | None = None,
 ) -> FetchResponse:
-    """Run ``fetch`` under the limiter, honoring Retry-After on 429.
+    """Run ``fetch`` under the limiter with bounded, classified retries.
 
-    Retries at most ``max_retries`` times with jitter; any other non-2xx
-    status raises :class:`ProviderHTTPError`, timeouts raise
-    :class:`ProviderTimeout`, and transport failures raise
-    :class:`ProviderNetworkError`. Callers cache only successful results.
+    HTTP 429 is retried at most ``max_retries`` times, honoring Retry-After.
+    HTTP 502/503/504, retryable transport failures, and timeouts share a
+    budget of ``max_transient_retries`` (timeouts at most once), using
+    Retry-After when present and exponential backoff otherwise; every delay
+    adds jitter. Exhausted or non-retryable failures raise
+    :class:`ProviderRateLimited`, :class:`ProviderHTTPError`,
+    :class:`ProviderTimeout`, or :class:`ProviderNetworkError`. Callers
+    cache only successful results.
     """
     rng = rng or random.Random()
-    attempt = 0
+    sleep = sleep if sleep is not None else _retry_sleep
+    rate_limit_retries = 0
+    transient_retries = 0
+    timeout_retries = 0
+
+    async def back_off(kind: str, delay: float) -> None:
+        delay += rng.uniform(0.0, 1.0)
+        logger.info(
+            "citation provider %s %s; retry %d in %.1fs",
+            provider,
+            kind,
+            rate_limit_retries + transient_retries,
+            delay,
+        )
+        await sleep(delay)
+
     while True:
-        async with limiter.slot():
-            try:
-                response = await fetch()
-            except (asyncio.TimeoutError, TimeoutError) as exc:
-                raise ProviderTimeout(provider, f"request timed out: {exc}") from exc
-            except TransportFailure as exc:
-                raise ProviderNetworkError(
-                    provider,
-                    exc.detail,
-                    exc_type=exc.exc_type,
-                    retryable=exc.retryable,
-                ) from exc
+        try:
+            response = await _attempt(fetch, provider=provider, limiter=limiter)
+        except ProviderTimeout:
+            if (
+                timeout_retries >= MAX_TIMEOUT_RETRIES
+                or transient_retries >= max_transient_retries
+            ):
+                raise
+            timeout_retries += 1
+            transient_retries += 1
+            await back_off("timed out", _backoff_seconds(transient_retries))
+            continue
+        except ProviderNetworkError as exc:
+            if not exc.retryable or transient_retries >= max_transient_retries:
+                raise
+            transient_retries += 1
+            await back_off(
+                f"transport failure {exc.exc_type}",
+                _backoff_seconds(transient_retries),
+            )
+            continue
         limiter.update_from_headers(response.headers)
         if response.status == 429:
             retry_after = _parse_retry_after(response.headers)
-            if attempt >= max_retries:
+            if rate_limit_retries >= max_retries:
                 raise ProviderRateLimited(
                     provider,
-                    f"HTTP 429 after {attempt + 1} attempts",
+                    f"HTTP 429 after {rate_limit_retries + 1} attempts",
                     retry_after=retry_after,
                 )
-            delay = (
-                retry_after if retry_after is not None else _DEFAULT_RETRY_AFTER_SECONDS
+            rate_limit_retries += 1
+            await back_off(
+                "rate limited (HTTP 429)",
+                retry_after if retry_after is not None else _DEFAULT_RETRY_AFTER_SECONDS,
             )
-            await sleep(delay + rng.uniform(0.0, 1.0))
-            attempt += 1
+            continue
+        if (
+            response.status in RETRYABLE_HTTP_STATUSES
+            and transient_retries < max_transient_retries
+        ):
+            transient_retries += 1
+            retry_after = _parse_retry_after(response.headers)
+            await back_off(
+                f"returned HTTP {response.status}",
+                retry_after
+                if retry_after is not None
+                else _backoff_seconds(transient_retries),
+            )
             continue
         if response.status >= 400:
-            raise ProviderHTTPError(provider, response.status)
+            attempts = rate_limit_retries + transient_retries + 1
+            raise ProviderHTTPError(
+                provider,
+                response.status,
+                f"HTTP {response.status}"
+                + (f" after {attempts} attempts" if attempts > 1 else ""),
+            )
         return response

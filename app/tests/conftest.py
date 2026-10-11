@@ -211,3 +211,17 @@ def offline_rag_config(monkeypatch):
 
     rag_cache_module._store_cache.clear()
     rag_cache_module._json_store_cache.clear()
+
+
+@pytest.fixture
+def no_citation_backoff(monkeypatch):
+    """Skip real retry backoff sleeps in citation provider calls."""
+    from skills.citation.providers import net
+
+    slept: list[float] = []
+
+    async def no_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(net, "_retry_sleep", no_sleep)
+    return slept
