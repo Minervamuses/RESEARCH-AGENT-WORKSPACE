@@ -19,13 +19,16 @@ from skills.citation.types import PublishedDateFilter, SourceRef
 TOOL_NAME = "citation_workflow"
 TOOL_DESCRIPTION = (
     "Academic citation workflow. search(query, optional year range) is "
-    "stateless exploratory discovery. save(works=[self-contained WorkIntent...]) "
-    "resolves each work through provider-specific bibliographic queries and "
-    "authoritative DOI verification. Pass title, authors, year, venue, "
-    "work_type, work_kind, identifiers, and version_kind as separate fields, "
-    "using the conversation and visible tool results to select the user's target. "
-    "Never invent bibliographic facts, pass provider syntax, or pass a result "
-    "position. save returns the actual per-item persistence result."
+    "stateless discovery that returns numbered records, each carrying its own "
+    "DOI/arXiv identifier. save(works=[WorkIntent...]) verifies and stores each "
+    "selected work. When the selected record shows a DOI or arXiv identifier, "
+    "pass requested_label plus that identifier; the workflow fetches "
+    "authoritative doi.org metadata and BibTeX itself, so do not re-type title, "
+    "authors, year, venue, or work_type. Only when no identifier exists, give "
+    "the known title, authors, year, venue, work_type, work_kind, and "
+    "version_kind as separate fields for a descriptive best match. Never invent "
+    "bibliographic facts, pass provider syntax, or pass a result number. save "
+    "returns the actual per-item persistence result."
 )
 
 CitationAction = Literal["search", "save", "sources", "source", "explain"]
@@ -40,8 +43,8 @@ class IdentifierInput(BaseModel):
         min_length=1,
         max_length=2048,
         description=(
-            "The DOI or arXiv identifier for the selected manifestation, taken "
-            "from the conversation or visible metadata."
+            "The DOI or arXiv identifier for the selected manifestation, copied "
+            "exactly from the selected search record or the conversation."
         ),
     )
 
@@ -57,7 +60,12 @@ class WorkIntentInput(BaseModel):
         ),
     )
     title: str = Field(
-        default="", max_length=512, description="The work title only."
+        default="",
+        max_length=512,
+        description=(
+            "The work title only. Needed only when no DOI/arXiv identifier is "
+            "available."
+        ),
     )
     authors: list[str] = Field(
         default_factory=list,
@@ -105,8 +113,10 @@ class WorkIntentInput(BaseModel):
         default_factory=list,
         max_length=8,
         description=(
-            "Stable DOI or arXiv identifiers for the selected manifestation. "
-            "Do not combine identifiers belonging to different versions."
+            "The selected record's DOI or arXiv identifier. This is the "
+            "preferred, sufficient save target: the workflow fetches the "
+            "authoritative metadata for it. Do not combine identifiers "
+            "belonging to different versions."
         ),
     )
 
@@ -181,26 +191,36 @@ def _format_records(records, states) -> str:
                 "retry the search later."
             )
         return "No bibliographic records found. " + "; ".join(states)
-    lines = [f"Found {len(records)} bibliographic record(s):"]
-    for record in records:
-        authors = ", ".join(record.authors) or "authors unknown"
-        metadata = [str(value) for value in (
-            record.title or "untitled", authors, record.year or "year unknown",
-            record.venue or "venue unknown", record.work_type or "type unknown",
-            record.version_kind or "version unknown",
-        )]
-        if record.doi:
-            metadata.append(f"DOI: {record.doi}")
+    lines = [
+        f"Found {len(records)} bibliographic record(s). Each numbered block is "
+        "one record; its metadata and identifiers belong together:"
+    ]
+    for number, record in enumerate(records, start=1):
         arxiv = record.identifiers.get("arxiv")
+        lines.append(f"{number}. {record.title or 'untitled'}")
+        lines.append(f"   authors: {', '.join(record.authors) or 'unknown'}")
+        lines.append(
+            f"   year: {record.year or 'unknown'}; "
+            f"venue: {record.venue or 'unknown'}; "
+            f"type: {record.work_type or 'unknown'}; "
+            f"version: {record.version_kind or 'unknown'}"
+        )
+        if record.doi:
+            lines.append(f"   DOI: {record.doi}")
         if arxiv:
-            metadata.append(f"arXiv: {arxiv}")
+            lines.append(f"   arXiv: {arxiv}")
         if record.url:
-            metadata.append(f"URL: {record.url}")
-        lines.append("- " + " | ".join(metadata))
+            lines.append(f"   URL: {record.url}")
+        if not record.doi and not arxiv:
+            lines.append(
+                "   no DOI/arXiv identifier: saving needs descriptive fields"
+            )
     lines.append("Provider states: " + "; ".join(states))
     lines.append(
-        "No result number is a save identifier; select the intended record from "
-        "the conversation and pass its stable DOI/arXiv identifier when available."
+        "To save a record, pass requested_label plus that block's DOI (or "
+        "arXiv identifier) in identifiers; the workflow fetches authoritative "
+        "metadata itself, so descriptive fields are unnecessary. Block numbers "
+        "are display labels, never save identifiers."
     )
     return "\n".join(lines)
 

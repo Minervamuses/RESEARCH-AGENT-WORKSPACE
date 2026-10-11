@@ -3,6 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
+import re
 import threading
 from types import SimpleNamespace
 import uuid
@@ -64,38 +65,33 @@ def _save_call_from_search_result(
     *,
     call_id: str,
 ) -> AIMessage:
+    """Select Paper A's block and save it by its DOI alone, as SKILL.md asks."""
     if message.status != "success":
         raise AssertionError("search tool call failed")
-    record_line = next(
-        (
-            line
-            for line in message.content.splitlines()
-            if line.startswith("- Paper A |")
-        ),
+    lines = message.content.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if re.fullmatch(r"\d+\. Paper A", line)),
         None,
     )
-    if record_line is None:
+    if start is None:
         raise AssertionError("Paper A was not present in the production search result")
-    fields = [field.strip() for field in record_line[2:].split(" | ")]
-    doi_field = next((field for field in fields if field.startswith("DOI: ")), None)
-    if len(fields) < 5 or doi_field is None:
-        raise AssertionError("search result omitted saveable bibliographic metadata")
-    title, authors_text, year_text, venue, work_type = fields[:5]
-    authors = [author.strip() for author in authors_text.split(",") if author.strip()]
+    block = []
+    for line in lines[start + 1:]:
+        if not line.startswith("   "):
+            break
+        block.append(line.strip())
+    doi = next(
+        (line.removeprefix("DOI: ") for line in block if line.startswith("DOI: ")),
+        None,
+    )
+    if doi is None:
+        raise AssertionError("search result omitted the selected record's DOI")
     return _workflow_call(
         {
             "action": "save",
             "works": [{
-                "requested_label": title,
-                "title": title,
-                "authors": authors,
-                "year": int(year_text),
-                "venue": venue,
-                "work_type": work_type,
-                "identifiers": [{
-                    "kind": "doi",
-                    "value": doi_field.removeprefix("DOI: "),
-                }],
+                "requested_label": "Paper A",
+                "identifiers": [{"kind": "doi", "value": doi}],
             }],
         },
         call_id,

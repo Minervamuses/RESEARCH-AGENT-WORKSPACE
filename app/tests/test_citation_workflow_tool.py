@@ -9,7 +9,12 @@ from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
 from skills.citation.providers.base import ProviderRecord
-from skills.citation.tool import CitationWorkflowInput, TOOL_NAME, create_citation_workflow_tool
+from skills.citation.tool import (
+    TOOL_DESCRIPTION,
+    TOOL_NAME,
+    CitationWorkflowInput,
+    create_citation_workflow_tool,
+)
 from skills.citation.types import (
     CanonicalIdentity,
     SaveAlternative,
@@ -303,3 +308,73 @@ def test_invalid_action_parameter_combination_has_no_save_side_effect():
     assert service.save_calls == 0
     asyncio.run(tool.ainvoke(args()))
     assert service.save_calls == 1
+
+
+def test_search_blocks_keep_each_records_identity_together():
+    class Service(FakeService):
+        async def search(self, query, *, date_filter=None):
+            return [
+                ProviderRecord(
+                    "crossref", "crossref:10.1234/a", 0, title="Paper A",
+                    authors=["Ada Lovelace", "Alan Turing"], year=2021,
+                    venue="Journal A", work_type="journal-article",
+                    version_kind="published", doi="10.1234/a",
+                    identifiers={"doi": "10.1234/a"},
+                ),
+                ProviderRecord(
+                    "openalex", "openalex:W2", 1, title="Paper A (preprint)",
+                    year=2020, version_kind="preprint",
+                    identifiers={"arxiv": "2001.00002"},
+                ),
+                ProviderRecord("openalex", "openalex:W3", 2, title="Untracked Note"),
+            ], ["crossref:ok", "openalex:ok"]
+
+    tool = create_citation_workflow_tool(service_getter=Service)
+    content = asyncio.run(tool.ainvoke({"action": "search", "query": "paper a"}))
+
+    header, body = content.split("\nProvider states:")[0].split("\n", 1)
+    assert header.startswith("Found 3 bibliographic record(s).")
+    first, second, third = _split_blocks(body)
+    assert first == [
+        "1. Paper A",
+        "   authors: Ada Lovelace, Alan Turing",
+        "   year: 2021; venue: Journal A; type: journal-article; version: published",
+        "   DOI: 10.1234/a",
+    ]
+    assert second == [
+        "2. Paper A (preprint)",
+        "   authors: unknown",
+        "   year: 2020; venue: unknown; type: unknown; version: preprint",
+        "   arXiv: 2001.00002",
+    ]
+    assert third[-1] == "   no DOI/arXiv identifier: saving needs descriptive fields"
+    assert "pass requested_label plus that block's DOI" in content
+    assert "never save identifiers" in content
+
+
+def _split_blocks(text):
+    blocks: list[list[str]] = []
+    for line in text.splitlines():
+        if line[:1].isdigit():
+            blocks.append([line])
+        else:
+            blocks[-1].append(line)
+    return blocks
+
+
+def test_tool_contract_prefers_identifier_only_saves():
+    definitions = CitationWorkflowInput.model_json_schema()["$defs"]
+    work_fields = definitions["WorkIntentInput"]["properties"]
+
+    assert "do not re-type title" in TOOL_DESCRIPTION
+    assert "preferred, sufficient save target" in work_fields["identifiers"]["description"]
+    assert "only when no DOI/arXiv" in work_fields["title"]["description"]
+    payload = CitationWorkflowInput.model_validate({
+        "action": "save",
+        "works": [{
+            "requested_label": "Paper A",
+            "identifiers": [{"kind": "doi", "value": "10.1234/a"}],
+        }],
+    })
+    intent = payload.works[0].to_domain()
+    assert (intent.title, intent.authors, intent.year) == ("", (), None)
