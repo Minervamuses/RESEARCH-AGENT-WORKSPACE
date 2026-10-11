@@ -354,3 +354,23 @@ def test_search_tool_does_not_present_total_failure_as_no_results(tmp_path):
     assert "crossref:timeout; datacite:server_error(502)" in content
     assert "not evidence that the work does not exist" in content
     assert "No bibliographic records found" not in content
+
+
+def test_storage_failure_cause_is_logged(tmp_path, monkeypatch, caplog):
+    from skills.citation.storage import StorageError
+
+    def write(*_args, **_kwargs):
+        raise StorageError("write_failed", "source-slot lock timeout")
+
+    monkeypatch.setattr(service_module, "write_identity_bundle", write)
+    service = _service(tmp_path, _ThreePaperFetcher())
+
+    with caplog.at_level(logging.WARNING, logger="skills.citation.service"):
+        outcome = asyncio.run(service.save((_intent("A", DOI_A),)))
+
+    assert _statuses(outcome) == [("storage_failed", "write_failed")]
+    message = next(
+        r.getMessage() for r in caplog.records if "storage failed" in r.getMessage()
+    )
+    assert outcome.batch_id in message
+    assert "write_failed (source-slot lock timeout)" in message

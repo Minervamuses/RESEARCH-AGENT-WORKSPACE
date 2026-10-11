@@ -352,7 +352,15 @@ class CitationService:
                 )
                 self.registry.register(ref, receipt=receipt)
             except (StorageError, ValueError) as exc:
-                return SaveItemOutcome(index, intent.requested_label, "storage_failed", getattr(exc, "code", "registry_conflict"))
+                code = getattr(exc, "code", "registry_conflict")
+                logger.warning(
+                    "citation bundle storage failed for batch %s item %d: %s (%s)",
+                    batch_id,
+                    index,
+                    code,
+                    exc,
+                )
+                return SaveItemOutcome(index, intent.requested_label, "storage_failed", code)
             return SaveItemOutcome(
                 index, intent.requested_label, "reused" if bundle.reused else "saved",
                 "reused_existing" if bundle.reused else "saved_new", receipt,
