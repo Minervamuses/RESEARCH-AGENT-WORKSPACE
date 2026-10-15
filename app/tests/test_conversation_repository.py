@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import copy
-import hashlib
 import json
 import os
 from dataclasses import replace
@@ -25,7 +23,6 @@ from agent.conversations import (
     FailureInfo,
     InvalidTransitionError,
     ToolActivitySummary,
-    validate_submitted_context,
 )
 
 
@@ -50,7 +47,6 @@ def _create(
     semantic_input: str | None = "semantic prompt",
     context_eligible: bool = True,
     thinking_mode: str | None = "normal",
-    submitted_context: dict | None = None,
 ):
     return repository.create(
         conversation_id=conversation_id,
@@ -62,7 +58,6 @@ def _create(
         context_eligible=context_eligible,
         thinking_mode=thinking_mode,
         submitted_at=_timestamp(1),
-        submitted_context=submitted_context,
     )
 
 
@@ -821,176 +816,3 @@ def test_large_malformed_document_is_distinct_from_model_schema_errors(tmp_path)
             message="safe",
             retryable=False,
         )
-
-
-def _submitted_context(project_id="local"):
-    source = "first\r\nsame\U0001f600\r\nsame\U0001f600\n"
-    selected = "same\U0001f600"
-    start = len("first\r\nsame\U0001f600\r\n".encode("utf-16-le")) // 2
-    snapshot = {
-        "rootPath": "/research", "path": "/research/draft.md",
-        "editorRevision": 3, "sourceText": source,
-        "diskFingerprint": "a" * 64,
-        "rangeStartUtf16": start,
-        "rangeEndUtf16": start + len(selected.encode("utf-16-le")) // 2,
-    }
-    rules = "# Project\nUse sources."
-    return {
-        "projectId": project_id, "rootPath": "/research",
-        "permissionMode": "ask", "requestedThinkingMode": "extended",
-        "skillReferences": [],
-        "projectRules": {"text": rules, "fingerprint": hashlib.sha256(rules.encode()).hexdigest()},
-        "documentContext": {key: value for key, value in snapshot.items() if not key.startswith("range")},
-        "references": [
-            {"referenceId": "document-1", "kind": "document", "text": selected,
-             "document": {"snapshot": snapshot, "startLine": 3, "endLine": 3}},
-            {"referenceId": "chat-1", "kind": "chat", "text": "quote \U0001f600",
-             "chat": {"projectId": project_id, "sessionId": CONVERSATION_ID, "turnId": _uuid4_hex(50),
-                      "role": "assistant", "messageFingerprint": "b" * 64,
-                      "startUtf16": 5, "endUtf16": 5 + len("quote \U0001f600".encode("utf-16-le")) // 2}},
-        ],
-    }
-
-
-def test_submitted_context_round_trip_is_detached_and_survives_retry(tmp_path):
-    repository = ConversationRepository(tmp_path)
-    context = _submitted_context()
-    original = copy.deepcopy(context)
-    snapshot = _create(repository, submitted_context=context)
-    context["references"].clear()
-    assert snapshot.document.schema_version == 2
-    assert snapshot.document.turns[0].submitted_context == original
-    assert repository.load(CONVERSATION_ID).document.turns[0].submitted_context == original
-    failed = repository.fail_turn(
-        snapshot, turn_id=_uuid4_hex(1), state="failed",
-        failure=FailureInfo("execution_failed", "try again", True),
-        finished_at=_timestamp(2),
-    )
-    parameters = {
-        "turn_id": _uuid4_hex(1), "kind": "conversational",
-        "display_input": "display prompt", "semantic_input": "semantic prompt",
-        "context_eligible": True, "thinking_mode": "normal",
-        "submitted_context": original,
-    }
-    changed = copy.deepcopy(original)
-    changed["permissionMode"] = "bypass"
-    with pytest.raises(ConversationConflictError, match="different input"):
-        repository.retry_turn(failed, retry_at=_timestamp(3), **{**parameters, "submitted_context": changed})
-    retried = repository.retry_turn(failed, retry_at=_timestamp(3), **parameters)
-    assert len(retried.document.turns) == 1
-    assert retried.document.turns[0].submitted_context == original
-    done = repository.complete_turn(retried, turn_id=_uuid4_hex(1), assistant_output="done", finished_at=_timestamp(4))
-    assert done.document.turns[0].submitted_context == original
-
-
-def test_v1_is_read_without_rewrite_and_upgrades_only_on_actual_write(tmp_path):
-    repository = ConversationRepository(tmp_path)
-    _create(repository)
-    path = repository.path_for(CONVERSATION_ID)
-    raw = json.loads(path.read_bytes())
-    raw["schemaVersion"] = 1
-    del raw["turns"][0]["submittedContext"]
-    original = json.dumps(raw, indent=2).encode()
-    path.write_bytes(original)
-    loaded = repository.load(CONVERSATION_ID)
-    assert loaded.document.schema_version == 1
-    assert loaded.document.turns[0].submitted_context is None
-    assert path.read_bytes() == original
-    upgraded = repository.complete_turn(
-        loaded, turn_id=_uuid4_hex(1), assistant_output="done", finished_at=_timestamp(2),
-    )
-    assert upgraded.document.schema_version == 2
-    assert upgraded.document.turns[0].submitted_context is None
-    saved = json.loads(path.read_bytes())
-    assert saved["schemaVersion"] == 2
-    assert saved["turns"][0]["submittedContext"] is None
-    assert saved["turns"][0]["semanticInput"] == raw["turns"][0]["semanticInput"]
-
-
-@pytest.mark.parametrize("version,include_context", [(1, True), (2, False), (3, True)])
-def test_v1_v2_turn_schema_is_strict(tmp_path, version, include_context):
-    repository = ConversationRepository(tmp_path)
-    _create(repository)
-    path = repository.path_for(CONVERSATION_ID)
-    raw = json.loads(path.read_bytes())
-    raw["schemaVersion"] = version
-    if not include_context:
-        raw["turns"][0].pop("submittedContext")
-    path.write_text(json.dumps(raw))
-    before = path.read_bytes()
-    with pytest.raises(ConversationMalformedError):
-        repository.load(CONVERSATION_ID)
-    assert path.read_bytes() == before
-
-
-@pytest.mark.parametrize("mutation", [
-    lambda c: c["references"][0].update(chat=c["references"][1]["chat"]),
-    lambda c: c["references"][0]["document"]["snapshot"].update(rangeStartUtf16=0),
-    lambda c: c["references"][0]["document"].update(startLine=2),
-    lambda c: c["references"][1]["chat"].update(projectId="other"),
-    lambda c: c["references"][1]["chat"].update(endUtf16=100),
-    lambda c: c["references"][0].update(text="first"),
-    lambda c: c["references"][1].update(referenceId="document-1"),
-    lambda c: c["documentContext"].update(rootPath="/other"),
-    lambda c: c["documentContext"].update(path="/research/../outside.md"),
-    lambda c: c["projectRules"].update(text="changed"),
-])
-def test_submitted_context_rejects_union_range_version_and_identity_mismatches(mutation):
-    context = _submitted_context()
-    mutation(context)
-    with pytest.raises(ConversationValidationError):
-        validate_submitted_context(context)
-
-
-def test_submitted_context_snapshot_mutation_cannot_rewrite_frozen_input(tmp_path):
-    repository = ConversationRepository(tmp_path)
-    snapshot = _create(repository, submitted_context=_submitted_context())
-    path = repository.path_for(CONVERSATION_ID)
-    original = path.read_bytes()
-    snapshot.document.turns[0].submitted_context["permissionMode"] = "bypass"
-    with pytest.raises(ConversationConflictError, match="snapshot was altered"):
-        repository.complete_turn(
-            snapshot, turn_id=_uuid4_hex(1), assistant_output="done", finished_at=_timestamp(2),
-        )
-    assert path.read_bytes() == original
-
-
-def test_submitted_context_limits_actual_serialized_input_without_truncation(tmp_path):
-    repository = ConversationRepository(tmp_path)
-    context = _submitted_context()
-    text = "\\" * (MAX_INPUT_BYTES // 2)
-    context["projectRules"] = {"text": text, "fingerprint": hashlib.sha256(text.encode()).hexdigest()}
-    with pytest.raises(ConversationValidationError, match="1 MiB"):
-        _create(repository, submitted_context=context)
-    assert not repository.path_for(CONVERSATION_ID).exists()
-    context = _submitted_context()
-    with pytest.raises(ConversationValidationError, match="text plus submittedContext"):
-        _create(repository, display_input="x" * (MAX_INPUT_BYTES - 100), submitted_context=context)
-    assert not repository.path_for(CONVERSATION_ID).exists()
-
-
-def test_submitted_context_skill_spans_match_original_display_input(tmp_path):
-    repository = ConversationRepository(tmp_path)
-    context = _submitted_context()
-    context["skillReferences"] = [{"name": "citation", "startUtf16": 0, "endUtf16": 9}]
-    with pytest.raises(ConversationValidationError, match="skillReferences"):
-        _create(repository, display_input="different", submitted_context=context)
-    with pytest.raises(ConversationValidationError, match="end at a token boundary"):
-        _create(repository, display_input="@citation.extra", submitted_context=context)
-    snapshot = _create(repository, display_input="@citation request", submitted_context=context)
-    assert snapshot.document.turns[0].submitted_context == context
-
-
-@pytest.mark.parametrize("path,valid", [
-    ("//research/draft.md", False),
-    ("/research/draft\x7f.md", False),
-    ("/research/draft\x85.md", True),
-])
-def test_submitted_context_canonical_linux_paths_match_protocol(path, valid):
-    context = _submitted_context()
-    context["documentContext"]["path"] = path
-    if valid:
-        assert validate_submitted_context(context) == context
-    else:
-        with pytest.raises(ConversationValidationError, match="canonical absolute Linux path"):
-            validate_submitted_context(context)
