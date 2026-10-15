@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
@@ -92,8 +93,22 @@ class CitationService:
         for record in records:
             key = ("doi", record.doi) if record.doi else (record.provider, record.provider_id)
             current = unique.get(key)
-            if current is None or record.rank < current.rank:
+            if current is None:
                 unique[key] = record
+                continue
+            winner, other = (
+                (record, current) if record.rank < current.rank else (current, record)
+            )
+            # Keep the existing metadata/rank winner while preserving a real
+            # abstract supplied by another provider for the same DOI.
+            if not winner.abstract and other.abstract:
+                winner = replace(
+                    winner,
+                    abstract=other.abstract,
+                    abstract_source=other.abstract_source,
+                    abstract_url=other.abstract_url,
+                )
+            unique[key] = winner
         ordered = sorted(unique.values(), key=lambda r: (r.rank, r.title.casefold(), r.provider))
         return ordered[:rows], states
 

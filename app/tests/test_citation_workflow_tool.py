@@ -340,12 +340,16 @@ def test_search_blocks_keep_each_records_identity_together():
         "   authors: Ada Lovelace, Alan Turing",
         "   year: 2021; venue: Journal A; type: journal-article; version: published",
         "   DOI: 10.1234/a",
+        "   URL: https://doi.org/10.1234/a",
+        "   abstract status: unavailable (no abstract retrieved)",
     ]
     assert second == [
         "2. Paper A (preprint)",
         "   authors: unknown",
         "   year: 2020; venue: unknown; type: unknown; version: preprint",
         "   arXiv: 2001.00002",
+        "   URL: https://arxiv.org/abs/2001.00002",
+        "   abstract status: unavailable (no abstract retrieved)",
     ]
     assert third[-1] == "   no DOI/arXiv identifier: saving needs descriptive fields"
     assert "pass requested_label plus that block's DOI" in content
@@ -378,3 +382,58 @@ def test_tool_contract_prefers_identifier_only_saves():
     })
     intent = payload.works[0].to_domain()
     assert (intent.title, intent.authors, intent.year) == ("", (), None)
+
+
+
+def test_search_reports_actual_abstract_source_and_partial_provider_failure():
+    class Service(FakeService):
+        async def search(self, query, *, date_filter=None):
+            return [
+                ProviderRecord(
+                    "crossref", "crossref:10.1234/a", 0, title="Paper A",
+                    doi="10.1234/a",
+                    abstract="In a small trial, retrieval reduced unsupported statements.",
+                    abstract_source="openalex",
+                    abstract_url="https://api.openalex.org/works/W1",
+                ),
+                ProviderRecord(
+                    "datacite", "datacite:10.1234/b", 1, title="Paper B",
+                    doi="10.1234/b", snippet="This snippet is not an abstract.",
+                ),
+            ], ["crossref:ok", "datacite:ok", "openalex:timeout"]
+
+    tool = create_citation_workflow_tool(service_getter=Service)
+    content = asyncio.run(tool.ainvoke({
+        "action": "search", "query": "retrieval unsupported statements",
+    }))
+
+    first, second = _split_blocks(content.split("\nProvider states:")[0].split("\n", 1)[1])
+    assert "   DOI: 10.1234/a" in first
+    assert "   abstract status: retrieved" in first
+    assert "   abstract source: openalex" in first
+    assert "   abstract source URL: https://api.openalex.org/works/W1" in first
+    assert "   abstract: In a small trial, retrieval reduced unsupported statements." in first
+    assert "   abstract status: unavailable (no abstract retrieved)" in second
+    assert "This snippet is not an abstract." not in content
+    assert "Search incomplete: some providers failed" in content
+    assert "does not establish support for the selected claim" in content
+    assert "No full text was retrieved." in content
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        (["crossref:timeout", "datacite:network_error"], "Search failed"),
+        (["crossref:ok", "datacite:timeout"], "No records returned by the responding providers"),
+    ],
+)
+def test_failed_provider_is_not_reported_as_an_exhaustive_zero_hit_search(states, expected):
+    class Service(FakeService):
+        async def search(self, query, *, date_filter=None):
+            return [], states
+
+    tool = create_citation_workflow_tool(service_getter=Service)
+    result = asyncio.run(tool.ainvoke({"action": "search", "query": "claim topic"}))
+    assert result.startswith(expected)
+    assert "not evidence" in result
+    assert "No bibliographic records found" not in result

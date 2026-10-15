@@ -20,7 +20,10 @@ TOOL_NAME = "citation_workflow"
 TOOL_DESCRIPTION = (
     "Academic citation workflow. search(query, optional year range) is "
     "stateless discovery that returns numbered records, each carrying its own "
-    "DOI/arXiv identifier. save(works=[WorkIntent...]) verifies and stores each "
+    "DOI/arXiv identifier plus the retrieved abstract and its source, or an "
+    "explicit unavailable status. Discovery is abstract-only: metadata/DOI "
+    "identity is not evidence that a claim is supported. "
+    "save(works=[WorkIntent...]) verifies and stores each "
     "selected work. When the selected record shows a DOI or arXiv identifier, "
     "pass requested_label plus that identifier; the workflow fetches "
     "authoritative doi.org metadata and BibTeX itself, so do not re-type title, "
@@ -182,6 +185,7 @@ def _error(message: str) -> str:
 
 
 def _format_records(records, states) -> str:
+    failed_states = [state for state in states if not state.endswith(":ok")]
     if not records:
         if states and not any(state.endswith(":ok") for state in states):
             return (
@@ -189,6 +193,12 @@ def _format_records(records, states) -> str:
                 + "; ".join(states)
                 + "). This is not evidence that the work does not exist; "
                 "retry the search later."
+            )
+        if failed_states:
+            return (
+                "No records returned by the responding providers. Search incomplete: "
+                + "; ".join(states)
+                + ". Provider failures are not evidence that relevant works do not exist."
             )
         return "No bibliographic records found. " + "; ".join(states)
     lines = [
@@ -209,13 +219,34 @@ def _format_records(records, states) -> str:
             lines.append(f"   DOI: {record.doi}")
         if arxiv:
             lines.append(f"   arXiv: {arxiv}")
-        if record.url:
-            lines.append(f"   URL: {record.url}")
+        url = record.url or (
+            f"https://doi.org/{record.doi}" if record.doi else
+            f"https://arxiv.org/abs/{arxiv}" if arxiv else None
+        )
+        lines.append(f"   URL: {url or 'unavailable'}")
+        if record.abstract:
+            lines.append("   abstract status: retrieved")
+            lines.append(f"   abstract source: {record.abstract_source or 'not supplied'}")
+            if record.abstract_url:
+                lines.append(f"   abstract source URL: {record.abstract_url}")
+            lines.append(f"   abstract: {record.abstract}")
+        else:
+            lines.append("   abstract status: unavailable (no abstract retrieved)")
         if not record.doi and not arxiv:
             lines.append(
                 "   no DOI/arXiv identifier: saving needs descriptive fields"
             )
     lines.append("Provider states: " + "; ".join(states))
+    if failed_states:
+        lines.append(
+            "Search incomplete: some providers failed; remaining candidates are "
+            "usable, but missing results cannot establish that relevant works do not exist."
+        )
+    lines.append(
+        "Relevance and limitations must be based only on retrieved abstracts. "
+        "Title similarity, metadata, or verified DOI identity does not establish "
+        "support for the selected claim. No full text was retrieved."
+    )
     lines.append(
         "To save a record, pass requested_label plus that block's DOI (or "
         "arXiv identifier) in identifiers; the workflow fetches authoritative "

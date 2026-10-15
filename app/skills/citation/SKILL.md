@@ -22,6 +22,15 @@ task; visible prior conversation still supplies metadata and authorization.
 - `search` is stateless. Pass a natural-language topic/title in `query` and
   optional `year_from`/`year_to`; never pass Crossref, DataCite, or OpenAlex
   query syntax.
+- For a selected claim, use the current editor snapshot, including unsaved
+  text, its selected UTF-16 range or requested source lines, and only the
+  surrounding context needed to understand the claim. Do not replace this
+  source with the disk copy, conversation history, or stale RAG chunks.
+- Form a concise topic query from the claim's key concepts, relationship,
+  and relevant population/context (at most 2048 characters). Do not paste a
+  whole paragraph as a supposed known paper title or route it through
+  bibliographic `search_work` matching. State the search focus so the user
+  can connect the candidates to the selected claim.
 - Prefer bibliographic facts from explicit user text or visible tool results;
   do not invent identifiers or silently complete uncertain metadata from
   memory. A DOI/arXiv identifier visible in the conversation or another tool
@@ -32,8 +41,23 @@ task; visible prior conversation still supplies metadata and authorization.
   to the metadata of its own record. There are no cX/mX identifiers or
   persistent candidate pools; conversational labels such as `1` are yours to
   resolve against visible results.
-- Metadata does not ground a content summary. Fetch actual text or explicitly
-  label any title-based description as inference.
+- Each result reports an actual retrieved abstract and its provider/source
+  URL, or explicitly says no abstract was retrieved. Present the candidate's
+  identity/link together with that availability and source. Do not invent an
+  abstract or substitute a search snippet, title, or DOI metadata for one.
+- Use only retrieved abstracts to explain possible relevance and specific
+  limitations for the selected claim. Separate what the abstract reports
+  from your interpretation; even an abstract-level match does not prove the
+  claim. For metadata-only candidates, say that relevance cannot yet be
+  assessed from an abstract. Title similarity and verified DOI identity
+  establish neither substantive support nor a content summary.
+- This workflow stops at abstracts. Do not download/read full text or start
+  a separate evidence-verification pipeline. Abstracts exist only in this
+  turn's discovery results; saving still verifies bibliographic identity
+  and BibTeX, without upgrading the result to claim verification.
+- If some providers fail, present the remaining results and the incomplete
+  search scope. A provider failure or missing abstract is not a zero-hit
+  result and is not evidence that relevant literature does not exist.
 
 ## Save
 

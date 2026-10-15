@@ -9,7 +9,7 @@ import pytest
 
 from skills.citation import service as service_module
 from skills.citation.hub import CitationProviderHub
-from skills.citation.providers.base import BibliographicQuery
+from skills.citation.providers.base import BibliographicQuery, ProviderRecord
 from skills.citation.providers.net import (
     FetchResponse,
     ProviderError,
@@ -374,3 +374,45 @@ def test_storage_failure_cause_is_logged(tmp_path, monkeypatch, caplog):
     )
     assert outcome.batch_id in message
     assert "write_failed (source-slot lock timeout)" in message
+
+
+
+@pytest.mark.parametrize("abstract_rank,metadata_rank", [(0, 1), (1, 0)])
+def test_search_doi_fusion_keeps_metadata_winner_and_real_abstract_source(
+    tmp_path, abstract_rank, metadata_rank,
+):
+    service = _service(tmp_path, _ThreePaperFetcher())
+    with_abstract = ProviderRecord(
+        "datacite", "datacite:10.1234/a", abstract_rank,
+        title="Abstract provider title", doi="10.1234/a",
+        abstract="A retrieved abstract, not a metadata inference.",
+        abstract_source="datacite",
+        abstract_url="https://api.datacite.org/dois/10.1234/a",
+    )
+    metadata_only = ProviderRecord(
+        "crossref", "crossref:10.1234/a", metadata_rank,
+        title="Metadata provider title", doi="10.1234/a",
+        url="https://publisher.example/a",
+    )
+
+    async def crossref(*_args, **_kwargs):
+        return [metadata_only]
+
+    async def datacite(*_args, **_kwargs):
+        return [with_abstract]
+
+    service.hub.crossref.search_text = crossref
+    service.hub.datacite.search_text = datacite
+    records, states = asyncio.run(service.search("claim topic"))
+    assert len(records) == 1
+    record = records[0]
+    assert record.title == (
+        "Abstract provider title" if abstract_rank < metadata_rank
+        else "Metadata provider title"
+    )
+    assert record.abstract == with_abstract.abstract
+    assert record.abstract_source == "datacite"
+    assert record.abstract_url == "https://api.datacite.org/dois/10.1234/a"
+    assert states == ["crossref:ok", "datacite:ok"]
+    assert metadata_only.abstract == ""  # Search fusion does not mutate provider results.
+    assert not (tmp_path / "cite").exists()

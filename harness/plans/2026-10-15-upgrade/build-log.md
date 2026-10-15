@@ -10,8 +10,8 @@
 | P1 | Complete | P1.S1～S2：文件閉環、離線與原生代表案例 | P2；最終整合仍由 P5 驗收 |
 | P2 | Complete | P2.S1～S2：行內多引用、真實 catalog／graph、順序操作與清理 | P3；真模型合作品質留 P5 明示 |
 | P3 | Complete | P3.S1～S2：各副作用入口與模式／批准驗收 | P4；最終原生整合留 P5 |
-| P4 | In progress | P3 已驗收；P0.S3 批准既定結果契約 | P4.S1 provider 摘要與主題查詢 |
-| P5 | Not started | 無 | P1～P4、原生 GUI 驗收能力 |
+| P4 | Complete | P4.S1～S2：摘要來源、主題檢索與真 graph 離線驗收 | P5 受限真模型與原生整合 |
+| P5 | In progress | P1～P4 已驗收，US$1 上限已明確批准 | 局部重複讀取、原生 A～E、真模型及收尾 suite |
 
 ## 原單檔計劃的撰寫歷史
 
@@ -119,6 +119,13 @@
 - provider 定向檢查 63 passed（0.15s）；第一次新增測試誤把 search_text 當成 provider 內去重入口，改測既有 search_work 後通過，沒有因此新增搜尋行為。git diff --check 通過。
 - 使用者其後兩次明確批准收尾付費驗收：既有 Gemini 3.8 Flash，最多 2 個代表回合、合計最多 6 次模型請求、每次最多 4096 輸出 tokens、總額不超過 US$1；citation 僅既有 provider 摘要搜尋。再次指示每個有意義步驟更新本檔並 commit。未執行付費呼叫；之後需以本次專用計數與保守成本上界限制，不修改專案預設 token／retry 設定。
 - 原有七檔使用者修改仍在工作樹；App 的內容核對只多出 P3 新 startup 說明所在 JSX 行造成的文字差異，原 selectionPreview 條件保留。P4.S2 繼續 topic query／去重摘要／真 graph 假模型驗收，P5 完成原生與受限真模型驗收。
+
+## P4.S2｜選取主張到摘要及引用 gate（2026-10-15）
+
+- P4.S1 已提交 632fd24。沿既有 search_text，把 live 選取主張／必要上下文轉為最多 2048 字元的主題 query；不把整段當已知論文標題。DOI 融合保留原 metadata／rank 勝出者，僅補入別 provider 的真摘要及來源；回覆格式區別 retrieved、metadata-only、provider 部分失敗，明示摘要相關性與限制。
+- 真 ChatSession／graph、實際 academic-paper-writing／citation 指引、假模型與既有 RoutingFetcher 內嵌 JATS 摘要案例：未儲存選取主張→topic query→真 search_text／provider parser→有摘要及 metadata-only→Ask 單項保存→真 DOI／BibTeX 與最終引用 gate。偽 marker 被既有 gate 阻擋；不讀舊 RAG，不改原稿，citation.json 沒有新增 abstract。
+- 定向命令 poetry run pytest tests/test_citation_workflow_tool.py tests/test_citation_save_isolation.py tests/test_inline_skills.py tests/test_citation_gate.py tests/test_citation_save_outcomes.py tests/test_citation_e2e.py -q --tb=short：109 passed（1.59s）；新測試早期誤寫 Crossref query 參數及安全訊息預期，修正測試斷言後通過。git diff --check 通過。
+- 獨立唯讀複核 provider 來源、DOI merge、live snapshot、無摘要／失敗呈現與最終 gate，未發現阻擋驗收問題。P4 完成；尚未呼叫真 provider／模型。P5 接續既有 fixture 的必要原生驗收能力、已找到的同次 sidebar refresh 重複 reconcile 局部修正、受限真模型與收尾完整 suite。
 
 ## 後續紀錄方式
 
