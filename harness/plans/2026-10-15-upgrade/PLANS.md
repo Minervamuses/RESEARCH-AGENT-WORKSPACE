@@ -72,6 +72,35 @@ Bypass 涵蓋文件寫入、Bash、citation 保存、知識庫匯入／刪除索
 
 不設新的永久批准 registry；優先復用現有 request／turn／approval 識別。未知狀態或重啟不自動重播寫入：先核對磁碟與既有回合結果，再讓使用者明確重試。文件寫入已成功但回傳中斷時，不因 retry 再次套用相同變更。
 
+### 3.3 P0 核對後的最小契約提案（尚待批准）
+
+以下只把 P0 所需批准具體化，不是已生效協定；批准狀態與來源只記在 build-log.md。P1 僅擴充既有 NDJSON，不新增 transport、資料庫、catalog 格式或永久操作 registry。
+
+**現有邊界：** contract.json 的 session.turn 僅接受 text／turnId／retry；Python、TypeScript、Rust 都拒絕未知 params。text 上限 1,048,576 UTF-8 bytes，一般 NDJSON 行上限 2,097,152 bytes；session.turn／session.transcript 的成功結果有既有全文例外，新文件方法不自動取得例外。CLI 直接使用 Session，沒有文件上下文的純聊天及 leading slash／單 Skill 行為保持原路徑。
+
+| P1 介面提案 | 最小輸入／輸出與目的 |
+| --- | --- |
+| workspace.select | 輸入 rootPath（Linux 絕對路徑），驗證後回傳 rootPath；僅活動工作階段記憶，不寫入 project catalog。 |
+| document.open | 輸入 path，必須位於選定 root；回傳 path、sourceText、diskFingerprint。僅 UTF-8 Markdown／單一 .tex 來源編輯。 |
+| session.turn 的 optional documentContext | rootPath、path、editorRevision、sourceText、diskFingerprint；選取時帶 rangeStartUtf16／rangeEndUtf16。保留原始 text；沒有上下文仍使用既有聊天契約。 |
+| document.save | 帶目前 documentContext 及完整來源文字；以 diskFingerprint 比對後手動存檔，失敗不顯示已儲存。編輯器 revision 不得在本次寫回期間被另一個本程式儲存交錯。 |
+| document.apply | 帶 parentRequestId、turnId、callId、目前 documentContext、replacementText；必須對應該回合已產生且已獲所需操作批准的候選，不能讓前端任意文字取得 Agent 操作身分。伺服器保留原回合快照／指定範圍，先比較目前 revision 與磁碟指紋；成功才同步文字與磁碟。 |
+| 文件操作結果 | path、rangeStartUtf16／rangeEndUtf16、status（saved／conflict／failed／cancelled），視狀態帶 savedFingerprint、candidateText、currentDiskText、issue；UI 同時保留本地 base／current editor。超過傳輸界線時明確報錯並保留候選，不截斷。 |
+| 衝突與 Undo | 不另設 conflict／Undo 服務或持久格式；保留目前／取消不寫入，採用候選用最新 revision／fingerprint 再送同一 apply 邊界，若再變更則重新衝突。有限 Undo 以新 requestId 呼叫 document.apply，帶原 turnId、undoOfCallId 與目前 documentContext；由後端依同編輯工作階段已成功操作的原快照推導反向候選，不接受任意 replacementText。Undo 與原 callId 分開去重，適用單項文件批准與版本檢查；後來修改不得被直接覆蓋。 |
+| P1 單項文件批准 | 復用 approval.required、approval.resolve 的 approvalId／parentRequestId／turnId；為文件操作增補 operation（document.apply／document.undo）、targetPath、rangeStartUtf16／rangeEndUtf16 與說明。既有 Bash payload 仍有效；文件事件不假造 Bash command／timeout。P3 的全專案語義不在此次 P1 協定批准內。 |
+
+**字元與邊界提案：** path／rootPath 沿既有路徑使用 8,192 UTF-8 bytes 上限；diskFingerprint／savedFingerprint 為磁碟原始 bytes 的 SHA-256 小寫 64 位十六進位。editorRevision 為非負安全整數、文字改變即遞增。rangeStartUtf16／rangeEndUtf16 是同份 sourceText 的 0-based UTF-16 code-unit 半開區間，不得切斷 surrogate pair；畫面來源行／欄自 1 起算，CRLF 算一次換行，原換行字元保留。新來源／替換文字容許空字串（空檔與刪除），不能沿用目前所有 string 皆非空的隱含規則；每個文字欄位有上限，並檢查整筆 JSON 編碼後 UTF-8 大小。既有 text／NDJSON 上限不擴大，不以截斷通過。
+
+**後續欄位候選（非此次批准）：** P2 的 optional skillReferences 為 name／startUtf16／endUtf16 陣列，定位原始 text 並去重載入指引；P3 增補回合固定的 permissionMode（ask／bypass）、workspaceRoot，以及一般操作的 operation／target／parameters。這些必須在各階段核對真正入口後另行批准；不預先變更既有持久 bashPermissionMode 格式。A6 採臨時 Normal 的整合仍保留模式說明與結束還原。
+
+**重試界線：** 現有 completed turnId 去重只證明終局對話已保存；檔案已寫入但終局回合尚未保存時仍有崩潰窗口。同 process 可用 turnId／callId 與寫後指紋避免再次套用；重啟後未知操作先核對磁碟及既有回合結果，不自動重放，不宣稱跨重啟 exactly-once。若實作證明必須新增持久 receipt，先停下提出具體 schema，不把本提案當成該批准。
+
+**具體批准包：**
+
+- **Q1｜A3 編輯器依賴：** 在 app/desktop 增加精確版本 monaco-editor@0.57.0 與 package-lock 更新，僅使用本地 ESM／必要 editor worker（Vite 既有 worker 能力），不加 React wrapper、CDN 或獨立 worker 服務。版本來自 [官方 release](https://github.com/microsoft/monaco-editor/releases/tag/v0.57.0)，worker 路徑依 [官方 ESM／Vite 指引](https://github.com/microsoft/monaco-editor/blob/main/docs/integrate-esm.md)。textarea 加自行維護 gutter／選取／Undo 雖可另提，但不能直接當成已滿足 VS Code 編輯體驗的等價替代。成本是一次套件下載／lock 更新與本地 TS／Vite build；預估數分鐘、未量測，新增一項套件及 worker 打包維護；單次可能超過約十分鐘時另批，原生 release build 不包含在此估計。
+- **Q2｜P1 範圍與通訊契約：** 接受 A1 的 Markdown／單一 .tex、A2 僅記憶體 root、A4 精確來源選取及必要上下文、A5 同編輯階段有限 Undo，以及上表 P1 介面／字元規則；A6 僅確認後續臨時 Normal 的方向，不提前批准 P2 契約。協定／fixtures／Python／TS／Rust 驗證同步修改，避免只塞進 prompt 而失去範圍、版本、存檔結果與操作身分檢查。成本是本地契約與文件測試、前端 build；不含付費模型／真 provider、不新增持久格式，維護限既有多語言協定及 fixture。
+- **Q3｜P1 局部實作檔案界線：** 此垂直切片必須超過三個 production 檔：contract.json／fixtures.json、app/agent/desktop/protocol.py、service.py、app/desktop/src/protocol.ts、App.tsx、styles.css、app/desktop/src-tauri/src/protocol.rs；Q1 的 package.json／package-lock.json。另提案至多新增 app/agent/desktop/documents.py（局部文件版本／讀寫／候選責任）與 app/desktop/src/DocumentEditor.tsx（編輯器生命週期／來源選取）。可在上述既有邊界內保持較少檔案便不新增；不全面拆解 service／App、不新增通用框架。直接相關測試沿既有 pytest／node／Rust 入口，既有 fixture_session.py 只補文件 fixture。跨語言驗證與 UI／後端各一處不可省略，否則無法完成真實開檔至存檔；沒有理由把 P2～P5 的所有檔案自動納入此批准。
+
 ## 4. 執行路線與驗收入口
 
 依賴順序為 **P0 → P1 → P2 → P3 → P4 → P5**。P1 先交付不依賴新多 Skill 語義的文件閉環；全產品完成仍需 P5。階段細節與驗收程序只在各階段檔維護；進度及實際結果只在 [build-log.md](build-log.md) 維護。
