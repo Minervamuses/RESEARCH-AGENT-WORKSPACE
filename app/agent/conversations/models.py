@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from pathlib import PurePosixPath
+from typing import Any, Literal
 from uuid import RFC_4122, UUID
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LATEST_CONTEXT_TURNS = 10
 
 MAX_TURNS = 4_096
@@ -171,6 +174,155 @@ def validate_project_id(value: object) -> str | None:
     return value
 
 
+
+def _context_object(value: object, required: set[str], optional: set[str] = frozenset()) -> dict[str, Any]:
+    if type(value) is not dict or not required <= set(value) or set(value) - required - optional:
+        _invalid("submittedContext object has missing or unexpected fields")
+    return value
+
+
+def _context_integer(value: object, field: str) -> int:
+    if type(value) is not int or not 0 <= value <= 9_007_199_254_740_991:
+        _invalid(f"{field} must be a non-negative safe integer")
+    return value
+
+
+def _context_path(value: object, field: str) -> str:
+    value = _validate_text(value, field, 8192, nonblank=True)
+    path = PurePosixPath(value)
+    if not value.startswith("/") or "\\" in value or ".." in path.parts or str(path) != value or any(ord(char) < 32 for char in value):
+        _invalid(f"{field} must be a canonical absolute Linux path")
+    return value
+
+
+def _context_fingerprint(value: object, field: str) -> str:
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        _invalid(f"{field} must be a SHA-256 fingerprint")
+    return value
+
+
+def _context_slice(source: str, start: int, end: int) -> tuple[str, int, int]:
+    _context_integer(start, "startUtf16")
+    _context_integer(end, "endUtf16")
+    if end < start:
+        _invalid("submittedContext range is reversed")
+    boundaries = {0: 0}
+    offset = 0
+    for index, character in enumerate(source):
+        offset += 2 if ord(character) > 0xffff else 1
+        if offset in {start, end}:
+            boundaries[offset] = index + 1
+    if start not in boundaries or end not in boundaries:
+        _invalid("submittedContext range exceeds source text or splits a surrogate pair")
+    left, right = boundaries[start], boundaries[end]
+    return source[left:right], left, right
+
+
+def _context_document(value: object, root: str, *, selected: bool) -> dict[str, Any]:
+    required = {"rootPath", "path", "editorRevision", "sourceText", "diskFingerprint"}
+    ranges = {"rangeStartUtf16", "rangeEndUtf16"}
+    snapshot = _context_object(value, required | ranges if selected else required, set() if selected else ranges)
+    if snapshot["rootPath"] != root:
+        _invalid("document snapshot belongs to a different project root")
+    path = _context_path(snapshot["path"], "document.path")
+    if path == root or not PurePosixPath(path).is_relative_to(root):
+        _invalid("document path must be inside its project root")
+    _context_integer(snapshot["editorRevision"], "editorRevision")
+    source = _validate_text(snapshot["sourceText"], "sourceText", MAX_INPUT_BYTES)
+    _context_fingerprint(snapshot["diskFingerprint"], "diskFingerprint")
+    if ("rangeStartUtf16" in snapshot) != ("rangeEndUtf16" in snapshot):
+        _invalid("document snapshot requires both UTF-16 range endpoints")
+    if "rangeStartUtf16" in snapshot:
+        _context_slice(source, snapshot["rangeStartUtf16"], snapshot["rangeEndUtf16"])
+    return snapshot
+
+
+def validate_submitted_context(value: object) -> dict[str, Any] | None:
+    """Validate frozen submission data without reading files; return detached JSON."""
+    if value is None:
+        return None
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise ConversationValidationError("submittedContext must be valid JSON") from exc
+    if len(encoded) > MAX_INPUT_BYTES:
+        _invalid("submittedContext exceeds the 1 MiB input limit")
+    context = _context_object(value, {
+        "projectId", "rootPath", "permissionMode", "requestedThinkingMode",
+        "skillReferences", "projectRules", "references",
+    }, {"documentContext"})
+    project_id = validate_project_id(context["projectId"])
+    if project_id is None:
+        _invalid("submittedContext.projectId must not be null")
+    root = _context_path(context["rootPath"], "rootPath")
+    if context["permissionMode"] not in ("ask", "bypass"):
+        _invalid("permissionMode must be ask or bypass")
+    if context["requestedThinkingMode"] not in ("normal", "extended"):
+        _invalid("requestedThinkingMode must be normal or extended")
+    skills = context["skillReferences"]
+    if type(skills) is not list or len(skills) > 128:
+        _invalid("skillReferences must be an array of at most 128 items")
+    for item in skills:
+        skill = _context_object(item, {"name", "startUtf16", "endUtf16"})
+        _validate_text(skill["name"], "skill.name", MAX_IDENTIFIER_BYTES, nonblank=True)
+        start = _context_integer(skill["startUtf16"], "skill.startUtf16")
+        end = _context_integer(skill["endUtf16"], "skill.endUtf16")
+        if end <= start:
+            _invalid("skill reference range must be nonempty")
+    rules = _context_object(context["projectRules"], {"text", "fingerprint"})
+    rules_text = _validate_text(rules["text"], "projectRules.text", MAX_INPUT_BYTES)
+    _context_fingerprint(rules["fingerprint"], "projectRules.fingerprint")
+    if hashlib.sha256(rules_text.encode("utf-8")).hexdigest() != rules["fingerprint"]:
+        _invalid("projectRules fingerprint does not match its text")
+    if "documentContext" in context:
+        _context_document(context["documentContext"], root, selected=False)
+    references = context["references"]
+    if type(references) is not list:
+        _invalid("references must be an array")
+    seen: set[str] = set()
+    for item in references:
+        if type(item) is not dict or item.get("kind") not in ("document", "chat"):
+            _invalid("reference kind must be document or chat")
+        kind = item["kind"]
+        reference = _context_object(item, {"referenceId", "kind", "text", kind})
+        reference_id = _validate_text(reference["referenceId"], "referenceId", MAX_IDENTIFIER_BYTES, nonblank=True)
+        if reference_id in seen:
+            _invalid("referenceId must be unique within a submission")
+        seen.add(reference_id)
+        frozen = _validate_text(reference["text"], "reference.text", MAX_INPUT_BYTES)
+        if not frozen:
+            _invalid("reference text must not be empty")
+        if kind == "document":
+            document = _context_object(reference["document"], {"snapshot", "startLine", "endLine"})
+            snapshot = _context_document(document["snapshot"], root, selected=True)
+            selected_text, left, right = _context_slice(
+                snapshot["sourceText"], snapshot["rangeStartUtf16"], snapshot["rangeEndUtf16"],
+            )
+            if selected_text != frozen:
+                _invalid("document reference text does not match its frozen snapshot range")
+            breaks = [match.end() for match in re.finditer(r"\r\n|\r|\n", snapshot["sourceText"])]
+            start_line = 1 + sum(end <= left for end in breaks)
+            end_line = 1 + sum(end < right for end in breaks)
+            if (type(document["startLine"]) is not int or type(document["endLine"]) is not int
+                    or document["startLine"] != start_line or document["endLine"] != end_line):
+                _invalid("document reference line numbers do not match the frozen source range")
+        else:
+            chat = _context_object(reference["chat"], {
+                "projectId", "sessionId", "turnId", "role", "messageFingerprint", "startUtf16", "endUtf16",
+            })
+            if chat["projectId"] != project_id:
+                _invalid("chat reference belongs to another project")
+            validate_conversation_id(chat["sessionId"])
+            validate_turn_id(chat["turnId"])
+            if chat["role"] not in ("user", "assistant"):
+                _invalid("chat reference role must be user or assistant")
+            _context_fingerprint(chat["messageFingerprint"], "messageFingerprint")
+            start = _context_integer(chat["startUtf16"], "chat.startUtf16")
+            end = _context_integer(chat["endUtf16"], "chat.endUtf16")
+            if end <= start or end - start != len(frozen.encode("utf-16-le")) // 2:
+                _invalid("chat reference range does not match its selected text length")
+    return json.loads(encoded)
+
 def validate_timestamp(value: object, field: str = "timestamp") -> str:
     """Validate a bounded ISO 8601 UTC timestamp ending in ``Z``."""
     timestamp = _validate_text(value, field, MAX_TIMESTAMP_BYTES)
@@ -257,8 +409,10 @@ class ConversationTurn:
     assistant_output: str | None
     tool_activities: tuple[ToolActivitySummary, ...]
     failure: FailureInfo | None
+    submitted_context: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "submitted_context", validate_submitted_context(self.submitted_context))
         validate_turn(self)
 
 
@@ -274,8 +428,8 @@ class ConversationDocument:
     turns: tuple[ConversationTurn, ...]
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version != SCHEMA_VERSION:
-            _invalid(f"schemaVersion must equal {SCHEMA_VERSION}")
+        if type(self.schema_version) is not int or self.schema_version not in (1, SCHEMA_VERSION):
+            _invalid(f"schemaVersion must equal 1 or {SCHEMA_VERSION}")
         validate_conversation_id(self.conversation_id)
         validate_project_id(self.project_id)
         _created_at, created_value = _timestamp_value(
@@ -364,6 +518,23 @@ def validate_turn(turn: ConversationTurn) -> ConversationTurn:
         MAX_INPUT_BYTES,
         nonblank=True,
     )
+    context = validate_submitted_context(turn.submitted_context)
+    if context is not None:
+        submitted = json.dumps(
+            {"text": turn.display_input, "submittedContext": context},
+            ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+        ).encode("utf-8")
+        if len(submitted) > MAX_INPUT_BYTES:
+            _invalid("text plus submittedContext exceeds the 1 MiB input limit")
+        for skill in context["skillReferences"]:
+            selected, left, right = _context_slice(turn.display_input, skill["startUtf16"], skill["endUtf16"])
+            if selected != "@" + skill["name"]:
+                _invalid("skillReferences do not match displayInput")
+            if left and re.match(r"[A-Za-z0-9_.@+-]", turn.display_input[left - 1]):
+                _invalid("skillReferences must begin at a token boundary")
+            suffix = turn.display_input[right:]
+            if re.match(r"[A-Za-z0-9_-]", suffix) or re.match(r"\.[A-Za-z0-9]", suffix):
+                _invalid("skillReferences must end at a token boundary")
     if type(turn.context_eligible) is not bool:
         _invalid("contextEligible must be a boolean")
     _submitted_at, submitted_value = _timestamp_value(
@@ -458,6 +629,11 @@ def validate_document(document: ConversationDocument) -> ConversationDocument:
     pending_seen = False
     for index, turn in enumerate(document.turns):
         validate_turn(turn)
+        if turn.submitted_context is not None:
+            if document.schema_version == 1:
+                _invalid("schemaVersion 1 cannot contain submittedContext")
+            if turn.submitted_context["projectId"] != document.project_id:
+                _invalid("submittedContext belongs to another conversation project")
         if turn.turn_number != index + 1:
             _invalid("turnNumber values must be contiguous starting at 1")
         if turn.turn_id in seen_ids:
@@ -511,4 +687,5 @@ __all__ = [
     "validate_timestamp",
     "validate_turn",
     "validate_turn_id",
+    "validate_submitted_context",
 ]

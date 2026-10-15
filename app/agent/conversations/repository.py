@@ -31,6 +31,7 @@ from agent.conversations.models import (
     validate_conversation_id,
     validate_document,
     validate_turn_id,
+    validate_submitted_context,
 )
 
 
@@ -144,8 +145,9 @@ def _failure_from_json(value: object) -> FailureInfo | None:
     )
 
 
-def _turn_from_json(value: object) -> ConversationTurn:
-    raw = _expect_exact_object(value, _TURN_KEYS)
+def _turn_from_json(value: object, schema_version: int) -> ConversationTurn:
+    keys = _TURN_KEYS | {"submittedContext"} if schema_version == SCHEMA_VERSION else _TURN_KEYS
+    raw = _expect_exact_object(value, keys)
     activities = raw["toolActivities"]
     if type(activities) is not list:
         raise ValueError("toolActivities must be a JSON array")
@@ -163,6 +165,7 @@ def _turn_from_json(value: object) -> ConversationTurn:
         assistant_output=raw["assistantOutput"],
         tool_activities=tuple(_activity_from_json(item) for item in activities),
         failure=_failure_from_json(raw["failure"]),
+        submitted_context=raw.get("submittedContext"),
     )
 
 
@@ -189,7 +192,7 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
         "schemaVersion" in raw_value
         and (
             type(raw_value["schemaVersion"]) is not int
-            or raw_value["schemaVersion"] != SCHEMA_VERSION
+            or raw_value["schemaVersion"] not in (1, SCHEMA_VERSION)
         )
     ):
         raise _ClassifiedMalformedError(
@@ -214,7 +217,7 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
             project_id=raw["projectId"],
             created_at=raw["createdAt"],
             updated_at=raw["updatedAt"],
-            turns=tuple(_turn_from_json(item) for item in turns),
+            turns=tuple(_turn_from_json(item, raw["schemaVersion"]) for item in turns),
         )
         return validate_document(document)
     except _ClassifiedMalformedError:
@@ -245,8 +248,9 @@ def _failure_to_json(failure: FailureInfo | None) -> dict[str, Any] | None:
     }
 
 
-def _turn_to_json(turn: ConversationTurn) -> dict[str, Any]:
+def _turn_to_json(turn: ConversationTurn, schema_version: int) -> dict[str, Any]:
     return {
+        **({"submittedContext": validate_submitted_context(turn.submitted_context)} if schema_version == SCHEMA_VERSION else {}),
         "turnId": turn.turn_id,
         "turnNumber": turn.turn_number,
         "kind": turn.kind,
@@ -272,7 +276,7 @@ def _document_to_json(document: ConversationDocument) -> dict[str, Any]:
         "projectId": document.project_id,
         "createdAt": document.created_at,
         "updatedAt": document.updated_at,
-        "turns": [_turn_to_json(turn) for turn in document.turns],
+        "turns": [_turn_to_json(turn, document.schema_version) for turn in document.turns],
     }
 
 
@@ -318,6 +322,7 @@ def _same_logical_input(
     semantic_input: object,
     context_eligible: object,
     thinking_mode: object,
+    submitted_context: object = None,
 ) -> bool:
     return (
         turn.kind == kind
@@ -325,6 +330,7 @@ def _same_logical_input(
         and turn.semantic_input == semantic_input
         and turn.context_eligible == context_eligible
         and turn.thinking_mode == thinking_mode
+        and turn.submitted_context == submitted_context
     )
 
 
@@ -382,6 +388,7 @@ class ConversationRepository:
         context_eligible: bool,
         thinking_mode: str | None,
         submitted_at: str,
+        submitted_context: dict[str, Any] | None = None,
     ) -> ConversationSnapshot:
         """Atomically create the first pending turn without clobbering a file."""
         turn = ConversationTurn(
@@ -398,6 +405,7 @@ class ConversationRepository:
             assistant_output=None,
             tool_activities=(),
             failure=None,
+            submitted_context=submitted_context,
         )
         document = ConversationDocument(
             schema_version=SCHEMA_VERSION,
@@ -414,6 +422,7 @@ class ConversationRepository:
         document: ConversationDocument,
     ) -> ConversationSnapshot:
         """Atomically publish one complete validated document without clobbering."""
+        document = replace(document, schema_version=SCHEMA_VERSION)
         payload = _encode_document(document)
         self._ensure_root(create=True)
         target = self.path_for(document.conversation_id)
@@ -475,6 +484,7 @@ class ConversationRepository:
         document: ConversationDocument,
     ) -> ConversationSnapshot:
         """Replace a snapshot only if its durable content is still unchanged."""
+        document = replace(document, schema_version=SCHEMA_VERSION)
         self._validate_snapshot_document_pair(snapshot, document)
         self._validate_document_update(snapshot.document, document)
         payload = _encode_document(document)
@@ -506,6 +516,7 @@ class ConversationRepository:
         context_eligible: bool,
         thinking_mode: str | None,
         submitted_at: str,
+        submitted_context: dict[str, Any] | None = None,
     ) -> ConversationSnapshot:
         """Append a pending turn or return an exact same-ID duplicate."""
         validate_turn_id(turn_id)
@@ -518,6 +529,7 @@ class ConversationRepository:
                 semantic_input=semantic_input,
                 context_eligible=context_eligible,
                 thinking_mode=thinking_mode,
+                submitted_context=validate_submitted_context(submitted_context),
             ):
                 raise ConversationConflictError(
                     "turnId already exists with different input"
@@ -545,6 +557,7 @@ class ConversationRepository:
             assistant_output=None,
             tool_activities=(),
             failure=None,
+            submitted_context=submitted_context,
         )
         document = replace(
             snapshot.document,
@@ -643,6 +656,7 @@ class ConversationRepository:
         context_eligible: bool,
         thinking_mode: str | None,
         retry_at: str,
+        submitted_context: dict[str, Any] | None = None,
     ) -> ConversationSnapshot:
         """Explicitly retry a failed/interrupted logical turn in place."""
         index, turn = self._required_turn(snapshot.document, turn_id)
@@ -653,6 +667,7 @@ class ConversationRepository:
             semantic_input=semantic_input,
             context_eligible=context_eligible,
             thinking_mode=thinking_mode,
+            submitted_context=validate_submitted_context(submitted_context),
         ):
             raise ConversationConflictError(
                 "turnId already exists with different input"
@@ -672,6 +687,7 @@ class ConversationRepository:
             assistant_output=None,
             tool_activities=(),
             failure=None,
+            submitted_context=submitted_context,
         )
         document = self._replace_turn(snapshot.document, index, pending, retry_at)
         return self.save(snapshot, document)
@@ -847,7 +863,7 @@ class ConversationRepository:
         before: ConversationDocument,
         after: ConversationDocument,
     ) -> None:
-        if before == after:
+        if replace(before, schema_version=SCHEMA_VERSION) == after:
             return
         if len(after.turns) == len(before.turns) + 1:
             if after.turns[:-1] != before.turns:
@@ -882,6 +898,7 @@ class ConversationRepository:
             "context_eligible",
             "thinking_mode",
             "submitted_at",
+            "submitted_context",
         )
         if any(getattr(old, field) != getattr(new, field) for field in immutable_fields):
             raise InvalidTransitionError(
@@ -1029,6 +1046,8 @@ class ConversationRepository:
             raise ConversationConflictError(
                 "conversation was modified after it was loaded"
             )
+        if _document_from_json(current, snapshot.document.conversation_id) != snapshot.document:
+            raise ConversationConflictError("conversation snapshot was altered after it was loaded")
 
     @staticmethod
     def _reject_unsafe_existing_target(target: Path) -> None:

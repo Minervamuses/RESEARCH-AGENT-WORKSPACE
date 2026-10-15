@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
 |---|---|---|---|---|
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
-| P2 | Not started | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
+| P2 | In progress | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
 | P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
 
@@ -126,3 +126,10 @@
 - Actual AT-SPI rendered bounds at 1080x720: sidebar 272px; Monaco code region 412x427px (not its 2px input textarea); transcript 370x197px. Evidence: project-one-document-open.json and dirty-draft-cancel-preserved.json in the fixture root. These are actual native controls and geometry; WSLg screenshot capture remains black and is not used as visual proof.
 - Independent read-only integration review at 281e538 found no demonstrated P1 blocking issue after tracing cold binding, ownership, rules reload, busy guards and epoch/catch/finally/focus paths. It did not rerun tests or claim GUI evidence. Main reviewed committed scope; no dependency, lock or environment changes, and worktree was clean.
 - P1 end condition is met by this checkpoint plus E05-E14 focused evidence. Remaining broader GUI permutations belong to P4; ongoing explicit discard/B-only/return-A check will be recorded when observed. Next dependency-ready phase is P2.
+
+### E16 / P2-S1: canonical v2 and pending submission persistence
+
+- Canonical writer now emits schemaVersion 2 with nullable submittedContext; strict v1 reads preserve bytes and schema identity until an actual fingerprint-checked write upgrades them. Existing pending-first session flow accepts optional context for conversational and display-only turns; same-ID/immutable comparisons include the detached structured packet. Nested snapshot tampering is rejected against durable data.
+- Model validation covers strict document/chat unions, original UTF-16 ranges/text/lines, project/root ownership, rules hash, Skill spans and serialized 1 MiB input size. No sidecar, store migration or real history access.
+- Actual checks: new canonical/session subset 21 passed (0.56s); full two affected modules `poetry run pytest tests/test_conversation_repository.py tests/test_session_persistence.py -q` -> 50 passed (1.43s). Main review found a doubled escape in Skill dot-boundary regex; corrected and added @citation.extra assertion, targeted node passed (0.30s). Scoped whitespace check passed.
+- Additional P1 native evidence: explicit dirty/draft discard opened B with only C, same-named draft.md contained B text; returning A showed only A/B and original A file. Reopening the native App required chooser again; Cancel exposed no history. Native test processes were stopped. Evidence in E15 fixture root: final-baseline-a.json, reopened-cold-chooser-ready.json, reopened-chooser-canceled.json. Early snapshot while backend was still starting failed its timing assertion; the later ready snapshot passed without repeating Start. No claimed screenshot evidence.

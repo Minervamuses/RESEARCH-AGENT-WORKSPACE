@@ -25,6 +25,7 @@ from agent.conversations.models import (
     InvalidTransitionError,
     ToolActivitySummary,
     is_canonical_uuid4_hex,
+    validate_submitted_context,
 )
 from agent.conversations.repository import (
     ConversationRepository,
@@ -62,4 +63,5 @@ __all__ = [
     "InvalidTransitionError",
     "ToolActivitySummary",
     "is_canonical_uuid4_hex",
+    "validate_submitted_context",
 ]

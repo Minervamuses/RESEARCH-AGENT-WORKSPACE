@@ -292,6 +292,7 @@ class ChatSession:
         thinking_mode: str | None,
         turn_id: str,
         retry: bool,
+        submitted_context: dict | None = None,
     ):
         if not is_canonical_uuid4_hex(turn_id):
             raise ConversationValidationError(
@@ -305,6 +306,7 @@ class ChatSession:
             "semantic_input": semantic_input,
             "context_eligible": context_eligible,
             "thinking_mode": thinking_mode,
+            "submitted_context": submitted_context,
         }
         submitted_at = self._now_timestamp()
         if snapshot is None:
@@ -369,6 +371,7 @@ class ChatSession:
         turn_id: str,
         retry: bool,
         thinking_mode: str | None = None,
+        submitted_context: dict | None = None,
     ):
         return await self._begin_persisted_turn(
             kind="conversational",
@@ -376,6 +379,7 @@ class ChatSession:
             semantic_input=semantic_input,
             context_eligible=True,
             thinking_mode=thinking_mode or self.thinking_mode,
+            submitted_context=submitted_context,
             turn_id=turn_id,
             retry=retry,
         )
@@ -1161,6 +1165,7 @@ class ChatSession:
         turn_id: str,
         retry: bool = False,
         failure_retryable: bool = True,
+        submitted_context: dict | None = None,
     ) -> tuple[object | None, TurnOutcome]:
         """Run one local command inside the canonical durable turn lifecycle."""
         async with self._turn_execution_lock:
@@ -1170,6 +1175,7 @@ class ChatSession:
                 semantic_input=None,
                 context_eligible=False,
                 thinking_mode=None,
+                submitted_context=submitted_context,
                 turn_id=turn_id,
                 retry=retry,
             )
@@ -1249,6 +1255,7 @@ class ChatSession:
         skill_name: str | None = None,
         skill_references: list[dict] | None = None,
         retry: bool = False,
+        submitted_context: dict | None = None,
     ) -> TurnOutcome:
         """Core entry point: one finalized turn with text, errors, and trace."""
         async with self._turn_execution_lock:
@@ -1273,6 +1280,7 @@ class ChatSession:
                 turn_id=logical_turn_id,
                 retry=retry,
                 thinking_mode=effective_mode,
+                submitted_context=submitted_context,
             )
             self._conversation_snapshot = snapshot
             if duplicate:
