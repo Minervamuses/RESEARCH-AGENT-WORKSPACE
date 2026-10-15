@@ -749,7 +749,8 @@ export function visibleMessageRange(root: Node, startNode: Node, startOffset: nu
     if (node.nodeType !== 1) return;
     const element = node as Element;
     if (element.hasAttribute("hidden") || element.getAttribute("aria-hidden") === "true" ||
-        element.hasAttribute("data-reference-exclude") || ["BUTTON", "INPUT", "TEXTAREA", "SELECT", "DETAILS"].includes(element.tagName)) return;
+        element.hasAttribute("data-reference-exclude") || ["INPUT", "TEXTAREA", "SELECT", "DETAILS"].includes(element.tagName) ||
+        (element.tagName === "BUTTON" && !(element.getAttribute("class") ?? "").split(/\s+/).includes("safe-link"))) return;
     const block = node !== root && /^(P|DIV|PRE|LI|UL|OL|BLOCKQUOTE|H[1-6])$/.test(element.tagName);
     if (block) newline();
     const boundaries = [text.length];

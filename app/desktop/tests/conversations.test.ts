@@ -993,11 +993,11 @@ test("visible chat coordinates preserve formatting text, paragraph breaks and UT
     nodeType: 1, tagName, childNodes, hasAttribute: (name: string) => Object.hasOwn(attributes, name),
     getAttribute: (name: string) => attributes[name] ?? null,
   });
-  const first = text("First "), strong = text("bold😀"), second = text("Second link");
+  const first = text("First "), strong = text("bold😀"), second = text("Second link"), action = text("Excluded action");
   const root = element("DIV", [
     element("P", [first, element("STRONG", [strong])]),
-    element("P", [element("A", [second])]),
-    element("BUTTON", [text("Excluded action")]),
+    element("P", [element("BUTTON", [second], { class: "safe-link" })]),
+    element("BUTTON", [action]),
     element("SPAN", [text("Hidden text")], { "aria-hidden": "true" }),
   ]);
   const selected = visibleMessageRange(root, strong, 0, second, 6)!;
@@ -1006,6 +1006,10 @@ test("visible chat coordinates preserve formatting text, paragraph breaks and UT
   assert.equal(selected.startUtf16, 6);
   assert.equal(selected.endUtf16, 19);
   assert.equal(selected.visibleText.slice(selected.startUtf16, selected.endUtf16), selected.text);
+  assert.deepEqual(visibleMessageRange(root, second, 0, second, second.textContent.length), {
+    visibleText: "First bold😀\nSecond link", text: "Second link", startUtf16: 13, endUtf16: 24,
+  });
+  assert.equal(visibleMessageRange(root, action, 0, action, action.textContent.length), null);
   assert.equal(visibleMessageRange(root, first, 0, text("Other message"), 3), null);
 });
 
