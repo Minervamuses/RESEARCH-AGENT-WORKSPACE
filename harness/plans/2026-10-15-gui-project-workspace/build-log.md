@@ -188,3 +188,9 @@
 - Open/save/apply exceptions stay visible in a persistent local error area; successful open/save removes it. Failed open retains source and undo receipt. No automatic save or project binding on file open.
 - Actual frontend checks: `npx tsc --noEmit` passed; four focused existing header/save/reconcile cases passed. Main reviewed complete three-file diff and whitespace. Native menu, keyboard and dirty workflow remain pending; no GUI completion claim.
 - Additional pre-S3 native width baseline: same font/zoom at1440x900 gives sidebar290px (p3-old-sidebar-1440-baseline.json in E23 fixture root), versus272px at1080x720. Owned native/Vite processes stopped after measurement. P3-S3 can now compare actual widths at both sizes.
+
+### E25 / A03 and A12 direct evidence gaps
+
+- Independent mapping found that malformed JSON was not evidence of filesystem permission denial, and separate pending/context tests did not directly establish structured pending recovery. Added only existing-test coverage for these two required cases.
+- Actual Linux uid1000 chmod(0) on owned temporary RESEARCH.md/history raises OS PermissionError; cold opening rejects without fallback and a failed switch preserves B binding. Finally restores exact mode; all fixture file bytes remain unchanged. Structured pending with both document/chat references becomes interrupted on restore, preserving original context/semantic/display with no graph invocation.
+- Exact command: `poetry run pytest tests/test_desktop_conversations.py::test_project_open_permission_denied_preserves_sources_and_current_binding tests/test_session_persistence.py::test_reload_interrupts_leftover_pending_without_replay -q --tb=short` -> 4 passed,0.53s; first attempt, one existing deprecation warning. Main reviewed two-file diff; whitespace passed. No production or real-data operations.

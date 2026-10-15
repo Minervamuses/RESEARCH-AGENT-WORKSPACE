@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -2425,6 +2426,48 @@ def test_project_settings_scoped_catalog_repair_requires_complete_healthy_scan(t
         "projects": [{"projectId": preview["projectId"], "name": project.name, "sessionIds": [SESSION_A]}]
     }
     assert loaded.load(SESSION_A).document.project_id == preview["projectId"]
+
+
+@pytest.mark.parametrize("denied", ["research", "history"])
+def test_project_open_permission_denied_preserves_sources_and_current_binding(tmp_path, denied):
+    assert os.geteuid() != 0, "run real permission checks as a non-root Linux user"
+    service, _catalog, factory, repository = _seed_coordinator(tmp_path, open_project=False)
+    blocked = tmp_path / "project-one" / "RESEARCH.md" if denied == "research" else repository.root.parent
+    assert blocked.is_relative_to(tmp_path) and blocked.stat().st_uid == os.geteuid()
+    original_mode = blocked.stat().st_mode & 0o7777
+    original_files = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    try:
+        blocked.chmod(0)
+        with pytest.raises(PermissionError):
+            if denied == "research":
+                blocked.read_bytes()
+            else:
+                list(blocked.iterdir())
+
+        with pytest.raises(DesktopServiceError, match="Permission denied") as cold_error:
+            asyncio.run(_open_project(service, tmp_path))
+        assert cold_error.value.code == "PROTOCOL_INVALID"
+        assert asyncio.run(service.dispatch("project.list", {}))["projects"] == []
+        assert service._conversation_repository is None and factory.sessions == []
+
+        opened = asyncio.run(_open_project(service, tmp_path, "project-two"))
+        bound_repository = service._conversation_repository
+        bound_documents = service._documents
+        with pytest.raises(DesktopServiceError, match="Permission denied") as switch_error:
+            asyncio.run(_open_project(service, tmp_path))
+        assert switch_error.value.code == "PROTOCOL_INVALID"
+        assert service._selected_project_id == opened["projectId"]
+        assert service._conversation_repository is bound_repository
+        assert service._documents is bound_documents
+        assert asyncio.run(service.dispatch("project.list", {}))["projects"] == [{
+            "projectId": opened["projectId"], "name": "project-two", "sessionCount": 1,
+        }]
+    finally:
+        blocked.chmod(original_mode)
+
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == original_files
+    assert not (Path(service.config.persist_dir) / CATALOG_FILENAME).exists()
 
 
 def test_project_settings_init_rejects_existing_unreadable_catalog(tmp_path):

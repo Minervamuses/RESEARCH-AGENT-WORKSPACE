@@ -234,7 +234,11 @@ def test_failed_turn_records_one_incident_in_log_and_transcript(
     assert len(records) == 1 and records[0].exc_info is not None
 
 
-def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path):
+@pytest.mark.parametrize("with_context", [False, True])
+def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path, with_context):
+    from test_conversation_repository import _submitted_context
+
+    context = _submitted_context(PROJECT_ID) if with_context else None
     repository = ConversationRepository(tmp_path)
     session_id = _id()
     turn_id = _id()
@@ -248,7 +252,10 @@ def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path
         context_eligible=True,
         thinking_mode="normal",
         submitted_at=_timestamp(1),
+        submitted_context=context,
     )
+    pending = repository.load(session_id).document.turns[-1]
+    assert pending.state == "pending" and pending.submitted_context == context
     graph = make_astream_graph()
     monkeypatch.setattr(
         "agent.session.build_graph",
@@ -271,6 +278,11 @@ def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path
     assert turn.assistant_output is None
     assert turn.failure is not None
     assert turn.failure.code == "interrupted"
+    assert turn.submitted_context == context
+    assert turn.semantic_input == pending.semantic_input
+    assert turn.display_input == pending.display_input
+    if with_context:
+        assert {reference["kind"] for reference in turn.submitted_context["references"]} == {"document", "chat"}
 
 
 def test_completed_duplicate_returns_durable_answer_without_graph(
