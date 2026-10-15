@@ -1,7 +1,6 @@
 """Ollama-based embedder — local embedding via Ollama server."""
 
 from langchain_core.embeddings import Embeddings
-from langchain_ollama import OllamaEmbeddings
 
 from rag.config import RAGConfig
 
@@ -16,6 +15,8 @@ class OllamaEmbedder(Embeddings):
     """
 
     def __init__(self, config: RAGConfig):
+        from langchain_ollama import OllamaEmbeddings
+
         self.config = config
         self._embeddings = OllamaEmbeddings(model=config.embed_model)
 

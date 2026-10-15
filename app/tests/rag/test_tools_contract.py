@@ -1,5 +1,8 @@
 """Contract tests for rag's framework-neutral tool layer."""
 
+import subprocess
+import sys
+
 import pytest
 
 from rag import RAGConfig, TOOL_SCHEMAS, dispatch
@@ -49,3 +52,21 @@ def test_dispatch_rejects_unknown_tool():
 def test_dispatch_rejects_config_in_tool_args():
     with pytest.raises(ValueError, match="config must be passed"):
         dispatch("rag_explore", {"config": {}})
+
+
+def test_public_import_defers_vector_backends():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; "
+            "from rag import ChromaStore, RAGConfig, TOOL_SCHEMAS, dispatch; "
+            "assert not ({\"chromadb\", \"langchain_chroma\", "
+            "\"langchain_ollama\", \"numpy\"} & sys.modules.keys())",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -62,7 +63,7 @@ import type {
   TranscriptTurnDto,
   TurnCompletedDto,
 } from "./protocol.ts";
-import { SafeContent } from "./SafeContent.tsx";
+import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
 import { DocumentEditor, type DocumentSnapshot } from "./DocumentEditor.tsx";
 import {
   ApprovalDialog,
@@ -92,6 +93,9 @@ import {
 const backendClient = createBackendClient({
   invoke: <T,>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args),
 });
+
+// Unchanged history must not be reparsed when the composer or live activity updates.
+const SafeContent = memo(ContentRenderer);
 
 const phaseLabels = {
   starting: "Starting backend",
@@ -466,8 +470,9 @@ async function fetchTranscriptPage(
   offset: number,
   limit: number,
   mismatchMessage = "The backend returned a transcript for a different conversation.",
+  request = backendClient.request,
 ): Promise<SessionTranscriptDto> {
-  const data = await backendClient.request("session.transcript", {
+  const data = await request("session.transcript", {
     projectId,
     sessionId,
     offset,
@@ -477,6 +482,55 @@ async function fetchTranscriptPage(
     throw protocolMismatch(mismatchMessage);
   }
   return data;
+}
+
+export async function selectConversationWithPreview(
+  projectId: string,
+  summary: SessionSummaryDto,
+  callbacks: {
+    isCurrent: () => boolean;
+    onPreview: (data: SessionTranscriptDto) => void;
+    onSelected: (selected: SessionSelectedDto) => void;
+  },
+  request = backendClient.request,
+): Promise<SessionTranscriptDto | null> {
+  let previewing = true;
+  const selectedRequest = request("session.select", { projectId, sessionId: summary.sessionId });
+  // Handle both outcomes immediately: selection may fail before this read finishes.
+  const transcriptRequest = fetchTranscriptPage(
+    projectId, summary.sessionId, transcriptTailOffset(summary.turnCount), TRANSCRIPT_PAGE_SIZE,
+    undefined, request,
+  ).then(
+    (data) => {
+      if (previewing && callbacks.isCurrent() && data.status === "ready") callbacks.onPreview(data);
+      return { data, error: null };
+    },
+    (error: unknown) => ({ data: null, error }),
+  );
+  try {
+    const selected = await selectedRequest as unknown as SessionSelectedDto;
+    if (!callbacks.isCurrent()) return null;
+    if (selected.projectId !== projectId || selected.sessionId !== summary.sessionId) {
+      throw protocolMismatch("The backend returned a different conversation than requested.");
+    }
+    callbacks.onSelected(selected);
+    const result = await transcriptRequest;
+    if (!callbacks.isCurrent()) return null;
+    if (result.data === null) throw result.error;
+    let data = result.data;
+    // Materializing a session recovers pending turns. A stale sidebar count can
+    // also select the wrong tail page, so confirm either case after selection.
+    if (data.items.some((turn) => turn.state === "pending") ||
+        data.total !== selected.turnCount || data.offset !== transcriptTailOffset(selected.turnCount)) {
+      data = await fetchTranscriptPage(
+        projectId, summary.sessionId, transcriptTailOffset(selected.turnCount), TRANSCRIPT_PAGE_SIZE,
+        undefined, request,
+      );
+    }
+    return callbacks.isCurrent() ? data : null;
+  } finally {
+    previewing = false;
+  }
 }
 
 function transcriptViewFrom(
@@ -505,7 +559,35 @@ export function mergeSessionItems(
   return [...bySession.values()];
 }
 
-export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
+function RestoredToolActivity({ activity }: {
+  activity: TranscriptTurnDto["toolActivities"][number];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <details
+      className="tool-activity"
+      aria-label={`Tool activity ${activity.name}`}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary className="message-label">
+        Tool activity · {activity.name} · {activity.status}
+        {activity.promptEligible ? " · restored context" : " · display only"}
+      </summary>
+      {expanded && <div className="tool-activity-content">
+        <div className="message tool-message">
+          <p className="message-label">Tool arguments · {activity.name}</p>
+          <SafeContent content={activity.arguments} />
+        </div>
+        <div className="message tool-result-message">
+          <p className="message-label">Tool result · {activity.name}</p>
+          <SafeContent content={activity.result} />
+        </div>
+      </div>}
+    </details>
+  );
+}
+
+export const RestoredTurn = memo(function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
   const displayOnly = turn.kind === "display-only";
   return (
     <article className="turn-group">
@@ -516,23 +598,10 @@ export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
         <SafeContent content={turn.userText} />
       </div>
       {turn.toolActivities.map((activity, index) => (
-        <section
-          className="tool-activity"
-          aria-label={`Tool activity ${activity.name}`}
+        <RestoredToolActivity
+          activity={activity}
           key={`${activity.callId ?? "legacy"}-${activity.name}-${index}`}
-        >
-          <div className="message tool-message">
-            <p className="message-label">
-              Tool activity · {activity.name} · {activity.status}
-              {activity.promptEligible ? " · restored context" : " · display only"}
-            </p>
-            <SafeContent content={activity.arguments} />
-          </div>
-          <div className="message tool-result-message">
-            <p className="message-label">Tool result · {activity.name}</p>
-            <SafeContent content={activity.result} />
-          </div>
-        </section>
+        />
       ))}
       {turn.state === "completed" && turn.assistantText !== null ? (
         <div className={`message ${displayOnly ? "system-message" : "assistant-message"}`}>
@@ -556,9 +625,9 @@ export function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
       )}
     </article>
   );
-}
+});
 
-export function ConversationTurns({ turns }: { turns: readonly VisibleConversationTurn[] }) {
+export const ConversationTurns = memo(function ConversationTurns({ turns }: { turns: readonly VisibleConversationTurn[] }) {
   return turns.map((item) => {
     if (item.source === "restored") {
       return <RestoredTurn turn={item.turn} key={item.key} />;
@@ -568,7 +637,7 @@ export function ConversationTurns({ turns }: { turns: readonly VisibleConversati
     }
     return <article className="turn-group pending-turn" key={item.key}><div className="message user-message"><p className="message-label">You · {item.retrying ? "retrying" : "pending"}</p><SafeContent content={item.turn.userText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{item.turn.activity.length > 0 && <ul className="activity-list">{item.turn.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>;
   });
-}
+});
 
 interface DocumentResult extends Partial<DocumentSnapshot> {
   path: string;
@@ -623,6 +692,7 @@ export default function App() {
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<SafeUiError | null>(null);
   const [transcript, setTranscript] = useState<TranscriptView | null>(null);
+  const [selectionPreview, setSelectionPreview] = useState<{ title: string; transcript: TranscriptView } | null>(null);
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [registrationIssue, setRegistrationIssue] = useState<string | null>(null);
@@ -809,6 +879,7 @@ export default function App() {
               const generationChanged = generationRef.current !== event.snapshot.generation;
               if (generationChanged || event.snapshot.lifecycle !== "ready") {
                 setSlashCatalogOwner(null);
+                setSelectionPreview(null);
                 pendingApprovalRef.current = null;
                 approvalResolvingRef.current = false;
                 setPendingApproval(null);
@@ -1036,6 +1107,7 @@ export default function App() {
       setCatalog(null);
       setSessionLists({});
       setTranscript(null);
+      setSelectionPreview(null);
       setLiveTurns([]);
       setPendingUserText(null);
       setRegistrationIssue(null);
@@ -1114,28 +1186,34 @@ export default function App() {
     if (conversationRef.current.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Selecting conversation");
     if (operation === null) return;
+    const previousSlashCatalogOwner = slashCatalogOwner;
     setSlashCatalogOwner(null);
+    setSelectionPreview(null);
     const generation = generationRef.current;
+    const isCurrent = () => generationRef.current === generation && workspaceOperation.current === operation;
     let selectionApplied = false;
     try {
-      const data = await backendClient.request("session.select", { projectId, sessionId: session.sessionId });
-      const selected = data as unknown as SessionSelectedDto;
-      if (generationRef.current !== generation) return;
-      if (selected.projectId !== projectId || selected.sessionId !== session.sessionId) {
-        throw protocolMismatch("The backend returned a different conversation than requested.");
-      }
-      setSlashCatalogOwner({ generation, projectId, sessionId: selected.sessionId });
-      dispatch({ type: "session-created", session: selected });
-      setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
-      applyConversation({ type: "conversation-selected", generation: generationRef.current, projectId, sessionId: session.sessionId });
-      selectionApplied = true;
-      setRegistrationIssue(null);
-      setLiveTurns([]);
-      setPendingUserText(null);
-      setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: "Loading saved transcript…", items: [], offset: 0, total: selected.turnCount, hasOlder: false });
-      const transcriptData = await fetchTranscriptPage(projectId, session.sessionId, transcriptTailOffset(selected.turnCount), TRANSCRIPT_PAGE_SIZE);
-      if (generationRef.current !== generation) return;
+      const transcriptData = await selectConversationWithPreview(projectId, session, {
+        isCurrent,
+        onPreview: (data) => {
+          setSelectionPreview({ title: session.title, transcript: transcriptViewFrom(projectId, session.sessionId, data) });
+          requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+        },
+        onSelected: (selected) => {
+          setSlashCatalogOwner({ generation, projectId, sessionId: selected.sessionId });
+          dispatch({ type: "session-created", session: selected });
+          setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
+          applyConversation({ type: "conversation-selected", generation, projectId, sessionId: session.sessionId });
+          selectionApplied = true;
+          setRegistrationIssue(null);
+          setLiveTurns([]);
+          setPendingUserText(null);
+          setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: "Loading saved transcript…", items: [], offset: 0, total: selected.turnCount, hasOlder: false });
+        },
+      });
+      if (transcriptData === null || !isCurrent()) return;
       setTranscript(transcriptViewFrom(projectId, session.sessionId, transcriptData));
+      setSelectionPreview(null);
       const retryTarget = latestRetryableTranscriptTurn(transcriptData.items);
       if (retryTarget !== null) {
         applyConversation({
@@ -1153,15 +1231,18 @@ export default function App() {
       requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
       focusComposer();
     } catch (error) {
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       const safe = workspaceError(error);
+      setSelectionPreview(null);
       if (selectionApplied) {
         setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: safe.message, items: [], offset: 0, total: 0, hasOlder: false });
+      } else {
+        setSlashCatalogOwner(previousSlashCatalogOwner);
       }
       setWorkspaceIssue(safe);
       focusComposer();
     } finally { finishWorkspaceOperation(operation); }
-  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer]);
+  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, slashCatalogOwner]);
 
   useEffect(() => {
     if (catalog === null || catalog.selectedProjectId === null || catalog.selectedSessionId === null || conversation.selected !== null || workspaceBusy !== null) return;
@@ -1589,12 +1670,13 @@ export default function App() {
     if (selected === null) return null;
     return sessionLists[selected.projectId]?.items.find((item) => item.sessionId === selected.sessionId) ?? null;
   }, [conversation.selected, sessionLists]);
+  const visibleTranscript = selectionPreview?.transcript ?? transcript;
   const visibleTurns = useMemo(() => mergeConversationTurns(
-    transcript === null
+    visibleTranscript === null
       ? []
-      : transcript.items.map((turn) => ({ sessionId: transcript.sessionId, turn })),
-    liveTurns,
-    pendingUserText === null || conversation.activeTurn === null
+      : visibleTranscript.items.map((turn) => ({ sessionId: visibleTranscript.sessionId, turn })),
+    selectionPreview === null ? liveTurns : [],
+    selectionPreview !== null || pendingUserText === null || conversation.activeTurn === null
       ? null
       : {
           sessionId: conversation.activeTurn.sessionId,
@@ -1602,7 +1684,7 @@ export default function App() {
           userText: pendingUserText,
           activity: conversation.activeTurn.activity,
         },
-  ), [conversation.activeTurn, liveTurns, pendingUserText, transcript]);
+  ), [conversation.activeTurn, liveTurns, pendingUserText, selectionPreview, visibleTranscript]);
   const renderConversation = state.phase === "session-ready" && state.session !== null && conversation.selected !== null;
   const activeSession = renderConversation ? state.session : null;
 
@@ -1638,7 +1720,7 @@ export default function App() {
       </aside>
 
       <main id="main-workspace" className="main-workspace" tabIndex={-1}>
-        <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
+        <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectionPreview?.title ?? selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
         <div className="writing-workspace">
           <section className="document-pane" aria-label="Source document workspace">
             <div className="document-toolbar">
@@ -1668,7 +1750,7 @@ export default function App() {
               </div>
             </section>}
           </section>
-        <div className={`workspace-body${renderConversation ? " conversation-workspace-body" : ""}`}>
+        <div className={`workspace-body${(renderConversation || selectionPreview !== null) ? " conversation-workspace-body" : ""}`}>
           {extensionFlow !== null && <ExtensionPanel
             flow={extensionFlow}
             busy={workspaceBusy !== null || state.activeAction !== null || interaction.turnActive}
@@ -1679,14 +1761,21 @@ export default function App() {
             onApply={applyExtensions}
             onRestart={restartForExtensions}
           />}
-          {(state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={sendTurn} disabled={interaction.turnActive}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
-          {registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
+          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={sendTurn} disabled={interaction.turnActive}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
+          {selectionPreview === null && registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
           {state.phase === "stopped" && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><p className="section-kicker">LOCAL · PRIVATE · ON THIS DEVICE</p><h3 id="stopped-title">Your research workspace is ready to connect</h3><p>Start the Linux backend, verify the local runtime, then create a conversation. No provider request is made by the runtime check.</p><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
           {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
           {state.phase === "busy" && <section className="empty-state" aria-labelledby="busy-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">LOCAL REQUEST</p><h3 id="busy-title">{state.activeAction === "session" ? "Creating your session" : "Checking the local runtime"}</h3><p>This check stays on your device and does not call a model provider.</p></section>}
-          {state.phase === "backend-ready" && state.diagnostics !== null && <section className="setup-card" aria-labelledby="backend-ready-title"><div className="success-mark" aria-hidden="true">✓</div><div><p className="section-kicker">BACKEND READY</p><h3 id="backend-ready-title">Create a conversation to begin</h3><p>The protocol and local runtime are ready. Creating or selecting a conversation starts enabled, configured MCP servers. No model request has been sent.</p><div className="action-row"><button className="primary-button" type="button" onClick={createSession} disabled={!canCreateSession}>Create local conversation</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div><RuntimeDetails diagnostics={state.diagnostics} /></div></section>}
+          {selectionPreview === null && state.phase === "backend-ready" && state.diagnostics !== null && <section className="setup-card" aria-labelledby="backend-ready-title"><div className="success-mark" aria-hidden="true">✓</div><div><p className="section-kicker">BACKEND READY</p><h3 id="backend-ready-title">Create a conversation to begin</h3><p>The protocol and local runtime are ready. Creating or selecting a conversation starts enabled, configured MCP servers. No model request has been sent.</p><div className="action-row"><button className="primary-button" type="button" onClick={createSession} disabled={!canCreateSession}>Create local conversation</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div><RuntimeDetails diagnostics={state.diagnostics} /></div></section>}
 
-          {activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
+          {selectionPreview !== null && <section className="conversation-surface" aria-label="Saved conversation preview" aria-busy="true">
+            <p className="control-state" role="status">Preparing this conversation… You can read the saved messages while it loads.</p>
+            <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
+              <ConversationTurns turns={visibleTurns} />
+              <div ref={transcriptEndRef} />
+            </div>
+          </section>}
+          {selectionPreview === null && activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
             <div className="session-controls" aria-label="Session controls">
               <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateThinkingMode(event.target.value as "normal" | "extended")}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
               <BashPermissionControl

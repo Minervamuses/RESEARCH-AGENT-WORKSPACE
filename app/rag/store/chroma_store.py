@@ -1,7 +1,6 @@
 """ChromaDB vector store."""
 
 from langchain_core.documents import Document
-from langchain_chroma import Chroma
 
 from rag.config import RAGConfig
 from rag.embedder.ollama import OllamaEmbedder
@@ -16,6 +15,8 @@ class ChromaStore(BaseStore):
         collection_name: str,
         config: RAGConfig,
     ):
+        from langchain_chroma import Chroma
+
         self.config = config
         self.collection_name = collection_name
         self._store = Chroma(

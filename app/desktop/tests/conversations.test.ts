@@ -7,7 +7,7 @@ import {
   type ConversationFailure,
   type VisibleConversationTurn,
 } from "../src/conversations.ts";
-import type { SessionCreatedDto, TranscriptTurnDto } from "../src/protocol.ts";
+import type { JsonObject, SessionCreatedDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto, TranscriptTurnDto } from "../src/protocol.ts";
 
 interface SafeContentModule {
   SafeContent: (props: { content: string; openExternal?: (url: string) => void | Promise<void> }) => unknown;
@@ -47,6 +47,16 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  selectConversationWithPreview: (
+    projectId: string,
+    summary: SessionSummaryDto,
+    callbacks: {
+      isCurrent: () => boolean;
+      onPreview: (data: SessionTranscriptDto) => void;
+      onSelected: (selected: SessionSelectedDto) => void;
+    },
+    request: (method: string, params: JsonObject) => Promise<JsonObject>,
+  ) => Promise<SessionTranscriptDto | null>;
   composerSlashCommands: (
     session: SessionCreatedDto | null,
     selected: { projectId: string; sessionId: string } | null,
@@ -459,7 +469,7 @@ test("new conversations delegate the MCP default to the backend", async () => {
   assert.equal("loadMcp" in params, false);
 });
 
-test("restored turns render tools between user and assistant without raw HTML", async () => {
+test("restored turns keep tool details lazy between user and assistant", async () => {
   const { RestoredTurn } = await loadAppHelpers();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
@@ -478,8 +488,8 @@ test("restored turns render tools between user and assistant without raw HTML", 
       toolActivities: [{
         callId: "call-1",
         name: "rag_search",
-        arguments: '{"query":"<script>bad()</script>"}',
-        result: "bounded result",
+        get arguments(): string { throw new Error("Collapsed tool arguments must not be rendered"); },
+        get result(): string { throw new Error("Collapsed tool result must not be rendered"); },
         status: "ok",
         promptEligible: true,
       }],
@@ -488,11 +498,11 @@ test("restored turns render tools between user and assistant without raw HTML", 
 
   const user = html.indexOf("You · restored turn 4");
   const tool = html.indexOf("Tool activity · rag_search · ok · restored context");
-  const result = html.indexOf("Tool result · rag_search");
   const assistant = html.indexOf("Assistant · restored");
-  assert.ok(user >= 0 && user < tool && tool < result && result < assistant);
-  assert.doesNotMatch(html, /<script>/i);
-  assert.match(html, /&lt;script&gt;/);
+  assert.ok(user >= 0 && user < tool && tool < assistant);
+  assert.match(html, /<details[^>]*class="tool-activity"[^>]*><summary/);
+  assert.doesNotMatch(html, /Tool result · rag_search/);
+  assert.doesNotMatch(html, /<details[^>]*open=/);
 });
 
 test("restored turns render a complete multi-megabyte answer from first marker to last", async () => {
@@ -547,7 +557,8 @@ test("citation menu inserts a task and restore displays its saved answer and too
   assert.match(html, /已保存並引用來源 \[1\]/);
   assert.match(html, /10\.1234\/paper-a/);
   assert.match(html, /Tool activity · citation_workflow · ok · display only/);
-  assert.ok(html.indexOf("Tool result · citation_workflow") < html.indexOf("Assistant · restored"));
+  assert.ok(html.indexOf("Tool activity · citation_workflow") < html.indexOf("Assistant · restored"));
+  assert.doesNotMatch(html, /Tool result · citation_workflow/);
 });
 
 test("restored transcript renders durable non-completed and display-only states without a fake answer", async () => {
@@ -631,4 +642,121 @@ test("conversation pages preserve membership order and replace duplicate summari
     { sessionId: first.sessionId, title: "A current" },
     { sessionId: second.sessionId, title: "B" },
   ]);
+});
+
+
+function selectionFixture() {
+  const summary: SessionSummaryDto = {
+    sessionId: "28b222e0cc6543aa8d7bbdc423de99a7",
+    title: "Saved conversation", turnCount: 1,
+    createdAt: null, updatedAt: null, status: "ready", issue: null,
+  };
+  const transcript: SessionTranscriptDto = {
+    projectId: "local", sessionId: summary.sessionId,
+    status: "ready", issue: null, total: 1, offset: 0, limit: 20, hasMore: false,
+    items: [{
+      turnId: "f2ddf2369f994905afa0b85d8cca79b1", turnNumber: 1,
+      kind: "conversational", state: "completed", timestamp: "2026-09-23T00:00:00Z",
+      userText: "Saved question", assistantText: "Saved answer",
+      failureCode: null, failureMessage: null, failureRetryable: null, toolActivities: [],
+    }],
+  };
+  const selected = { projectId: "local", sessionId: summary.sessionId, turnCount: 1 };
+  return { summary, transcript, selected };
+}
+
+test("saved messages preview before selection is ready without confirming a session", async () => {
+  const { selectConversationWithPreview } = await loadAppHelpers();
+  const { summary, transcript, selected } = selectionFixture();
+  const selection = Promise.withResolvers<JsonObject>();
+  const preview = Promise.withResolvers<SessionTranscriptDto>();
+  const confirmed: SessionSelectedDto[] = [];
+  const requests: string[] = [];
+  const result = selectConversationWithPreview("local", summary, {
+    isCurrent: () => true,
+    onPreview: preview.resolve,
+    onSelected: (session) => confirmed.push(session),
+  }, async (method) => {
+    requests.push(method);
+    return method === "session.select" ? selection.promise : transcript as unknown as JsonObject;
+  });
+  assert.deepEqual(await preview.promise, transcript);
+  assert.deepEqual(requests, ["session.select", "session.transcript"]);
+  assert.equal(confirmed.length, 0, "preview must not permit sending to the new session");
+  selection.resolve(selected);
+  assert.deepEqual(await result, transcript);
+  assert.equal(confirmed.length, 1);
+  assert.equal(requests.length, 2, "healthy saved turns need no second read");
+});
+
+test("selection failure rejects late previews and consumes outstanding read failures", async () => {
+  const { selectConversationWithPreview } = await loadAppHelpers();
+  const { summary, transcript: saved } = selectionFixture();
+  for (const readSucceeds of [true, false]) {
+    const selection = Promise.withResolvers<JsonObject>();
+    const transcript = Promise.withResolvers<JsonObject>();
+    let updates = 0;
+    const result = selectConversationWithPreview("local", summary, {
+      isCurrent: () => true,
+      onPreview: () => { updates += 1; },
+      onSelected: () => { updates += 1; },
+    }, async (method) => method === "session.select" ? selection.promise : transcript.promise);
+    const failure = assert.rejects(result, /selection failed/);
+    selection.reject(new Error("selection failed"));
+    await failure;
+    if (readSucceeds) transcript.resolve(saved as unknown as JsonObject);
+    else transcript.reject(new Error("read failed after selection"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(updates, 0);
+  }
+});
+
+test("a replaced backend generation discards preview and selection responses", async () => {
+  const { selectConversationWithPreview } = await loadAppHelpers();
+  const { summary, transcript, selected } = selectionFixture();
+  const selection = Promise.withResolvers<JsonObject>();
+  const read = Promise.withResolvers<JsonObject>();
+  let current = true;
+  let updates = 0;
+  const result = selectConversationWithPreview("local", summary, {
+    isCurrent: () => current,
+    onPreview: () => { updates += 1; },
+    onSelected: () => { updates += 1; },
+  }, async (method) => method === "session.select" ? selection.promise : read.promise);
+  current = false;
+  read.resolve(transcript as unknown as JsonObject);
+  selection.resolve(selected);
+  assert.equal(await result, null);
+  assert.equal(updates, 0);
+});
+
+test("pending saved turns are refreshed after selection recovers them", async () => {
+  const { selectConversationWithPreview } = await loadAppHelpers();
+  const { summary, transcript, selected } = selectionFixture();
+  const selection = Promise.withResolvers<JsonObject>();
+  const preview = Promise.withResolvers<SessionTranscriptDto>();
+  const recovered: SessionTranscriptDto = {
+    ...transcript, items: [{ ...transcript.items[0], state: "interrupted",
+      failureCode: "interrupted", failureMessage: "Previous turn interrupted.",
+      failureRetryable: true, assistantText: null }],
+  };
+  let reads = 0;
+  let confirmed = false;
+  const result = selectConversationWithPreview("local", summary, {
+    isCurrent: () => true,
+    onPreview: preview.resolve,
+    onSelected: () => { confirmed = true; },
+  }, async (method) => {
+    if (method === "session.select") return selection.promise;
+    reads += 1;
+    if (reads === 1) return {
+      ...transcript, items: [{ ...transcript.items[0], state: "pending", assistantText: null }],
+    } as unknown as JsonObject;
+    assert.equal(confirmed, true, "recovery refresh follows session materialization");
+    return recovered as unknown as JsonObject;
+  });
+  assert.equal((await preview.promise).items[0].state, "pending");
+  selection.resolve(selected);
+  assert.deepEqual(await result, recovered);
+  assert.equal(reads, 2);
 });
