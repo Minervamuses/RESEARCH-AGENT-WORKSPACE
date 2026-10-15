@@ -467,3 +467,17 @@ test("shared ordering and correlation traces", async (context) => {
     });
   }
 });
+
+
+test("project-open results preserve scoped identity and reject incomplete metadata", () => {
+  const data = {
+    rootPath: "/tmp/project", projectId: "p-test", historyDirectory: "/tmp/history",
+    rulesText: "", rulesFingerprint: "a".repeat(64), researchFingerprint: null,
+    status: "needs_configuration",
+  };
+  assert.doesNotThrow(() => validateResultData("workspace.select", data));
+  assert.throws(() => validateResultData("workspace.select", { ...data, status: "fallback" }));
+  assert.throws(() => validateResultData("workspace.select", { ...data, rulesFingerprint: "bad" }));
+  const { projectId: _projectId, ...missing } = data;
+  assert.throws(() => validateResultData("workspace.select", missing));
+});

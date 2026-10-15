@@ -3072,3 +3072,166 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
         assert caught.value.code == "PROTOCOL_INVALID"
     assert graph.states == [] and path.read_bytes() == before
     assert session._citation_service is None and session.active_skill_runtime is None
+
+
+async def _open_test_project(service, root: Path):
+    root.mkdir(exist_ok=True)
+    preview = await service.dispatch("workspace.select", {"rootPath": str(root), "action": "inspect"})
+    return await service.dispatch("workspace.select", {
+        "rootPath": str(root), "action": "initialize",
+        "historyDirectory": preview["historyDirectory"],
+        "expectedFingerprint": preview["researchFingerprint"],
+    })
+
+
+def test_project_open_cold_gate_does_not_touch_history(tmp_path: Path, monkeypatch) -> None:
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("cold startup must not instantiate or scan history")
+
+    monkeypatch.setattr("agent.desktop.service.ConversationRepository", forbidden)
+    monkeypatch.setattr("agent.desktop.service.DesktopProjectCatalog", forbidden)
+    service = _service(tmp_path)
+
+    async def run():
+        result = await service.dispatch("project.list", {})
+        assert result == {
+            "status": "ready", "issue": None, "projects": [],
+            "selectedProjectId": None, "selectedSessionId": None,
+        }
+        for method, params in (
+            ("session.create", {}),
+            ("session.list", {"projectId": "local"}),
+            ("session.transcript", {"projectId": "local", "sessionId": "123e4567e89b42d3a456426614174000"}),
+            ("document.open", {"path": "paper.md"}),
+        ):
+            with pytest.raises(DesktopServiceError, match="Open a research project"):
+                await service.dispatch(method, params)
+        params = _turn_params("cold turn")
+        for opening in (False, True):
+            service._workspace_opening = opening
+            with pytest.raises(DesktopServiceError) as caught:
+                await service.dispatch("session.turn", params)
+            assert caught.value.details == {
+                "turnId": params["turnId"], "state": None,
+                "accepted": False, "persisted": False,
+            }
+            assert service._project_operation_count == 0
+        service._workspace_opening = False
+        assert not (tmp_path / "store").exists()
+
+    asyncio.run(run())
+
+
+def test_project_open_preview_binding_and_failed_switch_preserve_state(tmp_path: Path) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+    root_a, root_b = tmp_path / "a", tmp_path / "b"
+    root_a.mkdir()
+    root_b.mkdir()
+    (root_a / "paper.md").write_text("A")
+    (root_b / "paper.md").write_text("B")
+
+    async def run():
+        preview = await service.dispatch("workspace.select", {"rootPath": str(root_a)})
+        assert preview["status"] == "needs_configuration"
+        assert service._project is None and service._conversation_repository is None
+        assert not (root_a / "RESEARCH.md").exists()
+        opened_a = await _open_test_project(service, root_a)
+        assert opened_a["status"] == "opened"
+        success_result(str(uuid.uuid4()), "workspace.select", opened_a)
+        assert service._documents.root == root_a
+        assert service._conversation_repository.root == Path(opened_a["historyDirectory"]) / "conversations"
+        assert service.config.persist_dir == str(tmp_path / "store")
+        assert (await service.dispatch("document.open", {"path": "paper.md"}))["sourceText"] == "A"
+        await service.dispatch("session.create", {"loadMcp": False})
+        original_session = service.session
+        original_documents = service._documents
+        original_repository = service._conversation_repository
+        original_session.clear_skill_installer = lambda: {
+            "cleanup_conflict": True, "cleanup_detail": "fixture conflict", "backup_path": "/fixture/backup",
+        }
+        with pytest.raises(DesktopServiceError, match="Installation cleanup stopped"):
+            await _open_test_project(service, root_b)
+        assert service.session is original_session
+        assert service._documents is original_documents
+        assert service._conversation_repository is original_repository
+        assert service._selected_project_id == opened_a["projectId"]
+        del original_session.clear_skill_installer
+        opened_b = await service.dispatch("workspace.select", {"rootPath": str(root_b)})
+        assert opened_b["status"] == "opened"
+        assert service.session is None
+        assert service._project_epoch == 2
+        projects = await service.dispatch("project.list", {})
+        assert [p["projectId"] for p in projects["projects"]] == [opened_b["projectId"]]
+        assert (await service.dispatch("document.open", {"path": "paper.md"}))["sourceText"] == "B"
+        with pytest.raises(DesktopServiceError, match="not the opened"):
+            await service.dispatch("session.list", {"projectId": opened_a["projectId"]})
+
+    asyncio.run(run())
+
+
+def test_project_open_rejects_foreign_or_incomplete_history_without_fallback(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+
+    async def run():
+        opened = await _open_test_project(service, tmp_path / "a")
+        repository = service._conversation_repository
+        snapshot = repository.create(
+            conversation_id="123e4567e89b42d3a456426614174000", project_id=opened["projectId"],
+            turn_id="123e4567e89b42d3a456426614174001", kind="conversational", display_input="fixture",
+            semantic_input="fixture", context_eligible=True, thinking_mode="normal",
+            submitted_at="2026-10-15T00:00:00Z",
+        )
+        repository.complete_turn(snapshot, turn_id="123e4567e89b42d3a456426614174001", assistant_output="saved",
+                                 finished_at="2026-10-15T00:00:01Z")
+        sessions = await service.dispatch("session.list", {"projectId": opened["projectId"]})
+        assert [item["sessionId"] for item in sessions["items"]] == ["123e4567e89b42d3a456426614174000"]
+        root_b = tmp_path / "b"
+        root_b.mkdir()
+        (root_b / "RESEARCH.md").write_text(
+            "<!-- research-agent-project\n"
+            + json.dumps({"version": 1, "historyDirectory": opened["historyDirectory"]})
+            + "\n-->\n"
+        )
+        with pytest.raises(DesktopServiceError, match="ownership"):
+            await service.dispatch("workspace.select", {"rootPath": str(root_b)})
+        assert service._project["projectId"] == opened["projectId"]
+        damaged = repository.root / ("123e4567e89b42d3a456426614174002" + ".json")
+        damaged.write_text("{")
+        before = service._catalog.path.read_bytes()
+        with pytest.raises(DesktopServiceError, match="incomplete"):
+            await service.dispatch("project.list", {})
+        assert service._catalog.path.read_bytes() == before
+        assert damaged.read_text() == "{"
+
+    asyncio.run(run())
+
+
+def test_project_open_waits_for_document_operation_and_active_turn(tmp_path: Path, monkeypatch) -> None:
+    service = _service(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+
+    async def run():
+        opened = await _open_test_project(service, tmp_path / "a")
+        def blocked_open(_path):
+            entered.set()
+            assert release.wait(5)
+            return {"path": "fixture.md", "sourceText": "", "diskFingerprint": "a" * 64}
+        monkeypatch.setattr(service._documents, "open", blocked_open)
+        task = asyncio.create_task(service.dispatch("document.open", {"path": "fixture.md"}))
+        assert await asyncio.to_thread(entered.wait, 5)
+        try:
+            with pytest.raises(DesktopServiceError, match="current operation"):
+                await service.dispatch("workspace.select", {"rootPath": str(tmp_path / "b")})
+            assert service._project["projectId"] == opened["projectId"]
+        finally:
+            release.set()
+            await task
+        assert service._project_operation_count == 0
+        service._turn_active = True
+        with pytest.raises(DesktopServiceError) as caught:
+            await service.dispatch("workspace.select", {"rootPath": str(tmp_path / "b")})
+        assert caught.value.code == "BUSY_TURN"
+        service._turn_active = False
+
+    asyncio.run(run())

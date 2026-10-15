@@ -51,11 +51,11 @@ from agent.cli.slash_commands import (
 from agent.diagnostics import attach_incident, incident_reference
 from agent.desktop.catalog import (
     CATALOG_MAX_SESSIONS,
-    DEFAULT_PROJECT_ID,
     CatalogError,
-    CatalogMalformedError,
-    CatalogUnavailableError,
     DesktopProjectCatalog,
+    inspect_project,
+    initialize_project,
+    load_project_catalog,
 )
 from agent.desktop.protocol import (
     PROTOCOL_VERSION,
@@ -257,35 +257,16 @@ class DesktopService:
             prune_folder=prune_folder,
         )
         self._extension_manager = extension_manager or ExtensionManager(self.config)
-        self._conversation_repository = (
-            conversation_repository or ConversationRepository(self.config.persist_dir)
-        )
-        self._catalog: DesktopProjectCatalog | None = project_catalog
-        self._catalog_issue: str | None = None
-        if self._catalog is None:
-            try:
-                self._catalog = DesktopProjectCatalog(self.config.persist_dir)
-            except CatalogMalformedError:
-                try:
-                    scan = self._conversation_repository.scan()
-                    self._catalog = DesktopProjectCatalog.rebuild_from_conversations(
-                        self.config.persist_dir,
-                        scan.summaries,
-                    )
-                except (ConversationError, CatalogError):
-                    self._catalog_issue = "The local project catalog is unavailable."
-            except CatalogUnavailableError:
-                self._catalog_issue = "The local project catalog is unavailable."
-        self._reconcile_lagged_catalog_entries()
-        catalog_projects = (
-            self._catalog.snapshot()["projects"] if self._catalog is not None else []
-        )
-        project_ids = [project["projectId"] for project in catalog_projects]
-        self._selected_project_id: str | None = (
-            DEFAULT_PROJECT_ID
-            if DEFAULT_PROJECT_ID in project_ids
-            else (project_ids[0] if project_ids else None)
-        )
+        # An explicit project open is the only entry to conversation storage.
+        self._conversation_repository: ConversationRepository | None = None
+        self._catalog: DesktopProjectCatalog | None = None
+        self._injected_repository = conversation_repository
+        self._injected_catalog = project_catalog
+        self._project: dict[str, Any] | None = None
+        self._selected_project_id: str | None = None
+        self._workspace_opening = False
+        self._project_operation_count = 0
+        self._project_epoch = 0
         self._session_registered = False
         self._pending_registration: tuple[str, str] | None = None
         self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
@@ -394,9 +375,24 @@ class DesktopService:
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "The desktop session is shutting down."
             )
+        project_operation = (
+            method.startswith("document.")
+            or (method.startswith("session.") and method not in {"session.status", "session.shutdown"})
+        )
+        project_operation_admitted = False
         try:
+            if self._workspace_opening and method not in {
+                "runtime.diagnostics", "session.status", "project.list",
+            }:
+                raise DesktopServiceError(
+                    "SESSION_NOT_READY", "Wait for the project open operation to finish.", retryable=True,
+                )
+            if project_operation:
+                self._require_project()
+                self._project_operation_count += 1
+                project_operation_admitted = True
             return await handler(params, event_sink)
-        except (DocumentError, SkillSelectionError) as exc:
+        except (DocumentError, SkillSelectionError, CatalogError) as exc:
             error = DesktopServiceError("PROTOCOL_INVALID", str(exc))
             if method == "session.turn":
                 error = self._with_turn_lifecycle(error, method, params)
@@ -435,6 +431,9 @@ class DesktopService:
             if method in {"session.turn", "extensions.apply"}:
                 mapped = self._with_turn_lifecycle(mapped, method, params)
             raise mapped from exc
+        finally:
+            if project_operation_admitted:
+                self._project_operation_count -= 1
 
     def _with_turn_lifecycle(
         self,
@@ -706,16 +705,15 @@ class DesktopService:
     async def _project_list(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        self._reconcile_lagged_catalog_entries()
-        if self._catalog is None:
+        if self._project is None:
             return {
-                "status": "unavailable",
-                "issue": self._catalog_issue
-                or "The local project catalog is unavailable.",
+                "status": "ready",
+                "issue": None,
                 "projects": [],
                 "selectedProjectId": None,
                 "selectedSessionId": None,
             }
+        self._reconcile_lagged_catalog_entries()
         snapshot = self._catalog.snapshot()
         return {
             "status": "ready",
@@ -1034,22 +1032,31 @@ class DesktopService:
         }
 
     def _reconcile_lagged_catalog_entries(self) -> None:
-        """Re-register healthy JSON conversations after a catalog-write gap."""
-        catalog = self._catalog
-        if catalog is None:
+        """Refresh only the opened project's complete, ownership-checked history."""
+        project = self._project
+        if project is None:
             return
-        try:
-            scan = self._conversation_repository.scan()
-            catalog.reconcile_conversations(scan.summaries)
-        except (ConversationError, CatalogError):
-            return
+        catalog, _repository = load_project_catalog(
+            project["projectId"], Path(project["rootPath"]).name, project["historyDirectory"],
+        )
+        # Preserve injected catalog behavior while refreshing its validated snapshot.
+        if self._catalog is not None:
+            self._catalog._snapshot = catalog.snapshot()
+        else:
+            self._catalog = catalog
+
+    def _require_project(self) -> dict[str, Any]:
+        if self._project is None:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "Open a research project before using documents or conversations.",
+            )
+        return self._project
 
     def _require_catalog_project(self, project_id: str) -> dict[str, Any]:
-        if self._catalog is None:
+        opened = self._require_project()
+        if self._catalog is None or project_id != opened["projectId"]:
             raise DesktopServiceError(
-                "SESSION_NOT_READY",
-                self._catalog_issue or "The local project catalog is unavailable.",
-                retryable=True,
+                "PROTOCOL_INVALID", "The requested project is not the opened research project.",
             )
         project = next(
             (
@@ -1824,11 +1831,70 @@ class DesktopService:
     async def _workspace_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        if self._turn_active:
-            raise DesktopServiceError("BUSY_TURN", "Wait for the active turn before changing workspace.")
-        result = await asyncio.to_thread(self._documents.select_root, params["rootPath"])
-        self._document_candidates.clear()
-        return result
+        if self._turn_active or self._pending_approval is not None:
+            raise DesktopServiceError("BUSY_TURN", "Wait for the active turn before changing project.")
+        if (
+            self._workspace_opening or self._project_operation_count
+            or self._session_creating or self._session_closing
+            or self._knowledge_active or self._extension_active
+            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
+        ):
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "Wait for the current operation before changing project.", retryable=True,
+            )
+        action = params.get("action", "open")
+        if action not in {"inspect", "open", "initialize"}:
+            raise DesktopServiceError("PROTOCOL_INVALID", "Unknown project open action.")
+        self._workspace_opening = True
+        try:
+            if action == "initialize":
+                if "historyDirectory" not in params or "expectedFingerprint" not in params:
+                    raise DesktopServiceError(
+                        "PROTOCOL_INVALID", "Inspect the project and confirm its history location before initialization.",
+                    )
+                project = await asyncio.to_thread(
+                    initialize_project, params["rootPath"], self.config.persist_dir,
+                    history_directory=params["historyDirectory"],
+                    expected_fingerprint=params["expectedFingerprint"],
+                )
+            else:
+                project = await asyncio.to_thread(
+                    inspect_project, params["rootPath"], self.config.persist_dir,
+                    history_directory=params.get("historyDirectory"),
+                )
+            if action == "inspect" or project["status"] != "ready":
+                return project
+            catalog, repository = await asyncio.to_thread(
+                load_project_catalog, project["projectId"], Path(project["rootPath"]).name,
+                project["historyDirectory"],
+            )
+            documents = DocumentWorkspace()
+            await asyncio.to_thread(documents.select_root, project["rootPath"])
+            # Injection never establishes ownership or skips the explicit open boundary.
+            if self._injected_repository is not None and self._injected_repository.root.resolve() == repository.root.resolve():
+                repository = self._injected_repository
+            if self._injected_catalog is not None and self._injected_catalog.path.resolve() == catalog.path.resolve():
+                self._injected_catalog._snapshot = catalog.snapshot()
+                catalog = self._injected_catalog
+            if self.lifecycle != "ready":
+                raise DesktopServiceError("SESSION_NOT_READY", "The backend changed state while opening the project.")
+            # Cleanup may fail; commit the new binding only after it succeeds.
+            await self._shutdown_session()
+            self._documents = documents
+            self._catalog = catalog
+            self._conversation_repository = repository
+            self._project = project
+            self._selected_project_id = project["projectId"]
+            self._project_epoch += 1
+            self._document_candidates.clear()
+            self._approval_document_snapshots.clear()
+            self._active_document_context = None
+            self._active_turn_permission_mode = None
+            self._tool_names.clear()
+            self._tool_summaries.clear()
+            return {**project, "status": "opened"}
+        finally:
+            self._workspace_opening = False
 
     async def _document_open(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -2553,6 +2619,7 @@ class DesktopService:
         self._composer_prune_preview = None
 
     def _require_session(self) -> ChatSession:
+        self._require_project()
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",

@@ -255,6 +255,12 @@ export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
 export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> = {
   "workspace.select": {
     rootPath: { type: "string", required: true, maxBytes: 8192 },
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    historyDirectory: { type: "string", required: true, maxBytes: 8192 },
+    rulesText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
+    rulesFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+    researchFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+    status: { type: "string", required: true, enum: ["ready", "needs_configuration", "needs_initialization", "opened"] },
   },
   "document.open": {
     path: { type: "string", required: true, maxBytes: 8192 },
@@ -601,6 +607,9 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
 export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "workspace.select": {
     rootPath: { type: "string", required: true, maxBytes: 8192 },
+    action: { type: "string", required: false, enum: ["inspect", "open", "initialize"] },
+    historyDirectory: { type: "string", required: false, maxBytes: 8192 },
+    expectedFingerprint: { type: "nullableString", required: false, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
   },
   "document.open": {
     path: { type: "string", required: true, maxBytes: 8192 },
@@ -1723,4 +1732,14 @@ export class ProtocolTraceValidator {
       state.terminal = true;
     }
   }
+}
+
+export interface ProjectWorkspaceDto {
+  rootPath: string;
+  projectId: string;
+  historyDirectory: string;
+  rulesText: string;
+  rulesFingerprint: string;
+  researchFingerprint: string | null;
+  status: "ready" | "needs_configuration" | "needs_initialization" | "opened";
 }

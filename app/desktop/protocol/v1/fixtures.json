@@ -1,6 +1,66 @@
 {
   "messages": [
     {
+      "name": "workspace-inspect",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000070",
+        "method": "workspace.select",
+        "params": {
+          "rootPath": "/tmp/project",
+          "action": "inspect"
+        }
+      }
+    },
+    {
+      "name": "workspace-initialize",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000070",
+        "method": "workspace.select",
+        "params": {
+          "rootPath": "/tmp/project",
+          "action": "initialize",
+          "historyDirectory": "../history",
+          "expectedFingerprint": null
+        }
+      }
+    },
+    {
+      "name": "workspace-invalid-action",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000070",
+        "method": "workspace.select",
+        "params": {
+          "rootPath": "/tmp/project",
+          "action": "fallback"
+        }
+      }
+    },
+    {
+      "name": "workspace-invalid-fingerprint",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000070",
+        "method": "workspace.select",
+        "params": {
+          "rootPath": "/tmp/project",
+          "expectedFingerprint": "not-a-hash"
+        }
+      }
+    },
+    {
       "name": "backend-ready",
       "valid": true,
       "message": {

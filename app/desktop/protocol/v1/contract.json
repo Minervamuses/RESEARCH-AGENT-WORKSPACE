@@ -104,7 +104,13 @@
   },
   "resultDataSchemas": {
     "workspace.select": {
-      "rootPath": {"type": "string", "required": true, "maxBytes": 8192}
+      "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
+      "projectId": {"type": "string", "required": true, "maxBytes": 256},
+      "historyDirectory": {"type": "string", "required": true, "maxBytes": 8192},
+      "rulesText": {"type": "string", "required": true, "maxBytes": 1048576, "allowEmpty": true},
+      "rulesFingerprint": {"type": "string", "required": true, "maxBytes": 64, "pattern": "^[0-9a-f]{64}$"},
+      "researchFingerprint": {"type": "nullableString", "required": true, "maxBytes": 64, "pattern": "^[0-9a-f]{64}$"},
+      "status": {"type": "string", "required": true, "enum": ["ready", "needs_configuration", "needs_initialization", "opened"]}
     },
     "document.open": {
       "path": {"type": "string", "required": true, "maxBytes": 8192},
@@ -441,7 +447,10 @@
       "operation": "lifecycle",
       "requiredParams": ["rootPath"],
       "params": {
-        "rootPath": {"type": "string", "required": true, "maxBytes": 8192}
+        "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
+        "action": {"type": "string", "required": false, "enum": ["inspect", "open", "initialize"]},
+        "historyDirectory": {"type": "string", "required": false, "maxBytes": 8192},
+        "expectedFingerprint": {"type": "nullableString", "required": false, "maxBytes": 64, "pattern": "^[0-9a-f]{64}$"}
       }
     },
     {

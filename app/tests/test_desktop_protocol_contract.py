@@ -560,3 +560,19 @@ def test_bash_permission_mode_protocol_contract() -> None:
         "required": True,
         "enum": ["ask", "bypass"],
     }
+
+
+def test_project_open_result_requires_scoped_identity_and_valid_metadata():
+    from agent.desktop.protocol import validate_result_data
+    data = {
+        "rootPath": "/tmp/project", "projectId": "p-test", "historyDirectory": "/tmp/history",
+        "rulesText": "", "rulesFingerprint": "a" * 64, "researchFingerprint": None,
+        "status": "needs_configuration",
+    }
+    validate_result_data("workspace.select", data)
+    for key, value in (("status", "fallback"), ("rulesFingerprint", "bad")):
+        with pytest.raises(ProtocolError):
+            validate_result_data("workspace.select", {**data, key: value})
+    del data["projectId"]
+    with pytest.raises(ProtocolError):
+        validate_result_data("workspace.select", data)

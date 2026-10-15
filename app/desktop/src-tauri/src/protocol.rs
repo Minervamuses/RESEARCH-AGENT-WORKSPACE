@@ -316,7 +316,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.list" => Some(&["projectId", "offset", "limit", "reconcile"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
-        "workspace.select" => Some(&["rootPath"]),
+        "workspace.select" => Some(&["rootPath", "action", "historyDirectory", "expectedFingerprint"]),
         "document.open" => Some(&["path"]),
         "document.save" => Some(&["documentContext"]),
         "document.apply" => Some(&["documentContext", "turnId", "callId", "parentRequestId", "undoOfCallId", "resolution", "expectedSnapshot"]),
@@ -665,7 +665,14 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
     }
 
     match method {
-        "workspace.select" => { expect_bounded_string(&params["rootPath"], "params.rootPath", 8_192)?; }
+        "workspace.select" => {
+            expect_bounded_string(&params["rootPath"], "params.rootPath", 8_192)?;
+            if let Some(value) = params.get("action") { validate_enum(value, "params.action", &["inspect", "open", "initialize"])?; }
+            validate_optional_string(params, "historyDirectory", 8_192)?;
+            if let Some(value) = params.get("expectedFingerprint") {
+                if !value.is_null() { validate_fingerprint(value, "params.expectedFingerprint")?; }
+            }
+        }
         "document.open" => { expect_bounded_string(&params["path"], "params.path", 8_192)?; }
         "document.save" | "document.apply" => {
             validate_document_context(&params["documentContext"], "params.documentContext")?;
@@ -1310,8 +1317,14 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
     validate_safe_object(data, "data")?;
     match method {
         "workspace.select" => {
-            validate_exact_data_keys(data, &["rootPath"])?;
+            validate_exact_data_keys(data, &["rootPath", "projectId", "historyDirectory", "rulesText", "rulesFingerprint", "researchFingerprint", "status"])?;
             expect_bounded_string(&data["rootPath"], "data.rootPath", 8_192)?;
+            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
+            expect_bounded_string(&data["historyDirectory"], "data.historyDirectory", 8_192)?;
+            expect_document_text(&data["rulesText"], "data.rulesText")?;
+            validate_fingerprint(&data["rulesFingerprint"], "data.rulesFingerprint")?;
+            if !data["researchFingerprint"].is_null() { validate_fingerprint(&data["researchFingerprint"], "data.researchFingerprint")?; }
+            validate_enum(&data["status"], "data.status", &["ready", "needs_configuration", "needs_initialization", "opened"])?;
         }
         "document.open" => {
             validate_data_keys(data, &["path", "sourceText", "diskFingerprint", "rootPath", "editorRevision"],
@@ -2863,9 +2876,10 @@ mod tests {
             for (field, rule) in schema {
                 let mut null_value = message.clone();
                 null_value["params"][field] = Value::Null;
-                assert!(
-                    parse_protocol_value(null_value).is_err(),
-                    "{method_name}.{field} null"
+                assert_eq!(
+                    parse_protocol_value(null_value).is_ok(),
+                    rule["type"] == "nullableString",
+                    "{method_name}.{field} null must follow its schema"
                 );
                 if rule["required"] == true {
                     let mut missing = message.clone();
