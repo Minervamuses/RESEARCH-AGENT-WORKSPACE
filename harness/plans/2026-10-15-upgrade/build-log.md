@@ -9,8 +9,8 @@
 | P0 | Complete | P0.S1～S3：runtime、邊界、批准與驗收入口可追溯 | 依 P1 開始文件閉環 |
 | P1 | Complete | P1.S1～S2：文件閉環、離線與原生代表案例 | P2；最終整合仍由 P5 驗收 |
 | P2 | Complete | P2.S1～S2：行內多引用、真實 catalog／graph、順序操作與清理 | P3；真模型合作品質留 P5 明示 |
-| P3 | In progress | P2 已滿足、P0.S3 批准計劃各環節 | P3.S1 共用單項批准與各副作用入口 |
-| P4 | Not started | 無 | P3、摘要傳遞及必要格式批准 |
+| P3 | Complete | P3.S1～S2：各副作用入口與模式／批准驗收 | P4；最終原生整合留 P5 |
+| P4 | In progress | P3 已驗收；P0.S3 批准既定結果契約 | P4.S1 provider 摘要與主題查詢 |
 | P5 | Not started | 無 | P1～P4、原生 GUI 驗收能力 |
 
 ## 原單檔計劃的撰寫歷史
@@ -106,6 +106,11 @@
 - 檢查：service／fixture／document service／policy／extension／Bash／tool access 定向子集 232 passed（10.20s）；graph／thinking／inline Skill 相關子集 68 passed（1.15s）；policy 含 RuntimeWarning 嚴格檢查 8 passed。installer 子集 22 passed；manager 模組最後擴充 invalid ZIP 參數前 54 passed。Python／TS 契約 147／141，Rust protocol 12 passed。root 最終 trust 10 passed（1.54s）、npx tsc --noEmit 及 task-only App 型別檢查通過；git diff --check 通過。
 - 實際失敗與修正：第一次既有 service 子集因舊 /init 測試未回應新增批准而等待，30 秒後以該測試 PID 中止；只替受影響成功／生命週期測試加入明確批准，原拒絕／正確性斷言保留。P2 的三個測試替身補 members／includes 契約；新 UI 測試的 regex 控制字元修正後通過。沒有真 provider、MCP、安裝、索引刪除或付費呼叫。
 - 本步提交必要產品／測試及本紀錄，App 仍只 stage task-only 內容；前存七檔使用者差異保留。獨立 P3 審閱收尾後記錄出口，再執行 P4；最終原生整合由 P5 驗收。
+
+## P3.S2｜獨立出口核對（2026-10-15）
+
+- P3.S1 已提交 550074b。獨立唯讀審閱 service／PolicyToolNode／GUI 的准入、逐項批准、拒絕、Bypass、凍結模式及清理，未發現阻擋驗收問題；沒有另外執行副作用或擴大測試。
+- P3 完成，P4 前提已滿足。繼續沿既有 search_text／ProviderRecord／DOI identity 傳遞當回合摘要，優先不改 citation.json 持久格式；不增加全文、付費模型或新搜尋管線。
 
 ## 後續紀錄方式
 
