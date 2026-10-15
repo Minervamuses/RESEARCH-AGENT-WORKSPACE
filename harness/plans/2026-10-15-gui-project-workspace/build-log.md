@@ -194,3 +194,8 @@
 - Independent mapping found that malformed JSON was not evidence of filesystem permission denial, and separate pending/context tests did not directly establish structured pending recovery. Added only existing-test coverage for these two required cases.
 - Actual Linux uid1000 chmod(0) on owned temporary RESEARCH.md/history raises OS PermissionError; cold opening rejects without fallback and a failed switch preserves B binding. Finally restores exact mode; all fixture file bytes remain unchanged. Structured pending with both document/chat references becomes interrupted on restore, preserving original context/semantic/display with no graph invocation.
 - Exact command: `poetry run pytest tests/test_desktop_conversations.py::test_project_open_permission_denied_preserves_sources_and_current_binding tests/test_session_persistence.py::test_reload_interrupts_leftover_pending_without_replay -q --tb=short` -> 4 passed,0.53s; first attempt, one existing deprecation warning. Main reviewed two-file diff; whitespace passed. No production or real-data operations.
+
+### E26 / P3-S3: sidebar width and long titles
+
+- Set sidebar minmax bounds14.5/17rem ->10.15/11.9rem; kept root font scale and760/1050px breakpoints. Reduced internal gaps, wrapped lifecycle actions and ellipsized project/conversation titles with full title and hover/keyboard-focus expansion.
+- Actual TypeScript and existing styles module2/2 passed. Initial new floating-point exact equality assertion failed at10.15 vs10.149999999999999; corrected numeric tolerance only, no production workaround. Main reviewed three-file diff and whitespace. Actual rendered70% ratio remains pending P3 native verification against E23/E24 baselines.

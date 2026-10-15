@@ -32,3 +32,14 @@ test("desktop type scale grows on wide windows and stays bounded", async () => {
   const saturationPx = ((maximumRem - fluidRem) * 16 * 100) / fluidVw;
   assert.ok(saturationPx <= 4000, "very wide windows must reach the upper bound");
 });
+
+test("compact sidebar uses the agreed 70 percent rem bounds and reveals full focused titles", async () => {
+  const styles = await readFile(resolve(currentDir, "../src/styles.css"), "utf8");
+  const shell = styles.match(/\.app-shell\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const columns = shell.match(/grid-template-columns:\s*minmax\(([\d.]+)rem,\s*([\d.]+)rem\)/);
+  assert.ok(columns);
+  assert.ok(Math.abs(Number(columns[1]) - 14.5 * 0.7) < 1e-10);
+  assert.ok(Math.abs(Number(columns[2]) - 17 * 0.7) < 1e-10);
+  assert.match(styles, /\.session-link:focus-visible span,[\s\S]*?white-space:\s*normal/);
+  assert.match(styles, /\.project-heading strong:focus-visible\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
+});

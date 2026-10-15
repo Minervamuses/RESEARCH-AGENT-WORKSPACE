@@ -2316,11 +2316,11 @@ export default function App() {
             const list = sessionLists[project.projectId];
             const rows = sidebarRowsForProject(project.projectId, list?.items ?? [], conversation.selected, selectedRegistered);
             return <div className="project-group" key={project.projectId}>
-              <div className="project-heading"><strong>{project.name}</strong><small>{project.sessionCount} saved</small></div>
+              <div className="project-heading"><strong tabIndex={0} title={project.name}>{project.name}</strong><small>{project.sessionCount} saved</small></div>
               {list?.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
               {rows.length === 0 && list?.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
                 const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === project.projectId;
-                return <li key={session.sessionId}><button type="button" className="session-link" aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
+                return <li key={session.sessionId}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
               {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
             </div>;
