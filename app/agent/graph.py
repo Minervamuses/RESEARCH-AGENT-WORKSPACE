@@ -103,6 +103,7 @@ def build_graph(
     bash_approval_handler=None,
     bash_command_runner=None,
     operation_approval_handler=None,
+    conversation_root: str | None = None,
 ):
     """Build and compile the conversational RAG agent graph.
 
@@ -130,6 +131,7 @@ def build_graph(
         extra_tools=extra_tools,
         bash_approval_handler=bash_approval_handler,
         bash_command_runner=bash_command_runner,
+        **({"conversation_root": conversation_root} if conversation_root is not None else {}),
     )
     skill_tools = list(skill_tools or [])
     base_names = [getattr(tool, "name", str(tool)) for tool in base_tools]

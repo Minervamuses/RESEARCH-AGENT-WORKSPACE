@@ -146,6 +146,7 @@ def build_base_tools(
     *,
     bash_approval_handler=None,
     bash_command_runner=None,
+    conversation_root: str | None = None,
 ) -> list:
     """Instantiate the local base tools, then append de-duplicated extra tools.
 
@@ -161,7 +162,7 @@ def build_base_tools(
 
     tools = [
         *create_rag_tools(config),
-        create_read_file_tool(config),
+        create_read_file_tool(config, **({"conversation_root": conversation_root} if conversation_root is not None else {})),
         create_bash_tool(config, **bash_kwargs),
     ]
     seen = {getattr(tool, "name", str(tool)) for tool in tools}

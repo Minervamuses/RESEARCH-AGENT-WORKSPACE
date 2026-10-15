@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from pathlib import Path
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -202,6 +203,9 @@ class FusionOrchestrator:
             llm_model=model_id,
         )
         approval_options = {}
+        repository = self._session.conversation_repository
+        if repository.root.resolve() != (Path(self._session.config.persist_dir).expanduser() / "conversations").resolve():
+            approval_options["conversation_root"] = str(repository.root.resolve())
         if self._session._operation_approval_handler is not None:
             approval_options["operation_approval_handler"] = (
                 self._session._operation_approval_handler

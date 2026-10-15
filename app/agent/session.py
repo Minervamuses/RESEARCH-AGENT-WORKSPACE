@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -188,6 +189,8 @@ class ChatSession:
                          "and updates. cancel abandons the pending installation."),
         )
         bash_tool_options = {}
+        if self.conversation_repository.root.resolve() != (Path(config.persist_dir).expanduser() / "conversations").resolve():
+            bash_tool_options["conversation_root"] = str(self.conversation_repository.root.resolve())
         if bash_approval_handler is not None:
             bash_tool_options["bash_approval_handler"] = bash_approval_handler
         if bash_command_runner is not None:

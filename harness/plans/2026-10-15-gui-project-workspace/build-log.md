@@ -80,3 +80,11 @@
 - History refresh accepts exactly the selected project; document.open no longer changes workspace. The chooser requires Save/Discard/Cancel for dirty content and explicit draft discard; failed open keeps current data. Backend restart reopens the already selected canonical root and retains editor/draft before restoring selection.
 - Changes limited to App.tsx, conversations.ts and existing conversations.test.ts. Actual checks: `npx tsc --noEmit` passed; Node conversations+documents 36/36 passed (~5.2s); after canonical-history-preview correction, tsc and 4 focused project tests passed. Main reviewed diff; scoped whitespace check passed.
 - Full epoch/late-result protection remains P1-S6. Native GUI integrated project-open acceptance remains pending fixture adaptation; no visual completeness claim is made.
+
+### E09 / P1-S5: scoped rules and archive tooling
+
+- Preserve the existing SYSTEM_PROMPT and append canonical project root plus RESEARCH rules with explicit Permission/version boundaries. Recheck settings at each new turn boundary; changes to history identity reject that turn and require reopening. In-flight rules and Permission stay fixed.
+- Propagate selected ConversationRepository root through the existing session -> graph -> inventory -> read_file chain, including Extended proposer graphs. CLI/default root retains the prior defaults; config.persist_dir and other stores are unchanged. No new module/dependency or alternate tool pipeline.
+- Actual tests: `poetry run pytest tests/test_desktop_service.py -q -k project_rules` -> 2 passed (0.39s), verifying system prompt preservation, midturn rule edits, Ask despite bypass text and pointer-change rejection before execution. `poetry run pytest tests/test_conversation_archive_access.py -q --tb=short` -> 7 passed (0.48s), including >1MiB scoped chunk access, unchanged global store, and Normal/Extended root propagation.
+- Earlier missing-Path-import failure and no-op repair are retained in E06/E07. User explicitly authorized the one-import correction and continuing P1-P4; corrected file was re-read before the successful rerun. Main reviewed diff and scoped whitespace check passed.
+- Next P1-S6: late-operation guards; inspection found existing session lifecycle calls can cancel pending approval before rejecting BUSY_TURN, so this directly relevant guard must be corrected and tested.

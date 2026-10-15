@@ -156,10 +156,13 @@ def _read_resolved_file(
     )
 
 
-def create_read_file_tool(config: AgentConfig) -> StructuredTool:
-    """Build the read_file tool. `config` accepted for factory symmetry."""
-    conversation_root = (
-        Path(config.persist_dir).expanduser() / "conversations"
+def create_read_file_tool(
+    config: AgentConfig, *, conversation_root: str | None = None,
+) -> StructuredTool:
+    """Build read_file with the selected canonical history's chunk allowlist."""
+    archive_root = (
+        Path(conversation_root) if conversation_root is not None
+        else Path(config.persist_dir).expanduser() / "conversations"
     ).resolve()
 
     def _run(
@@ -185,7 +188,7 @@ def create_read_file_tool(config: AgentConfig) -> StructuredTool:
             path,
             skill_root=skill_root,
             offset_bytes=offset_bytes,
-            conversation_root=conversation_root,
+            conversation_root=archive_root,
         )
 
     _run.__name__ = TOOL_NAME
