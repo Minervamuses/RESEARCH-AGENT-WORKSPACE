@@ -214,17 +214,6 @@ h3 {
   font-size: 0.69rem;
 }
 
-.workspace-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 1.8rem;
-  height: 1.8rem;
-  color: #315d50;
-  background: #e1ebe6;
-  border-radius: 0.45rem;
-}
-
 .sidebar-spacer {
   flex: 1 1 auto;
   min-height: 1.5rem;
