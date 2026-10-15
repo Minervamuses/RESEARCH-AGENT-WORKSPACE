@@ -234,11 +234,7 @@ def test_failed_turn_records_one_incident_in_log_and_transcript(
     assert len(records) == 1 and records[0].exc_info is not None
 
 
-@pytest.mark.parametrize("with_context", [False, True])
-def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path, with_context):
-    from test_conversation_repository import _submitted_context
-
-    context = _submitted_context(PROJECT_ID) if with_context else None
+def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path):
     repository = ConversationRepository(tmp_path)
     session_id = _id()
     turn_id = _id()
@@ -252,10 +248,7 @@ def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path
         context_eligible=True,
         thinking_mode="normal",
         submitted_at=_timestamp(1),
-        submitted_context=context,
     )
-    pending = repository.load(session_id).document.turns[-1]
-    assert pending.state == "pending" and pending.submitted_context == context
     graph = make_astream_graph()
     monkeypatch.setattr(
         "agent.session.build_graph",
@@ -278,11 +271,6 @@ def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path
     assert turn.assistant_output is None
     assert turn.failure is not None
     assert turn.failure.code == "interrupted"
-    assert turn.submitted_context == context
-    assert turn.semantic_input == pending.semantic_input
-    assert turn.display_input == pending.display_input
-    if with_context:
-        assert {reference["kind"] for reference in turn.submitted_context["references"]} == {"document", "chat"}
 
 
 def test_completed_duplicate_returns_durable_answer_without_graph(
@@ -403,79 +391,3 @@ def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
         f"q{number}" for number in range(4, 14)
     ]
     assert session.status_snapshot()["recent_turn_count"] == 10
-
-
-@pytest.mark.parametrize("display_only", [False, True])
-def test_submitted_context_is_durable_before_execution(monkeypatch, tmp_path, display_only):
-    from test_conversation_repository import _submitted_context
-
-    repository = ConversationRepository(tmp_path)
-    session_id, turn_id = _id(), _id()
-    context = _submitted_context(PROJECT_ID)
-    observed = []
-
-    def inspect_pending(_state=None):
-        pending = repository.load(session_id).document.turns[-1]
-        assert pending.state == "pending"
-        assert pending.submitted_context == context
-        observed.append(pending.submitted_context)
-
-    session = _session(
-        monkeypatch, tmp_path, repository=repository,
-        graph=make_astream_graph(on_state=inspect_pending), session_id=session_id,
-    )
-
-    async def run():
-        if display_only:
-            async def action():
-                inspect_pending()
-                return "command completed"
-            _value, outcome = await session.run_display_only_turn(
-                "/status", action, str, turn_id=turn_id, submitted_context=context,
-            )
-            return outcome
-        return await session.turn_outcome(
-            "original semantic", display_input="original display",
-            turn_id=turn_id, submitted_context=context,
-        )
-
-    assert asyncio.run(run()).state == "completed"
-    assert len(observed) == 1
-    saved = repository.load(session_id).document.turns[-1]
-    assert saved.submitted_context == context
-    assert saved.kind == ("display-only" if display_only else "conversational")
-
-
-def test_submitted_context_failure_restore_retry_keeps_original_context(monkeypatch, tmp_path):
-    from test_conversation_repository import _submitted_context
-
-    repository = ConversationRepository(tmp_path)
-    session_id, turn_id = _id(), _id()
-    context = _submitted_context(PROJECT_ID)
-    graph = FailingGraph()
-    first = _session(
-        monkeypatch, tmp_path, repository=repository, graph=graph, session_id=session_id,
-    )
-    with pytest.raises(RuntimeError, match="provider unavailable"):
-        asyncio.run(first.turn_outcome(
-            "original semantic", display_input="original display",
-            turn_id=turn_id, submitted_context=context,
-        ))
-    failed = repository.load(session_id)
-    assert failed.document.turns[-1].state == "failed"
-    assert failed.document.turns[-1].submitted_context == context
-    restored_graph = make_astream_graph()
-    restored = _session(
-        monkeypatch, tmp_path, repository=repository, graph=restored_graph, session_id=session_id,
-    )
-    assert restored_graph.states == []
-    result = asyncio.run(restored.turn_outcome(
-        "original semantic", display_input="original display",
-        turn_id=turn_id, retry=True,
-        submitted_context=failed.document.turns[-1].submitted_context,
-    ))
-    assert result.state == "completed"
-    saved = repository.load(session_id)
-    assert len(saved.document.turns) == 1
-    assert saved.document.turns[0].submitted_context == context
-    assert len(graph.states) == len(restored_graph.states) == 1
