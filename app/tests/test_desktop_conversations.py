@@ -1709,6 +1709,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
         "state": "completed",
         "timestamp": transcript["items"][0]["timestamp"],
         "userText": "persist this tool turn",
+        "submittedContext": None,
         "assistantText": "persisted final answer",
         "failureCode": None,
         "failureMessage": None,

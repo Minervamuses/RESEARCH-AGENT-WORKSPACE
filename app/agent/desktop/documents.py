@@ -150,7 +150,7 @@ class DocumentWorkspace:
                 "diskFingerprint": fingerprint,
             }
 
-    def validate_snapshot(self, snapshot: object) -> dict[str, Any]:
+    def validate_snapshot(self, snapshot: object, *, require_available: bool = True) -> dict[str, Any]:
         """Validate editor identity and coordinates without assuming it is saved."""
         if not isinstance(snapshot, dict):
             raise DocumentError("documentContext must be an object")
@@ -160,7 +160,15 @@ class DocumentWorkspace:
             raise DocumentError("documentContext has missing or unexpected fields")
         if snapshot["rootPath"] != str(self.root):
             raise DocumentError("documentContext belongs to another workspace")
-        path = self._path(snapshot["path"])
+        if require_available:
+            path = self._path(snapshot["path"])
+        else:
+            value = snapshot["path"]
+            if not isinstance(value, str) or not value or len(value.encode("utf-8")) > MAX_PATH_BYTES:
+                raise DocumentError("path must contain 1-8192 UTF-8 bytes")
+            path = Path(value).resolve(strict=False)
+            if self.root is None or not path.is_relative_to(self.root) or path.suffix.lower() not in _SUPPORTED_SUFFIXES:
+                raise DocumentError("document snapshot is outside the selected workspace or has an unsupported type")
         revision = snapshot["editorRevision"]
         if isinstance(revision, bool) or not isinstance(revision, int) or not 0 <= revision <= MAX_SAFE_INTEGER:
             raise DocumentError("editorRevision must be a non-negative safe integer")
@@ -178,9 +186,9 @@ class DocumentWorkspace:
                 raise DocumentError("document range end precedes its start")
         return {**snapshot, "path": str(path)}
 
-    def resolve_range(self, snapshot: dict[str, Any], prompt: str = "") -> dict[str, Any]:
+    def resolve_range(self, snapshot: dict[str, Any], prompt: str = "", *, require_available: bool = True) -> dict[str, Any]:
         """Use explicit selection, or one unambiguous line reference in this snapshot."""
-        validated = self.validate_snapshot(snapshot)
+        validated = self.validate_snapshot(snapshot, require_available=require_available)
         if "rangeStartUtf16" in validated:
             return validated
         matches = list(_LINE_REFERENCE.finditer(prompt))
