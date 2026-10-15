@@ -194,7 +194,7 @@ test("Product Plan Mode is retired while extended thinking remains", async () =>
   assert.equal(appSource.includes("session.set_mode"), false);
   assert.equal(appSource.includes("Response mode"), false);
   assert.equal(appSource.includes("session.set_thinking"), true);
-  assert.equal(appSource.includes('<option value="extended">Extended</option>'), true);
+  assert.equal(appSource.includes("<ThinkingControl"), true);
 });
 
 test("normal answers use only the final terminal result", () => {

@@ -9,7 +9,7 @@
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
 | P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
 | P3 | Complete | E24-E29: compact UI, focused checks/build and native A16-A20 | none | P4 dependency ready |
-| P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
+| P4 | In progress | E30: full regression results; native A21 underway | 42 obsolete Python fixture failures being corrected | Verify affected tests and complete native journey |
 
 ## 規劃證據
 
@@ -219,3 +219,10 @@
 - During fake document edit Ask approval, Thinking/Permission were disabled and effective-Normal document hint appeared. Approve wrote the candidate; menu Undo required its own Ask approval and restored original TeX bytes. External disk change + Ctrl+S retained external bytes and showed conflict/dirty. Separate owned locked/note.md directory chmod500 produced actual Errno13/Save failed/dirty, unchanged disk; directory restored700 in finally, Cancel preserved editor.
 - Two references show basename/lines and expanded complete source/version. Mixed-reference failure at1080x720 kept actual root height720, Message387x78 and Send74x40 inside viewport; transcript82px, resolving E23 overflow. At720x560 the existing stacked layout scrolls; keyboard focus brought Message and Send fully inside actual viewport. Long-title focus wrapped complete text within sidebar. Evidence: p3-savefailure-visible, p3-checkpoint-final, p3-minimum-*-focused, p3-longtitle-focus, p3-failed-turn-for-p4.json plus interaction snapshots in E28 fixture root.
 - P3 A16-A20 native checkpoint passed with no additional production change. Cached native/Vite retained for P4; only synthetic project data changed. P4 is now dependency-ready; full regression and complete two-failure/reopen journey have not yet been claimed.
+
+### E30 / P4-S3: one complete regression run and obsolete UI assertion
+
+- Read dependency-ready phase04 only after E29. Existing-suite cost evidence (86 modules, prior local runs and fake boundaries) supported bounded checks; no live provider/model/GPU or install. Executed once in parallel: `timeout 180s poetry run pytest -q --tb=short` (app), `timeout 120s npm test` (desktop), `timeout 180s cargo test --offline protocol` (src-tauri), all Conda app/Linux.
+- Full Python actual result:1452 passed,42 failed,2 warnings,39.43s. Six inline_skills,34 project_permissions and2 skill_adherence failures use obsolete cold DesktopService fixtures before project-open (the last two directly inject a session into an unbound service). Do not claim full pass. Updating only those owned synthetic setups while preserving Skill/permission assertions; no production gate relaxation and no second full-suite run planned.
+- Node actual full result:273 passed,1 failed,6.87s. The retired-Plan-mode check still required an Extended <option> in App.tsx after P3 intentionally replaced it with ThinkingControl. Updated that single source-integration assertion; existing footer SSR already verifies both options/current mode/guards. Exact focused rerun `node --test --experimental-strip-types --test-name-pattern="Product Plan Mode" tests/protocol.test.ts` ->1 passed,133.7ms. Unchanged273 results reused, no whole-suite rerun.
+- Rust actual filter matched15 tests (13 protocol plus2 related backend protocol cases),15 passed; cached compilation3.92s/test0.13s. The main binary contains0 tests, which is not counted as evidence. Frontend build from E27 remains valid (only a test assertion changed). Main reviewed the one-line test diff and whitespace; native A21 is in progress.
