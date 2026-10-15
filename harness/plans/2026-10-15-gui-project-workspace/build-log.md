@@ -1,0 +1,47 @@
+# 計畫狀態與實際證據
+
+這是唯一可變執行狀態來源。2026-10-15 本次只撰寫計畫，沒有功能實作、App 啟動、應用程式測試、build、provider 呼叫、migration 或 Git mutation。
+
+## 目前階段
+
+| 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
+|---|---|---|---|---|
+| P1 | Not started | 無 | 尚未要求開始實作 | 明確啟動後執行 P1-S1 |
+| P2 | Not started | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
+| P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
+| P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
+
+## 規劃證據
+
+### E01：環境與目標核對
+
+- 讀取使用者指定 long-horizon-plan-author 技能及其 templates/verification。
+- 以 WSL Linux git 讀取 branch/status/remote/HEAD：GUI，HEAD 1cf54d7ed8a6769e8c9e155fa8bcb6243621c156，開始時工作樹乾淨，origin 指定 repository。
+- 啟用 Conda app 後讀取 executable paths/version：Linux Git；Python 3.13.14、Poetry 2.4.1、Node 24.18.0、npm 11.16.0、cargo 1.97.1 均屬預期環境。
+- 未 fetch；無遠端最新狀態保證。rg 未安裝，使用 git grep/grep，沒有安裝工具。
+
+### E02：程式基線唯讀檢查
+
+主作者檢查 shared contract、Python/TS/Rust 協議、DocumentWorkspace、service、canonical repository/session、launcher、現有測試與 fixture。兩個平行唯讀子代理分別核對 frontend 與 persistence，提供具體行號；已完成並停止。
+
+確認 startup 全域 history 與文件根脫鉤、structured reference 缺失、歷史 retry context 缺失、archive read_file 根綁定、sidebar/layout 數值、可重用版本／Permission 檢查。摘要見 PLANS.md。未讀真實 history、秘密或使用者專案文件。
+
+### E03：計畫產物與覆蓋
+
+產出 GOALS、PLANS、contracts、四個 phase、PROMPTS、靜態索引與本 log（10 份內容檔），另有一份局部 .gitignore；範圍僅限本計畫目錄。12 個目標對應 4 個階段及 A01–A21 可觀察驗收。具體格式、chooser 與預設路徑標記為提案；未提供舊資料 mapping，接入舊資料時不得猜測。
+
+### E04：交付前驗證
+
+- 結構 lint：以 Conda app 的 Linux Python 執行下列唯讀命令，實際結果 ok=true、errors=[]、warnings=[]、checked_files=10。它只驗證檔案／連結／圖結構，不能證明 App 行為。
+  `python /mnt/c/Users/garyc/.codex/skills/long-horizon-plan-author/scripts/validate_plan.py /home/minervamuses/research-agent-workspace/harness/plans/2026-10-15-gui-project-workspace --json`
+- Fresh-context review：獨立 reviewer 只取得原需求、計畫位置與執行環境限制，讀完整計畫並查相關程式；另有唯讀專案契約交叉檢查。確認 fresh executor 第一動作與中斷恢復可行，提出一項具體 A21 順序缺口：同程序 retry 完成後已無原 failed turn 可供重開測試。
+- 修正：A21 第 5／6 步已分成兩個不同 turnId；第一個驗證同程序 retry 至 completed，第二個保留 failed 供重開 retry；作者核對修正後流程。不把已 completed 的第一個回合當 failed 重跑。
+- 作者交叉檢查：補上 Permission 改選後不得暗中以舊 Bypass retry、requested/effective Thinking 區別、既有 skillReferences 的保存，以及 initialized-empty 與 conversations/ 遺失的區別。12 個 G 與 A01–A21、依賴順序、非目標及三層協議工作一致；格式及 chooser 仍標為提案。
+- 逐檔 UTF-8 解碼、LF、結尾換行及 replacement-character 檢查通過。首次逐檔 `git diff --no-index --check -- /dev/null <實際檔案>` 找到 Markdown 行尾空白，已移除並重跑通過；沒有隱藏該發現。
+- Git 交接檢查發現根 .gitignore 的 build/ 會忽略四個 phase。已只在計畫目錄加 .gitignore 解除此影響；`git status --short --untracked-files=all` 確認 11 個檔案全數可見且均在本計畫目錄。tracked production diff 為空；`git diff --check` 通過，沒有 stage、commit、branch/worktree mutation。
+- 撰寫時一次過長的 shell 輸入遭 Windows command-line 長度限制，尚未建立檔案；改成較短的 WSL/Linux 寫入後成功。沒有因此改用 Windows runtime 寫 project 檔案。
+- 規劃就緒：可交付並明確啟動。實作階段仍全為 Not started，舊資料歸屬、真實 GUI 可操作性與可能昂貴的驗證依 D9/P4 條件處理；沒有將計畫驗證宣稱為功能完成。
+
+## 恢復規則
+
+開始前依 PROMPTS.md 讀文件並核對實際 workspace。實作後將實際步驟／命令／結果／驗收編號／限制寫入此處；不在 GOALS 或 index 增加第二份動態狀態。已完成檢查若來源未變可明確重用；被後續變更影響的檢查才重做。
