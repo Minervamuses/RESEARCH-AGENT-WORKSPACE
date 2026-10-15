@@ -9,7 +9,7 @@
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
 | P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
 | P3 | Complete | E24-E29: compact UI, focused checks/build and native A16-A20 | none | P4 dependency ready |
-| P4 | In progress | E30-E33: complete regression plus scoped repairs; native A21 underway | Native A10 exposed omitted safe-link label; correction under verification | Verify native link capture and complete journey |
+| P4 | In progress | E30-E33: complete regression plus scoped repairs; native A21 underway | Native A10 correction passed; remaining A21 reopen/switch flow underway | Complete native journey and final acceptance mapping |
 
 ## 規劃證據
 
@@ -248,3 +248,9 @@
 - Actual native assistant Markdown selection omitted visible local link text from its submitted chat reference. SafeContent renders approved links as button.safe-link; visibleMessageRange excluded every BUTTON. Evidence retained at /tmp/research-agent-desktop-phase02-p4gui-20261015-f0a955c/p4-a10-link-omission-evidence.json, with the original failed/completed canonical snapshots unchanged.
 - Minimal fix includes text from safe-link buttons only; ordinary action buttons and hidden/excluded controls remain excluded. Existing visible-chat test now mirrors the actual safe-link DOM and checks full visible text, exact selected-link UTF-16 range, ordinary-action exclusion and cross-message rejection.
 - Actual focused visible-chat test1/1 and TypeScript passed on first patch. Main reviewed the two-file diff; `timeout 120s npm run build` passed (735 modules;557ms bundle, existing Monaco chunk-size warning). Scoped whitespace passed. Native recheck and remaining A21 are still pending; earlier immutable submissions will not be rewritten.
+
+### E35 / P4 native corrected-link and first retry checkpoint
+
+- Native Tauri/WebKit reselected the same assistant Markdown after E34. Corrected new reference contains Bold fixture local link plus the second paragraph and emoji; cross-message selection still offers no Add. The old omission turn remains unchanged. Current isolated root is /tmp/research-agent-desktop-phase02-p4gui-20261015-f0a955c; p4-corrected-first-failed.json and p4-corrected-first-retry.json retain the observations.
+- New corrected logical turn682c02c753bb40a5a602103ed9642198 failed, editor changed, then original retry completed without duplicate (total4 turns at that checkpoint). Main independently read the failed snapshot and actual canonical JSON, confirming exact turnId, submittedContext, semanticInput and displayInput equality; document+assistant-chat references persist, chat UTF-16[0,122). The initial evidence-reader expected a full turn in the retry summary and raised KeyError; corrected by reading the actual canonical turn, with no file/app changes.
+- Independent final read-only audit found no additional demonstrated A01-A15 blocker. Actual42-file diff since planning commit2121935 stays within authorized existing modules/tests/log; no dependency/lock/environment/AGENTS changes, new persistent module or migration data. E31-E33 retain all original behavior assertions. A21 second failure/reopen and final switching remain in progress, so P4 is not complete.
