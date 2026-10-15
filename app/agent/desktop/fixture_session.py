@@ -877,6 +877,7 @@ class FixtureSession:
         retry: bool,
         kind: str = "conversational",
         context_eligible: bool = True,
+        submitted_context: dict[str, Any] | None = None,
     ) -> tuple[ConversationSnapshot, Any, bool]:
         if not is_canonical_uuid4_hex(turn_id):
             raise ValueError("turn_id must be a canonical UUIDv4 hex value")
@@ -890,6 +891,7 @@ class FixtureSession:
             "semantic_input": semantic_input,
             "context_eligible": context_eligible,
             "thinking_mode": self.thinking_mode if context_eligible else None,
+            "submitted_context": submitted_context,
         }
         submitted_at = _timestamp((self._turn_count or 0) + 1)
         if snapshot is None:
@@ -986,6 +988,7 @@ class FixtureSession:
         skill_name: str | None = None,
         skill_references: list[dict] | None = None,
         retry: bool = False,
+        submitted_context: dict[str, Any] | None = None,
     ) -> TurnOutcome:
         if skill_name is not None and skill_name not in {
             skill.name for skill in self.loaded_skills
@@ -999,6 +1002,7 @@ class FixtureSession:
             display_input=original_input,
             turn_id=turn_id,
             retry=retry,
+            submitted_context=submitted_context,
         )
         if duplicate:
             assert pending.assistant_output is not None
@@ -1029,7 +1033,7 @@ class FixtureSession:
                 raise FixtureProviderError(429)
             if text == "[[fixture:provider-error]]":
                 raise FixtureProviderError(503)
-            if text == FIXTURE_FAIL_ONCE and not retry:
+            if original_input == FIXTURE_FAIL_ONCE and not retry:
                 raise FixtureProviderError(503)
             if text == FIXTURE_DELAYED_FINAL:
                 await asyncio.sleep(0.05)
@@ -1051,23 +1055,33 @@ class FixtureSession:
             tool_activities: tuple[ToolActivitySummary, ...] = ()
             if FIXTURE_SKILLS_ABSTRACT in original_input:
                 answer = self._skills_abstract_answer(text)
-            elif original_input.startswith("[[fixture:document-replace]]"):
-                tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
-                if tool is None or not getattr(self, "_document_turn_active", False):
-                    raise RuntimeError("fixture document seam requires an active editor snapshot")
-                replacement = original_input.removeprefix("[[fixture:document-replace]]").lstrip(" ")
-                raw_message = await tool.ainvoke({
-                    "name": "document_edit", "id": "fixture-document-edit", "type": "tool_call",
-                    "args": {"replacement_text": replacement},
-                })
-                raw_result = raw_message.content
-                payload = json.loads(raw_result)
-                answer = f"Fixture document operation: {payload['status']}."
-                tool_activities = (ToolActivitySummary(
-                    call_id="fixture-document-edit", name="document_edit",
-                    status="ok" if payload["status"] == "saved" else "failed",
-                    summary=answer,
-                ),)
+            elif original_input.startswith(("[[fixture:document-replace]]", "[[fixture:reference-replace]]")):
+                reference_edit = original_input.startswith("[[fixture:reference-replace]]")
+                document_references = [
+                    reference for reference in (submitted_context or {}).get("references", [])
+                    if reference["kind"] == "document"
+                ]
+                if reference_edit and len(document_references) != 1:
+                    answer = "Fixture reference edit requires exactly one document reference; choose the reference to edit. No document was changed."
+                else:
+                    tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
+                    if tool is None or not getattr(self, "_document_turn_active", False):
+                        raise RuntimeError("fixture document seam requires an active editor snapshot")
+                    marker = "[[fixture:reference-replace]]" if reference_edit else "[[fixture:document-replace]]"
+                    arguments = {"replacement_text": original_input.removeprefix(marker).lstrip(" ")}
+                    if reference_edit:
+                        arguments["reference_id"] = document_references[0]["referenceId"]
+                    raw_message = await tool.ainvoke({
+                        "name": "document_edit", "id": "fixture-document-edit", "type": "tool_call",
+                        "args": arguments,
+                    })
+                    payload = json.loads(raw_message.content)
+                    answer = f"Fixture document operation: {payload['status']}."
+                    tool_activities = (ToolActivitySummary(
+                        call_id="fixture-document-edit", name="document_edit",
+                        status="ok" if payload["status"] == "saved" else "failed",
+                        summary=answer,
+                    ),)
             elif original_input.startswith("[[fixture:document-analyze]]"):
                 answer = "Fixture analysis received the current editor snapshot; no document tool was called."
             elif text == _FIXTURE_CRASH_TOOL:
@@ -1200,7 +1214,7 @@ class FixtureSession:
                     + "界" * 750_000
                     + "\nEND"
                 )
-            elif text == FIXTURE_FAIL_ONCE:
+            elif original_input == FIXTURE_FAIL_ONCE:
                 answer = "Fixture explicit retry completed on the original turn."
             else:
                 mode = "extended" if self.thinking_mode == "extended" else "normal"
@@ -1270,6 +1284,7 @@ class FixtureSession:
         turn_id: str,
         retry: bool = False,
         failure_retryable: bool = True,
+        submitted_context: dict[str, Any] | None = None,
     ) -> tuple[object | None, TurnOutcome]:
         """Run a deterministic local command through canonical persistence."""
         snapshot, pending, duplicate = self._begin_turn(
@@ -1279,6 +1294,7 @@ class FixtureSession:
             retry=retry,
             kind="display-only",
             context_eligible=False,
+            submitted_context=submitted_context,
         )
         if duplicate:
             assert pending.assistant_output is not None

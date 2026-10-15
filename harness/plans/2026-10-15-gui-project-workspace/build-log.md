@@ -160,3 +160,9 @@
 - Kept all reads in the project-root switch guard, but subtract read-only list/transcript operations for same-project session create/select admission. No concurrency pipeline was added. A deterministic delayed-transcript regression verifies selection succeeds, root switching remains blocked until the read finishes, and counters balance.
 - Actual focused command: `poetry run pytest tests/test_desktop_service.py -q -k "parallel_transcript_preview or project_lifecycle or project_open" --tb=short` -> 7 passed (0.49s), first run. Scoped whitespace check passed. Native recheck pending restart.
 - Native P2 observation before pause: selected second duplicate CRLF/emoji paragraph using Monaco keys, clicked Add selected document text to chat; card showed draft.md lines2-2 and same-emoji text, composer was focused, disk bytes unchanged and conversation still1turn. This is partial P2 GUI evidence, not full phase completion.
+
+### E21 / P2-S2 fixture submission and reference tool seam
+
+- Existing isolated fixture propagates submitted_context through conversational/display-only pending writes; fail-once marker reads original display input, so frozen semantic sources do not disable failure/retry. Two distinct logical IDs support same-process retry and a separate failed-turn reopen retry.
+- Added [[fixture:reference-replace]] to the existing document seam: exactly one document reference supplies its reference_id; zero/multiple references request clarification without a tool or write. Existing document-replace remains a background edit. This is synthetic fixture behavior, not model execution.
+- Actual checks: context/fail/status/round-trip subset5 passed (0.68s); new reference seam test1 passed (0.40s), checking0/2/1 references, unchanged bytes then second-duplicate-only save and proposal identity; existing real document coordinator1 passed (0.25s). Main reviewed actual diff and scoped whitespace check.
