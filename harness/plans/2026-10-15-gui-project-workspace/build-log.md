@@ -231,3 +231,8 @@
 
 - Existing test_project_permissions.py now explicitly opens the owned temporary project before session.create in five setup functions. Existing Ask/Bypass, frozen consent, correlated approval, stale prune and extension assertions/fakes are unchanged. No production code changed.
 - Actual `poetry run pytest tests/test_project_permissions.py -q` ->36 passed,0.69s, one existing warning; first patch/first run. This resolves the34 failures in that module from E30 and also rechecks its2 previously passing cases. Main reviewed complete diff; scoped whitespace check passed.
+
+### E32 / P4-S3: inline Skill regression fixture binding
+
+- Existing test_inline_skills.py opens the owned project before session.create in three setups and removes two obsolete later root-only workspace.select calls. All real catalog, multi-Skill order, save/retry, unsaved-claim and citation assertions and fake models remain unchanged.
+- Actual ordered multi-Skill targeted cases3/3 passed,0.43s; complete small module `poetry run pytest tests/test_inline_skills.py -q --tb=short` ->12 passed,0.65s, one existing warning. First patch passed without repairs; all six E30 failures in this module resolved. Main reviewed complete diff; scoped whitespace check passed.

@@ -16,7 +16,7 @@ from agent.skills import discover_skills
 from agent.skills.runtime import combine_skill_runtimes, load_skill_runtime, resolve_skill_references
 from agent.state import skill_runtime_to_agent_state
 from agent.turns.results import TurnOutcome
-from test_desktop_service import _service
+from test_desktop_service import _open_test_project, _service
 
 
 def test_inline_catalog_positions_duplicates_and_email_boundaries(tmp_path):
@@ -110,10 +110,10 @@ def test_two_real_catalog_skills_see_both_instructions_and_saved_first_product(t
         async def factory(config, *, load_mcp, **kwargs):
             return ChatSession(config, **kwargs)
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         model.session = service.session
         service.session.set_thinking_mode("extended")
-        await service.dispatch("workspace.select", {"rootPath": str(tmp_path)})
         path = tmp_path / "draft.md"
         path.write_text("前文\n相同段落😀\n後文\n")
         context = await service.dispatch("document.open", {"path": str(path)})
@@ -188,6 +188,7 @@ def test_missing_selected_skill_tools_are_visible_and_next_turn_is_clean(tmp_pat
             config = replace(config, skills_dir=str(tmp_path / "skills"))
             return ChatSession(config, **kwargs)
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         service.session.set_thinking_mode("extended")
         with pytest.raises(DesktopServiceError, match="required skill tools are unavailable: unavailable_helper"):
@@ -360,9 +361,9 @@ def test_selected_unsaved_claim_reaches_topic_search_abstract_and_final_citation
         async def factory(config, *, load_mcp, **kwargs):
             return ChatSession(config, **kwargs)
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         service.session.set_thinking_mode("extended")
-        await service.dispatch("workspace.select", {"rootPath": str(tmp_path)})
         path = tmp_path / "draft.md"
         path.write_text(original_disk_text)
         context = await service.dispatch("document.open", {"path": str(path)})
