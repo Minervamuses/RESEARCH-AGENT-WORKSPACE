@@ -179,6 +179,7 @@ class DesktopKnowledgeOperations:
     ]
     diff_folder: Callable[[Path, AgentConfig], Awaitable[dict[str, Any]]]
     prune_folder: Callable[[Path, AgentConfig], Awaitable[list[str]]]
+    workspace_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +310,7 @@ class DesktopService:
         self._document_candidates: dict[str, _DocumentCandidate] = {}
         self._active_document_context: dict[str, Any] | None = None
         self._active_turn_permission_mode: str | None = None
+        self._operation_approval_lock = asyncio.Lock()
         self._document_apply_lock = asyncio.Lock()
         self._document_tool_lock = asyncio.Lock()
         self._approval_document_snapshots: dict[str, dict[str, Any]] = {}
@@ -1202,6 +1204,11 @@ class DesktopService:
             for parameter in factory_parameters.values()
         ):
             kwargs["extra_tools"] = [self._document_tool]
+        if "operation_approval_handler" in factory_parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in factory_parameters.values()
+        ):
+            kwargs["operation_approval_handler"] = self._desktop_operation_approval
         if session_id is not None:
             kwargs["session_id"] = session_id
         session = await self._session_factory(config, **kwargs)
@@ -1436,6 +1443,11 @@ class DesktopService:
                 "/init takes no arguments.",
             )
         async with self._knowledge_operation(turn_owned=True):
+            await self._require_operation_approval(
+                "knowledge.init_workspace", str(getattr(self._knowledge_operations, "workspace_root", None) or find_app_root().parent),
+                "Import the host workspace into the local knowledge index, excluding the app directory.",
+                parameters={"storePath": str(Path(self.config.persist_dir).expanduser().resolve())},
+            )
             files, chunks, host_root, excluded = (
                 await self._knowledge_operations.init_workspace(self.config)
             )
@@ -1476,6 +1488,10 @@ class DesktopService:
                     "The selected file type is not supported for ingest.",
                 )
             async with self._knowledge_operation(turn_owned=True):
+                await self._require_operation_approval(
+                    "knowledge.ingest_file", str(target), "Import this file into the local knowledge index.",
+                    parameters={"storePath": str(Path(self.config.persist_dir).expanduser().resolve())},
+                )
                 pid, chunks = await self._knowledge_operations.ingest_file(
                     target,
                     self.config,
@@ -1500,6 +1516,10 @@ class DesktopService:
             )
 
         async with self._knowledge_operation(turn_owned=True):
+            await self._require_operation_approval(
+                "knowledge.ingest_folder", str(target), "Import this directory into the local knowledge index.",
+                parameters={"storePath": str(Path(self.config.persist_dir).expanduser().resolve())},
+            )
             files, chunks = await self._knowledge_operations.ingest_folder(
                 target,
                 self.config,
@@ -1575,7 +1595,8 @@ class DesktopService:
             lines.append("Re-run the same command with --yes to apply.")
             result = self._knowledge_result("\n".join(lines))
             self._composer_prune_preview = (session.session_id, preview)
-            return result
+            if self._active_turn_permission_mode != "bypass":
+                return result
 
         stored = self._composer_prune_preview
         self._composer_prune_preview = None
@@ -1590,6 +1611,10 @@ class DesktopService:
             )
         preview = stored[1]
         async with self._knowledge_operation(turn_owned=True):
+            await self._require_operation_approval(
+                "knowledge.prune_apply", str(target), "Prune these missing paths from the local knowledge index.",
+                parameters={"orphans": list(preview.orphans), "storePath": str(Path(self.config.persist_dir).expanduser().resolve())},
+            )
             latest = await self._knowledge_operations.diff_folder(
                 target,
                 self.config,
@@ -1880,47 +1905,139 @@ class DesktopService:
             }
         return json.dumps(result, ensure_ascii=False)
 
+    async def _single_operation_approval(
+        self, payload: dict[str, Any], *, event_sink: EventSink | None = None,
+        parent_request_id: str | None = None, turn_id: str | None = None,
+        permission_mode: str | None = None, document_context: dict[str, Any] | None = None,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """Serialize single-operation consent without changing correctness checks."""
+        mode = permission_mode or self._active_turn_permission_mode or self._bash_permission_mode
+        if mode == "bypass":
+            return True, document_context
+        sink = event_sink or self._turn_event_sink
+        active_owner = self._active_turn_id if self._turn_active else None
+        parent = parent_request_id or self._active_parent_request_id or getattr(sink, "request_id", None)
+        operation_turn = turn_id or self._active_turn_id or uuid.uuid4().hex
+        if sink is None or not isinstance(parent, str):
+            return False, document_context
+        async with self._operation_approval_lock:
+            if active_owner is not None and (not self._turn_active or self._active_turn_id != active_owner):
+                return False, document_context
+            if self._pending_approval is not None:
+                return False, document_context
+            now = datetime.now(timezone.utc)
+            pending = _PendingApproval(
+                approval_id=uuid.uuid4().hex, parent_request_id=parent,
+                turn_id=operation_turn, expires_at=now + timedelta(seconds=self._approval_timeout_seconds),
+                future=asyncio.get_running_loop().create_future(),
+            )
+            self._pending_approval = pending
+            if document_context is not None:
+                self._approval_document_snapshots[pending.approval_id] = document_context
+            try:
+                sink("approval.required", {
+                    **payload, "approvalId": pending.approval_id,
+                    "parentRequestId": parent, "turnId": operation_turn,
+                    "createdAt": self._utc_timestamp(now),
+                    "expiresAt": self._utc_timestamp(pending.expires_at),
+                })
+                approved = bool(await asyncio.wait_for(
+                    asyncio.shield(pending.future), timeout=self._approval_timeout_seconds,
+                ))
+                return approved, self._approval_document_snapshots.get(pending.approval_id, document_context)
+            except (TimeoutError, asyncio.CancelledError):
+                return False, document_context
+            except Exception:
+                # A failed event delivery cannot grant permission to execute.
+                return False, document_context
+            finally:
+                self._approval_document_snapshots.pop(pending.approval_id, None)
+                if self._pending_approval is pending:
+                    self._pending_approval = None
+                if not pending.future.done():
+                    pending.future.cancel()
+
+    async def _operation_approval(
+        self, operation: str, target: str, description: str, *,
+        parameters: Any = None, event_sink: EventSink | None = None,
+    ) -> bool:
+        mode = self._active_turn_permission_mode or self._bash_permission_mode
+        if mode == "bypass":
+            return True
+        summary = json.dumps(parameters, ensure_ascii=False, sort_keys=True, default=str) if parameters is not None else None
+        if (summary is not None and len(summary.encode("utf-8")) > 8192) or not self._approval_context_is_safe(target, description):
+            return False
+        if summary is not None and not self._approval_context_is_safe(summary, description):
+            return False
+        payload = {"operation": operation, "targetPath": target, "description": description}
+        if summary is not None:
+            payload["parametersSummary"] = summary
+        approved, _context = await self._single_operation_approval(
+            payload, event_sink=event_sink, permission_mode=mode,
+        )
+        return approved
+
+    async def _require_operation_approval(
+        self, operation: str, target: str, description: str, *,
+        parameters: Any = None, event_sink: EventSink | None = None,
+    ) -> None:
+        if not await self._operation_approval(
+            operation, target, description, parameters=parameters, event_sink=event_sink,
+        ):
+            raise DesktopServiceError("APPROVAL_DENIED", "The operation was denied or its approval expired; no write occurred.")
+
+    async def _desktop_operation_approval(self, name: str, args: dict[str, Any]) -> bool:
+        """Approve executable tools after the graph's existing admission check."""
+        family = getattr(self.session, "mcp_families", {}).get(name)
+        citation_save = name == "citation_workflow" and args.get("action") == "save"
+        skill_install = name == "skill_install" and args.get("action") in {"preview", "apply"}
+        mcp_call = family is not None and family != "desktop_document"
+        if not (citation_save or skill_install or mcp_call):
+            return True
+        if not self._turn_active or self._active_turn_id is None or self._active_parent_request_id is None:
+            return False
+        if citation_save:
+            policy = getattr(self.session, "_citation_policy", None)
+            loaded_service = getattr(policy, "loaded_service", None)
+            output_dir = getattr(loaded_service, "output_dir", None)
+            if output_dir is None:
+                output_dir = resolve_output_dir(self.config)
+            return await self._operation_approval(
+                "citation.save", str(Path(output_dir).expanduser().resolve()),
+                "Save this batch of citation candidates after source verification.", parameters=args.get("works"),
+            )
+        if skill_install:
+            context = getattr(self.session, "_installer_context", {})
+            installer = getattr(self.session, "_skill_installer", None)
+            paths = getattr(installer, "paths", None) or resolve_extension_paths(self.config)
+            source = context.get("source_path") or context.get("source_zip")
+            target = str(paths.state_root if args["action"] == "apply" else source or paths.dropin_root)
+            return await self._operation_approval(
+                "extension.install", target,
+                f"{args['action'].capitalize()} the selected skill installation.",
+                parameters={"arguments": args, "source": source, "installationRoot": str(paths.state_root)},
+            )
+        return await self._operation_approval(
+            "mcp.call", f"{family}/{name}", f"Call the installed MCP tool {name}.", parameters=args,
+        )
+
     async def _document_operation_approval(
         self, *, event_sink: EventSink | None, parent_request_id: str,
         turn_id: str, operation: str, context: dict[str, Any], permission_mode: str,
     ) -> tuple[bool, dict[str, Any]]:
-        if permission_mode == "bypass":
-            return True, context
-        if event_sink is None or self._pending_approval is not None:
-            return False, context
-        now = datetime.now(timezone.utc)
-        pending = _PendingApproval(
-            approval_id=uuid.uuid4().hex, parent_request_id=parent_request_id,
-            turn_id=turn_id, expires_at=now + timedelta(seconds=self._approval_timeout_seconds),
-            future=asyncio.get_running_loop().create_future(),
-        )
-        self._pending_approval = pending
-        self._approval_document_snapshots[pending.approval_id] = context
         range_start = context.get("rangeStartUtf16", 0)
         range_end = context.get("rangeEndUtf16", len(context["sourceText"].encode("utf-16-le")) // 2)
         source_start = utf16_to_index(context["sourceText"], range_start)
         source_end = utf16_to_index(context["sourceText"], range_end)
         first_line = len(re.findall(r"\r\n|\r|\n", context["sourceText"][:source_start])) + 1
         last_line = len(re.findall(r"\r\n|\r|\n", context["sourceText"][:max(source_start, source_end - 1)])) + 1
-        try:
-            event_sink("approval.required", {
-                "approvalId": pending.approval_id, "parentRequestId": parent_request_id,
-                "turnId": turn_id, "operation": operation, "targetPath": context["path"],
-                "rangeStartUtf16": range_start, "rangeEndUtf16": range_end,
-                "description": f"Save {Path(context['path']).name}, source lines {first_line}–{last_line}.",
-                "createdAt": self._utc_timestamp(now), "expiresAt": self._utc_timestamp(pending.expires_at),
-            })
-            approved = bool(await asyncio.wait_for(asyncio.shield(pending.future), timeout=self._approval_timeout_seconds))
-            current = self._approval_document_snapshots.pop(pending.approval_id, context)
-            return approved, current
-        except (TimeoutError, asyncio.CancelledError):
-            return False, context
-        finally:
-            self._approval_document_snapshots.pop(pending.approval_id, None)
-            if self._pending_approval is pending:
-                self._pending_approval = None
-            if not pending.future.done():
-                pending.future.cancel()
+        approved, current = await self._single_operation_approval({
+            "operation": operation, "targetPath": context["path"],
+            "rangeStartUtf16": range_start, "rangeEndUtf16": range_end,
+            "description": f"Save {Path(context['path']).name}, source lines {first_line}–{last_line}.",
+        }, event_sink=event_sink, parent_request_id=parent_request_id, turn_id=turn_id,
+            permission_mode=permission_mode, document_context=context)
+        return approved, current or context
 
     async def _document_apply(
         self, params: dict[str, Any], event_sink: EventSink | None
@@ -2021,6 +2138,9 @@ class DesktopService:
         self._active_turn_id = turn_id
         previous_mode = session.thinking_mode
         self._active_turn_permission_mode = self._bash_permission_mode
+        installer = getattr(session, "_skill_installer", None)
+        if installer is not None:
+            installer.bypass_approval = self._active_turn_permission_mode == "bypass"
         try:
             original_text = params["text"]
             try:
@@ -2292,6 +2412,8 @@ class DesktopService:
             }
         finally:
             self._complete_pending_approval(False)
+            if installer is not None:
+                installer.bypass_approval = False
             if self._active_document_context is not None:
                 session._document_turn_active = False
                 session.set_thinking_mode(previous_mode)
@@ -2454,6 +2576,10 @@ class DesktopService:
                 "BUSY_KNOWLEDGE_MUTATION",
                 "A knowledge operation is still active.",
                 retryable=True,
+            )
+        if self._extension_active:
+            raise DesktopServiceError(
+                "BUSY_EXTENSION_OPERATION", "An extension operation is still active.", retryable=True,
             )
         return self._require_session()
 
@@ -2677,7 +2803,7 @@ class DesktopService:
         )
 
     async def _knowledge_ingest_file(
-        self, params: dict[str, Any], _event_sink: EventSink | None
+        self, params: dict[str, Any], event_sink: EventSink | None
     ) -> dict[str, Any]:
         target = self._validated_path(params["path"], kind="file")
         if (
@@ -2688,6 +2814,10 @@ class DesktopService:
                 "INVALID_PATH", "The selected file type is not supported for ingest."
             )
         async with self._knowledge_operation():
+            await self._require_operation_approval(
+                "knowledge.ingest_file", str(target), "Import this file into the local knowledge index.",
+                parameters={"storePath": str(Path(self.config.persist_dir).expanduser().resolve())}, event_sink=event_sink,
+            )
             pid, chunks = await ingest_file(target, self.config)
         if chunks <= 0:
             raise DesktopServiceError(
@@ -2743,7 +2873,7 @@ class DesktopService:
         }
 
     async def _knowledge_prune_apply(
-        self, params: dict[str, Any], _event_sink: EventSink | None
+        self, params: dict[str, Any], event_sink: EventSink | None
     ) -> dict[str, Any]:
         preview = self._prune_previews.get(params["previewId"])
         if preview is None:
@@ -2751,6 +2881,10 @@ class DesktopService:
                 "PRUNE_PREVIEW_STALE", "The prune preview is unknown or already used."
             )
         async with self._knowledge_operation():
+            await self._require_operation_approval(
+                "knowledge.prune_apply", str(preview.root), "Prune these missing paths from the local knowledge index.",
+                parameters={"orphans": list(preview.orphans), "storePath": str(Path(self.config.persist_dir).expanduser().resolve())}, event_sink=event_sink,
+            )
             latest = await diff_folder(preview.root, self.config)
             latest_orphans = tuple(sorted(latest["missing_from_disk"]))
             if self._prune_digest(preview.root, latest_orphans) != preview.digest:
@@ -2847,6 +2981,7 @@ class DesktopService:
         session = self._require_session()
         preview_id, approved_values = self._extension_apply_values(params)
         approved = set(approved_values)
+        permission_mode = self._bash_permission_mode
         display_input = self._extension_apply_display_input(params)
 
         async def apply_once() -> ApplyReport:
@@ -2869,7 +3004,9 @@ class DesktopService:
             return await asyncio.to_thread(
                 self._extension_manager.apply,
                 preview,
-                approved_mcp_bindings=approved,
+                # Ask uses the explicit reviewed Apply action. Bypass derives
+                # consent only from this validated preview; manager rechecks it.
+                approved_mcp_bindings=known if permission_mode == "bypass" else approved,
             )
 
         async with self._extension_operation():
@@ -2955,7 +3092,7 @@ class DesktopService:
             or self._active_turn_id is None
         ):
             return False
-        if self._bash_permission_mode == "bypass":
+        if self._active_turn_permission_mode == "bypass":
             return True
         staged = asyncio.run_coroutine_threadsafe(
             self._stage_bash_approval(
@@ -2965,67 +3102,32 @@ class DesktopService:
             ),
             loop,
         )
-        try:
-            return bool(staged.result(timeout=self._approval_timeout_seconds + 1.0))
-        except Exception:
-            staged.cancel()
-            return False
+        owner_turn = self._active_turn_id
+        while True:
+            try:
+                return bool(staged.result(timeout=1.0))
+            except TimeoutError:
+                # Another operation can own the single approval UI. Its wait
+                # must not consume this operation's own approval deadline.
+                if not self._turn_active or self._active_turn_id != owner_turn or loop.is_closed():
+                    staged.cancel()
+                    return False
+            except Exception:
+                staged.cancel()
+                return False
 
     async def _stage_bash_approval(
-        self,
-        command: str,
-        description: str,
-        execution_timeout_seconds: int,
+        self, command: str, description: str, execution_timeout_seconds: int,
     ) -> bool:
-        sink = self._turn_event_sink
-        parent_request_id = self._active_parent_request_id
-        turn_id = self._active_turn_id
-        if (
-            self._pending_approval is not None
-            or sink is None
-            or parent_request_id is None
-            or turn_id is None
-            or not self._approval_context_is_safe(command, description)
-        ):
+        if (not self._turn_active or self._turn_event_sink is None
+                or self._active_parent_request_id is None or self._active_turn_id is None
+                or not self._approval_context_is_safe(command, description)):
             return False
-
-        now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(seconds=self._approval_timeout_seconds)
-        pending = _PendingApproval(
-            approval_id=uuid.uuid4().hex,
-            parent_request_id=parent_request_id,
-            turn_id=turn_id,
-            expires_at=expires_at,
-            future=asyncio.get_running_loop().create_future(),
-        )
-        self._pending_approval = pending
-        try:
-            sink("approval.required", {
-                "approvalId": pending.approval_id,
-                "parentRequestId": pending.parent_request_id,
-                "turnId": pending.turn_id,
-                "command": command,
-                "description": description,
-                "executionTimeoutSeconds": execution_timeout_seconds,
-                "createdAt": self._utc_timestamp(now),
-                "expiresAt": self._utc_timestamp(expires_at),
-            })
-        except Exception:
-            self._complete_pending_approval(False)
-            return False
-
-        try:
-            return bool(await asyncio.wait_for(
-                asyncio.shield(pending.future),
-                timeout=self._approval_timeout_seconds,
-            ))
-        except (TimeoutError, asyncio.CancelledError):
-            return False
-        finally:
-            if self._pending_approval is pending:
-                self._pending_approval = None
-            if not pending.future.done():
-                pending.future.cancel()
+        approved, _context = await self._single_operation_approval({
+            "command": command, "description": description,
+            "executionTimeoutSeconds": execution_timeout_seconds,
+        }, permission_mode=self._active_turn_permission_mode or "ask")
+        return approved
 
     def _complete_pending_approval(self, approved: bool) -> None:
         pending = self._pending_approval

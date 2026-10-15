@@ -412,6 +412,8 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
 def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes(
     fixture_root: Path,
 ) -> None:
+    from test_desktop_service import _dispatch_approved
+
     service = _service(fixture_root)
     source = fixture_root / FIXTURE_KNOWLEDGE_DIRNAME
     document = source / "fixture-notes.md"
@@ -454,7 +456,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
             f"/prune {source} --yes",
         ]
         results = [
-            await service.dispatch("session.turn", _turn_params(command))
+            await _dispatch_approved(service, "session.turn", _turn_params(command))
             for command in commands
         ]
         empty_preview = await service.dispatch(
@@ -465,7 +467,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
         marker.write_text("changed after preview\n", encoding="utf-8")
         try:
             with pytest.raises(DesktopServiceError) as changed:
-                await service.dispatch(
+                await _dispatch_approved(service,
                     "session.turn",
                     _turn_params(f"/prune {source} --yes"),
                 )

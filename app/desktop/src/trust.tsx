@@ -243,6 +243,7 @@ interface ApprovalDialogProps {
   resolving: boolean;
   onResolve: (approved: boolean) => void;
   returnFocus: () => void;
+  allowDocumentEditing?: boolean;
 }
 
 export function ApprovalDialog({
@@ -250,7 +251,9 @@ export function ApprovalDialog({
   resolving,
   onResolve,
   returnFocus,
+  allowDocumentEditing = false,
 }: ApprovalDialogProps) {
+  const nonModal = allowDocumentEditing || approval.operation !== undefined;
   const denyRef = useRef<HTMLButtonElement>(null);
   const approveRef = useRef<HTMLButtonElement>(null);
 
@@ -265,7 +268,7 @@ export function ApprovalDialog({
       if (!resolving) onResolve(false);
       return;
     }
-    if (event.key !== "Tab" || approval.operation !== undefined) return;
+    if (event.key !== "Tab" || nonModal) return;
     const first = denyRef.current;
     const last = approveRef.current;
     if (first === null || last === null) return;
@@ -279,29 +282,36 @@ export function ApprovalDialog({
   };
 
   const onBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    if (approval.operation === undefined && event.target === event.currentTarget && !resolving) onResolve(false);
+    if (!nonModal && event.target === event.currentTarget && !resolving) onResolve(false);
   };
 
   return (
-    <div className={approval.operation === undefined ? "approval-backdrop" : "approval-backdrop document-approval-backdrop"} onMouseDown={onBackdropMouseDown}>
+    <div className={nonModal ? "approval-backdrop document-approval-backdrop" : "approval-backdrop"} onMouseDown={onBackdropMouseDown}>
       <div
         className="approval-dialog"
         role="dialog"
-        aria-modal={approval.operation === undefined}
+        aria-modal={!nonModal}
         aria-labelledby="bash-approval-title"
         aria-describedby="bash-approval-description"
         onKeyDown={onKeyDown}
       >
         <p className="section-kicker">ONE-TIME OPERATION</p>
-        <h2 id="bash-approval-title">{approval.operation === undefined ? "Allow this Bash command?" : "Allow this document operation?"}</h2>
+        <h2 id="bash-approval-title">{approval.operation === undefined ? "Allow this Bash command?" : "Allow this operation?"}</h2>
         <p id="bash-approval-description">{approval.description}</p>
         <dl className="approval-context">
           {approval.operation === undefined ? <>
             <div><dt>Exact command</dt><dd><code>{approval.command}</code></dd></div>
             <div><dt>Execution timeout</dt><dd>{approval.executionTimeoutSeconds} seconds</dd></div>
           </> : <>
-            <div><dt>Operation</dt><dd>{approval.operation}</dd></div>
-            <div><dt>File</dt><dd><code>{approval.targetPath}</code></dd></div>
+            <div><dt>Action</dt><dd>{{
+              "document.apply": "Save document edit", "document.undo": "Undo document edit",
+              "citation.save": "Save citation batch", "knowledge.init_workspace": "Initialize index",
+              "knowledge.ingest_file": "Import file", "knowledge.ingest_folder": "Import folder",
+              "knowledge.prune_apply": "Prune index", "mcp.call": "Call MCP tool",
+              "extension.install": "Install or update extension", "extensions.apply": "Apply extension changes",
+            }[approval.operation]}</dd></div>
+            <div><dt>Target</dt><dd><code>{approval.targetPath}</code></dd></div>
+            {approval.parametersSummary !== undefined && <div><dt>Parameters</dt><dd><pre>{approval.parametersSummary}</pre></dd></div>}
           </>}
           <div>
             <dt>Approval expires</dt>
@@ -347,15 +357,16 @@ export function BashPermissionControl({
 }: BashPermissionControlProps) {
   return (
     <label className="bash-permission-control">
-      Bash permission
+      Project permission
       <select
-        aria-label="Bash permission"
+        aria-label="Project permission"
+        title={disabled ? "The current turn keeps its starting mode. Change the mode after it finishes." : "Applies to document edits, Bash, citation saves, indexing, MCP and extensions."}
         value={mode}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as BashPermissionMode)}
       >
-        <option value="ask">逐次詢問（預設）</option>
-        <option value="bypass">ByPassPermission（不再逐次詢問）</option>
+        <option value="ask">Ask · approve one operation</option>
+        <option value="bypass">Bypass · all project operations</option>
       </select>
     </label>
   );
@@ -377,6 +388,7 @@ interface ExtensionPanelProps {
   flow: ExtensionFlow;
   busy: boolean;
   canRestart: boolean;
+  permissionMode?: BashPermissionMode;
   onPreview: () => void;
   onDecision: (
     bindingHash: string,
@@ -390,12 +402,14 @@ export function ExtensionPanel({
   flow,
   busy,
   canRestart,
+  permissionMode = "ask",
   onPreview,
   onDecision,
   onApply,
   onRestart,
 }: ExtensionPanelProps) {
-  const approvedHashes = approvedBindingHashes(flow);
+  const approvedHashes = permissionMode === "bypass" && flow.preview !== null
+    ? flow.preview.bindings.map((binding) => binding.bindingHash) : approvedBindingHashes(flow);
   const preview = flow.preview;
 
   return (
@@ -404,7 +418,7 @@ export function ExtensionPanel({
       <h3 id="extension-flow-title">Review local extension changes</h3>
 
       {flow.phase === "ready" && <>
-        <p>Previewing may contact the configured model provider. Nothing is applied until you review every exact MCP binding and choose Apply.</p>
+        <p>Previewing may contact the configured model provider. Apply uses this preview. Ask requires a decision for each exact MCP binding; Bypass skips those consent choices.</p>
         <button className="primary-button" type="button" disabled={busy} onClick={onPreview}>Preview proposed extensions</button>
       </>}
 
@@ -427,16 +441,16 @@ export function ExtensionPanel({
               <div><dt>Environment names</dt><dd>{binding.environmentNames.length > 0 ? binding.environmentNames.join(", ") : "None"}</dd></div>
               <div><dt>Binding hash</dt><dd><code>{binding.bindingHash}</code></dd></div>
             </dl>
-            <div className="binding-decision" role="radiogroup" aria-label={`Decision for ${binding.name}`}>
+            {permissionMode === "ask" && <div className="binding-decision" role="radiogroup" aria-label={`Decision for ${binding.name}`}>
               <label><input type="radio" name={`extension-${binding.bindingHash}`} checked={flow.decisions[binding.bindingHash] === "deny"} disabled={busy} onChange={() => onDecision(binding.bindingHash, "deny")} /> Deny</label>
               <label><input type="radio" name={`extension-${binding.bindingHash}`} checked={flow.decisions[binding.bindingHash] === "approve"} disabled={busy} onChange={() => onDecision(binding.bindingHash, "approve")} /> Approve</label>
-            </div>
+            </div>}
           </fieldset>)}</div>}
-        <button className="primary-button" type="button" disabled={busy || approvedHashes === null} onClick={onApply}>Apply reviewed changes</button>
+        <button className="primary-button" type="button" disabled={busy || approvedHashes === null} onClick={onApply}>{permissionMode === "bypass" ? "Apply changes" : "Apply reviewed changes"}</button>
         {approvedHashes === null && <p className="extension-decision-note">Choose Approve or Deny for every binding before applying.</p>}
       </>}
 
-      {flow.phase === "applying" && <p role="status" aria-live="polite">Applying only the approved bindings from this preview…</p>}
+      {flow.phase === "applying" && <p role="status" aria-live="polite">Applying the current valid preview…</p>}
 
       {(flow.phase === "applied" || flow.phase === "restarting" || flow.phase === "awaiting-load" || flow.phase === "loaded") && flow.report !== null && <>
         <p role="status" aria-live="polite">

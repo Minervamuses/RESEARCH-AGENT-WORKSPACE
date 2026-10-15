@@ -723,6 +723,7 @@ class SkillInstaller:
         self.config = config
         self.manager_factory = manager_factory
         self.builtin_names = {name.casefold() for name in builtin_names}
+        self.bypass_approval = False
         self.pending = False
         self.last_result: dict[str, Any] | None = None
         self._temporary: Path | None = None
@@ -948,7 +949,7 @@ class SkillInstaller:
                                 candidates=self._candidates, **common)
         common.update({"name": self._candidate["name"], "candidate_root": self._candidate["root"],
                        "source_path": str(self._source)})
-        if self._waiting_update:
+        if self._waiting_update and not self.bypass_approval:
             return self._result("needs_update_approval", "已有同名不同內容的 skill；請明確同意更新或取消。", **common)
         if self._preview is not None:
             return self._result("preview_ready", "已驗證選定 skill，preview 已綁定本次使用者請求。",
@@ -1009,9 +1010,10 @@ class SkillInstaller:
         requires_update = (self._source_hash is not None and self._source_hash != desired.source_hash) or (
             applied is not None and applied.source_hash != desired.source_hash
         )
-        if requires_update and not self._allow_update:
+        if requires_update and not self._allow_update and not self.bypass_approval:
             self._waiting_update = True
             return self._status()
+        self._waiting_update = False
         self._check_current()
         if self._source_hash != desired.source_hash:
             self._source.parent.mkdir(parents=True, exist_ok=True)

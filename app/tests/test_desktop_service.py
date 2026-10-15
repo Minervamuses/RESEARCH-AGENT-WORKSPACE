@@ -425,6 +425,26 @@ def _turn_params(
     }
 
 
+async def _dispatch_approved(service, method, params):
+    """Existing lifecycle tests grant the new single-operation consent explicitly."""
+    tasks = []
+
+    class Sink:
+        request_id = str(uuid.uuid4())
+
+        def __call__(self, event, data):
+            if event == "approval.required":
+                tasks.append(asyncio.create_task(service.dispatch("approval.resolve", {
+                    "approvalId": data["approvalId"], "parentRequestId": data["parentRequestId"],
+                    "turnId": data["turnId"], "approved": True,
+                })))
+
+    try:
+        return await service.dispatch(method, params, event_sink=Sink())
+    finally:
+        await asyncio.gather(*tasks)
+
+
 def _canonical_session_factory(monkeypatch):
     monkeypatch.setattr(
         "agent.session.build_graph",
@@ -771,19 +791,19 @@ def test_composer_confirmed_prune_is_prompt_first_and_completed_duplicate_safe(
             prune_folder=prune_folder,
         ),
     )
-    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
     preview_id = uuid.uuid4().hex
     apply_id = uuid.uuid4().hex
 
-    asyncio.run(service.dispatch(
+    asyncio.run(_dispatch_approved(service,
         "session.turn",
         _turn_params(f"/prune {source}", turn_id=preview_id),
     ))
-    applied = asyncio.run(service.dispatch(
+    applied = asyncio.run(_dispatch_approved(service,
         "session.turn",
         _turn_params(f"/prune {source} --yes", turn_id=apply_id),
     ))
-    duplicate = asyncio.run(service.dispatch(
+    duplicate = asyncio.run(_dispatch_approved(service,
         "session.turn",
         _turn_params(f"/prune {source} --yes", turn_id=apply_id),
     ))
@@ -864,10 +884,10 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         session_factory=factory,
         knowledge_operations=operations,
     )
-    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
     session_id = sessions[-1].session_id
     apply_id = uuid.uuid4().hex
-    asyncio.run(service.dispatch(
+    asyncio.run(_dispatch_approved(service,
         "session.turn",
         _turn_params(f"/prune {source}", turn_id=uuid.uuid4().hex),
     ))
@@ -878,7 +898,7 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         else DesktopServiceError
     )
     with pytest.raises(outward_error):
-        asyncio.run(service.dispatch(
+        asyncio.run(_dispatch_approved(service,
             "session.turn",
             _turn_params(f"/prune {source} --yes", turn_id=apply_id),
         ))
@@ -898,24 +918,24 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         session_factory=factory,
         knowledge_operations=operations,
     )
-    asyncio.run(restarted.dispatch(
+    asyncio.run(_dispatch_approved(restarted,
         "session.select",
         {"projectId": "local", "sessionId": session_id},
     ))
     assert prune_calls == 1
 
-    asyncio.run(restarted.dispatch(
+    asyncio.run(_dispatch_approved(restarted,
         "session.turn",
         _turn_params(f"/prune {source}", turn_id=uuid.uuid4().hex),
     ))
     with pytest.raises(DesktopServiceError):
-        asyncio.run(restarted.dispatch(
+        asyncio.run(_dispatch_approved(restarted,
             "session.turn",
             _turn_params(f"/prune {source} --yes", turn_id=apply_id),
         ))
     assert prune_calls == 1
 
-    retried = asyncio.run(restarted.dispatch(
+    retried = asyncio.run(_dispatch_approved(restarted,
         "session.turn",
         _turn_params(
             f"/prune {source} --yes",
@@ -1001,7 +1021,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
         startup = load_extension_startup(service.config)
         assert startup.diagnostics == ()
         applied_skills = list(startup.skills)
-    created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    created = asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
     catalog = created["slashCommands"]
     assert len([command for command in catalog if command["name"] == "citation"]) == 1
     assert services == []
@@ -1012,7 +1032,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     for raw in ("/citation", "/citation   ", "/citation OFF", "/citation none", "/citation deactivate"):
         expected = asyncio.run(execute_slash_command(parse_slash_command(raw), context))
         with pytest.raises(DesktopServiceError) as caught:
-            asyncio.run(service.dispatch("session.turn", _turn_params(raw)))
+            asyncio.run(_dispatch_approved(service, "session.turn", _turn_params(raw)))
         assert caught.value.code == "PROTOCOL_INVALID"
         assert str(caught.value) == expected.message
     assert model.invocations == []
@@ -1021,7 +1041,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
 
     raw = "/CiTaTiOn off topic: 搜尋並保存 Paper A"
     params = _turn_params(raw)
-    result = asyncio.run(service.dispatch("session.turn", params))
+    result = asyncio.run(_dispatch_approved(service, "session.turn", params))
     assert result["responseKind"] == "answer"
     assert result["streamKind"] == "final_only" and result["chunkCount"] == 0
     assert "已保存並引用來源 [1]。" in result["text"]
@@ -1063,7 +1083,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
 
     monkeypatch.setattr(session, "_load_skill_runtime", observe_load)
     for retry in (False, True):
-        duplicate = asyncio.run(service.dispatch("session.turn", {**params, "retry": retry}))
+        duplicate = asyncio.run(_dispatch_approved(service, "session.turn", {**params, "retry": retry}))
         assert duplicate["text"] == result["text"]
         assert duplicate["turnNumber"] == result["turnNumber"]
         assert duplicate["state"] == "completed"
@@ -1073,7 +1093,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     assert (len(model.invocations), len(fetcher.calls), len(services), len(save_calls)) == counts
     assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths} == before
     with pytest.raises(DesktopServiceError) as caught:
-        asyncio.run(service.dispatch("session.turn", _turn_params("/citation save")))
+        asyncio.run(_dispatch_approved(service, "session.turn", _turn_params("/citation save")))
     assert caught.value.code == "PROTOCOL_INVALID"
     assert len(model.invocations) == count
 
@@ -1392,7 +1412,7 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
         session_factory=factory,
         knowledge_operations=operations,
     )
-    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
 
     commands = [
         "/init",
@@ -1403,7 +1423,7 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
         f"/prune {source} --yes",
     ]
     results = [
-        asyncio.run(service.dispatch("session.turn", _turn_params(command)))
+        asyncio.run(_dispatch_approved(service, "session.turn", _turn_params(command)))
         for command in commands
     ]
 
@@ -1535,12 +1555,12 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
         session_factory=factory,
         knowledge_operations=operations,
     )
-    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
 
     before_source = disk_file.read_bytes()
     before_store = set(fake_store)
     sync = asyncio.run(
-        service.dispatch("session.turn", _turn_params(f"/sync {root_a}"))
+        _dispatch_approved(service, "session.turn", _turn_params(f"/sync {root_a}"))
     )
     assert sync["responseKind"] == "command"
     assert disk_file.read_bytes() == before_source
@@ -1548,14 +1568,14 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
 
     with pytest.raises(DesktopServiceError) as missing:
         asyncio.run(
-            service.dispatch(
+            _dispatch_approved(service,
                 "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
     assert missing.value.code == "PRUNE_PREVIEW_STALE"
 
     preview = asyncio.run(
-        service.dispatch("session.turn", _turn_params(f"/prune {root_a}"))
+        _dispatch_approved(service, "session.turn", _turn_params(f"/prune {root_a}"))
     )
     assert "gone-a.md" in preview["text"]
     assert pruned == []
@@ -1563,14 +1583,14 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
 
     with pytest.raises(DesktopServiceError) as wrong_root:
         asyncio.run(
-            service.dispatch(
+            _dispatch_approved(service,
                 "session.turn", _turn_params(f"/prune {root_b} --yes")
             )
         )
     assert wrong_root.value.code == "PRUNE_PREVIEW_STALE"
     with pytest.raises(DesktopServiceError) as consumed_by_mismatch:
         asyncio.run(
-            service.dispatch(
+            _dispatch_approved(service,
                 "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
@@ -1578,12 +1598,12 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     assert pruned == []
 
     asyncio.run(
-        service.dispatch("session.turn", _turn_params(f"/prune {root_a}"))
+        _dispatch_approved(service, "session.turn", _turn_params(f"/prune {root_a}"))
     )
     fake_store.add("gone-b.md")
     with pytest.raises(DesktopServiceError) as changed:
         asyncio.run(
-            service.dispatch(
+            _dispatch_approved(service,
                 "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
@@ -1592,10 +1612,10 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
 
     fake_store.remove("gone-b.md")
     asyncio.run(
-        service.dispatch("session.turn", _turn_params(f"/prune {root_a}"))
+        _dispatch_approved(service, "session.turn", _turn_params(f"/prune {root_a}"))
     )
     applied = asyncio.run(
-        service.dispatch(
+        _dispatch_approved(service,
             "session.turn", _turn_params(f"/prune {root_a} --yes")
         )
     )
@@ -1604,7 +1624,7 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
     assert fake_store == {"known.md"}
     with pytest.raises(DesktopServiceError) as reused:
         asyncio.run(
-            service.dispatch(
+            _dispatch_approved(service,
                 "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
@@ -1615,10 +1635,10 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
         session_factory=_SessionFactory(),
         knowledge_operations=operations,
     )
-    asyncio.run(restarted.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(_dispatch_approved(restarted, "session.create", {"loadMcp": False}))
     with pytest.raises(DesktopServiceError) as after_restart:
         asyncio.run(
-            restarted.dispatch(
+            _dispatch_approved(restarted,
                 "session.turn", _turn_params(f"/prune {root_a} --yes")
             )
         )
@@ -1654,17 +1674,17 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
             session_factory=factory,
             knowledge_operations=operations,
         )
-        await service.dispatch("session.create", {"loadMcp": False})
+        await _dispatch_approved(service, "session.create", {"loadMcp": False})
         first = asyncio.create_task(
-            service.dispatch("session.turn", _turn_params("/init"))
+            _dispatch_approved(service, "session.turn", _turn_params("/init"))
         )
         await started.wait()
         with pytest.raises(DesktopServiceError) as normal_busy:
-            await service.dispatch(
+            await _dispatch_approved(service,
                 "session.turn", _turn_params("normal question")
             )
         with pytest.raises(DesktopServiceError) as command_busy:
-            await service.dispatch("session.turn", _turn_params("/init"))
+            await _dispatch_approved(service, "session.turn", _turn_params("/init"))
         assert normal_busy.value.code == "BUSY_TURN"
         assert command_busy.value.code == "BUSY_TURN"
         release.set()
@@ -1692,9 +1712,9 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
             prune_folder=forbidden,
         ),
     )
-    asyncio.run(failed.dispatch("session.create", {"loadMcp": False}))
+    asyncio.run(_dispatch_approved(failed, "session.create", {"loadMcp": False}))
     with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(failed.dispatch("session.turn", _turn_params("/init")))
+        asyncio.run(_dispatch_approved(failed, "session.turn", _turn_params("/init")))
     assert raised.value.code == "RAG_WRITE_FAILED"
     assert raised.value.details is not None
     assert raised.value.details["state"] is None
@@ -2046,7 +2066,7 @@ def test_single_file_ingest_rejects_zero_chunks_and_maps_ollama_failures(
     monkeypatch.setattr(service_module, "ingest_file", no_chunks)
     with pytest.raises(DesktopServiceError) as empty:
         asyncio.run(
-            service.dispatch("knowledge.ingest_file", {"path": str(target)})
+            _dispatch_approved(service, "knowledge.ingest_file", {"path": str(target)})
         )
     assert empty.value.code == "RAG_WRITE_FAILED"
 
@@ -2056,7 +2076,7 @@ def test_single_file_ingest_rejects_zero_chunks_and_maps_ollama_failures(
     monkeypatch.setattr(service_module, "ingest_file", missing_model)
     with pytest.raises(DesktopServiceError) as ollama:
         asyncio.run(
-            service.dispatch("knowledge.ingest_file", {"path": str(target)})
+            _dispatch_approved(service, "knowledge.ingest_file", {"path": str(target)})
         )
     assert ollama.value.code == "OLLAMA_MODEL_MISSING"
     assert ollama.value.details == {"partialWritePossible": True}
@@ -2067,7 +2087,7 @@ def test_single_file_ingest_rejects_zero_chunks_and_maps_ollama_failures(
     monkeypatch.setattr(service_module, "ingest_file", provider_response_error)
     with pytest.raises(DesktopServiceError) as response_error:
         asyncio.run(
-            service.dispatch("knowledge.ingest_file", {"path": str(target)})
+            _dispatch_approved(service, "knowledge.ingest_file", {"path": str(target)})
         )
     assert response_error.value.code == "RAG_WRITE_FAILED"
 

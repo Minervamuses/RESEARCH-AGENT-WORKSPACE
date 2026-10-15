@@ -517,12 +517,50 @@ def test_installer_requires_real_update_reply_before_staging(tmp_path):
     assert installer.pending is False
 
 
-def test_installer_multi_candidate_selection_is_bound_to_user_reply(tmp_path):
+def test_installer_bypass_updates_after_valid_preview_without_second_consent(tmp_path):
+    config = _config(tmp_path)
+    source = _write_skill(config, description="Existing user source")
+    original = (source / "SKILL.md").read_bytes()
+    manager = _manager(config, _write_private(tmp_path), _PlanModel([_plan_item()]))
+    assert manager.apply(manager.preview()).applied_revision == 1
+    archive, prepared, files = _installer_bundle(tmp_path)
+    installer = _installer(tmp_path, config, operation="update")
+    assert installer.bypass_approval is False
+    installer.begin(f"請用 skill-installer 安裝 {archive}", "conversation-a")
+    assert installer.run("preview", prepared_path=str(prepared))["status"] == "needs_update_approval"
+
+    installer.bypass_approval = True
+    resumed = installer.continue_request("繼續完成安裝", "conversation-a")
+    assert resumed["status"] == "needs_preparation"
+    assert (source / "SKILL.md").read_bytes() == original
+    assert installer.run("apply", preview_id="model-approved")["status"] == "blocked"
+    ready = installer.run("preview", prepared_path=str(prepared))
+    assert ready["status"] == "preview_ready"
+    report = installer.run("apply", preview_id=ready["preview_id"])
+
+    assert report["status"] == "complete"
+    assert installer._allow_update is False
+    assert installer.pending is False
+    registry = load_registry(Path(config.extension_state_dir))
+    installed = registry.extensions["skill:writer"]
+    assert registry.source_root == str(Path(config.extension_dropin_dir))
+    assert report["source_zip"] == str(archive)
+    assert report["source_path"] == str(source)
+    assert report["outcomes"][0]["outcome"] == "updated"
+    managed = Path(config.extension_state_dir) / installed.installed_relpath
+    for relative, raw in files.items():
+        assert (managed / relative).read_bytes() == raw
+        assert (source / relative).read_bytes() == raw
+
+
+@pytest.mark.parametrize("bypass", [False, True])
+def test_installer_multi_candidate_selection_is_bound_to_user_reply(tmp_path, bypass):
     config = _config(tmp_path)
     archive, prepared, files = _installer_bundle(tmp_path)
     with zipfile.ZipFile(archive, "a") as handle:
         handle.writestr("wrapper/alpha/SKILL.md", "---\nname: alpha\ndescription: Alpha\n---\n")
     installer = _installer(tmp_path, config)
+    installer.bypass_approval = bypass
     installer.begin(f"請用 skill-installer 安裝 {archive}", "conversation-a")
 
     waiting = installer.run("preview", candidate_root="wrapper/writer", prepared_path=str(prepared))
@@ -566,10 +604,12 @@ def test_installer_rejects_builtin_collision_before_dropin_write(tmp_path, name)
     assert not Path(config.extension_dropin_dir).exists()
 
 
-def test_installer_accepts_real_followup_path_but_not_tool_source(tmp_path):
+@pytest.mark.parametrize("bypass", [False, True])
+def test_installer_accepts_real_followup_path_but_not_tool_source(tmp_path, bypass):
     config = _config(tmp_path)
     archive, prepared, _ = _installer_bundle(tmp_path)
     installer = _installer(tmp_path, config)
+    installer.bypass_approval = bypass
     assert installer.begin("請用 skill-installer 安裝 ZIP", "a")["status"] == "needs_source"
     assert installer.run("preview", source_zip=str(archive), prepared_path=str(prepared))["status"] == "needs_source"
     assert not Path(config.extension_dropin_dir).exists()
@@ -639,11 +679,13 @@ def test_installer_apply_exception_checks_registry_before_cleanup(tmp_path, monk
     assert installer.pending is False
 
 
-def test_installer_invalid_zip_and_other_session_clear_authority(tmp_path):
+@pytest.mark.parametrize("bypass", [False, True])
+def test_installer_invalid_zip_and_other_session_clear_authority(tmp_path, bypass):
     config = _config(tmp_path)
     invalid = tmp_path / "invalid.zip"
     invalid.write_bytes(b"not a ZIP")
     installer = _installer(tmp_path, config)
+    installer.bypass_approval = bypass
     assert installer.begin(f"安裝 {invalid}", "a")["status"] == "blocked"
     assert installer.pending is False
     archive, prepared, _ = _installer_bundle(tmp_path)

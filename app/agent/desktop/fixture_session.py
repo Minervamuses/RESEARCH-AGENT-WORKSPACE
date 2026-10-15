@@ -687,6 +687,7 @@ class FixtureKnowledgeOperations:
             ingest_folder=self.ingest_folder,
             diff_folder=self.diff_folder,
             prune_folder=self.prune_folder,
+            workspace_root=self.root,
         )
 
 

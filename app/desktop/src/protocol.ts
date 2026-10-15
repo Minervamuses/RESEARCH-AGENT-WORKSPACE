@@ -178,10 +178,11 @@ export const DOCUMENT_APPROVAL_DATA_SCHEMA: FieldSchema = {
   approvalId: { type: "string", required: true, maxBytes: 256 },
   parentRequestId: { type: "requestId", required: true },
   turnId: { type: "string", required: true, maxBytes: 256 },
-  operation: { type: "string", required: true, enum: ["document.apply", "document.undo"] },
+  operation: { type: "string", required: true, enum: ["document.apply", "document.undo", "citation.save", "knowledge.init_workspace", "knowledge.ingest_file", "knowledge.ingest_folder", "knowledge.prune_apply", "mcp.call", "extension.install", "extensions.apply"] },
   targetPath: { type: "string", required: true, maxBytes: 8192 },
   rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
   rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  parametersSummary: { type: "string", required: false, maxBytes: 8192 },
   description: { type: "string", required: true, maxBytes: 4096 },
   createdAt: { type: "utcTimestamp", required: true },
   expiresAt: { type: "utcTimestamp", required: true },
@@ -995,10 +996,11 @@ export interface ApprovalRequiredDto {
   parentRequestId: string;
   turnId: string;
   command?: string;
-  operation?: "document.apply" | "document.undo";
+  operation?: "document.apply" | "document.undo" | "citation.save" | "knowledge.init_workspace" | "knowledge.ingest_file" | "knowledge.ingest_folder" | "knowledge.prune_apply" | "mcp.call" | "extension.install" | "extensions.apply";
   targetPath?: string;
   rangeStartUtf16?: number;
   rangeEndUtf16?: number;
+  parametersSummary?: string;
   description: string;
   executionTimeoutSeconds?: number;
   createdAt: string;

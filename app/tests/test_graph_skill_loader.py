@@ -77,6 +77,7 @@ def test_skill_loader_populates_state_from_runtime(monkeypatch, tmp_path):
         instructions="# Skill",
         pinned_references={"references/guide.md": "guide"},
         tool_access=_resolution(["read_file"]),
+        members=(),
     )
     cfg = AgentConfig(persist_dir=str(tmp_path))
     graph = build_graph(cfg, skill_runtime_getter=lambda: runtime)

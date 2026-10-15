@@ -581,15 +581,16 @@ fn validate_document_operations(value: &Value) -> Result<(), ProtocolViolation> 
 
 fn validate_document_approval(request_id: &str, data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
     validate_data_keys(data,
-        &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "rangeStartUtf16", "rangeEndUtf16", "description", "createdAt", "expiresAt"],
+        &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "rangeStartUtf16", "rangeEndUtf16", "description", "parametersSummary", "createdAt", "expiresAt"],
         &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "description", "createdAt", "expiresAt"])?;
     for (name, max_bytes) in [("approvalId", 256), ("turnId", 256), ("targetPath", 8_192), ("description", 4_096)] {
         expect_bounded_string(&data[name], &format!("data.{name}"), max_bytes)?;
     }
+    if let Some(value) = data.get("parametersSummary") { expect_bounded_string(value, "data.parametersSummary", 8_192)?; }
     let parent = expect_non_empty_string(&data["parentRequestId"], "data.parentRequestId")?;
     validate_request_id(parent)?;
     if parent != request_id { return Err(ProtocolViolation::invalid("data.parentRequestId must match the event requestId")); }
-    validate_enum(&data["operation"], "data.operation", &["document.apply", "document.undo"])?;
+    validate_enum(&data["operation"], "data.operation", &["document.apply", "document.undo", "citation.save", "knowledge.init_workspace", "knowledge.ingest_file", "knowledge.ingest_folder", "knowledge.prune_apply", "mcp.call", "extension.install", "extensions.apply"])?;
     for name in ["createdAt", "expiresAt"] {
         let timestamp = expect_non_empty_string(&data[name], &format!("data.{name}"))?;
         if !is_utc_timestamp(timestamp) { return Err(ProtocolViolation::invalid(format!("data.{name} must be a UTC ISO 8601 timestamp"))); }

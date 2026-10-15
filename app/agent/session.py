@@ -119,6 +119,7 @@ class ChatSession:
         project_id: str | None = None,
         bash_approval_handler=None,
         bash_command_runner=None,
+        operation_approval_handler: Callable[[str, dict], Awaitable[bool]] | None = None,
     ):
         self.config = config
         self.thinking_mode = "normal"
@@ -191,6 +192,9 @@ class ChatSession:
             bash_tool_options["bash_approval_handler"] = bash_approval_handler
         if bash_command_runner is not None:
             bash_tool_options["bash_command_runner"] = bash_command_runner
+        self._operation_approval_handler = operation_approval_handler
+        if operation_approval_handler is not None:
+            bash_tool_options["operation_approval_handler"] = operation_approval_handler
         self.graph = build_graph(
             config,
             extra_tools=extra_tools,
@@ -1385,6 +1389,7 @@ class ChatSession:
         bash_approval_handler=None,
         bash_command_runner=None,
         extra_tools: list | None = None,
+        operation_approval_handler: Callable[[str, dict], Awaitable[bool]] | None = None,
     ) -> "ChatSession":
         """Async factory that loads MCP tools (if enabled) before graph construction.
 
@@ -1411,6 +1416,7 @@ class ChatSession:
             project_id=project_id,
             bash_approval_handler=bash_approval_handler,
             bash_command_runner=bash_command_runner,
+            operation_approval_handler=operation_approval_handler,
         )
 
     @classmethod

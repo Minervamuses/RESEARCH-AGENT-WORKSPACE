@@ -102,6 +102,7 @@ def build_graph(
     global_mcp_families: set[str] | frozenset[str] | None = None,
     bash_approval_handler=None,
     bash_command_runner=None,
+    operation_approval_handler=None,
 ):
     """Build and compile the conversational RAG agent graph.
 
@@ -116,6 +117,8 @@ def build_graph(
             with a base tool fails fast.
         mcp_families: MCP tool-name to family map. Tools in the ``web_search``
             family are global; other families are skill-scoped.
+        operation_approval_handler: Optional asynchronous desktop consent for
+            admitted tool calls. Omitted by CLI callers.
 
     Returns:
         A compiled LangGraph that accepts AgentState and manages
@@ -339,6 +342,7 @@ def build_graph(
     graph.add_node("tools", PolicyToolNode(
         tools,
         default_tool_names=default_names,
+        operation_approval_handler=operation_approval_handler,
         handle_tool_errors=_tool_error_to_message,
     ))
 

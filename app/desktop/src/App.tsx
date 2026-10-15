@@ -1056,7 +1056,7 @@ export default function App() {
       parentRequestId: approval.parentRequestId,
       turnId: approval.turnId,
       approved,
-      ...(approval.operation !== undefined && documentRef.current !== null ? { documentContext: documentRef.current as unknown as JsonObject } : {}),
+      ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentRef.current as unknown as JsonObject } : {}),
     }).then((data) => {
       const result = data as unknown as ApprovalResolvedDto;
       if (result.approvalId !== approval.approvalId) {
@@ -1393,9 +1393,12 @@ export default function App() {
   const applyExtensions = useCallback(() => {
     const flow = extensionFlow;
     if (flow === null) return;
-    const submitting = flow.phase === "error" && flow.applyRequest !== null
-      ? beginExtensionApplyRecovery(flow)
-      : beginExtensionApply(flow, newLogicalTurnId());
+    const effectiveFlow = state.session?.bashPermissionMode === "bypass" && flow.preview !== null
+      ? { ...flow, decisions: Object.fromEntries(flow.preview.bindings.map((binding) => [binding.bindingHash, "approve" as const])) }
+      : flow;
+    const submitting = effectiveFlow.phase === "error" && effectiveFlow.applyRequest !== null
+      ? beginExtensionApplyRecovery(effectiveFlow)
+      : beginExtensionApply(effectiveFlow, newLogicalTurnId());
     const request = extensionApplyRequest(submitting);
     if (request === null) return;
     const operation = beginWorkspaceOperation("Applying extensions");
@@ -1599,7 +1602,7 @@ export default function App() {
       <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
       <aside className="sidebar" aria-label="Research Agent workspace">
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">R</span><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>Research Agent</h1></div></div>
-        <button className="new-session-button" type="button" onClick={createSession} disabled={!canCreateSession || interaction.createDisabled}><span aria-hidden="true">＋</span> New conversation</button>
+        <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={createSession} disabled={!canCreateSession || interaction.createDisabled}><span aria-hidden="true">＋</span> New conversation</button>
         <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
           <h2 id="workspace-label">Projects</h2>
           {catalog === null && <p className="sidebar-note">{catalogGeneration === null ? "Loading local projects…" : "Projects unavailable"}</p>}
@@ -1621,7 +1624,7 @@ export default function App() {
         <div className="sidebar-spacer" />
         <section className="backend-controls" aria-labelledby="backend-controls-title">
           <div className="sidebar-status" role="status" aria-live="polite"><span className={`status-dot status-${state.phase}`} aria-hidden="true" /><span><strong id="backend-controls-title">{phaseLabels[state.phase]}</strong><small>{state.snapshot === null ? "Desktop process not observed" : `Generation ${state.snapshot.generation} · ${state.snapshot.pendingRequests} pending`}</small></span></div>
-          <div className="control-row"><button type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>{state.error !== null && state.phase === "stopped" ? "Retry start" : "Start"}</button><button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div>
+          <div className="control-row"><button type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>{state.error !== null && state.phase === "stopped" ? "Retry start" : "Start"}</button><button type="button" title="Restarting reloads enabled, configured MCP servers for the conversation." onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div>
         </section>
       </aside>
 
@@ -1661,6 +1664,7 @@ export default function App() {
             flow={extensionFlow}
             busy={workspaceBusy !== null || state.activeAction !== null || interaction.turnActive}
             canRestart={canRestart}
+            permissionMode={state.session?.bashPermissionMode ?? "ask"}
             onPreview={previewExtensions}
             onDecision={decideBinding}
             onApply={applyExtensions}
@@ -1671,7 +1675,7 @@ export default function App() {
           {state.phase === "stopped" && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><p className="section-kicker">LOCAL · PRIVATE · ON THIS DEVICE</p><h3 id="stopped-title">Your research workspace is ready to connect</h3><p>Start the Linux backend, verify the local runtime, then create a conversation. No provider request is made by the runtime check.</p><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
           {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
           {state.phase === "busy" && <section className="empty-state" aria-labelledby="busy-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">LOCAL REQUEST</p><h3 id="busy-title">{state.activeAction === "session" ? "Creating your session" : "Checking the local runtime"}</h3><p>This check stays on your device and does not call a model provider.</p></section>}
-          {state.phase === "backend-ready" && state.diagnostics !== null && <section className="setup-card" aria-labelledby="backend-ready-title"><div className="success-mark" aria-hidden="true">✓</div><div><p className="section-kicker">BACKEND READY</p><h3 id="backend-ready-title">Create a conversation to begin</h3><p>The protocol and local runtime are ready. Saved projects are loaded locally; no provider request has been sent.</p><div className="action-row"><button className="primary-button" type="button" onClick={createSession} disabled={!canCreateSession}>Create local conversation</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div><RuntimeDetails diagnostics={state.diagnostics} /></div></section>}
+          {state.phase === "backend-ready" && state.diagnostics !== null && <section className="setup-card" aria-labelledby="backend-ready-title"><div className="success-mark" aria-hidden="true">✓</div><div><p className="section-kicker">BACKEND READY</p><h3 id="backend-ready-title">Create a conversation to begin</h3><p>The protocol and local runtime are ready. Creating or selecting a conversation starts enabled, configured MCP servers. No model request has been sent.</p><div className="action-row"><button className="primary-button" type="button" onClick={createSession} disabled={!canCreateSession}>Create local conversation</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div><RuntimeDetails diagnostics={state.diagnostics} /></div></section>}
 
           {activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
             <div className="session-controls" aria-label="Session controls">
@@ -1681,7 +1685,7 @@ export default function App() {
                 disabled={interaction.controlDisabled || workspaceBusy !== null}
                 onChange={(mode) => void updateBashPermissionMode(mode)}
               />
-              <p className="control-state">Use @ to add Skills anywhere in your message. Each Skill runs for this turn; write “first…then…” when order matters. File edits and citation tasks use Normal thinking and restore your selection afterward. Slash commands remain available.</p>
+              <p className="control-state">Use @ to add Skills anywhere in your message. Each Skill runs for this turn; write “first…then…” when order matters. File edits and citation tasks use Normal thinking and restore your selection afterward. Ask/Bypass stays fixed during a turn; change it after completion. Slash commands remain available.</p>
             </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
@@ -1713,6 +1717,7 @@ export default function App() {
         resolving={approvalResolving}
         onResolve={resolvePendingApproval}
         returnFocus={focusComposer}
+        allowDocumentEditing={documentValue !== null}
       />}
     </div>
   );

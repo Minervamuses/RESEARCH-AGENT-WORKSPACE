@@ -98,6 +98,15 @@
 - **檢查：** 新 test_inline_skills.py 與既有 document/installer adherence 相關子集最後 42 passed（1.72s）；先前更廣 Skill/citation/policy/document/fixture 定向子集 134 passed（4.71s）。root 曾跑 poetry run pytest tests/test_inline_skills.py tests/test_desktop_document_service.py -q，15 passed（0.69s），其後代理加入上述三項最小回歸並通過。不存在真 provider／模型呼叫；不把離線合作當真模型品質。git diff --check 通過。
 - **界線／下一步：** P2 行為與必要離線檢查完成；P5 將重啟最終 binary/backend 後確認原生 @ 選單與代表整合。開始 P3 所有已列副作用入口的 Ask／Bypass；唯讀準備已確認 tool admission 必須先於操作批准，既有 Bash 同步橋不可從 async 工具呼叫。
 
+## P3.S1｜專案單項批准與凍結模式（2026-10-15）
+
+- 共用單項批准序列涵蓋文件 apply／Undo、Bash、citation save、索引 init／ingest／prune、已准入 MCP 呼叫、Skill installer preview／apply。回合開始固定 Ask／Bypass，執行與等待批准時不可改；工具先通過有效 allowlist，拒絕不執行。CLI 沒有 desktop callback 時保留原行為。
+- Bypass 略過同意，仍保留文件 CAS／範圍、prune 預覽再次核對、installer source／manifest／binding／revision／一次性 preview。明確 Save／Extension Apply 按鈕本身是具體單項操作指示；Bypass extension 不再要求逐 binding radio 同意，但目標仍顯示並從當前合法 preview 導出。
+- 原有 Bash wire 保留；非 Bash 使用有限 operation 與最多 8192 UTF-8 bytes 的慣性文字參數摘要，同步 Python／TS／Rust fixtures。GUI 改 Project permission、等待期間凍結提示，文件開啟時批准面板不阻擋編輯器。建立／選取／重啟對話的已配置 MCP startup 由具體使用者動作發起，加入可見說明；安裝 binding 仍依既有來源驗證，模型沒有 startup RPC 工具。
+- 檢查：service／fixture／document service／policy／extension／Bash／tool access 定向子集 232 passed（10.20s）；graph／thinking／inline Skill 相關子集 68 passed（1.15s）；policy 含 RuntimeWarning 嚴格檢查 8 passed。installer 子集 22 passed；manager 模組最後擴充 invalid ZIP 參數前 54 passed。Python／TS 契約 147／141，Rust protocol 12 passed。root 最終 trust 10 passed（1.54s）、npx tsc --noEmit 及 task-only App 型別檢查通過；git diff --check 通過。
+- 實際失敗與修正：第一次既有 service 子集因舊 /init 測試未回應新增批准而等待，30 秒後以該測試 PID 中止；只替受影響成功／生命週期測試加入明確批准，原拒絕／正確性斷言保留。P2 的三個測試替身補 members／includes 契約；新 UI 測試的 regex 控制字元修正後通過。沒有真 provider、MCP、安裝、索引刪除或付費呼叫。
+- 本步提交必要產品／測試及本紀錄，App 仍只 stage task-only 內容；前存七檔使用者差異保留。獨立 P3 審閱收尾後記錄出口，再執行 P4；最終原生整合由 P5 驗收。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。

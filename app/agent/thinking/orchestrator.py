@@ -201,10 +201,16 @@ class FusionOrchestrator:
             self._session.config,
             llm_model=model_id,
         )
+        approval_options = {}
+        if self._session._operation_approval_handler is not None:
+            approval_options["operation_approval_handler"] = (
+                self._session._operation_approval_handler
+            )
         graph = self._graph_builder(
             cloned,
             extra_tools=None,
             skill_runtime_getter=None,
+            **approval_options,
         )
         self._proposer_graphs[model_id] = graph
         return graph

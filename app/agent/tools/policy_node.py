@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -17,6 +17,7 @@ class PolicyToolNode(ToolNode):
     proposer state), otherwise the graph's default global tool names. A
     forged call to a tool outside that set — e.g. a skill-scoped tool from
     normal mode — is answered with an error ToolMessage and never executed.
+    Optional desktop operation consent runs only after this admission check.
     """
 
     def __init__(
@@ -24,10 +25,12 @@ class PolicyToolNode(ToolNode):
         tools: list,
         *,
         default_tool_names: Iterable[str],
+        operation_approval_handler: Callable[[str, dict], Awaitable[bool]] | None = None,
         **tool_node_kwargs: Any,
     ):
         super().__init__(tools, **tool_node_kwargs)
         self._default_tool_names = frozenset(default_tool_names)
+        self._operation_approval_handler = operation_approval_handler
 
     def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         decision = self._partition(input)
@@ -36,6 +39,15 @@ class PolicyToolNode(ToolNode):
         allowed_input, denied_messages, call_order = decision
         if allowed_input is None:
             return {"messages": denied_messages}
+        if self._operation_approval_handler is not None:
+            # Desktop approval needs its running event loop. Never create an
+            # unawaited coroutine or bypass consent through the sync entrypoint.
+            for call in allowed_input["messages"][-1].tool_calls:
+                denied_messages.append(_denied_message(
+                    call,
+                    "operation approval requires asynchronous execution",
+                ))
+            return {"messages": _merge_tool_messages(call_order, denied_messages, {})}
         allowed_result = super().invoke(allowed_input, config=config, **kwargs)
         return {"messages": _merge_tool_messages(call_order, denied_messages, allowed_result)}
 
@@ -46,6 +58,26 @@ class PolicyToolNode(ToolNode):
         allowed_input, denied_messages, call_order = decision
         if allowed_input is None:
             return {"messages": denied_messages}
+        if self._operation_approval_handler is not None:
+            approved_calls = []
+            # One pending desktop request at a time, even if the model emits
+            # several tool calls in one response. ToolNode may execute approved
+            # calls concurrently only after their individual consent resolves.
+            for call in allowed_input["messages"][-1].tool_calls:
+                try:
+                    approved = await self._operation_approval_handler(
+                        call["name"], dict(call.get("args") or {}),
+                    )
+                except Exception:
+                    denied_messages.append(_denied_message(call, "operation approval failed"))
+                    continue
+                if approved:
+                    approved_calls.append(call)
+                else:
+                    denied_messages.append(_denied_message(call, "operation denied by user"))
+            if not approved_calls:
+                return {"messages": _merge_tool_messages(call_order, denied_messages, {})}
+            allowed_input = _with_tool_calls(allowed_input, approved_calls)
         allowed_result = await super().ainvoke(allowed_input, config=config, **kwargs)
         return {"messages": _merge_tool_messages(call_order, denied_messages, allowed_result)}
 
@@ -74,31 +106,38 @@ class PolicyToolNode(ToolNode):
             name = call.get("name", "")
             call_id = call.get("id", "")
             call_order.append(call_id)
-            if name in effective_names:
+            if name in effective_names and name in self.tools_by_name:
                 allowed_calls.append(call)
             else:
-                denied_messages.append(ToolMessage(
-                    content=f"Tool error: tool not available in the current mode: {name}",
-                    tool_call_id=call_id,
-                    name=name,
-                    status="error",
+                denied_messages.append(_denied_message(
+                    call, "tool not available in the current mode",
                 ))
 
-        if not denied_messages:
+        if not denied_messages and self._operation_approval_handler is None:
             return None
 
         if not allowed_calls:
             return None, denied_messages, call_order
 
-        filtered_message = AIMessage(
-            content=last_message.content,
-            additional_kwargs=last_message.additional_kwargs,
-            response_metadata=last_message.response_metadata,
-            tool_calls=allowed_calls,
-        )
-        filtered_input = dict(input)
-        filtered_input["messages"] = [*messages[:-1], filtered_message]
-        return filtered_input, denied_messages, call_order
+        return _with_tool_calls(input, allowed_calls), denied_messages, call_order
+
+
+def _denied_message(call: dict, reason: str) -> ToolMessage:
+    return ToolMessage(
+        content=f"Tool error: {reason}: {call.get('name', '')}",
+        tool_call_id=call.get("id", ""),
+        name=call.get("name", ""),
+        status="error",
+    )
+
+
+def _with_tool_calls(input: Mapping, calls: list[dict]) -> dict:
+    messages = input["messages"]
+    filtered_input = dict(input)
+    filtered_input["messages"] = [
+        *messages[:-1], messages[-1].model_copy(update={"tool_calls": calls}),
+    ]
+    return filtered_input
 
 
 def _merge_tool_messages(

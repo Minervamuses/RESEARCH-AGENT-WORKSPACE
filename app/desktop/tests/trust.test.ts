@@ -16,6 +16,7 @@ interface TrustModule {
     resolving: boolean;
     onResolve: (approved: boolean) => void;
     returnFocus: () => void;
+    allowDocumentEditing?: boolean;
   }) => unknown;
   acceptApprovalEvent: (
     generation: number,
@@ -42,6 +43,10 @@ interface TrustModule {
   observeExtensionRevision: (flow: unknown, revision: number) => unknown;
   receiveExtensionApply: (flow: unknown, report: ExtensionApplyDto) => unknown;
   receiveExtensionPreview: (flow: unknown, preview: ExtensionPreviewDto) => unknown;
+  ExtensionPanel: (props: {
+    flow: unknown; busy: boolean; canRestart: boolean; permissionMode?: "ask" | "bypass";
+    onPreview: () => void; onDecision: () => void; onApply: () => void; onRestart: () => void;
+  }) => unknown;
   BashPermissionControl?: (props: {
     mode: "ask" | "bypass";
     disabled: boolean;
@@ -248,7 +253,7 @@ test("Bash approval renders inert context with exactly Deny and Approve actions"
   assert.match(html, /&lt;script&gt;inert\(\)&lt;\/script&gt;/);
 });
 
-test("Bash permission control renders two mutually exclusive options with bypass warning", async () => {
+test("Project permission control renders Ask/Bypass with project scope and frozen-turn guidance", async () => {
   const trust = await loadTrust();
   assert.ok(trust.BashPermissionControl, "BashPermissionControl component must be exported");
 
@@ -261,9 +266,10 @@ test("Bash permission control renders two mutually exclusive options with bypass
   assert.doesNotMatch(askHtml, /disabled/);
   assert.equal((askHtml.match(/<option\b/g) ?? []).length, 2);
   assert.match(askHtml, /value="ask"[^>]*selected/);
-  assert.match(askHtml, /逐次詢問/);
-  assert.match(askHtml, /ByPassPermission/);
-  assert.match(askHtml, /不再逐次詢問/);
+  assert.match(askHtml, /Project permission/);
+  assert.match(askHtml, /Ask · approve one operation/);
+  assert.match(askHtml, /Bypass · all project operations/);
+  assert.match(askHtml, /document edits, Bash, citation saves, indexing, MCP and extensions/);
 
   const disabledHtml = renderToStaticMarkup(createElement(trust.BashPermissionControl, {
     mode: "bypass",
@@ -272,6 +278,7 @@ test("Bash permission control renders two mutually exclusive options with bypass
   }));
   assert.match(disabledHtml, /<select\b[^>]*disabled/);
   assert.match(disabledHtml, /value="bypass"[^>]*selected/);
+  assert.match(disabledHtml, /Change the mode after it finishes/);
 });
 
 test("Bash permission ACK reconciles only for same-generation and same-session", async () => {
@@ -312,4 +319,37 @@ test("Bash permission ACK reconciles only for same-generation and same-session",
     }),
     null,
   );
+});
+
+
+test("generic operation approval shows safe action/target/parameters and leaves source editing reachable", async () => {
+  const { ApprovalDialog } = await loadTrust();
+  const html = renderToStaticMarkup(createElement(ApprovalDialog, {
+    approval: {
+      approvalId: "generic-approval", parentRequestId: "00000000-0000-4000-8000-000000000402",
+      turnId: "turn-2", operation: "mcp.call", targetPath: "research-server/search",
+      parametersSummary: "<script>not executable</script>", description: "Call one loaded MCP tool.",
+      createdAt: "2026-08-28T04:00:00.000Z", expiresAt: "2026-08-28T04:01:00.000Z",
+    },
+    resolving: false, onResolve: () => undefined, returnFocus: () => undefined, allowDocumentEditing: true,
+  }));
+  assert.match(html, /aria-modal="false"/);
+  assert.match(html, /Call MCP tool/);
+  assert.match(html, /research-server\/search/);
+  assert.match(html, /Parameters/);
+  assert.doesNotMatch(html, /<script\b|Execution timeout|Exact command/);
+  assert.equal((html.match(/<button\b/g) ?? []).length, 2);
+});
+
+test("Bypass extension preview keeps exact targets visible without a second binding-consent step", async () => {
+  const trust = await loadTrust();
+  const flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-bypass"), preview);
+  const html = renderToStaticMarkup(createElement(trust.ExtensionPanel, {
+    flow, busy: false, canRestart: false, permissionMode: "bypass",
+    onPreview: () => undefined, onDecision: () => undefined, onApply: () => undefined, onRestart: () => undefined,
+  }));
+  assert.doesNotMatch(html, /type="radio"/);
+  assert.doesNotMatch(html, /Choose Approve or Deny/);
+  assert.match(html, /Command/);
+  assert.match(html, /<button[^>]*>Apply changes<\/button>/);
 });
