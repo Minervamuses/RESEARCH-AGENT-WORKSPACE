@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
 |---|---|---|---|---|
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
-| P2 | In progress | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
+| P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
 | P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
 
@@ -173,3 +173,11 @@
 - New submission first inspects current project rules under the operation owner, then freezes context; retries skip inspection and reuse original context. Text/reference edits start a new logical turn; differing Permission/Thinking disable original retry with an explicit new-turn option. References-only drafts require discard confirmation on project/conversation changes. All asynchronous selection/hash/focus paths retain generation/epoch/token ownership. Named document proposal uses the original reference snapshot for conflict display, without sending that local UI field to document.apply.
 - Actual checks: TypeScript passed; related conversations/documents/answer_stream67/67 passed; final ownership/reference/retry subset9 passed. Main review found line labels only counted LF; changed to canonical CRLF/CR/LF break endpoints and added CR-only case, final TypeScript and2 focused document-reference checks passed. No P3 grid/dimension changes, only14 required reference CSS rules.
 - Independent read-only App/reducer review found no demonstrated blocking issue in retry, discard, late callbacks, historical cards or source identity. Main reviewed actual diff and whitespace check. Native selection/mixed-reference/retry verification remains in progress; P2 is not complete yet.
+
+### E23 / P2 native checkpoint and phase completion
+
+- Native Linux Tauri/WebKit at `/tmp/research-agent-desktop-phase02-p2gui-20261015-2c56ba5`: restarted backend to generation2, explicitly reopened A and first selection succeeded with seed transcript (p2-first-select-fixed.json), confirming E20 race correction in the App.
+- Selected the second identical CRLF/emoji line; Add to chat retained UTF-16 [8,14), original revision0/source and lines2-2 after cursor movement and editor changes. No save or turn occurred on add. References-only draft with dirty editor survived inspect-B then Cancel. Native visible A seed question selection added a chat card with original message identity/hash.
+- Mixed document+chat references sent with [[fixture:fail-once]] failed, then Retry saved draft completed after further editor edits. Main independently compared p2-failed-turn-evidence.json and p2-retried-turn-evidence.json: identical turnId 9cbd8ed8366742018c829ddca0257ce2, submittedContext, semanticInput and displayInput; failed -> completed, total conversation count remained2. Native snapshots p2-mixed-failed/retried retained in fixture root.
+- Actual same-window baseline p2-layout-baseline.json: 1080x720, sidebar272px, Monaco code412x427px, transcript370x197px; font/zoom unchanged. Two draft references reduced transcript to35px and failure notice overflowed viewport; this observed layout defect is within the next P3 compression task, not claimed resolved. Pixel capture is unavailable; AT-SPI rendered controls/geometry and exact disk evidence are used.
+- P2 implementation end condition met using E16-E23; remaining reopen, multiple failed logical turns and full reference-write native journey belong to P4. Owned Vite/native sessions stopped, fixture/evidence preserved. Runtime/GUI branch and clean HEAD6cf31fd rechecked before this entry. No provider/dependency/real-history operation.
