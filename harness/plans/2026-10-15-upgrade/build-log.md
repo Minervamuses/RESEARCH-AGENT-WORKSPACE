@@ -6,8 +6,8 @@
 
 | 階段 | 狀態 | 實作證據 | 阻擋／下一步 |
 | --- | --- | --- | --- |
-| P0 | Blocked | P0.S1、P0.S2 唯讀核對與批准提案已完成；出口未驗收 | 等待 PLANS.md §3.3 的 Q1～Q3 明確批准；之後完成 P0 出口再開始 P1 |
-| P1 | Not started | 無 | P0、編輯器與契約批准 |
+| P0 | Complete | P0.S1～S3：runtime、邊界、批准與驗收入口可追溯 | 依 P1 開始文件閉環 |
+| P1 | In progress | P0.S3 已批准並重新通過 gate | P1.S1：文件／協定／編輯器最小閉環 |
 | P2 | Not started | 無 | P1、引用契約批准 |
 | P3 | Not started | 無 | P2、權限契約批准 |
 | P4 | Not started | 無 | P3、摘要傳遞及必要格式批准 |
@@ -58,6 +58,13 @@
 - **獨立複核與修正：** 唯讀子代理確認 schema／成本／批准界線，指出 Undo 若沿原 callId 會被去重、任意反向文字又破壞候選綁定。已在 §3.3 加入 undoOfCallId、以新 requestId 獨立辨識，反向候選從同編輯階段已成功操作的原快照推導；仍須版本檢查，不覆蓋後來修改。這只是 Q2 的明確提案，未改產品協定或新增持久記錄。
 - **本步檢查：** Conda app 執行 validate_plan.py <計畫包> --json：11 檔、0 errors、14 個既有 BOUNDARY_LINK warnings；另逐一確認 14 個包外連結目標皆存在且在 repository 內，UTF-8／LF／尾端空白通過。git diff --check 通過；排除本計畫包後的既有產品 diff 雜湊與 P0.S1 相同。未執行產品測試或以 lint 代替產品驗收。
 - **批准狀態／停止點：** 使用者本回合的執行與逐步本機 commit 授權有效；尚無 Q1（Monaco 套件／worker）、Q2（P1 範圍與 wire）、Q3（跨三個 production 檔／至多兩個局部模組）的明確批准。較小方案與成本／維護影響已列 PLANS.md §3.3。依 Personal Engineering Defaults Approval Gates 及 PLANS.md §6.3，P0 出口與 P1 產品修改等待這三項；其餘獨立唯讀 P0 核對已完成，P2～P5 依賴未滿足。下一步收到具體批准後記錄來源、完成 P0 出口，再依 P1 最小閉環實作並逐步 commit。
+
+## P0.S3｜批准後恢復（2026-10-15，Asia/Taipei）
+
+- **批准來源：** 使用者本回合明確說「我批准計劃裡所有環節，完成計劃」。接受 A1～A6、§3.3 Q1～Q3，以及 P1～P5 既定範圍的必要契約、局部模組、依賴與驗收環節；不再於階段邊界重複詢問。仍遵守計劃非目標與失敗處理；未具體定義的付費用量沒有自行編造額度，不推送、不改分支、不重寫歷史。
+- **重新 gate：** Ubuntu-24.04／Linux bash 與 /usr/bin/git；Python 3.13.14、Poetry 2.4.1、Node 24.18.0、npm 11.16.0 皆 Conda app。GUI，起始 HEAD 46fa7b6f3bc7f707e1bbaa7aaf223d74c0b426d4；index 空，七個既有 tracked 修改與 P0.S1 的 SHA-256 b9490df75eae2817b211d64657be4a3e87a2ada5c212bb4b8a8f19c642fe1b06 一致，未見中斷後新增產品副作用。
+- **恢復點：** 已讀適用規範、GOALS→PLANS→build-log→P0→P1；最後未驗收項為批准出口，現已具備。P0 完成，P1 開始；P2～P5 仍須前階段實際驗收。
+- **變更保護：** 七個既有工作樹檔案與原 diff 已複製到 repository 外的 Linux 暫存快照；之後重疊檔案只提交本次改動，保留原有未提交差異。未建立 worktree 或改變 Git 分支。
 
 ## 後續紀錄方式
 
