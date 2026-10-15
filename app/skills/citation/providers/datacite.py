@@ -15,6 +15,7 @@ from skills.citation.providers.base import (
     ProviderRecord,
     QueryPass,
     RelationEdge,
+    abstract_text,
     plausible_identity_hit,
 )
 from skills.citation.providers.net import (
@@ -47,6 +48,7 @@ _RESULT_FIELDS = ",".join(
         "identifiers",
         "alternateIdentifiers",
         "state",
+        "descriptions",
     )
 )
 
@@ -220,6 +222,12 @@ def parse_doi_item(item: dict, rank: int) -> ProviderRecord | None:
         publisher=publisher,
         url=url,
     )
+    abstract = ""
+    for description in _entries(attributes.get("descriptions")):
+        if description.get("descriptionType") == "Abstract":
+            abstract = abstract_text(description.get("description"))
+            if abstract:
+                break
     provenance = {
         field: PROVIDER_NAME
         for field in (
@@ -255,6 +263,11 @@ def parse_doi_item(item: dict, rank: int) -> ProviderRecord | None:
         version=str(attributes.get("version", "") or "").strip(),
         record_state=str(attributes.get("state", "") or "").strip().casefold(),
         field_provenance=provenance,
+        abstract=abstract,
+        abstract_source=PROVIDER_NAME if abstract else "",
+        abstract_url=(
+            f"{SEARCH_URL}/{urllib.parse.quote(doi, safe='')}" if abstract else None
+        ),
     )
 
 

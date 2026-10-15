@@ -5,6 +5,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from html.parser import HTMLParser
 
 from skills.citation.normalize import normalize_title
 
@@ -134,6 +135,44 @@ class ProviderRecord:
     manifestations: tuple[Manifestation, ...] = ()
     version: str = ""
     record_state: str = ""
+    abstract: str = ""
+    abstract_source: str = ""
+    abstract_url: str | None = None
+
+
+class _AbstractTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        name = tag.rsplit(":", 1)[-1]
+        if name in {"script", "style"}:
+            self._ignored_depth += 1
+        elif name in {"p", "br", "div", "sec", "title", "li"}:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        name = tag.rsplit(":", 1)[-1]
+        if name in {"script", "style"} and self._ignored_depth:
+            self._ignored_depth -= 1
+        elif name in {"p", "div", "sec", "title", "li"}:
+            self.parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if not self._ignored_depth:
+            self.parts.append(data)
+
+
+def abstract_text(value: object) -> str:
+    """Return provider abstract text without XML/HTML markup or executable content."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    parser = _AbstractTextParser()
+    parser.feed(value)
+    parser.close()
+    return " ".join("".join(parser.parts).split())
 
 
 def plausible_identity_hit(query: BibliographicQuery, record: ProviderRecord) -> bool:

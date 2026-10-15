@@ -23,6 +23,7 @@ from skills.citation.providers.base import (
     ProviderRecord,
     QueryPass,
     RelationEdge,
+    abstract_text,
     plausible_identity_hit,
 )
 from skills.citation.providers.net import (
@@ -273,6 +274,7 @@ def parse_work_item(item: dict, rank: int) -> ProviderRecord | None:
     containers = item.get("container-title") or []
     score = item.get("score")
     relations, relation_edges = _parse_relations(item)
+    abstract = abstract_text(item.get("abstract"))
     return ProviderRecord(
         provider=PROVIDER_NAME,
         provider_id=f"crossref:{doi}",
@@ -294,6 +296,11 @@ def parse_work_item(item: dict, rank: int) -> ProviderRecord | None:
         aliases=_parse_aliases(item, doi),
         relation_edges=relation_edges,
         version=str(item.get("version", "") or ""),
+        abstract=abstract,
+        abstract_source=PROVIDER_NAME if abstract else "",
+        abstract_url=(
+            f"{SEARCH_URL}/{urllib.parse.quote(doi, safe='')}" if abstract else None
+        ),
     )
 
 
@@ -366,7 +373,7 @@ class CrossrefClient:
         query_params: dict[str, str] = {
             "query.bibliographic": query,
             "rows": str(rows),
-            "select": "DOI,title,author,issued,score,container-title,type,URL",
+            "select": "DOI,title,author,issued,score,container-title,type,URL,abstract",
         }
         native_filters = []
         if date_filter is not None and date_filter.date_from:

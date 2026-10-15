@@ -420,3 +420,53 @@ def test_query_escaping_survives_url_encoding_without_changing_filter_shape():
     assert KEY not in repr(
         [key for key in client._cache._items]  # noqa: SLF001 - secret audit
     )
+
+
+def test_search_reconstructs_abstract_positions_with_openalex_record_source():
+    item = {
+        **NORMAL_WORK,
+        "abstract_inverted_index": {
+            "test": [1, 4], "A": [0], "repeated": [3], "has": [2],
+        },
+    }
+    client, calls = _client([_body([item])])
+
+    record = asyncio.run(client.search_text("test repeated"))[0]
+
+    assert record.abstract == "A test has repeated test"
+    assert record.abstract_source == "openalex"
+    assert record.abstract_url == "https://api.openalex.org/works/W1234567890"
+    params = urllib.parse.parse_qs(urllib.parse.urlsplit(calls[0][0]).query)
+    assert "abstract_inverted_index" in params["select"][0].split(",")
+
+
+@pytest.mark.parametrize("index", [
+    None,
+    {},
+    {"missing": [1]},
+    {"duplicate": [0], "collision": [0]},
+    {"invalid": [True]},
+    {"invalid": ["0"]},
+    {"invalid": []},
+])
+def test_incomplete_or_malformed_openalex_index_is_unavailable(index):
+    record = parse_work({**NORMAL_WORK, "abstract_inverted_index": index}, rank=0)
+
+    assert record.abstract == ""
+    assert record.abstract_source == ""
+    assert record.abstract_url is None
+
+
+def test_duplicate_openalex_record_preserves_obtained_abstract_without_changing_rank():
+    first = {**NORMAL_WORK, "abstract_inverted_index": None}
+    second = {**NORMAL_WORK, "abstract_inverted_index": {"Recorded": [0], "abstract.": [1]}}
+    client, _calls = _client([_body([first, second])])
+
+    records = asyncio.run(client.search_work(BibliographicQuery(title="A Structured Work")))
+
+    assert len(records) == 1
+    assert records[0].rank == 0
+    assert records[0].doi == "10.1234/example"
+    assert records[0].abstract == "Recorded abstract."
+    assert records[0].abstract_source == "openalex"
+    assert records[0].abstract_url == "https://api.openalex.org/works/W1234567890"

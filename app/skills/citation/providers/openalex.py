@@ -60,6 +60,7 @@ _IDENTITY_SELECT = ",".join(
         "biblio",
         "is_retracted",
         "is_paratext",
+        "abstract_inverted_index",
     )
 )
 
@@ -264,6 +265,31 @@ def _parse_manifestations(result: dict, top_level_doi: str | None) -> tuple[Mani
     return tuple(manifestations.values())
 
 
+def _abstract_from_index(value: object) -> str:
+    """Rebuild only complete, unambiguous provider word positions."""
+    if not isinstance(value, dict) or not value:
+        return ""
+    words: dict[int, str] = {}
+    for word, positions in value.items():
+        if not isinstance(word, str) or not word.strip():
+            return ""
+        if not isinstance(positions, list) or not positions:
+            return ""
+        for position in positions:
+            if (
+                not isinstance(position, int)
+                or isinstance(position, bool)
+                or position < 0
+                or position in words
+            ):
+                return ""
+            words[position] = word
+    ordered = sorted(words)
+    if any(position != index for index, position in enumerate(ordered)):
+        return ""
+    return " ".join(words[position] for position in ordered)
+
+
 def parse_work(result: dict, rank: int) -> ProviderRecord:
     """Normalize one OpenAlex Work without discarding DOI locations."""
     raw_id = str(result.get("id", "") or "")
@@ -299,6 +325,7 @@ def parse_work(result: dict, rank: int) -> ProviderRecord:
         for key, value in (result.get("ids") or {}).items()
         if isinstance(value, (str, int))
     }
+    abstract = _abstract_from_index(result.get("abstract_inverted_index"))
     manifestations = _parse_manifestations(result, doi)
     primary_manifestation = next(
         (item for item in manifestations if item.is_primary), None
@@ -327,6 +354,13 @@ def parse_work(result: dict, rank: int) -> ProviderRecord:
         version=str(primary.get("version", "") or "") if isinstance(primary, dict) else "",
         record_state="retracted" if result.get("is_retracted") else "",
         manifestations=manifestations,
+        abstract=abstract,
+        abstract_source=PROVIDER_NAME if abstract else "",
+        abstract_url=(
+            f"{SEARCH_URL}/{short_id}"
+            if abstract and re.fullmatch(r"W[0-9]+", short_id)
+            else None
+        ),
         field_provenance={
             field: PROVIDER_NAME
             for field in (
@@ -389,6 +423,13 @@ def _merge_records(
         )
         merged[key] = replace(
             preferred,
+            abstract=preferred.abstract or other.abstract,
+            abstract_source=(
+                preferred.abstract_source if preferred.abstract else other.abstract_source
+            ),
+            abstract_url=(
+                preferred.abstract_url if preferred.abstract else other.abstract_url
+            ),
             manifestations=_merge_manifestations(
                 preferred.manifestations, other.manifestations
             ),

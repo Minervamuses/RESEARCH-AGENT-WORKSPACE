@@ -112,6 +112,14 @@
 - P3.S1 已提交 550074b。獨立唯讀審閱 service／PolicyToolNode／GUI 的准入、逐項批准、拒絕、Bypass、凍結模式及清理，未發現阻擋驗收問題；沒有另外執行副作用或擴大測試。
 - P3 完成，P4 前提已滿足。繼續沿既有 search_text／ProviderRecord／DOI identity 傳遞當回合摘要，優先不改 citation.json 持久格式；不增加全文、付費模型或新搜尋管線。
 
+## P4.S1｜既有 provider 摘要傳遞與收尾用量批准（2026-10-15）
+
+- P3 出口已提交 65718be。沿現有 ProviderRecord 新增只限當回合的 abstract／abstract_source／abstract_url，不改 SourceRef 或 citation.json。Crossref 清理 JATS／HTML，OpenAlex 重建完整且無歧義的倒排摘要，DataCite 僅取 descriptionType=Abstract；缺漏明示 unavailable，不從 title／snippet 推造摘要。保留 provider query／identity／rank 流程及去重來源。
+- 格式以官方文件唯讀核對：Crossref api_format／select、OpenAlex works attributes、DataCite Description／API queries。未為此呼叫真搜尋或下載全文；HTML 清理只用 Python stdlib，未加依賴。
+- provider 定向檢查 63 passed（0.15s）；第一次新增測試誤把 search_text 當成 provider 內去重入口，改測既有 search_work 後通過，沒有因此新增搜尋行為。git diff --check 通過。
+- 使用者其後兩次明確批准收尾付費驗收：既有 Gemini 3.8 Flash，最多 2 個代表回合、合計最多 6 次模型請求、每次最多 4096 輸出 tokens、總額不超過 US$1；citation 僅既有 provider 摘要搜尋。再次指示每個有意義步驟更新本檔並 commit。未執行付費呼叫；之後需以本次專用計數與保守成本上界限制，不修改專案預設 token／retry 設定。
+- 原有七檔使用者修改仍在工作樹；App 的內容核對只多出 P3 新 startup 說明所在 JSX 行造成的文字差異，原 selectionPreview 條件保留。P4.S2 繼續 topic query／去重摘要／真 graph 假模型驗收，P5 完成原生與受限真模型驗收。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。

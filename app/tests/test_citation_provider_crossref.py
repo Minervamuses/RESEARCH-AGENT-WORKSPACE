@@ -356,3 +356,33 @@ def test_parse_work_item_identifies_preprint_version():
     assert record is not None
     assert record.version_kind == "preprint"
     assert record.relations["is-preprint-of"] == ["10.1000/published"]
+
+
+def test_search_returns_cleaned_abstract_with_crossref_record_source():
+    item = {
+        "DOI": "10.1234/abstract",
+        "title": ["A synthetic abstract record"],
+        "abstract": (
+            "<jats:abstract><jats:p>Protein <jats:italic>structure</jats:italic>"
+            " &amp; function.</jats:p><jats:p>第二段 😀</jats:p>"
+            "<script>ignore()</script></jats:abstract>"
+        ),
+    }
+    client, calls = _client([_search_body([item])])
+
+    record = asyncio.run(client.search_text("protein structure"))[0]
+
+    assert record.abstract == "Protein structure & function. 第二段 😀"
+    assert record.abstract_source == "crossref"
+    assert record.abstract_url == "https://api.crossref.org/works/10.1234%2Fabstract"
+    params = urllib.parse.parse_qs(urllib.parse.urlsplit(calls[0][0]).query)
+    assert "abstract" in params["select"][0].split(",")
+
+
+@pytest.mark.parametrize("value", [None, "", {"text": "not an abstract"}, "<p> </p>"])
+def test_missing_or_malformed_crossref_abstract_is_unavailable(value):
+    record = parse_work_item({"DOI": "10.1234/empty", "abstract": value}, rank=0)
+
+    assert record.abstract == ""
+    assert record.abstract_source == ""
+    assert record.abstract_url is None

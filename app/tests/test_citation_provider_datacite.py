@@ -395,3 +395,39 @@ def test_search_work_errors_are_not_cached_but_success_is_cached():
     assert [record.doi for record in again] == [record.doi for record in records]
     assert len(calls) == 2
     assert len(cache) == 1
+
+
+def test_search_extracts_only_explicit_abstract_description_with_record_source():
+    item = _doi_item("10.1234/abstract", "A synthetic abstract record")
+    item["attributes"]["descriptions"] = [
+        {"descriptionType": "Methods", "description": "This is not an abstract."},
+        {"descriptionType": "Abstract", "description": "<p>Sample &amp; result.</p>"},
+        {"descriptionType": "Abstract", "description": "A second language."},
+    ]
+    client, calls = _client([_body([item])])
+
+    record = asyncio.run(client.search_text("sample result"))[0]
+
+    assert record.abstract == "Sample & result."
+    assert record.abstract_source == "datacite"
+    assert record.abstract_url == "https://api.datacite.org/dois/10.1234%2Fabstract"
+    params = _params(calls[0][0])
+    assert "descriptions" in params["fields[dois]"][0].split(",")
+
+
+@pytest.mark.parametrize("descriptions", [
+    None,
+    [{"descriptionType": "Methods", "description": "Methods only."}],
+    [{"descriptionType": "Abstract", "description": {"invalid": True}}],
+])
+def test_metadata_without_abstract_does_not_relabel_other_datacite_descriptions(
+    descriptions,
+):
+    item = _doi_item("10.1234/empty", "Metadata only")
+    item["attributes"]["descriptions"] = descriptions
+
+    record = parse_doi_item(item, rank=0)
+
+    assert record.abstract == ""
+    assert record.abstract_source == ""
+    assert record.abstract_url is None
