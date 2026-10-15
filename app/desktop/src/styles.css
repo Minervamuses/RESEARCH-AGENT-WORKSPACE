@@ -1227,7 +1227,7 @@ h3 {
 }
 
 /* Source and conversation share a workspace; tool waits never disable editing. */
-.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); min-height: 0; flex: 1; }
+.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); height: calc(100vh - 4.4rem); min-height: 0; flex: 1; }
 .document-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #d4d6d8; background: #fff; }
 .document-toolbar { padding: .7rem; border-bottom: 1px solid #dedfdd; }
 .document-toolbar label { display: grid; gap: .2rem; margin-bottom: .4rem; color: #66716d; font-size: .72rem; }
@@ -1235,10 +1235,10 @@ h3 {
 .document-toolbar .action-row { flex-wrap: wrap; gap: .35rem; }
 .document-toolbar button { min-height: 1.9rem; padding: .3rem .55rem; font-size: .72rem; }
 .document-notice { padding: .45rem .7rem; margin: 0; color: #52645c; background: #f3f7f4; font-size: .72rem; }
-.document-editor { display: flex; flex-direction: column; flex: 1; min-height: 16rem; min-width: 0; }
-.document-editor-surface { flex: 1; min-height: 12rem; }
+.document-editor { display: flex; flex-direction: column; flex: 1; min-height: 6rem; min-width: 0; }
+.document-editor-surface { flex: 1; min-height: 0; }
 .document-editor-status { padding: .35rem .7rem; color: #66716d; font-size: .68rem; border-top: 1px solid #dedfdd; }
-.document-conflict { padding: .7rem; max-height: 45vh; overflow: auto; border-top: 2px solid #b38539; background: #fffaf0; }
+.document-conflict { flex: 0 1 auto; min-height: 0; padding: .7rem; max-height: 45vh; overflow: auto; border-top: 2px solid #b38539; background: #fffaf0; }
 .document-conflict h3 { font-size: .95rem; }
 .document-conflict p, .document-conflict button, .conflict-versions { font-size: .72rem; }
 .conflict-versions pre { max-height: 9rem; overflow: auto; white-space: pre-wrap; padding: .5rem; background: #fff; border: 1px solid #dedfdd; }

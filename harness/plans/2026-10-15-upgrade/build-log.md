@@ -158,6 +158,14 @@
 - 修正後 inline skills＋citation workflow 定向 44 passed（0.74s）；沒有為指引變更重跑全 suite。使用者原批准的 2 回合已用完；已提出只重用現有摘要的 1 個修正驗收回合、最多再 2 次請求、全程仍 6 次／US$1，等待此具體增量範圍，原生其他走查繼續。
 - 原生修正後重做第 40–45 行反白、聊天、Enter、等待時移到第 48 行、Approve：成功保存，Python 逐字核對只替換原 6 行文字、其餘包含兩個重複段落與換行不變。最終 npm run build 成功（0.545s，既有 Monaco chunk 提示）；Bypass／多 Skill GUI／摘要展示仍繼續。
 
+## P5.S5｜摘要修正真模型驗收與可操作衝突面板（2026-10-15）
+
+- P5.S4 已提交 ccc6ca1。使用者明確回覆「批准這 1 個修正驗收回合」；只重用已取得摘要、不再搜尋。沿同一已保存對話／更新後稿件載入真 writing＋citation 新指引，保留前兩回合／證據備份，不重播寫入；tool_choice=none，沒有新工具／provider／保存操作。
+- 修正回合用了 1 次請求，全程合計 3 回合／5 次 HTTP 200；usage.cost 合計 US$0.04694805，保守累積預留 US$0.30571575，仍在 6 次／4096 output／US$1 內。獨立與 root 品質核對：答案分開摘要明說的反應時間／ERP 結果、有限關聯解讀、摘要未報告的樣本數／隨機化／控制資訊；不再斷言非 RCT 或因果效益，原阻擋解除。aggregate 證據在 /tmp/upgrade-live-validation-approved/correction-evidence.json；代表案例通過不等於所有未來模型輸出保證。
+- 原生 Bypass Undo 無逐次批准，逐字回到原稿。再由隔離磁碟追加外部版本，在 GUI 保留第 54 行舊選取送出候選：未出批准、結果明確 conflict，沒有覆蓋磁碟。實際找到衝突區被編輯器擠出視窗；只減 min-height 的第一次修正不足，確認 writing grid 的高度未受約束後，第二次以既有 conversation 高度約束＋可縮編輯器／衝突區修正，原生面板與按鈕可讀可操作。
+- 收起候選內容→Keep editor；Python 核對原始 50 行／兩個重複段落與外部附註逐字不變，候選從未保存。npm run build 再次成功（0.574s），Monaco chunk 工具提示保留。未擴大為 layout 重構／新測試框架。
+- 本步只提交必要 CSS task-only 內容及本紀錄，原使用者 CSS 差異保留。原生 @ 部分名稱／鍵盤與滑鼠選取、當前未儲存主張到摘要的展示仍待最後走查；之後才標 P5 完成。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。
