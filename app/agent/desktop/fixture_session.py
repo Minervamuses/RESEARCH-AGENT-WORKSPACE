@@ -1055,33 +1055,23 @@ class FixtureSession:
             tool_activities: tuple[ToolActivitySummary, ...] = ()
             if FIXTURE_SKILLS_ABSTRACT in original_input:
                 answer = self._skills_abstract_answer(text)
-            elif original_input.startswith(("[[fixture:document-replace]]", "[[fixture:reference-replace]]")):
-                reference_edit = original_input.startswith("[[fixture:reference-replace]]")
-                document_references = [
-                    reference for reference in (submitted_context or {}).get("references", [])
-                    if reference["kind"] == "document"
-                ]
-                if reference_edit and len(document_references) != 1:
-                    answer = "Fixture reference edit requires exactly one document reference; choose the reference to edit. No document was changed."
-                else:
-                    tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
-                    if tool is None or not getattr(self, "_document_turn_active", False):
-                        raise RuntimeError("fixture document seam requires an active editor snapshot")
-                    marker = "[[fixture:reference-replace]]" if reference_edit else "[[fixture:document-replace]]"
-                    arguments = {"replacement_text": original_input.removeprefix(marker).lstrip(" ")}
-                    if reference_edit:
-                        arguments["reference_id"] = document_references[0]["referenceId"]
-                    raw_message = await tool.ainvoke({
-                        "name": "document_edit", "id": "fixture-document-edit", "type": "tool_call",
-                        "args": arguments,
-                    })
-                    payload = json.loads(raw_message.content)
-                    answer = f"Fixture document operation: {payload['status']}."
-                    tool_activities = (ToolActivitySummary(
-                        call_id="fixture-document-edit", name="document_edit",
-                        status="ok" if payload["status"] == "saved" else "failed",
-                        summary=answer,
-                    ),)
+            elif original_input.startswith("[[fixture:document-replace]]"):
+                tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
+                if tool is None or not getattr(self, "_document_turn_active", False):
+                    raise RuntimeError("fixture document seam requires an active editor snapshot")
+                replacement = original_input.removeprefix("[[fixture:document-replace]]").lstrip(" ")
+                raw_message = await tool.ainvoke({
+                    "name": "document_edit", "id": "fixture-document-edit", "type": "tool_call",
+                    "args": {"replacement_text": replacement},
+                })
+                raw_result = raw_message.content
+                payload = json.loads(raw_result)
+                answer = f"Fixture document operation: {payload['status']}."
+                tool_activities = (ToolActivitySummary(
+                    call_id="fixture-document-edit", name="document_edit",
+                    status="ok" if payload["status"] == "saved" else "failed",
+                    summary=answer,
+                ),)
             elif original_input.startswith("[[fixture:document-analyze]]"):
                 answer = "Fixture analysis received the current editor snapshot; no document tool was called."
             elif text == _FIXTURE_CRASH_TOOL:
