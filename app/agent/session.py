@@ -647,10 +647,6 @@ class ChatSession:
             return None
         return SystemMessage(content=self._tool_availability_block())
 
-    def _citation_registry(self):
-        """The session source registry, or None before first citation use."""
-        return self._citation_policy.registry
-
     def _build_sources_hint(self) -> SystemMessage | None:
         """Inject the visible/recently-activated sources (at most 20).
 
