@@ -6,7 +6,7 @@
 
 | 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
 |---|---|---|---|---|
-| P1 | Not started | 無 | 尚未要求開始實作 | 明確啟動後執行 P1-S1 |
+| P1 | In progress | E05: runtime/branch preflight | GUI baseline pending | P1-S2 metadata helpers |
 | P2 | Not started | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
 | P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
@@ -45,3 +45,14 @@
 ## 恢復規則
 
 開始前依 PROMPTS.md 讀文件並核對實際 workspace。實作後將實際步驟／命令／結果／驗收編號／限制寫入此處；不在 GOALS 或 index 增加第二份動態狀態。已完成檢查若來源未變可明確重用；被後續變更影響的檢查才重做。
+
+## Execution evidence
+
+### E05 / P1-S1: authorized execution and runtime preflight (2026-10-15 Asia/Taipei)
+
+- The user explicitly started the complete plan, accepted D1/D4/D5 and necessary cross-layer/tool parameter changes, and required a commit for each change step. Local step commits are authorized by that instruction; push/merge/rebase/branch/worktree changes and expensive checks still require separate approval. No new dependencies, paid providers, or real history migration are authorized.
+- First action was read-only runtime/branch/dirty discovery: GUI, clean working tree, origin git@github.com:Minervamuses/RESEARCH-AGENT-WORKSPACE.git. Current HEAD is 2121935 (planning commit), after the documented baseline 1cf54d7. No implementation existed at this checkpoint.
+- Read root AGENTS.md, then GOALS.md, PLANS.md, context/contracts.md, build-log.md, and dependency-ready phase-01-project.md. No ancestor or nested AGENTS.md was found.
+- Windows PowerShell is only the host launcher; project commands use WSL Ubuntu-24.04 bash at /home/minervamuses/research-agent-workspace. /usr/bin/git 2.43.0; Conda app Python 3.13.14, Poetry 2.4.1, Node 24.18.0 and cargo 1.97.1 verified. conda is not on login-shell PATH, so use its absolute launcher or source its activation script. rg is absent; use git grep/find without installing tools.
+- Existing Python, Node and Rust tests/fixtures were located. node_modules, dist and Rust debug cache/binary exist. WSLg DISPLAY=:0 and wayland-0, xdotool and gdbus are available; no app process was running. A separate read-only/isolated-fixture baseline investigation is in progress; no GUI acceptance or size measurement is claimed yet.
+- No build/test/provider call or real history access has occurred in this step. Next: finish GUI baseline before CSS changes; implement and verify P1-S2 in existing desktop catalog/test modules.
