@@ -3452,3 +3452,35 @@ def test_project_lifecycle_rejection_preserves_pending_consent(tmp_path: Path, t
         service._turn_active = False
 
     asyncio.run(run())
+
+
+def test_project_selection_allows_its_parallel_transcript_preview_but_still_blocks_root_switch(tmp_path, monkeypatch):
+    async def run():
+        factory, _sessions = _canonical_session_factory(monkeypatch)
+        service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
+        repository = service._conversation_repository
+        conversation_id = uuid.uuid4().hex
+        repository.create(conversation_id=conversation_id, project_id=service._selected_project_id, turn_id=uuid.uuid4().hex, kind="conversational", display_input="saved preview", semantic_input="saved preview", context_eligible=True, thinking_mode="normal", submitted_at="2026-10-15T00:00:00Z")
+        await service.dispatch("project.list", {})
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        original_read = service._read_conversation_turns
+        def delayed_read(*args):
+            entered.set()
+            assert release.wait(2)
+            return original_read(*args)
+        monkeypatch.setattr(service, "_read_conversation_turns", delayed_read)
+        params = {"projectId": service._selected_project_id, "sessionId": conversation_id}
+        preview = asyncio.create_task(service.dispatch("session.transcript", {**params, "offset": 0, "limit": 10}))
+        assert await asyncio.to_thread(entered.wait, 1)
+        try:
+            selected = await service.dispatch("session.select", params)
+            assert selected["sessionId"] == conversation_id
+            with pytest.raises(DesktopServiceError):
+                await service.dispatch("workspace.select", {"rootPath": str(tmp_path)})
+        finally:
+            release.set()
+        assert (await preview)["sessionId"] == conversation_id
+        assert service._project_operation_count == 0 and service._project_read_count == 0
+    asyncio.run(run())

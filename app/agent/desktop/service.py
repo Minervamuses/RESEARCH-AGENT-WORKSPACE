@@ -268,6 +268,7 @@ class DesktopService:
         self._selected_project_id: str | None = None
         self._workspace_opening = False
         self._project_operation_count = 0
+        self._project_read_count = 0
         self._project_epoch = 0
         self._session_registered = False
         self._pending_registration: tuple[str, str] | None = None
@@ -386,6 +387,7 @@ class DesktopService:
             or (method.startswith("session.") and method not in {"session.status", "session.shutdown"})
         )
         project_operation_admitted = False
+        project_read = method in {"session.list", "session.transcript"}
         try:
             if self._workspace_opening and method not in {
                 "runtime.diagnostics", "session.status", "project.list",
@@ -396,6 +398,7 @@ class DesktopService:
             if project_operation:
                 self._require_project()
                 self._project_operation_count += 1
+                self._project_read_count += int(project_read)
                 project_operation_admitted = True
             return await handler(params, event_sink)
         except (DocumentError, SkillSelectionError, CatalogError) as exc:
@@ -440,6 +443,7 @@ class DesktopService:
         finally:
             if project_operation_admitted:
                 self._project_operation_count -= 1
+                self._project_read_count -= int(project_read)
 
     def _with_turn_lifecycle(
         self,
@@ -789,7 +793,7 @@ class DesktopService:
         if (
             self._knowledge_active or self._extension_active
             or self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count > 1
+            or self._project_operation_count - self._project_read_count > 1
         ):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
@@ -1337,7 +1341,7 @@ class DesktopService:
         if (
             self._knowledge_active or self._extension_active
             or self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count > 1
+            or self._project_operation_count - self._project_read_count > 1
         ):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
