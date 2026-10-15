@@ -20,6 +20,7 @@ export interface ConversationActivity {
 
 export interface ActiveConversationTurn extends ConversationSelection {
   backendGeneration: number;
+  projectEpoch: number;
   requestId: string;
   turnId: string;
   activity: readonly ConversationActivity[];
@@ -107,6 +108,7 @@ export interface ConversationFailure extends ConversationSelection {
 
 export interface ConversationState {
   backendGeneration: number;
+  projectEpoch: number;
   selected: ConversationSelection | null;
   draft: string;
   activeTurn: ActiveConversationTurn | null;
@@ -114,9 +116,9 @@ export interface ConversationState {
   failure: ConversationFailure | null;
 }
 
-export type ConversationAction =
+export type ConversationAction = (
   | { type: "backend-generation-changed"; generation: number }
-  | { type: "project-opened"; generation: number }
+  | { type: "project-opened"; generation: number; preserveDraft?: boolean }
   | ({ type: "conversation-selected"; generation: number } & ConversationSelection)
   | { type: "draft-changed"; draft: string }
   | ({ type: "turn-started"; generation: number; requestId: string; turnId: string } & ConversationSelection)
@@ -153,7 +155,25 @@ export type ConversationAction =
       message: string;
       retryable: boolean;
     } & ConversationSelection)
-  | { type: "failure-cleared" };
+  | { type: "failure-cleared" }
+) & { projectEpoch?: number };
+
+export interface WorkspaceOperationOwner {
+  generation: number;
+  projectEpoch: number;
+  token: symbol;
+}
+
+export function ownsWorkspaceOperation(
+  owner: WorkspaceOperationOwner,
+  current: WorkspaceOperationOwner | null,
+  generation: number,
+  projectEpoch: number,
+): boolean {
+  return current !== null && owner.token === current.token &&
+    owner.generation === generation && owner.generation === current.generation &&
+    owner.projectEpoch === projectEpoch && owner.projectEpoch === current.projectEpoch;
+}
 
 export interface ConversationInteractionState {
   turnActive: boolean;
@@ -165,6 +185,7 @@ export interface ConversationInteractionState {
 
 export const initialConversationState: ConversationState = {
   backendGeneration: 0,
+  projectEpoch: 0,
   selected: null,
   draft: "",
   activeTurn: null,
@@ -401,6 +422,9 @@ export function conversationReducer(
   state: ConversationState,
   action: ConversationAction,
 ): ConversationState {
+  if (action.type !== "backend-generation-changed" && action.type !== "project-opened" &&
+      action.type !== "draft-changed" && action.type !== "failure-cleared" &&
+      (action.projectEpoch ?? 0) !== state.projectEpoch) return state;
   if (action.type === "backend-generation-changed") {
     if (!isNonNegativeSafeInteger(action.generation) || action.generation <= state.backendGeneration) {
       return state;
@@ -415,8 +439,9 @@ export function conversationReducer(
     };
   }
   if (action.type === "project-opened") {
-    if (action.generation !== state.backendGeneration || state.activeTurn !== null) return state;
-    return { ...initialConversationState, backendGeneration: state.backendGeneration };
+    const projectEpoch = action.projectEpoch ?? state.projectEpoch + 1;
+    if (action.generation !== state.backendGeneration || state.activeTurn !== null || projectEpoch <= state.projectEpoch) return state;
+    return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch, draft: action.preserveDraft ? state.draft : "" };
   }
   if (action.type === "conversation-selected") {
     if (
@@ -457,6 +482,7 @@ export function conversationReducer(
       ...state,
       activeTurn: {
         backendGeneration: action.generation,
+        projectEpoch: state.projectEpoch,
         projectId: action.projectId,
         sessionId: action.sessionId,
         requestId: action.requestId,

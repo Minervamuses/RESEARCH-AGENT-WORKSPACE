@@ -6,6 +6,8 @@ import {
   mergeConversationTurns,
   conversationReducer,
   initialConversationState,
+  ownsWorkspaceOperation,
+  type WorkspaceOperationOwner,
   type ConversationFailure,
   type VisibleConversationTurn,
 } from "../src/conversations.ts";
@@ -52,6 +54,7 @@ interface AppHelpersModule {
   loadSelectedProjectHistory: (
     projectId: string | null,
     request: (method: string, params: JsonObject) => Promise<JsonObject>,
+    isCurrent?: () => boolean,
   ) => Promise<unknown>;
   selectConversationWithPreview: (
     projectId: string,
@@ -815,4 +818,88 @@ test("only a successful project-open action clears the old conversation draft", 
   assert.equal(changedProject.draft, "");
   assert.equal(changedProject.selected, null);
   assert.equal(changedProject.failure, null);
+});
+
+test("an old catalog response after A to B to A cannot launch a conversation read", async () => {
+  const { loadSelectedProjectHistory } = await loadAppHelpers();
+  const catalog = Promise.withResolvers<JsonObject>();
+  const owner = { generation: 4, projectEpoch: 1, token: Symbol("first A catalog") };
+  let current: WorkspaceOperationOwner = owner;
+  const requests: string[] = [];
+  const result = loadSelectedProjectHistory("project-a", async (method) => {
+    requests.push(method);
+    if (method !== "project.list") throw new Error("Old A must not read the reopened project's sessions");
+    return catalog.promise;
+  }, () => ownsWorkspaceOperation(owner, current, 4, current.projectEpoch));
+  current = { generation: 4, projectEpoch: 3, token: Symbol("reopened A catalog") };
+  catalog.resolve({ projects: [{ projectId: "project-a" }], selectedProjectId: "project-a", selectedSessionId: null });
+  assert.equal(await result, null);
+  assert.deepEqual(requests, ["project.list"]);
+});
+
+test("an old same-project selection cannot publish preview or selection after reopen", async () => {
+  const { selectConversationWithPreview } = await loadAppHelpers();
+  const { summary, transcript, selected } = selectionFixture();
+  const selection = Promise.withResolvers<JsonObject>();
+  const read = Promise.withResolvers<JsonObject>();
+  const owner = { generation: 4, projectEpoch: 1, token: Symbol("first A selection") };
+  let current = owner;
+  let updates = 0;
+  const result = selectConversationWithPreview("local", summary, {
+    isCurrent: () => ownsWorkspaceOperation(owner, current, 4, current.projectEpoch),
+    onPreview: () => { updates += 1; },
+    onSelected: () => { updates += 1; },
+  }, async (method) => method === "session.select" ? selection.promise : read.promise);
+  current = { generation: 4, projectEpoch: 3, token: Symbol("reopened A selection") };
+  read.resolve(transcript as unknown as JsonObject);
+  selection.resolve(selected);
+  assert.equal(await result, null);
+  assert.equal(updates, 0);
+});
+
+test("a stale rejection and finally cannot replace an error or clear the new operation", async () => {
+  const deferred = Promise.withResolvers<void>();
+  const owner = { generation: 4, projectEpoch: 1, token: Symbol("old document save") };
+  let current: WorkspaceOperationOwner | null = owner;
+  let projectEpoch = 1;
+  let notice = "";
+  const completion = deferred.promise.catch(() => {
+    if (ownsWorkspaceOperation(owner, current, 4, projectEpoch)) notice = "Old save failed";
+  }).finally(() => {
+    if (ownsWorkspaceOperation(owner, current, 4, projectEpoch)) current = null;
+  });
+  const next = { generation: 4, projectEpoch: 3, token: Symbol("new document save") };
+  current = next;
+  projectEpoch = 3;
+  notice = "Current project notice";
+  deferred.reject(new Error("Old backend rejection"));
+  await completion;
+  assert.equal(notice, "Current project notice");
+  assert.equal(current, next);
+  assert.equal(ownsWorkspaceOperation({ ...next, token: Symbol("earlier operation") }, next, 4, 3), false);
+  assert.equal(ownsWorkspaceOperation(next, next, 5, 3), false);
+});
+
+test("turn results from the first A cannot update a new A epoch with matching IDs", () => {
+  const projectId = "project-a", sessionId = "session-a";
+  const turnId = "f2ddf2369f994905afa0b85d8cca79b1";
+  let state = conversationReducer(initialConversationState, { type: "project-opened", generation: 0, projectEpoch: 1 });
+  state = conversationReducer(state, { type: "project-opened", generation: 0, projectEpoch: 2 });
+  state = conversationReducer(state, { type: "project-opened", generation: 0, projectEpoch: 3 });
+  state = conversationReducer(state, { type: "conversation-selected", generation: 0, projectEpoch: 3, projectId, sessionId });
+  state = conversationReducer(state, { type: "draft-changed", draft: "New A draft" });
+  state = conversationReducer(state, { type: "turn-started", generation: 0, projectEpoch: 3, projectId, sessionId, requestId: "same-request", turnId });
+  assert.ok(state.activeTurn);
+  assert.equal(conversationReducer(state, {
+    type: "turn-failed", generation: 0, projectEpoch: 1, projectId, sessionId, requestId: "same-request", message: "Old failure", retryable: true,
+  }), state);
+  assert.equal(conversationReducer(state, {
+    type: "turn-succeeded", generation: 0, projectEpoch: 1, projectId, requestId: "same-request",
+    result: { sessionId, turnId, turnNumber: 1, state: "completed", accepted: true, persisted: true, text: "Old answer" },
+  }), state);
+  assert.equal(conversationReducer(state, {
+    type: "activity-received", generation: 0, projectEpoch: 1, sessionId, requestId: "same-request",
+    activity: { kind: "tool", label: "Old tool", status: null },
+  }), state);
+  assert.equal(state.draft, "New A draft");
 });

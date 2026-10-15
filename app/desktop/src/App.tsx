@@ -34,6 +34,8 @@ import {
   latestRetryableTranscriptTurn,
   mergeConversationTurns,
   nextTurnSubmission,
+  ownsWorkspaceOperation,
+  type WorkspaceOperationOwner,
   reconciledTurnCount,
   sameSelection,
   upsertLiveTurn,
@@ -162,13 +164,16 @@ export function sessionCreateParams(projectId: string): JsonObject {
 export async function loadSelectedProjectHistory(
   projectId: string | null,
   request: (method: "project.list" | "session.list", params: JsonObject) => Promise<JsonObject> = backendClient.request,
+  isCurrent: () => boolean = () => true,
 ): Promise<{ catalog: ProjectListDto; sessions: SessionListDto } | null> {
   if (projectId === null) return null;
   const catalog = await request("project.list", {}) as unknown as ProjectListDto;
+  if (!isCurrent()) return null;
   if (catalog.projects.length !== 1 || catalog.projects[0].projectId !== projectId || catalog.selectedProjectId !== projectId) {
     throw protocolMismatch("The backend returned history for a different project.");
   }
   const sessions = await request("session.list", { projectId, offset: 0, limit: 50, reconcile: false }) as unknown as SessionListDto;
+  if (!isCurrent()) return null;
   if (sessions.projectId !== projectId) throw protocolMismatch("The backend returned conversations for a different project.");
   return { catalog, sessions };
 }
@@ -703,6 +708,7 @@ export default function App() {
   const [project, setProject] = useState<ProjectWorkspaceDto | null>(null);
   const projectRef = useRef<ProjectWorkspaceDto | null>(null);
   const bindingGenerationRef = useRef<number | null>(null);
+  const projectEpochRef = useRef(0);
   const resumeSelectionRef = useRef<ConversationSelection | null>(null);
   const resumeDraftRef = useRef<string | null>(null);
   const [chooserOpen, setChooserOpen] = useState(true);
@@ -746,14 +752,19 @@ export default function App() {
     setDocumentValue(value);
   }, []);
   const inFlight = useRef(false);
-  const catalogLoading = useRef<number | null>(null);
+  const exclusiveOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
+  const catalogLoading = useRef<WorkspaceOperationOwner | null>(null);
   const diagnosticsAttempt = useRef<number | null>(null);
   const generationRef = useRef(0);
   const conversationRef = useRef(conversation);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
-  const workspaceOperation = useRef<symbol | null>(null);
+  const workspaceOperation = useRef<WorkspaceOperationOwner | null>(null);
+  const documentOperationRef = useRef<WorkspaceOperationOwner | null>(null);
+  const approvalOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
+  const frameOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
+  const turnOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const pendingApprovalRef = useRef<PendingApproval | null>(null);
   const approvalResolvingRef = useRef(false);
 
@@ -767,24 +778,58 @@ export default function App() {
     return next;
   }, []);
 
-  const beginWorkspaceOperation = useCallback((label: string): symbol | null => {
-    if (workspaceOperation.current !== null || inFlight.current) return null;
-    const token = Symbol(label);
-    workspaceOperation.current = token;
+  const captureOwner = useCallback((label: string): WorkspaceOperationOwner => ({
+    generation: generationRef.current, projectEpoch: projectEpochRef.current, token: Symbol(label),
+  }), []);
+
+  const ownsOperation = useCallback((owner: WorkspaceOperationOwner, current: WorkspaceOperationOwner | null) =>
+    ownsWorkspaceOperation(owner, current, generationRef.current, projectEpochRef.current), []);
+
+  const beginWorkspaceOperation = useCallback((label: string): WorkspaceOperationOwner | null => {
+    if (workspaceOperation.current !== null || inFlight.current || documentBusyRef.current ||
+        pendingApprovalRef.current !== null || conversationRef.current.activeTurn !== null) return null;
+    const owner = captureOwner(label);
+    workspaceOperation.current = owner;
+    turnOwnerRef.current = null;
+    frameOwnerRef.current = null;
     setWorkspaceBusy(label);
     setWorkspaceIssue(null);
-    return token;
-  }, []);
+    return owner;
+  }, [captureOwner]);
 
-  const finishWorkspaceOperation = useCallback((token: symbol) => {
-    if (workspaceOperation.current !== token) return;
+  const finishWorkspaceOperation = useCallback((owner: WorkspaceOperationOwner) => {
+    if (!ownsOperation(owner, workspaceOperation.current)) return;
     workspaceOperation.current = null;
+    setWorkspaceBusy(null);
+  }, [ownsOperation]);
+
+  const scheduleOwnedFrame = useCallback((owner: WorkspaceOperationOwner, update: () => void) => {
+    frameOwnerRef.current = owner;
+    requestAnimationFrame(() => {
+      if (ownsOperation(owner, frameOwnerRef.current) &&
+          (workspaceOperation.current === null || workspaceOperation.current.token === owner.token)) update();
+    });
+  }, [ownsOperation]);
+
+  const invalidateOperations = useCallback(() => {
+    workspaceOperation.current = null;
+    documentOperationRef.current = null;
+    catalogLoading.current = null;
+    approvalOwnerRef.current = null;
+    frameOwnerRef.current = null;
+    turnOwnerRef.current = null;
+    documentRequestRef.current = null;
+    documentBusyRef.current = false;
+    setDocumentBusy(false);
     setWorkspaceBusy(null);
   }, []);
 
   const receiveDocumentResult = useCallback((result: DocumentResult, captured: DocumentSnapshot, action: DocumentAction | null) => {
     const current = documentRef.current;
     if (current === null || current.path !== captured.path || current.rootPath !== captured.rootPath) return;
+    if (result.path !== captured.path || (result.rootPath !== undefined && result.rootPath !== captured.rootPath)) {
+      throw protocolMismatch("The backend returned a document result for a different source.");
+    }
     if (result.status === "saved" && result.sourceText !== undefined && result.diskFingerprint !== undefined) {
       documentBaselineRef.current = { ...captured, sourceText: result.sourceText, diskFingerprint: result.diskFingerprint };
       if (current.editorRevision === captured.editorRevision && current.sourceText === captured.sourceText) {
@@ -815,8 +860,11 @@ export default function App() {
 
   const applyDocumentOperation = useCallback(async (action: DocumentAction, resolution?: "keep" | "use" | "cancel", expectedSnapshot?: DocumentSnapshot) => {
     const captured = documentRef.current;
-    if (captured === null || documentBusyRef.current) return;
-    const generation = generationRef.current;
+    if (captured === null || documentBusyRef.current || workspaceOperation.current !== null ||
+        bindingGenerationRef.current !== generationRef.current) return;
+    const owner = captureOwner("document.apply");
+    documentOperationRef.current = owner;
+    frameOwnerRef.current = null;
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
@@ -826,51 +874,82 @@ export default function App() {
       } as unknown as JsonObject);
       documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId };
       const result = await tracked.result as unknown as DocumentResult;
-      if (generationRef.current === generation) receiveDocumentResult(result, captured, action);
+      if (ownsOperation(owner, documentOperationRef.current)) receiveDocumentResult(result, captured, action);
     } catch (error) {
-      setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
+      if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
     } finally {
-      documentBusyRef.current = false;
-      setDocumentBusy(false);
-      documentRequestRef.current = null;
-      pendingApprovalRef.current = null;
-      setPendingApproval(null);
+      if (ownsOperation(owner, documentOperationRef.current)) {
+        documentOperationRef.current = null;
+        documentBusyRef.current = false;
+        setDocumentBusy(false);
+        const requestId = documentRequestRef.current?.requestId;
+        documentRequestRef.current = null;
+        if (pendingApprovalRef.current?.parentRequestId === requestId) {
+          pendingApprovalRef.current = null;
+          approvalOwnerRef.current = null;
+          approvalResolvingRef.current = false;
+          setPendingApproval(null);
+          setApprovalResolving(false);
+        }
+      }
     }
-  }, [receiveDocumentResult]);
+  }, [captureOwner, ownsOperation, receiveDocumentResult]);
 
   const openDocument = useCallback(async () => {
-    if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null || conversationRef.current.activeTurn !== null || documentBusyRef.current) return;
+    if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
+        conversationRef.current.activeTurn !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
     if (documentRef.current !== null && !window.confirm("Opening a file replaces the current editor contents. Continue?")) return;
-    const generation = generationRef.current;
+    const owner = captureOwner("document.open");
+    documentOperationRef.current = owner;
+    frameOwnerRef.current = null;
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
       const opened = await backendClient.request("document.open", { path: filePath }) as unknown as DocumentSnapshot;
-      if (generationRef.current !== generation) return;
+      if (!ownsOperation(owner, documentOperationRef.current)) return;
+      if (opened.rootPath !== projectRef.current?.rootPath) throw protocolMismatch("The backend opened a document from a different project.");
       documentBaselineRef.current = { ...opened };
       updateDocument({ ...opened, editorRevision: opened.editorRevision ?? 0 });
       setFilePath(opened.path);
       setDocumentConflict(null);
       setLastDocumentAction(null);
       setDocumentNotice("Opened. The Agent will use the current editor text, including unsaved changes.");
-    } catch (error) { setDocumentNotice(workspaceError(error).message); }
-    finally { documentBusyRef.current = false; setDocumentBusy(false); }
-  }, [filePath, updateDocument]);
+    } catch (error) {
+      if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message);
+    } finally {
+      if (ownsOperation(owner, documentOperationRef.current)) {
+        documentOperationRef.current = null;
+        documentBusyRef.current = false;
+        setDocumentBusy(false);
+      }
+    }
+  }, [captureOwner, filePath, ownsOperation, updateDocument]);
 
-  const saveDocument = useCallback(async () => {
+  const saveDocument = useCallback(async (parentOperation: WorkspaceOperationOwner | null = null) => {
     const captured = documentRef.current;
-    if (captured === null || documentBusyRef.current) return false;
-    const generation = generationRef.current;
+    if (captured === null || documentBusyRef.current || bindingGenerationRef.current !== generationRef.current ||
+        (workspaceOperation.current !== null && workspaceOperation.current !== parentOperation)) return false;
+    const owner = captureOwner("document.save");
+    documentOperationRef.current = owner;
+    frameOwnerRef.current = null;
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
       const result = await backendClient.request("document.save", { documentContext: documentContextPayload(captured) }) as unknown as DocumentResult;
-      if (generationRef.current !== generation) return false;
+      if (!ownsOperation(owner, documentOperationRef.current)) return false;
       receiveDocumentResult(result, captured, null);
       return result.status === "saved" && documentRef.current?.sourceText === documentBaselineRef.current?.sourceText;
-    } catch (error) { setDocumentNotice(workspaceError(error).message + " Your editor text is retained."); return false; }
-    finally { documentBusyRef.current = false; setDocumentBusy(false); }
-  }, [receiveDocumentResult]);
+    } catch (error) {
+      if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your editor text is retained.");
+      return false;
+    } finally {
+      if (ownsOperation(owner, documentOperationRef.current)) {
+        documentOperationRef.current = null;
+        documentBusyRef.current = false;
+        setDocumentBusy(false);
+      }
+    }
+  }, [captureOwner, ownsOperation, receiveDocumentResult]);
 
   const resolveDocumentConflict = useCallback(async (resolution: "keep" | "use" | "cancel") => {
     if (documentConflict === null) return;
@@ -906,8 +985,10 @@ export default function App() {
           try {
             const event = parseBridgeEvent(payload);
             if (event.type === "lifecycle") {
+              if (event.snapshot.generation < generationRef.current) return;
               const generationChanged = generationRef.current !== event.snapshot.generation;
               if (generationChanged) {
+                invalidateOperations();
                 resumeSelectionRef.current = conversationRef.current.selected ?? resumeSelectionRef.current;
                 resumeDraftRef.current = conversationRef.current.draft;
                 bindingGenerationRef.current = null;
@@ -956,6 +1037,8 @@ export default function App() {
             const documentRequest = documentRequestRef.current;
             if (active === null && documentRequest === null) return;
             const generation = generationRef.current;
+            if (active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpochRef.current)) return;
+            if (documentRequest !== null && (documentOperationRef.current === null || !ownsOperation(documentOperationRef.current, documentOperationRef.current))) return;
             if (message.event === "document.proposed" && active !== null && message.requestId === active.requestId && message.data.turnId === active.turnId && typeof message.data.callId === "string") {
               void applyDocumentOperation({ turnId: active.turnId, callId: message.data.callId, parentRequestId: active.requestId });
               return;
@@ -972,6 +1055,8 @@ export default function App() {
                 setPendingApproval((current) => {
                   if (current !== null) return current;
                   pendingApprovalRef.current = accepted;
+                  approvalOwnerRef.current = captureOwner("approval");
+                  frameOwnerRef.current = null;
                   return accepted;
                 });
               }
@@ -979,6 +1064,7 @@ export default function App() {
               applyConversation({
                 type: "activity-received",
                 generation,
+                projectEpoch: active.projectEpoch,
                 requestId: message.requestId,
                 sessionId: active.sessionId,
                 activity: { kind: "stage", label: message.data.stage, status: null },
@@ -987,6 +1073,7 @@ export default function App() {
               applyConversation({
                 type: "activity-received",
                 generation,
+                projectEpoch: active.projectEpoch,
                 requestId: message.requestId,
                 sessionId: active.sessionId,
                 activity: { kind: "tool", label: message.data.name, status: message.data.status },
@@ -999,8 +1086,9 @@ export default function App() {
         if (disposed) { unlisten(); return; }
         removeListener = unlisten;
         const snapshot = await backendClient.snapshot();
-        if (!disposed) {
+        if (!disposed && snapshot.generation >= generationRef.current) {
           const generationChanged = generationRef.current !== snapshot.generation;
+          if (generationChanged) invalidateOperations();
           if (generationChanged && projectRef.current !== null) {
             resumeSelectionRef.current = conversationRef.current.selected ?? resumeSelectionRef.current;
             resumeDraftRef.current = conversationRef.current.draft;
@@ -1035,19 +1123,28 @@ export default function App() {
       }
     })();
     return () => { disposed = true; removeListener?.(); };
-  }, [applyConversation, applyDocumentOperation]);
+  }, [applyConversation, applyDocumentOperation, captureOwner, invalidateOperations, ownsOperation]);
 
-  const runExclusive = useCallback(async (action: BackendActionName, operation: () => Promise<void>) => {
+  const runExclusive = useCallback(async (action: BackendActionName, operation: (owner: WorkspaceOperationOwner) => Promise<void>) => {
     if (inFlight.current) return;
+    const owner = captureOwner(action);
+    exclusiveOwnerRef.current = owner;
     inFlight.current = true;
     dispatch({ type: "action-started", action });
-    try { await operation(); }
-    catch (error) { dispatch({ type: "action-failed", error: workspaceError(error) }); }
-    finally { inFlight.current = false; }
-  }, []);
+    try { await operation(owner); }
+    catch (error) {
+      if (ownsOperation(owner, exclusiveOwnerRef.current)) dispatch({ type: "action-failed", error: workspaceError(error) });
+    } finally {
+      if (exclusiveOwnerRef.current?.token === owner.token) {
+        exclusiveOwnerRef.current = null;
+        inFlight.current = false;
+      }
+    }
+  }, [captureOwner, ownsOperation]);
 
   const runLifecycle = useCallback((action: "start" | "restart" | "shutdown") => {
-    if (workspaceOperation.current !== null) return;
+    if (workspaceOperation.current !== null || documentBusyRef.current || pendingApprovalRef.current !== null ||
+        conversationRef.current.activeTurn !== null) return;
     setSlashCatalogOwner(null);
     if (action === "restart") {
       resumeSelectionRef.current = conversationRef.current.selected;
@@ -1056,8 +1153,10 @@ export default function App() {
       setExtensionFlow((current) => current === null ? null : markExtensionRestarting(current));
     }
     const operation = action === "start" ? backendClient.start : action === "restart" ? backendClient.restart : backendClient.shutdown;
-    void runExclusive(action, async () => {
+    void runExclusive(action, async (owner) => {
       const snapshot = await operation();
+      if (exclusiveOwnerRef.current?.token !== owner.token || owner.projectEpoch !== projectEpochRef.current ||
+          snapshot.generation < generationRef.current) return;
       generationRef.current = snapshot.generation;
       applyConversation({ type: "backend-generation-changed", generation: snapshot.generation });
       dispatch({ type: "snapshot", snapshot });
@@ -1072,11 +1171,12 @@ export default function App() {
     const generation = state.snapshot?.generation;
     if (generation === undefined || (!force && diagnosticsAttempt.current === generation)) return;
     diagnosticsAttempt.current = generation;
-    void runExclusive("diagnostics", async () => {
+    void runExclusive("diagnostics", async (owner) => {
       const data = await backendClient.request("runtime.diagnostics", {});
+      if (!ownsOperation(owner, exclusiveOwnerRef.current)) return;
       dispatch({ type: "diagnostics-succeeded", diagnostics: toBoundedDiagnostics(data as unknown as RuntimeDiagnosticsDto) });
     });
-  }, [runExclusive, state.snapshot?.generation]);
+  }, [ownsOperation, runExclusive, state.snapshot?.generation]);
 
   useEffect(() => {
     if (state.phase === "backend-ready" && state.snapshot?.lifecycle === "ready" && state.diagnostics === null && state.activeAction === null) loadDiagnostics(false);
@@ -1084,31 +1184,34 @@ export default function App() {
 
   const loadCatalog = useCallback(async (generation: number) => {
     const currentProject = projectRef.current;
-    if (currentProject === null || bindingGenerationRef.current !== generation || catalogLoading.current === generation) return;
-    catalogLoading.current = generation;
+    if (currentProject === null || bindingGenerationRef.current !== generation || generation !== generationRef.current) return;
+    const owner = captureOwner("project history");
+    catalogLoading.current = owner;
+    const isCurrent = () => ownsOperation(owner, catalogLoading.current);
     setWorkspaceIssue(null);
     try {
-      const loaded = await loadSelectedProjectHistory(currentProject.projectId);
-      if (generationRef.current !== generation || loaded === null) return;
+      const loaded = await loadSelectedProjectHistory(currentProject.projectId, backendClient.request, isCurrent);
+      if (!isCurrent() || loaded === null) return;
       setCatalog(loaded.catalog);
       setSessionLists({ [currentProject.projectId]: loaded.sessions });
       setCatalogGeneration(generation);
     } catch (error) {
-      if (generationRef.current === generation) {
+      if (isCurrent()) {
         setCatalogGeneration(generation);
         setWorkspaceIssue(workspaceError(error));
       }
     } finally {
-      if (catalogLoading.current === generation) catalogLoading.current = null;
+      if (isCurrent()) catalogLoading.current = null;
     }
-  }, []);
+  }, [captureOwner, ownsOperation]);
 
   const chooseProject = useCallback(async (action: "inspect" | "open" | "initialize") => {
     if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
         documentBusyRef.current || documentConflict !== null) return;
     const operation = beginWorkspaceOperation(action === "inspect" ? "Inspecting project" : "Opening project");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const generation = operation.generation;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setChooserIssue(null);
     try {
       if (action !== "inspect") {
@@ -1117,11 +1220,18 @@ export default function App() {
           return;
         }
         if (documentRef.current !== null && documentRef.current.sourceText !== documentBaselineRef.current?.sourceText && dirtyChoice === "save") {
-          if (!await saveDocument()) {
+          const saved = await saveDocument(operation);
+          if (!isCurrent()) return;
+          if (!saved) {
             setChooserIssue("The document was not saved. Resolve the save issue before switching.");
             return;
           }
         }
+      }
+      if (!isCurrent()) return;
+      if (action === "initialize" && candidate?.status === "needs_configuration" && candidateHistory !== candidate.historyDirectory) {
+        setChooserIssue("Inspect the edited history location before initializing.");
+        return;
       }
       const data = await backendClient.request("workspace.select", {
         rootPath: candidate?.rootPath ?? candidateRoot,
@@ -1132,18 +1242,21 @@ export default function App() {
           expectedFingerprint: candidate?.researchFingerprint ?? null,
         } : {}),
       }) as unknown as ProjectWorkspaceDto;
-      if (generationRef.current !== generation || workspaceOperation.current !== operation) return;
+      if (!isCurrent()) return;
       if (data.status !== "opened") {
         setCandidate(data);
         setCandidateRoot(data.rootPath);
         setCandidateHistory(data.historyDirectory);
         return;
       }
+      finishWorkspaceOperation(operation);
+      projectEpochRef.current += 1;
+      frameOwnerRef.current = null;
       projectRef.current = data;
       bindingGenerationRef.current = generation;
       setProject(data);
       setRootPath(data.rootPath);
-      applyConversation({ type: "project-opened", generation });
+      applyConversation({ type: "project-opened", generation, projectEpoch: projectEpochRef.current });
       setCatalog(null);
       setCatalogGeneration(null);
       setSessionLists({});
@@ -1175,11 +1288,11 @@ export default function App() {
       setDirtyChoice("save");
       await loadCatalog(generation);
     } catch (error) {
-      if (generationRef.current === generation && workspaceOperation.current === operation) {
+      if (isCurrent()) {
         setChooserIssue(workspaceError(error).message);
       }
     } finally { finishWorkspaceOperation(operation); }
-  }, [applyConversation, beginWorkspaceOperation, candidate, candidateHistory, candidateRoot, dirtyChoice, discardDraft, documentConflict, finishWorkspaceOperation, loadCatalog, saveDocument, updateDocument]);
+  }, [applyConversation, beginWorkspaceOperation, candidate, candidateHistory, candidateRoot, dirtyChoice, discardDraft, documentConflict, finishWorkspaceOperation, loadCatalog, ownsOperation, saveDocument, updateDocument]);
 
   const showProjectChooser = useCallback(() => {
     if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
@@ -1202,12 +1315,12 @@ export default function App() {
     if (current === undefined || !current.hasMore) return;
     const operation = beginWorkspaceOperation("Loading more conversations");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     const offset = current.items.length;
     void (async () => {
       try {
         const data = await backendClient.request("session.list", { projectId, offset, limit: 50 }) as unknown as SessionListDto;
-        if (generationRef.current !== generation) return;
+        if (!isCurrent()) return;
         if (data.projectId !== projectId || data.offset !== offset) {
           throw protocolMismatch("The backend returned a mismatched conversation page.");
         }
@@ -1221,12 +1334,12 @@ export default function App() {
           };
         });
       } catch (error) {
-        if (generationRef.current === generation) setWorkspaceIssue(workspaceError(error));
+        if (isCurrent()) setWorkspaceIssue(workspaceError(error));
       } finally {
         finishWorkspaceOperation(operation);
       }
     })();
-  }, [beginWorkspaceOperation, finishWorkspaceOperation, sessionLists]);
+  }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, sessionLists]);
 
   useEffect(() => {
     const generation = state.snapshot?.generation;
@@ -1256,7 +1369,7 @@ export default function App() {
   useEffect(() => {
     const generation = state.snapshot?.generation;
     if (generation === undefined || state.snapshot?.lifecycle !== "ready" || state.diagnostics === null ||
-        project === null || catalogGeneration === generation || catalogLoading.current === generation ||
+        project === null || catalogGeneration === generation || (catalogLoading.current !== null && ownsOperation(catalogLoading.current, catalogLoading.current)) ||
         workspaceOperation.current !== null) return;
     if (bindingGenerationRef.current === generation) {
       void loadCatalog(generation);
@@ -1264,31 +1377,43 @@ export default function App() {
     }
     const operation = beginWorkspaceOperation("Reopening selected project");
     if (operation === null) return;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     void backendClient.request("workspace.select", { rootPath: project.rootPath, action: "open" }).then(async (data) => {
-      if (generationRef.current !== generation || workspaceOperation.current !== operation) return;
+      if (!isCurrent()) return;
       const opened = data as unknown as ProjectWorkspaceDto;
       if (opened.status !== "opened" || opened.projectId !== project.projectId || opened.rootPath !== project.rootPath) {
         throw protocolMismatch("The selected project could not be restored. Open it explicitly to continue.");
       }
+      finishWorkspaceOperation(operation);
+      projectEpochRef.current += 1;
+      frameOwnerRef.current = null;
+      applyConversation({ type: "project-opened", generation, projectEpoch: projectEpochRef.current, preserveDraft: true });
       projectRef.current = opened;
       bindingGenerationRef.current = generation;
       setProject(opened);
       await loadCatalog(generation);
     }).catch((error: unknown) => {
-      if (generationRef.current !== generation || workspaceOperation.current !== operation) return;
+      if (!isCurrent()) return;
       setCatalogGeneration(generation);
       setChooserIssue(workspaceError(error).message);
       setCandidate(null);
       setCandidateRoot(project.rootPath);
       setChooserOpen(true);
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [beginWorkspaceOperation, catalogGeneration, finishWorkspaceOperation, loadCatalog, project, state.diagnostics, state.snapshot?.generation, state.snapshot?.lifecycle]);
+  }, [applyConversation, beginWorkspaceOperation, catalogGeneration, finishWorkspaceOperation, loadCatalog, ownsOperation, project, state.diagnostics, state.snapshot?.generation, state.snapshot?.lifecycle]);
 
-  const focusComposer = useCallback(() => { requestAnimationFrame(() => composerRef.current?.focus()); }, []);
+  const focusComposer = useCallback((owner: WorkspaceOperationOwner = captureOwner("composer focus")) => {
+    scheduleOwnedFrame(owner, () => composerRef.current?.focus());
+  }, [captureOwner, scheduleOwnedFrame]);
 
-  const resolvePendingApproval = useCallback((approved: boolean) => {
+  const resolvePendingApproval = useCallback((approved: boolean, expectedApprovalId?: string) => {
     const approval = pendingApprovalRef.current;
-    if (approval === null || approvalResolvingRef.current) return;
+    const owner = approvalOwnerRef.current;
+    if (approval === null || owner === null || approvalResolvingRef.current ||
+        (expectedApprovalId !== undefined && approval.approvalId !== expectedApprovalId) ||
+        !ownsOperation(owner, approvalOwnerRef.current)) return;
+    const isCurrent = () => ownsOperation(owner, approvalOwnerRef.current) &&
+      pendingApprovalRef.current?.approvalId === approval.approvalId;
     approvalResolvingRef.current = true;
     setApprovalResolving(true);
     void backendClient.request("approval.resolve", {
@@ -1298,32 +1423,37 @@ export default function App() {
       approved,
       ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(documentRef.current) } : {}),
     }).then((data) => {
+      if (!isCurrent()) return;
       const result = data as unknown as ApprovalResolvedDto;
       if (result.approvalId !== approval.approvalId) {
         throw protocolMismatch("The backend resolved a different approval request.");
       }
     }).catch((error: unknown) => {
-      if (generationRef.current === approval.generation) {
-        setWorkspaceIssue(workspaceError(error));
-      }
+      if (isCurrent()) setWorkspaceIssue(workspaceError(error));
     }).finally(() => {
-      if (pendingApprovalRef.current?.approvalId === approval.approvalId) {
-        pendingApprovalRef.current = null;
-        setPendingApproval(null);
-      }
+      if (!isCurrent()) return;
+      pendingApprovalRef.current = null;
+      approvalOwnerRef.current = null;
+      setPendingApproval(null);
       approvalResolvingRef.current = false;
       setApprovalResolving(false);
+      focusComposer(owner);
     });
-  }, []);
+  }, [focusComposer, ownsOperation]);
+
+  const returnApprovalFocus = useCallback(() => {
+    const owner = approvalOwnerRef.current;
+    if (pendingApprovalRef.current === null && owner !== null && ownsOperation(owner, approvalOwnerRef.current)) focusComposer(owner);
+  }, [focusComposer, ownsOperation]);
 
   useEffect(() => {
     if (pendingApproval === null) return;
     const remaining = Date.parse(pendingApproval.expiresAt) - Date.now();
     if (remaining <= 0) {
-      resolvePendingApproval(false);
+      resolvePendingApproval(false, pendingApproval.approvalId);
       return;
     }
-    const timeout = window.setTimeout(() => resolvePendingApproval(false), remaining);
+    const timeout = window.setTimeout(() => resolvePendingApproval(false, pendingApproval.approvalId), remaining);
     return () => window.clearTimeout(timeout);
   }, [pendingApproval, resolvePendingApproval]);
 
@@ -1344,30 +1474,38 @@ export default function App() {
   const selectConversation = useCallback(async (projectId: string, session: SessionSummaryDto) => {
     if (conversationRef.current.activeTurn !== null || projectRef.current?.projectId !== projectId ||
         bindingGenerationRef.current !== generationRef.current || documentBusyRef.current || pendingApprovalRef.current !== null) return;
-    if (resumeDraftRef.current === null && conversationRef.current.draft.length > 0 &&
-        !sameSelection(conversationRef.current.selected, { projectId, sessionId: session.sessionId }) &&
+    if (sameSelection(conversationRef.current.selected, { projectId, sessionId: session.sessionId })) {
+      focusComposer();
+      return;
+    }
+    const restoringSelection = resumeSelectionRef.current?.projectId === projectId && resumeSelectionRef.current.sessionId === session.sessionId;
+    if (!restoringSelection && conversationRef.current.draft.length > 0 &&
         !window.confirm("Discard the unsent draft and select this conversation?")) return;
     const operation = beginWorkspaceOperation("Selecting conversation");
     if (operation === null) return;
     const previousSlashCatalogOwner = slashCatalogOwner;
     setSlashCatalogOwner(null);
     setSelectionPreview(null);
-    const generation = generationRef.current;
-    const isCurrent = () => generationRef.current === generation && workspaceOperation.current === operation;
+    const generation = operation.generation;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     let selectionApplied = false;
     try {
       const transcriptData = await selectConversationWithPreview(projectId, session, {
         isCurrent,
         onPreview: (data) => {
           setSelectionPreview({ title: session.title, transcript: transcriptViewFrom(projectId, session.sessionId, data) });
-          requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+          scheduleOwnedFrame(operation, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
         },
         onSelected: (selected) => {
           setSlashCatalogOwner({ generation, projectId, sessionId: selected.sessionId });
           dispatch({ type: "session-created", session: selected });
           setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
-          applyConversation({ type: "conversation-selected", generation, projectId, sessionId: session.sessionId });
+          applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, projectId, sessionId: session.sessionId });
           selectionApplied = true;
+          if (!restoringSelection) {
+            resumeDraftRef.current = null;
+            resumeSelectionRef.current = null;
+          }
           setRegistrationIssue(null);
           setLiveTurns([]);
           setPendingUserText(null);
@@ -1382,6 +1520,7 @@ export default function App() {
         applyConversation({
           type: "retry-target-restored",
           generation,
+          projectEpoch: operation.projectEpoch,
           projectId,
           sessionId: session.sessionId,
           turnId: retryTarget.turnId,
@@ -1396,8 +1535,8 @@ export default function App() {
         resumeDraftRef.current = null;
         resumeSelectionRef.current = null;
       }
-      requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
-      focusComposer();
+      scheduleOwnedFrame(operation, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+      focusComposer(operation);
     } catch (error) {
       if (!isCurrent()) return;
       const safe = workspaceError(error);
@@ -1408,9 +1547,9 @@ export default function App() {
         setSlashCatalogOwner(previousSlashCatalogOwner);
       }
       setWorkspaceIssue(safe);
-      focusComposer();
+      focusComposer(operation);
     } finally { finishWorkspaceOperation(operation); }
-  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, slashCatalogOwner]);
+  }, [ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, slashCatalogOwner]);
 
   useEffect(() => {
     if (catalog === null || catalog.selectedProjectId === null || conversation.selected !== null || workspaceBusy !== null) return;
@@ -1430,19 +1569,20 @@ export default function App() {
     const operation = beginWorkspaceOperation("Creating conversation");
     if (operation === null) return;
     setSlashCatalogOwner(null);
-    const generation = generationRef.current;
+    const generation = operation.generation;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     void (async () => {
       try {
         const data = await backendClient.request("session.create", sessionCreateParams(activeProjectId));
         const session = data as unknown as SessionCreatedDto;
-        if (generationRef.current !== generation) return;
+        if (!isCurrent()) return;
         if (session.projectId !== undefined && session.projectId !== activeProjectId) {
           throw protocolMismatch("The backend created a conversation in a different project.");
         }
         setSlashCatalogOwner({ generation, projectId: activeProjectId, sessionId: session.sessionId });
         dispatch({ type: "session-created", session });
         setExtensionFlow((current) => observeExtensionRevision(current, session.extensionRevision));
-        applyConversation({ type: "conversation-selected", generation, projectId: activeProjectId, sessionId: session.sessionId });
+        applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, projectId: activeProjectId, sessionId: session.sessionId });
         if (resumeDraftRef.current !== null) {
           applyConversation({ type: "draft-changed", draft: resumeDraftRef.current });
           resumeDraftRef.current = null;
@@ -1452,21 +1592,21 @@ export default function App() {
         setLiveTurns([]);
         setPendingUserText(null);
         setRegistrationIssue(null);
-        focusComposer();
+        focusComposer(operation);
       } catch (error) {
-        if (generationRef.current !== generation) return;
+        if (!isCurrent()) return;
         setWorkspaceIssue(workspaceError(error));
-        focusComposer();
+        focusComposer(operation);
       } finally { finishWorkspaceOperation(operation); }
     })();
-  }, [activeProjectId, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer]);
+  }, [ownsOperation, activeProjectId, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer]);
 
   const loadOlder = useCallback(() => {
     const current = transcript;
     if (current === null || current.offset <= 0) return;
     const operation = beginWorkspaceOperation("Loading older turns");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     const container = transcriptRef.current;
     const previousHeight = container?.scrollHeight ?? 0;
     const previousTop = container?.scrollTop ?? 0;
@@ -1475,20 +1615,26 @@ export default function App() {
     void (async () => {
       try {
         const data = await fetchTranscriptPage(current.projectId, current.sessionId, offset, limit, "The backend returned older turns for a different conversation.");
-        if (generationRef.current !== generation) return;
+        if (!isCurrent()) return;
         setTranscript((value) => value === null || value.projectId !== current.projectId || value.sessionId !== current.sessionId ? value : { ...value, status: data.status, issue: data.issue, items: mergeTranscriptItems(data.items, value.items), offset: data.offset, total: data.total, hasOlder: data.status === "ready" && data.offset > 0 });
-        requestAnimationFrame(() => { if (container !== null) container.scrollTop = previousTop + container.scrollHeight - previousHeight; });
+        scheduleOwnedFrame(operation, () => { if (container !== null) container.scrollTop = previousTop + container.scrollHeight - previousHeight; });
       } catch (error) {
-        if (generationRef.current === generation) setWorkspaceIssue(workspaceError(error));
+        if (isCurrent()) setWorkspaceIssue(workspaceError(error));
       }
       finally { finishWorkspaceOperation(operation); }
     })();
-  }, [beginWorkspaceOperation, finishWorkspaceOperation, transcript]);
+  }, [ownsOperation, scheduleOwnedFrame, beginWorkspaceOperation, finishWorkspaceOperation, transcript]);
 
   const sendTurn = useCallback(() => {
     const selected = conversationRef.current.selected;
     const draft = conversationRef.current.draft;
-    if (selected === null || draft.trim().length === 0 || conversationRef.current.activeTurn !== null || workspaceOperation.current !== null || inFlight.current) return;
+    if (selected === null || draft.trim().length === 0 || conversationRef.current.activeTurn !== null ||
+        workspaceOperation.current !== null || inFlight.current || documentBusyRef.current ||
+        pendingApprovalRef.current !== null || bindingGenerationRef.current !== generationRef.current ||
+        projectRef.current?.projectId !== selected.projectId) return;
+    const owner = captureOwner("conversation turn");
+    const generation = owner.generation;
+    const isCurrent = () => ownsOperation(owner, turnOwnerRef.current) && sameSelection(conversationRef.current.selected, selected);
     let tracked;
     const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
     const turnId = submission.turnId;
@@ -1509,24 +1655,26 @@ export default function App() {
     }
     catch (error) { setWorkspaceIssue(error instanceof Error && !(error instanceof BackendClientError)
       ? { code: "PROTOCOL_INVALID", message: error.message, retryable: false, source: "protocol" }
-      : workspaceError(error)); focusComposer(); return; }
-    const generation = generationRef.current;
+      : workspaceError(error)); focusComposer(owner); return; }
+    turnOwnerRef.current = owner;
+    frameOwnerRef.current = null;
     setPendingUserText(draft);
     setWorkspaceIssue(null);
-    applyConversation({ type: "turn-started", generation, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
+    applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
     void tracked.result.then(async (data) => {
+      if (!isCurrent()) return;
       const result = data as unknown as TurnCompletedDto;
-      const next = applyConversation({ type: "turn-succeeded", generation, requestId: tracked.requestId, projectId: selected.projectId, result });
+      const next = applyConversation({ type: "turn-succeeded", generation, projectEpoch: owner.projectEpoch, requestId: tracked.requestId, projectId: selected.projectId, result });
       const answer = next.latestAnswer;
       if (answer === null || answer.requestId !== tracked.requestId) {
         const active = next.activeTurn;
         if (active === null || active.requestId !== tracked.requestId) return;
         const mismatch = protocolMismatch("The backend returned a mismatched conversation result.").uiError;
-        const failed = applyConversation({ type: "turn-failed", generation, requestId: tracked.requestId, projectId: selected.projectId, sessionId: selected.sessionId, message: mismatch.message, retryable: mismatch.retryable });
+        const failed = applyConversation({ type: "turn-failed", generation, projectEpoch: owner.projectEpoch, requestId: tracked.requestId, projectId: selected.projectId, sessionId: selected.sessionId, message: mismatch.message, retryable: mismatch.retryable });
         if (failed.failure?.requestId === tracked.requestId) {
           setPendingUserText(null);
           setWorkspaceIssue(mismatch);
-          focusComposer();
+          focusComposer(owner);
         }
         return;
       }
@@ -1563,14 +1711,16 @@ export default function App() {
         setRegistrationIssue(null);
         await loadCatalog(generation);
       }
-      if (generationRef.current !== generation) return;
-      requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
-      focusComposer();
+      if (!isCurrent()) return;
+      scheduleOwnedFrame(owner, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+      focusComposer(owner);
     }).catch((error: unknown) => {
+      if (!isCurrent()) return;
       const safe = workspaceError(error);
       const next = applyConversation({
         type: "turn-failed",
         generation,
+        projectEpoch: owner.projectEpoch,
         requestId: tracked.requestId,
         projectId: selected.projectId,
         sessionId: selected.sessionId,
@@ -1585,14 +1735,14 @@ export default function App() {
       setPendingApproval(null);
       setApprovalResolving(false);
       setWorkspaceIssue(safe);
-      focusComposer();
+      focusComposer(owner);
       if (!isPersistedTurnFailure(next.failure)) return;
       const operation = beginWorkspaceOperation("Refreshing saved conversation");
       if (operation === null) return;
       // beginWorkspaceOperation clears the banner for user gestures; this refresh is not one.
       setWorkspaceIssue(safe);
       const selectionIsCurrent = () => (
-        generationRef.current === generation && sameSelection(conversationRef.current.selected, selected)
+        ownsOperation(operation, workspaceOperation.current) && sameSelection(conversationRef.current.selected, selected)
       );
       void (async () => {
         try {
@@ -1618,7 +1768,7 @@ export default function App() {
           setTranscript(transcriptViewFrom(selected.projectId, selected.sessionId, data));
           setLiveTurns([]);
           setRegistrationIssue(null);
-          requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+          scheduleOwnedFrame(operation, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
         } catch (reconciliationError: unknown) {
           if (!selectionIsCurrent()) return;
           const issue = workspaceError(reconciliationError);
@@ -1629,25 +1779,25 @@ export default function App() {
         }
       })();
     });
-  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
+  }, [captureOwner, ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 
   const previewExtensions = useCallback(() => {
     const flow = extensionFlow;
     if (flow === null || (flow.phase !== "ready" && flow.phase !== "error")) return;
     const operation = beginWorkspaceOperation("Previewing extensions");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? beginExtensionPreview(current) : current);
     void backendClient.request("extensions.preview", {}).then((data) => {
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       const preview = data as unknown as ExtensionPreviewDto;
       setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? receiveExtensionPreview(current, preview) : current);
     }).catch((error: unknown) => {
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       const safe = workspaceError(error);
       setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? failExtensionFlow(current, safe.message) : current);
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation]);
+  }, [ownsOperation, beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation]);
 
   const decideBinding = useCallback((
     bindingHash: string,
@@ -1669,10 +1819,10 @@ export default function App() {
     if (request === null) return;
     const operation = beginWorkspaceOperation("Applying extensions");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? submitting : current);
     void backendClient.request("extensions.apply", request).then((data) => {
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       const report = data as unknown as ExtensionApplyDto;
       if (report.sessionId !== state.session?.sessionId || report.turnId !== request.turnId) {
         throw protocolMismatch("The backend returned an apply result for a different conversation turn.");
@@ -1710,15 +1860,15 @@ export default function App() {
           },
         });
       }
-      requestAnimationFrame(() => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
+      scheduleOwnedFrame(operation, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
     }).catch((error: unknown) => {
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       const safe = workspaceError(error);
       setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId
         ? failExtensionApply(current, safe.message, safe.turnLifecycle)
         : current);
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, liveTurns, state.session, transcript]);
+  }, [ownsOperation, scheduleOwnedFrame, beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, liveTurns, state.session, transcript]);
 
   const restartForExtensions = useCallback(() => {
     if (extensionFlow?.phase !== "applied" || extensionFlow.report?.restartRequired !== true) return;
@@ -1730,25 +1880,26 @@ export default function App() {
     if (selected === null || conversation.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Retrying registration");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const generation = operation.generation;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     void backendClient.request("session.retry_registration", selected as unknown as JsonObject).then(async (data) => {
       const result = data as unknown as RegistrationRetryDto;
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       if (result.projectId !== selected.projectId || result.sessionId !== selected.sessionId) {
         throw protocolMismatch("The backend returned registration state for a different conversation.");
       }
       if (result.status === "registered") {
         setRegistrationIssue(null);
         if (state.session !== null) dispatch({ type: "session-created", session: { ...state.session, registered: true } });
-        await loadCatalog(generationRef.current);
+        await loadCatalog(generation);
       } else setRegistrationIssue(result.issue ?? "Catalog registration is still pending.");
     }).catch((error: unknown) => {
-      if (generationRef.current === generation) setWorkspaceIssue(workspaceError(error));
+      if (isCurrent()) setWorkspaceIssue(workspaceError(error));
     }).finally(() => {
+      if (isCurrent()) focusComposer(operation);
       finishWorkspaceOperation(operation);
-      if (generationRef.current === generation) focusComposer();
     });
-  }, [beginWorkspaceOperation, conversation.activeTurn, conversation.selected, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
+  }, [ownsOperation, beginWorkspaceOperation, conversation.activeTurn, conversation.selected, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 
   const updateThinkingMode = useCallback(async (
     mode: "normal" | "extended",
@@ -1757,10 +1908,10 @@ export default function App() {
     if (selected === null || conversationRef.current.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Updating session controls");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     try {
       const data = await backendClient.request("session.set_thinking", { mode });
-      if (generationRef.current !== generation) return;
+      if (!isCurrent()) return;
       if (data.sessionId !== selected.sessionId) {
         throw protocolMismatch("The backend returned controls for a different conversation.");
       }
@@ -1770,15 +1921,15 @@ export default function App() {
           ? data as unknown as SessionCreatedDto
           : { ...state.session, ...data as unknown as SessionCreatedDto },
       });
-      focusComposer();
+      focusComposer(operation);
     } catch (error) {
-      if (generationRef.current === generation) {
+      if (isCurrent()) {
         setWorkspaceIssue(workspaceError(error));
-        focusComposer();
+        focusComposer(operation);
       }
     }
     finally { finishWorkspaceOperation(operation); }
-  }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
+  }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
   const updateBashPermissionMode = useCallback(async (
     mode: BashPermissionMode,
@@ -1787,9 +1938,11 @@ export default function App() {
     if (selected === null || conversationRef.current.activeTurn !== null) return;
     const operation = beginWorkspaceOperation("Updating session controls");
     if (operation === null) return;
-    const generation = generationRef.current;
+    const generation = operation.generation;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     try {
       const data = (await backendClient.request("session.set_bash_permission", { mode })) as unknown as SessionBashPermissionSetDto;
+      if (!isCurrent()) return;
       const updatedMode = reconcileBashPermissionAck(
         generation,
         generationRef.current,
@@ -1797,7 +1950,7 @@ export default function App() {
         data,
       );
       if (updatedMode === null) {
-        if (generationRef.current !== generation) return;
+        if (!isCurrent()) return;
         throw protocolMismatch("The backend returned controls for a different conversation.");
       }
       dispatch({
@@ -1817,16 +1970,16 @@ export default function App() {
             }
           : { ...state.session, bashPermissionMode: updatedMode },
       });
-      focusComposer();
+      focusComposer(operation);
     } catch (error) {
-      if (generationRef.current === generation) {
+      if (isCurrent()) {
         setWorkspaceIssue(workspaceError(error));
-        focusComposer();
+        focusComposer(operation);
       }
     } finally {
       finishWorkspaceOperation(operation);
     }
-  }, [beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
+  }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
   useEffect(() => { if (workspaceIssue !== null) focusComposer(); }, [focusComposer, workspaceIssue]);
   useEffect(() => {
@@ -1884,9 +2037,9 @@ export default function App() {
               {list?.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
               {rows.length === 0 && list?.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
                 const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === project.projectId;
-                return <li key={session.sessionId}><button type="button" className="session-link" aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
+                return <li key={session.sessionId}><button type="button" className="session-link" aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
-              {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || workspaceBusy !== null}>Load more conversations</button>}
+              {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
             </div>;
           })}
         </section>
@@ -1955,10 +2108,10 @@ export default function App() {
           </section>}
           {selectionPreview === null && activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
             <div className="session-controls" aria-label="Session controls">
-              <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || workspaceBusy !== null} onChange={(event) => void updateThinkingMode(event.target.value as "normal" | "extended")}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
+              <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null} onChange={(event) => void updateThinkingMode(event.target.value as "normal" | "extended")}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
               <BashPermissionControl
                 mode={activeSession.bashPermissionMode}
-                disabled={interaction.controlDisabled || workspaceBusy !== null}
+                disabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
                 onChange={(mode) => void updateBashPermissionMode(mode)}
               />
               <p className="control-state">Use @ to add Skills anywhere in your message. Each Skill runs for this turn; write “first…then…” when order matters. File edits and citation tasks use Normal thinking and restore your selection afterward. Ask/Bypass stays fixed during a turn; change it after completion. Slash commands remain available.</p>
@@ -1978,7 +2131,7 @@ export default function App() {
               commands={composerSlashCommands(state.session, conversation.selected, state.snapshot?.generation, slashCatalogOwner,
                 state.snapshot?.lifecycle === "ready" && state.phase === "session-ready" && idle)}
               disabled={conversation.selected === null || interaction.turnActive}
-              sendDisabled={interaction.sendDisabled || workspaceBusy !== null}
+              sendDisabled={interaction.sendDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
               onSubmit={sendTurn}
             />
@@ -2038,7 +2191,7 @@ export default function App() {
         approval={pendingApproval}
         resolving={approvalResolving}
         onResolve={resolvePendingApproval}
-        returnFocus={focusComposer}
+        returnFocus={returnApprovalFocus}
         allowDocumentEditing={documentValue !== null}
       />}
     </div>

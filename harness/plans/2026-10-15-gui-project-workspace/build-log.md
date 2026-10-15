@@ -107,3 +107,9 @@
 - Adapted existing conversation coordinator fixtures to explicitly open two separately owned project/history roots. Updated old orphan/malformed/partial-scan fallback expectations to the authorized fail-closed behavior, asserting unchanged bytes. Turn lifecycle, ordered registration, controls, retry/no-replay and citation-entry coverage remain.
 - Only test_desktop_conversations.py changed; all 44 test functions retained and S2 metadata tests preserved. Actual complete-file run once: `poetry run pytest tests/test_desktop_conversations.py -q --tb=short` -> 61 passed, 2.42s. Earlier focused run: 11 passed/2 failures (fake factory missing system_prompt argument and obsolete local-project expectation); corrected those test assumptions, focused 15/15 passed before the complete-file run.
 - Main reviewed actual setup/expectation diff and scoped whitespace check passed. No production bypass, true history migration or provider request.
+
+### E13 / P1-S6 frontend: ownership of delayed results
+
+- Added backend-generation, project-epoch and operation-token checks to existing workspace/document/catalog/session/control/approval callbacks, including catches, finalizers and delayed focus/scroll. Reopening A after A-to-B invalidates results from the first A. Conversation switch confirmation preserves an unsent draft on cancel/failure.
+- Actual checks by frontend agent: TypeScript no-emit passed; existing conversations/documents/answer_stream tests 58/58 passed (~4.45s); final five focused epoch checks and TypeScript passed. Four new cases use deferred responses for catalog/selection/rejection and reducer epochs. An initial TypeScript check found six obsolete unused locals after replacing guards; removed before successful verification.
+- Main reviewed the changed control flow and scoped whitespace check. Native project interaction remains pending and is running against synthetic data; these unit checks do not establish GUI acceptance.
