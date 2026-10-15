@@ -199,28 +199,15 @@ h3 {
   text-transform: uppercase;
 }
 
-.workspace-item {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.65rem;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid #dedfdd;
-  border-radius: 0.6rem;
-}
-
-.workspace-item > span:last-child,
 .sidebar-status > span:last-child {
   display: grid;
   min-width: 0;
 }
 
-.workspace-item strong,
 .sidebar-status strong {
   font-size: 0.82rem;
 }
 
-.workspace-item small,
 .sidebar-status small {
   margin-top: 0.14rem;
   color: #777d7a;
