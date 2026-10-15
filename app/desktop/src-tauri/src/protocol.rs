@@ -15,6 +15,10 @@ pub const FULL_TEXT_RESULT_METHODS: &[&str] = &["session.turn", "session.transcr
 pub const PROTOCOL_METHODS: &[&str] = &[
     "runtime.diagnostics",
     "project.list",
+    "workspace.select",
+    "document.open",
+    "document.save",
+    "document.apply",
     "session.create",
     "session.list",
     "session.select",
@@ -49,6 +53,7 @@ pub const REQUEST_EVENTS: &[&str] = &[
     "tool.started",
     "tool.finished",
     "tool.failed",
+    "document.proposed",
     "approval.required",
     "knowledge.progress",
     "shutdown.progress",
@@ -263,6 +268,10 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
     match method {
         "runtime.diagnostics" => Some(&[]),
         "project.list" => Some(&[]),
+        "workspace.select" => Some(&["rootPath"]),
+        "document.open" => Some(&["path"]),
+        "document.save" => Some(&["documentContext"]),
+        "document.apply" => Some(&["documentContext", "turnId"]),
         "session.create" => Some(&[]),
         "session.list" => Some(&["projectId"]),
         "session.select" | "session.retry_registration" | "session.transcript" => {
@@ -307,7 +316,11 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.list" => Some(&["projectId", "offset", "limit"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
-        "session.turn" => Some(&["text", "turnId", "retry"]),
+        "workspace.select" => Some(&["rootPath"]),
+        "document.open" => Some(&["path"]),
+        "document.save" => Some(&["documentContext"]),
+        "document.apply" => Some(&["documentContext", "turnId", "callId", "parentRequestId", "undoOfCallId", "resolution", "expectedSnapshot"]),
+        "session.turn" => Some(&["text", "turnId", "retry", "documentContext"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.set_bash_permission" => Some(&["mode"]),
         "knowledge.search" => Some(&[
@@ -341,6 +354,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
             "parentRequestId",
             "turnId",
             "approved",
+            "documentContext",
         ]),
         _ => None,
     }
@@ -470,6 +484,119 @@ fn validate_optional_integer(
     Ok(())
 }
 
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+fn expect_document_text<'a>(value: &'a Value, field: &str) -> Result<&'a str, ProtocolViolation> {
+    let text = value.as_str().ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be a string")))?;
+    if text.len() > 1_048_576 {
+        return Err(ProtocolViolation::invalid(format!("{field} is too large")));
+    }
+    Ok(text)
+}
+
+fn validate_fingerprint(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
+    let text = expect_non_empty_string(value, field)?;
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')) {
+        return Err(ProtocolViolation::invalid(format!("{field} must be a SHA-256 fingerprint")));
+    }
+    Ok(())
+}
+
+fn validate_document_range(data: &Map<String, Value>, field: &str, source: Option<&str>) -> Result<(), ProtocolViolation> {
+    let (start, end) = (data.get("rangeStartUtf16"), data.get("rangeEndUtf16"));
+    match (start, end) {
+        (None, None) => Ok(()),
+        (Some(start), Some(end)) => {
+            let start = expect_integer_range(start, &format!("{field}.rangeStartUtf16"), 0, MAX_SAFE_INTEGER)?;
+            let end = expect_integer_range(end, &format!("{field}.rangeEndUtf16"), 0, MAX_SAFE_INTEGER)?;
+            if start > end {
+                return Err(ProtocolViolation::invalid(format!("{field} has a reversed UTF-16 range")));
+            }
+            if let Some(text) = source {
+                let mut position = 0_i64;
+                let mut start_valid = start == 0;
+                let mut end_valid = end == 0;
+                for character in text.chars() {
+                    position += character.len_utf16() as i64;
+                    start_valid |= position == start;
+                    end_valid |= position == end;
+                }
+                if !start_valid || !end_valid {
+                    return Err(ProtocolViolation::invalid(format!("{field} range exceeds source text or splits a surrogate pair")));
+                }
+            }
+            Ok(())
+        }
+        _ => Err(ProtocolViolation::invalid(format!("{field} requires both UTF-16 range endpoints"))),
+    }
+}
+
+fn validate_document_context(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
+    let data = expect_object(value, field)?;
+    validate_data_keys(data,
+        &["rootPath", "path", "editorRevision", "sourceText", "diskFingerprint", "rangeStartUtf16", "rangeEndUtf16"],
+        &["rootPath", "path", "editorRevision", "sourceText", "diskFingerprint"])?;
+    for name in ["rootPath", "path"] {
+        expect_bounded_string(&data[name], &format!("{field}.{name}"), 8_192)?;
+    }
+    expect_integer_range(&data["editorRevision"], &format!("{field}.editorRevision"), 0, MAX_SAFE_INTEGER)?;
+    let source = expect_document_text(&data["sourceText"], &format!("{field}.sourceText"))?;
+    validate_fingerprint(&data["diskFingerprint"], &format!("{field}.diskFingerprint"))?;
+    validate_document_range(data, field, Some(source))
+}
+
+fn validate_document_result(data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
+    validate_data_keys(data,
+        &["path", "status", "sourceText", "diskFingerprint", "rangeStartUtf16", "rangeEndUtf16", "candidateText", "currentDiskText", "issue", "callId", "rootPath", "editorRevision", "savedFingerprint", "expectedSnapshot"],
+        &["path", "status"])?;
+    expect_bounded_string(&data["path"], "data.path", 8_192)?;
+    validate_enum(&data["status"], "data.status", &["saved", "conflict", "failed", "cancelled"])?;
+    for name in ["sourceText", "candidateText", "currentDiskText"] {
+        if let Some(value) = data.get(name) { expect_document_text(value, &format!("data.{name}"))?; }
+    }
+    for name in ["diskFingerprint", "savedFingerprint"] {
+        if let Some(value) = data.get(name) { validate_fingerprint(value, &format!("data.{name}"))?; }
+    }
+    for (name, max_bytes) in [("rootPath", 8_192), ("issue", 4_096), ("callId", 256)] {
+        if let Some(value) = data.get(name) { expect_bounded_string(value, &format!("data.{name}"), max_bytes)?; }
+    }
+    if let Some(value) = data.get("editorRevision") { expect_integer_range(value, "data.editorRevision", 0, MAX_SAFE_INTEGER)?; }
+    if let Some(value) = data.get("expectedSnapshot") { validate_document_context(value, "data.expectedSnapshot")?; }
+    validate_document_range(data, "data", None)
+}
+
+fn validate_document_operations(value: &Value) -> Result<(), ProtocolViolation> {
+    let items = value.as_array().ok_or_else(|| ProtocolViolation::invalid("data.documentOperations must be an array"))?;
+    if items.len() > 128 { return Err(ProtocolViolation::invalid("data.documentOperations contains too many items")); }
+    for item in items {
+        let data = expect_object(item, "data.documentOperations[]")?;
+        validate_exact_data_keys(data, &["callId", "path", "candidateText", "rangeStartUtf16", "rangeEndUtf16"])?;
+        expect_bounded_string(&data["callId"], "data.documentOperations[].callId", 256)?;
+        expect_bounded_string(&data["path"], "data.documentOperations[].path", 8_192)?;
+        expect_document_text(&data["candidateText"], "data.documentOperations[].candidateText")?;
+        validate_document_range(data, "data.documentOperations[]", None)?;
+    }
+    Ok(())
+}
+
+fn validate_document_approval(request_id: &str, data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
+    validate_data_keys(data,
+        &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "rangeStartUtf16", "rangeEndUtf16", "description", "createdAt", "expiresAt"],
+        &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "description", "createdAt", "expiresAt"])?;
+    for (name, max_bytes) in [("approvalId", 256), ("turnId", 256), ("targetPath", 8_192), ("description", 4_096)] {
+        expect_bounded_string(&data[name], &format!("data.{name}"), max_bytes)?;
+    }
+    let parent = expect_non_empty_string(&data["parentRequestId"], "data.parentRequestId")?;
+    validate_request_id(parent)?;
+    if parent != request_id { return Err(ProtocolViolation::invalid("data.parentRequestId must match the event requestId")); }
+    validate_enum(&data["operation"], "data.operation", &["document.apply", "document.undo"])?;
+    for name in ["createdAt", "expiresAt"] {
+        let timestamp = expect_non_empty_string(&data[name], &format!("data.{name}"))?;
+        if !is_utc_timestamp(timestamp) { return Err(ProtocolViolation::invalid(format!("data.{name} must be a UTC ISO 8601 timestamp"))); }
+    }
+    validate_document_range(data, "data", None)
+}
+
 fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), ProtocolViolation> {
     let required = required_params(method)
         .ok_or_else(|| ProtocolViolation::invalid(format!("Unknown method: {method}")))?;
@@ -491,6 +618,22 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
     }
 
     match method {
+        "workspace.select" => { expect_bounded_string(&params["rootPath"], "params.rootPath", 8_192)?; }
+        "document.open" => { expect_bounded_string(&params["path"], "params.path", 8_192)?; }
+        "document.save" | "document.apply" => {
+            validate_document_context(&params["documentContext"], "params.documentContext")?;
+            if method == "document.apply" {
+                expect_turn_id(&params["turnId"], "params.turnId")?;
+                if params.contains_key("callId") == params.contains_key("undoOfCallId") {
+                    return Err(ProtocolViolation::invalid("document.apply requires exactly one of callId or undoOfCallId"));
+                }
+                validate_optional_string(params, "callId", 256)?;
+                validate_optional_string(params, "undoOfCallId", 256)?;
+                if let Some(value) = params.get("parentRequestId") { validate_request_id(expect_non_empty_string(value, "params.parentRequestId")?)?; }
+                if let Some(value) = params.get("resolution") { validate_enum(value, "params.resolution", &["keep", "use", "cancel"])?; }
+                if let Some(value) = params.get("expectedSnapshot") { validate_document_context(value, "params.expectedSnapshot")?; }
+            }
+        }
         "session.create" => {
             if let Some(load_mcp) = params.get("loadMcp") {
                 if !load_mcp.is_boolean() {
@@ -519,6 +662,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         }
         "session.turn" => {
             expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
+            if let Some(value) = params.get("documentContext") { validate_document_context(value, "params.documentContext")?; }
             expect_turn_id(&params["turnId"], "params.turnId")?;
             if !params["retry"].is_boolean() {
                 return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
@@ -601,6 +745,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         }
         "approval.resolve" => {
             validate_optional_string(params, "approvalId", 256)?;
+            if let Some(value) = params.get("documentContext") { validate_document_context(value, "params.documentContext")?; }
             if let Some(parent_request_id) = params.get("parentRequestId") {
                 let parent_request_id = expect_non_empty_string(
                     parent_request_id,
@@ -860,7 +1005,15 @@ fn validate_event_data(
 ) -> Result<(), ProtocolViolation> {
     validate_safe_object(data, "data")?;
     validate_tool_event(event, data)?;
+    if event == "approval.required" && data.contains_key("operation") {
+        return validate_document_approval(request_id, data);
+    }
     match event {
+        "document.proposed" => {
+            validate_exact_data_keys(data, &["turnId", "callId"])?;
+            expect_turn_id(&data["turnId"], "data.turnId")?;
+            expect_bounded_string(&data["callId"], "data.callId", 256)?;
+        }
         "approval.required" => {
             const KEYS: &[&str] = &[
                 "approvalId",
@@ -1103,6 +1256,20 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
     let data = expect_object(value, "data")?;
     validate_safe_object(data, "data")?;
     match method {
+        "workspace.select" => {
+            validate_exact_data_keys(data, &["rootPath"])?;
+            expect_bounded_string(&data["rootPath"], "data.rootPath", 8_192)?;
+        }
+        "document.open" => {
+            validate_data_keys(data, &["path", "sourceText", "diskFingerprint", "rootPath", "editorRevision"],
+                &["path", "sourceText", "diskFingerprint"])?;
+            if let Some(value) = data.get("rootPath") { expect_bounded_string(value, "data.rootPath", 8_192)?; }
+            if let Some(value) = data.get("editorRevision") { expect_integer_range(value, "data.editorRevision", 0, MAX_SAFE_INTEGER)?; }
+            expect_bounded_string(&data["path"], "data.path", 8_192)?;
+            expect_document_text(&data["sourceText"], "data.sourceText")?;
+            validate_fingerprint(&data["diskFingerprint"], "data.diskFingerprint")?;
+        }
+        "document.save" | "document.apply" => validate_document_result(data)?,
         "runtime.diagnostics" => {
             const KEYS: &[&str] = &[
                 "backendState",
@@ -1189,6 +1356,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                     "registrationStatus",
                     "registrationIssue",
                     "extensionAction",
+                    "documentOperations",
                 ],
                 &[
                     "sessionId",
@@ -1203,6 +1371,7 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 ],
             )?;
             validate_completed_turn_fields(data, "session.turn", None)?;
+            if let Some(value) = data.get("documentOperations") { validate_document_operations(value)?; }
             validate_string_array(
                 &data["validationErrors"],
                 "data.validationErrors",
@@ -2112,6 +2281,10 @@ impl ProtocolTraceValidator {
                         state.next_sequence
                     )));
                 }
+                if event.event == "document.proposed" && (state.method != "session.turn"
+                    || event.data.get("turnId").and_then(Value::as_str) != state.turn_id.as_deref()) {
+                    return Err(ProtocolViolation::invalid("document.proposed must match the active session.turn"));
+                }
                 state.next_sequence += 1;
             }
             ProtocolMessage::Result(result) => {
@@ -2185,6 +2358,7 @@ mod tests {
 
     fn sample_field_value(rule: &Value, request_id: &str) -> Value {
         match rule["type"].as_str().expect("field type") {
+            "string" if rule["pattern"].is_string() => Value::String("0".repeat(64)),
             "string" => rule["enum"]
                 .as_array()
                 .and_then(|values| values.first())
@@ -2194,6 +2368,8 @@ mod tests {
             "nullableString" | "nullableBoolean" => Value::Null,
             "integer" => Value::from(rule["minimum"].as_i64().unwrap_or(0)),
             "stringArray" => Value::Array(Vec::new()),
+            "object" => Value::Object(rule["items"].as_object().expect("object schema").iter()
+                .map(|(field, item_rule)| (field.clone(), sample_field_value(item_rule, request_id))).collect()),
             "objectArray" => {
                 let item = rule["items"]
                     .as_object()
@@ -2218,7 +2394,7 @@ mod tests {
                 Value::Bool(true)
             }
             "boolean" | "nullableBoolean" | "integer" => Value::String("wrong".to_owned()),
-            "stringArray" | "objectArray" => Value::Bool(true),
+            "stringArray" | "objectArray" | "object" => Value::Bool(true),
             other => panic!("unknown field type: {other}"),
         }];
         if let Some(minimum) = rule["minimum"].as_i64() {
@@ -2606,10 +2782,11 @@ mod tests {
         for method in contract["methods"].as_array().expect("methods") {
             let method_name = method["name"].as_str().expect("method name");
             let schema = method["params"].as_object().expect("params schema");
-            let params = schema
+            let mut params = schema
                 .iter()
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
+            if method_name == "document.apply" { params.remove("undoOfCallId"); }
             let message = serde_json::json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "messageType": "request",
@@ -2714,12 +2891,13 @@ mod tests {
                 .iter()
                 .find(|item| item["name"] == *method)
                 .expect("result method contract");
-            let params = method_contract["params"]
+            let mut params = method_contract["params"]
                 .as_object()
                 .expect("params schema")
                 .iter()
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
+            if method == "document.apply" { params.remove("undoOfCallId"); }
             let schema = schema_value.as_object().expect("result data schema");
             let mut data = schema
                 .iter()
@@ -2787,7 +2965,7 @@ mod tests {
                         Value::Object(missing),
                     )
                     .is_ok(),
-                    rule["required"] == false,
+                    rule["required"] == false && !matches!(field.as_str(), "rangeStartUtf16" | "rangeEndUtf16"),
                     "{method}.{field} missing"
                 );
 

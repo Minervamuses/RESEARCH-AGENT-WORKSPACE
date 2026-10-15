@@ -705,6 +705,7 @@ class FixtureSession:
         crash_control: _FixtureCrashControl,
         bash_approval_handler: Callable[[str, str, int], bool] | None,
         bash_command_runner: Callable[..., Any] | None,
+        extra_tools: list | None = None,
     ) -> None:
         self.config = config
         self.session_id = session_id
@@ -725,6 +726,7 @@ class FixtureSession:
         self._prompt_persisted_callback: Callable[[], None] | None = None
         self._search_handler = search_handler
         self._crash_control = crash_control
+        self.extra_tools = list(extra_tools or [])
         self._bash_tool = (
             create_bash_tool(
                 config,
@@ -956,7 +958,22 @@ class FixtureSession:
             )[:_MAX_CONTEXT_CHARS]
             new_messages: list[Any] = []
             tool_activities: tuple[ToolActivitySummary, ...] = ()
-            if text == _FIXTURE_CRASH_TOOL:
+            if original_input.startswith("[[fixture:document-replace]]"):
+                tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
+                if tool is None or not getattr(self, "_document_turn_active", False):
+                    raise RuntimeError("fixture document seam requires an active editor snapshot")
+                replacement = original_input.removeprefix("[[fixture:document-replace]]").lstrip(" ")
+                raw_result = await tool.ainvoke({"replacement_text": replacement})
+                payload = json.loads(raw_result)
+                answer = f"Fixture document operation: {payload['status']}."
+                tool_activities = (ToolActivitySummary(
+                    call_id="fixture-document-edit", name="document_edit",
+                    status="ok" if payload["status"] == "saved" else "failed",
+                    summary=answer,
+                ),)
+            elif original_input.startswith("[[fixture:document-analyze]]"):
+                answer = "Fixture analysis received the current editor snapshot; no document tool was called."
+            elif text == _FIXTURE_CRASH_TOOL:
                 self._crash_control.record_effect("tool", turn_id)
                 self._crash_control.hit(
                     "during_tool_after_side_effect",
@@ -1273,6 +1290,7 @@ class FixtureSessionFactory:
         session_id: str | None = None,
         bash_approval_handler: Callable[[str, str, int], bool] | None = None,
         bash_command_runner: Callable[..., Any] | None = None,
+        extra_tools: list | None = None,
     ) -> FixtureSession:
         del load_mcp
         if session_id is None:
@@ -1300,6 +1318,7 @@ class FixtureSessionFactory:
             crash_control=self._crash_control,
             bash_approval_handler=bash_approval_handler,
             bash_command_runner=bash_command_runner,
+            extra_tools=extra_tools,
         )
 
 

@@ -876,6 +876,340 @@
           "expiresAt": "2026-08-24T01:03:03Z"
         }
       }
+    },
+    {
+      "name": "document-context-utf16-snapshot",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "session.turn",
+        "params": {
+          "text": "只分析第二段",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "document-save-empty-source",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 0,
+            "rangeEndUtf16": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "document-apply-bound-candidate",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.apply",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          },
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "callId": "doc-1"
+        }
+      }
+    },
+    {
+      "name": "document-undo-bound-original",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.apply",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          },
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "undoOfCallId": "doc-1"
+        }
+      }
+    },
+    {
+      "name": "document-context-rejects-surrogate-split",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 3,
+            "rangeEndUtf16": 4
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-context-rejects-missing-range-end",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-context-rejects-out-of-bounds",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 100
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-context-rejects-unsafe-revision",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 9007199254740992,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-context-rejects-unknown-field",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12,
+            "arbitrary": "no"
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-context-rejects-invalid-fingerprint",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.save",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "ABC",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-apply-rejects-arbitrary-replacement",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.apply",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          },
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "callId": "doc-1",
+          "replacementText": "cannot replace candidate"
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-apply-requires-operation-identity",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "document.apply",
+        "params": {
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          },
+          "turnId": "123e4567e89b42d3a456426614174000"
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-approval-without-bash-command",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "sequence": 1,
+        "event": "approval.required",
+        "data": {
+          "approvalId": "a1",
+          "parentRequestId": "00000000-0000-4000-8000-000000000061",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "operation": "document.apply",
+          "targetPath": "/tmp/research/稿.md",
+          "rangeStartUtf16": 10,
+          "rangeEndUtf16": 12,
+          "description": "Replace selected source range",
+          "createdAt": "2026-10-15T00:00:00Z",
+          "expiresAt": "2026-10-15T00:10:00Z"
+        }
+      }
+    },
+    {
+      "name": "document-proposed-live-turn",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "sequence": 1,
+        "event": "document.proposed",
+        "data": {
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "callId": "doc-1"
+        }
+      }
+    },
+    {
+      "name": "document-approval-current-editor-context",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "method": "approval.resolve",
+        "params": {
+          "approvalId": "a1",
+          "parentRequestId": "00000000-0000-4000-8000-000000000061",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "approved": true,
+          "documentContext": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/稿.md",
+            "editorRevision": 3,
+            "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12
+          }
+        }
+      }
     }
   ],
   "rawLines": [
@@ -1916,6 +2250,244 @@
         }
       ],
       "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-open-empty-file",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "document.open",
+          "params": {
+            "path": "/tmp/research/稿.md"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "ok": true,
+          "data": {
+            "path": "/tmp/research/稿.md",
+            "sourceText": "",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "document-save-empty-result",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "document.save",
+          "params": {
+            "documentContext": {
+              "rootPath": "/tmp/research",
+              "path": "/tmp/research/稿.md",
+              "editorRevision": 3,
+              "sourceText": "",
+              "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+              "rangeStartUtf16": 0,
+              "rangeEndUtf16": 0
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "ok": true,
+          "data": {
+            "path": "/tmp/research/稿.md",
+            "status": "saved",
+            "sourceText": "",
+            "diskFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+            "savedFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        }
+      ]
+    },
+    {
+      "name": "document-conflict-preserves-empty-disk",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "document.apply",
+          "params": {
+            "documentContext": {
+              "rootPath": "/tmp/research",
+              "path": "/tmp/research/稿.md",
+              "editorRevision": 3,
+              "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+              "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+              "rangeStartUtf16": 10,
+              "rangeEndUtf16": 12
+            },
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "callId": "doc-1"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "ok": true,
+          "data": {
+            "path": "/tmp/research/稿.md",
+            "status": "conflict",
+            "candidateText": "",
+            "currentDiskText": "",
+            "expectedSnapshot": {
+              "rootPath": "/tmp/research",
+              "path": "/tmp/research/稿.md",
+              "editorRevision": 3,
+              "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+              "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+              "rangeStartUtf16": 10,
+              "rangeEndUtf16": 12
+            },
+            "rangeStartUtf16": 10,
+            "rangeEndUtf16": 12,
+            "callId": "doc-1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "document-result-rejects-unknown-field",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "document.save",
+          "params": {
+            "documentContext": {
+              "rootPath": "/tmp/research",
+              "path": "/tmp/research/稿.md",
+              "editorRevision": 3,
+              "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+              "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+              "rangeStartUtf16": 10,
+              "rangeEndUtf16": 12
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "ok": true,
+          "data": {
+            "path": "/tmp/research/稿.md",
+            "status": "saved",
+            "arbitrary": "no"
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-result-rejects-unpaired-range",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "document.save",
+          "params": {
+            "documentContext": {
+              "rootPath": "/tmp/research",
+              "path": "/tmp/research/稿.md",
+              "editorRevision": 3,
+              "sourceText": "中文🙂\t\r\n\n相同\n相同\n",
+              "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+              "rangeStartUtf16": 10,
+              "rangeEndUtf16": 12
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "ok": true,
+          "data": {
+            "path": "/tmp/research/稿.md",
+            "status": "conflict",
+            "rangeStartUtf16": 1
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-proposed-rejects-other-turn",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "method": "session.turn",
+          "params": {
+            "text": "改寫",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000061",
+          "sequence": 1,
+          "event": "document.proposed",
+          "data": {
+            "turnId": "223e4567e89b42d3a456426614174000",
+            "callId": "doc-1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "document-open-real-context-result",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000062",
+          "method": "document.open",
+          "params": {
+            "path": "/tmp/research/paper.md"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000062",
+          "ok": true,
+          "data": {
+            "rootPath": "/tmp/research",
+            "path": "/tmp/research/paper.md",
+            "sourceText": "中文🙂\r\n",
+            "diskFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+            "editorRevision": 0
+          }
+        }
+      ]
     }
   ]
 }

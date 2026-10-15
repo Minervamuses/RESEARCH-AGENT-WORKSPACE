@@ -116,7 +116,13 @@ def validate_turn_id(value: Any, field: str = "turnId") -> str:
 def _validate_field_rule(value: Any, rule: dict[str, Any], field: str) -> None:
     field_type = rule["type"]
     if field_type == "string":
-        text = _expect_string(value, field)
+        text = value if rule.get("allowEmpty") and isinstance(value, str) else _expect_string(value, field)
+        try:
+            text.encode("utf-8")
+        except UnicodeEncodeError:
+            _invalid(f"{field} must contain valid Unicode")
+        if "pattern" in rule and not re.fullmatch(rule["pattern"], text):
+            _invalid(f"{field} has an invalid format")
         if len(text.encode("utf-8")) > rule.get("maxBytes", math.inf):
             _invalid(f"{field} is too large")
         if "enum" in rule and text not in rule["enum"]:
@@ -152,6 +158,9 @@ def _validate_field_rule(value: Any, rule: dict[str, Any], field: str) -> None:
                 "itemMaxBytes", math.inf
             ):
                 _invalid(f"{field}[{index}] is too large")
+        return
+    if field_type == "object":
+        _validate_object_schema(_expect_object(value, field), rule["items"], field)
         return
     if field_type == "objectArray":
         if not isinstance(value, list):
@@ -195,6 +204,37 @@ def _validate_object_schema(
                 _invalid(f"{field}.{name} is required")
             continue
         _validate_field_rule(value[name], rule, f"{field}.{name}")
+
+
+def _validate_document_range(value: dict[str, Any], field: str, *, source: bool = False) -> None:
+    start = value.get("rangeStartUtf16")
+    end = value.get("rangeEndUtf16")
+    if (start is None) != (end is None):
+        _invalid(f"{field} requires both UTF-16 range endpoints")
+    if start is None:
+        return
+    if start > end:
+        _invalid(f"{field} has a reversed UTF-16 range")
+    if source:
+        boundaries = {0}
+        position = 0
+        for character in value["sourceText"]:
+            position += 2 if ord(character) > 0xffff else 1
+            boundaries.add(position)
+        if start not in boundaries or end not in boundaries:
+            _invalid(f"{field} range exceeds source text or splits a surrogate pair")
+
+
+def _validate_document_params(method: str, params: dict[str, Any]) -> None:
+    context = params.get("documentContext")
+    if context is not None:
+        _validate_document_range(context, "params.documentContext", source=True)
+    expected = params.get("expectedSnapshot")
+    if expected is not None:
+        _validate_document_range(expected, "params.expectedSnapshot", source=True)
+    if method == "document.apply":
+        if ("callId" in params) == ("undoOfCallId" in params):
+            _invalid("document.apply requires exactly one of callId or undoOfCallId")
 
 
 def _normalize_data_key(key: str) -> str:
@@ -259,9 +299,12 @@ def _validate_event_data(
             if optional in data:
                 _expect_string(data[optional], f"data.{optional}")
 
-    schema = CONTRACT["eventDataSchemas"].get(event)
+    schema = (CONTRACT["documentApprovalDataSchema"] if event == "approval.required" and "operation" in data
+              else CONTRACT["eventDataSchemas"].get(event))
     if schema is not None:
         _validate_object_schema(data, schema, "data")
+    if event == "approval.required" and "operation" in data:
+        _validate_document_range(data, "data")
     if (
         event == "approval.required"
         and data["parentRequestId"] != request_id
@@ -275,6 +318,13 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
     schema = CONTRACT["resultDataSchemas"].get(method)
     if schema is not None:
         _validate_object_schema(data, schema, "data")
+    if method in {"document.save", "document.apply"}:
+        _validate_document_range(data, "data")
+        if "expectedSnapshot" in data:
+            _validate_document_range(data["expectedSnapshot"], "data.expectedSnapshot", source=True)
+    if method == "session.turn":
+        for operation in data.get("documentOperations", []):
+            _validate_document_range(operation, "data.documentOperations")
     if method in _DURABLE_TURN_METHODS and (
         data.get("state") != "completed"
         or data.get("accepted") is not True
@@ -354,6 +404,7 @@ def validate_message(value: Any) -> dict[str, Any]:
             _invalid(f"Unknown method: {method}")
         params = _expect_object(message.get("params"), "params")
         _validate_object_schema(params, METHODS[method]["params"], "params")
+        _validate_document_params(method, params)
         return message
 
     if message_type == "event":
@@ -614,6 +665,11 @@ class TraceValidator:
                     f"Expected sequence {state['nextSequence']}, "
                     f"received {message['sequence']}"
                 )
+            if message["event"] == "document.proposed" and (
+                state["method"] != "session.turn"
+                or message["data"]["turnId"] != state["turnId"]
+            ):
+                _invalid("document.proposed must match the active session.turn")
             state["nextSequence"] = int(state["nextSequence"]) + 1
             return
         if message_type == "result":

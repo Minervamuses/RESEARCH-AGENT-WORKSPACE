@@ -1225,3 +1225,32 @@ h3 {
     grid-template-columns: 1fr;
   }
 }
+
+/* Source and conversation share a workspace; tool waits never disable editing. */
+.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); min-height: 0; flex: 1; }
+.document-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #d4d6d8; background: #fff; }
+.document-toolbar { padding: .7rem; border-bottom: 1px solid #dedfdd; }
+.document-toolbar label { display: grid; gap: .2rem; margin-bottom: .4rem; color: #66716d; font-size: .72rem; }
+.document-toolbar input { min-width: 0; width: 100%; padding: .35rem .5rem; border: 1px solid #d4d6d8; border-radius: .3rem; color: #23272f; }
+.document-toolbar .action-row { flex-wrap: wrap; gap: .35rem; }
+.document-toolbar button { min-height: 1.9rem; padding: .3rem .55rem; font-size: .72rem; }
+.document-notice { padding: .45rem .7rem; margin: 0; color: #52645c; background: #f3f7f4; font-size: .72rem; }
+.document-editor { display: flex; flex-direction: column; flex: 1; min-height: 16rem; min-width: 0; }
+.document-editor-surface { flex: 1; min-height: 12rem; }
+.document-editor-status { padding: .35rem .7rem; color: #66716d; font-size: .68rem; border-top: 1px solid #dedfdd; }
+.document-conflict { padding: .7rem; max-height: 45vh; overflow: auto; border-top: 2px solid #b38539; background: #fffaf0; }
+.document-conflict h3 { font-size: .95rem; }
+.document-conflict p, .document-conflict button, .conflict-versions { font-size: .72rem; }
+.conflict-versions pre { max-height: 9rem; overflow: auto; white-space: pre-wrap; padding: .5rem; background: #fff; border: 1px solid #dedfdd; }
+.writing-workspace > .workspace-body { min-width: 0; padding: .8rem; }
+@media (max-width: 1050px) {
+  .writing-workspace { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  .document-pane { min-height: 55vh; border-right: 0; border-bottom: 1px solid #d4d6d8; }
+}
+
+.document-editor-empty { padding: 1.5rem .9rem; color: #66716d; font-size: .8rem; }
+.document-approval-backdrop { pointer-events: none; background: transparent; justify-content: flex-end; align-items: flex-start; padding: 5rem 1.5rem 1rem; }
+.document-approval-backdrop .approval-dialog { pointer-events: auto; width: min(30rem, 90vw); box-shadow: 0 1rem 3rem #23272f33; }
+
+.writing-workspace .conversation-surface { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+.writing-workspace .transcript { min-height: 0; }

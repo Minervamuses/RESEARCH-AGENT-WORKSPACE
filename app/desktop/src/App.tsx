@@ -63,6 +63,7 @@ import type {
   TurnCompletedDto,
 } from "./protocol.ts";
 import { SafeContent } from "./SafeContent.tsx";
+import { DocumentEditor, type DocumentSnapshot } from "./DocumentEditor.tsx";
 import {
   ApprovalDialog,
   BashPermissionControl,
@@ -522,6 +523,40 @@ export function ConversationTurns({ turns }: { turns: readonly VisibleConversati
   });
 }
 
+interface DocumentResult extends Partial<DocumentSnapshot> {
+  path: string;
+  status: "saved" | "conflict" | "failed" | "cancelled";
+  callId?: string;
+  savedFingerprint?: string;
+  candidateText?: string;
+  currentDiskText?: string;
+  issue?: string;
+  expectedSnapshot?: DocumentSnapshot;
+}
+
+export function reconcileSavedDocument(
+  current: DocumentSnapshot,
+  captured: DocumentSnapshot,
+  saved: { sourceText: string; diskFingerprint: string; editorRevision?: number; rangeStartUtf16?: number; rangeEndUtf16?: number },
+  agentOperation: boolean,
+): DocumentSnapshot {
+  if (current.editorRevision !== captured.editorRevision || current.sourceText !== captured.sourceText) {
+    return { ...current, diskFingerprint: saved.diskFingerprint };
+  }
+  return {
+    ...current, sourceText: saved.sourceText, diskFingerprint: saved.diskFingerprint,
+    editorRevision: saved.editorRevision ?? current.editorRevision + Number(saved.sourceText !== current.sourceText),
+    ...(agentOperation ? { rangeStartUtf16: saved.rangeStartUtf16, rangeEndUtf16: saved.rangeEndUtf16 } : {}),
+  };
+}
+
+interface DocumentAction {
+  turnId: string;
+  callId?: string;
+  undoOfCallId?: string;
+  parentRequestId?: string;
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(backendReducer, initialBackendState);
   const [conversation, conversationDispatch] = useReducer(conversationReducer, initialConversationState);
@@ -538,6 +573,21 @@ export default function App() {
   const [extensionFlow, setExtensionFlow] = useState<ExtensionFlow | null>(null);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [approvalResolving, setApprovalResolving] = useState(false);
+  const [documentValue, setDocumentValue] = useState<DocumentSnapshot | null>(null);
+  const documentRef = useRef<DocumentSnapshot | null>(null);
+  const [rootPath, setRootPath] = useState("");
+  const [filePath, setFilePath] = useState("");
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const documentBusyRef = useRef(false);
+  const [documentNotice, setDocumentNotice] = useState("Choose a research folder, then open a Markdown or TeX source file.");
+  const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResult; base: DocumentSnapshot } | null>(null);
+  const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
+  const documentRequestRef = useRef<{ requestId: string; turnId: string } | null>(null);
+  const submittedDocumentRef = useRef<DocumentSnapshot | null>(null);
+  const updateDocument = useCallback((value: DocumentSnapshot | null) => {
+    documentRef.current = value;
+    setDocumentValue(value);
+  }, []);
   const inFlight = useRef(false);
   const catalogLoading = useRef<number | null>(null);
   const diagnosticsAttempt = useRef<number | null>(null);
@@ -574,6 +624,114 @@ export default function App() {
     workspaceOperation.current = null;
     setWorkspaceBusy(null);
   }, []);
+
+  const receiveDocumentResult = useCallback((result: DocumentResult, captured: DocumentSnapshot, action: DocumentAction | null) => {
+    const current = documentRef.current;
+    if (current === null || current.path !== captured.path) return;
+    if (result.status === "saved" && result.sourceText !== undefined && result.diskFingerprint !== undefined) {
+      if (current.editorRevision === captured.editorRevision && current.sourceText === captured.sourceText) {
+        updateDocument(reconcileSavedDocument(current, captured, {
+          sourceText: result.sourceText, diskFingerprint: result.diskFingerprint,
+          editorRevision: result.editorRevision,
+          rangeStartUtf16: result.rangeStartUtf16, rangeEndUtf16: result.rangeEndUtf16,
+        }, action !== null));
+        setDocumentNotice("Saved to disk. You can inspect the changed source.");
+      } else {
+        updateDocument({ ...current, diskFingerprint: result.diskFingerprint });
+        setDocumentNotice("The requested version was saved. Your newer editor changes remain unsaved.");
+      }
+      setDocumentConflict(null);
+      if (action?.callId !== undefined) setLastDocumentAction(action);
+      if (action?.undoOfCallId !== undefined) setLastDocumentAction(null);
+    } else if (result.status === "conflict") {
+      setDocumentConflict({ result, action, base: submittedDocumentRef.current ?? captured });
+      setDocumentNotice("The editor or disk changed. Choose which version to keep.");
+    } else if (result.status === "failed") {
+      setDocumentConflict({ result, action, base: submittedDocumentRef.current ?? captured });
+      setDocumentNotice(result.issue ?? "Save failed. The editor and candidate are retained.");
+    } else {
+      setDocumentNotice(result.issue ?? "Operation cancelled. Your current text is retained.");
+      setDocumentConflict(null);
+    }
+  }, [updateDocument]);
+
+  const applyDocumentOperation = useCallback(async (action: DocumentAction, resolution?: "keep" | "use" | "cancel", expectedSnapshot?: DocumentSnapshot) => {
+    const captured = documentRef.current;
+    if (captured === null || documentBusyRef.current) return;
+    const generation = generationRef.current;
+    documentBusyRef.current = true;
+    setDocumentBusy(true);
+    try {
+      const tracked = backendClient.requestTracked("document.apply", {
+        ...action, documentContext: captured, ...(resolution === undefined ? {} : { resolution }),
+        ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
+      } as unknown as JsonObject);
+      documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId };
+      const result = await tracked.result as unknown as DocumentResult;
+      if (generationRef.current === generation) receiveDocumentResult(result, captured, action);
+    } catch (error) {
+      setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
+    } finally {
+      documentBusyRef.current = false;
+      setDocumentBusy(false);
+      documentRequestRef.current = null;
+      pendingApprovalRef.current = null;
+      setPendingApproval(null);
+    }
+  }, [receiveDocumentResult]);
+
+  const openDocument = useCallback(async () => {
+    if (conversationRef.current.activeTurn !== null || documentBusyRef.current) return;
+    if (documentRef.current !== null && !window.confirm("Opening a file replaces the current editor contents. Continue?")) return;
+    const generation = generationRef.current;
+    documentBusyRef.current = true;
+    setDocumentBusy(true);
+    try {
+      const selected = await backendClient.request("workspace.select", { rootPath }) as unknown as { rootPath: string };
+      const opened = await backendClient.request("document.open", { path: filePath }) as unknown as DocumentSnapshot;
+      if (generationRef.current !== generation) return;
+      updateDocument({ ...opened, rootPath: selected.rootPath, editorRevision: opened.editorRevision ?? 0 });
+      setRootPath(selected.rootPath);
+      setFilePath(opened.path);
+      setDocumentConflict(null);
+      setLastDocumentAction(null);
+      setDocumentNotice("Opened. The Agent will use the current editor text, including unsaved changes.");
+    } catch (error) { setDocumentNotice(workspaceError(error).message); }
+    finally { documentBusyRef.current = false; setDocumentBusy(false); }
+  }, [rootPath, filePath, updateDocument]);
+
+  const saveDocument = useCallback(async () => {
+    const captured = documentRef.current;
+    if (captured === null || documentBusyRef.current) return;
+    const generation = generationRef.current;
+    documentBusyRef.current = true;
+    setDocumentBusy(true);
+    try {
+      const result = await backendClient.request("document.save", { documentContext: captured } as unknown as JsonObject) as unknown as DocumentResult;
+      if (generationRef.current === generation) receiveDocumentResult(result, captured, null);
+    } catch (error) { setDocumentNotice(workspaceError(error).message + " Your editor text is retained."); }
+    finally { documentBusyRef.current = false; setDocumentBusy(false); }
+  }, [receiveDocumentResult]);
+
+  const resolveDocumentConflict = useCallback(async (resolution: "keep" | "use" | "cancel") => {
+    if (documentConflict === null) return;
+    const { action, result } = documentConflict;
+    if (action !== null) {
+      await applyDocumentOperation(action, resolution, result.expectedSnapshot);
+    } else if (resolution === "use" && result.expectedSnapshot !== undefined) {
+      const current = documentRef.current;
+      if (current === null) return;
+      if (current.editorRevision !== result.expectedSnapshot.editorRevision || current.sourceText !== result.expectedSnapshot.sourceText) {
+        setDocumentNotice("The editor changed again. Save again to review the current conflict.");
+        return;
+      }
+      updateDocument({ ...current, diskFingerprint: result.expectedSnapshot.diskFingerprint });
+      await saveDocument();
+    } else {
+      setDocumentConflict(null);
+      setDocumentNotice("Current editor text retained. Disk was not changed.");
+    }
+  }, [documentConflict, applyDocumentOperation, saveDocument, updateDocument]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -630,13 +788,18 @@ export default function App() {
             }
             if (message.messageType !== "event" || !("requestId" in message)) return;
             const active = conversationRef.current.activeTurn;
-            if (active === null) return;
+            const documentRequest = documentRequestRef.current;
+            if (active === null && documentRequest === null) return;
             const generation = generationRef.current;
+            if (message.event === "document.proposed" && active !== null && message.requestId === active.requestId && message.data.turnId === active.turnId && typeof message.data.callId === "string") {
+              void applyDocumentOperation({ turnId: active.turnId, callId: message.data.callId, parentRequestId: active.requestId });
+              return;
+            }
             if (message.event === "approval.required") {
               const accepted = acceptApprovalEvent(
                 generation,
                 message.requestId,
-                active.requestId,
+                message.requestId === documentRequest?.requestId ? documentRequest.requestId : active?.requestId ?? null,
                 message.data as unknown as ApprovalRequiredDto,
                 Date.now(),
               );
@@ -647,7 +810,7 @@ export default function App() {
                   return accepted;
                 });
               }
-            } else if (message.event === "stage.changed" && typeof message.data.stage === "string") {
+            } else if (active !== null && message.event === "stage.changed" && typeof message.data.stage === "string") {
               applyConversation({
                 type: "activity-received",
                 generation,
@@ -655,7 +818,7 @@ export default function App() {
                 sessionId: active.sessionId,
                 activity: { kind: "stage", label: message.data.stage, status: null },
               });
-            } else if (message.event.startsWith("tool.") && typeof message.data.name === "string" && typeof message.data.status === "string") {
+            } else if (active !== null && message.event.startsWith("tool.") && typeof message.data.name === "string" && typeof message.data.status === "string") {
               applyConversation({
                 type: "activity-received",
                 generation,
@@ -702,7 +865,7 @@ export default function App() {
       }
     })();
     return () => { disposed = true; removeListener?.(); };
-  }, [applyConversation]);
+  }, [applyConversation, applyDocumentOperation]);
 
   const runExclusive = useCallback(async (action: BackendActionName, operation: () => Promise<void>) => {
     if (inFlight.current) return;
@@ -843,6 +1006,7 @@ export default function App() {
       parentRequestId: approval.parentRequestId,
       turnId: approval.turnId,
       approved,
+      ...(approval.operation !== undefined && documentRef.current !== null ? { documentContext: documentRef.current as unknown as JsonObject } : {}),
     }).then((data) => {
       const result = data as unknown as ApprovalResolvedDto;
       if (result.approvalId !== approval.approvalId) {
@@ -877,8 +1041,8 @@ export default function App() {
     if (pendingApproval === null) return;
     const active = conversation.activeTurn;
     if (
-      active === null ||
-      active.requestId !== pendingApproval.parentRequestId
+      active?.requestId !== pendingApproval.parentRequestId &&
+      documentRequestRef.current?.requestId !== pendingApproval.parentRequestId
     ) {
       pendingApprovalRef.current = null;
       approvalResolvingRef.current = false;
@@ -1017,7 +1181,11 @@ export default function App() {
         text: draft,
         turnId,
         retry: submission.retry,
+        ...((submission.retry ? submittedDocumentRef.current : documentRef.current) === null ? {} : {
+          documentContext: (submission.retry ? submittedDocumentRef.current : documentRef.current) as unknown as JsonObject,
+        }),
       });
+      if (!submission.retry) submittedDocumentRef.current = documentRef.current === null ? null : { ...documentRef.current };
     }
     catch (error) { setWorkspaceIssue(workspaceError(error)); focusComposer(); return; }
     const generation = generationRef.current;
@@ -1403,6 +1571,35 @@ export default function App() {
 
       <main id="main-workspace" className="main-workspace" tabIndex={-1}>
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
+        <div className="writing-workspace">
+          <section className="document-pane" aria-label="Source document workspace">
+            <div className="document-toolbar">
+              <label>Research folder<input aria-label="Research folder" value={rootPath} onChange={(event) => setRootPath(event.target.value)} placeholder="/home/you/research" disabled={interaction.turnActive || documentBusy} /></label>
+              <label>Source file<input aria-label="Source file" value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="draft.md or draft.tex" disabled={interaction.turnActive || documentBusy} /></label>
+              <div className="action-row">
+                <button type="button" onClick={() => void openDocument()} disabled={interaction.turnActive || documentBusy || rootPath.trim() === "" || filePath.trim() === "" || state.snapshot?.lifecycle !== "ready"}>Open source</button>
+                <button type="button" onClick={() => void saveDocument()} disabled={documentValue === null || documentBusy || state.snapshot?.lifecycle !== "ready"}>Save</button>
+                <button type="button" onClick={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })} disabled={lastDocumentAction === null || documentBusy || interaction.turnActive}>Undo Agent edit</button>
+              </div>
+            </div>
+            <p className="document-notice" role="status">{documentBusy ? "Checking and saving the requested version…" : documentNotice}</p>
+            <DocumentEditor value={documentValue} onChange={updateDocument} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
+            {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
+              <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
+              <p>Keeping the editor or cancelling leaves disk unchanged. Using the candidate replaces this file after checking its version again.</p>
+              <div className="conflict-versions">
+                <details><summary>Turn source</summary><pre>{documentConflict.base.sourceText}</pre></details>
+                <details><summary>Current editor</summary><pre>{documentValue?.sourceText}</pre></details>
+                <details><summary>Current disk</summary><pre>{documentConflict.result.currentDiskText ?? "Unavailable"}</pre></details>
+                <details open><summary>Agent candidate / requested save</summary><pre>{documentConflict.result.candidateText ?? documentValue?.sourceText}</pre></details>
+              </div>
+              <div className="action-row">
+                <button type="button" disabled={documentBusy} onClick={() => void resolveDocumentConflict("keep")}>Keep editor</button>
+                <button type="button" disabled={documentBusy || documentConflict.result.expectedSnapshot === undefined} onClick={() => void resolveDocumentConflict("use")}>Use candidate and save</button>
+                <button type="button" disabled={documentBusy} onClick={() => void resolveDocumentConflict("cancel")}>Cancel</button>
+              </div>
+            </section>}
+          </section>
         <div className={`workspace-body${renderConversation ? " conversation-workspace-body" : ""}`}>
           {extensionFlow !== null && <ExtensionPanel
             flow={extensionFlow}
@@ -1450,6 +1647,7 @@ export default function App() {
             <p className="session-meta">Session {activeSession.sessionId} · {activeSession.turnCount} turns · {selectedRegistered ? "cataloged" : "transient"} · Citation output {state.diagnostics?.citationOutputPath ?? "unavailable"}</p>
           </section>}
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}
+        </div>
         </div>
       </main>
       {pendingApproval !== null && <ApprovalDialog

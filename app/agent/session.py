@@ -123,6 +123,8 @@ class ChatSession:
         self.active_skill_runtime: SkillRuntime | None = None
         self.extra_tools = list(extra_tools or [])
         self.mcp_families = dict(mcp_families or {})
+        if any(getattr(tool, "name", None) == "document_edit" for tool in self.extra_tools):
+            self.mcp_families["document_edit"] = "desktop_document"
         self.global_mcp_families = frozenset(
             global_mcp_families
             if global_mcp_families is not None
@@ -211,6 +213,7 @@ class ChatSession:
         self._turn_execution_lock = asyncio.Lock()
         self._final_text_validator: Callable[[str, list[str]], None] | None = None
         self._prompt_persisted_callback: Callable[[], None] | None = None
+        self._document_turn_active = False
 
     @staticmethod
     def _now_timestamp() -> str:
@@ -1068,11 +1071,17 @@ class ChatSession:
         extra_system_messages: list[SystemMessage] | None = None,
     ) -> GraphTurnResult:
         """Run the session graph once with session policy (no candidate scope)."""
+        skill_state = skill_runtime_to_agent_state(self.active_skill_runtime)
+        if self._document_turn_active:
+            skill_state["effective_tools"] = list(dict.fromkeys([
+                *self.tool_access_resolution().effective_tools,
+                "document_edit",
+            ]))
         return await self._execute_graph(
             graph=self.graph,
             user_input=user_input,
             prompt_history=self._prompt_history(),
-            skill_state=skill_runtime_to_agent_state(self.active_skill_runtime),
+            skill_state=skill_state,
             extra_system_messages=extra_system_messages,
             candidate_id=None,
         )
@@ -1340,6 +1349,7 @@ class ChatSession:
         project_id: str | None = None,
         bash_approval_handler=None,
         bash_command_runner=None,
+        extra_tools: list | None = None,
     ) -> "ChatSession":
         """Async factory that loads MCP tools (if enabled) before graph construction.
 
@@ -1352,7 +1362,7 @@ class ChatSession:
         return cls(
             config,
             system_prompt=system_prompt,
-            extra_tools=list(startup.extra_tools),
+            extra_tools=[*startup.extra_tools, *(extra_tools or [])],
             progress_cb=progress_cb,
             mcp_families=dict(startup.mcp_families),
             global_mcp_families=startup.global_mcp_families,

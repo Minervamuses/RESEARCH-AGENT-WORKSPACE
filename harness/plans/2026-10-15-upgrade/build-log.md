@@ -7,8 +7,8 @@
 | 階段 | 狀態 | 實作證據 | 阻擋／下一步 |
 | --- | --- | --- | --- |
 | P0 | Complete | P0.S1～S3：runtime、邊界、批准與驗收入口可追溯 | 依 P1 開始文件閉環 |
-| P1 | In progress | P0.S3 已批准並重新通過 gate | P1.S1：文件／協定／編輯器最小閉環 |
-| P2 | Not started | 無 | P1、引用契約批准 |
+| P1 | Complete | P1.S1～S2：文件閉環、離線與原生代表案例 | P2；最終整合仍由 P5 驗收 |
+| P2 | In progress | P1 前提已滿足、P0.S3 全計劃範圍批准 | P2.S1 行內引用與多 Skill 真實載入 |
 | P3 | Not started | 無 | P2、權限契約批准 |
 | P4 | Not started | 無 | P3、摘要傳遞及必要格式批准 |
 | P5 | Not started | 無 | P1～P4、原生 GUI 驗收能力 |
@@ -71,6 +71,17 @@
 - 依 P0.S3 的批准，在 Linux／Conda app 的 app/desktop 執行 npm install --save-exact monaco-editor@0.57.0 --ignore-scripts --no-audit --no-fund；2 秒完成，新增 4 packages，npm ls monaco-editor --depth=0 確認 0.57.0。
 - 僅 package.json／package-lock.json 為本步產品變更；沒有增加 wrapper、CDN、服務或執行安裝腳本。編輯器／文件／協定同一階段的實作在進行中，尚不將其離線結果當成 P1 完成。
 - 下一步 P1.S2 整合文件閉環並跑定向驗收。原有七檔變更保留在暫存基線；本 commit 不收編它們。
+
+## P1.S2｜文件閉環與代表性原生流程（2026-10-15）
+
+- **實作：** 新增局部 DocumentWorkspace 與 Monaco DocumentEditor；既有 NDJSON 的 workspace.select、document.open/save/apply、documentContext、document.proposed 與非 Bash 單項批准同步 Python／TS／Rust。服務將當前未儲存文字、UTF-16 選取／來源行範圍交給真 ChatSession；document_edit 等待前端送回最新編輯器快照，實際 CAS 存檔／衝突結果回到模型後才完成回答。純分析不呼叫寫入工具。文件回合臨時 Normal 並還原；未開文件保留原聊天入口。
+- **版本與失敗：** 同程式讀寫序列化、磁碟 SHA-256 比對、同回合候選綁定、防重送、明示衝突選擇與再次版本檢查、寫入失敗保留候選、有限 Undo。Ask 批准時另傳最新 documentContext，等待期間仍可編輯；Bypass 仍檢查版本。去重僅同 process，外部編輯器比對與 replace 間仍有縮小但未消除的競態窗口；沒有新增持久 receipt 或跨程式交易保證。
+- **發現與修正：** 實際 open 回傳 rootPath/editorRevision 原先未列 schema，補共同 fixture；獨立複核找出 saved range 過期、手動 Save 無故增加 revision、手動 Save 意外全選三項，已局部修正並加回歸案例。未修改目標或降低驗收。
+- **離線檢查：** poetry run pytest tests/test_desktop_documents.py tests/test_desktop_document_service.py -q 最後 40 passed（0.64s）；包含第 40–45 來源行、重複第二段、中文／emoji／tab／BOM／CRLF、未儲存文字、分析／越界、編輯器／磁碟衝突與再變、寫入失敗、拒絕、回覆中斷重試及 Undo。服務代理另跑既有 service/session/fixture/Skill/thinking 相關子集 169 passed。Python 契約 135、TS 契約 129、Rust protocol 12 passed；cargo 首次增量編譯 66 秒，最後 2.84 秒。npm test 在初整合 194 passed；最後 documents 5、trust+documents 11（修正前兩案例）及 npx tsc --noEmit 通過。npm run build 最後成功（Vite 約 0.6s），保留 Monaco chunk size 的工具提示，未為消除提示擴大優化。
+- **原生實際走查：** npm run tauri dev -- --no-watch 啟動 WSLg（已有 debug cache，編譯 0.99s）；使用 computer-use 技能的 sky API 直接操作 msrdc Research Agent 視窗。phase02 fixture root=/tmp/research-agent-desktop-phase02-upgrade-2uofbvmf，AGENT_LOG_DIR 指向其 logs。啟動後端→建立隔離對話→開 draft.md→Monaco 顯示來源行號→拖曳選取第 54 行的第二個重複段落→轉到右側保有選取→Enter 送出 fake-model 指令→顯示單項文件批准→Approve→實際磁碟只改第二段為「修正版 😀」，第一段、前 50 行與末尾換行不變。再次手動 Save 後 Undo→獨立單次批准→磁碟逐字回到原稿；未因手動 Save 產生偽衝突。
+- **原生證據界線：** 上述是實際桌面／檔案流程與假模型，不是真模型品質證明。最後 saved range 修正在 native Python process 啟動後發生；其邏輯已有離線回歸，P5 必須重啟 backend 載入最終程式後再走最終代表情境。原生控制已證明可用，撤回 P0 僅因 cua API disabled 而預估須使用者操作的限制；Windows 外掛的 sky 能操作 WSLg 視窗。只在 /tmp fixture 改檔，未呼叫 provider。
+- **持久化／保護：** 本次僅提交 P1 產品／測試改動及本紀錄；App.tsx/css 與既有使用者修改重疊，以 repository 外基線產生 task-only index 內容，兩處文字重疊已明確保留 HEAD 的原行為並加 P1 內容；task-only App 另以 TypeScript virtual CompilerHost 型別檢查通過。工作樹仍保有全部原修改；未收編 conversations.test.ts、RAG、main.py 或其他既有未追蹤檔。
+- **下一步：** P2 行內引用與多 Skill。P1 故意僅一個文件候選／回合，P2 的先後操作必須使用真正 tool call identity 並更新已存檔上下文，不能把整回合去重誤用成忽略第二次不同操作。P3 未完成前不宣稱全專案權限已統一；P5 最終 GUI／真模型狀態仍分開記錄。
 
 ## 後續紀錄方式
 

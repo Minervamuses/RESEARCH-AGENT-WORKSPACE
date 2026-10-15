@@ -7,6 +7,10 @@ export const FULL_TEXT_RESULT_METHODS = ["session.turn", "session.transcript"] a
 export const PROTOCOL_METHODS = [
   "runtime.diagnostics",
   "project.list",
+  "workspace.select",
+  "document.open",
+  "document.save",
+  "document.apply",
   "session.create",
   "session.list",
   "session.select",
@@ -41,6 +45,7 @@ export const REQUEST_EVENTS = [
   "tool.started",
   "tool.finished",
   "tool.failed",
+  "document.proposed",
   "approval.required",
   "knowledge.progress",
   "shutdown.progress",
@@ -105,6 +110,7 @@ export interface FieldRule {
     | "nullableBoolean"
     | "integer"
     | "stringArray"
+    | "object"
     | "objectArray"
     | "requestId"
     | "turnId"
@@ -117,6 +123,8 @@ export interface FieldRule {
   itemMaxBytes?: number;
   enum?: readonly string[];
   items?: FieldSchema;
+  allowEmpty?: boolean;
+  pattern?: string;
 }
 
 export type FieldSchema = Record<string, FieldRule>;
@@ -156,7 +164,51 @@ export const FORBIDDEN_DATA_KEY_FRAGMENTS = [
   "turnlogs",
 ] as const;
 
+export const DOCUMENT_CONTEXT_SCHEMA: FieldSchema = {
+  rootPath: { type: "string", required: true, maxBytes: 8192 },
+  path: { type: "string", required: true, maxBytes: 8192 },
+  editorRevision: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
+  sourceText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
+  diskFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+};
+
+export const DOCUMENT_APPROVAL_DATA_SCHEMA: FieldSchema = {
+  approvalId: { type: "string", required: true, maxBytes: 256 },
+  parentRequestId: { type: "requestId", required: true },
+  turnId: { type: "string", required: true, maxBytes: 256 },
+  operation: { type: "string", required: true, enum: ["document.apply", "document.undo"] },
+  targetPath: { type: "string", required: true, maxBytes: 8192 },
+  rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  description: { type: "string", required: true, maxBytes: 4096 },
+  createdAt: { type: "utcTimestamp", required: true },
+  expiresAt: { type: "utcTimestamp", required: true },
+};
+
+export const DOCUMENT_RESULT_SCHEMA: FieldSchema = {
+  path: { type: "string", required: true, maxBytes: 8192 },
+  status: { type: "string", required: true, enum: ["saved", "conflict", "failed", "cancelled"] },
+  sourceText: { type: "string", required: false, maxBytes: 1048576, allowEmpty: true },
+  diskFingerprint: { type: "string", required: false, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  candidateText: { type: "string", required: false, maxBytes: 1048576, allowEmpty: true },
+  currentDiskText: { type: "string", required: false, maxBytes: 1048576, allowEmpty: true },
+  issue: { type: "string", required: false, maxBytes: 4096 },
+  callId: { type: "string", required: false, maxBytes: 256 },
+  rootPath: { type: "string", required: false, maxBytes: 8192 },
+  editorRevision: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  savedFingerprint: { type: "string", required: false, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  expectedSnapshot: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
+};
+
 export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
+  "document.proposed": {
+    turnId: { type: "turnId", required: true },
+    callId: { type: "string", required: true, maxBytes: 256 },
+  },
   "approval.required": {
     approvalId: { type: "string", required: true, maxBytes: 256 },
     parentRequestId: { type: "requestId", required: true },
@@ -200,6 +252,18 @@ export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
 };
 
 export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> = {
+  "workspace.select": {
+    rootPath: { type: "string", required: true, maxBytes: 8192 },
+  },
+  "document.open": {
+    path: { type: "string", required: true, maxBytes: 8192 },
+    sourceText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
+    diskFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+    rootPath: { type: "string", required: false, maxBytes: 8192 },
+    editorRevision: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
+  },
+  "document.save": DOCUMENT_RESULT_SCHEMA,
+  "document.apply": DOCUMENT_RESULT_SCHEMA,
   "runtime.diagnostics": {
     backendState: {
       type: "string",
@@ -282,6 +346,18 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     registered: { type: "boolean", required: false },
   },
   "session.turn": {
+    documentOperations: {
+      type: "objectArray",
+      required: false,
+      maxItems: 128,
+      items: {
+        callId: { type: "string", required: true, maxBytes: 256 },
+        path: { type: "string", required: true, maxBytes: 8192 },
+        candidateText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
+        rangeStartUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
+        rangeEndUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
+      },
+    },
     sessionId: { type: "string", required: true, maxBytes: 256 },
     turnId: { type: "turnId", required: true },
     turnNumber: { type: "integer", required: true, minimum: 1, maximum: 4_096 },
@@ -522,6 +598,24 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
 };
 
 export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
+  "workspace.select": {
+    rootPath: { type: "string", required: true, maxBytes: 8192 },
+  },
+  "document.open": {
+    path: { type: "string", required: true, maxBytes: 8192 },
+  },
+  "document.save": {
+    documentContext: { type: "object", required: true, items: DOCUMENT_CONTEXT_SCHEMA },
+  },
+  "document.apply": {
+    documentContext: { type: "object", required: true, items: DOCUMENT_CONTEXT_SCHEMA },
+    turnId: { type: "turnId", required: true },
+    callId: { type: "string", required: false, maxBytes: 256 },
+    parentRequestId: { type: "requestId", required: false },
+    undoOfCallId: { type: "string", required: false, maxBytes: 256 },
+    resolution: { type: "string", required: false, enum: ["keep", "use", "cancel"] },
+    expectedSnapshot: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
+  },
   "runtime.diagnostics": {},
   "project.list": {},
   "session.create": {
@@ -555,6 +649,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "session.status": {},
   "session.turn": {
+    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
     text: { type: "string", required: true, maxBytes: 1_048_576 },
     turnId: { type: "turnId", required: true },
     retry: { type: "boolean", required: true },
@@ -616,6 +711,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
     retry: { type: "boolean", required: true },
   },
   "approval.resolve": {
+    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
     approvalId: { type: "string", required: true, maxBytes: 256 },
     parentRequestId: { type: "requestId", required: false },
     turnId: { type: "string", required: false, maxBytes: 256 },
@@ -655,6 +751,7 @@ export interface ToolSummaryDto {
 }
 
 export interface TurnCompletedDto {
+  documentOperations?: DocumentOperationDto[];
   sessionId: string;
   turnId: string;
   turnNumber: number;
@@ -834,13 +931,60 @@ export interface ExtensionApplyDto {
   diagnostics: string[];
 }
 
+export interface DocumentContextDto {
+  rootPath: string;
+  path: string;
+  editorRevision: number;
+  sourceText: string;
+  diskFingerprint: string;
+  rangeStartUtf16?: number;
+  rangeEndUtf16?: number;
+}
+
+export interface DocumentOperationDto {
+  callId: string;
+  path: string;
+  candidateText: string;
+  rangeStartUtf16: number;
+  rangeEndUtf16: number;
+}
+
+export interface DocumentOpenDto {
+  path: string;
+  sourceText: string;
+  diskFingerprint: string;
+  rootPath?: string;
+  editorRevision?: number;
+}
+
+export interface DocumentResultDto {
+  path: string;
+  status: "saved" | "conflict" | "failed" | "cancelled";
+  sourceText?: string;
+  diskFingerprint?: string;
+  savedFingerprint?: string;
+  rootPath?: string;
+  editorRevision?: number;
+  expectedSnapshot?: DocumentContextDto;
+  rangeStartUtf16?: number;
+  rangeEndUtf16?: number;
+  candidateText?: string;
+  currentDiskText?: string;
+  issue?: string;
+  callId?: string;
+}
+
 export interface ApprovalRequiredDto {
   approvalId: string;
   parentRequestId: string;
   turnId: string;
-  command: string;
+  command?: string;
+  operation?: "document.apply" | "document.undo";
+  targetPath?: string;
+  rangeStartUtf16?: number;
+  rangeEndUtf16?: number;
   description: string;
-  executionTimeoutSeconds: number;
+  executionTimeoutSeconds?: number;
   createdAt: string;
   expiresAt: string;
 }
@@ -997,7 +1141,19 @@ function isValidUtcTimestamp(value: string): boolean {
 
 function validateFieldRule(value: unknown, rule: FieldRule, field: string): void {
   if (rule.type === "string") {
-    const text = expectString(value, field);
+    const text = rule.allowEmpty && typeof value === "string" ? value : expectString(value, field);
+    if (rule.pattern !== undefined && !new RegExp(rule.pattern).test(text)) {
+      invalid(`${field} has an invalid format`);
+    }
+    for (let index = 0; index < text.length; index += 1) {
+      const unit = text.charCodeAt(index);
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        const next = text.charCodeAt(++index);
+        if (!(next >= 0xdc00 && next <= 0xdfff)) invalid(`${field} must contain valid Unicode`);
+      } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+        invalid(`${field} must contain valid Unicode`);
+      }
+    }
     if (rule.maxBytes !== undefined && encoder.encode(text).byteLength > rule.maxBytes) {
       invalid(`${field} is too large`);
     }
@@ -1041,6 +1197,10 @@ function validateFieldRule(value: unknown, rule: FieldRule, field: string): void
         invalid(`${field}[${index}] is too large`);
       }
     });
+    return;
+  }
+  if (rule.type === "object") {
+    validateObjectSchema(expectObject(value, field), rule.items!, field);
     return;
   }
   if (rule.type === "objectArray") {
@@ -1141,8 +1301,29 @@ function validateVersion(message: JsonObject): void {
   }
 }
 
+function validateDocumentRange(value: JsonObject, field: string, source = false): void {
+  const start = value.rangeStartUtf16 as number | undefined;
+  const end = value.rangeEndUtf16 as number | undefined;
+  if ((start === undefined) !== (end === undefined)) invalid(`${field} requires both UTF-16 range endpoints`);
+  if (start === undefined || end === undefined) return;
+  if (start > end) invalid(`${field} has a reversed UTF-16 range`);
+  if (source) {
+    const text = value.sourceText as string;
+    for (const offset of [start, end]) {
+      if (offset > text.length) invalid(`${field} range exceeds source text`);
+      const unit = text.charCodeAt(offset);
+      if (unit >= 0xdc00 && unit <= 0xdfff) invalid(`${field} range splits a surrogate pair`);
+    }
+  }
+}
+
 function validateParams(method: ProtocolMethod, params: JsonObject): void {
   validateObjectSchema(params, METHOD_PARAM_SCHEMAS[method], "params");
+  if (params.documentContext !== undefined) validateDocumentRange(params.documentContext as JsonObject, "params.documentContext", true);
+  if (params.expectedSnapshot !== undefined) validateDocumentRange(params.expectedSnapshot as JsonObject, "params.expectedSnapshot", true);
+  if (method === "document.apply" && (("callId" in params) === ("undoOfCallId" in params))) {
+    invalid("document.apply requires exactly one of callId or undoOfCallId");
+  }
 }
 
 export function validateResultData(method: ProtocolMethod, data: JsonObject): void {
@@ -1150,6 +1331,13 @@ export function validateResultData(method: ProtocolMethod, data: JsonObject): vo
   const schema = RESULT_DATA_SCHEMAS[method];
   if (schema !== undefined) {
     validateObjectSchema(data, schema, "data");
+  }
+  if (method === "document.save" || method === "document.apply") {
+    validateDocumentRange(data, "data");
+    if (data.expectedSnapshot !== undefined) validateDocumentRange(data.expectedSnapshot as JsonObject, "data.expectedSnapshot", true);
+  }
+  if (method === "session.turn" && data.documentOperations !== undefined) {
+    (data.documentOperations as JsonObject[]).forEach((item) => validateDocumentRange(item, "data.documentOperations"));
   }
   if (
     (method === "session.turn" || method === "extensions.apply") &&
@@ -1251,10 +1439,12 @@ function validateToolEvent(event: RequestEvent, data: JsonObject): void {
 
 function validateEventData(event: RequestEvent, requestId: string, data: JsonObject): void {
   validateToolEvent(event, data);
-  const schema = EVENT_DATA_SCHEMAS[event];
+  const schema = event === "approval.required" && "operation" in data
+    ? DOCUMENT_APPROVAL_DATA_SCHEMA : EVENT_DATA_SCHEMAS[event];
   if (schema !== undefined) {
     validateObjectSchema(data, schema, "data");
   }
+  if (event === "approval.required" && "operation" in data) validateDocumentRange(data, "data");
   if (event === "approval.required" && data.parentRequestId !== requestId) {
     invalid("data.parentRequestId must match the event requestId");
   }
@@ -1463,6 +1653,10 @@ export class ProtocolTraceValidator {
       }
       if (message.sequence !== state.nextSequence) {
         invalid(`Expected sequence ${state.nextSequence}, received ${message.sequence}`);
+      }
+      if (message.event === "document.proposed" &&
+          (state.method !== "session.turn" || message.data.turnId !== state.turnId)) {
+        invalid("document.proposed must match the active session.turn");
       }
       state.nextSequence += 1;
       return;

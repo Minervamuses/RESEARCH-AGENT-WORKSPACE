@@ -265,7 +265,7 @@ export function ApprovalDialog({
       if (!resolving) onResolve(false);
       return;
     }
-    if (event.key !== "Tab") return;
+    if (event.key !== "Tab" || approval.operation !== undefined) return;
     const first = denyRef.current;
     const last = approveRef.current;
     if (first === null || last === null) return;
@@ -279,31 +279,30 @@ export function ApprovalDialog({
   };
 
   const onBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget && !resolving) onResolve(false);
+    if (approval.operation === undefined && event.target === event.currentTarget && !resolving) onResolve(false);
   };
 
   return (
-    <div className="approval-backdrop" onMouseDown={onBackdropMouseDown}>
+    <div className={approval.operation === undefined ? "approval-backdrop" : "approval-backdrop document-approval-backdrop"} onMouseDown={onBackdropMouseDown}>
       <div
         className="approval-dialog"
         role="dialog"
-        aria-modal="true"
+        aria-modal={approval.operation === undefined}
         aria-labelledby="bash-approval-title"
         aria-describedby="bash-approval-description"
         onKeyDown={onKeyDown}
       >
-        <p className="section-kicker">ONE-TIME LOCAL COMMAND</p>
-        <h2 id="bash-approval-title">Allow this Bash command?</h2>
+        <p className="section-kicker">ONE-TIME OPERATION</p>
+        <h2 id="bash-approval-title">{approval.operation === undefined ? "Allow this Bash command?" : "Allow this document operation?"}</h2>
         <p id="bash-approval-description">{approval.description}</p>
         <dl className="approval-context">
-          <div>
-            <dt>Exact command</dt>
-            <dd><code>{approval.command}</code></dd>
-          </div>
-          <div>
-            <dt>Execution timeout</dt>
-            <dd>{approval.executionTimeoutSeconds} seconds</dd>
-          </div>
+          {approval.operation === undefined ? <>
+            <div><dt>Exact command</dt><dd><code>{approval.command}</code></dd></div>
+            <div><dt>Execution timeout</dt><dd>{approval.executionTimeoutSeconds} seconds</dd></div>
+          </> : <>
+            <div><dt>Operation</dt><dd>{approval.operation}</dd></div>
+            <div><dt>File</dt><dd><code>{approval.targetPath}</code></dd></div>
+          </>}
           <div>
             <dt>Approval expires</dt>
             <dd>{approval.expiresAt}</dd>
