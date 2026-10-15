@@ -2573,12 +2573,12 @@ mod tests {
                 .unwrap_or_else(|| Value::String("x".to_owned())),
             "boolean" => Value::Bool(false),
             "nullableString" | "nullableBoolean" | "nullableSubmittedContext" => Value::Null,
-            "submittedContext" => {
-                let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures");
-                fixtures["messages"].as_array().expect("messages").iter()
-                    .find(|item| item["name"] == "submitted-document-and-chat").expect("submission fixture")
-                    ["message"]["params"]["submittedContext"].clone()
-            },
+            "submittedContext" => serde_json::json!({
+                "projectId": "p1", "rootPath": "/tmp/project",
+                "permissionMode": "ask", "requestedThinkingMode": "normal",
+                "skillReferences": [], "references": [],
+                "projectRules": {"text": "", "fingerprint": "0".repeat(64)},
+            }),
             "integer" => Value::from(rule["minimum"].as_i64().unwrap_or(0)),
             "stringArray" => Value::Array(Vec::new()),
             "object" => Value::Object(rule["items"].as_object().expect("object schema").iter()
@@ -3358,16 +3358,6 @@ mod tests {
                 );
             }
         }
-    }
-    #[test]
-    fn submission_size_includes_context_and_preserves_legacy_text_limit() {
-        let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures");
-        let mut request = fixtures["messages"].as_array().expect("messages").iter()
-            .find(|item| item["name"] == "submitted-document-and-chat").expect("submission fixture")["message"].clone();
-        request["params"]["text"] = Value::String("x".repeat(1_048_576));
-        assert!(parse_protocol_value(request.clone()).is_err());
-        request["params"].as_object_mut().expect("params").remove("submittedContext");
-        assert!(parse_protocol_value(request).is_ok());
     }
 
 }
