@@ -92,3 +92,14 @@ test("Agent saved snapshots use the post-replacement selection and preserve edit
   const newer = { ...base, sourceText: "new user text", editorRevision: 6 };
   assert.deepEqual(save(newer, base, receipt, true), { ...newer, diskFingerprint: receipt.diskFingerprint });
 });
+
+test("a selection collapsed during approval omits optional range keys from every document payload", async () => {
+  await loadHelpers();
+  const payload = (await (await server!).ssrLoadModule("/src/App.tsx")).documentContextPayload;
+  const base = { rootPath: "/tmp/project", path: "/tmp/project/draft.md", sourceText: "one\ntwo\n", editorRevision: 1, diskFingerprint: "a".repeat(64) };
+  const collapsed = payload({ ...base, rangeStartUtf16: undefined, rangeEndUtf16: undefined });
+  assert.deepEqual(collapsed, base);
+  assert.equal(Object.hasOwn(collapsed, "rangeStartUtf16"), false);
+  assert.equal(Object.hasOwn(collapsed, "rangeEndUtf16"), false);
+  assert.deepEqual(payload({ ...base, rangeStartUtf16: 4, rangeEndUtf16: 7 }), { ...base, rangeStartUtf16: 4, rangeEndUtf16: 7 });
+});

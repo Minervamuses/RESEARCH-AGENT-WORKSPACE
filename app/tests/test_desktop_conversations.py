@@ -332,7 +332,10 @@ class _CoordinatorFactory:
         session_id=None,
         conversation_repository=None,
         project_id=None,
+        extra_tools=None,
+        operation_approval_handler=None,
     ):
+        del extra_tools, operation_approval_handler
         self.load_mcp_calls.append(load_mcp)
         resolved_id = session_id or self.new_ids.pop(0)
         session = _CoordinatorSession(
@@ -2067,6 +2070,29 @@ def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+async def _dispatch_citation_approved(service, params, events=None):
+    """Grant exactly the citation save needed by restoration lifecycle cases."""
+    tasks = []
+
+    class Sink:
+        request_id = str(uuid.uuid4())
+
+        def __call__(self, event, data):
+            if events is not None:
+                events.append((event, data))
+            if event == "approval.required":
+                assert data["operation"] == "citation.save"
+                tasks.append(asyncio.create_task(service.dispatch("approval.resolve", {
+                    "approvalId": data["approvalId"], "parentRequestId": data["parentRequestId"],
+                    "turnId": data["turnId"], "approved": True,
+                })))
+
+    try:
+        return await service.dispatch("session.turn", params, event_sink=Sink())
+    finally:
+        await asyncio.gather(*tasks)
+
+
 def _citation_desktop(monkeypatch, tmp_path):
     from test_citation_e2e import _SearchSaveModel, _fixture_services, _rag_search
     from test_desktop_service import _service
@@ -2098,7 +2124,8 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     asyncio.run(service.dispatch("session.set_thinking", {"mode": "extended"}))
     params = _turn_params("/citation 搜尋 Paper A，保存並正式引用")
     events = []
-    result = asyncio.run(service.dispatch("session.turn", params, event_sink=lambda event, data: events.append((event, data))))
+    result = asyncio.run(_dispatch_citation_approved(service, params, events))
+    assert [event for event, _data in events].count("approval.required") == 1
     assert result["responseKind"] == "answer" and result["streamKind"] == "final_only"
     assert "已保存並引用來源 [1]。" in result["text"]
     assert [event for event, _data in events].count("tool.started") == 2
@@ -2197,12 +2224,12 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         if terminal == "provider":
             monkeypatch.setattr(model, "invoke", fail_after_save)
             with pytest.raises(DesktopServiceError) as caught:
-                await service.dispatch("session.turn", params)
+                await _dispatch_citation_approved(service, params)
             assert caught.value.details["state"] == "failed"
             assert caught.value.details["persisted"] is True
         else:
             monkeypatch.setattr(session, "finalize_and_record", hold_final)
-            task = asyncio.create_task(service.dispatch("session.turn", params))
+            task = asyncio.create_task(_dispatch_citation_approved(service, params))
             try:
                 await asyncio.wait_for(entered.wait(), timeout=3)
                 assert session.citation_skill_active and session._citation_service is services[0]
@@ -2242,7 +2269,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         with pytest.raises(DesktopServiceError):
             await restarted.dispatch("session.turn", params)
         assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
-        retried = await restarted.dispatch("session.turn", {**params, "retry": True})
+        retried = await _dispatch_citation_approved(restarted, {**params, "retry": True})
         assert "已保存並引用來源 [1]。" in retried["text"]
         assert retried["turnNumber"] == 1
         assert len(services) == 2 and services[0] is not services[1]

@@ -141,6 +141,14 @@
 - 收尾全 Python suite 以 poetry run pytest -q --tb=short 啟動一次，476 passed 後停滯；只對該 pytest PID 送 SIGINT。輸出確認 test_desktop_answer_stream.py 的舊 _AnswerSession 替身缺 thinking_mode，service task 提早 AttributeError，測試仍在等事件。未宣稱 suite 通過；下一步最小補替身後定向檢查，再按同一 collection 順序續跑剩餘項，避免無理由重跑已通過 476 項。
 - 受限真模型腳本僅在 /tmp 準備；非互動 Linux shell 無 key，但正常 bash -ic profile 的 key 存在，僅檢查 bool、沒有讀印憑證或改環境。尚未付費請求。
 
+## P5.S3｜原生選取消失回歸與完整 suite 續跑（2026-10-15）
+
+- P5.S2 已提交 e6ed835。原生實際選取第 40–45 行、轉到聊天仍保留反白，Enter 後控制項立即停用；Ask 顯示正確來源行／目標。等待批准時點進來源第 48 行仍能移動游標，但此舉使選取欄位成 undefined；原 Tauri 傳送保留鍵後成 null，批准回覆被 strict schema 拒絕，沒有寫入。此為實際產品缺陷，未把首輪走查算通過。
+- 最小修正 App 的 documentContextPayload：傳送 save／apply／turn／approval 時明確省略空的選取鍵，保留有效成對 UTF-16 範圍。新增直接回歸測試，documents 6 passed（3.60s）、tsc 與 task-only App 型別檢查通過。HMR 因新增 export 重載狀態，接下來重新開同稿走查；原 failed／cancelled 候選及對話記錄未自動重播。
+- 全 suite 的有序 collection 共 1389 項；前 476 passed，補 _AnswerSession 真實 thinking_mode／loaded_skills 契約後該 module 15 passed。從第 477 項續跑 913：902 passed、11 failed（24.14s）。其中 4 個 desktop conversation 舊替身／citation 批准、1 個 extension journey 舊單一 Bash 批准預期，已僅更新必要測試契約並保留重播／取消／反偽斷言；各 4／3 passed。
+- 另 6 個 cross-process 失敗是 root 用 stdin 內 pytest.main 續跑，multiprocessing spawn 無法重載 <stdin>，不是產品錯誤。改用正常 poetry run pytest tests/test_extension_manager.py -q -k cross_process 後 6 passed（5.02s），沒有因此修改 production。首輪及續跑 log 在 /tmp/upgrade-final-pytest*.log，全部 1389 個 collection 項目現已在原次／續跑／失敗定向重驗覆蓋通過；沒有再重跑全 suite。保留既有 LangChain deprecation 與 duplicate ZIP fixture warnings。
+- 真模型首次執行於送出前被成本 hook 攔截：SDK 未帶入預期 provider max_price。requests=0、預留／付費=0；不移除成本 gate，修正暫存驗收腳本的 SDK serialization 後才繼續。原批准 2 回合／6 次請求／4096 tokens／US$1 沒有擴大。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。

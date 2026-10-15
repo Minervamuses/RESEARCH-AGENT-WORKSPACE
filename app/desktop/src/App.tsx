@@ -581,6 +581,15 @@ interface DocumentResult extends Partial<DocumentSnapshot> {
   expectedSnapshot?: DocumentSnapshot;
 }
 
+export function documentContextPayload(value: DocumentSnapshot): JsonObject {
+  const { rangeStartUtf16, rangeEndUtf16, ...context } = value;
+  return {
+    ...context,
+    ...(typeof rangeStartUtf16 === "number" && typeof rangeEndUtf16 === "number"
+      ? { rangeStartUtf16, rangeEndUtf16 } : {}),
+  };
+}
+
 export function reconcileSavedDocument(
   current: DocumentSnapshot,
   captured: DocumentSnapshot,
@@ -713,7 +722,7 @@ export default function App() {
     setDocumentBusy(true);
     try {
       const tracked = backendClient.requestTracked("document.apply", {
-        ...action, documentContext: captured, ...(resolution === undefined ? {} : { resolution }),
+        ...action, documentContext: documentContextPayload(captured), ...(resolution === undefined ? {} : { resolution }),
         ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
       } as unknown as JsonObject);
       documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId };
@@ -757,7 +766,7 @@ export default function App() {
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
-      const result = await backendClient.request("document.save", { documentContext: captured } as unknown as JsonObject) as unknown as DocumentResult;
+      const result = await backendClient.request("document.save", { documentContext: documentContextPayload(captured) }) as unknown as DocumentResult;
       if (generationRef.current === generation) receiveDocumentResult(result, captured, null);
     } catch (error) { setDocumentNotice(workspaceError(error).message + " Your editor text is retained."); }
     finally { documentBusyRef.current = false; setDocumentBusy(false); }
@@ -1056,7 +1065,7 @@ export default function App() {
       parentRequestId: approval.parentRequestId,
       turnId: approval.turnId,
       approved,
-      ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentRef.current as unknown as JsonObject } : {}),
+      ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(documentRef.current) } : {}),
     }).then((data) => {
       const result = data as unknown as ApprovalResolvedDto;
       if (result.approvalId !== approval.approvalId) {
@@ -1233,7 +1242,7 @@ export default function App() {
         retry: submission.retry,
         skillReferences: (submission.retry ? submittedSkillReferencesRef.current : inlineSkillReferences(draft, state.session?.loadedSkills ?? [], selectedSkillNamesRef.current)) as unknown as JsonObject[],
         ...((submission.retry ? submittedDocumentRef.current : documentRef.current) === null ? {} : {
-          documentContext: (submission.retry ? submittedDocumentRef.current : documentRef.current) as unknown as JsonObject,
+          documentContext: documentContextPayload((submission.retry ? submittedDocumentRef.current : documentRef.current)!),
         }),
       });
       if (!submission.retry) {

@@ -485,7 +485,28 @@ def test_conversational_zip_acceptance(entry, tmp_path, monkeypatch, capsys):
     assert "MODEL CLAIM" not in answers[0]
     assert model.calls[-1] == ("read_file", {"path": str(installed / "forms.md")})
     if entry == "desktop":
-        assert len([event for event in events if event[0] == "approval.required"]) == 1
+        approvals = [payload for method, payload in events if method == "approval.required"]
+        assert len(approvals) == 3
+        bash, preview, apply = approvals
+        assert bash["command"] == command
+        assert bash["description"] == "Extract the authorized skill into isolated test temp"
+        assert bash["executionTimeoutSeconds"] > 0
+        assert len({item["approvalId"] for item in approvals}) == 3
+        assert len({item["parentRequestId"] for item in approvals}) == 1
+        assert len({item["turnId"] for item in approvals}) == 1
+        for approval, action, target in (
+            (preview, "preview", root / "skill/pdf"),
+            (apply, "apply", Path(config.extension_state_dir)),
+        ):
+            assert approval["operation"] == "extension.install"
+            assert approval["targetPath"] == str(target)
+            arguments = next(args for name, args in model.calls
+                             if name == "skill_install" and args.get("action") == action)
+            assert json.loads(approval["parametersSummary"]) == {
+                "arguments": arguments,
+                "source": str(root / "skill/pdf"),
+                "installationRoot": config.extension_state_dir,
+            }
     print(json.dumps({"entry": entry, "upstream": bool(provided), "archive_sha256": archive_hash,
                       "selected_root": selected_root, "files_verified": len(expected),
                       "bundle_bytes": sum(map(len, expected.values())),

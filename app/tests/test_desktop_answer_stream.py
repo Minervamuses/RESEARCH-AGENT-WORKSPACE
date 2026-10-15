@@ -17,6 +17,8 @@ class _AnswerSession:
     def __init__(self, text: str) -> None:
         self.session_id = "00000000000040008000000000000021"
         self.text = text
+        self.thinking_mode = "normal"
+        self.loaded_skills = []
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.blocked = False
