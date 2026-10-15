@@ -6,7 +6,7 @@
 
 | 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
 |---|---|---|---|---|
-| P1 | In progress | E05-E12: project binding, rules and scoped tests | Frontend S6 and integrated GUI pending | Finish S6/S7, verify native project flow |
+| P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
 | P2 | Not started | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
 | P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
@@ -119,3 +119,10 @@
 - Adapted existing service scenarios to explicitly open an owned project, including canonical restart/registration/citation fixtures; the base service helper remains cold. Existing read-only sidebar scan-count test now instruments all scoped repository instances and retains its fewer-scans assertion.
 - Actual complete-file run: `poetry run pytest tests/test_desktop_service.py -q --tb=short` -> 89 passed, 3.71s. Earlier subsets: 20 passed, then 15 passed/3 setup failures (cold fixture and fake missing canonical records); corrected to explicit fixture opening and existing canonical factories, then all three passed. No production gate relaxation.
 - Main reviewed actual fixture and assertion changes; git diff --check passed. P1 implementation and focused regression tests are complete; native chooser/switch verification remains the final P1 checkpoint.
+
+### E15 / P1 native checkpoint and independent review
+
+- Native Linux Tauri/WebKit with a fresh no-provider fixture at `/tmp/research-agent-desktop-phase02-p1gui-20261015-e895dc4`: cold start showed project chooser with no conversations. Opening project-one showed only its two seeded conversations, not project-two. Opened draft.md, entered unsaved editor text and an unsent composer draft. Switching/inspecting project-two showed explicit dirty Save/Discard and draft-discard choices; Cancel preserved A root, unsaved editor and `Unsent A draft`. Both project files remained unchanged on disk.
+- Actual AT-SPI rendered bounds at 1080x720: sidebar 272px; Monaco code region 412x427px (not its 2px input textarea); transcript 370x197px. Evidence: project-one-document-open.json and dirty-draft-cancel-preserved.json in the fixture root. These are actual native controls and geometry; WSLg screenshot capture remains black and is not used as visual proof.
+- Independent read-only integration review at 281e538 found no demonstrated P1 blocking issue after tracing cold binding, ownership, rules reload, busy guards and epoch/catch/finally/focus paths. It did not rerun tests or claim GUI evidence. Main reviewed committed scope; no dependency, lock or environment changes, and worktree was clean.
+- P1 end condition is met by this checkpoint plus E05-E14 focused evidence. Remaining broader GUI permutations belong to P4; ongoing explicit discard/B-only/return-A check will be recorded when observed. Next dependency-ready phase is P2.
