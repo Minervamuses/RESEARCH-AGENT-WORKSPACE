@@ -2,7 +2,6 @@ import {
   PROTOCOL_VERSION,
   ProtocolTraceValidator,
   type JsonObject,
-  type ProcessEventEnvelope,
   type ProtocolMessage,
   type ProtocolMethod,
   type ProtocolOrigin,
@@ -587,8 +586,4 @@ export function createBackendClient(options: {
     shutdown,
     restart: () => lifecycleCommand("backend_restart"),
   };
-}
-
-export function isProcessEvent(message: ProtocolMessage): message is ProcessEventEnvelope {
-  return message.messageType === "event" && !("requestId" in message);
 }
