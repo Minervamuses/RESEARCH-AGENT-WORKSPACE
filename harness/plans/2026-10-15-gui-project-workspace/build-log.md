@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
 | P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
-| P3 | In progress | E24: compact document actions | none | Sidebar/footer/layout then native measurement |
+| P3 | Complete | E24-E29: compact UI, focused checks/build and native A16-A20 | none | P4 dependency ready |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
 
 ## 規劃證據
@@ -212,3 +212,10 @@
 - To compare the same long-title list rather than infer from CSS, materialized read-only `git archive d01d4c0` frontend source in `/tmp/research-agent-p3-baseline-ui-1urhhxou/app/desktop`, linked already-installed dependencies and served it through existing Vite/native binary. No checkout/branch/worktree mutation or install. Both old and current UI used the same isolated fixture `/tmp/research-agent-desktop-phase02-p3gui-20261015-57fc0f8`, same seeded A transcript, CRLF duplicate source and additional long-title conversation; selected A for every measure. Font/zoom unchanged.
 - Actual AT-SPI sidebar at1080x720:272 ->190px (69.8529%; agreed272*0.7=190.4, integer bounds differ by-0.4px). At1440x900:290 ->203px (70.0%). Editor heights427 ->584px (+157) and608 ->754px (+146); transcript heights197 ->423px (+226) and387 ->585px (+198). Main read p3-old-new-layout-comparison.json, checked all longTitlePresent flags and both ratios/height increases. Four underlying snapshots preserved there; no pixel screenshot claim.
 - Current native Document actions -> Open file dialog actually opened draft.md; old permanent path inputs and top controls are absent. Native save/Undo, keyboard/disabled controls, multi-reference failure and minimum-window usability are still in progress; P3 not yet marked complete.
+
+### E29 / P3 native operations and phase completion
+
+- Same isolated E28 native App: .md -> dirty Open .tex showed confirmation; Escape/Cancel retained editor and disk. Ctrl+S and menu Save each wrote actual bytes and cleared dirty. Clean open .tex succeeded. Thinking Space/Down/Enter selected Extended, Space/Escape closed menu; Permission keyboard selected Bypass then Ask with visible acknowledged states.
+- During fake document edit Ask approval, Thinking/Permission were disabled and effective-Normal document hint appeared. Approve wrote the candidate; menu Undo required its own Ask approval and restored original TeX bytes. External disk change + Ctrl+S retained external bytes and showed conflict/dirty. Separate owned locked/note.md directory chmod500 produced actual Errno13/Save failed/dirty, unchanged disk; directory restored700 in finally, Cancel preserved editor.
+- Two references show basename/lines and expanded complete source/version. Mixed-reference failure at1080x720 kept actual root height720, Message387x78 and Send74x40 inside viewport; transcript82px, resolving E23 overflow. At720x560 the existing stacked layout scrolls; keyboard focus brought Message and Send fully inside actual viewport. Long-title focus wrapped complete text within sidebar. Evidence: p3-savefailure-visible, p3-checkpoint-final, p3-minimum-*-focused, p3-longtitle-focus, p3-failed-turn-for-p4.json plus interaction snapshots in E28 fixture root.
+- P3 A16-A20 native checkpoint passed with no additional production change. Cached native/Vite retained for P4; only synthetic project data changed. P4 is now dependency-ready; full regression and complete two-failure/reopen journey have not yet been claimed.
