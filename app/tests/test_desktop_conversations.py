@@ -337,8 +337,9 @@ class _CoordinatorFactory:
         project_id=None,
         extra_tools=None,
         operation_approval_handler=None,
+        system_prompt=None,
     ):
-        del extra_tools, operation_approval_handler
+        del extra_tools, operation_approval_handler, system_prompt
         self.load_mcp_calls.append(load_mcp)
         resolved_id = session_id or self.new_ids.pop(0)
         session = _CoordinatorSession(
@@ -452,44 +453,55 @@ def _append_lifecycle_turn(
     )
 
 
+def _project_id(tmp_path, name="project-one"):
+    return inspect_project(str(tmp_path / name), tmp_path / "store")["projectId"]
+
+
+def _configure_project(tmp_path, history, name="project-one"):
+    root = tmp_path / name
+    root.mkdir(exist_ok=True)
+    preview = inspect_project(str(root), tmp_path / "store", history_directory=str(history))
+    initialize_project(
+        str(root), tmp_path / "store", history_directory=str(history),
+        expected_fingerprint=preview["researchFingerprint"],
+    )
+    return root
+
+
+async def _open_project(service, tmp_path, name="project-one"):
+    opened = await service.dispatch("workspace.select", {
+        "rootPath": str(tmp_path / name), "action": "open",
+    })
+    assert opened["status"] == "opened"
+    return opened
+
+
 def _seed_coordinator(
     tmp_path,
     *,
     new_ids=(),
     seeded_sessions=(SESSION_A, SESSION_B, SESSION_C),
+    open_project=True,
 ):
-    persist_dir = tmp_path / "coordinator-store"
-    persist_dir.mkdir()
-    (persist_dir / CATALOG_FILENAME).write_text(json.dumps({
-        "projects": [
-            {
-                "projectId": "p1",
-                "name": "Project One",
-                "sessionIds": [SESSION_A, SESSION_B],
-            },
-            {
-                "projectId": "p2",
-                "name": "Project Two",
-                "sessionIds": [SESSION_C],
-            },
-        ]
-    }), encoding="utf-8")
-    repository = ConversationRepository(persist_dir)
-    projects = {
-        SESSION_A: "p1",
-        SESSION_B: "p1",
-        SESSION_C: "p2",
-    }
-    for session_id in seeded_sessions:
-        _append_completed_turn(
-            repository,
-            session_id,
-            projects[session_id],
-        )
-    catalog = DesktopProjectCatalog(persist_dir)
+    histories = {}
+    for name, session_ids in (
+        ("project-one", (SESSION_A, SESSION_B)),
+        ("project-two", (SESSION_C,)),
+    ):
+        history = tmp_path / f"{name}-history"
+        _configure_project(tmp_path, history, name)
+        project_id = _project_id(tmp_path, name)
+        repository = ConversationRepository(history)
+        catalog = DesktopProjectCatalog(history)
+        for session_id in session_ids:
+            if session_id in seeded_sessions:
+                _append_completed_turn(repository, session_id, project_id)
+            catalog.register_session(project_id, session_id)
+        histories[name] = (catalog, repository)
+    catalog, repository = histories["project-one"]
     factory = _CoordinatorFactory(new_ids=new_ids)
     config = AgentConfig(
-        persist_dir=str(persist_dir),
+        persist_dir=str(tmp_path / "store"),
         plan_logs_dir=str(tmp_path / "plans"),
     )
     service = DesktopService(
@@ -503,7 +515,8 @@ def _seed_coordinator(
             "CONDA_PREFIX": "/conda/envs/app",
         },
     )
-
+    if open_project:
+        asyncio.run(_open_project(service, tmp_path))
     return service, catalog, factory, repository
 
 
@@ -533,7 +546,7 @@ def test_catalog_follows_materialized_session_and_same_session_select(tmp_path):
 
     async def select(session_id):
         snapshot = await service.dispatch("session.select", {
-            "projectId": "p1", "sessionId": session_id,
+            "projectId": _project_id(tmp_path), "sessionId": session_id,
         })
         _assert_result("session.select", snapshot, 910)
         return snapshot["slashCommands"][-1]["name"]
@@ -648,10 +661,10 @@ def test_service_rebuilds_malformed_catalog_from_healthy_json_deterministically(
     tmp_path,
 ):
     persist_dir = tmp_path / "catalog-rebuild"
-    persist_dir.mkdir()
+    _configure_project(tmp_path, persist_dir)
     repository = ConversationRepository(persist_dir)
     for session_id in (SESSION_B, SESSION_A):
-        _append_completed_turn(repository, session_id, "local")
+        _append_completed_turn(repository, session_id, _project_id(tmp_path))
     conversation_bytes = {
         session_id: repository.path_for(session_id).read_bytes()
         for session_id in (SESSION_A, SESSION_B)
@@ -666,16 +679,17 @@ def test_service_rebuilds_malformed_catalog_from_healthy_json_deterministically(
         session_factory=_CoordinatorFactory(),
         environ={},
     )
+    asyncio.run(_open_project(service, tmp_path))
     projects = asyncio.run(service.dispatch("project.list", {}))
     sessions = asyncio.run(service.dispatch(
         "session.list",
-        {"projectId": "local", "offset": 0, "limit": 50},
+        {"projectId": _project_id(tmp_path), "offset": 0, "limit": 50},
     ))
 
     assert projects["status"] == "ready"
     assert projects["projects"] == [{
-        "projectId": "local",
-        "name": "Local research",
+        "projectId": _project_id(tmp_path),
+        "name": "project-one",
         "sessionCount": 2,
     }]
     assert [item["sessionId"] for item in sessions["items"]] == [
@@ -684,8 +698,8 @@ def test_service_rebuilds_malformed_catalog_from_healthy_json_deterministically(
     ]
     assert json.loads(catalog_path.read_text(encoding="utf-8")) == {
         "projects": [{
-            "projectId": "local",
-            "name": "Local research",
+            "projectId": _project_id(tmp_path),
+            "name": "project-one",
             "sessionIds": [SESSION_A, SESSION_B],
         }]
     }
@@ -700,9 +714,10 @@ def test_service_rebuilds_malformed_catalog_from_healthy_json_deterministically(
         session_factory=_CoordinatorFactory(),
         environ={},
     )
+    asyncio.run(_open_project(restarted, tmp_path))
     restarted_sessions = asyncio.run(restarted.dispatch(
         "session.list",
-        {"projectId": "local", "offset": 0, "limit": 50},
+        {"projectId": _project_id(tmp_path), "offset": 0, "limit": 50},
     ))
     assert [item["sessionId"] for item in restarted_sessions["items"]] == [
         SESSION_A,
@@ -710,151 +725,79 @@ def test_service_rebuilds_malformed_catalog_from_healthy_json_deterministically(
     ]
 
 
-def test_unknown_project_orphan_uses_deterministic_project_name_fallback(tmp_path):
-    persist_dir = tmp_path / "unknown-project"
-    persist_dir.mkdir()
+def test_unknown_project_orphan_requires_mapping_without_changing_history(tmp_path):
+    persist_dir = tmp_path / "unknown-project-history"
+    _configure_project(tmp_path, persist_dir)
     repository = ConversationRepository(persist_dir)
     _append_completed_turn(
-        repository,
-        SESSION_D,
-        "research-one",
-        assistant_output="recoverable answer",
+        repository, SESSION_D, "research-one", assistant_output="recoverable answer",
     )
     conversation_path = repository.path_for(SESSION_D)
     conversation_bytes = conversation_path.read_bytes()
-    config = AgentConfig(persist_dir=str(persist_dir))
+    catalog_path = persist_dir / CATALOG_FILENAME
+    catalog_bytes = catalog_path.read_bytes()
     factory = _CoordinatorFactory()
-
     service = DesktopService(
         original_cwd=tmp_path,
-        config=config,
+        config=AgentConfig(persist_dir=str(tmp_path / "store")),
         conversation_repository=repository,
         session_factory=factory,
         environ={},
     )
-    projects = asyncio.run(service.dispatch("project.list", {}))
-    sessions = asyncio.run(service.dispatch(
-        "session.list",
-        {"projectId": "research-one", "offset": 0, "limit": 50},
-    ))
-    selected = asyncio.run(service.dispatch(
-        "session.select",
-        {"projectId": "research-one", "sessionId": SESSION_D},
-    ))
 
-    assert projects["projects"] == [
-        {
-            "projectId": "local",
-            "name": "Local research",
-            "sessionCount": 0,
-        },
-        {
-            "projectId": "research-one",
-            "name": "research-one",
-            "sessionCount": 1,
-        },
-    ]
-    assert [item["sessionId"] for item in sessions["items"]] == [SESSION_D]
-    assert selected["sessionId"] == SESSION_D
-    assert factory.sessions[-1].turn_inputs == []
+    with pytest.raises(DesktopServiceError, match="ownership") as raised:
+        asyncio.run(_open_project(service, tmp_path))
+
+    assert raised.value.code == "PROTOCOL_INVALID"
+    assert asyncio.run(service.dispatch("project.list", {}))["projects"] == []
+    assert factory.sessions == []
     assert conversation_path.read_bytes() == conversation_bytes
+    assert catalog_path.read_bytes() == catalog_bytes
 
 
-def test_catalog_only_missing_json_stays_unavailable_without_fake_transcript(
-    tmp_path,
-):
-    service, catalog, _factory, repository = _seed_coordinator(
-        tmp_path,
-        seeded_sessions=(SESSION_A,),
+def test_catalog_only_missing_json_blocks_open_without_fake_transcript(tmp_path):
+    service, catalog, factory, repository = _seed_coordinator(
+        tmp_path, seeded_sessions=(SESSION_A,), open_project=False,
     )
     missing_path = repository.path_for(SESSION_B)
+    catalog_bytes = catalog.path.read_bytes()
+    conversation_bytes = repository.path_for(SESSION_A).read_bytes()
 
-    selected = asyncio.run(service.dispatch(
-        "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
-    ))
-    asyncio.run(service.dispatch("session.set_bash_permission", {"mode": "bypass"}))
-    sessions = asyncio.run(service.dispatch(
-        "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 50},
-    ))
-    transcript = asyncio.run(service.dispatch(
-        "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_B, "offset": 0, "limit": 20},
-    ))
-    missing_summary = next(
-        item for item in sessions["items"] if item["sessionId"] == SESSION_B
-    )
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(service.dispatch(
-            "session.select",
-            {"projectId": "p1", "sessionId": SESSION_B},
-        ))
+    with pytest.raises(DesktopServiceError, match="missing conversations") as raised:
+        asyncio.run(_open_project(service, tmp_path))
+    with pytest.raises(DesktopServiceError) as transcript_error:
+        asyncio.run(service.dispatch("session.transcript", {
+            "projectId": _project_id(tmp_path), "sessionId": SESSION_B,
+            "offset": 0, "limit": 20,
+        }))
 
-    assert selected["sessionId"] == SESSION_A
-    assert missing_summary["status"] == "unavailable"
-    assert missing_summary["turnCount"] == 0
-    assert transcript == {
-        "projectId": "p1",
-        "sessionId": SESSION_B,
-        "status": "unavailable",
-        "issue": "No persisted transcript is available.",
-        "items": [],
-        "total": 0,
-        "offset": 0,
-        "limit": 20,
-        "hasMore": False,
-    }
-    assert raised.value.code == "SESSION_NOT_READY"
-    assert service.session is not None
-    assert service.session.session_id == SESSION_A
-    assert catalog.project_for_session(SESSION_B) == "p1"
+    assert raised.value.code == "PROTOCOL_INVALID"
+    assert transcript_error.value.code == "SESSION_NOT_READY"
+    assert asyncio.run(service.dispatch("project.list", {}))["projects"] == []
+    assert factory.sessions == []
+    assert catalog.path.read_bytes() == catalog_bytes
+    assert repository.path_for(SESSION_A).read_bytes() == conversation_bytes
     assert not missing_path.exists()
-    controls = asyncio.run(service.dispatch(
-        "session.set_thinking", {"mode": "extended"}
-    ))
-    assert controls["sessionId"] == SESSION_A
-    assert controls["bashPermissionMode"] == "bypass"
 
 
-def test_malformed_conversation_is_isolated_while_healthy_session_lists_and_selects(
-    tmp_path,
-):
-    base, _catalog, _factory, repository = _seed_coordinator(tmp_path)
+def test_malformed_conversation_blocks_incomplete_history_scan_without_writes(tmp_path):
+    service, catalog, factory, repository = _seed_coordinator(tmp_path, open_project=False)
     malformed_path = repository.path_for(SESSION_B)
     malformed_bytes = b'{"schemaVersion":1,"private":"do not expose"}\n'
     malformed_path.write_bytes(malformed_bytes)
-    factory = _CoordinatorFactory()
-    service = DesktopService(
-        original_cwd=tmp_path,
-        config=base.config,
-        project_catalog=DesktopProjectCatalog(base.config.persist_dir),
-        conversation_repository=repository,
-        session_factory=factory,
-        environ={},
-    )
+    catalog_bytes = catalog.path.read_bytes()
+    healthy_bytes = repository.path_for(SESSION_A).read_bytes()
 
-    sessions = asyncio.run(service.dispatch(
-        "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 50},
-    ))
-    selected = asyncio.run(service.dispatch(
-        "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
-    ))
-    transcript = asyncio.run(service.dispatch(
-        "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "offset": 0, "limit": 20},
-    ))
-    by_session = {item["sessionId"]: item for item in sessions["items"]}
+    with pytest.raises(DesktopServiceError, match="incomplete") as raised:
+        asyncio.run(_open_project(service, tmp_path))
 
-    assert by_session[SESSION_A]["status"] == "ready"
-    assert by_session[SESSION_B]["status"] == "degraded"
-    assert "private" not in by_session[SESSION_B]["issue"]
-    assert selected["sessionId"] == SESSION_A
-    assert transcript["status"] == "ready"
-    assert factory.sessions[-1].turn_inputs == []
+    assert raised.value.code == "PROTOCOL_INVALID"
+    assert "private" not in str(raised.value)
+    assert asyncio.run(service.dispatch("project.list", {}))["projects"] == []
+    assert factory.sessions == []
     assert malformed_path.read_bytes() == malformed_bytes
+    assert repository.path_for(SESSION_A).read_bytes() == healthy_bytes
+    assert catalog.path.read_bytes() == catalog_bytes
 
 
 def test_session_restore_uses_only_canonical_history_and_writes_through(
@@ -920,61 +863,50 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
     assert snapshot.document.turns[1].semantic_input == "canonical semantic q2"
 
 
-def test_coordinator_preserves_p1_p2_membership_order_across_restart(tmp_path):
+def test_coordinator_preserves_scoped_membership_order_across_restart(tmp_path):
     service, catalog, _factory, repository = _seed_coordinator(tmp_path)
-
     projects = asyncio.run(service.dispatch("project.list", {}))
-    p1 = asyncio.run(service.dispatch(
-        "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 50},
-    ))
-    p2 = asyncio.run(service.dispatch(
-        "session.list",
-        {"projectId": "p2", "offset": 0, "limit": 50},
-    ))
+    first = asyncio.run(service.dispatch("session.list", {
+        "projectId": _project_id(tmp_path), "offset": 0, "limit": 50,
+    }))
     _assert_result("project.list", projects, 201)
-    _assert_result("session.list", p1, 202)
-    _assert_result("session.list", p2, 203)
-    assert [item["projectId"] for item in projects["projects"]] == ["p1", "p2"]
-    assert [item["sessionId"] for item in p1["items"]] == [SESSION_A, SESSION_B]
-    assert [item["sessionId"] for item in p2["items"]] == [SESSION_C]
-    assert set(catalog.snapshot()["projects"][0]) == {
-        "projectId",
-        "name",
-        "sessionIds",
-    }
+    _assert_result("session.list", first, 202)
+    assert [item["projectId"] for item in projects["projects"]] == [_project_id(tmp_path)]
+    assert [item["sessionId"] for item in first["items"]] == [SESSION_A, SESSION_B]
+    assert set(catalog.snapshot()["projects"][0]) == {"projectId", "name", "sessionIds"}
+    with pytest.raises(DesktopServiceError):
+        asyncio.run(service.dispatch("session.list", {
+            "projectId": _project_id(tmp_path, "project-two"), "offset": 0, "limit": 50,
+        }))
+    asyncio.run(_open_project(service, tmp_path, "project-two"))
+    second = asyncio.run(service.dispatch("session.list", {
+        "projectId": _project_id(tmp_path, "project-two"), "offset": 0, "limit": 50,
+    }))
+    _assert_result("session.list", second, 203)
+    assert [item["sessionId"] for item in second["items"]] == [SESSION_C]
+    assert asyncio.run(service.dispatch("project.list", {}))["projects"] == [{
+        "projectId": _project_id(tmp_path, "project-two"), "name": "project-two", "sessionCount": 1,
+    }]
 
-    restarted_catalog = DesktopProjectCatalog(service.config.persist_dir)
     restarted_factory = _CoordinatorFactory()
     restarted = DesktopService(
-        original_cwd=tmp_path,
-        config=service.config,
-        project_catalog=restarted_catalog,
-        conversation_repository=repository,
-        session_factory=restarted_factory,
-        environ={
-            "CONDA_DEFAULT_ENV": "app",
-            "CONDA_PREFIX": "/conda/envs/app",
-        },
+        original_cwd=tmp_path, config=service.config,
+        session_factory=restarted_factory, environ={},
     )
-
+    assert asyncio.run(restarted.dispatch("project.list", {}))["projects"] == []
+    asyncio.run(_open_project(restarted, tmp_path))
     after_restart = asyncio.run(restarted.dispatch("project.list", {}))
-    p1_after = asyncio.run(restarted.dispatch(
-        "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 50},
-    ))
-    selected = asyncio.run(restarted.dispatch(
-        "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
-    ))
+    first_after = asyncio.run(restarted.dispatch("session.list", {
+        "projectId": _project_id(tmp_path), "offset": 0, "limit": 50,
+    }))
+    selected = asyncio.run(restarted.dispatch("session.select", {
+        "projectId": _project_id(tmp_path), "sessionId": SESSION_A,
+    }))
     _assert_result("project.list", after_restart, 204)
-    _assert_result("session.list", p1_after, 205)
+    _assert_result("session.list", first_after, 205)
     _assert_result("session.select", selected, 206)
-    assert [item["projectId"] for item in after_restart["projects"]] == ["p1", "p2"]
-    assert [item["sessionId"] for item in p1_after["items"]] == [
-        SESSION_A,
-        SESSION_B,
-    ]
+    assert [item["projectId"] for item in after_restart["projects"]] == [_project_id(tmp_path)]
+    assert [item["sessionId"] for item in first_after["items"]] == [SESSION_A, SESSION_B]
     assert selected["sessionId"] == SESSION_A
     assert selected["turnCount"] == 1
     assert selected["thinkingMode"] == "normal"
@@ -988,7 +920,7 @@ def test_restart_discovers_completed_json_missing_from_catalog_without_replay(
     _append_completed_turn(
         repository,
         SESSION_D,
-        "p1",
+        _project_id(tmp_path),
         display_input="saved before catalog registration",
         assistant_output="already answered",
     )
@@ -996,7 +928,7 @@ def test_restart_discovers_completed_json_missing_from_catalog_without_replay(
     durable_before = durable_path.read_bytes()
     assert catalog.project_for_session(SESSION_D) is None
 
-    restarted_catalog = DesktopProjectCatalog(service.config.persist_dir)
+    restarted_catalog = DesktopProjectCatalog(catalog.path.parent)
     restarted_factory = _CoordinatorFactory()
     restarted = DesktopService(
         original_cwd=tmp_path,
@@ -1010,17 +942,18 @@ def test_restart_discovers_completed_json_missing_from_catalog_without_replay(
         },
     )
 
+    asyncio.run(_open_project(restarted, tmp_path))
     sessions = asyncio.run(restarted.dispatch(
         "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 50},
+        {"projectId": _project_id(tmp_path), "offset": 0, "limit": 50},
     ))
     transcript = asyncio.run(restarted.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_D, "limit": 20},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_D, "limit": 20},
     ))
     selected = asyncio.run(restarted.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_D},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_D},
     ))
 
     assert [item["sessionId"] for item in sessions["items"]] == [
@@ -1028,7 +961,7 @@ def test_restart_discovers_completed_json_missing_from_catalog_without_replay(
         SESSION_B,
         SESSION_D,
     ]
-    assert restarted_catalog.project_for_session(SESSION_D) == "p1"
+    assert restarted_catalog.project_for_session(SESSION_D) == _project_id(tmp_path)
     assert transcript["status"] == "ready"
     assert transcript["items"][0]["assistantText"] == "already answered"
     assert selected["turnCount"] == 1
@@ -1048,7 +981,7 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
 
         await service.dispatch(
             "session.create",
-            {"projectId": "p1", "loadMcp": False},
+            {"projectId": _project_id(tmp_path), "loadMcp": False},
         )
         assert factory.load_mcp_calls == [False]
 
@@ -1057,7 +990,7 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
         }
         selected = await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
         )
 
         assert selected["sessionId"] == SESSION_A
@@ -1068,23 +1001,23 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
 
 def test_ready_conversation_and_transcript_pages_report_exact_boundaries(tmp_path):
     service, _catalog, _factory, repository = _seed_coordinator(tmp_path)
-    _append_completed_turn(repository, SESSION_A, "p1", 2)
+    _append_completed_turn(repository, SESSION_A, _project_id(tmp_path), 2)
 
     sessions_first = asyncio.run(service.dispatch(
         "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 1},
+        {"projectId": _project_id(tmp_path), "offset": 0, "limit": 1},
     ))
     sessions_second = asyncio.run(service.dispatch(
         "session.list",
-        {"projectId": "p1", "offset": 1, "limit": 1},
+        {"projectId": _project_id(tmp_path), "offset": 1, "limit": 1},
     ))
     transcript_first = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "offset": 0, "limit": 1},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "offset": 0, "limit": 1},
     ))
     transcript_second = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "offset": 1, "limit": 1},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "offset": 1, "limit": 1},
     ))
 
     assert [item["sessionId"] for item in sessions_first["items"]] == [SESSION_A]
@@ -1103,10 +1036,10 @@ def test_ready_conversation_and_transcript_pages_report_exact_boundaries(tmp_pat
 
 def test_sidebar_summary_is_derived_from_json_lifecycle_metadata(tmp_path):
     persist_dir = tmp_path / "summary-store"
-    persist_dir.mkdir()
+    _configure_project(tmp_path, persist_dir)
     (persist_dir / CATALOG_FILENAME).write_text(json.dumps({
         "projects": [{
-            "projectId": "p1",
+            "projectId": _project_id(tmp_path),
             "name": "Project One",
             "sessionIds": [SESSION_A],
         }]
@@ -1115,7 +1048,7 @@ def test_sidebar_summary_is_derived_from_json_lifecycle_metadata(tmp_path):
     _append_lifecycle_turn(
         repository,
         SESSION_A,
-        "p1",
+        _project_id(tmp_path),
         1,
         kind="display-only",
         display_input="/status",
@@ -1123,7 +1056,7 @@ def test_sidebar_summary_is_derived_from_json_lifecycle_metadata(tmp_path):
     _append_lifecycle_turn(
         repository,
         SESSION_A,
-        "p1",
+        _project_id(tmp_path),
         2,
         state="failed",
         display_input="  First   accepted\nresearch question  ",
@@ -1131,7 +1064,7 @@ def test_sidebar_summary_is_derived_from_json_lifecycle_metadata(tmp_path):
     _append_lifecycle_turn(
         repository,
         SESSION_A,
-        "p1",
+        _project_id(tmp_path),
         3,
         display_input="later prompt cannot replace the title",
     )
@@ -1144,9 +1077,10 @@ def test_sidebar_summary_is_derived_from_json_lifecycle_metadata(tmp_path):
         environ={},
     )
 
+    asyncio.run(_open_project(service, tmp_path))
     sessions = asyncio.run(service.dispatch(
         "session.list",
-        {"projectId": "p1", "offset": 0, "limit": 50},
+        {"projectId": _project_id(tmp_path), "offset": 0, "limit": 50},
     ))
     summary = sessions["items"][0]
 
@@ -1163,10 +1097,10 @@ def test_sidebar_summary_is_derived_from_json_lifecycle_metadata(tmp_path):
 
 def test_fifty_turn_transcript_pages_preserve_every_lifecycle_record(tmp_path):
     persist_dir = tmp_path / "fifty-turn-store"
-    persist_dir.mkdir()
+    _configure_project(tmp_path, persist_dir)
     (persist_dir / CATALOG_FILENAME).write_text(json.dumps({
         "projects": [{
-            "projectId": "p1",
+            "projectId": _project_id(tmp_path),
             "name": "Project One",
             "sessionIds": [SESSION_A],
         }]
@@ -1184,7 +1118,7 @@ def test_fifty_turn_transcript_pages_preserve_every_lifecycle_record(tmp_path):
         _append_lifecycle_turn(
             repository,
             SESSION_A,
-            "p1",
+            _project_id(tmp_path),
             number,
             kind="display-only" if number % 5 == 0 else "conversational",
             state=state,
@@ -1198,9 +1132,10 @@ def test_fifty_turn_transcript_pages_preserve_every_lifecycle_record(tmp_path):
         environ={},
     )
 
+    asyncio.run(_open_project(service, tmp_path))
     pages = [
         asyncio.run(service.dispatch("session.transcript", {
-            "projectId": "p1",
+            "projectId": _project_id(tmp_path),
             "sessionId": SESSION_A,
             "offset": offset,
             "limit": 20,
@@ -1234,10 +1169,10 @@ def test_fifty_turn_transcript_pages_preserve_every_lifecycle_record(tmp_path):
 
 def test_long_transcript_survives_switch_back_and_backend_recreation(tmp_path):
     persist_dir = tmp_path / "long-transcript-store"
-    persist_dir.mkdir()
+    _configure_project(tmp_path, persist_dir)
     (persist_dir / CATALOG_FILENAME).write_text(json.dumps({
         "projects": [{
-            "projectId": "p1",
+            "projectId": _project_id(tmp_path),
             "name": "Project One",
             "sessionIds": [SESSION_A, SESSION_B],
         }]
@@ -1248,20 +1183,20 @@ def test_long_transcript_survives_switch_back_and_backend_recreation(tmp_path):
     _append_completed_turn(
         repository,
         SESSION_A,
-        "p1",
+        _project_id(tmp_path),
         assistant_output=first_answer,
     )
     _append_completed_turn(
         repository,
         SESSION_A,
-        "p1",
+        _project_id(tmp_path),
         turn_number=2,
         assistant_output=second_answer,
     )
-    _append_completed_turn(repository, SESSION_B, "p1")
+    _append_completed_turn(repository, SESSION_B, _project_id(tmp_path))
 
     def make_service() -> DesktopService:
-        return DesktopService(
+        service = DesktopService(
             original_cwd=tmp_path,
             config=AgentConfig(persist_dir=str(persist_dir)),
             project_catalog=DesktopProjectCatalog(persist_dir),
@@ -1270,24 +1205,27 @@ def test_long_transcript_survives_switch_back_and_backend_recreation(tmp_path):
             environ={},
         )
 
+        asyncio.run(_open_project(service, tmp_path))
+        return service
+
     first = make_service()
     asyncio.run(first.dispatch(
-        "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+        "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
     ))
     initial = asyncio.run(first.dispatch("session.transcript", {
-        "projectId": "p1",
+        "projectId": _project_id(tmp_path),
         "sessionId": SESSION_A,
         "offset": 0,
         "limit": 20,
     }))
     asyncio.run(first.dispatch(
-        "session.select", {"projectId": "p1", "sessionId": SESSION_B}
+        "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}
     ))
     asyncio.run(first.dispatch(
-        "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+        "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
     ))
     switched = asyncio.run(first.dispatch("session.transcript", {
-        "projectId": "p1",
+        "projectId": _project_id(tmp_path),
         "sessionId": SESSION_A,
         "offset": 0,
         "limit": 20,
@@ -1295,10 +1233,10 @@ def test_long_transcript_survives_switch_back_and_backend_recreation(tmp_path):
 
     restarted = make_service()
     selected = asyncio.run(restarted.dispatch(
-        "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+        "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
     ))
     restored = asyncio.run(restarted.dispatch("session.transcript", {
-        "projectId": "p1",
+        "projectId": _project_id(tmp_path),
         "sessionId": SESSION_A,
         "offset": 0,
         "limit": 20,
@@ -1321,7 +1259,7 @@ def test_transient_d_registers_once_after_first_durable_turn(tmp_path):
 
     created = asyncio.run(service.dispatch(
         "session.create",
-        {"projectId": "p1", "loadMcp": False},
+        {"projectId": _project_id(tmp_path), "loadMcp": False},
     ))
     _assert_result("session.create", created, 211)
     assert created["sessionId"] == SESSION_D
@@ -1340,7 +1278,7 @@ def test_transient_d_registers_once_after_first_durable_turn(tmp_path):
     assert local["responseKind"] == "command"
     assert local["registrationStatus"] == "registered"
     assert factory.sessions[-1].turn_inputs == []
-    assert catalog.project_for_session(SESSION_D) == "p1"
+    assert catalog.project_for_session(SESSION_D) == _project_id(tmp_path)
 
     first = asyncio.run(service.dispatch("session.turn", {
         "text": "first",
@@ -1380,6 +1318,7 @@ def test_first_prompt_registers_catalog_before_provider_failure(
         persist_dir=str(tmp_path / "store"),
         plan_logs_dir=str(tmp_path / "plans"),
     )
+    _configure_project(tmp_path, Path(config.persist_dir))
     catalog = DesktopProjectCatalog(config.persist_dir)
     repository = ConversationRepository(config.persist_dir)
     created_id: str | None = None
@@ -1433,9 +1372,10 @@ def test_first_prompt_registers_catalog_before_provider_failure(
             "CONDA_PREFIX": "/conda/envs/app",
         },
     )
+    asyncio.run(_open_project(service, tmp_path))
     created = asyncio.run(service.dispatch(
         "session.create",
-        {"projectId": "local", "loadMcp": False},
+        {"projectId": _project_id(tmp_path), "loadMcp": False},
     ))
     created_id = created["sessionId"]
     turn_id = _logical_turn_id(214)
@@ -1447,14 +1387,14 @@ def test_first_prompt_registers_catalog_before_provider_failure(
             "retry": False,
         }))
 
-    assert observed == {"state": "pending", "owner": "local"}
+    assert observed == {"state": "pending", "owner": _project_id(tmp_path)}
     assert raised.value.details == {
         "turnId": turn_id,
         "state": "failed",
         "accepted": True,
         "persisted": True,
     }
-    assert catalog.project_for_session(created_id) == "local"
+    assert catalog.project_for_session(created_id) == _project_id(tmp_path)
     assert repository.load(created_id).document.turns[-1].state == "failed"
 
 
@@ -1463,7 +1403,7 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
 
     selected_a = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     thinking = asyncio.run(service.dispatch(
         "session.set_thinking",
@@ -1476,7 +1416,7 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
     }))
     selected_b = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_B},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_B},
     ))
     b_second = asyncio.run(service.dispatch("session.turn", {
         "text": "B second",
@@ -1485,7 +1425,7 @@ def test_select_a_b_a_isolates_canonical_context_without_flushing(tmp_path):
     }))
     returned_a = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     a_third = asyncio.run(service.dispatch("session.turn", {
         "text": "A third",
@@ -1534,7 +1474,7 @@ def test_control_snapshots_are_not_evicted_at_the_old_128_session_boundary(
     service, _catalog, factory, _repository = _seed_coordinator(tmp_path)
     asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     snapshot = service._capture_controls(factory.sessions[-1])
     session_ids = [uuid.UUID(int=index + 1, version=4).hex for index in range(129)]
@@ -1555,10 +1495,10 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     )
     created = asyncio.run(service.dispatch(
         "session.create",
-        {"projectId": "p1", "loadMcp": False},
+        {"projectId": _project_id(tmp_path), "loadMcp": False},
     ))
     _assert_result("session.create", created, 231)
-    durable_path = Path(service.config.persist_dir) / CATALOG_FILENAME
+    durable_path = catalog.path
     durable_before = durable_path.read_bytes()
     atomic_replace = catalog._atomic_replace
 
@@ -1584,15 +1524,15 @@ def test_registration_failure_is_pending_and_retry_does_not_rerun_turn(
     monkeypatch.setattr(catalog, "_atomic_replace", atomic_replace)
     retry = asyncio.run(service.dispatch(
         "session.retry_registration",
-        {"projectId": "p1", "sessionId": SESSION_D},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_D},
     ))
     repeated_retry = asyncio.run(service.dispatch(
         "session.retry_registration",
-        {"projectId": "p1", "sessionId": SESSION_D},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_D},
     ))
     transcript = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_D, "offset": 0, "limit": 20},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_D, "offset": 0, "limit": 20},
     ))
     _assert_result("session.retry_registration", retry, 233)
     _assert_result("session.retry_registration", repeated_retry, 234)
@@ -1618,6 +1558,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
         ),
     )
     persist_dir = tmp_path / "plan-lifecycle-store"
+    _configure_project(tmp_path, persist_dir)
     catalog = DesktopProjectCatalog(persist_dir)
     config = AgentConfig(
         persist_dir=str(persist_dir),
@@ -1673,9 +1614,10 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     )
 
     async def run_first_process():
+        await _open_project(first, tmp_path)
         created = await first.dispatch(
             "session.create",
-            {"projectId": "local", "loadMcp": False},
+            {"projectId": _project_id(tmp_path), "loadMcp": False},
         )
         answer = await first.dispatch(
             "session.turn",
@@ -1695,7 +1637,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     assert first_answer["state"] == "completed"
     assert first_shutdown == {"status": "stopped"}
     assert fake_tool_invocations == ["call-persisted"]
-    assert catalog.project_for_session(SESSION_D) == "local"
+    assert catalog.project_for_session(SESSION_D) == _project_id(tmp_path)
 
     second_graph = make_astream_graph(answer="continued answer")
 
@@ -1735,13 +1677,14 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     )
 
     async def run_second_process():
+        await _open_project(second, tmp_path)
         transcript = await second.dispatch(
             "session.transcript",
-            {"projectId": "local", "sessionId": SESSION_D, "limit": 20},
+            {"projectId": _project_id(tmp_path), "sessionId": SESSION_D, "limit": 20},
         )
         selected = await second.dispatch(
             "session.select",
-            {"projectId": "local", "sessionId": SESSION_D},
+            {"projectId": _project_id(tmp_path), "sessionId": SESSION_D},
         )
         continued = await second.dispatch(
             "session.turn",
@@ -1831,7 +1774,7 @@ def test_transcript_complete_text_and_bounded_tool_page_are_returned_whole(
     )
     field_result = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "limit": 20},
     ))
     assert field_result["status"] == "ready"
     assert field_result["items"][0]["userText"] == "x" * 32_769
@@ -1862,7 +1805,7 @@ def test_transcript_complete_text_and_bounded_tool_page_are_returned_whole(
     )
     page_result = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "limit": 20},
     ))
     assert page_result["status"] == "ready"
     assert len(page_result["items"][0]["toolActivities"]) == 16
@@ -1873,7 +1816,7 @@ def test_duplicate_caller_turn_id_returns_saved_answer_without_model_replay(tmp_
     service, _catalog, factory, repository = _seed_coordinator(tmp_path)
     selected = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     turn_id = _logical_turn_id(311)
     first = asyncio.run(service.dispatch("session.turn", {
@@ -1902,16 +1845,16 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
     selected = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     _assert_result("session.select", selected, 251)
 
     for method, params in (
         ("session.list", {"projectId": "missing", "offset": 0, "limit": 20}),
-        ("session.select", {"projectId": "p1", "sessionId": SESSION_C}),
+        ("session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_C}),
         (
             "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_C, "offset": 0, "limit": 20},
+            {"projectId": _project_id(tmp_path), "sessionId": SESSION_C, "offset": 0, "limit": 20},
         ),
     ):
         with pytest.raises(DesktopServiceError) as raised:
@@ -1924,7 +1867,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     monkeypatch.setattr(service, "_read_conversation_turns", degraded)
     degraded_result = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "offset": 0, "limit": 20},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "offset": 0, "limit": 20},
     ))
     _assert_result("session.transcript", degraded_result, 252)
     assert degraded_result["status"] == "degraded"
@@ -1938,7 +1881,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     )
     unavailable = asyncio.run(service.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "offset": 0, "limit": 20},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "offset": 0, "limit": 20},
     ))
     _assert_result("session.transcript", unavailable, 253)
     assert unavailable["status"] == "unavailable"
@@ -1946,8 +1889,8 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
 
     service._turn_active = True
     for method, params in (
-        ("session.create", {"projectId": "p1", "loadMcp": False}),
-        ("session.select", {"projectId": "p1", "sessionId": SESSION_B}),
+        ("session.create", {"projectId": _project_id(tmp_path), "loadMcp": False}),
+        ("session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}),
         ("session.set_thinking", {"mode": "normal"}),
     ):
         with pytest.raises(DesktopServiceError) as raised:
@@ -1969,28 +1912,22 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
         session_factory=_CoordinatorFactory(new_ids=(SESSION_D,)),
         environ={},
     )
-    rebuilt_projects = asyncio.run(malformed_service.dispatch("project.list", {}))
-    _assert_result("project.list", rebuilt_projects, 254)
-    assert rebuilt_projects == {
-        "status": "ready",
-        "issue": None,
-        "projects": [{
-            "projectId": "local",
-            "name": "Local research",
-            "sessionCount": 0,
-        }],
-        "selectedProjectId": "local",
-        "selectedSessionId": None,
+    cold_projects = asyncio.run(malformed_service.dispatch("project.list", {}))
+    _assert_result("project.list", cold_projects, 254)
+    assert cold_projects == {
+        "status": "ready", "issue": None, "projects": [],
+        "selectedProjectId": None, "selectedSessionId": None,
     }
-    assert json.loads(
-        (malformed_dir / CATALOG_FILENAME).read_text(encoding="utf-8")
-    ) == {
-        "projects": [{
-            "projectId": "local",
-            "name": "Local research",
-            "sessionIds": [],
-        }]
-    }
+    assert (malformed_dir / CATALOG_FILENAME).read_bytes() == malformed_bytes
+    root = tmp_path / "malformed-project"
+    root.mkdir()
+    (root / "RESEARCH.md").write_text(_project_metadata(malformed_dir), encoding="utf-8")
+    (malformed_dir / "conversations").mkdir()
+    with pytest.raises(DesktopServiceError) as malformed_open:
+        asyncio.run(malformed_service.dispatch("workspace.select", {"rootPath": str(root)}))
+    assert malformed_open.value.code == "PROTOCOL_INVALID"
+    assert (malformed_dir / CATALOG_FILENAME).read_bytes() == malformed_bytes
+    assert asyncio.run(malformed_service.dispatch("project.list", {})) == cold_projects
 
 
 def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversations(
@@ -2000,7 +1937,7 @@ def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversati
 
     selected_a = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     assert selected_a["bashPermissionMode"] == "ask"
 
@@ -2012,26 +1949,27 @@ def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversati
 
     selected_b = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_B},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_B},
     ))
     assert selected_b["bashPermissionMode"] == "ask"
 
     returned_a = asyncio.run(service.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
     assert returned_a["bashPermissionMode"] == "bypass"
 
 
 def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
+    service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
+
     async def run():
-        service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
         await service.dispatch(
-            "session.select", {"projectId": "p1", "sessionId": SESSION_B}
+            "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}
         )
         await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
         selected_a = await service.dispatch(
-            "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+            "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
         )
         assert selected_a["bashPermissionMode"] == "ask"
         original_session = service.session
@@ -2047,7 +1985,7 @@ def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
 
         monkeypatch.setattr(service, "_load_conversation", paused_load)
         selection = asyncio.create_task(service.dispatch(
-            "session.select", {"projectId": "p1", "sessionId": SESSION_B}
+            "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}
         ))
         try:
             await asyncio.wait_for(read_started.wait(), timeout=5)
@@ -2066,7 +2004,7 @@ def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
         assert selected_b["sessionId"] == SESSION_B
         assert selected_b["bashPermissionMode"] == "bypass"
         returned_a = await service.dispatch(
-            "session.select", {"projectId": "p1", "sessionId": SESSION_A}
+            "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
         )
         assert returned_a["bashPermissionMode"] == "ask"
 
@@ -2118,12 +2056,13 @@ def _citation_desktop(monkeypatch, tmp_path):
 
 
 def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(monkeypatch, tmp_path):
-    from test_desktop_service import _service, _turn_params
+    from test_desktop_service import _open_test_project, _service, _turn_params
 
     service, model, fetcher, services, sessions = _citation_desktop(monkeypatch, tmp_path)
+    asyncio.run(_open_test_project(service, tmp_path))
     created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session_a = service.session
-    selected = {"projectId": "local", "sessionId": created["sessionId"]}
+    selected = {"projectId": service._selected_project_id, "sessionId": created["sessionId"]}
     asyncio.run(service.dispatch("session.set_thinking", {"mode": "extended"}))
     params = _turn_params("/citation 搜尋 Paper A，保存並正式引用")
     events = []
@@ -2163,6 +2102,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
 
     # Recreate the backend against only this temporary canonical store.
     restarted = _service(tmp_path, session_factory=service._session_factory)
+    asyncio.run(_open_test_project(restarted, tmp_path))
     asyncio.run(restarted.dispatch("session.create", {"loadMcp": False}))
     asyncio.run(restarted.dispatch("session.select", selected))
     restored = asyncio.run(restarted.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
@@ -2186,6 +2126,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     ))
     counts = (len(model.invocations), len(fetcher.calls), len(services))
     recovered = _service(tmp_path, session_factory=service._session_factory)
+    asyncio.run(_open_test_project(recovered, tmp_path))
     asyncio.run(recovered.dispatch("session.create", {"loadMcp": False}))
     asyncio.run(recovered.dispatch("session.select", selected))
     interrupted = asyncio.run(recovered.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
@@ -2198,16 +2139,17 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
 @pytest.mark.parametrize("terminal", ["provider", "cancel"])
 def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tmp_path, terminal):
     from test_citation_e2e import _workflow_results, _save_content
-    from test_desktop_service import _service, _turn_params
+    from test_desktop_service import _open_test_project, _service, _turn_params
 
     service, model, fetcher, services, _sessions = _citation_desktop(monkeypatch, tmp_path)
 
     async def scenario():
+        await _open_test_project(service, tmp_path)
         created = await service.dispatch("session.create", {"loadMcp": False})
         session = service.session
         session.set_thinking_mode("extended")
         params = _turn_params("/citation 搜尋 Paper A，保存並正式引用")
-        selected = {"projectId": "local", "sessionId": created["sessionId"]}
+        selected = {"projectId": service._selected_project_id, "sessionId": created["sessionId"]}
         original_invoke = model.invoke
         finalize = session.finalize_and_record
         entered = asyncio.Event()
@@ -2263,6 +2205,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         monkeypatch.setattr(model, "invoke", original_invoke)
         counts = (len(model.invocations), len(fetcher.calls), len(services))
         restarted = _service(tmp_path, session_factory=service._session_factory)
+        await _open_test_project(restarted, tmp_path)
         await restarted.dispatch("session.create", {"loadMcp": False})
         await restarted.dispatch("session.select", selected)
         transcript = await restarted.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20})

@@ -6,7 +6,7 @@
 
 | 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
 |---|---|---|---|---|
-| P1 | In progress | E05: runtime/branch preflight | GUI baseline pending | P1-S2 metadata helpers |
+| P1 | In progress | E05-E12: project binding, rules and scoped tests | Frontend S6 and integrated GUI pending | Finish S6/S7, verify native project flow |
 | P2 | Not started | 無 | P1 | 依 D4/D5 進行 canonical 與協議調整 |
 | P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
@@ -101,3 +101,9 @@
 - Adapted existing fixture, document-service, final-answer, extension-entry and crash-recovery tests to explicit project opening and scoped history, retaining their permission/save/conflict/undo/replay assertions. No production gate bypass or new test framework.
 - Actual checks: fixture module first run 20 passed/1 failed because its old no-RAG-write assertion excluded only store/conversations; changed that exclusion to the selected history/conversations and reran the single case successfully. All 21 fixture cases therefore have passing evidence (unchanged 20 reused). Document-service cases: 6 non-fixture passed (0.51s), then 1 fixture passed (0.24s). Answer-stream + affected extension-entry cases: 17 passed, 1 unrelated user_dropin case deselected (0.96s). Crash-recovery module under 120s cap: 6 passed (8.72s); no actual provider calls.
 - Main reviewed fixture production diff and test scope, git diff --check passed. Conversation/service legacy fixture adaptation and native project GUI flow are still pending, so P1 remains in progress.
+
+### E12 / P1-S7 conversation regression fixtures
+
+- Adapted existing conversation coordinator fixtures to explicitly open two separately owned project/history roots. Updated old orphan/malformed/partial-scan fallback expectations to the authorized fail-closed behavior, asserting unchanged bytes. Turn lifecycle, ordered registration, controls, retry/no-replay and citation-entry coverage remain.
+- Only test_desktop_conversations.py changed; all 44 test functions retained and S2 metadata tests preserved. Actual complete-file run once: `poetry run pytest tests/test_desktop_conversations.py -q --tb=short` -> 61 passed, 2.42s. Earlier focused run: 11 passed/2 failures (fake factory missing system_prompt argument and obsolete local-project expectation); corrected those test assumptions, focused 15/15 passed before the complete-file run.
+- Main reviewed actual setup/expectation diff and scoped whitespace check passed. No production bypass, true history migration or provider request.
