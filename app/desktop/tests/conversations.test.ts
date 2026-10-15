@@ -52,6 +52,7 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  DocumentHeader: (props: { path: string | null; dirty: boolean; busy: boolean; openDisabled: boolean; saveDisabled: boolean; undoDisabled: boolean; onOpen: () => void; onSave: () => void; onUndo: () => void }) => unknown;
   documentReference: (snapshot: { rootPath: string; path: string; sourceText: string; editorRevision: number; diskFingerprint: string; rangeStartUtf16?: number; rangeEndUtf16?: number }, referenceId: string) => Reference;
   backgroundDocumentContext: (snapshot: unknown) => Record<string, unknown> | undefined;
   checkSubmissionSize: (text: string, context: SubmittedContext | null) => void;
@@ -1073,4 +1074,31 @@ test("document reference line labels count lone CR boundaries with an exclusive 
   assert.equal(reference.text, "second\r");
   assert.equal(reference.document.startLine, 2);
   assert.equal(reference.document.endLine, 2);
+});
+
+test("compact document header keeps filename, dirty state and guarded file actions without a permanent path input", async () => {
+  const { DocumentHeader } = await loadAppHelpers();
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const html = renderToStaticMarkup(createElement(DocumentHeader, {
+    path: "/tmp/project-a/draft.md", dirty: true, busy: false,
+    openDisabled: false, saveDisabled: false, undoDisabled: true,
+    onOpen: () => {}, onSave: () => {}, onUndo: () => {},
+  }));
+  assert.match(html, /title="\/tmp\/project-a\/draft.md"/);
+  assert.match(html, />draft.md</);
+  assert.match(html, /aria-label="Unsaved changes"/);
+  assert.match(html, /aria-label="Document actions"/);
+  assert.match(html, /Open file…/);
+  assert.match(html, /Save <kbd>Ctrl\+S<\/kbd>/);
+  assert.match(html, /<button[^>]*disabled[^>]*>Undo last Agent edit/);
+  assert.doesNotMatch(html, /<input|Research folder|Source file/);
+  const busyHtml = renderToStaticMarkup(createElement(DocumentHeader, {
+    path: null, dirty: false, busy: true,
+    openDisabled: true, saveDisabled: true, undoDisabled: true,
+    onOpen: () => {}, onSave: () => {}, onUndo: () => {},
+  }));
+  assert.equal((busyHtml.match(/ disabled/g) ?? []).length, 3);
+  assert.match(busyHtml, /Working…/);
+  assert.doesNotMatch(busyHtml, /Unsaved changes/);
 });

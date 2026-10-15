@@ -781,6 +781,42 @@ function MessageBody({ text, source }: { text: string; source?: { projectId: str
   })}><SafeContent content={text} /></div>;
 }
 
+export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, undoDisabled, onOpen, onSave, onUndo }: {
+  path: string | null; dirty: boolean; busy: boolean;
+  openDisabled: boolean; saveDisabled: boolean; undoDisabled: boolean;
+  onOpen: () => void; onSave: () => void; onUndo: () => void;
+}) {
+  const activate = (event: React.MouseEvent<HTMLButtonElement>, action: () => void) => {
+    const menu = event.currentTarget.closest("details");
+    if (menu !== null) {
+      menu.open = false;
+      menu.querySelector("summary")?.focus();
+    }
+    action();
+  };
+  return <header className="document-header">
+    <span className="document-name" title={path ?? undefined}>{path?.split("/").at(-1) ?? "No source file"}</span>
+    {dirty && <span className="document-dirty" role="status" aria-label="Unsaved changes" title="Unsaved changes">●</span>}
+    {busy && <span className="document-busy" role="status">Working…</span>}
+    <details className="document-menu" data-document-menu onKeyDown={(event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.currentTarget.open = false;
+        event.currentTarget.querySelector("summary")?.focus();
+      }
+    }} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+    }}>
+      <summary aria-label="Document actions" title="Document actions">•••</summary>
+      <div className="document-menu-actions">
+        <button type="button" disabled={openDisabled} onClick={(event) => activate(event, onOpen)}>Open file…</button>
+        <button type="button" disabled={saveDisabled} onClick={(event) => activate(event, onSave)}>Save <kbd>Ctrl+S</kbd></button>
+        <button type="button" disabled={undoDisabled} onClick={(event) => activate(event, onUndo)}>Undo last Agent edit</button>
+      </div>
+    </details>
+  </header>;
+}
+
 interface DocumentResult extends Partial<DocumentSnapshot> {
   path: string;
   status: "saved" | "conflict" | "failed" | "cancelled";
@@ -874,7 +910,8 @@ export default function App() {
   const [filePath, setFilePath] = useState("");
   const [documentBusy, setDocumentBusy] = useState(false);
   const documentBusyRef = useRef(false);
-  const [documentNotice, setDocumentNotice] = useState("Choose a research folder, then open a Markdown or TeX source file.");
+  const [documentNotice, setDocumentNotice] = useState<string | null>(null);
+  const [openFileDialog, setOpenFileDialog] = useState(false);
   const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResult; base: DocumentSnapshot } | null>(null);
   const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
   const documentRequestRef = useRef<{ requestId: string; turnId: string } | null>(null);
@@ -972,10 +1009,10 @@ export default function App() {
           editorRevision: result.editorRevision,
           rangeStartUtf16: result.rangeStartUtf16, rangeEndUtf16: result.rangeEndUtf16,
         }, action !== null));
-        setDocumentNotice("Saved to disk. You can inspect the changed source.");
+        setDocumentNotice(null);
       } else {
         updateDocument({ ...current, diskFingerprint: result.diskFingerprint });
-        setDocumentNotice("The requested version was saved. Your newer editor changes remain unsaved.");
+        setDocumentNotice(null);
       }
       setDocumentConflict(null);
       if (action?.callId !== undefined) setLastDocumentAction(action);
@@ -1033,7 +1070,8 @@ export default function App() {
   const openDocument = useCallback(async () => {
     if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
         conversationRef.current.activeTurn !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
-    if (documentRef.current !== null && !window.confirm("Opening a file replaces the current editor contents. Continue?")) return;
+    if (documentRef.current !== null && documentRef.current.sourceText !== documentBaselineRef.current?.sourceText &&
+        !window.confirm("Discard unsaved document changes and open another file?")) return;
     const owner = captureOwner("document.open");
     documentOperationRef.current = owner;
     frameOwnerRef.current = null;
@@ -1048,7 +1086,8 @@ export default function App() {
       setFilePath(opened.path);
       setDocumentConflict(null);
       setLastDocumentAction(null);
-      setDocumentNotice("Opened. The Agent will use the current editor text, including unsaved changes.");
+      setDocumentNotice(null);
+      setOpenFileDialog(false);
     } catch (error) {
       if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message);
     } finally {
@@ -1102,7 +1141,7 @@ export default function App() {
       await saveDocument();
     } else {
       setDocumentConflict(null);
-      setDocumentNotice("Current editor text retained. Disk was not changed.");
+      setDocumentNotice(null);
     }
   }, [documentConflict, applyDocumentOperation, saveDocument, updateDocument]);
 
@@ -1417,7 +1456,8 @@ export default function App() {
       setFilePath("");
       setDocumentConflict(null);
       setLastDocumentAction(null);
-      setDocumentNotice("Open a Markdown or TeX source file from this project.");
+      setDocumentNotice(null);
+      setOpenFileDialog(false);
       setWorkspaceIssue(null);
       setChooserOpen(false);
       setChatSelection(null);
@@ -2297,16 +2337,18 @@ export default function App() {
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectionPreview?.title ?? selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
         <div className="writing-workspace">
           <section className="document-pane" aria-label="Source document workspace">
-            <div className="document-toolbar">
-              <label>Research folder<input aria-label="Research folder" value={rootPath} readOnly placeholder="Choose a project first" disabled /></label>
-              <label>Source file<input aria-label="Source file" value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="draft.md or draft.tex" disabled={interaction.turnActive || documentBusy} /></label>
-              <div className="action-row">
-                <button type="button" onClick={() => void openDocument()} disabled={activeProjectId === null || workspaceBusy !== null || interaction.turnActive || documentBusy || rootPath.trim() === "" || filePath.trim() === "" || state.snapshot?.lifecycle !== "ready"}>Open source</button>
-                <button type="button" onClick={() => void saveDocument()} disabled={documentValue === null || documentBusy || state.snapshot?.lifecycle !== "ready"}>Save</button>
-                <button type="button" onClick={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })} disabled={lastDocumentAction === null || documentBusy || interaction.turnActive}>Undo Agent edit</button>
-              </div>
-            </div>
-            <p className="document-notice" role="status">{documentBusy ? "Checking and saving the requested version…" : documentNotice}</p>
+            <DocumentHeader path={documentValue?.path ?? null} dirty={documentDirty} busy={documentBusy}
+              openDisabled={activeProjectId === null || workspaceBusy !== null || interaction.turnActive || documentBusy || rootPath.trim() === "" || state.snapshot?.lifecycle !== "ready"}
+              saveDisabled={documentValue === null || documentBusy || state.snapshot?.lifecycle !== "ready"}
+              undoDisabled={lastDocumentAction === null || documentBusy || interaction.turnActive}
+              onOpen={() => {
+                setFilePath(documentValue?.path.startsWith(rootPath + "/") ? documentValue.path.slice(rootPath.length + 1) : "");
+                setOpenFileDialog(true);
+              }}
+              onSave={() => void saveDocument()}
+              onUndo={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })}
+            />
+            {documentNotice !== null && <p className="document-error" role="status">{documentNotice}</p>}
             <DocumentEditor value={documentValue} onChange={updateDocument} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
             {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
               <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
@@ -2392,6 +2434,35 @@ export default function App() {
         </div>
         </div>
       </main>
+      {openFileDialog && <div className="approval-backdrop">
+        <form className="approval-dialog file-open-dialog" role="dialog" aria-modal="true" aria-labelledby="file-open-title"
+          onSubmit={(event) => { event.preventDefault(); void openDocument(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !documentBusy) {
+              event.preventDefault();
+              setOpenFileDialog(false);
+              scheduleOwnedFrame(captureOwner("close file dialog"), () => document.querySelector<HTMLElement>("[data-document-menu] > summary")?.focus());
+            }
+            if (event.key !== "Tab") return;
+            const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input:not(:disabled), button:not(:disabled)"));
+            const first = controls[0], last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+          }}>
+          <h2 id="file-open-title">Open source file</h2>
+          <p>Choose a Markdown or TeX file inside this project.</p>
+          <label>Relative file path<input autoFocus aria-label="Relative file path" value={filePath}
+            onChange={(event) => setFilePath(event.target.value)} placeholder="draft.md or draft.tex" disabled={documentBusy} /></label>
+          {documentNotice !== null && <p className="document-error" role="alert">{documentNotice}</p>}
+          <div className="action-row">
+            <button type="submit" className="primary-button" disabled={documentBusy || filePath.trim() === ""}>{documentBusy ? "Opening…" : "Open file"}</button>
+            <button type="button" disabled={documentBusy} onClick={() => {
+              setOpenFileDialog(false);
+              scheduleOwnedFrame(captureOwner("close file dialog"), () => document.querySelector<HTMLElement>("[data-document-menu] > summary")?.focus());
+            }}>Cancel</button>
+          </div>
+        </form>
+      </div>}
       {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <div className="approval-backdrop">
         <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="project-chooser-title"
           onKeyDown={(event) => {

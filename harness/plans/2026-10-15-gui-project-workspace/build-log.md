@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
 | P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
-| P3 | Not started | 無 | P2 | 刪常駐區塊、重排與量測 |
+| P3 | In progress | E24: compact document actions | none | Sidebar/footer/layout then native measurement |
 | P4 | Not started | 無 | P1/P2/P3 | 執行 A21 與相關回歸 |
 
 ## 規劃證據
@@ -181,3 +181,10 @@
 - Mixed document+chat references sent with [[fixture:fail-once]] failed, then Retry saved draft completed after further editor edits. Main independently compared p2-failed-turn-evidence.json and p2-retried-turn-evidence.json: identical turnId 9cbd8ed8366742018c829ddca0257ce2, submittedContext, semanticInput and displayInput; failed -> completed, total conversation count remained2. Native snapshots p2-mixed-failed/retried retained in fixture root.
 - Actual same-window baseline p2-layout-baseline.json: 1080x720, sidebar272px, Monaco code412x427px, transcript370x197px; font/zoom unchanged. Two draft references reduced transcript to35px and failure notice overflowed viewport; this observed layout defect is within the next P3 compression task, not claimed resolved. Pixel capture is unavailable; AT-SPI rendered controls/geometry and exact disk evidence are used.
 - P2 implementation end condition met using E16-E23; remaining reopen, multiple failed logical turns and full reference-write native journey belong to P4. Owned Vite/native sessions stopped, fixture/evidence preserved. Runtime/GUI branch and clean HEAD6cf31fd rechecked before this entry. No provider/dependency/real-history operation.
+
+### E24 / P3-S1/S2: compact document actions
+
+- Removed permanent folder/path fields, toolbar and normal success notice. Existing document header now contains filename/full-path title, true dirty marker, short busy indicator and Open file/Save/Undo last Agent edit menu. Open uses a temporary relative-path dialog with Escape/Tab handling; dirty replacement requires explicit confirmation. Existing document.open/save/apply/undo and Mod+S handlers remain the only operations.
+- Open/save/apply exceptions stay visible in a persistent local error area; successful open/save removes it. Failed open retains source and undo receipt. No automatic save or project binding on file open.
+- Actual frontend checks: `npx tsc --noEmit` passed; four focused existing header/save/reconcile cases passed. Main reviewed complete three-file diff and whitespace. Native menu, keyboard and dirty workflow remain pending; no GUI completion claim.
+- Additional pre-S3 native width baseline: same font/zoom at1440x900 gives sidebar290px (p3-old-sidebar-1440-baseline.json in E23 fixture root), versus272px at1080x720. Owned native/Vite processes stopped after measurement. P3-S3 can now compare actual widths at both sizes.

@@ -1171,12 +1171,20 @@ h3 {
 /* Source and conversation share a workspace; tool waits never disable editing. */
 .writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); height: calc(100vh - 4.4rem); min-height: 0; flex: 1; }
 .document-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #d4d6d8; background: #fff; }
-.document-toolbar { padding: .7rem; border-bottom: 1px solid #dedfdd; }
-.document-toolbar label { display: grid; gap: .2rem; margin-bottom: .4rem; color: #66716d; font-size: .72rem; }
-.document-toolbar input { min-width: 0; width: 100%; padding: .35rem .5rem; border: 1px solid #d4d6d8; border-radius: .3rem; color: #23272f; }
-.document-toolbar .action-row { flex-wrap: wrap; gap: .35rem; }
-.document-toolbar button { min-height: 1.9rem; padding: .3rem .55rem; font-size: .72rem; }
-.document-notice { padding: .45rem .7rem; margin: 0; color: #52645c; background: #f3f7f4; font-size: .72rem; }
+.document-header { display: flex; align-items: center; gap: .45rem; flex: 0 0 auto; min-width: 0; padding: .35rem .7rem; border-bottom: 1px solid #dedfdd; }
+.document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
+.document-dirty { color: #9b6a25; font-size: .65rem; }
+.document-busy { color: #66716d; font-size: .7rem; }
+.document-menu { position: relative; margin-left: auto; }
+.document-menu > summary { padding: .3rem .55rem; border-radius: .35rem; cursor: pointer; list-style: none; }
+.document-menu > summary::-webkit-details-marker { display: none; }
+.document-menu-actions { position: absolute; top: 100%; right: 0; z-index: 60; display: grid; min-width: 13rem; padding: .3rem; background: #fff; border: 1px solid #d4d6d8; border-radius: .45rem; box-shadow: 0 .35rem 1rem #23272f22; }
+.document-menu-actions button { text-align: left; border: 0; min-height: 2rem; font-size: .75rem; }
+.document-menu-actions kbd { float: right; margin-left: 1rem; color: #66716d; font: inherit; }
+.document-error { flex: 0 0 auto; max-height: 16vh; overflow: auto; padding: .45rem .7rem; margin: 0; color: #7b4540; background: #fff7f5; font-size: .75rem; }
+.file-open-dialog label { display: grid; gap: .3rem; margin: 1rem 0; }
+.file-open-dialog input { width: 100%; padding: .5rem; }
+.file-open-dialog .document-error { margin-bottom: .7rem; }
 .document-editor { display: flex; flex-direction: column; flex: 1; min-height: 6rem; min-width: 0; }
 .document-editor-surface { flex: 1; min-height: 0; }
 .document-editor-status { padding: .35rem .7rem; color: #66716d; font-size: .68rem; border-top: 1px solid #dedfdd; }
