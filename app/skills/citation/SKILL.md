@@ -51,6 +51,13 @@ task; visible prior conversation still supplies metadata and authorization.
   claim. For metadata-only candidates, say that relevance cannot yet be
   assessed from an abstract. Title similarity and verified DOI identity
   establish neither substantive support nor a content summary.
+- Describe study design and method limitations only when the retrieved
+  abstract states them. Higher/lower activity groups alone do not establish
+  extreme-group sampling, non-random assignment, or the absence of an RCT.
+  If randomization or control methods are not reported, say that the
+  abstract does not specify them and the design cannot be determined.
+  Do not turn missing methods into definite design facts or definite
+  unaddressed confounders.
 - This workflow stops at abstracts. Do not download/read full text or start
   a separate evidence-verification pipeline. Abstracts exist only in this
   turn's discovery results; saving still verifies bibliographic identity

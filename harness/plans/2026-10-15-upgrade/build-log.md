@@ -149,6 +149,15 @@
 - 另 6 個 cross-process 失敗是 root 用 stdin 內 pytest.main 續跑，multiprocessing spawn 無法重載 <stdin>，不是產品錯誤。改用正常 poetry run pytest tests/test_extension_manager.py -q -k cross_process 後 6 passed（5.02s），沒有因此修改 production。首輪及續跑 log 在 /tmp/upgrade-final-pytest*.log，全部 1389 個 collection 項目現已在原次／續跑／失敗定向重驗覆蓋通過；沒有再重跑全 suite。保留既有 LangChain deprecation 與 duplicate ZIP fixture warnings。
 - 真模型首次執行於送出前被成本 hook 攔截：SDK 未帶入預期 provider max_price。requests=0、預留／付費=0；不移除成本 gate，修正暫存驗收腳本的 SDK serialization 後才繼續。原批准 2 回合／6 次請求／4096 tokens／US$1 沒有擴大。
 
+## P5.S4｜受限真模型樣例與摘要品質修正（2026-10-15）
+
+- P5.S3 已提交 d0e048c。SDK ProviderPreferences 的 max_price 需要字串，numeric 會靜默丟整個 provider；只在 /tmp 驗收腳本改為 "0.75"／"3.75"，以 dummy key 於傳輸前核對實際 request body，沒有降低 gate。原 0 HTTP 失敗證據已備份 /tmp/upgrade-live-validation-zero-http-blocked/。
+- 真執行完成 2 回合、4 次 HTTP 200；實際 usage.cost 合計 US$0.03546480，保守累積預留 US$0.22321800，每次 max_tokens=4096，provider 價格上限與 HTTP 計數 hook 保留。證據 /tmp/upgrade-live-validation-approved/evidence.json；不自動重播此目錄。原專案模型／retry 設定不變。
+- 第一回合真 academic-paper-writing／document_edit／Ask 單項批准，把第二個重複英文段落潤飾後保存；磁碟只改指定範圍，第一段、emoji 前文與其餘未儲存註記保持。第二回合同一對話真 writing＋citation 載入完整指引，以更新後選取稿形成 physical activity working memory older adults 主題 query，僅一次真搜尋，Crossref／DataCite 均 ok；10 個融合候選中 7 有摘要、3 缺摘要。回覆列 3 個候選／來源／摘要限制；無全文／保存 citation／RAG／Bash／MCP，Extended 模式及 Skill 清理均還原。
+- 獨立唯讀品質審閱確認來源與內容吻合，但候選 2 摘要只說 higher／lower activity groups，模型卻推成 extreme groups／非 RCT；此項阻擋「摘要不誇大」驗收，沒有把兩回合當零問題通過。最小補強 citation SKILL：研究設計與方法限制須由摘要明示，缺少隨機化／控制資訊只能說未交代、無法判定，不補成確定設計或混雜事實。不新增 judge／全文管線。
+- 修正後 inline skills＋citation workflow 定向 44 passed（0.74s）；沒有為指引變更重跑全 suite。使用者原批准的 2 回合已用完；已提出只重用現有摘要的 1 個修正驗收回合、最多再 2 次請求、全程仍 6 次／US$1，等待此具體增量範圍，原生其他走查繼續。
+- 原生修正後重做第 40–45 行反白、聊天、Enter、等待時移到第 48 行、Approve：成功保存，Python 逐字核對只替換原 6 行文字、其餘包含兩個重複段落與換行不變。最終 npm run build 成功（0.545s，既有 Monaco chunk 提示）；Bypass／多 Skill GUI／摘要展示仍繼續。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。
