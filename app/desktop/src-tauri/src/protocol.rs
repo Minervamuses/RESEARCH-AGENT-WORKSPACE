@@ -320,7 +320,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "document.open" => Some(&["path"]),
         "document.save" => Some(&["documentContext"]),
         "document.apply" => Some(&["documentContext", "turnId", "callId", "parentRequestId", "undoOfCallId", "resolution", "expectedSnapshot"]),
-        "session.turn" => Some(&["text", "turnId", "retry", "documentContext"]),
+        "session.turn" => Some(&["text", "turnId", "retry", "documentContext", "skillReferences"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.set_bash_permission" => Some(&["mode"]),
         "knowledge.search" => Some(&[
@@ -597,6 +597,52 @@ fn validate_document_approval(request_id: &str, data: &Map<String, Value>) -> Re
     validate_document_range(data, "data", None)
 }
 
+fn validate_skill_references(params: &Map<String, Value>) -> Result<(), ProtocolViolation> {
+    let Some(value) = params.get("skillReferences") else { return Ok(()); };
+    let items = value.as_array().ok_or_else(|| ProtocolViolation::invalid("params.skillReferences must be an array"))?;
+    if items.len() > 128 { return Err(ProtocolViolation::invalid("params.skillReferences contains too many items")); }
+    let text = expect_non_empty_string(&params["text"], "params.text")?;
+    let mut offsets = HashMap::new();
+    for item in items {
+        let item = expect_object(item, "params.skillReferences[]")?;
+        validate_exact_data_keys(item, &["name", "startUtf16", "endUtf16"])?;
+        expect_bounded_string(&item["name"], "params.skillReferences[].name", 256)?;
+        for field in ["startUtf16", "endUtf16"] {
+            let offset = expect_integer_range(&item[field], &format!("params.skillReferences[].{field}"), 0, MAX_SAFE_INTEGER)?;
+            offsets.insert(offset, None);
+        }
+    }
+    let mut position = 0_i64;
+    if let Some(value) = offsets.get_mut(&0) { *value = Some(0); }
+    for (index, character) in text.char_indices() {
+        position += character.len_utf16() as i64;
+        if let Some(value) = offsets.get_mut(&position) { *value = Some(index + character.len_utf8()); }
+    }
+    for item in items {
+        let first = json_integer(&item["startUtf16"]).expect("validated integer");
+        let last = json_integer(&item["endUtf16"]).expect("validated integer");
+        let start = offsets.get(&first).and_then(|value| *value);
+        let end = offsets.get(&last).and_then(|value| *value);
+        let (Some(start), Some(end)) = (start, end) else {
+            return Err(ProtocolViolation::invalid("params.skillReferences has an invalid UTF-16 range"));
+        };
+        if first > last || text.get(start..end) != Some(format!("@{}", item["name"].as_str().expect("validated name")).as_str()) {
+            return Err(ProtocolViolation::invalid("params.skillReferences does not match the original text"));
+        }
+        if let Some(previous) = text[..start].chars().next_back() {
+            if previous.is_ascii_alphanumeric() || "_.@+-".contains(previous) {
+                return Err(ProtocolViolation::invalid("params.skillReferences must begin at a Skill token boundary"));
+            }
+        }
+        let suffix = &text[end..];
+        if suffix.chars().next().is_some_and(|ch| ch.is_ascii_alphanumeric() || "_-".contains(ch))
+            || (suffix.starts_with('.') && suffix.chars().nth(1).is_some_and(|ch| ch.is_ascii_alphanumeric())) {
+            return Err(ProtocolViolation::invalid("params.skillReferences must end at a Skill token boundary"));
+        }
+    }
+    Ok(())
+}
+
 fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), ProtocolViolation> {
     let required = required_params(method)
         .ok_or_else(|| ProtocolViolation::invalid(format!("Unknown method: {method}")))?;
@@ -662,6 +708,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         }
         "session.turn" => {
             expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
+            validate_skill_references(params)?;
             if let Some(value) = params.get("documentContext") { validate_document_context(value, "params.documentContext")?; }
             expect_turn_id(&params["turnId"], "params.turnId")?;
             if !params["retry"].is_boolean() {
@@ -2787,6 +2834,7 @@ mod tests {
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
             if method_name == "document.apply" { params.remove("undoOfCallId"); }
+            if method_name == "session.turn" { params.insert("text".to_owned(), Value::String("@x".to_owned())); params["skillReferences"][0]["endUtf16"] = Value::from(2); }
             let message = serde_json::json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "messageType": "request",
@@ -2898,6 +2946,7 @@ mod tests {
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
             if method == "document.apply" { params.remove("undoOfCallId"); }
+            if method == "session.turn" { params.insert("text".to_owned(), Value::String("@x".to_owned())); params["skillReferences"][0]["endUtf16"] = Value::from(2); }
             let schema = schema_value.as_object().expect("result data schema");
             let mut data = schema
                 .iter()

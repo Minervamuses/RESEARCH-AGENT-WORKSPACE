@@ -83,6 +83,13 @@
 - **持久化／保護：** 本次僅提交 P1 產品／測試改動及本紀錄；App.tsx/css 與既有使用者修改重疊，以 repository 外基線產生 task-only index 內容，兩處文字重疊已明確保留 HEAD 的原行為並加 P1 內容；task-only App 另以 TypeScript virtual CompilerHost 型別檢查通過。工作樹仍保有全部原修改；未收編 conversations.test.ts、RAG、main.py 或其他既有未追蹤檔。
 - **下一步：** P2 行內引用與多 Skill。P1 故意僅一個文件候選／回合，P2 的先後操作必須使用真正 tool call identity 並更新已存檔上下文，不能把整回合去重誤用成忽略第二次不同操作。P3 未完成前不宣稱全專案權限已統一；P5 最終 GUI／真模型狀態仍分開記錄。
 
+## P2.S1｜行內選單與引用契約（2026-10-15）
+
+- P1.S2 已提交 6ac9264。此步把既有 slash composer 擴為游標所在的 @ token；滑鼠／方向鍵／Enter 插入只替換當前 token，保留前後文與插入後游標；Esc、Shift+Enter、IME composing 保留原行為。無匹配的普通 @ 文字明示作原文傳送，選單選過但已移除的 Skill 則報 unavailable；沒有新持久 registry。
+- 原始 prompt 不改，送出時重新掃描當前 catalog 的精確引用及 UTF-16 位置；保留重複位置，emoji／中文相鄰可用，排除 email／網域；明確 retry 保持原提交引用與文件快照。Python／TS／Rust 共同 strict schema 新增 skillReferences，最多 128 個，未知欄位／過期位置／分裂 surrogate 拒絕。
+- 檢查：Python 契約 143、TS 137、Rust protocol 12 passed；node --test --experimental-strip-types tests/inline_skills.test.ts 4 passed；與既有 conversations.test.ts 同跑 30 passed（4.76s），npx tsc --noEmit 通過。此步只證明輸入與通訊契約，多 Skill 模型實際載入／清理由 P2.S2 驗收。
+- 本步只提交 App 的 task-only 變更、協定／共同 fixtures、新增定向 node 測試與本紀錄；既有 App／其他七檔使用者修改仍留在工作樹。P2 後端在相同既定階段持續實作中，尚未宣告 P2 完成。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。

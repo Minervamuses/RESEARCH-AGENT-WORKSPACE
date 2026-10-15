@@ -194,6 +194,43 @@ export function insertSlashCommand(draft: string, name: string): string {
   return `${/^[^\S\r\n]*/.exec(draft)?.[0] ?? ""}/${name} `;
 }
 
+export interface InlineSkillReference { name: string; startUtf16: number; endUtf16: number }
+
+export function inlineSkillToken(draft: string, start: number, end: number): { start: number; end: number; prefix: string } | null {
+  if (start !== end) return null;
+  let tokenStart = start;
+  while (tokenStart > 0 && /[A-Za-z0-9_-]/.test(draft[tokenStart - 1])) tokenStart -= 1;
+  if (tokenStart === 0 || draft[tokenStart - 1] !== "@") return null;
+  const at = tokenStart - 1;
+  if (at > 0 && /[A-Za-z0-9_.@+-]/.test(draft[at - 1])) return null;
+  let tokenEnd = start;
+  while (tokenEnd < draft.length && /[A-Za-z0-9_-]/.test(draft[tokenEnd])) tokenEnd += 1;
+  if (draft[tokenEnd] === "." && /[A-Za-z0-9]/.test(draft[tokenEnd + 1] ?? "")) return null;
+  return { start: at, end: tokenEnd, prefix: draft.slice(tokenStart, start) };
+}
+
+export function insertInlineSkill(draft: string, token: { start: number; end: number }, name: string): { text: string; caret: number } {
+  const replacement = "@" + name + (token.end === draft.length ? " " : "");
+  return { text: draft.slice(0, token.start) + replacement + draft.slice(token.end), caret: token.start + replacement.length };
+}
+
+export function inlineSkillReferences(draft: string, skills: readonly string[], selectedNames: ReadonlySet<string> = new Set()): InlineSkillReference[] {
+  const available = new Set(skills);
+  const references: InlineSkillReference[] = [];
+  for (const match of draft.matchAll(/@([A-Za-z0-9][A-Za-z0-9_-]*)/g)) {
+    const start = match.index!;
+    const end = start + match[0].length;
+    const token = inlineSkillToken(draft, end, end);
+    if (token === null || token.start !== start) continue;
+    if (!available.has(match[1])) {
+      if (selectedNames.has(match[1])) throw new Error("Selected Skill is no longer available: " + match[1]);
+      continue;
+    }
+    references.push({ name: match[1], startUtf16: start, endUtf16: end });
+  }
+  return references;
+}
+
 export function handleComposerKey(
   event: { key: string; shiftKey: boolean; isComposing: boolean; preventDefault: () => void },
   menu: { open: boolean; count: number; active: number },
@@ -225,21 +262,21 @@ export function handleComposerKey(
   }
 }
 
-export function SlashCommandList({ commands, active, onSelect }: {
-  commands: SlashCommands; active: number; onSelect: (index: number) => void;
+export function SlashCommandList({ commands, active, onSelect, inline = false }: {
+  commands: SlashCommands; active: number; onSelect: (index: number) => void; inline?: boolean;
 }) {
-  return <ul id="composer-slash-commands" className="slash-command-list" role="listbox" aria-label="Slash commands">
+  return <ul id="composer-slash-commands" className="slash-command-list" role="listbox" aria-label={inline ? "Skills" : "Slash commands"}>
     {commands.map((command, index) => <li
       key={command.name} id={`composer-slash-option-${index}`} role="option"
       aria-selected={index === active}
       onPointerDown={(event) => event.preventDefault()}
       onClick={() => onSelect(index)}
-    ><strong>/{command.name}</strong><span>{command.description}</span></li>)}
+    ><strong>{inline ? "@" : "/"}{command.name}</strong><span>{command.description}</span></li>)}
   </ul>;
 }
 
-function SlashComposer({ draft, commands, textareaRef, disabled, sendDisabled, onChange, onSubmit }: {
-  draft: string; commands: SlashCommands; textareaRef: RefObject<HTMLTextAreaElement | null>;
+function SlashComposer({ draft, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, onChange, onSubmit }: {
+  draft: string; commands: SlashCommands; skills: readonly string[]; onSkillPicked: (name: string) => void; textareaRef: RefObject<HTMLTextAreaElement | null>;
   disabled: boolean; sendDisabled: boolean; onChange: (draft: string) => void; onSubmit: () => void;
 }) {
   const [focused, setFocused] = useState(false);
@@ -247,21 +284,28 @@ function SlashComposer({ draft, commands, textareaRef, disabled, sendDisabled, o
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   const composingRef = useRef(false);
-  const insertion = useRef<string | null>(null);
+  const insertion = useRef<{ text: string; caret: number } | null>(null);
   const [selection, setSelection] = useState({ draft, commands, index: 0 });
   const prefix = slashPrefix(draft, cursor.start, cursor.end);
-  const matches = useMemo(() => filterSlashCommands(commands, prefix ?? ""), [commands, prefix]);
-  const open = focused && !disabled && !composing && commands.length > 0 &&
-    dismissed !== draft && prefix !== null;
+  const inline = inlineSkillToken(draft, cursor.start, cursor.end);
+  const inlinePrefix = inline?.prefix ?? null;
+  const matches = useMemo(() => inlinePrefix === null
+    ? filterSlashCommands(commands, prefix ?? "")
+    : skills.filter((name) => name.toLowerCase().startsWith(inlinePrefix.toLowerCase()))
+      .map((name) => ({ name, description: commands.find((item) => item.name === name)?.description ?? "Use this Skill for the current message" })),
+    [commands, skills, prefix, inlinePrefix]);
+  const open = focused && !disabled && !composing && (inline !== null || commands.length > 0) &&
+    dismissed !== draft && (inline !== null || prefix !== null);
   const active = selection.draft === draft && selection.commands === commands
     ? Math.min(selection.index, Math.max(0, matches.length - 1)) : 0;
 
   useLayoutEffect(() => {
-    if (insertion.current !== draft) return;
+    if (insertion.current?.text !== draft) return;
+    const caret = insertion.current.caret;
     insertion.current = null;
     textareaRef.current?.focus();
-    textareaRef.current?.setSelectionRange(draft.length, draft.length);
-    setCursor({ start: draft.length, end: draft.length });
+    textareaRef.current?.setSelectionRange(caret, caret);
+    setCursor({ start: caret, end: caret });
   }, [draft, textareaRef]);
 
   useEffect(() => {
@@ -270,10 +314,13 @@ function SlashComposer({ draft, commands, textareaRef, disabled, sendDisabled, o
 
   const select = (index: number) => {
     if (!open || composingRef.current || matches[index] === undefined) return;
-    const value = insertSlashCommand(draft, matches[index].name);
-    insertion.current = value;
-    setDismissed(value);
-    onChange(value);
+    const inserted = inline === null
+      ? { text: insertSlashCommand(draft, matches[index].name), caret: insertSlashCommand(draft, matches[index].name).length }
+      : insertInlineSkill(draft, inline, matches[index].name);
+    if (inline !== null) onSkillPicked(matches[index].name);
+    insertion.current = inserted;
+    setDismissed(inserted.text);
+    onChange(inserted.text);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     handleComposerKey({
@@ -294,8 +341,8 @@ function SlashComposer({ draft, commands, textareaRef, disabled, sendDisabled, o
   }}>
     <label htmlFor="conversation-draft">Message</label>
     {open && <>
-      <SlashCommandList commands={matches} active={active} onSelect={select} />
-      <span className="slash-command-status" role="status">{matches.length === 0 ? "No matching commands" : `${matches.length} commands · ↑↓ to move · Enter to insert · Esc to close`}</span>
+      <SlashCommandList commands={matches} active={active} onSelect={select} inline={inline !== null} />
+      <span className="slash-command-status" role="status">{matches.length === 0 ? (inline !== null ? "No matching Skill. Unselected @ text is sent literally." : "No matching commands") : `${matches.length} ${inline !== null ? "Skills" : "commands"} · ↑↓ to move · Enter to insert · Esc to close`}</span>
     </>}
     <textarea id="conversation-draft" ref={textareaRef} value={draft}
       onChange={(event) => {
@@ -584,6 +631,9 @@ export default function App() {
   const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
   const documentRequestRef = useRef<{ requestId: string; turnId: string } | null>(null);
   const submittedDocumentRef = useRef<DocumentSnapshot | null>(null);
+  const selectedSkillNamesRef = useRef(new Set<string>());
+  const submittedSkillReferencesRef = useRef<InlineSkillReference[]>([]);
+  useEffect(() => { selectedSkillNamesRef.current.clear(); }, [conversation.selected?.projectId, conversation.selected?.sessionId]);
   const updateDocument = useCallback((value: DocumentSnapshot | null) => {
     documentRef.current = value;
     setDocumentValue(value);
@@ -1181,13 +1231,19 @@ export default function App() {
         text: draft,
         turnId,
         retry: submission.retry,
+        skillReferences: (submission.retry ? submittedSkillReferencesRef.current : inlineSkillReferences(draft, state.session?.loadedSkills ?? [], selectedSkillNamesRef.current)) as unknown as JsonObject[],
         ...((submission.retry ? submittedDocumentRef.current : documentRef.current) === null ? {} : {
           documentContext: (submission.retry ? submittedDocumentRef.current : documentRef.current) as unknown as JsonObject,
         }),
       });
-      if (!submission.retry) submittedDocumentRef.current = documentRef.current === null ? null : { ...documentRef.current };
+      if (!submission.retry) {
+        submittedDocumentRef.current = documentRef.current === null ? null : { ...documentRef.current };
+        submittedSkillReferencesRef.current = inlineSkillReferences(draft, state.session?.loadedSkills ?? [], selectedSkillNamesRef.current);
+      }
     }
-    catch (error) { setWorkspaceIssue(workspaceError(error)); focusComposer(); return; }
+    catch (error) { setWorkspaceIssue(error instanceof Error && !(error instanceof BackendClientError)
+      ? { code: "PROTOCOL_INVALID", message: error.message, retryable: false, source: "protocol" }
+      : workspaceError(error)); focusComposer(); return; }
     const generation = generationRef.current;
     setPendingUserText(draft);
     setWorkspaceIssue(null);
@@ -1625,7 +1681,7 @@ export default function App() {
                 disabled={interaction.controlDisabled || workspaceBusy !== null}
                 onChange={(mode) => void updateBashPermissionMode(mode)}
               />
-              <p className="control-state">Skills run once with /&lt;skill-name&gt; &lt;prompt&gt;. Use /citation &lt;prompt&gt; for one citation task in normal thinking; your selected thinking mode is restored afterward. Available commands appear in the / menu.</p>
+              <p className="control-state">Use @ to add Skills anywhere in your message. Each Skill runs for this turn; write “first…then…” when order matters. File edits and citation tasks use Normal thinking and restore your selection afterward. Slash commands remain available.</p>
             </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
@@ -1637,6 +1693,8 @@ export default function App() {
             <SlashComposer
               key={`${state.snapshot?.generation}:${conversation.selected?.projectId}:${conversation.selected?.sessionId}`}
               draft={conversation.draft} textareaRef={composerRef}
+              skills={state.session?.loadedSkills ?? []}
+              onSkillPicked={(name) => selectedSkillNamesRef.current.add(name)}
               commands={composerSlashCommands(state.session, conversation.selected, state.snapshot?.generation, slashCatalogOwner,
                 state.snapshot?.lifecycle === "ready" && state.phase === "session-ready" && idle)}
               disabled={conversation.selected === null || interaction.turnActive}

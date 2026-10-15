@@ -1210,6 +1210,199 @@
           }
         }
       }
+    },
+    {
+      "name": "skill-references-middle-multiple-repeated",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "使用@academic-paper-writing 先整理🙂，再用 @citation，最後 @academic-paper-writing",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "academic-paper-writing",
+              "startUtf16": 2,
+              "endUtf16": 25
+            },
+            {
+              "name": "citation",
+              "startUtf16": 35,
+              "endUtf16": 44
+            },
+            {
+              "name": "academic-paper-writing",
+              "startUtf16": 48,
+              "endUtf16": 71
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "skill-reference-at-start-and-chinese-suffix",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "@citation查詢文獻",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "citation",
+              "startUtf16": 0,
+              "endUtf16": 9
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "skill-references-stale-offset",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "使用@academic-paper-writing 先整理🙂，再用 @citation，最後 @academic-paper-writing",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "academic-paper-writing",
+              "startUtf16": 0,
+              "endUtf16": 25
+            }
+          ]
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "skill-reference-email-is-not-a-skill",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "author@citation",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "citation",
+              "startUtf16": 6,
+              "endUtf16": 15
+            }
+          ]
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "skill-reference-domain-is-not-a-skill",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "@citation.org",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "citation",
+              "startUtf16": 0,
+              "endUtf16": 9
+            }
+          ]
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "skill-reference-partial-name-is-invalid",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "@citation-extra",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "citation",
+              "startUtf16": 0,
+              "endUtf16": 9
+            }
+          ]
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "skill-reference-emoji-split",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "🙂 @citation",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "citation",
+              "startUtf16": 1,
+              "endUtf16": 12
+            }
+          ]
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "skill-reference-rejects-unknown-field",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000063",
+        "method": "session.turn",
+        "params": {
+          "text": "@citation",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "retry": false,
+          "skillReferences": [
+            {
+              "name": "citation",
+              "startUtf16": 0,
+              "endUtf16": 9,
+              "label": "no"
+            }
+          ]
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
     }
   ],
   "rawLines": [

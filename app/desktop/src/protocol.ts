@@ -649,6 +649,16 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "session.status": {},
   "session.turn": {
+    skillReferences: {
+      type: "objectArray",
+      required: false,
+      maxItems: 128,
+      items: {
+        name: { type: "string", required: true, maxBytes: 256 },
+        startUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
+        endUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
+      },
+    },
     documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
     text: { type: "string", required: true, maxBytes: 1_048_576 },
     turnId: { type: "turnId", required: true },
@@ -929,6 +939,12 @@ export interface ExtensionApplyDto {
   restartRequired: boolean;
   items: ExtensionApplyItemDto[];
   diagnostics: string[];
+}
+
+export interface SkillReferenceDto {
+  name: string;
+  startUtf16: number;
+  endUtf16: number;
 }
 
 export interface DocumentContextDto {
@@ -1317,8 +1333,29 @@ function validateDocumentRange(value: JsonObject, field: string, source = false)
   }
 }
 
+function validateSkillReferences(params: JsonObject): void {
+  const text = params.text as string;
+  for (const item of (params.skillReferences ?? []) as SkillReferenceDto[]) {
+    const start = item.startUtf16;
+    const end = item.endUtf16;
+    if (start > end || end > text.length) invalid("params.skillReferences has an invalid UTF-16 range");
+    for (const offset of [start, end]) {
+      const unit = text.charCodeAt(offset);
+      if (unit >= 0xdc00 && unit <= 0xdfff) invalid("params.skillReferences range splits a surrogate pair");
+    }
+    if (text.slice(start, end) !== "@" + item.name) invalid("params.skillReferences does not match the original text");
+    if (start > 0 && /[A-Za-z0-9_.@+-]/.test(text[start - 1])) {
+      invalid("params.skillReferences must begin at a Skill token boundary");
+    }
+    if (/^[A-Za-z0-9_-]|^\.[A-Za-z0-9]/.test(text.slice(end))) {
+      invalid("params.skillReferences must end at a Skill token boundary");
+    }
+  }
+}
+
 function validateParams(method: ProtocolMethod, params: JsonObject): void {
   validateObjectSchema(params, METHOD_PARAM_SCHEMAS[method], "params");
+  if (method === "session.turn") validateSkillReferences(params);
   if (params.documentContext !== undefined) validateDocumentRange(params.documentContext as JsonObject, "params.documentContext", true);
   if (params.expectedSnapshot !== undefined) validateDocumentRange(params.expectedSnapshot as JsonObject, "params.expectedSnapshot", true);
   if (method === "document.apply" && (("callId" in params) === ("undoOfCallId" in params))) {

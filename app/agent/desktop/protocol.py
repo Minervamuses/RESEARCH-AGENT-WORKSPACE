@@ -225,6 +225,32 @@ def _validate_document_range(value: dict[str, Any], field: str, *, source: bool 
             _invalid(f"{field} range exceeds source text or splits a surrogate pair")
 
 
+def _validate_skill_references(params: dict[str, Any]) -> None:
+    references = params.get("skillReferences", [])
+    if not references:
+        return
+    text = params["text"]
+    wanted = {item[key] for item in references for key in ("startUtf16", "endUtf16")}
+    boundaries = {0: 0}
+    position = 0
+    for index, character in enumerate(text):
+        position += 2 if ord(character) > 0xffff else 1
+        if position in wanted:
+            boundaries[position] = index + 1
+    for item in references:
+        start, end = item["startUtf16"], item["endUtf16"]
+        if start > end or start not in boundaries or end not in boundaries:
+            _invalid("params.skillReferences has an invalid UTF-16 range")
+        first, last = boundaries[start], boundaries[end]
+        if text[first:last] != "@" + item["name"]:
+            _invalid("params.skillReferences does not match the original text")
+        if first and re.match(r"[A-Za-z0-9_.@+-]", text[first - 1]):
+            _invalid("params.skillReferences must begin at a Skill token boundary")
+        suffix = text[last:]
+        if re.match(r"[A-Za-z0-9_-]", suffix) or re.match(r"\.[A-Za-z0-9]", suffix):
+            _invalid("params.skillReferences must end at a Skill token boundary")
+
+
 def _validate_document_params(method: str, params: dict[str, Any]) -> None:
     context = params.get("documentContext")
     if context is not None:
@@ -405,6 +431,8 @@ def validate_message(value: Any) -> dict[str, Any]:
         params = _expect_object(message.get("params"), "params")
         _validate_object_schema(params, METHODS[method]["params"], "params")
         _validate_document_params(method, params)
+        if method == "session.turn":
+            _validate_skill_references(params)
         return message
 
     if message_type == "event":
