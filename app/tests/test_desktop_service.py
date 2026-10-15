@@ -3208,11 +3208,19 @@ def test_project_open_rejects_foreign_or_incomplete_history_without_fallback(tmp
 
 
 def test_project_open_waits_for_document_operation_and_active_turn(tmp_path: Path, monkeypatch) -> None:
-    service = _service(tmp_path)
+    service = _service(tmp_path, session_factory=_SessionFactory())
     entered, release = threading.Event(), threading.Event()
 
     async def run():
         opened = await _open_test_project(service, tmp_path / "a")
+        await service.dispatch("session.create", {"loadMcp": False})
+        session = service.session
+        lifecycle_requests = (
+            ("session.create", {"loadMcp": False}),
+            ("session.select", {"projectId": opened["projectId"], "sessionId": session.session_id}),
+            ("session.shutdown", {}),
+            ("runtime.shutdown", {}),
+        )
         def blocked_open(_path):
             entered.set()
             assert release.wait(5)
@@ -3224,10 +3232,21 @@ def test_project_open_waits_for_document_operation_and_active_turn(tmp_path: Pat
             with pytest.raises(DesktopServiceError, match="current operation"):
                 await service.dispatch("workspace.select", {"rootPath": str(tmp_path / "b")})
             assert service._project["projectId"] == opened["projectId"]
+            for method, params in lifecycle_requests:
+                with pytest.raises(DesktopServiceError) as caught:
+                    await service.dispatch(method, params)
+                assert caught.value.code == "SESSION_NOT_READY"
+                assert service.session is session and service.lifecycle == "ready"
         finally:
             release.set()
             await task
         assert service._project_operation_count == 0
+        async with service._document_apply_lock:
+            for method, params in lifecycle_requests:
+                with pytest.raises(DesktopServiceError) as caught:
+                    await service.dispatch(method, params)
+                assert caught.value.code == "SESSION_NOT_READY"
+                assert service.session is session and service.lifecycle == "ready"
         service._turn_active = True
         with pytest.raises(DesktopServiceError) as caught:
             await service.dispatch("workspace.select", {"rootPath": str(tmp_path / "b")})
@@ -3309,5 +3328,55 @@ def test_project_rules_changed_history_pointer_rejects_before_turn(tmp_path: Pat
         assert service._conversation_repository is repository
         assert service._project == {**opened, "status": "ready"}
         assert not service._turn_active and service._project_operation_count == 0
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("turn_active", [False, True])
+def test_project_lifecycle_rejection_preserves_pending_consent(tmp_path: Path, turn_active: bool) -> None:
+    factory = _SessionFactory()
+    service = _service(tmp_path, session_factory=factory)
+
+    async def run():
+        opened = await _open_test_project(service, tmp_path / "research")
+        await service.dispatch("session.create", {"loadMcp": False})
+        session = service.session
+        required = asyncio.Event()
+        events = []
+
+        class Sink:
+            request_id = str(uuid.uuid4())
+
+            def __call__(self, event, data):
+                events.append((event, data))
+                required.set()
+
+        service._turn_active = turn_active
+        consent = asyncio.create_task(service._single_operation_approval(
+            {"operation": "document.apply", "targetPath": "paper.md", "description": "Save fixture"},
+            event_sink=Sink(), turn_id=uuid.uuid4().hex, permission_mode="ask",
+        ))
+        await required.wait()
+        pending = service._pending_approval
+        for method, params in (
+            ("session.create", {"loadMcp": False}),
+            ("session.select", {"projectId": opened["projectId"], "sessionId": session.session_id}),
+            ("session.shutdown", {}),
+            ("runtime.shutdown", {}),
+        ):
+            with pytest.raises(DesktopServiceError) as caught:
+                await service.dispatch(method, params)
+            assert caught.value.code == "BUSY_TURN"
+            assert service._pending_approval is pending
+            assert not pending.future.done() and not consent.done()
+            assert service.session is session and service.lifecycle == "ready"
+        data = events[0][1]
+        await service.dispatch("approval.resolve", {
+            "approvalId": data["approvalId"], "parentRequestId": data["parentRequestId"],
+            "turnId": data["turnId"], "approved": True,
+        })
+        assert await consent == (True, None)
+        assert service._pending_approval is None and len(factory.calls) == 1
+        service._turn_active = False
 
     asyncio.run(run())

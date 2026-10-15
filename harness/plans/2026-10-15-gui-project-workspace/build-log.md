@@ -88,3 +88,9 @@
 - Actual tests: `poetry run pytest tests/test_desktop_service.py -q -k project_rules` -> 2 passed (0.39s), verifying system prompt preservation, midturn rule edits, Ask despite bypass text and pointer-change rejection before execution. `poetry run pytest tests/test_conversation_archive_access.py -q --tb=short` -> 7 passed (0.48s), including >1MiB scoped chunk access, unchanged global store, and Normal/Extended root propagation.
 - Earlier missing-Path-import failure and no-op repair are retained in E06/E07. User explicitly authorized the one-import correction and continuing P1-P4; corrected file was re-read before the successful rerun. Main reviewed diff and scoped whitespace check passed.
 - Next P1-S6: late-operation guards; inspection found existing session lifecycle calls can cancel pending approval before rejecting BUSY_TURN, so this directly relevant guard must be corrected and tested.
+
+### E10 / P1-S6 backend: preserve pending consent on rejected switching
+
+- Session create/select/shutdown and runtime shutdown now reject an active turn or pending approval before any cancellation. Document apply/tool locks and outstanding project operations block lifecycle replacement. Existing explicit approval.resolve remains the decision boundary.
+- Extended delayed-document test and two pending-consent cases prove rejected lifecycle requests leave the future unresolved until explicit resolution. Actual command: `poetry run pytest tests/test_desktop_service.py -q -k "project_open or project_rules or project_lifecycle"` -> 8 passed, 81 deselected, 0.47s. Main reviewed resulting control flow; scoped whitespace check passed.
+- Frontend epoch/operation/focus protection is still being completed separately. Cached native build `timeout 180s cargo build --offline` succeeded in 6.01s, with no dependency or lock change, for the upcoming integrated Linux GUI check.

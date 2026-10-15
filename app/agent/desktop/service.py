@@ -768,8 +768,7 @@ class DesktopService:
     async def _session_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        self._complete_pending_approval(False)
-        if self._turn_active:
+        if self._turn_active or self._pending_approval is not None:
             raise DesktopServiceError(
                 "BUSY_TURN",
                 "A conversation cannot be changed during an active turn.",
@@ -781,7 +780,11 @@ class DesktopService:
                 "A desktop session is already being materialized.",
                 retryable=True,
             )
-        if self._knowledge_active or self._extension_active:
+        if (
+            self._knowledge_active or self._extension_active
+            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            or self._project_operation_count > 1
+        ):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "The selected conversation cannot change during another operation.",
@@ -1316,16 +1319,19 @@ class DesktopService:
     async def _session_create(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        self._complete_pending_approval(False)
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "A desktop session is already being created.",
                 retryable=True,
             )
-        if self._turn_active:
+        if self._turn_active or self._pending_approval is not None:
             raise DesktopServiceError("BUSY_TURN", "A session turn is still active.")
-        if self._knowledge_active or self._extension_active:
+        if (
+            self._knowledge_active or self._extension_active
+            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            or self._project_operation_count > 1
+        ):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "A new conversation cannot be created during another operation.",
@@ -2563,7 +2569,6 @@ class DesktopService:
     async def _runtime_shutdown(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        self._complete_pending_approval(False)
         if self.lifecycle == "stopped":
             return {"status": "stopped"}
         if self._session_creating:
@@ -2572,7 +2577,7 @@ class DesktopService:
                 "A desktop session is still being created.",
                 retryable=True,
             )
-        if self._turn_active:
+        if self._turn_active or self._pending_approval is not None:
             raise DesktopServiceError(
                 "BUSY_TURN", "A session turn is still active.", retryable=True
             )
@@ -2598,14 +2603,13 @@ class DesktopService:
         return {"status": "stopped"}
 
     async def _shutdown_session(self) -> dict[str, Any]:
-        self._complete_pending_approval(False)
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "A desktop session is still being created.",
                 retryable=True,
             )
-        if self._turn_active:
+        if self._turn_active or self._pending_approval is not None:
             raise DesktopServiceError(
                 "BUSY_TURN", "A session turn is still active.", retryable=True
             )
@@ -2626,6 +2630,13 @@ class DesktopService:
                 "BUSY_EXTENSION_OPERATION",
                 "An extension operation is still active.",
                 retryable=True,
+            )
+        if (
+            self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            or self._project_operation_count
+        ):
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "Wait for the current document or conversation operation.", retryable=True,
             )
         session = self.session
         if session is None:
