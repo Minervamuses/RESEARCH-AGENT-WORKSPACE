@@ -134,6 +134,13 @@
 - 定向服務 3 passed；Python 契約 150、TS 契約 144、Rust protocol 12 passed（增量編譯 5.43s）；root npx tsc --noEmit 與 task-only App 型別檢查通過。共同 strict schema／fixtures 同步，git diff --check 通過。
 - 本步只提交有因果依據的局部修正，原有 memo／lazy／sidebar Promise.all 使用者修改仍留工作樹，不收編。下一步重啟最終 native/backend，走查 A～E、工具等待可編輯與 Bypass 衝突；受限真模型腳本只在隔離暫存稿驗收，不改預設模型設定。
 
+## P5.S2｜最終原生驗收入口與收尾檢查（2026-10-15）
+
+- P5.S1 已提交 aa3cbd1。重用原 phase02 fixture，載入真 builtin／合法 applied Skill catalog、精確引用、完整指引／roots／pinned references；明確 skills-abstract marker 只用 recorded 假模型資料，將當前未儲存選取與真摘要 formatter 顯示在原生 UI。原有文件／假 Bash／隔離 store 保留，未建立新 framework。fixture 整檔 21 passed（3.17s）、UTF-8／LF／diff 檢查通過；首次大編輯命令遭 auto review 阻擋未執行，改成較小 patch 後完成同一已批准範圍。
+- root npm test：218 passed（5.08s）；npm run build 成功（Vite 0.57s），只保留 Monaco chunk size 工具提示。npm run tauri dev -- --no-watch 重新編譯最終 Rust（3.28s），phase02 root 與 log root 同 P1；原生後端已重新啟動，舊對話可載入並顯示 Project permission／startup 說明。原生 A～E 正在走查，尚不當作完成。
+- 收尾全 Python suite 以 poetry run pytest -q --tb=short 啟動一次，476 passed 後停滯；只對該 pytest PID 送 SIGINT。輸出確認 test_desktop_answer_stream.py 的舊 _AnswerSession 替身缺 thinking_mode，service task 提早 AttributeError，測試仍在等事件。未宣稱 suite 通過；下一步最小補替身後定向檢查，再按同一 collection 順序續跑剩餘項，避免無理由重跑已通過 476 項。
+- 受限真模型腳本僅在 /tmp 準備；非互動 Linux shell 無 key，但正常 bash -ic profile 的 key 存在，僅檢查 bool、沒有讀印憑證或改環境。尚未付費請求。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。

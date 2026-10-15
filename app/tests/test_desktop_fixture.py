@@ -25,6 +25,7 @@ from agent.desktop.fixture_session import (
     FIXTURE_MODE,
     FIXTURE_MODE_ENV,
     FIXTURE_RAG_QUESTION,
+    FIXTURE_SKILLS_ABSTRACT,
     FIXTURE_ROOT_ENV,
     FIXTURE_ROOT_PREFIX,
     SESSION_A,
@@ -38,6 +39,8 @@ from agent.desktop.fixture_session import (
     require_fixture_root,
 )
 from agent.desktop.service import DesktopServiceError
+from agent.skills import discover_skills
+from agent.skills.runtime import resolve_skill_references
 
 
 @pytest.fixture
@@ -911,7 +914,9 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
         run_restarted_process()
     )
     assert loaded["extensionRevision"] == 1
-    assert loaded["loadedSkills"] == ["fixture-writer"]
+    assert set(loaded["loadedSkills"]) == {
+        skill.name for skill in discover_skills(restarted.config)
+    } | {"fixture-writer"}
     assert "activeSkill" not in loaded
     assert "taskMode" not in loaded
     assert loaded["mcpFamilies"] == ["fixture-clock"]
@@ -1100,7 +1105,9 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     ) = asyncio.run(run_second_process())
     assert restarted_diagnostics["mcpEnabled"] is True
     assert restarted_diagnostics["mcpFamilies"] == ["fixture-clock"]
-    assert loaded["loadedSkills"] == ["fixture-writer"]
+    assert set(loaded["loadedSkills"]) == {
+        skill.name for skill in discover_skills(second.config)
+    } | {"fixture-writer"}
     assert "activeSkill" not in loaded and "taskMode" not in loaded
     assert skill["streamKind"] == "final_only" and skill["chunkCount"] == 0
     assert skill["text"].startswith("Fixture skill fixture-writer")
@@ -1330,3 +1337,62 @@ def test_malformed_existing_catalog_is_rebuilt_from_canonical_conversations(
         {"projectId": "p1", "name": "p1", "sessionCount": 2},
         {"projectId": "p2", "name": "p2", "sessionCount": 1},
     ]
+
+
+def test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection(
+    fixture_root: Path, monkeypatch,
+) -> None:
+    service = _service(fixture_root)
+    loaded = []
+
+    async def run():
+        created = await service.dispatch("session.create", {"loadMcp": False})
+        assert {"academic-paper-writing", "citation"} <= set(created["loadedSkills"])
+        assert {"academic-paper-writing", "citation"} <= {
+            item["name"] for item in created["slashCommands"]
+        }
+        load = service.session._load_skill_runtime
+
+        def capture(name):
+            runtime = load(name)
+            loaded.append(runtime)
+            return runtime
+
+        monkeypatch.setattr(service.session, "_load_skill_runtime", capture)
+        await service.dispatch("workspace.select", {"rootPath": str(fixture_root)})
+        path = fixture_root / "draft.md"
+        path.write_text("Old disk/RAG claim.\n", encoding="utf-8")
+        context = await service.dispatch("document.open", {"path": str(path)})
+        source = "前文😀\n當前未儲存論述：檢索可減少醫療問答無來源主張。\n後文"
+        start = len("前文😀\n".encode("utf-16-le")) // 2
+        end = len(source.removesuffix("\n後文").encode("utf-16-le")) // 2
+        context.update(
+            sourceText=source, editorRevision=2,
+            rangeStartUtf16=start, rangeEndUtf16=end,
+        )
+        prompt = "請先用 @academic-paper-writing，再用 @citation " + FIXTURE_SKILLS_ABSTRACT
+        result = await service.dispatch("session.turn", {
+            **_turn_params(prompt), "documentContext": context,
+            "skillReferences": resolve_skill_references(prompt, service.session.loaded_skills),
+        })
+        assert "Current selected claim: 當前未儲存論述：檢索可減少醫療問答無來源主張。" in result["text"]
+        assert "Current selected claim: 前文" not in result["text"]
+        assert "Old disk/RAG claim" not in result["text"]
+        assert "Recorded fixture / fake model; no live provider or model call." in result["text"]
+        assert "abstract status: retrieved" in result["text"]
+        assert "abstract status: unavailable" in result["text"]
+        assert "cannot prove the current claim" in result["text"]
+        assert "Skill: academic-paper-writing; skill_root:" in result["text"]
+        assert "Skill: citation; skill_root:" in result["text"]
+        assert path.read_text() == "Old disk/RAG claim.\n"
+        assert not Path(service.config.citation_output_dir).exists()
+        assert service.session.active_skill_runtime is None
+
+    asyncio.run(run())
+    writing = next(runtime for runtime in loaded if runtime.name == "academic-paper-writing")
+    citation = next(runtime for runtime in loaded if runtime.name == "citation")
+    assert "# Academic Paper Writing" in writing.instructions
+    assert writing.pinned_references
+    assert "# Citation Skill" in citation.instructions
+    assert writing.root != citation.root
+    assert writing.root.is_dir() and citation.root.is_dir()
