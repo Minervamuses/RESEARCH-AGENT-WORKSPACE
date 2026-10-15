@@ -10,7 +10,7 @@ import pytest
 from agent.desktop.protocol import request_event
 from agent.desktop.service import DesktopServiceError
 from test_desktop_service import (
-    _FakeExtensionManager, _FakeSession, _SessionFactory, _service, _turn_params,
+    _FakeExtensionManager, _FakeSession, _SessionFactory, _open_test_project, _service, _turn_params,
 )
 
 
@@ -71,6 +71,7 @@ def test_tool_operations_receive_frozen_single_operation_consent(tmp_path, tool,
             return ToolSession(config, progress_cb, operation_approval_handler)
 
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
         await service.dispatch("session.set_bash_permission", {"mode": mode})
 
@@ -134,6 +135,7 @@ def test_slash_index_mutations_ask_or_bypass_without_real_index(tmp_path, kind, 
         operations = SimpleNamespace(init_workspace=init, ingest_file=file, ingest_folder=folder,
                                      diff_folder=diff, prune_folder=prune, workspace_root=source)
         service = _service(tmp_path, session_factory=_SessionFactory(), knowledge_operations=operations)
+        await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
         await service.dispatch("session.set_bash_permission", {"mode": mode})
         command = {"init": "/init", "file": f"/ingest {document}", "folder": f"/ingest {source}", "prune": f"/prune {source}"}[kind]
@@ -186,6 +188,7 @@ def test_direct_index_rpc_mutators_have_correlated_approval(tmp_path, monkeypatc
         monkeypatch.setattr("agent.desktop.service.diff_folder", diff)
         monkeypatch.setattr("agent.desktop.service.prune_folder", prune)
         service = _service(tmp_path, session_factory=_SessionFactory())
+        await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
         await service.dispatch("session.set_bash_permission", {"mode": mode})
         if kind == "ingest":
@@ -226,6 +229,7 @@ def test_bypass_prune_rechecks_preview_instead_of_silently_accepting_stale_set(t
 
         ops = SimpleNamespace(diff_folder=diff, prune_folder=prune)
         service = _service(tmp_path, session_factory=_SessionFactory(), knowledge_operations=ops)
+        await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
         await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
         with pytest.raises(DesktopServiceError) as raised:
@@ -241,6 +245,7 @@ def test_extension_apply_uses_explicit_apply_or_current_bypass_bindings(tmp_path
     async def run():
         manager = _FakeExtensionManager(tmp_path)
         service = _service(tmp_path, session_factory=_SessionFactory(), extension_manager=manager)
+        await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
         await service.dispatch("session.set_bash_permission", {"mode": mode})
         preview = await service.dispatch("extensions.preview", {})
