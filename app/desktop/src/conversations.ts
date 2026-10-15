@@ -116,6 +116,7 @@ export interface ConversationState {
 
 export type ConversationAction =
   | { type: "backend-generation-changed"; generation: number }
+  | { type: "project-opened"; generation: number }
   | ({ type: "conversation-selected"; generation: number } & ConversationSelection)
   | { type: "draft-changed"; draft: string }
   | ({ type: "turn-started"; generation: number; requestId: string; turnId: string } & ConversationSelection)
@@ -412,6 +413,10 @@ export function conversationReducer(
       latestAnswer: null,
       failure: null,
     };
+  }
+  if (action.type === "project-opened") {
+    if (action.generation !== state.backendGeneration || state.activeTurn !== null) return state;
+    return { ...initialConversationState, backendGeneration: state.backendGeneration };
   }
   if (action.type === "conversation-selected") {
     if (

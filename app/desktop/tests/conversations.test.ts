@@ -4,6 +4,8 @@ import { createServer, type ViteDevServer } from "vite";
 
 import {
   mergeConversationTurns,
+  conversationReducer,
+  initialConversationState,
   type ConversationFailure,
   type VisibleConversationTurn,
 } from "../src/conversations.ts";
@@ -47,6 +49,10 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  loadSelectedProjectHistory: (
+    projectId: string | null,
+    request: (method: string, params: JsonObject) => Promise<JsonObject>,
+  ) => Promise<unknown>;
   selectConversationWithPreview: (
     projectId: string,
     summary: SessionSummaryDto,
@@ -759,4 +765,54 @@ test("pending saved turns are refreshed after selection recovers them", async ()
   selection.resolve(selected);
   assert.deepEqual(await result, recovered);
   assert.equal(reads, 2);
+});
+
+test("cold startup makes no catalog or conversation requests before a project is opened", async () => {
+  const { loadSelectedProjectHistory } = await loadAppHelpers();
+  const calls: string[] = [];
+  assert.equal(await loadSelectedProjectHistory(null, async (method) => {
+    calls.push(method);
+    throw new Error("History must not be read");
+  }), null);
+  assert.deepEqual(calls, []);
+});
+
+test("selected project history rejects a foreign catalog before reading conversations", async () => {
+  const { loadSelectedProjectHistory } = await loadAppHelpers();
+  const calls: string[] = [];
+  await assert.rejects(loadSelectedProjectHistory("project-a", async (method) => {
+    calls.push(method);
+    return { projects: [{ projectId: "project-b" }], selectedProjectId: "project-b", selectedSessionId: null };
+  }), /different project/);
+  assert.deepEqual(calls, ["project.list"]);
+});
+
+test("selected project history requests only its own first conversation page", async () => {
+  const { loadSelectedProjectHistory } = await loadAppHelpers();
+  const calls: Array<{ method: string; params: JsonObject }> = [];
+  const result = await loadSelectedProjectHistory("project-a", async (method, params) => {
+    calls.push({ method, params });
+    return method === "project.list"
+      ? { projects: [{ projectId: "project-a" }], selectedProjectId: "project-a", selectedSessionId: null }
+      : { projectId: "project-a", items: [] };
+  });
+  assert.ok(result);
+  assert.deepEqual(calls, [
+    { method: "project.list", params: {} },
+    { method: "session.list", params: { projectId: "project-a", offset: 0, limit: 50, reconcile: false } },
+  ]);
+});
+
+test("only a successful project-open action clears the old conversation draft", () => {
+  const selected = conversationReducer(initialConversationState, {
+    type: "conversation-selected", generation: 0, projectId: "project-a", sessionId: "session-a",
+  });
+  const drafted = conversationReducer(selected, { type: "draft-changed", draft: "Keep this draft" });
+  assert.equal(conversationReducer(drafted, { type: "project-opened", generation: 1 }), drafted);
+  const reopenedBackend = conversationReducer(drafted, { type: "backend-generation-changed", generation: 1 });
+  assert.equal(reopenedBackend.draft, "Keep this draft");
+  const changedProject = conversationReducer(reopenedBackend, { type: "project-opened", generation: 1 });
+  assert.equal(changedProject.draft, "");
+  assert.equal(changedProject.selected, null);
+  assert.equal(changedProject.failure, null);
 });
