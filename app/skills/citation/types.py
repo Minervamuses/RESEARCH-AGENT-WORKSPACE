@@ -98,9 +98,6 @@ class PublishedDateFilter:
     def admits_year(self, year):
         return year is not None and (self.year_from is None or year >= self.year_from) and (self.year_to is None or year <= self.year_to)
 
-    def describe(self):
-        return f"{self.date_from or '...'} .. {self.date_to or '...'}"
-
 
 @dataclass
 class SourceRef:
