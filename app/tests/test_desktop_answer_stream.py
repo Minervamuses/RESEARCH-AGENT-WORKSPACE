@@ -56,7 +56,7 @@ def _turn_params(text: str) -> dict[str, object]:
     return {"text": text, "turnId": uuid.uuid4().hex, "retry": False}
 
 
-def _service(tmp_path: Path, session: _AnswerSession) -> DesktopService:
+async def _service(tmp_path: Path, session: _AnswerSession) -> DesktopService:
     service = DesktopService(
         original_cwd=tmp_path,
         environ={
@@ -71,6 +71,12 @@ def _service(tmp_path: Path, session: _AnswerSession) -> DesktopService:
             plan_logs_dir=str(tmp_path / "plans"),
         ),
     )
+    preview = await service.dispatch("workspace.select", {"rootPath": str(tmp_path), "action": "inspect"})
+    await service.dispatch("workspace.select", {
+        "rootPath": str(tmp_path), "action": "initialize",
+        "historyDirectory": preview["historyDirectory"],
+        "expectedFingerprint": preview["researchFingerprint"],
+    })
     service.session = session  # type: ignore[assignment]
     return service
 
@@ -79,7 +85,7 @@ def test_answer_is_delivered_only_by_the_final_terminal_result(tmp_path: Path) -
     async def run() -> None:
         session = _AnswerSession("final answer")
         session.blocked = True
-        service = _service(tmp_path, session)
+        service = await _service(tmp_path, session)
         events: list[tuple[str, dict]] = []
 
         task = asyncio.create_task(
@@ -106,7 +112,7 @@ def test_answer_is_delivered_only_by_the_final_terminal_result(tmp_path: Path) -
 def test_unicode_answer_is_returned_whole_without_answer_events(tmp_path: Path) -> None:
     text = "a" * 16_383 + "🙂" + "b" * 16_383 + "終"
     session = _AnswerSession(text)
-    service = _service(tmp_path, session)
+    service = asyncio.run(_service(tmp_path, session))
     events: list[tuple[str, dict]] = []
 
     result = asyncio.run(
@@ -128,7 +134,7 @@ def test_answer_past_the_old_single_item_limit_is_returned_whole_and_final_only(
 ) -> None:
     text = '中文🙂\n"quoted"\\path\n' + "x" * 2_100_000
     session = _AnswerSession(text)
-    service = _service(tmp_path, session)
+    service = asyncio.run(_service(tmp_path, session))
     events: list[tuple[str, dict]] = []
 
     result = asyncio.run(
@@ -148,7 +154,7 @@ def test_answer_past_the_old_single_item_limit_is_returned_whole_and_final_only(
 def test_failed_answer_emits_no_answer_events(tmp_path: Path) -> None:
     failing = _AnswerSession("unused")
     failing.error = RuntimeError("provider payload must stay private")
-    failing_service = _service(tmp_path, failing)
+    failing_service = asyncio.run(_service(tmp_path, failing))
     failed_events: list[tuple[str, dict]] = []
 
     with pytest.raises(DesktopServiceError) as raised:
@@ -179,7 +185,7 @@ def test_complete_success_preserves_escaped_text_and_bounded_metadata(
 ) -> None:
     session = _AnswerSession(text)
     session.validation_errors = validation_errors
-    service = _service(tmp_path, session)
+    service = asyncio.run(_service(tmp_path, session))
     events: list[tuple[str, dict]] = []
 
     result = asyncio.run(
@@ -201,7 +207,7 @@ def test_final_only_answer_does_not_call_the_event_sink(
     tmp_path: Path,
 ) -> None:
     session = _AnswerSession("authoritative")
-    service = _service(tmp_path, session)
+    service = asyncio.run(_service(tmp_path, session))
     calls = 0
 
     def broken_sink(_name: str, _data: dict) -> None:
@@ -227,7 +233,7 @@ def test_cancelled_turn_emits_no_answer_events(tmp_path: Path) -> None:
     async def run() -> None:
         session = _AnswerSession("must stay hidden")
         session.blocked = True
-        service = _service(tmp_path, session)
+        service = await _service(tmp_path, session)
         events: list[tuple[str, dict]] = []
 
         task = asyncio.create_task(
@@ -269,7 +275,7 @@ def test_provider_http_failures_are_safe_and_bounded(
 
     session = _AnswerSession("unused")
     session.error = ProviderFailure()
-    service = _service(tmp_path, session)
+    service = asyncio.run(_service(tmp_path, session))
     events: list[tuple[str, dict]] = []
 
     with pytest.raises(DesktopServiceError) as raised:
@@ -297,7 +303,7 @@ def test_unexpected_turn_failure_reports_a_logged_incident(
 
     failing = _AnswerSession("unused")
     failing.error = AttributeError("private provider payload")
-    service = _service(tmp_path, failing)
+    service = asyncio.run(_service(tmp_path, failing))
     diagnostics.install_diagnostic_log(
         "desktop-backend", echo_stderr=False,
         env={"AGENT_LOG_DIR": str(tmp_path / "logs")},
@@ -338,7 +344,7 @@ def test_desktop_reuses_an_incident_the_session_already_logged(
     incident, _new = attach_incident(error)
     failing = _AnswerSession("unused")
     failing.error = error
-    service = _service(tmp_path, failing)
+    service = asyncio.run(_service(tmp_path, failing))
 
     with caplog.at_level(logging.WARNING, logger="agent.desktop.service"):
         with pytest.raises(DesktopServiceError) as raised:
@@ -354,7 +360,7 @@ def test_desktop_reuses_an_incident_the_session_already_logged(
 def test_self_explanatory_failures_carry_no_incident(tmp_path: Path) -> None:
     failing = _AnswerSession("unused")
     failing.error = RuntimeError("OPENROUTER_API_KEY is not set")
-    service = _service(tmp_path, failing)
+    service = asyncio.run(_service(tmp_path, failing))
 
     with pytest.raises(DesktopServiceError) as raised:
         asyncio.run(service.dispatch(

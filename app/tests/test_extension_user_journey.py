@@ -437,6 +437,12 @@ def test_conversational_zip_acceptance(entry, tmp_path, monkeypatch, capsys):
             await fresh.turn("Read forms.md only, do not execute scripts", skill_name="pdf")
         else:
             service = DesktopService(config=config, original_cwd=tmp_path, environ={}, approval_timeout_seconds=3.0)
+            preview = await service.dispatch("workspace.select", {"rootPath": str(tmp_path), "action": "inspect"})
+            await service.dispatch("workspace.select", {
+                "rootPath": str(tmp_path), "action": "initialize",
+                "historyDirectory": preview["historyDirectory"],
+                "expectedFingerprint": preview["researchFingerprint"],
+            })
             await service.dispatch("session.create", {"loadMcp": False})
             class Sink:
                 request_id = uuid.uuid4().hex

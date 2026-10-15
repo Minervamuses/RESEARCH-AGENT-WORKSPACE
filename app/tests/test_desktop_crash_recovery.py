@@ -28,6 +28,7 @@ import pytest
 
 from agent.config import AgentConfig
 from agent.conversations import ConversationRepository
+from agent.desktop.catalog import inspect_project
 from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX, SESSION_A
 from agent.desktop.protocol import PROTOCOL_VERSION, parse_line
 from agent.skills.citation.session_policy import CitationSessionPolicy
@@ -35,7 +36,6 @@ from agent.skills.citation.session_policy import CitationSessionPolicy
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = APP_ROOT.parent
-PROJECT_ID = "p1"
 CHECKPOINT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_CHECKPOINT"
 CHECKPOINT_TURN_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_TURN_ID"
 SIDE_EFFECT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_SIDE_EFFECT_SENTINEL"
@@ -241,9 +241,13 @@ class BackendProcess:
         return data
 
     def select_fixture_session(self) -> None:
+        opened = self.request("workspace.select", {
+            "rootPath": str(self.root / "projects" / "project-one"), "action": "open",
+        })
+        self.project_id = opened["projectId"]
         selected = self.request(
             "session.select",
-            {"projectId": PROJECT_ID, "sessionId": SESSION_A},
+            {"projectId": self.project_id, "sessionId": SESSION_A},
         )
         assert selected["sessionId"] == SESSION_A
 
@@ -251,7 +255,7 @@ class BackendProcess:
         return self.request(
             "session.transcript",
             {
-                "projectId": PROJECT_ID,
+                "projectId": self.project_id,
                 "sessionId": SESSION_A,
                 "offset": 0,
                 "limit": 20,
@@ -374,8 +378,13 @@ def _effect(effect: str, turn_id: str) -> dict[str, str]:
     return {"effect": effect, "turnId": turn_id}
 
 
+def _history_repository(root: Path) -> ConversationRepository:
+    project = inspect_project(str(root / "projects" / "project-one"), root / "store")
+    return ConversationRepository(project["historyDirectory"])
+
+
 def _turn(root: Path, turn_id: str):
-    snapshot = ConversationRepository(root / "store").load(SESSION_A)
+    snapshot = _history_repository(root).load(SESSION_A)
     return next(item for item in snapshot.document.turns if item.turn_id == turn_id)
 
 
@@ -392,7 +401,7 @@ def test_kill_before_prompt_temp_keeps_draft_unaccepted_and_resendable(
     first = _start(crash_root, checkpoint=checkpoint, turn_id=turn_id)
     try:
         first.select_fixture_session()
-        repository = ConversationRepository(crash_root / "store")
+        repository = _history_repository(crash_root)
         before = repository.path_for(SESSION_A).read_bytes()
         request_id = first.send("session.turn", _turn_params(draft, turn_id))
         first.kill_at_checkpoint(checkpoint, turn_id, request_id)
@@ -516,7 +525,7 @@ def test_kill_after_citation_rejection_never_persists_unsafe_completed_text(
         pending = _turn(crash_root, turn_id)
         assert pending.state == "pending" and pending.assistant_output is None
         assert unsafe_draft not in (
-            ConversationRepository(crash_root / "store")
+            _history_repository(crash_root)
             .path_for(SESSION_A)
             .read_text(encoding="utf-8")
         )
@@ -545,7 +554,7 @@ def test_kill_after_citation_rejection_never_persists_unsafe_completed_text(
         assert safe["text"] == expected_safe
         assert unsafe_draft not in safe["text"]
         assert unsafe_draft not in (
-            ConversationRepository(crash_root / "store")
+            _history_repository(crash_root)
             .path_for(SESSION_A)
             .read_text(encoding="utf-8")
         )
@@ -572,7 +581,7 @@ def test_kill_after_completed_temp_fsync_leaves_pending_authority(
         first.kill_at_checkpoint(checkpoint, turn_id, request_id)
         pending = _turn(crash_root, turn_id)
         assert pending.state == "pending" and pending.assistant_output is None
-        repository = ConversationRepository(crash_root / "store")
+        repository = _history_repository(crash_root)
         assert list(repository.root.glob(f".{SESSION_A}.*.tmp"))
         assert _effects(crash_root) == [_effect("provider", turn_id)]
     finally:

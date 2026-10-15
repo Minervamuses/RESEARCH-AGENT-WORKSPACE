@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from agent.config import AgentConfig
 from agent.conversations import (
@@ -32,12 +32,14 @@ from agent.desktop.catalog import (
     CatalogMalformedError,
     CatalogUnavailableError,
     DesktopProjectCatalog,
+    inspect_project,
+    initialize_project,
 )
 from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
 from agent.desktop.documents import selected_text
 from agent.extensions.manager import ExtensionManager
 from agent.extensions.startup import load_extension_startup
-from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX
+from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX, SYSTEM_PROMPT
 from agent.skills.citation.session_policy import CitationSessionPolicy
 from agent.skills import discover_skills
 from agent.skills.runtime import (
@@ -99,9 +101,9 @@ SESSION_B = "f2ddf2369f994905afa0b85d8cca79b1"
 SESSION_C = "7a9708991f8f420bbdadc3e430a78c10"
 
 _SEED_TURNS = {
-    SESSION_A: ("p1", "A seed question", "A seed answer"),
-    SESSION_B: ("p1", "B seed question", "B seed answer"),
-    SESSION_C: ("p2", "C seed question", "C seed answer"),
+    SESSION_A: ("project-one", "A seed question", "A seed answer"),
+    SESSION_B: ("project-one", "B seed question", "B seed answer"),
+    SESSION_C: ("project-two", "C seed question", "C seed answer"),
 }
 _FIXTURE_TIMESTAMP = datetime(2026, 8, 28, 2, 30, tzinfo=timezone.utc)
 _MAX_CONTEXT_CHARS = 2_048
@@ -518,6 +520,10 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         root / FIXTURE_PRIVATE_SKILL_DIRNAME,
         root / "citations",
         root / FIXTURE_KNOWLEDGE_DIRNAME,
+        root / "projects",
+        root / "projects" / "project-one",
+        root / "projects" / "project-two",
+        persist_dir / "projects",
     )
     if any(path.is_symlink() for path in guarded_paths):
         raise FixtureConfigurationError("fixture child roots must not be symlinks")
@@ -532,30 +538,8 @@ def seed_fixture_root(root: Path) -> AgentConfig:
             "The fixture knowledge answer is local and deterministic.\n",
             encoding="utf-8",
         )
-    catalog_path = persist_dir / CATALOG_FILENAME
-    if catalog_path.is_symlink() or (
-        plan_logs_dir.is_dir()
-        and any(path.is_symlink() for path in plan_logs_dir.iterdir())
-    ):
+    if plan_logs_dir.is_dir() and any(path.is_symlink() for path in plan_logs_dir.iterdir()):
         raise FixtureConfigurationError("fixture persistence files must not be symlinks")
-    if not catalog_path.exists():
-        catalog_path.write_text(
-            json.dumps({
-                "projects": [
-                    {
-                        "projectId": "p1",
-                        "name": "Project One",
-                        "sessionIds": [SESSION_A, SESSION_B],
-                    },
-                    {
-                        "projectId": "p2",
-                        "name": "Project Two",
-                        "sessionIds": [SESSION_C],
-                    },
-                ]
-            }, ensure_ascii=False, separators=(",", ":")) + "\n",
-            encoding="utf-8",
-        )
     config = AgentConfig(
         persist_dir=str(persist_dir),
         plan_logs_dir=str(plan_logs_dir),
@@ -564,18 +548,45 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         citation_output_dir=str(root / "citations"),
     )
     _seed_fixture_extensions(root)
-    repository = ConversationRepository(persist_dir)
-    for index, (session_id, (project_id, user, answer)) in enumerate(
-        _SEED_TURNS.items()
-    ):
-        _seed_canonical_turn(
-            repository,
-            index=index,
-            session_id=session_id,
-            project_id=project_id,
-            user=user,
-            answer=answer,
-        )
+    for project_name in ("project-one", "project-two"):
+        project_root = root / "projects" / project_name
+        project_root.mkdir(parents=True, exist_ok=True)
+        research_path = project_root / "RESEARCH.md"
+        if research_path.is_symlink():
+            raise FixtureConfigurationError("fixture project settings must not be symlinks")
+        project = inspect_project(str(project_root), persist_dir)
+        history = persist_dir / "projects" / project["projectId"]
+        if (
+            Path(project["historyDirectory"]) != history.resolve()
+            or history.is_symlink()
+            or (history / "conversations").is_symlink()
+            or (history / CATALOG_FILENAME).is_symlink()
+        ):
+            raise FixtureConfigurationError("fixture project history must stay in its isolated child root")
+        if not research_path.exists():
+            project = initialize_project(
+                str(project_root), persist_dir,
+                history_directory=str(history), expected_fingerprint=None,
+            )
+        elif project["status"] != "ready":
+            raise FixtureConfigurationError("existing fixture project settings require explicit repair")
+        repository = ConversationRepository(history)
+        for index, (session_id, (owner, user, answer)) in enumerate(_SEED_TURNS.items()):
+            if owner != project_name:
+                continue
+            _seed_canonical_turn(
+                repository, index=index, session_id=session_id,
+                project_id=project["projectId"], user=user, answer=answer,
+            )
+        if (history / CATALOG_FILENAME).exists():
+            try:
+                catalog = DesktopProjectCatalog(history)
+            except (CatalogMalformedError, CatalogUnavailableError):
+                # Opening the selected project owns any catalog repair.
+                continue
+            for session_id, (owner, _user, _answer) in _SEED_TURNS.items():
+                if owner == project_name:
+                    catalog.register_session(project["projectId"], session_id)
     return config
 
 
@@ -713,8 +724,10 @@ class FixtureSession:
         bash_approval_handler: Callable[[str, str, int], bool] | None,
         bash_command_runner: Callable[..., Any] | None,
         extra_tools: list | None = None,
+        system_prompt: str = SYSTEM_PROMPT,
     ) -> None:
         self.config = config
+        self.system_prompt_message = SystemMessage(content=system_prompt)
         self.session_id = session_id
         self.project_id = project_id
         self.conversation_repository = conversation_repository
@@ -1377,6 +1390,7 @@ class FixtureSessionFactory:
         bash_approval_handler: Callable[[str, str, int], bool] | None = None,
         bash_command_runner: Callable[..., Any] | None = None,
         extra_tools: list | None = None,
+        system_prompt: str = SYSTEM_PROMPT,
     ) -> FixtureSession:
         del load_mcp
         if session_id is None:
@@ -1405,6 +1419,7 @@ class FixtureSessionFactory:
             bash_approval_handler=bash_approval_handler,
             bash_command_runner=bash_command_runner,
             extra_tools=extra_tools,
+            system_prompt=system_prompt,
         )
 
 
@@ -1417,19 +1432,11 @@ def build_phase02_fixture_service(
     root = require_fixture_root(environ)
     crash_control = _FixtureCrashControl(root, environ)
     config = seed_fixture_root(root)
-    try:
-        catalog: DesktopProjectCatalog | None = DesktopProjectCatalog(
-            config.persist_dir
-        )
-    except (CatalogMalformedError, CatalogUnavailableError):
-        catalog = None
-    conversation_repository: ConversationRepository
-    if crash_control.target_turn_id is None:
-        conversation_repository = ConversationRepository(config.persist_dir)
-    else:
+    project = inspect_project(str(root / "projects" / "project-one"), config.persist_dir)
+    conversation_repository: ConversationRepository | None = None
+    if crash_control.target_turn_id is not None:
         conversation_repository = _FixtureConversationRepository(
-            config.persist_dir,
-            crash_control,
+            project["historyDirectory"], crash_control,
         )
     sanitized_environ = {
         key: environ[key]
@@ -1448,9 +1455,8 @@ def build_phase02_fixture_service(
         original_cwd=original_cwd,
         environ=sanitized_environ,
         config=config,
-        project_catalog=catalog,
         extension_manager=extension_manager,
-        session_factory=FixtureSessionFactory(catalog, crash_control),
+        session_factory=FixtureSessionFactory(None, crash_control),
         conversation_repository=conversation_repository,
         knowledge_operations=knowledge_operations.as_operations(),
         bash_command_runner=bash_runner,

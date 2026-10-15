@@ -86,8 +86,13 @@ async def _setup(tmp_path, monkeypatch):
         return ChatSession(config, loaded_skills=[], **kwargs)
 
     service = _service(tmp_path, session_factory=factory)
-    await service.dispatch("session.create", {"loadMcp": False})
-    await service.dispatch("workspace.select", {"rootPath": str(tmp_path)})
+    preview = await service.dispatch("workspace.select", {"rootPath": str(tmp_path), "action": "inspect"})
+    project = await service.dispatch("workspace.select", {
+        "rootPath": str(tmp_path), "action": "initialize",
+        "historyDirectory": preview["historyDirectory"],
+        "expectedFingerprint": preview["researchFingerprint"],
+    })
+    await service.dispatch("session.create", {"loadMcp": False, "projectId": project["projectId"]})
     path = tmp_path / "稿件.md"
     path.write_text("相同段落🙂\n\n相同段落🙂\n尾段\n", encoding="utf-8")
     context = await service.dispatch("document.open", {"path": str(path)})
@@ -233,9 +238,11 @@ def test_isolated_desktop_fixture_calls_real_document_coordinator():
 
     async def run(root):
         service = build_phase02_fixture_service(original_cwd=root, environ={FIXTURE_ROOT_ENV: str(root)})
-        await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("workspace.select", {"rootPath": str(root)})
-        path = root / "draft.md"
+        project_root = root / "projects" / "project-one"
+        project = await service.dispatch("workspace.select", {"rootPath": str(project_root)})
+        assert project["status"] == "opened"
+        await service.dispatch("session.create", {"loadMcp": False, "projectId": project["projectId"]})
+        path = project_root / "draft.md"
         path.write_text("first\nsecond\n")
         context = await service.dispatch("document.open", {"path": str(path)})
         context.update(rangeStartUtf16=6, rangeEndUtf16=12)

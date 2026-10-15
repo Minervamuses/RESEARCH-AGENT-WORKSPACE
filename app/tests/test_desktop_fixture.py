@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from agent.conversations import ConversationRepository
-from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog
+from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog, inspect_project
 from agent.desktop.fixture_session import (
     FIXTURE_BASH_APPROVE,
     FIXTURE_BASH_DENY,
@@ -77,11 +77,29 @@ def _environ(root: Path) -> dict[str, str]:
     }
 
 
-def _service(root: Path):
-    return build_phase02_fixture_service(
+def _project_info(root: Path, name: str = "project-one"):
+    return inspect_project(str(root / "projects" / name), root / "store")
+
+
+def _project_id(root: Path, name: str = "project-one"):
+    return _project_info(root, name)["projectId"]
+
+
+def _history_root(service):
+    return _project_info(Path(service.config.persist_dir).parent)["historyDirectory"]
+
+
+def _service(root: Path, *, open_project: bool = False):
+    service = build_phase02_fixture_service(
         original_cwd=root,
         environ=_environ(root),
     )
+    if open_project:
+        opened = asyncio.run(service.dispatch(
+            "workspace.select", {"rootPath": str(root / "projects" / "project-one")},
+        ))
+        assert opened["status"] == "opened"
+    return service
 
 
 _TURN_SEQUENCE = itertools.count(1)
@@ -119,70 +137,67 @@ def test_fixture_rejects_symlinked_child_store(fixture_root: Path) -> None:
     (fixture_root / "store").symlink_to(fixture_root, target_is_directory=True)
 
     with pytest.raises(FixtureConfigurationError, match="child roots"):
-        _service(fixture_root)
+        _service(fixture_root, open_project=True)
 
 
 def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     fixture_root: Path,
 ) -> None:
     first = _service(fixture_root)
-    first_projects = asyncio.run(first.dispatch("project.list", {}))
-    assert [
-        (item["projectId"], item["sessionCount"])
-        for item in first_projects["projects"]
-    ] == [("p1", 2), ("p2", 1)]
-    snapshot = DesktopProjectCatalog(first.config.persist_dir).snapshot()
+    cold = asyncio.run(first.dispatch("project.list", {}))
+    assert cold["projects"] == []
+    assert cold["selectedProjectId"] is None
+    assert first.session is None
+    assert not (Path(first.config.persist_dir) / CATALOG_FILENAME).exists()
+    project = _project_info(fixture_root)
+    history = Path(project["historyDirectory"])
+    snapshot = DesktopProjectCatalog(history).snapshot()
     assert snapshot == {
-        "projects": [
-            {
-                "projectId": "p1",
-                "name": "Project One",
-                "sessionIds": [SESSION_A, SESSION_B],
-            },
-            {
-                "projectId": "p2",
-                "name": "Project Two",
-                "sessionIds": [SESSION_C],
-            },
-        ]
+        "projects": [{
+            "projectId": project["projectId"],
+            "name": "project-one",
+            "sessionIds": [SESSION_A, SESSION_B],
+        }]
     }
-    original_catalog = (
-        Path(first.config.persist_dir) / CATALOG_FILENAME
-    ).read_bytes()
-
+    original_catalog = (history / CATALOG_FILENAME).read_bytes()
     second = _service(fixture_root)
-    assert DesktopProjectCatalog(second.config.persist_dir).snapshot() == snapshot
-    assert (
-        Path(second.config.persist_dir) / CATALOG_FILENAME
-    ).read_bytes() == original_catalog
+    assert asyncio.run(second.dispatch("project.list", {}))["projects"] == []
+    assert DesktopProjectCatalog(history).snapshot() == snapshot
+    assert (history / CATALOG_FILENAME).read_bytes() == original_catalog
+    asyncio.run(second.dispatch("workspace.select", {"rootPath": project["rootPath"]}))
     asyncio.run(second.dispatch(
-        "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        "session.select", {"projectId": project["projectId"], "sessionId": SESSION_A},
     ))
     transcripts = asyncio.run(second.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        {"projectId": project["projectId"], "sessionId": SESSION_A, "limit": 20},
     ))
     assert transcripts["status"] == "ready"
     assert transcripts["items"][0]["userText"] == "A seed question"
-    repository = ConversationRepository(second.config.persist_dir)
-    assert repository.path_for(SESSION_A).is_file()
+    repository = ConversationRepository(history)
     seeded = repository.load(SESSION_A).document.turns[0]
     assert seeded.kind == "display-only"
     assert seeded.context_eligible is False
     assert seeded.semantic_input is None
+    other = _project_info(fixture_root, "project-two")
+    assert other["historyDirectory"] != project["historyDirectory"]
+    asyncio.run(second.dispatch("workspace.select", {"rootPath": other["rootPath"]}))
+    projects = asyncio.run(second.dispatch("project.list", {}))
+    assert projects["projects"] == [{
+        "projectId": other["projectId"], "name": "project-two", "sessionCount": 1,
+    }]
     assert not Path(second.config.plan_logs_dir).exists()
 
 
 def test_fixture_status_reports_canonical_conversation_root(
     fixture_root: Path,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
 
     async def run():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         return await service.dispatch(
             "session.turn",
@@ -190,9 +205,7 @@ def test_fixture_status_reports_canonical_conversation_root(
         )
 
     status = asyncio.run(run())
-    expected_root = ConversationRepository(
-        service.config.persist_dir
-    ).display_root()
+    expected_root = ConversationRepository(_history_root(service)).display_root()
     assert status["responseKind"] == "command"
     assert status["streamKind"] == "final_only"
     assert (
@@ -204,17 +217,17 @@ def test_fixture_status_reports_canonical_conversation_root(
 def test_real_service_round_trip_registration_restore_and_final_only_answer(
     fixture_root: Path,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     events: list[tuple[str, dict]] = []
 
     async def run():
         created = await service.dispatch(
             "session.create",
-            {"projectId": "p1", "loadMcp": True},
+            {"projectId": _project_id(fixture_root), "loadMcp": True},
         )
         transient_id = created["sessionId"]
         assert created["registered"] is False
-        before = DesktopProjectCatalog(service.config.persist_dir).snapshot()
+        before = DesktopProjectCatalog(_history_root(service)).snapshot()
         assert transient_id not in before["projects"][0]["sessionIds"]
 
         turn_id = "00000000000040008000000000001001"
@@ -236,17 +249,17 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
 
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         await service.dispatch("session.turn", _turn_params("A second"))
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_B},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_B},
         )
         await service.dispatch("session.turn", _turn_params("B second"))
         selected_a = await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         continued_a = await service.dispatch(
             "session.turn",
@@ -259,21 +272,21 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
     assert "turn 3" in continued_a["text"]
     assert "A second" in continued_a["text"]
     assert "B second" not in continued_a["text"]
-    durable = DesktopProjectCatalog(service.config.persist_dir).snapshot()
+    durable = DesktopProjectCatalog(_history_root(service)).snapshot()
     assert durable["projects"][0]["sessionIds"] == [
         SESSION_A,
         SESSION_B,
         transient_id,
     ]
-    transient = ConversationRepository(service.config.persist_dir).load(transient_id)
+    transient = ConversationRepository(_history_root(service)).load(transient_id)
     assert transient.document.turns[0].display_input == "register D"
     assert transient.document.turns[0].semantic_input == "register D"
 
-    restarted = _service(fixture_root)
+    restarted = _service(fixture_root, open_project=True)
     reopened = asyncio.run(
         restarted.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
     )
     assert reopened["turnCount"] == 3
@@ -282,14 +295,14 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
 def test_fixture_long_answer_survives_switch_and_backend_restart(
     fixture_root: Path,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     turn_id = "00000000000040008000000000001011"
     events: list[tuple[str, dict]] = []
 
     async def run_first():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         result = await service.dispatch(
             "session.turn",
@@ -298,15 +311,15 @@ def test_fixture_long_answer_survives_switch_and_backend_restart(
         )
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_B},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_B},
         )
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         switched = await service.dispatch(
             "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A, "limit": 20},
         )
         await service.dispatch("runtime.shutdown", {})
         return result, switched
@@ -326,16 +339,16 @@ def test_fixture_long_answer_survives_switch_and_backend_restart(
     assert switched["status"] == "ready"
     assert switched["items"][-1]["assistantText"] == expected
 
-    persisted = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    persisted = ConversationRepository(_history_root(service)).load(SESSION_A)
     assert persisted.document.turns[-1].assistant_output == expected
-    restarted = _service(fixture_root)
+    restarted = _service(fixture_root, open_project=True)
     asyncio.run(restarted.dispatch(
         "session.select",
-        {"projectId": "p1", "sessionId": SESSION_A},
+        {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
     ))
     restored = asyncio.run(restarted.dispatch(
         "session.transcript",
-        {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+        {"projectId": _project_id(fixture_root), "sessionId": SESSION_A, "limit": 20},
     ))
     assert restored["items"][-1]["assistantText"] == expected
 
@@ -349,12 +362,13 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
         original_cwd=fixture_root,
         environ=environ,
     )
+    asyncio.run(service.dispatch("workspace.select", {"rootPath": _project_info(fixture_root)["rootPath"]}))
     turn_id = "00000000000040008000000000001012"
 
     async def run():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         with pytest.raises(DesktopServiceError) as first:
             await service.dispatch(
@@ -379,11 +393,11 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
         )
         transcript = await service.dispatch(
             "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A, "limit": 20},
         )
         sessions = await service.dispatch(
             "session.list",
-            {"projectId": "p1", "offset": 0, "limit": 50},
+            {"projectId": _project_id(fixture_root), "offset": 0, "limit": 50},
         )
         return first.value, retry, replay, transcript, sessions
 
@@ -417,7 +431,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
 ) -> None:
     from test_desktop_service import _dispatch_approved
 
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     source = fixture_root / FIXTURE_KNOWLEDGE_DIRNAME
     document = source / "fixture-notes.md"
     events: list[tuple[str, dict]] = []
@@ -425,7 +439,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
     async def run():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         answer = await service.dispatch(
             "session.turn",
@@ -434,7 +448,7 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
         )
         transcript = await service.dispatch(
             "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_A, "limit": 20},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A, "limit": 20},
         )
         plan_logs = {
             path: path.read_bytes()
@@ -533,16 +547,17 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
         for path in Path(service.config.persist_dir).rglob("*")
         if path.is_file()
     }
+    conversation_prefix = (Path(_history_root(service)) / "conversations").relative_to(service.config.persist_dir)
     assert {
         path: content
         for path, content in after_store.items()
-        if path.parts[0] != "conversations"
+        if not path.is_relative_to(conversation_prefix)
     } == {
         path: content
         for path, content in store_snapshot.items()
-        if path.parts[0] != "conversations"
+        if not path.is_relative_to(conversation_prefix)
     }
-    durable = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    durable = ConversationRepository(_history_root(service)).load(SESSION_A)
     assert [turn.kind for turn in durable.document.turns[-8:]] == [
         "display-only"
     ] * 8
@@ -571,12 +586,12 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
 def test_extended_success_and_scripted_provider_errors_are_bounded(
     fixture_root: Path,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
 
     async def run():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         thinking = await service.dispatch(
             "session.set_thinking",
@@ -624,7 +639,7 @@ def test_extended_success_and_scripted_provider_errors_are_bounded(
     ]
     assert [error.retryable for error in errors] == [True, True]
     assert all("synthetic" not in str(error) for error in errors)
-    snapshot = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    snapshot = ConversationRepository(_history_root(service)).load(SESSION_A)
     by_id = {turn.turn_id: turn for turn in snapshot.document.turns}
     assert by_id[success_turn_id].state == "completed"
     assert [by_id[turn_id].state for turn_id in failed_turn_ids] == [
@@ -637,14 +652,14 @@ def test_extended_success_and_scripted_provider_errors_are_bounded(
 def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
     fixture_root: Path,
 ) -> None:
-    first = _service(fixture_root)
+    first = _service(fixture_root, open_project=True)
     normal_turn_id = "00000000000040008000000000002101"
     extended_turn_id = "00000000000040008000000000002102"
 
     async def run_first_process():
         selected = await first.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         normal = await first.dispatch(
             "session.turn",
@@ -670,17 +685,17 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
     assert extended_turn["text"].startswith("Fixture extended")
     assert shutdown == {"status": "stopped"}
 
-    restarted = _service(fixture_root)
+    restarted = _service(fixture_root, open_project=True)
 
     async def run_second_process():
         restored = await restarted.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         transcript = await restarted.dispatch(
             "session.transcript",
             {
-                "projectId": "p1",
+                "projectId": _project_id(fixture_root),
                 "sessionId": SESSION_A,
                 "offset": 0,
                 "limit": 20,
@@ -696,7 +711,7 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
     }
     assert transcript_by_id[normal_turn_id]["state"] == "completed"
     assert transcript_by_id[extended_turn_id]["state"] == "completed"
-    persisted = ConversationRepository(restarted.config.persist_dir).load(SESSION_A)
+    persisted = ConversationRepository(_history_root(restarted)).load(SESSION_A)
     persisted_by_id = {
         turn.turn_id: turn for turn in persisted.document.turns
     }
@@ -708,12 +723,12 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
 def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
     fixture_root: Path,
 ) -> None:
-    first = _service(fixture_root)
+    first = _service(fixture_root, open_project=True)
 
     async def run_first_process():
         selected = await first.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         bypassed = await first.dispatch(
             "session.set_bash_permission",
@@ -727,12 +742,12 @@ def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
     assert bypassed["bashPermissionMode"] == "bypass"
     assert shutdown == {"status": "stopped"}
 
-    restarted = _service(fixture_root)
+    restarted = _service(fixture_root, open_project=True)
 
     async def run_second_process():
         restored = await restarted.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         stopped = await restarted.dispatch("session.shutdown", {})
         return restored, stopped
@@ -750,13 +765,13 @@ def test_switch_and_shutdown_leave_existing_plan_logs_untouched(
     legacy_source = plan_dir / "plan-existing-user-source.md"
     legacy_source.write_text("existing user data\n", encoding="utf-8")
     legacy_before = legacy_source.read_bytes()
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     assert Path(service.config.plan_logs_dir) == plan_dir
 
     async def run():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         await service.dispatch(
             "session.turn",
@@ -764,7 +779,7 @@ def test_switch_and_shutdown_leave_existing_plan_logs_untouched(
         )
         selected = await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_B},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_B},
         )
         shutdown = await service.dispatch("session.shutdown", {})
         return selected, shutdown
@@ -773,7 +788,7 @@ def test_switch_and_shutdown_leave_existing_plan_logs_untouched(
     assert selected["sessionId"] == SESSION_B
     assert shutdown == {"status": "stopped"}
     assert legacy_source.read_bytes() == legacy_before
-    canonical = ConversationRepository(service.config.persist_dir).load(SESSION_A)
+    canonical = ConversationRepository(_history_root(service)).load(SESSION_A)
     assert canonical.document.turns[-1].display_input == "canonical before switch"
     assert canonical.document.turns[-1].state == "completed"
 
@@ -786,14 +801,14 @@ def test_fixture_never_uses_chat_session_factory_or_exposes_credentials(
         raise AssertionError("real ChatSession factory must not run")
 
     monkeypatch.setattr("agent.session.ChatSession.create", forbidden_provider_factory)
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     diagnostics = asyncio.run(service.dispatch("runtime.diagnostics", {}))
     assert diagnostics["openRouterConfigured"] is False
     assert diagnostics["storePath"].startswith(str(fixture_root))
     result = asyncio.run(
         service.dispatch(
             "session.create",
-            {"projectId": "p1", "loadMcp": True},
+            {"projectId": _project_id(fixture_root), "loadMcp": True},
         )
     )
     assert result["mcpFamilies"] == []
@@ -802,14 +817,14 @@ def test_fixture_never_uses_chat_session_factory_or_exposes_credentials(
 def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
     fixture_root: Path,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     provider = service._extension_manager.model_factory.__self__
     assert isinstance(provider, FixtureExtensionProvider)
 
     async def run_first_process():
         created = await service.dispatch(
             "session.create",
-            {"projectId": "p1", "loadMcp": True},
+            {"projectId": _project_id(fixture_root), "loadMcp": True},
         )
         status_turn = await service.dispatch(
             "session.turn",
@@ -883,13 +898,13 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
     assert post_apply["restartRequired"] is True
     assert replayed == applied
 
-    restarted = _service(fixture_root)
+    restarted = _service(fixture_root, open_project=True)
     restarted_provider = restarted._extension_manager.model_factory.__self__
 
     async def run_restarted_process():
         loaded = await restarted.dispatch(
             "session.create",
-            {"projectId": "p1", "loadMcp": True},
+            {"projectId": _project_id(fixture_root), "loadMcp": True},
         )
         skill_turn = await restarted.dispatch(
             "session.turn",
@@ -902,7 +917,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
         transcript = await restarted.dispatch(
             "session.transcript",
             {
-                "projectId": "p1",
+                "projectId": _project_id(fixture_root),
                 "sessionId": loaded["sessionId"],
                 "limit": 20,
             },
@@ -928,7 +943,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
         '/fixture-writer Draft  "quoted"   body',
         "ordinary follow-up",
     ]
-    snapshot = ConversationRepository(restarted.config.persist_dir).load(
+    snapshot = ConversationRepository(_history_root(restarted)).load(
         loaded["sessionId"]
     )
     skill_record = snapshot.document.turns[-2]
@@ -946,10 +961,10 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     root = phase07_fixture_root
     legacy_chat_history = root / "store" / "chat_history"
     assert not legacy_chat_history.exists()
-    first = _service(root)
+    first = _service(root, open_project=True)
 
     async def run_first_process():
-        created = await first.dispatch("session.create", {"projectId": "p1"})
+        created = await first.dispatch("session.create", {"projectId": _project_id(root)})
         diagnostics = await first.dispatch("runtime.diagnostics", {})
         events: list[tuple[str, dict]] = []
         crossed_old_deadline = asyncio.Event()
@@ -970,7 +985,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         ))
         await asyncio.wait_for(crossed_old_deadline.wait(), timeout=1)
         assert not pending.done()
-        pending_snapshot = ConversationRepository(first.config.persist_dir).load(
+        pending_snapshot = ConversationRepository(_history_root(first)).load(
             created["sessionId"]
         )
         assert pending_snapshot.document.turns[-1].turn_id == delayed_turn_id
@@ -1026,10 +1041,10 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             "text": f"Local fixture result for: {query}",
         }]
 
-    second = _service(root)
+    second = _service(root, open_project=True)
 
     async def run_second_process():
-        loaded = await second.dispatch("session.create", {"projectId": "p1"})
+        loaded = await second.dispatch("session.create", {"projectId": _project_id(root)})
         diagnostics = await second.dispatch("runtime.diagnostics", {})
         assert second.session is not None
         before_skill_turn = second.session._turn_count
@@ -1068,7 +1083,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         transcript = await second.dispatch(
             "session.transcript",
             {
-                "projectId": "p1",
+                "projectId": _project_id(root),
                 "sessionId": loaded["sessionId"],
                 "limit": 20,
             },
@@ -1137,23 +1152,23 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert tool_turn["toolActivities"][0]["arguments"] == "(not retained)"
     assert second_shutdown == {"status": "stopped"}
 
-    third = _service(root)
+    third = _service(root, open_project=True)
     third._session_factory._search_handler = counting_search
 
     async def run_third_process():
-        await third.dispatch("session.create", {"projectId": "p1"})
+        await third.dispatch("session.create", {"projectId": _project_id(root)})
         diagnostics = await third.dispatch("runtime.diagnostics", {})
         restored = await third.dispatch(
             "session.transcript",
             {
-                "projectId": "p1",
+                "projectId": _project_id(root),
                 "sessionId": loaded["sessionId"],
                 "limit": 20,
             },
         )
         selected = await third.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": loaded["sessionId"]},
+            {"projectId": _project_id(root), "sessionId": loaded["sessionId"]},
         )
         continued_events: list[tuple[str, dict]] = []
         continued = await third.dispatch(
@@ -1163,11 +1178,11 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         )
         seed_selected = await third.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_B},
+            {"projectId": _project_id(root), "sessionId": SESSION_B},
         )
         seed_transcript = await third.dispatch(
             "session.transcript",
-            {"projectId": "p1", "sessionId": SESSION_B, "limit": 20},
+            {"projectId": _project_id(root), "sessionId": SESSION_B, "limit": 20},
         )
         shutdown = await third.dispatch("session.shutdown", {})
         return (
@@ -1192,7 +1207,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         final_shutdown,
     ) = asyncio.run(run_third_process())
     assert final_diagnostics["mcpEnabled"] is True
-    restored_snapshot = ConversationRepository(third.config.persist_dir).load(
+    restored_snapshot = ConversationRepository(_history_root(third)).load(
         loaded["sessionId"]
     )
     assert selected["turnCount"] + 1 == len(restored_snapshot.document.turns)
@@ -1215,7 +1230,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert seed_transcript["items"][0]["userText"] == "B seed question"
     assert seed_transcript["items"][0]["assistantText"] == "B seed answer"
     assert seed_transcript["items"][0]["toolActivities"] == []
-    seeded = ConversationRepository(third.config.persist_dir).load(SESSION_B)
+    seeded = ConversationRepository(_history_root(third)).load(SESSION_B)
     assert seeded.document.turns[0].kind == "display-only"
     assert seeded.document.turns[0].semantic_input is None
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
@@ -1226,7 +1241,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
 def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
     fixture_root: Path,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     runner = service._bash_command_runner
     assert isinstance(runner, FixtureBashRunner)
 
@@ -1269,7 +1284,7 @@ def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
     async def run():
         await service.dispatch(
             "session.select",
-            {"projectId": "p1", "sessionId": SESSION_A},
+            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         approved = await decide(
             FIXTURE_BASH_APPROVE,
@@ -1317,32 +1332,28 @@ def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
 def test_malformed_existing_catalog_is_rebuilt_from_canonical_conversations(
     fixture_root: Path,
 ) -> None:
-    store = fixture_root / "store"
-    store.mkdir()
-    path = store / CATALOG_FILENAME
-    original = b'{"projects":[{"unexpected":true}]}\n'
+    _service(fixture_root)
+    project = _project_info(fixture_root)
+    path = Path(project["historyDirectory"]) / CATALOG_FILENAME
+    original = b'{"projects":[{"unexpected":true}]}\\n'
     path.write_bytes(original)
-
     service = _service(fixture_root)
+    cold = asyncio.run(service.dispatch("project.list", {}))
+    assert cold["projects"] == []
+    assert path.read_bytes() == original
+    opened = asyncio.run(service.dispatch("workspace.select", {"rootPath": project["rootPath"]}))
+    assert opened["status"] == "opened"
     projects = asyncio.run(service.dispatch("project.list", {}))
-
     assert path.read_bytes() != original
-    assert projects["status"] == "ready"
-    assert projects["projects"] == [
-        {
-            "projectId": "local",
-            "name": "Local research",
-            "sessionCount": 0,
-        },
-        {"projectId": "p1", "name": "p1", "sessionCount": 2},
-        {"projectId": "p2", "name": "p2", "sessionCount": 1},
-    ]
+    assert projects["projects"] == [{
+        "projectId": project["projectId"], "name": "project-one", "sessionCount": 2,
+    }]
 
 
 def test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection(
     fixture_root: Path, monkeypatch,
 ) -> None:
-    service = _service(fixture_root)
+    service = _service(fixture_root, open_project=True)
     loaded = []
 
     async def run():
@@ -1359,8 +1370,7 @@ def test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection(
             return runtime
 
         monkeypatch.setattr(service.session, "_load_skill_runtime", capture)
-        await service.dispatch("workspace.select", {"rootPath": str(fixture_root)})
-        path = fixture_root / "draft.md"
+        path = Path(_project_info(fixture_root)["rootPath"]) / "draft.md"
         path.write_text("Old disk/RAG claim.\n", encoding="utf-8")
         context = await service.dispatch("document.open", {"path": str(path)})
         source = "前文😀\n當前未儲存論述：檢索可減少醫療問答無來源主張。\n後文"
