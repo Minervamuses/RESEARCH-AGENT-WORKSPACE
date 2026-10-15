@@ -66,6 +66,12 @@
 - **恢復點：** 已讀適用規範、GOALS→PLANS→build-log→P0→P1；最後未驗收項為批准出口，現已具備。P0 完成，P1 開始；P2～P5 仍須前階段實際驗收。
 - **變更保護：** 七個既有工作樹檔案與原 diff 已複製到 repository 外的 Linux 暫存快照；之後重疊檔案只提交本次改動，保留原有未提交差異。未建立 worktree 或改變 Git 分支。
 
+## P1.S1｜編輯器依賴（2026-10-15）
+
+- 依 P0.S3 的批准，在 Linux／Conda app 的 app/desktop 執行 npm install --save-exact monaco-editor@0.57.0 --ignore-scripts --no-audit --no-fund；2 秒完成，新增 4 packages，npm ls monaco-editor --depth=0 確認 0.57.0。
+- 僅 package.json／package-lock.json 為本步產品變更；沒有增加 wrapper、CDN、服務或執行安裝腳本。編輯器／文件／協定同一階段的實作在進行中，尚不將其離線結果當成 P1 完成。
+- 下一步 P1.S2 整合文件閉環並跑定向驗收。原有七檔變更保留在暫存基線；本 commit 不收編它們。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。
