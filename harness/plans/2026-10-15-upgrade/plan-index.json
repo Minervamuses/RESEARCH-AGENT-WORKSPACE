@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "plan_id": "upgrade",
+  "goals": [
+    {
+      "id": "G1",
+      "text": "互動即時回饋與代表性桌面流暢度"
+    },
+    {
+      "id": "G2",
+      "text": "行內引用與多 Skill 的實際執行"
+    },
+    {
+      "id": "G3",
+      "text": "文件與 Agent 並列工作區"
+    },
+    {
+      "id": "G4",
+      "text": "來源行號與精確選取範圍"
+    },
+    {
+      "id": "G5",
+      "text": "指定範圍修改、衝突處理與直接存檔"
+    },
+    {
+      "id": "G6",
+      "text": "學術寫作與 citation 的文件上下文整合"
+    },
+    {
+      "id": "G7",
+      "text": "專案 Ask／Bypass 與可檢查的操作結果"
+    }
+  ],
+  "phases": [
+    {
+      "id": "P0",
+      "file": "build/phase-00-preflight.md",
+      "depends_on": [],
+      "covers": [
+        "G1",
+        "G2",
+        "G3",
+        "G4",
+        "G5",
+        "G6",
+        "G7"
+      ]
+    },
+    {
+      "id": "P1",
+      "file": "build/phase-01-document-workspace.md",
+      "depends_on": [
+        "P0"
+      ],
+      "covers": [
+        "G3",
+        "G4",
+        "G5"
+      ]
+    },
+    {
+      "id": "P2",
+      "file": "build/phase-02-inline-skills.md",
+      "depends_on": [
+        "P1"
+      ],
+      "covers": [
+        "G2",
+        "G6"
+      ]
+    },
+    {
+      "id": "P3",
+      "file": "build/phase-03-project-permissions.md",
+      "depends_on": [
+        "P2"
+      ],
+      "covers": [
+        "G7"
+      ]
+    },
+    {
+      "id": "P4",
+      "file": "build/phase-04-citation-abstracts.md",
+      "depends_on": [
+        "P2",
+        "P3"
+      ],
+      "covers": [
+        "G6"
+      ]
+    },
+    {
+      "id": "P5",
+      "file": "build/phase-05-interaction-validation.md",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "covers": [
+        "G1",
+        "G2",
+        "G3",
+        "G4",
+        "G5",
+        "G6",
+        "G7"
+      ]
+    }
+  ]
+}
