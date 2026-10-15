@@ -258,7 +258,7 @@ def _installer_apply_step(messages):
     return "skill_install", {"action": "apply", "preview_id": receipt.get("preview_id", "missing")}
 
 
-def _real_installer_session(tmp_path, monkeypatch, steps, *, approve=True):
+def _real_installer_session(tmp_path, monkeypatch, steps, *, approve=True, project_id=None):
     from agent.extensions.manager import ExtensionManager
     model = _InstallerScriptModel(steps)
     monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
@@ -268,7 +268,11 @@ def _real_installer_session(tmp_path, monkeypatch, steps, *, approve=True):
         extension_dropin_dir=str(tmp_path / "dropins"),
         extension_state_dir=str(tmp_path / "state"),
     )
-    session = ChatSession(config, bash_approval_handler=approve if callable(approve) else lambda *_args: approve)
+    session = ChatSession(
+        config,
+        project_id=project_id,
+        bash_approval_handler=approve if callable(approve) else lambda *_args: approve,
+    )
     session.extension_manager = ExtensionManager(config, model_factory=lambda _cfg: _InstallerPlanModel())
     return session, model
 
@@ -515,7 +519,7 @@ def test_installer_new_request_reports_cleanup_conflict_without_replacing_transa
     assert not Path(session.config.extension_state_dir).exists()
 
 
-def _previewed_installer(tmp_path, monkeypatch):
+def _previewed_installer(tmp_path, monkeypatch, *, project_id=None):
     archive = _installer_test_archive(tmp_path)
     prepared = tmp_path / "prepared"
     session, model = _real_installer_session(tmp_path, monkeypatch, [
@@ -523,7 +527,7 @@ def _previewed_installer(tmp_path, monkeypatch):
         _installer_extract_step(archive, prepared),
         ("skill_install", {"action": "preview", "prepared_path": str(prepared)}),
         "Preview complete",
-    ])
+    ], project_id=project_id)
     source = Path(session.config.extension_dropin_dir) / "skill/writer"
     source.mkdir(parents=True)
     (source / "SKILL.md").write_bytes(b"---\nname: writer\ndescription: Existing\n---\nOriginal\n")
@@ -540,14 +544,25 @@ def _previewed_installer(tmp_path, monkeypatch):
 def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
     tmp_path, monkeypatch, skill_name,
 ):
+    from agent.desktop.catalog import initialize_project
     from conftest import make_astream_graph
-    from test_desktop_service import _service, _turn_params
+    from test_desktop_service import _open_test_project, _service, _turn_params
     from test_thinking_session import _Factory, _default_models
 
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    project = initialize_project(
+        str(project_root),
+        tmp_path / "history",
+        history_directory=str(tmp_path / "history"),
+        expected_fingerprint=None,
+    )
     models = _default_models()
     monkeypatch.setattr("agent.session.get_chat_model_for_role", lambda _cfg, *, role: models[role])
     monkeypatch.setattr("agent.session.get_fusion_aggregator_model", lambda _cfg: models["aggregator"])
-    session, model, source, backup = _previewed_installer(tmp_path, monkeypatch)
+    session, model, source, backup = _previewed_installer(
+        tmp_path, monkeypatch, project_id=project["projectId"],
+    )
     factory = _Factory()
     session._fusion._graph_builder = factory
     session._prompt_master_skill_text_cache = "prompt-master skill"
@@ -567,11 +582,30 @@ def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
 
     monkeypatch.setattr(session, "_run_turn", observe_run)
     calls_before = list(model.calls)
-    service = _service(tmp_path, config=session.config)
-    service.session = session
-    response = asyncio.run(service.dispatch(
-        "session.turn", _turn_params(f"/{skill_name} draft"),
-    ))
+
+    async def session_factory(
+        config, *, load_mcp, progress_cb, conversation_repository, project_id,
+    ):
+        assert load_mcp is False
+        assert config.persist_dir == session.config.persist_dir
+        assert conversation_repository.root == session.conversation_repository.root
+        assert project_id == session.project_id
+        session.progress_cb = progress_cb
+        return session
+
+    service = _service(tmp_path, config=session.config, session_factory=session_factory)
+
+    async def run():
+        opened = await _open_test_project(service, project_root)
+        assert opened["projectId"] == project["projectId"]
+        created = await service.dispatch("session.create", {
+            "projectId": opened["projectId"], "loadMcp": False,
+        })
+        assert created["sessionId"] == session.session_id
+        assert session._skill_installer.pending
+        return await service.dispatch("session.turn", _turn_params(f"/{skill_name} draft"))
+
+    response = asyncio.run(run())
     assert "source cleanup conflict" in response["text"]
     assert "staged source changed; preserving user changes and backup" in response["text"]
     assert f"backup_path: {backup}" in response["text"]

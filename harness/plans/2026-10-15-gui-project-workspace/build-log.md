@@ -9,7 +9,7 @@
 | P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
 | P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
 | P3 | Complete | E24-E29: compact UI, focused checks/build and native A16-A20 | none | P4 dependency ready |
-| P4 | In progress | E30: full regression results; native A21 underway | 42 obsolete Python fixture failures being corrected | Verify affected tests and complete native journey |
+| P4 | In progress | E30-E33: complete regression plus scoped repairs; native A21 underway | Native A10 exposed omitted safe-link label; correction under verification | Verify native link capture and complete journey |
 
 ## 規劃證據
 
@@ -236,3 +236,9 @@
 
 - Existing test_inline_skills.py opens the owned project before session.create in three setups and removes two obsolete later root-only workspace.select calls. All real catalog, multi-Skill order, save/retry, unsaved-claim and citation assertions and fake models remain unchanged.
 - Actual ordered multi-Skill targeted cases3/3 passed,0.43s; complete small module `poetry run pytest tests/test_inline_skills.py -q --tb=short` ->12 passed,0.65s, one existing warning. First patch passed without repairs; all six E30 failures in this module resolved. Main reviewed complete diff; scoped whitespace check passed.
+
+### E33 / P4-S3: Skill installer regression fixture ownership
+
+- Existing two cleanup-conflict cases create owned project metadata before the preview turn and pass its project identity into the existing ChatSession helper. They then explicitly open that project and use session.create with a test factory returning the previewed session, checking repository root/project identity and retained pending installer state. No existing history ownership is relabeled; no production gate is bypassed. Original cleanup conflict, backup bytes, no execution and mode/answer assertions remain.
+- First targeted run failed2/2 in0.31s because the new setup passed Path instead of required str to initialize_project. Corrected only that argument; second focused run2/2 passed,0.40s. Existing shared-helper load-failure/duplicate case1 passed,0.27s. One existing warning; main reviewed complete diff and scoped whitespace passed.
+- All42 Python failures from E30 now have passing scoped evidence (34 E31,6 E32,2 here), with unchanged1452 initial passing results reused. This is not a second full-suite pass. No dependencies, paid providers or real data were involved.
