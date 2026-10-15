@@ -1,15 +1,15 @@
 # 計畫狀態與實際證據
 
-這是唯一可變執行狀態來源。2026-10-15 本次只撰寫計畫，沒有功能實作、App 啟動、應用程式測試、build、provider 呼叫、migration 或 Git mutation。
+這是唯一可變執行狀態來源。E01–E04 記錄最初的 planning-only 交付；使用者後續明確授權完整實作與逐步 commit，實際執行見 E05 起。下方 Complete 僅依已執行的測試、原生 GUI 與磁碟證據判定。
 
 ## 目前階段
 
 | 階段 | 狀態 | 實作證據 | 阻塞／前提 | 下一步 |
 |---|---|---|---|---|
-| P1 | Complete | E05-E15: implementation, focused tests and native checkpoint | none | P2 dependency is ready; broader acceptance continues in P4 |
-| P2 | Complete | E16-E23: canonical/protocol/reference lifecycle and native mixed-reference retry | none | P3 dependency ready; full A21 continues in P4 |
-| P3 | Complete | E24-E29: compact UI, focused checks/build and native A16-A20 | none | P4 dependency ready |
-| P4 | In progress | E30-E33: complete regression plus scoped repairs; native A21 underway | Native A10 correction passed; remaining A21 reopen/switch flow underway | Complete native journey and final acceptance mapping |
+| P1 | Complete | E05-E15, E25, E30-E33, E37-E38 | none | No remaining required work |
+| P2 | Complete | E16-E23, E25, E34-E38 | none | No remaining required work |
+| P3 | Complete | E24-E29, E30, E34 | none | No remaining required work |
+| P4 | Complete | E30-E38: regression repairs, complete native journey and acceptance mapping | none; real-history migration is not applicable | Stop; authorized plan completed |
 
 ## 規劃證據
 
@@ -260,3 +260,49 @@
 - Second mixed-reference turn5c1368a490534075bd27cf2ff93d4e9c was left failed before shutdown. Native App fully closed and reopened to cold chooser, then explicitly selected A. Owned draft.md was temporarily renamed: both original history reference cards restored while the source was unavailable, without opening a substitute document. Original Retry completed; source was restored afterward for the next step.
 - p4-06-reopen-retry-comparison.json records5 ->5 turns, all four prior completed turns byte-for-byte unchanged as parsed records, and original context/semantic equality. Main independently compared p4-second-failed.json with the actual canonical completed turn: same ID, submittedContext, semanticInput and displayInput. Assistant full-body UTF-16 range and SHA-256 match its preserved visible text, including link label. The original cross-message snapshot also contains the explicit Select text within one message at a time notice.
 - One earlier UI sequencing attempt closed before the intended second submission; p4-second-attempt-incomplete.json is retained as unsuccessful test activity, not used as failed-turn evidence. The actual distinct failed turn and full reopen above supply the required proof. Pending -> interrupted without replay reuses E25. Step7-12 remain underway; P4 is not yet complete.
+
+### E37 / P4 native final document/switch/error flow
+
+- Same current native fixture completed remaining A21 steps. No-reference Chinese request for lines40-45 on a50-line CRLF/emoji/long-line source: Ask Deny left disk unchanged; Ask Approve saved only UTF-16[1663,1813). Main independently read p4-step7-before.md/after.md, verified this starts at line40 and spans6 lines, and compared unchanged prefix1723bytes/suffix125bytes. Bypass after external disk modification produced visible Document version conflict and preserved external bytes. Pending Ask visibly disabled Switch; Save/Undo native evidence reuses E29.
+- Native second-duplicate lines7-8 add preserved disk/turn count and focused Message. Long-line20 selection was added by keyboard Return on Add, expanded and removed, then added again. Dirty editor+Message+references survived switch Cancel exactly (p4-08-cancel-comparison.json). Actual chmod500 save failure stayed in A with dirty/reference state and explicit error; original0755 restored in finally. Following the visible instruction, canceled chooser and pending save issue before reopening B with explicit discard. No unsaved A text was written.
+- B showed only C conversation and its distinct same-named draft.md; A return showed only A/B conversations. B metadata temporarily pointed to an owned regular file: visible historyDirectory must be a directory error, existing A remained explicitly selected, no fabricated B/global/empty history. Metadata restored afterward. Main independently verified all5 store files still match p4-step11-no-data-change.json before/after SHA-256 hashes.
+- Final p4-final-audit.json and p4-evidence-index.json were read by main. Both229-byte RESEARCH files contain description/rules and metadata only; A/B history roots and all canonical project identities are separate (A2 conversations, B1). Main independently parsed metadata and canonical records. Final A conversation has8 completed turns; original omission turn, corrected first and second retry packets remain immutable. Source rename and directory modes restored. Owned native42961 and Vite87493 stopped; no native process or1420/1421 listener remained, fixture retained.
+- Native evidence is actual Linux Tauri/WebKit AT-SPI controls/text/geometry plus disk/canonical data. No screenshot success or request-level native trace is claimed. Cold no-scan proof reuses E07/E14 service instrumentation; interrupted recovery reuses E25; controlled delayed success/error/finally/approval reuses E13/E22 and E30 Node run, not invented native event injection. Layout/keyboard/Undo reuse unchanged E28/E29. The initial omitted link and premature second-turn setup remain documented unsuccessful observations, superseded by E34-E36 verified corrections.
+
+### E38 / P4-S4 final acceptance and scope audit
+
+Every required acceptance now has observed evidence. Unit/protocol checks and native observations have distinct roles below; static checks alone are not treated as GUI acceptance.
+
+| Acceptance | Actual evidence | Result |
+|---|---|---|
+| A01 cold project gate | E07/E14 no pre-open repository scan; E15/E16 and E36 native chooser/cancel/reopen with no history before selection | Pass |
+| A02 metadata initialization | E06/E12 explicit create/append, prose bytes, unique marker/idempotency and external-write conflict tests | Pass |
+| A03 valid/invalid history pointers | E06/E12 absolute/relative/invalid metadata cases; E25 actual Linux permission denial; E37 native invalid-pointer error and unchanged files | Pass |
+| A04 history/root ownership | E07/E12 ownership mismatch/mixed/null rejection; E15/E16/E37 native A/B same filenames and isolated histories | Pass |
+| A05 guarded switching | E10/E13 guards and owned deferred callbacks; E15/E37 native Cancel/save failure/explicit discard with preserved state | Pass |
+| A06 rules and frozen permissions | E09/E10 boundary reload, SYSTEM_PROMPT preservation, pointer change and pending-consent guards; E29/E37 native disabled controls | Pass |
+| A07 scoped archive and old data | E09 seven archive tests including >1MiB and Normal/Extended; E12/E16 malformed scan/v1 read-no-write and unchanged storage defaults | Pass |
+| A08 editor add and keyboard | E18 original UTF-16 helper tests; E23/E37 native second duplicate, emoji/CRLF, long line, add/expand/remove/focus/no-write/no-turn and keyboard | Pass |
+| A09 immutable draft references | E18/E22 snapshot/reducer tests; E23/E35/E37 native selection/editor changes retain frozen cards and separate background | Pass |
+| A10 chat visible text/source | E22 visible-range tests; E34 safe-link fix; E35-E36 native assistant bold/link/paragraph/emoji, correct hash/range and explicit cross-message rejection; E23 user selection | Pass |
+| A11 original retry vs new turn | E19/E22 immutable retry/control mismatch/new-ID tests; E35 first mixed fail/retry exact context and E36 distinct second logical ID | Pass |
+| A12 reopen/interrupted/legacy | E16 v1/v2 strict read/write; E19 missing-file/legacy retry tests; E25 durable mixed pending becomes interrupted without replay; E36 native missing-source restore and same-ID retry | Pass |
+| A13 background and writable target | E19 background40-45 vs quoted chat, ambiguous multi-reference and chat-target tests; E37 native no-reference exact six-line modification | Pass |
+| A14 version checks/Undo/no replay | E19 Ask/Bypass stale editor/disk, duplicate target and no replay tests; E29 native Save/Agent Undo; E36 completed records unchanged; E37 Bypass conflict | Pass |
+| A15 references and stale work | E13/E22 epoch/token/deferred result, references-only draft and actual serialized-size tests; E23/E37 native cancellation/discard; E30 existing Node run | Pass |
+| A16 compact document header | E24 focused checks; E28/E29 native absence of permanent fields, menu .md/.tex opening and dirty guard | Pass |
+| A17 actual Save/Undo/error | E29 actual Ctrl+S/menu Save, Ask Agent Undo, disk conflict and OS save failure with dirty state; E37 failure during switch | Pass |
+| A18 sidebar width/title | E28 same-content/font/zoom old/new widths272->190 and290->203 (69.8529% integer rounding and70.0%); E29 native long-title focus/minimum window | Pass |
+| A19 footer Thinking/Permission | E27 checks/build; E29 native keyboard/current values/disabled guards/effective-Normal preference behavior | Pass |
+| A20 actual reading space | E28 editor heights+157/+146 and transcript+226/+198 at1080/1440; E29 multi-reference/error/approval and keyboard-visible Send/input | Pass |
+| A21 integrated current GUI journey | E35-E37 and p4-evidence-index.json: cold A, unsaved document+assistant references, two failed IDs, original retry/full reopen, line edits, permission/version boundaries, A-B-A and invalid pointer; explicitly listed unchanged evidence reused | Pass |
+
+Conditional checks:
+- Crash/pending/retry persistence: triggered. Existing crash recovery6 cases passed in E11 (8.72s), also part of E30's initial passing results; structured pending/interrupted directly checked in E25, full native reopen in E36. Only owned fake checkpoint processes used.
+- Session factory/control restoration: triggered. Existing lifecycle/thinking/approval and scoped service/conversation tests passed in E10/E12/E14/E19 and E30; remaining fixture integration failures resolved E31-E33. Native controls and pending consent observed E29/E37.
+- Real legacy migration: not applicable, not authorized and no mapping provided. No real conversation source read, ownership guess, relocation or ID rewrite. Synthetic v1 compatibility is tested separately and does not count as a real migration.
+- Unrelated RAG/Skills sweeps: not added. Existing complete suite ran once under the bounded cost estimate; the three repaired Skill/permission fixtures are direct project-gate integrations, with original assertions retained.
+
+Final regression accounting: E30 full Python1452 passed/42 failed; all42 have later passing scoped evidence in E31-E33, unchanged1452 reused. E30 full Node273 passed/1 failed; that assertion passed its targeted rerun, and the later visible-link correction passed targeted test/TypeScript/build in E34. Rust protocol filter15 passed. No second full-suite pass is claimed. Existing deprecation and Monaco chunk-size warnings remain; no unresolved required test or GUI failure.
+
+Final scope audit: main ran git diff --check2121935..HEAD and working diff check successfully, confirmed GUI and clean tree before this log update, and verified all42 changed files decode UTF-8/use LF. Actual dependency/lock/environment/AGENTS diff is empty. All implementation changes were committed by verified slice; this final log change is committed separately under the user's explicit authorization. No push, merge, rebase, branch/worktree mutation, new dependency, provider/model/GPU call or real-data operation occurred. All G1-G12 and P1-P4 requirements are complete; stop without optional cleanup or expansion.
