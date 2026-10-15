@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Collection, Mapping, Sequence
@@ -19,6 +20,10 @@ from agent.tools import inventory as tool_inventory
 _NONE = "(none)"
 
 
+class SkillSelectionError(ValueError):
+    """A user-selected skill cannot be loaded for this turn."""
+
+
 @dataclass(frozen=True)
 class SkillRuntime:
     """Loaded runtime context for one active skill."""
@@ -29,6 +34,15 @@ class SkillRuntime:
     manifest: Mapping[str, Any]
     pinned_references: dict[str, str]
     tool_access: ToolAccessResolution
+    members: tuple[SkillRuntime, ...] = ()
+
+    def includes(self, name: str) -> bool:
+        """Whether this turn includes the named real skill."""
+        return any(runtime.name == name for runtime in self.runtimes)
+
+    @property
+    def runtimes(self) -> tuple[SkillRuntime, ...]:
+        return self.members or (self,)
 
     def read_skill_resource(self, rel_path: str) -> str:
         """Read a resource path relative to this skill root."""
@@ -44,6 +58,17 @@ class SkillRuntime:
 
     def context_block(self) -> str:
         """Render prompt-visible context for the active skill."""
+        if self.members:
+            return "\n\n".join(runtime.context_block() for runtime in self.members) + (
+                "\n\n[Multiple selected skills]\nFollow every selected skill in the original "
+                "user request. Preserve the request's natural-language relationships and "
+                "order. If the user says first A then B, use A's actual result in B; "
+                "a successful document_edit tool result contains the saved source and "
+                "updated selection for the next operation. If instructions truly conflict "
+                "or a necessary choice is missing, explain the specific conflict and ask "
+                "the user; do not silently omit a skill. Resolve each relative resource "
+                "against that skill's own skill_root."
+            )
         lines = [
             "[Active skill]",
             f"name: {self.name}",
@@ -208,6 +233,53 @@ def load_skill_runtime(
         config=config,
     )
     return replace(runtime, pinned_references=pinned_references)
+
+
+def combine_skill_runtimes(runtimes: Sequence[SkillRuntime]) -> SkillRuntime:
+    """Combine already validated selections without granting additional tools."""
+    selected = list({runtime.name: runtime for runtime in runtimes}.values())
+    if not selected:
+        raise ValueError("at least one skill is required")
+    if len(selected) == 1:
+        return selected[0]
+
+    def names(field: str) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(
+            name for runtime in selected for name in getattr(runtime.tool_access, field)
+        ))
+    return replace(
+        selected[0], name=", ".join(runtime.name for runtime in selected),
+        instructions="\n\n".join(runtime.instructions for runtime in selected),
+        pinned_references={}, members=tuple(selected),
+        tool_access=ToolAccessResolution(
+            global_tools=names("global_tools"), skill_tools=names("skill_tools"),
+            effective_tools=names("effective_tools"), missing_required=(),
+            missing_optional=names("missing_optional"),
+        ),
+    )
+
+
+def resolve_skill_references(
+    text: str, catalog: Sequence[SkillMetadata], references: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Recalculate catalog mentions, checking explicit selections against original text."""
+    by_name = {skill.name: skill for skill in catalog}
+    parsed: list[dict[str, Any]] = []
+    if by_name:
+        alternatives = "|".join(re.escape(name) for name in sorted(by_name, key=len, reverse=True))
+        pattern = re.compile(r"(?<![A-Za-z0-9_.@+-])@(" + alternatives + r")(?![A-Za-z0-9_-]|\.[A-Za-z0-9])")
+        for match in pattern.finditer(text):
+            parsed.append({
+                "name": match[1],
+                "startUtf16": len(text[:match.start()].encode("utf-16-le")) // 2,
+                "endUtf16": len(text[:match.end()].encode("utf-16-le")) // 2,
+            })
+    for reference in references or ():
+        if reference.get("name") not in by_name:
+            raise SkillSelectionError(f"Selected skill is unavailable or was removed: {reference.get('name')}")
+        if dict(reference) not in parsed:
+            raise SkillSelectionError(f"Selected skill reference is stale or not an exact catalog mention: {reference.get('name')}")
+    return parsed
 
 
 def find_skill_metadata(

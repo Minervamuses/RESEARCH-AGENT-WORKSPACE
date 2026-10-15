@@ -903,6 +903,7 @@ class FixtureSession:
         display_input: str | None = None,
         turn_id: str | None = None,
         skill_name: str | None = None,
+        skill_references: list[dict] | None = None,
         retry: bool = False,
     ) -> TurnOutcome:
         if skill_name is not None and skill_name not in {
@@ -963,7 +964,11 @@ class FixtureSession:
                 if tool is None or not getattr(self, "_document_turn_active", False):
                     raise RuntimeError("fixture document seam requires an active editor snapshot")
                 replacement = original_input.removeprefix("[[fixture:document-replace]]").lstrip(" ")
-                raw_result = await tool.ainvoke({"replacement_text": replacement})
+                raw_message = await tool.ainvoke({
+                    "name": "document_edit", "id": "fixture-document-edit", "type": "tool_call",
+                    "args": {"replacement_text": replacement},
+                })
+                raw_result = raw_message.content
                 payload = json.loads(raw_result)
                 answer = f"Fixture document operation: {payload['status']}."
                 tool_activities = (ToolActivitySummary(

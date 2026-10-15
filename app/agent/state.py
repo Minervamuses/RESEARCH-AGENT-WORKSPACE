@@ -26,6 +26,8 @@ class AgentState(TypedDict, total=False):
     # The shared tool access resolution's effective tool names for this turn.
     # Absent/None means normal mode: the graph binds its default global tools.
     effective_tools: list[str] | None
+    active_skills: list[str]
+    skill_roots: dict[str, str]
 
 
 def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
@@ -37,10 +39,18 @@ def skill_runtime_to_agent_state(runtime: SkillRuntime | None) -> AgentState:
     """
     if runtime is None:
         return {}
-    return {
+    result = {
         "active_skill": runtime.name,
         "skill_root": str(runtime.root),
         "skill_instructions": runtime.instructions,
         "loaded_references": dict(runtime.pinned_references),
         "effective_tools": list(runtime.tool_access.effective_tools),
     }
+    if runtime.members:
+        result["active_skills"] = [member.name for member in runtime.members]
+        result["skill_roots"] = {member.name: str(member.root) for member in runtime.members}
+        result["loaded_references"] = {
+            f"{member.name}/{path}": content
+            for member in runtime.members for path, content in member.pinned_references.items()
+        }
+    return result

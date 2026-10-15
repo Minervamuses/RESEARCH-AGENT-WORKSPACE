@@ -19,11 +19,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import InjectedToolCallId, StructuredTool
 from langgraph.errors import GraphRecursionError
 
 from agent.config import AgentConfig, validate_graph_recursion_limit
@@ -81,6 +81,7 @@ from agent.ingest import (
 from agent.paths import find_app_root
 from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX
 from agent.skills import DEFAULT_SKILLS_DIR
+from agent.skills.runtime import SkillSelectionError, resolve_skill_references
 from agent.turns.safety import content_text
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
@@ -309,6 +310,7 @@ class DesktopService:
         self._active_document_context: dict[str, Any] | None = None
         self._active_turn_permission_mode: str | None = None
         self._document_apply_lock = asyncio.Lock()
+        self._document_tool_lock = asyncio.Lock()
         self._approval_document_snapshots: dict[str, dict[str, Any]] = {}
         self._document_tool = StructuredTool.from_function(
             coroutine=self._desktop_document_edit,
@@ -392,7 +394,7 @@ class DesktopService:
             )
         try:
             return await handler(params, event_sink)
-        except DocumentError as exc:
+        except (DocumentError, SkillSelectionError) as exc:
             error = DesktopServiceError("PROTOCOL_INVALID", str(exc))
             if method == "session.turn":
                 error = self._with_turn_lifecycle(error, method, params)
@@ -1810,7 +1812,14 @@ class DesktopService:
     ) -> dict[str, Any]:
         return await asyncio.to_thread(self._documents.save, params["documentContext"])
 
-    async def _desktop_document_edit(self, replacement_text: str) -> str:
+    async def _desktop_document_edit(
+        self, replacement_text: str, tool_call_id: Annotated[str, InjectedToolCallId],
+    ) -> str:
+        """Serialize document tools so each operation starts from the prior save."""
+        async with self._document_tool_lock:
+            return await self._run_desktop_document_edit(replacement_text, tool_call_id)
+
+    async def _run_desktop_document_edit(self, replacement_text: str, tool_call_id: str) -> str:
         """Prepare one bounded candidate and wait for the actual editor save result."""
         context = self._active_document_context
         turn_id = self._active_turn_id
@@ -1818,15 +1827,28 @@ class DesktopService:
         sink = self._turn_event_sink
         if not self._turn_active or context is None or turn_id is None or parent_request_id is None or sink is None:
             return json.dumps({"status": "failed", "issue": "No active desktop document snapshot is available."})
-        existing = next((candidate for candidate in self._document_candidates.values() if candidate.turn_id == turn_id), None)
+        # The model call's identity is stable for an explicit retry, while two
+        # distinct operations within one turn must remain separate candidates.
+        call_id = hashlib.sha256(f"{turn_id}\0{tool_call_id}".encode("utf-8")).hexdigest()
+        existing = self._document_candidates.get(call_id)
         if existing is not None:
+            await asyncio.to_thread(
+                self._documents.prepare, existing.context, replacement_text,
+                turn_id=turn_id, call_id=call_id,
+            )
             if existing.result is not None:
                 if existing.result.get("status") == "saved":
                     checked = await asyncio.to_thread(self._documents.apply, existing.value, context)
                     existing.result = {**checked, "callId": existing.value["callId"]}
+                    if checked.get("status") == "saved":
+                        self._active_document_context = {
+                            key: checked[key] for key in (
+                                "rootPath", "path", "editorRevision", "sourceText", "diskFingerprint",
+                                "rangeStartUtf16", "rangeEndUtf16",
+                            )
+                        }
                 return json.dumps(existing.result, ensure_ascii=False)
             return json.dumps({"status": "failed", "issue": "This turn already has a pending document candidate; do not replay it."})
-        call_id = uuid.uuid4().hex
         candidate_value = await asyncio.to_thread(
             self._documents.prepare, context, replacement_text, turn_id=turn_id, call_id=call_id,
         )
@@ -1849,6 +1871,13 @@ class DesktopService:
             candidate.result = result
             if not future.done():
                 future.set_result(result)
+        if result.get("status") == "saved":
+            self._active_document_context = {
+                key: result[key] for key in (
+                    "rootPath", "path", "editorRevision", "sourceText", "diskFingerprint",
+                    "rangeStartUtf16", "rangeEndUtf16",
+                )
+            }
         return json.dumps(result, ensure_ascii=False)
 
     async def _document_operation_approval(
@@ -1994,6 +2023,16 @@ class DesktopService:
         self._active_turn_permission_mode = self._bash_permission_mode
         try:
             original_text = params["text"]
+            try:
+                references = resolve_skill_references(original_text, session.loaded_skills, params.get("skillReferences"))
+                if isinstance(session, ChatSession):
+                    for name in dict.fromkeys(reference["name"] for reference in references):
+                        try:
+                            session._load_skill_runtime(name)
+                        except (KeyError, ValueError, OSError) as exc:
+                            raise ValueError(f"Cannot load selected skill {name}: {exc}") from exc
+            except ValueError as exc:
+                raise DesktopServiceError("PROTOCOL_INVALID", str(exc)) from exc
             turn_text = original_text
             turn_skill_name: str | None = None
             try:
@@ -2189,12 +2228,14 @@ class DesktopService:
                     raise DocumentError("The prompt plus document snapshot exceeds the existing 1 MiB turn limit; select a smaller document.")
                 session.set_thinking_mode("normal")
                 session._document_turn_active = True
+            skill_options = {"skill_references": params["skillReferences"]} if "skillReferences" in params else {}
             if turn_skill_name is None:
                 outcome = await session.turn_outcome(
                     turn_text,
                     display_input=original_text,
                     turn_id=turn_id,
                     retry=params["retry"],
+                    **skill_options,
                 )
             else:
                 outcome = await session.turn_outcome(
@@ -2203,6 +2244,7 @@ class DesktopService:
                     turn_id=turn_id,
                     skill_name=turn_skill_name,
                     retry=params["retry"],
+                    **skill_options,
                 )
             if (
                 outcome.turn_id != turn_id

@@ -8,8 +8,8 @@
 | --- | --- | --- | --- |
 | P0 | Complete | P0.S1～S3：runtime、邊界、批准與驗收入口可追溯 | 依 P1 開始文件閉環 |
 | P1 | Complete | P1.S1～S2：文件閉環、離線與原生代表案例 | P2；最終整合仍由 P5 驗收 |
-| P2 | In progress | P1 前提已滿足、P0.S3 全計劃範圍批准 | P2.S1 行內引用與多 Skill 真實載入 |
-| P3 | Not started | 無 | P2、權限契約批准 |
+| P2 | Complete | P2.S1～S2：行內多引用、真實 catalog／graph、順序操作與清理 | P3；真模型合作品質留 P5 明示 |
+| P3 | In progress | P2 已滿足、P0.S3 批准計劃各環節 | P3.S1 共用單項批准與各副作用入口 |
 | P4 | Not started | 無 | P3、摘要傳遞及必要格式批准 |
 | P5 | Not started | 無 | P1～P4、原生 GUI 驗收能力 |
 
@@ -89,6 +89,14 @@
 - 原始 prompt 不改，送出時重新掃描當前 catalog 的精確引用及 UTF-16 位置；保留重複位置，emoji／中文相鄰可用，排除 email／網域；明確 retry 保持原提交引用與文件快照。Python／TS／Rust 共同 strict schema 新增 skillReferences，最多 128 個，未知欄位／過期位置／分裂 surrogate 拒絕。
 - 檢查：Python 契約 143、TS 137、Rust protocol 12 passed；node --test --experimental-strip-types tests/inline_skills.test.ts 4 passed；與既有 conversations.test.ts 同跑 30 passed（4.76s），npx tsc --noEmit 通過。此步只證明輸入與通訊契約，多 Skill 模型實際載入／清理由 P2.S2 驗收。
 - 本步只提交 App 的 task-only 變更、協定／共同 fixtures、新增定向 node 測試與本紀錄；既有 App／其他七檔使用者修改仍留在工作樹。P2 後端在相同既定階段持續實作中，尚未宣告 P2 完成。
+
+## P2.S2｜同回合多 Skill 與文件順序操作（2026-10-15）
+
+- P2.S1 已提交 21e476d。SkillRuntime 的局部組合保存各 Skill 真實 root／完整指引與已解析工具聯集，AgentState 同步 active_skills／skill_roots；仍沿既有 graph／policy 准入，不另建 scheduler。原始 prompt／UTF-16 引用與文件快照各自核對；引用失效與工具缺失明示，普通 email／@ 原文不誤載入。
+- 真 ChatSession／graph 的假模型用實際 academic-paper-writing 與 citation catalog；驗證兩份指引、原始自然語言、有效工具集合及獨立同名 references root。明確依序的兩次 document_edit 使用真模型工具 callId，各自版本檢查／存檔，第二步讀到第一步新稿。Extended 臨時 Normal、citation registry／單次狀態與 installer authority 在成功／失敗／取消後清理，原模式還原；文件內容不成為 installer 授權。
+- **複核修正：** A 已保存但 B 尚未完成的重試，先核對舊 receipt 的磁碟／編輯器版本再更新活動快照，不重寫 A；混合 installer 的 authoritative 狀態與其他 Skill 產物並存，單 installer 的防偽狀態行為保留；既有 ToolNode 同批兩個文件呼叫以局部 async lock 序列化整個候選至回寫，避免前端 busy 丟事件／等待逾時，沒有新增並行流程。
+- **檢查：** 新 test_inline_skills.py 與既有 document/installer adherence 相關子集最後 42 passed（1.72s）；先前更廣 Skill/citation/policy/document/fixture 定向子集 134 passed（4.71s）。root 曾跑 poetry run pytest tests/test_inline_skills.py tests/test_desktop_document_service.py -q，15 passed（0.69s），其後代理加入上述三項最小回歸並通過。不存在真 provider／模型呼叫；不把離線合作當真模型品質。git diff --check 通過。
+- **界線／下一步：** P2 行為與必要離線檢查完成；P5 將重啟最終 binary/backend 後確認原生 @ 選單與代表整合。開始 P3 所有已列副作用入口的 Ask／Bypass；唯讀準備已確認 tool admission 必須先於操作批准，既有 Bash 同步橋不可從 async 工具呼叫。
 
 ## 後續紀錄方式
 

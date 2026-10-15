@@ -32,6 +32,7 @@ def _runtime(**overrides):
         instructions="# Skill",
         pinned_references={"references/guide.md": "guide"},
         tool_access=_resolution(),
+        members=(),
     )
     base.update(overrides)
     return SimpleNamespace(**base)
