@@ -9,6 +9,7 @@ interface SourceChange {
   text: string;
 }
 interface DocumentHelpers {
+  captureDocumentSelection: (snapshot: DocumentSnapshot | null) => DocumentSnapshot | null;
   documentOffsetAt: (source: string, position: Position) => number;
   documentPositionAt: (source: string, offset: number) => Position;
   applyDocumentChanges: (source: string, changes: readonly SourceChange[]) => string;
@@ -40,6 +41,41 @@ test("a source selection targets the second duplicate without changing BOM, tabs
     range: { startLineNumber: 4, startColumn: 1, endLineNumber: 4, endColumn: 8 },
     text: "修改後😀",
   }]), "\uFEFF前言\r\n相同😀\t文字\r\n\n修改後😀\r\n");
+});
+
+test("adding the second duplicate captures its exact UTF-16 range and freezes the complete source version", async () => {
+  const { captureDocumentSelection, documentOffsetAt } = await loadHelpers();
+  const sourceText = "\uFEFFIntro\r\nSame😀 text\r\nSame😀 text\r\n";
+  const current: DocumentSnapshot = {
+    rootPath: "/tmp/project", path: "/tmp/project/draft.md", sourceText,
+    editorRevision: 7, diskFingerprint: "a".repeat(64),
+    rangeStartUtf16: documentOffsetAt(sourceText, { lineNumber: 3, column: 1 }),
+    rangeEndUtf16: documentOffsetAt(sourceText, { lineNumber: 4, column: 1 }),
+  };
+  const captured = captureDocumentSelection(current)!;
+  assert.notEqual(captured, current);
+  assert.equal(Object.isFrozen(captured), true);
+  assert.equal(captured.rangeStartUtf16, sourceText.lastIndexOf("Same"));
+  assert.equal(captured.sourceText.slice(captured.rangeStartUtf16, captured.rangeEndUtf16), "Same😀 text\r\n");
+  // A later blur/cursor move, edit or save only changes the current editor snapshot.
+  current.rangeStartUtf16 = undefined;
+  current.rangeEndUtf16 = undefined;
+  current.sourceText = "changed after adding";
+  current.editorRevision = 8;
+  current.diskFingerprint = "b".repeat(64);
+  assert.equal(captured.sourceText, sourceText);
+  assert.equal(captured.editorRevision, 7);
+  assert.equal(captured.diskFingerprint, "a".repeat(64));
+  assert.equal(captured.rangeEndUtf16, sourceText.length);
+});
+
+test("adding a reference requires a complete nonempty range within the captured source", async () => {
+  const { captureDocumentSelection } = await loadHelpers();
+  const base = { rootPath: "/tmp/project", path: "/tmp/project/draft.md", sourceText: "one😀", editorRevision: 1, diskFingerprint: "a".repeat(64) };
+  assert.equal(captureDocumentSelection(base), null);
+  assert.equal(captureDocumentSelection({ ...base, rangeStartUtf16: 2, rangeEndUtf16: 2 }), null);
+  assert.equal(captureDocumentSelection({ ...base, rangeStartUtf16: 0, rangeEndUtf16: 6 }), null);
+  assert.equal(captureDocumentSelection({ ...base, rangeStartUtf16: 3, rangeEndUtf16: 5 })?.sourceText.slice(3, 5), "😀");
 });
 
 test("source lines 40–45 use stored lines even when one source line is long", async () => {

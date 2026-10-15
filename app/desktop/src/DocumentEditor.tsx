@@ -15,6 +15,7 @@ interface DocumentEditorProps {
   value: DocumentSnapshot | null;
   onChange: (snapshot: DocumentSnapshot) => void;
   onSave: () => void;
+  onAddReference?: (snapshot: DocumentSnapshot) => void;
   saveDisabled?: boolean;
 }
 
@@ -63,19 +64,30 @@ export function applyDocumentChanges(source: string, changes: readonly SourceCha
   return edits.reduce((text, change) => text.slice(0, change.start) + change.text + text.slice(change.end), source);
 }
 
+export function captureDocumentSelection(snapshot: DocumentSnapshot | null): DocumentSnapshot | null {
+  if (!snapshot) return null;
+  const start = snapshot.rangeStartUtf16;
+  const end = snapshot.rangeEndUtf16;
+  if (start === undefined || end === undefined || !Number.isInteger(start) || !Number.isInteger(end)
+    || start < 0 || start >= end || end > snapshot.sourceText.length) return null;
+  // Every field is a string or number; a frozen copy cannot follow later editor changes.
+  return Object.freeze({ ...snapshot, rangeStartUtf16: start, rangeEndUtf16: end });
+}
+
 function modelSource(source: string): string {
   return source.startsWith("\uFEFF") ? source.slice(1) : source;
 }
 
-export function DocumentEditor({ value, onChange, onSave, saveDisabled = false }: DocumentEditorProps) {
+export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDisabled = false }: DocumentEditorProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const snapshotRef = useRef<DocumentSnapshot | null>(value);
-  const callbacksRef = useRef({ onChange, onSave, saveDisabled });
+  const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled });
+  const refreshReferenceActionRef = useRef<(() => void) | null>(null);
   const incomingRef = useRef(false);
   const [selectionLabel, setSelectionLabel] = useState("Line 1, column 1");
   const [issue, setIssue] = useState<string | null>(null);
-  callbacksRef.current = { onChange, onSave, saveDisabled };
+  callbacksRef.current = { onChange, onSave, onAddReference, saveDisabled };
 
   useEffect(() => {
     snapshotRef.current = value;
@@ -113,6 +125,45 @@ export function DocumentEditor({ value, onChange, onSave, saveDisabled = false }
         tabSize: 4,
       });
       editorRef.current = instance;
+      let selectedSnapshot = captureDocumentSelection(initial);
+      const canAddReference = instance.createContextKey<boolean>("workspaceCanAddReference", false);
+      const addSelection = () => {
+        const captured = captureDocumentSelection(selectedSnapshot);
+        if (captured) callbacksRef.current.onAddReference?.(captured);
+      };
+      const referenceButton = document.createElement("button");
+      referenceButton.type = "button";
+      referenceButton.className = "document-reference-action";
+      referenceButton.textContent = "Add to chat";
+      referenceButton.title = "Add selection to chat (Ctrl/Cmd+Alt+Enter)";
+      referenceButton.setAttribute("aria-label", "Add selected document text to chat");
+      referenceButton.setAttribute("aria-keyshortcuts", "Control+Alt+Enter Meta+Alt+Enter");
+      referenceButton.addEventListener("click", addSelection);
+      const referenceWidget: editor.IContentWidget = {
+        getId: () => "workspace.document.add-reference",
+        getDomNode: () => referenceButton,
+        suppressMouseDown: true,
+        getPosition: () => selectedSnapshot && callbacksRef.current.onAddReference ? {
+          position: documentPositionAt(selectedSnapshot.sourceText, selectedSnapshot.rangeEndUtf16!),
+          preference: [monaco.editor.ContentWidgetPositionPreference.BELOW, monaco.editor.ContentWidgetPositionPreference.ABOVE],
+        } : null,
+      };
+      instance.addContentWidget(referenceWidget);
+      const refreshReferenceAction = () => {
+        selectedSnapshot = captureDocumentSelection(snapshotRef.current);
+        canAddReference.set(Boolean(selectedSnapshot && callbacksRef.current.onAddReference));
+        instance.layoutContentWidget(referenceWidget);
+      };
+      refreshReferenceActionRef.current = refreshReferenceAction;
+      const referenceAction = instance.addAction({
+        id: "workspace.document.add-reference",
+        label: "Add selection to chat",
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter],
+        precondition: "workspaceCanAddReference",
+        contextMenuGroupId: "9_cutcopypaste",
+        contextMenuOrder: 4,
+        run: addSelection,
+      });
       const publishSelection = () => {
         const current = snapshotRef.current;
         const selection = instance.getSelection();
@@ -125,6 +176,7 @@ export function DocumentEditor({ value, onChange, onSave, saveDisabled = false }
           rangeEndUtf16: selection.isEmpty() ? undefined : end,
         };
         snapshotRef.current = updated;
+        refreshReferenceAction();
         setSelectionLabel(selection.isEmpty()
           ? `Line ${selection.positionLineNumber}, column ${selection.positionColumn}`
           : `Lines ${selection.startLineNumber}–${selection.endLineNumber} · selected source`);
@@ -154,7 +206,12 @@ export function DocumentEditor({ value, onChange, onSave, saveDisabled = false }
         const end = documentPositionAt(initial.sourceText, initial.rangeEndUtf16);
         instance.setSelection(new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column));
       }
+      refreshReferenceAction();
       disposeEditor = () => {
+        if (refreshReferenceActionRef.current === refreshReferenceAction) refreshReferenceActionRef.current = null;
+        referenceButton.removeEventListener("click", addSelection);
+        referenceAction.dispose();
+        instance.removeContentWidget(referenceWidget);
         contentListener.dispose();
         selectionListener.dispose();
         saveAction.dispose();
@@ -209,7 +266,8 @@ export function DocumentEditor({ value, onChange, onSave, saveDisabled = false }
       }
     }
     snapshotRef.current = value;
-  }, [value]);
+    refreshReferenceActionRef.current?.();
+  }, [value, onAddReference]);
 
   return (
     <div className="document-editor">
