@@ -113,3 +113,9 @@
 - Added backend-generation, project-epoch and operation-token checks to existing workspace/document/catalog/session/control/approval callbacks, including catches, finalizers and delayed focus/scroll. Reopening A after A-to-B invalidates results from the first A. Conversation switch confirmation preserves an unsent draft on cancel/failure.
 - Actual checks by frontend agent: TypeScript no-emit passed; existing conversations/documents/answer_stream tests 58/58 passed (~4.45s); final five focused epoch checks and TypeScript passed. Four new cases use deferred responses for catalog/selection/rejection and reducer epochs. An initial TypeScript check found six obsolete unused locals after replacing guards; removed before successful verification.
 - Main reviewed the changed control flow and scoped whitespace check. Native project interaction remains pending and is running against synthetic data; these unit checks do not establish GUI acceptance.
+
+### E14 / P1-S7 service regression fixtures
+
+- Adapted existing service scenarios to explicitly open an owned project, including canonical restart/registration/citation fixtures; the base service helper remains cold. Existing read-only sidebar scan-count test now instruments all scoped repository instances and retains its fewer-scans assertion.
+- Actual complete-file run: `poetry run pytest tests/test_desktop_service.py -q --tb=short` -> 89 passed, 3.71s. Earlier subsets: 20 passed, then 15 passed/3 setup failures (cold fixture and fake missing canonical records); corrected to explicit fixture opening and existing canonical factories, then all three passed. No production gate relaxation.
+- Main reviewed actual fixture and assertion changes; git diff --check passed. P1 implementation and focused regression tests are complete; native chooser/switch verification remains the final P1 checkpoint.

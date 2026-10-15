@@ -20,7 +20,7 @@ from agent.cli.slash_commands import (
     SlashCommandResult,
 )
 from agent.conversations import ConversationRepository
-from agent.desktop.catalog import DesktopProjectCatalog
+from agent.desktop.catalog import initialize_project, load_project_catalog
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus, ManagementError
@@ -504,6 +504,7 @@ def test_session_create_defaults_mcp_on_and_preserves_explicit_opt_out(
 ) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
 
     asyncio.run(service.dispatch("session.create", params))
 
@@ -514,6 +515,7 @@ def test_session_create_failure_keeps_backend_retryable(tmp_path: Path) -> None:
     factory = _SessionFactory()
     factory.fail_once = True
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
 
     with pytest.raises(DesktopServiceError) as raised:
         asyncio.run(
@@ -546,6 +548,7 @@ def test_session_create_failure_keeps_backend_retryable(tmp_path: Path) -> None:
 def test_session_catalog_projects_only_dispatchable_canonical_commands(tmp_path: Path) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     created = asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     assert created["slashCommands"][-1] == {
         "name": "research", "description": "Research local material.",
@@ -568,6 +571,7 @@ def test_session_catalog_projects_only_dispatchable_canonical_commands(tmp_path:
 def test_session_catalog_fails_explicitly_instead_of_truncating(tmp_path: Path) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session = factory.created
     session.loaded_skills = [
@@ -604,6 +608,7 @@ def test_session_create_is_single_flight_and_blocks_shutdown(tmp_path: Path) -> 
             return session
 
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         first = asyncio.create_task(
             service.dispatch("session.create", {"loadMcp": False})
         )
@@ -631,6 +636,7 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
 ) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session = factory.created
     assert session is not None
@@ -653,6 +659,7 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
 def test_composer_first_attempt_is_not_an_implicit_retry(tmp_path: Path) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     first_id = uuid.uuid4().hex
@@ -689,7 +696,7 @@ def test_composer_help_is_durable_display_only_before_handler(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    repository = ConversationRepository(tmp_path / "store")
+    repository = ConversationRepository(tmp_path / "history")
     factory, sessions = _canonical_session_factory(monkeypatch)
     observed = []
 
@@ -719,6 +726,7 @@ def test_composer_help_is_durable_display_only_before_handler(
         session_factory=factory,
         slash_registry=registry,
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     turn_id = uuid.uuid4().hex
 
@@ -754,7 +762,7 @@ def test_composer_confirmed_prune_is_prompt_first_and_completed_duplicate_safe(
 ) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    repository = ConversationRepository(tmp_path / "store")
+    repository = ConversationRepository(tmp_path / "history")
     factory, sessions = _canonical_session_factory(monkeypatch)
     observed: list[tuple[str, str, str, str]] = []
     prune_calls = 0
@@ -791,6 +799,7 @@ def test_composer_confirmed_prune_is_prompt_first_and_completed_duplicate_safe(
             prune_folder=prune_folder,
         ),
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
     preview_id = uuid.uuid4().hex
     apply_id = uuid.uuid4().hex
@@ -850,7 +859,7 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         extension_state_dir=str(tmp_path / "state"),
         plan_logs_dir=str(tmp_path / "plans"),
     )
-    repository = ConversationRepository(config.persist_dir)
+    repository = ConversationRepository(tmp_path / "history")
     factory, sessions = _canonical_session_factory(monkeypatch)
     prune_calls = 0
 
@@ -884,6 +893,7 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         session_factory=factory,
         knowledge_operations=operations,
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
     session_id = sessions[-1].session_id
     apply_id = uuid.uuid4().hex
@@ -918,9 +928,10 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         session_factory=factory,
         knowledge_operations=operations,
     )
+    asyncio.run(_open_test_project(restarted, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(_dispatch_approved(restarted,
         "session.select",
-        {"projectId": "local", "sessionId": session_id},
+        {"projectId": service._selected_project_id, "sessionId": session_id},
     ))
     assert prune_calls == 1
 
@@ -960,6 +971,7 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
 def test_composer_routes_dynamic_skill_once_as_answer(tmp_path: Path) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session = factory.created
     assert session is not None
@@ -1009,6 +1021,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
         return ChatSession(config, loaded_skills=applied_skills, **kwargs)
 
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     if unavailable_kind == "applied":
         import shutil
         from agent.extensions.startup import load_extension_startup
@@ -1108,6 +1121,7 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
         session_factory=factory,
         extension_manager=manager,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     status = asyncio.run(service.dispatch(
@@ -1150,12 +1164,17 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
         persist_dir=str(tmp_path / "store"),
         plan_logs_dir=str(tmp_path / "plans"),
     )
-    catalog = DesktopProjectCatalog(config.persist_dir)
-    repository = ConversationRepository(config.persist_dir)
+    project = initialize_project(
+        str(tmp_path), config.persist_dir,
+        history_directory=str(tmp_path / "history"), expected_fingerprint=None,
+    )
+    catalog, repository = load_project_catalog(
+        project["projectId"], tmp_path.name, project["historyDirectory"],
+    )
     conversation_id = uuid.uuid4().hex
     repository.create(
         conversation_id=conversation_id,
-        project_id="local",
+        project_id=project["projectId"],
         turn_id=uuid.uuid4().hex,
         kind="conversational",
         display_input="durable before catalog",
@@ -1173,15 +1192,16 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
         conversation_repository=repository,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     sessions = asyncio.run(service.dispatch(
         "session.list",
-        {"projectId": "local", "offset": 0, "limit": 50},
+        {"projectId": service._selected_project_id, "offset": 0, "limit": 50},
     ))
 
     assert [item["sessionId"] for item in sessions["items"]] == [conversation_id]
     assert sessions["items"][0]["turnCount"] == 1
     assert sessions["items"][0]["title"] == "durable before catalog"
-    assert catalog.project_for_session(conversation_id) == "local"
+    assert catalog.project_for_session(conversation_id) == project["projectId"]
     assert factory.calls == []
 
 
@@ -1191,21 +1211,22 @@ def test_sidebar_refresh_skips_repeat_scans_without_changing_session_dtos(monkey
     from test_desktop_fixture import _service as fixture_service
 
     with tempfile.TemporaryDirectory(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp") as temporary_root:
-        service = fixture_service(Path(temporary_root))
+        service = fixture_service(Path(temporary_root), open_project=True)
         repository = service._conversation_repository
-        scan, load = repository.scan, repository.load
+        scan, load = ConversationRepository.scan, ConversationRepository.load
         counts = {"scan": 0, "load": 0}
 
-        def count_scan():
+        def count_scan(current):
+            assert current.root == repository.root
             counts["scan"] += 1
-            return scan()
+            return scan(current)
 
-        def count_load(conversation_id):
+        def count_load(current, conversation_id):
             counts["load"] += 1
-            return load(conversation_id)
+            return load(current, conversation_id)
 
-        monkeypatch.setattr(repository, "scan", count_scan)
-        monkeypatch.setattr(repository, "load", count_load)
+        monkeypatch.setattr(ConversationRepository, "scan", count_scan)
+        monkeypatch.setattr(ConversationRepository, "load", count_load)
 
         async def refresh(*, already_reconciled):
             catalog = await service.dispatch("project.list", {})
@@ -1218,10 +1239,10 @@ def test_sidebar_refresh_skips_repeat_scans_without_changing_session_dtos(monkey
             return catalog, pages
 
         before = asyncio.run(refresh(already_reconciled=False))
-        assert counts == {"scan": 3, "load": 12}
+        assert counts == {"scan": 2, "load": 6}
         counts.update(scan=0, load=0)
         after = asyncio.run(refresh(already_reconciled=True))
-        assert counts == {"scan": 1, "load": 6}
+        assert counts == {"scan": 1, "load": 4}
         assert after == before
 
 
@@ -1232,8 +1253,13 @@ def test_session_list_reconciles_json_created_after_service_start(
         persist_dir=str(tmp_path / "store"),
         plan_logs_dir=str(tmp_path / "plans"),
     )
-    catalog = DesktopProjectCatalog(config.persist_dir)
-    repository = ConversationRepository(config.persist_dir)
+    project = initialize_project(
+        str(tmp_path), config.persist_dir,
+        history_directory=str(tmp_path / "history"), expected_fingerprint=None,
+    )
+    catalog, repository = load_project_catalog(
+        project["projectId"], tmp_path.name, project["historyDirectory"],
+    )
     factory = _SessionFactory()
     service = _service(
         tmp_path,
@@ -1242,10 +1268,11 @@ def test_session_list_reconciles_json_created_after_service_start(
         conversation_repository=repository,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     conversation_id = uuid.uuid4().hex
     repository.create(
         conversation_id=conversation_id,
-        project_id="local",
+        project_id=project["projectId"],
         turn_id=uuid.uuid4().hex,
         kind="conversational",
         display_input="appeared after startup",
@@ -1257,10 +1284,10 @@ def test_session_list_reconciles_json_created_after_service_start(
 
     sessions = asyncio.run(service.dispatch(
         "session.list",
-        {"projectId": "local", "offset": 0, "limit": 50},
+        {"projectId": service._selected_project_id, "offset": 0, "limit": 50},
     ))
 
-    assert catalog.project_for_session(conversation_id) == "local"
+    assert catalog.project_for_session(conversation_id) == project["projectId"]
     assert [item["sessionId"] for item in sessions["items"]] == [
         conversation_id
     ]
@@ -1279,6 +1306,7 @@ def test_composer_rejects_invalid_or_disallowed_commands_before_model(
 ) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session = factory.created
     assert session is not None
@@ -1295,6 +1323,7 @@ def test_composer_rejects_duplicate_skill_collision_before_model(
 ) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session = factory.created
     assert session is not None
@@ -1325,6 +1354,7 @@ def test_removed_generic_skill_methods_are_unknown(
 ) -> None:
     factory = _SessionFactory()
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     with pytest.raises(DesktopServiceError) as raised:
@@ -1361,6 +1391,7 @@ def test_composer_rejects_aliases_and_unsupported_typed_results(
         session_factory=factory,
         slash_registry=registry,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     with pytest.raises(DesktopServiceError) as alias_error:
@@ -1397,6 +1428,7 @@ def test_composer_bounds_local_command_output_and_safe_errors(
         session_factory=factory,
         slash_registry=registry,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     result = asyncio.run(
@@ -1452,6 +1484,7 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
         session_factory=factory,
         knowledge_operations=operations,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
 
     commands = [
@@ -1524,6 +1557,7 @@ def test_composer_knowledge_paths_fail_closed_before_injected_operations(
         session_factory=factory,
         knowledge_operations=operations,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     invalid = [
@@ -1552,7 +1586,7 @@ def test_composer_knowledge_paths_fail_closed_before_injected_operations(
 
 
 def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     root_a = tmp_path / "source-a"
     root_b = tmp_path / "source-b"
@@ -1589,12 +1623,13 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
         diff_folder=diff_folder,
         prune_folder=prune_folder,
     )
-    factory = _SessionFactory()
+    factory, _sessions = _canonical_session_factory(monkeypatch)
     service = _service(
         tmp_path,
         session_factory=factory,
         knowledge_operations=operations,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(_dispatch_approved(service, "session.create", {"loadMcp": False}))
 
     before_source = disk_file.read_bytes()
@@ -1672,9 +1707,10 @@ def test_composer_sync_is_read_only_and_prune_confirmation_is_one_use(
 
     restarted = _service(
         tmp_path,
-        session_factory=_SessionFactory(),
+        session_factory=factory,
         knowledge_operations=operations,
     )
+    asyncio.run(_open_test_project(restarted, tmp_path))
     asyncio.run(_dispatch_approved(restarted, "session.create", {"loadMcp": False}))
     with pytest.raises(DesktopServiceError) as after_restart:
         asyncio.run(
@@ -1714,6 +1750,7 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
             session_factory=factory,
             knowledge_operations=operations,
         )
+        await _open_test_project(service, tmp_path)
         await _dispatch_approved(service, "session.create", {"loadMcp": False})
         first = asyncio.create_task(
             _dispatch_approved(service, "session.turn", _turn_params("/init"))
@@ -1752,6 +1789,7 @@ def test_composer_knowledge_command_uses_turn_lock_and_reports_failure(
             prune_folder=forbidden,
         ),
     )
+    asyncio.run(_open_test_project(failed, tmp_path / "failed-project"))
     asyncio.run(_dispatch_approved(failed, "session.create", {"loadMcp": False}))
     with pytest.raises(DesktopServiceError) as raised:
         asyncio.run(_dispatch_approved(failed, "session.turn", _turn_params("/init")))
@@ -1802,6 +1840,7 @@ def test_composer_rejects_oversized_prune_preview_without_arming_confirmation(
             prune_folder=prune_folder,
         ),
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
 
     with pytest.raises(DesktopServiceError) as preview:
@@ -1827,6 +1866,7 @@ def test_turn_is_fail_fast_busy_and_emits_only_safe_tool_data(tmp_path: Path) ->
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         session = factory.created
         assert session is not None
@@ -1874,6 +1914,7 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         session = factory.created
         assert session is not None
@@ -1909,6 +1950,7 @@ def test_conversation_replacement_clears_installer_before_saving_controls(
     async def run() -> None:
         factory, sessions = _canonical_session_factory(monkeypatch)
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         first = sessions[-1]
         await service.dispatch("session.turn", _turn_params("/help"))
@@ -1926,7 +1968,7 @@ def test_conversation_replacement_clears_installer_before_saving_controls(
 
         begin_installer(first)
         await service.dispatch("session.select", {
-            "projectId": "local",
+            "projectId": service._selected_project_id,
             "sessionId": first.session_id,
         })
         assert pending == {first.session_id}
@@ -1940,7 +1982,7 @@ def test_conversation_replacement_clears_installer_before_saving_controls(
         begin_installer(second)
 
         selected = await service.dispatch("session.select", {
-            "projectId": "local",
+            "projectId": service._selected_project_id,
             "sessionId": first.session_id,
         })
 
@@ -1958,6 +2000,7 @@ def test_session_shutdown_clears_active_session(
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {})
         session = factory.created
         assert session is not None
@@ -1985,6 +2028,7 @@ def test_runtime_shutdown_is_idempotent(tmp_path: Path) -> None:
     async def run() -> None:
         factory = _SessionFactory()
         service = _service(tmp_path, session_factory=factory)
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {})
         session = factory.created
         assert session is not None
@@ -2156,6 +2200,7 @@ def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(
         extension_manager=manager,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     catalog_before = service._session_snapshot(factory.created)["slashCommands"]
 
@@ -2213,6 +2258,7 @@ def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(
 def test_extension_apply_maps_manager_lock_conflict_to_busy(monkeypatch, tmp_path):
     manager = _FakeExtensionManager(tmp_path)
     service = _service(tmp_path, extension_manager=manager, session_factory=_SessionFactory())
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     preview = asyncio.run(service.dispatch("extensions.preview", {}))
 
@@ -2237,7 +2283,7 @@ def test_extension_apply_is_prompt_first_and_replays_completed_report_after_rest
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    repository = ConversationRepository(tmp_path / "store")
+    repository = ConversationRepository(tmp_path / "history")
     factory, sessions = _canonical_session_factory(monkeypatch)
     manager = _FakeExtensionManager(tmp_path)
     service = _service(
@@ -2246,6 +2292,7 @@ def test_extension_apply_is_prompt_first_and_replays_completed_report_after_rest
         conversation_repository=repository,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session_id = sessions[-1].session_id
     preview = asyncio.run(service.dispatch("extensions.preview", {}))
@@ -2298,9 +2345,10 @@ def test_extension_apply_is_prompt_first_and_replays_completed_report_after_rest
         conversation_repository=repository,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(restarted, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(restarted.dispatch(
         "session.select",
-        {"projectId": "local", "sessionId": session_id},
+        {"projectId": service._selected_project_id, "sessionId": session_id},
     ))
     replayed = asyncio.run(restarted.dispatch("extensions.apply", params))
 
@@ -2317,7 +2365,7 @@ def test_extension_apply_unclean_crash_restores_interrupted_without_replay(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    repository = ConversationRepository(tmp_path / "store")
+    repository = ConversationRepository(tmp_path / "history")
     factory, sessions = _canonical_session_factory(monkeypatch)
     manager = _FakeExtensionManager(tmp_path)
     service = _service(
@@ -2326,6 +2374,7 @@ def test_extension_apply_unclean_crash_restores_interrupted_without_replay(
         conversation_repository=repository,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(service, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session_id = sessions[-1].session_id
     preview = asyncio.run(service.dispatch("extensions.preview", {}))
@@ -2363,9 +2412,10 @@ def test_extension_apply_unclean_crash_restores_interrupted_without_replay(
         conversation_repository=repository,
         session_factory=factory,
     )
+    asyncio.run(_open_test_project(restarted, tmp_path, history_directory=str(repository.root.parent)))
     asyncio.run(restarted.dispatch(
         "session.select",
-        {"projectId": "local", "sessionId": session_id},
+        {"projectId": service._selected_project_id, "sessionId": session_id},
     ))
 
     interrupted = repository.load(session_id).document.turns[-1]
@@ -2422,6 +2472,7 @@ def test_pending_bash_turn_blocks_extension_preview(tmp_path: Path) -> None:
             bash_command_runner=lambda *_args, **_kwargs: None,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         sink = _CorrelatedEventSink(
             "00000000-0000-4000-8000-000000000309"
@@ -2470,6 +2521,7 @@ def test_extension_preview_blocks_a_concurrent_session_turn(tmp_path: Path) -> N
             extension_manager=manager,
             session_factory=factory,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         preview = asyncio.create_task(service.dispatch("extensions.preview", {}))
         assert await asyncio.to_thread(preview_started.wait, 1)
@@ -2508,6 +2560,7 @@ def test_desktop_bash_approve_executes_once_and_replay_is_denied(
             bash_command_runner=runner,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         sink = _CorrelatedEventSink(
             "00000000-0000-4000-8000-000000000301"
@@ -2572,6 +2625,7 @@ def test_desktop_bash_deny_timeout_and_unsafe_context_execute_nothing(
             bash_command_runner=runner,
             approval_timeout_seconds=0.03,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
 
         denied_sink = _CorrelatedEventSink(
@@ -2641,6 +2695,7 @@ def test_desktop_bash_rejects_unknown_and_clears_matching_mismatch(
             bash_command_runner=runner,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
 
         first_sink = _CorrelatedEventSink(
@@ -2714,6 +2769,7 @@ def test_conversation_replacement_or_shutdown_denies_pending_bash(
             bash_command_runner=runner,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         sink = _CorrelatedEventSink(
             "00000000-0000-4000-8000-000000000307"
@@ -2743,6 +2799,7 @@ def test_desktop_bash_permission_mode_defaults_to_ask_and_rejects_busy_turn(
             bash_command_runner=lambda *_args, **_kwargs: None,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         created = await service.dispatch("session.create", {"loadMcp": False})
         assert created["bashPermissionMode"] == "ask"
 
@@ -2798,6 +2855,7 @@ def test_desktop_bash_permission_mode_idle_setter_and_fake_runner_bypass(
             bash_command_runner=runner,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         created = await service.dispatch("session.create", {"loadMcp": False})
         session_id = created["sessionId"]
 
@@ -2862,6 +2920,7 @@ def test_desktop_bash_permission_mode_switching_back_to_ask_restores_approval(
             bash_command_runner=runner,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         created = await service.dispatch("session.create", {"loadMcp": False})
         session_id = created["sessionId"]
 
@@ -2932,6 +2991,7 @@ def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_with
             bash_command_runner=runner,
             approval_timeout_seconds=1,
         )
+        await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
         await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
 
@@ -2956,6 +3016,7 @@ def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_with
 def test_installer_cleanup_conflict_is_visible_before_session_replacement(tmp_path, monkeypatch, method):
     factory, _sessions = _canonical_session_factory(monkeypatch)
     service = _service(tmp_path, session_factory=factory)
+    asyncio.run(_open_test_project(service, tmp_path))
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     current = service.session
     backup = str(tmp_path / "retained-backup")
@@ -2978,7 +3039,11 @@ def test_completed_citation_replay_keeps_canonical_identity(monkeypatch, tmp_pat
     graph = make_astream_graph()
     monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: graph)
     service = _service(tmp_path)
-    session = ChatSession(service.config)
+    asyncio.run(_open_test_project(service, tmp_path))
+    session = ChatSession(
+        service.config, conversation_repository=service._conversation_repository,
+        project_id=service._selected_project_id,
+    )
     service.session = session
     repository = session.conversation_repository
     params = _turn_params("/citation find Paper A")
@@ -3040,7 +3105,11 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
     graph = make_astream_graph()
     monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: graph)
     service = _service(tmp_path)
-    session = ChatSession(service.config)
+    asyncio.run(_open_test_project(service, tmp_path))
+    session = ChatSession(
+        service.config, conversation_repository=service._conversation_repository,
+        project_id=service._selected_project_id,
+    )
     service.session = session
     params = _turn_params("/citation find Paper A")
     repository = session.conversation_repository
@@ -3074,9 +3143,12 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
     assert session._citation_service is None and session.active_skill_runtime is None
 
 
-async def _open_test_project(service, root: Path):
+async def _open_test_project(service, root: Path, *, history_directory: str | None = None):
     root.mkdir(exist_ok=True)
-    preview = await service.dispatch("workspace.select", {"rootPath": str(root), "action": "inspect"})
+    params = {"rootPath": str(root), "action": "inspect"}
+    if history_directory is not None:
+        params["historyDirectory"] = history_directory
+    preview = await service.dispatch("workspace.select", params)
     return await service.dispatch("workspace.select", {
         "rootPath": str(root), "action": "initialize",
         "historyDirectory": preview["historyDirectory"],
