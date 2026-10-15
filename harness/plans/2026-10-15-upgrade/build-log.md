@@ -127,6 +127,13 @@
 - 定向命令 poetry run pytest tests/test_citation_workflow_tool.py tests/test_citation_save_isolation.py tests/test_inline_skills.py tests/test_citation_gate.py tests/test_citation_save_outcomes.py tests/test_citation_e2e.py -q --tb=short：109 passed（1.59s）；新測試早期誤寫 Crossref query 參數及安全訊息預期，修正測試斷言後通過。git diff --check 通過。
 - 獨立唯讀複核 provider 來源、DOI merge、live snapshot、無摘要／失敗呈現與最終 gate，未發現阻擋驗收問題。P4 完成；尚未呼叫真 provider／模型。P5 接續既有 fixture 的必要原生驗收能力、已找到的同次 sidebar refresh 重複 reconcile 局部修正、受限真模型與收尾完整 suite。
 
+## P5.S1｜移除同次側欄刷新重複掃描（2026-10-15）
+
+- P4.S2 已提交 5608daf。先追到 loadCatalog 的 project.list 與每個 project 的 session.list 都 reconcile／scan／load JSON；不新增 cache 或並行模型。session.list 增加選配 reconcile:boolean、預設 true；只有緊接成功 project.list 的同次 sidebar refresh 傳 false，loadMore／直接呼叫不變。
+- 重用既有 2 projects／3 JSON fixture，在 constructor 後重設 scan／load 計數，重播相同操作：before scan=3、load=12；after scan=1、load=6，catalog 與每頁 DTO 逐項完全相同。既有啟動後新 JSON／restart-gap 發現案例仍通過；不是用計數宣稱體感更快，原生觀察另記。
+- 定向服務 3 passed；Python 契約 150、TS 契約 144、Rust protocol 12 passed（增量編譯 5.43s）；root npx tsc --noEmit 與 task-only App 型別檢查通過。共同 strict schema／fixtures 同步，git diff --check 通過。
+- 本步只提交有因果依據的局部修正，原有 memo／lazy／sidebar Promise.all 使用者修改仍留工作樹，不收編。下一步重啟最終 native/backend，走查 A～E、工具等待可編輯與 Bypass 衝突；受限真模型腳本只在隔離暫存稿驗收，不改預設模型設定。
+
 ## 後續紀錄方式
 
 每次有意義的執行步驟以階段／步驟 ID 記錄：實際改動、批准的範圍及來源、輸入／命令、觀察結果、證據位置、限制、下一步。僅依觀察把上表改為 Not started／In progress／Blocked／Complete；不得把撰寫計劃或結構 lint 當作實作完成。

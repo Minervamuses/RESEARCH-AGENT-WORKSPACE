@@ -743,7 +743,10 @@ class DesktopService:
                 "Conversation summaries are unavailable during an active turn.",
                 retryable=True,
             )
-        self._reconcile_lagged_catalog_entries()
+        # The sidebar already reconciled through its preceding project.list.
+        # Standalone and pagination requests retain fresh discovery by default.
+        if params.get("reconcile", True):
+            self._reconcile_lagged_catalog_entries()
         project = self._require_catalog_project(params["projectId"])
         offset = int(params.get("offset", 0))
         limit = int(params.get("limit", 50))

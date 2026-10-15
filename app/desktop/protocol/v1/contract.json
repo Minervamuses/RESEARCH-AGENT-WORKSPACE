@@ -527,7 +527,8 @@
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "offset": {"type": "integer", "required": false, "minimum": 0, "maximum": 4294967295},
-        "limit": {"type": "integer", "required": false, "minimum": 1, "maximum": 50}
+        "limit": {"type": "integer", "required": false, "minimum": 1, "maximum": 50},
+        "reconcile": {"type": "boolean", "required": false}
       }
     },
     {

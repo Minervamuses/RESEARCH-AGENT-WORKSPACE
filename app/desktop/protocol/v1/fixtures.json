@@ -355,6 +355,49 @@
       }
     },
     {
+      "name": "session-list-skips-repeat-reconciliation",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000710",
+        "method": "session.list",
+        "params": {
+          "projectId": "local",
+          "reconcile": false
+        }
+      }
+    },
+    {
+      "name": "session-list-explicit-reconciliation",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000711",
+        "method": "session.list",
+        "params": {
+          "projectId": "local",
+          "reconcile": true
+        }
+      }
+    },
+    {
+      "name": "session-list-rejects-nonboolean-reconciliation",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000712",
+        "method": "session.list",
+        "params": {
+          "projectId": "local",
+          "reconcile": "false"
+        }
+      }
+    },
+    {
       "name": "session-list-rejects-oversized-page",
       "valid": false,
       "errorCode": "PROTOCOL_INVALID",

@@ -313,7 +313,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         | "extensions.preview"
         | "runtime.shutdown" => Some(&[]),
         "session.create" => Some(&["loadMcp", "graphRecursionLimit", "projectId"]),
-        "session.list" => Some(&["projectId", "offset", "limit"]),
+        "session.list" => Some(&["projectId", "offset", "limit", "reconcile"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "workspace.select" => Some(&["rootPath"]),
@@ -696,6 +696,11 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
             validate_optional_string(params, "projectId", 256)?;
             validate_optional_integer(params, "offset", 0, u32::MAX as i64)?;
             validate_optional_integer(params, "limit", 1, 50)?;
+            if let Some(reconcile) = params.get("reconcile") {
+                if !reconcile.is_boolean() {
+                    return Err(ProtocolViolation::invalid("params.reconcile must be a boolean"));
+                }
+            }
         }
         "session.select" | "session.retry_registration" => {
             validate_optional_string(params, "projectId", 256)?;

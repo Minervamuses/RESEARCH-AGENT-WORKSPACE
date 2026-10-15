@@ -633,6 +633,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
     projectId: { type: "string", required: true, maxBytes: 256 },
     offset: { type: "integer", required: false, minimum: 0, maximum: 0xffff_ffff },
     limit: { type: "integer", required: false, minimum: 1, maximum: 50 },
+    reconcile: { type: "boolean", required: false },
   },
   "session.select": {
     projectId: { type: "string", required: true, maxBytes: 256 },

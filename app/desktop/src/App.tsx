@@ -967,7 +967,7 @@ export default function App() {
       const projectData = await backendClient.request("project.list", {});
       const nextCatalog = projectData as unknown as ProjectListDto;
       const entries = await Promise.all(nextCatalog.projects.map(async (project) => {
-        const data = await backendClient.request("session.list", { projectId: project.projectId, offset: 0, limit: 50 });
+        const data = await backendClient.request("session.list", { projectId: project.projectId, offset: 0, limit: 50, reconcile: false });
         return [project.projectId, data as unknown as SessionListDto] as const;
       }));
       if (generationRef.current !== generation) return;

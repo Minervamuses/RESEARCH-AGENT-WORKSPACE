@@ -1185,6 +1185,46 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
     assert factory.calls == []
 
 
+def test_sidebar_refresh_skips_repeat_scans_without_changing_session_dtos(monkeypatch):
+    import tempfile
+    from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX
+    from test_desktop_fixture import _service as fixture_service
+
+    with tempfile.TemporaryDirectory(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp") as temporary_root:
+        service = fixture_service(Path(temporary_root))
+        repository = service._conversation_repository
+        scan, load = repository.scan, repository.load
+        counts = {"scan": 0, "load": 0}
+
+        def count_scan():
+            counts["scan"] += 1
+            return scan()
+
+        def count_load(conversation_id):
+            counts["load"] += 1
+            return load(conversation_id)
+
+        monkeypatch.setattr(repository, "scan", count_scan)
+        monkeypatch.setattr(repository, "load", count_load)
+
+        async def refresh(*, already_reconciled):
+            catalog = await service.dispatch("project.list", {})
+            pages = []
+            for project in catalog["projects"]:
+                params = {"projectId": project["projectId"], "offset": 0, "limit": 50}
+                if already_reconciled:
+                    params["reconcile"] = False
+                pages.append(await service.dispatch("session.list", params))
+            return catalog, pages
+
+        before = asyncio.run(refresh(already_reconciled=False))
+        assert counts == {"scan": 3, "load": 12}
+        counts.update(scan=0, load=0)
+        after = asyncio.run(refresh(already_reconciled=True))
+        assert counts == {"scan": 1, "load": 6}
+        assert after == before
+
+
 def test_session_list_reconciles_json_created_after_service_start(
     tmp_path: Path,
 ) -> None:
