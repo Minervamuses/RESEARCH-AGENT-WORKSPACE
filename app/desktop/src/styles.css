@@ -332,8 +332,7 @@ h3 {
   flex-direction: column;
 }
 
-.empty-state > p:not(.section-kicker, .shutdown-summary),
-.session-intro p {
+.empty-state > p:not(.section-kicker, .shutdown-summary) {
   max-width: 38rem;
   margin-bottom: 1.25rem;
   color: #626a68;
@@ -468,11 +467,6 @@ h3 {
 
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; }
-}
-
-.session-intro {
-  display: grid;
-  justify-items: center;
 }
 
 .composer-preview {
