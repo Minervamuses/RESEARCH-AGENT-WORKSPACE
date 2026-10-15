@@ -253,7 +253,7 @@ test("Bash approval renders inert context with exactly Deny and Approve actions"
   assert.match(html, /&lt;script&gt;inert\(\)&lt;\/script&gt;/);
 });
 
-test("Project permission control renders Ask/Bypass with project scope and frozen-turn guidance", async () => {
+test("Permission control renders Ask/Bypass with project scope and frozen-turn guidance", async () => {
   const trust = await loadTrust();
   assert.ok(trust.BashPermissionControl, "BashPermissionControl component must be exported");
 
@@ -266,9 +266,9 @@ test("Project permission control renders Ask/Bypass with project scope and froze
   assert.doesNotMatch(askHtml, /disabled/);
   assert.equal((askHtml.match(/<option\b/g) ?? []).length, 2);
   assert.match(askHtml, /value="ask"[^>]*selected/);
-  assert.match(askHtml, /Project permission/);
-  assert.match(askHtml, /Ask · approve one operation/);
-  assert.match(askHtml, /Bypass · all project operations/);
+  assert.match(askHtml, /aria-label="Permission"/);
+  assert.match(askHtml, />Ask<\/option>/);
+  assert.match(askHtml, />Bypass<\/option>/);
   assert.match(askHtml, /document edits, Bash, citation saves, indexing, MCP and extensions/);
 
   const disabledHtml = renderToStaticMarkup(createElement(trust.BashPermissionControl, {

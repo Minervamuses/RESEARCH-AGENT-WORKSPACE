@@ -109,7 +109,9 @@ h3 {
 .app-shell {
   display: grid;
   grid-template-columns: minmax(10.15rem, 11.9rem) minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   background: #f7f7f5;
 }
 
@@ -117,6 +119,8 @@ h3 {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
   padding: 1rem 0.6rem;
   color: #343942;
   background: #eeeeeb;
@@ -287,7 +291,8 @@ h3 {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  height: 100%;
   background:
     radial-gradient(circle at 72% 15%, rgba(47, 112, 91, 0.06), transparent 28rem),
     #fafaf8;
@@ -303,6 +308,9 @@ h3 {
   background: rgba(250, 250, 248, 0.92);
   border-bottom: 1px solid #e5e5e2;
 }
+
+.workspace-header > div { min-width: 0; }
+.workspace-header h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .header-status {
   flex: 0 0 auto;
@@ -477,10 +485,16 @@ h3 {
 }
 
 .session-meta {
+  flex: 0 0 auto;
+  max-height: 5rem;
+  overflow: auto;
   margin: 0;
   color: #818683;
   font-size: 0.7rem;
 }
+
+.session-meta summary { cursor: pointer; }
+.session-meta p { margin: .3rem 0 0; }
 
 .project-browser {
   min-height: 0;
@@ -570,57 +584,44 @@ h3 {
 }
 
 .conversation-workspace-body {
+  display: flex;
+  flex-direction: column;
   align-content: stretch;
+  gap: .5rem;
   width: 100%;
-  height: calc(100vh - 4.4rem);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   padding: clamp(0.75rem, 2vw, 1.4rem);
 }
 
+.conversation-workspace-body > .notice,
+.conversation-workspace-body > .extension-card {
+  flex: 0 0 auto;
+  max-height: min(18vh, 8rem);
+  overflow: auto;
+  padding: .6rem;
+}
+
+.conversation-workspace-body > .notice { gap: .55rem; }
+.conversation-workspace-body > .notice h3 { font-size: .9rem; margin-bottom: .25rem; }
+.conversation-workspace-body > .notice p { margin-bottom: .35rem; line-height: 1.4; font-size: .75rem; }
+.conversation-workspace-body > .notice button { min-height: 1.9rem; padding: .3rem .5rem; font-size: .72rem; }
+.conversation-workspace-body > .notice .notice-icon { width: 1.5rem; height: 1.5rem; }
+
 .conversation-surface {
-  display: grid;
-  grid-template-rows: auto minmax(12rem, 1fr) auto auto;
-  gap: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: .5rem;
   min-width: 0;
   min-height: 0;
 }
 
-.session-controls {
-  display: flex;
-  align-items: end;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-  padding: 0.65rem;
-  background: rgba(255, 255, 255, 0.84);
-  border: 1px solid #e0e2df;
-  border-radius: 0.75rem;
-}
-
-.session-controls label {
-  color: #626b67;
-  font-size: 0.68rem;
-  font-weight: 700;
-}
-
-.session-controls label {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.session-controls select {
-  min-height: 2rem;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.72rem;
-}
-
-.control-state {
-  flex: 1 1 12rem;
-  margin: 0 0 0.45rem;
-  color: #68716e;
-  font-size: 0.7rem;
-  text-align: right;
-}
+.control-state { flex: 0 0 auto; margin: 0; color: #68716e; font-size: .7rem; }
 
 .transcript {
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   padding: clamp(0.5rem, 2vw, 1rem);
@@ -787,6 +788,8 @@ h3 {
 }
 
 .composer {
+  flex: 0 0 auto;
+  min-width: 0;
   display: grid;
   gap: 0.35rem;
   padding: 0.65rem;
@@ -805,6 +808,7 @@ h3 {
 .composer textarea {
   width: 100%;
   min-height: 4.5rem;
+  max-height: min(20vh, 10rem);
   padding: 0.55rem;
   color: #23272f;
   resize: vertical;
@@ -850,10 +854,25 @@ h3 {
   gap: 0.65rem;
 }
 
-.composer-footer span {
-  color: #7b827f;
-  font-size: 0.66rem;
-}
+.composer-footer > button { flex: 0 0 auto; }
+.composer-controls { display: flex; align-items: end; flex-wrap: wrap; gap: .4rem; min-width: 0; }
+.bash-permission-control { display: grid; gap: .15rem; color: #626b67; font-size: .66rem; font-weight: 700; }
+.bash-permission-control select { min-height: 1.9rem; padding: .25rem .35rem; font: inherit; font-size: .75rem; }
+.thinking-control { position: relative; }
+.thinking-trigger { display: flex; align-items: center; gap: .3rem; min-height: 1.9rem; padding: .35rem .45rem; font-size: .75rem; }
+.thinking-trigger svg { flex: 0 0 auto; }
+.thinking-options { position: absolute; bottom: calc(100% + .35rem); left: 0; z-index: 60; display: grid; width: 9rem; padding: .25rem; background: #fff; border: 1px solid #d4d6d8; border-radius: .45rem; box-shadow: 0 .35rem 1rem #23272f22; }
+.thinking-options[hidden] { display: none; }
+.thinking-options button { min-height: 2rem; padding: .4rem .5rem; border: 0; text-align: left; font-size: .75rem; }
+.thinking-options [aria-checked="true"] { background: #e7efeb; font-weight: 700; }
+.composer-turn-hint { margin: 0; color: #68716e; font-size: .68rem; }
+.composer-notices { flex: 0 0 auto; min-height: 0; max-height: min(12vh, 5rem); overflow: auto; }
+.composer > .reference-cards { max-height: min(16vh, 7rem); margin: 0; }
+.composer > .reference-cards .reference-card { padding: .4rem .55rem; }
+.composer > .reference-cards .reference-card summary strong,
+.composer > .reference-cards .reference-card summary span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer > .reference-cards .reference-card[open] summary strong,
+.composer > .reference-cards .reference-card[open] summary span { white-space: normal; }
 
 .registration-notice {
   border-color: #e5d4a8;
@@ -1062,6 +1081,8 @@ h3 {
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
   }
 
   .sidebar {
@@ -1107,14 +1128,11 @@ h3 {
 
   .main-workspace {
     min-height: 0;
+    height: auto;
   }
 
   .conversation-workspace-body {
     height: auto;
-    min-height: 70vh;
-  }
-
-  .conversation-surface {
     min-height: 70vh;
   }
 
@@ -1159,28 +1177,11 @@ h3 {
     grid-column: auto;
   }
 
-  .session-controls {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .session-controls label,
-  .session-controls select {
-    width: 100%;
-  }
-
-  .control-state {
-    text-align: left;
-  }
-
   .message {
     max-width: 100%;
   }
 
-  .composer-footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
+  .composer-footer { gap: .35rem; }
 
   .extension-summary,
   .approval-actions {
@@ -1189,7 +1190,7 @@ h3 {
 }
 
 /* Source and conversation share a workspace; tool waits never disable editing. */
-.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); height: calc(100vh - 4.4rem); min-height: 0; flex: 1; }
+.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); height: 100%; min-height: 0; flex: 1; }
 .document-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #d4d6d8; background: #fff; }
 .document-header { display: flex; align-items: center; gap: .45rem; flex: 0 0 auto; min-width: 0; padding: .35rem .7rem; border-bottom: 1px solid #dedfdd; }
 .document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
@@ -1213,16 +1214,21 @@ h3 {
 .document-conflict p, .document-conflict button, .conflict-versions { font-size: .72rem; }
 .conflict-versions pre { max-height: 9rem; overflow: auto; white-space: pre-wrap; padding: .5rem; background: #fff; border: 1px solid #dedfdd; }
 .writing-workspace > .workspace-body { min-width: 0; padding: .8rem; }
+.writing-workspace > .workspace-body:not(.conversation-workspace-body) { overflow: auto; }
 @media (max-width: 1050px) {
   .writing-workspace { grid-template-columns: minmax(0, 1fr); overflow: auto; }
   .document-pane { min-height: 55vh; border-right: 0; border-bottom: 1px solid #d4d6d8; }
+  .writing-workspace > .workspace-body { min-height: 70vh; }
+}
+@media (max-width: 760px) {
+  .writing-workspace { height: auto; overflow: visible; }
+  .writing-workspace > .conversation-workspace-body { height: 75vh; }
 }
 
 .document-editor-empty { padding: 1.5rem .9rem; color: #66716d; font-size: .8rem; }
 .document-approval-backdrop { pointer-events: none; background: transparent; justify-content: flex-end; align-items: flex-start; padding: 5rem 1.5rem 1rem; }
 .document-approval-backdrop .approval-dialog { pointer-events: auto; width: min(30rem, 90vw); box-shadow: 0 1rem 3rem #23272f33; }
 
-.writing-workspace .conversation-surface { grid-template-rows: auto minmax(0, 1fr) auto auto; }
 .writing-workspace .transcript { min-height: 0; }
 
 /* Frozen context stays separate from selectable message text. */

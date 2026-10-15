@@ -43,3 +43,14 @@ test("compact sidebar uses the agreed 70 percent rem bounds and reveals full foc
   assert.match(styles, /\.session-link:focus-visible span,[\s\S]*?white-space:\s*normal/);
   assert.match(styles, /\.project-heading strong:focus-visible\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
 });
+
+test("conversation layout removes obsolete fixed controls and gives draft context its own bounded scroll area", async () => {
+  const styles = await readFile(resolve(currentDir, "../src/styles.css"), "utf8");
+  assert.doesNotMatch(styles, /\.session-controls\b|\.document-toolbar\b|\.document-notice\b/);
+  const surface = styles.match(/\.conversation-surface\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  assert.match(surface, /display:\s*flex/);
+  assert.doesNotMatch(surface, /grid-template-rows/);
+  assert.match(styles, /\.composer > \.reference-cards\s*\{[^}]*max-height:\s*min\(/);
+  assert.match(styles, /\.composer-notices\s*\{[^}]*max-height:[^}]*overflow:\s*auto/);
+  assert.match(styles, /\.composer-footer > button\s*\{[^}]*flex:\s*0 0 auto/);
+});

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
@@ -357,19 +358,63 @@ export function BashPermissionControl({
 }: BashPermissionControlProps) {
   return (
     <label className="bash-permission-control">
-      Project permission
+      Permission
       <select
-        aria-label="Project permission"
+        aria-label="Permission"
         title={disabled ? "The current turn keeps its starting mode. Change the mode after it finishes." : "Applies to document edits, Bash, citation saves, indexing, MCP and extensions."}
         value={mode}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value as BashPermissionMode)}
       >
-        <option value="ask">Ask · approve one operation</option>
-        <option value="bypass">Bypass · all project operations</option>
+        <option value="ask">Ask</option>
+        <option value="bypass">Bypass</option>
       </select>
     </label>
   );
+}
+
+export function ThinkingControl({ mode, disabled, onChange }: {
+  mode: "normal" | "extended"; disabled: boolean; onChange: (mode: "normal" | "extended") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const label = mode === "normal" ? "Normal" : "Extended";
+  useEffect(() => {
+    if (disabled) setOpen(false);
+    else if (open) menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  }, [disabled, open]);
+  const close = () => { setOpen(false); trigger.current?.focus(); };
+  return <div className="thinking-control" onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+  }} onKeyDown={(event) => {
+    if (event.key === "Escape" && open) { event.preventDefault(); close(); }
+  }}>
+    <button ref={trigger} className="thinking-trigger" type="button" disabled={disabled}
+      aria-label={"Thinking: " + label} aria-haspopup="menu" aria-expanded={open}
+      title={"Thinking: " + label + (disabled ? ". The current turn keeps its starting mode." : ". Document and citation tasks use Normal when required.")}
+      onClick={() => setOpen(!open)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown" && !disabled) { event.preventDefault(); setOpen(true); }
+      }}>
+      <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18"><path d="m10 2 2.1 5.9L18 10l-5.9 2.1L10 18l-2.1-5.9L2 10l5.9-2.1Z" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+      <span>{label}</span>
+    </button>
+    <div ref={menu} className="thinking-options" role="menu" aria-label="Thinking mode" hidden={!open}
+      onKeyDown={(event) => {
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+        const current = options.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+        options[next]?.focus();
+      }}>
+      {(["normal", "extended"] as const).map((value) => <button type="button" role="menuitemradio"
+        aria-checked={mode === value} tabIndex={mode === value ? 0 : -1} disabled={disabled} key={value}
+        onClick={() => { close(); onChange(value); }}>{value === "normal" ? "Normal" : "Extended"}</button>)}
+    </div>
+  </div>;
 }
 
 export function reconcileBashPermissionAck(

@@ -199,3 +199,10 @@
 
 - Set sidebar minmax bounds14.5/17rem ->10.15/11.9rem; kept root font scale and760/1050px breakpoints. Reduced internal gaps, wrapped lifecycle actions and ellipsized project/conversation titles with full title and hover/keyboard-focus expansion.
 - Actual TypeScript and existing styles module2/2 passed. Initial new floating-point exact equality assertion failed at10.15 vs10.149999999999999; corrected numeric tolerance only, no production workaround. Main reviewed three-file diff and whitespace. Actual rendered70% ratio remains pending P3 native verification against E23/E24 baselines.
+
+### E27 / P3-S4/S5/S6: footer controls and usable height
+
+- Moved Thinking icon/current-mode menu and Permission Ask/Bypass to composer footer left, Send right. Reused ACK handlers and turn/document/approval/workspace disabled guards. Thinking menu supports Escape/arrows/Home/End and returns focus; actual document Extended preference gets a short effective-Normal hint only while active.
+- Removed old session-controls and both obsolete four-row conversation tracks. Conversation now allocates remaining height to transcript; draft references, retry/error notices and session details have bounded scroll areas. Normal document/composer controls remain compact, with existing narrow breakpoints and unchanged font scale.
+- Main review caught task-introduced duplicate media CSS (removed) and full-path ellipsis hiding reference filename/lines. Compact card now displays basename and original lines, with full source path in title and expanded version detail. No frozen-packet changes. Independent read-only review found no demonstrated handler/ACK/retry/focus blocker.
+- Actual `npx tsc --noEmit`, documents/trust/styles/conversations66/66 and `npm run build` passed (735modules; existing Monaco >500kB chunk warning). Final card correction additionally passed one targeted card test, TypeScript and justified rebuild; whitespace check passed. Two preliminary tool-input quoting errors executed no shell or file changes. Native dimensions, keyboard, save/Undo and multiple-card failure usability still pending; P3 remains in progress.

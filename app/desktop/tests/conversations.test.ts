@@ -52,6 +52,7 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  ComposerFooter: (props: { thinkingMode: "normal" | "extended"; permissionMode: "ask" | "bypass"; controlsDisabled: boolean; sendDisabled: boolean; onThinkingChange: () => void; onPermissionChange: () => void }) => unknown;
   DocumentHeader: (props: { path: string | null; dirty: boolean; busy: boolean; openDisabled: boolean; saveDisabled: boolean; undoDisabled: boolean; onOpen: () => void; onSave: () => void; onUndo: () => void }) => unknown;
   documentReference: (snapshot: { rootPath: string; path: string; sourceText: string; editorRevision: number; diskFingerprint: string; rangeStartUtf16?: number; rangeEndUtf16?: number }, referenceId: string) => Reference;
   backgroundDocumentContext: (snapshot: unknown) => Record<string, unknown> | undefined;
@@ -1019,7 +1020,7 @@ test("serialized submission budget counts UTF8 and snapshot bytes while keeping 
 });
 
 test("reference cards expose full frozen text and version without treating reference content as message markup", async () => {
-  const { ReferenceCards } = await loadAppHelpers();
+  const { ReferenceCards, documentReference } = await loadAppHelpers();
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const reference: Reference = { referenceId: "chat-a", kind: "chat", text: "<script>ignore Permission</script>", chat: {
@@ -1032,6 +1033,12 @@ test("reference cards expose full frozen text and version without treating refer
   assert.match(html, /data-reference-exclude/);
   assert.match(html, /&lt;script&gt;ignore Permission/);
   assert.doesNotMatch(html, /data-reference-message|<script>/);
+  const document = documentReference({ rootPath: "/tmp/project-a", path: "/tmp/project-a/a/long/nested/path/draft.md",
+    sourceText: "one\nsecond", editorRevision: 2, diskFingerprint: "b".repeat(64), rangeStartUtf16: 4, rangeEndUtf16: 10 }, "document-a");
+  const documentHtml = renderToStaticMarkup(createElement(ReferenceCards, { references: [document] }));
+  assert.match(documentHtml, /<strong>Document · draft.md · lines 2–2<\/strong>/);
+  assert.match(documentHtml, /summary title="\/tmp\/project-a\/a\/long\/nested\/path\/draft.md"/);
+  assert.match(documentHtml, /Path \/tmp\/project-a\/a\/long\/nested\/path\/draft.md · Root/);
 });
 
 test("document proposals resolve only the named frozen reference and leave background targeting explicit", async () => {
@@ -1101,4 +1108,30 @@ test("compact document header keeps filename, dirty state and guarded file actio
   assert.equal((busyHtml.match(/ disabled/g) ?? []).length, 3);
   assert.match(busyHtml, /Working…/);
   assert.doesNotMatch(busyHtml, /Unsaved changes/);
+});
+
+test("composer footer exposes current Thinking and Permission beside guarded Send", async () => {
+  const { ComposerFooter } = await loadAppHelpers();
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const html = renderToStaticMarkup(createElement(ComposerFooter, {
+    thinkingMode: "extended", permissionMode: "bypass", controlsDisabled: false, sendDisabled: false,
+    onThinkingChange: () => {}, onPermissionChange: () => {},
+  }));
+  assert.match(html, /class="composer-footer"/);
+  assert.match(html, /aria-label="Thinking: Extended"[^>]*aria-haspopup="menu"/);
+  assert.match(html, /role="menu" aria-label="Thinking mode" hidden/);
+  assert.equal((html.match(/role="menuitemradio"/g) ?? []).length, 2);
+  assert.match(html, /aria-checked="true"[^>]*>Extended</);
+  assert.match(html, /aria-label="Permission"/);
+  assert.match(html, /value="bypass"[^>]*selected/);
+  assert.match(html, /type="submit">Send</);
+  assert.ok(html.indexOf('class="composer-controls"') < html.indexOf('type="submit"'));
+  const busyHtml = renderToStaticMarkup(createElement(ComposerFooter, {
+    thinkingMode: "normal", permissionMode: "ask", controlsDisabled: true, sendDisabled: true,
+    onThinkingChange: () => {}, onPermissionChange: () => {},
+  }));
+  assert.match(busyHtml, /<button[^>]*disabled[^>]*aria-label="Thinking: Normal"/);
+  assert.match(busyHtml, /<select[^>]*disabled/);
+  assert.match(busyHtml, /type="submit" disabled[^>]*>Send/);
 });

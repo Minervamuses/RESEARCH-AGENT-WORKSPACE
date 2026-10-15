@@ -73,6 +73,7 @@ import { DocumentEditor, type DocumentSnapshot } from "./DocumentEditor.tsx";
 import {
   ApprovalDialog,
   BashPermissionControl,
+  ThinkingControl,
   ExtensionPanel,
   acceptApprovalEvent,
   beginExtensionApply,
@@ -301,8 +302,24 @@ export function SlashCommandList({ commands, active, onSelect, inline = false }:
   </ul>;
 }
 
-function SlashComposer({ draft, references, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, onChange, onSubmit }: {
+export function ComposerFooter({ thinkingMode, permissionMode, controlsDisabled, sendDisabled, onThinkingChange, onPermissionChange }: {
+  thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode;
+  controlsDisabled: boolean; sendDisabled: boolean;
+  onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
+}) {
+  return <div className="composer-footer">
+    <div className="composer-controls" aria-label="Conversation settings">
+      <ThinkingControl mode={thinkingMode} disabled={controlsDisabled} onChange={onThinkingChange} />
+      <BashPermissionControl mode={permissionMode} disabled={controlsDisabled} onChange={onPermissionChange} />
+    </div>
+    <button className="primary-button" type="submit" disabled={sendDisabled}>Send</button>
+  </div>;
+}
+
+function SlashComposer({ draft, references, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, controlsDisabled, thinkingMode, permissionMode, onThinkingChange, onPermissionChange, turnHint, onChange, onSubmit }: {
   references: readonly Reference[]; onRemoveReference: (id: string) => void;
+  thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode; controlsDisabled: boolean; turnHint?: string;
+  onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
   draft: string; commands: SlashCommands; skills: readonly string[]; onSkillPicked: (name: string) => void; textareaRef: RefObject<HTMLTextAreaElement | null>;
   disabled: boolean; sendDisabled: boolean; onChange: (draft: string) => void; onSubmit: () => void;
 }) {
@@ -390,9 +407,11 @@ function SlashComposer({ draft, references, onRemoveReference, commands, skills,
       aria-autocomplete="list" aria-haspopup="listbox"
       aria-controls={open ? "composer-slash-commands" : undefined}
       aria-activedescendant={open && matches.length > 0 ? `composer-slash-option-${active}` : undefined}
-      rows={4} placeholder="Ask about your research…" disabled={disabled}
+      rows={3} title="Enter to send · Shift+Enter for a new line · @ to add a Skill" placeholder="Ask about your research…" disabled={disabled}
     />
-    <div className="composer-footer"><span>Enter to send · Shift+Enter for a new line</span><button className="primary-button" type="submit" disabled={sendDisabled}>Send</button></div>
+    {turnHint !== undefined && <p className="composer-turn-hint" role="status">{turnHint}</p>}
+    <ComposerFooter thinkingMode={thinkingMode} permissionMode={permissionMode} controlsDisabled={controlsDisabled}
+      sendDisabled={sendDisabled} onThinkingChange={onThinkingChange} onPermissionChange={onPermissionChange} />
   </form>;
 }
 
@@ -761,13 +780,13 @@ export function ReferenceCards({ references, onRemove }: { references: readonly 
   if (references.length === 0) return null;
   return <div className="reference-cards" aria-label={onRemove === undefined ? "Submitted references" : "Draft references"} data-reference-exclude>
     {references.map((reference) => <details className="reference-card" key={reference.referenceId}>
-      <summary><strong>{reference.kind === "document"
-        ? `Document · ${reference.document.snapshot.path} · lines ${reference.document.startLine}–${reference.document.endLine}`
+      <summary title={reference.kind === "document" ? reference.document.snapshot.path : undefined}><strong>{reference.kind === "document"
+        ? `Document · ${reference.document.snapshot.path.split("/").at(-1)} · lines ${reference.document.startLine}–${reference.document.endLine}`
         : `Chat · ${reference.chat.role} · ${reference.chat.sessionId.slice(0, 8)} / ${reference.chat.turnId.slice(0, 8)}`}</strong>
         <span>{reference.text.replace(/\s+/g, " ").slice(0, 100)}{reference.text.length > 100 ? "…" : ""}</span></summary>
       <pre>{reference.text}</pre>
       <p className="reference-version">{reference.kind === "document"
-        ? `Root ${reference.document.snapshot.rootPath} · revision ${reference.document.snapshot.editorRevision} · disk ${reference.document.snapshot.diskFingerprint}`
+        ? `Path ${reference.document.snapshot.path} · Root ${reference.document.snapshot.rootPath} · revision ${reference.document.snapshot.editorRevision} · disk ${reference.document.snapshot.diskFingerprint}`
         : `Project ${reference.chat.projectId} · UTF-16 ${reference.chat.startUtf16}–${reference.chat.endUtf16} · message ${reference.chat.messageFingerprint}`}</p>
       {onRemove !== undefined && <button type="button" onClick={() => onRemove(reference.referenceId)}>Remove reference</button>}
     </details>)}
@@ -2392,15 +2411,6 @@ export default function App() {
             </div>
           </section>}
           {selectionPreview === null && activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
-            <div className="session-controls" aria-label="Session controls">
-              <label>Thinking<select value={activeSession.thinkingMode} disabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null} onChange={(event) => void updateThinkingMode(event.target.value as "normal" | "extended")}><option value="normal">Normal</option><option value="extended">Extended</option></select></label>
-              <BashPermissionControl
-                mode={activeSession.bashPermissionMode}
-                disabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
-                onChange={(mode) => void updateBashPermissionMode(mode)}
-              />
-              <p className="control-state">Use @ to add Skills anywhere in your message. Each Skill runs for this turn; write “first…then…” when order matters. File edits and citation tasks use Normal thinking and restore your selection afterward. Ask/Bypass stays fixed during a turn; change it after completion. Slash commands remain available.</p>
-            </div>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
@@ -2408,16 +2418,24 @@ export default function App() {
               <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} />
               <div ref={transcriptEndRef} />
             </div>
+            {(conversation.failure !== null && conversation.submittedContext !== null || referenceIssue !== null) && <div className="composer-notices">
             {conversation.failure !== null && conversation.submittedContext !== null && <div className="reference-retry-settings">
               <p>Saved turn: {conversation.submittedContext.permissionMode === "ask" ? "Ask" : "Bypass"} · {conversation.submittedContext.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
                 {!retryControlsMatch && " Current controls differ; the original retry is disabled."}</p>
               <button type="button" onClick={sendNewTurn} disabled={!idle}>Send new turn with current settings</button>
             </div>}
             {referenceIssue !== null && <p className="reference-issue" role="status">{referenceIssue}</p>}
+            </div>}
             <SlashComposer
               key={`${state.snapshot?.generation}:${conversation.selected?.projectId}:${conversation.selected?.sessionId}`}
               draft={conversation.draft} textareaRef={composerRef}
               references={conversation.draftReferences}
+              thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.bashPermissionMode}
+              controlsDisabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
+              onThinkingChange={(mode) => void updateThinkingMode(mode)}
+              onPermissionChange={(mode) => void updateBashPermissionMode(mode)}
+              turnHint={conversation.activeTurn !== null && conversation.submittedContext?.documentContext !== undefined &&
+                conversation.submittedContext.requestedThinkingMode === "extended" ? "Normal for this document turn; Extended resumes afterward." : undefined}
               onRemoveReference={(referenceId) => applyConversation({ type: "reference-removed", generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch, referenceId })}
               skills={state.session?.loadedSkills ?? []}
               onSkillPicked={(name) => selectedSkillNamesRef.current.add(name)}
@@ -2428,7 +2446,7 @@ export default function App() {
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
               onSubmit={sendTurn}
             />
-            <p className="session-meta">Session {activeSession.sessionId} · {activeSession.turnCount} turns · {selectedRegistered ? "cataloged" : "transient"} · Citation output {state.diagnostics?.citationOutputPath ?? "unavailable"}</p>
+            <details className="session-meta"><summary>Session details · {activeSession.turnCount} turns</summary><p>Session {activeSession.sessionId} · {selectedRegistered ? "cataloged" : "transient"} · Citation output {state.diagnostics?.citationOutputPath ?? "unavailable"}</p></details>
           </section>}
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}
         </div>
