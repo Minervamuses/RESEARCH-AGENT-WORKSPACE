@@ -320,7 +320,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "document.open" => Some(&["path"]),
         "document.save" => Some(&["documentContext"]),
         "document.apply" => Some(&["documentContext", "turnId", "callId", "parentRequestId", "undoOfCallId", "resolution", "expectedSnapshot"]),
-        "session.turn" => Some(&["text", "turnId", "retry", "documentContext", "skillReferences"]),
+        "session.turn" => Some(&["text", "turnId", "retry", "documentContext", "skillReferences", "submittedContext"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.set_bash_permission" => Some(&["mode"]),
         "knowledge.search" => Some(&[
@@ -644,6 +644,129 @@ fn validate_skill_references(params: &Map<String, Value>) -> Result<(), Protocol
     Ok(())
 }
 
+fn validate_project_path(value: &str, field: &str) -> Result<(), ProtocolViolation> {
+    if !value.starts_with('/') || value.chars().any(|ch| ch == '\\' || (ch as u32) < 32 || ch == '\u{7f}')
+        || (value != "/" && value.split('/').skip(1).any(|part| part.is_empty() || matches!(part, "." | ".."))) {
+        return Err(ProtocolViolation::invalid(format!("{field} must be an absolute normalized Linux path")));
+    }
+    Ok(())
+}
+
+fn validate_context_document(value: &Value, root: &str) -> Result<(), ProtocolViolation> {
+    validate_document_context(value, "submittedContext.document")?;
+    let path = value["path"].as_str().expect("validated path");
+    validate_project_path(path, "document.path")?;
+    let prefix = if root == "/" { "/".to_owned() } else { format!("{root}/") };
+    if value["rootPath"] != root || path == root || !path.starts_with(&prefix) {
+        return Err(ProtocolViolation::invalid("document snapshot belongs to another project root"));
+    }
+    Ok(())
+}
+
+fn utf16_byte_index(text: &str, offset: i64) -> Option<usize> {
+    let mut position = 0_i64;
+    if offset == 0 { return Some(0); }
+    for (index, ch) in text.char_indices() {
+        position += ch.len_utf16() as i64;
+        if position == offset { return Some(index + ch.len_utf8()); }
+    }
+    None
+}
+
+fn validate_submitted_context(value: &Value) -> Result<(), ProtocolViolation> {
+    let context = expect_object(value, "submittedContext")?;
+    validate_data_keys(context,
+        &["projectId", "rootPath", "permissionMode", "requestedThinkingMode", "skillReferences", "projectRules", "documentContext", "references"],
+        &["projectId", "rootPath", "permissionMode", "requestedThinkingMode", "skillReferences", "projectRules", "references"])?;
+    if serde_json::to_vec(value).map_err(|_| ProtocolViolation::invalid("invalid submittedContext JSON"))?.len() > 1_048_576 {
+        return Err(ProtocolViolation::invalid("submittedContext exceeds the 1 MiB input limit"));
+    }
+    let project = expect_bounded_string(&context["projectId"], "submittedContext.projectId", 64)?;
+    if !project.bytes().enumerate().all(|(index, ch)| ch.is_ascii_lowercase() || ch.is_ascii_digit()
+        || (index > 0 && matches!(ch, b'.' | b'_' | b'-'))) {
+        return Err(ProtocolViolation::invalid("submittedContext.projectId must be a canonical project ID"));
+    }
+    let root = expect_bounded_string(&context["rootPath"], "submittedContext.rootPath", 8192)?;
+    validate_project_path(root, "rootPath")?;
+    validate_enum(&context["permissionMode"], "permissionMode", &["ask", "bypass"])?;
+    validate_enum(&context["requestedThinkingMode"], "requestedThinkingMode", &["normal", "extended"])?;
+    let skills = context["skillReferences"].as_array().ok_or_else(|| ProtocolViolation::invalid("skillReferences must be an array"))?;
+    if skills.len() > 128 { return Err(ProtocolViolation::invalid("too many Skill references")); }
+    for value in skills {
+        let skill = expect_object(value, "skillReferences[]")?;
+        validate_exact_data_keys(skill, &["name", "startUtf16", "endUtf16"])?;
+        let name = expect_bounded_string(&skill["name"], "skill.name", 256)?;
+        let start = expect_integer_range(&skill["startUtf16"], "skill.startUtf16", 0, MAX_SAFE_INTEGER)?;
+        let end = expect_integer_range(&skill["endUtf16"], "skill.endUtf16", 0, MAX_SAFE_INTEGER)?;
+        if name.trim().is_empty() || end <= start { return Err(ProtocolViolation::invalid("invalid Skill reference")); }
+    }
+    let rules = expect_object(&context["projectRules"], "projectRules")?;
+    validate_exact_data_keys(rules, &["text", "fingerprint"])?;
+    expect_document_text(&rules["text"], "projectRules.text")?;
+    validate_fingerprint(&rules["fingerprint"], "projectRules.fingerprint")?;
+    if let Some(document) = context.get("documentContext") { validate_context_document(document, root)?; }
+    let references = context["references"].as_array().ok_or_else(|| ProtocolViolation::invalid("references must be an array"))?;
+    let mut seen = std::collections::HashSet::new();
+    for value in references {
+        let reference = expect_object(value, "reference")?;
+        validate_enum(reference.get("kind").unwrap_or(&Value::Null), "reference.kind", &["document", "chat"])?;
+        let kind = reference["kind"].as_str().expect("validated kind");
+        validate_exact_data_keys(reference, &["referenceId", "kind", "text", kind])?;
+        let id = expect_bounded_string(&reference["referenceId"], "referenceId", 256)?;
+        if id.trim().is_empty() || !seen.insert(id) { return Err(ProtocolViolation::invalid("referenceId must be nonblank and unique")); }
+        let frozen = expect_bounded_string(&reference["text"], "reference.text", 1_048_576)?;
+        if kind == "document" {
+            let document = expect_object(&reference["document"], "reference.document")?;
+            validate_exact_data_keys(document, &["snapshot", "startLine", "endLine"])?;
+            let snapshot = &document["snapshot"];
+            validate_context_document(snapshot, root)?;
+            let source = snapshot["sourceText"].as_str().expect("validated source");
+            let start = expect_integer_range(&snapshot["rangeStartUtf16"], "rangeStartUtf16", 0, MAX_SAFE_INTEGER)?;
+            let end = expect_integer_range(&snapshot["rangeEndUtf16"], "rangeEndUtf16", 0, MAX_SAFE_INTEGER)?;
+            let (Some(left), Some(right)) = (utf16_byte_index(source, start), utf16_byte_index(source, end)) else {
+                return Err(ProtocolViolation::invalid("invalid document reference range"));
+            };
+            if source.get(left..right) != Some(frozen) { return Err(ProtocolViolation::invalid("document reference text does not match frozen range")); }
+            let bytes = source.as_bytes();
+            let breaks: Vec<usize> = bytes.iter().enumerate().filter_map(|(index, byte)| {
+                if *byte == b'\r' { Some(index + if bytes.get(index + 1) == Some(&b'\n') { 2 } else { 1 }) }
+                else if *byte == b'\n' && (index == 0 || bytes[index - 1] != b'\r') { Some(index + 1) }
+                else { None }
+            }).collect();
+            let first = expect_integer_range(&document["startLine"], "startLine", 1, MAX_SAFE_INTEGER)?;
+            let last = expect_integer_range(&document["endLine"], "endLine", 1, MAX_SAFE_INTEGER)?;
+            if first != 1 + breaks.iter().filter(|offset| **offset <= left).count() as i64
+                || last != 1 + breaks.iter().filter(|offset| **offset < right).count() as i64 {
+                return Err(ProtocolViolation::invalid("document reference line numbers do not match frozen range"));
+            }
+        } else {
+            let chat = expect_object(&reference["chat"], "reference.chat")?;
+            validate_exact_data_keys(chat, &["projectId", "sessionId", "turnId", "role", "messageFingerprint", "startUtf16", "endUtf16"])?;
+            expect_bounded_string(&chat["projectId"], "chat.projectId", 64)?;
+            expect_turn_id(&chat["sessionId"], "chat.sessionId")?;
+            expect_turn_id(&chat["turnId"], "chat.turnId")?;
+            validate_enum(&chat["role"], "chat.role", &["user", "assistant"])?;
+            validate_fingerprint(&chat["messageFingerprint"], "chat.messageFingerprint")?;
+            let start = expect_integer_range(&chat["startUtf16"], "chat.startUtf16", 0, MAX_SAFE_INTEGER)?;
+            let end = expect_integer_range(&chat["endUtf16"], "chat.endUtf16", 0, MAX_SAFE_INTEGER)?;
+            if chat["projectId"] != project || end <= start || end - start != frozen.encode_utf16().count() as i64 {
+                return Err(ProtocolViolation::invalid("chat reference project or UTF-16 range is invalid"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_submission_input(text: &Value, context: &Value) -> Result<(), ProtocolViolation> {
+    let params = serde_json::json!({"text": text, "skillReferences": context["skillReferences"]});
+    validate_skill_references(params.as_object().expect("object"))?;
+    let payload = serde_json::json!({"text": text, "submittedContext": context});
+    if serde_json::to_vec(&payload).map_err(|_| ProtocolViolation::invalid("invalid submission JSON"))?.len() > 1_048_576 {
+        return Err(ProtocolViolation::invalid("text and submittedContext exceed the 1 MiB input limit"));
+    }
+    Ok(())
+}
+
 fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), ProtocolViolation> {
     let required = required_params(method)
         .ok_or_else(|| ProtocolViolation::invalid(format!("Unknown method: {method}")))?;
@@ -722,6 +845,10 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         "session.turn" => {
             expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
             validate_skill_references(params)?;
+            if let Some(value) = params.get("submittedContext") {
+                validate_submitted_context(value)?;
+                validate_submission_input(&params["text"], value)?;
+            }
             if let Some(value) = params.get("documentContext") { validate_document_context(value, "params.documentContext")?; }
             expect_turn_id(&params["turnId"], "params.turnId")?;
             if !params["retry"].is_boolean() {
@@ -1070,9 +1197,14 @@ fn validate_event_data(
     }
     match event {
         "document.proposed" => {
-            validate_exact_data_keys(data, &["turnId", "callId"])?;
+            validate_data_keys(data, &["turnId", "callId", "referenceId"], &["turnId", "callId"])?;
             expect_turn_id(&data["turnId"], "data.turnId")?;
             expect_bounded_string(&data["callId"], "data.callId", 256)?;
+            if let Some(reference) = data.get("referenceId") {
+                if expect_bounded_string(reference, "data.referenceId", 256)?.trim().is_empty() {
+                    return Err(ProtocolViolation::invalid("data.referenceId must be nonblank"));
+                }
+            }
         }
         "approval.required" => {
             const KEYS: &[&str] = &[
@@ -1677,8 +1809,10 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             }
             for (index, item) in items.iter().enumerate() {
                 let item = expect_object(item, &format!("data.items[{index}]"))?;
-                validate_exact_data_keys(
+                validate_data_keys(
                     item,
+                    &["turnId", "turnNumber", "kind", "state", "timestamp", "userText", "assistantText",
+                      "failureCode", "failureMessage", "failureRetryable", "toolActivities", "submittedContext"],
                     &[
                         "turnId",
                         "turnNumber",
@@ -1693,6 +1827,13 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                         "toolActivities",
                     ],
                 )?;
+                if let Some(context) = item.get("submittedContext").filter(|value| !value.is_null()) {
+                    validate_submitted_context(context)?;
+                    if context["projectId"] != data["projectId"] {
+                        return Err(ProtocolViolation::invalid("transcript submittedContext belongs to another project"));
+                    }
+                    validate_submission_input(&item["userText"], context)?;
+                }
                 expect_turn_id(&item["turnId"], &format!("data.items[{index}].turnId"))?;
                 expect_integer_range(
                     &item["turnNumber"],
@@ -2431,7 +2572,13 @@ mod tests {
                 .cloned()
                 .unwrap_or_else(|| Value::String("x".to_owned())),
             "boolean" => Value::Bool(false),
-            "nullableString" | "nullableBoolean" => Value::Null,
+            "nullableString" | "nullableBoolean" | "nullableSubmittedContext" => Value::Null,
+            "submittedContext" => {
+                let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures");
+                fixtures["messages"].as_array().expect("messages").iter()
+                    .find(|item| item["name"] == "submitted-document-and-chat").expect("submission fixture")
+                    ["message"]["params"]["submittedContext"].clone()
+            },
             "integer" => Value::from(rule["minimum"].as_i64().unwrap_or(0)),
             "stringArray" => Value::Array(Vec::new()),
             "object" => Value::Object(rule["items"].as_object().expect("object schema").iter()
@@ -2460,7 +2607,7 @@ mod tests {
                 Value::Bool(true)
             }
             "boolean" | "nullableBoolean" | "integer" => Value::String("wrong".to_owned()),
-            "stringArray" | "objectArray" | "object" => Value::Bool(true),
+            "stringArray" | "objectArray" | "object" | "submittedContext" | "nullableSubmittedContext" => Value::Bool(true),
             other => panic!("unknown field type: {other}"),
         }];
         if let Some(minimum) = rule["minimum"].as_i64() {
@@ -2936,8 +3083,9 @@ mod tests {
                 );
                 let mut missing = message.clone();
                 missing["data"].as_object_mut().expect("data").remove(field);
-                assert!(
+                assert_eq!(
                     parse_protocol_value(missing).is_err(),
+                    rule["required"] == Value::Bool(true),
                     "{event}.{field} missing"
                 );
                 assert_field_boundaries_rejected(&message, "data", field, rule);
@@ -3211,4 +3359,15 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn submission_size_includes_context_and_preserves_legacy_text_limit() {
+        let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures");
+        let mut request = fixtures["messages"].as_array().expect("messages").iter()
+            .find(|item| item["name"] == "submitted-document-and-chat").expect("submission fixture")["message"].clone();
+        request["params"]["text"] = Value::String("x".repeat(1_048_576));
+        assert!(parse_protocol_value(request.clone()).is_err());
+        request["params"].as_object_mut().expect("params").remove("submittedContext");
+        assert!(parse_protocol_value(request).is_ok());
+    }
+
 }

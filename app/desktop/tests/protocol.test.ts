@@ -19,6 +19,7 @@ import {
   PROTOCOL_METHODS,
   PROTOCOL_VERSION,
   RESULT_DATA_SCHEMAS,
+  SUBMITTED_CONTEXT_SCHEMA,
   ProtocolContractError,
   ProtocolTraceValidator,
   REQUEST_EVENTS,
@@ -61,6 +62,7 @@ interface ContractDocument {
   eventDataSchemas: Record<string, Record<string, ContractFieldRule>>;
   resultDataSchemas: Record<string, Record<string, ContractFieldRule>>;
   turnErrorDetailsSchema: Record<string, ContractFieldRule>;
+  submittedContextSchema: Record<string, ContractFieldRule>;
   methods: ContractMethod[];
   errorCodes: string[];
 }
@@ -119,6 +121,7 @@ test("language-neutral manifest matches TypeScript constants", async () => {
       TURN_ERROR_DETAILS_SCHEMA: Record<string, ContractFieldRule>;
     }
   ).TURN_ERROR_DETAILS_SCHEMA;
+  assert.deepEqual(contract.submittedContextSchema, SUBMITTED_CONTEXT_SCHEMA);
   assert.equal(contract.protocolVersion, PROTOCOL_VERSION);
   assert.equal(contract.maxLineBytes, MAX_PROTOCOL_LINE_BYTES);
   assert.deepEqual(contract.fullTextResultMethods, [...FULL_TEXT_RESULT_METHODS]);
@@ -334,6 +337,7 @@ test("session summaries and transcripts expose canonical lifecycle state", () =>
     "state",
     "timestamp",
     "userText",
+    "submittedContext",
     "assistantText",
     "failureCode",
     "failureMessage",
@@ -480,4 +484,15 @@ test("project-open results preserve scoped identity and reject incomplete metada
   assert.throws(() => validateResultData("workspace.select", { ...data, rulesFingerprint: "bad" }));
   const { projectId: _projectId, ...missing } = data;
   assert.throws(() => validateResultData("workspace.select", missing));
+});
+
+test("submission byte limit includes frozen context without changing legacy text limit", async () => {
+  const fixtures = await loadJson<FixtureDocument>("fixtures.json");
+  const message = structuredClone(fixtures.messages.find((item) => item.name === "submitted-document-and-chat")!.message) as {
+    params: { text: string; submittedContext?: unknown };
+  };
+  message.params.text = "x".repeat(1_048_576);
+  assert.throws(() => parseProtocolMessage(message), /1 MiB/);
+  delete message.params.submittedContext;
+  assert.doesNotThrow(() => parseProtocolMessage(message));
 });

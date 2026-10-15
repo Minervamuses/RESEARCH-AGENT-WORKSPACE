@@ -59,7 +59,8 @@
   "eventDataSchemas": {
     "document.proposed": {
       "turnId": {"type": "turnId", "required": true},
-      "callId": {"type": "string", "required": true, "maxBytes": 256}
+      "callId": {"type": "string", "required": true, "maxBytes": 256},
+      "referenceId": {"type": "string", "required": false, "maxBytes": 256, "pattern": "^[\\s\\S]*\\S[\\s\\S]*$"}
     },
     "approval.required": {
       "approvalId": {"type": "string", "required": true, "maxBytes": 256},
@@ -100,6 +101,258 @@
     "ingest.failed": {
       "stage": {"type": "string", "required": true, "maxBytes": 256},
       "partialWritePossible": {"type": "boolean", "required": true}
+    }
+  },
+  "submittedContextSchema": {
+    "projectId": {
+      "type": "string",
+      "required": true,
+      "maxBytes": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "rootPath": {
+      "type": "string",
+      "required": true,
+      "maxBytes": 8192
+    },
+    "permissionMode": {
+      "type": "string",
+      "required": true,
+      "enum": [
+        "ask",
+        "bypass"
+      ]
+    },
+    "requestedThinkingMode": {
+      "type": "string",
+      "required": true,
+      "enum": [
+        "normal",
+        "extended"
+      ]
+    },
+    "skillReferences": {
+      "type": "objectArray",
+      "required": true,
+      "maxItems": 128,
+      "items": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 256
+        },
+        "startUtf16": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "endUtf16": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "projectRules": {
+      "type": "object",
+      "required": true,
+      "items": {
+        "text": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 1048576,
+          "allowEmpty": true
+        },
+        "fingerprint": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "documentContext": {
+      "type": "object",
+      "required": false,
+      "items": {
+        "rootPath": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 8192
+        },
+        "path": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 8192
+        },
+        "editorRevision": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sourceText": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 1048576,
+          "allowEmpty": true
+        },
+        "diskFingerprint": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rangeStartUtf16": {
+          "type": "integer",
+          "required": false,
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rangeEndUtf16": {
+          "type": "integer",
+          "required": false,
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "references": {
+      "type": "objectArray",
+      "required": true,
+      "items": {
+        "referenceId": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 256
+        },
+        "kind": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "document",
+            "chat"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "required": true,
+          "maxBytes": 1048576,
+          "allowEmpty": false
+        },
+        "document": {
+          "type": "object",
+          "required": false,
+          "items": {
+            "snapshot": {
+              "type": "object",
+              "required": true,
+              "items": {
+                "rootPath": {
+                  "type": "string",
+                  "required": true,
+                  "maxBytes": 8192
+                },
+                "path": {
+                  "type": "string",
+                  "required": true,
+                  "maxBytes": 8192
+                },
+                "editorRevision": {
+                  "type": "integer",
+                  "required": true,
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sourceText": {
+                  "type": "string",
+                  "required": true,
+                  "maxBytes": 1048576,
+                  "allowEmpty": true
+                },
+                "diskFingerprint": {
+                  "type": "string",
+                  "required": true,
+                  "maxBytes": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "rangeStartUtf16": {
+                  "type": "integer",
+                  "required": true,
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "rangeEndUtf16": {
+                  "type": "integer",
+                  "required": true,
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            "startLine": {
+              "type": "integer",
+              "required": true,
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "endLine": {
+              "type": "integer",
+              "required": true,
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "chat": {
+          "type": "object",
+          "required": false,
+          "items": {
+            "projectId": {
+              "type": "string",
+              "required": true,
+              "maxBytes": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "sessionId": {
+              "type": "turnId",
+              "required": true
+            },
+            "turnId": {
+              "type": "turnId",
+              "required": true
+            },
+            "role": {
+              "type": "string",
+              "required": true,
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "messageFingerprint": {
+              "type": "string",
+              "required": true,
+              "maxBytes": 64,
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "startUtf16": {
+              "type": "integer",
+              "required": true,
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "endUtf16": {
+              "type": "integer",
+              "required": true,
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      }
     }
   },
   "resultDataSchemas": {
@@ -343,6 +596,7 @@
           "state": {"type": "string", "required": true, "enum": ["pending", "completed", "failed", "interrupted"]},
           "timestamp": {"type": "utcTimestamp", "required": true},
           "userText": {"type": "string", "required": true},
+          "submittedContext": {"type": "nullableSubmittedContext", "required": false},
           "assistantText": {"type": "nullableString", "required": true},
           "failureCode": {"type": "nullableString", "required": true, "maxBytes": 256, "enum": ["execution_failed", "persistence_failed", "interrupted", "cancelled"]},
           "failureMessage": {"type": "nullableString", "required": true, "maxBytes": 4096},
@@ -575,6 +829,7 @@
       "operation": "mutation",
       "requiredParams": ["text", "turnId", "retry"],
       "params": {
+        "submittedContext": {"type": "submittedContext", "required": false},
         "skillReferences": {
           "type": "objectArray",
           "required": false,

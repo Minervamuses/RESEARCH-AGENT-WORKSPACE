@@ -979,3 +979,18 @@ def test_submitted_context_skill_spans_match_original_display_input(tmp_path):
         _create(repository, display_input="@citation.extra", submitted_context=context)
     snapshot = _create(repository, display_input="@citation request", submitted_context=context)
     assert snapshot.document.turns[0].submitted_context == context
+
+
+@pytest.mark.parametrize("path,valid", [
+    ("//research/draft.md", False),
+    ("/research/draft\x7f.md", False),
+    ("/research/draft\x85.md", True),
+])
+def test_submitted_context_canonical_linux_paths_match_protocol(path, valid):
+    context = _submitted_context()
+    context["documentContext"]["path"] = path
+    if valid:
+        assert validate_submitted_context(context) == context
+    else:
+        with pytest.raises(ConversationValidationError, match="canonical absolute Linux path"):
+            validate_submitted_context(context)

@@ -1,6 +1,1453 @@
 {
   "messages": [
     {
+      "name": "submitted-document-and-chat",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-uppercase-project-id",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "P-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "P-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "submitted-project-id-trailing-newline",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test\n",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test\n",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "submitted-delete-control-path",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "submitted-c1-unicode-path",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-double-slash-root",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "//tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "//tmp/project",
+              "path": "//tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "//tmp/project",
+                    "path": "//tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "document-proposed-frozen-reference",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "sequence": 1,
+        "event": "document.proposed",
+        "data": {
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "callId": "doc-1",
+          "referenceId": "document-1"
+        }
+      }
+    },
+    {
+      "name": "document-proposed-blank-reference",
+      "valid": false,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000061",
+        "sequence": 1,
+        "event": "document.proposed",
+        "data": {
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "callId": "doc-1",
+          "referenceId": "   "
+        }
+      },
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "submitted-null-context",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": null
+        }
+      }
+    },
+    {
+      "name": "submitted-missing-context-rules",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-mixed-reference-union",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                },
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-missing-reference-source",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂"
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-changed-frozen-text",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "wrong",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-surrogate-split",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 12
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 12
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-changed-source-line",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 1,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-foreign-document-root",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/another",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/another",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-foreign-chat-project",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "another",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-chat-range-length",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 13
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-chat-invalid-session",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "legacy-name",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-duplicate-reference-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "document-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-unexpected-reference-field",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                },
+                "path": "/tmp/project/paper.md"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-document-traversal",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/../outside.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/../outside.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "submitted-skill-token-mismatch",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-0000000000a0",
+        "method": "session.turn",
+        "params": {
+          "text": "question",
+          "turnId": "000000000000400080000000000000a3",
+          "retry": false,
+          "submittedContext": {
+            "projectId": "p-test",
+            "rootPath": "/tmp/project",
+            "permissionMode": "ask",
+            "requestedThinkingMode": "extended",
+            "skillReferences": [
+              {
+                "name": "writer",
+                "startUtf16": 0,
+                "endUtf16": 7
+              }
+            ],
+            "projectRules": {
+              "text": "Follow project rules.",
+              "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+            },
+            "documentContext": {
+              "rootPath": "/tmp/project",
+              "path": "/tmp/project/paper.md",
+              "editorRevision": 3,
+              "sourceText": "﻿same\r\nsame🙂\r\nend",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "rangeStartUtf16": 7,
+              "rangeEndUtf16": 13
+            },
+            "references": [
+              {
+                "referenceId": "document-1",
+                "kind": "document",
+                "text": "same🙂",
+                "document": {
+                  "snapshot": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "startLine": 2,
+                  "endLine": 2
+                }
+              },
+              {
+                "referenceId": "chat-1",
+                "kind": "chat",
+                "text": "quoted🙂",
+                "chat": {
+                  "projectId": "p-test",
+                  "sessionId": "000000000000400080000000000000a1",
+                  "turnId": "000000000000400080000000000000a2",
+                  "role": "assistant",
+                  "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "startUtf16": 4,
+                  "endUtf16": 12
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "workspace-inspect",
       "valid": true,
       "message": {
@@ -67,7 +1514,9 @@
         "protocolVersion": 1,
         "messageType": "event",
         "event": "backend.ready",
-        "data": {"status": "ready"}
+        "data": {
+          "status": "ready"
+        }
       }
     },
     {
@@ -133,7 +1582,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000004",
         "method": "knowledge.ingest_file",
-        "params": {"path": "/tmp/研究 資料/paper 01.pdf"}
+        "params": {
+          "path": "/tmp/研究 資料/paper 01.pdf"
+        }
       }
     },
     {
@@ -144,7 +1595,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000020",
         "method": "knowledge.prune_apply",
-        "params": {"previewId": "prune-preview-opaque-1"}
+        "params": {
+          "previewId": "prune-preview-opaque-1"
+        }
       }
     },
     {
@@ -169,7 +1622,9 @@
         "method": "extensions.apply",
         "params": {
           "previewId": "extension-preview-opaque-1",
-          "approvedBindingHashes": ["sha256:binding-1"],
+          "approvedBindingHashes": [
+            "sha256:binding-1"
+          ],
           "turnId": "00000000000040008000000000000022",
           "retry": false
         }
@@ -189,7 +1644,9 @@
           "approvedBindingHashes": [],
           "turnId": "00000000000040008000000000000023",
           "retry": false,
-          "preview": {"raw": "must stay in Python memory"}
+          "preview": {
+            "raw": "must stay in Python memory"
+          }
         }
       }
     },
@@ -201,7 +1658,10 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000024",
         "method": "approval.resolve",
-        "params": {"approvalId": "approval-opaque-1", "approved": false}
+        "params": {
+          "approvalId": "approval-opaque-1",
+          "approved": false
+        }
       }
     },
     {
@@ -287,7 +1747,9 @@
         "messageType": "event",
         "requestId": "00000000-0000-4000-8000-000000000007",
         "event": "request.progress",
-        "data": {"stage": "agent"}
+        "data": {
+          "stage": "agent"
+        }
       }
     },
     {
@@ -348,7 +1810,9 @@
           "code": "INTERNAL_ERROR",
           "message": "內部錯誤。",
           "retryable": false,
-          "details": {"traceback": "must remain on stderr"}
+          "details": {
+            "traceback": "must remain on stderr"
+          }
         }
       }
     },
@@ -389,7 +1853,10 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000030",
         "method": "session.create",
-        "params": {"loadMcp": false, "graphRecursionLimit": 64}
+        "params": {
+          "loadMcp": false,
+          "graphRecursionLimit": 64
+        }
       }
     },
     {
@@ -411,7 +1878,11 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000071",
         "method": "session.list",
-        "params": {"projectId": "local", "offset": 0, "limit": 50}
+        "params": {
+          "projectId": "local",
+          "offset": 0,
+          "limit": 50
+        }
       }
     },
     {
@@ -466,7 +1937,10 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000072",
         "method": "session.list",
-        "params": {"projectId": "local", "limit": 51}
+        "params": {
+          "projectId": "local",
+          "limit": 51
+        }
       }
     },
     {
@@ -477,7 +1951,10 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000073",
         "method": "session.select",
-        "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+        "params": {
+          "projectId": "local",
+          "sessionId": "0123456789abcdef0123456789abcdef"
+        }
       }
     },
     {
@@ -524,7 +2001,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000031",
         "method": "session.create",
-        "params": {"llmModel": "untrusted/model"}
+        "params": {
+          "llmModel": "untrusted/model"
+        }
       }
     },
     {
@@ -536,7 +2015,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000032",
         "method": "session.set_mode",
-        "params": {"mode": "plan"}
+        "params": {
+          "mode": "plan"
+        }
       }
     },
     {
@@ -547,7 +2028,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000082",
         "method": "session.set_thinking",
-        "params": {"mode": "extended"}
+        "params": {
+          "mode": "extended"
+        }
       }
     },
     {
@@ -558,7 +2041,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000083",
         "method": "session.set_bash_permission",
-        "params": {"mode": "bypass"}
+        "params": {
+          "mode": "bypass"
+        }
       }
     },
     {
@@ -570,7 +2055,9 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000084",
         "method": "session.set_bash_permission",
-        "params": {"mode": "auto"}
+        "params": {
+          "mode": "auto"
+        }
       }
     },
     {
@@ -583,7 +2070,9 @@
         "requestId": "00000000-0000-4000-8000-000000000033",
         "method": "session.turn",
         "params": {
-          "text": {"raw": "not text"},
+          "text": {
+            "raw": "not text"
+          },
           "turnId": "00000000000040008000000000000033",
           "retry": false
         }
@@ -749,7 +2238,9 @@
           "code": "RAG_PARTIAL_WRITE_POSSIBLE",
           "message": "A partial write may have occurred.",
           "retryable": false,
-          "details": {"partialWritePossible": true}
+          "details": {
+            "partialWritePossible": true
+          }
         }
       }
     },
@@ -778,7 +2269,10 @@
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000035",
         "method": "knowledge.search",
-        "params": {"query": "研究代理", "k": 21}
+        "params": {
+          "query": "研究代理",
+          "k": 21
+        }
       }
     },
     {
@@ -790,7 +2284,11 @@
         "messageType": "result",
         "requestId": "00000000-0000-4000-8000-000000000036",
         "ok": true,
-        "data": {"rawProviderPayload": {"choices": []}}
+        "data": {
+          "rawProviderPayload": {
+            "choices": []
+          }
+        }
       }
     },
     {
@@ -802,7 +2300,9 @@
         "messageType": "event",
         "requestId": null,
         "event": "backend.ready",
-        "data": {"status": "ready"}
+        "data": {
+          "status": "ready"
+        }
       }
     },
     {
@@ -876,7 +2376,9 @@
           "executionTimeoutSeconds": 30,
           "createdAt": "2026-08-24T01:02:03Z",
           "expiresAt": "2026-08-24T01:03:03Z",
-          "rawArgs": {"shell": true}
+          "rawArgs": {
+            "shell": true
+          }
         }
       }
     },
@@ -889,7 +2391,11 @@
         "requestId": "00000000-0000-4000-8000-00000000003b",
         "sequence": 1,
         "event": "writing.file_completed",
-        "data": {"filePath": "docs/研究 paper.md", "chunks": 3, "filesCompleted": 1}
+        "data": {
+          "filePath": "docs/研究 paper.md",
+          "chunks": 3,
+          "filesCompleted": 1
+        }
       }
     },
     {
@@ -919,7 +2425,9 @@
         "messageType": "result",
         "requestId": "00000000-0000-4000-8000-000000000040",
         "ok": true,
-        "data": {"openRouterApiKey": "must remain in Python"}
+        "data": {
+          "openRouterApiKey": "must remain in Python"
+        }
       }
     },
     {
@@ -931,7 +2439,9 @@
         "messageType": "result",
         "requestId": "00000000-0000-4000-8000-000000000044",
         "ok": true,
-        "data": {"openRouterApiKey": "must remain in Python"}
+        "data": {
+          "openRouterApiKey": "must remain in Python"
+        }
       }
     },
     {
@@ -943,7 +2453,9 @@
         "messageType": "result",
         "requestId": "00000000-0000-4000-8000-000000000041",
         "ok": true,
-        "data": {"accessToken": "must remain in Python"}
+        "data": {
+          "accessToken": "must remain in Python"
+        }
       }
     },
     {
@@ -955,7 +2467,14 @@
         "messageType": "result",
         "requestId": "00000000-0000-4000-8000-000000000042",
         "ok": true,
-        "data": {"messages": [{"type": "ai", "content": "raw internal object"}]}
+        "data": {
+          "messages": [
+            {
+              "type": "ai",
+              "content": "raw internal object"
+            }
+          ]
+        }
       }
     },
     {
@@ -1633,14 +3152,297 @@
     }
   ],
   "originCases": [
-    {"name": "python-ready", "event": "backend.ready", "origin": "python", "valid": true},
-    {"name": "rust-cannot-spoof-ready", "event": "backend.ready", "origin": "rust", "valid": false, "errorCode": "PROTOCOL_INVALID"},
-    {"name": "rust-crash", "event": "backend.crashed", "origin": "rust", "valid": true},
-    {"name": "python-cannot-spoof-crash", "event": "backend.crashed", "origin": "python", "valid": false, "errorCode": "PROTOCOL_INVALID"},
-    {"name": "python-protocol-error", "event": "backend.protocol_error", "origin": "python", "valid": true},
-    {"name": "rust-protocol-error", "event": "backend.protocol_error", "origin": "rust", "valid": true}
+    {
+      "name": "python-ready",
+      "event": "backend.ready",
+      "origin": "python",
+      "valid": true
+    },
+    {
+      "name": "rust-cannot-spoof-ready",
+      "event": "backend.ready",
+      "origin": "rust",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "rust-crash",
+      "event": "backend.crashed",
+      "origin": "rust",
+      "valid": true
+    },
+    {
+      "name": "python-cannot-spoof-crash",
+      "event": "backend.crashed",
+      "origin": "python",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "python-protocol-error",
+      "event": "backend.protocol_error",
+      "origin": "python",
+      "valid": true
+    },
+    {
+      "name": "rust-protocol-error",
+      "event": "backend.protocol_error",
+      "origin": "rust",
+      "valid": true
+    }
   ],
   "traces": [
+    {
+      "name": "transcript-frozen-submission",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-0000000000a0",
+          "method": "session.transcript",
+          "params": {
+            "projectId": "p-test",
+            "sessionId": "000000000000400080000000000000a1"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-0000000000a0",
+          "ok": true,
+          "data": {
+            "projectId": "p-test",
+            "sessionId": "000000000000400080000000000000a1",
+            "status": "ready",
+            "issue": null,
+            "items": [
+              {
+                "turnId": "000000000000400080000000000000a3",
+                "turnNumber": 1,
+                "kind": "conversational",
+                "state": "failed",
+                "timestamp": "2026-10-15T00:00:00Z",
+                "userText": "question",
+                "assistantText": null,
+                "failureCode": "execution_failed",
+                "failureMessage": "fixture failure",
+                "failureRetryable": true,
+                "toolActivities": [],
+                "submittedContext": {
+                  "projectId": "p-test",
+                  "rootPath": "/tmp/project",
+                  "permissionMode": "ask",
+                  "requestedThinkingMode": "extended",
+                  "skillReferences": [],
+                  "projectRules": {
+                    "text": "Follow project rules.",
+                    "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+                  },
+                  "documentContext": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "references": [
+                    {
+                      "referenceId": "document-1",
+                      "kind": "document",
+                      "text": "same🙂",
+                      "document": {
+                        "snapshot": {
+                          "rootPath": "/tmp/project",
+                          "path": "/tmp/project/paper.md",
+                          "editorRevision": 3,
+                          "sourceText": "﻿same\r\nsame🙂\r\nend",
+                          "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "rangeStartUtf16": 7,
+                          "rangeEndUtf16": 13
+                        },
+                        "startLine": 2,
+                        "endLine": 2
+                      }
+                    },
+                    {
+                      "referenceId": "chat-1",
+                      "kind": "chat",
+                      "text": "quoted🙂",
+                      "chat": {
+                        "projectId": "p-test",
+                        "sessionId": "000000000000400080000000000000a1",
+                        "turnId": "000000000000400080000000000000a2",
+                        "role": "assistant",
+                        "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "startUtf16": 4,
+                        "endUtf16": 12
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "total": 1,
+            "offset": 0,
+            "limit": 20,
+            "hasMore": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "transcript-legacy-null-submission",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-0000000000a0",
+          "method": "session.transcript",
+          "params": {
+            "projectId": "p-test",
+            "sessionId": "000000000000400080000000000000a1"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-0000000000a0",
+          "ok": true,
+          "data": {
+            "projectId": "p-test",
+            "sessionId": "000000000000400080000000000000a1",
+            "status": "ready",
+            "issue": null,
+            "items": [
+              {
+                "turnId": "000000000000400080000000000000a3",
+                "turnNumber": 1,
+                "kind": "conversational",
+                "state": "failed",
+                "timestamp": "2026-10-15T00:00:00Z",
+                "userText": "question",
+                "assistantText": null,
+                "failureCode": "execution_failed",
+                "failureMessage": "fixture failure",
+                "failureRetryable": true,
+                "toolActivities": [],
+                "submittedContext": null
+              }
+            ],
+            "total": 1,
+            "offset": 0,
+            "limit": 20,
+            "hasMore": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "transcript-foreign-submission",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-0000000000a0",
+          "method": "session.transcript",
+          "params": {
+            "projectId": "p-test",
+            "sessionId": "000000000000400080000000000000a1"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-0000000000a0",
+          "ok": true,
+          "data": {
+            "projectId": "another",
+            "sessionId": "000000000000400080000000000000a1",
+            "status": "ready",
+            "issue": null,
+            "items": [
+              {
+                "turnId": "000000000000400080000000000000a3",
+                "turnNumber": 1,
+                "kind": "conversational",
+                "state": "failed",
+                "timestamp": "2026-10-15T00:00:00Z",
+                "userText": "question",
+                "assistantText": null,
+                "failureCode": "execution_failed",
+                "failureMessage": "fixture failure",
+                "failureRetryable": true,
+                "toolActivities": [],
+                "submittedContext": {
+                  "projectId": "p-test",
+                  "rootPath": "/tmp/project",
+                  "permissionMode": "ask",
+                  "requestedThinkingMode": "extended",
+                  "skillReferences": [],
+                  "projectRules": {
+                    "text": "Follow project rules.",
+                    "fingerprint": "113d17f46439ceb0507b8bdc5445cd150678495bd95b4582ecde29ec7d79b73d"
+                  },
+                  "documentContext": {
+                    "rootPath": "/tmp/project",
+                    "path": "/tmp/project/paper.md",
+                    "editorRevision": 3,
+                    "sourceText": "﻿same\r\nsame🙂\r\nend",
+                    "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "rangeStartUtf16": 7,
+                    "rangeEndUtf16": 13
+                  },
+                  "references": [
+                    {
+                      "referenceId": "document-1",
+                      "kind": "document",
+                      "text": "same🙂",
+                      "document": {
+                        "snapshot": {
+                          "rootPath": "/tmp/project",
+                          "path": "/tmp/project/paper.md",
+                          "editorRevision": 3,
+                          "sourceText": "﻿same\r\nsame🙂\r\nend",
+                          "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "rangeStartUtf16": 7,
+                          "rangeEndUtf16": 13
+                        },
+                        "startLine": 2,
+                        "endLine": 2
+                      }
+                    },
+                    {
+                      "referenceId": "chat-1",
+                      "kind": "chat",
+                      "text": "quoted🙂",
+                      "chat": {
+                        "projectId": "p-test",
+                        "sessionId": "000000000000400080000000000000a1",
+                        "turnId": "000000000000400080000000000000a2",
+                        "role": "assistant",
+                        "messageFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "startUtf16": 4,
+                        "endUtf16": 12
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "total": 1,
+            "offset": 0,
+            "limit": 20,
+            "hasMore": false
+          }
+        }
+      ]
+    },
     {
       "name": "ordered-request-event-result",
       "valid": true,
@@ -1658,7 +3460,9 @@
           "requestId": "00000000-0000-4000-8000-000000000010",
           "sequence": 1,
           "event": "request.started",
-          "data": {"stage": "diagnostics"}
+          "data": {
+            "stage": "diagnostics"
+          }
         },
         {
           "protocolVersion": 1,
@@ -1712,7 +3516,9 @@
           "requestId": "00000000-0000-4000-8000-000000000012",
           "sequence": 2,
           "event": "request.progress",
-          "data": {"stage": "agent"}
+          "data": {
+            "stage": "agent"
+          }
         }
       ]
     },
@@ -1741,7 +3547,9 @@
           "requestId": "00000000-0000-4000-8000-000000000013",
           "sequence": 1,
           "event": "request.progress",
-          "data": {"stage": "late"}
+          "data": {
+            "stage": "late"
+          }
         }
       ]
     },
@@ -1756,7 +3564,9 @@
           "requestId": "00000000-0000-4000-8000-000000000014",
           "sequence": 1,
           "event": "request.progress",
-          "data": {"stage": "unknown"}
+          "data": {
+            "stage": "unknown"
+          }
         }
       ]
     },
@@ -1779,7 +3589,13 @@
           "data": {
             "status": "ready",
             "issue": null,
-            "projects": [{"projectId": "local", "name": "Local research", "sessionCount": 1}],
+            "projects": [
+              {
+                "projectId": "local",
+                "name": "Local research",
+                "sessionCount": 1
+              }
+            ],
             "selectedProjectId": "local",
             "selectedSessionId": "0123456789abcdef0123456789abcdef"
           }
@@ -1789,7 +3605,11 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000078",
           "method": "session.list",
-          "params": {"projectId": "local", "offset": 0, "limit": 50}
+          "params": {
+            "projectId": "local",
+            "offset": 0,
+            "limit": 50
+          }
         },
         {
           "protocolVersion": 1,
@@ -1800,15 +3620,17 @@
             "projectId": "local",
             "status": "ready",
             "issue": null,
-            "items": [{
-              "sessionId": "0123456789abcdef0123456789abcdef",
-              "title": "研究摘要",
-              "turnCount": 4,
-              "createdAt": "2026-08-28T00:00:00Z",
-              "updatedAt": "2026-08-28T00:00:00Z",
-              "status": "ready",
-              "issue": null
-            }],
+            "items": [
+              {
+                "sessionId": "0123456789abcdef0123456789abcdef",
+                "title": "研究摘要",
+                "turnCount": 4,
+                "createdAt": "2026-08-28T00:00:00Z",
+                "updatedAt": "2026-08-28T00:00:00Z",
+                "status": "ready",
+                "issue": null
+              }
+            ],
             "total": 1,
             "offset": 0,
             "limit": 50,
@@ -1820,7 +3642,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000079",
           "method": "session.select",
-          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+          "params": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef"
+          }
         },
         {
           "protocolVersion": 1,
@@ -1847,7 +3672,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-00000000007a",
           "method": "session.retry_registration",
-          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+          "params": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef"
+          }
         },
         {
           "protocolVersion": 1,
@@ -1866,7 +3694,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-00000000007b",
           "method": "session.transcript",
-          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+          "params": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef"
+          }
         },
         {
           "protocolVersion": 1,
@@ -1890,14 +3721,16 @@
                 "failureCode": null,
                 "failureMessage": null,
                 "failureRetryable": null,
-                "toolActivities": [{
-                  "callId": "call-1",
-                  "name": "rag_search",
-                  "arguments": "{\"query\":\"研究\"}",
-                  "result": "bounded local result",
-                  "status": "ok",
-                  "promptEligible": true
-                }]
+                "toolActivities": [
+                  {
+                    "callId": "call-1",
+                    "name": "rag_search",
+                    "arguments": "{\"query\":\"研究\"}",
+                    "result": "bounded local result",
+                    "status": "ok",
+                    "promptEligible": true
+                  }
+                ]
               },
               {
                 "turnId": "00000000000040008000000000000082",
@@ -1990,7 +3823,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-00000000007d",
           "method": "session.transcript",
-          "params": {"projectId": "local", "sessionId": "0123456789abcdef0123456789abcdef"}
+          "params": {
+            "projectId": "local",
+            "sessionId": "0123456789abcdef0123456789abcdef"
+          }
         },
         {
           "protocolVersion": 1,
@@ -2002,26 +3838,30 @@
             "sessionId": "0123456789abcdef0123456789abcdef",
             "status": "ready",
             "issue": null,
-            "items": [{
-              "turnId": "00000000000040008000000000000085",
-              "turnNumber": 1,
-              "kind": "conversational",
-              "state": "completed",
-              "timestamp": "2026-08-28T00:00:00Z",
-              "userText": "question",
-              "assistantText": "answer",
-              "failureCode": null,
-              "failureMessage": null,
-              "failureRetryable": null,
-              "toolActivities": [{
-                "callId": null,
-                "name": "legacy_tool",
-                "arguments": "{}",
-                "result": "display only",
-                "status": "running",
-                "promptEligible": false
-              }]
-            }],
+            "items": [
+              {
+                "turnId": "00000000000040008000000000000085",
+                "turnNumber": 1,
+                "kind": "conversational",
+                "state": "completed",
+                "timestamp": "2026-08-28T00:00:00Z",
+                "userText": "question",
+                "assistantText": "answer",
+                "failureCode": null,
+                "failureMessage": null,
+                "failureRetryable": null,
+                "toolActivities": [
+                  {
+                    "callId": null,
+                    "name": "legacy_tool",
+                    "arguments": "{}",
+                    "result": "display only",
+                    "status": "running",
+                    "promptEligible": false
+                  }
+                ]
+              }
+            ],
             "total": 1,
             "offset": 0,
             "limit": 20,
@@ -2039,7 +3879,10 @@
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000066",
           "method": "session.create",
-          "params": {"loadMcp": false, "graphRecursionLimit": 64}
+          "params": {
+            "loadMcp": false,
+            "graphRecursionLimit": 64
+          }
         },
         {
           "protocolVersion": 1,
@@ -2052,8 +3895,15 @@
             "graphRecursionLimit": 64,
             "thinkingMode": "normal",
             "bashPermissionMode": "ask",
-            "slashCommands": [{"name": "literature-review", "description": "Review literature."}],
-            "loadedSkills": ["literature-review"],
+            "slashCommands": [
+              {
+                "name": "literature-review",
+                "description": "Review literature."
+              }
+            ],
+            "loadedSkills": [
+              "literature-review"
+            ],
             "mcpFamilies": [],
             "startupDiagnostics": [],
             "extensionRevision": 2
@@ -2397,7 +4247,9 @@
           "data": {
             "previewId": "extension-preview-opaque-2",
             "summary": "一項 MCP binding 等待核准。",
-            "proposedSkills": ["literature-review"],
+            "proposedSkills": [
+              "literature-review"
+            ],
             "bindings": [
               {
                 "name": "local-search",
@@ -2405,9 +4257,14 @@
                 "bindingHash": "sha256:binding-2",
                 "requiresApproval": true,
                 "command": "/conda/envs/app/bin/python",
-                "arguments": ["server.py", "--safe"],
+                "arguments": [
+                  "server.py",
+                  "--safe"
+                ],
                 "workingDirectory": "/workspace/extensions/local-search",
-                "environmentNames": ["LOCAL_SEARCH_MODE"]
+                "environmentNames": [
+                  "LOCAL_SEARCH_MODE"
+                ]
               }
             ]
           }
@@ -2436,7 +4293,9 @@
             "summary": "摘要",
             "proposedSkills": [],
             "bindings": [],
-            "preview": {"privateSkillHash": "must remain in Python"}
+            "preview": {
+              "privateSkillHash": "must remain in Python"
+            }
           }
         }
       ]

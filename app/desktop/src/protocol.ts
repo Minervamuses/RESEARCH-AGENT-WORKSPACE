@@ -112,6 +112,8 @@ export interface FieldRule {
     | "stringArray"
     | "object"
     | "objectArray"
+    | "submittedContext"
+    | "nullableSubmittedContext"
     | "requestId"
     | "turnId"
     | "utcTimestamp";
@@ -174,6 +176,259 @@ export const DOCUMENT_CONTEXT_SCHEMA: FieldSchema = {
   rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
 };
 
+export const SUBMITTED_CONTEXT_SCHEMA: FieldSchema = {
+  "projectId": {
+    "type": "string",
+    "required": true,
+    "maxBytes": 64,
+    "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+  },
+  "rootPath": {
+    "type": "string",
+    "required": true,
+    "maxBytes": 8192
+  },
+  "permissionMode": {
+    "type": "string",
+    "required": true,
+    "enum": [
+      "ask",
+      "bypass"
+    ]
+  },
+  "requestedThinkingMode": {
+    "type": "string",
+    "required": true,
+    "enum": [
+      "normal",
+      "extended"
+    ]
+  },
+  "skillReferences": {
+    "type": "objectArray",
+    "required": true,
+    "maxItems": 128,
+    "items": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 256
+      },
+      "startUtf16": {
+        "type": "integer",
+        "required": true,
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "endUtf16": {
+        "type": "integer",
+        "required": true,
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "projectRules": {
+    "type": "object",
+    "required": true,
+    "items": {
+      "text": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 1048576,
+        "allowEmpty": true
+      },
+      "fingerprint": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 64,
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  },
+  "documentContext": {
+    "type": "object",
+    "required": false,
+    "items": {
+      "rootPath": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 8192
+      },
+      "path": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 8192
+      },
+      "editorRevision": {
+        "type": "integer",
+        "required": true,
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "sourceText": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 1048576,
+        "allowEmpty": true
+      },
+      "diskFingerprint": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 64,
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "rangeStartUtf16": {
+        "type": "integer",
+        "required": false,
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "rangeEndUtf16": {
+        "type": "integer",
+        "required": false,
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "references": {
+    "type": "objectArray",
+    "required": true,
+    "items": {
+      "referenceId": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 256
+      },
+      "kind": {
+        "type": "string",
+        "required": true,
+        "enum": [
+          "document",
+          "chat"
+        ]
+      },
+      "text": {
+        "type": "string",
+        "required": true,
+        "maxBytes": 1048576,
+        "allowEmpty": false
+      },
+      "document": {
+        "type": "object",
+        "required": false,
+        "items": {
+          "snapshot": {
+            "type": "object",
+            "required": true,
+            "items": {
+              "rootPath": {
+                "type": "string",
+                "required": true,
+                "maxBytes": 8192
+              },
+              "path": {
+                "type": "string",
+                "required": true,
+                "maxBytes": 8192
+              },
+              "editorRevision": {
+                "type": "integer",
+                "required": true,
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "sourceText": {
+                "type": "string",
+                "required": true,
+                "maxBytes": 1048576,
+                "allowEmpty": true
+              },
+              "diskFingerprint": {
+                "type": "string",
+                "required": true,
+                "maxBytes": 64,
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "rangeStartUtf16": {
+                "type": "integer",
+                "required": true,
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "rangeEndUtf16": {
+                "type": "integer",
+                "required": true,
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "startLine": {
+            "type": "integer",
+            "required": true,
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "endLine": {
+            "type": "integer",
+            "required": true,
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "chat": {
+        "type": "object",
+        "required": false,
+        "items": {
+          "projectId": {
+            "type": "string",
+            "required": true,
+            "maxBytes": 64,
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "sessionId": {
+            "type": "turnId",
+            "required": true
+          },
+          "turnId": {
+            "type": "turnId",
+            "required": true
+          },
+          "role": {
+            "type": "string",
+            "required": true,
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "messageFingerprint": {
+            "type": "string",
+            "required": true,
+            "maxBytes": 64,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "startUtf16": {
+            "type": "integer",
+            "required": true,
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "endUtf16": {
+            "type": "integer",
+            "required": true,
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    }
+  }
+};
+
 export const DOCUMENT_APPROVAL_DATA_SCHEMA: FieldSchema = {
   approvalId: { type: "string", required: true, maxBytes: 256 },
   parentRequestId: { type: "requestId", required: true },
@@ -209,6 +464,7 @@ export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
   "document.proposed": {
     turnId: { type: "turnId", required: true },
     callId: { type: "string", required: true, maxBytes: 256 },
+    referenceId: { type: "string", required: false, maxBytes: 256, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" },
   },
   "approval.required": {
     approvalId: { type: "string", required: true, maxBytes: 256 },
@@ -495,6 +751,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
         },
         timestamp: { type: "utcTimestamp", required: true },
         userText: { type: "string", required: true },
+        submittedContext: { type: "nullableSubmittedContext", required: false },
         assistantText: { type: "nullableString", required: true },
         failureCode: {
           type: "nullableString",
@@ -660,6 +917,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "session.status": {},
   "session.turn": {
+    submittedContext: { type: "submittedContext", required: false },
     skillReferences: {
       type: "objectArray",
       required: false,
@@ -870,6 +1128,7 @@ export interface TranscriptTurnDto {
   state: "pending" | "completed" | "failed" | "interrupted";
   timestamp: string;
   userText: string;
+  submittedContext?: SubmittedContext | null;
   assistantText: string | null;
   failureCode: "execution_failed" | "persistence_failed" | "interrupted" | "cancelled" | null;
   failureMessage: string | null;
@@ -966,6 +1225,43 @@ export interface DocumentContextDto {
   diskFingerprint: string;
   rangeStartUtf16?: number;
   rangeEndUtf16?: number;
+}
+
+export type Reference =
+  | {
+      referenceId: string;
+      kind: "document";
+      text: string;
+      document: {
+        snapshot: DocumentContextDto & { rangeStartUtf16: number; rangeEndUtf16: number };
+        startLine: number;
+        endLine: number;
+      };
+    }
+  | {
+      referenceId: string;
+      kind: "chat";
+      text: string;
+      chat: {
+        projectId: string;
+        sessionId: string;
+        turnId: string;
+        role: "user" | "assistant";
+        messageFingerprint: string;
+        startUtf16: number;
+        endUtf16: number;
+      };
+    };
+
+export interface SubmittedContext {
+  projectId: string;
+  rootPath: string;
+  permissionMode: "ask" | "bypass";
+  requestedThinkingMode: "normal" | "extended";
+  skillReferences: SkillReferenceDto[];
+  projectRules: { text: string; fingerprint: string };
+  documentContext?: DocumentContextDto;
+  references: Reference[];
 }
 
 export interface DocumentOperationDto {
@@ -1168,10 +1464,16 @@ function isValidUtcTimestamp(value: string): boolean {
 }
 
 function validateFieldRule(value: unknown, rule: FieldRule, field: string): void {
+  if (rule.type === "submittedContext" || rule.type === "nullableSubmittedContext") {
+    if (value === null && rule.type === "nullableSubmittedContext") return;
+    validateSubmittedContext(value);
+    return;
+  }
   if (rule.type === "string") {
     const text = rule.allowEmpty && typeof value === "string" ? value : expectString(value, field);
-    if (rule.pattern !== undefined && !new RegExp(rule.pattern).test(text)) {
-      invalid(`${field} has an invalid format`);
+    if (rule.pattern !== undefined) {
+      const match = new RegExp(rule.pattern).exec(text);
+      if (!match || match.index !== 0 || match[0].length !== text.length) invalid(`${field} has an invalid format`);
     }
     for (let index = 0; index < text.length; index += 1) {
       const unit = text.charCodeAt(index);
@@ -1365,9 +1667,74 @@ function validateSkillReferences(params: JsonObject): void {
   }
 }
 
+function validateProjectPath(value: string, field: string): void {
+  if (!value.startsWith("/") || /[\\\x00-\x1f\x7f]/.test(value) ||
+      (value !== "/" && value.split("/").slice(1).some((part) => !part || part === "." || part === ".."))) {
+    invalid(`${field} must be an absolute normalized Linux path`);
+  }
+}
+
+function validateContextDocument(snapshot: DocumentContextDto, root: string): void {
+  validateProjectPath(snapshot.path, "document.path");
+  if (snapshot.rootPath !== root || snapshot.path === root ||
+      !snapshot.path.startsWith(root === "/" ? "/" : root + "/")) {
+    invalid("document snapshot belongs to another project root");
+  }
+  validateDocumentRange(snapshot as unknown as JsonObject, "submittedContext.document", true);
+}
+
+export function validateSubmittedContext(value: unknown): asserts value is SubmittedContext {
+  const context = expectObject(value, "submittedContext");
+  validateObjectSchema(context, SUBMITTED_CONTEXT_SCHEMA, "submittedContext");
+  if (encoder.encode(JSON.stringify(context)).byteLength > 1_048_576) invalid("submittedContext exceeds the 1 MiB input limit");
+  const submitted = value as SubmittedContext;
+  validateProjectPath(submitted.rootPath, "rootPath");
+  for (const skill of submitted.skillReferences) {
+    if (!skill.name.trim() || skill.endUtf16 <= skill.startUtf16) invalid("invalid submitted Skill reference");
+  }
+  if (submitted.documentContext) validateContextDocument(submitted.documentContext, submitted.rootPath);
+  const seen = new Set<string>();
+  for (const reference of submitted.references) {
+    if (!reference.referenceId.trim() || seen.has(reference.referenceId)) invalid("referenceId must be nonblank and unique");
+    seen.add(reference.referenceId);
+    if (reference.kind === "document") {
+      if (!("document" in reference) || "chat" in reference) invalid("document reference requires only document source");
+      const { snapshot, startLine, endLine } = reference.document;
+      validateContextDocument(snapshot, submitted.rootPath);
+      const start = snapshot.rangeStartUtf16, end = snapshot.rangeEndUtf16;
+      if (snapshot.sourceText.slice(start, end) !== reference.text) invalid("document reference text does not match frozen range");
+      const breaks = [...snapshot.sourceText.matchAll(/\r\n|\r|\n/g)].map((match) => match.index! + match[0].length);
+      if (startLine !== 1 + breaks.filter((offset) => offset <= start).length ||
+          endLine !== 1 + breaks.filter((offset) => offset < end).length) {
+        invalid("document reference line numbers do not match frozen range");
+      }
+    } else {
+      if (!("chat" in reference) || "document" in reference) invalid("chat reference requires only chat source");
+      const chat = reference.chat;
+      if (chat.projectId !== submitted.projectId || chat.endUtf16 <= chat.startUtf16 ||
+          chat.endUtf16 - chat.startUtf16 !== reference.text.length) {
+        invalid("chat reference project or UTF-16 range is invalid");
+      }
+    }
+  }
+}
+
+function validateSubmissionSize(text: string, submittedContext: SubmittedContext): void {
+  if (encoder.encode(JSON.stringify({ text, submittedContext })).byteLength > 1_048_576) {
+    invalid("text and submittedContext exceed the 1 MiB input limit");
+  }
+}
+
 function validateParams(method: ProtocolMethod, params: JsonObject): void {
   validateObjectSchema(params, METHOD_PARAM_SCHEMAS[method], "params");
-  if (method === "session.turn") validateSkillReferences(params);
+  if (method === "session.turn") {
+    validateSkillReferences(params);
+    if (params.submittedContext !== undefined) {
+      const context = params.submittedContext as SubmittedContext;
+      validateSkillReferences({ text: params.text, skillReferences: context.skillReferences });
+      validateSubmissionSize(params.text as string, context);
+    }
+  }
   if (params.documentContext !== undefined) validateDocumentRange(params.documentContext as JsonObject, "params.documentContext", true);
   if (params.expectedSnapshot !== undefined) validateDocumentRange(params.expectedSnapshot as JsonObject, "params.expectedSnapshot", true);
   if (method === "document.apply" && (("callId" in params) === ("undoOfCallId" in params))) {
@@ -1396,6 +1763,12 @@ export function validateResultData(method: ProtocolMethod, data: JsonObject): vo
   }
   if (method === "session.transcript") {
     (data.items as JsonObject[]).forEach((item) => {
+      const context = item.submittedContext as SubmittedContext | null | undefined;
+      if (context) {
+        if (context.projectId !== data.projectId) invalid("transcript submittedContext belongs to another project");
+        validateSkillReferences({ text: item.userText, skillReferences: context.skillReferences });
+        validateSubmissionSize(item.userText as string, context);
+      }
       const failureValues = [
         item.failureCode,
         item.failureMessage,

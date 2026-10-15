@@ -309,6 +309,7 @@ def test_session_summary_and_transcript_expose_complete_durable_lifecycle() -> N
         "state",
         "timestamp",
         "userText",
+        "submittedContext",
         "assistantText",
         "failureCode",
         "failureMessage",
@@ -576,3 +577,14 @@ def test_project_open_result_requires_scoped_identity_and_valid_metadata():
     del data["projectId"]
     with pytest.raises(ProtocolError):
         validate_result_data("workspace.select", data)
+
+
+def test_submission_byte_limit_includes_frozen_context_and_preserves_legacy_text():
+    import copy
+    request = copy.deepcopy(next(case["message"] for case in FIXTURES["messages"]
+                                 if case["name"] == "submitted-document-and-chat"))
+    request["params"]["text"] = "x" * 1_048_576
+    with pytest.raises(ProtocolError, match="1 MiB"):
+        validate_message(request)
+    del request["params"]["submittedContext"]
+    validate_message(request)

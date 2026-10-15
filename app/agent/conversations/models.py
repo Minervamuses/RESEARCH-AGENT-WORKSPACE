@@ -190,7 +190,11 @@ def _context_integer(value: object, field: str) -> int:
 def _context_path(value: object, field: str) -> str:
     value = _validate_text(value, field, 8192, nonblank=True)
     path = PurePosixPath(value)
-    if not value.startswith("/") or "\\" in value or ".." in path.parts or str(path) != value or any(ord(char) < 32 for char in value):
+    if (
+        not value.startswith("/") or value.startswith("//") or "\\" in value
+        or ".." in path.parts or str(path) != value
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
         _invalid(f"{field} must be a canonical absolute Linux path")
     return value
 

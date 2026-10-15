@@ -10,6 +10,7 @@ from typing import Any
 from uuid import RFC_4122, UUID
 
 from agent.paths import find_app_root
+from agent.conversations import ConversationValidationError, validate_submitted_context
 
 
 PROTOCOL_DIR = find_app_root() / "desktop" / "protocol" / "v1"
@@ -115,6 +116,17 @@ def validate_turn_id(value: Any, field: str = "turnId") -> str:
 
 def _validate_field_rule(value: Any, rule: dict[str, Any], field: str) -> None:
     field_type = rule["type"]
+    if field_type in {"submittedContext", "nullableSubmittedContext"}:
+        if value is None and field_type == "nullableSubmittedContext":
+            return
+        if value is None:
+            _invalid(f"{field} must be an object")
+        _validate_object_schema(_expect_object(value, field), CONTRACT["submittedContextSchema"], field)
+        try:
+            validate_submitted_context(value)
+        except ConversationValidationError as exc:
+            _invalid(str(exc))
+        return
     if field_type == "string":
         text = value if rule.get("allowEmpty") and isinstance(value, str) else _expect_string(value, field)
         try:
@@ -251,6 +263,12 @@ def _validate_skill_references(params: dict[str, Any]) -> None:
             _invalid("params.skillReferences must end at a Skill token boundary")
 
 
+def _validate_submission_size(text: str, context: dict[str, Any]) -> None:
+    payload = json.dumps({"text": text, "submittedContext": context}, ensure_ascii=False, separators=(",", ":"))
+    if len(payload.encode("utf-8")) > 1_048_576:
+        _invalid("text and submittedContext exceed the 1 MiB input limit")
+
+
 def _validate_document_params(method: str, params: dict[str, Any]) -> None:
     context = params.get("documentContext")
     if context is not None:
@@ -359,6 +377,12 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
         _invalid(f"{method} success must be durably completed")
     if method == "session.transcript":
         for item in data["items"]:
+            context = item.get("submittedContext")
+            if context is not None:
+                if context["projectId"] != data["projectId"]:
+                    _invalid("transcript submittedContext belongs to another project")
+                _validate_skill_references({"text": item["userText"], "skillReferences": context["skillReferences"]})
+                _validate_submission_size(item["userText"], context)
             state = item["state"]
             assistant_text = item["assistantText"]
             failure_values = (
@@ -433,6 +457,10 @@ def validate_message(value: Any) -> dict[str, Any]:
         _validate_document_params(method, params)
         if method == "session.turn":
             _validate_skill_references(params)
+            if "submittedContext" in params:
+                context = params["submittedContext"]
+                _validate_skill_references({"text": params["text"], "skillReferences": context["skillReferences"]})
+                _validate_submission_size(params["text"], context)
         return message
 
     if message_type == "event":
