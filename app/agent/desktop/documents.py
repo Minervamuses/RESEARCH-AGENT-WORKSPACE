@@ -229,14 +229,6 @@ class DocumentWorkspace:
             self._candidates[key] = candidate
             return copy.deepcopy(candidate)
 
-    def get_candidate(self, turn_id: str, call_id: str) -> dict[str, Any]:
-        """Return a copy of an operation prepared in this process."""
-        with self._lock:
-            candidate = self._candidates.get((turn_id, call_id))
-            if candidate is None:
-                raise DocumentError("unknown document operation; do not replay after restart")
-            return copy.deepcopy(candidate)
-
     @staticmethod
     def _same_editor(left: dict[str, Any], right: dict[str, Any]) -> bool:
         return all(left[key] == right[key] for key in ("rootPath", "path", "editorRevision", "sourceText"))
