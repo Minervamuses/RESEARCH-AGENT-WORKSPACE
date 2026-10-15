@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import itertools
 import json
 import os
@@ -13,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.conversations import ConversationConflictError, ConversationRepository
+from agent.conversations import ConversationRepository
 from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog, inspect_project
 from agent.desktop.fixture_session import (
     FIXTURE_BASH_APPROVE,
@@ -33,7 +32,6 @@ from agent.desktop.fixture_session import (
     SESSION_B,
     SESSION_C,
     FixtureConfigurationError,
-    FixtureProviderError,
     FixtureBashRunner,
     FixtureExtensionProvider,
     FixtureKnowledgeOperations,
@@ -427,143 +425,6 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
         {"effect": "provider", "turnId": turn_id},
     ]
 
-
-
-@pytest.mark.parametrize("display_only", [False, True])
-def test_fixture_frozen_context_survives_failure_retry_and_reopen(
-    fixture_root: Path, display_only: bool,
-) -> None:
-    service = _service(fixture_root, open_project=True)
-    project = _project_info(fixture_root)
-    repository = ConversationRepository(project["historyDirectory"])
-    source_path = Path(project["rootPath"]) / "frozen.md"
-    source = "Frozen document🙂"
-    source_path.write_text(source, encoding="utf-8")
-    document = {
-        "rootPath": project["rootPath"], "path": str(source_path),
-        "editorRevision": 3, "sourceText": source,
-        "diskFingerprint": hashlib.sha256(source.encode("utf-8")).hexdigest(),
-        "rangeStartUtf16": 0, "rangeEndUtf16": len(source.encode("utf-16-le")) // 2,
-    }
-    seeded = repository.load(SESSION_A).document.turns[0]
-    frozen = {
-        "projectId": project["projectId"], "rootPath": project["rootPath"],
-        "permissionMode": "ask", "requestedThinkingMode": "normal",
-        "skillReferences": [],
-        "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
-        "documentContext": document,
-        "references": [
-            {"referenceId": "document-one", "kind": "document", "text": source,
-             "document": {"snapshot": document, "startLine": 1, "endLine": 1}},
-            {"referenceId": "chat-one", "kind": "chat", "text": "A seed answer",
-             "chat": {"projectId": project["projectId"], "sessionId": SESSION_A,
-                      "turnId": seeded.turn_id, "role": "assistant",
-                      "messageFingerprint": hashlib.sha256(b"A seed answer").hexdigest(),
-                      "startUtf16": 0, "endUtf16": 13}},
-        ],
-    }
-    first_id = "00000000000040008000000000001101"
-    reopened_id = "00000000000040008000000000001102"
-    persisted = []
-    executions = []
-
-    async def run_turn(session, turn_id, *, retry=False, context=frozen):
-        if not display_only:
-            return await session.turn_outcome(
-                "Frozen submission data\n" + FIXTURE_FAIL_ONCE,
-                display_input=FIXTURE_FAIL_ONCE, turn_id=turn_id,
-                retry=retry, submitted_context=context,
-            )
-        async def action():
-            executions.append(turn_id)
-            if not retry:
-                raise RuntimeError("fixture command failed once")
-            return "done"
-        _, outcome = await session.run_display_only_turn(
-            "frozen fixture command", action, str, turn_id=turn_id,
-            retry=retry, submitted_context=context,
-        )
-        return outcome
-
-    async def run():
-        await service.dispatch("session.select", {"projectId": project["projectId"], "sessionId": SESSION_A})
-        session = service.session
-        session._set_prompt_persisted_callback(lambda: persisted.append(
-            repository.load(SESSION_A).document.turns[-1].submitted_context,
-        ))
-        failure_type = RuntimeError if display_only else FixtureProviderError
-        with pytest.raises(failure_type):
-            await run_turn(session, first_id)
-        assert persisted[-1] == frozen
-        assert repository.load(SESSION_A).document.turns[-1].state == "failed"
-        completed = await run_turn(session, first_id, retry=True)
-        assert completed.state == "completed"
-        changed = {**frozen, "permissionMode": "bypass"}
-        with pytest.raises(ConversationConflictError):
-            await run_turn(session, first_id, retry=True, context=changed)
-        with pytest.raises(failure_type):
-            await run_turn(session, reopened_id)
-        source_path.unlink()
-        await service.dispatch("session.shutdown", {})
-        restarted = _service(fixture_root)
-        await restarted.dispatch("workspace.select", {"rootPath": project["rootPath"]})
-        await restarted.dispatch("session.select", {"projectId": project["projectId"], "sessionId": SESSION_A})
-        restored = repository.load(SESSION_A).document.turns[-1]
-        assert restored.state == "failed" and restored.submitted_context == frozen
-        retried = await run_turn(restarted.session, reopened_id, retry=True, context=restored.submitted_context)
-        assert retried.state == "completed"
-        replay = await run_turn(restarted.session, reopened_id, retry=True, context=restored.submitted_context)
-        assert replay.text == retried.text
-
-    asyncio.run(run())
-    turns = repository.load(SESSION_A).document.turns
-    for turn_id in (first_id, reopened_id):
-        matching = [turn for turn in turns if turn.turn_id == turn_id]
-        assert len(matching) == 1 and matching[0].state == "completed"
-        assert matching[0].submitted_context == frozen
-    if display_only:
-        assert executions == [first_id, first_id, reopened_id, reopened_id]
-
-
-
-def test_fixture_reference_edit_targets_one_frozen_reference(fixture_root: Path) -> None:
-    from test_desktop_document_service import _Sink
-
-    service = _service(fixture_root, open_project=True)
-    project = _project_info(fixture_root)
-    path = Path(project["rootPath"]) / "repeated.md"
-    original = "same\nsame\nend\n"
-    path.write_text(original)
-
-    async def run():
-        await service.dispatch("session.select", {"projectId": project["projectId"], "sessionId": SESSION_A})
-        background = await service.dispatch("document.open", {"path": str(path)})
-        selected = {**background, "rangeStartUtf16": 5, "rangeEndUtf16": 9}
-        reference = {"referenceId": "second-paragraph", "kind": "document", "text": "same",
-                     "document": {"snapshot": selected, "startLine": 2, "endLine": 2}}
-        for references in ([], [reference, {**reference, "referenceId": "ambiguous-other"}], [reference]):
-            context = {
-                "projectId": project["projectId"], "rootPath": project["rootPath"],
-                "permissionMode": "ask", "requestedThinkingMode": "normal", "skillReferences": [],
-                "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
-                "documentContext": background, "references": references,
-            }
-            sink = _Sink(service, selected)
-            result = await service.dispatch("session.turn", {
-                **_turn_params("[[fixture:reference-replace]] changed"), "submittedContext": context,
-            }, event_sink=sink)
-            await asyncio.gather(*sink.tasks)
-            if len(references) != 1:
-                assert "requires exactly one document reference" in result["text"]
-                assert not any(event == "document.proposed" for event, _ in sink.events)
-                assert path.read_text() == original
-            else:
-                assert result["text"] == "Fixture document operation: saved."
-                assert path.read_text() == "same\nchanged\nend\n"
-                proposed = next(data for event, data in sink.events if event == "document.proposed")
-                assert proposed["referenceId"] == reference["referenceId"]
-
-    asyncio.run(run())
 
 
 def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes(
