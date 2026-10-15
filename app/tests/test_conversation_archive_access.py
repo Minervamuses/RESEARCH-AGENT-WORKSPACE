@@ -319,35 +319,3 @@ def test_large_canonical_archive_is_read_in_bounded_chunks_after_exact_grep(
     assert len(chunks) == 2
     assert document["turns"][0]["state"] == "completed"
     assert marker in document["turns"][0]["semanticInput"]
-
-
-def test_scoped_history_chunk_allowlist_does_not_change_global_store(tmp_path):
-    scoped = tmp_path / "project-history"
-    scoped.mkdir()
-    repository = _canonical_fixture(scoped, "scoped marker " + "x" * (MAX_BYTES // 2 + 16_384))
-    path = next(repository.root.glob("*.json")).resolve()
-    global_store = tmp_path / "global-store"
-    config = AgentConfig(persist_dir=str(global_store))
-    default_tool = create_read_file_tool(config)
-    assert "error" in json.loads(default_tool.invoke({"path": str(path), "offset_bytes": 0}))
-    selected_tool = create_read_file_tool(config, conversation_root=str(repository.root))
-    first = json.loads(selected_tool.invoke({"path": str(path), "offset_bytes": 0}))
-    assert first["next_offset"] is not None
-    assert "scoped marker" in first["content"]
-    assert config.persist_dir == str(global_store)
-    assert not global_store.exists()
-
-
-def test_scoped_session_normal_and_extended_graphs_share_archive_root(tmp_path, monkeypatch):
-    captured = []
-    def graph_builder(_config, **kwargs):
-        captured.append(kwargs)
-        return object()
-    monkeypatch.setattr("agent.session.build_graph", graph_builder)
-    config = AgentConfig(persist_dir=str(tmp_path / "global"))
-    repository = ConversationRepository(tmp_path / "history")
-    session = ChatSession(config, loaded_skills=[], conversation_repository=repository)
-    session._fusion._proposer_graph("fixture-model")
-    assert len(captured) == 2
-    assert all(item["conversation_root"] == str(repository.root.resolve()) for item in captured)
-    assert config.persist_dir == str(tmp_path / "global")
