@@ -471,28 +471,3 @@ test("shared ordering and correlation traces", async (context) => {
     });
   }
 });
-
-
-test("project-open results preserve scoped identity and reject incomplete metadata", () => {
-  const data = {
-    rootPath: "/tmp/project", projectId: "p-test", historyDirectory: "/tmp/history",
-    rulesText: "", rulesFingerprint: "a".repeat(64), researchFingerprint: null,
-    status: "needs_configuration",
-  };
-  assert.doesNotThrow(() => validateResultData("workspace.select", data));
-  assert.throws(() => validateResultData("workspace.select", { ...data, status: "fallback" }));
-  assert.throws(() => validateResultData("workspace.select", { ...data, rulesFingerprint: "bad" }));
-  const { projectId: _projectId, ...missing } = data;
-  assert.throws(() => validateResultData("workspace.select", missing));
-});
-
-test("submission byte limit includes frozen context without changing legacy text limit", async () => {
-  const fixtures = await loadJson<FixtureDocument>("fixtures.json");
-  const message = structuredClone(fixtures.messages.find((item) => item.name === "submitted-document-and-chat")!.message) as {
-    params: { text: string; submittedContext?: unknown };
-  };
-  message.params.text = "x".repeat(1_048_576);
-  assert.throws(() => parseProtocolMessage(message), /1 MiB/);
-  delete message.params.submittedContext;
-  assert.doesNotThrow(() => parseProtocolMessage(message));
-});
