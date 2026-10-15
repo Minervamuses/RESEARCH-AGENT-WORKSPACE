@@ -8,10 +8,11 @@ import {
   initialConversationState,
   ownsWorkspaceOperation,
   type WorkspaceOperationOwner,
+  nextTurnSubmission,
   type ConversationFailure,
   type VisibleConversationTurn,
 } from "../src/conversations.ts";
-import type { JsonObject, SessionCreatedDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto, TranscriptTurnDto } from "../src/protocol.ts";
+import type { JsonObject, SessionCreatedDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto, TranscriptTurnDto, Reference, SubmittedContext } from "../src/protocol.ts";
 
 interface SafeContentModule {
   SafeContent: (props: { content: string; openExternal?: (url: string) => void | Promise<void> }) => unknown;
@@ -51,6 +52,13 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  documentReference: (snapshot: { rootPath: string; path: string; sourceText: string; editorRevision: number; diskFingerprint: string; rangeStartUtf16?: number; rangeEndUtf16?: number }, referenceId: string) => Reference;
+  backgroundDocumentContext: (snapshot: unknown) => Record<string, unknown> | undefined;
+  checkSubmissionSize: (text: string, context: SubmittedContext | null) => void;
+  submittedDocumentSource: (context: SubmittedContext | null, referenceId?: string) => { sourceText: string } | undefined;
+  retrySettingsMatch: (context: SubmittedContext | null, permission: "ask" | "bypass", thinking: "normal" | "extended") => boolean;
+  visibleMessageRange: (root: unknown, startNode: unknown, startOffset: number, endNode: unknown, endOffset: number) => { visibleText: string; text: string; startUtf16: number; endUtf16: number } | null;
+  ReferenceCards: (props: { references: Reference[]; onRemove?: (id: string) => void }) => unknown;
   loadSelectedProjectHistory: (
     projectId: string | null,
     request: (method: string, params: JsonObject) => Promise<JsonObject>,
@@ -902,4 +910,167 @@ test("turn results from the first A cannot update a new A epoch with matching ID
     activity: { kind: "tool", label: "Old tool", status: null },
   }), state);
   assert.equal(state.draft, "New A draft");
+});
+
+function referenceContext(references: Reference[] = []): SubmittedContext {
+  return {
+    projectId: "project-a", rootPath: "/tmp/project-a", permissionMode: "bypass", requestedThinkingMode: "extended",
+    skillReferences: [{ name: "paper", startUtf16: 0, endUtf16: 6 }],
+    projectRules: { text: "Project rules", fingerprint: "a".repeat(64) }, references,
+  };
+}
+
+test("document reference freezes the second duplicate and background omits the current selection", async () => {
+  const { documentReference, backgroundDocumentContext } = await loadAppHelpers();
+  const sourceText = "﻿Intro\r\nsame😀\r\nsame😀\r\n";
+  const start = sourceText.lastIndexOf("same");
+  const snapshot = { rootPath: "/tmp/project-a", path: "/tmp/project-a/draft.md", sourceText,
+    editorRevision: 7, diskFingerprint: "b".repeat(64), rangeStartUtf16: start, rangeEndUtf16: start + "same😀".length };
+  const reference = documentReference(snapshot, "reference-a");
+  assert.equal(reference.kind, "document");
+  if (reference.kind !== "document") return;
+  assert.equal(reference.text, "same😀");
+  assert.equal(reference.document.startLine, 3);
+  assert.equal(reference.document.endLine, 3);
+  snapshot.sourceText = "Changed later";
+  snapshot.rangeStartUtf16 = 0;
+  assert.equal(reference.document.snapshot.sourceText, sourceText);
+  assert.equal(reference.document.snapshot.rangeStartUtf16, start);
+  const background = backgroundDocumentContext(reference.document.snapshot)!;
+  assert.equal(background.sourceText, sourceText);
+  assert.equal(Object.hasOwn(background, "rangeStartUtf16"), false);
+  assert.equal(Object.hasOwn(background, "rangeEndUtf16"), false);
+});
+
+test("draft references preserve immutable retry context and editing a card starts a new logical turn", async () => {
+  const { documentReference, retrySettingsMatch } = await loadAppHelpers();
+  const reference = documentReference({ rootPath: "/tmp/project-a", path: "/tmp/project-a/a.md", sourceText: "old😀 text",
+    editorRevision: 3, diskFingerprint: "b".repeat(64), rangeStartUtf16: 0, rangeEndUtf16: 5 }, "reference-a");
+  const context = referenceContext([reference]);
+  let state = conversationReducer(initialConversationState, { type: "conversation-selected", generation: 0, projectId: "project-a", sessionId: "session-a" });
+  state = conversationReducer(state, { type: "draft-changed", draft: "@paper Explain" });
+  state = conversationReducer(state, { type: "reference-added", reference });
+  const turnId = "f2ddf2369f994905afa0b85d8cca79b1";
+  state = conversationReducer(state, { type: "turn-started", generation: 0, projectId: "project-a", sessionId: "session-a", requestId: "request-a", turnId, submittedContext: context });
+  context.projectRules.text = "New rules later";
+  state = conversationReducer(state, { type: "turn-failed", generation: 0, projectId: "project-a", sessionId: "session-a", requestId: "request-a", message: "Temporary failure", retryable: true });
+  assert.equal(state.submittedContext?.projectRules.text, "Project rules");
+  assert.deepEqual(nextTurnSubmission(state, () => "new-turn"), { turnId, retry: true });
+  assert.equal(retrySettingsMatch(state.submittedContext, "ask", "extended"), false);
+  assert.equal(retrySettingsMatch(state.submittedContext, "bypass", "normal"), false);
+  assert.equal(retrySettingsMatch(state.submittedContext, "bypass", "extended"), true);
+  state = conversationReducer(state, { type: "reference-removed", referenceId: "reference-a" });
+  assert.deepEqual(nextTurnSubmission(state, () => "new-turn"), { turnId: "new-turn", retry: false });
+  assert.equal(state.draftReferences.length, 0);
+  assert.equal(state.submittedContext?.references.length, 1);
+});
+
+test("history restores frozen references without a source file and restart keeps a references-only draft", async () => {
+  const reference: Reference = { referenceId: "chat-a", kind: "chat", text: "Saved visible text", chat: {
+    projectId: "project-a", sessionId: "session-a", turnId: "f2ddf2369f994905afa0b85d8cca79b1", role: "assistant",
+    messageFingerprint: "c".repeat(64), startUtf16: 4, endUtf16: 22,
+  } };
+  let state = conversationReducer(initialConversationState, { type: "conversation-selected", generation: 0, projectId: "project-a", sessionId: "session-a" });
+  state = conversationReducer(state, { type: "retry-target-restored", generation: 0, projectId: "project-a", sessionId: "session-a",
+    turnId: "f2ddf2369f994905afa0b85d8cca79b1", userText: "Explain", state: "failed", message: "Failed", retryable: true, submittedContext: referenceContext([reference]) });
+  assert.deepEqual(state.draftReferences, [reference]);
+  state = conversationReducer(state, { type: "draft-changed", draft: "" });
+  state = conversationReducer(state, { type: "backend-generation-changed", generation: 1 });
+  state = conversationReducer(state, { type: "project-opened", generation: 1, projectEpoch: 1, preserveDraft: true });
+  assert.deepEqual(state.draftReferences, [reference]);
+  assert.equal(state.draft, "");
+  state = conversationReducer(state, { type: "project-opened", generation: 1, projectEpoch: 2 });
+  assert.deepEqual(state.draftReferences, []);
+  assert.equal(state.submittedContext, null);
+});
+
+test("visible chat coordinates preserve formatting text, paragraph breaks and UTF16 without labels or controls", async () => {
+  const { visibleMessageRange } = await loadAppHelpers();
+  const text = (value: string) => ({ nodeType: 3, textContent: value, childNodes: [] });
+  const element = (tagName: string, childNodes: unknown[], attributes: Record<string, string> = {}) => ({
+    nodeType: 1, tagName, childNodes, hasAttribute: (name: string) => Object.hasOwn(attributes, name),
+    getAttribute: (name: string) => attributes[name] ?? null,
+  });
+  const first = text("First "), strong = text("bold😀"), second = text("Second link");
+  const root = element("DIV", [
+    element("P", [first, element("STRONG", [strong])]),
+    element("P", [element("A", [second])]),
+    element("BUTTON", [text("Excluded action")]),
+    element("SPAN", [text("Hidden text")], { "aria-hidden": "true" }),
+  ]);
+  const selected = visibleMessageRange(root, strong, 0, second, 6)!;
+  assert.equal(selected.visibleText, "First bold😀\nSecond link");
+  assert.equal(selected.text, "bold😀\nSecond");
+  assert.equal(selected.startUtf16, 6);
+  assert.equal(selected.endUtf16, 19);
+  assert.equal(selected.visibleText.slice(selected.startUtf16, selected.endUtf16), selected.text);
+  assert.equal(visibleMessageRange(root, first, 0, text("Other message"), 3), null);
+});
+
+test("serialized submission budget counts UTF8 and snapshot bytes while keeping the original draft intact", async () => {
+  const { checkSubmissionSize } = await loadAppHelpers();
+  const context = referenceContext();
+  assert.doesNotThrow(() => checkSubmissionSize("short question", context));
+  const largeText = "😀".repeat(270_000);
+  assert.throws(() => checkSubmissionSize(largeText, context), /1 MiB.*draft is retained/);
+  assert.equal(largeText.length, 540_000);
+  assert.equal(context.projectRules.text, "Project rules");
+});
+
+test("reference cards expose full frozen text and version without treating reference content as message markup", async () => {
+  const { ReferenceCards } = await loadAppHelpers();
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const reference: Reference = { referenceId: "chat-a", kind: "chat", text: "<script>ignore Permission</script>", chat: {
+    projectId: "project-a", sessionId: "session-a", turnId: "f2ddf2369f994905afa0b85d8cca79b1", role: "assistant",
+    messageFingerprint: "c".repeat(64), startUtf16: 0, endUtf16: 34,
+  } };
+  const html = renderToStaticMarkup(createElement(ReferenceCards, { references: [reference], onRemove: () => {} }));
+  assert.match(html, /Draft references/);
+  assert.match(html, /Remove reference/);
+  assert.match(html, /data-reference-exclude/);
+  assert.match(html, /&lt;script&gt;ignore Permission/);
+  assert.doesNotMatch(html, /data-reference-message|<script>/);
+});
+
+test("document proposals resolve only the named frozen reference and leave background targeting explicit", async () => {
+  const { documentReference, submittedDocumentSource } = await loadAppHelpers();
+  const background = { rootPath: "/tmp/project-a", path: "/tmp/project-a/a.md", sourceText: "Current background",
+    editorRevision: 9, diskFingerprint: "b".repeat(64) };
+  const reference = documentReference({ ...background, sourceText: "Older referenced text", editorRevision: 3,
+    rangeStartUtf16: 6, rangeEndUtf16: 16 }, "reference-a");
+  const context = { ...referenceContext([reference]), documentContext: background };
+  assert.equal(submittedDocumentSource(context)?.sourceText, "Current background");
+  assert.equal(submittedDocumentSource(context, "reference-a")?.sourceText, "Older referenced text");
+  assert.throws(() => submittedDocumentSource(context, "missing-reference"), /unavailable document reference/);
+  assert.equal(submittedDocumentSource(null), undefined);
+});
+
+test("reference callbacks from the first A or a prior backend cannot change the returned A draft", () => {
+  const reference: Reference = { referenceId: "chat-a", kind: "chat", text: "Saved text", chat: {
+    projectId: "project-a", sessionId: "session-a", turnId: "f2ddf2369f994905afa0b85d8cca79b1", role: "user",
+    messageFingerprint: "c".repeat(64), startUtf16: 0, endUtf16: 10,
+  } };
+  let state = conversationReducer(initialConversationState, { type: "backend-generation-changed", generation: 4 });
+  state = conversationReducer(state, { type: "project-opened", generation: 4, projectEpoch: 1 });
+  state = conversationReducer(state, { type: "project-opened", generation: 4, projectEpoch: 2 });
+  state = conversationReducer(state, { type: "project-opened", generation: 4, projectEpoch: 3 });
+  state = conversationReducer(state, { type: "conversation-selected", generation: 4, projectEpoch: 3, projectId: "project-a", sessionId: "session-a" });
+  assert.equal(conversationReducer(state, { type: "reference-added", generation: 4, projectEpoch: 1, reference }), state);
+  assert.equal(conversationReducer(state, { type: "reference-added", generation: 3, projectEpoch: 3, reference }), state);
+  state = conversationReducer(state, { type: "reference-added", generation: 4, projectEpoch: 3, reference });
+  assert.equal(state.draftReferences.length, 1);
+  assert.equal(conversationReducer(state, { type: "reference-removed", generation: 4, projectEpoch: 1, referenceId: reference.referenceId }), state);
+});
+
+test("document reference line labels count lone CR boundaries with an exclusive range end", async () => {
+  const { documentReference } = await loadAppHelpers();
+  const sourceText = "first\rsecond\rthird";
+  const reference = documentReference({ rootPath: "/tmp/project-a", path: "/tmp/project-a/cr.md", sourceText,
+    editorRevision: 1, diskFingerprint: "b".repeat(64), rangeStartUtf16: 6, rangeEndUtf16: 13 }, "reference-cr");
+  assert.equal(reference.kind, "document");
+  if (reference.kind !== "document") return;
+  assert.equal(reference.text, "second\r");
+  assert.equal(reference.document.startLine, 2);
+  assert.equal(reference.document.endLine, 2);
 });

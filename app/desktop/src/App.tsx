@@ -55,6 +55,8 @@ import type {
   ProjectListDto,
   ProjectSummaryDto,
   ProjectWorkspaceDto,
+  Reference,
+  SubmittedContext,
   RegistrationRetryDto,
   RuntimeDiagnosticsDto,
   SessionBashPermissionSetDto,
@@ -299,7 +301,8 @@ export function SlashCommandList({ commands, active, onSelect, inline = false }:
   </ul>;
 }
 
-function SlashComposer({ draft, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, onChange, onSubmit }: {
+function SlashComposer({ draft, references, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, onChange, onSubmit }: {
+  references: readonly Reference[]; onRemoveReference: (id: string) => void;
   draft: string; commands: SlashCommands; skills: readonly string[]; onSkillPicked: (name: string) => void; textareaRef: RefObject<HTMLTextAreaElement | null>;
   disabled: boolean; sendDisabled: boolean; onChange: (draft: string) => void; onSubmit: () => void;
 }) {
@@ -364,6 +367,7 @@ function SlashComposer({ draft, commands, skills, onSkillPicked, textareaRef, di
     if (!composingRef.current) onSubmit();
   }}>
     <label htmlFor="conversation-draft">Message</label>
+    <ReferenceCards references={references} onRemove={disabled ? undefined : onRemoveReference} />
     {open && <>
       <SlashCommandList commands={matches} active={active} onSelect={select} inline={inline !== null} />
       <span className="slash-command-status" role="status">{matches.length === 0 ? (inline !== null ? "No matching Skill. Unselected @ text is sent literally." : "No matching commands") : `${matches.length} ${inline !== null ? "Skills" : "commands"} · ↑↓ to move · Enter to insert · Esc to close`}</span>
@@ -607,7 +611,8 @@ function RestoredToolActivity({ activity }: {
   );
 }
 
-export const RestoredTurn = memo(function RestoredTurn({ turn }: { turn: TranscriptTurnDto }) {
+export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessionId }: { turn: TranscriptTurnDto; projectId?: string; sessionId?: string }) {
+  const source = projectId === undefined || sessionId === undefined ? undefined : { projectId, sessionId, turnId: turn.turnId };
   const displayOnly = turn.kind === "display-only";
   return (
     <article className="turn-group">
@@ -615,7 +620,8 @@ export const RestoredTurn = memo(function RestoredTurn({ turn }: { turn: Transcr
         <p className="message-label">
           You · restored turn {turn.turnNumber}{displayOnly ? " · display-only" : ""}
         </p>
-        <SafeContent content={turn.userText} />
+        <MessageBody text={turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} />
+        <ReferenceCards references={turn.submittedContext?.references ?? []} />
       </div>
       {turn.toolActivities.map((activity, index) => (
         <RestoredToolActivity
@@ -628,7 +634,7 @@ export const RestoredTurn = memo(function RestoredTurn({ turn }: { turn: Transcr
           <p className="message-label">
             {displayOnly ? "Local command output · restored · display-only" : "Assistant · restored"}
           </p>
-          <SafeContent content={turn.assistantText} />
+          <MessageBody text={turn.assistantText} source={displayOnly || source === undefined ? undefined : { ...source, role: "assistant" }} />
         </div>
       ) : turn.state === "pending" ? (
         <div className="message system-message">
@@ -647,17 +653,133 @@ export const RestoredTurn = memo(function RestoredTurn({ turn }: { turn: Transcr
   );
 });
 
-export const ConversationTurns = memo(function ConversationTurns({ turns }: { turns: readonly VisibleConversationTurn[] }) {
+export const ConversationTurns = memo(function ConversationTurns({ turns, projectId }: { turns: readonly VisibleConversationTurn[]; projectId?: string }) {
   return turns.map((item) => {
+    const source = projectId === undefined ? undefined : { projectId, sessionId: item.sessionId, turnId: item.turnId };
     if (item.source === "restored") {
-      return <RestoredTurn turn={item.turn} key={item.key} />;
+      return <RestoredTurn turn={item.turn} projectId={projectId} sessionId={item.sessionId} key={item.key} />;
     }
     if (item.source === "live") {
-      return <article className="turn-group" key={item.key}><div className="message user-message"><p className="message-label">You</p><SafeContent content={item.turn.userText} /></div><div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}><p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p><SafeContent content={item.turn.assistantText} /></div></article>;
+      return <article className="turn-group" key={item.key}>
+        <div className="message user-message"><p className="message-label">You</p>
+          <MessageBody text={item.turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} />
+          <ReferenceCards references={item.turn.submittedContext?.references ?? []} />
+        </div>
+        <div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}>
+          <p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p>
+          <MessageBody text={item.turn.assistantText} source={item.turn.responseKind === "command" || source === undefined ? undefined : { ...source, role: "assistant" }} />
+        </div>
+      </article>;
     }
-    return <article className="turn-group pending-turn" key={item.key}><div className="message user-message"><p className="message-label">You · {item.retrying ? "retrying" : "pending"}</p><SafeContent content={item.turn.userText} /></div><div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>{item.turn.activity.length > 0 && <ul className="activity-list">{item.turn.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}</article>;
+    return <article className="turn-group pending-turn" key={item.key}>
+      <div className="message user-message"><p className="message-label">You · {item.retrying ? "retrying" : "pending"}</p>
+        <MessageBody text={item.turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} />
+        <ReferenceCards references={item.turn.submittedContext?.references ?? []} />
+      </div>
+      <div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>
+      {item.turn.activity.length > 0 && <ul className="activity-list">{item.turn.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}
+    </article>;
   });
 });
+
+export function documentReference(snapshot: DocumentSnapshot, referenceId: string): Reference {
+  const { rangeStartUtf16: start, rangeEndUtf16: end, sourceText } = snapshot;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start! < 0 || end! <= start! || end! > sourceText.length) {
+    throw new Error("Select document text before adding a reference.");
+  }
+  let startLine = 1, endLine = 1;
+  for (const newline of sourceText.matchAll(/\r\n|\r|\n/g)) {
+    const boundary = newline.index + newline[0].length;
+    if (boundary <= start!) startLine += 1;
+    if (boundary < end!) endLine += 1;
+  }
+  return { referenceId, kind: "document", text: sourceText.slice(start, end), document: {
+    snapshot: { ...structuredClone(snapshot), rangeStartUtf16: start!, rangeEndUtf16: end! },
+    startLine, endLine,
+  } };
+}
+
+export function backgroundDocumentContext(snapshot: DocumentSnapshot | null): DocumentSnapshot | undefined {
+  if (snapshot === null) return undefined;
+  const { rangeStartUtf16: _start, rangeEndUtf16: _end, ...background } = snapshot;
+  return { ...background };
+}
+
+export function checkSubmissionSize(text: string, submittedContext: SubmittedContext | null): void {
+  const input = submittedContext === null ? text : JSON.stringify({ text, submittedContext });
+  if (new TextEncoder().encode(input).byteLength > 1024 * 1024) {
+    throw new Error("This submission exceeds the 1 MiB input limit. Remove references or use a smaller source document; your draft is retained.");
+  }
+}
+
+export function retrySettingsMatch(context: SubmittedContext | null, permission: BashPermissionMode, thinking: "normal" | "extended"): boolean {
+  return context === null || (context.permissionMode === permission && context.requestedThinkingMode === thinking);
+}
+
+export function visibleMessageRange(root: Node, startNode: Node, startOffset: number, endNode: Node, endOffset: number): { visibleText: string; text: string; startUtf16: number; endUtf16: number } | null {
+  let text = "";
+  const positions = new Map<Node, { start: number; end: number; boundaries: number[] }>();
+  const newline = () => { if (text.length > 0 && !text.endsWith("\n")) text += "\n"; };
+  const visit = (node: Node) => {
+    const start = text.length;
+    if (node.nodeType === 3) {
+      text += node.textContent ?? "";
+      positions.set(node, { start, end: text.length, boundaries: [] });
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const element = node as Element;
+    if (element.hasAttribute("hidden") || element.getAttribute("aria-hidden") === "true" ||
+        element.hasAttribute("data-reference-exclude") || ["BUTTON", "INPUT", "TEXTAREA", "SELECT", "DETAILS"].includes(element.tagName)) return;
+    const block = node !== root && /^(P|DIV|PRE|LI|UL|OL|BLOCKQUOTE|H[1-6])$/.test(element.tagName);
+    if (block) newline();
+    const boundaries = [text.length];
+    if (element.tagName === "BR") text += "\n";
+    for (const child of Array.from(node.childNodes)) {
+      visit(child);
+      boundaries.push(text.length);
+    }
+    positions.set(node, { start, end: text.length, boundaries });
+    if (block) newline();
+  };
+  visit(root);
+  const visibleText = text.replace(/\n+$/, "");
+  const offset = (node: Node, index: number): number | null => {
+    const position = positions.get(node);
+    if (position === undefined || !Number.isSafeInteger(index) || index < 0) return null;
+    const value = node.nodeType === 3
+      ? index <= position.end - position.start ? position.start + index : undefined
+      : position.boundaries[index];
+    return value === undefined ? null : Math.min(value, visibleText.length);
+  };
+  const startUtf16 = offset(startNode, startOffset), endUtf16 = offset(endNode, endOffset);
+  if (startUtf16 === null || endUtf16 === null || endUtf16 <= startUtf16) return null;
+  return { visibleText, text: visibleText.slice(startUtf16, endUtf16), startUtf16, endUtf16 };
+}
+
+export function ReferenceCards({ references, onRemove }: { references: readonly Reference[]; onRemove?: (id: string) => void }) {
+  if (references.length === 0) return null;
+  return <div className="reference-cards" aria-label={onRemove === undefined ? "Submitted references" : "Draft references"} data-reference-exclude>
+    {references.map((reference) => <details className="reference-card" key={reference.referenceId}>
+      <summary><strong>{reference.kind === "document"
+        ? `Document · ${reference.document.snapshot.path} · lines ${reference.document.startLine}–${reference.document.endLine}`
+        : `Chat · ${reference.chat.role} · ${reference.chat.sessionId.slice(0, 8)} / ${reference.chat.turnId.slice(0, 8)}`}</strong>
+        <span>{reference.text.replace(/\s+/g, " ").slice(0, 100)}{reference.text.length > 100 ? "…" : ""}</span></summary>
+      <pre>{reference.text}</pre>
+      <p className="reference-version">{reference.kind === "document"
+        ? `Root ${reference.document.snapshot.rootPath} · revision ${reference.document.snapshot.editorRevision} · disk ${reference.document.snapshot.diskFingerprint}`
+        : `Project ${reference.chat.projectId} · UTF-16 ${reference.chat.startUtf16}–${reference.chat.endUtf16} · message ${reference.chat.messageFingerprint}`}</p>
+      {onRemove !== undefined && <button type="button" onClick={() => onRemove(reference.referenceId)}>Remove reference</button>}
+    </details>)}
+  </div>;
+}
+
+function MessageBody({ text, source }: { text: string; source?: { projectId: string; sessionId: string; turnId: string; role: "user" | "assistant" } }) {
+  return <div className="reference-message-body" {...(source === undefined ? {} : {
+    "data-reference-message": "", "data-project-id": source.projectId, "data-session-id": source.sessionId,
+    "data-turn-id": source.turnId, "data-message-role": source.role,
+  })}><SafeContent content={text} /></div>;
+}
 
 interface DocumentResult extends Partial<DocumentSnapshot> {
   path: string;
@@ -700,12 +822,25 @@ interface DocumentAction {
   callId?: string;
   undoOfCallId?: string;
   parentRequestId?: string;
+  sourceSnapshot?: DocumentSnapshot;
+}
+
+export function submittedDocumentSource(context: SubmittedContext | null, referenceId?: string): DocumentSnapshot | undefined {
+  if (referenceId === undefined) return context?.documentContext;
+  const reference = context?.references.find((item) => item.referenceId === referenceId);
+  if (reference?.kind !== "document") throw new Error("The document proposal names an unavailable document reference.");
+  return reference.document.snapshot;
 }
 
 export default function App() {
   const [state, dispatch] = useReducer(backendReducer, initialBackendState);
   const [conversation, conversationDispatch] = useReducer(conversationReducer, initialConversationState);
   const [project, setProject] = useState<ProjectWorkspaceDto | null>(null);
+  const [referenceIssue, setReferenceIssue] = useState<string | null>(null);
+  const [chatSelection, setChatSelection] = useState<{
+    owner: WorkspaceOperationOwner; projectId: string; sessionId: string; turnId: string; role: "user" | "assistant";
+    visibleText: string; text: string; startUtf16: number; endUtf16: number; top: number; left: number;
+  } | null>(null);
   const projectRef = useRef<ProjectWorkspaceDto | null>(null);
   const bindingGenerationRef = useRef<number | null>(null);
   const projectEpochRef = useRef(0);
@@ -745,7 +880,6 @@ export default function App() {
   const documentRequestRef = useRef<{ requestId: string; turnId: string } | null>(null);
   const submittedDocumentRef = useRef<DocumentSnapshot | null>(null);
   const selectedSkillNamesRef = useRef(new Set<string>());
-  const submittedSkillReferencesRef = useRef<InlineSkillReference[]>([]);
   useEffect(() => { selectedSkillNamesRef.current.clear(); }, [conversation.selected?.projectId, conversation.selected?.sessionId]);
   const updateDocument = useCallback((value: DocumentSnapshot | null) => {
     documentRef.current = value;
@@ -847,10 +981,10 @@ export default function App() {
       if (action?.callId !== undefined) setLastDocumentAction(action);
       if (action?.undoOfCallId !== undefined) setLastDocumentAction(null);
     } else if (result.status === "conflict") {
-      setDocumentConflict({ result, action, base: submittedDocumentRef.current ?? captured });
+      setDocumentConflict({ result, action, base: action?.sourceSnapshot ?? (action !== null ? submittedDocumentRef.current : null) ?? captured });
       setDocumentNotice("The editor or disk changed. Choose which version to keep.");
     } else if (result.status === "failed") {
-      setDocumentConflict({ result, action, base: submittedDocumentRef.current ?? captured });
+      setDocumentConflict({ result, action, base: action?.sourceSnapshot ?? (action !== null ? submittedDocumentRef.current : null) ?? captured });
       setDocumentNotice(result.issue ?? "Save failed. The editor and candidate are retained.");
     } else {
       setDocumentNotice(result.issue ?? "Operation cancelled. Your current text is retained.");
@@ -868,8 +1002,9 @@ export default function App() {
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
+      const { sourceSnapshot: _sourceSnapshot, ...requestAction } = action;
       const tracked = backendClient.requestTracked("document.apply", {
-        ...action, documentContext: documentContextPayload(captured), ...(resolution === undefined ? {} : { resolution }),
+        ...requestAction, documentContext: documentContextPayload(captured), ...(resolution === undefined ? {} : { resolution }),
         ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
       } as unknown as JsonObject);
       documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId };
@@ -1040,7 +1175,9 @@ export default function App() {
             if (active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpochRef.current)) return;
             if (documentRequest !== null && (documentOperationRef.current === null || !ownsOperation(documentOperationRef.current, documentOperationRef.current))) return;
             if (message.event === "document.proposed" && active !== null && message.requestId === active.requestId && message.data.turnId === active.turnId && typeof message.data.callId === "string") {
-              void applyDocumentOperation({ turnId: active.turnId, callId: message.data.callId, parentRequestId: active.requestId });
+              const sourceSnapshot = submittedDocumentSource(conversationRef.current.submittedContext,
+                typeof message.data.referenceId === "string" ? message.data.referenceId : undefined);
+              void applyDocumentOperation({ turnId: active.turnId, callId: message.data.callId, parentRequestId: active.requestId, sourceSnapshot });
               return;
             }
             if (message.event === "approval.required") {
@@ -1215,8 +1352,8 @@ export default function App() {
     setChooserIssue(null);
     try {
       if (action !== "inspect") {
-        if (conversationRef.current.draft.length > 0 && !discardDraft) {
-          setChooserIssue("Confirm discarding the unsent draft, or cancel to keep it.");
+        if ((conversationRef.current.draft.length > 0 || conversationRef.current.draftReferences.length > 0) && !discardDraft) {
+          setChooserIssue("Confirm discarding the unsent draft and references, or cancel to keep it.");
           return;
         }
         if (documentRef.current !== null && documentRef.current.sourceText !== documentBaselineRef.current?.sourceText && dirtyChoice === "save") {
@@ -1274,7 +1411,6 @@ export default function App() {
       updateDocument(null);
       documentBaselineRef.current = null;
       submittedDocumentRef.current = null;
-      submittedSkillReferencesRef.current = [];
       selectedSkillNamesRef.current.clear();
       resumeSelectionRef.current = null;
       resumeDraftRef.current = null;
@@ -1284,6 +1420,8 @@ export default function App() {
       setDocumentNotice("Open a Markdown or TeX source file from this project.");
       setWorkspaceIssue(null);
       setChooserOpen(false);
+      setChatSelection(null);
+      setReferenceIssue(null);
       setDiscardDraft(false);
       setDirtyChoice("save");
       await loadCatalog(generation);
@@ -1406,6 +1544,71 @@ export default function App() {
     scheduleOwnedFrame(owner, () => composerRef.current?.focus());
   }, [captureOwner, scheduleOwnedFrame]);
 
+  const addDocumentReference = useCallback((snapshot: DocumentSnapshot) => {
+    if (conversation.backendGeneration !== generationRef.current || conversation.projectEpoch !== projectEpochRef.current ||
+        conversationRef.current.selected === null || !sameSelection(conversation.selected, conversationRef.current.selected) ||
+        conversationRef.current.activeTurn !== null ||
+        workspaceOperation.current !== null || snapshot.rootPath !== projectRef.current?.rootPath) return;
+    const owner = captureOwner("document reference");
+    try {
+      applyConversation({ type: "reference-added", generation: owner.generation, projectEpoch: owner.projectEpoch, reference: documentReference(snapshot, newLogicalTurnId()) });
+      setReferenceIssue(null);
+      focusComposer(owner);
+    } catch (error) { setReferenceIssue(error instanceof Error ? error.message : "Could not capture the document selection."); }
+  }, [applyConversation, captureOwner, conversation.backendGeneration, conversation.projectEpoch, conversation.selected, focusComposer]);
+
+  const captureChatSelection = useCallback(() => {
+    const selection = document.getSelection();
+    if (selection === null || selection.isCollapsed || selection.rangeCount !== 1) { setChatSelection(null); return; }
+    const range = selection.getRangeAt(0);
+    const element = (node: Node) => node.nodeType === 1 ? node as Element : node.parentElement;
+    const first = element(range.startContainer)?.closest<HTMLElement>("[data-reference-message]");
+    const last = element(range.endContainer)?.closest<HTMLElement>("[data-reference-message]");
+    if (first === undefined || first === null || last !== first) {
+      setChatSelection(null);
+      if (first !== undefined && first !== null || last !== undefined && last !== null) setReferenceIssue("Select text within one message at a time.");
+      return;
+    }
+    const { projectId, sessionId, turnId, messageRole: role } = first.dataset;
+    if (!first.isConnected || projectId === undefined || projectId !== projectRef.current?.projectId || sessionId === undefined || turnId === undefined ||
+        (role !== "user" && role !== "assistant")) { setChatSelection(null); return; }
+    const captured = visibleMessageRange(first, range.startContainer, range.startOffset, range.endContainer, range.endOffset);
+    if (captured === null || captured.text.trim() === "") { setChatSelection(null); return; }
+    const rect = range.getBoundingClientRect();
+    setChatSelection({ ...captured, projectId, sessionId, turnId, role, owner: captureOwner("chat selection"),
+      top: Math.min(window.innerHeight - 44, rect.bottom + 6), left: Math.max(8, Math.min(window.innerWidth - 180, rect.left)) });
+    setReferenceIssue(null);
+  }, [captureOwner]);
+
+  useEffect(() => {
+    document.addEventListener("selectionchange", captureChatSelection);
+    return () => document.removeEventListener("selectionchange", captureChatSelection);
+  }, [captureChatSelection]);
+
+  const addChatReference = useCallback(async () => {
+    const captured = chatSelection;
+    const selected = conversationRef.current.selected;
+    if (captured === null || selected === null || selected.projectId !== captured.projectId || selected.sessionId !== captured.sessionId ||
+        captured.owner.generation !== generationRef.current || captured.owner.projectEpoch !== projectEpochRef.current) return;
+    const owner = beginWorkspaceOperation("Adding chat reference");
+    if (owner === null) return;
+    try {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(captured.visibleText));
+      if (!ownsOperation(owner, workspaceOperation.current)) return;
+      const messageFingerprint = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+      applyConversation({ type: "reference-added", generation: owner.generation, projectEpoch: owner.projectEpoch, reference: {
+        referenceId: newLogicalTurnId(), kind: "chat", text: captured.text,
+        chat: { projectId: captured.projectId, sessionId: captured.sessionId, turnId: captured.turnId, role: captured.role,
+          messageFingerprint, startUtf16: captured.startUtf16, endUtf16: captured.endUtf16 },
+      } });
+      setChatSelection(null);
+      setReferenceIssue(null);
+      focusComposer(owner);
+    } catch (error) {
+      if (ownsOperation(owner, workspaceOperation.current)) setReferenceIssue(error instanceof Error ? error.message : "Could not capture the chat selection.");
+    } finally { finishWorkspaceOperation(owner); }
+  }, [applyConversation, beginWorkspaceOperation, chatSelection, finishWorkspaceOperation, focusComposer, ownsOperation]);
+
   const resolvePendingApproval = useCallback((approved: boolean, expectedApprovalId?: string) => {
     const approval = pendingApprovalRef.current;
     const owner = approvalOwnerRef.current;
@@ -1479,8 +1682,8 @@ export default function App() {
       return;
     }
     const restoringSelection = resumeSelectionRef.current?.projectId === projectId && resumeSelectionRef.current.sessionId === session.sessionId;
-    if (!restoringSelection && conversationRef.current.draft.length > 0 &&
-        !window.confirm("Discard the unsent draft and select this conversation?")) return;
+    if (!restoringSelection && (conversationRef.current.draft.length > 0 || conversationRef.current.draftReferences.length > 0) &&
+        !window.confirm("Discard the unsent draft and references and select this conversation?")) return;
     const operation = beginWorkspaceOperation("Selecting conversation");
     if (operation === null) return;
     const previousSlashCatalogOwner = slashCatalogOwner;
@@ -1500,8 +1703,10 @@ export default function App() {
           setSlashCatalogOwner({ generation, projectId, sessionId: selected.sessionId });
           dispatch({ type: "session-created", session: selected });
           setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
-          applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, projectId, sessionId: session.sessionId });
+          applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, preserveDraft: restoringSelection, projectId, sessionId: session.sessionId });
           selectionApplied = true;
+          setChatSelection(null);
+          setReferenceIssue(null);
           if (!restoringSelection) {
             resumeDraftRef.current = null;
             resumeSelectionRef.current = null;
@@ -1516,9 +1721,11 @@ export default function App() {
       setTranscript(transcriptViewFrom(projectId, session.sessionId, transcriptData));
       setSelectionPreview(null);
       const retryTarget = latestRetryableTranscriptTurn(transcriptData.items);
-      if (retryTarget !== null) {
+      if (retryTarget !== null && (resumeDraftRef.current === null ||
+          (conversationRef.current.draft === retryTarget.userText && JSON.stringify(conversationRef.current.draftReferences) === JSON.stringify(retryTarget.submittedContext?.references ?? [])))) {
         applyConversation({
           type: "retry-target-restored",
+          submittedContext: retryTarget.submittedContext ?? null,
           generation,
           projectEpoch: operation.projectEpoch,
           projectId,
@@ -1564,8 +1771,8 @@ export default function App() {
 
   const createSession = useCallback(() => {
     if (activeProjectId === null || conversationRef.current.activeTurn !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
-    if (resumeDraftRef.current === null && conversationRef.current.draft.length > 0 &&
-        !window.confirm("Discard the unsent draft and create a new conversation?")) return;
+    if (resumeDraftRef.current === null && (conversationRef.current.draft.length > 0 || conversationRef.current.draftReferences.length > 0) &&
+        !window.confirm("Discard the unsent draft and references and create a new conversation?")) return;
     const operation = beginWorkspaceOperation("Creating conversation");
     if (operation === null) return;
     setSlashCatalogOwner(null);
@@ -1582,12 +1789,14 @@ export default function App() {
         setSlashCatalogOwner({ generation, projectId: activeProjectId, sessionId: session.sessionId });
         dispatch({ type: "session-created", session });
         setExtensionFlow((current) => observeExtensionRevision(current, session.extensionRevision));
-        applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, projectId: activeProjectId, sessionId: session.sessionId });
+        applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, preserveDraft: resumeDraftRef.current !== null, projectId: activeProjectId, sessionId: session.sessionId });
         if (resumeDraftRef.current !== null) {
           applyConversation({ type: "draft-changed", draft: resumeDraftRef.current });
           resumeDraftRef.current = null;
           resumeSelectionRef.current = null;
         }
+        setChatSelection(null);
+        setReferenceIssue(null);
         setTranscript({ projectId: activeProjectId, sessionId: session.sessionId, status: "ready", issue: null, items: [], offset: 0, total: 0, hasOlder: false });
         setLiveTurns([]);
         setPendingUserText(null);
@@ -1625,42 +1834,68 @@ export default function App() {
     })();
   }, [ownsOperation, scheduleOwnedFrame, beginWorkspaceOperation, finishWorkspaceOperation, transcript]);
 
-  const sendTurn = useCallback(() => {
+  const sendTurn = useCallback(async () => {
     const selected = conversationRef.current.selected;
     const draft = conversationRef.current.draft;
-    if (selected === null || draft.trim().length === 0 || conversationRef.current.activeTurn !== null ||
-        workspaceOperation.current !== null || inFlight.current || documentBusyRef.current ||
-        pendingApprovalRef.current !== null || bindingGenerationRef.current !== generationRef.current ||
-        projectRef.current?.projectId !== selected.projectId) return;
-    const owner = captureOwner("conversation turn");
+    const selectedProject = projectRef.current;
+    const session = state.session;
+    if (selected === null || selectedProject === null || session === null || draft.trim().length === 0 ||
+        conversationRef.current.activeTurn !== null || workspaceOperation.current !== null || inFlight.current ||
+        documentBusyRef.current || pendingApprovalRef.current !== null || bindingGenerationRef.current !== generationRef.current ||
+        selectedProject.projectId !== selected.projectId) return;
+    const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
+    if (submission.retry && !retrySettingsMatch(conversationRef.current.submittedContext, session.bashPermissionMode, session.thinkingMode)) {
+      setReferenceIssue("The saved turn uses different Permission or Thinking settings. Send a new turn with the current settings, or restore those settings explicitly before retrying.");
+      return;
+    }
+    const owner = beginWorkspaceOperation(submission.retry ? "Preparing saved retry" : "Preparing submission");
+    if (owner === null) return;
     const generation = owner.generation;
     const isCurrent = () => ownsOperation(owner, turnOwnerRef.current) && sameSelection(conversationRef.current.selected, selected);
-    let tracked;
-    const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
     const turnId = submission.turnId;
+    const references = structuredClone(conversationRef.current.draftReferences);
+    const background = backgroundDocumentContext(documentRef.current);
+    let submittedContext = submission.retry ? structuredClone(conversationRef.current.submittedContext) : null;
+    let tracked;
     try {
-      tracked = backendClient.requestTracked("session.turn", {
-        text: draft,
-        turnId,
-        retry: submission.retry,
-        skillReferences: (submission.retry ? submittedSkillReferencesRef.current : inlineSkillReferences(draft, state.session?.loadedSkills ?? [], selectedSkillNamesRef.current)) as unknown as JsonObject[],
-        ...((submission.retry ? submittedDocumentRef.current : documentRef.current) === null ? {} : {
-          documentContext: documentContextPayload((submission.retry ? submittedDocumentRef.current : documentRef.current)!),
-        }),
-      });
       if (!submission.retry) {
-        submittedDocumentRef.current = documentRef.current === null ? null : { ...documentRef.current };
-        submittedSkillReferencesRef.current = inlineSkillReferences(draft, state.session?.loadedSkills ?? [], selectedSkillNamesRef.current);
+        const inspected = await backendClient.request("workspace.select", { rootPath: selectedProject.rootPath, action: "inspect" }) as unknown as ProjectWorkspaceDto;
+        if (!ownsOperation(owner, workspaceOperation.current)) return;
+        if (inspected.status !== "ready" || inspected.projectId !== selectedProject.projectId ||
+            inspected.rootPath !== selectedProject.rootPath || inspected.historyDirectory !== selectedProject.historyDirectory) {
+          throw new Error("The project history configuration changed. Reopen the project before sending; your draft is retained.");
+        }
+        submittedContext = {
+          projectId: selected.projectId, rootPath: selectedProject.rootPath,
+          permissionMode: session.bashPermissionMode, requestedThinkingMode: session.thinkingMode,
+          skillReferences: inlineSkillReferences(draft, session.loadedSkills, selectedSkillNamesRef.current),
+          projectRules: { text: inspected.rulesText, fingerprint: inspected.rulesFingerprint },
+          ...(background === undefined ? {} : { documentContext: background }),
+          references,
+        };
       }
-    }
-    catch (error) { setWorkspaceIssue(error instanceof Error && !(error instanceof BackendClientError)
-      ? { code: "PROTOCOL_INVALID", message: error.message, retryable: false, source: "protocol" }
-      : workspaceError(error)); focusComposer(owner); return; }
+      checkSubmissionSize(draft, submittedContext);
+      if (!ownsOperation(owner, workspaceOperation.current)) return;
+      tracked = backendClient.requestTracked("session.turn", {
+        text: draft, turnId, retry: submission.retry,
+        ...(submittedContext === null ? {} : { submittedContext: submittedContext as unknown as JsonObject }),
+      });
+      submittedDocumentRef.current = submittedDocumentSource(submittedContext) ?? null;
+      setReferenceIssue(null);
+    } catch (error) {
+      if (ownsOperation(owner, workspaceOperation.current)) {
+        setWorkspaceIssue(error instanceof Error && !(error instanceof BackendClientError)
+          ? { code: "SUBMISSION_INVALID", message: error.message, retryable: false, source: "protocol" }
+          : workspaceError(error));
+        focusComposer(owner);
+      }
+      return;
+    } finally { finishWorkspaceOperation(owner); }
     turnOwnerRef.current = owner;
     frameOwnerRef.current = null;
     setPendingUserText(draft);
     setWorkspaceIssue(null);
-    applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
+    applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, submittedContext, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
     void tracked.result.then(async (data) => {
       if (!isCurrent()) return;
       const result = data as unknown as TurnCompletedDto;
@@ -1683,6 +1918,7 @@ export default function App() {
         turnId: answer.turnId,
         turnNumber: answer.turnNumber,
         userText: draft,
+        submittedContext,
         assistantText: answer.text,
         responseKind: answer.responseKind,
         streamKind: answer.streamKind,
@@ -1780,6 +2016,11 @@ export default function App() {
       })();
     });
   }, [captureOwner, ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
+
+  const sendNewTurn = useCallback(() => {
+    applyConversation({ type: "new-turn-requested", generation: generationRef.current, projectEpoch: projectEpochRef.current });
+    void sendTurn();
+  }, [applyConversation, sendTurn]);
 
   const previewExtensions = useCallback(() => {
     const flow = extensionFlow;
@@ -2011,10 +2252,12 @@ export default function App() {
           sessionId: conversation.activeTurn.sessionId,
           turnId: conversation.activeTurn.turnId,
           userText: pendingUserText,
+          submittedContext: conversation.submittedContext,
           activity: conversation.activeTurn.activity,
         },
   ), [conversation.activeTurn, liveTurns, pendingUserText, selectionPreview, visibleTranscript]);
   const renderConversation = activeProjectId !== null && state.phase === "session-ready" && state.session !== null && conversation.selected?.projectId === activeProjectId;
+  const retryControlsMatch = retrySettingsMatch(conversation.submittedContext, state.session?.bashPermissionMode ?? "ask", state.session?.thinkingMode ?? "normal");
   const documentDirty = documentValue !== null && documentValue.sourceText !== documentBaselineRef.current?.sourceText;
   const activeSession = renderConversation ? state.session : null;
 
@@ -2064,12 +2307,12 @@ export default function App() {
               </div>
             </div>
             <p className="document-notice" role="status">{documentBusy ? "Checking and saving the requested version…" : documentNotice}</p>
-            <DocumentEditor value={documentValue} onChange={updateDocument} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
+            <DocumentEditor value={documentValue} onChange={updateDocument} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
             {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
               <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
               <p>Keeping the editor or cancelling leaves disk unchanged. Using the candidate replaces this file after checking its version again.</p>
               <div className="conflict-versions">
-                <details><summary>Turn source</summary><pre>{documentConflict.base.sourceText}</pre></details>
+                <details><summary>Original source</summary><pre>{documentConflict.base.sourceText}</pre></details>
                 <details><summary>Current editor</summary><pre>{documentValue?.sourceText}</pre></details>
                 <details><summary>Current disk</summary><pre>{documentConflict.result.currentDiskText ?? "Unavailable"}</pre></details>
                 <details open><summary>Agent candidate / requested save</summary><pre>{documentConflict.result.candidateText ?? documentValue?.sourceText}</pre></details>
@@ -2092,7 +2335,7 @@ export default function App() {
             onApply={applyExtensions}
             onRestart={restartForExtensions}
           />}
-          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={sendTurn} disabled={interaction.turnActive}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
+          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
           {selectionPreview === null && registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
           {state.phase === "stopped" && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><p className="section-kicker">LOCAL · PRIVATE · ON THIS DEVICE</p><h3 id="stopped-title">Your research workspace is ready to connect</h3><p>Start the Linux backend, verify the local runtime, then create a conversation. No provider request is made by the runtime check.</p><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
           {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
@@ -2102,7 +2345,7 @@ export default function App() {
           {selectionPreview !== null && <section className="conversation-surface" aria-label="Saved conversation preview" aria-busy="true">
             <p className="control-state" role="status">Preparing this conversation… You can read the saved messages while it loads.</p>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
-              <ConversationTurns turns={visibleTurns} />
+              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} />
               <div ref={transcriptEndRef} />
             </div>
           </section>}
@@ -2120,18 +2363,26 @@ export default function App() {
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
               {visibleTurns.length === 0 && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Enter sends. Shift+Enter adds a new line.</p></div>}
-              <ConversationTurns turns={visibleTurns} />
+              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} />
               <div ref={transcriptEndRef} />
             </div>
+            {conversation.failure !== null && conversation.submittedContext !== null && <div className="reference-retry-settings">
+              <p>Saved turn: {conversation.submittedContext.permissionMode === "ask" ? "Ask" : "Bypass"} · {conversation.submittedContext.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
+                {!retryControlsMatch && " Current controls differ; the original retry is disabled."}</p>
+              <button type="button" onClick={sendNewTurn} disabled={!idle}>Send new turn with current settings</button>
+            </div>}
+            {referenceIssue !== null && <p className="reference-issue" role="status">{referenceIssue}</p>}
             <SlashComposer
               key={`${state.snapshot?.generation}:${conversation.selected?.projectId}:${conversation.selected?.sessionId}`}
               draft={conversation.draft} textareaRef={composerRef}
+              references={conversation.draftReferences}
+              onRemoveReference={(referenceId) => applyConversation({ type: "reference-removed", generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch, referenceId })}
               skills={state.session?.loadedSkills ?? []}
               onSkillPicked={(name) => selectedSkillNamesRef.current.add(name)}
               commands={composerSlashCommands(state.session, conversation.selected, state.snapshot?.generation, slashCatalogOwner,
                 state.snapshot?.lifecycle === "ready" && state.phase === "session-ready" && idle)}
-              disabled={conversation.selected === null || interaction.turnActive}
-              sendDisabled={interaction.sendDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
+              disabled={conversation.selected === null || interaction.turnActive || workspaceBusy !== null}
+              sendDisabled={interaction.sendDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || (conversation.failure !== null && !retryControlsMatch)}
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
               onSubmit={sendTurn}
             />
@@ -2174,10 +2425,10 @@ export default function App() {
               <label><input type="radio" name="project-document-choice" checked={dirtyChoice === "save"} onChange={() => setDirtyChoice("save")} /> Save before opening</label>
               <label><input type="radio" name="project-document-choice" checked={dirtyChoice === "discard"} onChange={() => setDirtyChoice("discard")} /> Discard only after the project opens</label>
             </fieldset>}
-            {conversation.draft.length > 0 && <label><input type="checkbox" checked={discardDraft} disabled={workspaceBusy !== null}
-              onChange={(event) => setDiscardDraft(event.target.checked)} /> Discard the unsent draft only after the project opens</label>}
+            {(conversation.draft.length > 0 || conversation.draftReferences.length > 0) && <label><input type="checkbox" checked={discardDraft} disabled={workspaceBusy !== null}
+              onChange={(event) => setDiscardDraft(event.target.checked)} /> Discard the unsent draft and references only after the project opens</label>}
             <div className="action-row"><button className="primary-button" type="button"
-              disabled={workspaceBusy !== null || (conversation.draft.length > 0 && !discardDraft) || candidateHistory.trim() === "" || (candidate.status === "needs_configuration" && candidateHistory !== candidate.historyDirectory)}
+              disabled={workspaceBusy !== null || ((conversation.draft.length > 0 || conversation.draftReferences.length > 0) && !discardDraft) || candidateHistory.trim() === "" || (candidate.status === "needs_configuration" && candidateHistory !== candidate.historyDirectory)}
               onClick={() => void chooseProject(candidate.status === "ready" ? "open" : "initialize")}>
               {documentDirty && dirtyChoice === "save" ? "Save and " : ""}{candidate.status === "ready" ? "Open project" : "Initialize and open project"}
             </button></div>
@@ -2187,6 +2438,9 @@ export default function App() {
           <button type="button" disabled={workspaceBusy !== null} onClick={() => setChooserOpen(false)}>Cancel</button>
         </section>
       </div>}
+      {chatSelection !== null && renderConversation && idle && !chooserOpen && <button type="button" className="chat-reference-action"
+        style={{ position: "fixed", top: chatSelection.top, left: chatSelection.left }}
+        onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Add selected text to chat</button>}
       {pendingApproval !== null && <ApprovalDialog
         approval={pendingApproval}
         resolving={approvalResolving}

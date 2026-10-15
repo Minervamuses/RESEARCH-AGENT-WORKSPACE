@@ -1,5 +1,7 @@
 import type {
   TranscriptTurnDto,
+  Reference,
+  SubmittedContext,
   TurnLifecycleDetailsDto,
 } from "./protocol.ts";
 
@@ -49,6 +51,7 @@ export interface FinalConversationAnswer extends ConversationSelection {
 }
 
 export interface LiveTurn {
+  submittedContext?: SubmittedContext | null;
   sessionId: string;
   turnId: string;
   turnNumber: number;
@@ -64,6 +67,7 @@ export interface RestoredConversationTurn {
 }
 
 export interface PendingConversationTurn {
+  submittedContext?: SubmittedContext | null;
   sessionId: string;
   turnId: string;
   userText: string;
@@ -111,6 +115,8 @@ export interface ConversationState {
   projectEpoch: number;
   selected: ConversationSelection | null;
   draft: string;
+  draftReferences: Reference[];
+  submittedContext: SubmittedContext | null;
   activeTurn: ActiveConversationTurn | null;
   latestAnswer: FinalConversationAnswer | null;
   failure: ConversationFailure | null;
@@ -119,9 +125,12 @@ export interface ConversationState {
 export type ConversationAction = (
   | { type: "backend-generation-changed"; generation: number }
   | { type: "project-opened"; generation: number; preserveDraft?: boolean }
-  | ({ type: "conversation-selected"; generation: number } & ConversationSelection)
+  | ({ type: "conversation-selected"; generation: number; preserveDraft?: boolean } & ConversationSelection)
   | { type: "draft-changed"; draft: string }
-  | ({ type: "turn-started"; generation: number; requestId: string; turnId: string } & ConversationSelection)
+  | { type: "reference-added"; reference: Reference; generation?: number }
+  | { type: "reference-removed"; referenceId: string; generation?: number }
+  | { type: "new-turn-requested"; generation?: number }
+  | ({ type: "turn-started"; generation: number; requestId: string; turnId: string; submittedContext?: SubmittedContext | null } & ConversationSelection)
   | ({
       type: "activity-received";
       generation: number;
@@ -148,6 +157,7 @@ export type ConversationAction = (
     })
   | ({
       type: "retry-target-restored";
+      submittedContext?: SubmittedContext | null;
       generation: number;
       turnId: string;
       userText: string;
@@ -188,6 +198,8 @@ export const initialConversationState: ConversationState = {
   projectEpoch: 0,
   selected: null,
   draft: "",
+  draftReferences: [],
+  submittedContext: null,
   activeTurn: null,
   latestAnswer: null,
   failure: null,
@@ -403,6 +415,7 @@ function finalizeTurn(
   return {
     ...state,
     draft: "",
+    draftReferences: [],
     activeTurn: null,
     latestAnswer: {
       projectId: active.projectId,
@@ -441,7 +454,10 @@ export function conversationReducer(
   if (action.type === "project-opened") {
     const projectEpoch = action.projectEpoch ?? state.projectEpoch + 1;
     if (action.generation !== state.backendGeneration || state.activeTurn !== null || projectEpoch <= state.projectEpoch) return state;
-    return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch, draft: action.preserveDraft ? state.draft : "" };
+    return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch,
+      draft: action.preserveDraft ? state.draft : "",
+      draftReferences: action.preserveDraft ? state.draftReferences : [],
+      submittedContext: action.preserveDraft ? state.submittedContext : null };
   }
   if (action.type === "conversation-selected") {
     if (
@@ -453,12 +469,25 @@ export function conversationReducer(
     }
     return {
       ...state,
-      draft: sameSelection(state.selected, action) ? state.draft : "",
+      draft: action.preserveDraft || sameSelection(state.selected, action) ? state.draft : "",
+      draftReferences: action.preserveDraft || sameSelection(state.selected, action) ? state.draftReferences : [],
+      submittedContext: action.preserveDraft || sameSelection(state.selected, action) ? state.submittedContext : null,
       selected: { projectId: action.projectId, sessionId: action.sessionId },
       latestAnswer: null,
       failure: null,
     };
   }
+  if ((action.type === "reference-added" || action.type === "reference-removed" || action.type === "new-turn-requested") &&
+      action.generation !== undefined && action.generation !== state.backendGeneration) return state;
+  if (action.type === "reference-added") {
+    if (state.activeTurn !== null || state.selected === null || state.draftReferences.some((item) => item.referenceId === action.reference.referenceId)) return state;
+    return { ...state, draftReferences: [...state.draftReferences, structuredClone(action.reference)], failure: null };
+  }
+  if (action.type === "reference-removed") {
+    if (state.activeTurn !== null) return state;
+    return { ...state, draftReferences: state.draftReferences.filter((item) => item.referenceId !== action.referenceId), failure: null };
+  }
+  if (action.type === "new-turn-requested") return state.activeTurn === null ? { ...state, failure: null } : state;
   if (action.type === "draft-changed") {
     return typeof action.draft === "string"
       ? {
@@ -480,6 +509,7 @@ export function conversationReducer(
     }
     return {
       ...state,
+      submittedContext: action.submittedContext === undefined ? state.submittedContext : structuredClone(action.submittedContext),
       activeTurn: {
         backendGeneration: action.generation,
         projectEpoch: state.projectEpoch,
@@ -526,7 +556,7 @@ export function conversationReducer(
         turnId: active.turnId,
         message: action.message.slice(0, 320),
         retryable: action.retryable,
-        draftPreserved: state.draft.length > 0,
+        draftPreserved: state.draft.length > 0 || state.draftReferences.length > 0,
         turnLifecycle,
       },
     };
@@ -548,6 +578,8 @@ export function conversationReducer(
     return {
       ...state,
       draft: action.userText,
+      draftReferences: structuredClone(action.submittedContext?.references ?? []),
+      submittedContext: structuredClone(action.submittedContext ?? null),
       latestAnswer: null,
       failure: {
         projectId: action.projectId,
