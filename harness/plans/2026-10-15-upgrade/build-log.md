@@ -6,12 +6,12 @@
 
 | 階段 | 狀態 | 實作證據 | 阻擋／下一步 |
 | --- | --- | --- | --- |
-| P0 | Complete | P0.S1～S3：runtime、邊界、批准與驗收入口可追溯 | 依 P1 開始文件閉環 |
-| P1 | Complete | P1.S1～S2：文件閉環、離線與原生代表案例 | P2；最終整合仍由 P5 驗收 |
-| P2 | Complete | P2.S1～S2：行內多引用、真實 catalog／graph、順序操作與清理 | P3；真模型合作品質留 P5 明示 |
-| P3 | Complete | P3.S1～S2：各副作用入口與模式／批准驗收 | P4；最終原生整合留 P5 |
-| P4 | Complete | P4.S1～S2：摘要來源、主題檢索與真 graph 離線驗收 | P5 受限真模型與原生整合 |
-| P5 | In progress | P1～P4 已驗收，US$1 上限已明確批准 | 局部重複讀取、原生 A～E、真模型及收尾 suite |
+| P0 | Complete | P0.S1～S3：runtime、邊界、批准與驗收入口可追溯 | 無；最終核對見 P5.S6 |
+| P1 | Complete | P1.S1～S2、P5.S3／S5／S6：文件閉環、失敗與原生流程 | 無 |
+| P2 | Complete | P2.S1～S2、P5.S4～S6：行內多引用、真 graph／模型合作 | 無 |
+| P3 | Complete | P3.S1～S2、P5.S5～S6：副作用、模式、Bypass 衝突 | 無 |
+| P4 | Complete | P4.S1～S2、P5.S4～S6：摘要來源、真搜尋與品質修正驗收 | 無 |
+| P5 | Complete | P5.S1～S6：原生 A～E、必要分支、真模型與完整檢查 | 無；計劃完成 |
 
 ## 原單檔計劃的撰寫歷史
 
@@ -165,6 +165,18 @@
 - 原生 Bypass Undo 無逐次批准，逐字回到原稿。再由隔離磁碟追加外部版本，在 GUI 保留第 54 行舊選取送出候選：未出批准、結果明確 conflict，沒有覆蓋磁碟。實際找到衝突區被編輯器擠出視窗；只減 min-height 的第一次修正不足，確認 writing grid 的高度未受約束後，第二次以既有 conversation 高度約束＋可縮編輯器／衝突區修正，原生面板與按鈕可讀可操作。
 - 收起候選內容→Keep editor；Python 核對原始 50 行／兩個重複段落與外部附註逐字不變，候選從未保存。npm run build 再次成功（0.574s），Monaco chunk 工具提示保留。未擴大為 layout 重構／新測試框架。
 - 本步只提交必要 CSS task-only 內容及本紀錄，原使用者 CSS 差異保留。原生 @ 部分名稱／鍵盤與滑鼠選取、當前未儲存主張到摘要的展示仍待最後走查；之後才標 P5 完成。
+
+## P5.S6｜最終原生 A～E 與完成出口（2026-10-15）
+
+- P5.S5 已提交 008ba13。沿同一 WSLg 視窗、draft.md 與已保存對話完成剩餘原生操作；沒有另建並行模型或更換驗收目標。P0～P5 全部完成，D1～D8 未重開。
+- **A／G1：** 重新啟動後端、載入原有對話有畫面回饋；Enter 出現 prompt／執行鎖及單項批准。等待中來源可點選、拖曳、移動游標與實際輸入「（等待時編輯）」；右側單回合、Send／模式／切對話保持停用。Deny 後新編輯仍在，實際磁碟未變。右側結果可捲動，左側選取保留；本次未見須等待整回合才能編輯的凍結。WSLg 截圖有重繪延後，沒有將其當作 app 延遲量測或宣稱相對原版的體感改善幅度。
+- **B／G2：** 句中「請先用 @acad」→Down→Enter，只插入完整 academic-paper-writing、turnCount 保持 4；接著第二個 @ci→Esc 保留原文→Backspace 成 @c 重開→滑鼠插入 citation，Enter 才送出一次、turnCount=5。實際解析兩組引用，載入真 roots／完整指引及 pinned references（21386 characters）；不是只有文字標籤。
+- **C、D／G3～G5：** 最終版本原生第 40–45 行反白、轉聊天仍保留、成功只替換指定六行並立即存檔；Bypass Undo 逐字恢復。第二個重複段落定位與未儲存新主張保持第 54 來源行。Bypass 外部版本差異停在 conflict，Keep editor 後外部磁碟逐字保留。P1 定向離線另覆蓋存檔失敗保留候選、再次版本變更拒絕、retry 不重寫、BOM／CRLF／emoji／tab，沒有以 UI 狀態代替檔案核對。
+- **E／G6：** 原生 fake-model 明示 recorded 結果，收到第 54 行「檢索增強生成可降低醫療問答中的無根據陳述。」及 revision=3，顯示有摘要／無摘要與限制；durable turn 及磁碟核對證明未從舊磁碟／RAG 取代未儲存稿，也沒有改檔。真模型／真 Crossref、DataCite 搜尋與修正品質另見 S4～S5；合計 US$0.04694805、5 次請求，沒有進一步花費。摘要未交代的方法已如實列未知，最終 citation 身分 gate 與保存測試保留。
+- **G7：** P3 各操作種類的批准／拒絕／Bypass 實際效果由 232 項相關定向測試及收尾 collection 覆蓋；原生補驗單項文件批准／拒絕、Bypass Undo／版本衝突及回合模式凍結。沒有用 Bypass 放寬正確性或啟用缺失工具。
+- **檢查出口：** Python 有序 collection 1389 項全部由首輪 476、續跑成功 902、11 個失敗修正後定向通過覆蓋；中斷與 runner 誤用未隱藏。前端完整 218 項通過後，修正新增的 documents 第 6 案與相關型別檢查通過；最終 npm build 成功。最後共同協定 Python 150／TS 144／Rust 12 passed。最後計畫包靜態檢查 11 檔、0 errors、14 個既有 BOUNDARY_LINK warnings（包外 repository 來源連結，P0 已確認存在），不當產品驗收。沒有必要檢查仍待執行；保留已記錄的工具 warnings 與 process-only receipt／單檔格式界線，不宣稱跨重啟 exactly-once 或普遍模型品質。
+- **收尾／Git：** 最後 7 個既有使用者 tracked deltas 逐一與 P0 暫存基線比較保留；App 的 startup 說明重疊只作已記錄文字正規化，原功能差異未被收編。git diff --check 通過，index 在本步前為空；dirty 僅原七檔及既有 untracked，不新增專案外持久狀態。正常 Shut down 顯示 backend stopped gracefully，再關閉隔離視窗；Tauri dev exit 0，程序核對沒有 desktop backend／Vite／pytest／驗收模型腳本殘留。暫存 fixture、對話／檢查／用量證據保留在已列 /tmp 路徑。
+- **獨立完成核對：** 唯讀對照 GOALS／PLANS／phase05、既有 log、最終原生與真模型結果，確認 G1～G7、A～E 及必要失敗分支均有證據，沒有未解阻擋。此完成紀錄本機提交後停止；不 push、不改分支／worktree，不擴大後續優化。
 
 ## 後續紀錄方式
 
