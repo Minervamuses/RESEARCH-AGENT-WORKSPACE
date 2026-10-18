@@ -38,7 +38,7 @@ from agent.conversations import (
     ConversationUnavailableError,
     ToolActivitySummary,
 )
-from agent.conversations.models import validate_submitted_context
+from agent.conversations.models import MAX_TITLE_BYTES, validate_submitted_context
 from agent.cli.slash_commands import (
     ParsedSlashCommand,
     SlashCommand,
@@ -354,6 +354,7 @@ class DesktopService:
             "session.create": self._session_create,
             "session.list": self._session_list,
             "session.select": self._session_select,
+            "session.rename": self._session_rename,
             "session.retry_registration": self._session_retry_registration,
             "session.transcript": self._session_transcript,
             "session.status": self._session_status,
@@ -903,6 +904,57 @@ class DesktopService:
             "projectId": project["projectId"],
             "registered": True,
         }
+
+    async def _session_rename(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        if self._turn_active or self._pending_approval is not None:
+            raise DesktopServiceError(
+                "BUSY_TURN", "Wait for the active turn before renaming a conversation.",
+                retryable=True,
+            )
+        if (
+            self._session_creating or self._knowledge_active or self._extension_active
+            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            or self._project_operation_count - self._project_read_count > 1
+        ):
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "Wait for the current conversation operation before renaming.",
+                retryable=True,
+            )
+        project = self._require_catalog_project(params["projectId"])
+        session_id = params["sessionId"]
+        if session_id not in project["sessionIds"]:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID", "The requested conversation does not belong to that project.",
+            )
+        title = params["title"]
+        if not isinstance(title, str) or not title.strip() or len(title.strip().encode("utf-8")) > MAX_TITLE_BYTES:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID", f"A conversation title must contain 1–{MAX_TITLE_BYTES} UTF-8 bytes.",
+            )
+        title = title.strip()
+
+        def rename_saved_conversation() -> ConversationSnapshot:
+            snapshot = self._load_conversation(session_id, project["projectId"])
+            if snapshot is None:
+                raise ConversationUnavailableError("canonical conversation is unavailable")
+            return self._conversation_repository.rename(
+                snapshot, title, updated_at=self._utc_timestamp(datetime.now(timezone.utc)),
+            )
+
+        # Keep the existing conversation gate closed until the short write settles.
+        self._session_creating = True
+        try:
+            await await_sync_work(rename_saved_conversation)
+        except ConversationError as exc:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "The saved conversation could not be renamed. Refresh and try again.",
+                retryable=True,
+            ) from exc
+        finally:
+            self._session_creating = False
+        return {"projectId": project["projectId"], "sessionId": session_id, "title": title}
 
     async def _session_retry_registration(
         self, params: dict[str, Any], _event_sink: EventSink | None

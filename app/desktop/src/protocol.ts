@@ -14,6 +14,7 @@ export const PROTOCOL_METHODS = [
   "session.create",
   "session.list",
   "session.select",
+  "session.rename",
   "session.retry_registration",
   "session.transcript",
   "session.status",
@@ -735,6 +736,11 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     projectId: { type: "string", required: true, maxBytes: 256 },
     registered: { type: "boolean", required: true },
   },
+  "session.rename": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    title: { type: "string", required: true, maxBytes: 256 },
+  },
   "session.retry_registration": {
     projectId: { type: "string", required: true, maxBytes: 256 },
     sessionId: { type: "string", required: true, maxBytes: 32 },
@@ -918,6 +924,11 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "session.select": {
     projectId: { type: "string", required: true, maxBytes: 256 },
     sessionId: { type: "string", required: true, maxBytes: 32 },
+  },
+  "session.rename": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    title: { type: "string", required: true, maxBytes: 256 },
   },
   "session.retry_registration": {
     projectId: { type: "string", required: true, maxBytes: 256 },
@@ -1104,6 +1115,12 @@ export interface ProjectListDto {
   projects: ProjectSummaryDto[];
   selectedProjectId: string | null;
   selectedSessionId: string | null;
+}
+
+export interface SessionRenamedDto {
+  projectId: string;
+  sessionId: string;
+  title: string;
 }
 
 export interface SessionSummaryDto {

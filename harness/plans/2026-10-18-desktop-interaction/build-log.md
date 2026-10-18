@@ -6,9 +6,9 @@
 |---|---|---|---|---|
 | P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
 | P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過 | 整體實機流程在 P6 再核對 | P3 可開始 |
-| P3 | Implemented | 真 graph／coordinator 的 Ask、Bypass 兩段保存與前端工作範圍檢查通過 | 整體桌面流程待固定版本驗收 | 隨 P5-S1 啟動時確認實機 |
+| P3 | Complete | Ask／Bypass 真保存檢查；實機兩次 Ask 保存後讀回兩段成果 | 無 | P6 重用此證據 |
 | P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
-| P5 | Not started | 保存與索引分工已讀；P4 已通過 | S1 尚未開始；T3 已授權 | P5-S1 canonical title |
+| P5 | In progress | S1 名稱保存、三側協定、真右鍵改名與重選通過 | S2 未實作；整個程式重開後名稱待最後驗收 | P5-S2 一致刪除 |
 | P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
 
 ## 計劃撰寫紀錄
@@ -87,3 +87,10 @@
   - Linux Conda app：`poetry run pytest tests/test_desktop_document_service.py tests/test_desktop_documents.py -q`：53 passed／1.10s。真 graph＋假模型＋真 coordinator 以原兩個 referenceId 順序修改，包含中文／emoji、CRLF 正規化及第一個 callId 重送；Ask／Bypass 各一次，均只有兩次寫入，最終磁碟保留兩段成果與未選區，原 submittedContext 不變。沿用 Ask 拒絕檢查。
   - desktop `node --test --experimental-strip-types tests/documents.test.ts tests/trust.test.ts`：19 passed；`npm run build` 通過。已有 phase02 fixture 增加最小 `[[fixture:document-multiple]]` 兩引用離線分支供桌面驗收；`poetry run pytest tests/test_desktop_fixture.py -q`：22 passed。新 fixture 分支的真 UI 操作尚未執行；不把既有 fixture tests 當作該分支實機證據。
   - 根代理審閱兩側變更並核對工作基準一致；scoped whitespace 通過，僅既有 LangGraph／bundle warnings。沒有新增 D1 防誤用處理、儲存、佇列或依賴。Scoped commit：`fix(desktop): preserve sequential passage edits [P3-S1]`。接續 P5-S1；固定版本 UI 一併核對 P2 接受後清除與 P3 兩次核准保存。
+- P2／P3 實機補證／2026-10-19 — P3-S1 已提交 `193d83e`。以 root `python main.py --dev` 固定版本、同一隔離 fixture、一般視窗再次載入專案與文件；原生 picker 仍由使用者完成。建立兩個 document comments，Enter 各自收合，主訊息空白按 Send 一次。第一個 Ask 尚未核准時，文件旁 1／2 與 composer 留言均已清除；讀回第五個 canonical turn `411d1fe1c1d54015b355c6a20f668e7a` 為 pending、permission=ask，含兩份原始 references，原磁碟未改。
+  - 依序核准 source lines 1–1 與 3–3，第二次核准畫面已顯示第一段新內容；沒有 busy 丟失下一份提案。最後 UI 顯示 Passage 1: saved／Passage 2: saved、Send 恢復；同一第五回合為 completed。Linux 讀回測試 .md：`第一段已更新，保留更多說明🙂native WSL picker.`、空行、`第二段已更新🚀`。第一份引用只選第一段前 38 UTF-16 單位，未選的 `native WSL picker.` 保留；第二份原引用 58–90 的位置由工作快照正確前移。原 references 保持原文／原範圍。無 live provider。
+- P5-S1／2026-10-19 — canonical schema 3 新增 nullable customTitle；v1/v2 仍可讀，v2 submittedContext 不丟失，僅實際寫入目標升級。repository rename 只改 metadata／updatedAt，summary 優先自訂名；一般 turn 不可同時偷改名稱。service 的 `session.rename` 核對 project membership 與 idle，沿既有 gate 等短保存完成；可改非選取的已保存對話，不切換目前 session。空暫時對話不提供 Rename，不擴充空歷史格式。
+  - 側欄 row 專用右鍵選單只有 Rename，沒有瀏覽器導覽；沿既有 modal 顯示改名、取消及保存錯誤，成功 ack 才改目標名稱並保留已載分頁。Linux Conda app：repository 25 passed，最後等效簡化後 title／rename 5 passed；conversations／service 模組 120 passed、1 個舊 P4 取消期望失敗，更新既有測試為 TURN_CANCELLED／durable interrupted 後僅該案例重跑 1 passed，未改取消 production。
+  - 協定 Python 171 passed、Node 165 passed、Rust protocol 12 passed；初次新增 fixture 的 result 錯帶 method、invalid case 漏 errorCode，修正測試資料後三側全通過。前端 conversations 29 passed；`npm run build`、scoped whitespace 通過。根代理審閱必要 production 變更；無新增 dependency／storage layer。
+  - 真 UI 右鍵既有五回合對話，改名「桌面多段驗收」，側欄與標題立即更新。canonical customTitle 保存；改名前後 turns 的 SHA-256 均 `1a45801df23f86789823b9654bb21fc1a096f80bc598812ec476ec6743c5ffbe`。建立第二則 `Keep this test conversation.` 後重選原對話，新名仍在，歷史標記不復活。service recreation／下一回合保名由本步測試通過，整個應用重開後手動選回在 S2 最後驗收核對。
+  - 後續刪除驗收保留 B：`5bc7ff8f87754bc2a6d0a3471709eeea`，canonical SHA-256 `9a33c2d3825df6c7553e5ec84a711f8f427f74bed4d940c8f509dc30dd3af21c`；測試文稿 SHA-256 `ddac4c1fd4ec02636cc999382db3a5992cbe4de269de80759e19bf5dbee334b5`。這些均在 `/tmp` 隔離專案，未用使用者 store。完成後已關閉本次 dev 程序，避免下一步 HMR。Scoped commit：`feat(desktop): persist conversation names [P5-S1]`；接續 P5-S2。

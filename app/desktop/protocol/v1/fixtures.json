@@ -1690,6 +1690,67 @@
           "text": "No copied prompt in acceptance event"
         }
       }
+    },
+    {
+      "name": "session-rename-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000082",
+        "method": "session.rename",
+        "params": {
+          "projectId": "p1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "title": "研究對話🙂"
+        }
+      }
+    },
+    {
+      "name": "session-rename-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000082",
+        "ok": true,
+        "data": {
+          "projectId": "p1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "title": "研究對話🙂"
+        }
+      }
+    },
+    {
+      "name": "session-rename-missing-title",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000082",
+        "method": "session.rename",
+        "params": {
+          "projectId": "p1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7"
+        }
+      }
+    },
+    {
+      "name": "session-rename-title-byte-limit",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000082",
+        "method": "session.rename",
+        "params": {
+          "projectId": "p1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "title": "中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中"
+        }
+      }
     }
   ],
   "rawLines": [

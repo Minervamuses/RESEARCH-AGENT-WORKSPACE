@@ -561,6 +561,10 @@ h3 {
   border-color: #d6d9d6;
 }
 
+.session-link:disabled { pointer-events: none; }
+.conversation-menu-backdrop { position: fixed; inset: 0; z-index: 900; }
+.document-menu-actions.conversation-menu { position: fixed; right: auto; min-width: 12rem; }
+
 .session-link span {
   font-size: 0.76rem;
   font-weight: 680;

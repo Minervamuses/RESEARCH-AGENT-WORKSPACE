@@ -586,6 +586,11 @@
       "projectId": {"type": "string", "required": true, "maxBytes": 256},
       "registered": {"type": "boolean", "required": true}
     },
+    "session.rename": {
+      "projectId": {"type": "string", "required": true, "maxBytes": 256},
+      "sessionId": {"type": "string", "required": true, "maxBytes": 32},
+      "title": {"type": "string", "required": true, "maxBytes": 256}
+    },
     "session.retry_registration": {
       "projectId": {"type": "string", "required": true, "maxBytes": 256},
       "sessionId": {"type": "string", "required": true, "maxBytes": 32},
@@ -813,6 +818,16 @@
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "sessionId": {"type": "string", "required": true, "maxBytes": 32}
+      }
+    },
+    {
+      "name": "session.rename",
+      "operation": "mutation",
+      "requiredParams": ["projectId", "sessionId", "title"],
+      "params": {
+        "projectId": {"type": "string", "required": true, "maxBytes": 256},
+        "sessionId": {"type": "string", "required": true, "maxBytes": 32},
+        "title": {"type": "string", "required": true, "maxBytes": 256}
       }
     },
     {

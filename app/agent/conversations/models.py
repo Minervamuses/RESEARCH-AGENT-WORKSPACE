@@ -12,7 +12,7 @@ from typing import Any, Literal
 from uuid import RFC_4122, UUID
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 LATEST_CONTEXT_TURNS = 10
 
 MAX_TURNS = 4_096
@@ -430,10 +430,14 @@ class ConversationDocument:
     created_at: str
     updated_at: str
     turns: tuple[ConversationTurn, ...]
+    custom_title: str | None = None
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version not in (1, SCHEMA_VERSION):
-            _invalid(f"schemaVersion must equal 1 or {SCHEMA_VERSION}")
+        if type(self.schema_version) is not int or self.schema_version not in (1, 2, SCHEMA_VERSION):
+            _invalid(f"schemaVersion must equal 1, 2, or {SCHEMA_VERSION}")
+        _validate_optional_text(self.custom_title, "customTitle", MAX_TITLE_BYTES, nonblank=True)
+        if self.schema_version < 3 and self.custom_title is not None:
+            _invalid("customTitle requires schemaVersion 3")
         validate_conversation_id(self.conversation_id)
         validate_project_id(self.project_id)
         _created_at, created_value = _timestamp_value(

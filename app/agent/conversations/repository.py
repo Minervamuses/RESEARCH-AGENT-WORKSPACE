@@ -146,7 +146,7 @@ def _failure_from_json(value: object) -> FailureInfo | None:
 
 
 def _turn_from_json(value: object, schema_version: int) -> ConversationTurn:
-    keys = _TURN_KEYS | {"submittedContext"} if schema_version == SCHEMA_VERSION else _TURN_KEYS
+    keys = _TURN_KEYS | {"submittedContext"} if schema_version >= 2 else _TURN_KEYS
     raw = _expect_exact_object(value, keys)
     activities = raw["toolActivities"]
     if type(activities) is not list:
@@ -192,7 +192,7 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
         "schemaVersion" in raw_value
         and (
             type(raw_value["schemaVersion"]) is not int
-            or raw_value["schemaVersion"] not in (1, SCHEMA_VERSION)
+            or raw_value["schemaVersion"] not in (1, 2, SCHEMA_VERSION)
         )
     ):
         raise _ClassifiedMalformedError(
@@ -201,7 +201,8 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
         )
 
     try:
-        raw = _expect_exact_object(raw_value, _DOCUMENT_KEYS)
+        keys = _DOCUMENT_KEYS | {"customTitle"} if raw_value.get("schemaVersion") == 3 else _DOCUMENT_KEYS
+        raw = _expect_exact_object(raw_value, keys)
         conversation_id = validate_conversation_id(raw["conversationId"])
         if conversation_id != expected_id:
             raise _ClassifiedMalformedError(
@@ -218,6 +219,7 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
             created_at=raw["createdAt"],
             updated_at=raw["updatedAt"],
             turns=tuple(_turn_from_json(item, raw["schemaVersion"]) for item in turns),
+            custom_title=raw.get("customTitle"),
         )
         return validate_document(document)
     except _ClassifiedMalformedError:
@@ -250,7 +252,7 @@ def _failure_to_json(failure: FailureInfo | None) -> dict[str, Any] | None:
 
 def _turn_to_json(turn: ConversationTurn, schema_version: int) -> dict[str, Any]:
     return {
-        **({"submittedContext": validate_submitted_context(turn.submitted_context)} if schema_version == SCHEMA_VERSION else {}),
+        **({"submittedContext": validate_submitted_context(turn.submitted_context)} if schema_version >= 2 else {}),
         "turnId": turn.turn_id,
         "turnNumber": turn.turn_number,
         "kind": turn.kind,
@@ -271,6 +273,7 @@ def _turn_to_json(turn: ConversationTurn, schema_version: int) -> dict[str, Any]
 
 def _document_to_json(document: ConversationDocument) -> dict[str, Any]:
     return {
+        **({"customTitle": document.custom_title} if document.schema_version >= 3 else {}),
         "schemaVersion": document.schema_version,
         "conversationId": document.conversation_id,
         "projectId": document.project_id,
@@ -505,6 +508,24 @@ class ConversationRepository:
             self._cleanup_temp(temporary)
         return ConversationSnapshot(document=document, fingerprint=_fingerprint(payload))
 
+    def rename(
+        self,
+        snapshot: ConversationSnapshot,
+        title: str,
+        *,
+        updated_at: str,
+    ) -> ConversationSnapshot:
+        """Save a custom sidebar title without changing any recorded turn."""
+        if type(title) is not str:
+            raise ConversationValidationError("customTitle must be a string")
+        document = replace(
+            snapshot.document,
+            schema_version=SCHEMA_VERSION,
+            custom_title=title.strip(),
+            updated_at=updated_at,
+        )
+        return self.save(snapshot, document)
+
     def append_pending(
         self,
         snapshot: ConversationSnapshot,
@@ -718,14 +739,15 @@ class ConversationRepository:
 
     def summary(self, snapshot: ConversationSnapshot) -> ConversationSummary:
         """Derive bounded sidebar metadata without persisting a second authority."""
-        title: str | None = None
-        for turn in snapshot.document.turns:
-            if turn.kind != "conversational" or not turn.semantic_input.strip():
-                continue
-            collapsed = " ".join(turn.display_input.split())
-            if collapsed:
-                title = _truncate_utf8(collapsed, MAX_TITLE_BYTES)
-                break
+        title = snapshot.document.custom_title
+        if title is None:
+            for turn in snapshot.document.turns:
+                if turn.kind != "conversational" or not turn.semantic_input.strip():
+                    continue
+                collapsed = " ".join(turn.display_input.split())
+                if collapsed:
+                    title = _truncate_utf8(collapsed, MAX_TITLE_BYTES)
+                    break
         return ConversationSummary(
             conversation_id=snapshot.document.conversation_id,
             project_id=snapshot.document.project_id,
@@ -863,8 +885,10 @@ class ConversationRepository:
         before: ConversationDocument,
         after: ConversationDocument,
     ) -> None:
-        if replace(before, schema_version=SCHEMA_VERSION) == after:
+        if before.turns == after.turns:
             return
+        if before.custom_title != after.custom_title:
+            raise InvalidTransitionError("a turn transition cannot change customTitle")
         if len(after.turns) == len(before.turns) + 1:
             if after.turns[:-1] != before.turns:
                 raise InvalidTransitionError(

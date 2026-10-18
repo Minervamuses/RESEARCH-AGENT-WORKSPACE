@@ -64,6 +64,7 @@ import type {
   SessionBashPermissionSetDto,
   SessionCreatedDto,
   SessionListDto,
+  SessionRenamedDto,
   SessionSelectedDto,
   SessionSummaryDto,
   SessionTranscriptDto,
@@ -1010,6 +1011,10 @@ export default function App() {
   const documentBaselineRef = useRef<DocumentSnapshot | null>(null);
   const [catalog, setCatalog] = useState<ProjectListDto | null>(null);
   const [sessionLists, setSessionLists] = useState<Record<string, SessionListDto>>({});
+  const [conversationMenu, setConversationMenu] = useState<{ projectId: string; session: SidebarSessionRow; left: number; top: number } | null>(null);
+  const [renameDialog, setRenameDialog] = useState<{ projectId: string; sessionId: string; title: string; issue: string | null; owner: WorkspaceOperationOwner } | null>(null);
+  const conversationMenuRef = useRef<HTMLDivElement>(null);
+  const conversationMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const [slashCatalogOwner, setSlashCatalogOwner] = useState<SlashCatalogOwner | null>(null);
   const [catalogGeneration, setCatalogGeneration] = useState<number | null>(null);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
@@ -1085,6 +1090,7 @@ export default function App() {
     frameOwnerRef.current = null;
     setWorkspaceBusy(label);
     setWorkspaceIssue(null);
+    setConversationMenu(null);
     return owner;
   }, [captureOwner]);
 
@@ -1117,7 +1123,13 @@ export default function App() {
     documentBusyRef.current = false;
     setDocumentBusy(false);
     setWorkspaceBusy(null);
+    setConversationMenu(null);
+    setRenameDialog(null);
   }, []);
+
+  useEffect(() => {
+    if (conversationMenu !== null) conversationMenuRef.current?.focus();
+  }, [conversationMenu]);
 
   const receiveDocumentResult = useCallback((result: DocumentResult, captured: DocumentSnapshot, action: DocumentAction | null) => {
     const current = documentRef.current;
@@ -1537,6 +1549,40 @@ export default function App() {
       if (isCurrent()) catalogLoading.current = null;
     }
   }, [captureOwner, ownsOperation]);
+
+  const renameConversation = useCallback(async () => {
+    const target = renameDialog;
+    if (target === null || !ownsOperation(target.owner, target.owner) ||
+        projectRef.current?.projectId !== target.projectId || bindingGenerationRef.current !== generationRef.current ||
+        state.snapshot?.lifecycle !== "ready" || state.activeAction !== null ||
+        !sessionLists[target.projectId]?.items.some((item) => item.sessionId === target.sessionId && item.status === "ready")) return;
+    const title = target.title.trim();
+    if (title.length === 0 || new TextEncoder().encode(title).length > 256) return;
+    const operation = beginWorkspaceOperation("Renaming conversation");
+    if (operation === null) return;
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
+    setRenameDialog({ ...target, issue: null });
+    try {
+      const result = await backendClient.request("session.rename", { projectId: target.projectId, sessionId: target.sessionId, title }) as unknown as SessionRenamedDto;
+      if (!isCurrent()) return;
+      if (result.projectId !== target.projectId || result.sessionId !== target.sessionId) {
+        throw protocolMismatch("The backend renamed a different conversation.");
+      }
+      catalogLoading.current = null;
+      setSessionLists((lists) => {
+        const list = lists[target.projectId];
+        if (list === undefined) return lists;
+        return { ...lists, [target.projectId]: { ...list, items: list.items.map((item) =>
+          item.sessionId === target.sessionId ? { ...item, title: result.title } : item) } };
+      });
+      setRenameDialog(null);
+      conversationMenuReturnFocusRef.current?.focus();
+    } catch (error) {
+      if (isCurrent()) setRenameDialog({ ...target, issue: workspaceError(error).message });
+    } finally {
+      finishWorkspaceOperation(operation);
+    }
+  }, [beginWorkspaceOperation, finishWorkspaceOperation, ownsOperation, renameDialog, sessionLists, state.activeAction, state.snapshot?.lifecycle]);
 
   const chooseProject = useCallback(async (action: "inspect" | "open" | "initialize", browse = false) => {
     if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
@@ -2522,6 +2568,9 @@ export default function App() {
   const canRestart = !state.browserPreview && (idle || stopRecovery) && (state.phase === "crashed" || state.phase === "degraded" || state.snapshot?.childRunning === true);
   const canShutdown = !state.browserPreview && idle && state.snapshot?.childRunning === true;
   const canCreateSession = !state.browserPreview && idle && workspaceBusy === null && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && activeProjectId !== null;
+  const canManageConversations = !state.browserPreview && idle && !chooserOpen && state.snapshot?.lifecycle === "ready" &&
+    state.diagnostics !== null && bindingGenerationRef.current === generationRef.current;
+  const renameTitleTooLong = renameDialog !== null && new TextEncoder().encode(renameDialog.title.trim()).length > 256;
   const shutdownMessage = shutdownSummary(state.snapshot);
   const selectedSummary = useMemo(() => {
     const selected = conversation.selected;
@@ -2568,7 +2617,14 @@ export default function App() {
               {list?.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
               {rows.length === 0 && list?.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
                 const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === project.projectId;
-                return <li key={session.sessionId}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
+                return <li key={session.sessionId} tabIndex={-1} onContextMenu={(event) => {
+                  event.preventDefault();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  conversationMenuReturnFocusRef.current = event.currentTarget;
+                  setConversationMenu({ projectId: project.projectId, session,
+                    left: Math.max(8, Math.min(event.clientX || bounds.left, window.innerWidth - 200)),
+                    top: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - 70)) });
+                }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
               {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
             </div>;
@@ -2689,6 +2745,57 @@ export default function App() {
         </div>
         </div>
       </main>
+      {conversationMenu !== null && <div className="conversation-menu-backdrop" onClick={() => {
+        setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus();
+      }} onContextMenu={(event) => { event.preventDefault(); setConversationMenu(null); }}>
+        <div className="document-menu-actions conversation-menu" role="menu" aria-label="Conversation actions" tabIndex={-1}
+          ref={conversationMenuRef} style={{ left: conversationMenu.left, top: conversationMenu.top }}
+          onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+            if (event.key === "Escape" || event.key === "Tab") {
+              event.preventDefault(); setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus();
+            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+            }
+          }}>
+          <button type="button" role="menuitem"
+            disabled={!canManageConversations || conversationMenu.session.transient || conversationMenu.session.status !== "ready"}
+            onClick={() => {
+              setRenameDialog({ projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId,
+                title: conversationMenu.session.title, issue: null, owner: captureOwner("Rename dialog") });
+              setConversationMenu(null);
+            }}>Rename</button>
+        </div>
+      </div>}
+      {renameDialog !== null && <div className="approval-backdrop">
+        <form className="approval-dialog file-open-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-conversation-title"
+          onSubmit={(event) => { event.preventDefault(); void renameConversation(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && workspaceBusy === null) {
+              event.preventDefault(); setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus();
+            }
+            if (event.key !== "Tab") return;
+            const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input:not(:disabled), button:not(:disabled)"));
+            const first = controls[0], last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+          }}>
+          <h2 id="rename-conversation-title">Rename conversation</h2>
+          <label>Name<input autoFocus value={renameDialog.title} disabled={workspaceBusy !== null}
+            onFocus={(event) => event.currentTarget.select()}
+            onKeyDown={(event) => { if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }}
+            onChange={(event) => setRenameDialog({ ...renameDialog, title: event.target.value, issue: null })} /></label>
+          {renameTitleTooLong && <p className="extension-error" role="alert">Enter a shorter name.</p>}
+          {renameDialog.issue !== null && <p className="extension-error" role="alert">{renameDialog.issue}</p>}
+          <div className="action-row">
+            <button type="submit" className="primary-button" disabled={!canManageConversations || renameDialog.title.trim() === "" || renameTitleTooLong}>
+              {workspaceBusy === "Renaming conversation" ? "Saving…" : "Save name"}
+            </button>
+            <button type="button" disabled={workspaceBusy !== null} onClick={() => {
+              setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus();
+            }}>Cancel</button>
+          </div>
+        </form>
+      </div>}
       {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <div className="approval-backdrop">
         <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="project-chooser-title"
           onKeyDown={(event) => {

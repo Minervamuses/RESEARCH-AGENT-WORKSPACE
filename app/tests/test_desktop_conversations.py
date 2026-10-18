@@ -862,6 +862,91 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
     assert snapshot.document.turns[1].semantic_input == "canonical semantic q2"
 
 
+def test_rename_survives_selection_restart_and_next_real_session_turn(tmp_path, monkeypatch):
+    service, _catalog, _factory, repository = _seed_coordinator(tmp_path)
+    graph = make_astream_graph(answer="answer after rename")
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: graph)
+
+    async def factory(config, *, load_mcp, **kwargs):
+        return ChatSession(config, loaded_skills=[], **kwargs)
+
+    service._session_factory = factory
+    project_id = _project_id(tmp_path)
+    before = repository.load(SESSION_A).document
+    other_bytes = repository.path_for(SESSION_B).read_bytes()
+
+    async def run():
+        await service.dispatch("session.select", {"projectId": project_id, "sessionId": SESSION_A})
+        selected = service.session
+        renamed = await service.dispatch("session.rename", {
+            "projectId": project_id, "sessionId": SESSION_A, "title": "  研究筆記😀  ",
+        })
+        assert renamed == {"projectId": project_id, "sessionId": SESSION_A, "title": "研究筆記😀"}
+        _assert_result("session.rename", renamed, 260)
+        assert service.session is selected
+        saved = repository.load(SESSION_A).document
+        assert saved.custom_title == "研究筆記😀" and saved.turns == before.turns
+        assert saved.created_at == before.created_at
+        assert repository.path_for(SESSION_B).read_bytes() == other_bytes
+
+        outcome = await service.dispatch("session.turn", {
+            "text": "continue after renaming", "turnId": _logical_turn_id(260), "retry": False,
+        })
+        assert outcome["text"] == "answer after rename"
+        assert service.session is selected
+        saved = repository.load(SESSION_A).document
+        assert saved.custom_title == "研究筆記😀" and saved.turns[:-1] == before.turns
+        await service.dispatch("session.select", {"projectId": project_id, "sessionId": SESSION_B})
+        selected_b = service.session
+        await service.dispatch("session.rename", {
+            "projectId": project_id, "sessionId": SESSION_A, "title": "最終研究筆記😀",
+        })
+        assert service.session is selected_b
+        assert repository.path_for(SESSION_B).read_bytes() == other_bytes
+        await service.dispatch("session.select", {"projectId": project_id, "sessionId": SESSION_A})
+        summaries = await service.dispatch("session.list", {"projectId": project_id})
+        assert next(item["title"] for item in summaries["items"] if item["sessionId"] == SESSION_A) == "最終研究筆記😀"
+        assert next(item["title"] for item in summaries["items"] if item["sessionId"] == SESSION_B) == f"{SESSION_B[:4]} question 1"
+
+        restarted = DesktopService(
+            original_cwd=tmp_path, config=service.config, session_factory=factory, environ={},
+        )
+        assert (await restarted.dispatch("project.list", {}))["selectedProjectId"] is None
+        await _open_project(restarted, tmp_path)
+        await restarted.dispatch("session.select", {"projectId": project_id, "sessionId": SESSION_A})
+        summaries = await restarted.dispatch("session.list", {"projectId": project_id})
+        assert next(item["title"] for item in summaries["items"] if item["sessionId"] == SESSION_A) == "最終研究筆記😀"
+        transcript = await restarted.dispatch("session.transcript", {
+            "projectId": project_id, "sessionId": SESSION_A,
+        })
+        assert transcript["items"][0]["userText"] == before.turns[0].display_input
+        assert transcript["items"][0]["assistantText"] == before.turns[0].assistant_output
+        assert transcript["items"][-1]["userText"] == "continue after renaming"
+
+    asyncio.run(run())
+
+
+def test_rename_validation_and_save_failure_preserve_saved_title(tmp_path, monkeypatch):
+    service, _catalog, _factory, repository = _seed_coordinator(tmp_path)
+    params = {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "title": "New title"}
+    before = repository.path_for(SESSION_A).read_bytes()
+    for title in ("   ", "😀" * 65):
+        with pytest.raises(DesktopServiceError) as error:
+            asyncio.run(service.dispatch("session.rename", {**params, "title": title}))
+        assert error.value.code == "PROTOCOL_INVALID"
+    assert repository.path_for(SESSION_A).read_bytes() == before
+
+    def failed_rename(*_args, **_kwargs):
+        raise ConversationUnavailableError("fixture title save failed")
+
+    monkeypatch.setattr(repository, "rename", failed_rename)
+    with pytest.raises(DesktopServiceError) as error:
+        asyncio.run(service.dispatch("session.rename", params))
+    assert error.value.code == "SESSION_NOT_READY"
+    assert repository.path_for(SESSION_A).read_bytes() == before
+    assert service._session_creating is False
+
+
 def test_coordinator_preserves_scoped_membership_order_across_restart(tmp_path):
     service, catalog, _factory, repository = _seed_coordinator(tmp_path)
     projects = asyncio.run(service.dispatch("project.list", {}))
@@ -1852,6 +1937,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     for method, params in (
         ("session.list", {"projectId": "missing", "offset": 0, "limit": 20}),
         ("session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_C}),
+        ("session.rename", {"projectId": _project_id(tmp_path), "sessionId": SESSION_C, "title": "Wrong project"}),
         (
             "session.transcript",
             {"projectId": _project_id(tmp_path), "sessionId": SESSION_C, "offset": 0, "limit": 20},
@@ -1892,6 +1978,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
         ("session.create", {"projectId": _project_id(tmp_path), "loadMcp": False}),
         ("session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}),
         ("session.set_thinking", {"mode": "normal"}),
+        ("session.rename", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A, "title": "Busy"}),
     ):
         with pytest.raises(DesktopServiceError) as raised:
             asyncio.run(service.dispatch(method, params))
@@ -1960,7 +2047,8 @@ def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversati
     assert returned_a["bashPermissionMode"] == "bypass"
 
 
-def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["select", "rename"])
+def test_conversation_change_blocks_turn_during_read(tmp_path, monkeypatch, operation):
     service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
 
     async def run():
@@ -1985,7 +2073,10 @@ def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
 
         monkeypatch.setattr(service, "_load_conversation", paused_load)
         selection = asyncio.create_task(service.dispatch(
-            "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}
+            f"session.{operation}", {
+                "projectId": _project_id(tmp_path), "sessionId": SESSION_B,
+                **({"title": "Renamed B"} if operation == "rename" else {}),
+            },
         ))
         try:
             await asyncio.wait_for(read_started.wait(), timeout=5)
@@ -2002,7 +2093,11 @@ def test_select_blocks_turn_during_conversation_read(tmp_path, monkeypatch):
             selected_b = await asyncio.wait_for(selection, timeout=5)
 
         assert selected_b["sessionId"] == SESSION_B
-        assert selected_b["bashPermissionMode"] == "bypass"
+        if operation == "select":
+            assert selected_b["bashPermissionMode"] == "bypass"
+        else:
+            assert selected_b["title"] == "Renamed B"
+            assert service.session is original_session
         returned_a = await service.dispatch(
             "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
         )
@@ -2188,8 +2283,13 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
                     assert busy.value.code == "BUSY_TURN"
                     assert session._citation_service is services[0]
                 task.cancel()
-                with pytest.raises(asyncio.CancelledError):
+                with pytest.raises(DesktopServiceError) as cancelled:
                     await task
+                assert cancelled.value.code == "TURN_CANCELLED"
+                assert cancelled.value.details == {
+                    "turnId": params["turnId"], "state": "interrupted",
+                    "accepted": True, "persisted": True,
+                }
             finally:
                 release.set()
                 if not task.done():

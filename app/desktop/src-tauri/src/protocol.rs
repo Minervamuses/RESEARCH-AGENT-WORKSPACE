@@ -22,6 +22,7 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "session.create",
     "session.list",
     "session.select",
+    "session.rename",
     "session.retry_registration",
     "session.transcript",
     "session.status",
@@ -280,6 +281,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "session.select" | "session.retry_registration" | "session.transcript" => {
             Some(&["projectId", "sessionId"])
         }
+        "session.rename" => Some(&["projectId", "sessionId", "title"]),
         "session.status" => Some(&[]),
         "session.turn" => Some(&["text", "turnId", "retry"]),
         "session.set_thinking" => Some(&["mode"]),
@@ -319,6 +321,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.create" => Some(&["loadMcp", "graphRecursionLimit", "projectId"]),
         "session.list" => Some(&["projectId", "offset", "limit", "reconcile"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
+        "session.rename" => Some(&["projectId", "sessionId", "title"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "session.stop" => Some(&["sessionId", "turnId", "parentRequestId"]),
         "workspace.select" => Some(&["rootPath", "action", "historyDirectory", "expectedFingerprint"]),
@@ -840,6 +843,11 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
         "session.select" | "session.retry_registration" => {
             validate_optional_string(params, "projectId", 256)?;
             validate_optional_string(params, "sessionId", 32)?;
+        }
+        "session.rename" => {
+            validate_optional_string(params, "projectId", 256)?;
+            validate_optional_string(params, "sessionId", 32)?;
+            validate_optional_string(params, "title", 256)?;
         }
         "session.transcript" => {
             validate_optional_string(params, "projectId", 256)?;
@@ -1550,6 +1558,12 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
         }
         "session.create" => validate_session_snapshot(data, false)?,
         "session.select" => validate_session_snapshot(data, true)?,
+        "session.rename" => {
+            validate_data_keys(data, &["projectId", "sessionId", "title"], &["projectId", "sessionId", "title"])?;
+            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
+            expect_bounded_string(&data["title"], "data.title", 256)?;
+        }
         "session.turn" => {
             validate_data_keys(
                 data,
