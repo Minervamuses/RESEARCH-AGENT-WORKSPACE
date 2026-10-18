@@ -4,8 +4,8 @@
 
 | 階段 | 狀態 | 已有證據 | 阻礙／條件 | 下一動作 |
 |---|---|---|---|---|
-| P1 | In progress | P1-S1 自動啟動測試／build／實際桌面 ready 通過 | P1-S2 原生整合待實機 | 原生 picker 探測與接入 |
-| P2 | Not started | 現有 selection/references／保存掛點已讀 | P1；T3 event | 依 P2-S1 實作草稿與合成 |
+| P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
+| P2 | Not started | 現有 selection/references／保存掛點已讀；P1 已通過 | S1 尚未開始 | 依 P2-S1 實作草稿與合成 |
 | P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
 | P4 | In progress | P4-S1a–c 模型／本地工作／MCP／Stop 協定、保存與文件整合通過 | Send／Stop UI 與實機操作尚未完成 | P4-S2 |
 | P5 | Not started | 保存與索引分工已讀 | P4、T3 title/schema | P5-S1 canonical title |
@@ -55,3 +55,9 @@
   - Linux Conda app／app：`poetry run pytest tests/test_desktop_service.py tests/test_desktop_document_service.py tests/test_desktop_server.py -q`：109 passed／4.78s；`poetry run pytest tests/test_session_persistence.py tests/test_session_lifecycle.py tests/test_skill_adherence.py -q`：44 passed；`poetry run pytest tests/test_thinking_session.py tests/test_graph_skill_loader.py tests/test_inline_skills.py tests/test_conversation_archive_access.py -q`：62 passed。最後保留原 turn body 縮排、縮小 diff 後，`poetry run pytest tests/test_desktop_document_service.py -q`：11 passed／0.80s；根代理 `poetry run pytest tests/test_desktop_service.py tests/test_desktop_fixture.py -k stop -q`：1 passed／0.28s，確認 fixture 中斷保存與下一回合。保留既有 LangGraph deprecation warning。
   - 協定：`poetry run pytest tests/test_desktop_protocol_contract.py -q`：161 passed／0.40s；desktop `node --test --experimental-strip-types tests/protocol.test.ts`：155 passed；src-tauri `cargo test --locked protocol::tests -- --nocapture`：12 passed；`npm run build` 通過（既有 large chunk warning）。stop result 只接受真實 terminal 或未接受的 null，核對關聯 ID；Stop 失敗不終結原 request。Scoped whitespace 及根代理 production review 通過。
   - 首次整合檢查的 EOF 舊測試預期「沒有 terminal」，已依新的 exactly-one cancellation terminal 更新後通過。沒有 live provider、GPU 或完整 suite 重跑。P1-S2 正式選取視窗仍等待使用者選取，與本階段無依賴；未降低其實機驗收。Scoped commit：`feat(desktop): stop and settle the active turn [P4-S1c]`；下一步 P4-S2。
+- P1-S2 接入／待實機 — Rust `backend.rs`／`lib.rs` 新增必要的 project/document picker commands；固定 PowerShell STA 程式從 stdin 收 JSON，不把外部路徑拼成程式；返回選取／取消／錯誤，UNC 對應 Linux 路徑後 canonicalize。App 沿既有 workspace.select／document.open/save 開啟真正文件，取消保留文件／草稿。沒有新增 picker dependency 或 Windows 研究 runtime。
+  - 已執行 Linux Conda app：desktop `npm run build` 通過；`node --test --experimental-strip-types tests/documents.test.ts`：6 passed；src-tauri `cargo test --locked picker_maps_wsl_unc`：1 passed；app `poetry run pytest tests/test_desktop_documents.py -q`：34 passed，含中文空白與三種 suffix；專案外及不支援格式沿既有測試拒絕。Scoped whitespace 與獨立靜態 review 通過。根目錄 `python main.py` 增量 release build 1m11s 成功，正式資料夾 picker 已顯示。
+  - 正式 picker 仍等待選取 `/tmp/desktop-picker-中文 1navum15`；前一個「已選取」完成的是 disposable probe，不能算正式 Rust→Windows→Python 與同檔保存驗收。Computer Use 無法取得該原生 dialog 的 window target，使用者協助選取的問題仍待回覆。尚須正式選資料夾及 .md、UI 保存後 Linux 讀回、取消一次。探測程式 `/tmp/desktop-picker-probe.py` 已移除，測試文件保留供驗收。S2 未提交；P2/P3 仍等待 P1。
+- P1-S2 實機完成／2026-10-18 — 使用者協助正式原生視窗選取後，UI 的 Resolved project 確認 `/tmp/desktop-picker-中文 1navum15`，從 UI 初始化並開啟。正式 Open file 視窗從該專案開始；使用者選取 `測試 文件.md`，編輯器正確顯示原文。根代理在編輯器加入 ` Saved through the native WSL picker.`，以 Ctrl+S 保存；Linux `cat` 同一路徑讀回 `Original paragraph. Saved through the native WSL picker.`，dirty 標記消失。
+  - 建立離線測試對話並輸入尚未送出的 `[[fixture:wait-stop]]`，再次開啟正式檔案視窗，使用者按取消後，UI 仍顯示同一專案、同一文件與完整未送草稿；Linux 讀回保存文字不變。三種允許 suffix、專案外及 .txt 範圍檢查沿用本步已通過的 34 項 pytest，不重跑已完成證據。Windows picker 實機最低驗收已滿足，無 live provider。
+  - Scope：Rust `backend.rs`／`lib.rs`、App 的 picker hunks、`test_desktop_documents.py` 及本步紀錄；保留未提交 P4-S2 UI 與使用者既有變更。Scoped commit：`feat(desktop): select WSL files with native dialogs [P1-S2]`。P1 完成，P2 可開始。

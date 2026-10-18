@@ -59,6 +59,21 @@ def test_root_rejects_outside_symlink_and_non_sources(tmp_path):
     assert path.read_text() == "原稿\n"
 
 
+def test_picker_paths_keep_all_three_source_suffixes_and_reject_txt(tmp_path):
+    root = tmp_path / "中文 project"
+    root.mkdir()
+    documents = DocumentWorkspace()
+    documents.select_root(str(root))
+    for suffix in ("md", "markdown", "tex", "txt"):
+        path = root / f"原稿 file.{suffix}"
+        path.write_text("原稿", encoding="utf-8")
+        if suffix == "txt":
+            with pytest.raises(DocumentError):
+                documents.open(str(path))
+        else:
+            assert documents.open(str(path))["path"] == str(path)
+
+
 def test_exact_second_paragraph_preserves_other_text_and_crlf(tmp_path):
     source = "標題😀\r\n\r\n重複\t段落\r\n\r\n重複\t段落\r\n尾聲\r\n"
     documents, path, base = workspace(tmp_path, source)

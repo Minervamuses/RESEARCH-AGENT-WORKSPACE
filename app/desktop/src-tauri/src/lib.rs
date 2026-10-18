@@ -3,7 +3,7 @@ pub mod protocol;
 
 use backend::{
     backend_request, backend_restart, backend_shutdown, backend_snapshot, backend_start,
-    BackendManager,
+    pick_document, pick_project, BackendManager,
 };
 use tauri::Manager;
 
@@ -20,7 +20,9 @@ pub fn run() {
             backend_snapshot,
             backend_request,
             backend_shutdown,
-            backend_restart
+            backend_restart,
+            pick_project,
+            pick_document
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the Research Agent desktop shell");

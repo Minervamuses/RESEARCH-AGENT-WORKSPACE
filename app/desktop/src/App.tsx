@@ -927,11 +927,9 @@ export default function App() {
   const [documentValue, setDocumentValue] = useState<DocumentSnapshot | null>(null);
   const documentRef = useRef<DocumentSnapshot | null>(null);
   const [rootPath, setRootPath] = useState("");
-  const [filePath, setFilePath] = useState("");
   const [documentBusy, setDocumentBusy] = useState(false);
   const documentBusyRef = useRef(false);
   const [documentNotice, setDocumentNotice] = useState<string | null>(null);
-  const [openFileDialog, setOpenFileDialog] = useState(false);
   const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResult; base: DocumentSnapshot } | null>(null);
   const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
   const documentRequestRef = useRef<{ requestId: string; turnId: string } | null>(null);
@@ -1090,24 +1088,24 @@ export default function App() {
   const openDocument = useCallback(async () => {
     if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
         conversationRef.current.activeTurn !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
-    if (documentRef.current !== null && documentRef.current.sourceText !== documentBaselineRef.current?.sourceText &&
-        !window.confirm("Discard unsaved document changes and open another file?")) return;
     const owner = captureOwner("document.open");
     documentOperationRef.current = owner;
     frameOwnerRef.current = null;
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
-      const opened = await backendClient.request("document.open", { path: filePath }) as unknown as DocumentSnapshot;
+      const path = await invoke<string | null>("pick_document", { rootPath: projectRef.current.rootPath });
+      if (path === null || !ownsOperation(owner, documentOperationRef.current)) return;
+      if (documentRef.current !== null && documentRef.current.sourceText !== documentBaselineRef.current?.sourceText &&
+          !window.confirm("Discard unsaved document changes and open another file?")) return;
+      const opened = await backendClient.request("document.open", { path }) as unknown as DocumentSnapshot;
       if (!ownsOperation(owner, documentOperationRef.current)) return;
       if (opened.rootPath !== projectRef.current?.rootPath) throw protocolMismatch("The backend opened a document from a different project.");
       documentBaselineRef.current = { ...opened };
       updateDocument({ ...opened, editorRevision: opened.editorRevision ?? 0 });
-      setFilePath(opened.path);
       setDocumentConflict(null);
       setLastDocumentAction(null);
       setDocumentNotice(null);
-      setOpenFileDialog(false);
     } catch (error) {
       if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message);
     } finally {
@@ -1117,7 +1115,7 @@ export default function App() {
         setDocumentBusy(false);
       }
     }
-  }, [captureOwner, filePath, ownsOperation, updateDocument]);
+  }, [captureOwner, ownsOperation, updateDocument]);
 
   const saveDocument = useCallback(async (parentOperation: WorkspaceOperationOwner | null = null) => {
     const captured = documentRef.current;
@@ -1404,7 +1402,7 @@ export default function App() {
     }
   }, [captureOwner, ownsOperation]);
 
-  const chooseProject = useCallback(async (action: "inspect" | "open" | "initialize") => {
+  const chooseProject = useCallback(async (action: "inspect" | "open" | "initialize", browse = false) => {
     if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
         documentBusyRef.current || documentConflict !== null) return;
     const operation = beginWorkspaceOperation(action === "inspect" ? "Inspecting project" : "Opening project");
@@ -1413,6 +1411,14 @@ export default function App() {
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setChooserIssue(null);
     try {
+      let selectedRoot = candidate?.rootPath ?? candidateRoot;
+      if (browse) {
+        const picked = await invoke<string | null>("pick_project", { initialPath: selectedRoot || null });
+        if (picked === null || !isCurrent()) return;
+        selectedRoot = picked;
+        setCandidateRoot(picked);
+        setCandidate(null);
+      }
       if (action !== "inspect") {
         if ((conversationRef.current.draft.length > 0 || conversationRef.current.draftReferences.length > 0) && !discardDraft) {
           setChooserIssue("Confirm discarding the unsent draft and references, or cancel to keep it.");
@@ -1433,9 +1439,9 @@ export default function App() {
         return;
       }
       const data = await backendClient.request("workspace.select", {
-        rootPath: candidate?.rootPath ?? candidateRoot,
+        rootPath: selectedRoot,
         action,
-        ...(action === "inspect" && candidate?.status === "needs_configuration" ? { historyDirectory: candidateHistory } : {}),
+        ...(action === "inspect" && !browse && candidate?.status === "needs_configuration" ? { historyDirectory: candidateHistory } : {}),
         ...(action === "initialize" ? {
           historyDirectory: candidateHistory,
           expectedFingerprint: candidate?.researchFingerprint ?? null,
@@ -1476,11 +1482,9 @@ export default function App() {
       selectedSkillNamesRef.current.clear();
       resumeSelectionRef.current = null;
       resumeDraftRef.current = null;
-      setFilePath("");
       setDocumentConflict(null);
       setLastDocumentAction(null);
       setDocumentNotice(null);
-      setOpenFileDialog(false);
       setWorkspaceIssue(null);
       setChooserOpen(false);
       setChatSelection(null);
@@ -2364,10 +2368,7 @@ export default function App() {
               openDisabled={activeProjectId === null || workspaceBusy !== null || interaction.turnActive || documentBusy || rootPath.trim() === "" || state.snapshot?.lifecycle !== "ready"}
               saveDisabled={documentValue === null || documentBusy || state.snapshot?.lifecycle !== "ready"}
               undoDisabled={lastDocumentAction === null || documentBusy || interaction.turnActive}
-              onOpen={() => {
-                setFilePath(documentValue?.path.startsWith(rootPath + "/") ? documentValue.path.slice(rootPath.length + 1) : "");
-                setOpenFileDialog(true);
-              }}
+              onOpen={() => void openDocument()}
               onSave={() => void saveDocument()}
               onUndo={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })}
             />
@@ -2457,35 +2458,6 @@ export default function App() {
         </div>
         </div>
       </main>
-      {openFileDialog && <div className="approval-backdrop">
-        <form className="approval-dialog file-open-dialog" role="dialog" aria-modal="true" aria-labelledby="file-open-title"
-          onSubmit={(event) => { event.preventDefault(); void openDocument(); }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && !documentBusy) {
-              event.preventDefault();
-              setOpenFileDialog(false);
-              scheduleOwnedFrame(captureOwner("close file dialog"), () => document.querySelector<HTMLElement>("[data-document-menu] > summary")?.focus());
-            }
-            if (event.key !== "Tab") return;
-            const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input:not(:disabled), button:not(:disabled)"));
-            const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-          }}>
-          <h2 id="file-open-title">Open source file</h2>
-          <p>Choose a Markdown or TeX file inside this project.</p>
-          <label>Relative file path<input autoFocus aria-label="Relative file path" value={filePath}
-            onChange={(event) => setFilePath(event.target.value)} placeholder="draft.md or draft.tex" disabled={documentBusy} /></label>
-          {documentNotice !== null && <p className="document-error" role="alert">{documentNotice}</p>}
-          <div className="action-row">
-            <button type="submit" className="primary-button" disabled={documentBusy || filePath.trim() === ""}>{documentBusy ? "Opening…" : "Open file"}</button>
-            <button type="button" disabled={documentBusy} onClick={() => {
-              setOpenFileDialog(false);
-              scheduleOwnedFrame(captureOwner("close file dialog"), () => document.querySelector<HTMLElement>("[data-document-menu] > summary")?.focus());
-            }}>Cancel</button>
-          </div>
-        </form>
-      </div>}
       {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <div className="approval-backdrop">
         <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="project-chooser-title"
           onKeyDown={(event) => {
@@ -2498,12 +2470,9 @@ export default function App() {
           }}>
           <p className="section-kicker">LOCAL PROJECT</p>
           <h2 id="project-chooser-title">{project === null ? "Open a research project" : "Switch research project"}</h2>
-          <p>Choose an existing Linux folder. Its RESEARCH.md defines the project rules and conversation history location.</p>
-          <label>Project folder<input aria-label="Project folder" value={candidateRoot} autoFocus
-            onChange={(event) => { setCandidateRoot(event.target.value); setCandidate(null); setChooserIssue(null); }}
-            placeholder="/home/you/research" disabled={workspaceBusy !== null} /></label>
-          <div className="action-row"><button type="button" disabled={workspaceBusy !== null || candidateRoot.trim() === ""}
-            onClick={() => void chooseProject("inspect")}>Inspect project</button></div>
+          <p>Choose an existing WSL folder. Its RESEARCH.md defines the project rules and conversation history location.</p>
+          <div className="action-row"><button type="button" autoFocus disabled={workspaceBusy !== null}
+            onClick={() => void chooseProject("inspect", true)}>Choose project folder…</button></div>
           {candidate !== null && <div className="approval-context">
             <p><strong>Resolved project:</strong> <code>{candidate.rootPath}</code></p>
             {candidate.status === "needs_configuration" ? <>
@@ -2511,7 +2480,7 @@ export default function App() {
               <label>History directory<input aria-label="History directory" value={candidateHistory}
                 disabled={workspaceBusy !== null} onChange={(event) => setCandidateHistory(event.target.value)} /></label>
               <p><strong>Resolved history:</strong> <code>{candidate.historyDirectory}</code></p>
-              {candidateHistory !== candidate.historyDirectory && <p>Inspect project again to preview and confirm the resolved history location before initializing.</p>}
+              {candidateHistory !== candidate.historyDirectory && <button type="button" disabled={workspaceBusy !== null} onClick={() => void chooseProject("inspect")}>Inspect history location</button>}
             </> : <p><strong>History directory:</strong> <code>{candidate.historyDirectory}</code></p>}
             {candidate.status === "needs_initialization" && <p>This configured history does not exist yet. Initialize an empty history here, or cancel and edit RESEARCH.md to change its location.</p>}
             {candidate.status === "ready" && <p>Open this project and validate its existing conversation history.</p>}

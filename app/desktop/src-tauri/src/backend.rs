@@ -747,6 +747,130 @@ pub async fn backend_restart(app_handle: AppHandle) -> BackendSnapshot {
         })
 }
 
+// The script is fixed; the selected location is JSON data on stdin, never code.
+const WINDOWS_PICKER_SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
+Add-Type -AssemblyName System.Windows.Forms
+$data = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$owner = New-Object System.Windows.Forms.Form
+$owner.ShowInTaskbar = $false
+$owner.Opacity = 0
+$owner.TopMost = $true
+if ($data.kind -eq 'project') {
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = 'Choose the WSL research project'
+    $dialog.SelectedPath = $data.initialPath
+    $dialog.ShowNewFolderButton = $false
+} else {
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Title = 'Open a source file inside the current WSL project'
+    $dialog.InitialDirectory = $data.initialPath
+    $dialog.Filter = 'Markdown and TeX (*.md;*.markdown;*.tex)|*.md;*.markdown;*.tex'
+    $dialog.CheckFileExists = $true
+    $dialog.Multiselect = $false
+}
+try {
+    $owner.Show()
+    if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+        $path = if ($data.kind -eq 'project') { $dialog.SelectedPath } else { $dialog.FileName }
+        @{status='selected'; path=$path} | ConvertTo-Json -Compress
+    } else { @{status='cancelled'} | ConvertTo-Json -Compress }
+} finally { $dialog.Dispose(); $owner.Dispose() }
+"#;
+
+fn picker_error(message: &str) -> BridgeError {
+    BridgeError::new("NATIVE_PICKER_FAILED", message, true)
+}
+
+fn is_wsl_unc(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.starts_with(r"\\wsl.localhost\") || lower.starts_with(r"\\wsl$\")
+}
+
+fn current_distro_path(selected: &str, distro: &str) -> Option<PathBuf> {
+    let mut parts = selected.strip_prefix(r"\\")?.split('\\');
+    let host = parts.next()?;
+    if !host.eq_ignore_ascii_case("wsl.localhost") && !host.eq_ignore_ascii_case("wsl$") {
+        return None;
+    }
+    if !parts.next()?.eq_ignore_ascii_case(distro) { return None; }
+    Some(Path::new("/").join(parts.collect::<Vec<_>>().join("/")))
+}
+
+fn wsl_windows_path(path: &Path) -> Result<String, BridgeError> {
+    let output = Command::new("wslpath").arg("-w").arg(path).output()
+        .map_err(|_| picker_error("WSL path conversion is unavailable. Start this app in WSL."))?;
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if !output.status.success() || !is_wsl_unc(&value) {
+        return Err(picker_error("Choose research files in the WSL filesystem, not a Windows drive."));
+    }
+    Ok(value)
+}
+
+fn run_windows_picker(kind: &str, initial_path: String) -> Result<Option<String>, BridgeError> {
+    let initial = fs::canonicalize(initial_path)
+        .map_err(|_| picker_error("The starting folder is unavailable. Choose an existing WSL folder."))?;
+    let initial_unc = wsl_windows_path(&initial)?;
+    let mut child = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-STA", "-WindowStyle", "Hidden", "-Command", WINDOWS_PICKER_SCRIPT])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+        .map_err(|_| picker_error("Windows PowerShell could not open the native picker. Check WSL Windows interoperability and retry."))?;
+    let data = serde_json::to_vec(&json!({"kind": kind, "initialPath": initial_unc}))
+        .expect("picker data is serializable");
+    let sent = child.stdin.take().expect("piped stdin").write_all(&data);
+    if sent.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(picker_error("The Windows picker could not receive the starting folder. Retry selection."));
+    }
+    let output = child.wait_with_output()
+        .map_err(|_| picker_error("The Windows picker did not return a selection. Retry selection."))?;
+    if !output.status.success() {
+        return Err(picker_error("Windows could not show the native picker. Check Windows interoperability and retry."));
+    }
+    let result: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| picker_error("The Windows picker returned an unreadable result. Retry selection."))?;
+    if result["status"] == "cancelled" { return Ok(None); }
+    let selected = result["path"].as_str()
+        .filter(|_| result["status"] == "selected")
+        .ok_or_else(|| picker_error("The Windows picker returned no file or folder."))?;
+    if !is_wsl_unc(selected) {
+        return Err(picker_error("Choose research files in the WSL filesystem, not a Windows drive."));
+    }
+    let distro = std::env::var("WSL_DISTRO_NAME").unwrap_or_default();
+    let mapped = if let Some(path) = current_distro_path(selected, &distro) {
+        path
+    } else {
+        let output = Command::new("wslpath").args(["-u", selected]).output()
+            .map_err(|_| picker_error("This WSL location cannot be mapped from the running Linux environment."))?;
+        if !output.status.success() {
+            return Err(picker_error("This WSL location is not accessible from the running Linux environment."));
+        }
+        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
+    };
+    let canonical = fs::canonicalize(mapped)
+        .map_err(|_| picker_error("The selected WSL location is not accessible from this Linux environment."))?;
+    wsl_windows_path(&canonical)?;
+    Ok(Some(canonical.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub async fn pick_project(initial_path: Option<String>) -> Result<Option<String>, BridgeError> {
+    let initial = initial_path.filter(|path| !path.is_empty())
+        .or_else(|| std::env::var("HOME").ok()).unwrap_or_else(|| "/".to_owned());
+    tauri::async_runtime::spawn_blocking(move || run_windows_picker("project", initial))
+        .await.map_err(|_| picker_error("The project picker stopped unexpectedly. Retry selection."))?
+}
+
+#[tauri::command]
+pub async fn pick_document(root_path: String) -> Result<Option<String>, BridgeError> {
+    tauri::async_runtime::spawn_blocking(move || run_windows_picker("document", root_path))
+        .await.map_err(|_| picker_error("The file picker stopped unexpectedly. Retry selection."))?
+}
+
 fn lock_state(core: &SupervisorCore) -> MutexGuard<'_, SupervisorState> {
     core.state
         .lock()
@@ -1548,6 +1672,20 @@ fn kill_child(child: &ChildControl) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picker_maps_wsl_unc_without_changing_unicode_or_spaces() {
+        assert_eq!(
+            current_distro_path(r"\\wsl.localhost\Ubuntu-24.04\tmp\中文 project\原稿.md", "Ubuntu-24.04"),
+            Some(PathBuf::from("/tmp/中文 project/原稿.md")),
+        );
+        assert_eq!(
+            current_distro_path(r"\\wsl$\Ubuntu-24.04\home\user", "Ubuntu-24.04"),
+            Some(PathBuf::from("/home/user")),
+        );
+        assert!(!is_wsl_unc(r"C:\research\draft.md"));
+        assert!(!is_wsl_unc(r"\\server\research\draft.md"));
+    }
     use std::io::{Cursor, Seek};
     use std::sync::atomic::{AtomicU64, Ordering};
 
