@@ -7,8 +7,8 @@
 | P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
 | P2 | Not started | 現有 selection/references／保存掛點已讀；P1 已通過 | S1 尚未開始 | 依 P2-S1 實作草稿與合成 |
 | P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
-| P4 | In progress | P4-S1a–c 模型／本地工作／MCP／Stop 協定、保存與文件整合通過 | Send／Stop UI 與實機操作尚未完成 | P4-S2 |
-| P5 | Not started | 保存與索引分工已讀 | P4、T3 title/schema | P5-S1 canonical title |
+| P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
+| P5 | Not started | 保存與索引分工已讀；P4 已通過 | S1 尚未開始；T3 已授權 | P5-S1 canonical title |
 | P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
 
 ## 計劃撰寫紀錄
@@ -58,6 +58,16 @@
 - P1-S2 接入／待實機 — Rust `backend.rs`／`lib.rs` 新增必要的 project/document picker commands；固定 PowerShell STA 程式從 stdin 收 JSON，不把外部路徑拼成程式；返回選取／取消／錯誤，UNC 對應 Linux 路徑後 canonicalize。App 沿既有 workspace.select／document.open/save 開啟真正文件，取消保留文件／草稿。沒有新增 picker dependency 或 Windows 研究 runtime。
   - 已執行 Linux Conda app：desktop `npm run build` 通過；`node --test --experimental-strip-types tests/documents.test.ts`：6 passed；src-tauri `cargo test --locked picker_maps_wsl_unc`：1 passed；app `poetry run pytest tests/test_desktop_documents.py -q`：34 passed，含中文空白與三種 suffix；專案外及不支援格式沿既有測試拒絕。Scoped whitespace 與獨立靜態 review 通過。根目錄 `python main.py` 增量 release build 1m11s 成功，正式資料夾 picker 已顯示。
   - 正式 picker 仍等待選取 `/tmp/desktop-picker-中文 1navum15`；前一個「已選取」完成的是 disposable probe，不能算正式 Rust→Windows→Python 與同檔保存驗收。Computer Use 無法取得該原生 dialog 的 window target，使用者協助選取的問題仍待回覆。尚須正式選資料夾及 .md、UI 保存後 Linux 讀回、取消一次。探測程式 `/tmp/desktop-picker-probe.py` 已移除，測試文件保留供驗收。S2 未提交；P2/P3 仍等待 P1。
+- P4-S2 介面／待實機 — `App.tsx`、`conversations.ts`、`trust.tsx` 接上 Send／Stop／Stopping；核准 modal 內有 Stop，送出後立即阻止重複停止與新回合。原 turn terminal 與 Stop 回覆皆到達才解除鎖定；Stop 失敗顯示實際錯誤並保留鎖，可對同一回合重試，原 turn 已終結後可明確 Restart。正常停止沿既有 transcript 讀回使用者訊息及 interrupted；取消回合不自動還原為重試目標。沒有新增來源編輯鎖、D1 防誤用機制或 framework。
+  - Linux Conda app／desktop：`node --test --experimental-strip-types tests/answer_stream.test.ts tests/conversations.test.ts tests/trust.test.ts`：59 passed；涵蓋雙回覆順序、重複／過期關聯、Stop 失敗保持阻擋、取消後新 turnId，以及 Footer／modal 顯示。`npm run build` 通過（既有 large chunk warning）；相關六檔 whitespace 通過。獨立 review 指出的正常完成／Stop 失敗競態已修正：turnCount、registered 及 extension preview 本地結果先整理，再等待 Stop；沒有新增恢復層。
+  - 2026-10-18 再核對：原工作樹、GUI 分支、HEAD `b849543`；Linux Git 與 Conda app Python 3.13.14／Poetry 2.4.1 符合設定，staged 空。Windows Computer Use 仍看到正式原生資料夾視窗停在 home，沒有返回選取結果，且視窗清單仍不能取得其操作 target。未重跑完整 suite、未呼叫 live provider。
+  - 真實桌面點 Stop、核准等待 Stop 及下一則訊息仍未驗收；S2 不宣稱完成，未提交。保留目前正式 picker 與測試資料等待使用者選取；之後先完成 P1-S2 同檔保存／取消並 scoped commit，再以既有離線 fixture 驗收 P4-S2。兩步的 App 變更須分 hunk 提交，不可混入同一 commit。P2/P3、P5、P6 分別繼續等待其階段依賴；D1 不是阻礙。
+- 驗收恢復／2026-10-18 — 使用者回覆已關閉測試視窗；核對應用及 backend 皆退出，工作樹／GUI 分支及四筆 commit 保留。根目錄 `python main.py` 增量 release build 1m11s 通過，包含最新 P4-S2 UI。首次重啟命令的 shell 變數傳遞讓 fixture root 為空，backend 未啟動；以明確絕對路徑修正啟動參數後重開，未修改 production 程式或重跑 build。
+  - 當前隔離測試環境：`RESEARCH_AGENT_DESKTOP_FIXTURE=phase02`、`RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT=/tmp/research-agent-desktop-phase02-stop-JrW0GI`，已從 backend process environment 核對。一個桌面 child、一個 backend；實際 UI 為 Backend ready／Generation 1／0 pending，未發起模型回合。重新點正式 Choose project folder，Windows 原生視窗已顯示，等待使用者選取既有 `/tmp/desktop-picker-中文 1navum15`；已明確請使用者保留主視窗。尚未因此取得新的選取／保存／Stop 驗收證據。
 - P1-S2 實機完成／2026-10-18 — 使用者協助正式原生視窗選取後，UI 的 Resolved project 確認 `/tmp/desktop-picker-中文 1navum15`，從 UI 初始化並開啟。正式 Open file 視窗從該專案開始；使用者選取 `測試 文件.md`，編輯器正確顯示原文。根代理在編輯器加入 ` Saved through the native WSL picker.`，以 Ctrl+S 保存；Linux `cat` 同一路徑讀回 `Original paragraph. Saved through the native WSL picker.`，dirty 標記消失。
   - 建立離線測試對話並輸入尚未送出的 `[[fixture:wait-stop]]`，再次開啟正式檔案視窗，使用者按取消後，UI 仍顯示同一專案、同一文件與完整未送草稿；Linux 讀回保存文字不變。三種允許 suffix、專案外及 .txt 範圍檢查沿用本步已通過的 34 項 pytest，不重跑已完成證據。Windows picker 實機最低驗收已滿足，無 live provider。
   - Scope：Rust `backend.rs`／`lib.rs`、App 的 picker hunks、`test_desktop_documents.py` 及本步紀錄；保留未提交 P4-S2 UI 與使用者既有變更。Scoped commit：`feat(desktop): select WSL files with native dialogs [P1-S2]`。P1 完成，P2 可開始。
+- P4-S2 實機完成／2026-10-18 — P1-S2 已提交 `f33d541`。沿同一 root launcher／正式桌面／離線 fixture，送 `[[fixture:wait-stop]]`：實際 Send 變 Stop，新建／切換及控制停用；點 Stop 後回合中斷、草稿清除、讀回原使用者訊息與 interrupted 狀態。
+  - 第二回合送 `[[fixture:document-replace]] This replacement must be stopped before approval.`，Ask 文件核准顯示目標文件及 Stop；在核准視窗內按 Stop，核准消失、文件保持原內容、保存第二個 interrupted 回合。第三回合 `[[fixture:document-analyze]] Confirm the next turn works.` 正常顯示 assistant complete，Send 恢復，Ask 未改變。
+  - Linux Conda app 讀回臨時 canonical JSON：同一 conversation 三個不同 turnId，state 依序 interrupted／interrupted／completed，前兩個 failure.code 為 cancelled，第三個有實際回答；三回合 permissionMode 都為 ask。讀回測試 .md 仍為先前保存文字。桌面 PID 19298／backend PID 19369 全程不變，Generation 1／0 pending，沒有以 Restart 假停止。停止太快，實機截圖未捕捉 Stopping 過場；其即時狀態與雙 terminal 順序已由本步 UI 程式／59 項針對性測試核對。臨時讀回 script 用後移除。
+  - 無新增程式修正或重跑已通過 tests；相關 scoped whitespace 通過。Scoped commit：`feat(desktop): expose Stop until the turn settles [P4-S2]`。P4 完成，接續 P2；P5 依賴亦已滿足。

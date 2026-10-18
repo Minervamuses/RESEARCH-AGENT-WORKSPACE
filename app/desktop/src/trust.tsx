@@ -245,6 +245,9 @@ interface ApprovalDialogProps {
   onResolve: (approved: boolean) => void;
   returnFocus: () => void;
   allowDocumentEditing?: boolean;
+  onStop?: () => void;
+  stopping?: boolean;
+  stopError?: string;
 }
 
 export function ApprovalDialog({
@@ -253,10 +256,12 @@ export function ApprovalDialog({
   onResolve,
   returnFocus,
   allowDocumentEditing = false,
+  onStop,
+  stopping = false,
+  stopError,
 }: ApprovalDialogProps) {
   const nonModal = allowDocumentEditing || approval.operation !== undefined;
   const denyRef = useRef<HTMLButtonElement>(null);
-  const approveRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     denyRef.current?.focus();
@@ -270,9 +275,9 @@ export function ApprovalDialog({
       return;
     }
     if (event.key !== "Tab" || nonModal) return;
-    const first = denyRef.current;
-    const last = approveRef.current;
-    if (first === null || last === null) return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+    const first = controls[0], last = controls.at(-1);
+    if (first === undefined || last === undefined) { event.preventDefault(); return; }
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();
@@ -320,6 +325,7 @@ export function ApprovalDialog({
           </div>
         </dl>
         <p className="approval-note">This decision applies once to this exact pending request. Closing or leaving this conversation denies it.</p>
+        {stopError !== undefined && <p className="error-text" role="alert">{stopError}</p>}
         <div className="approval-actions">
           <button
             ref={denyRef}
@@ -331,7 +337,6 @@ export function ApprovalDialog({
             Deny
           </button>
           <button
-            ref={approveRef}
             className="primary-button"
             type="button"
             disabled={resolving}
@@ -339,6 +344,9 @@ export function ApprovalDialog({
           >
             Approve
           </button>
+          {onStop !== undefined && <button type="button" disabled={stopping} onClick={onStop}>
+            {stopping ? "Stopping…" : "Stop"}
+          </button>}
         </div>
       </div>
     </div>

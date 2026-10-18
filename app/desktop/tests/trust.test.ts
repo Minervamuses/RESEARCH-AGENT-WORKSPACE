@@ -17,6 +17,9 @@ interface TrustModule {
     onResolve: (approved: boolean) => void;
     returnFocus: () => void;
     allowDocumentEditing?: boolean;
+    onStop?: () => void;
+    stopping?: boolean;
+    stopError?: string;
   }) => unknown;
   acceptApprovalEvent: (
     generation: number,
@@ -352,4 +355,23 @@ test("Bypass extension preview keeps exact targets visible without a second bind
   assert.doesNotMatch(html, /Choose Approve or Deny/);
   assert.match(html, /Command/);
   assert.match(html, /<button[^>]*>Apply changes<\/button>/);
+});
+
+
+test("approval keeps Stop and its failure visible inside the modal", async () => {
+  const { ApprovalDialog } = await loadTrust();
+  const approval: ApprovalRequiredDto = {
+    approvalId: "approval-stop", parentRequestId: "00000000-0000-4000-8000-000000000402",
+    turnId: "123e4567e89b42d3a456426614174001", command: "sleep 30", description: "Wait locally.",
+    executionTimeoutSeconds: 60, createdAt: "2026-10-18T04:00:00.000Z", expiresAt: "2026-10-18T04:01:00.000Z",
+  };
+  const props = { approval, resolving: true, onResolve: () => undefined, returnFocus: () => undefined, onStop: () => undefined };
+  const pending = renderToStaticMarkup(createElement(ApprovalDialog, { ...props, stopping: true }));
+  assert.match(pending, /aria-modal="true"/);
+  assert.equal((pending.match(/disabled=""/g) ?? []).length, 3);
+  assert.match(pending, />Stopping…<\/button>/);
+  const failed = renderToStaticMarkup(createElement(ApprovalDialog, { ...props, stopping: false, stopError: "Stop failed; the turn remains active." }));
+  assert.match(failed, /role="alert">Stop failed; the turn remains active\./);
+  assert.match(failed, /type="button">Stop<\/button>/);
+  assert.equal((failed.match(/disabled=""/g) ?? []).length, 2);
 });

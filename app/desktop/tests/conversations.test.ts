@@ -47,6 +47,11 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  ComposerFooter: (props: {
+    thinkingMode: "normal"; permissionMode: "ask"; controlsDisabled: boolean; sendDisabled: boolean;
+    turnActive: boolean; stopping: boolean; onStop: () => void;
+    onThinkingChange: () => void; onPermissionChange: () => void;
+  }) => unknown;
   selectConversationWithPreview: (
     projectId: string,
     summary: SessionSummaryDto,
@@ -759,4 +764,21 @@ test("pending saved turns are refreshed after selection recovers them", async ()
   selection.resolve(selected);
   assert.deepEqual(await result, recovered);
   assert.equal(reads, 2);
+});
+
+
+test("composer replaces disabled Send with Stop and disables only the pending stop", async () => {
+  const { ComposerFooter } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const props = { thinkingMode: "normal" as const, permissionMode: "ask" as const,
+    controlsDisabled: true, sendDisabled: true, onStop: () => undefined,
+    onThinkingChange: () => undefined, onPermissionChange: () => undefined };
+  const ready = renderToStaticMarkup(createElement(ComposerFooter, { ...props, turnActive: false, stopping: false }));
+  assert.match(ready, /type="submit" disabled="">Send<\/button>/);
+  const active = renderToStaticMarkup(createElement(ComposerFooter, { ...props, turnActive: true, stopping: false }));
+  assert.match(active, /type="button">Stop<\/button>/);
+  assert.doesNotMatch(active, /type="submit"/);
+  const stopping = renderToStaticMarkup(createElement(ComposerFooter, { ...props, turnActive: true, stopping: true }));
+  assert.match(stopping, /type="button" disabled="">Stopping…<\/button>/);
 });

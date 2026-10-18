@@ -67,6 +67,7 @@ import type {
   SessionTranscriptDto,
   TranscriptTurnDto,
   TurnCompletedDto,
+  TurnStoppedDto,
 } from "./protocol.ts";
 import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
 import { DocumentEditor, type DocumentSnapshot } from "./DocumentEditor.tsx";
@@ -302,9 +303,10 @@ export function SlashCommandList({ commands, active, onSelect, inline = false }:
   </ul>;
 }
 
-export function ComposerFooter({ thinkingMode, permissionMode, controlsDisabled, sendDisabled, onThinkingChange, onPermissionChange }: {
+export function ComposerFooter({ thinkingMode, permissionMode, controlsDisabled, sendDisabled, turnActive = false, stopping = false, onStop, onThinkingChange, onPermissionChange }: {
   thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode;
   controlsDisabled: boolean; sendDisabled: boolean;
+  turnActive?: boolean; stopping?: boolean; onStop?: () => void;
   onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
 }) {
   return <div className="composer-footer">
@@ -312,12 +314,15 @@ export function ComposerFooter({ thinkingMode, permissionMode, controlsDisabled,
       <ThinkingControl mode={thinkingMode} disabled={controlsDisabled} onChange={onThinkingChange} />
       <BashPermissionControl mode={permissionMode} disabled={controlsDisabled} onChange={onPermissionChange} />
     </div>
-    <button className="primary-button" type="submit" disabled={sendDisabled}>Send</button>
+    {turnActive
+      ? <button className="primary-button" type="button" disabled={stopping} onClick={onStop}>{stopping ? "Stopping…" : "Stop"}</button>
+      : <button className="primary-button" type="submit" disabled={sendDisabled}>Send</button>}
   </div>;
 }
 
-function SlashComposer({ draft, references, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, controlsDisabled, thinkingMode, permissionMode, onThinkingChange, onPermissionChange, turnHint, onChange, onSubmit }: {
+function SlashComposer({ draft, references, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, controlsDisabled, turnActive, stopping, onStop, thinkingMode, permissionMode, onThinkingChange, onPermissionChange, turnHint, onChange, onSubmit }: {
   references: readonly Reference[]; onRemoveReference: (id: string) => void;
+  turnActive: boolean; stopping: boolean; onStop: () => void;
   thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode; controlsDisabled: boolean; turnHint?: string;
   onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
   draft: string; commands: SlashCommands; skills: readonly string[]; onSkillPicked: (name: string) => void; textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -411,7 +416,8 @@ function SlashComposer({ draft, references, onRemoveReference, commands, skills,
     />
     {turnHint !== undefined && <p className="composer-turn-hint" role="status">{turnHint}</p>}
     <ComposerFooter thinkingMode={thinkingMode} permissionMode={permissionMode} controlsDisabled={controlsDisabled}
-      sendDisabled={sendDisabled} onThinkingChange={onThinkingChange} onPermissionChange={onPermissionChange} />
+      sendDisabled={sendDisabled} turnActive={turnActive} stopping={stopping} onStop={onStop}
+      onThinkingChange={onThinkingChange} onPermissionChange={onPermissionChange} />
   </form>;
 }
 
@@ -954,6 +960,7 @@ export default function App() {
   const approvalOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const frameOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const turnOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
+  const stopPromiseRef = useRef<Promise<void> | null>(null);
   const pendingApprovalRef = useRef<PendingApproval | null>(null);
   const approvalResolvingRef = useRef(false);
 
@@ -976,7 +983,8 @@ export default function App() {
 
   const beginWorkspaceOperation = useCallback((label: string): WorkspaceOperationOwner | null => {
     if (workspaceOperation.current !== null || inFlight.current || documentBusyRef.current ||
-        pendingApprovalRef.current !== null || conversationRef.current.activeTurn !== null) return null;
+        pendingApprovalRef.current !== null || conversationRef.current.activeTurn !== null ||
+        conversationRef.current.stopRequest !== null) return null;
     const owner = captureOwner(label);
     workspaceOperation.current = owner;
     turnOwnerRef.current = null;
@@ -1008,6 +1016,7 @@ export default function App() {
     frameOwnerRef.current = null;
     turnOwnerRef.current = null;
     documentRequestRef.current = null;
+    stopPromiseRef.current = null;
     documentBusyRef.current = false;
     setDocumentBusy(false);
     setWorkspaceBusy(null);
@@ -1087,7 +1096,7 @@ export default function App() {
 
   const openDocument = useCallback(async () => {
     if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
-        conversationRef.current.activeTurn !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
+        conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
     const owner = captureOwner("document.open");
     documentOperationRef.current = owner;
     frameOwnerRef.current = null;
@@ -1231,6 +1240,8 @@ export default function App() {
             const generation = generationRef.current;
             if (active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpochRef.current)) return;
             if (documentRequest !== null && (documentOperationRef.current === null || !ownsOperation(documentOperationRef.current, documentOperationRef.current))) return;
+            if (conversationRef.current.stopRequest !== null &&
+                (message.event === "document.proposed" || message.event === "approval.required")) return;
             if (message.event === "document.proposed" && active !== null && message.requestId === active.requestId && message.data.turnId === active.turnId && typeof message.data.callId === "string") {
               const sourceSnapshot = submittedDocumentSource(conversationRef.current.submittedContext,
                 typeof message.data.referenceId === "string" ? message.data.referenceId : undefined);
@@ -1340,8 +1351,10 @@ export default function App() {
   }, [captureOwner, ownsOperation]);
 
   const runLifecycle = useCallback((action: "start" | "restart" | "shutdown") => {
+    const current = conversationRef.current;
+    const stopRecovery = action === "restart" && current.stopRequest?.status === "failed" && current.activeTurn === null;
     if (workspaceOperation.current !== null || documentBusyRef.current || pendingApprovalRef.current !== null ||
-        conversationRef.current.activeTurn !== null) return;
+        current.activeTurn !== null || (current.stopRequest !== null && !stopRecovery)) return;
     setSlashCatalogOwner(null);
     if (action === "restart") {
       resumeSelectionRef.current = conversationRef.current.selected;
@@ -1500,7 +1513,7 @@ export default function App() {
   }, [applyConversation, beginWorkspaceOperation, candidate, candidateHistory, candidateRoot, dirtyChoice, discardDraft, documentConflict, finishWorkspaceOperation, loadCatalog, ownsOperation, saveDocument, updateDocument]);
 
   const showProjectChooser = useCallback(() => {
-    if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
+    if (conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || pendingApprovalRef.current !== null ||
         documentBusyRef.current || workspaceOperation.current !== null || inFlight.current) return;
     if (documentConflict !== null) {
       setWorkspaceIssue({ code: "DOCUMENT_CONFLICT", message: "Resolve or cancel the document conflict before switching projects.", retryable: false, source: "business" });
@@ -1676,10 +1689,57 @@ export default function App() {
     } finally { finishWorkspaceOperation(owner); }
   }, [applyConversation, beginWorkspaceOperation, chatSelection, finishWorkspaceOperation, focusComposer, ownsOperation]);
 
+  const stopTurn = useCallback(() => {
+    const current = conversationRef.current;
+    if (inFlight.current || (current.stopRequest !== null && current.stopRequest.status !== "failed")) return;
+    const target = current.stopRequest ?? current.activeTurn;
+    if (target === null || current.backendGeneration !== generationRef.current || current.projectEpoch !== projectEpochRef.current) return;
+    const generation = current.backendGeneration, projectEpoch = current.projectEpoch;
+    const retryingStop = current.stopRequest?.status === "failed";
+    const correlation = { generation, projectEpoch, projectId: target.projectId, sessionId: target.sessionId,
+      requestId: target.requestId, turnId: target.turnId };
+    applyConversation({ type: "stop-requested", generation, projectEpoch });
+    const pending = Promise.resolve().then(() => backendClient.request("session.stop", {
+      sessionId: target.sessionId, turnId: target.turnId, parentRequestId: target.requestId,
+    })).then(async (data) => {
+      const result = data as unknown as TurnStoppedDto;
+      if (result.sessionId !== target.sessionId || result.turnId !== target.turnId) {
+        throw protocolMismatch("The backend stopped a different turn.");
+      }
+      const next = applyConversation({ type: "stop-succeeded", ...correlation });
+      if (!retryingStop || next.stopRequest !== null || next.activeTurn !== null ||
+          generation !== generationRef.current || projectEpoch !== projectEpochRef.current || !sameSelection(next.selected, target)) return;
+      const operation = beginWorkspaceOperation("Refreshing saved conversation");
+      if (operation === null) return;
+      try {
+        await loadCatalog(generation);
+        if (!ownsOperation(operation, workspaceOperation.current) || state.session?.sessionId !== target.sessionId) return;
+        if (next.failure?.turnLifecycle?.accepted) {
+          const data = await fetchTranscriptPage(target.projectId, target.sessionId,
+            transcriptTailOffset(state.session.turnCount + 1), TRANSCRIPT_PAGE_SIZE);
+          if (!ownsOperation(operation, workspaceOperation.current)) return;
+          dispatch({ type: "session-created", session: { ...state.session, registered: true, turnCount: data.total } });
+          setTranscript(transcriptViewFrom(target.projectId, target.sessionId, data));
+          setLiveTurns([]);
+        }
+        setPendingUserText(null);
+      } catch (error: unknown) {
+        if (ownsOperation(operation, workspaceOperation.current)) {
+          setRegistrationIssue(`The turn stopped, but its saved conversation could not be refreshed. ${workspaceError(error).message}`);
+        }
+      } finally { finishWorkspaceOperation(operation); }
+    }).catch((error: unknown) => {
+      applyConversation({ type: "stop-failed", ...correlation, message: workspaceError(error).message });
+    }).finally(() => {
+      if (stopPromiseRef.current === pending) stopPromiseRef.current = null;
+    });
+    stopPromiseRef.current = pending;
+  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, loadCatalog, ownsOperation, state.session]);
+
   const resolvePendingApproval = useCallback((approved: boolean, expectedApprovalId?: string) => {
     const approval = pendingApprovalRef.current;
     const owner = approvalOwnerRef.current;
-    if (approval === null || owner === null || approvalResolvingRef.current ||
+    if (approval === null || owner === null || approvalResolvingRef.current || conversationRef.current.stopRequest !== null ||
         (expectedApprovalId !== undefined && approval.approvalId !== expectedApprovalId) ||
         !ownsOperation(owner, approvalOwnerRef.current)) return;
     const isCurrent = () => ownsOperation(owner, approvalOwnerRef.current) &&
@@ -1907,7 +1967,7 @@ export default function App() {
     const selectedProject = projectRef.current;
     const session = state.session;
     if (selected === null || selectedProject === null || session === null || draft.trim().length === 0 ||
-        conversationRef.current.activeTurn !== null || workspaceOperation.current !== null || inFlight.current ||
+        conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || workspaceOperation.current !== null || inFlight.current ||
         documentBusyRef.current || pendingApprovalRef.current !== null || bindingGenerationRef.current !== generationRef.current ||
         selectedProject.projectId !== selected.projectId) return;
     const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
@@ -2012,16 +2072,19 @@ export default function App() {
         setRegistrationIssue(result.registrationIssue ?? "The saved conversation is awaiting catalog registration.");
       } else if (result.registrationStatus === "registered") {
         setRegistrationIssue(null);
-        await loadCatalog(generation);
       }
+      await stopPromiseRef.current;
+      if (!isCurrent() || conversationRef.current.stopRequest !== null) return;
+      if (result.registrationStatus === "registered") await loadCatalog(generation);
       if (!isCurrent()) return;
       scheduleOwnedFrame(owner, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
       focusComposer(owner);
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
       if (!isCurrent()) return;
       const safe = workspaceError(error);
       const next = applyConversation({
         type: "turn-failed",
+        cancelled: safe.code === "TURN_CANCELLED",
         generation,
         projectEpoch: owner.projectEpoch,
         requestId: tracked.requestId,
@@ -2032,13 +2095,15 @@ export default function App() {
         turnLifecycle: safe.turnLifecycle ?? null,
       });
       if (next.failure?.requestId !== tracked.requestId) return;
-      setPendingUserText(null);
       pendingApprovalRef.current = null;
       approvalResolvingRef.current = false;
       setPendingApproval(null);
       setApprovalResolving(false);
       setWorkspaceIssue(safe);
       focusComposer(owner);
+      await stopPromiseRef.current;
+      if (!isCurrent() || conversationRef.current.stopRequest !== null) return;
+      setPendingUserText(null);
       if (!isPersistedTurnFailure(next.failure)) return;
       const operation = beginWorkspaceOperation("Refreshing saved conversation");
       if (operation === null) return;
@@ -2298,7 +2363,10 @@ export default function App() {
   const interaction = conversationInteractionState(conversation);
   const idle = state.activeAction === null && !interaction.turnActive && workspaceBusy === null && !documentBusy && pendingApproval === null;
   const canStart = !state.browserPreview && idle && (state.snapshot === null || state.snapshot.lifecycle === "stopped");
-  const canRestart = !state.browserPreview && idle && (state.phase === "crashed" || state.phase === "degraded" || state.snapshot?.childRunning === true);
+  const stopRecovery = conversation.stopRequest?.status === "failed" && conversation.activeTurn === null &&
+    state.activeAction === null && workspaceBusy === null && !documentBusy && pendingApproval === null;
+  const stopping = conversation.stopRequest !== null && conversation.stopRequest.status !== "failed";
+  const canRestart = !state.browserPreview && (idle || stopRecovery) && (state.phase === "crashed" || state.phase === "degraded" || state.snapshot?.childRunning === true);
   const canShutdown = !state.browserPreview && idle && state.snapshot?.childRunning === true;
   const canCreateSession = !state.browserPreview && idle && workspaceBusy === null && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && activeProjectId !== null;
   const shutdownMessage = shutdownSummary(state.snapshot);
@@ -2401,7 +2469,15 @@ export default function App() {
             onApply={applyExtensions}
             onRestart={restartForExtensions}
           />}
-          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
+          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : conversation.failure?.cancelled ? "Turn stopped" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
+          {conversation.stopRequest?.status === "failed" && <section className="notice notice-error" role="alert">
+            <div><h3>The turn could not finish stopping</h3><p>{conversation.stopRequest.error}</p>
+              {conversation.activeTurn === null && pendingUserText !== null && <details><summary>Your message</summary><SafeContent content={pendingUserText} /></details>}
+              <div className="action-row"><button type="button" onClick={stopTurn}>Retry Stop</button>
+                {conversation.activeTurn === null && <button type="button" disabled={!canRestart} onClick={() => runLifecycle("restart")}>Restart backend</button>}
+              </div>
+            </div>
+          </section>}
           {selectionPreview === null && registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
           {(state.phase === "starting" || (state.snapshot === null && state.error === null && !state.browserPreview)) && <section className="empty-state" role="status"><h3>Preparing your research workspace</h3><p>Connecting to the local backend. Choose a project when it is ready.</p></section>}
           {state.phase === "stopped" && state.snapshot !== null && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><h3 id="stopped-title">The local backend is stopped</h3><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
@@ -2424,8 +2500,8 @@ export default function App() {
               <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} />
               <div ref={transcriptEndRef} />
             </div>
-            {(conversation.failure !== null && conversation.submittedContext !== null || referenceIssue !== null) && <div className="composer-notices">
-            {conversation.failure !== null && conversation.submittedContext !== null && <div className="reference-retry-settings">
+            {(conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null || referenceIssue !== null) && <div className="composer-notices">
+            {conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null && <div className="reference-retry-settings">
               <p>Saved turn: {conversation.submittedContext.permissionMode === "ask" ? "Ask" : "Bypass"} · {conversation.submittedContext.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
                 {!retryControlsMatch && " Current controls differ; the original retry is disabled."}</p>
               <button type="button" onClick={sendNewTurn} disabled={!idle}>Send new turn with current settings</button>
@@ -2437,6 +2513,7 @@ export default function App() {
               draft={conversation.draft} textareaRef={composerRef}
               references={conversation.draftReferences}
               thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.bashPermissionMode}
+              turnActive={interaction.turnActive} stopping={stopping} onStop={stopTurn}
               controlsDisabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
               onThinkingChange={(mode) => void updateThinkingMode(mode)}
               onPermissionChange={(mode) => void updateBashPermissionMode(mode)}
@@ -2448,7 +2525,7 @@ export default function App() {
               commands={composerSlashCommands(state.session, conversation.selected, state.snapshot?.generation, slashCatalogOwner,
                 state.snapshot?.lifecycle === "ready" && state.phase === "session-ready" && idle)}
               disabled={conversation.selected === null || interaction.turnActive || workspaceBusy !== null}
-              sendDisabled={interaction.sendDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || (conversation.failure !== null && !retryControlsMatch)}
+              sendDisabled={interaction.sendDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || (conversation.failure !== null && !conversation.failure.cancelled && !retryControlsMatch)}
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
               onSubmit={sendTurn}
             />
@@ -2506,7 +2583,10 @@ export default function App() {
         onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Add selected text to chat</button>}
       {pendingApproval !== null && <ApprovalDialog
         approval={pendingApproval}
-        resolving={approvalResolving}
+        resolving={approvalResolving || conversation.stopRequest !== null}
+        onStop={(conversation.activeTurn?.turnId ?? conversation.stopRequest?.turnId) === pendingApproval.turnId ? stopTurn : undefined}
+        stopping={stopping}
+        stopError={conversation.stopRequest?.error ?? undefined}
         onResolve={resolvePendingApproval}
         returnFocus={returnApprovalFocus}
         allowDocumentEditing={documentValue !== null}

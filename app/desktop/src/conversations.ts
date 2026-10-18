@@ -101,7 +101,15 @@ export type VisibleConversationTurn =
       turn: PendingConversationTurn;
     };
 
+export interface ConversationStop extends ConversationSelection {
+  requestId: string;
+  turnId: string;
+  status: "requesting" | "confirmed" | "failed";
+  error: string | null;
+}
+
 export interface ConversationFailure extends ConversationSelection {
+  cancelled?: boolean;
   requestId: string | null;
   turnId: string;
   message: string;
@@ -118,6 +126,7 @@ export interface ConversationState {
   draftReferences: Reference[];
   submittedContext: SubmittedContext | null;
   activeTurn: ActiveConversationTurn | null;
+  stopRequest: ConversationStop | null;
   latestAnswer: FinalConversationAnswer | null;
   failure: ConversationFailure | null;
 }
@@ -130,6 +139,9 @@ export type ConversationAction = (
   | { type: "reference-added"; reference: Reference; generation?: number }
   | { type: "reference-removed"; referenceId: string; generation?: number }
   | { type: "new-turn-requested"; generation?: number }
+  | { type: "stop-requested"; generation: number }
+  | ({ type: "stop-succeeded"; generation: number; requestId: string; turnId: string } & ConversationSelection)
+  | ({ type: "stop-failed"; generation: number; requestId: string; turnId: string; message: string } & ConversationSelection)
   | ({ type: "turn-started"; generation: number; requestId: string; turnId: string; submittedContext?: SubmittedContext | null } & ConversationSelection)
   | ({
       type: "activity-received";
@@ -147,6 +159,7 @@ export type ConversationAction = (
     })
   | ({
       type: "turn-failed";
+      cancelled?: boolean;
       generation: number;
       requestId: string;
       projectId: string;
@@ -201,6 +214,7 @@ export const initialConversationState: ConversationState = {
   draftReferences: [],
   submittedContext: null,
   activeTurn: null,
+  stopRequest: null,
   latestAnswer: null,
   failure: null,
 };
@@ -417,6 +431,7 @@ function finalizeTurn(
     draft: "",
     draftReferences: [],
     activeTurn: null,
+    stopRequest: state.stopRequest?.status === "confirmed" ? null : state.stopRequest,
     latestAnswer: {
       projectId: active.projectId,
       sessionId: active.sessionId,
@@ -447,13 +462,33 @@ export function conversationReducer(
       backendGeneration: action.generation,
       selected: null,
       activeTurn: null,
+      stopRequest: null,
       latestAnswer: null,
       failure: null,
     };
   }
+  if (action.type === "stop-requested") {
+    if (action.generation !== state.backendGeneration ||
+        (state.stopRequest !== null && state.stopRequest.status !== "failed")) return state;
+    const target = state.stopRequest ?? state.activeTurn;
+    if (target === null) return state;
+    return { ...state, stopRequest: {
+      projectId: target.projectId, sessionId: target.sessionId,
+      requestId: target.requestId, turnId: target.turnId, status: "requesting", error: null,
+    } };
+  }
+  if (action.type === "stop-succeeded" || action.type === "stop-failed") {
+    const stop = state.stopRequest;
+    if (stop === null || stop.status !== "requesting" || action.generation !== state.backendGeneration ||
+        action.requestId !== stop.requestId || action.turnId !== stop.turnId || !sameSelection(stop, action)) return state;
+    if (action.type === "stop-failed") {
+      return { ...state, stopRequest: { ...stop, status: "failed", error: action.message } };
+    }
+    return { ...state, stopRequest: state.activeTurn === null ? null : { ...stop, status: "confirmed" } };
+  }
   if (action.type === "project-opened") {
     const projectEpoch = action.projectEpoch ?? state.projectEpoch + 1;
-    if (action.generation !== state.backendGeneration || state.activeTurn !== null || projectEpoch <= state.projectEpoch) return state;
+    if (action.generation !== state.backendGeneration || state.activeTurn !== null || state.stopRequest !== null || projectEpoch <= state.projectEpoch) return state;
     return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch,
       draft: action.preserveDraft ? state.draft : "",
       draftReferences: action.preserveDraft ? state.draftReferences : [],
@@ -461,7 +496,7 @@ export function conversationReducer(
   }
   if (action.type === "conversation-selected") {
     if (
-      state.activeTurn !== null ||
+      state.activeTurn !== null || state.stopRequest !== null ||
       action.generation !== state.backendGeneration ||
       !isValidSelection(action)
     ) {
@@ -480,14 +515,14 @@ export function conversationReducer(
   if ((action.type === "reference-added" || action.type === "reference-removed" || action.type === "new-turn-requested") &&
       action.generation !== undefined && action.generation !== state.backendGeneration) return state;
   if (action.type === "reference-added") {
-    if (state.activeTurn !== null || state.selected === null || state.draftReferences.some((item) => item.referenceId === action.reference.referenceId)) return state;
+    if (state.activeTurn !== null || state.stopRequest !== null || state.selected === null || state.draftReferences.some((item) => item.referenceId === action.reference.referenceId)) return state;
     return { ...state, draftReferences: [...state.draftReferences, structuredClone(action.reference)], failure: null };
   }
   if (action.type === "reference-removed") {
-    if (state.activeTurn !== null) return state;
+    if (state.activeTurn !== null || state.stopRequest !== null) return state;
     return { ...state, draftReferences: state.draftReferences.filter((item) => item.referenceId !== action.referenceId), failure: null };
   }
-  if (action.type === "new-turn-requested") return state.activeTurn === null ? { ...state, failure: null } : state;
+  if (action.type === "new-turn-requested") return state.activeTurn === null && state.stopRequest === null ? { ...state, failure: null } : state;
   if (action.type === "draft-changed") {
     return typeof action.draft === "string"
       ? {
@@ -499,7 +534,7 @@ export function conversationReducer(
   }
   if (action.type === "turn-started") {
     if (
-      state.activeTurn !== null ||
+      state.activeTurn !== null || state.stopRequest !== null ||
       action.generation !== state.backendGeneration ||
       !sameSelection(state.selected, action) ||
       !isNonEmptyString(action.requestId) ||
@@ -548,22 +583,26 @@ export function conversationReducer(
     return {
       ...state,
       activeTurn: null,
+      stopRequest: state.stopRequest?.status === "confirmed" ? null : state.stopRequest,
+      draft: action.cancelled && turnLifecycle?.accepted ? "" : state.draft,
+      draftReferences: action.cancelled && turnLifecycle?.accepted ? [] : state.draftReferences,
       latestAnswer: null,
       failure: {
+        ...(action.cancelled ? { cancelled: true } : {}),
         projectId: active.projectId,
         sessionId: active.sessionId,
         requestId: active.requestId,
         turnId: active.turnId,
         message: action.message.slice(0, 320),
-        retryable: action.retryable,
-        draftPreserved: state.draft.length > 0 || state.draftReferences.length > 0,
+        retryable: action.cancelled ? false : action.retryable,
+        draftPreserved: !(action.cancelled && turnLifecycle?.accepted) && (state.draft.length > 0 || state.draftReferences.length > 0),
         turnLifecycle,
       },
     };
   }
   if (action.type === "retry-target-restored") {
     if (
-      state.activeTurn !== null ||
+      state.activeTurn !== null || state.stopRequest !== null ||
       action.generation !== state.backendGeneration ||
       !sameSelection(state.selected, action) ||
       !isCanonicalTurnId(action.turnId) ||
@@ -608,7 +647,7 @@ export function nextTurnSubmission(
   state: ConversationState,
   idFactory: () => string,
 ): { turnId: string; retry: boolean } {
-  if (state.failure !== null) {
+  if (state.failure !== null && !state.failure.cancelled) {
     return { turnId: state.failure.turnId, retry: true };
   }
   return { turnId: idFactory(), retry: false };
@@ -624,7 +663,7 @@ export function latestRetryableTranscriptTurn(
     (latest, item) => {
       if (
         (item.state !== "failed" && item.state !== "interrupted") ||
-        item.failureRetryable !== true
+        item.failureRetryable !== true || item.failureCode === "cancelled"
       ) {
         return latest;
       }
@@ -643,7 +682,7 @@ export function latestRetryableTranscriptTurn(
 export function conversationInteractionState(
   state: ConversationState,
 ): ConversationInteractionState {
-  const turnActive = state.activeTurn !== null;
+  const turnActive = state.activeTurn !== null || state.stopRequest !== null;
   return {
     turnActive,
     sendDisabled: turnActive || state.selected === null || state.draft.trim().length === 0,

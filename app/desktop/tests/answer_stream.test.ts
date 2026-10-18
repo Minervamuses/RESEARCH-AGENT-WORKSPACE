@@ -593,3 +593,63 @@ test("activity is correlated, bounded, and the global turn lock blocks controls"
   });
   assert.equal(wrongRequest, state);
 });
+
+
+test("Stop waits for both replies in either order and ignores duplicate clicks", () => {
+  const stop = { type: "stop-requested", generation: 1 } as const;
+  const stopped = { type: "stop-succeeded", generation: 1, projectId, sessionId, requestId, turnId } as const;
+  for (const first of ["turn", "stop"]) {
+    let state = conversationReducer(activeState(), stop);
+    assert.equal(conversationReducer(state, stop), state);
+    state = first === "turn" ? succeed(state) : conversationReducer(state, stopped);
+    assert.deepEqual(conversationInteractionState(state), {
+      turnActive: true, sendDisabled: true, createDisabled: true, selectDisabled: true, controlDisabled: true,
+    });
+    assert.equal(conversationReducer(state, {
+      type: "turn-started", generation: 1, projectId, sessionId, requestId: retryRequestId, turnId: otherTurnId,
+    }), state);
+    state = first === "turn" ? conversationReducer(state, stopped) : succeed(state);
+    assert.equal(state.activeTurn, null);
+    assert.equal(state.stopRequest, null);
+    assert.equal(conversationInteractionState(state).turnActive, false);
+    assert.equal(state.latestAnswer?.text, "complete answer");
+  }
+});
+
+test("Stop failure remains blocked after the turn ends and can retry only its own target", () => {
+  let state = conversationReducer(activeState(), { type: "stop-requested", generation: 1 });
+  state = conversationReducer(state, {
+    type: "stop-failed", generation: 1, projectId, sessionId, requestId, turnId, message: "Local work is still stopping.",
+  });
+  assert.equal(state.stopRequest?.error, "Local work is still stopping.");
+  state = succeed(state);
+  assert.equal(conversationInteractionState(state).turnActive, true);
+  state = conversationReducer(state, { type: "stop-requested", generation: 1 });
+  const action = { type: "stop-succeeded", generation: 1, projectId, sessionId, requestId, turnId } as const;
+  for (const stale of [
+    { ...action, generation: 0 }, { ...action, projectEpoch: 1 },
+    { ...action, requestId: retryRequestId }, { ...action, sessionId: otherSessionId }, { ...action, turnId: otherTurnId },
+  ]) assert.equal(conversationReducer(state, stale), state);
+  state = conversationReducer(state, action);
+  assert.equal(state.stopRequest, null);
+  assert.equal(conversationInteractionState(state).turnActive, false);
+});
+
+test("explicit cancellation preserves saved history but starts the next prompt with a new ID", () => {
+  for (const accepted of [false, true]) {
+    let state = conversationReducer(activeState("cancel this"), { type: "stop-requested", generation: 1 });
+    state = conversationReducer(state, {
+      type: "turn-failed", generation: 1, projectId, sessionId, requestId, cancelled: true,
+      message: "The turn was stopped.", retryable: false,
+      turnLifecycle: { turnId, state: accepted ? "interrupted" : null, accepted, persisted: accepted },
+    });
+    assert.equal(state.stopRequest?.status, "requesting");
+    assert.equal(state.failure?.turnLifecycle?.accepted, accepted);
+    assert.equal(state.failure?.retryable, false);
+    assert.equal(state.draft, accepted ? "" : "cancel this");
+    assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false });
+  }
+  const cancelled = { ...transcriptTurn(2, otherTurnId, "interrupted"), failureCode: "cancelled" as const };
+  assert.equal(latestRetryableTranscriptTurn([cancelled]), null);
+  assert.equal(latestRetryableTranscriptTurn([transcriptTurn(1, turnId, "failed"), cancelled])?.turnId, turnId);
+});
