@@ -25,6 +25,7 @@ Built-in skill 的 domain code 與 agent runtime 是不同邊界。例如 `skill
 
 ## Developer entry points
 
+- 桌面介面：回到 workspace 根目錄，啟用 Conda `app` 後執行 `python main.py`。操作方式見 [workspace README](../README.md)。
 - `agent.ChatSession`：stateful chat facade。
 - `agent.build_graph`：單回合 LangGraph workflow builder。
 - `python -m agent.cli.chat --no-mcp`：不啟動 MCP 的本機 CLI。

@@ -4,12 +4,12 @@
 
 | 階段 | 狀態 | 已有證據 | 阻礙／條件 | 下一動作 |
 |---|---|---|---|---|
-| P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
+| P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | 無 |
 | P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過；P6 重開確認 | 無 | 無 |
-| P3 | Complete | Ask／Bypass 真保存檢查；實機兩次 Ask 保存後讀回兩段成果 | 無 | P6 重用此證據 |
-| P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
-| P5 | Complete | 重開保名；真 UI Cancel、active→Stopping→delete、B 可開及產出不變通過 | 無 | P6 整體確認 |
-| P6 | In progress | S1 整體證據、重開確認及一次完整 pytest 已完成；三項測試適配後個別通過 | S2 README 未完成 | P6-S2 主要 README |
+| P3 | Complete | Ask／Bypass 真保存檢查；實機兩次 Ask 保存後讀回兩段成果 | 無 | 無 |
+| P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | 無 |
+| P5 | Complete | 重開保名；真 UI Cancel、active→Stopping→delete、B 可開及產出不變通過 | 無 | 無 |
+| P6 | Complete | S1 整體證據與一次完整 pytest；三項測試適配後個別通過；S2 README／入口及連結核對完成 | 無必需驗收阻礙；已知工具／WSLg 限制見下 | 無，計劃完成 |
 
 ## 計劃撰寫紀錄
 
@@ -106,3 +106,7 @@
   - 在 Linux Conda app 執行一次 `poetry run pytest -q`：1458 passed、3 failed、2 warnings／38.02s。三項均直接受 P4 介面改動影響的舊測試：`SelectionModel` 與 `_DeterministicManagementModel` 只有 invoke，分別補必要 ainvoke；取消 answer-stream 測試改核對 TURN_CANCELLED 及未接受／未保存狀態。沒有改 production 或降低實際業務斷言。修正後只重跑原三個單案例，各 1 passed（0.25s／0.24s／0.53s）；完整 suite 沒有重跑，不宣稱修後整套再次通過。
   - `app/desktop` 的 `npm test` 補完整現有前端檢查：260 passed／5.60s。正式 release 的 typecheck／Vite build 與 Rust protocol 14 項已在 P5-S2 通過且之後沒有 production 改動，沿用不重跑。既有 LangGraph deprecation、測試 zip 重名及 Vite chunk warnings 無直接阻礙；未安裝依賴、未呼叫 live paid provider、GPU 或全資料重播。
   - G1–G9 在 D1 約定正常流程內具備以上實際證據，沒有尚未驗證的必需功能。僅測試 fake／取消期望與證據檔為本步改動；scoped review／whitespace 通過。Scoped commit：`test(desktop): verify integrated interaction workflow [P6-S1]`；接續最後 README。
+- P6-S2／2026-10-19 — P6-S1 已提交 `207ceed`。功能確認後新增根 README 作主要使用入口，補 `app/README.md` 的根啟動指引。內容涵蓋 Linux／WSL／Windows picker 分工、Conda app／Poetry、既有系統套件與 shell key、首次／過期 release 建置、自動後端及 Retry／MCP Restart、三種允許格式及專案界線、每次手動選取、逐段留言 Enter／IME 與整批送出、接受後清草稿／一般歷史、同文件多段、Ask／Bypass、D1 正常操作順序、Stop 真正收束與保留效果，以及持久改名／確認刪除。
+  - 人工按實際程式核對指令／UI 標籤；五個新 README 本地連結均存在，根啟動位置、env／manifest／lock 位置與 LF 核對通過。初稿沿舊 app 文件帶入不存在的 SKILLS_GUIDE 連結，檢查發現後從新 README 移除；未擴大修理其他歷史文件。獨立審閱僅要求將刪除後清選取限定為「目前選中的對話」，已修正；scoped whitespace 通過。沒有重跑既有功能或完整 suite。
+  - 隔離正式版測試視窗已正常關閉（launcher exit 0）；臨時診斷 Python scripts 已移除。測試專案與產出留在 `/tmp`，未碰使用者 store。維持原 GUI 分支／工作樹，無 dependency／env／lock 變更、無 push；原 ` D problem.html`、`?? app/store/` 及未追蹤計劃來源保持原狀。
+  - G1–G10 均完成，D1 排除情境未加機制或專門測試。驗收限制保持明示：原生 picker 由使用者協助、模型用離線 fixture、先前 WSLg 最大化／HMR 輸入無反應未定位，一般正式版視窗流程已通過。Scoped commit：`docs(desktop): document the verified workflow [P6-S2]`。計劃完成，停止擴充。
