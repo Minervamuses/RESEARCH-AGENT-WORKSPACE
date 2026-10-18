@@ -35,6 +35,9 @@ from agent.skills.runtime import load_skill_runtime
 class _DeterministicManagementModel:
     """Stand in only for the external LLM; host validation remains real."""
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         content = messages[-1].content
         payload = json.loads(content[content.index("{") :])

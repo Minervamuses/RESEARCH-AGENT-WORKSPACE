@@ -245,9 +245,13 @@ def test_cancelled_turn_emits_no_answer_events(tmp_path: Path) -> None:
         )
         await session.started.wait()
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        with pytest.raises(DesktopServiceError) as raised:
             await task
 
+        assert raised.value.code == "TURN_CANCELLED"
+        assert raised.value.details["state"] is None
+        assert raised.value.details["accepted"] is False
+        assert raised.value.details["persisted"] is False
         assert events == []
         assert service._turn_active is False
 

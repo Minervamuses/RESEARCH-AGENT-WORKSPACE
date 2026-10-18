@@ -5,11 +5,11 @@
 | 階段 | 狀態 | 已有證據 | 阻礙／條件 | 下一動作 |
 |---|---|---|---|---|
 | P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
-| P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過 | 整體實機流程在 P6 再核對 | P3 可開始 |
+| P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過；P6 重開確認 | 無 | 無 |
 | P3 | Complete | Ask／Bypass 真保存檢查；實機兩次 Ask 保存後讀回兩段成果 | 無 | P6 重用此證據 |
 | P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
 | P5 | Complete | 重開保名；真 UI Cancel、active→Stopping→delete、B 可開及產出不變通過 | 無 | P6 整體確認 |
-| P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
+| P6 | In progress | S1 整體證據、重開確認及一次完整 pytest 已完成；三項測試適配後個別通過 | S2 README 未完成 | P6-S2 主要 README |
 
 ## 計劃撰寫紀錄
 
@@ -101,3 +101,8 @@
   - 實機完成：使用者選同一測試專案，根代理手動開啟並選回 A，整個應用重開後仍名為「桌面多段驗收」且五回合歷史可見、草稿空白。輸入尚未送出的草稿，右鍵 Delete 顯示只刪對話／產出保留及先 Stop 說明；Cancel 後草稿、A/B 及產出均保留，三檔 SHA-256 與前述基線相同。
   - 將草稿替換為 `[[fixture:wait-stop]]` 並送出，第六回合 `3125ea0e11db41a3839d56cd068cf6d4` 已落盤 pending，Send 變 Stop、草稿清空。直接右鍵 Delete 並確認，真 UI 捕捉 `Stopping and finishing the current turn…`／`Stopping…`，之後回到 Backend ready；A、其 transcript 與重試／草稿消失，清單只剩 B。Linux 核對 canonical A 不存在、catalog 只含 B；B 與測試文稿 SHA-256 仍為前述基線。實際再選 B 成功載入原訊息，未重啟後端。刪除後再次開程式的整體確認留給 P6-S1。
   - 無 live provider，未修改使用者研究資料。Scoped commit：`feat(desktop): delete conversations after stopping [P5-S2]`；P1–P5 全部完成，接續 P6-S1。
+- P6-S1／2026-10-19 — P5-S2 已提交 `d9a579b`。重用同一隔離專案的分段實機證據：P1 正式 Windows 原生 picker／同檔保存／取消；P2 文件兩段與 assistant 回覆留言、Enter 收合、修改／移除、空白主訊息整批送出；P2-S2 接受後清除及 P3 同回合兩段真保存；P4 模型等待／核准等待 Stop 後再送成功；P5 重新開程式仍保名、Cancel 不變、active→Stop→delete。原生視窗由使用者操作，其他 UI 由 Computer Use 操作；模型內容為既有離線 fixture，真正 bash process group 與 MCP cleanup 另由 P4 本地子程序證據涵蓋，未以 stub 冒充。
+  - 完成刪除後以 UI 關閉正式版（launcher exit 0），再次從根目錄 `python main.py` 啟動，沒有重建、Backend ready／Generation 1／0 pending，專案／文件／對話仍須手動選，草稿與標記未恢復。使用者再次選同一資料夾後根代理開啟，清單及 canonical catalog 只剩 B；手動選 B，原訊息可讀、composer 空白。B 與兩段產出 SHA-256 仍等於 P5 基線，A 未復活。此輪正式版一直使用一般視窗且無 HMR，輸入正常；先前最大化／HMR 輸入無反應的根因仍未證實，未做範圍外修正。
+  - 在 Linux Conda app 執行一次 `poetry run pytest -q`：1458 passed、3 failed、2 warnings／38.02s。三項均直接受 P4 介面改動影響的舊測試：`SelectionModel` 與 `_DeterministicManagementModel` 只有 invoke，分別補必要 ainvoke；取消 answer-stream 測試改核對 TURN_CANCELLED 及未接受／未保存狀態。沒有改 production 或降低實際業務斷言。修正後只重跑原三個單案例，各 1 passed（0.25s／0.24s／0.53s）；完整 suite 沒有重跑，不宣稱修後整套再次通過。
+  - `app/desktop` 的 `npm test` 補完整現有前端檢查：260 passed／5.60s。正式 release 的 typecheck／Vite build 與 Rust protocol 14 項已在 P5-S2 通過且之後沒有 production 改動，沿用不重跑。既有 LangGraph deprecation、測試 zip 重名及 Vite chunk warnings 無直接阻礙；未安裝依賴、未呼叫 live paid provider、GPU 或全資料重播。
+  - G1–G9 在 D1 約定正常流程內具備以上實際證據，沒有尚未驗證的必需功能。僅測試 fake／取消期望與證據檔為本步改動；scoped review／whitespace 通過。Scoped commit：`test(desktop): verify integrated interaction workflow [P6-S1]`；接續最後 README。

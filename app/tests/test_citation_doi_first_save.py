@@ -137,6 +137,9 @@ def test_two_turn_selection_saves_the_chosen_record_by_doi_only(monkeypatch, tmp
         def bind_tools(self, _tools):
             return self
 
+        async def ainvoke(self, messages):
+            return self.invoke(messages)
+
         def invoke(self, messages):
             request = [m for m in messages if isinstance(m, HumanMessage)][-1].content
             results = _workflow_results(messages)
