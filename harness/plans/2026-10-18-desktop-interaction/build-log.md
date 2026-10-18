@@ -5,7 +5,7 @@
 | 階段 | 狀態 | 已有證據 | 阻礙／條件 | 下一動作 |
 |---|---|---|---|---|
 | P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
-| P2 | In progress | S1 草稿操作、來源／請求分離與實機整批送出通過 | S2 尚未實作 | 以 durable acceptance 清除草稿 |
+| P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過 | 整體實機流程在 P6 再核對 | P3 可開始 |
 | P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
 | P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
 | P5 | Not started | 保存與索引分工已讀；P4 已通過 | S1 尚未開始；T3 已授權 | P5-S1 canonical title |
@@ -77,3 +77,8 @@
   - 實機沿既有 phase02 隔離 fixture，以 root `python main.py --dev` 載入已保存對話與測試 .md。兩段文件及一段 assistant 回覆各建立留言；Enter 均只收合。重開第一則修改為 `Explain the evidence in the first passage.`，移除第二則，剩下數字 1／3；主訊息空白，按 Send 一次。UI 變 Stop 後完成，恢復 Send 且標記清除；canonical 同一 conversation 從 3 變 4 回合，第四個 turnId `3203e97b33314a458531e95575955aa6`、completed，只有 document／assistant chat 兩份 references 與對應要求，permissionMode=ask，未修改來源文件。fixture 只作本地回應，無 live provider；模型前立即清除的生命週期仍由 S2 接續。
   - 開發驗收中曾在 HMR／最大化後出現輸入無反應；首次重啟同一隔離 dev 應用恢復，第二次由使用者還原普通視窗後繼續完成以上操作。未證實根因，未據此改動程式或環境；原生 picker 仍需使用者協助，因 Computer Use 無法取得該 dialog 的 window target。普通視窗完整標註流程已通過。
   - Scoped commit：`feat(desktop): add passage comment drafts [P2-S1]`。下一步 P2-S2；未改分支／工作樹、依賴、環境或使用者既有檔案。
+- P2-S2／2026-10-18 — S1 已提交 `9581624`。沿 pending 保存 callback 發出有序 `turn.accepted`，事件失聯與 catalog 註冊互不阻斷；existing-turn 的拒絕／保存失敗不提前通知，成功 retry 及 completed duplicate 各通知一次。Python／TypeScript／Rust 共用 contract 與六個必要 fixture，無新儲存層。
+  - 前端核對 generation／project epoch／request／session／turn，accepted 即清除草稿與原文標記，模型仍在執行。接受前失敗保留草稿；接受附近失聯以 transcript 的同一 durable turnId 查證，不自動另送新回合。保留原 text／submittedContext 作明確 retry，但載入 failed／interrupted 不重建歷史標記。取消後清除待確認送出 ID，避免重啟後誤重試已取消回合。
+  - Linux Conda app：`poetry run pytest tests/test_desktop_service.py tests/test_desktop_document_service.py tests/test_desktop_fixture.py tests/test_desktop_server.py tests/test_session_persistence.py -q`：153 passed／8.84s；掛起模型確認 pending 已保存、accepted 已發出且沒有 terminal，Stop 後仍恰有一個 accepted 與 terminal。保存拒絕、retry、catalog／event 獨立失敗及 transcript 讀回分界通過。
+  - 協定：`poetry run pytest tests/test_desktop_protocol_contract.py -q`：167 passed；desktop `node --test --experimental-strip-types tests/protocol.test.ts`：161 passed；src-tauri `cargo test --locked protocol::tests -- --nocapture`：12 passed。前端 answer_stream／conversations／inline_skills：56 passed；最後取消 ID 修正後 answer_stream：23 passed；`npm run build`、scoped whitespace 通過。保留既有 LangGraph／bundle warnings，未重跑 full suite 或使用 live provider。
+  - 根代理審閱 production diff；S1 dev 應用已正常關閉後才改程式，避免 HMR 影響人工選檔。此步生命週期以既有 fake model、真正保存及 reducer 驗證；整體實機在 P6 核對，不宣稱本步另做新 UI 操作。Scoped commit：`feat(desktop): clear drafts after durable acceptance [P2-S2]`；接續 P3-S1。

@@ -7,6 +7,7 @@
   "messageTypes": ["request", "event", "result"],
   "requestEvents": [
     "request.started",
+    "turn.accepted",
     "request.progress",
     "stage.changed",
     "tool.started",
@@ -57,6 +58,10 @@
   "toolEventDataKeys": ["name", "callId", "status", "candidateId"],
   "toolStatuses": ["started", "ok", "failed", "denied"],
   "eventDataSchemas": {
+    "turn.accepted": {
+      "sessionId": {"type": "string", "required": true, "maxBytes": 256},
+      "turnId": {"type": "turnId", "required": true}
+    },
     "document.proposed": {
       "turnId": {"type": "turnId", "required": true},
       "callId": {"type": "string", "required": true, "maxBytes": 256},

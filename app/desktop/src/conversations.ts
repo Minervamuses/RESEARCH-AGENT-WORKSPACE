@@ -125,6 +125,12 @@ export interface DraftAnnotation {
   expanded: boolean;
 }
 
+export interface SubmittedTurn extends ConversationSelection {
+  turnId: string;
+  text: string;
+  accepted: boolean;
+}
+
 export interface ConversationState {
   backendGeneration: number;
   projectEpoch: number;
@@ -134,6 +140,7 @@ export interface ConversationState {
   annotations: DraftAnnotation[];
   nextAnnotationNumber: number;
   submittedContext: SubmittedContext | null;
+  submittedTurn: SubmittedTurn | null;
   activeTurn: ActiveConversationTurn | null;
   stopRequest: ConversationStop | null;
   latestAnswer: FinalConversationAnswer | null;
@@ -153,7 +160,9 @@ export type ConversationAction = (
   | { type: "stop-requested"; generation: number }
   | ({ type: "stop-succeeded"; generation: number; requestId: string; turnId: string } & ConversationSelection)
   | ({ type: "stop-failed"; generation: number; requestId: string; turnId: string; message: string } & ConversationSelection)
-  | ({ type: "turn-started"; generation: number; requestId: string; turnId: string; submittedContext?: SubmittedContext | null } & ConversationSelection)
+  | ({ type: "turn-started"; generation: number; requestId: string; turnId: string; text?: string; submittedContext?: SubmittedContext | null } & ConversationSelection)
+  | ({ type: "turn-accepted"; generation: number; requestId: string; turnId: string } & ConversationSelection)
+  | ({ type: "turn-acceptance-reconciled"; generation: number; turnId: string; state: TranscriptTurnDto["state"] } & ConversationSelection)
   | ({
       type: "activity-received";
       generation: number;
@@ -226,6 +235,7 @@ export const initialConversationState: ConversationState = {
   annotations: [],
   nextAnnotationNumber: 1,
   submittedContext: null,
+  submittedTurn: null,
   activeTurn: null,
   stopRequest: null,
   latestAnswer: null,
@@ -445,6 +455,7 @@ function finalizeTurn(
     draftReferences: [],
     annotations: [],
     nextAnnotationNumber: 1,
+    submittedTurn: null,
     activeTurn: null,
     stopRequest: state.stopRequest?.status === "confirmed" ? null : state.stopRequest,
     latestAnswer: {
@@ -509,6 +520,7 @@ export function conversationReducer(
       draftReferences: action.preserveDraft ? state.draftReferences : [],
       annotations: action.preserveDraft ? state.annotations : [],
       nextAnnotationNumber: action.preserveDraft ? state.nextAnnotationNumber : 1,
+      submittedTurn: action.preserveDraft ? state.submittedTurn : null,
       submittedContext: action.preserveDraft ? state.submittedContext : null };
   }
   if (action.type === "conversation-selected") {
@@ -526,6 +538,7 @@ export function conversationReducer(
       annotations: action.preserveDraft || sameSelection(state.selected, action) ? state.annotations : [],
       nextAnnotationNumber: action.preserveDraft || sameSelection(state.selected, action) ? state.nextAnnotationNumber : 1,
       submittedContext: action.preserveDraft || sameSelection(state.selected, action) ? state.submittedContext : null,
+      submittedTurn: action.preserveDraft || sameSelection(state.selected, action) ? state.submittedTurn : null,
       selected: { projectId: action.projectId, sessionId: action.sessionId },
       latestAnswer: null,
       failure: null,
@@ -538,26 +551,28 @@ export function conversationReducer(
     return { ...state, draftReferences: [...state.draftReferences, structuredClone(action.reference)],
       annotations: [...state.annotations.map((item) => ({ ...item, expanded: false })), {
         referenceId: action.reference.referenceId, number: state.nextAnnotationNumber, comment: "", expanded: true,
-      }], nextAnnotationNumber: state.nextAnnotationNumber + 1, failure: null };
+      }], nextAnnotationNumber: state.nextAnnotationNumber + 1, submittedTurn: null, failure: null };
   }
   if (action.type === "reference-removed") {
     if (state.activeTurn !== null || state.stopRequest !== null) return state;
     return { ...state, draftReferences: state.draftReferences.filter((item) => item.referenceId !== action.referenceId),
-      annotations: state.annotations.filter((item) => item.referenceId !== action.referenceId), failure: null };
+      annotations: state.annotations.filter((item) => item.referenceId !== action.referenceId), submittedTurn: null, failure: null };
   }
   if (action.type === "annotation-changed" || action.type === "annotation-toggled") {
     if (state.activeTurn !== null || state.stopRequest !== null) return state;
     return { ...state, annotations: state.annotations.map((item) => item.referenceId !== action.referenceId
       ? action.type === "annotation-toggled" && action.expanded ? { ...item, expanded: false } : item
       : action.type === "annotation-changed" ? { ...item, comment: action.comment } : { ...item, expanded: action.expanded }),
+      submittedTurn: action.type === "annotation-changed" ? null : state.submittedTurn,
       failure: action.type === "annotation-changed" ? null : state.failure };
   }
-  if (action.type === "new-turn-requested") return state.activeTurn === null && state.stopRequest === null ? { ...state, failure: null } : state;
+  if (action.type === "new-turn-requested") return state.activeTurn === null && state.stopRequest === null ? { ...state, submittedTurn: null, failure: null } : state;
   if (action.type === "draft-changed") {
     return typeof action.draft === "string"
       ? {
           ...state,
           draft: action.draft,
+          submittedTurn: action.draft === state.draft || state.activeTurn !== null ? state.submittedTurn : null,
           failure: action.draft === state.draft ? state.failure : null,
         }
       : state;
@@ -575,6 +590,9 @@ export function conversationReducer(
     return {
       ...state,
       submittedContext: action.submittedContext === undefined ? state.submittedContext : structuredClone(action.submittedContext),
+      submittedTurn: { projectId: action.projectId, sessionId: action.sessionId, turnId: action.turnId,
+        text: action.text ?? composeTurnText(state.draft, state.annotations),
+        accepted: state.submittedTurn?.turnId === action.turnId && state.submittedTurn.accepted },
       activeTurn: {
         backendGeneration: action.generation,
         projectEpoch: state.projectEpoch,
@@ -590,6 +608,21 @@ export function conversationReducer(
   }
   if (action.type === "activity-received") {
     return receiveActivity(state, action);
+  }
+  if (action.type === "turn-accepted" || action.type === "turn-acceptance-reconciled") {
+    const submitted = state.submittedTurn;
+    if (action.generation !== state.backendGeneration || !sameSelection(state.selected, action) ||
+        submitted === null || submitted.turnId !== action.turnId || !sameSelection(submitted, action)) return state;
+    if (action.type === "turn-accepted") {
+      const active = state.activeTurn;
+      if (active === null || active.backendGeneration !== action.generation || active.projectEpoch !== state.projectEpoch ||
+          active.requestId !== action.requestId || active.turnId !== action.turnId || !sameSelection(active, action)) return state;
+    }
+    return { ...state, draft: "", draftReferences: [], annotations: [], nextAnnotationNumber: 1,
+      failure: action.type === "turn-acceptance-reconciled" && state.failure?.turnId === action.turnId
+        ? { ...state.failure, draftPreserved: false, turnLifecycle: { turnId: action.turnId, state: action.state, accepted: true, persisted: true } }
+        : state.failure,
+      submittedTurn: { ...submitted, accepted: true } };
   }
   if (action.type === "turn-succeeded") {
     return finalizeTurn(state, action);
@@ -610,14 +643,16 @@ export function conversationReducer(
     ) {
       return state;
     }
+    const accepted = turnLifecycle?.accepted === true || state.submittedTurn?.accepted === true;
     return {
       ...state,
       activeTurn: null,
       stopRequest: state.stopRequest?.status === "confirmed" ? null : state.stopRequest,
-      draft: action.cancelled && turnLifecycle?.accepted ? "" : state.draft,
-      draftReferences: action.cancelled && turnLifecycle?.accepted ? [] : state.draftReferences,
-      annotations: action.cancelled && turnLifecycle?.accepted ? [] : state.annotations,
-      nextAnnotationNumber: action.cancelled && turnLifecycle?.accepted ? 1 : state.nextAnnotationNumber,
+      draft: accepted ? "" : state.draft,
+      draftReferences: accepted ? [] : state.draftReferences,
+      annotations: accepted ? [] : state.annotations,
+      nextAnnotationNumber: accepted ? 1 : state.nextAnnotationNumber,
+      submittedTurn: action.cancelled || state.submittedTurn === null ? null : { ...state.submittedTurn, accepted },
       latestAnswer: null,
       failure: {
         ...(action.cancelled ? { cancelled: true } : {}),
@@ -627,7 +662,7 @@ export function conversationReducer(
         turnId: active.turnId,
         message: action.message.slice(0, 320),
         retryable: action.cancelled ? false : action.retryable,
-        draftPreserved: !(action.cancelled && turnLifecycle?.accepted) && (state.draft.length > 0 || state.draftReferences.length > 0),
+        draftPreserved: !accepted && (state.draft.length > 0 || state.draftReferences.length > 0),
         turnLifecycle,
       },
     };
@@ -648,11 +683,12 @@ export function conversationReducer(
     }
     return {
       ...state,
-      draft: action.userText,
-      draftReferences: structuredClone(action.submittedContext?.references ?? []),
+      draft: "",
+      draftReferences: [],
       annotations: [],
       nextAnnotationNumber: 1,
       submittedContext: structuredClone(action.submittedContext ?? null),
+      submittedTurn: { projectId: action.projectId, sessionId: action.sessionId, turnId: action.turnId, text: action.userText, accepted: true },
       latestAnswer: null,
       failure: {
         projectId: action.projectId,
@@ -661,7 +697,7 @@ export function conversationReducer(
         turnId: action.turnId,
         message: action.message.slice(0, 320),
         retryable: action.retryable,
-        draftPreserved: true,
+        draftPreserved: false,
         turnLifecycle: {
           turnId: action.turnId,
           state: action.state,
@@ -684,7 +720,17 @@ export function nextTurnSubmission(
   if (state.failure !== null && !state.failure.cancelled) {
     return { turnId: state.failure.turnId, retry: true };
   }
+  if (state.failure === null && state.submittedTurn !== null && !state.submittedTurn.accepted && sameSelection(state.selected, state.submittedTurn)) {
+    return { turnId: state.submittedTurn.turnId, retry: true };
+  }
   return { turnId: idFactory(), retry: false };
+}
+
+export function turnSubmissionText(state: ConversationState): string {
+  if (state.submittedTurn !== null && sameSelection(state.selected, state.submittedTurn) &&
+      ((state.failure !== null && !state.failure.cancelled && state.failure.turnId === state.submittedTurn.turnId) ||
+       (state.failure === null && !state.submittedTurn.accepted))) return state.submittedTurn.text;
+  return composeTurnText(state.draft, state.annotations);
 }
 
 export function composeTurnText(draft: string, annotations: readonly DraftAnnotation[]): string {

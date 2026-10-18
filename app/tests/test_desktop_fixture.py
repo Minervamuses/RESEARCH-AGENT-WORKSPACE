@@ -371,10 +371,18 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
             "session.select",
             {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
+        accepted = []
+
+        def sink(event, data):
+            if event == "turn.accepted":
+                saved = service._conversation_repository.load(SESSION_A).document.turns[-1]
+                accepted.append((data, saved.state))
+
         with pytest.raises(DesktopServiceError) as first:
             await service.dispatch(
                 "session.turn",
                 _turn_params(FIXTURE_FAIL_ONCE, turn_id=turn_id),
+                event_sink=sink,
             )
         retry = await service.dispatch(
             "session.turn",
@@ -383,6 +391,7 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
                 "turnId": turn_id,
                 "retry": True,
             },
+            event_sink=sink,
         )
         replay = await service.dispatch(
             "session.turn",
@@ -391,7 +400,12 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
                 "turnId": turn_id,
                 "retry": True,
             },
+            event_sink=sink,
         )
+        assert accepted == [
+            ({"sessionId": SESSION_A, "turnId": turn_id}, state)
+            for state in ("pending", "pending", "completed")
+        ]
         transcript = await service.dispatch(
             "session.transcript",
             {"projectId": _project_id(fixture_root), "sessionId": SESSION_A, "limit": 20},
@@ -659,8 +673,13 @@ def test_stop_fixture_retains_interrupted_prompt_and_allows_next_turn(fixture_ro
             "projectId": _project_id(fixture_root), "sessionId": SESSION_A,
         })
         ready = asyncio.Event()
+        events = []
 
         def sink(event, data):
+            events.append((event, data))
+            if event == "turn.accepted":
+                saved = service._conversation_repository.load(SESSION_A).document.turns[-1]
+                assert saved.turn_id == data["turnId"] and saved.state == "pending"
             if event == "stage.changed" and data["stage"] == "fixture.prepare":
                 ready.set()
 
@@ -668,6 +687,8 @@ def test_stop_fixture_retains_interrupted_prompt_and_allows_next_turn(fixture_ro
         params = _turn_params(FIXTURE_WAIT_STOP)
         turn_task = asyncio.create_task(service.dispatch("session.turn", params, event_sink=sink))
         await asyncio.wait_for(ready.wait(), 2)
+        assert events[0] == ("turn.accepted", {"sessionId": SESSION_A, "turnId": params["turnId"]})
+        assert sum(event == "turn.accepted" for event, _data in events) == 1
         result = await service.dispatch("session.stop", {
             "sessionId": SESSION_A, "turnId": params["turnId"],
             "parentRequestId": sink.request_id,

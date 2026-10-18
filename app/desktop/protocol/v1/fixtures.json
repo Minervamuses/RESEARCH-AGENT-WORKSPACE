@@ -1643,6 +1643,53 @@
           "parentRequestId": "not-a-request-id"
         }
       }
+    },
+    {
+      "name": "turn-accepted",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000081",
+        "sequence": 2,
+        "event": "turn.accepted",
+        "data": {
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "turnId": "123e4567e89b42d3a456426614174000"
+        }
+      }
+    },
+    {
+      "name": "turn-accepted-needs-session",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000081",
+        "sequence": 2,
+        "event": "turn.accepted",
+        "data": {
+          "turnId": "123e4567e89b42d3a456426614174000"
+        }
+      }
+    },
+    {
+      "name": "turn-accepted-rejects-extra-payload",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "event",
+        "requestId": "00000000-0000-4000-8000-000000000081",
+        "sequence": 2,
+        "event": "turn.accepted",
+        "data": {
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "text": "No copied prompt in acceptance event"
+        }
+      }
     }
   ],
   "rawLines": [
@@ -3413,6 +3460,152 @@
         }
       ],
       "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "turn-accepted-before-stopped-terminal",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "method": "session.turn",
+          "params": {
+            "text": "Explain the references",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "sequence": 1,
+          "event": "request.started",
+          "data": {
+            "method": "session.turn"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "sequence": 2,
+          "event": "turn.accepted",
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The accepted turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": "interrupted",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-accepted-rejects-other-turn",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "method": "session.turn",
+          "params": {
+            "text": "Explain the references",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "sequence": 1,
+          "event": "request.started",
+          "data": {
+            "method": "session.turn"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "sequence": 2,
+          "event": "turn.accepted",
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "223e4567e89b42d3a456426614174000"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The accepted turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": "interrupted",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "turn-accepted-rejects-other-method",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "method": "runtime.diagnostics",
+          "params": {}
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "sequence": 1,
+          "event": "request.started",
+          "data": {
+            "method": "runtime.diagnostics"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "event",
+          "requestId": "00000000-0000-4000-8000-000000000081",
+          "sequence": 2,
+          "event": "turn.accepted",
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000"
+          }
+        }
+      ]
     }
   ]
 }

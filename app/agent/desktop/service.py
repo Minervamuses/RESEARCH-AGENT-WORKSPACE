@@ -1279,9 +1279,25 @@ class DesktopService:
         )
         if callable(set_prompt_persisted_callback):
             set_prompt_persisted_callback(
-                lambda: self._register_saved_session(session)
+                lambda: self._on_prompt_persisted(session)
             )
         return session
+
+    def _on_prompt_persisted(self, session: ChatSession) -> None:
+        owner = self._turn_work
+        sink = self._turn_event_sink
+        if (
+            owner is not None and not owner.done.done()
+            and owner.session_id == session.session_id and sink is not None
+        ):
+            try:
+                sink("turn.accepted", {
+                    "sessionId": owner.session_id, "turnId": owner.turn_id,
+                })
+            except Exception:
+                # A disconnected event stream cannot undo a saved prompt.
+                pass
+        self._register_saved_session(session)
 
     @staticmethod
     def _project_system_prompt(project: Mapping[str, Any]) -> str:

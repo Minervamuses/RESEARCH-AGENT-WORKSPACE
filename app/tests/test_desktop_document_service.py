@@ -300,6 +300,13 @@ def test_stop_model_wait_has_one_terminal_retains_user_and_allows_next_turn(tmp_
         ))
         try:
             await asyncio.wait_for(entered.wait(), 2)
+            await writer._queue.join()
+            before_stop = [json.loads(line) for line in output.getvalue().splitlines()]
+            events = [message for message in before_stop if message.get("requestId") == parent_id]
+            assert [message["event"] for message in events[:2]] == ["request.started", "turn.accepted"]
+            assert events[1]["data"] == {"sessionId": service.session.session_id, "turnId": turn_id}
+            assert service._conversation_repository.load(service.session.session_id).document.turns[-1].state == "pending"
+            assert all(message["messageType"] != "result" for message in events)
             stop_params = {
                 "sessionId": service.session.session_id, "turnId": turn_id,
                 "parentRequestId": parent_id,
@@ -330,6 +337,10 @@ def test_stop_model_wait_has_one_terminal_retains_user_and_allows_next_turn(tmp_
         turn_results = [m for m in messages if m.get("requestId") == parent_id and m["messageType"] == "result"]
         stop_results = [m for m in messages if m.get("requestId") == stop_id and m["messageType"] == "result"]
         assert len(turn_results) == len(stop_results) == 1
+        turn_events = [m for m in messages if m.get("requestId") == parent_id and m["messageType"] == "event"]
+        assert [m["sequence"] for m in turn_events] == list(range(1, len(turn_events) + 1))
+        assert sum(m["event"] == "turn.accepted" for m in turn_events) == 1
+        assert messages.index(turn_events[1]) < messages.index(turn_results[0])
         assert turn_results[0]["error"]["code"] == "TURN_CANCELLED"
         assert turn_results[0]["error"]["details"]["state"] == "interrupted"
         assert stop_results[0]["data"]["state"] == "interrupted"
@@ -543,5 +554,70 @@ def test_reference_comments_reach_model_as_requests_with_source_and_permission_b
         assert saved.display_input == text and saved.submitted_context == submitted
         assert saved.semantic_input == prompt and result["state"] == "completed"
         assert len(service._conversation_repository.load(service.session.session_id).document.turns) == 2
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["validation", "pending_save"])
+def test_unaccepted_turn_keeps_no_prompt_and_emits_no_acceptance(tmp_path, monkeypatch, failure):
+    from agent.conversations import ConversationUnavailableError
+
+    async def run():
+        service, model, _path, _context = await _setup(tmp_path, monkeypatch)
+        events = []
+        text = "/not-a-command" if failure == "validation" else "分析保存失敗"
+        if failure == "pending_save":
+            def failed_create(**_kwargs):
+                raise ConversationUnavailableError("fixture pending save failed")
+            monkeypatch.setattr(service._conversation_repository, "create", failed_create)
+        with pytest.raises(DesktopServiceError) as error:
+            await service.dispatch("session.turn", {
+                "text": text, "turnId": uuid.uuid4().hex, "retry": False,
+            }, event_sink=lambda event, data: events.append((event, data)))
+        assert error.value.details["accepted"] is False
+        assert error.value.details["persisted"] is False
+        assert not any(event == "turn.accepted" for event, _data in events)
+        assert service._conversation_repository.load_optional(service.session.session_id) is None
+        assert model.calls == []
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["event_delivery", "catalog"])
+def test_acceptance_and_catalog_registration_fail_independently(tmp_path, monkeypatch, failure):
+    from agent.desktop.catalog import CatalogError
+
+    async def run():
+        service, model, _path, _context = await _setup(tmp_path, monkeypatch)
+        observed = []
+        turn_id = uuid.uuid4().hex
+
+        def sink(event, data):
+            if event == "turn.accepted":
+                saved = service._conversation_repository.load(service.session.session_id).document.turns[-1]
+                observed.append((data, saved.state, len(model.calls)))
+                if failure == "event_delivery":
+                    raise OSError("fixture event stream disconnected")
+
+        if failure == "catalog":
+            def failed_registration(*_args):
+                raise CatalogError("fixture catalog write failed")
+            monkeypatch.setattr(service._catalog, "register_session", failed_registration)
+
+        result = await service.dispatch("session.turn", {
+            "text": "分析接受時機", "turnId": turn_id, "retry": False,
+        }, event_sink=sink)
+        assert observed == [({"sessionId": service.session.session_id, "turnId": turn_id}, "pending", 0)]
+        assert result["state"] == "completed"
+        assert result["registrationStatus"] == ("pending" if failure == "catalog" else "registered")
+        assert service._session_registered is (failure != "catalog")
+        if failure == "event_delivery":
+            transcript = await service.dispatch("session.transcript", {
+                "projectId": service._selected_project_id, "sessionId": service.session.session_id,
+            })
+            matching = [item for item in transcript["items"] if item["turnId"] == turn_id]
+            assert len(matching) == 1
+            assert matching[0]["state"] == "completed"
+            assert matching[0]["userText"] == "分析接受時機"
 
     asyncio.run(run())

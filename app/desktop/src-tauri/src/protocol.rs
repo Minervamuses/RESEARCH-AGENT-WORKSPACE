@@ -49,6 +49,7 @@ pub const PROTOCOL_METHODS: &[&str] = &[
 
 pub const REQUEST_EVENTS: &[&str] = &[
     "request.started",
+    "turn.accepted",
     "request.progress",
     "stage.changed",
     "tool.started",
@@ -1205,6 +1206,11 @@ fn validate_event_data(
         return validate_document_approval(request_id, data);
     }
     match event {
+        "turn.accepted" => {
+            validate_exact_data_keys(data, &["sessionId", "turnId"])?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
+            expect_turn_id(&data["turnId"], "data.turnId")?;
+        }
         "document.proposed" => {
             validate_data_keys(data, &["turnId", "callId", "referenceId"], &["turnId", "callId"])?;
             expect_turn_id(&data["turnId"], "data.turnId")?;
@@ -2513,9 +2519,9 @@ impl ProtocolTraceValidator {
                         state.next_sequence
                     )));
                 }
-                if event.event == "document.proposed" && (state.method != "session.turn"
+                if matches!(event.event.as_str(), "document.proposed" | "turn.accepted") && (state.method != "session.turn"
                     || event.data.get("turnId").and_then(Value::as_str) != state.turn_id.as_deref()) {
-                    return Err(ProtocolViolation::invalid("document.proposed must match the active session.turn"));
+                    return Err(ProtocolViolation::invalid(format!("{} must match the active session.turn", event.event)));
                 }
                 state.next_sequence += 1;
             }

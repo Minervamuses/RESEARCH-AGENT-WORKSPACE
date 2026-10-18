@@ -726,11 +726,11 @@ class TraceValidator:
                     f"Expected sequence {state['nextSequence']}, "
                     f"received {message['sequence']}"
                 )
-            if message["event"] == "document.proposed" and (
+            if message["event"] in {"document.proposed", "turn.accepted"} and (
                 state["method"] != "session.turn"
                 or message["data"]["turnId"] != state["turnId"]
             ):
-                _invalid("document.proposed must match the active session.turn")
+                _invalid(f"{message['event']} must match the active session.turn")
             state["nextSequence"] = int(state["nextSequence"]) + 1
             return
         if message_type == "result":

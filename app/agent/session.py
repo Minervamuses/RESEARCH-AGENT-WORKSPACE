@@ -348,8 +348,8 @@ class ChatSession:
             )
             existing = self._turn_from_snapshot(snapshot, turn_id)
             assert existing is not None
-            self._notify_prompt_persisted()
             if existing.state == "completed":
+                self._notify_prompt_persisted()
                 return snapshot, existing, True
             if existing.state == "pending":
                 raise ConversationConflictError(

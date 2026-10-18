@@ -41,6 +41,7 @@ export const PROTOCOL_METHODS = [
 
 export const REQUEST_EVENTS = [
   "request.started",
+  "turn.accepted",
   "request.progress",
   "stage.changed",
   "tool.started",
@@ -463,6 +464,10 @@ export const DOCUMENT_RESULT_SCHEMA: FieldSchema = {
 };
 
 export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
+  "turn.accepted": {
+    sessionId: { type: "string", required: true, maxBytes: 256 },
+    turnId: { type: "turnId", required: true },
+  },
   "document.proposed": {
     turnId: { type: "turnId", required: true },
     callId: { type: "string", required: true, maxBytes: 256 },
@@ -2106,9 +2111,9 @@ export class ProtocolTraceValidator {
       if (message.sequence !== state.nextSequence) {
         invalid(`Expected sequence ${state.nextSequence}, received ${message.sequence}`);
       }
-      if (message.event === "document.proposed" &&
+      if ((message.event === "document.proposed" || message.event === "turn.accepted") &&
           (state.method !== "session.turn" || message.data.turnId !== state.turnId)) {
-        invalid("document.proposed must match the active session.turn");
+        invalid(`${message.event} must match the active session.turn`);
       }
       state.nextSequence += 1;
       return;

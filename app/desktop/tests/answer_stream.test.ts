@@ -11,6 +11,8 @@ import {
   mergeConversationTurns,
   reconciledTurnCount,
   upsertLiveTurn,
+  composeTurnText,
+  turnSubmissionText,
   type AuthoritativeTurnResult,
   type ConversationAction,
   type ConversationState,
@@ -226,7 +228,8 @@ test("failure lifecycle distinguishes not accepted from durable terminal records
     } as unknown as ConversationAction);
     assert.deepEqual(failed.failure?.turnLifecycle, lifecycle, name);
     assert.equal(failed.failure?.turnId, turnId, name);
-    assert.equal(failed.draft, name, name);
+    assert.equal(failed.draft, lifecycle.accepted ? "" : name, name);
+    assert.equal(turnSubmissionText(failed), name, "explicit retry retains the original request");
     assert.equal(failed.latestAnswer, null, name);
   }
 
@@ -334,7 +337,8 @@ test("restart transcript can restore an interrupted same-ID retry target", () =>
     accepted: true,
     persisted: true,
   });
-  assert.equal(state.draft, "question");
+  assert.equal(state.draft, "");
+  assert.equal(turnSubmissionText(state), "question");
   assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId, retry: true });
 });
 
@@ -648,8 +652,73 @@ test("explicit cancellation preserves saved history but starts the next prompt w
     assert.equal(state.failure?.retryable, false);
     assert.equal(state.draft, accepted ? "" : "cancel this");
     assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false });
+    state = conversationReducer(state, { type: "backend-generation-changed", generation: 2 });
+    state = conversationReducer(state, { type: "conversation-selected", generation: 2, projectId, sessionId, preserveDraft: true });
+    assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false }, "restart does not revive an explicitly cancelled ID");
   }
   const cancelled = { ...transcriptTurn(2, otherTurnId, "interrupted"), failureCode: "cancelled" as const };
   assert.equal(latestRetryableTranscriptTurn([cancelled]), null);
   assert.equal(latestRetryableTranscriptTurn([transcriptTurn(1, turnId, "failed"), cancelled])?.turnId, turnId);
+});
+
+test("only the current accepted event clears annotation drafts while the model remains active", () => {
+  const reference = { referenceId: "reference", kind: "chat" as const, text: "source text",
+    chat: { projectId, sessionId, turnId: otherTurnId, role: "assistant" as const,
+      messageFingerprint: "a".repeat(64), startUtf16: 0, endUtf16: 11 } };
+  let draft = conversationReducer(selectedState(""), { type: "reference-added", generation: 1, reference });
+  draft = conversationReducer(draft, { type: "annotation-changed", generation: 1, referenceId: "reference", comment: "Explain this claim." });
+  const sentText = composeTurnText(draft.draft, draft.annotations);
+  const context = { projectId, rootPath: "/tmp/project", permissionMode: "ask" as const, requestedThinkingMode: "normal" as const,
+    skillReferences: [], projectRules: { text: "rules", fingerprint: "b".repeat(64) }, references: [reference] };
+  const started = conversationReducer(draft, { type: "turn-started", generation: 1, requestId, projectId, sessionId, turnId, text: sentText, submittedContext: context });
+  assert.equal(started.annotations.length, 1, "request dispatch does not mean acceptance");
+  const rejected = conversationReducer(started, { type: "turn-failed", generation: 1, requestId, projectId, sessionId,
+    message: "pending write rejected", retryable: true, turnLifecycle: { turnId, state: null, accepted: false, persisted: false } });
+  assert.deepEqual(rejected.annotations, draft.annotations);
+  assert.deepEqual(rejected.draftReferences, [reference]);
+  const accepted = { type: "turn-accepted" as const, generation: 1, projectEpoch: 0, requestId, projectId, sessionId, turnId };
+  for (const mismatch of [{ generation: 0 }, { projectEpoch: 1 }, { requestId: retryRequestId }, { sessionId: otherSessionId }, { turnId: otherTurnId }, { projectId: "other" }]) {
+    assert.equal(conversationReducer(started, { ...accepted, ...mismatch }), started);
+  }
+  const running = conversationReducer(started, accepted);
+  assert.notEqual(running.activeTurn, null, "acceptance does not finish the turn");
+  assert.equal(running.draft, "");
+  assert.deepEqual(running.draftReferences, []);
+  assert.deepEqual(running.annotations, []);
+  assert.deepEqual(running.submittedContext, context, "saved source context is not cleared");
+  const failed = conversationReducer(running, { type: "turn-failed", generation: 1, requestId, projectId, sessionId,
+    message: "model failed", retryable: true, turnLifecycle: { turnId, state: "failed", accepted: true, persisted: true } });
+  assert.equal(failed.failure?.draftPreserved, false);
+  assert.equal(turnSubmissionText(failed), sentText);
+  assert.deepEqual(nextTurnSubmission(failed, () => otherTurnId), { turnId, retry: true });
+  const retry = conversationReducer(failed, { type: "turn-started", generation: 1, requestId: retryRequestId, projectId, sessionId, turnId,
+    text: turnSubmissionText(failed), submittedContext: failed.submittedContext });
+  assert.deepEqual(retry.annotations, []);
+  assert.deepEqual(retry.submittedContext, context);
+});
+
+test("an uncertain send reconciles its durable turn ID after reconnect without restoring history annotations", () => {
+  let state = activeState("original composite request");
+  state = conversationReducer(state, { type: "backend-generation-changed", generation: 2 });
+  state = conversationReducer(state, { type: "project-opened", generation: 2, projectEpoch: 1, preserveDraft: true });
+  state = conversationReducer(state, { type: "conversation-selected", generation: 2, projectEpoch: 1, projectId, sessionId, preserveDraft: true });
+  assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId, retry: true }, "no matching transcript record is not permission to duplicate the turn");
+  assert.equal(conversationReducer(state, { type: "turn-acceptance-reconciled", generation: 2, projectEpoch: 1, projectId, sessionId,
+    turnId: otherTurnId, state: "interrupted" }), state);
+  state = conversationReducer(state, { type: "turn-acceptance-reconciled", generation: 2, projectEpoch: 1, projectId, sessionId, turnId, state: "interrupted" });
+  assert.equal(state.draft, "");
+  assert.equal(state.submittedTurn?.accepted, true);
+  state = conversationReducer(state, { type: "retry-target-restored", generation: 2, projectEpoch: 1, projectId, sessionId, turnId,
+    userText: "original composite request", state: "interrupted", message: "interrupted", retryable: true,
+    submittedContext: { projectId, rootPath: "/tmp/project", permissionMode: "ask", requestedThinkingMode: "normal", skillReferences: [],
+      projectRules: { text: "rules", fingerprint: "b".repeat(64) }, references: [{ referenceId: "saved", kind: "chat", text: "saved source",
+        chat: { projectId, sessionId, turnId: otherTurnId, role: "assistant", messageFingerprint: "a".repeat(64), startUtf16: 0, endUtf16: 12 } }] } });
+  assert.equal(state.draft, "");
+  assert.deepEqual(state.draftReferences, []);
+  assert.deepEqual(state.annotations, []);
+  assert.equal(state.submittedContext?.references.length, 1);
+  assert.equal(turnSubmissionText(state), "original composite request");
+  state = conversationReducer(state, { type: "draft-changed", draft: "new question" });
+  assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false });
+  assert.equal(turnSubmissionText(state), "new question");
 });

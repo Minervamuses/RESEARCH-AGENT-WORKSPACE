@@ -35,6 +35,7 @@ import {
   latestRetryableTranscriptTurn,
   mergeConversationTurns,
   nextTurnSubmission,
+  turnSubmissionText,
   ownsWorkspaceOperation,
   type WorkspaceOperationOwner,
   reconciledTurnCount,
@@ -1299,6 +1300,12 @@ export default function App() {
             const generation = generationRef.current;
             if (active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpochRef.current)) return;
             if (documentRequest !== null && (documentOperationRef.current === null || !ownsOperation(documentOperationRef.current, documentOperationRef.current))) return;
+            if (message.event === "turn.accepted" && active !== null && turnOwnerRef.current !== null &&
+                ownsOperation(turnOwnerRef.current, turnOwnerRef.current) && typeof message.data.sessionId === "string" && typeof message.data.turnId === "string") {
+              applyConversation({ type: "turn-accepted", generation, projectEpoch: active.projectEpoch,
+                projectId: active.projectId, sessionId: message.data.sessionId, turnId: message.data.turnId, requestId: message.requestId });
+              return;
+            }
             if (conversationRef.current.stopRequest !== null &&
                 (message.event === "document.proposed" || message.event === "approval.required")) return;
             if (message.event === "document.proposed" && active !== null && message.requestId === active.requestId && message.data.turnId === active.turnId && typeof message.data.callId === "string") {
@@ -1905,9 +1912,18 @@ export default function App() {
       if (transcriptData === null || !isCurrent()) return;
       setTranscript(transcriptViewFrom(projectId, session.sessionId, transcriptData));
       setSelectionPreview(null);
-      const retryTarget = latestRetryableTranscriptTurn(transcriptData.items);
-      if (retryTarget !== null && (resumeDraftRef.current === null ||
-          (conversationRef.current.draft === retryTarget.userText && JSON.stringify(conversationRef.current.draftReferences) === JSON.stringify(retryTarget.submittedContext?.references ?? [])))) {
+      const submitted = conversationRef.current.submittedTurn;
+      const savedSubmission = submitted !== null && sameSelection(submitted, { projectId, sessionId: session.sessionId })
+        ? transcriptData.items.find((turn) => turn.turnId === submitted.turnId) : undefined;
+      if (savedSubmission !== undefined) {
+        applyConversation({ type: "turn-acceptance-reconciled", generation, projectEpoch: operation.projectEpoch,
+          projectId, sessionId: session.sessionId, turnId: savedSubmission.turnId, state: savedSubmission.state });
+        resumeDraftRef.current = null;
+        resumeSelectionRef.current = null;
+      }
+      const retryTarget = latestRetryableTranscriptTurn(restoringSelection && submitted !== null
+        ? savedSubmission === undefined ? [] : [savedSubmission] : transcriptData.items);
+      if (retryTarget !== null && resumeDraftRef.current === null) {
         applyConversation({
           type: "retry-target-restored",
           submittedContext: retryTarget.submittedContext ?? null,
@@ -2021,7 +2037,7 @@ export default function App() {
 
   const sendTurn = useCallback(async () => {
     const selected = conversationRef.current.selected;
-    const draft = composeTurnText(conversationRef.current.draft, conversationRef.current.annotations);
+    const draft = turnSubmissionText(conversationRef.current);
     const selectedProject = projectRef.current;
     const session = state.session;
     if (selected === null || selectedProject === null || session === null || draft.trim().length === 0 ||
@@ -2080,7 +2096,7 @@ export default function App() {
     frameOwnerRef.current = null;
     setPendingUserText(draft);
     setWorkspaceIssue(null);
-    applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, submittedContext, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
+    applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, text: draft, submittedContext, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
     void tracked.result.then(async (data) => {
       if (!isCurrent()) return;
       const result = data as unknown as TurnCompletedDto;
@@ -2162,7 +2178,7 @@ export default function App() {
       await stopPromiseRef.current;
       if (!isCurrent() || conversationRef.current.stopRequest !== null) return;
       setPendingUserText(null);
-      if (!isPersistedTurnFailure(next.failure)) return;
+      if (!isPersistedTurnFailure(next.failure) && next.submittedTurn?.accepted !== true && safe.source !== "transport") return;
       const operation = beginWorkspaceOperation("Refreshing saved conversation");
       if (operation === null) return;
       // beginWorkspaceOperation clears the banner for user gestures; this refresh is not one.
@@ -2187,6 +2203,11 @@ export default function App() {
             TRANSCRIPT_PAGE_SIZE,
           );
           if (!selectionIsCurrent()) return;
+          const savedTurn = data.items.find((turn) => turn.turnId === turnId);
+          if (savedTurn !== undefined) {
+            applyConversation({ type: "turn-acceptance-reconciled", generation, projectEpoch: operation.projectEpoch,
+              projectId: selected.projectId, sessionId: selected.sessionId, turnId, state: savedTurn.state });
+          }
           dispatch({
             type: "session-created",
             session: { ...currentSession, registered: true, turnCount: data.total },
@@ -2199,7 +2220,7 @@ export default function App() {
           if (!selectionIsCurrent()) return;
           const issue = workspaceError(reconciliationError);
           setWorkspaceIssue(safe);
-          setRegistrationIssue(`The prompt is saved, but the conversation state could not be refreshed. ${issue.message}`);
+          setRegistrationIssue(`${next.submittedTurn?.accepted || isPersistedTurnFailure(next.failure) ? "The prompt is saved, but" : "Delivery is unconfirmed and"} the conversation state could not be refreshed. ${issue.message}`);
         } finally {
           finishWorkspaceOperation(operation);
         }
@@ -2536,7 +2557,7 @@ export default function App() {
             onApply={applyExtensions}
             onRestart={restartForExtensions}
           />}
-          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : conversation.failure?.cancelled ? "Turn stopped" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && conversation.failure.draftPreserved && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved draft</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
+          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : conversation.failure?.cancelled ? "Turn stopped" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && (conversation.failure.draftPreserved || conversation.submittedTurn?.turnId === conversation.failure.turnId) && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved turn</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
           {conversation.stopRequest?.status === "failed" && <section className="notice notice-error" role="alert">
             <div><h3>The turn could not finish stopping</h3><p>{conversation.stopRequest.error}</p>
               {conversation.activeTurn === null && pendingUserText !== null && <details><summary>Your message</summary><SafeContent content={pendingUserText} /></details>}
@@ -2571,7 +2592,7 @@ export default function App() {
             {conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null && <div className="reference-retry-settings">
               <p>Saved turn: {conversation.submittedContext.permissionMode === "ask" ? "Ask" : "Bypass"} · {conversation.submittedContext.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
                 {!retryControlsMatch && " Current controls differ; the original retry is disabled."}</p>
-              <button type="button" onClick={sendNewTurn} disabled={!idle}>Send new turn with current settings</button>
+              {composeTurnText(conversation.draft, conversation.annotations).trim().length > 0 && <button type="button" onClick={sendNewTurn} disabled={!idle}>Send new turn with current settings</button>}
             </div>}
             {referenceIssue !== null && <p className="reference-issue" role="status">{referenceIssue}</p>}
             </div>}

@@ -14,8 +14,10 @@ from conftest import make_astream_graph
 
 from agent.config import AgentConfig
 from agent.conversations import (
+    ConversationConflictError,
     ConversationRepository,
     ConversationUnavailableError,
+    FailureInfo,
 )
 from agent.session import ChatSession
 
@@ -107,9 +109,11 @@ def test_prompt_is_durable_before_the_graph_starts(monkeypatch, tmp_path):
     assert repository.load(session_id).document.turns[-1].state == "completed"
 
 
+@pytest.mark.parametrize("write_method", ["create", "append_pending"])
 def test_pending_write_failure_prevents_graph_or_provider_work(
     monkeypatch,
     tmp_path,
+    write_method,
 ):
     repository = ConversationRepository(tmp_path)
     session_id = _id()
@@ -122,10 +126,17 @@ def test_pending_write_failure_prevents_graph_or_provider_work(
         session_id=session_id,
     )
 
-    def reject_pending(**_kwargs):
+    if write_method == "append_pending":
+        asyncio.run(session.turn_outcome("previous prompt", turn_id=_id()))
+        graph.states.clear()
+    before = repository.load_optional(session_id)
+    accepted = []
+    session._set_prompt_persisted_callback(lambda: accepted.append("accepted"))
+
+    def reject_pending(*_args, **_kwargs):
         raise ConversationUnavailableError("injected pending write failure")
 
-    monkeypatch.setattr(repository, "create", reject_pending)
+    monkeypatch.setattr(repository, write_method, reject_pending)
 
     with pytest.raises(ConversationUnavailableError, match="pending write"):
         asyncio.run(session.turn_outcome(
@@ -135,7 +146,8 @@ def test_pending_write_failure_prevents_graph_or_provider_work(
         ))
 
     assert graph.states == []
-    assert repository.load_optional(session_id) is None
+    assert accepted == []
+    assert repository.load_optional(session_id) == before
 
 
 def test_final_write_failure_never_returns_success_or_completed_partial(
@@ -304,6 +316,10 @@ def test_completed_duplicate_returns_durable_answer_without_graph(
         graph=duplicate_graph,
         session_id=session_id,
     )
+    accepted = []
+    duplicate_session._set_prompt_persisted_callback(
+        lambda: accepted.append(repository.load(session_id).document.turns[-1].state)
+    )
     duplicate = asyncio.run(duplicate_session.turn_outcome(
         "same logical request",
         display_input="same logical request",
@@ -316,7 +332,65 @@ def test_completed_duplicate_returns_durable_answer_without_graph(
     assert duplicate.accepted is True
     assert duplicate.persisted is True
     assert duplicate_graph.states == []
+    assert accepted == ["completed"]
     assert repository.path_for(session_id).read_bytes() == before
+
+
+@pytest.mark.parametrize("state", ["failed", "interrupted"])
+def test_existing_turn_notifies_only_after_successful_explicit_retry(
+    monkeypatch, tmp_path, state,
+):
+    repository = ConversationRepository(tmp_path)
+    session_id, turn_id = _id(), _id()
+    snapshot = repository.create(
+        conversation_id=session_id, project_id=PROJECT_ID, turn_id=turn_id,
+        kind="conversational", display_input="retry this prompt",
+        semantic_input="retry this prompt", context_eligible=True,
+        thinking_mode="normal", submitted_at=_timestamp(1),
+    )
+    repository.fail_turn(
+        snapshot, turn_id=turn_id, state=state,
+        failure=FailureInfo(
+            code="execution_failed" if state == "failed" else "cancelled",
+            message="Try again.", retryable=True,
+        ),
+        finished_at=_timestamp(2),
+    )
+    graph = make_astream_graph(answer="retried answer")
+    session = _session(
+        monkeypatch, tmp_path, repository=repository, graph=graph, session_id=session_id,
+    )
+    accepted = []
+    session._set_prompt_persisted_callback(
+        lambda: accepted.append((
+            repository.load(session_id).document.turns[-1].state, len(graph.states),
+        ))
+    )
+    with pytest.raises(ConversationConflictError, match="explicit retry"):
+        asyncio.run(session.turn_outcome("retry this prompt", turn_id=turn_id))
+    assert accepted == []
+    assert graph.states == []
+
+    original_retry = repository.retry_turn
+
+    def reject_retry(*_args, **_kwargs):
+        raise ConversationUnavailableError("injected retry write failure")
+
+    monkeypatch.setattr(repository, "retry_turn", reject_retry)
+    with pytest.raises(ConversationUnavailableError, match="retry write"):
+        asyncio.run(session.turn_outcome("retry this prompt", turn_id=turn_id, retry=True))
+    assert accepted == []
+    assert graph.states == []
+    assert repository.load(session_id).document.turns[-1].state == state
+
+    monkeypatch.setattr(repository, "retry_turn", original_retry)
+    outcome = asyncio.run(session.turn_outcome(
+        "retry this prompt", turn_id=turn_id, retry=True,
+    ))
+    assert outcome.state == "completed"
+    assert outcome.text == "retried answer"
+    assert accepted == [("pending", 0)]
+    assert len(graph.states) == 1
 
 
 def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
@@ -410,7 +484,12 @@ def test_cancelled_pending_save_retains_input_and_finishes_interrupted(
     release = threading.Event()
     action_calls = []
     accepted = []
-    session._set_prompt_persisted_callback(lambda: accepted.append(turn_id))
+
+    def record_acceptance():
+        saved = repository.load(session.session_id).document.turns[-1]
+        accepted.append((saved.turn_id, saved.state))
+
+    session._set_prompt_persisted_callback(record_acceptance)
     original_create = repository.create
 
     def held_create(**kwargs):
@@ -445,6 +524,7 @@ def test_cancelled_pending_save_retains_input_and_finishes_interrupted(
                 task.cancel()
                 await asyncio.sleep(0)
                 assert not task.done(), "accepted save must settle before Stop returns"
+                assert accepted == []
                 release.set()
                 with pytest.raises(asyncio.CancelledError):
                     await asyncio.wait_for(task, timeout=3)
@@ -462,12 +542,14 @@ def test_cancelled_pending_save_retains_input_and_finishes_interrupted(
         assert saved.state == "interrupted"
         assert saved.failure.code == "cancelled"
         assert saved.assistant_output is None
-        assert accepted == [turn_id]
+        assert accepted == [(turn_id, "pending")]
         assert action_calls == []
         assert graph.states == []
-        next_outcome = await session.turn_outcome("continue", turn_id=_id())
+        next_turn_id = _id()
+        next_outcome = await session.turn_outcome("continue", turn_id=next_turn_id)
         assert next_outcome.state == "completed"
         assert next_outcome.text == "next answer"
+        assert accepted == [(turn_id, "pending"), (next_turn_id, "pending")]
 
     asyncio.run(run())
 
