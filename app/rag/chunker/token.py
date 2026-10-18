@@ -4,6 +4,7 @@ import tiktoken
 from langchain_core.documents import Document
 
 from rag.config import RAGConfig, validate_chunking
+from rag.types import check_cancelled
 
 
 class TokenChunker:
@@ -31,6 +32,7 @@ class TokenChunker:
         Returns:
             List of Documents with page_content and metadata.
         """
+        check_cancelled()
         tokens = self._enc.encode(text)
         if not tokens:
             return []
@@ -40,6 +42,7 @@ class TokenChunker:
         chunk_id = 0
 
         while start < len(tokens):
+            check_cancelled()
             end = min(start + self.chunk_size, len(tokens))
             chunk_text = self._enc.decode(tokens[start:end])
 

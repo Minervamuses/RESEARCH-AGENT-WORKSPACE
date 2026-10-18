@@ -5,6 +5,7 @@ from langchain_core.documents import Document
 from rag.store.base import BaseStore
 from rag.store.chroma_store import ChromaStore
 from rag.store.json_store import JSONStore
+from rag.types import check_cancelled
 
 
 class DocumentStore(BaseStore):
@@ -16,7 +17,9 @@ class DocumentStore(BaseStore):
 
     def add(self, documents: list[Document]) -> None:
         """Add documents to both stores."""
+        check_cancelled()
         self.json.add(documents)
+        check_cancelled()
         self.chroma.add(documents)
 
     def get(self, pid: str | None = None) -> list[Document]:
@@ -25,11 +28,15 @@ class DocumentStore(BaseStore):
 
     def delete(self, pid: str) -> None:
         """Delete from both stores."""
+        check_cancelled()
         self.json.delete(pid)
+        check_cancelled()
         self.chroma.delete(pid)
 
     def delete_many(self, pids: list[str]) -> None:
         """Delete all documents matching any pid from both stores."""
         for pid in pids:
+            check_cancelled()
             self.json.delete(pid)
+        check_cancelled()
         self.chroma.delete_many(pids)

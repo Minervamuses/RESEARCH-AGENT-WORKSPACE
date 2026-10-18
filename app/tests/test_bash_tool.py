@@ -1,6 +1,10 @@
 """Tests for the user-approval-gated bash tool."""
 
+import asyncio
 import json
+from pathlib import Path
+import shlex
+import sys
 import subprocess
 
 import pytest
@@ -311,3 +315,56 @@ def test_injected_denial_or_failure_never_calls_runner(monkeypatch):
         assert payload["approved"] is False
 
     assert calls == 0
+
+
+@pytest.mark.parametrize("background", [False, True], ids=["active-command", "finished-shell"])
+def test_stop_exits_owned_bash_child_before_returning(tmp_path, background):
+    from agent.ingest import LocalWorkScope
+    from agent.tools.bash import _group_running
+
+    child = tmp_path / "child.py"
+    pid_file = tmp_path / "child.pid"
+    effect_file = tmp_path / "late-effect"
+    child.write_text(f"""import os, pathlib, signal, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))
+time.sleep(30)
+pathlib.Path({str(effect_file)!r}).write_text('too late')
+""")
+    command = shlex.join([sys.executable, str(child)])
+    if background:
+        command += " >/dev/null 2>&1 &"
+
+    async def run():
+        scope = LocalWorkScope()
+        tool = create_bash_tool(
+            AgentConfig(persist_dir=str(tmp_path)), approval_handler=lambda *_args: True,
+        )
+        with scope.bind():
+            task = asyncio.create_task(tool.ainvoke({
+                "command": command, "description": "Wait for the local fixture child", "timeout_sec": 30,
+            }))
+            try:
+                async with asyncio.timeout(3):
+                    while not pid_file.exists():
+                        await asyncio.sleep(0.001)
+                if background:
+                    assert json.loads(await task)["exit_code"] == 0
+                scope.request_stop()
+                if not background:
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                await scope.finish_stop()
+                assert not effect_file.exists()
+                assert all(not _group_running(process.pid) for process in scope._bash_processes)
+                child_stat = Path("/proc") / pid_file.read_text() / "stat"
+                assert not child_stat.exists() or child_stat.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+            finally:
+                scope.request_stop()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await scope.finish_stop()
+
+    asyncio.run(run())

@@ -1,6 +1,7 @@
 """Text helpers for LangChain chat models."""
 
 from langchain_core.messages import HumanMessage
+from rag.types import invoke_provider
 
 
 def normalize_content(content, *, drop_unknown_parts: bool) -> str:
@@ -36,7 +37,10 @@ def invoke_text(model, prompt: str) -> str:
 
     Unknown content parts are dropped and the result is stripped.
     """
-    response = model.invoke([HumanMessage(content=prompt)])
+    messages = [HumanMessage(content=prompt)]
+    response = invoke_provider(
+        lambda: model.invoke(messages), lambda: model.ainvoke(messages),
+    )
     content = getattr(response, "content", response)
     return normalize_content(content, drop_unknown_parts=True).strip()
 
@@ -47,7 +51,9 @@ def invoke_text_messages(model, messages: list) -> str:
     Unlike invoke_text, unknown content parts keep their repr and list-joined
     content is not stripped, so multi-part reply boundaries stay intact.
     """
-    return _messages_response_text(model.invoke(messages))
+    return _messages_response_text(invoke_provider(
+        lambda: model.invoke(messages), lambda: model.ainvoke(messages),
+    ))
 
 
 async def ainvoke_text_messages(model, messages: list) -> str:

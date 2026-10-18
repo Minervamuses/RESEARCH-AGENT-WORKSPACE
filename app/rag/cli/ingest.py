@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -25,6 +26,7 @@ from rag.collect import (
     get_file_preview,
 )
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
+from rag.types import check_cancelled
 from rag.store.cache import get_chroma_store, get_json_store
 from rag.store.document_store import DocumentStore
 from rag.tagger.llm_tagger import FolderMeta, LLMTagger
@@ -45,12 +47,14 @@ def _tag_folders(folders: dict[str, list[Path]], config: RAGConfig) -> dict[str,
     collected first, then any failure aborts the whole run before folder_meta
     is persisted.
     """
+    check_cancelled()
     tagger = LLMTagger(config)
 
     print(f"Tagging {len(folders)} folders...")
     ordered = sorted(folders.items())
 
     def _tag_one(folder_rel: str, files: list[Path]) -> FolderMeta:
+        check_cancelled()
         file_names = [f.name for f in files]
         file_previews = {f.name: get_file_preview(f) for f in files[:10]}
         return tagger.tag(folder_rel or "(project root)", file_names, file_previews)
@@ -58,14 +62,21 @@ def _tag_folders(folders: dict[str, list[Path]], config: RAGConfig) -> dict[str,
     # The OpenAI client is thread-safe; 4 workers keeps 429 pressure low and
     # the SDK-side retry (max_retries) absorbs transient rate limits.
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            folder_rel: executor.submit(_tag_one, folder_rel, files)
-            for folder_rel, files in ordered
-        }
-        results = {
-            folder_rel: future.result()
-            for folder_rel, future in futures.items()
-        }
+        futures = {}
+        try:
+            for folder_rel, files in ordered:
+                check_cancelled()
+                futures[folder_rel] = executor.submit(
+                    copy_context().run, _tag_one, folder_rel, files,
+                )
+            results = {}
+            for folder_rel, future in futures.items():
+                check_cancelled()
+                results[folder_rel] = future.result()
+        except BaseException:
+            for future in futures.values():
+                future.cancel()
+            raise
 
     folder_meta: dict[str, dict] = {}
     for folder_rel, meta in results.items():
@@ -130,6 +141,7 @@ def ingest_repo(
 
     # Save folder metadata (merge with existing so partial ingest doesn't lose
     # tags from folders outside this run's scope).
+    check_cancelled()
     meta_path = Path(config.folder_meta_path())
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     existing_meta: dict[str, dict] = {}
@@ -140,6 +152,7 @@ def ingest_repo(
         except (json.JSONDecodeError, OSError):
             existing_meta = {}
     existing_meta.update(scoped_folder_meta)
+    check_cancelled()
     with meta_path.open("w", encoding="utf-8") as f:
         json.dump(existing_meta, f, ensure_ascii=False, indent=2)
     print(f"\nFolder metadata saved to {meta_path}")
@@ -159,6 +172,7 @@ def ingest_repo(
     # Persist raw.json once after the run rather than rewriting it per document.
     with json_store.deferred_save():
         for folder_rel, files in sorted(folders.items()):
+            check_cancelled()
             meta = folder_meta.get(folder_rel, {"tags": [], "summary": ""})
             tags = meta.get("tags", [])
             category = tags[0] if tags else "unknown"
@@ -166,6 +180,7 @@ def ingest_repo(
             folder_pids: list[str] = []
             folder_docs: list[Document] = []
             for file_path in files:
+                check_cancelled()
                 try:
                     text = file_path.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, PermissionError):
@@ -202,8 +217,10 @@ def ingest_repo(
             # Folder-level upsert: one batched delete for the folder's pids,
             # then adds in slices. Rerunning after an interruption re-deletes
             # and re-adds the whole folder, so upserts stay correct.
+            check_cancelled()
             store.delete_many(folder_pids)
             for start in range(0, len(folder_docs), _ADD_BATCH_SIZE):
+                check_cancelled()
                 store.add(folder_docs[start:start + _ADD_BATCH_SIZE])
 
     return files_ingested, total_chunks
@@ -247,9 +264,12 @@ def ingest_single(
     if not text.strip():
         return pid_val, 0
 
+    check_cancelled()
     docs = chunker.chunk(text, pid_val)
     if docs:
+        check_cancelled()
         store.delete(pid_val)
+        check_cancelled()
         store.add(docs)
     return pid_val, len(docs)
 

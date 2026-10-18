@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rag.types import check_cancelled
+
 # File extensions to ingest as text
 TEXT_EXTENSIONS = {
     # Docs
@@ -58,6 +60,7 @@ def get_file_preview(path: Path) -> str:
     try:
         with path.open("r", encoding="utf-8") as f:
             for line in f:
+                check_cancelled()
                 stripped = line.strip()
                 if stripped:
                     return stripped[:120]
@@ -85,7 +88,12 @@ def collect_folders(
     skip_names = SKIP_DIRS | (extra_skip or set())
     skip_path_parts = [Path(p).parts for p in (skip_rel_paths or set())]
     folders: dict[str, list[Path]] = {}
-    for file_path in sorted(root.rglob("*")):
+    paths = []
+    for file_path in root.rglob("*"):
+        check_cancelled()
+        paths.append(file_path)
+    for file_path in sorted(paths):
+        check_cancelled()
         if not file_path.is_file():
             continue
         parts = file_path.relative_to(root).parts

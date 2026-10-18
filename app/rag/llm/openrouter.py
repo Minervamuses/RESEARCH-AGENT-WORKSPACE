@@ -3,9 +3,10 @@
 import os
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from rag.config import RAGConfig
+from rag.types import invoke_provider
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -54,6 +55,16 @@ class OpenRouterLLM:
         if extra_body is not None:
             kwargs["extra_body"] = extra_body
 
-        resp = self.client.chat.completions.create(**kwargs)
+        async def request():
+            # Each scoped request closes its own async transport on cancellation.
+            async with AsyncOpenAI(
+                base_url=OPENROUTER_BASE_URL, api_key=self.client.api_key,
+                max_retries=self.client.max_retries, timeout=self.client.timeout,
+            ) as client:
+                return await client.chat.completions.create(**kwargs)
+
+        resp = invoke_provider(
+            lambda: self.client.chat.completions.create(**kwargs), request,
+        )
         content = resp.choices[0].message.content
         return content.strip() if content else ""

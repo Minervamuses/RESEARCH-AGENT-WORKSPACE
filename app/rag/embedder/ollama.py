@@ -3,6 +3,7 @@
 from langchain_core.embeddings import Embeddings
 
 from rag.config import RAGConfig
+from rag.types import invoke_provider
 
 
 class OllamaEmbedder(Embeddings):
@@ -22,8 +23,14 @@ class OllamaEmbedder(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed documents through the langchain ``Embeddings`` protocol."""
-        return self._embeddings.embed_documents(texts)
+        return invoke_provider(
+            lambda: self._embeddings.embed_documents(texts),
+            lambda: self._embeddings.aembed_documents(texts),
+        )
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query text."""
-        return self._embeddings.embed_query(text)
+        return invoke_provider(
+            lambda: self._embeddings.embed_query(text),
+            lambda: self._embeddings.aembed_query(text),
+        )

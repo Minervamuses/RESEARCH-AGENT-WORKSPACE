@@ -9,6 +9,7 @@ from langchain_core.tools import StructuredTool
 from rag import TOOL_SCHEMAS, dispatch
 
 from agent.config import AgentConfig
+from agent.ingest import run_local_work
 
 DEFAULT_RAG_TOOL_NAMES = ("rag_explore", "rag_search", "rag_get_context")
 
@@ -29,8 +30,12 @@ def _make_rag_runner(tool_name: str, config: AgentConfig):
     def _run(**kwargs: Any) -> str:
         return _invoke_rag_tool(tool_name, config, **kwargs)
 
+    async def _arun(**kwargs: Any) -> str:
+        return await run_local_work(_run, **kwargs)
+
     _run.__name__ = tool_name
-    return _run
+    _arun.__name__ = tool_name
+    return _run, _arun
 
 
 def create_rag_tools(config: AgentConfig) -> list[StructuredTool]:
@@ -45,10 +50,11 @@ def create_rag_tools(config: AgentConfig) -> list[StructuredTool]:
     schemas_by_name = {schema["name"]: schema for schema in TOOL_SCHEMAS}
     for name in DEFAULT_RAG_TOOL_NAMES:
         schema = schemas_by_name[name]
-        runner = _make_rag_runner(name, config)
+        runner, async_runner = _make_rag_runner(name, config)
         tools.append(
             StructuredTool.from_function(
                 func=runner,
+                coroutine=async_runner,
                 name=name,
                 description=schema["description"],
                 args_schema=schema["input_schema"],

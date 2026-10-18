@@ -17,6 +17,7 @@ from pathlib import Path
 
 from rag.collect import collect_folders
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
+from rag.types import check_cancelled
 from rag.store.cache import get_chroma_store, get_json_store
 from rag.utils.paths import source_namespace
 
@@ -31,6 +32,7 @@ def _stored_file_paths(config: RAGConfig, namespace: str) -> dict[str, str]:
     json_store = get_json_store(config)
     paths: dict[str, str] = {}
     for doc in json_store.get():
+        check_cancelled()
         metadata = doc.metadata
         if metadata.get("source_namespace") != namespace:
             continue
@@ -70,6 +72,7 @@ def list_diff(
     on_disk: set[str] = set()
     for files in folders.values():
         for file_path in files:
+            check_cancelled()
             on_disk.add(str(file_path.relative_to(root)))
 
     in_store = set(_stored_file_paths(cfg, namespace))
@@ -112,6 +115,8 @@ def prune_orphans(
     chroma = get_chroma_store(KNOWLEDGE_COLLECTION, cfg)
     json_store = get_json_store(cfg)
     for pid in orphan_pids:
+        check_cancelled()
         chroma.delete(pid)
+        check_cancelled()
         json_store.delete(pid)
     return orphan_pids

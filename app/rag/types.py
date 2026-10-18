@@ -1,6 +1,40 @@
 """Framework-neutral data types for the KMS public API."""
 
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from typing import Any, TypeVar
+
+
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class WorkCallbacks:
+    """Optional host callbacks for one cancellable synchronous operation."""
+
+    check_cancelled: Callable[[], None]
+    request_stop: Callable[[], None]
+    run_async: Callable[[Callable[[], Awaitable[Any]]], Any]
+
+
+work_callbacks: ContextVar[WorkCallbacks | None] = ContextVar("rag_work_callbacks", default=None)
+
+
+def check_cancelled() -> None:
+    """Check the current host operation without depending on an agent runtime."""
+    callbacks = work_callbacks.get()
+    if callbacks is not None:
+        callbacks.check_cancelled()
+
+
+def invoke_provider(sync_call: Callable[[], _T], async_call: Callable[[], Awaitable[_T]]) -> _T:
+    """Keep ordinary sync callers unchanged; let a scoped host own async waits."""
+    callbacks = work_callbacks.get()
+    if callbacks is None:
+        return sync_call()
+    callbacks.check_cancelled()
+    return callbacks.run_async(async_call)
 
 
 @dataclass(frozen=True)

@@ -8,16 +8,22 @@ cannot hang or silently execute commands without supervision.
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.config import AgentConfig
+from agent.ingest import current_local_work, run_local_work
 from agent.paths import find_app_root
+from rag.types import check_cancelled
 
 TOOL_NAME = "bash"
 TOOL_DESCRIPTION = (
@@ -99,6 +105,69 @@ def _user_approves(command: str, description: str) -> bool:
     return answer in {"y", "yes"}
 
 
+def _group_running(group_id: int) -> bool:
+    """Ignore exited zombies while waiting for this Linux process group."""
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        if int(fields[2]) == group_id and fields[0] != "Z":
+            return True
+    return False
+
+
+def _stop_process_group(process: subprocess.Popen[str]) -> None:
+    """Terminate the command's group and reap its direct shell process."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            break
+        deadline = time.monotonic() + 0.5
+        while _group_running(process.pid) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if not _group_running(process.pid):
+            break
+    if _group_running(process.pid):
+        raise RuntimeError("The stopped bash process group has not exited.")
+    process.wait()
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            stream.close()
+
+
+def _run_controlled_command(command: str, *, timeout: int, capture_output: bool, **kwargs: Any):
+    scope = current_local_work()
+    check_cancelled()
+    process = subprocess.Popen(
+        command, start_new_session=True,
+        stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
+        **kwargs,
+    )
+    if scope is not None:
+        scope.register_bash_process(process)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                stdout, stderr = process.communicate(timeout=min(0.05, remaining))
+                check_cancelled()
+                return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        _stop_process_group(process)
+        raise
+
+
 def _run_bash(
     command: str,
     description: str,
@@ -107,6 +176,7 @@ def _run_bash(
     approval_handler: BashApprovalHandler | None = None,
     command_runner: BashCommandRunner | None = None,
 ) -> str:
+    check_cancelled()
     capped_timeout = max(1, min(int(timeout_sec), MAX_TIMEOUT_SEC))
     if approval_handler is None:
         if not sys.stdin.isatty():
@@ -123,8 +193,11 @@ def _run_bash(
     if not approved:
         return _denied(f"user denied execution of: {command}", command)
 
+    check_cancelled()
     cwd = str(find_app_root())
-    runner = command_runner or subprocess.run
+    runner = command_runner or (
+        _run_controlled_command if current_local_work() is not None else subprocess.run
+    )
 
     try:
         completed = runner(
@@ -177,10 +250,14 @@ def create_bash_tool(
             command_runner=command_runner,
         )
 
+    async def _arun(command: str, description: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> str:
+        return await run_local_work(_run, command, description, timeout_sec)
+
     _run.__name__ = TOOL_NAME
 
     return StructuredTool.from_function(
         func=_run,
+        coroutine=_arun,
         name=TOOL_NAME,
         description=TOOL_DESCRIPTION,
         args_schema=BashInput,

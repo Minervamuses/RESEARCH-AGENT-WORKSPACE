@@ -17,6 +17,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import Field
 
 from agent.config import AgentConfig
+from agent.ingest import run_local_work
 from agent.conversations.models import is_canonical_uuid4_hex
 
 TOOL_NAME = "read_file"
@@ -191,10 +192,18 @@ def create_read_file_tool(
             conversation_root=archive_root,
         )
 
+    async def _arun(
+        path: str,
+        offset_bytes: int | None = None,
+        state: Annotated[dict, InjectedState] | None = None,
+    ) -> str:
+        return await run_local_work(_run, path, offset_bytes, state)
+
     _run.__name__ = TOOL_NAME
 
     return StructuredTool.from_function(
         func=_run,
+        coroutine=_arun,
         name=TOOL_NAME,
         description=TOOL_DESCRIPTION,
         infer_schema=True,

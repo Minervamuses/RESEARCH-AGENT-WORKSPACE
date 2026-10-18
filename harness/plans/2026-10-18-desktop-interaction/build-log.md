@@ -7,7 +7,7 @@
 | P1 | In progress | P1-S1 自動啟動測試／build／實際桌面 ready 通過 | P1-S2 原生整合待實機 | 原生 picker 探測與接入 |
 | P2 | Not started | 現有 selection/references／保存掛點已讀 | P1；T3 event | 依 P2-S1 實作草稿與合成 |
 | P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
-| P4 | In progress | P4-S1a 模型 async 取消、同步入口相容與中斷保存測試通過 | 本地工具收束與 Stop 整合尚未完成 | P4-S1b |
+| P4 | In progress | P4-S1a 模型 await、S1b 本地工具/provider 收束及 MCP 本機取消探測通過 | Stop 協定、回合／文件保存整合與 UI 尚未完成 | P4-S1c |
 | P5 | Not started | 保存與索引分工已讀 | P4、T3 title/schema | P5-S1 canonical title |
 | P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
 
@@ -47,3 +47,7 @@
   - Linux Conda app／app：`poetry run pytest tests/test_graph_skill_loader.py tests/test_thinking.py tests/test_thinking_session.py -q`：89 passed／0.75s；`poetry run pytest tests/test_citation_e2e.py tests/test_conversation_archive_access.py tests/test_desktop_document_service.py tests/test_policy_tool_node.py tests/test_inline_skills.py tests/test_skill_adherence.py -q`：73 passed／3.06s。7 個必要取消案例涵蓋 main 初次／重試／repair 及 extended 四個模型階段，核對 cleanup、未執行後續、interrupted/cancelled 保存與 main 下一次呼叫。初次新增 repair 測試的工具名錯誤已修正，未改 production 來迎合測試。Scoped whitespace 通過，根代理已審閱 production diff。
   - 未使用 live provider；Stop protocol/UI、bash、RAG、MCP／文件工作收束尚未完成。Scoped commit：`fix(agent): await cancellable model requests [P4-S1a]`；下一步 P4-S1b。
 - P1-S2 探測／2026-10-18 — 可丟棄 PowerShell STA／Windows Forms probe 已從 WSL 顯示資料夾視窗。Computer Use 無法列出或取得該 PowerShell-hosted 視窗，使用者明確回覆「看得到」，並手動完成測試選取；stdout 成功返回含中文／空白的 WSL UNC 路徑。這不是未顯示或 interop 失敗；先前等待是自動操作工具可見性限制。`wslpath -u` 本機不能直接處理該 UNC，正式接入將採計劃允許的明確 UNC→目前 distro Linux 路徑映射，再 realpath 核對。正式 picker／同檔保存仍待驗證。
+- P4-S1b／2026-10-18 — S1a commit `0cd9489`。既有 `agent/ingest.py` 增加當前回合的 context-local 停止／worker 等待，RAG 接收通用 callbacks，沿原 event loop 等 native async provider；cached store 不保留 turn scope。既有 ingest／sync／chunk／folder 及 store 副作用邊界檢查停止，保留原 folder executor 並等待已開始工作。bash 沿現有 runner 持有 process group，停止時 TERM／必要 KILL，等待退出並回收直接 shell；read_file/RAG async wrapper 等實際 worker 返回。同步 CLI、timeout/retry、依賴與儲存格式不變，未新增 module／concurrency model。
+  - Linux Conda app／app：`poetry run pytest tests/test_ingest.py tests/test_bash_tool.py tests/test_read_file_tool.py tests/rag/test_ingest_guards.py tests/rag/test_store_batching.py tests/rag/test_component_flow.py tests/rag/test_tools_contract.py tests/test_policy_tool_node.py -q`：60 passed／5.91s；包含最後 store 邊界修改。`poetry run pytest tests/test_text_normalization.py -q`：18 passed／0.19s。Scoped whitespace 通過，根代理審閱 production diff。曾有新增測試字串換行錯誤及一次指定不存在測試檔，已修正後跑上述正確命令。
+  - 最小本地案例確認停止後不啟動下一個 ingest 檔案、provider cleanup 已完成、既有四個 folder workers 的 context 傳遞及已結束 shell 留下的同群組 child 終止。無外網 MCP ephemeral probe 經 actual loader／converted tool／每次 call 的 stdio context：direct 與預設 shell/server/grep 路徑各約 4.004s 收束，忽略 SIGTERM 的 stub 最終退出，process group 空；不需修改 MCP production。未使用 live provider、embedding 或 GPU。
+  - `LocalWorkScope.bind/request_stop/finish_stop` 尚待 S1c 綁入桌面；`await_sync_work` 會無條件等短同步保存後重新拋取消，接受邊界結果由 session 層接續處理。已完成效果不回滾；不宣稱撤銷遠端請求或控制自行 detached 的後代。Scoped commit：`fix(agent): drain controlled local work on cancellation [P4-S1b]`；下一步 S1c。
