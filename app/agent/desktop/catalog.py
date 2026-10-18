@@ -188,6 +188,30 @@ class DesktopProjectCatalog:
         self._snapshot = validated
         return True
 
+    def unregister_session(self, project_id: str, session_id: str) -> bool:
+        """Durably remove one session ID while preserving its project entry."""
+        if not is_canonical_session_id(session_id):
+            raise CatalogConflictError("sessionId must be canonical UUIDv4 hex")
+        owner = self.project_for_session(session_id)
+        if owner is not None and owner != project_id:
+            raise CatalogConflictError(
+                f"session {session_id} is registered to project {owner}"
+            )
+        candidate = copy.deepcopy(self._snapshot)
+        target = next(
+            (project for project in candidate["projects"] if project["projectId"] == project_id),
+            None,
+        )
+        if target is None:
+            raise CatalogConflictError(f"unknown projectId: {project_id}")
+        if owner is None:
+            return False
+        target["sessionIds"].remove(session_id)
+        validated = _validate_snapshot(candidate)
+        self._atomic_replace(validated)
+        self._snapshot = validated
+        return True
+
     @classmethod
     def rebuild_from_conversations(
         cls,

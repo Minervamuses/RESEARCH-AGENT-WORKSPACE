@@ -151,6 +151,7 @@ export type ConversationAction = (
   | { type: "backend-generation-changed"; generation: number }
   | { type: "project-opened"; generation: number; preserveDraft?: boolean }
   | ({ type: "conversation-selected"; generation: number; preserveDraft?: boolean } & ConversationSelection)
+  | ({ type: "conversation-deleted"; generation: number } & ConversationSelection)
   | { type: "draft-changed"; draft: string }
   | { type: "reference-added"; reference: Reference; generation?: number }
   | { type: "reference-removed"; referenceId: string; generation?: number }
@@ -543,6 +544,11 @@ export function conversationReducer(
       latestAnswer: null,
       failure: null,
     };
+  }
+  if (action.type === "conversation-deleted") {
+    if (action.generation !== state.backendGeneration || state.activeTurn !== null || state.stopRequest !== null ||
+        !sameSelection(state.selected, action)) return state;
+    return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch: state.projectEpoch };
   }
   if ((action.type === "reference-added" || action.type === "reference-removed" || action.type === "annotation-changed" || action.type === "annotation-toggled" || action.type === "new-turn-requested") &&
       action.generation !== undefined && action.generation !== state.backendGeneration) return state;

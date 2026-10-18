@@ -22,6 +22,7 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "session.create",
     "session.list",
     "session.select",
+    "session.delete",
     "session.rename",
     "session.retry_registration",
     "session.transcript",
@@ -278,7 +279,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "document.apply" => Some(&["documentContext", "turnId"]),
         "session.create" => Some(&[]),
         "session.list" => Some(&["projectId"]),
-        "session.select" | "session.retry_registration" | "session.transcript" => {
+        "session.select" | "session.delete" | "session.retry_registration" | "session.transcript" => {
             Some(&["projectId", "sessionId"])
         }
         "session.rename" => Some(&["projectId", "sessionId", "title"]),
@@ -320,7 +321,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         | "runtime.shutdown" => Some(&[]),
         "session.create" => Some(&["loadMcp", "graphRecursionLimit", "projectId"]),
         "session.list" => Some(&["projectId", "offset", "limit", "reconcile"]),
-        "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
+        "session.select" | "session.delete" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.rename" => Some(&["projectId", "sessionId", "title"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
         "session.stop" => Some(&["sessionId", "turnId", "parentRequestId"]),
@@ -840,7 +841,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
                 }
             }
         }
-        "session.select" | "session.retry_registration" => {
+        "session.select" | "session.delete" | "session.retry_registration" => {
             validate_optional_string(params, "projectId", 256)?;
             validate_optional_string(params, "sessionId", 32)?;
         }
@@ -1558,6 +1559,12 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
         }
         "session.create" => validate_session_snapshot(data, false)?,
         "session.select" => validate_session_snapshot(data, true)?,
+        "session.delete" => {
+            validate_exact_data_keys(data, &["projectId", "sessionId", "status"])?;
+            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
+            validate_enum(&data["status"], "data.status", &["deleted"])?;
+        }
         "session.rename" => {
             validate_data_keys(data, &["projectId", "sessionId", "title"], &["projectId", "sessionId", "title"])?;
             expect_bounded_string(&data["projectId"], "data.projectId", 256)?;

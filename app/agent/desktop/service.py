@@ -355,6 +355,7 @@ class DesktopService:
             "session.list": self._session_list,
             "session.select": self._session_select,
             "session.rename": self._session_rename,
+            "session.delete": self._session_delete,
             "session.retry_registration": self._session_retry_registration,
             "session.transcript": self._session_transcript,
             "session.status": self._session_status,
@@ -955,6 +956,57 @@ class DesktopService:
         finally:
             self._session_creating = False
         return {"projectId": project["projectId"], "sessionId": session_id, "title": title}
+
+    async def _session_delete(
+        self, params: dict[str, Any], _event_sink: EventSink | None
+    ) -> dict[str, Any]:
+        if self._turn_active or self._pending_approval is not None:
+            raise DesktopServiceError(
+                "BUSY_TURN", "Stop the active turn and wait for it to finish before deleting.",
+                retryable=True,
+            )
+        if (
+            self._session_creating or self._knowledge_active or self._extension_active
+            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            or self._project_operation_count > 1
+        ):
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "Wait for the current conversation operation before deleting.",
+                retryable=True,
+            )
+        project = self._require_catalog_project(params["projectId"])
+        session_id = params["sessionId"]
+        selected = (
+            self.session is not None and self.session.session_id == session_id
+            and self._selected_project_id == project["projectId"]
+        )
+        if session_id not in project["sessionIds"] and not selected:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID", "The requested conversation does not belong to that project.",
+            )
+        try:
+            snapshot = self._load_conversation(session_id, project["projectId"])
+        except ConversationError as exc:
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "The stored conversation is unavailable and cannot be deleted.",
+            ) from exc
+        if selected:
+            await self._shutdown_session(allow_current_project_operation=True)
+        # Keep index removal and canonical unlink in one short synchronous section,
+        # so this service cannot reconcile the still-present file between them.
+        try:
+            self._catalog.unregister_session(project["projectId"], session_id)
+            if snapshot is not None:
+                self._conversation_repository.delete(snapshot)
+        except (CatalogError, ConversationError) as exc:
+            if self._load_conversation(session_id, project["projectId"]) is not None:
+                self._catalog.register_session(project["projectId"], session_id)
+            raise DesktopServiceError(
+                "SESSION_NOT_READY", "The conversation could not be deleted. Refresh and try again.",
+                retryable=True,
+            ) from exc
+        self._control_snapshots.pop(session_id, None)
+        return {"projectId": project["projectId"], "sessionId": session_id, "status": "deleted"}
 
     async def _session_retry_registration(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -2952,7 +3004,9 @@ class DesktopService:
         self.lifecycle = "stopped"
         return {"status": "stopped"}
 
-    async def _shutdown_session(self) -> dict[str, Any]:
+    async def _shutdown_session(
+        self, *, allow_current_project_operation: bool = False,
+    ) -> dict[str, Any]:
         if self._session_creating:
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
@@ -2983,7 +3037,7 @@ class DesktopService:
             )
         if (
             self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count
+            or self._project_operation_count > int(allow_current_project_operation)
         ):
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "Wait for the current document or conversation operation.", retryable=True,

@@ -1751,6 +1751,65 @@
           "title": "中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中"
         }
       }
+    },
+    {
+      "name": "session-delete-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000091",
+        "method": "session.delete",
+        "params": {
+          "projectId": "project-1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7"
+        }
+      }
+    },
+    {
+      "name": "session-delete-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000091",
+        "ok": true,
+        "data": {
+          "projectId": "project-1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "status": "deleted"
+        }
+      }
+    },
+    {
+      "name": "session-delete-requires-session",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000091",
+        "method": "session.delete",
+        "params": {
+          "projectId": "project-1"
+        }
+      }
+    },
+    {
+      "name": "session-delete-rejects-file-scope",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000091",
+        "method": "session.delete",
+        "params": {
+          "projectId": "project-1",
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "path": "output.md"
+        }
+      }
     }
   ],
   "rawLines": [

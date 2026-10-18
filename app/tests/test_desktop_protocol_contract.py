@@ -44,6 +44,7 @@ def test_protocol_manifest_safety_invariants() -> None:
         "session.create",
         "session.list",
         "session.select",
+        "session.delete",
         "session.rename",
         "session.retry_registration",
         "session.transcript",

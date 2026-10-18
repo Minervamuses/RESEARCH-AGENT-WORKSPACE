@@ -526,6 +526,22 @@ class ConversationRepository:
         )
         return self.save(snapshot, document)
 
+    def delete(self, snapshot: ConversationSnapshot) -> None:
+        """Remove only the canonical file matching this loaded snapshot."""
+        if type(snapshot) is not ConversationSnapshot:
+            raise ConversationValidationError("snapshot must be a ConversationSnapshot")
+        validate_document(snapshot.document)
+        self._ensure_root(create=False)
+        target = self.path_for(snapshot.document.conversation_id)
+        self._assert_snapshot_current(snapshot, target)
+        try:
+            os.unlink(target)
+        except OSError as exc:
+            raise ConversationUnavailableError(
+                f"cannot delete conversation: {exc}"
+            ) from exc
+        self._fsync_root()
+
     def append_pending(
         self,
         snapshot: ConversationSnapshot,

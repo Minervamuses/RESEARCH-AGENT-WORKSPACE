@@ -8,7 +8,7 @@
 | P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過 | 整體實機流程在 P6 再核對 | P3 可開始 |
 | P3 | Complete | Ask／Bypass 真保存檢查；實機兩次 Ask 保存後讀回兩段成果 | 無 | P6 重用此證據 |
 | P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
-| P5 | In progress | S1 名稱保存、三側協定、真右鍵改名與重選通過 | S2 未實作；整個程式重開後名稱待最後驗收 | P5-S2 一致刪除 |
+| P5 | Complete | 重開保名；真 UI Cancel、active→Stopping→delete、B 可開及產出不變通過 | 無 | P6 整體確認 |
 | P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
 
 ## 計劃撰寫紀錄
@@ -94,3 +94,10 @@
   - 協定 Python 171 passed、Node 165 passed、Rust protocol 12 passed；初次新增 fixture 的 result 錯帶 method、invalid case 漏 errorCode，修正測試資料後三側全通過。前端 conversations 29 passed；`npm run build`、scoped whitespace 通過。根代理審閱必要 production 變更；無新增 dependency／storage layer。
   - 真 UI 右鍵既有五回合對話，改名「桌面多段驗收」，側欄與標題立即更新。canonical customTitle 保存；改名前後 turns 的 SHA-256 均 `1a45801df23f86789823b9654bb21fc1a096f80bc598812ec476ec6743c5ffbe`。建立第二則 `Keep this test conversation.` 後重選原對話，新名仍在，歷史標記不復活。service recreation／下一回合保名由本步測試通過，整個應用重開後手動選回在 S2 最後驗收核對。
   - 後續刪除驗收保留 B：`5bc7ff8f87754bc2a6d0a3471709eeea`，canonical SHA-256 `9a33c2d3825df6c7553e5ec84a711f8f427f74bed4d940c8f509dc30dd3af21c`；測試文稿 SHA-256 `ddac4c1fd4ec02636cc999382db3a5992cbe4de269de80759e19bf5dbee334b5`。這些均在 `/tmp` 隔離專案，未用使用者 store。完成後已關閉本次 dev 程序，避免下一步 HMR。Scoped commit：`feat(desktop): persist conversation names [P5-S1]`；接續 P5-S2。
+- P5-S2／2026-10-19 — `repository.delete` 驗證 canonical／fingerprint 後只 unlink 目標；catalog 沿既有 atomic replace 移除單一 session，保留 project。`session.delete` 要求真正 idle，selected 目標先解除綁定；同一同步段移除索引及檔案，失敗且 canonical 仍存在才恢復索引，沒有 journal／tombstone／新 concurrency。非 selected 刪除保留目前 session，transient 只解除記憶體綁定。
+  - 右鍵 Delete 一次說明只刪對話、不刪專案及產出；Cancel 不送請求。active 目標先 Stop，等 Stop 回覆、原 turn terminal 與既有 transcript/catalog refresh、document apply 全部結束，再送 delete；Stop 失敗保留重試。只有 delete ack 後清目標清單與被刪選取的草稿／transcript／retry／backend session，沿既有 catalog refresh 更新資料。
+  - Linux Conda app：repository 26 passed；`poetry run pytest tests/test_desktop_conversations.py tests/test_desktop_service.py -q` 123 passed／6.04s，涵蓋 A/B＋產出、active A→Stop→delete、service recreation 不復活、transient、唯一 unlink failure→索引恢復→retry。前端 conversations＋answer_stream 54 passed；build／scoped whitespace 通過。Python protocol 175 passed、Node protocol＋backend 182 passed、`cargo test protocol --lib` 14 passed。保留既有 LangGraph deprecation／Vite large chunk warnings。
+  - 根代理審查 production diff，核對原 GUI 工作樹及 Conda app；沒有 dependency／env／lock 更動。`python main.py` 正常入口 release 重建 1m12s 成功，正式版自動 Backend ready／Generation 1／0 pending，初始無專案、文件或草稿恢復。已開原生資料夾視窗等待使用者協助；實機名稱、Cancel／delete 及重開結果尚待記錄，不以測試代替。
+  - 實機完成：使用者選同一測試專案，根代理手動開啟並選回 A，整個應用重開後仍名為「桌面多段驗收」且五回合歷史可見、草稿空白。輸入尚未送出的草稿，右鍵 Delete 顯示只刪對話／產出保留及先 Stop 說明；Cancel 後草稿、A/B 及產出均保留，三檔 SHA-256 與前述基線相同。
+  - 將草稿替換為 `[[fixture:wait-stop]]` 並送出，第六回合 `3125ea0e11db41a3839d56cd068cf6d4` 已落盤 pending，Send 變 Stop、草稿清空。直接右鍵 Delete 並確認，真 UI 捕捉 `Stopping and finishing the current turn…`／`Stopping…`，之後回到 Backend ready；A、其 transcript 與重試／草稿消失，清單只剩 B。Linux 核對 canonical A 不存在、catalog 只含 B；B 與測試文稿 SHA-256 仍為前述基線。實際再選 B 成功載入原訊息，未重啟後端。刪除後再次開程式的整體確認留給 P6-S1。
+  - 無 live provider，未修改使用者研究資料。Scoped commit：`feat(desktop): delete conversations after stopping [P5-S2]`；P1–P5 全部完成，接續 P6-S1。

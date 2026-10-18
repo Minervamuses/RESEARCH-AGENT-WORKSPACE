@@ -586,6 +586,11 @@
       "projectId": {"type": "string", "required": true, "maxBytes": 256},
       "registered": {"type": "boolean", "required": true}
     },
+    "session.delete": {
+      "projectId": {"type": "string", "required": true, "maxBytes": 256},
+      "sessionId": {"type": "string", "required": true, "maxBytes": 32},
+      "status": {"type": "string", "required": true, "enum": ["deleted"]}
+    },
     "session.rename": {
       "projectId": {"type": "string", "required": true, "maxBytes": 256},
       "sessionId": {"type": "string", "required": true, "maxBytes": 32},
@@ -814,6 +819,15 @@
     {
       "name": "session.select",
       "operation": "lifecycle",
+      "requiredParams": ["projectId", "sessionId"],
+      "params": {
+        "projectId": {"type": "string", "required": true, "maxBytes": 256},
+        "sessionId": {"type": "string", "required": true, "maxBytes": 32}
+      }
+    },
+    {
+      "name": "session.delete",
+      "operation": "mutation",
       "requiredParams": ["projectId", "sessionId"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},

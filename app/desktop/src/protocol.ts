@@ -14,6 +14,7 @@ export const PROTOCOL_METHODS = [
   "session.create",
   "session.list",
   "session.select",
+  "session.delete",
   "session.rename",
   "session.retry_registration",
   "session.transcript",
@@ -736,6 +737,11 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     projectId: { type: "string", required: true, maxBytes: 256 },
     registered: { type: "boolean", required: true },
   },
+  "session.delete": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    status: { type: "string", required: true, enum: ["deleted"] },
+  },
   "session.rename": {
     projectId: { type: "string", required: true, maxBytes: 256 },
     sessionId: { type: "string", required: true, maxBytes: 32 },
@@ -922,6 +928,10 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
     reconcile: { type: "boolean", required: false },
   },
   "session.select": {
+    projectId: { type: "string", required: true, maxBytes: 256 },
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+  },
+  "session.delete": {
     projectId: { type: "string", required: true, maxBytes: 256 },
     sessionId: { type: "string", required: true, maxBytes: 32 },
   },
@@ -1121,6 +1131,12 @@ export interface SessionRenamedDto {
   projectId: string;
   sessionId: string;
   title: string;
+}
+
+export interface SessionDeletedDto {
+  projectId: string;
+  sessionId: string;
+  status: "deleted";
 }
 
 export interface SessionSummaryDto {

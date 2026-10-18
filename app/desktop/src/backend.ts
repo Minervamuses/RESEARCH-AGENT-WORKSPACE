@@ -115,6 +115,7 @@ export type BackendUiAction =
   | { type: "action-completed"; action: BackendActionName }
   | { type: "diagnostics-succeeded"; diagnostics: BoundedRuntimeDiagnostics }
   | { type: "session-created"; session: SessionCreatedDto }
+  | { type: "session-cleared"; sessionId: string }
   | { type: "action-failed"; error: SafeUiError };
 
 const backendLifecycles: readonly BackendLifecycle[] = [
@@ -375,6 +376,11 @@ export function backendReducer(state: BackendUiState, action: BackendUiAction): 
       error: null,
       activeAction: null,
     };
+  }
+  if (action.type === "session-cleared") {
+    if (state.session?.sessionId !== action.sessionId) return state;
+    const nextState = { ...state, session: null, error: null };
+    return { ...nextState, phase: settledReadyPhase(nextState) };
   }
   const fallbackPhase: UiLifecycle =
     state.snapshot?.lifecycle === "crashed"

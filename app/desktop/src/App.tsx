@@ -63,6 +63,7 @@ import type {
   RuntimeDiagnosticsDto,
   SessionBashPermissionSetDto,
   SessionCreatedDto,
+  SessionDeletedDto,
   SessionListDto,
   SessionRenamedDto,
   SessionSelectedDto,
@@ -166,6 +167,38 @@ export function sidebarRowsForProject(
 
 export function sessionCreateParams(projectId: string): JsonObject {
   return { projectId };
+}
+
+export function DeleteConversationDialog({ title, status, error, onConfirm, onCancel }: {
+  title: string;
+  status: "stopping" | "deleting" | null;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const busy = status !== null;
+  return <div className="approval-backdrop">
+    <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !busy) { event.preventDefault(); onCancel(); }
+        if (event.key !== "Tab") return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+        const first = controls[0], last = controls.at(-1);
+        if (controls.length === 0) event.preventDefault();
+        else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }}>
+      <h2 id="delete-conversation-title">Delete conversation?</h2>
+      <p>Delete the conversation record “{title}”? The project and its output files will remain.</p>
+      <p>If this conversation is running, it will be stopped before deletion.</p>
+      {error !== null && <p className="extension-error" role="alert">{error}</p>}
+      {busy && <p role="status">{status === "stopping" ? "Stopping and finishing the current turn…" : "Deleting conversation…"}</p>}
+      <div className="action-row">
+        <button type="button" disabled={busy} onClick={onConfirm}>{error === null ? "Delete conversation" : "Retry deletion"}</button>
+        <button type="button" autoFocus disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </section>
+  </div>;
 }
 
 export async function loadSelectedProjectHistory(
@@ -1013,6 +1046,8 @@ export default function App() {
   const [sessionLists, setSessionLists] = useState<Record<string, SessionListDto>>({});
   const [conversationMenu, setConversationMenu] = useState<{ projectId: string; session: SidebarSessionRow; left: number; top: number } | null>(null);
   const [renameDialog, setRenameDialog] = useState<{ projectId: string; sessionId: string; title: string; issue: string | null; owner: WorkspaceOperationOwner } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ projectId: string; sessionId: string; title: string; status: "stopping" | "deleting" | null; issue: string | null; owner: WorkspaceOperationOwner } | null>(null);
+  const deleteOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const conversationMenuRef = useRef<HTMLDivElement>(null);
   const conversationMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const [slashCatalogOwner, setSlashCatalogOwner] = useState<SlashCatalogOwner | null>(null);
@@ -1060,6 +1095,7 @@ export default function App() {
   const frameOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const turnOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
+  const turnSettlementPromiseRef = useRef<Promise<void> | null>(null);
   const pendingApprovalRef = useRef<PendingApproval | null>(null);
   const approvalResolvingRef = useRef(false);
 
@@ -1120,11 +1156,14 @@ export default function App() {
     workingDocumentSourcesRef.current = null;
     submittedDocumentRef.current = null;
     stopPromiseRef.current = null;
+    turnSettlementPromiseRef.current = null;
+    deleteOwnerRef.current = null;
     documentBusyRef.current = false;
     setDocumentBusy(false);
     setWorkspaceBusy(null);
     setConversationMenu(null);
     setRenameDialog(null);
+    setDeleteDialog(null);
   }, []);
 
   useEffect(() => {
@@ -1905,6 +1944,89 @@ export default function App() {
     stopPromiseRef.current = pending;
   }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, loadCatalog, ownsOperation, state.session]);
 
+  const deleteConversation = useCallback(async () => {
+    const target = deleteDialog;
+    if (target === null || deleteOwnerRef.current !== null || !ownsOperation(target.owner, target.owner) ||
+        projectRef.current?.projectId !== target.projectId || bindingGenerationRef.current !== generationRef.current ||
+        state.snapshot?.lifecycle !== "ready" || inFlight.current) return;
+    const owner = target.owner;
+    deleteOwnerRef.current = owner;
+    const isCurrent = () => ownsOperation(owner, deleteOwnerRef.current);
+    let operation: WorkspaceOperationOwner | null = null;
+    setDeleteDialog({ ...target, issue: null, status: "stopping" });
+    try {
+      const settlement = turnSettlementPromiseRef.current;
+      const running = conversationRef.current.stopRequest ?? conversationRef.current.activeTurn;
+      if (running !== null) {
+        if (!sameSelection(running, target)) throw new Error("Wait for the current conversation to finish before deleting another conversation.");
+        stopTurn();
+        await stopPromiseRef.current;
+        if (!isCurrent()) return;
+        if (conversationRef.current.stopRequest?.status === "failed") {
+          throw new Error(conversationRef.current.stopRequest.error ?? "The conversation could not be stopped.");
+        }
+      }
+      await settlement;
+      if (!isCurrent()) return;
+      await documentApplyPromiseRef.current;
+      if (!isCurrent()) return;
+      if (conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null) {
+        throw new Error("The conversation has not finished stopping. Retry deletion after it stops.");
+      }
+      operation = beginWorkspaceOperation("Deleting conversation");
+      if (operation === null) throw new Error("The workspace is still busy. Retry deletion when the current operation finishes.");
+      setDeleteDialog({ ...target, issue: null, status: "deleting" });
+      const result = await backendClient.request("session.delete", { projectId: target.projectId, sessionId: target.sessionId }) as unknown as SessionDeletedDto;
+      if (!isCurrent() || !ownsOperation(operation, workspaceOperation.current)) return;
+      if (result.projectId !== target.projectId || result.sessionId !== target.sessionId || result.status !== "deleted") {
+        throw protocolMismatch("The backend deleted a different conversation.");
+      }
+      catalogLoading.current = null;
+      const selectedDeleted = sameSelection(conversationRef.current.selected, target);
+      setSessionLists((lists) => {
+        const list = lists[target.projectId];
+        if (list === undefined) return lists;
+        const items = list.items.filter((item) => item.sessionId !== target.sessionId);
+        return { ...lists, [target.projectId]: { ...list, items, total: Math.max(0, list.total - (list.items.length - items.length)) } };
+      });
+      setCatalog((current) => current === null ? null : {
+        ...current,
+        selectedSessionId: current.selectedProjectId === target.projectId &&
+          (selectedDeleted || current.selectedSessionId === target.sessionId) ? null : current.selectedSessionId,
+      });
+      if (sameSelection(resumeSelectionRef.current, target)) {
+        resumeSelectionRef.current = null;
+        resumeDraftRef.current = null;
+      }
+      if (selectedDeleted) {
+        applyConversation({ type: "conversation-deleted", generation: owner.generation, projectEpoch: owner.projectEpoch,
+          projectId: target.projectId, sessionId: target.sessionId });
+        dispatch({ type: "session-cleared", sessionId: target.sessionId });
+        setSlashCatalogOwner(null);
+        setTranscript(null);
+        setSelectionPreview(null);
+        setLiveTurns([]);
+        setPendingUserText(null);
+        setRegistrationIssue(null);
+        setExtensionFlow(null);
+        setChatSelection(null);
+        setReferenceIssue(null);
+        submittedDocumentRef.current = null;
+        workingDocumentSourcesRef.current = null;
+      }
+      await loadCatalog(owner.generation);
+      if (!isCurrent()) return;
+      setDeleteDialog(null);
+      scheduleOwnedFrame(operation, () => document.getElementById("main-workspace")?.focus());
+    } catch (error) {
+      if (isCurrent()) setDeleteDialog({ ...target, issue: workspaceError(error).message, status: null });
+    } finally {
+      if (operation !== null) finishWorkspaceOperation(operation);
+      if (deleteOwnerRef.current === owner) deleteOwnerRef.current = null;
+    }
+  }, [applyConversation, beginWorkspaceOperation, deleteDialog, finishWorkspaceOperation, loadCatalog, ownsOperation,
+    scheduleOwnedFrame, state.snapshot?.lifecycle, stopTurn]);
+
   const resolvePendingApproval = useCallback((approved: boolean, expectedApprovalId?: string) => {
     const approval = pendingApprovalRef.current;
     const owner = approvalOwnerRef.current;
@@ -2206,7 +2328,7 @@ export default function App() {
     setPendingUserText(draft);
     setWorkspaceIssue(null);
     applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, text: draft, submittedContext, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
-    void tracked.result.then(async (data) => {
+    const settlement = tracked.result.then(async (data) => {
       if (!isCurrent()) return;
       workingDocumentSourcesRef.current = null;
       const result = data as unknown as TurnCompletedDto;
@@ -2297,7 +2419,7 @@ export default function App() {
       const selectionIsCurrent = () => (
         ownsOperation(operation, workspaceOperation.current) && sameSelection(conversationRef.current.selected, selected)
       );
-      void (async () => {
+      await (async () => {
         try {
           await loadCatalog(generation);
           const currentSession = state.session;
@@ -2336,7 +2458,10 @@ export default function App() {
           finishWorkspaceOperation(operation);
         }
       })();
+    }).finally(() => {
+      if (turnSettlementPromiseRef.current === settlement) turnSettlementPromiseRef.current = null;
     });
+    turnSettlementPromiseRef.current = settlement;
   }, [captureOwner, ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
 
   const sendNewTurn = useCallback(() => {
@@ -2570,6 +2695,12 @@ export default function App() {
   const canCreateSession = !state.browserPreview && idle && workspaceBusy === null && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && activeProjectId !== null;
   const canManageConversations = !state.browserPreview && idle && !chooserOpen && state.snapshot?.lifecycle === "ready" &&
     state.diagnostics !== null && bindingGenerationRef.current === generationRef.current;
+  const menuTargetsRunningConversation = conversationMenu !== null && sameSelection(
+    conversation.stopRequest ?? conversation.activeTurn, { projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId },
+  );
+  const canDeleteConversation = !state.browserPreview && !chooserOpen && state.snapshot?.lifecycle === "ready" &&
+    state.diagnostics !== null && bindingGenerationRef.current === generationRef.current &&
+    state.activeAction === null && workspaceBusy === null && (idle || menuTargetsRunningConversation);
   const renameTitleTooLong = renameDialog !== null && new TextEncoder().encode(renameDialog.title.trim()).length > 256;
   const shutdownMessage = shutdownSummary(state.snapshot);
   const selectedSummary = useMemo(() => {
@@ -2601,7 +2732,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
-      <aside className="sidebar" aria-label="Research Agent workspace">
+      <aside className="sidebar" aria-label="Research Agent workspace" inert={deleteDialog !== null}>
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">R</span><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>Research Agent</h1></div></div>
         <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={createSession} disabled={!canCreateSession || interaction.createDisabled}><span aria-hidden="true">＋</span> New conversation</button>
         <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
@@ -2623,7 +2754,7 @@ export default function App() {
                   conversationMenuReturnFocusRef.current = event.currentTarget;
                   setConversationMenu({ projectId: project.projectId, session,
                     left: Math.max(8, Math.min(event.clientX || bounds.left, window.innerWidth - 200)),
-                    top: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - 70)) });
+                    top: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - 110)) });
                 }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
               {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
@@ -2637,7 +2768,7 @@ export default function App() {
         </section>
       </aside>
 
-      <main id="main-workspace" className="main-workspace" tabIndex={-1}>
+      <main id="main-workspace" className="main-workspace" tabIndex={-1} inert={deleteDialog !== null}>
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectionPreview?.title ?? selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
         <div className="writing-workspace">
           <section className="document-pane" aria-label="Source document workspace">
@@ -2754,7 +2885,10 @@ export default function App() {
             if (event.key === "Escape" || event.key === "Tab") {
               event.preventDefault(); setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus();
             } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+              event.preventDefault();
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+              const current = items.indexOf(document.activeElement as HTMLButtonElement);
+              items[(current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
             }
           }}>
           <button type="button" role="menuitem"
@@ -2764,6 +2898,11 @@ export default function App() {
                 title: conversationMenu.session.title, issue: null, owner: captureOwner("Rename dialog") });
               setConversationMenu(null);
             }}>Rename</button>
+          <button type="button" role="menuitem" disabled={!canDeleteConversation} onClick={() => {
+            setDeleteDialog({ projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId,
+              title: conversationMenu.session.title, status: null, issue: null, owner: captureOwner("Delete dialog") });
+            setConversationMenu(null);
+          }}>Delete</button>
         </div>
       </div>}
       {renameDialog !== null && <div className="approval-backdrop">
@@ -2796,6 +2935,11 @@ export default function App() {
           </div>
         </form>
       </div>}
+      {deleteDialog !== null && <DeleteConversationDialog title={deleteDialog.title} status={deleteDialog.status} error={deleteDialog.issue}
+        onConfirm={() => void deleteConversation()} onCancel={() => {
+          setDeleteDialog(null);
+          scheduleOwnedFrame(deleteDialog.owner, () => conversationMenuReturnFocusRef.current?.focus());
+        }} />}
       {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <div className="approval-backdrop">
         <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="project-chooser-title"
           onKeyDown={(event) => {
@@ -2839,10 +2983,10 @@ export default function App() {
           <button type="button" disabled={workspaceBusy !== null} onClick={() => setChooserOpen(false)}>Cancel</button>
         </section>
       </div>}
-      {chatSelection !== null && renderConversation && idle && !chooserOpen && <button type="button" className="chat-reference-action"
+      {chatSelection !== null && renderConversation && idle && !chooserOpen && deleteDialog === null && <button type="button" className="chat-reference-action"
         style={{ position: "fixed", top: chatSelection.top, left: chatSelection.left }}
         onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Comment on selection</button>}
-      {pendingApproval !== null && <ApprovalDialog
+      {pendingApproval !== null && deleteDialog === null && <ApprovalDialog
         approval={pendingApproval}
         resolving={approvalResolving || conversation.stopRequest !== null}
         onStop={(conversation.activeTurn?.turnId ?? conversation.stopRequest?.turnId) === pendingApproval.turnId ? stopTurn : undefined}

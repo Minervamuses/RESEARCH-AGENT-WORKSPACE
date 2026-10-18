@@ -639,6 +639,27 @@ test("Stop failure remains blocked after the turn ends and can retry only its ow
   assert.equal(conversationInteractionState(state).turnActive, false);
 });
 
+test("deleting the selected idle conversation clears its draft and retry state only", () => {
+  const action = { type: "conversation-deleted", generation: 1, projectId, sessionId } as const;
+  const running = activeState();
+  assert.equal(conversationReducer(running, action), running);
+  const waiting = conversationReducer(running, { type: "stop-requested", generation: 1 });
+  assert.equal(conversationReducer(succeed(waiting), action).selected?.sessionId, sessionId);
+  const failed = conversationReducer(running, { type: "turn-failed", generation: 1, projectId, sessionId, requestId,
+    message: "Try again", retryable: true });
+  const ready = { ...failed, draftReferences: [{ referenceId: "reference", kind: "chat" as const, text: "source",
+    chat: { projectId, sessionId, turnId, role: "assistant" as const, messageFingerprint: "a".repeat(64), startUtf16: 0, endUtf16: 6 } }],
+    annotations: [{ referenceId: "reference", number: 1, comment: "Rewrite this", expanded: false }], nextAnnotationNumber: 2 };
+  assert.notEqual(ready.submittedTurn, null);
+  for (const mismatch of [{ sessionId: otherSessionId }, { projectId: "other" }, { generation: 0 }, { projectEpoch: 1 }]) {
+    assert.equal(conversationReducer(ready, { ...action, ...mismatch }), ready);
+  }
+  const deleted = conversationReducer(ready, action);
+  assert.deepEqual(deleted, { ...initialConversationState, backendGeneration: 1 });
+  assert.equal(conversationInteractionState(deleted).createDisabled, false);
+  assert.equal(conversationInteractionState(deleted).selectDisabled, false);
+});
+
 test("explicit cancellation preserves saved history but starts the next prompt with a new ID", () => {
   for (const accepted of [false, true]) {
     let state = conversationReducer(activeState("cancel this"), { type: "stop-requested", generation: 1 });

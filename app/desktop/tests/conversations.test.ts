@@ -51,6 +51,10 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  DeleteConversationDialog: (props: {
+    title: string; status: "stopping" | "deleting" | null; error: string | null;
+    onConfirm: () => void; onCancel: () => void;
+  }) => unknown;
   visibleMessageRange: (root: Node, startNode: Node, startOffset: number, endNode: Node, endOffset: number) => {
     visibleText: string; text: string; startUtf16: number; endUtf16: number;
   } | null;
@@ -134,6 +138,33 @@ function loadAppHelpers(): Promise<AppHelpersModule> {
 
 after(async () => {
   if (devServer !== undefined) await (await devServer).close();
+});
+
+test("conversation deletion confirms its scope and Cancel does not confirm", async () => {
+  const { DeleteConversationDialog } = await loadAppHelpers();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  let confirmed = 0, cancelled = 0;
+  const props = { title: "Research notes", status: null, error: null,
+    onConfirm: () => { confirmed++; }, onCancel: () => { cancelled++; } };
+  const dialog = DeleteConversationDialog(props);
+  const html = renderToStaticMarkup(dialog);
+  assert.match(html, /Delete the conversation record/);
+  assert.match(html, /The project and its output files will remain/);
+  assert.match(html, /stopped before deletion/);
+  const section = elementChildren(dialog)[0];
+  const actions = elementChildren(section).at(-1);
+  const [confirmButton, cancelButton] = elementChildren(actions) as ReactElementLike[];
+  (cancelButton.props.onClick as () => void)();
+  assert.equal(cancelled, 1);
+  assert.equal(confirmed, 0);
+  (confirmButton.props.onClick as () => void)();
+  assert.equal(confirmed, 1);
+  const stopping = renderToStaticMarkup(DeleteConversationDialog({ ...props, status: "stopping" }));
+  assert.equal((stopping.match(/disabled=""/g) ?? []).length, 2);
+  assert.match(stopping, /Stopping and finishing the current turn/);
+  const failed = renderToStaticMarkup(DeleteConversationDialog({ ...props, error: "Stop failed: local work is still active." }));
+  assert.match(failed, /Stop failed: local work is still active/);
+  assert.match(failed, /Retry deletion/);
 });
 
 test("slash menu filters backend names only at a complete command prefix", async () => {

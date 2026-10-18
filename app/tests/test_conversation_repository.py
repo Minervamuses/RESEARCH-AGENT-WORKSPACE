@@ -508,6 +508,22 @@ def test_invalid_custom_title_preserves_saved_conversation(tmp_path, title):
     assert repository.path_for(CONVERSATION_ID).read_bytes() == before
 
 
+def test_delete_requires_current_snapshot_before_removing_canonical_file(tmp_path):
+    repository = ConversationRepository(tmp_path)
+    original = _create(repository)
+    current = repository.rename(original, "Updated name", updated_at=_timestamp(2))
+    path = repository.path_for(CONVERSATION_ID)
+    current_bytes = path.read_bytes()
+
+    with pytest.raises(ConversationConflictError, match="modified"):
+        repository.delete(original)
+    assert path.read_bytes() == current_bytes
+
+    repository.delete(current)
+    assert repository.load_optional(CONVERSATION_ID) is None
+    assert repository.root.is_dir()
+
+
 def test_bounded_non_answer_fields_fail_before_publish(tmp_path):
     repository = ConversationRepository(tmp_path)
     maximum_input = "輸" * (MAX_INPUT_BYTES // len("輸".encode("utf-8")))

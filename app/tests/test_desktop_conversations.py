@@ -947,6 +947,134 @@ def test_rename_validation_and_save_failure_preserve_saved_title(tmp_path, monke
     assert service._session_creating is False
 
 
+def test_delete_stopped_conversation_does_not_revive_or_remove_other_files(tmp_path, monkeypatch):
+    service, catalog, _factory, repository = _seed_coordinator(tmp_path)
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: make_astream_graph())
+
+    async def factory(config, *, load_mcp, **kwargs):
+        return ChatSession(config, loaded_skills=[], **kwargs)
+
+    service._session_factory = factory
+    project_id = _project_id(tmp_path)
+    target = {"projectId": project_id, "sessionId": SESSION_A}
+    other_bytes = repository.path_for(SESSION_B).read_bytes()
+    output = tmp_path / "project-one" / "research-output.md"
+    output.write_text("Keep this research output.", encoding="utf-8")
+
+    async def run():
+        await service.dispatch("session.select", target)
+        entered, cleaned = asyncio.Event(), asyncio.Event()
+
+        async def held_final(**_kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaned.set()
+
+        monkeypatch.setattr(service.session, "finalize_and_record", held_final)
+
+        def sink(_event, _data):
+            pass
+
+        sink.request_id = str(uuid.uuid4())
+        turn_id = _logical_turn_id(450)
+        turn = asyncio.create_task(service.dispatch("session.turn", {
+            "text": "Stop this turn before deleting.", "turnId": turn_id, "retry": False,
+        }, event_sink=sink))
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            with pytest.raises(DesktopServiceError) as busy:
+                await service.dispatch("session.delete", target)
+            assert busy.value.code == "BUSY_TURN"
+            assert repository.path_for(SESSION_A).is_file()
+            stopped = await service.dispatch("session.stop", {
+                "sessionId": SESSION_A, "turnId": turn_id, "parentRequestId": sink.request_id,
+            })
+            assert stopped["state"] == "interrupted" and cleaned.is_set()
+            with pytest.raises(DesktopServiceError) as cancelled:
+                await turn
+            assert cancelled.value.code == "TURN_CANCELLED"
+            assert repository.load(SESSION_A).document.turns[-1].state == "interrupted"
+        finally:
+            if not turn.done():
+                turn.cancel()
+            await asyncio.gather(turn, return_exceptions=True)
+
+        deleted = await service.dispatch("session.delete", target)
+        assert deleted == {**target, "status": "deleted"}
+        _assert_result("session.delete", deleted, 451)
+        assert service.session is None
+        assert repository.load_optional(SESSION_A) is None
+        assert catalog.project_for_session(SESSION_A) is None
+        await service.dispatch("project.list", {})
+        summaries = await service.dispatch("session.list", {"projectId": project_id})
+        assert [item["sessionId"] for item in summaries["items"]] == [SESSION_B]
+        await service.dispatch("session.select", {"projectId": project_id, "sessionId": SESSION_B})
+        assert service.session.session_id == SESSION_B
+        assert repository.path_for(SESSION_B).read_bytes() == other_bytes
+        assert output.read_text(encoding="utf-8") == "Keep this research output."
+
+        restarted = DesktopService(
+            original_cwd=tmp_path, config=service.config, session_factory=factory, environ={},
+        )
+        await _open_project(restarted, tmp_path)
+        summaries = await restarted.dispatch("session.list", {"projectId": project_id})
+        assert [item["sessionId"] for item in summaries["items"]] == [SESSION_B]
+        transient = await restarted.dispatch("session.create", {"loadMcp": False})
+        transient_id = transient["sessionId"]
+        assert repository.load_optional(transient_id) is None
+        result = await restarted.dispatch("session.delete", {
+            "projectId": project_id, "sessionId": transient_id,
+        })
+        assert result["status"] == "deleted" and restarted.session is None
+        assert repository.load_optional(transient_id) is None
+        assert repository.path_for(SESSION_B).read_bytes() == other_bytes
+        assert output.read_text(encoding="utf-8") == "Keep this research output."
+
+    asyncio.run(run())
+
+
+def test_delete_unlink_failure_restores_index_and_can_retry_without_changing_selection(tmp_path, monkeypatch):
+    import agent.conversations.repository as repository_module
+
+    service, catalog, _factory, repository = _seed_coordinator(tmp_path)
+    project_id = _project_id(tmp_path)
+    target = {"projectId": project_id, "sessionId": SESSION_A}
+    path = repository.path_for(SESSION_A)
+    before = path.read_bytes()
+    other_bytes = repository.path_for(SESSION_B).read_bytes()
+    original_unlink = repository_module.os.unlink
+
+    def failed_unlink(target_path, *args, **kwargs):
+        if Path(target_path) == path:
+            raise PermissionError("fixture canonical unlink failed")
+        return original_unlink(target_path, *args, **kwargs)
+
+    async def run():
+        await service.dispatch("session.select", {"projectId": project_id, "sessionId": SESSION_B})
+        selected = service.session
+        monkeypatch.setattr(repository_module.os, "unlink", failed_unlink)
+        with pytest.raises(DesktopServiceError) as failed:
+            await service.dispatch("session.delete", target)
+        assert failed.value.code == "SESSION_NOT_READY"
+        assert service.session is selected
+        assert path.read_bytes() == before
+        assert catalog.project_for_session(SESSION_A) == project_id
+        assert DesktopProjectCatalog(repository.root.parent).project_for_session(SESSION_A) == project_id
+        monkeypatch.setattr(repository_module.os, "unlink", original_unlink)
+
+        result = await service.dispatch("session.delete", target)
+        assert result == {**target, "status": "deleted"}
+        assert service.session is selected
+        assert repository.load_optional(SESSION_A) is None
+        summaries = await service.dispatch("session.list", {"projectId": project_id})
+        assert [item["sessionId"] for item in summaries["items"]] == [SESSION_B]
+        assert repository.path_for(SESSION_B).read_bytes() == other_bytes
+
+    asyncio.run(run())
+
+
 def test_coordinator_preserves_scoped_membership_order_across_restart(tmp_path):
     service, catalog, _factory, repository = _seed_coordinator(tmp_path)
     projects = asyncio.run(service.dispatch("project.list", {}))
@@ -1938,6 +2066,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
         ("session.list", {"projectId": "missing", "offset": 0, "limit": 20}),
         ("session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_C}),
         ("session.rename", {"projectId": _project_id(tmp_path), "sessionId": SESSION_C, "title": "Wrong project"}),
+        ("session.delete", {"projectId": _project_id(tmp_path), "sessionId": SESSION_C}),
         (
             "session.transcript",
             {"projectId": _project_id(tmp_path), "sessionId": SESSION_C, "offset": 0, "limit": 20},
