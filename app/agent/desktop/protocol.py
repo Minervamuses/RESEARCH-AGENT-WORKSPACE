@@ -375,6 +375,10 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
         or data.get("persisted") is not True
     ):
         _invalid(f"{method} success must be durably completed")
+    if method == "session.stop":
+        durable = data["state"] is not None
+        if data["accepted"] is not durable or data["persisted"] is not durable:
+            _invalid("session.stop lifecycle must match its durable state")
     if method == "session.transcript":
         for item in data["items"]:
             context = item.get("submittedContext")
@@ -704,9 +708,10 @@ class TraceValidator:
                 "method": message["method"],
                 "turnId": (
                     message["params"]["turnId"]
-                    if message["method"] in _DURABLE_TURN_METHODS
+                    if message["method"] in _DURABLE_TURN_METHODS or message["method"] == "session.stop"
                     else None
                 ),
+                "sessionId": message["params"].get("sessionId") if message["method"] == "session.stop" else None,
             }
             return
         if message_type == "event" and "requestId" in message:
@@ -743,6 +748,8 @@ class TraceValidator:
                     and message["data"].get("turnId") != expected_turn_id
                 ):
                     _invalid("data.turnId must match params.turnId")
+                if state["method"] == "session.stop" and message["data"]["sessionId"] != state["sessionId"]:
+                    _invalid("data.sessionId must match params.sessionId")
             elif state["method"] in _DURABLE_TURN_METHODS:
                 details = message["error"]["details"]
                 _validate_turn_error_details(details)

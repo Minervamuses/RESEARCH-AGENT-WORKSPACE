@@ -28,6 +28,7 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "session.turn",
     "session.set_thinking",
     "session.set_bash_permission",
+    "session.stop",
     "session.shutdown",
     "knowledge.overview",
     "knowledge.search",
@@ -85,6 +86,7 @@ pub const PROTOCOL_ERROR_CODES: &[&str] = &[
     "OLLAMA_MODEL_MISSING",
     "GRAPH_LIMIT_REACHED",
     "BUSY_TURN",
+    "TURN_CANCELLED",
     "BUSY_KNOWLEDGE_MUTATION",
     "BUSY_EXTENSION_OPERATION",
     "INVALID_PATH",
@@ -281,6 +283,7 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "session.turn" => Some(&["text", "turnId", "retry"]),
         "session.set_thinking" => Some(&["mode"]),
         "session.set_bash_permission" => Some(&["mode"]),
+        "session.stop" => Some(&["sessionId", "turnId", "parentRequestId"]),
         "session.shutdown" => Some(&[]),
         "knowledge.overview" => Some(&[]),
         "knowledge.search" => Some(&["query"]),
@@ -316,6 +319,7 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
         "session.list" => Some(&["projectId", "offset", "limit", "reconcile"]),
         "session.select" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
         "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
+        "session.stop" => Some(&["sessionId", "turnId", "parentRequestId"]),
         "workspace.select" => Some(&["rootPath", "action", "historyDirectory", "expectedFingerprint"]),
         "document.open" => Some(&["path"]),
         "document.save" => Some(&["documentContext"]),
@@ -854,6 +858,11 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
             if !params["retry"].is_boolean() {
                 return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
             }
+        }
+        "session.stop" => {
+            expect_bounded_string(&params["sessionId"], "params.sessionId", 32)?;
+            expect_turn_id(&params["turnId"], "params.turnId")?;
+            validate_request_id(expect_non_empty_string(&params["parentRequestId"], "params.parentRequestId")?)?;
         }
         "session.set_thinking" => {
             let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
@@ -1638,6 +1647,18 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
             }
             if let Some(value) = data.get("extensionAction") {
                 validate_enum(value, "data.extensionAction", &["status", "preview"])?;
+            }
+        }
+        "session.stop" => {
+            validate_exact_data_keys(data, &["sessionId", "turnId", "state", "accepted", "persisted"])?;
+            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
+            expect_turn_id(&data["turnId"], "data.turnId")?;
+            if !data["state"].is_null() {
+                validate_enum(&data["state"], "data.state", &["completed", "failed", "interrupted"])?;
+            }
+            let durable = !data["state"].is_null();
+            if data["accepted"] != Value::Bool(durable) || data["persisted"] != Value::Bool(durable) {
+                return Err(ProtocolViolation::invalid("session.stop lifecycle must match its durable state"));
             }
         }
         "session.shutdown" | "runtime.shutdown" => {
@@ -2436,6 +2457,7 @@ struct RequestTraceState {
     terminal: bool,
     method: String,
     turn_id: Option<String>,
+    session_id: Option<String>,
 }
 
 impl ProtocolTraceValidator {
@@ -2448,7 +2470,7 @@ impl ProtocolTraceValidator {
                         request.request_id
                     )));
                 }
-                let turn_id = if is_durable_turn_method(&request.method) {
+                let turn_id = if is_durable_turn_method(&request.method) || request.method == "session.stop" {
                     request
                         .params
                         .get("turnId")
@@ -2464,6 +2486,9 @@ impl ProtocolTraceValidator {
                         terminal: false,
                         method: request.method.clone(),
                         turn_id,
+                        session_id: if request.method == "session.stop" {
+                            request.params.get("sessionId").and_then(Value::as_str).map(str::to_owned)
+                        } else { None },
                     },
                 );
             }
@@ -2523,6 +2548,10 @@ impl ProtocolTraceValidator {
                                 "data.turnId must match params.turnId",
                             ));
                         }
+                    }
+                    if state.method == "session.stop" && result.data.as_ref()
+                        .and_then(|data| data.get("sessionId")).and_then(Value::as_str) != state.session_id.as_deref() {
+                        return Err(ProtocolViolation::invalid("data.sessionId must match params.sessionId"));
                     }
                 } else if is_durable_turn_method(&state.method) {
                     let details = result

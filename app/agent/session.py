@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
@@ -23,6 +23,7 @@ from agent.turns.safety import (
 )
 
 from agent.config import AgentConfig
+from agent.ingest import current_local_work
 from agent.diagnostics import attach_incident, incident_reference
 from agent.extensions.manager import ExtensionManager, SkillInstaller
 from agent.conversations import (
@@ -99,6 +100,23 @@ Language policy:
 - For other languages, match the user's input language without conversion."""
 
 ONE_SHOT_DISPLAY_INPUT_PREFIX = "One-shot local action: "
+_T = TypeVar("_T")
+
+
+async def _await_persistence(work: Awaitable[_T]) -> tuple[_T, bool]:
+    """Retain a short persistence boundary's actual result despite cancellation."""
+    task = asyncio.create_task(work)
+    cancelled = False
+    while True:
+        try:
+            return await asyncio.shield(task), cancelled
+        except asyncio.CancelledError:
+            cancelled = True
+            scope = current_local_work()
+            if scope is not None:
+                scope.request_stop()
+            if task.done():
+                return task.result(), cancelled
 
 
 class ChatSession:
@@ -396,8 +414,11 @@ class ChatSession:
         turn_id = self._active_turn_id
         if snapshot is None or turn_id is None:
             return
+        turn = self._turn_from_snapshot(snapshot, turn_id)
+        if turn is None or turn.state != "pending":
+            return
         try:
-            self._conversation_snapshot = await asyncio.to_thread(
+            saved, _cancelled = await _await_persistence(asyncio.to_thread(
                 self.conversation_repository.fail_turn,
                 snapshot,
                 turn_id=turn_id,
@@ -408,8 +429,9 @@ class ChatSession:
                     retryable=retryable,
                 ),
                 finished_at=self._now_timestamp(),
-            )
-            self._active_turn_snapshot = self._conversation_snapshot
+            ))
+            self._conversation_snapshot = saved
+            self._active_turn_snapshot = saved
         except Exception:
             # Preserve the original execution/finalization failure. A leftover
             # pending turn is deterministically recovered on the next load.
@@ -774,14 +796,14 @@ class ChatSession:
             save_call_observed=save_call_observed,
         )
         tool_activities = self._tool_activity_summaries(tool_calls, new_messages)
-        completed = await asyncio.to_thread(
+        completed, _cancelled = await _await_persistence(asyncio.to_thread(
             self.conversation_repository.complete_turn,
             snapshot,
             turn_id=turn_id,
             assistant_output=final_text,
             finished_at=self._now_timestamp(),
             tool_activities=tool_activities,
-        )
+        ))
         self._conversation_snapshot = completed
         self._active_turn_snapshot = completed
         completed_turn = self._turn_from_snapshot(completed, turn_id)
@@ -917,7 +939,18 @@ class ChatSession:
                 result = await asyncio.shield(task)
             except asyncio.CancelledError:
                 # The host must settle before cancellation can restore its staged source.
-                await asyncio.shield(task)
+                scope = current_local_work()
+                if scope is not None:
+                    scope.request_stop()
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not task.cancelled():
+                    task.exception()
                 raise
             self._installer_context = result
             return json.dumps(result, ensure_ascii=False, default=str)
@@ -1169,15 +1202,17 @@ class ChatSession:
     ) -> tuple[object | None, TurnOutcome]:
         """Run one local command inside the canonical durable turn lifecycle."""
         async with self._turn_execution_lock:
-            snapshot, turn, duplicate = await self._begin_persisted_turn(
-                kind="display-only",
-                display_input=display_input,
-                semantic_input=None,
-                context_eligible=False,
-                thinking_mode=None,
-                submitted_context=submitted_context,
-                turn_id=turn_id,
-                retry=retry,
+            (snapshot, turn, duplicate), cancelled = await _await_persistence(
+                self._begin_persisted_turn(
+                    kind="display-only",
+                    display_input=display_input,
+                    semantic_input=None,
+                    context_eligible=False,
+                    thinking_mode=None,
+                    submitted_context=submitted_context,
+                    turn_id=turn_id,
+                    retry=retry,
+                )
             )
             self._conversation_snapshot = snapshot
             if duplicate:
@@ -1194,6 +1229,8 @@ class ChatSession:
             self._active_turn_snapshot = snapshot
             self._active_turn_id = turn_id
             try:
+                if cancelled:
+                    raise asyncio.CancelledError()
                 raw_result = await action()
                 final_text = render_result(raw_result)
                 if not isinstance(final_text, str) or not final_text.strip():
@@ -1202,13 +1239,13 @@ class ChatSession:
                     )
                 if self._final_text_validator is not None:
                     self._final_text_validator(final_text, [])
-                completed = await asyncio.to_thread(
+                completed, _cancelled = await _await_persistence(asyncio.to_thread(
                     self.conversation_repository.complete_turn,
                     snapshot,
                     turn_id=turn_id,
                     assistant_output=final_text,
                     finished_at=self._now_timestamp(),
-                )
+                ))
                 self._conversation_snapshot = completed
                 self._active_turn_snapshot = completed
                 completed_turn = self._turn_from_snapshot(completed, turn_id)
@@ -1274,13 +1311,15 @@ class ChatSession:
                 effective_mode = "normal"
             elif skill_names and self._installer_previous_mode is not None:
                 effective_mode = self._installer_previous_mode
-            snapshot, turn, duplicate = await self._begin_turn(
-                semantic_input=user_input,
-                display_input=display_input if display_input is not None else user_input,
-                turn_id=logical_turn_id,
-                retry=retry,
-                thinking_mode=effective_mode,
-                submitted_context=submitted_context,
+            (snapshot, turn, duplicate), cancelled = await _await_persistence(
+                self._begin_turn(
+                    semantic_input=user_input,
+                    display_input=display_input if display_input is not None else user_input,
+                    turn_id=logical_turn_id,
+                    retry=retry,
+                    thinking_mode=effective_mode,
+                    submitted_context=submitted_context,
+                )
             )
             self._conversation_snapshot = snapshot
             if duplicate:
@@ -1296,6 +1335,8 @@ class ChatSession:
             self._active_turn_snapshot = snapshot
             self._active_turn_id = logical_turn_id
             try:
+                if cancelled:
+                    raise asyncio.CancelledError()
                 if installer_turn:
                     runtime = combine_skill_runtimes([
                         self._load_skill_runtime(name) for name in skill_names

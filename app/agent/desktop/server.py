@@ -305,6 +305,20 @@ class DesktopServer:
                 event_sink=context,
             )
             await context.success(data)
+        except asyncio.CancelledError:
+            if not context._terminal:
+                details = None
+                if context.method in {"session.turn", "extensions.apply"}:
+                    details = {
+                        "turnId": params["turnId"], "state": None,
+                        "accepted": False, "persisted": False,
+                    }
+                error = ProtocolError("TURN_CANCELLED", "The request was stopped.", details=details)
+                lifecycle = getattr(self._service, "_with_turn_lifecycle", None)
+                if details is not None and callable(lifecycle):
+                    error = lifecycle(error, context.method, params)
+                await context.failure(error)
+            return
         except ProtocolError as exc:
             await context.failure(exc)
             return

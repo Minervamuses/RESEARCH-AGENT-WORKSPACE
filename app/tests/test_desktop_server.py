@@ -738,11 +738,13 @@ def test_stdin_eof_cancels_stuck_request_after_bounded_grace() -> None:
     exit_code, service, messages = asyncio.run(run())
     assert exit_code == 1
     assert service.cancelled is True
-    assert not any(
-        message.get("requestId") == request_id
+    terminal = [
+        message for message in messages
+        if message.get("requestId") == request_id
         and message.get("messageType") == "result"
-        for message in messages
-    )
+    ]
+    assert len(terminal) == 1
+    assert terminal[0]["error"]["code"] == "TURN_CANCELLED"
 
 
 class _LateProgressService:

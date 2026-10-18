@@ -17,7 +17,7 @@ import sys
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -74,6 +74,10 @@ from agent.extensions.manager import (
 )
 from agent.extensions.paths import resolve_extension_paths
 from agent.ingest import (
+    LocalWorkScope,
+    await_sync_work,
+    current_local_work,
+    run_local_work,
     diff_folder,
     ingest_file,
     ingest_folder,
@@ -215,6 +219,21 @@ class _DocumentCandidate:
     permission_mode: str
     future: asyncio.Future[dict[str, Any]] | None = None
     result: dict[str, Any] | None = None
+    stopped: bool = False
+
+
+@dataclass
+class _TurnWork:
+    session_id: str
+    turn_id: str
+    parent_request_id: str | None
+    task: asyncio.Task
+    scope: LocalWorkScope
+    done: asyncio.Future[None]
+    document_tasks: set[asyncio.Task] = field(default_factory=set)
+    stopping: bool = False
+    result: dict[str, Any] | None = None
+    error: DesktopServiceError | None = None
 
 
 class DesktopService:
@@ -277,6 +296,8 @@ class DesktopService:
         self._load_mcp = True
         self._session_creating = False
         self._turn_active = False
+        self._turn_work: _TurnWork | None = None
+        self._last_stopped_turn: _TurnWork | None = None
         self._session_closing = False
         self._knowledge_active = False
         self._extension_active = False
@@ -336,6 +357,7 @@ class DesktopService:
             "session.transcript": self._session_transcript,
             "session.status": self._session_status,
             "session.turn": self._session_turn,
+            "session.stop": self._session_stop,
             "workspace.select": self._workspace_select,
             "document.open": self._document_open,
             "document.save": self._document_save,
@@ -1275,7 +1297,7 @@ class DesktopService:
 
     async def _refresh_project_rules(self, session: ChatSession) -> None:
         opened = self._require_project()
-        current = await asyncio.to_thread(
+        current = await run_local_work(
             inspect_project, opened["rootPath"], self.config.persist_dir,
         )
         if current["status"] != "ready" or any(
@@ -1970,6 +1992,9 @@ class DesktopService:
         self, replacement_text: str, tool_call_id: str, reference_id: str | None = None,
     ) -> str:
         """Prepare one bounded candidate and wait for the actual editor save result."""
+        scope = current_local_work()
+        if scope is not None:
+            scope.check_cancelled()
         context = self._active_document_context
         document_references = [item for item in self._active_references if item["kind"] == "document"]
         reference = None
@@ -1993,13 +2018,13 @@ class DesktopService:
         call_id = hashlib.sha256(f"{turn_id}\0{tool_call_id}".encode("utf-8")).hexdigest()
         existing = self._document_candidates.get(call_id)
         if existing is not None:
-            await asyncio.to_thread(
+            await run_local_work(
                 self._documents.prepare, existing.context, replacement_text,
                 turn_id=turn_id, call_id=call_id,
             )
             if existing.result is not None:
                 if existing.result.get("status") == "saved":
-                    checked = await asyncio.to_thread(self._documents.apply, existing.value, context)
+                    checked = await run_local_work(self._documents.apply, existing.value, context)
                     existing.result = {**checked, "callId": existing.value["callId"]}
                     if checked.get("status") == "saved":
                         self._active_document_context = {
@@ -2010,7 +2035,7 @@ class DesktopService:
                         }
                 return json.dumps(existing.result, ensure_ascii=False)
             return json.dumps({"status": "failed", "issue": "This turn already has a pending document candidate; do not replay it."})
-        candidate_value = await asyncio.to_thread(
+        candidate_value = await run_local_work(
             self._documents.prepare, context, replacement_text, turn_id=turn_id, call_id=call_id,
         )
         future = asyncio.get_running_loop().create_future()
@@ -2023,7 +2048,11 @@ class DesktopService:
         try:
             sink("document.proposed", {"turnId": turn_id, "callId": call_id, **({"referenceId": reference["referenceId"]} if reference is not None else {})})
             result = await asyncio.wait_for(asyncio.shield(future), timeout=self._approval_timeout_seconds * 2)
-        except (TimeoutError, asyncio.CancelledError):
+        except asyncio.CancelledError:
+            if not future.done():
+                future.cancel()
+            raise
+        except TimeoutError:
             result = {
                 "path": context["path"], "callId": call_id, "status": "cancelled",
                 "candidateText": candidate_value["candidateText"],
@@ -2047,6 +2076,9 @@ class DesktopService:
         permission_mode: str | None = None, document_context: dict[str, Any] | None = None,
     ) -> tuple[bool, dict[str, Any] | None]:
         """Serialize single-operation consent without changing correctness checks."""
+        scope = current_local_work()
+        if scope is not None:
+            scope.check_cancelled()
         mode = permission_mode or self._active_turn_permission_mode or self._bash_permission_mode
         if mode == "bypass":
             return True, document_context
@@ -2057,6 +2089,8 @@ class DesktopService:
         if sink is None or not isinstance(parent, str):
             return False, document_context
         async with self._operation_approval_lock:
+            if scope is not None:
+                scope.check_cancelled()
             if active_owner is not None and (not self._turn_active or self._active_turn_id != active_owner):
                 return False, document_context
             if self._pending_approval is not None:
@@ -2080,8 +2114,10 @@ class DesktopService:
                 approved = bool(await asyncio.wait_for(
                     asyncio.shield(pending.future), timeout=self._approval_timeout_seconds,
                 ))
+                if scope is not None:
+                    scope.check_cancelled()
                 return approved, self._approval_document_snapshots.get(pending.approval_id, document_context)
-            except (TimeoutError, asyncio.CancelledError):
+            except TimeoutError:
                 return False, document_context
             except Exception:
                 # A failed event delivery cannot grant permission to execute.
@@ -2097,6 +2133,9 @@ class DesktopService:
         self, operation: str, target: str, description: str, *,
         parameters: Any = None, event_sink: EventSink | None = None,
     ) -> bool:
+        scope = current_local_work()
+        if scope is not None:
+            scope.check_cancelled()
         mode = self._active_turn_permission_mode or self._bash_permission_mode
         if mode == "bypass":
             return True
@@ -2178,6 +2217,28 @@ class DesktopService:
     async def _document_apply(
         self, params: dict[str, Any], event_sink: EventSink | None
     ) -> dict[str, Any]:
+        candidate = self._document_candidates.get(params.get("callId") or params.get("undoOfCallId"))
+        owner = self._turn_work
+        owns_candidate = (
+            owner is not None and candidate is not None
+            and owner.turn_id == candidate.turn_id
+            and owner.parent_request_id == candidate.parent_request_id
+        )
+        if candidate is not None and candidate.stopped and not params.get("undoOfCallId"):
+            raise DocumentError("The owning turn was stopped; this document operation can no longer start.")
+        if not owns_candidate or not self._turn_active:
+            return await self._apply_document_candidate(params, event_sink)
+        task = asyncio.current_task()
+        owner.document_tasks.add(task)
+        try:
+            with owner.scope.bind():
+                return await self._apply_document_candidate(params, event_sink)
+        finally:
+            owner.document_tasks.discard(task)
+
+    async def _apply_document_candidate(
+        self, params: dict[str, Any], event_sink: EventSink | None
+    ) -> dict[str, Any]:
         async with self._document_apply_lock:
             context = self._documents.validate_snapshot(params["documentContext"])
             turn_id = params["turnId"]
@@ -2194,11 +2255,14 @@ class DesktopService:
                 raise DocumentError("Document operation does not match the active turn.")
             if context["path"] != candidate.context["path"]:
                 raise DocumentError("Document operation belongs to another file.")
+            scope = current_local_work()
+            if scope is not None:
+                scope.check_cancelled()
             resolution = params.get("resolution")
             if undo_of and resolution is not None:
                 raise DocumentError("Undo does not adopt an arbitrary conflict candidate.")
             if resolution in {"keep", "cancel"}:
-                result = await asyncio.to_thread(
+                result = await await_sync_work(
                     self._documents.apply, candidate.value, context,
                     resolution="current" if resolution == "keep" else "cancel",
                 )
@@ -2225,11 +2289,11 @@ class DesktopService:
                     request_id = getattr(event_sink, "request_id", None)
                     if not isinstance(request_id, str):
                         raise DocumentError("Undo requires a new correlated requestId.")
-                    result = await asyncio.to_thread(
+                    result = await await_sync_work(
                         self._documents.undo, undo_of, context, request_id=request_id, turn_id=turn_id,
                     )
                 else:
-                    result = await asyncio.to_thread(
+                    result = await await_sync_work(
                         self._documents.apply, candidate.value, context,
                         resolution="candidate" if resolution == "use" else None,
                         expected_snapshot=params.get("expectedSnapshot"),
@@ -2246,7 +2310,7 @@ class DesktopService:
     ) -> tuple[dict[str, Any] | None, ConversationTurn | None]:
         """Check the project boundary and restore an existing immutable submission."""
         await self._refresh_project_rules(session)
-        snapshot = await asyncio.to_thread(self._load_conversation, session.session_id, self._selected_project_id)
+        snapshot = await run_local_work(self._load_conversation, session.session_id, self._selected_project_id)
         existing = next((turn for turn in snapshot.document.turns if turn.turn_id == params["turnId"]), None) if snapshot else None
         supplied = validate_submitted_context(params.get("submittedContext"))
         if existing is not None:
@@ -2301,6 +2365,84 @@ class DesktopService:
                 retryable=True,
             )
         self._turn_active = True
+        task = asyncio.current_task()
+        owner = _TurnWork(
+            session.session_id, params["turnId"],
+            getattr(event_sink, "request_id", None), task,
+            LocalWorkScope(), asyncio.get_running_loop().create_future(),
+        )
+        self._turn_work = owner
+        previous_mode = session.thinking_mode
+        installer = getattr(session, "_skill_installer", None)
+        if installer is not None:
+            installer.bypass_approval = self._bash_permission_mode == "bypass"
+        response = None
+        failure = None
+        try:
+            response = await self._run_session_turn(params, event_sink, session, owner)
+        except asyncio.CancelledError:
+            self._request_turn_stop(owner)
+            failure = DesktopServiceError("TURN_CANCELLED", "The current turn was stopped.")
+        except Exception as exc:
+            failure = exc
+        finally:
+            cleanup = asyncio.create_task(self._finish_turn_work(owner))
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    self._request_turn_stop(owner)
+                    if response is None and failure is None:
+                        failure = DesktopServiceError("TURN_CANCELLED", "The current turn was stopped.")
+                except Exception:
+                    break
+            try:
+                cleanup.result()
+            except Exception as exc:
+                owner.error = DesktopServiceError("INTERNAL_ERROR", "The turn's local work could not finish stopping.")
+                failure = exc
+            lifecycle = self._with_turn_lifecycle(
+                DesktopServiceError("TURN_CANCELLED", "The current turn was stopped."),
+                "session.turn", params,
+            ).details
+            owner.result = {
+                "sessionId": session.session_id, "turnId": owner.turn_id,
+                **({key: response[key] for key in ("state", "accepted", "persisted")}
+                   if response is not None else lifecycle),
+            }
+            if owner.result["state"] == "pending":
+                owner.error = DesktopServiceError(
+                    "INTERNAL_ERROR", "The turn has not reached a saved terminal state.",
+                    details=lifecycle,
+                )
+            self._complete_pending_approval(False)
+            if installer is not None:
+                installer.bypass_approval = False
+            if self._active_document_context is not None:
+                session._document_turn_active = False
+                session.set_thinking_mode(previous_mode)
+            self._active_document_context = None
+            self._active_references = []
+            self._active_editor_path = None
+            self._active_turn_permission_mode = None
+            self._active_parent_request_id = None
+            self._active_turn_id = None
+            self._turn_loop = None
+            self._turn_event_sink = None
+            self._tool_names = {}
+            self._tool_summaries = {}
+            self._turn_active = owner.error is not None
+
+            if not owner.done.done():
+                owner.done.set_result(None)
+        if failure is not None:
+            raise failure
+        return response
+
+    async def _run_session_turn(
+        self, params: dict[str, Any], event_sink: EventSink | None, session: ChatSession,
+        owner: _TurnWork,
+    ) -> dict[str, Any]:
         self._turn_event_sink = event_sink
         self._tool_names = {}
         self._tool_summaries = {}
@@ -2311,12 +2453,8 @@ class DesktopService:
             parent_request_id if isinstance(parent_request_id, str) else None
         )
         self._active_turn_id = turn_id
-        previous_mode = session.thinking_mode
         self._active_turn_permission_mode = self._bash_permission_mode
-        installer = getattr(session, "_skill_installer", None)
-        if installer is not None:
-            installer.bypass_approval = self._active_turn_permission_mode == "bypass"
-        try:
+        with owner.scope.bind():
             submitted_context, original_turn = await self._submitted_turn_context(session, params)
             if submitted_context is not None:
                 params = {**params, "skillReferences": submitted_context["skillReferences"]}
@@ -2355,7 +2493,7 @@ class DesktopService:
                     )
                 completed_citation = False
                 if command.name == "citation":
-                    snapshot = await asyncio.to_thread(
+                    snapshot = await run_local_work(
                         self._conversation_repository.load_optional, session.session_id,
                     )
                     completed_citation = snapshot is not None and any(
@@ -2613,24 +2751,43 @@ class DesktopService:
                 "registrationStatus": registration_status,
                 "registrationIssue": registration_issue,
             }
-        finally:
+
+    def _request_turn_stop(self, owner: _TurnWork) -> None:
+        owner.stopping = True
+        owner.scope.request_stop()
+        for candidate in self._document_candidates.values():
+            if candidate.turn_id == owner.turn_id and candidate.parent_request_id == owner.parent_request_id:
+                candidate.stopped = True
+        if self._turn_work is owner:
             self._complete_pending_approval(False)
-            if installer is not None:
-                installer.bypass_approval = False
-            if self._active_document_context is not None:
-                session._document_turn_active = False
-                session.set_thinking_mode(previous_mode)
-            self._active_document_context = None
-            self._active_references = []
-            self._active_editor_path = None
-            self._active_turn_permission_mode = None
-            self._active_parent_request_id = None
-            self._active_turn_id = None
-            self._turn_loop = None
-            self._turn_event_sink = None
-            self._tool_names = {}
-            self._tool_summaries = {}
-            self._turn_active = False
+
+    async def _finish_turn_work(self, owner: _TurnWork) -> None:
+        self._complete_pending_approval(False)
+        if owner.document_tasks:
+            await asyncio.gather(*tuple(owner.document_tasks), return_exceptions=True)
+        await owner.scope.finish_stop()
+
+    async def _session_stop(
+        self, params: dict[str, Any], _event_sink: EventSink | None,
+    ) -> dict[str, Any]:
+        def matches(owner: _TurnWork | None) -> bool:
+            return owner is not None and (
+                owner.session_id == params["sessionId"]
+                and owner.turn_id == params["turnId"]
+                and owner.parent_request_id == params["parentRequestId"]
+            )
+
+        owner = self._turn_work if matches(self._turn_work) else self._last_stopped_turn
+        if not matches(owner):
+            raise DesktopServiceError("PROTOCOL_INVALID", "Stop does not match the owning turn request.")
+        self._last_stopped_turn = owner
+        if not owner.done.done() and not owner.stopping:
+            self._request_turn_stop(owner)
+            owner.task.cancel()
+        await asyncio.shield(owner.done)
+        if owner.error is not None:
+            raise owner.error
+        return dict(owner.result)
 
     async def _session_set_thinking(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -3124,7 +3281,7 @@ class DesktopService:
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
         session = self.session
-        status = await asyncio.to_thread(
+        status = await run_local_work(
             self._extension_manager.status,
             running_revision=(session.running_extension_revision if session else 0),
             running_mcp_families=(
@@ -3305,6 +3462,11 @@ class DesktopService:
             return False
         if self._active_turn_permission_mode == "bypass":
             return True
+        scope = current_local_work()
+        if scope is not None:
+            return scope.run_async(lambda: self._stage_bash_approval(
+                command, description, execution_timeout_seconds,
+            ))
         staged = asyncio.run_coroutine_threadsafe(
             self._stage_bash_approval(
                 command,
@@ -3352,6 +3514,9 @@ class DesktopService:
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
         pending = self._pending_approval
+        if self._turn_work is not None and self._turn_active and self._turn_work.stopping:
+            self._complete_pending_approval(False)
+            raise DesktopServiceError("APPROVAL_DENIED", "The owning turn is stopping.")
         if pending is None or params["approvalId"] != pending.approval_id:
             raise DesktopServiceError(
                 "APPROVAL_DENIED",

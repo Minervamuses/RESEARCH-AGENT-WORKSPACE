@@ -1,6 +1,8 @@
 """Document edits cross the real session graph and desktop approval boundary."""
 
 import asyncio
+import io
+import threading
 import json
 import tempfile
 import uuid
@@ -265,3 +267,198 @@ def test_isolated_desktop_fixture_calls_real_document_coordinator():
 
     with tempfile.TemporaryDirectory(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp") as directory:
         asyncio.run(run(Path(directory)))
+
+
+def test_stop_model_wait_has_one_terminal_retains_user_and_allows_next_turn(tmp_path, monkeypatch):
+    from agent.desktop.server import DesktopServer, ProtocolWriter, RequestContext
+
+    async def run():
+        service, model, _path, _context = await _setup(tmp_path, monkeypatch)
+        entered = asyncio.Event()
+        cleaned = asyncio.Event()
+        original = model.ainvoke
+
+        async def wait_model(messages):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                cleaned.set()
+
+        model.ainvoke = wait_model
+        output = io.StringIO()
+        writer = ProtocolWriter(output)
+        writer.start()
+        server = DesktopServer(service, writer)
+        turn_id = uuid.uuid4().hex
+        parent_id, stop_id = str(uuid.uuid4()), str(uuid.uuid4())
+        params = {"text": "分析等待", "turnId": turn_id, "retry": False}
+        task = asyncio.create_task(server._handle_request(
+            RequestContext(parent_id, "session.turn", writer), params,
+        ))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            stop_params = {
+                "sessionId": service.session.session_id, "turnId": turn_id,
+                "parentRequestId": parent_id,
+            }
+            with pytest.raises(DesktopServiceError):
+                await service.dispatch("session.stop", {**stop_params, "parentRequestId": str(uuid.uuid4())})
+            assert not task.done()
+            await server._handle_request(RequestContext(stop_id, "session.stop", writer), stop_params)
+            await task
+            assert cleaned.is_set()
+            replay = await service.dispatch("session.stop", stop_params)
+            assert replay["state"] == "interrupted"
+            saved = service._conversation_repository.load(service.session.session_id).document.turns[-1]
+            assert saved.display_input == "分析等待"
+            assert saved.state == "interrupted"
+            model.ainvoke = original
+            result = await service.dispatch("session.turn", {
+                "text": "分析下一題", "turnId": uuid.uuid4().hex, "retry": False,
+            })
+            assert result["state"] == "completed"
+            assert (await service.dispatch("session.stop", stop_params)) == replay
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await writer.stop()
+        messages = [json.loads(line) for line in output.getvalue().splitlines()]
+        turn_results = [m for m in messages if m.get("requestId") == parent_id and m["messageType"] == "result"]
+        stop_results = [m for m in messages if m.get("requestId") == stop_id and m["messageType"] == "result"]
+        assert len(turn_results) == len(stop_results) == 1
+        assert turn_results[0]["error"]["code"] == "TURN_CANCELLED"
+        assert turn_results[0]["error"]["details"]["state"] == "interrupted"
+        assert stop_results[0]["data"]["state"] == "interrupted"
+
+    asyncio.run(run())
+
+
+def test_stop_pending_approval_rejects_late_approval_and_apply_after_next_turn(tmp_path, monkeypatch):
+    async def run():
+        service, _model, path, context = await _setup(tmp_path, monkeypatch)
+        original = path.read_bytes()
+        pending = asyncio.Event()
+
+        class WaitingSink(_Sink):
+            def __call__(self, event, data):
+                if event == "approval.required":
+                    self.events.append((event, data))
+                    pending.set()
+                else:
+                    super().__call__(event, data)
+
+        sink = WaitingSink(service, context)
+        turn_id = uuid.uuid4().hex
+        task = asyncio.create_task(service.dispatch("session.turn", {
+            "text": "改寫稿件", "turnId": turn_id, "retry": False, "documentContext": context,
+        }, event_sink=sink))
+        await asyncio.wait_for(pending.wait(), 2)
+        approval = next(data for event, data in sink.events if event == "approval.required")
+        proposed = next(data for event, data in sink.events if event == "document.proposed")
+        stopped = await service.dispatch("session.stop", {
+            "sessionId": service.session.session_id, "turnId": turn_id, "parentRequestId": sink.request_id,
+        })
+        with pytest.raises(DesktopServiceError) as error:
+            await task
+        assert error.value.code == "TURN_CANCELLED"
+        await asyncio.gather(*sink.tasks, return_exceptions=True)
+        assert stopped["state"] == "interrupted"
+        with pytest.raises(DesktopServiceError) as denied:
+            await service.dispatch("approval.resolve", {
+                "approvalId": approval["approvalId"], "parentRequestId": sink.request_id,
+                "turnId": turn_id, "approved": True,
+            })
+        assert denied.value.code == "APPROVAL_DENIED"
+        await service.dispatch("session.turn", {"text": "分析下一題", "turnId": uuid.uuid4().hex, "retry": False})
+        with pytest.raises(DesktopServiceError, match="stopped"):
+            await service.dispatch("document.apply", {
+                "documentContext": context, "turnId": turn_id,
+                "callId": proposed["callId"], "parentRequestId": sink.request_id,
+            }, event_sink=sink)
+        assert path.read_bytes() == original
+
+    asyncio.run(run())
+
+
+def test_stop_waits_started_document_save_and_preserves_saved_effect(tmp_path, monkeypatch):
+    async def run():
+        service, model, path, context = await _setup(tmp_path, monkeypatch)
+        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        entered, release = threading.Event(), threading.Event()
+        original_apply = service._documents.apply
+
+        def slow_save(*args, **kwargs):
+            entered.set()
+            assert release.wait(2), "test must release the started document write"
+            return original_apply(*args, **kwargs)
+
+        monkeypatch.setattr(service._documents, "apply", slow_save)
+        sink = _Sink(service, context)
+        turn_id = uuid.uuid4().hex
+        task = asyncio.create_task(service.dispatch("session.turn", {
+            "text": "改寫稿件", "turnId": turn_id, "retry": False, "documentContext": context,
+        }, event_sink=sink))
+        try:
+            async with asyncio.timeout(2):
+                while not entered.is_set():
+                    await asyncio.sleep(0.001)
+            stop = asyncio.create_task(service.dispatch("session.stop", {
+                "sessionId": service.session.session_id, "turnId": turn_id, "parentRequestId": sink.request_id,
+            }))
+            await asyncio.sleep(0.01)
+            assert not stop.done() and service._turn_active
+            release.set()
+            assert (await stop)["state"] == "interrupted"
+            with pytest.raises(DesktopServiceError) as error:
+                await task
+            assert error.value.code == "TURN_CANCELLED"
+            await asyncio.gather(*sink.tasks)
+            assert sink.results[0]["status"] == "saved"
+            assert path.read_text() == model.replacement
+            assert not service._turn_active
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, *sink.tasks, return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_failed_stop_cleanup_keeps_new_turn_blocked(tmp_path, monkeypatch):
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        entered = asyncio.Event()
+
+        async def waiting(_messages):
+            entered.set()
+            await asyncio.Event().wait()
+
+        model.ainvoke = waiting
+        sink = _Sink(service, context)
+        turn_id = uuid.uuid4().hex
+        task = asyncio.create_task(service.dispatch("session.turn", {
+            "text": "分析等待", "turnId": turn_id, "retry": False,
+        }, event_sink=sink))
+        await asyncio.wait_for(entered.wait(), 2)
+
+        async def failed_cleanup():
+            raise RuntimeError("fixture local work did not finish")
+
+        monkeypatch.setattr(service._turn_work.scope, "finish_stop", failed_cleanup)
+        with pytest.raises(DesktopServiceError) as failed:
+            await service.dispatch("session.stop", {
+                "sessionId": service.session.session_id, "turnId": turn_id, "parentRequestId": sink.request_id,
+            })
+        assert failed.value.code == "INTERNAL_ERROR"
+        with pytest.raises(DesktopServiceError):
+            await task
+        assert service._turn_active
+        with pytest.raises(DesktopServiceError) as busy:
+            await service.dispatch("session.turn", {"text": "分析下一題", "turnId": uuid.uuid4().hex, "retry": False})
+        assert busy.value.code == "BUSY_TURN"
+
+    asyncio.run(run())

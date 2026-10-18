@@ -509,6 +509,13 @@
       "registrationIssue": {"type": "nullableString", "required": false, "maxBytes": 4096},
       "extensionAction": {"type": "string", "required": false, "enum": ["status", "preview"]}
     },
+    "session.stop": {
+      "sessionId": {"type": "string", "required": true, "maxBytes": 32},
+      "turnId": {"type": "turnId", "required": true},
+      "state": {"type": "nullableString", "required": true, "enum": ["completed", "failed", "interrupted"]},
+      "accepted": {"type": "boolean", "required": true},
+      "persisted": {"type": "boolean", "required": true}
+    },
     "session.shutdown": {
       "status": {"type": "string", "required": true, "enum": ["stopped", "no_session"]}
     },
@@ -884,6 +891,16 @@
       "requiredParams": ["mode"],
       "params": {"mode": {"type": "string", "required": true, "enum": ["ask", "bypass"]}}
     },
+    {
+      "name": "session.stop",
+      "operation": "lifecycle",
+      "requiredParams": ["sessionId", "turnId", "parentRequestId"],
+      "params": {
+        "sessionId": {"type": "string", "required": true, "maxBytes": 32},
+        "turnId": {"type": "turnId", "required": true},
+        "parentRequestId": {"type": "requestId", "required": true}
+      }
+    },
     {"name": "session.shutdown", "operation": "lifecycle", "requiredParams": [], "params": {}},
     {"name": "knowledge.overview", "operation": "read", "requiredParams": [], "params": {}},
     {
@@ -1005,6 +1022,7 @@
     "OLLAMA_MODEL_MISSING",
     "GRAPH_LIMIT_REACHED",
     "BUSY_TURN",
+    "TURN_CANCELLED",
     "BUSY_KNOWLEDGE_MUTATION",
     "BUSY_EXTENSION_OPERATION",
     "INVALID_PATH",

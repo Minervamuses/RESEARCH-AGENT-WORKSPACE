@@ -60,6 +60,7 @@ FIXTURE_CHANGED_ORPHAN_MARKER = ".fixture-changed-orphans"
 FIXTURE_LONG_OUTPUT_MARKER = ".fixture-long-output"
 FIXTURE_RAG_QUESTION = "What does the fixture knowledge say?"
 FIXTURE_DELAYED_FINAL = "[[fixture:delayed-final]]"
+FIXTURE_WAIT_STOP = "[[fixture:wait-stop]]"
 FIXTURE_LONG_FINAL = "[[fixture:long-final]]"
 FIXTURE_FAIL_ONCE = "[[fixture:fail-once]]"
 FIXTURE_BASH_APPROVE = "[[fixture:bash-approve]]"
@@ -1029,6 +1030,8 @@ class FixtureSession:
             self._crash_control.record_effect("provider", turn_id)
             if self._progress_cb is not None:
                 self._progress_cb("fixture.prepare", [])
+            if original_input == FIXTURE_WAIT_STOP:
+                await asyncio.Event().wait()
             if text == "[[fixture:rate-limit]]":
                 raise FixtureProviderError(429)
             if text == "[[fixture:provider-error]]":

@@ -19,6 +19,7 @@ from agent.desktop.fixture_session import (
     FIXTURE_BASH_DENY,
     FIXTURE_CHANGED_ORPHAN_MARKER,
     FIXTURE_DELAYED_FINAL,
+    FIXTURE_WAIT_STOP,
     FIXTURE_FAIL_ONCE,
     FIXTURE_KNOWLEDGE_DIRNAME,
     FIXTURE_LONG_FINAL,
@@ -648,6 +649,41 @@ def test_extended_success_and_scripted_provider_errors_are_bounded(
         "failed",
     ]
     assert all(by_id[turn_id].assistant_output is None for turn_id in failed_turn_ids)
+
+
+def test_stop_fixture_retains_interrupted_prompt_and_allows_next_turn(fixture_root: Path) -> None:
+    service = _service(fixture_root, open_project=True)
+
+    async def run():
+        await service.dispatch("session.select", {
+            "projectId": _project_id(fixture_root), "sessionId": SESSION_A,
+        })
+        ready = asyncio.Event()
+
+        def sink(event, data):
+            if event == "stage.changed" and data["stage"] == "fixture.prepare":
+                ready.set()
+
+        sink.request_id = "00000000-0000-4000-8000-000000004001"
+        params = _turn_params(FIXTURE_WAIT_STOP)
+        turn_task = asyncio.create_task(service.dispatch("session.turn", params, event_sink=sink))
+        await asyncio.wait_for(ready.wait(), 2)
+        result = await service.dispatch("session.stop", {
+            "sessionId": SESSION_A, "turnId": params["turnId"],
+            "parentRequestId": sink.request_id,
+        })
+        assert result["state"] == "interrupted"
+        assert result["accepted"] is True and result["persisted"] is True
+        with pytest.raises(DesktopServiceError, match="cancel|stop") as error:
+            await turn_task
+        assert error.value.code == "TURN_CANCELLED"
+        snapshot = ConversationRepository(_history_root(service)).load(SESSION_A)
+        assert snapshot.document.turns[-1].display_input == FIXTURE_WAIT_STOP
+        assert snapshot.document.turns[-1].state == "interrupted"
+        following = await service.dispatch("session.turn", _turn_params("After Stop"))
+        assert following["state"] == "completed"
+
+    asyncio.run(run())
 
 
 def test_thinking_mode_resets_to_normal_after_service_restart_and_select(

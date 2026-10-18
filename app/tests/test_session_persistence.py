@@ -5,6 +5,7 @@ so no provider, Ollama, Chroma, or user store is involved.
 """
 
 import asyncio
+import threading
 import uuid
 
 import pytest
@@ -391,3 +392,198 @@ def test_latest_ten_pairs_and_current_prompt_appear_exactly_once(
         f"q{number}" for number in range(4, 14)
     ]
     assert session.status_snapshot()["recent_turn_count"] == 10
+
+
+@pytest.mark.parametrize("display_only", [False, True])
+def test_cancelled_pending_save_retains_input_and_finishes_interrupted(
+    monkeypatch, tmp_path, display_only,
+):
+    from agent.ingest import LocalWorkScope
+
+    repository = ConversationRepository(tmp_path)
+    graph = make_astream_graph(answer="next answer")
+    session = _session(
+        monkeypatch, tmp_path, repository=repository, graph=graph, session_id=_id(),
+    )
+    turn_id = _id()
+    entered = threading.Event()
+    release = threading.Event()
+    action_calls = []
+    accepted = []
+    session._set_prompt_persisted_callback(lambda: accepted.append(turn_id))
+    original_create = repository.create
+
+    def held_create(**kwargs):
+        snapshot = original_create(**kwargs)
+        entered.set()
+        assert release.wait(timeout=3)
+        return snapshot
+
+    monkeypatch.setattr(repository, "create", held_create)
+
+    async def action():
+        action_calls.append("ran")
+        return "local result"
+
+    async def run():
+        scope = LocalWorkScope()
+        with scope.bind():
+            work = (
+                session.run_display_only_turn(
+                    "keep this prompt", action, str, turn_id=turn_id,
+                )
+                if display_only
+                else session.turn_outcome("keep this prompt", turn_id=turn_id)
+            )
+            task = asyncio.create_task(work)
+            try:
+                async with asyncio.timeout(3):
+                    while not entered.is_set():
+                        await asyncio.sleep(0.001)
+                task.cancel()
+                await asyncio.sleep(0)
+                task.cancel()
+                await asyncio.sleep(0)
+                assert not task.done(), "accepted save must settle before Stop returns"
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=3)
+                with pytest.raises(asyncio.CancelledError):
+                    scope.check_cancelled()
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+        saved = repository.load(session.session_id).document.turns[-1]
+        assert saved.turn_id == turn_id
+        assert saved.display_input == "keep this prompt"
+        assert saved.state == "interrupted"
+        assert saved.failure.code == "cancelled"
+        assert saved.assistant_output is None
+        assert accepted == [turn_id]
+        assert action_calls == []
+        assert graph.states == []
+        next_outcome = await session.turn_outcome("continue", turn_id=_id())
+        assert next_outcome.state == "completed"
+        assert next_outcome.text == "next answer"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("display_only", [False, True])
+def test_cancelled_completed_save_returns_the_actual_completed_result(
+    monkeypatch, tmp_path, display_only,
+):
+    repository = ConversationRepository(tmp_path)
+    graph = make_astream_graph(answer="saved answer")
+    session = _session(
+        monkeypatch, tmp_path, repository=repository, graph=graph, session_id=_id(),
+    )
+    turn_id = _id()
+    entered = threading.Event()
+    release = threading.Event()
+    original_complete = repository.complete_turn
+    fail_calls = []
+    original_fail = repository.fail_turn
+
+    def held_complete(*args, **kwargs):
+        snapshot = original_complete(*args, **kwargs)
+        entered.set()
+        assert release.wait(timeout=3)
+        return snapshot
+
+    def observed_fail(*args, **kwargs):
+        fail_calls.append(kwargs["state"])
+        return original_fail(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "complete_turn", held_complete)
+    monkeypatch.setattr(repository, "fail_turn", observed_fail)
+
+    async def action():
+        return "saved answer"
+
+    async def run():
+        work = (
+            session.run_display_only_turn(
+                "finish this prompt", action, str, turn_id=turn_id,
+            )
+            if display_only
+            else session.turn_outcome("finish this prompt", turn_id=turn_id)
+        )
+        task = asyncio.create_task(work)
+        try:
+            async with asyncio.timeout(3):
+                while not entered.is_set():
+                    await asyncio.sleep(0.001)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done(), "terminal save must settle before Stop returns"
+            release.set()
+            result = await asyncio.wait_for(task, timeout=3)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        outcome = result[1] if display_only else result
+        assert outcome.state == "completed"
+        assert outcome.text == "saved answer"
+        assert outcome.accepted is True
+        assert outcome.persisted is True
+
+    asyncio.run(run())
+    saved = repository.load(session.session_id).document.turns[-1]
+    assert saved.state == "completed"
+    assert saved.assistant_output == "saved answer"
+    assert session._conversation_snapshot.document.turns[-1] == saved
+    assert fail_calls == []
+
+
+def test_cancellation_waits_for_failure_save_without_starting_another_write(
+    monkeypatch, tmp_path,
+):
+    repository = ConversationRepository(tmp_path)
+    session = _session(
+        monkeypatch, tmp_path, repository=repository, graph=FailingGraph(),
+        session_id=_id(),
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    original_fail = repository.fail_turn
+    fail_calls = []
+
+    def held_fail(*args, **kwargs):
+        fail_calls.append(kwargs["state"])
+        entered.set()
+        assert release.wait(timeout=3)
+        return original_fail(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "fail_turn", held_fail)
+
+    async def run():
+        task = asyncio.create_task(session.turn_outcome("failed work", turn_id=_id()))
+        try:
+            async with asyncio.timeout(3):
+                while not entered.is_set():
+                    await asyncio.sleep(0.001)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            release.set()
+            with pytest.raises(RuntimeError, match="provider unavailable"):
+                await asyncio.wait_for(task, timeout=3)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(run())
+    assert fail_calls == ["failed"]
+    assert repository.load(session.session_id).document.turns[-1].state == "failed"

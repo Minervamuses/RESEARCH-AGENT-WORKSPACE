@@ -20,6 +20,7 @@ export const PROTOCOL_METHODS = [
   "session.turn",
   "session.set_thinking",
   "session.set_bash_permission",
+  "session.stop",
   "session.shutdown",
   "knowledge.overview",
   "knowledge.search",
@@ -77,6 +78,7 @@ export const PROTOCOL_ERROR_CODES = [
   "OLLAMA_MODEL_MISSING",
   "GRAPH_LIMIT_REACHED",
   "BUSY_TURN",
+  "TURN_CANCELLED",
   "BUSY_KNOWLEDGE_MUTATION",
   "BUSY_EXTENSION_OPERATION",
   "INVALID_PATH",
@@ -656,6 +658,13 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     registrationIssue: { type: "nullableString", required: false, maxBytes: 4_096 },
     extensionAction: { type: "string", required: false, enum: ["status", "preview"] },
   },
+  "session.stop": {
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    turnId: { type: "turnId", required: true },
+    state: { type: "nullableString", required: true, enum: ["completed", "failed", "interrupted"] },
+    accepted: { type: "boolean", required: true },
+    persisted: { type: "boolean", required: true },
+  },
   "session.shutdown": {
     status: { type: "string", required: true, enum: ["stopped", "no_session"] },
   },
@@ -939,6 +948,11 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   "session.set_bash_permission": {
     mode: { type: "string", required: true, enum: ["ask", "bypass"] },
   },
+  "session.stop": {
+    sessionId: { type: "string", required: true, maxBytes: 32 },
+    turnId: { type: "turnId", required: true },
+    parentRequestId: { type: "requestId", required: true },
+  },
   "session.shutdown": {},
   "knowledge.overview": {},
   "knowledge.search": {
@@ -1018,6 +1032,14 @@ export interface ProtocolErrorDto {
 export interface TurnLifecycleDetailsDto {
   turnId: string;
   state: "pending" | "completed" | "failed" | "interrupted" | null;
+  accepted: boolean;
+  persisted: boolean;
+}
+
+export interface TurnStoppedDto {
+  sessionId: string;
+  turnId: string;
+  state: "completed" | "failed" | "interrupted" | null;
   accepted: boolean;
   persisted: boolean;
 }
@@ -1761,6 +1783,12 @@ export function validateResultData(method: ProtocolMethod, data: JsonObject): vo
   ) {
     invalid(`${method} success must be durably completed`);
   }
+  if (method === "session.stop") {
+    const durable = data.state !== null;
+    if (data.accepted !== durable || data.persisted !== durable) {
+      invalid("session.stop lifecycle must match its durable state");
+    }
+  }
   if (method === "session.transcript") {
     (data.items as JsonObject[]).forEach((item) => {
       const context = item.submittedContext as SubmittedContext | null | undefined;
@@ -2044,6 +2072,7 @@ interface RequestTraceState {
   terminal: boolean;
   method: ProtocolMethod;
   turnId: string | null;
+  sessionId: string | null;
 }
 
 export class ProtocolTraceValidator {
@@ -2059,9 +2088,10 @@ export class ProtocolTraceValidator {
         terminal: false,
         method: message.method,
         turnId:
-          message.method === "session.turn" || message.method === "extensions.apply"
+          message.method === "session.turn" || message.method === "extensions.apply" || message.method === "session.stop"
             ? String(message.params.turnId)
             : null,
+        sessionId: message.method === "session.stop" ? String(message.params.sessionId) : null,
       });
       return;
     }
@@ -2096,7 +2126,10 @@ export class ProtocolTraceValidator {
         if (state.turnId !== null && message.data.turnId !== state.turnId) {
           invalid("data.turnId must match params.turnId");
         }
-      } else if (state.turnId !== null) {
+        if (state.method === "session.stop" && message.data.sessionId !== state.sessionId) {
+          invalid("data.sessionId must match params.sessionId");
+        }
+      } else if (state.method === "session.turn" || state.method === "extensions.apply") {
         const details = parseTurnLifecycleDetails(message.error.details);
         if (details.turnId !== state.turnId) {
           invalid("error.details.turnId must match params.turnId");

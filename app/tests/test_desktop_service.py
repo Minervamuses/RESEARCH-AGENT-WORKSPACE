@@ -902,12 +902,7 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         _turn_params(f"/prune {source}", turn_id=uuid.uuid4().hex),
     ))
 
-    outward_error = (
-        asyncio.CancelledError
-        if failure_type is asyncio.CancelledError
-        else DesktopServiceError
-    )
-    with pytest.raises(outward_error):
+    with pytest.raises(DesktopServiceError):
         asyncio.run(_dispatch_approved(service,
             "session.turn",
             _turn_params(f"/prune {source} --yes", turn_id=apply_id),
@@ -1928,8 +1923,9 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
         await session.turn_started.wait()
 
         turn.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        with pytest.raises(DesktopServiceError) as stopped:
             await turn
+        assert stopped.value.code == "TURN_CANCELLED"
 
         assert service._turn_active is False
         assert session.skill_turn_inputs == [

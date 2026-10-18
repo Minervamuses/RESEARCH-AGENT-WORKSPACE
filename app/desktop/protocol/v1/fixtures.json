@@ -1612,6 +1612,37 @@
         }
       },
       "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-stop-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000072",
+        "method": "session.stop",
+        "params": {
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "parentRequestId": "00000000-0000-4000-8000-000000000071"
+        }
+      }
+    },
+    {
+      "name": "session-stop-rejects-invalid-parent-request",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000072",
+        "method": "session.stop",
+        "params": {
+          "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+          "turnId": "123e4567e89b42d3a456426614174000",
+          "parentRequestId": "not-a-request-id"
+        }
+      }
     }
   ],
   "rawLines": [
@@ -2979,6 +3010,409 @@
           }
         }
       ]
+    },
+    {
+      "name": "session-stop-after-durable-cancellation",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "method": "session.turn",
+          "params": {
+            "text": "Wait for local work.",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": "interrupted",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": "interrupted",
+            "accepted": true,
+            "persisted": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-stop-before-prompt-acceptance",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "method": "session.turn",
+          "params": {
+            "text": "Wait for local work.",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": null,
+              "accepted": false,
+              "persisted": false
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": null,
+            "accepted": false,
+            "persisted": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-stop-completed-race",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": "completed",
+            "accepted": true,
+            "persisted": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-stop-error-keeps-original-request-independent",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "method": "session.turn",
+          "params": {
+            "text": "Wait for local work.",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": false,
+          "error": {
+            "code": "SESSION_NOT_READY",
+            "message": "The turn was stopped.",
+            "retryable": false,
+            "details": {}
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": "interrupted",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "session-stop-rejects-pending-success",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": "pending",
+            "accepted": true,
+            "persisted": true
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-stop-rejects-unpersisted-terminal",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": "interrupted",
+            "accepted": true,
+            "persisted": false
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-stop-rejects-other-session",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "f2ddf2369f994905afa0b85d8cca79b1",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": "interrupted",
+            "accepted": true,
+            "persisted": true
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-stop-rejects-other-turn",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "223e4567e89b42d3a456426614174000",
+            "state": "interrupted",
+            "accepted": true,
+            "persisted": true
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
+    },
+    {
+      "name": "session-stop-does-not-allow-two-turn-terminals",
+      "valid": false,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "method": "session.turn",
+          "params": {
+            "text": "Wait for local work.",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "retry": false
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "method": "session.stop",
+          "params": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "parentRequestId": "00000000-0000-4000-8000-000000000071"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": "interrupted",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000072",
+          "ok": true,
+          "data": {
+            "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
+            "turnId": "123e4567e89b42d3a456426614174000",
+            "state": "interrupted",
+            "accepted": true,
+            "persisted": true
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000071",
+          "ok": false,
+          "error": {
+            "code": "TURN_CANCELLED",
+            "message": "The turn was stopped.",
+            "retryable": false,
+            "details": {
+              "turnId": "123e4567e89b42d3a456426614174000",
+              "state": "interrupted",
+              "accepted": true,
+              "persisted": true
+            }
+          }
+        }
+      ],
+      "errorCode": "PROTOCOL_INVALID"
     }
   ]
 }

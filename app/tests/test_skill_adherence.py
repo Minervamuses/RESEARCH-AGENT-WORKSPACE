@@ -453,6 +453,7 @@ def test_installer_slow_preview_keeps_loop_responsive_and_cancellation_waits_for
                 responsive = not preview_finished.is_set() and not release_preview.is_set()
                 task.cancel()
                 await asyncio.sleep(0)
+                task.cancel()
                 await asyncio.sleep(0)
                 waited_for_worker = not task.done()
         finally:
