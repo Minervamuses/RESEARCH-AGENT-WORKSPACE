@@ -463,6 +463,7 @@ export type InvokeCommand = <T>(
 ) => Promise<T>;
 
 export interface BackendClient {
+  initialize(onStarting: () => void): Promise<BackendSnapshot>;
   start(): Promise<BackendSnapshot>;
   snapshot(): Promise<BackendSnapshot>;
   request(method: ProtocolMethod, params: JsonObject): Promise<JsonObject>;
@@ -512,6 +513,7 @@ export function createBackendClient(options: {
   idFactory?: () => string;
 }): BackendClient {
   const idFactory = options.idFactory ?? (() => globalThis.crypto.randomUUID());
+  let initialization: Promise<BackendSnapshot> | undefined;
 
   async function snapshot(): Promise<BackendSnapshot> {
     try {
@@ -577,6 +579,14 @@ export function createBackendClient(options: {
   }
 
   return {
+    initialize(onStarting) {
+      initialization ??= snapshot().then((current) => {
+        if (current.lifecycle !== "stopped" || current.childRunning) return current;
+        onStarting();
+        return lifecycleCommand("backend_start");
+      });
+      return initialization;
+    },
     start: () => lifecycleCommand("backend_start"),
     snapshot,
     async request(method, params) {

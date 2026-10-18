@@ -38,6 +38,52 @@ const readySnapshot: BackendSnapshot = {
   childRunning: true,
 };
 
+test("initialization starts once, including overlapping and repeated initialization", async () => {
+  const calls: string[] = [];
+  const client = createBackendClient({
+    invoke: async <T>(command: string) => {
+      calls.push(command);
+      return (command === "backend_snapshot" ? stoppedSnapshot : readySnapshot) as T;
+    },
+  });
+  let starting = 0;
+  const initialize = () => client.initialize(() => { starting += 1; });
+  assert.deepEqual(await Promise.all([initialize(), initialize()]), [readySnapshot, readySnapshot]);
+  await initialize();
+  assert.deepEqual(calls, ["backend_snapshot", "backend_start"]);
+  assert.equal(starting, 1);
+});
+
+test("initialization adopts a running backend without starting another child", async () => {
+  for (const lifecycle of ["starting", "ready"] as const) {
+    const current = { ...readySnapshot, lifecycle };
+    const client = createBackendClient({
+      invoke: async <T>(command: string) => {
+        assert.equal(command, "backend_snapshot");
+        return current as T;
+      },
+    });
+    assert.deepEqual(await client.initialize(() => assert.fail("must not start")), current);
+  }
+});
+
+test("failed initialization does not loop and permits explicit retry", async () => {
+  let starts = 0;
+  const client = createBackendClient({
+    invoke: async <T>(command: string) => {
+      if (command === "backend_snapshot") return stoppedSnapshot as T;
+      starts += 1;
+      if (starts === 1) throw new Error("Backend could not start");
+      return readySnapshot as T;
+    },
+  });
+  await assert.rejects(client.initialize(() => {}), /could not start/);
+  await assert.rejects(client.initialize(() => {}), /could not start/);
+  assert.equal(starts, 1);
+  assert.deepEqual(await client.start(), readySnapshot);
+  assert.equal(starts, 2);
+});
+
 const diagnostics: RuntimeDiagnosticsDto = {
   backendState: "ready",
   platform: "linux",
