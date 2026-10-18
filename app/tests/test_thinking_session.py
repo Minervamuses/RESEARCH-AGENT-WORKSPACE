@@ -4,6 +4,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from conftest import QueuedModel
 from conftest import answer_updates as _answer
 from conftest import tool_then_answer_updates as _tool_then_answer
@@ -597,3 +599,52 @@ def test_extended_records_configuration_error(monkeypatch, tmp_path):
 
     assert "thinking_rewrite_model" in answer
     assert factory.calls == []
+
+
+@pytest.mark.parametrize("stage", ["rewrite", "aggregator", "reviewer", "repair"])
+def test_extended_model_wait_cancels_and_persists_interrupted(monkeypatch, tmp_path, stage):
+    class WaitingModel:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.cleaned = asyncio.Event()
+
+        def invoke(self, _messages):
+            raise AssertionError("extended mode must not start a synchronous provider")
+
+        async def ainvoke(self, _messages):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                self.cleaned.set()
+
+    async def run():
+        waiting = WaitingModel()
+        factory = _Factory(scripts={
+            "p1": [_answer("a1")], "p2": [_answer("a2")], "p3": [_answer("a3")],
+            "session-writer": [_answer("Unmarked revised answer")],
+        })
+        models = _default_models()
+        if stage == "repair":
+            models["reviewer"] = QueuedModel([_review_json("revise", [_finding()])])
+        models[stage] = waiting
+        session = _make_session(
+            monkeypatch, tmp_path, factory, models=models,
+            cfg=_cfg(tmp_path, proposer_models=["p1", "p2", "p3"]),
+        )
+        task = asyncio.create_task(session.turn("Keep this user request."))
+        await asyncio.wait_for(waiting.started.wait(), timeout=2)
+        calls_before_cancel = len(factory.calls)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert waiting.cleaned.is_set()
+        assert len(factory.calls) == calls_before_cancel
+        saved = session.conversation_repository.load(session.session_id).document.turns[-1]
+        assert saved.display_input == "Keep this user request."
+        assert saved.state == "interrupted"
+        assert saved.failure.code == "cancelled"
+        assert saved.assistant_output is None
+
+    asyncio.run(run())

@@ -237,6 +237,9 @@ def test_real_session_factory_wires_operation_consent_to_graph_and_fusion(monkey
         def bind_tools(self, _tools):
             return self
 
+        async def ainvoke(self, messages):
+            return self.invoke(messages)
+
         def invoke(self, messages):
             if isinstance(messages[-1], ToolMessage):
                 return AIMessage(content="completed")

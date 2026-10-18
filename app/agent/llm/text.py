@@ -47,7 +47,15 @@ def invoke_text_messages(model, messages: list) -> str:
     Unlike invoke_text, unknown content parts keep their repr and list-joined
     content is not stripped, so multi-part reply boundaries stay intact.
     """
-    response = model.invoke(messages)
+    return _messages_response_text(model.invoke(messages))
+
+
+async def ainvoke_text_messages(model, messages: list) -> str:
+    """Await the model's native async request with the same text normalization."""
+    return _messages_response_text(await model.ainvoke(messages))
+
+
+def _messages_response_text(response) -> str:
     content = getattr(response, "content", response)
     if isinstance(content, list):
         return normalize_content(content, drop_unknown_parts=False)

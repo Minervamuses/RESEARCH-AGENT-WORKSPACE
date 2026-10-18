@@ -227,6 +227,9 @@ class _InstallerScriptModel:
         self.bindings.append([tool.name for tool in tools])
         return self
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         step = next(self.steps)
         if callable(step):

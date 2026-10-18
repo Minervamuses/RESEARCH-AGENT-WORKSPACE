@@ -1,5 +1,6 @@
 """Tests for graph skill state loading."""
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -649,3 +650,54 @@ def test_agent_node_repairs_structured_tool_content(monkeypatch, tmp_path):
     assert final.response_metadata["turn_recovery"] == (
         "repaired:structured_tool_content"
     )
+
+
+@pytest.mark.parametrize("prelude", [
+    None,
+    AIMessage(content=""),
+    AIMessage(content=[{"type": "tool_use", "name": "read_file", "input": {"path": "draft.md"}}]),
+], ids=["initial", "empty-retry", "repair"])
+def test_async_graph_cancels_native_model_wait_and_can_run_again(monkeypatch, tmp_path, prelude):
+    class WaitingModel:
+        def __init__(self):
+            self.prelude = prelude
+            self.started = asyncio.Event()
+            self.cleaned = asyncio.Event()
+            self.waiting = True
+
+        def bind_tools(self, _tools):
+            return self
+
+        def invoke(self, _messages):
+            raise AssertionError("async graph must not start a synchronous provider")
+
+        async def ainvoke(self, _messages):
+            if self.prelude is not None:
+                response, self.prelude = self.prelude, None
+                return response
+            if not self.waiting:
+                return AIMessage(content="Next turn works.")
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                self.cleaned.set()
+
+    async def run():
+        model = WaitingModel()
+        monkeypatch.setattr("agent.graph.get_chat_model", lambda _cfg: model)
+        monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _cfg: [])
+        graph = build_graph(AgentConfig(persist_dir=str(tmp_path)))
+        state = {"messages": [HumanMessage(content="question")]}
+        task = asyncio.create_task(graph.ainvoke(state))
+        await asyncio.wait_for(model.started.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert model.cleaned.is_set()
+        model.waiting = False
+        result = await graph.ainvoke(state)
+        assert result["messages"][-1].content == "Next turn works."
+
+    asyncio.run(run())

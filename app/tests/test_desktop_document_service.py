@@ -28,6 +28,9 @@ class _DocumentModel:
         self.bound_names.append(tuple(tool.name for tool in tools))
         return self
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         self.calls.append(messages)
         if self.fail_before_answer:

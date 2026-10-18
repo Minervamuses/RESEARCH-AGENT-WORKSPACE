@@ -7,7 +7,7 @@
 | P1 | In progress | P1-S1 自動啟動測試／build／實際桌面 ready 通過 | P1-S2 原生整合待實機 | 原生 picker 探測與接入 |
 | P2 | Not started | 現有 selection/references／保存掛點已讀 | P1；T3 event | 依 P2-S1 實作草稿與合成 |
 | P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
-| P4 | Not started | 取消吞掉／同步 bash 缺口已確認 | T3；現行受控工具追查 | P4-S1 有限追 call graph |
+| P4 | In progress | P4-S1a 模型 async 取消、同步入口相容與中斷保存測試通過 | 本地工具收束與 Stop 整合尚未完成 | P4-S1b |
 | P5 | Not started | 保存與索引分工已讀 | P4、T3 title/schema | P5-S1 canonical title |
 | P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
 
@@ -42,3 +42,8 @@
   - Linux Conda app：`cd app/desktop && node --test --experimental-strip-types tests/backend.test.ts`，13 passed；`npm run build` 通過；保留既有大型 bundle 提示，未擴充處理。`git diff --check -- app/desktop/src/App.tsx app/desktop/src/backend.ts app/desktop/tests/backend.test.ts` 通過。
   - 根目錄 `python main.py` 實際啟動，增量 release build 1m06s 成功。Windows Computer Use 觀察 Research Agent (Ubuntu-24.04)：Backend ready、Generation 1／0 pending、專案 chooser 打開，沒有選歷史或研究回合。Linux ps 核對一個 desktop child、一個 `python -m agent.desktop.server`。快速 preparing 過場未截到；其渲染及啟動回呼由程式／測試核對。啟動出現 EGL warning，但畫面正常可見。
   - Scoped commit：`feat(desktop): start the backend automatically [P1-S1]`。下一步 P1-S2。
+- P4-S1a／2026-10-18 — P1-S1 commit `a98d47c`。在 P1 原生視窗探測等待期間，依獨立 P4 路線有限追查可達工作，將 S1 細分為模型 await、本地工作收束、Stop 整合三個可驗證子步驟（詳 phase-04-stop.md）。沒有新增 dependency／module／concurrency model。
+  - `graph.py` 以既有 RunnableLambda 保留 sync invoke 及加入 native async ainvoke；同一本地 generator 共用三個模型請求的 recovery 決策。`llm/text.py`、thinking review/parsers/orchestrator 的 rewrite／aggregate／review／repair 都走 native async，保留同步 helper。相關假模型補上 async stub，production 無同步 fallback。
+  - Linux Conda app／app：`poetry run pytest tests/test_graph_skill_loader.py tests/test_thinking.py tests/test_thinking_session.py -q`：89 passed／0.75s；`poetry run pytest tests/test_citation_e2e.py tests/test_conversation_archive_access.py tests/test_desktop_document_service.py tests/test_policy_tool_node.py tests/test_inline_skills.py tests/test_skill_adherence.py -q`：73 passed／3.06s。7 個必要取消案例涵蓋 main 初次／重試／repair 及 extended 四個模型階段，核對 cleanup、未執行後續、interrupted/cancelled 保存與 main 下一次呼叫。初次新增 repair 測試的工具名錯誤已修正，未改 production 來迎合測試。Scoped whitespace 通過，根代理已審閱 production diff。
+  - 未使用 live provider；Stop protocol/UI、bash、RAG、MCP／文件工作收束尚未完成。Scoped commit：`fix(agent): await cancellable model requests [P4-S1a]`；下一步 P4-S1b。
+- P1-S2 探測／2026-10-18 — 可丟棄 PowerShell STA／Windows Forms probe 已從 WSL 顯示資料夾視窗。Computer Use 無法列出或取得該 PowerShell-hosted 視窗，使用者明確回覆「看得到」，並手動完成測試選取；stdout 成功返回含中文／空白的 WSL UNC 路徑。這不是未顯示或 interop 失敗；先前等待是自動操作工具可見性限制。`wslpath -u` 本機不能直接處理該 UNC，正式接入將採計劃允許的明確 UNC→目前 distro Linux 路徑映射，再 realpath 核對。正式 picker／同檔保存仍待驗證。

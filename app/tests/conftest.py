@@ -33,6 +33,9 @@ class QueuedModel:
         self.calls.append(messages)
         return AIMessage(content=self.outputs.pop(0))
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
 
 def answer_updates(text):
     """One agent update carrying a plain assistant answer."""

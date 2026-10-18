@@ -10,7 +10,7 @@ from typing import Sequence, TypeVar
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
-from agent.llm.text import invoke_text_messages as invoke_text
+from agent.llm.text import ainvoke_text_messages, invoke_text_messages as invoke_text
 from agent.thinking.schemas import (
     FusionAggregateResult,
     RevisedDraft,
@@ -117,17 +117,7 @@ def parse_reviser_output(text: str, *, repair_model=None) -> RevisedDraft:
         try:
             repaired = invoke_text(
                 repair_model,
-                [
-                    SystemMessage(content=(
-                        "Split the following text strictly into two sections marked "
-                        "DRAFT: and REBUTTAL:. Preserve the user's visible draft content. "
-                        "Move internal disagreement or reviewer discussion into REBUTTAL. "
-                        "Return only the two marked sections. "
-                        "Preserve the original content's language verbatim—do not translate. "
-                        "Keep the marker names themselves in English (DRAFT, REBUTTAL)."
-                    )),
-                    HumanMessage(content=text),
-                ],
+                _reviser_repair_messages(text),
             )
             parsed = _parse_marked_reviser_output(repaired)
             if parsed is not None:
@@ -136,6 +126,43 @@ def parse_reviser_output(text: str, *, repair_model=None) -> RevisedDraft:
         except Exception as exc:  # pragma: no cover - logging-only safety path
             logger.warning("reviser output marker repair raised: %s", exc)
 
+    return _reviser_fallback(text)
+
+
+async def aparse_reviser_output(text: str, *, repair_model=None) -> RevisedDraft:
+    """Parse a reviser response, awaiting any repair through the async model."""
+    parsed = _parse_marked_reviser_output(text)
+    if parsed is not None:
+        return parsed
+    if repair_model is not None:
+        try:
+            repaired = await ainvoke_text_messages(
+                repair_model, _reviser_repair_messages(text),
+            )
+            parsed = _parse_marked_reviser_output(repaired)
+            if parsed is not None:
+                return parsed
+            logger.warning("reviser output marker repair failed")
+        except Exception as exc:
+            logger.warning("reviser output marker repair raised: %s", exc)
+    return _reviser_fallback(text)
+
+
+def _reviser_repair_messages(text: str) -> list:
+    return [
+        SystemMessage(content=(
+            "Split the following text strictly into two sections marked "
+            "DRAFT: and REBUTTAL:. Preserve the user's visible draft content. "
+            "Move internal disagreement or reviewer discussion into REBUTTAL. "
+            "Return only the two marked sections. "
+            "Preserve the original content's language verbatim—do not translate. "
+            "Keep the marker names themselves in English (DRAFT, REBUTTAL)."
+        )),
+        HumanMessage(content=text),
+    ]
+
+
+def _reviser_fallback(text: str) -> RevisedDraft:
     stripped = _heuristic_strip_tail(text)
     if stripped is not None:
         return stripped

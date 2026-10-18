@@ -117,7 +117,13 @@ class _SearchSaveModel:
             self.invoked_tool_names.append(names)
             return self.invoke(messages)
 
-        return SimpleNamespace(invoke=invoke)
+        async def ainvoke(messages):
+            return invoke(messages)
+
+        return SimpleNamespace(invoke=invoke, ainvoke=ainvoke)
+
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
 
     def invoke(self, messages):
         self.invocations.append([message.model_copy(deep=True) for message in messages])
@@ -161,6 +167,9 @@ class _DenialAwareModel:
     def bind_tools(self, _tools):
         return self
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         results = _workflow_results(messages)
         if not results:
@@ -188,6 +197,9 @@ class _EmptySearchAwareModel:
     def bind_tools(self, _tools):
         return self
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         results = _workflow_results(messages)
         if not results:
@@ -213,6 +225,9 @@ class _RejectingReceiptModel:
 
     def bind_tools(self, _tools):
         return self
+
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
 
     def invoke(self, messages):
         results = _workflow_results(messages)
@@ -325,6 +340,9 @@ class _SaveReportingModel:
 
     def bind_tools(self, _tools):
         return self
+
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
 
     def invoke(self, messages):
         self.invocations.append([message.model_copy(deep=True) for message in messages])

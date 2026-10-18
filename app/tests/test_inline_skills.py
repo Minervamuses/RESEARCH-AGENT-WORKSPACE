@@ -65,6 +65,9 @@ class _OrderedModel:
         self.bound = tuple(tool.name for tool in tools)
         return self
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         self.calls.append(messages)
         assert set(self.bound) == set(self.session.tool_access_resolution().effective_tools)
@@ -234,6 +237,9 @@ def test_contradictory_instructions_reach_model_and_question_is_returned(tmp_pat
     class Model:
         def bind_tools(self, tools):
             return self
+        async def ainvoke(self, messages):
+            return self.invoke(messages)
+
         def invoke(self, messages):
             content = "\n".join(str(message.content) for message in messages)
             assert "Always use British spelling." in content
@@ -310,6 +316,9 @@ def test_selected_unsaved_claim_reaches_topic_search_abstract_and_final_citation
         def bind_tools(self, tools):
             self.bound = tuple(tool.name for tool in tools)
             return self
+
+        async def ainvoke(self, messages):
+            return self.invoke(messages)
 
         def invoke(self, messages):
             self.calls.append(messages)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 
 from agent.config import AgentConfig
@@ -173,7 +174,8 @@ def build_graph(
             )
         return bound_model_cache[key]
 
-    def agent_node(state: AgentState):
+    def _agent_requests(state: AgentState):
+        """Share response/recovery decisions between sync and async model calls."""
         messages = state["messages"]
         tool_names = _effective_names(state)
         graph_steps_remaining = int(state["remaining_steps"])
@@ -183,7 +185,7 @@ def build_graph(
             *([_GRAPH_LIMIT_FINALIZATION_INSTRUCTION] if force_final else []),
         ]
         invoke_model = model if force_final else _model_for_state(state)
-        response = invoke_model.invoke(prompt_messages)
+        response = yield invoke_model, prompt_messages
         # A truly empty reply is upstream flakiness: retry the identical
         # request instead of entering the recovery ladder, whose no-tool
         # repair stage cannot finish tool work and must never invent it.
@@ -204,7 +206,7 @@ def build_graph(
                 graph_steps_remaining=graph_steps_remaining,
                 messages=messages,
             )
-            response = invoke_model.invoke(prompt_messages)
+            response = yield invoke_model, prompt_messages
         if _is_empty_model_response(response):
             log_model_response(
                 response,
@@ -266,7 +268,7 @@ def build_graph(
                 )
             return {"messages": [response]}
 
-        repaired = model.invoke([*prompt_messages, _REPAIR_INSTRUCTION])
+        repaired = yield model, [*prompt_messages, _REPAIR_INSTRUCTION]
         repaired, repair_dropped = _strip_tool_calls(repaired)
         repair_issue = find_content_tool_protocol_artifact(
             repaired.content,
@@ -313,6 +315,32 @@ def build_graph(
             },
         )]}
 
+    def agent_node(state: AgentState):
+        requests = _agent_requests(state)
+        try:
+            request_model, prompt = next(requests)
+            while True:
+                response = request_model.invoke(prompt)
+                try:
+                    request_model, prompt = requests.send(response)
+                except StopIteration as completed:
+                    return completed.value
+        finally:
+            requests.close()
+
+    async def async_agent_node(state: AgentState):
+        requests = _agent_requests(state)
+        try:
+            request_model, prompt = next(requests)
+            while True:
+                response = await request_model.ainvoke(prompt)
+                try:
+                    request_model, prompt = requests.send(response)
+                except StopIteration as completed:
+                    return completed.value
+        finally:
+            requests.close()
+
     def _tool_error_to_message(exc: Exception) -> str:
         incident, _new = attach_incident(exc)
         logger.error(
@@ -340,7 +368,7 @@ def build_graph(
 
     graph = StateGraph(AgentState)
     graph.add_node("skill_loader", skill_loader_node)
-    graph.add_node("agent", agent_node)
+    graph.add_node("agent", RunnableLambda(agent_node, afunc=async_agent_node))
     graph.add_node("tools", PolicyToolNode(
         tools,
         default_tool_names=default_names,

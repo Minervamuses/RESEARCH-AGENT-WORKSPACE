@@ -28,12 +28,12 @@ from agent.llm.thinking import (
 )
 from agent.skills.runtime import render_tool_availability_block
 from agent.turns.results import GraphTurnResult
-from agent.thinking.parsers import parse_reviser_output
+from agent.thinking.parsers import aparse_reviser_output
 from agent.thinking.review import (
-    aggregate_candidates,
+    aaggregate_candidates,
     render_route_message,
-    review_draft,
-    rewrite_prompt,
+    areview_draft,
+    arewrite_prompt,
     route_review_report,
 )
 from agent.thinking.schemas import (
@@ -443,7 +443,7 @@ class FusionOrchestrator:
 
         if len(successful) >= quorum:
             try:
-                aggregate = aggregate_candidates(
+                aggregate = await aaggregate_candidates(
                     self._get_fusion_aggregator_model(),
                     raw_user_input=user_input,
                     rewritten_prompt=rewritten_prompt,
@@ -526,7 +526,7 @@ class FusionOrchestrator:
         proposer_availability = self._proposer_tool_availability_block()
         reviewer_availability = self._reviewer_tool_availability_block()
         try:
-            rewrite_result = rewrite_prompt(
+            rewrite_result = await arewrite_prompt(
                 rewrite_model,
                 skill_text=prompt_master_skill,
                 user_input=user_input,
@@ -642,7 +642,7 @@ class FusionOrchestrator:
 
         while True:
             try:
-                report = review_draft(
+                report = await areview_draft(
                     reviewer_model,
                     raw_user_input=user_input,
                     rewritten_prompt=rewritten_prompt,
@@ -677,7 +677,7 @@ class FusionOrchestrator:
                     report=report,
                 ),
             )
-            parsed = parse_reviser_output(
+            parsed = await aparse_reviser_output(
                 reviser_result.answer,
                 repair_model=repair_model,
             )

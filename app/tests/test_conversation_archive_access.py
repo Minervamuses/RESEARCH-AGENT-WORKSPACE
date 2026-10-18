@@ -33,6 +33,9 @@ class _ArchiveLookupModel:
         self.bound_tool_names.append([item.name for item in tools])
         return self
 
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
     def invoke(self, messages):
         bash_results = [
             message for message in messages
