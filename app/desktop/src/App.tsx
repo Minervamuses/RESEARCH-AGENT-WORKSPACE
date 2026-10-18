@@ -29,6 +29,7 @@ import {
 } from "./backend.ts";
 import {
   conversationInteractionState,
+  composeTurnText,
   conversationReducer,
   initialConversationState,
   latestRetryableTranscriptTurn,
@@ -70,7 +71,7 @@ import type {
   TurnStoppedDto,
 } from "./protocol.ts";
 import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
-import { DocumentEditor, type DocumentSnapshot } from "./DocumentEditor.tsx";
+import { AnnotationComment, DocumentEditor, type AnnotationControls, type DocumentSnapshot } from "./DocumentEditor.tsx";
 import {
   ApprovalDialog,
   BashPermissionControl,
@@ -320,8 +321,9 @@ export function ComposerFooter({ thinkingMode, permissionMode, controlsDisabled,
   </div>;
 }
 
-function SlashComposer({ draft, references, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, controlsDisabled, turnActive, stopping, onStop, thinkingMode, permissionMode, onThinkingChange, onPermissionChange, turnHint, onChange, onSubmit }: {
+function SlashComposer({ draft, references, annotationControls, onRemoveReference, commands, skills, onSkillPicked, textareaRef, disabled, sendDisabled, controlsDisabled, turnActive, stopping, onStop, thinkingMode, permissionMode, onThinkingChange, onPermissionChange, turnHint, onChange, onSubmit }: {
   references: readonly Reference[]; onRemoveReference: (id: string) => void;
+  annotationControls: AnnotationControls;
   turnActive: boolean; stopping: boolean; onStop: () => void;
   thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode; controlsDisabled: boolean; turnHint?: string;
   onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
@@ -389,7 +391,17 @@ function SlashComposer({ draft, references, onRemoveReference, commands, skills,
     if (!composingRef.current) onSubmit();
   }}>
     <label htmlFor="conversation-draft">Message</label>
-    <ReferenceCards references={references} onRemove={disabled ? undefined : onRemoveReference} />
+    <ReferenceCards references={references.filter((reference) => !annotationControls.annotations.some((item) => item.referenceId === reference.referenceId))}
+      onRemove={disabled ? undefined : onRemoveReference} />
+    {annotationControls.annotations.length > 0 && <div className="annotation-batch" data-reference-exclude>
+      <span>{annotationControls.annotations.length} passage comments</span>
+      {annotationControls.annotations.map((annotation) => <button key={annotation.referenceId} type="button" disabled={disabled}
+        title={annotation.comment || "No request yet"} onClick={() => annotationControls.onToggle(annotation.referenceId, true)}>
+        {annotation.number}{annotation.comment.trim() === "" ? " · empty" : ""}
+      </button>)}
+      {draft.trim() === "" && annotationControls.annotations.every((item) => item.comment.trim() === "") &&
+        <span>Add a comment or a message before sending.</span>}
+    </div>}
     {open && <>
       <SlashCommandList commands={matches} active={active} onSelect={select} inline={inline !== null} />
       <span className="slash-command-status" role="status">{matches.length === 0 ? (inline !== null ? "No matching Skill. Unselected @ text is sent literally." : "No matching commands") : `${matches.length} ${inline !== null ? "Skills" : "commands"} · ↑↓ to move · Enter to insert · Esc to close`}</span>
@@ -636,7 +648,7 @@ function RestoredToolActivity({ activity }: {
   );
 }
 
-export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessionId }: { turn: TranscriptTurnDto; projectId?: string; sessionId?: string }) {
+export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessionId, annotationControls }: { turn: TranscriptTurnDto; projectId?: string; sessionId?: string; annotationControls?: AnnotationControls }) {
   const source = projectId === undefined || sessionId === undefined ? undefined : { projectId, sessionId, turnId: turn.turnId };
   const displayOnly = turn.kind === "display-only";
   return (
@@ -645,7 +657,7 @@ export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessio
         <p className="message-label">
           You · restored turn {turn.turnNumber}{displayOnly ? " · display-only" : ""}
         </p>
-        <MessageBody text={turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} />
+        <MessageBody text={turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} annotationControls={annotationControls} />
         <ReferenceCards references={turn.submittedContext?.references ?? []} />
       </div>
       {turn.toolActivities.map((activity, index) => (
@@ -659,7 +671,7 @@ export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessio
           <p className="message-label">
             {displayOnly ? "Local command output · restored · display-only" : "Assistant · restored"}
           </p>
-          <MessageBody text={turn.assistantText} source={displayOnly || source === undefined ? undefined : { ...source, role: "assistant" }} />
+          <MessageBody text={turn.assistantText} source={displayOnly || source === undefined ? undefined : { ...source, role: "assistant" }} annotationControls={annotationControls} />
         </div>
       ) : turn.state === "pending" ? (
         <div className="message system-message">
@@ -678,21 +690,21 @@ export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessio
   );
 });
 
-export const ConversationTurns = memo(function ConversationTurns({ turns, projectId }: { turns: readonly VisibleConversationTurn[]; projectId?: string }) {
+export const ConversationTurns = memo(function ConversationTurns({ turns, projectId, annotationControls }: { turns: readonly VisibleConversationTurn[]; projectId?: string; annotationControls?: AnnotationControls }) {
   return turns.map((item) => {
     const source = projectId === undefined ? undefined : { projectId, sessionId: item.sessionId, turnId: item.turnId };
     if (item.source === "restored") {
-      return <RestoredTurn turn={item.turn} projectId={projectId} sessionId={item.sessionId} key={item.key} />;
+      return <RestoredTurn turn={item.turn} projectId={projectId} sessionId={item.sessionId} annotationControls={annotationControls} key={item.key} />;
     }
     if (item.source === "live") {
       return <article className="turn-group" key={item.key}>
         <div className="message user-message"><p className="message-label">You</p>
-          <MessageBody text={item.turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} />
+          <MessageBody text={item.turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} annotationControls={annotationControls} />
           <ReferenceCards references={item.turn.submittedContext?.references ?? []} />
         </div>
         <div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}>
           <p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p>
-          <MessageBody text={item.turn.assistantText} source={item.turn.responseKind === "command" || source === undefined ? undefined : { ...source, role: "assistant" }} />
+          <MessageBody text={item.turn.assistantText} source={item.turn.responseKind === "command" || source === undefined ? undefined : { ...source, role: "assistant" }} annotationControls={annotationControls} />
         </div>
       </article>;
     }
@@ -800,11 +812,58 @@ export function ReferenceCards({ references, onRemove }: { references: readonly 
   </div>;
 }
 
-function MessageBody({ text, source }: { text: string; source?: { projectId: string; sessionId: string; turnId: string; role: "user" | "assistant" } }) {
-  return <div className="reference-message-body" {...(source === undefined ? {} : {
+function MessageBody({ text, source, annotationControls }: { text: string; source?: { projectId: string; sessionId: string; turnId: string; role: "user" | "assistant" }; annotationControls?: AnnotationControls }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [positions, setPositions] = useState<Record<string, { top: number; left: number }>>({});
+  const references = useMemo(() => annotationControls?.references.filter((reference) => reference.kind === "chat" && source !== undefined &&
+    reference.chat.projectId === source.projectId && reference.chat.sessionId === source.sessionId &&
+    reference.chat.turnId === source.turnId && reference.chat.role === source.role &&
+    annotationControls.annotations.some((item) => item.referenceId === reference.referenceId)) ?? [],
+  [annotationControls?.references, annotationControls?.annotations, source?.projectId, source?.sessionId, source?.turnId, source?.role]);
+  useLayoutEffect(() => {
+    const root = bodyRef.current;
+    if (root === null || references.length === 0) { setPositions({}); return; }
+    const positionMarkers = () => {
+      const bounds = root.getBoundingClientRect();
+      const nodes: { node: Node; start: number; end: number }[] = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const range = visibleMessageRange(root, node, 0, node, node.textContent?.length ?? 0);
+        if (range !== null) nodes.push({ node, start: range.startUtf16, end: range.endUtf16 });
+      }
+      const next: Record<string, { top: number; left: number }> = {};
+      for (const reference of references) {
+        if (reference.kind !== "chat") continue;
+        const end = reference.chat.endUtf16;
+        const last = nodes.find((node) => node.start < end && node.end >= end) ?? nodes.filter((node) => node.end <= end).at(-1);
+        if (last === undefined) continue;
+        const offset = Math.min(end - last.start, last.node.textContent?.length ?? 0);
+        const range = document.createRange();
+        range.setStart(last.node, Math.max(0, offset - 1));
+        range.setEnd(last.node, offset);
+        const rect = range.getBoundingClientRect();
+        next[reference.referenceId] = { top: rect.bottom - bounds.top,
+          left: Math.max(0, Math.min(rect.right - bounds.left, root.clientWidth - 280)) };
+      }
+      setPositions(next);
+    };
+    positionMarkers();
+    const observer = new ResizeObserver(positionMarkers);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [text, references]);
+  return <div ref={bodyRef} className="reference-message-body" {...(source === undefined ? {} : {
     "data-reference-message": "", "data-project-id": source.projectId, "data-session-id": source.sessionId,
     "data-turn-id": source.turnId, "data-message-role": source.role,
-  })}><SafeContent content={text} /></div>;
+  })}><SafeContent content={text} />
+    {annotationControls && references.map((reference) => {
+      const annotation = annotationControls.annotations.find((item) => item.referenceId === reference.referenceId);
+      const position = positions[reference.referenceId];
+      return annotation && position ? <div key={reference.referenceId} className="chat-annotation-anchor" data-reference-exclude style={position}>
+        <AnnotationComment annotation={annotation} controls={annotationControls} />
+      </div> : null;
+    })}
+  </div>;
 }
 
 export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, undoDisabled, onOpen, onSave, onUndo }: {
@@ -1633,9 +1692,8 @@ export default function App() {
     try {
       applyConversation({ type: "reference-added", generation: owner.generation, projectEpoch: owner.projectEpoch, reference: documentReference(snapshot, newLogicalTurnId()) });
       setReferenceIssue(null);
-      focusComposer(owner);
     } catch (error) { setReferenceIssue(error instanceof Error ? error.message : "Could not capture the document selection."); }
-  }, [applyConversation, captureOwner, conversation.backendGeneration, conversation.projectEpoch, conversation.selected, focusComposer]);
+  }, [applyConversation, captureOwner, conversation.backendGeneration, conversation.projectEpoch, conversation.selected]);
 
   const captureChatSelection = useCallback(() => {
     const selection = document.getSelection();
@@ -1683,11 +1741,11 @@ export default function App() {
       } });
       setChatSelection(null);
       setReferenceIssue(null);
-      focusComposer(owner);
+      document.getSelection()?.removeAllRanges();
     } catch (error) {
       if (ownsOperation(owner, workspaceOperation.current)) setReferenceIssue(error instanceof Error ? error.message : "Could not capture the chat selection.");
     } finally { finishWorkspaceOperation(owner); }
-  }, [applyConversation, beginWorkspaceOperation, chatSelection, finishWorkspaceOperation, focusComposer, ownsOperation]);
+  }, [applyConversation, beginWorkspaceOperation, chatSelection, finishWorkspaceOperation, ownsOperation]);
 
   const stopTurn = useCallback(() => {
     const current = conversationRef.current;
@@ -1963,7 +2021,7 @@ export default function App() {
 
   const sendTurn = useCallback(async () => {
     const selected = conversationRef.current.selected;
-    const draft = conversationRef.current.draft;
+    const draft = composeTurnText(conversationRef.current.draft, conversationRef.current.annotations);
     const selectedProject = projectRef.current;
     const session = state.session;
     if (selected === null || selectedProject === null || session === null || draft.trim().length === 0 ||
@@ -2362,6 +2420,15 @@ export default function App() {
   const selectedRegistered = state.session?.registered === true;
   const interaction = conversationInteractionState(conversation);
   const idle = state.activeAction === null && !interaction.turnActive && workspaceBusy === null && !documentBusy && pendingApproval === null;
+  const annotationControls = useMemo<AnnotationControls>(() => ({
+    annotations: conversation.annotations, references: conversation.draftReferences, disabled: !idle || chooserOpen,
+    onChange: (referenceId, comment) => applyConversation({ type: "annotation-changed", referenceId, comment,
+      generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch }),
+    onToggle: (referenceId, expanded) => applyConversation({ type: "annotation-toggled", referenceId, expanded,
+      generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch }),
+    onRemove: (referenceId) => applyConversation({ type: "reference-removed", referenceId,
+      generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch }),
+  }), [applyConversation, conversation.annotations, conversation.draftReferences, conversation.backendGeneration, conversation.projectEpoch, idle, chooserOpen]);
   const canStart = !state.browserPreview && idle && (state.snapshot === null || state.snapshot.lifecycle === "stopped");
   const stopRecovery = conversation.stopRequest?.status === "failed" && conversation.activeTurn === null &&
     state.activeAction === null && workspaceBusy === null && !documentBusy && pendingApproval === null;
@@ -2441,7 +2508,7 @@ export default function App() {
               onUndo={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })}
             />
             {documentNotice !== null && <p className="document-error" role="status">{documentNotice}</p>}
-            <DocumentEditor value={documentValue} onChange={updateDocument} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
+            <DocumentEditor value={documentValue} onChange={updateDocument} annotationControls={annotationControls} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
             {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
               <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
               <p>Keeping the editor or cancelling leaves disk unchanged. Using the candidate replaces this file after checking its version again.</p>
@@ -2488,7 +2555,7 @@ export default function App() {
           {selectionPreview !== null && <section className="conversation-surface" aria-label="Saved conversation preview" aria-busy="true">
             <p className="control-state" role="status">Preparing this conversation… You can read the saved messages while it loads.</p>
             <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
-              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} />
+              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} annotationControls={annotationControls} />
               <div ref={transcriptEndRef} />
             </div>
           </section>}
@@ -2497,7 +2564,7 @@ export default function App() {
               {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
               {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
               {visibleTurns.length === 0 && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Enter sends. Shift+Enter adds a new line.</p></div>}
-              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} />
+              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} annotationControls={annotationControls} />
               <div ref={transcriptEndRef} />
             </div>
             {(conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null || referenceIssue !== null) && <div className="composer-notices">
@@ -2512,6 +2579,7 @@ export default function App() {
               key={`${state.snapshot?.generation}:${conversation.selected?.projectId}:${conversation.selected?.sessionId}`}
               draft={conversation.draft} textareaRef={composerRef}
               references={conversation.draftReferences}
+              annotationControls={annotationControls}
               thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.bashPermissionMode}
               turnActive={interaction.turnActive} stopping={stopping} onStop={stopTurn}
               controlsDisabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
@@ -2580,7 +2648,7 @@ export default function App() {
       </div>}
       {chatSelection !== null && renderConversation && idle && !chooserOpen && <button type="button" className="chat-reference-action"
         style={{ position: "fixed", top: chatSelection.top, left: chatSelection.left }}
-        onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Add selected text to chat</button>}
+        onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Comment on selection</button>}
       {pendingApproval !== null && <ApprovalDialog
         approval={pendingApproval}
         resolving={approvalResolving || conversation.stopRequest !== null}

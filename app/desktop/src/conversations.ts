@@ -118,12 +118,21 @@ export interface ConversationFailure extends ConversationSelection {
   turnLifecycle: TurnLifecycleDetailsDto | null;
 }
 
+export interface DraftAnnotation {
+  referenceId: string;
+  number: number;
+  comment: string;
+  expanded: boolean;
+}
+
 export interface ConversationState {
   backendGeneration: number;
   projectEpoch: number;
   selected: ConversationSelection | null;
   draft: string;
   draftReferences: Reference[];
+  annotations: DraftAnnotation[];
+  nextAnnotationNumber: number;
   submittedContext: SubmittedContext | null;
   activeTurn: ActiveConversationTurn | null;
   stopRequest: ConversationStop | null;
@@ -138,6 +147,8 @@ export type ConversationAction = (
   | { type: "draft-changed"; draft: string }
   | { type: "reference-added"; reference: Reference; generation?: number }
   | { type: "reference-removed"; referenceId: string; generation?: number }
+  | { type: "annotation-changed"; referenceId: string; comment: string; generation: number }
+  | { type: "annotation-toggled"; referenceId: string; expanded: boolean; generation: number }
   | { type: "new-turn-requested"; generation?: number }
   | { type: "stop-requested"; generation: number }
   | ({ type: "stop-succeeded"; generation: number; requestId: string; turnId: string } & ConversationSelection)
@@ -212,6 +223,8 @@ export const initialConversationState: ConversationState = {
   selected: null,
   draft: "",
   draftReferences: [],
+  annotations: [],
+  nextAnnotationNumber: 1,
   submittedContext: null,
   activeTurn: null,
   stopRequest: null,
@@ -430,6 +443,8 @@ function finalizeTurn(
     ...state,
     draft: "",
     draftReferences: [],
+    annotations: [],
+    nextAnnotationNumber: 1,
     activeTurn: null,
     stopRequest: state.stopRequest?.status === "confirmed" ? null : state.stopRequest,
     latestAnswer: {
@@ -492,6 +507,8 @@ export function conversationReducer(
     return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch,
       draft: action.preserveDraft ? state.draft : "",
       draftReferences: action.preserveDraft ? state.draftReferences : [],
+      annotations: action.preserveDraft ? state.annotations : [],
+      nextAnnotationNumber: action.preserveDraft ? state.nextAnnotationNumber : 1,
       submittedContext: action.preserveDraft ? state.submittedContext : null };
   }
   if (action.type === "conversation-selected") {
@@ -506,21 +523,34 @@ export function conversationReducer(
       ...state,
       draft: action.preserveDraft || sameSelection(state.selected, action) ? state.draft : "",
       draftReferences: action.preserveDraft || sameSelection(state.selected, action) ? state.draftReferences : [],
+      annotations: action.preserveDraft || sameSelection(state.selected, action) ? state.annotations : [],
+      nextAnnotationNumber: action.preserveDraft || sameSelection(state.selected, action) ? state.nextAnnotationNumber : 1,
       submittedContext: action.preserveDraft || sameSelection(state.selected, action) ? state.submittedContext : null,
       selected: { projectId: action.projectId, sessionId: action.sessionId },
       latestAnswer: null,
       failure: null,
     };
   }
-  if ((action.type === "reference-added" || action.type === "reference-removed" || action.type === "new-turn-requested") &&
+  if ((action.type === "reference-added" || action.type === "reference-removed" || action.type === "annotation-changed" || action.type === "annotation-toggled" || action.type === "new-turn-requested") &&
       action.generation !== undefined && action.generation !== state.backendGeneration) return state;
   if (action.type === "reference-added") {
     if (state.activeTurn !== null || state.stopRequest !== null || state.selected === null || state.draftReferences.some((item) => item.referenceId === action.reference.referenceId)) return state;
-    return { ...state, draftReferences: [...state.draftReferences, structuredClone(action.reference)], failure: null };
+    return { ...state, draftReferences: [...state.draftReferences, structuredClone(action.reference)],
+      annotations: [...state.annotations.map((item) => ({ ...item, expanded: false })), {
+        referenceId: action.reference.referenceId, number: state.nextAnnotationNumber, comment: "", expanded: true,
+      }], nextAnnotationNumber: state.nextAnnotationNumber + 1, failure: null };
   }
   if (action.type === "reference-removed") {
     if (state.activeTurn !== null || state.stopRequest !== null) return state;
-    return { ...state, draftReferences: state.draftReferences.filter((item) => item.referenceId !== action.referenceId), failure: null };
+    return { ...state, draftReferences: state.draftReferences.filter((item) => item.referenceId !== action.referenceId),
+      annotations: state.annotations.filter((item) => item.referenceId !== action.referenceId), failure: null };
+  }
+  if (action.type === "annotation-changed" || action.type === "annotation-toggled") {
+    if (state.activeTurn !== null || state.stopRequest !== null) return state;
+    return { ...state, annotations: state.annotations.map((item) => item.referenceId !== action.referenceId
+      ? action.type === "annotation-toggled" && action.expanded ? { ...item, expanded: false } : item
+      : action.type === "annotation-changed" ? { ...item, comment: action.comment } : { ...item, expanded: action.expanded }),
+      failure: action.type === "annotation-changed" ? null : state.failure };
   }
   if (action.type === "new-turn-requested") return state.activeTurn === null && state.stopRequest === null ? { ...state, failure: null } : state;
   if (action.type === "draft-changed") {
@@ -586,6 +616,8 @@ export function conversationReducer(
       stopRequest: state.stopRequest?.status === "confirmed" ? null : state.stopRequest,
       draft: action.cancelled && turnLifecycle?.accepted ? "" : state.draft,
       draftReferences: action.cancelled && turnLifecycle?.accepted ? [] : state.draftReferences,
+      annotations: action.cancelled && turnLifecycle?.accepted ? [] : state.annotations,
+      nextAnnotationNumber: action.cancelled && turnLifecycle?.accepted ? 1 : state.nextAnnotationNumber,
       latestAnswer: null,
       failure: {
         ...(action.cancelled ? { cancelled: true } : {}),
@@ -618,6 +650,8 @@ export function conversationReducer(
       ...state,
       draft: action.userText,
       draftReferences: structuredClone(action.submittedContext?.references ?? []),
+      annotations: [],
+      nextAnnotationNumber: 1,
       submittedContext: structuredClone(action.submittedContext ?? null),
       latestAnswer: null,
       failure: {
@@ -653,6 +687,13 @@ export function nextTurnSubmission(
   return { turnId: idFactory(), retry: false };
 }
 
+export function composeTurnText(draft: string, annotations: readonly DraftAnnotation[]): string {
+  const requests = annotations.filter((item) => item.comment.trim().length > 0)
+    .map((item) => `Reference ${item.referenceId}:\n${item.comment.trim()}`);
+  if (requests.length === 0) return draft;
+  return `${draft.trim().length > 0 ? `Main request:\n${draft}\n\n` : ""}Requests for frozen references:\n\n${requests.join("\n\n")}`;
+}
+
 export function latestRetryableTranscriptTurn(
   items: readonly TranscriptTurnDto[],
 ): (TranscriptTurnDto & {
@@ -685,7 +726,7 @@ export function conversationInteractionState(
   const turnActive = state.activeTurn !== null || state.stopRequest !== null;
   return {
     turnActive,
-    sendDisabled: turnActive || state.selected === null || state.draft.trim().length === 0,
+    sendDisabled: turnActive || state.selected === null || composeTurnText(state.draft, state.annotations).trim().length === 0,
     createDisabled: turnActive,
     selectDisabled: turnActive,
     controlDisabled: turnActive,

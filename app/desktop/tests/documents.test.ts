@@ -1,4 +1,5 @@
-import type { DocumentSnapshot } from "../src/DocumentEditor.tsx";
+import type { AnnotationControls, DocumentSnapshot } from "../src/DocumentEditor.tsx";
+import type { DraftAnnotation } from "../src/conversations.ts";
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
@@ -9,6 +10,9 @@ interface SourceChange {
   text: string;
 }
 interface DocumentHelpers {
+  AnnotationComment: (props: { annotation: DraftAnnotation; controls: AnnotationControls }) => unknown;
+  handleAnnotationKey: (event: { key: string; shiftKey: boolean; isComposing: boolean;
+    preventDefault: () => void; stopPropagation: () => void }, confirm: () => void) => void;
   documentOffsetAt: (source: string, position: Position) => number;
   documentPositionAt: (source: string, offset: number) => Position;
   applyDocumentChanges: (source: string, changes: readonly SourceChange[]) => string;
@@ -102,4 +106,32 @@ test("a selection collapsed during approval omits optional range keys from every
   assert.equal(Object.hasOwn(collapsed, "rangeStartUtf16"), false);
   assert.equal(Object.hasOwn(collapsed, "rangeEndUtf16"), false);
   assert.deepEqual(payload({ ...base, rangeStartUtf16: 4, rangeEndUtf16: 7 }), { ...base, rangeStartUtf16: 4, rangeEndUtf16: 7 });
+});
+
+test("annotation Enter confirms locally while IME and Shift+Enter keep editing", async () => {
+  const { AnnotationComment, handleAnnotationKey } = await loadHelpers();
+  let confirms = 0, prevented = 0, stopped = 0;
+  const event = { key: "Enter", shiftKey: false, isComposing: false,
+    preventDefault: () => { prevented++; }, stopPropagation: () => { stopped++; } };
+  handleAnnotationKey({ ...event, isComposing: true }, () => { confirms++; });
+  handleAnnotationKey({ ...event, shiftKey: true }, () => { confirms++; });
+  assert.equal(confirms, 0);
+  handleAnnotationKey(event, () => { confirms++; });
+  assert.equal(confirms, 1);
+  assert.equal(prevented, 1);
+  assert.equal(stopped, 3, "comment keyboard events never reach the batch composer");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const annotation = { referenceId: "reference", number: 3, comment: "Revise this", expanded: true };
+  const controls = { annotations: [annotation], references: [], disabled: false,
+    onChange: () => {}, onToggle: () => {}, onRemove: () => {} };
+  const open = renderToStaticMarkup(createElement(AnnotationComment, { annotation, controls }));
+  assert.match(open, /data-reference-exclude/);
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /<textarea[^>]*aria-label="Comment 3"[^>]*>Revise this<\/textarea>/);
+  assert.match(open, />Remove<\/button>/);
+  assert.doesNotMatch(open, /type="submit"/);
+  const closed = renderToStaticMarkup(createElement(AnnotationComment, { annotation: { ...annotation, expanded: false }, controls }));
+  assert.match(closed, /aria-expanded="false"/);
+  assert.doesNotMatch(closed, /textarea/);
 });

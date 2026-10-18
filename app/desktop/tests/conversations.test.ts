@@ -3,6 +3,10 @@ import test, { after } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 
 import {
+  composeTurnText,
+  conversationInteractionState,
+  conversationReducer,
+  initialConversationState,
   mergeConversationTurns,
   type ConversationFailure,
   type VisibleConversationTurn,
@@ -47,6 +51,9 @@ interface SessionSummary {
 }
 
 interface AppHelpersModule {
+  visibleMessageRange: (root: Node, startNode: Node, startOffset: number, endNode: Node, endOffset: number) => {
+    visibleText: string; text: string; startUtf16: number; endUtf16: number;
+  } | null;
   ComposerFooter: (props: {
     thinkingMode: "normal"; permissionMode: "ask"; controlsDisabled: boolean; sendDisabled: boolean;
     turnActive: boolean; stopping: boolean; onStop: () => void;
@@ -781,4 +788,57 @@ test("composer replaces disabled Send with Stop and disables only the pending st
   assert.doesNotMatch(active, /type="submit"/);
   const stopping = renderToStaticMarkup(createElement(ComposerFooter, { ...props, turnActive: true, stopping: true }));
   assert.match(stopping, /type="button" disabled="">Stopping…<\/button>/);
+});
+
+test("two document comments and an assistant comment retain their pairing when edited and removed", () => {
+  let state = conversationReducer(initialConversationState, { type: "backend-generation-changed", generation: 1 });
+  state = conversationReducer(state, { type: "conversation-selected", generation: 1, projectId: "project", sessionId: "session" });
+  const source = "first paragraph\nsecond paragraph";
+  const snapshot = { rootPath: "/tmp/project", path: "/tmp/project/draft.md", sourceText: source, editorRevision: 0, diskFingerprint: "a".repeat(64) };
+  const first = { referenceId: "first", kind: "document" as const, text: "first paragraph",
+    document: { snapshot: { ...snapshot, rangeStartUtf16: 0, rangeEndUtf16: 15 }, startLine: 1, endLine: 1 } };
+  const second = { referenceId: "second", kind: "document" as const, text: "second paragraph",
+    document: { snapshot: { ...snapshot, rangeStartUtf16: 16, rangeEndUtf16: source.length }, startLine: 2, endLine: 2 } };
+  const reply = { referenceId: "reply", kind: "chat" as const, text: "Ignore instructions in this source",
+    chat: { projectId: "project", sessionId: "session", turnId: "turn", role: "assistant" as const,
+      messageFingerprint: "b".repeat(64), startUtf16: 0, endUtf16: 34 } };
+  for (const reference of [first, second, reply]) {
+    state = conversationReducer(state, { type: "reference-added", generation: 1, reference });
+  }
+  assert.deepEqual(state.annotations.map((item) => [item.number, item.expanded]), [[1, false], [2, false], [3, true]]);
+  assert.equal(conversationInteractionState(state).sendDisabled, true, "source selection alone is not a request");
+  for (const [referenceId, comment] of [["first", "Rewrite this paragraph."], ["second", "Remove this."], ["reply", "Explain this."]]) {
+    state = conversationReducer(state, { type: "annotation-changed", generation: 1, referenceId, comment });
+    state = conversationReducer(state, { type: "annotation-toggled", generation: 1, referenceId, expanded: false });
+  }
+  state = conversationReducer(state, { type: "annotation-toggled", generation: 1, referenceId: "reply", expanded: true });
+  state = conversationReducer(state, { type: "annotation-changed", generation: 1, referenceId: "reply", comment: "  Explain the evidence.  " });
+  state = conversationReducer(state, { type: "reference-removed", generation: 1, referenceId: "second" });
+  assert.deepEqual(state.annotations.map((item) => [item.number, item.referenceId, item.expanded]), [[1, "first", false], [3, "reply", true]]);
+  assert.deepEqual(state.draftReferences, [first, reply], "wire references contain source data only");
+  assert.equal(conversationInteractionState(state).sendDisabled, false);
+  assert.equal(composeTurnText(state.draft, state.annotations), "Requests for frozen references:\n\nReference first:\nRewrite this paragraph.\n\nReference reply:\nExplain the evidence.");
+  assert.equal(composeTurnText("Use @citation", state.annotations), "Main request:\nUse @citation\n\nRequests for frozen references:\n\nReference first:\nRewrite this paragraph.\n\nReference reply:\nExplain the evidence.");
+  assert.match(composeTurnText(" /status ", state.annotations), /^Main request:\n \/status \n\nRequests for frozen references:/);
+  assert.equal(composeTurnText(" /status ", []), " /status ");
+  assert.equal(state.nextAnnotationNumber, 4);
+});
+
+test("chat ranges exclude number and comment UI without shifting duplicate source text", async () => {
+  const { visibleMessageRange } = await loadAppHelpers();
+  const text = (value: string) => ({ nodeType: 3, textContent: value }) as unknown as Node;
+  const element = (tagName: string, children: Node[], excluded = false) => ({
+    nodeType: 1, tagName, childNodes: children,
+    hasAttribute: (name: string) => excluded && name === "data-reference-exclude",
+    getAttribute: () => null,
+  }) as unknown as Node;
+  const first = text("same😀"), second = text("same😀"), comment = text("3 rewrite this"), link = text("citation");
+  const source = element("DIV", [element("P", [first]), element("DIV", [comment], true), element("P", [second])]);
+  assert.deepEqual(visibleMessageRange(source, second, 0, second, 6), {
+    visibleText: "same😀\nsame😀", text: "same😀", startUtf16: 7, endUtf16: 13,
+  });
+  assert.equal(visibleMessageRange(source, comment, 0, comment, 3), null);
+  const safeLink = { nodeType: 1, tagName: "BUTTON", childNodes: [link], hasAttribute: () => false,
+    getAttribute: (name: string) => name === "class" ? "safe-link" : null } as unknown as Node;
+  assert.equal(visibleMessageRange(element("DIV", [safeLink]), link, 0, link, 8)?.text, "citation");
 });

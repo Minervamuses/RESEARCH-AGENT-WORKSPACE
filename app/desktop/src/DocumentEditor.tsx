@@ -1,5 +1,54 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { editor, IPosition, IRange } from "monaco-editor/editor/editor.api";
+import type { DraftAnnotation } from "./conversations.ts";
+import type { Reference } from "./protocol.ts";
+
+export interface AnnotationControls {
+  annotations: readonly DraftAnnotation[];
+  references: readonly Reference[];
+  disabled: boolean;
+  onChange: (referenceId: string, comment: string) => void;
+  onToggle: (referenceId: string, expanded: boolean) => void;
+  onRemove: (referenceId: string) => void;
+}
+
+export function handleAnnotationKey(event: {
+  key: string; shiftKey: boolean; isComposing: boolean;
+  preventDefault: () => void; stopPropagation: () => void;
+}, confirm: () => void): void {
+  event.stopPropagation();
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  confirm();
+}
+
+export function AnnotationComment({ annotation, controls }: { annotation: DraftAnnotation; controls: AnnotationControls }) {
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
+  useEffect(() => { if (annotation.expanded) inputRef.current?.focus(); }, [annotation.expanded]);
+  return <div className="annotation-comment" data-reference-exclude onMouseDown={(event) => event.stopPropagation()}>
+    <button className="annotation-number" type="button" aria-label={`Comment ${annotation.number}`}
+      aria-expanded={annotation.expanded} disabled={controls.disabled}
+      title={annotation.comment || "Add a request for this selection"}
+      onClick={() => controls.onToggle(annotation.referenceId, !annotation.expanded)}>{annotation.number}</button>
+    {annotation.expanded && <div className="annotation-popup">
+      <label>Comment {annotation.number}<textarea ref={inputRef} rows={3} value={annotation.comment} disabled={controls.disabled}
+        aria-label={`Comment ${annotation.number}`} placeholder="What should the agent do with this passage?"
+        onChange={(event) => controls.onChange(annotation.referenceId, event.target.value)}
+        onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }}
+        onKeyDown={(event) => handleAnnotationKey({ key: event.key, shiftKey: event.shiftKey,
+          isComposing: composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229,
+          preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation(),
+        }, () => controls.onToggle(annotation.referenceId, false))} /></label>
+      <div className="annotation-actions">
+        <button type="button" disabled={controls.disabled} onClick={() => controls.onToggle(annotation.referenceId, false)}>Done</button>
+        <button type="button" disabled={controls.disabled} onClick={() => controls.onRemove(annotation.referenceId)}>Remove</button>
+      </div>
+      <p>Enter to confirm · Shift+Enter for a new line</p>
+    </div>}
+  </div>;
+}
 
 export interface DocumentSnapshot {
   rootPath: string;
@@ -16,6 +65,7 @@ interface DocumentEditorProps {
   onChange: (snapshot: DocumentSnapshot) => void;
   onSave: () => void;
   onAddReference?: (snapshot: DocumentSnapshot) => void;
+  annotationControls?: AnnotationControls;
   saveDisabled?: boolean;
 }
 
@@ -78,16 +128,20 @@ function modelSource(source: string): string {
   return source.startsWith("\uFEFF") ? source.slice(1) : source;
 }
 
-export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDisabled = false }: DocumentEditorProps) {
+export function DocumentEditor({ value, onChange, onSave, onAddReference, annotationControls, saveDisabled = false }: DocumentEditorProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const snapshotRef = useRef<DocumentSnapshot | null>(value);
   const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled });
   const refreshReferenceActionRef = useRef<(() => void) | null>(null);
+  const annotationControlsRef = useRef(annotationControls);
+  const refreshAnnotationsRef = useRef<(() => void) | null>(null);
+  const [annotationHosts, setAnnotationHosts] = useState<{ referenceId: string; node: HTMLDivElement }[]>([]);
   const incomingRef = useRef(false);
   const [selectionLabel, setSelectionLabel] = useState("Line 1, column 1");
   const [issue, setIssue] = useState<string | null>(null);
   callbacksRef.current = { onChange, onSave, onAddReference, saveDisabled };
+  annotationControlsRef.current = annotationControls;
 
   useEffect(() => {
     snapshotRef.current = value;
@@ -129,14 +183,17 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDi
       const canAddReference = instance.createContextKey<boolean>("workspaceCanAddReference", false);
       const addSelection = () => {
         const captured = captureDocumentSelection(selectedSnapshot);
-        if (captured) callbacksRef.current.onAddReference?.(captured);
+        if (captured) {
+          callbacksRef.current.onAddReference?.(captured);
+          instance.setPosition(documentPositionAt(captured.sourceText, captured.rangeEndUtf16!));
+        }
       };
       const referenceButton = document.createElement("button");
       referenceButton.type = "button";
       referenceButton.className = "document-reference-action";
-      referenceButton.textContent = "Add to chat";
-      referenceButton.title = "Add selection to chat (Ctrl/Cmd+Alt+Enter)";
-      referenceButton.setAttribute("aria-label", "Add selected document text to chat");
+      referenceButton.textContent = "Add comment";
+      referenceButton.title = "Comment on selection (Ctrl/Cmd+Alt+Enter)";
+      referenceButton.setAttribute("aria-label", "Comment on selected document text");
       referenceButton.setAttribute("aria-keyshortcuts", "Control+Alt+Enter Meta+Alt+Enter");
       referenceButton.addEventListener("click", addSelection);
       const referenceWidget: editor.IContentWidget = {
@@ -149,6 +206,39 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDi
         } : null,
       };
       instance.addContentWidget(referenceWidget);
+      const annotationWidgets = new Map<string, { widget: editor.IContentWidget; node: HTMLDivElement }>();
+      const refreshAnnotations = () => {
+        const controls = annotationControlsRef.current;
+        const references = controls?.references.filter((reference) => reference.kind === "document" &&
+          reference.document.snapshot.path === initial.path && reference.document.snapshot.rootPath === initial.rootPath &&
+          controls.annotations.some((annotation) => annotation.referenceId === reference.referenceId)) ?? [];
+        let changed = false;
+        for (const [id, entry] of annotationWidgets) {
+          if (references.some((reference) => reference.referenceId === id)) continue;
+          instance.removeContentWidget(entry.widget);
+          annotationWidgets.delete(id);
+          changed = true;
+        }
+        for (const reference of references) {
+          if (reference.kind !== "document" || annotationWidgets.has(reference.referenceId)) continue;
+          const node = document.createElement("div");
+          node.className = "document-annotation-widget";
+          const snapshot = reference.document.snapshot;
+          const widget: editor.IContentWidget = {
+            getId: () => `workspace.annotation.${reference.referenceId}`, getDomNode: () => node,
+            allowEditorOverflow: true,
+            getPosition: () => ({ position: documentPositionAt(snapshot.sourceText, snapshot.rangeEndUtf16!),
+              preference: [monaco.editor.ContentWidgetPositionPreference.BELOW, monaco.editor.ContentWidgetPositionPreference.ABOVE] }),
+          };
+          annotationWidgets.set(reference.referenceId, { widget, node });
+          instance.addContentWidget(widget);
+          changed = true;
+        }
+        for (const entry of annotationWidgets.values()) instance.layoutContentWidget(entry.widget);
+        if (changed) setAnnotationHosts(Array.from(annotationWidgets, ([referenceId, { node }]) => ({ referenceId, node })));
+      };
+      refreshAnnotationsRef.current = refreshAnnotations;
+      refreshAnnotations();
       const refreshReferenceAction = () => {
         selectedSnapshot = captureDocumentSelection(snapshotRef.current);
         canAddReference.set(Boolean(selectedSnapshot && callbacksRef.current.onAddReference));
@@ -157,7 +247,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDi
       refreshReferenceActionRef.current = refreshReferenceAction;
       const referenceAction = instance.addAction({
         id: "workspace.document.add-reference",
-        label: "Add selection to chat",
+        label: "Comment on selection",
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter],
         precondition: "workspaceCanAddReference",
         contextMenuGroupId: "9_cutcopypaste",
@@ -208,6 +298,9 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDi
       }
       refreshReferenceAction();
       disposeEditor = () => {
+        if (refreshAnnotationsRef.current === refreshAnnotations) refreshAnnotationsRef.current = null;
+        for (const entry of annotationWidgets.values()) instance.removeContentWidget(entry.widget);
+        setAnnotationHosts([]);
         if (refreshReferenceActionRef.current === refreshReferenceAction) refreshReferenceActionRef.current = null;
         referenceButton.removeEventListener("click", addSelection);
         referenceAction.dispose();
@@ -269,11 +362,17 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, saveDi
     refreshReferenceActionRef.current?.();
   }, [value, onAddReference]);
 
+  useEffect(() => { refreshAnnotationsRef.current?.(); }, [annotationControls, annotationHosts]);
+
   return (
     <div className="document-editor">
       {!value && <p className="document-editor-empty">Choose a research folder and open a Markdown or .tex document.</p>}
       {issue && <p className="error-text" role="alert">Source editor: {issue}</p>}
       <div className="document-editor-surface" ref={surfaceRef} />
+      {annotationControls && annotationHosts.map(({ referenceId, node }) => {
+        const annotation = annotationControls.annotations.find((item) => item.referenceId === referenceId);
+        return annotation ? createPortal(<AnnotationComment annotation={annotation} controls={annotationControls} />, node, referenceId) : null;
+      })}
       {value && <div className="document-editor-status">{selectionLabel} · Source lines · Ctrl/Cmd+S to save</div>}
     </div>
   );

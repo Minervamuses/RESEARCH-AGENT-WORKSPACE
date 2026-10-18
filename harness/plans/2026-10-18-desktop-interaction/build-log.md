@@ -5,7 +5,7 @@
 | 階段 | 狀態 | 已有證據 | 阻礙／條件 | 下一動作 |
 |---|---|---|---|---|
 | P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
-| P2 | Not started | 現有 selection/references／保存掛點已讀；P1 已通過 | S1 尚未開始 | 依 P2-S1 實作草稿與合成 |
+| P2 | In progress | S1 草稿操作、來源／請求分離與實機整批送出通過 | S2 尚未實作 | 以 durable acceptance 清除草稿 |
 | P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
 | P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
 | P5 | Not started | 保存與索引分工已讀；P4 已通過 | S1 尚未開始；T3 已授權 | P5-S1 canonical title |
@@ -71,3 +71,9 @@
   - 第二回合送 `[[fixture:document-replace]] This replacement must be stopped before approval.`，Ask 文件核准顯示目標文件及 Stop；在核准視窗內按 Stop，核准消失、文件保持原內容、保存第二個 interrupted 回合。第三回合 `[[fixture:document-analyze]] Confirm the next turn works.` 正常顯示 assistant complete，Send 恢復，Ask 未改變。
   - Linux Conda app 讀回臨時 canonical JSON：同一 conversation 三個不同 turnId，state 依序 interrupted／interrupted／completed，前兩個 failure.code 為 cancelled，第三個有實際回答；三回合 permissionMode 都為 ask。讀回測試 .md 仍為先前保存文字。桌面 PID 19298／backend PID 19369 全程不變，Generation 1／0 pending，沒有以 Restart 假停止。停止太快，實機截圖未捕捉 Stopping 過場；其即時狀態與雙 terminal 順序已由本步 UI 程式／59 項針對性測試核對。臨時讀回 script 用後移除。
   - 無新增程式修正或重跑已通過 tests；相關 scoped whitespace 通過。Scoped commit：`feat(desktop): expose Stop until the turn settles [P4-S2]`。P4 完成，接續 P2；P5 依賴亦已滿足。
+- P2-S1／2026-10-18 — P4-S2 已提交 `36c35d0`。文件 Monaco 與對話可見來源旁顯示批次數字／留言框；Enter 只確認收合，Shift+Enter 換行，IME composition 不送出；可重開修改及移除。Reference 仍是單一來源，留言／展開／號碼僅在記憶體。整批合成一則 text，引用沿既有 submittedContext；空白主訊息搭配留言可送。後端明確按 referenceId 處理各段要求，Ask／Bypass 與 chat 唯讀不變。
+  - 獨立 review 發現 slash 主訊息搭配留言可能被本地命令丟棄參數；有留言時將主訊息標為 `Main request:` 正文，純 slash 不變。真正 TypeScript 合成結果餵 Python slash parser：純 slash／slash 加留言／只有留言三個分界通過。document popup 使用參與 Monaco 量測的高度，不另建標註模組、儲存或 D1 防誤用機制。
+  - Linux Conda app：desktop `node --test --experimental-strip-types tests/documents.test.ts tests/conversations.test.ts tests/inline_skills.test.ts tests/answer_stream.test.ts`：61 passed；最後 slash 修正後 conversations／inline_skills：33 passed；`npm run build` 通過。app `poetry run pytest tests/test_desktop_document_service.py tests/test_desktop_service.py tests/test_inline_skills.py -q`：106 passed／4.94s；真 graph／fake model 核對請求與引用分區、引文指令不授權，以及 Ask 拒絕與 Bypass 正常保存。Scoped whitespace／LF 通過。
+  - 實機沿既有 phase02 隔離 fixture，以 root `python main.py --dev` 載入已保存對話與測試 .md。兩段文件及一段 assistant 回覆各建立留言；Enter 均只收合。重開第一則修改為 `Explain the evidence in the first passage.`，移除第二則，剩下數字 1／3；主訊息空白，按 Send 一次。UI 變 Stop 後完成，恢復 Send 且標記清除；canonical 同一 conversation 從 3 變 4 回合，第四個 turnId `3203e97b33314a458531e95575955aa6`、completed，只有 document／assistant chat 兩份 references 與對應要求，permissionMode=ask，未修改來源文件。fixture 只作本地回應，無 live provider；模型前立即清除的生命週期仍由 S2 接續。
+  - 開發驗收中曾在 HMR／最大化後出現輸入無反應；首次重啟同一隔離 dev 應用恢復，第二次由使用者還原普通視窗後繼續完成以上操作。未證實根因，未據此改動程式或環境；原生 picker 仍需使用者協助，因 Computer Use 無法取得該 dialog 的 window target。普通視窗完整標註流程已通過。
+  - Scoped commit：`feat(desktop): add passage comment drafts [P2-S1]`。下一步 P2-S2；未改分支／工作樹、依賴、環境或使用者既有檔案。

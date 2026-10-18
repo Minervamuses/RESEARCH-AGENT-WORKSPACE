@@ -1244,3 +1244,18 @@ h3 {
 .reference-retry-settings p { margin: 0 0 0.35rem; }
 .chat-reference-action, .document-reference-action { z-index: 50; padding: 0.45rem 0.65rem; color: #fff; background: #236c55; border: 1px solid #17533f; border-radius: 0.4rem; box-shadow: 0 0.25rem 0.7rem #20382d33; cursor: pointer; font: inherit; font-size: 0.78rem; }
 .chat-reference-action:hover, .document-reference-action:hover { background: #17533f; }
+.reference-message-body { position: relative; }
+.chat-annotation-anchor { position: absolute; z-index: 20; }
+.document-annotation-widget { z-index: 30; }
+.annotation-comment { position: relative; font: 13px/1.45 "Segoe UI", sans-serif; }
+.annotation-number { width: 1.65rem; height: 1.65rem; padding: 0; border: 1px solid #17533f; border-radius: 50%; background: #236c55; color: #fff; font-weight: 700; cursor: pointer; box-shadow: 0 2px 5px #20382d33; }
+.annotation-number[aria-expanded="true"] { background: #174c3b; }
+.annotation-popup { position: absolute; top: 1.9rem; left: 0; z-index: 60; box-sizing: border-box; width: 260px; padding: .65rem; border: 1px solid #a9bdb4; border-radius: .55rem; color: #20382d; background: #fff; box-shadow: 0 .35rem 1rem #20382d33; white-space: normal; }
+.document-annotation-widget .annotation-popup { position: relative; top: auto; margin-top: .25rem; }
+.annotation-popup label { display: grid; gap: .3rem; font-weight: 600; }
+.annotation-popup textarea { box-sizing: border-box; width: 100%; min-height: 4.5rem; padding: .4rem; resize: vertical; font: inherit; line-height: 1.5; color: #20382d; background: #fff; border: 1px solid #a9bdb4; border-radius: .3rem; }
+.annotation-actions { display: flex; gap: .4rem; margin-top: .45rem; }
+.annotation-actions button { padding: .25rem .55rem; font: inherit; cursor: pointer; }
+.annotation-popup p { margin: .45rem 0 0; color: #5c7066; font-size: .7rem; }
+.annotation-batch { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .75rem; color: #466152; }
+.annotation-batch button { padding: .1rem .4rem; border: 1px solid #a9bdb4; border-radius: .35rem; color: #17533f; background: #f1f7f3; }
