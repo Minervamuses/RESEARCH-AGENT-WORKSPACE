@@ -135,3 +135,51 @@ test("annotation Enter confirms locally while IME and Shift+Enter keep editing",
   assert.match(closed, /aria-expanded="false"/);
   assert.doesNotMatch(closed, /textarea/);
 });
+
+test("saved document receipts advance two UTF-16 references without changing the submitted context", async () => {
+  await loadHelpers();
+  const { advanceWorkingDocumentSources, documentOperationContext, documentContextPayload, submittedDocumentSource } = await (await server!).ssrLoadModule("/src/App.tsx");
+  const source = "前言\r\n甲😀段\r\n保留\r\n乙😀段\r\n尾聲";
+  const base = { rootPath: "/tmp/project", path: "/tmp/project/draft.md", sourceText: source, editorRevision: 3, diskFingerprint: "a".repeat(64) };
+  const firstStart = source.indexOf("甲"), firstEnd = firstStart + "甲😀段".length;
+  const secondStart = source.indexOf("乙"), secondEnd = secondStart + "乙😀段".length;
+  const submitted = { documentContext: base, references: [
+    { referenceId: "first", kind: "document", text: "甲😀段", document: { startLine: 2, endLine: 2,
+      snapshot: { ...base, rangeStartUtf16: firstStart, rangeEndUtf16: firstEnd } } },
+    { referenceId: "second", kind: "document", text: "乙😀段", document: { startLine: 4, endLine: 4,
+      snapshot: { ...base, rangeStartUtf16: secondStart, rangeEndUtf16: secondEnd } } },
+  ] };
+  const original = structuredClone(submitted);
+  let working = structuredClone(submitted);
+  const beforeFirst = submittedDocumentSource(working, "first");
+  const replacement = "修改甲😀\r\n新增";
+  const firstSaved = { ...base, status: "saved", sourceText: source.slice(0, firstStart) + replacement + source.slice(firstEnd),
+    editorRevision: 4, diskFingerprint: "b".repeat(64), rangeStartUtf16: firstStart, rangeEndUtf16: firstStart + replacement.length };
+  for (const status of ["conflict", "failed", "cancelled"]) {
+    assert.equal(advanceWorkingDocumentSources(working, beforeFirst, { ...firstSaved, status }), working);
+  }
+  working = advanceWorkingDocumentSources(working, beforeFirst, firstSaved);
+  assert.deepEqual(submitted, original);
+  assert.deepEqual(advanceWorkingDocumentSources(working, beforeFirst, firstSaved), working, "duplicate receipt cannot move a range twice");
+  const beforeSecond = submittedDocumentSource(working, "second");
+  const delta = firstSaved.rangeEndUtf16 - firstEnd;
+  assert.equal(beforeSecond.rangeStartUtf16, secondStart + delta);
+  assert.equal(beforeSecond.rangeEndUtf16, secondEnd + delta);
+  assert.equal(beforeSecond.sourceText.slice(beforeSecond.rangeStartUtf16, beforeSecond.rangeEndUtf16), "乙😀段");
+  assert.equal(beforeSecond.editorRevision, 4);
+  assert.equal(beforeSecond.diskFingerprint, firstSaved.diskFingerprint);
+  const currentEditor = { ...base, ...firstSaved };
+  const applyContext = documentOperationContext(currentEditor, beforeSecond);
+  assert.equal(applyContext.sourceText, firstSaved.sourceText);
+  assert.equal(applyContext.rangeStartUtf16, beforeSecond.rangeStartUtf16, "apply and Ask use the second reference instead of the prior editor selection");
+  assert.equal(documentContextPayload(applyContext).rangeEndUtf16, beforeSecond.rangeEndUtf16);
+  const secondSaved = { ...base, status: "saved", sourceText: firstSaved.sourceText.slice(0, beforeSecond.rangeStartUtf16) + "乙改🙂" + firstSaved.sourceText.slice(beforeSecond.rangeEndUtf16),
+    editorRevision: 5, diskFingerprint: "c".repeat(64), rangeStartUtf16: beforeSecond.rangeStartUtf16,
+    rangeEndUtf16: beforeSecond.rangeStartUtf16 + "乙改🙂".length };
+  working = advanceWorkingDocumentSources(working, beforeSecond, secondSaved);
+  assert.equal(working.documentContext.sourceText, "前言\r\n修改甲😀\r\n新增\r\n保留\r\n乙改🙂\r\n尾聲");
+  assert.equal(working.documentContext.rangeStartUtf16, secondSaved.rangeStartUtf16);
+  assert.equal(working.references[0].document.snapshot.sourceText, secondSaved.sourceText);
+  assert.deepEqual(advanceWorkingDocumentSources(working, beforeFirst, firstSaved), working, "an older saved base cannot roll back the current snapshot");
+  assert.deepEqual(submitted, original);
+});

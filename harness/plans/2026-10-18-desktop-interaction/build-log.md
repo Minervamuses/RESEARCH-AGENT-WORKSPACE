@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | P1 | Complete | S1 自動啟動；S2 正式中文空白 UNC 選取、同檔保存及取消保留狀態均通過 | 無 | P2 可開始 |
 | P2 | Complete | S1 實機整批送出；S2 durable acceptance、拒絕保留及歷史不還原標記通過 | 整體實機流程在 P6 再核對 | P3 可開始 |
-| P3 | Not started | 原 reference snapshot 路徑已確認 | P2 | 驗證兩次 edit 的最小案例 |
+| P3 | Implemented | 真 graph／coordinator 的 Ask、Bypass 兩段保存與前端工作範圍檢查通過 | 整體桌面流程待固定版本驗收 | 隨 P5-S1 啟動時確認實機 |
 | P4 | Complete | S1a–c 後端收束；S2 59 項前端檢查、build、實機等待／核准 Stop 與下一回合通過 | 無 | P5 可開始 |
 | P5 | Not started | 保存與索引分工已讀；P4 已通過 | S1 尚未開始；T3 已授權 | P5-S1 canonical title |
 | P6 | Not started | 根 README 缺失已確認 | P1–P5、實機證據 | 完成後先整體確認再寫 README |
@@ -82,3 +82,8 @@
   - Linux Conda app：`poetry run pytest tests/test_desktop_service.py tests/test_desktop_document_service.py tests/test_desktop_fixture.py tests/test_desktop_server.py tests/test_session_persistence.py -q`：153 passed／8.84s；掛起模型確認 pending 已保存、accepted 已發出且沒有 terminal，Stop 後仍恰有一個 accepted 與 terminal。保存拒絕、retry、catalog／event 獨立失敗及 transcript 讀回分界通過。
   - 協定：`poetry run pytest tests/test_desktop_protocol_contract.py -q`：167 passed；desktop `node --test --experimental-strip-types tests/protocol.test.ts`：161 passed；src-tauri `cargo test --locked protocol::tests -- --nocapture`：12 passed。前端 answer_stream／conversations／inline_skills：56 passed；最後取消 ID 修正後 answer_stream：23 passed；`npm run build`、scoped whitespace 通過。保留既有 LangGraph／bundle warnings，未重跑 full suite 或使用 live provider。
   - 根代理審閱 production diff；S1 dev 應用已正常關閉後才改程式，避免 HMR 影響人工選檔。此步生命週期以既有 fake model、真正保存及 reducer 驗證；整體實機在 P6 核對，不宣稱本步另做新 UI 操作。Scoped commit：`feat(desktop): clear drafts after durable acceptance [P2-S2]`；接續 P3-S1。
+- P3-S1／2026-10-19 — P2-S2 已提交 `706e1dc`。後端沿當前回合的 reference deepcopy 更新可寫來源，saved 回執在解鎖下一個工具呼叫前更新 source／revision／fingerprint 及 UTF-16 範圍；原訊息與候選原基準保持不變。重複 receipt 只接受吻合舊基準的更新，不重複位移或退回舊內容。沒有改工具簽名或 protocol。
+  - App 以回合內 working clone 取得下一候選的範圍，真正 apply／Ask 使用對應引用範圍。第二份 proposal 若先於第一個 apply terminal 到達，等待同一 apply Promise 的結果與 cleanup，再核對 owner／Stop，不再因 busy 直接丟棄。回合終點／停止／generation 變動清除 working state，保留已保存文件與 Undo。
+  - Linux Conda app：`poetry run pytest tests/test_desktop_document_service.py tests/test_desktop_documents.py -q`：53 passed／1.10s。真 graph＋假模型＋真 coordinator 以原兩個 referenceId 順序修改，包含中文／emoji、CRLF 正規化及第一個 callId 重送；Ask／Bypass 各一次，均只有兩次寫入，最終磁碟保留兩段成果與未選區，原 submittedContext 不變。沿用 Ask 拒絕檢查。
+  - desktop `node --test --experimental-strip-types tests/documents.test.ts tests/trust.test.ts`：19 passed；`npm run build` 通過。已有 phase02 fixture 增加最小 `[[fixture:document-multiple]]` 兩引用離線分支供桌面驗收；`poetry run pytest tests/test_desktop_fixture.py -q`：22 passed。新 fixture 分支的真 UI 操作尚未執行；不把既有 fixture tests 當作該分支實機證據。
+  - 根代理審閱兩側變更並核對工作基準一致；scoped whitespace 通過，僅既有 LangGraph／bundle warnings。沒有新增 D1 防誤用處理、儲存、佇列或依賴。Scoped commit：`fix(desktop): preserve sequential passage edits [P3-S1]`。接續 P5-S1；固定版本 UI 一併核對 P2 接受後清除與 P3 兩次核准保存。

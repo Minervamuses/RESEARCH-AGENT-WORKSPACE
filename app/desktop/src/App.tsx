@@ -947,11 +947,43 @@ interface DocumentAction {
   sourceSnapshot?: DocumentSnapshot;
 }
 
-export function submittedDocumentSource(context: SubmittedContext | null, referenceId?: string): DocumentSnapshot | undefined {
+type WorkingDocumentSources = Pick<SubmittedContext, "documentContext" | "references">;
+
+export function submittedDocumentSource(context: WorkingDocumentSources | null, referenceId?: string): DocumentSnapshot | undefined {
   if (referenceId === undefined) return context?.documentContext;
   const reference = context?.references.find((item) => item.referenceId === referenceId);
   if (reference?.kind !== "document") throw new Error("The document proposal names an unavailable document reference.");
   return reference.document.snapshot;
+}
+
+export function documentOperationContext(current: DocumentSnapshot, source?: DocumentSnapshot): DocumentSnapshot {
+  if (source === undefined) return current;
+  return { ...current, rangeStartUtf16: source.rangeStartUtf16, rangeEndUtf16: source.rangeEndUtf16 };
+}
+
+export function advanceWorkingDocumentSources(
+  working: WorkingDocumentSources | null, before: DocumentSnapshot, result: DocumentResult,
+): WorkingDocumentSources | null {
+  if (working === null || result.status !== "saved" || result.path !== before.path ||
+      result.rootPath !== before.rootPath || result.sourceText === undefined || result.editorRevision === undefined ||
+      result.diskFingerprint === undefined || result.rangeEndUtf16 === undefined) return working;
+  const start = before.rangeStartUtf16 ?? 0, end = before.rangeEndUtf16 ?? before.sourceText.length;
+  const newEnd = result.rangeEndUtf16, delta = newEnd - end;
+  const advance = (snapshot: DocumentSnapshot, activeDocument = false): DocumentSnapshot => {
+    if (snapshot.path !== before.path || snapshot.rootPath !== before.rootPath || snapshot.sourceText !== before.sourceText ||
+        snapshot.editorRevision !== before.editorRevision || snapshot.diskFingerprint !== before.diskFingerprint) return snapshot;
+    let left = activeDocument ? result.rangeStartUtf16 : snapshot.rangeStartUtf16;
+    let right = activeDocument ? result.rangeEndUtf16 : snapshot.rangeEndUtf16;
+    if (!activeDocument && left !== undefined && right !== undefined && right > start) {
+      if (left >= end) { left += delta; right += delta; }
+      else { left = Math.min(left, start); right = Math.max(newEnd, right + delta); }
+    }
+    return { ...snapshot, sourceText: result.sourceText!, editorRevision: result.editorRevision!, diskFingerprint: result.diskFingerprint!,
+      rangeStartUtf16: left, rangeEndUtf16: right };
+  };
+  return { documentContext: working.documentContext === undefined ? undefined : advance(working.documentContext, true),
+    references: working.references.map((reference) => reference.kind === "document"
+      ? { ...reference, document: { ...reference.document, snapshot: advance(reference.document.snapshot) as typeof reference.document.snapshot } } : reference) };
 }
 
 export default function App() {
@@ -998,7 +1030,9 @@ export default function App() {
   const [documentNotice, setDocumentNotice] = useState<string | null>(null);
   const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResult; base: DocumentSnapshot } | null>(null);
   const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
-  const documentRequestRef = useRef<{ requestId: string; turnId: string } | null>(null);
+  const documentRequestRef = useRef<{ requestId: string; turnId: string; context: DocumentSnapshot } | null>(null);
+  const documentApplyPromiseRef = useRef<Promise<void> | null>(null);
+  const workingDocumentSourcesRef = useRef<WorkingDocumentSources | null>(null);
   const submittedDocumentRef = useRef<DocumentSnapshot | null>(null);
   const selectedSkillNamesRef = useRef(new Set<string>());
   useEffect(() => { selectedSkillNamesRef.current.clear(); }, [conversation.selected?.projectId, conversation.selected?.sessionId]);
@@ -1076,6 +1110,9 @@ export default function App() {
     frameOwnerRef.current = null;
     turnOwnerRef.current = null;
     documentRequestRef.current = null;
+    documentApplyPromiseRef.current = null;
+    workingDocumentSourcesRef.current = null;
+    submittedDocumentRef.current = null;
     stopPromiseRef.current = null;
     documentBusyRef.current = false;
     setDocumentBusy(false);
@@ -1089,6 +1126,9 @@ export default function App() {
       throw protocolMismatch("The backend returned a document result for a different source.");
     }
     if (result.status === "saved" && result.sourceText !== undefined && result.diskFingerprint !== undefined) {
+      if (action?.callId !== undefined && action.sourceSnapshot !== undefined) {
+        workingDocumentSourcesRef.current = advanceWorkingDocumentSources(workingDocumentSourcesRef.current, action.sourceSnapshot, result);
+      }
       documentBaselineRef.current = { ...captured, sourceText: result.sourceText, diskFingerprint: result.diskFingerprint };
       if (current.editorRevision === captured.editorRevision && current.sourceText === captured.sourceText) {
         updateDocument(reconcileSavedDocument(current, captured, {
@@ -1116,42 +1156,47 @@ export default function App() {
     }
   }, [updateDocument]);
 
-  const applyDocumentOperation = useCallback(async (action: DocumentAction, resolution?: "keep" | "use" | "cancel", expectedSnapshot?: DocumentSnapshot) => {
-    const captured = documentRef.current;
-    if (captured === null || documentBusyRef.current || workspaceOperation.current !== null ||
-        bindingGenerationRef.current !== generationRef.current) return;
-    const owner = captureOwner("document.apply");
-    documentOperationRef.current = owner;
-    frameOwnerRef.current = null;
-    documentBusyRef.current = true;
-    setDocumentBusy(true);
-    try {
-      const { sourceSnapshot: _sourceSnapshot, ...requestAction } = action;
-      const tracked = backendClient.requestTracked("document.apply", {
-        ...requestAction, documentContext: documentContextPayload(captured), ...(resolution === undefined ? {} : { resolution }),
-        ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
-      } as unknown as JsonObject);
-      documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId };
-      const result = await tracked.result as unknown as DocumentResult;
-      if (ownsOperation(owner, documentOperationRef.current)) receiveDocumentResult(result, captured, action);
-    } catch (error) {
-      if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
-    } finally {
-      if (ownsOperation(owner, documentOperationRef.current)) {
-        documentOperationRef.current = null;
-        documentBusyRef.current = false;
-        setDocumentBusy(false);
-        const requestId = documentRequestRef.current?.requestId;
-        documentRequestRef.current = null;
-        if (pendingApprovalRef.current?.parentRequestId === requestId) {
-          pendingApprovalRef.current = null;
-          approvalOwnerRef.current = null;
-          approvalResolvingRef.current = false;
-          setPendingApproval(null);
-          setApprovalResolving(false);
+  const applyDocumentOperation = useCallback((action: DocumentAction, resolution?: "keep" | "use" | "cancel", expectedSnapshot?: DocumentSnapshot): Promise<void> => {
+    const current = documentRef.current;
+    if (current === null || documentBusyRef.current || workspaceOperation.current !== null ||
+        bindingGenerationRef.current !== generationRef.current) return Promise.resolve();
+    const captured = documentOperationContext(current, action.sourceSnapshot);
+    const pending = (async () => {
+      const owner = captureOwner("document.apply");
+      documentOperationRef.current = owner;
+      frameOwnerRef.current = null;
+      documentBusyRef.current = true;
+      setDocumentBusy(true);
+      try {
+        const { sourceSnapshot: _sourceSnapshot, ...requestAction } = action;
+        const tracked = backendClient.requestTracked("document.apply", {
+          ...requestAction, documentContext: documentContextPayload(captured), ...(resolution === undefined ? {} : { resolution }),
+          ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
+        } as unknown as JsonObject);
+        documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId, context: captured };
+        const result = await tracked.result as unknown as DocumentResult;
+        if (ownsOperation(owner, documentOperationRef.current)) receiveDocumentResult(result, captured, action);
+      } catch (error) {
+        if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
+      } finally {
+        if (ownsOperation(owner, documentOperationRef.current)) {
+          documentOperationRef.current = null;
+          documentBusyRef.current = false;
+          setDocumentBusy(false);
+          const requestId = documentRequestRef.current?.requestId;
+          documentRequestRef.current = null;
+          if (pendingApprovalRef.current?.parentRequestId === requestId) {
+            pendingApprovalRef.current = null;
+            approvalOwnerRef.current = null;
+            approvalResolvingRef.current = false;
+            setPendingApproval(null);
+            setApprovalResolving(false);
+          }
         }
       }
-    }
+    })().finally(() => { if (documentApplyPromiseRef.current === pending) documentApplyPromiseRef.current = null; });
+    documentApplyPromiseRef.current = pending;
+    return pending;
   }, [captureOwner, ownsOperation, receiveDocumentResult]);
 
   const openDocument = useCallback(async () => {
@@ -1309,9 +1354,21 @@ export default function App() {
             if (conversationRef.current.stopRequest !== null &&
                 (message.event === "document.proposed" || message.event === "approval.required")) return;
             if (message.event === "document.proposed" && active !== null && message.requestId === active.requestId && message.data.turnId === active.turnId && typeof message.data.callId === "string") {
-              const sourceSnapshot = submittedDocumentSource(conversationRef.current.submittedContext,
-                typeof message.data.referenceId === "string" ? message.data.referenceId : undefined);
-              void applyDocumentOperation({ turnId: active.turnId, callId: message.data.callId, parentRequestId: active.requestId, sourceSnapshot });
+              const owner = turnOwnerRef.current;
+              if (owner === null) return;
+              const callId = message.data.callId;
+              const referenceId = typeof message.data.referenceId === "string" ? message.data.referenceId : undefined;
+              void (async () => {
+                await documentApplyPromiseRef.current;
+                const current = conversationRef.current.activeTurn;
+                if (disposed || !ownsOperation(owner, turnOwnerRef.current) || current === null ||
+                    current.requestId !== active.requestId || current.turnId !== active.turnId || current.sessionId !== active.sessionId ||
+                    conversationRef.current.stopRequest !== null) return;
+                const sourceSnapshot = submittedDocumentSource(workingDocumentSourcesRef.current, referenceId);
+                await applyDocumentOperation({ turnId: current.turnId, callId, parentRequestId: current.requestId, sourceSnapshot });
+              })().catch((error: unknown) => {
+                if (ownsOperation(owner, turnOwnerRef.current)) setDocumentNotice(workspaceError(error).message);
+              });
               return;
             }
             if (message.event === "approval.required") {
@@ -1764,6 +1821,7 @@ export default function App() {
     const correlation = { generation, projectEpoch, projectId: target.projectId, sessionId: target.sessionId,
       requestId: target.requestId, turnId: target.turnId };
     applyConversation({ type: "stop-requested", generation, projectEpoch });
+    workingDocumentSourcesRef.current = null;
     const pending = Promise.resolve().then(() => backendClient.request("session.stop", {
       sessionId: target.sessionId, turnId: target.turnId, parentRequestId: target.requestId,
     })).then(async (data) => {
@@ -1816,7 +1874,9 @@ export default function App() {
       parentRequestId: approval.parentRequestId,
       turnId: approval.turnId,
       approved,
-      ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(documentRef.current) } : {}),
+      ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(
+        documentOperationContext(documentRef.current, documentRequestRef.current?.turnId === approval.turnId ? documentRequestRef.current.context : undefined),
+      ) } : {}),
     }).then((data) => {
       if (!isCurrent()) return;
       const result = data as unknown as ApprovalResolvedDto;
@@ -2082,6 +2142,9 @@ export default function App() {
         ...(submittedContext === null ? {} : { submittedContext: submittedContext as unknown as JsonObject }),
       });
       submittedDocumentRef.current = submittedDocumentSource(submittedContext) ?? null;
+      workingDocumentSourcesRef.current = submittedContext === null ? null : structuredClone({
+        documentContext: submittedContext.documentContext, references: submittedContext.references,
+      });
       setReferenceIssue(null);
     } catch (error) {
       if (ownsOperation(owner, workspaceOperation.current)) {
@@ -2099,6 +2162,7 @@ export default function App() {
     applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, text: draft, submittedContext, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
     void tracked.result.then(async (data) => {
       if (!isCurrent()) return;
+      workingDocumentSourcesRef.current = null;
       const result = data as unknown as TurnCompletedDto;
       const next = applyConversation({ type: "turn-succeeded", generation, projectEpoch: owner.projectEpoch, requestId: tracked.requestId, projectId: selected.projectId, result });
       const answer = next.latestAnswer;
@@ -2155,6 +2219,7 @@ export default function App() {
       focusComposer(owner);
     }).catch(async (error: unknown) => {
       if (!isCurrent()) return;
+      workingDocumentSourcesRef.current = null;
       const safe = workspaceError(error);
       const next = applyConversation({
         type: "turn-failed",

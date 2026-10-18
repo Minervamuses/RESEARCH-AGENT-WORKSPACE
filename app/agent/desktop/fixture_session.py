@@ -61,6 +61,7 @@ FIXTURE_LONG_OUTPUT_MARKER = ".fixture-long-output"
 FIXTURE_RAG_QUESTION = "What does the fixture knowledge say?"
 FIXTURE_DELAYED_FINAL = "[[fixture:delayed-final]]"
 FIXTURE_WAIT_STOP = "[[fixture:wait-stop]]"
+FIXTURE_DOCUMENT_MULTIPLE = "[[fixture:document-multiple]]"
 FIXTURE_LONG_FINAL = "[[fixture:long-final]]"
 FIXTURE_FAIL_ONCE = "[[fixture:fail-once]]"
 FIXTURE_BASH_APPROVE = "[[fixture:bash-approve]]"
@@ -1058,6 +1059,31 @@ class FixtureSession:
             tool_activities: tuple[ToolActivitySummary, ...] = ()
             if FIXTURE_SKILLS_ABSTRACT in original_input:
                 answer = self._skills_abstract_answer(text)
+            elif FIXTURE_DOCUMENT_MULTIPLE in original_input:
+                tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
+                document_refs = [
+                    item for item in (submitted_context or {}).get("references", [])
+                    if item["kind"] == "document"
+                ]
+                if tool is None or len(document_refs) != 2 or not getattr(self, "_document_turn_active", False):
+                    raise RuntimeError("fixture multi-edit requires two document references")
+                activities = []
+                for index, (reference, replacement) in enumerate(zip(document_refs, (
+                    "第一段已更新，保留更多說明🙂", "第二段已更新🚀",
+                )), start=1):
+                    call_id = f"fixture-document-edit-{index}"
+                    raw_message = await tool.ainvoke({
+                        "name": "document_edit", "id": call_id, "type": "tool_call",
+                        "args": {"replacement_text": replacement, "reference_id": reference["referenceId"]},
+                    })
+                    payload = json.loads(raw_message.content)
+                    activities.append(ToolActivitySummary(
+                        call_id=call_id, name="document_edit",
+                        status="ok" if payload["status"] == "saved" else "failed",
+                        summary=f"Passage {index}: {payload['status']}.",
+                    ))
+                tool_activities = tuple(activities)
+                answer = "Fixture document operations: " + " ".join(item.summary for item in activities)
             elif original_input.startswith("[[fixture:document-replace]]"):
                 tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
                 if tool is None or not getattr(self, "_document_turn_active", False):
