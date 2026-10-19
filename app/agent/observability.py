@@ -8,17 +8,28 @@ stage that must be tool-free?
 Artifact-derived citation saves additionally emit only aggregate item counts,
 clearly separated from tool execution status.
 
-Privacy contract: only counts, lengths, identifiers, and enum-like fields are
-ever logged. Message content, tool-call arguments, DOIs, and provider free
-text never reach the log record.
+A per-attempt ``TurnTimingTrace`` callback additionally logs when each model
+call and admitted tool call actually ran, so a slow turn can be split into
+model and tool intervals from the persistent diagnostic log.
+
+Privacy contract: only counts, lengths, identifiers, hashes, durations, and
+enum-like fields are ever logged. Message content, tool-call arguments, raw
+queries, DOIs, and provider free text never reach the log record.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from collections.abc import Iterable
+import threading
+import time
+import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, ToolMessage
 
 from agent.llm.text import normalize_content
@@ -234,3 +245,182 @@ def log_citation_save_metrics(
         "citation_save_finalized %s",
         _format_record(metrics.to_record()),
     )
+
+
+_MAX_TRACE_ID_CHARS = 64
+
+
+def query_hash(query: str) -> str:
+    """Return a short irreversible digest that links repeated queries."""
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+
+
+def _trace_id(value: object) -> str | None:
+    return str(value)[:_MAX_TRACE_ID_CHARS] if value is not None else None
+
+
+def _tool_result_counts(output: object) -> dict[str, object]:
+    """Read allowlisted counts from structured tool artifacts only."""
+    artifact = getattr(output, "artifact", None)
+    if not isinstance(artifact, dict):
+        return {}
+    if artifact.get("kind") == "citation_search_summary":
+        return {
+            key: artifact.get(key)
+            for key in ("candidate_count", "abstract_count", "provider_count", "failed_provider_count")
+        }
+    if artifact.get("kind") == "citation_save_batch":
+        statuses = [item.get("status") for item in artifact.get("items") or [] if isinstance(item, dict)]
+        return {
+            "save_items": len(statuses),
+            "save_saved": statuses.count("saved"),
+            "save_reused": statuses.count("reused"),
+        }
+    return {}
+
+
+class TurnTimingTrace(BaseCallbackHandler):
+    """Log the real start and end of every model and tool run in one attempt.
+
+    One instance covers one execution attempt of a logical turn; a retry gets
+    a new ``attempt``. ``at_ms`` is the monotonic offset from the attempt
+    start and ``duration_ms`` the monotonic run length, so parallel tool runs
+    keep their own intervals. Model calls include recovery re-invocations;
+    SDK-internal HTTP retries stay inside one model interval. Runs still open
+    when the turn ends are logged as ``unfinished``.
+    """
+
+    run_inline = True
+
+    def __init__(self, turn_id: str, *, clock: Callable[[], float] = time.monotonic):
+        self.turn_id = turn_id
+        self.attempt = uuid.uuid4().hex[:12]
+        self._clock = clock
+        self._started = clock()
+        self._lock = threading.Lock()
+        self._model_seq = 0
+        self._tool_count = 0
+        self._model_runs: dict[UUID, tuple[int, float]] = {}
+        self._tool_runs: dict[UUID, tuple[dict[str, object], float]] = {}
+        self._model_by_call: dict[str, int] = {}
+        self._finished = False
+        self._emit("turn_start", {})
+
+    def _ms(self, since: float | None = None) -> int:
+        return round((self._clock() - (self._started if since is None else since)) * 1000)
+
+    def _emit(self, event: str, fields: dict[str, object]) -> None:
+        record = {"event": event, "turn_id": self.turn_id, "attempt": self.attempt, **fields}
+        logger.info("turn_trace %s", _format_record(record))
+
+    def on_chat_model_start(self, serialized, messages, *, run_id: UUID, **kwargs: Any) -> None:
+        with self._lock:
+            if self._finished:
+                return
+            self._model_seq += 1
+            self._model_runs[run_id] = (self._model_seq, self._clock())
+            self._emit("model_start", {"model_seq": self._model_seq, "at_ms": self._ms()})
+
+    def on_llm_end(self, response, *, run_id: UUID, **kwargs: Any) -> None:
+        with self._lock:
+            run = self._model_runs.pop(run_id, None)
+            if run is None or self._finished:
+                return
+            seq, started = run
+            tool_calls = 0
+            input_tokens = output_tokens = None
+            for generations in getattr(response, "generations", None) or []:
+                for generation in generations:
+                    message = getattr(generation, "message", None)
+                    if not isinstance(message, AIMessage):
+                        continue
+                    for call in message.tool_calls or []:
+                        tool_calls += 1
+                        if call.get("id") is not None:
+                            self._model_by_call[str(call["id"])] = seq
+                    input_tokens, output_tokens, _total = _usage_tokens(message)
+            self._emit("model_end", {
+                "model_seq": seq, "status": "ok", "at_ms": self._ms(),
+                "duration_ms": self._ms(started), "tool_calls": tool_calls,
+                "input_tokens": input_tokens, "output_tokens": output_tokens,
+            })
+
+    def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        with self._lock:
+            run = self._model_runs.pop(run_id, None)
+            if run is None or self._finished:
+                return
+            seq, started = run
+            self._emit("model_end", {
+                "model_seq": seq, "status": "error", "error_type": type(error).__name__,
+                "at_ms": self._ms(), "duration_ms": self._ms(started),
+            })
+
+    def on_tool_start(self, serialized, input_str, *, run_id: UUID, inputs=None, **kwargs: Any) -> None:
+        with self._lock:
+            if self._finished:
+                return
+            name = (serialized or {}).get("name") or kwargs.get("name")
+            call_id = _trace_id(kwargs.get("tool_call_id"))
+            fields: dict[str, object] = {
+                "tool": _trace_id(name), "tool_call_id": call_id,
+                "model_seq": self._model_by_call.get(call_id) if call_id is not None else None,
+            }
+            if isinstance(inputs, dict):
+                action = inputs.get("action")
+                if name == _CITATION_TOOL_NAME and isinstance(action, str):
+                    fields["action"] = action if action in _CITATION_ACTIONS else "unknown"
+                if isinstance(inputs.get("query"), str):
+                    fields["query_hash"] = query_hash(inputs["query"])
+            self._tool_count += 1
+            self._tool_runs[run_id] = (fields, self._clock())
+            self._emit("tool_start", {**fields, "at_ms": self._ms()})
+
+    def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
+        with self._lock:
+            run = self._tool_runs.pop(run_id, None)
+            if run is None or self._finished:
+                return
+            fields, started = run
+            status = getattr(output, "status", "success") if isinstance(output, ToolMessage) else "success"
+            self._emit("tool_end", {
+                **fields, "status": "error" if status == "error" else "ok",
+                "at_ms": self._ms(), "duration_ms": self._ms(started), **_tool_result_counts(output),
+            })
+
+    def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        with self._lock:
+            run = self._tool_runs.pop(run_id, None)
+            if run is None or self._finished:
+                return
+            fields, started = run
+            self._emit("tool_end", {
+                **fields, "status": "error", "error_type": type(error).__name__,
+                "at_ms": self._ms(), "duration_ms": self._ms(started),
+            })
+
+    def finish(self, state: str) -> None:
+        """Close the attempt; runs that never reported an end stay visible."""
+        with self._lock:
+            if self._finished:
+                return
+            self._finished = True
+            unfinished = 0
+            for seq, started in self._model_runs.values():
+                unfinished += 1
+                self._emit("model_end", {
+                    "model_seq": seq, "status": "unfinished",
+                    "at_ms": self._ms(), "duration_ms": self._ms(started),
+                })
+            for fields, started in self._tool_runs.values():
+                unfinished += 1
+                self._emit("tool_end", {
+                    **fields, "status": "unfinished",
+                    "at_ms": self._ms(), "duration_ms": self._ms(started),
+                })
+            self._model_runs.clear()
+            self._tool_runs.clear()
+            self._emit("turn_end", {
+                "state": state, "duration_ms": self._ms(), "model_calls": self._model_seq,
+                "tool_calls": self._tool_count, "unfinished": unfinished,
+            })

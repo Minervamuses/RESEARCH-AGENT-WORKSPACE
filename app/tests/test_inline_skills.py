@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 import shutil
 import subprocess
@@ -519,7 +520,9 @@ async def _submit_reference_turn(
     ("  /CITATION\n為選取論述找可引用的文獻，說明限制 ", "為選取論述找可引用的文獻，說明限制"),
     ("/citation", None),
 ])
-def test_desktop_citation_command_survives_reference_comment_composition(tmp_path, monkeypatch, draft, main_request):
+def test_desktop_citation_command_survives_reference_comment_composition(
+    tmp_path, monkeypatch, caplog, draft, main_request,
+):
     unsaved = "研究背景\n檢索增強生成可降低無來源主張。\n未儲存的結論段落。\n"
 
     async def run():
@@ -530,9 +533,10 @@ def test_desktop_citation_command_survives_reference_comment_composition(tmp_pat
         path = tmp_path / "draft.md"
         path.write_text("研究背景\n舊稿。\n", encoding="utf-8")
         comment = "這段需要醫療問答中的實證來源。"
-        text, submitted, result = await _submit_reference_turn(
-            service, path, draft, comment, unsaved_text=unsaved,
-        )
+        with caplog.at_level(logging.INFO, logger="agent.observability"):
+            text, submitted, result = await _submit_reference_turn(
+                service, path, draft, comment, unsaved_text=unsaved,
+            )
 
         assert result["state"] == "completed"
         assert "citation_workflow" in model.invoked_tools[0]
@@ -555,6 +559,13 @@ def test_desktop_citation_command_survives_reference_comment_composition(tmp_pat
         assert service.session._citation_service is None
         assert service.session.thinking_mode == "extended"
         assert path.read_text(encoding="utf-8") == "研究背景\n舊稿。\n"
+        # The same turn is traceable in the diagnostic log without its text.
+        trace = [record.getMessage() for record in caplog.records
+                 if record.getMessage().startswith("turn_trace ") and f"turn_id={result['turnId']}" in record.getMessage()]
+        assert trace[0].startswith("turn_trace event=turn_start") and "state=completed" in trace[-1]
+        assert any("event=tool_end" in line and "tool=citation_workflow" in line and "action=search" in line
+                   and "status=ok" in line and "candidate_count=2" in line for line in trace)
+        assert all(comment not in line and "Paper A" not in line for line in trace)
 
     asyncio.run(run())
 

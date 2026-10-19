@@ -49,6 +49,7 @@ from agent.llm.thinking import (
 )
 from agent.observability import (
     CitationSaveMetrics,
+    TurnTimingTrace,
     completed_citation_calls,
     log_citation_save_metrics,
 )
@@ -183,6 +184,7 @@ class ChatSession:
         self._recover_interrupted_turn()
         self._active_turn_snapshot: ConversationSnapshot | None = None
         self._active_turn_id: str | None = None
+        self._turn_trace: TurnTimingTrace | None = None
         self._turn_journal = TurnJournal()
         self._citation_policy = CitationSessionPolicy(config)
         self.citation_workflow_tool = self._citation_policy.workflow_tool
@@ -1126,6 +1128,7 @@ class ChatSession:
             extra_system_messages=extra_system_messages,
             candidate_id=candidate_id,
             progress_cb=self._progress_cb,
+            callbacks=[self._turn_trace] if self._turn_trace is not None else None,
         )
 
     async def _run_graph_turn(
@@ -1334,6 +1337,8 @@ class ChatSession:
                 )
             self._active_turn_snapshot = snapshot
             self._active_turn_id = logical_turn_id
+            self._turn_trace = TurnTimingTrace(logical_turn_id)
+            trace_state = "failed"
             try:
                 if cancelled:
                     raise asyncio.CancelledError()
@@ -1341,17 +1346,21 @@ class ChatSession:
                     runtime = combine_skill_runtimes([
                         self._load_skill_runtime(name) for name in skill_names
                     ]) if skill_names else None
-                    return await self._run_installer_turn(
+                    outcome = await self._run_installer_turn(
                         user_input, new_request=installer_request,
                         runtime=runtime, authority_input=original_input,
                     )
-                if skill_names:
-                    return await self._run_one_shot_skill_turn(
+                elif skill_names:
+                    outcome = await self._run_one_shot_skill_turn(
                         user_input,
                         skill_names[0], skill_names=skill_names,
                     )
-                return await self._run_turn(user_input)
+                else:
+                    outcome = await self._run_turn(user_input)
+                trace_state = outcome.state
+                return outcome
             except asyncio.CancelledError:
+                trace_state = "cancelled"
                 await self._fail_active_turn(
                     state="interrupted",
                     code="cancelled",
@@ -1381,6 +1390,8 @@ class ChatSession:
                 )
                 raise
             finally:
+                self._turn_trace.finish(trace_state)
+                self._turn_trace = None
                 self._active_turn_snapshot = None
                 self._active_turn_id = None
 

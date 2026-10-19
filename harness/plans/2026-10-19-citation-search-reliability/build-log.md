@@ -9,7 +9,7 @@
 | P1 | Complete | X1：真實 composeTurnText→DesktopService→Citation 離線案例；反例 3 種 | 無 | P3/P4 沿用同一代表案例 |
 | P2 | Complete | X2：外部 commit `ddb2dba`；source／安裝 dist 各 13/13 離線通過；安裝已備份並更新 | 無；真實搜尋品質／速度未宣稱改善 | P7 量測沿用同一回歸檔 |
 | P3 | Complete | X3：同版本全文只出現一次；異版本／同 fingerprint 異內容分開；retry 重用已去重輸入 | 無；端到端速度未量 | P4 沿用同一代表案例 |
-| P4 | Not started | E4／既有 logger | 驗 callback／統計接點，記必要局部檔案集合 | 真 graph＋fake tools 驗 ID 與計時 |
+| P4 | Complete | X4：per-attempt callback → INFO `turn_trace` 持久 log；並行／例外／拒絕／取消／重試／Citation 計數均驗 | 自然使用樣本尚無（使用者下次正常使用即產生） | P6–P10 讀 trace |
 | P5 | Not started | E5／SDK 實版讀碼 | 執行者選有限政策並記錄依據 | 恢復或重建最小 offline probe，直接推進 |
 | P6 | Not started | E6／echo 歷史記錄 | P2、P4 與真搜尋器程序資料 | 量測並自主判定／完成必要重用 |
 | P7 | Not started | E7／source 機制 | P2、P4 與 engine/browser 資料 | 逐一選有證據的主變數並驗證 |
@@ -93,3 +93,25 @@ WSL Bash、`/usr/bin/git`、Conda app（Python 3.13.14、Poetry 2.4.1、Node 24.
 - **測試**：`test_desktop_document_service.py` 新增 `_model_references()`（把投影還原為完整 references）與 `_full_text_count()`。既有兩個測試由「frozen JSON 逐字相等」改成「投影可還原成原 references＋全文只出現一次」，保留 `submitted_context == submitted` 等儲存斷言。新增 `test_model_input_shows_each_frozen_document_version_once`：未保存 editor（revision 1）、同版本兩個 range、已保存 revision 0 兩個 range、同 path／同 fingerprint／同 revision 但內容不同的第三版；三種全文各只出現一次、指標值精確、range 欄位保留；首次模型失敗後 retry 的實際模型輸入與已存 `semantic_input` 逐字相同；未寫檔。P1 跨層測試加斷言：背景 editor 與段落 reference 共用一份全文。未修改的 service 下這三個測試失敗（格式不含指標且全文重複）。
 - **檢查**（app/，sandbox 外以容許 `/tmp` fixture）：`tests/test_desktop_document_service.py tests/test_inline_skills.py tests/test_desktop_service.py` 119 passed；所有引用 submittedContext／references／fixture_session 的 13 個 test modules 487 passed；`git diff --check` 通過。
 - **限制**：只縮小新回合的模型輸入；舊回合 retry 仍用其已存的未去重 semantic_input（計劃要求不遷移）。未量 token 或延遲改善。
+
+### X4 — P4：最小可持久化執行計時
+
+- **檔案（4 個 production）**：`agent/observability.py` 新增 `TurnTimingTrace`（LangChain `BaseCallbackHandler`，`run_inline=True`，執行緒鎖）與 `query_hash()`；`agent/turns/execution.py` 的 `execute_graph()` 多一個 `callbacks` 參數，有值時以 `config={"callbacks": …}` 傳給 `graph.astream`；`agent/session.py` 在 `turn_outcome()` 每次執行（非 duplicate）建立一個 trace、`_execute_graph()` 把它傳入，`finally` 以 completed／failed／cancelled 收尾；`skills/citation/tool.py` 的 search 回傳計數 artifact `{"kind": "citation_search_summary", candidate_count, abstract_count, provider_count, failed_provider_count}`。第 4 檔的必要性：search 原本只有給模型的格式化文字、artifact 為 None，callback 無可靠結構可讀；artifact 不送模型，save 統計只認 `citation_save_batch` kind，不受影響。
+- **事件語義**（logger `agent.observability`，INFO，單行 `turn_trace key=value …`）：`turn_start`；`model_start/model_end`（`model_seq` 在同一 attempt 內遞增，含 repair 再呼叫；SDK 內部 HTTP 重試在同一區間內，不推測次數；`tool_calls`、可得時 token）；`tool_start/tool_end`（`tool`、`tool_call_id`、產生它的 `model_seq`、Citation 的 allowlist `action`、任何字串 `query` 的 `query_hash`＝sha256 前 16 hex、`status` ok／error／unfinished、`error_type`、Citation 計數；save 只記 items／saved／reused 數）；`turn_end`（state、duration、model_calls、tool_calls、unfinished）。`at_ms` 為相對 attempt 起點的 monotonic offset，`duration_ms` 為 monotonic 長度；牆鐘時間由既有 log formatter 的 asctime 提供。重試同一 logical turn 有新 `attempt`。未獲授權的工具不執行，因此沒有 tool_start（不會被記成成功）。被取消的工具 LangChain 不回呼，收尾時記 `status=unfinished`。callback 例外由 LangChain callback manager 吞下，不會讓回合失敗。不記內容、原始 query、DOI、工具參數或結果文字。
+- **持久化**：沿用 `install_diagnostic_log()` 的 INFO rotating file（GUI：`desktop-backend.log`；CLI：`cli.log`；位置 `$AGENT_LOG_DIR` 或 `$XDG_STATE_HOME/research-agent/logs/`，預設 `~/.local/state/research-agent/logs/`；5 MiB×3 輪替）。檔案無法建立時沿用既有 fallback（stderr 只有 WARNING，並有 "diagnostic log file unavailable" 警告，即追蹤不可用）。
+- **解析程序**（直接讀）：`grep -h 'turn_trace' ~/.local/state/research-agent/logs/desktop-backend.log* | grep 'turn_id=<對話 JSON 的 turnId>'`。同 `tool_call_id` 的 start/end 配對；並行區間用 `at_ms - duration_ms` 到 `at_ms`；turn 總時間看 `turn_end duration_ms`，不要把工具 duration 相加。
+- **測試**（`tests/test_observability.py`，真 graph＋真 `BaseChatModel` 假模型）：快／慢兩工具同批並行（兩者都在任一結束前開始、快者先結束、duration 各自正確、model_seq=1）；工具例外 `status=error error_type=ConnectionResetError`；未授權工具無事件；模型例外 `model_end status=error` 與 `turn_end state=failed`；同 turn 重試產生新 attempt；取消時工具 `unfinished`、`state=cancelled`；`install_diagnostic_log` 後關閉 handler 再讀檔仍有完整事件；Citation fixture 中同 query 的 hash 相同、不同 query 不同、候選數／摘要數與 fixture 相符（2/0、年分過濾後 1/0）、model 呼叫 3 次而工具 3 次；log 文字不含 query、DOI、標題。P1 跨層案例另斷言同 turnId 的 trace 有 Citation search `candidate_count=2`、`state=completed`，且不含留言。
+- **檢查**：`tests/test_observability.py` 17 passed；`tests/test_inline_skills.py` 18 passed；完整 `python -m pytest -q -p no:cacheprovider`（sandbox 外）1473 passed、44 秒。
+- **離線樣本**（fixture，非真實延遲）：
+
+```text
+turn_trace event=model_end … model_seq=1 status=ok at_ms=3 duration_ms=0 tool_calls=2 input_tokens=11 output_tokens=3
+turn_trace event=tool_end … tool=rag_search tool_call_id=call-fast model_seq=1 query_hash=6d96f400688b4623 status=ok at_ms=15 duration_ms=10
+turn_trace event=tool_end … tool=rag_explore tool_call_id=call-slow model_seq=1 query_hash=38c0b4f8aa93bbbb status=ok at_ms=256 duration_ms=251
+turn_trace event=tool_end … tool=citation_workflow tool_call_id=search-2 model_seq=2 action=search query_hash=124b71b4601630d3 status=ok at_ms=7 duration_ms=1 candidate_count=2 abstract_count=0 provider_count=2 failed_provider_count=0
+turn_trace event=tool_end … tool=citation_workflow tool_call_id=search-3 model_seq=2 action=search query_hash=2415a887f1296d34 status=ok at_ms=1006 duration_ms=999 candidate_count=1 …
+turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 tool_calls=3 unfinished=0
+```
+
+  最後兩筆：同 query 的 search-2 走成功快取約 1 ms；不同 query 的 search-3 即使 fetcher 為離線也約 999 ms，指向 provider 端的固定等待（P8 跟進）。
+- **限制**：目前尚無修正後的自然使用 trace；P6–P10 的真實耗時判斷需要它或有界免費量測。只觀測 LangChain 可回呼的模型（測試用 fake 若非 BaseChatModel 則無 model 事件，工具事件仍有）。

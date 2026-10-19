@@ -340,7 +340,15 @@ def create_citation_workflow_tool(
             )
             records, states = await service.search(query, date_filter=date_filter)
             records = [r for r in records if (year_from is None or (r.year is not None and r.year >= year_from)) and (year_to is None or (r.year is not None and r.year <= year_to))]
-            return _format_records(records, states), None
+            # Counts only, for redaction-safe turn timing; the model reads the text.
+            summary = {
+                "kind": "citation_search_summary",
+                "candidate_count": len(records),
+                "abstract_count": sum(1 for record in records if record.abstract),
+                "provider_count": len(states),
+                "failed_provider_count": sum(1 for state in states if not state.endswith(":ok")),
+            }
+            return _format_records(records, states), summary
         if action == "save":
             if not works or any(value is not None for value in (query, source_id, page, year_from, year_to)):
                 return _error("save requires only works (1..10)"), None

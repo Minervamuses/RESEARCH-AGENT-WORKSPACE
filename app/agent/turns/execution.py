@@ -22,6 +22,7 @@ async def execute_graph(
     extra_system_messages: list[SystemMessage] | None = None,
     candidate_id: str | None = None,
     progress_cb: ProgressCallback | None = None,
+    callbacks: list | None = None,
 ) -> GraphTurnResult:
     """Run one graph and normalize its messages, calls, and recovery metadata."""
     input_messages = [
@@ -37,6 +38,7 @@ async def execute_graph(
     async for update in graph.astream(
         initial_state,
         stream_mode="updates",
+        **({"config": {"callbacks": callbacks}} if callbacks else {}),
     ):
         for node_name, delta in update.items():
             new_msgs = delta.get("messages", []) if isinstance(delta, dict) else []
