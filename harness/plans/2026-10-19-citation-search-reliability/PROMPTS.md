@@ -1,29 +1,23 @@
-# 執行入口
+# 全計劃啟動與恢復
 
-下列文字是未來可交給執行者的指令，不代表本次已啟動實作。狀態只看 [build-log.md](build-log.md)，規則只看 [PLANS.md](PLANS.md)。
+以下是使用者最新澄清後的單一啟動 prompt，取代舊版「只啟動 P1–P4、後續另問、commit 另問」。把它交給執行者即可啟動完整任務；本次修訂文件本身不執行程式實作。詳細規則見 [PLANS.md](PLANS.md)，狀態只看 [build-log.md](build-log.md)。
 
-## 啟動第一批
+## 可直接貼上的啟動 prompt
 
-> 請執行 `harness/plans/2026-10-19-citation-search-reliability/` 的第一批 P1–P4。依序閱讀適用 AGENTS.md、GOALS.md、PLANS.md、build-log.md 與下一個 dependency-ready phase，先完成 Linux／Conda app runtime gate 與 Git 狀態核對。P1 第一個動作是核對 composeTurnText 與段落留言測試，接到後端真實技能啟動邊界。遵守原有審批與成本限制，外部目標、超過三個 production files 等仍依 PLANS.md 處理；已授權範圍內持續完成，不只交付分析。先完成離線代表案例，再明確列出實際正常使用 trace 是否待補。P5 與 P6–P10 不在這次啟動範圍，不自行做後續優化或付費呼叫。若需要 Git commit 授權，先完成可審閱的改動與檢查後再請示。
+> 請完整執行 `harness/plans/2026-10-19-citation-search-reliability/` 的 P1–P10，持續完成所有任務，不只做第一批、交付分析或列出後續選項。先讀適用 AGENTS.md、GOALS.md、PLANS.md、build-log.md 與相關階段，確認 WSL／Linux、Conda app 和 Git 狀態，再從尚未完成且依賴已滿足的步驟開始。
+>
+> 先修 P1–P4；P5 獨立推進，P6–P10 依新增證據由你自行排序與選擇最小有效方案。一般實作選擇、有限 timeout／重試預算、計劃內必要的局部多檔修改與已列明的生命週期／相容介面調整，請自行判斷、記錄依據並驗證，不要逐項詢問我。證據不足時先做最小必要調查，不以猜測宣稱成功，也不要為完成任務硬做沒有必要的優化。
+>
+> 我授權本計劃所需的主專案修改，以及 `/home/minervamuses/mcp-servers/web-search-mcp` 的相關 source 修正、使用現有依賴 build、驗證後備份並更新 `/home/minervamuses/.local/share/mcp-servers/web-search-mcp` 的對應產物。每個完成且經驗證的有意義小步驟，都直接在所屬 Git repo 使用 WSL／Linux Git 做 scoped local commit；不要等全部做完才一次提交，也不要每次 commit 前問我。不 push、不切分支、不改 worktree，保留使用者原有變更。
+>
+> 遇到錯誤先在範圍內診斷修復；把原因、嘗試、結果、限制與下一步記到 build-log.md。某項受阻就繼續其他不受阻項目；不要把每次失敗、一般設定選擇、階段結束或後續排序變成詢問。不要無界重試、擴大成重寫或跳過必要驗收。完整處理所有階段後再一次總結結果、commit、問題與未完成項目。
+>
+> 保留 PLANS.md 的真正邊界：不得擅自增加付費呼叫、變更依賴、刪除使用者資料或做計劃外破壞性操作。先採安全低成本替代並繼續獨立工作；只有剩餘工作確實全被不可自行解決的條件阻擋時，才集中說明必要的使用者介入。被阻擋或缺驗收的項目不得標為完成。
 
-如要一併授權 P2 的既定外部交付，可明確附加：
+## 中斷後恢復
 
-> 我授權修改 `/home/minervamuses/mcp-servers/web-search-mcp` 的結果保留控制流程，使用現有依賴 build，驗證後備份並更新 `/home/minervamuses/.local/share/mcp-servers/web-search-mcp` 對應 build 產物。保留既有 package-lock.json 修改，不安裝依賴、不改環境。外部 source 的 scoped commit 如需執行請另依我的明確授權。
+> 繼續執行 `harness/plans/2026-10-19-citation-search-reliability/`，沿用完整 P1–P10、自主決策及逐步 WSL commit 授權，不再要求我選下一批或重複批准 commit。先讀 GOALS、PLANS、build-log 與適用指令，核對 Git、實際安裝及既有證據，從下一個可執行步驟繼續。對已提交或已更新安裝的操作先確認結果，不重複執行。只有全部完成，或剩餘工作全被真實 blocker 阻擋時才交付最終總結。
 
-若希望每個 coherent step 後在 WSL 提交，可附加「授權對本次已驗收的主專案改動做 scoped local commits，不 push」；這不授權把外部 source 複製進主專案。
+## 只修訂／稽核時
 
-## 恢復已啟動範圍
-
-> 恢復 `harness/plans/2026-10-19-citation-search-reliability/`。先讀適用指令、GOALS、PLANS、build-log，重核目前 Git／外部安裝與已存在證據，再從日誌的下一步繼續此前已獲授權範圍。不要重複做已完成的遠端操作或重問已有授權；未解 blocker 只阻擋受影響工作。不要從這段恢復文字推定新增實作、付費或 Git 授權。
-
-## 啟動後續決策與選定項目
-
-> 請讀第一批修正後的既有 trace，依 PLANS.md 的決策方法評估 P6–P10，最多提出三個有證據的下一步，不先實作或跑付費呼叫。分清缺測量與已知正確性問題，為建議項目列出寫入檔案、成本、驗收與需要的政策選擇。
-
-選定具體項目與預算後，再明確要求執行該階段。P5 的啟動須指定或確認 timeout／重試政策；不能只要求把 max_retries 設為 0。
-
-## 修訂或稽核
-
-> 只修訂這份計劃以反映以下新決策。保留已完成證據、未受影響目標與原有範圍，更新相關階段、依賴、驗收、index 與 log；不要實作程式。
-
-> 只稽核這份計劃與來源 brief／目前原始碼的符合程度。指出會造成誤作、無法驗收或越權的具體缺口；不要修改或執行，除非另獲修訂授權。
+使用者明確要求「修訂計劃」或「稽核計劃」時，仍只做該操作，不把上面的引文當作立即執行指令。修訂需同步目標、路線、階段與 log，保留已完成證據；稽核未獲修訂要求時只報告問題。

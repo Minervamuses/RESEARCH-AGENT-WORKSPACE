@@ -88,9 +88,7 @@
       "id": "P6",
       "file": "build/phase-06-mcp-lifecycle.md",
       "depends_on": [
-        "P1",
         "P2",
-        "P3",
         "P4"
       ],
       "covers": [
@@ -101,9 +99,7 @@
       "id": "P7",
       "file": "build/phase-07-engine-budget.md",
       "depends_on": [
-        "P1",
         "P2",
-        "P3",
         "P4"
       ],
       "covers": [
@@ -115,8 +111,6 @@
       "file": "build/phase-08-provider-budget.md",
       "depends_on": [
         "P1",
-        "P2",
-        "P3",
         "P4"
       ],
       "covers": [
@@ -126,12 +120,7 @@
     {
       "id": "P9",
       "file": "build/phase-09-candidate-filter.md",
-      "depends_on": [
-        "P1",
-        "P2",
-        "P3",
-        "P4"
-      ],
+      "depends_on": [],
       "covers": [
         "G9"
       ]
@@ -141,7 +130,6 @@
       "file": "build/phase-10-research-stop.md",
       "depends_on": [
         "P1",
-        "P2",
         "P3",
         "P4"
       ],

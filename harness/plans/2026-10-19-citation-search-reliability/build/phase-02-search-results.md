@@ -1,6 +1,6 @@
 # P2 — Web Search 不遺失已取得結果
 
-目標 G2；依賴：無其他階段；先通過具名外部 source／安裝授權。共通政策見 [PLANS](../PLANS.md)，不可退讓條件見 [GOALS](../GOALS.md)。
+目標 G2；依賴：無其他階段；完整啟動已涵蓋下列具名外部 source／安裝與逐步 commit，先核對有效入口。共通政策見 [PLANS](../PLANS.md)，不可退讓條件見 [GOALS](../GOALS.md)。
 
 ## 輸入與目標
 
@@ -16,7 +16,7 @@ P2-S2：只修改 `search()` 的 best result 控制流程。每次取得有效�
 
 P2-S3：使用現有 Linux Node/npm 與已安裝 dependencies，在 source checkout 跑 `npm run build`（已存在，內容為 tsc）。build 失敗先報缺件，不自動 install 或改 lock。以修復後測試驗證 source 生成 dist。
 
-P2-S4：有外部安裝授權後，記錄且備份將被更新的確切產物，複製本次 build 必需產物至有效安裝目錄；比對 checksum，將同一離線測試指向實際 runtime dist 再驗證。不只驗 checkout 的 dist。若需讓 running process 重載，先辨識受影響進程並在空閒／已授權時重啟，不能中止使用者正在執行的回合。
+P2-S4：記錄且備份將被更新的確切產物，複製本次 build 必需產物至有效安裝目錄；比對 checksum，將同一離線測試指向實際 runtime dist 再驗證。不只驗 checkout 的 dist。若需讓 running process 重載，先辨識受影響進程並在空閒／已授權時重啟，不能中止使用者正在執行的回合。
 
 ## 核心四情境與直接回歸邊界
 
@@ -33,6 +33,6 @@ P2-S4：有外部安裝授權後，記錄且備份將被更新的確切產物，
 
 ## 交付、失敗與恢復
 
-交付需包含 source diff、build 命令結果、source／安裝各自 checksum、四情境實際結果與未變動 lock 的確認。外部修改不會自動進本研究專案 commit；只有得到外部 Git commit 授權才提交外部 repo，否則記錄 diff／檔案 checkpoint。
+交付需包含 source diff、build 命令結果、source／安裝各自 checksum、四情境實際結果與未變動 lock 的確認。外部修改不會自動進本研究專案 commit；完成並驗證 source 修正後直接在外部 repo 從 WSL scoped commit；安裝驗收作下一個交付 checkpoint，在主專案 log 記錄 source commit、安裝 checksum 與結果。兩者都沿用全計劃授權，不另請示；無法提交／安裝時記錄 blocker，繼續獨立項目。
 
 安裝驗收失敗只還原本次備份的指定產物，保留 source patch 與診斷，不整樹刪除／reset。本階段不宣稱搜尋加速或品質提高。

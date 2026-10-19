@@ -19,11 +19,11 @@
 
 時間戳供跨記錄關聯，duration 用 monotonic clock。重試同一 logical turn 要有新的 attempt ID，工具 call ID 不能跨 attempt 誤配。模型 callback 次數包含 outer empty-response/repair 再呼叫；SDK 一次 invoke 內部 HTTP 重試仍在同一 model 區間，未知 attempt 次數不虛構。
 
-候選／摘要數從現有型別／實際結果產生處取得，不以任意 regex 猜模型 prose。首選 callback 在記憶體讀工具結果，只輸出 allowlist 計數；若現有 citation tool 的 content-only 輸出無可靠結構，先列出最小額外插點（例如 citation/tool.py 或 service.py）及文件數，按超過三檔 gate 請核准。不能以把未知記成 0 來假裝滿足；未知應為 null／unavailable，並記錄原因。G4 完整驗收仍需至少一個真 Citation fixture 能產生可靠數量。
+候選／摘要數從現有型別／實際結果產生處取得，不以任意 regex 猜模型 prose。首選 callback 在記憶體讀工具結果，只輸出 allowlist 計數；若現有 citation tool 的 content-only 輸出無可靠結構，先列出最小額外插點（例如 citation/tool.py 或 service.py）及文件數，說明較小方案不足的原因，再依全計劃自主範圍實作與驗證，不因必要局部多檔而中斷。不能以把未知記成 0 來假裝滿足；未知應為 null／unavailable，並記錄原因。G4 完整驗收仍需至少一個真 Citation fixture 能產生可靠數量。
 
 ## 步驟與驗收
 
-P4-S1：核實 callback 可觀測真正 model 與每個 admitted tool；實作一組 per-execution handler／最小事件串接，不更動並行模型。先核定檔案集合；需要超過三 production files 時先給可審閱方案再取得核准。
+P4-S1：核實 callback 可觀測真正 model 與每個 admitted tool；實作一組 per-execution handler／最小事件串接，不更動並行模型。先記錄最小檔案集合；需要超過三 production files 時列明各檔因果必要性，沿用全計劃授權繼續，不新增一般框架。
 
 P4-S2：沿用 INFO 診斷 log，輸出到既有 component 檔案並確實 flush 到可在重啟後讀取；不可只寫 DEBUG 或記憶體 journal。保留 stdout 作 NDJSON。logger 不可寫入時沿用現有 fallback，應標記追蹤不可用，不能因診斷失敗讓研究回合失敗。
 
@@ -35,6 +35,6 @@ P4-S4：沿用 Citation fixture 檢查 search action、同 query hash 可串接�
 
 ## 交付與量測出口
 
-交付一段已去內容的實際離線 trace、所用事件語義、精確 log 位置與解析程序（可直接閱讀，不另造分析平台）。用 P1–P3 修好後的一次正常使用 trace 決定 P6–P10；若尚無自然樣本，記錄缺口，不跑付費補查、不報性能改善。總時間與重疊區間要分開；未觀測區段列未知。
+交付一段已去內容的實際離線 trace、所用事件語義、精確 log 位置與解析程序（可直接閱讀，不另造分析平台）。先用修好後的離線代表案例產生真實執行邊界 trace，供其他階段驗證串接與機制；另用已有正常使用 trace 或有界免費搜尋資料判斷實際成本。缺自然樣本只阻擋需要該證據的性能／模型行為驗收，不阻止所有後續。記錄缺口，繼續獨立工作，不自行跑付費補查或宣稱性能改善。總時間與重疊區間要分開；未觀測區段列未知。
 
-若 callback 路線不能以小改動達成，遵循兩次嘗試規則停止並給較小替代接點，不升級成通用 tracing 系統。
+若 callback 路線不能以小改動達成，遵循兩次嘗試規則記錄該路線阻塞與較小替代接點，繼續其他獨立工作，不升級成通用 tracing 系統。
