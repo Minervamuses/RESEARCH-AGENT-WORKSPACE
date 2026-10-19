@@ -913,6 +913,8 @@ def test_citation_follow_up_receives_stop_rules_and_repeat_signal(monkeypatch, t
     assert len(services) == 1 and fetcher.calls  # Offline fixture hub, one task-scoped service.
     assert "## Follow-up searches and stopping" in seen["prompt"]
     assert "Search again only for a named gap" in seen["prompt"]
+    assert "Do not fill\n  that gap from memory" in seen["prompt"]
+    assert "a short list of the searches you ran" in seen["prompt"]
     first, repeat = seen["results"]
     assert "already returned" not in first
     assert "This search added no new records" in repeat

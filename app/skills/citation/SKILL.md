@@ -50,7 +50,9 @@ task; visible prior conversation still supplies metadata and authorization.
   from your interpretation; even an abstract-level match does not prove the
   claim. For metadata-only candidates, say that relevance cannot yet be
   assessed from an abstract. Title similarity and verified DOI identity
-  establish neither substantive support nor a content summary.
+  establish neither substantive support nor a content summary. Do not fill
+  that gap from memory: do not describe what such a work says or how it is
+  regarded, and do not count it as support in a summary or synthesis.
 - Describe study design and method limitations only when the retrieved
   abstract states them. Higher/lower activity groups alone do not establish
   extreme-group sampling, non-random assignment, or the absence of an RCT.
@@ -79,6 +81,9 @@ task; visible prior conversation still supplies metadata and authorization.
 - Reporting that the retrieved abstracts do not cover part of the claim is a
   complete answer. There is no fixed number of searches; stop when the
   remaining gaps produce no new evidence.
+- End the answer with a short list of the searches you ran, each with the
+  gap it targeted, followed by which parts of the claim are supported,
+  unsupported, or not assessable from the retrieved abstracts.
 - A provider marked `skipped(... earlier in this task)` already failed in
   this task and is not retried until the next `/citation` task.
 

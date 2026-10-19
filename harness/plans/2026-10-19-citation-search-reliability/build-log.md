@@ -1,6 +1,6 @@
 # 執行紀錄
 
-本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；目前只剩 P10 的真模型行為驗收待一次能完成的自然 /citation trace（I3，見 X12）。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
+本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；P1–P10 均有完成證據（P10 附限制，見 X13），尚待追查的只有 I4。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
 
 ## 目前階段
 
@@ -15,7 +15,7 @@
 | P7 | Complete（X12 補強） | X8＋X12：`a2019f5` 改序；自然 query 下 DDG 回 202 anomaly、Brave 回 429 驗證頁，`a75a754` 讓 Brave 4xx 立即放棄；同 6 個自然 query 最終引擎不變、Brave 段 4.4–5.4 s→1.4–1.9 s；已部署 | heuristic 對長學術 query 給低分（0.10–0.30）仍會觸發 fallback，未改（無證據顯示 fallback 結果較好） | — |
 | P8 | Complete | X9：live provider 分段＋離線故障反例；同 task 已耗盡重試的 provider 後續 query 跳過並明示；整次 deadline 有證據不需 | 自然 provider 故障樣本極少（1 次非暫時性） | — |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
-| P10 | In progress | X10＋X12：第一次自然 /citation 只做 1 次 citation search（10 候選／4 摘要）與 2 次 web 補查、3 個 query hash 皆不同，但最終回答呼叫 504 失敗，無法判定收斂 | 需一次能產出最終回答的自然 /citation trace | 使用者以 Retry 或重新 `/citation` 再跑一次後依 X10 程序判定 |
+| P10 | Complete（附限制） | X13：重啟後自然 /citation 完成（112 s）；5 次 citation search、hash 全不同、每次皆有新候選與新摘要，無 web、無重複，回答列出剩餘缺口後停止 | 「無新證據即收斂」分支未在自然使用中觸發（僅離線驗證）；本次逐次補查目的無法回查；無摘要候選被以記憶描述 → 技能文字已收緊，效果未驗 | — |
 
 問題出現時在下方追加穩定 ID、原因／假說、已嘗試命令、結果／證據、採用替代方案、剩餘限制與下一步。保留 Not started／In progress／Blocked／Complete 狀態；有證據不需修改時於結果欄明列，缺證或待驗不能算 Complete。問題不會自動停止其他工作。
 
@@ -197,7 +197,7 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 | I0 | 全部 | Bash sandbox 中 `/tmp` 唯讀；外部 repo 與 `~/.local/share` 不在 sandbox 寫入範圍 | 硬編 `/tmp` 的 fixture 測試在 sandbox 內失敗；外部檔案寫入 `Read-only file system` | 這些命令改在 sandbox 外執行（使用者已授權外部 source／安裝更新）；結果全部通過 | 無 |
 | I1 | P6 附帶 | 在 sandbox 外跑完整 pytest 時，部分測試寫入使用者真實的 `~/.cache/agent-mcp/*.stderr.log`（追加 run header、建立測試 server log） | 確認來源為既有測試隔離缺口；之後的完整 pytest 改以 `XDG_CACHE_HOME=$TMPDIR/…` 執行，確認不再追加 | 已追加的少數 header 行未刪除（屬使用者資料目錄，不做計劃外刪除） | 另案：conftest 隔離 `XDG_CACHE_HOME` |
 | I2 | P10 開發 | P10 graph 測試初版用 `_seed_fixture_service`，但 /citation one-shot 會先 reset service，lazy 建出真 hub，於開發時對 Crossref／DataCite 公開 API 實打一次（免費、通用 query "Paper A"） | 改用 `_fixture_services` 並斷言只用離線 fetcher、只建一個 service；提交版本不觸網 | 無殘留；未涉及付費服務 | 無 |
-| I3 | P10 | 真模型補查／停止行為需自然 /citation trace；第一次自然 trace（X12）因最終模型呼叫 504 未產出回答 | 完成離線驗證；X12 修正 504 不重試 | P10 維持 In progress | 再跑一次 /citation（Retry 或新的 `/citation`）後依 X10 判定 |
+| I3 | P10 | 真模型補查／停止行為需自然 /citation trace；第一次自然 trace（X12）因最終模型呼叫 504 未產出回答 | X12 修正 504 不重試；使用者重啟後重跑，X13 取得完成的 trace | 已解決；限制見 X13 | 無 |
 | I4 | P8 | DataCite 在兩次自然 /citation 皆 `error`（非暫時性） | 一般與語法字元 query 皆未重現同類錯誤 | Crossref 結果照常、標示 incomplete | 需要時加入固定錯誤子類別的診斷 |
 
 ## 執行事件（收尾）
@@ -237,3 +237,32 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **P10 判定**：`78ade11b` 只做 1 次 citation search，之後以 web search 補查 2 次；3 個 query hash 都不同，沒有重複 query，也沒有重複 citation search。但最終回答呼叫失敗，看不到收斂與停止理由；補查的具名缺口沒有保存（失敗回合不存 assistant 訊息），無法判定。P10 仍 In progress。
 - **使用方式觀察**：失敗後送出的 "try again" 是新的一般回合（沒有 `/citation`，Citation 未啟動），模型改用 bash／rag／web；要重試同一 /citation 應使用失敗回合的 Retry（重用凍結的提交與 `/citation`）或重新以 `/citation` 開頭。
 - **I4（待查）**：DataCite 在兩次自然 /citation（10/15 與今晚）都是 `failed: error`（非暫時性：payload 超過 2 MiB 或無法解析；log 不記細節）。兩個一般 query 正常；含 Elasticsearch 語法字元的 query 回的是 HTTP 400（`http_error`，不同類別）。未取得原 query，未能重現；Crossref 結果照常交付且標示 incomplete。若要追查，需要在不記 provider 自由文字的前提下記錄固定的錯誤子類別。
+
+### X13 — 2026-10-19 23:07–23:09：第二次自然 /citation（重啟後）與 P10 判定
+
+使用者重啟 GUI（後端 pid 100064，含 `ccb0c40`），再以 `/citation Main request:…`＋段落留言送出。這是新回合 `efd95091`（turnNumber 1，新對話），不是對失敗回合的 Retry。以下只記結構與判定，不抄錄請求、回答或 query。
+
+- **trace**：112.2 s、completed。
+  - 模型 6 次共 103.5 s（約 92%）：第一次規劃 42.2 s／1,489 output tokens，最後回答 34.5 s／4,281 tokens。
+  - citation search 5 次共 8.6 s（1.0–2.8 s／次）；provider 皆成功，DataCite 這次正常；沒有 web 搜尋，也沒有 OpenRouter 重試紀錄。
+  - 不同案例，不與 10/15（304 s）或 10/19（341 s）回合比較快慢，也不宣稱縮短。
+- **補查與停止（G10）**：
+  - 5 個 query hash 全不同。
+  - 每次新增候選依序為 10／7／10／10／10，新增摘要為 6／1／5／5／6；第二次有 3 筆重複，tool 已標示。
+  - 沒有無新證據的重查。
+  - 最終回答依技能列出 search focus、候選（含摘要狀態與來源）及 "Remaining Gaps"：
+    - 一項子主張（以既定標準評估 LLM 寫作流程）標為 retrieved abstracts 未涵蓋；
+    - 兩個關鍵候選標為無摘要、無法據摘要評估；
+    - 未經授權不保存，請使用者選擇。
+  - 判定：自然使用下補查有新增證據、沒有重複、能誠實收斂並列出未支持部分，沒有固定次數上限或 web 繞道，符合 G10。
+- **限制與後續處理**：
+  1. 「無新證據即收斂」分支這次沒被觸發，因為每次都有新證據；它只有 X10 的離線驗證。
+  2. 失敗或完成的回合都不保存中間 AIMessage，log 只記 query hash，因此每次補查各自對準哪個缺口無法回查；回答只有整體 search focus。
+  3. 違反既有摘要規則：兩個無摘要候選，回答先說無法評估，接著又以模型記憶描述其內容與地位，並在綜合段列為「methodological backing」；也沒有依規則以題名補查摘要。目前未設 `OPENALEX_API_KEY`，只有 Crossref／DataCite，題名補查多半也拿不到這類期刊的摘要。
+  - **修改（`skills/citation/SKILL.md`）**：
+    - metadata-only 候選不得以記憶描述其內容或地位，也不得在摘要或綜合中算作支持；
+    - 回答結尾須簡列執行過的 search 及各自針對的缺口，再列已支持、未支持、無法據摘要評估的部分。
+    - 這讓限制 2 未來可由使用者直接看到，也針對限制 3；兩者的實際效果尚未在自然使用中驗證，不宣稱已改善。
+  - `tests/test_citation_e2e.py` 斷言模型 prompt 含新規則；相關 75 passed，完整 pytest 1495 passed。
+- **給使用者的設定建議**：若要讓更多候選帶有可評估的摘要，可設定 `OPENALEX_API_KEY`（hub 已支援，未設時 OpenAlex 停用）。
+- **論文評估注意**：本次技能文字收緊屬於實驗條件的一部分；比較 Citation 與一般代理時，應註明使用的 SKILL.md 版本（本 commit 之後）。
