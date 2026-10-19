@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "plan_id": "citation-search-reliability-2026-10-19",
+  "goals": [
+    {
+      "id": "G1",
+      "text": "段落留言保留Citation啟動"
+    },
+    {
+      "id": "G2",
+      "text": "搜尋保留最佳有效結果"
+    },
+    {
+      "id": "G3",
+      "text": "模型上下文全文去重"
+    },
+    {
+      "id": "G4",
+      "text": "持久化最小執行計時"
+    },
+    {
+      "id": "G5",
+      "text": "SDK有限timeout與重試"
+    },
+    {
+      "id": "G6",
+      "text": "依程序成本決定MCP重用"
+    },
+    {
+      "id": "G7",
+      "text": "依引擎證據改善搜尋"
+    },
+    {
+      "id": "G8",
+      "text": "Citation有限等待與部分結果"
+    },
+    {
+      "id": "G9",
+      "text": "資格過濾早於截斷"
+    },
+    {
+      "id": "G10",
+      "text": "補查缺口與停止條件"
+    }
+  ],
+  "phases": [
+    {
+      "id": "P1",
+      "file": "build/phase-01-activation.md",
+      "depends_on": [],
+      "covers": [
+        "G1"
+      ]
+    },
+    {
+      "id": "P2",
+      "file": "build/phase-02-search-results.md",
+      "depends_on": [],
+      "covers": [
+        "G2"
+      ]
+    },
+    {
+      "id": "P3",
+      "file": "build/phase-03-context.md",
+      "depends_on": [],
+      "covers": [
+        "G3"
+      ]
+    },
+    {
+      "id": "P4",
+      "file": "build/phase-04-timing.md",
+      "depends_on": [],
+      "covers": [
+        "G4"
+      ]
+    },
+    {
+      "id": "P5",
+      "file": "build/phase-05-retry-policy.md",
+      "depends_on": [],
+      "covers": [
+        "G5"
+      ]
+    },
+    {
+      "id": "P6",
+      "file": "build/phase-06-mcp-lifecycle.md",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "covers": [
+        "G6"
+      ]
+    },
+    {
+      "id": "P7",
+      "file": "build/phase-07-engine-budget.md",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "covers": [
+        "G7"
+      ]
+    },
+    {
+      "id": "P8",
+      "file": "build/phase-08-provider-budget.md",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "covers": [
+        "G8"
+      ]
+    },
+    {
+      "id": "P9",
+      "file": "build/phase-09-candidate-filter.md",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "covers": [
+        "G9"
+      ]
+    },
+    {
+      "id": "P10",
+      "file": "build/phase-10-research-stop.md",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "covers": [
+        "G10"
+      ]
+    }
+  ]
+}
