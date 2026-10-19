@@ -13,7 +13,7 @@
 | P5 | Complete | X5：顯式 SDK client；每次 HTTP 600 s、重試窗 4×5 s、Retry-After ≤8 s、0＝真停用；真 wrapper/SDK＋MockTransport＋假時鐘驗 7 情境 | 真 provider 行為未打（無付費呼叫） | — |
 | P6 | Complete（有證據不需修改） | X7：真 server 每次呼叫程序開銷 0.39 s；重用會讓 server 內 10 次／分 limiter 開始拒絕 | 無 | — |
 | P7 | Complete | X8：外部 commit `a2019f5`（引擎順序 Bing→DDG→Brave）；同 5 query 前後最終引擎／品質相同，fallback 段 5.2–6.1 s→0.6–1.1 s；已部署 | 樣本小（5 query、單一網路環境）；heuristic 與 deadline 有證據不需改 | — |
-| P8 | Not started | E8／gather/retry 機制 | P1、P4 與 Citation/provider 資料 | 分段歸因、選保守政策並驗證 |
+| P8 | Complete | X9：live provider 分段＋離線故障反例；同 task 已耗盡重試的 provider 後續 query 跳過並明示；整次 deadline 有證據不需 | 自然 provider 故障樣本極少（1 次非暫時性） | — |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
 | P10 | Not started | E10／工具與技能邊界 | P1、P3、P4 與新 action trace | 分析缺口、調整並驗證停止行為 |
 
@@ -159,3 +159,20 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **外部 repo**：`a2019f5 perf(search): try DuckDuckGo before the Brave browser fallback [P7]`（`src/search-engine.ts` 順序與註解；回歸檔改順序斷言並新增「DDG 可用時不跑 Brave」「DDG 無結果時仍跑 Brave」，15/15）。`package-lock.json` 使用者修改仍未 stage。ESLint 仍只有既有 `debugBing` 1 error。
 - **安裝交付**：備份 `~/.local/share/mcp-servers/.backups/web-search-mcp/20261019T130058Z-P7/dist/`（即 P2 版本：js `54edc6ae…be48b`）；替換 `search-engine.js`（新 `7622c778c8cf7b78fc84ffade9b308f43e9b94525e105d3249268413eaa36e7c`）、`.js.map`、`.d.ts.map`；安裝與 source dist `diff -rq` 相同；回歸檔指向安裝 dist 15/15；以 app 實際 launch spec 經 MCP 做 2 次真實搜尋（中文、英文）各回 5 筆（7.3 s、2.5 s；stderr 寫到 `$TMPDIR`）。部署前後無執行中的 web-search 程序。還原：把 P7 備份三檔複製回安裝 dist（回到 P2 版）。
 - **限制**：樣本只有 5 個 query、單一時段與網路；Brave 在其他網路可能可用（此時它只在 DDG 無可用結果時才跑）。DDG 以 axios 抓 html 版，若被限流會回 0 筆而落到 Brave，行為同修改前。
+
+### X9 — P8：Citation provider 等待與不完整結果
+
+- **P8-S1 分段證據**：
+  - 離線 P4 trace：同回合並行的第二個不同 query 在 Crossref limiter 等約 1 s（public pool：並行 1、間隔 1 s）；同 query 第二次走成功快取約 1 ms。
+  - 免費 live 小樣本（真 hub＋httpx，未設 `CROSSREF_MAILTO`／`DATACITE_MAILTO`／`OPENALEX_API_KEY`，4 個通用 query）：Crossref 每次 4.1–4.9 s（以 HTTP 為主），DataCite 0.45–1.3 s，`gather` 讓每次 search ≈ Crossref 時間；兩個新 query 並行時 Crossref 排隊，第二個 8.1 s；重複 query 0 s；無失敗。
+  - 自然 log：`desktop-backend.log` 只有 1 筆 provider 失敗（10/15 DataCite `error`，非暫時性、不重試），沒有 retry 紀錄；10/15 Citation 回合（304 s、10 次 citation_workflow）無法再細分，因為當時沒有 P4 trace。
+  - 讀碼得到的故障路徑上限（每 provider、每次 search）：timeout 2×25 s＋退避 ≈ 52 s；5xx 3 次＋退避（或 Retry-After ≤ 30 s）；429 3 次＋最多 2×31 s。**關鍵缺口**：錯誤不快取，同一 task 的每個新 query 都會對同一故障 provider 重新付一次這段等待。
+- **P8-S2 政策（執行者選定）**：
+  - 同 task 故障 provider 預算：provider 在某次 search 以暫時性類別（`rate_limited`／`timeout`／`network_error`／`server_error`，沿用既有 `TRANSIENT_FAILURE_KINDS`）耗盡既有重試後，同一 `CitationService` 的後續 search 不再呼叫它，state 為 `<provider>:skipped(<kind> earlier in this task)`。owner 是 `CitationService` 實例；生產路徑的 /citation 是 one-shot，session 在回合前後各 `reset()` 一次，因此重置點就是回合邊界，下一回合會重新嘗試。（`activate_citation_skill()` 的持續啟用只有測試使用，該路徑下記憶持續到停用。）不做跨回合 circuit breaker、不寫持久快取、不動 hub。
+  - 整次 search 時間預算：**不加**。正常情況最慢的是 Crossref，它是主要來源，提早回傳會丟掉它的紀錄；正常等待 ≤ 約 5 s（排隊 ≤ 約 8 s）；故障路徑已有既有上限，且加上上一條後每 task 每 provider 最多付一次。並行大量 search 時加 deadline 反而可能截斷慢但有效的 Crossref 回應。
+  - 部分結果：沿用既有語義（成功來源的候選＋各 provider state＋"Search incomplete"）；skipped 屬失敗 state，全部失敗／跳過時仍是 "Search failed…not evidence"，不是零命中。save 與 DOI resolution 的重試政策不變。
+- **修改**：只改 `skills/citation/service.py`（`_failed_search_providers` 與 `call()` 的跳過／記錄）。
+- **驗收**（`tests/test_citation_hub.py`，真 hub／provider client／httpx MockTransport，`no_citation_backoff` 記錄退避而不真等）：DataCite timeout／503／429 三種下，第一個 query 回 Crossref 候選並記 `datacite:timeout`／`server_error(503)`／`rate_limited`（各 1–2 次退避）；同 task 第二個新 query 不呼叫、不等待 DataCite，tool 輸出含 Paper A、`datacite:skipped(… earlier in this task)` 與 "Search incomplete"；新 service（下一回合）再次呼叫 DataCite。404 與成功不觸發跳過。兩來源皆 timeout 時第一、二次都是 "Search failed"，且第二次 0 次 HTTP。取消中的 search 拋 `CancelledError` 且不記錄故障。修改前同測試第二個 query 會再打 2–3 次 DataCite。
+- **檢查**：`tests/test_citation_hub.py` 17 passed；完整 pytest 1490 passed（40 s）。
+- **建議（使用者設定，未代為設定）**：設 `CROSSREF_MAILTO`（免費 polite pool：並行 3、間隔 1/3 s）可減少同回合並行 search 在 Crossref 的排隊；這是需使用者提供 email 的環境設定，不屬本次自動修改。
+- **限制**：真實故障下的時間節省未在自然使用中觀測到（樣本內無暫時性故障）；本項是機制上限的改善，不宣稱已縮短特定回合。

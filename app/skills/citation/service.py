@@ -51,6 +51,11 @@ class CitationService:
             doi_org=hub.doi_org,
         )
         self.authorities = AuthorityRegistry(fetcher=hub._fetch)
+        # Search providers that already exhausted their retries on a transient
+        # failure. A service lives for one Citation task (the session rebuilds
+        # it per turn), so later queries in that task skip them instead of
+        # waiting on the same outage again; the next task tries them again.
+        self._failed_search_providers: dict[str, str] = {}
 
     async def search(
         self,
@@ -64,6 +69,9 @@ class CitationService:
             providers.append(("openalex", self.hub.openalex))
 
         async def call(name, provider):
+            earlier = self._failed_search_providers.get(name)
+            if earlier is not None:
+                return [], f"{name}:skipped({earlier} earlier in this task)"
             try:
                 return await provider.search_text(
                     query,
@@ -76,6 +84,9 @@ class CitationService:
                     name,
                     describe_failure(exc),
                 )
+                kind = failure_kind(exc)
+                if kind in TRANSIENT_FAILURE_KINDS:
+                    self._failed_search_providers.setdefault(name, kind)
                 return [], f"{name}:{describe_failure(exc)}"
             except Exception as exc:
                 logger.error(
