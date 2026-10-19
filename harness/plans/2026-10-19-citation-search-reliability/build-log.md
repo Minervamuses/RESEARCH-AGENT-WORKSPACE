@@ -1,6 +1,6 @@
 # 執行紀錄
 
-本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
+本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；目前只剩 P10 的真模型行為驗收待自然使用 trace（I3）。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
 
 ## 目前階段
 
@@ -189,3 +189,24 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **檢查**：`tests/test_citation_workflow_tool.py tests/test_citation_e2e.py tests/test_observability.py` 69 passed；完整 pytest 1492 passed（`XDG_CACHE_HOME` 指向 `$TMPDIR`，未再寫使用者 MCP log）。
 - **為何不是 Complete**：腳本模型只能驗指示與工具邊界，不能證明真模型會少補查或正確收斂；計劃要求真模型停止行為需「已有或經授權的單一代表正常使用 trace」。目前沒有，也無付費呼叫授權。
 - **恢復條件與程序**：使用者下次以 GUI 正常執行一次 /citation（例如段落留言），之後執行 `grep -h 'turn_trace' ~/.local/state/research-agent/logs/desktop-backend.log* | grep 'turn_id=<該回合 turnId>'`：逐一看 `action=search` 的 `query_hash` 是否重複、`new_candidate_count`／`new_abstract_count` 是否為 0 後仍繼續搜尋，並在原對話內核對每次補查的目的；若仍有無新證據的重複補查，再依該 trace 調整技能文字（或在證據指向 DOI 摘要時才考慮最小向後相容 action）。
+
+## 問題紀錄
+
+| ID | 階段 | 原因／證據 | 嘗試與結果 | 採用替代／剩餘限制 | 下一步 |
+|---|---|---|---|---|---|
+| I0 | 全部 | Bash sandbox 中 `/tmp` 唯讀；外部 repo 與 `~/.local/share` 不在 sandbox 寫入範圍 | 硬編 `/tmp` 的 fixture 測試在 sandbox 內失敗；外部檔案寫入 `Read-only file system` | 這些命令改在 sandbox 外執行（使用者已授權外部 source／安裝更新）；結果全部通過 | 無 |
+| I1 | P6 附帶 | 在 sandbox 外跑完整 pytest 時，部分測試寫入使用者真實的 `~/.cache/agent-mcp/*.stderr.log`（追加 run header、建立測試 server log） | 確認來源為既有測試隔離缺口；之後的完整 pytest 改以 `XDG_CACHE_HOME=$TMPDIR/…` 執行，確認不再追加 | 已追加的少數 header 行未刪除（屬使用者資料目錄，不做計劃外刪除） | 另案：conftest 隔離 `XDG_CACHE_HOME` |
+| I2 | P10 開發 | P10 graph 測試初版用 `_seed_fixture_service`，但 /citation one-shot 會先 reset service，lazy 建出真 hub，於開發時對 Crossref／DataCite 公開 API 實打一次（免費、通用 query "Paper A"） | 改用 `_fixture_services` 並斷言只用離線 fetcher、只建一個 service；提交版本不觸網 | 無殘留；未涉及付費服務 | 無 |
+| I3 | P10 | 真模型補查／停止行為需自然 /citation trace；目前沒有，且無付費模型呼叫授權 | 完成離線技能／工具／graph 邊界驗證與 trace 計數 | P10 維持 In progress | 使用者下次正常使用 /citation 後依 X10 程序判定 |
+
+## 執行事件（收尾）
+
+### X11 — 2026-10-19：全計劃第一輪完成狀態
+
+- **完成**：P1、P2、P3、P4、P5、P8、P9 為實作並驗收；P6 為「有證據不需修改」；P7 為量測後實作單一變數並部署。第一批連通案例（主請求 `/citation`＋段落留言 → 真 TS 組裝 → backend 技能啟動 → 模型輸入同版本全文一份 → 真 Citation tool／離線 provider → 同 turnId 的持久化 trace 可回查）由 `test_desktop_citation_command_survives_reference_comment_composition` 涵蓋。
+- **未完成**：P10 的真模型行為驗收（I3）。其餘階段沒有 Blocked。
+- **主專案 commits**（`df9e58b..`）：`2bc784a` P1、`57c31dd` P2 log、`2bfdb22` P3、`7eddb30` P4、`37a448c` P5、`868b5a2` P9、`b1e3d20` P6、`1de6c62` P7 log、`1f1fa78` P8、`022bdcb` P10（本收尾紀錄另一個 commit）。
+- **外部 repo commits**（`eeb03f8..`）：`ddb2dba` P2、`a2019f5` P7；使用者的 `package-lock.json` 修改保留未動。
+- **安裝**：`~/.local/share/mcp-servers/web-search-mcp/dist/search-engine.js` 現為 `7622c778…6e7c`（= source `a2019f5` build）；備份 `…/.backups/web-search-mcp/20261019T123509Z-P2/`（原始版）與 `…20261019T130058Z-P7/`（P2 版）。
+- **最後驗證**：完整 pytest 1492 passed（sandbox 外、`XDG_CACHE_HOME` 隔離）；desktop `npm test` 260 passed 與 `npm run build` 成功（前端只在 P1 變動）；外部回歸 15/15（source 與安裝 dist）；Rust desktop 未變動，未跑 cargo。
+- **使用者可選的後續**：(1) 正常使用一次 /citation 以完成 P10 驗收；(2) 若要減少 Crossref 排隊，可自行設定 `CROSSREF_MAILTO`；(3) /citation 下是否解除 web_search 綁定仍是先前待決的另案，本計劃未更動。
