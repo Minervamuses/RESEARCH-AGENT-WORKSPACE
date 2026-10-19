@@ -1,6 +1,6 @@
 # 執行紀錄
 
-本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；目前只剩 P10 的真模型行為驗收待自然使用 trace（I3）。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
+本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；目前只剩 P10 的真模型行為驗收待一次能完成的自然 /citation trace（I3，見 X12）。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
 
 ## 目前階段
 
@@ -10,12 +10,12 @@
 | P2 | Complete | X2：外部 commit `ddb2dba`；source／安裝 dist 各 13/13 離線通過；安裝已備份並更新 | 無；真實搜尋品質／速度未宣稱改善 | P7 量測沿用同一回歸檔 |
 | P3 | Complete | X3：同版本全文只出現一次；異版本／同 fingerprint 異內容分開；retry 重用已去重輸入 | 無；端到端速度未量 | P4 沿用同一代表案例 |
 | P4 | Complete | X4：per-attempt callback → INFO `turn_trace` 持久 log；並行／例外／拒絕／取消／重試／Citation 計數均驗 | 自然使用樣本尚無（使用者下次正常使用即產生） | P6–P10 讀 trace |
-| P5 | Complete | X5：顯式 SDK client；每次 HTTP 600 s、重試窗 4×5 s、Retry-After ≤8 s、0＝真停用；真 wrapper/SDK＋MockTransport＋假時鐘驗 7 情境 | 真 provider 行為未打（無付費呼叫） | — |
+| P5 | Complete（X12 修訂） | X5 → X12：自然使用中 504 於 32／51 s 後才回、20 s 時間窗不重試；改為次數制（`llm_max_retries=2`，與單次耗時無關）`ccb0c40` | 修訂後的真 provider 行為待下次自然使用觀察 | — |
 | P6 | Complete（有證據不需修改） | X7：真 server 每次呼叫程序開銷 0.39 s；重用會讓 server 內 10 次／分 limiter 開始拒絕 | 無 | — |
-| P7 | Complete | X8：外部 commit `a2019f5`（引擎順序 Bing→DDG→Brave）；同 5 query 前後最終引擎／品質相同，fallback 段 5.2–6.1 s→0.6–1.1 s；已部署 | 樣本小（5 query、單一網路環境）；heuristic 與 deadline 有證據不需改 | — |
+| P7 | Complete（X12 補強） | X8＋X12：`a2019f5` 改序；自然 query 下 DDG 回 202 anomaly、Brave 回 429 驗證頁，`a75a754` 讓 Brave 4xx 立即放棄；同 6 個自然 query 最終引擎不變、Brave 段 4.4–5.4 s→1.4–1.9 s；已部署 | heuristic 對長學術 query 給低分（0.10–0.30）仍會觸發 fallback，未改（無證據顯示 fallback 結果較好） | — |
 | P8 | Complete | X9：live provider 分段＋離線故障反例；同 task 已耗盡重試的 provider 後續 query 跳過並明示；整次 deadline 有證據不需 | 自然 provider 故障樣本極少（1 次非暫時性） | — |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
-| P10 | In progress | X10：技能補查／停止規則＋同 task 重複候選標示與新證據計數；離線契約與 graph 邊界已驗 | **真模型補查／停止行為待驗**：需一次修正後的自然 /citation 使用 trace（無付費呼叫授權） | 使用者下次正常使用 /citation 後依 X10 程序讀 trace 判定 |
+| P10 | In progress | X10＋X12：第一次自然 /citation 只做 1 次 citation search（10 候選／4 摘要）與 2 次 web 補查、3 個 query hash 皆不同，但最終回答呼叫 504 失敗，無法判定收斂 | 需一次能產出最終回答的自然 /citation trace | 使用者以 Retry 或重新 `/citation` 再跑一次後依 X10 程序判定 |
 
 問題出現時在下方追加穩定 ID、原因／假說、已嘗試命令、結果／證據、採用替代方案、剩餘限制與下一步。保留 Not started／In progress／Blocked／Complete 狀態；有證據不需修改時於結果欄明列，缺證或待驗不能算 Complete。問題不會自動停止其他工作。
 
@@ -197,7 +197,8 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 | I0 | 全部 | Bash sandbox 中 `/tmp` 唯讀；外部 repo 與 `~/.local/share` 不在 sandbox 寫入範圍 | 硬編 `/tmp` 的 fixture 測試在 sandbox 內失敗；外部檔案寫入 `Read-only file system` | 這些命令改在 sandbox 外執行（使用者已授權外部 source／安裝更新）；結果全部通過 | 無 |
 | I1 | P6 附帶 | 在 sandbox 外跑完整 pytest 時，部分測試寫入使用者真實的 `~/.cache/agent-mcp/*.stderr.log`（追加 run header、建立測試 server log） | 確認來源為既有測試隔離缺口；之後的完整 pytest 改以 `XDG_CACHE_HOME=$TMPDIR/…` 執行，確認不再追加 | 已追加的少數 header 行未刪除（屬使用者資料目錄，不做計劃外刪除） | 另案：conftest 隔離 `XDG_CACHE_HOME` |
 | I2 | P10 開發 | P10 graph 測試初版用 `_seed_fixture_service`，但 /citation one-shot 會先 reset service，lazy 建出真 hub，於開發時對 Crossref／DataCite 公開 API 實打一次（免費、通用 query "Paper A"） | 改用 `_fixture_services` 並斷言只用離線 fetcher、只建一個 service；提交版本不觸網 | 無殘留；未涉及付費服務 | 無 |
-| I3 | P10 | 真模型補查／停止行為需自然 /citation trace；目前沒有，且無付費模型呼叫授權 | 完成離線技能／工具／graph 邊界驗證與 trace 計數 | P10 維持 In progress | 使用者下次正常使用 /citation 後依 X10 程序判定 |
+| I3 | P10 | 真模型補查／停止行為需自然 /citation trace；第一次自然 trace（X12）因最終模型呼叫 504 未產出回答 | 完成離線驗證；X12 修正 504 不重試 | P10 維持 In progress | 再跑一次 /citation（Retry 或新的 `/citation`）後依 X10 判定 |
+| I4 | P8 | DataCite 在兩次自然 /citation 皆 `error`（非暫時性） | 一般與語法字元 query 皆未重現同類錯誤 | Crossref 結果照常、標示 incomplete | 需要時加入固定錯誤子類別的診斷 |
 
 ## 執行事件（收尾）
 
@@ -210,3 +211,29 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **安裝**：`~/.local/share/mcp-servers/web-search-mcp/dist/search-engine.js` 現為 `7622c778…6e7c`（= source `a2019f5` build）；備份 `…/.backups/web-search-mcp/20261019T123509Z-P2/`（原始版）與 `…20261019T130058Z-P7/`（P2 版）。
 - **最後驗證**：完整 pytest 1492 passed（sandbox 外、`XDG_CACHE_HOME` 隔離）；desktop `npm test` 260 passed 與 `npm run build` 成功（前端只在 P1 變動）；外部回歸 15/15（source 與安裝 dist）；Rust desktop 未變動，未跑 cargo。
 - **使用者可選的後續**：(1) 正常使用一次 /citation 以完成 P10 驗收；(2) 若要減少 Crossref 排隊，可自行設定 `CROSSREF_MAILTO`；(3) /citation 下是否解除 web_search 綁定仍是先前待決的另案，本計劃未更動。
+
+### X12 — 2026-10-19 22:33–22:39：第一次自然使用 trace 與修正
+
+使用者在 GUI 跑了 `/citation`（段落留言），失敗後另送一個一般回合 "try again"。只讀結構欄位、trace 與 log；未把 query、內文或回答寫入任何檔案。
+
+- **P1／P3／P4 自然驗收**：回合 `78ade11b` 的 display 為 `/citation Main request:…`，Citation 確實啟動（呼叫 citation_workflow）。14,696 字全文在模型輸入只出現 1 次，semantic input 17,365 字（先前同類 32,205 字），reference 以 `sourceTextSameAs` 指向 editor snapshot。`turn_trace` 完整寫入 `desktop-backend.log`，可依 turnId 重建。
+- **時間分解**：
+  - `78ade11b`（/citation，63.5 s，failed）：模型 4 次 44.3 s（其中最後一次 32.6 s 失敗）；citation search 1 次 3.6 s（10 候選、4 摘要、DataCite `error`）；web 2 次 15.6 s。
+  - `a1ca5da3`（"try again"，一般回合、無 Citation，181.6 s，failed）：模型 13 次 139.1 s（最後一次 51.5 s 失敗）；web 4 次 38.8 s；rag_search 3.5 s；bash 6 次 0.08 s。
+  - 模型時間約 70–77%；web 約 21–25%。
+- **失敗根因（P5 回歸）**：兩回合都在最後一次模型呼叫收到 OpenRouter `504 {"message":"The operation was aborted","metadata":{"provider_name":"Google"}}`，分別在 32.6 s 與 51.5 s 後才回。X5 的 SDK 重試窗是從第一次請求起算 20 s，失敗回來時窗已關，所以一次都沒重試（舊 25 分鐘窗會重試）。
+  - **修正 `ccb0c40`**：停用 SDK 重試；改用 httpx `Client`／`AsyncClient` 子類在 `send()` 內重送，凡 5xx 或 `httpx.NetworkError`／`RemoteProtocolError` 最多重試 `llm_max_retries` 次（預設 2，與單次耗時無關），等待 1、2 s（上限 8 s，Retry-After 同上限）；timeout（600 s）、4xx、429 不重試；取消立即停止。每次重試寫 INFO `openrouter request retry n/N after <cause> in <delay>`。子類而非自訂 transport，避免繞過 httpx 的環境 proxy 設定。
+  - 上界：持續快速 5xx 約 3 s 停；慢 504 最多 3 次嘗試＋3 s；timeout 只 1 次。
+  - 測試新增「50 s 後 504 再成功」與連線錯誤情境；完整 pytest 1495 passed。
+- **Web search（P7 補強）**：以已安裝版本重量同 6 個自然 query（只輸出時間軸，query 只存在 scratchpad）。5/6 個 Bing 品質 0.10–0.30（長學術 query 的關鍵字比例低）而進 fallback：
+  - DuckDuckGo 對含引號／OR 的 query 回 **HTTP 202 anomaly 頁**（0 筆，0.1–0.8 s）；
+  - Brave 回 **HTTP 429 驗證頁**（約 0.35 s 就回），但程式仍等 3 s 結果 selector，每次共 4.4–5.4 s；
+  - 最後回 Bing 結果（P2 的保留修正生效，修正前會回空）。
+  - **修正（外部 `a75a754`）**：Brave 導覽回應 ≥400 時丟 `braveBlocked` 錯誤，不等 selector、不開第二個瀏覽器；200 頁行為不變。
+  - 同 6 query 再測：最終引擎不變（Bing×5、DDG×1），Brave 段 1.4–1.9 s，Bing 之後的 fallback 段由 4.7–6.1 s 降為 1.5–3.7 s。
+  - 回歸檔以假 Playwright browser 測 429／403 立即失敗、200 仍等待，19/19；舊版恰好失敗那兩項。ESLint 仍只有既有 1 error。
+  - 部署：備份 `~/.local/share/mcp-servers/.backups/web-search-mcp/20261019T144721Z-P7b/`（a2019f5 版，js `7622c778…6e7c`），安裝 js 現為 `c76e400ec2ccf2030a42cfbbe114cdec35ce98a48db0b571d629eba78f71231f`，與 `a75a754` 的 build 位元相同；app 實際 launch spec 做 1 次真實搜尋 5 筆／5.3 s。
+  - 流程註記：第一次提交被 `git diff --cached --check`（我改到的那行保留了原有行尾空白）擋下，但同一 shell 的部署已先執行；去掉空白後重 build，確認產物與已部署檔案位元相同，再提交。安裝內容與 commit 一致。
+- **P10 判定**：`78ade11b` 只做 1 次 citation search，之後以 web search 補查 2 次；3 個 query hash 都不同，沒有重複 query，也沒有重複 citation search。但最終回答呼叫失敗，看不到收斂與停止理由；補查的具名缺口沒有保存（失敗回合不存 assistant 訊息），無法判定。P10 仍 In progress。
+- **使用方式觀察**：失敗後送出的 "try again" 是新的一般回合（沒有 `/citation`，Citation 未啟動），模型改用 bash／rag／web；要重試同一 /citation 應使用失敗回合的 Retry（重用凍結的提交與 `/citation`）或重新以 `/citation` 開頭。
+- **I4（待查）**：DataCite 在兩次自然 /citation（10/15 與今晚）都是 `failed: error`（非暫時性：payload 超過 2 MiB 或無法解析；log 不記細節）。兩個一般 query 正常；含 Elasticsearch 語法字元的 query 回的是 HTTP 400（`http_error`，不同類別）。未取得原 query，未能重現；Crossref 結果照常交付且標示 incomplete。若要追查，需要在不記 provider 自由文字的前提下記錄固定的錯誤子類別。
