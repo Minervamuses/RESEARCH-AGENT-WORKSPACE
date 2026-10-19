@@ -15,7 +15,7 @@
 | P7 | Complete | X8：外部 commit `a2019f5`（引擎順序 Bing→DDG→Brave）；同 5 query 前後最終引擎／品質相同，fallback 段 5.2–6.1 s→0.6–1.1 s；已部署 | 樣本小（5 query、單一網路環境）；heuristic 與 deadline 有證據不需改 | — |
 | P8 | Complete | X9：live provider 分段＋離線故障反例；同 task 已耗盡重試的 provider 後續 query 跳過並明示；整次 deadline 有證據不需 | 自然 provider 故障樣本極少（1 次非暫時性） | — |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
-| P10 | Not started | E10／工具與技能邊界 | P1、P3、P4 與新 action trace | 分析缺口、調整並驗證停止行為 |
+| P10 | In progress | X10：技能補查／停止規則＋同 task 重複候選標示與新證據計數；離線契約與 graph 邊界已驗 | **真模型補查／停止行為待驗**：需一次修正後的自然 /citation 使用 trace（無付費呼叫授權） | 使用者下次正常使用 /citation 後依 X10 程序讀 trace 判定 |
 
 問題出現時在下方追加穩定 ID、原因／假說、已嘗試命令、結果／證據、採用替代方案、剩餘限制與下一步。保留 Not started／In progress／Blocked／Complete 狀態；有證據不需修改時於結果欄明列，缺證或待驗不能算 Complete。問題不會自動停止其他工作。
 
@@ -176,3 +176,16 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **檢查**：`tests/test_citation_hub.py` 17 passed；完整 pytest 1490 passed（40 s）。
 - **建議（使用者設定，未代為設定）**：設 `CROSSREF_MAILTO`（免費 polite pool：並行 3、間隔 1/3 s）可減少同回合並行 search 在 Crossref 的排隊；這是需使用者提供 email 的環境設定，不屬本次自動修改。
 - **限制**：真實故障下的時間節省未在自然使用中觀測到（樣本內無暫時性故障）；本項是機制上限的改善，不宣稱已縮短特定回合。
+
+### X10 — P10：補查缺口與停止條件（離線部分完成，真模型行為待驗）
+
+- **P10-S1 現況**：兩筆歷史回合的 citation／web 呼叫沒有保存 action 或 query，無法認定哪些補查多餘（10/15：10 次 citation_workflow＋13 次 web；10/19：0＋14）。修正後尚無自然 /citation 使用，因此沒有新的 action trace；未以付費模型補跑。不以工具次數推論模型輪數。
+- **判定 DOI 補摘要 action**：沒有證據顯示主要缺口是「指定 DOI 取不到摘要」，依計劃不新增 action，tool 介面不變。
+- **P10-S2 修改**：
+  - `skills/citation/SKILL.md` 新增 "Follow-up searches and stopping"：補查只針對具名缺口（選取主張中尚無摘要涵蓋的部分，或某候選缺摘要時以其題名再查）並說明目標；遇 `already returned earlier in this task` 或沒有新紀錄／新摘要時不改寫重查，改為回答已支持／未支持／無法評估與限制；回報摘要未涵蓋也是完整答案；沒有固定搜尋次數；`skipped(... earlier in this task)` 的 provider 本 task 不再重試（對應 P8）。全域 Web Search 仍可用（是否在 /citation 下解除綁定屬使用者尚未決定的另案，未更動）。
+  - `skills/citation/tool.py`：以 `WeakKeyDictionary` 依 service 實例（= 一個 Citation task）記住已回傳的候選（鍵同 service 去重：DOI，否則 provider＋id），search 輸出在重複候選加一行 `already returned earlier in this task`，並在標頭後加「N new; M already returned」或「This search added no new records…」；計數 artifact 增加 `new_candidate_count`、`new_abstract_count`。
+  - `agent/observability.py`：trace 允許列出上述兩個計數。因此下一次自然使用時，每個 search 的「新證據增量」會直接出現在 `turn_trace … tool_end … action=search query_hash=… new_candidate_count=… new_abstract_count=…`，可據此辨識重複 query（同 hash）、只有重複候選（new=0）與新證據。
+- **P10-S3 離線驗證**：真 service＋tool：同 task 先窄後寬再重複，輸出與計數分別為 5 新（1 新摘要）→「8 new; 2 already returned」且標在正確兩筆 → 全部重複「added no new records」、計數 0／0；新 service 不帶重複標示。真 graph＋腳本模型＋離線 fixture hub 的 /citation one-shot：模型收到的 prompt 含新規則，第二次相同 search 的工具結果含「added no new records」與「abstract status: unavailable」，最終回答誠實收斂（腳本固定）。P4 Citation trace 測試斷言 new_candidate_count 為 2／0／0。`test_citation_skill_text_is_free_of_protocol_artifacts` 通過。
+- **檢查**：`tests/test_citation_workflow_tool.py tests/test_citation_e2e.py tests/test_observability.py` 69 passed；完整 pytest 1492 passed（`XDG_CACHE_HOME` 指向 `$TMPDIR`，未再寫使用者 MCP log）。
+- **為何不是 Complete**：腳本模型只能驗指示與工具邊界，不能證明真模型會少補查或正確收斂；計劃要求真模型停止行為需「已有或經授權的單一代表正常使用 trace」。目前沒有，也無付費呼叫授權。
+- **恢復條件與程序**：使用者下次以 GUI 正常執行一次 /citation（例如段落留言），之後執行 `grep -h 'turn_trace' ~/.local/state/research-agent/logs/desktop-backend.log* | grep 'turn_id=<該回合 turnId>'`：逐一看 `action=search` 的 `query_hash` 是否重複、`new_candidate_count`／`new_abstract_count` 是否為 0 後仍繼續搜尋，並在原對話內核對每次補查的目的；若仍有無新證據的重複補查，再依該 trace 調整技能文字（或在證據指向 DOI 摘要時才考慮最小向後相容 action）。

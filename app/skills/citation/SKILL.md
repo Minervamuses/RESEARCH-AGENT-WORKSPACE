@@ -66,6 +66,22 @@ task; visible prior conversation still supplies metadata and authorization.
   search scope. A provider failure or missing abstract is not a zero-hit
   result and is not evidence that relevant literature does not exist.
 
+## Follow-up searches and stopping
+
+- Search again only for a named gap: a part of the selected claim that no
+  retrieved abstract addresses yet, or a specific candidate whose abstract
+  was unavailable (search for that work's title to look for a record that
+  carries an abstract). State which gap each follow-up search targets.
+- A record marked `already returned earlier in this task` is a repeat. When
+  a search adds no new record or abstract for its gap, do not reword and
+  repeat it. Answer with what the retrieved abstracts support, what remains
+  unsupported or cannot be assessed, and the limits of the search.
+- Reporting that the retrieved abstracts do not cover part of the claim is a
+  complete answer. There is no fixed number of searches; stop when the
+  remaining gaps produce no new evidence.
+- A provider marked `skipped(... earlier in this task)` already failed in
+  this task and is not retried until the next `/citation` task.
+
 ## Save
 
 - A save call contains one `works` array (1–10 WorkIntent objects).

@@ -184,7 +184,12 @@ def _error(message: str) -> str:
     return f"validation error: {message}"
 
 
-def _format_records(records, states) -> str:
+def _record_key(record) -> tuple[str, str]:
+    """Identify a search record the same way the service de-duplicates it."""
+    return ("doi", record.doi) if record.doi else (record.provider, record.provider_id)
+
+
+def _format_records(records, states, repeated: frozenset[int] = frozenset()) -> str:
     failed_states = [state for state in states if not state.endswith(":ok")]
     if not records:
         if states and not any(state.endswith(":ok") for state in states):
@@ -205,9 +210,21 @@ def _format_records(records, states) -> str:
         f"Found {len(records)} bibliographic record(s). Each numbered block is "
         "one record; its metadata and identifiers belong together:"
     ]
+    if len(repeated) == len(records):
+        lines.append(
+            "This search added no new records: all were already returned by "
+            "earlier searches in this task."
+        )
+    elif repeated:
+        lines.append(
+            f"{len(records) - len(repeated)} new record(s); {len(repeated)} "
+            "already returned by earlier searches in this task."
+        )
     for number, record in enumerate(records, start=1):
         arxiv = record.identifiers.get("arxiv")
         lines.append(f"{number}. {record.title or 'untitled'}")
+        if number - 1 in repeated:
+            lines.append("   already returned earlier in this task")
         lines.append(f"   authors: {', '.join(record.authors) or 'unknown'}")
         lines.append(
             f"   year: {record.year or 'unknown'}; "
@@ -301,6 +318,8 @@ def create_citation_workflow_tool(
     # ``asyncio.run`` invocations remains valid; storage has its own
     # cross-process identity lock for the actual filesystem mutation.
     save_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    # Records already shown per service; a service lives for one Citation task.
+    shown_records: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
     def _save_lock() -> asyncio.Lock:
         loop = asyncio.get_running_loop()
@@ -340,15 +359,27 @@ def create_citation_workflow_tool(
             )
             records, states = await service.search(query, date_filter=date_filter)
             records = [r for r in records if (year_from is None or (r.year is not None and r.year >= year_from)) and (year_to is None or (r.year is not None and r.year <= year_to))]
+            shown = shown_records.setdefault(service, {})
+            repeated = frozenset(
+                index for index, record in enumerate(records) if _record_key(record) in shown
+            )
+            new_abstracts = sum(
+                1 for record in records if record.abstract and not shown.get(_record_key(record))
+            )
+            for record in records:
+                key = _record_key(record)
+                shown[key] = shown.get(key, False) or bool(record.abstract)
             # Counts only, for redaction-safe turn timing; the model reads the text.
             summary = {
                 "kind": "citation_search_summary",
                 "candidate_count": len(records),
                 "abstract_count": sum(1 for record in records if record.abstract),
+                "new_candidate_count": len(records) - len(repeated),
+                "new_abstract_count": new_abstracts,
                 "provider_count": len(states),
                 "failed_provider_count": sum(1 for state in states if not state.endswith(":ok")),
             }
-            return _format_records(records, states), summary
+            return _format_records(records, states, repeated), summary
         if action == "save":
             if not works or any(value is not None for value in (query, source_id, page, year_from, year_to)):
                 return _error("save requires only works (1..10)"), None

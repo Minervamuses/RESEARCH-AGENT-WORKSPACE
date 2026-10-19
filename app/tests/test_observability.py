@@ -630,6 +630,8 @@ def test_turn_trace_links_citation_actions_queries_and_counts(monkeypatch, tmp_p
     assert (ends["search-1"]["candidate_count"], ends["search-1"]["abstract_count"]) == ("2", "0")
     assert (ends["search-3"]["candidate_count"], ends["search-3"]["abstract_count"]) == ("1", "0")
     assert ends["search-1"]["provider_count"] == "2" and ends["search-1"]["failed_provider_count"] == "0"
+    # New-evidence increments per search: the repeat and the year-filtered subset add nothing.
+    assert [ends[call]["new_candidate_count"] for call in ("search-1", "search-2", "search-3")] == ["2", "0", "0"]
     assert [ends[call]["model_seq"] for call in ("search-1", "search-2", "search-3")] == ["1", "2", "2"]
     assert records[-1]["model_calls"] == "3" and records[-1]["tool_calls"] == "3"
     log_text = "\n".join(record.getMessage() for record in caplog.records)

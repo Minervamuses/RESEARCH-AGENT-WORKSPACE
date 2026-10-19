@@ -527,3 +527,36 @@ def test_year_filtered_search_returns_rows_when_enough_are_eligible_and_bounds_a
         ("datacite", 2), ("crossref", 3), ("datacite", 3), ("crossref", 4), ("crossref", 5),
     ]
     assert None in [record.year for record in unfiltered]  # Unknown years stay without a filter.
+
+
+def test_repeated_search_records_are_marked_and_counted_within_one_task(tmp_path):
+    service, _crossref, _datacite = _year_pool_service(tmp_path)
+    tool = create_citation_workflow_tool(service_getter=lambda: service)
+
+    def search(**args):
+        message = asyncio.run(tool.ainvoke({
+            "type": "tool_call", "id": "call", "name": TOOL_NAME, "args": {"action": "search", "query": "pool", **args},
+        }))
+        return message.content, message.artifact
+
+    first, first_counts = search(year_from=2021, year_to=2022)
+    assert "already returned" not in first and "added no new records" not in first
+    assert (first_counts["new_candidate_count"], first_counts["new_abstract_count"]) == (5, 1)
+
+    wider, wider_counts = search()
+    assert "8 new record(s); 2 already returned by earlier searches in this task." in wider
+    marked = [block[0] for block in _split_blocks(wider.split("\nProvider states:")[0].split("\n", 2)[2])
+              if "   already returned earlier in this task" in block]
+    assert marked == ["2. datacite rank 0 (2022)", "5. crossref rank 2 (2021)"]
+    assert (wider_counts["candidate_count"], wider_counts["new_candidate_count"]) == (10, 8)
+    assert wider_counts["new_abstract_count"] == 0  # The only abstract was already shown.
+
+    repeat, repeat_counts = search(year_from=2021, year_to=2022)
+    assert "This search added no new records: all were already returned by earlier searches in this task." in repeat
+    assert repeat.count("   already returned earlier in this task") == 5
+    assert (repeat_counts["new_candidate_count"], repeat_counts["new_abstract_count"]) == (0, 0)
+
+    next_service, _crossref, _datacite = _year_pool_service(tmp_path)
+    next_tool = create_citation_workflow_tool(service_getter=lambda: next_service)
+    fresh = asyncio.run(next_tool.ainvoke({"action": "search", "query": "pool", "year_from": 2021, "year_to": 2022}))
+    assert "already returned" not in fresh  # A new task starts without repeats.

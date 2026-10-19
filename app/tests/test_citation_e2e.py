@@ -887,3 +887,34 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
                 assert await asyncio.to_thread(finished.wait, 5)
 
     asyncio.run(scenario())
+
+
+def test_citation_follow_up_receives_stop_rules_and_repeat_signal(monkeypatch, tmp_path):
+    """Offline boundary check only: it cannot show a real model searches less."""
+    from test_observability import _ScriptedChatModel, _calls, _timed_session
+
+    seen = {}
+
+    def final(messages):
+        seen["prompt"] = "\n".join(str(message.content) for message in messages)
+        seen["results"] = [message.content for message in messages if isinstance(message, ToolMessage)]
+        return AIMessage(content="摘要不足以判定其餘子主張；不再重複搜尋。")
+
+    session = _timed_session(monkeypatch, tmp_path, [
+        _calls(("citation_workflow", {"action": "search", "query": "Paper A"}, "first")),
+        _calls(("citation_workflow", {"action": "search", "query": "Paper A"}, "repeat")),
+        final,
+    ], [])
+    fetcher = RoutingFetcher()
+    services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
+    outcome = asyncio.run(session.turn_outcome("檢查這段的來源", skill_name="citation"))
+
+    assert outcome.state == "completed"
+    assert len(services) == 1 and fetcher.calls  # Offline fixture hub, one task-scoped service.
+    assert "## Follow-up searches and stopping" in seen["prompt"]
+    assert "Search again only for a named gap" in seen["prompt"]
+    first, repeat = seen["results"]
+    assert "already returned" not in first
+    assert "This search added no new records" in repeat
+    # Fixture records carry no abstract, so the model is told relevance cannot be assessed.
+    assert "abstract status: unavailable (no abstract retrieved)" in repeat

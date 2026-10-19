@@ -267,7 +267,10 @@ def _tool_result_counts(output: object) -> dict[str, object]:
     if artifact.get("kind") == "citation_search_summary":
         return {
             key: artifact.get(key)
-            for key in ("candidate_count", "abstract_count", "provider_count", "failed_provider_count")
+            for key in (
+                "candidate_count", "abstract_count", "new_candidate_count",
+                "new_abstract_count", "provider_count", "failed_provider_count",
+            )
         }
     if artifact.get("kind") == "citation_save_batch":
         statuses = [item.get("status") for item in artifact.get("items") or [] if isinstance(item, dict)]
