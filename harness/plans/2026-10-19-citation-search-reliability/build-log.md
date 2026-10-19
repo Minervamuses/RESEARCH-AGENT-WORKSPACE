@@ -7,7 +7,7 @@
 | ID | 狀態 | 已有證據 | 實際前提／待解事項 | 下一步 |
 |---|---|---|---|---|
 | P1 | Complete | X1：真實 composeTurnText→DesktopService→Citation 離線案例；反例 3 種 | 無 | P3/P4 沿用同一代表案例 |
-| P2 | Not started | E2／source、dist、四情境腳本 | 核對有效入口並保留 lock diff；無逐項授權門檻 | 修復後斷言、source/build/安裝驗收與外部 commit |
+| P2 | Complete | X2：外部 commit `ddb2dba`；source／安裝 dist 各 13/13 離線通過；安裝已備份並更新 | 無；真實搜尋品質／速度未宣稱改善 | P7 量測沿用同一回歸檔 |
 | P3 | Not started | E3／重複全文已確認 | 可獨立於 P2 進行 | 模型投影去重及 snapshot／retry 驗收 |
 | P4 | Not started | E4／既有 logger | 驗 callback／統計接點，記必要局部檔案集合 | 真 graph＋fake tools 驗 ID 與計時 |
 | P5 | Not started | E5／SDK 實版讀碼 | 執行者選有限政策並記錄依據 | 恢復或重建最小 offline probe，直接推進 |
@@ -73,3 +73,15 @@ WSL Bash、`/usr/bin/git`、Conda app（Python 3.13.14、Poetry 2.4.1、Node 24.
 - **跨層測試**：`app/tests/test_inline_skills.py` 新增 `_desktop_compose_turn_text()`，以 Conda app 的 Linux Node `--experimental-strip-types` 直接 import 真實 `desktop/src/conversations.ts` 的 `composeTurnText`，把輸出連同仿 App.tsx 的背景 documentContext＋一個 frozen document reference 送進真實 `DesktopService.session.turn`、真 graph、真 Citation tool／service 與離線 RoutingFetcher。3 個正向參數（含大寫／換行與 bare）驗證：首次模型呼叫已綁 `citation_workflow`、prompt 含 `# Citation Skill`、主請求與留言完整、引用快照完整、實際執行一次 search 工具、回合後 runtime 與 extended thinking 恢復、未寫檔。3 個反例驗證不啟動。修復前同測試以原 TS 執行失敗（綁定工具缺 `citation_workflow`），修復後通過。
 - **檢查**（app/）：`python -m pytest -q -p no:cacheprovider tests/test_inline_skills.py` 18 passed；`tests/test_desktop_service.py tests/test_citation_slash_command.py tests/test_citation_skill_activation.py` 112 passed＋1 個 sandbox `/tmp` 失敗，該測試在 sandbox 外重跑 passed。app/desktop：`npm test` 260 passed；`npm run build` 成功（只有既有 chunk 大小警告）；`git diff --check` 通過。
 - **限制**：GUI 的使用者訊息顯示會變成 `/citation Main request:…`（display_input 即實際提交文字）；這是保留明確指令的直接結果，不影響已存歷史回合。真模型行為未測（無付費呼叫）。
+
+### X2 — P2：Web Search 所有結束分支保留最佳結果
+
+- **有效入口**：本 shell、程式碼與 shell profile 均無 `AGENT_MCP_WEB_SEARCH_COMMAND/ARGS`、`XDG_DATA_HOME` 覆寫；`agent.mcp._web_search_spec()` 實際回傳 `…/miniconda3/envs/app/bin/node ~/.local/share/mcp-servers/web-search-mcp/dist/index.js`。部署前 `ps` 無 web-search 進程，未中斷任何回合。執行中的 GUI 若另有環境覆寫無法從此讀到；如日後 log 顯示不同入口，需重核。
+- **Build 可重現性**：未修改的 HEAD 以 `tsc --outDir $TMPDIR/...` 重建，`.js`／`.d.ts` 與既有 dist 位元相同（只有 sourcemap 相對路徑不同），因此新 dist 的差異只來自本修正。
+- **修改（外部 repo `/home/minervamuses/mcp-servers/web-search-mcp`）**：只改 `src/search-engine.ts` 的 `search()` 控制流程。`bestQuality` 起始 -1（分數 0 的非空結果也成為 best）；所有非空後的返回用 `bestSoFar()`（best results＋其自身 engine 名）；Brave 達門檻但分數低於先前 Bing 時回 Bing；迴圈結束若有 best 則回 best；`handleBrowserError` 自身失敗時，有 best 回 best、無 best 維持原例外契約。同分保留較早引擎。未改 heuristic、重試、引擎順序、browser 生命週期。search() 沒有取消機制，故「取消不得吞成成功」在此層不適用。
+- **回歸檔**：新增 `tests/test-search-result-retention.mjs`（Node assert，封鎖 net／TLS／fetch／Playwright launch，stub 三引擎；參數可指定 dist 目錄）。13 情境：計劃核心四情境（中文 query 經現有 heuristic 得 0.5 分）、分數 0 保留、較佳者取代、同分穩定、全空、全失敗、錯誤處理失敗有／無 best、forceMultiEngine、停用品質檢查。舊 dist 8/13 失敗（重現遺失），新 source dist 13/13。
+- **外部 commit**：`ddb2dba fix(search): return the best result found on every exit [P2]`，只含 `src/search-engine.ts` 與新測試；使用者既有 `package-lock.json` 修改未 stage，其 diff hash 修改前後相同。ESLint 唯一 error（`debugBing` unused）為既有；新增 2 個與既有風格一致的 no-console 警告。
+- **安裝交付**：只有 `search-engine.js`、`.js.map`、`.d.ts.map` 三檔不同。備份至 `~/.local/share/mcp-servers/.backups/web-search-mcp/20261019T123509Z-P2/dist/`（舊 SHA256：js `dad8f448…a9758`、js.map `9a07ce6a…c074`、d.ts.map `3cbbf514…b39a`），以同目錄暫存檔＋`mv` 原子替換。安裝後 js `54edc6ae067ec1c59a3462b06194349c93d0f76281dc4d8c9e2ab7c5d6bbe48b`，與 source dist 全目錄 `diff -rq` 相同。
+- **runtime 驗收**：同一回歸檔指向安裝 dist 13/13；以 app 的實際 launch spec 經 MCP stdio initialize＋list_tools 成功，列出 `full-web-search`、`get-single-web-page-content`、`get-web-search-summaries`。（server 本身把啟動訊息印到 stdout，app 端既有 sanitize_stdout 處理；裸 client 只記 parse 警告。）
+- **還原方式**：把備份三檔複製回 `~/.local/share/mcp-servers/web-search-mcp/dist/`。
+- **限制**：未跑真實搜尋；不宣稱搜尋加速或品質提高。
