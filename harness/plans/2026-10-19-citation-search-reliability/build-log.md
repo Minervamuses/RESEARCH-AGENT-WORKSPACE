@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | P1 | Complete | X1：真實 composeTurnText→DesktopService→Citation 離線案例；反例 3 種 | 無 | P3/P4 沿用同一代表案例 |
 | P2 | Complete | X2：外部 commit `ddb2dba`；source／安裝 dist 各 13/13 離線通過；安裝已備份並更新 | 無；真實搜尋品質／速度未宣稱改善 | P7 量測沿用同一回歸檔 |
-| P3 | Not started | E3／重複全文已確認 | 可獨立於 P2 進行 | 模型投影去重及 snapshot／retry 驗收 |
+| P3 | Complete | X3：同版本全文只出現一次；異版本／同 fingerprint 異內容分開；retry 重用已去重輸入 | 無；端到端速度未量 | P4 沿用同一代表案例 |
 | P4 | Not started | E4／既有 logger | 驗 callback／統計接點，記必要局部檔案集合 | 真 graph＋fake tools 驗 ID 與計時 |
 | P5 | Not started | E5／SDK 實版讀碼 | 執行者選有限政策並記錄依據 | 恢復或重建最小 offline probe，直接推進 |
 | P6 | Not started | E6／echo 歷史記錄 | P2、P4 與真搜尋器程序資料 | 量測並自主判定／完成必要重用 |
@@ -85,3 +85,11 @@ WSL Bash、`/usr/bin/git`、Conda app（Python 3.13.14、Poetry 2.4.1、Node 24.
 - **runtime 驗收**：同一回歸檔指向安裝 dist 13/13；以 app 的實際 launch spec 經 MCP stdio initialize＋list_tools 成功，列出 `full-web-search`、`get-single-web-page-content`、`get-web-search-summaries`。（server 本身把啟動訊息印到 stdout，app 端既有 sanitize_stdout 處理；裸 client 只記 parse 警告。）
 - **還原方式**：把備份三檔複製回 `~/.local/share/mcp-servers/web-search-mcp/dist/`。
 - **限制**：未跑真實搜尋；不宣稱搜尋加速或品質提高。
+
+### X3 — P3：模型輸入全文去重，保留完整 frozen snapshot
+
+- **修改**：只改 `app/agent/desktop/service.py`。新增模組函式 `_model_reference_projection()`，只用於組 prompt 的 `[Frozen references …]` JSON：版本相同性鍵為 `(rootPath, path, editorRevision, diskFingerprint, sourceText)`（不含 range）。若 document reference 的鍵等於本回合 editor snapshot，或等於先前某個 reference，該 reference 的 snapshot 省略 `sourceText`，改為 `sourceTextSameAs: "current editor document snapshot"` 或 `"referenceId <id>"`，其 range、行號、path、revision、fingerprint、選取 text 全保留；chat reference 不變。說明文字加一句「sourceTextSameAs 省略的全文在本訊息前文、range 套用於該全文」。`self._active_references`、`submitted_context`、document_edit 工具、wire 與儲存 JSON 均未改；1 MiB 檢查仍在。
+- **決策**：editor snapshot 在 prompt 中位於 references 之前，因此指標只往前指；不建立全域 cache、不正規化字串、不以 path 或 fingerprint 單獨判斷。editor 的 path 經 `validate_snapshot` resolve，與 reference 原字串不同時保守地不合併（只會少去重，不會錯合併）。
+- **測試**：`test_desktop_document_service.py` 新增 `_model_references()`（把投影還原為完整 references）與 `_full_text_count()`。既有兩個測試由「frozen JSON 逐字相等」改成「投影可還原成原 references＋全文只出現一次」，保留 `submitted_context == submitted` 等儲存斷言。新增 `test_model_input_shows_each_frozen_document_version_once`：未保存 editor（revision 1）、同版本兩個 range、已保存 revision 0 兩個 range、同 path／同 fingerprint／同 revision 但內容不同的第三版；三種全文各只出現一次、指標值精確、range 欄位保留；首次模型失敗後 retry 的實際模型輸入與已存 `semantic_input` 逐字相同；未寫檔。P1 跨層測試加斷言：背景 editor 與段落 reference 共用一份全文。未修改的 service 下這三個測試失敗（格式不含指標且全文重複）。
+- **檢查**（app/，sandbox 外以容許 `/tmp` fixture）：`tests/test_desktop_document_service.py tests/test_inline_skills.py tests/test_desktop_service.py` 119 passed；所有引用 submittedContext／references／fixture_session 的 13 個 test modules 487 passed；`git diff --check` 通過。
+- **限制**：只縮小新回合的模型輸入；舊回合 retry 仍用其已存的未去重 semantic_input（計劃要求不遷移）。未量 token 或延遲改善。

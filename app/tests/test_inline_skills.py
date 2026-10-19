@@ -543,7 +543,9 @@ def test_desktop_citation_command_survives_reference_comment_composition(tmp_pat
         assert request.startswith("Main request:\n" + main_request + "\n\n" if main_request else "Requests for")
         assert comment in request and "Reference doc-claim:" in request
         assert "/citation" not in request.casefold()
-        assert json.dumps(unsaved, ensure_ascii=False) in human  # Frozen unsaved editor text.
+        # The background editor and the paragraph reference share one frozen full text.
+        assert human.count(json.dumps(unsaved, ensure_ascii=False)) == 1
+        assert '"sourceTextSameAs": "current editor document snapshot"' in human
         assert len(services) == 1
         assert any(isinstance(message, ToolMessage) and message.name == "citation_workflow"
                    for message in model.calls[-1])
