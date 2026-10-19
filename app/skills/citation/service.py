@@ -110,6 +110,10 @@ class CitationService:
                 )
             unique[key] = winner
         ordered = sorted(unique.values(), key=lambda r: (r.rank, r.title.casefold(), r.provider))
+        if date_filter is not None and (date_filter.year_from is not None or date_filter.year_to is not None):
+            # Apply year eligibility before truncating so lower-ranked eligible
+            # candidates already retrieved can fill the result.
+            ordered = [record for record in ordered if date_filter.admits_year(record.year)]
         return ordered[:rows], states
 
     async def save(self, intents: tuple[WorkIntent, ...]) -> SaveBatchOutcome:

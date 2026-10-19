@@ -437,3 +437,93 @@ def test_failed_provider_is_not_reported_as_an_exhaustive_zero_hit_search(states
     assert result.startswith(expected)
     assert "not evidence" in result
     assert "No bibliographic records found" not in result
+
+
+class _RankedProvider:
+    """Offline provider returning a fixed ranked list for every query."""
+
+    def __init__(self, records):
+        self.records = records
+        self.calls = []
+
+    async def search_text(self, query, *, rows, date_filter=None):
+        self.calls.append((query, rows, date_filter))
+        return list(self.records)
+
+
+def _ranked(provider, rank, year, *, doi=None, abstract=None):
+    title = f"{provider} rank {rank} ({year})"
+    return ProviderRecord(
+        provider, f"{provider}:{rank}", rank, title=title, year=year,
+        doi=doi or f"10.1234/{provider}-{rank}", abstract=abstract,
+        abstract_source=provider if abstract else None,
+    )
+
+
+def _year_pool_service(tmp_path):
+    """A real CitationService whose higher-ranked candidates are mostly ineligible."""
+    from types import SimpleNamespace
+
+    from skills.citation.service import CitationService
+
+    crossref = _RankedProvider([
+        _ranked("crossref", 0, 2010), _ranked("crossref", 1, None),
+        _ranked("crossref", 2, 2021, doi="10.1234/shared"),
+        _ranked("crossref", 3, 2010), _ranked("crossref", 4, None), _ranked("crossref", 5, 2010),
+        _ranked("crossref", 6, 2021), _ranked("crossref", 7, 2022),
+        _ranked("crossref", 8, 2021), _ranked("crossref", 9, 2023),
+    ])
+    datacite = _RankedProvider([
+        _ranked("datacite", 0, 2022), _ranked("datacite", 1, 2005), _ranked("datacite", 2, 2005),
+        _ranked("datacite", 3, None),
+        _ranked("datacite", 4, 2021, doi="10.1234/shared", abstract="Shared abstract from DataCite."),
+    ])
+    hub = SimpleNamespace(crossref=crossref, datacite=datacite, openalex=None, doi_org=None, _fetch=None)
+    return CitationService(hub, output_dir=tmp_path / "cite"), crossref, datacite
+
+
+def test_year_filter_runs_before_truncation_so_eligible_candidates_fill_in(tmp_path):
+    service, crossref, datacite = _year_pool_service(tmp_path)
+    tool = create_citation_workflow_tool(service_getter=lambda: service)
+    content = asyncio.run(tool.ainvoke({
+        "action": "search", "query": "pool", "year_from": 2021, "year_to": 2022,
+    }))
+
+    blocks = _split_blocks(content.split("\nProvider states:")[0].split("\n", 1)[1])
+    titles = [block[0].split(". ", 1)[1] for block in blocks]
+    # Before the fix only the eligible records among the first ten ranks survived (2 of 5).
+    assert titles == [
+        "datacite rank 0 (2022)", "crossref rank 2 (2021)", "crossref rank 6 (2021)",
+        "crossref rank 7 (2022)", "crossref rank 8 (2021)",
+    ]
+    assert content.startswith("Found 5 bibliographic record(s).")
+    shared = "\n".join(blocks[1])
+    assert "   DOI: 10.1234/shared" in shared and "   abstract: Shared abstract from DataCite." in shared
+    assert "   abstract source: datacite" in shared
+    # Provider requests are unchanged: one call each, same per-provider cap, same filter.
+    for provider in (crossref, datacite):
+        assert len(provider.calls) == 1
+        query, rows, date_filter = provider.calls[0]
+        assert (query, rows, date_filter.year_from, date_filter.year_to) == ("pool", 10, 2021, 2022)
+
+
+def test_year_filtered_search_returns_rows_when_enough_are_eligible_and_bounds_are_inclusive(tmp_path):
+    from skills.citation.types import PublishedDateFilter
+
+    service, _crossref, _datacite = _year_pool_service(tmp_path)
+    records, _states = asyncio.run(service.search(
+        "pool", rows=3, date_filter=PublishedDateFilter.from_year_range(2021, 2022),
+    ))
+    assert [record.title for record in records] == [
+        "datacite rank 0 (2022)", "crossref rank 2 (2021)", "crossref rank 6 (2021)",
+    ]
+    records, _states = asyncio.run(service.search(
+        "pool", date_filter=PublishedDateFilter.from_year_range(2022, None),
+    ))
+    assert [record.year for record in records] == [2022, 2022, 2023]
+    unfiltered, _states = asyncio.run(service.search("pool"))
+    assert [(record.provider, record.rank) for record in unfiltered] == [
+        ("crossref", 0), ("datacite", 0), ("crossref", 1), ("datacite", 1), ("crossref", 2),
+        ("datacite", 2), ("crossref", 3), ("datacite", 3), ("crossref", 4), ("crossref", 5),
+    ]
+    assert None in [record.year for record in unfiltered]  # Unknown years stay without a filter.

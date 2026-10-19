@@ -14,7 +14,7 @@
 | P6 | Not started | E6／echo 歷史記錄 | P2、P4 與真搜尋器程序資料 | 量測並自主判定／完成必要重用 |
 | P7 | Not started | E7／source 機制 | P2、P4 與 engine/browser 資料 | 逐一選有證據的主變數並驗證 |
 | P8 | Not started | E8／gather/retry 機制 | P1、P4 與 Citation/provider 資料 | 分段歸因、選保守政策並驗證 |
-| P9 | Not started | E9／過濾順序 | 可用既有 offline fixtures，無其他階段硬依賴 | 建立補位反例並修復驗收 |
+| P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
 | P10 | Not started | E10／工具與技能邊界 | P1、P3、P4 與新 action trace | 分析缺口、調整並驗證停止行為 |
 
 問題出現時在下方追加穩定 ID、原因／假說、已嘗試命令、結果／證據、採用替代方案、剩餘限制與下一步。保留 Not started／In progress／Blocked／Complete 狀態；有證據不需修改時於結果欄明列，缺證或待驗不能算 Complete。問題不會自動停止其他工作。
@@ -130,3 +130,12 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **離線驗收**（`tests/test_openrouter_model.py`）：持續 503（async 與 sync）→ sleeps `[1,2,4,8,8]`、6 次、虛擬 23 s、最終 `OpenRouterError` 503；request timeout → 實際 request 帶 ms→s 換算後的 phase timeout，600 s 時只 1 次，1.5 s 時 5 次、虛擬 22.5 s；Retry-After 3600 → sleep `[8.0]` 後成功、content 與 usage 保留、attribution header 與 host 正確；一次 503 後成功 → sleep `[1.0]`；`llm_max_retries=0` 與不可重試 400 → 恰 1 次、無 sleep；取消 → `CancelledError`、1 次、無重試。既有 factory kwargs 測試改為 stub `bounded_sdk_client` 並檢查 `timeout`。
 - **檢查**：`tests/test_openrouter_model.py tests/test_thinking_models.py tests/test_thinking_session.py` 53 passed；完整 pytest（sandbox 外）1481 passed、40 秒；`git diff --check` 通過。
 - **限制**：真實 OpenRouter 對非串流長回應是否送 keep-alive 位元組未驗（需付費呼叫）；若不送，600 s phase timeout 就是單次生成的實際上限。不據此宣稱解釋歷史 341 秒。
+
+### X6 — P9：先資格過濾，再截斷候選
+
+- **排序依據**：P9 是已知正確性缺口且可完全離線，P6–P8 需要實際量測，因此在 P5 後先做。
+- **反例**（`tests/test_citation_workflow_tool.py`，真 `CitationService`＋真 tool，fake provider 只替換 `search_text`）：Crossref 10 筆、DataCite 5 筆，前段多為 2010／2005／未知年份，後段有 2021–2022 合格候選，且一筆 DOI 兩來源重複（勝者無摘要、另一來源有摘要）。修正前 `year_from=2021, year_to=2022` 只回 2 筆（前 10 名中的合格者），實際已取得 5 筆合格。
+- **修改**：只在 `skills/citation/service.py` 的 `search()` 排序後、`[:rows]` 前，若 date filter 有年份上下界就以既有 `PublishedDateFilter.admits_year()` 過濾。DOI 去重與跨來源摘要合併在過濾前完成，rank 比較、provider 呼叫次數、每來源上限（`min(rows, 20)`）與傳給 provider 的 filter 均不變；tool 的本地年分過濾保留為相同語義的防線。無年份界線時行為完全不變。
+- **驗收**：tool 格式化輸出回 5 筆合格（依原 rank 順序）、`Found 5`；共享 DOI 的 DataCite 真摘要與 `abstract source: datacite` 保留；各 provider 仍只被呼叫一次、rows=10、filter 年份相同。service 直接以 rows=3 回 3 筆合格；單邊界 `year_from=2022` 包含 2022、2023（inclusive）；未知年份在有界線時不通過；無 filter 時前 10 名與修改前相同且保留未知年份。
+- **檢查**：`tests/test_citation*.py` 376 passed；`tests/test_citation_workflow_tool.py tests/test_citation_hub.py tests/test_citation_e2e.py tests/test_observability.py tests/test_inline_skills.py` 95 passed；`git diff --check` 通過。
+- **限制**：排序沒有調整，摘要存在不升權（計劃明訂另議）；不據此報告研究時間縮短。
