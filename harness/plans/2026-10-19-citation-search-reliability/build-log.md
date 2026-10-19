@@ -11,7 +11,7 @@
 | P3 | Complete | X3：同版本全文只出現一次；異版本／同 fingerprint 異內容分開；retry 重用已去重輸入 | 無；端到端速度未量 | P4 沿用同一代表案例 |
 | P4 | Complete | X4：per-attempt callback → INFO `turn_trace` 持久 log；並行／例外／拒絕／取消／重試／Citation 計數均驗 | 自然使用樣本尚無（使用者下次正常使用即產生） | P6–P10 讀 trace |
 | P5 | Complete | X5：顯式 SDK client；每次 HTTP 600 s、重試窗 4×5 s、Retry-After ≤8 s、0＝真停用；真 wrapper/SDK＋MockTransport＋假時鐘驗 7 情境 | 真 provider 行為未打（無付費呼叫） | — |
-| P6 | Not started | E6／echo 歷史記錄 | P2、P4 與真搜尋器程序資料 | 量測並自主判定／完成必要重用 |
+| P6 | Complete（有證據不需修改） | X7：真 server 每次呼叫程序開銷 0.39 s；重用會讓 server 內 10 次／分 limiter 開始拒絕 | 無 | — |
 | P7 | Not started | E7／source 機制 | P2、P4 與 engine/browser 資料 | 逐一選有證據的主變數並驗證 |
 | P8 | Not started | E8／gather/retry 機制 | P1、P4 與 Citation/provider 資料 | 分段歸因、選保守政策並驗證 |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
@@ -139,3 +139,12 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **驗收**：tool 格式化輸出回 5 筆合格（依原 rank 順序）、`Found 5`；共享 DOI 的 DataCite 真摘要與 `abstract source: datacite` 保留；各 provider 仍只被呼叫一次、rows=10、filter 年份相同。service 直接以 rows=3 回 3 筆合格；單邊界 `year_from=2022` 包含 2022、2023（inclusive）；未知年份在有界線時不通過；無 filter 時前 10 名與修改前相同且保留未知年份。
 - **檢查**：`tests/test_citation*.py` 376 passed；`tests/test_citation_workflow_tool.py tests/test_citation_hub.py tests/test_citation_e2e.py tests/test_observability.py tests/test_inline_skills.py` 95 passed；`git diff --check` 通過。
 - **限制**：排序沒有調整，摘要存在不升權（計劃明訂另議）；不據此報告研究時間縮短。
+
+### X7 — P6：MCP session 重用的量測與判定（維持現狀）
+
+- **量測方法**：以 app 實際 `_web_search_spec()`＋`_spec_to_connection()`（`/bin/sh -c "node …/dist/index.js 2>>log | grep '^{'"`）連到已安裝 server，呼叫 `get-web-search-summaries` 並給空 query，使 server 在 zod 驗證即回錯、不觸網，因此只量程序與 MCP 協定成本。`XDG_CACHE_HOME` 指向 `$TMPDIR`，不寫使用者 log。兩輪各 6 次。
+- **結果**：現行 `get_tools()`（每次呼叫新建 stdio session）每次 0.374–0.429 s（中位數 0.387／0.395 s），工具清單載入 0.39–0.47 s；同一 `client.session()` 持續 session：開啟＋列工具 0.36–0.38 s 一次，之後每次 0.001–0.005 s，關閉 0.008 s。即每次 web 工具呼叫約 0.39 s 是可省的程序成本。
+- **自然使用對照**：10/19 回合（`cbdca28b`，341 s）有 14 次 `get-web-search-summaries`，10/15 回合（`29f3b12a`，304 s）有 13 次 web 呼叫；程序成本合計約 5.5／5.1 s，各約 1.6–1.7%。同回合的 Bing 頁面時間（下見 X8）每次 1.5–5 s，P7 量到 fallback 每次另花 4.5–6 s，程序成本不是主要項。
+- **重用的具體風險**：外部 server 的 `RateLimiter` 是程序內「每分鐘 10 次、超過直接丟錯」。現在每次呼叫是新程序，limiter 每次重置所以從未觸發；離線 stub 驗證同一 `SearchEngine` 實例第 11 次即 `Failed to perform search: Rate limit exceeded`。改為持續 session 會把 10/19 這種 14 次搜尋的回合推向 limiter 失敗，另外 session 擁有者須貫穿 ChatSession／desktop shutdown／取消／崩潰（至少 mcp.py、startup.py、session.py、desktop service 四檔）。
+- **判定**：省下約 0.39 s／次，不值得改變 server 實際行為（引入 rate-limit 失敗）並增加跨四檔的生命週期。依計劃完成定義記為「有證據不需修改」；沒有實作或宣稱加速。MCP 程序重用與 browser 重用無關（P7 另判）。
+- **附帶發現（I1）**：在 sandbox 外跑完整 pytest 時，部分測試會在使用者真實的 `~/.cache/agent-mcp/*.stderr.log` 追加 run header（今日 12:44／12:51 UTC 共 4 行，並建立 alpha／beta／dropin／legacy 等測試 server 的 log）。這是既有測試隔離缺口，非本計劃引入；未刪除任何檔案。之後讀 web_search.stderr.log 時，這些 header 不是使用者回合。建議另案讓 conftest 隔離 `XDG_CACHE_HOME`。
