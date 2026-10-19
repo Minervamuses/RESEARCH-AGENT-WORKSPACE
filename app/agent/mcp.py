@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent.paths import user_data_root
+from agent.paths import find_app_root
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,8 @@ def _env_flag(name: str, *, default: bool) -> bool:
 
 
 def _default_web_search_entrypoint() -> Path:
-    return user_data_root(dict(os.environ)) / "mcp-servers/web-search-mcp/dist/index.js"
+    """Return the build output of the vendored server (see its README)."""
+    return find_app_root() / "vendor/web-search-mcp/dist/index.js"
 
 
 def _web_search_spec() -> MCPServerSpec | None:
@@ -87,8 +88,9 @@ def _web_search_spec() -> MCPServerSpec | None:
             missing.append("node executable on PATH")
         logger.warning(
             "Web Search MCP is enabled by default but %s is missing; "
-            "skipping it. Set AGENT_ENABLE_MCP_WEB_SEARCH=0 to disable it "
-            "explicitly, or install the server in the standard user-data path.",
+            "skipping it. Build it with `npm ci && npm run build` in "
+            "app/vendor/web-search-mcp, or set AGENT_ENABLE_MCP_WEB_SEARCH=0 "
+            "to disable it explicitly.",
             " and ".join(missing),
         )
         return None

@@ -23,15 +23,15 @@ def _clear_mcp_env(monkeypatch):
 
 
 def _install_default_web_search(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    entrypoint = tmp_path / "mcp-servers/web-search-mcp/dist/index.js"
+    monkeypatch.setattr(mcp_module, "find_app_root", lambda: tmp_path)
+    entrypoint = tmp_path / "vendor/web-search-mcp/dist/index.js"
     entrypoint.parent.mkdir(parents=True)
     entrypoint.write_text("// test server", encoding="utf-8")
     monkeypatch.setattr(mcp_module.shutil, "which", lambda name: "/usr/bin/node")
     return entrypoint
 
 
-def test_resolve_mcp_specs_defaults_to_installed_web_search(
+def test_resolve_mcp_specs_defaults_to_vendored_web_search_build(
     monkeypatch, tmp_path
 ):
     _clear_mcp_env(monkeypatch)
@@ -53,13 +53,14 @@ def test_resolve_mcp_specs_skips_missing_default_web_search(
     monkeypatch, tmp_path, caplog
 ):
     _clear_mcp_env(monkeypatch)
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(mcp_module, "find_app_root", lambda: tmp_path)
     monkeypatch.setattr(mcp_module.shutil, "which", lambda name: "/usr/bin/node")
 
     specs = mcp_module.resolve_mcp_specs()
 
     assert specs == []
     assert "enabled by default" in caplog.text
+    assert "app/vendor/web-search-mcp" in caplog.text
 
 
 def test_resolve_mcp_specs_allows_explicit_web_search_disable(

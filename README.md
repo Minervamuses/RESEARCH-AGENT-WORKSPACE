@@ -19,10 +19,16 @@ cd app
 poetry install
 cd desktop
 npm ci
-cd ../..
+cd ../vendor/web-search-mcp
+npm ci
+npx playwright install chromium firefox
+npm run build
+cd ../../..
 ```
 
 已存在 `app` 環境時直接啟用，不必重新建立。Conda 管理 Python、Poetry、Node 與 Rust；Poetry 在這個環境內管理 Python 套件，專案已停用 Poetry 自建虛擬環境。
+
+網頁搜尋工具來自專案內附的 [Web Search MCP server](app/vendor/web-search-mcp/README.md)，agent 啟動時載入它的 `dist/index.js`。尚未 build 時 agent 仍會啟動，只是沒有網頁搜尋，log 會記錄缺少的路徑。
 
 模型使用啟動 shell 繼承的 `OPENROUTER_API_KEY`，例如：
 

@@ -12,6 +12,8 @@
 - `package-lock.json`：補上 `zod` 並對齊 0.3.1 的 lock（MCP SDK 1.15.0、Playwright 1.54.2、TypeScript 5.8.3）。upstream 提交的 lock 停在 0.2.2，而且缺 `zod`。較新的依賴（MCP SDK 1.29、TypeScript 5.9）會讓 `src/index.ts` 的 `server.tool()` 型別檢查出現 TS2589；兩者產生的 `dist` 相同，但為了讓 `npm run build` 乾淨通過，暫不升級。
 - 未帶入 upstream 的 README、`docs/`、`mcp.json` 範例、未使用的 `scripts/bundle.js`、舊式 `.eslintrc.json`，以及需要連網的手動測試腳本。
 
+`app/agent/mcp.py` 預設以 Conda 環境的 `node` 啟動本目錄的 `dist/index.js`；設定 `AGENT_MCP_WEB_SEARCH_COMMAND`／`AGENT_MCP_WEB_SEARCH_ARGS` 可改用其他啟動方式，`AGENT_ENABLE_MCP_WEB_SEARCH=0` 則停用。
+
 ## 建置與檢查
 
 在 Conda `app` 環境（提供 Node 與 npm）、本目錄執行：
