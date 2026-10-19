@@ -10,7 +10,7 @@
 | P2 | Complete | X2：外部 commit `ddb2dba`；source／安裝 dist 各 13/13 離線通過；安裝已備份並更新 | 無；真實搜尋品質／速度未宣稱改善 | P7 量測沿用同一回歸檔 |
 | P3 | Complete | X3：同版本全文只出現一次；異版本／同 fingerprint 異內容分開；retry 重用已去重輸入 | 無；端到端速度未量 | P4 沿用同一代表案例 |
 | P4 | Complete | X4：per-attempt callback → INFO `turn_trace` 持久 log；並行／例外／拒絕／取消／重試／Citation 計數均驗 | 自然使用樣本尚無（使用者下次正常使用即產生） | P6–P10 讀 trace |
-| P5 | Not started | E5／SDK 實版讀碼 | 執行者選有限政策並記錄依據 | 恢復或重建最小 offline probe，直接推進 |
+| P5 | Complete | X5：顯式 SDK client；每次 HTTP 600 s、重試窗 4×5 s、Retry-After ≤8 s、0＝真停用；真 wrapper/SDK＋MockTransport＋假時鐘驗 7 情境 | 真 provider 行為未打（無付費呼叫） | — |
 | P6 | Not started | E6／echo 歷史記錄 | P2、P4 與真搜尋器程序資料 | 量測並自主判定／完成必要重用 |
 | P7 | Not started | E7／source 機制 | P2、P4 與 engine/browser 資料 | 逐一選有證據的主變數並驗證 |
 | P8 | Not started | E8／gather/retry 機制 | P1、P4 與 Citation/provider 資料 | 分段歸因、選保守政策並驗證 |
@@ -115,3 +115,18 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 
   最後兩筆：同 query 的 search-2 走成功快取約 1 ms；不同 query 的 search-3 即使 fetcher 為離線也約 999 ms，指向 provider 端的固定等待（P8 跟進）。
 - **限制**：目前尚無修正後的自然使用 trace；P6–P10 的真實耗時判斷需要它或有界免費量測。只觀測 LangChain 可回呼的模型（測試用 fake 若非 BaseChatModel 則無 model 事件，工具事件仍有）。
+
+### X5 — P5：有限 timeout 與真實 SDK 重試政策
+
+- **探針**：計劃提到的 503／timeout 舊探針在 repo 與 /tmp 均找不到，改在 `tests/test_openrouter_model.py` 重建：真 factory → 真 `ChatOpenRouter` → 真 openrouter SDK → `httpx.MockTransport`；以 monkeypatch 只替換 SDK `openrouter.utils.retries` 模組的 `time`／`asyncio.sleep`／`random`（假時鐘、無 jitter、不真的等待）。無網路、無付費呼叫。
+- **修改前基準**（同一假時鐘，持續 503）：原 wrapper `max_retries=0` → 71 次 HTTP、虛擬 3609 s（落回 SDK 60 分預設窗）；`max_retries=10`（原預設）→ 36 次、1509 s；HTTP timeout 四個 phase 都是 None。
+- **決策 O5（執行者選定，非使用者指定、非性能保證）**：
+  - 每次 HTTP attempt `llm_request_timeout_ms = 600_000`（SDK 以 ms 傳入、httpx 換成 600 s 的 connect/read/write/pool phase timeout）。理由：非串流回應可能數分鐘才完成（65,536 token 上限、fusion judge），5 分以內的值可能切斷慢但有效的回答；10 分仍為有限值，GUI Stop 仍是使用者的總控制。它是 phase timeout，不是整次呼叫的硬 deadline。
+  - SDK 重試只針對既有 5XX 與連線／timeout 錯誤（SDK 原本即不重試 429），重試窗 = `llm_max_retries × 5_000 ms`；預設 `llm_max_retries` 由 10 改為 4 → 20 s 窗；backoff 1 s 起、指數 2、單次 sleep 上限 8 s。`llm_max_retries = 0` 明確傳 `retry_config=None`，真正只打一次（修正 0 落回 60 分窗的陷阱）。
+  - Server `Retry-After` 經 httpx response event hook 截到 ≤ 8 s（HTTP-date 或無法解析也截到 8 s），因 SDK 原本會無上限地 sleep 該值。
+  - 可證明上界：持續 5XX ≈ 窗＋8 s（預設 23 s 內停止）；timeout 時第一個 600 s attempt 已超過窗，不再重試；短 timeout 時最多窗＋8 s＋一個 timeout。
+  - 使用者可見取捨：暫時 5XX 在 20 s 內自動吸收；更長的故障會讓回合在約半分鐘內失敗（GUI 可重試），不再靜默等 25–60 分。回復方式：調整 `AgentConfig.llm_max_retries`／`llm_request_timeout_ms`，或還原本 commit。
+- **修改**：`agent/llm/openrouter.py` 新增 `bounded_sdk_client()`（以 wrapper 的公開欄位複製 HTTP-Referer／X-Title／categories attribution headers、`follow_redirects=True`、base URL、API key），factory 建好 `ChatOpenRouter`（也傳 `timeout`、`max_retries` 供內省）後以公開 `client` 欄位換成此 client；transport 參數只供離線測試。`agent/config.py`：`llm_max_retries` 註解與預設（10→4）、新增 `llm_request_timeout_ms`。沒有修改 site-packages、沒有升級或替換套件。所有 agent 模型（graph 的 async `get_chat_model`、thinking 角色與 `agent/llm/text.py` 同步 helper 經 `get_openrouter_chat_model`）都經此 factory；`rag` 的獨立 OpenRouter factory 不在本計劃範圍。`graph.py` 的 empty-response 重試是另一層，未改。
+- **離線驗收**（`tests/test_openrouter_model.py`）：持續 503（async 與 sync）→ sleeps `[1,2,4,8,8]`、6 次、虛擬 23 s、最終 `OpenRouterError` 503；request timeout → 實際 request 帶 ms→s 換算後的 phase timeout，600 s 時只 1 次，1.5 s 時 5 次、虛擬 22.5 s；Retry-After 3600 → sleep `[8.0]` 後成功、content 與 usage 保留、attribution header 與 host 正確；一次 503 後成功 → sleep `[1.0]`；`llm_max_retries=0` 與不可重試 400 → 恰 1 次、無 sleep；取消 → `CancelledError`、1 次、無重試。既有 factory kwargs 測試改為 stub `bounded_sdk_client` 並檢查 `timeout`。
+- **檢查**：`tests/test_openrouter_model.py tests/test_thinking_models.py tests/test_thinking_session.py` 53 passed；完整 pytest（sandbox 外）1481 passed、40 秒；`git diff --check` 通過。
+- **限制**：真實 OpenRouter 對非串流長回應是否送 keep-alive 位元組未驗（需付費呼叫）；若不送，600 s phase timeout 就是單次生成的實際上限。不據此宣稱解釋歷史 341 秒。

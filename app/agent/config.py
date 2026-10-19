@@ -24,7 +24,8 @@ class AgentConfig(RAGConfig):
     # Core runtime
     llm_model: str = "google/gemini-3.8-flash"  # Main chat model.
     llm_max_tokens: int = 65_536  # Main response token cap.
-    llm_max_retries: int = 10  # OpenRouter retry count.
+    llm_max_retries: int = 4  # Each unit adds 5 s to the SDK retry window; 0 disables retries.
+    llm_request_timeout_ms: int = 600_000  # Per HTTP attempt (httpx phase timeout), not a total deadline.
     graph_recursion_limit: int = 64  # Per-graph superstep limit.
 
     # Thinking models
