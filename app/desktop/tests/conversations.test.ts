@@ -852,6 +852,16 @@ test("two document comments and an assistant comment retain their pairing when e
   assert.equal(composeTurnText("Use @citation", state.annotations), "Main request:\nUse @citation\n\nRequests for frozen references:\n\nReference first:\nRewrite this paragraph.\n\nReference reply:\nExplain the evidence.");
   assert.match(composeTurnText(" /status ", state.annotations), /^Main request:\n \/status \n\nRequests for frozen references:/);
   assert.equal(composeTurnText(" /status ", []), " /status ");
+  const requests = "Requests for frozen references:\n\nReference first:\nRewrite this paragraph.\n\nReference reply:\nExplain the evidence.";
+  assert.equal(composeTurnText("/citation 找來源", state.annotations), `/citation Main request:\n找來源\n\n${requests}`);
+  assert.equal(composeTurnText("  /CITATION\n找來源 ", state.annotations), `/CITATION Main request:\n找來源\n\n${requests}`);
+  assert.equal(composeTurnText("/citation", state.annotations), `/citation ${requests}`);
+  for (const draft of ["/citation off", "/citation NONE", " /citation deactivate", "/citationfoo 找來源", "請用 /citation 找來源", "@citation 找來源"]) {
+    assert.equal(composeTurnText(draft, state.annotations), `Main request:\n${draft}\n\n${requests}`, draft);
+  }
+  const commented = state.annotations.map((item) => ({ ...item, comment: "/citation 找來源" }));
+  assert.match(composeTurnText("說明這段", commented), /^Main request:\n說明這段\n\nRequests for frozen references:\n\nReference first:\n\/citation 找來源/);
+  assert.equal(composeTurnText("/citation 找來源", []), "/citation 找來源");
   assert.equal(state.nextAnnotationNumber, 4);
 });
 

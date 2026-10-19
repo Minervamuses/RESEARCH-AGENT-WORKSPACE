@@ -1,12 +1,12 @@
 # 執行紀錄
 
-本檔是唯一狀態 owner。目前操作是計劃修訂，所有程式實作階段仍未開始。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
+本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
 
 ## 目前階段
 
 | ID | 狀態 | 已有證據 | 實際前提／待解事項 | 下一步 |
 |---|---|---|---|---|
-| P1 | Not started | E1／歷史回合，未修復 | 全計劃尚未由啟動 prompt 開始實作 | 環境 gate 後串接前端與 backend fixture |
+| P1 | Complete | X1：真實 composeTurnText→DesktopService→Citation 離線案例；反例 3 種 | 無 | P3/P4 沿用同一代表案例 |
 | P2 | Not started | E2／source、dist、四情境腳本 | 核對有效入口並保留 lock diff；無逐項授權門檻 | 修復後斷言、source/build/安裝驗收與外部 commit |
 | P3 | Not started | E3／重複全文已確認 | 可獨立於 P2 進行 | 模型投影去重及 snapshot／retry 驗收 |
 | P4 | Not started | E4／既有 logger | 驗 callback／統計接點，記必要局部檔案集合 | 真 graph＋fake tools 驗 ID 與計時 |
@@ -57,3 +57,19 @@ git diff --cached --check -- harness/plans/2026-10-19-citation-search-reliabilit
 移除 P6–P10 對整批 P1–P4 的不必要共同阻塞，保留每項真正資料前提；P9 可獨立用離線反例修正。增加問題處理、最終集中回報與完成狀態定義，避免「記錄問題＝全部完成」。
 
 目前未實作 production code，也未跑 app tests／build／live provider。另一子代理先核對舊版矛盾，再複核修訂後完整入口、契約、各階段、狀態表與 index，未發現剩餘實質自主契約矛盾。WSL Conda app 結構 lint 通過：17 files、0 errors、0 warnings；diff check 最初找到 PLANS.md 檔尾多一空行，修正後通過。此次僅修訂 13 份既有計劃文件，原始 brief／蒐證與 A1–A3 歷史保留；未改 production code、未納入使用者既有刪除／app/store。本次修訂使用 commit subject `docs(plan): enable autonomous execution with stepwise commits [A4]`，實際 hash 以 WSL Git 為準，不為補記自身 hash 再提交一次。
+
+## 執行事件
+
+### X0 — 2026-10-19：啟動 gate
+
+WSL Bash、`/usr/bin/git`、Conda app（Python 3.13.14、Poetry 2.4.1、Node 24.18.0、npm 11.16.0）。主專案 HEAD `df9e58b`；`450f6d3..HEAD` 只有計劃文件，無 production 變動。起始 staged 空；使用者既有刪除與 `app/store/` 保留。根目錄出現的 `.bashrc`、`.gitconfig`、`.mcp.json` 等未追蹤項是 sandbox 掛載的 `/dev/null` 字元裝置，不是檔案，絕不 stage。外部 source HEAD `eeb03f8`，dirty 仍只有 ` M package-lock.json`；source 與安裝的 `dist/search-engine.js` SHA256 仍同為 `dad8f448…a9758`。
+
+已知環境限制（沿用）：Bash sandbox 中 `/tmp` 唯讀，`test_sidebar_refresh_skips_repeat_scans_without_changing_session_dtos` 等硬編 `/tmp` 的測試在 sandbox 內失敗，需在 sandbox 外重跑；不是本計劃引入的回歸。
+
+### X1 — P1：主請求 `/citation` 在段落留言組裝後仍啟動 Citation
+
+- **修改**：只改 `app/desktop/src/conversations.ts` 的 `composeTurnText()`。有留言時，若主請求（去前導空白）以 `/citation` 加空白或結尾開頭（不分大小寫，與 backend registry casefold 一致），組成 `/<原指令> Main request:\n<其餘>\n\nRequests for frozen references:…`；其餘部分只 trim，backend `_handle_citation` 依原 raw text 取自然語言 followup，不重建 shlex。單獨 `off/none/deactivate` 不提前，維持原「Main request:」包裝，因此不會因留言變成啟動。
+- **決策**：bare `/citation`＋留言也提前為 `/citation Requests for frozen references:…`，因使用者已在主輸入明確選 Citation，留言即其 prompt；無留言時 bare `/citation` 的 Usage 錯誤不變。其他 slash 指令（例如 `/status`）完全不變；`/citationfoo`、文句中 `/citation`、`@citation` 與留言內 `/citation` 都不啟動。沒有新增 wire 欄位，`skillReferences` 協定未改。
+- **跨層測試**：`app/tests/test_inline_skills.py` 新增 `_desktop_compose_turn_text()`，以 Conda app 的 Linux Node `--experimental-strip-types` 直接 import 真實 `desktop/src/conversations.ts` 的 `composeTurnText`，把輸出連同仿 App.tsx 的背景 documentContext＋一個 frozen document reference 送進真實 `DesktopService.session.turn`、真 graph、真 Citation tool／service 與離線 RoutingFetcher。3 個正向參數（含大寫／換行與 bare）驗證：首次模型呼叫已綁 `citation_workflow`、prompt 含 `# Citation Skill`、主請求與留言完整、引用快照完整、實際執行一次 search 工具、回合後 runtime 與 extended thinking 恢復、未寫檔。3 個反例驗證不啟動。修復前同測試以原 TS 執行失敗（綁定工具缺 `citation_workflow`），修復後通過。
+- **檢查**（app/）：`python -m pytest -q -p no:cacheprovider tests/test_inline_skills.py` 18 passed；`tests/test_desktop_service.py tests/test_citation_slash_command.py tests/test_citation_skill_activation.py` 112 passed＋1 個 sandbox `/tmp` 失敗，該測試在 sandbox 外重跑 passed。app/desktop：`npm test` 260 passed；`npm run build` 成功（只有既有 chunk 大小警告）；`git diff --check` 通過。
+- **限制**：GUI 的使用者訊息顯示會變成 `/citation Main request:…`（display_input 即實際提交文字）；這是保留明確指令的直接結果，不影響已存歷史回合。真模型行為未測（無付費呼叫）。

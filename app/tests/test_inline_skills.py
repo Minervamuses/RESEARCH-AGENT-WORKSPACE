@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+from pathlib import Path
+import shutil
+import subprocess
 import uuid
 from dataclasses import replace
 
@@ -412,4 +415,169 @@ def test_selected_unsaved_claim_reaches_topic_search_abstract_and_final_citation
 
     original_disk_text = "舊稿：詞袋相似度與文件分類。\n"
     prompt = "先用 @academic-paper-writing 檢查選取論述，再用 @citation 找摘要、保存第一篇並說明限制。"
+    asyncio.run(run())
+
+
+_DESKTOP_CONVERSATIONS = Path(__file__).resolve().parents[1] / "desktop" / "src" / "conversations.ts"
+
+
+def _desktop_compose_turn_text(draft: str, annotations: list[dict]) -> str:
+    """Run the shipped desktop composer so the backend receives its real wire text."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Linux Node is required to run the desktop composer")
+    script = (
+        f"import {{ composeTurnText }} from {json.dumps(_DESKTOP_CONVERSATIONS.as_uri())};"
+        "let input = '';"
+        "for await (const chunk of process.stdin) input += chunk;"
+        "const { draft, annotations } = JSON.parse(input);"
+        "process.stdout.write(JSON.stringify(composeTurnText(draft, annotations)));"
+    )
+    completed = subprocess.run(
+        [node, "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script],
+        input=json.dumps({"draft": draft, "annotations": annotations}),
+        capture_output=True, text=True, timeout=60, check=True,
+    )
+    return json.loads(completed.stdout)
+
+
+class _CitationReferenceModel:
+    """Record each real graph prompt and run one offline Citation search when bound."""
+
+    def __init__(self):
+        self.bound: tuple[str, ...] = ()
+        self.invoked_tools: list[tuple[str, ...]] = []
+        self.calls = []
+
+    def bind_tools(self, tools):
+        self.bound = tuple(tool.name for tool in tools)
+        return self
+
+    async def ainvoke(self, messages):
+        return self.invoke(messages)
+
+    def invoke(self, messages):
+        self.calls.append(list(messages))
+        self.invoked_tools.append(self.bound)
+        if "citation_workflow" not in self.bound:
+            return AIMessage(content="一般回答，未啟動 Citation。")
+        if not any(isinstance(message, ToolMessage) for message in messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "citation_workflow", "args": {"action": "search", "query": "Paper A"},
+                "id": "reference-search", "type": "tool_call",
+            }])
+        return AIMessage(content="已依搜尋結果說明候選與限制，未保存或引用來源。")
+
+
+def _reference_turn_fixture(tmp_path, monkeypatch):
+    from test_citation_e2e import _fixture_services
+
+    model = _CitationReferenceModel()
+    monkeypatch.setattr("agent.graph.get_chat_model", lambda _config: model)
+    monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [])
+    services = _fixture_services(monkeypatch, tmp_path)
+
+    async def factory(config, *, load_mcp, **kwargs):
+        assert load_mcp is False
+        return ChatSession(config, **kwargs)
+
+    return model, services, _service(tmp_path, session_factory=factory)
+
+
+async def _submit_reference_turn(
+    service, path, draft, comment, *, unsaved_text, reference_text="檢索增強生成可降低無來源主張。",
+):
+    """Mirror App.tsx: background editor context plus one frozen document reference."""
+    opened = await service.dispatch("document.open", {"path": str(path)})
+    background = {key: value for key, value in opened.items() if key not in {"rangeStartUtf16", "rangeEndUtf16"}}
+    background.update(sourceText=unsaved_text, editorRevision=1)
+    start = unsaved_text.index(reference_text)
+    reference = {
+        "referenceId": "doc-claim", "kind": "document", "text": reference_text,
+        "document": {"snapshot": {**background, "rangeStartUtf16": start, "rangeEndUtf16": start + len(reference_text)},
+                     "startLine": 2, "endLine": 2},
+    }
+    text = _desktop_compose_turn_text(draft, [
+        {"referenceId": "doc-claim", "number": 1, "comment": comment, "expanded": False},
+    ])
+    project = service._project
+    submitted = {
+        "projectId": project["projectId"], "rootPath": project["rootPath"],
+        "permissionMode": service.bash_permission_mode, "requestedThinkingMode": service.session.thinking_mode,
+        "skillReferences": [],
+        "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
+        "documentContext": background, "references": [reference],
+    }
+    result = await service.dispatch("session.turn", {
+        "text": text, "turnId": uuid.uuid4().hex, "retry": False, "submittedContext": submitted,
+    })
+    return text, submitted, result
+
+
+@pytest.mark.parametrize("draft,main_request", [
+    ("/citation 為選取論述找可引用的文獻，說明限制", "為選取論述找可引用的文獻，說明限制"),
+    ("  /CITATION\n為選取論述找可引用的文獻，說明限制 ", "為選取論述找可引用的文獻，說明限制"),
+    ("/citation", None),
+])
+def test_desktop_citation_command_survives_reference_comment_composition(tmp_path, monkeypatch, draft, main_request):
+    unsaved = "研究背景\n檢索增強生成可降低無來源主張。\n未儲存的結論段落。\n"
+
+    async def run():
+        model, services, service = _reference_turn_fixture(tmp_path, monkeypatch)
+        await _open_test_project(service, tmp_path)
+        await service.dispatch("session.create", {"loadMcp": False})
+        service.session.set_thinking_mode("extended")
+        path = tmp_path / "draft.md"
+        path.write_text("研究背景\n舊稿。\n", encoding="utf-8")
+        comment = "這段需要醫療問答中的實證來源。"
+        text, submitted, result = await _submit_reference_turn(
+            service, path, draft, comment, unsaved_text=unsaved,
+        )
+
+        assert result["state"] == "completed"
+        assert "citation_workflow" in model.invoked_tools[0]
+        first_prompt = "\n".join(str(message.content) for message in model.calls[0])
+        assert "# Citation Skill" in first_prompt
+        human = next(message.content for message in reversed(model.calls[0]) if isinstance(message, HumanMessage))
+        request = human.split("[Current editor document snapshot", 1)[0]
+        assert request.startswith("Main request:\n" + main_request + "\n\n" if main_request else "Requests for")
+        assert comment in request and "Reference doc-claim:" in request
+        assert "/citation" not in request.casefold()
+        assert json.dumps(unsaved, ensure_ascii=False) in human  # Frozen unsaved editor text.
+        assert len(services) == 1
+        assert any(isinstance(message, ToolMessage) and message.name == "citation_workflow"
+                   for message in model.calls[-1])
+        saved = service._conversation_repository.load(service.session.session_id).document.turns[-1]
+        assert saved.display_input == text and saved.submitted_context == submitted
+        assert service.session.active_skill_runtime is None
+        assert service.session._citation_service is None
+        assert service.session.thinking_mode == "extended"
+        assert path.read_text(encoding="utf-8") == "研究背景\n舊稿。\n"
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("draft,comment", [
+    ("請說明這段的論證", "/citation 找來源"),
+    ("/citation off", "這段需要來源。"),
+    ("/citationfoo 找來源", "這段需要來源。"),
+])
+def test_reference_comments_cannot_select_or_reactivate_citation(tmp_path, monkeypatch, draft, comment):
+    async def run():
+        model, services, service = _reference_turn_fixture(tmp_path, monkeypatch)
+        await _open_test_project(service, tmp_path)
+        await service.dispatch("session.create", {"loadMcp": False})
+        path = tmp_path / "draft.md"
+        path.write_text("研究背景\n舊稿。\n", encoding="utf-8")
+        text, _submitted, result = await _submit_reference_turn(
+            service, path, draft, comment,
+            unsaved_text="研究背景\n/citation 檢索增強生成可降低無來源主張。\n",
+            reference_text="/citation 檢索增強生成可降低無來源主張。",
+        )
+        assert text.startswith("Main request:\n" + draft)
+        assert result["text"] == "一般回答，未啟動 Citation。"
+        assert model.invoked_tools and all("citation_workflow" not in names for names in model.invoked_tools)
+        assert services == []
+        assert service.session.active_skill_runtime is None
+
     asyncio.run(run())

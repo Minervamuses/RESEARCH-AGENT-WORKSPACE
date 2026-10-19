@@ -739,11 +739,25 @@ export function turnSubmissionText(state: ConversationState): string {
   return composeTurnText(state.draft, state.annotations);
 }
 
+// Only the main request can select Citation; comments and quoted sources stay data.
+const CITATION_COMMAND = /^\/citation(?=\s|$)/i;
+const CITATION_OFF_ARGUMENT = /^(?:off|none|deactivate)$/i;
+
 export function composeTurnText(draft: string, annotations: readonly DraftAnnotation[]): string {
   const requests = annotations.filter((item) => item.comment.trim().length > 0)
     .map((item) => `Reference ${item.referenceId}:\n${item.comment.trim()}`);
   if (requests.length === 0) return draft;
-  return `${draft.trim().length > 0 ? `Main request:\n${draft}\n\n` : ""}Requests for frozen references:\n\n${requests.join("\n\n")}`;
+  const body = `Requests for frozen references:\n\n${requests.join("\n\n")}`;
+  const request = draft.trimStart();
+  const command = CITATION_COMMAND.exec(request);
+  if (command !== null) {
+    // Keep the explicit command first so the backend's existing /citation handler sees it.
+    const prompt = request.slice(command[0].length).trim();
+    if (!CITATION_OFF_ARGUMENT.test(prompt)) {
+      return `${command[0]} ${prompt.length > 0 ? `Main request:\n${prompt}\n\n` : ""}${body}`;
+    }
+  }
+  return `${draft.trim().length > 0 ? `Main request:\n${draft}\n\n` : ""}${body}`;
 }
 
 export function latestRetryableTranscriptTurn(
