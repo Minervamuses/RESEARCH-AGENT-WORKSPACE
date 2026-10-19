@@ -1,6 +1,6 @@
 # 執行紀錄
 
-本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；P1–P10 均有完成證據（P10 附限制，見 X13），尚待追查的只有 I4。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
+本檔是唯一狀態 owner。2026-10-19 起依 PROMPTS 全計劃啟動執行（見下方「執行事件」X 系列）；P1–P10 均已 Complete（見 X14 收尾），計劃外仍開著的只有 I1、I4。完整啟動後沿用 P1–P10 自主決策、問題留存與逐步 WSL commit 契約，不逐項索取授權。最新規則見 [PLANS](PLANS.md)及 A4；A1–A3 保留為原版交付歷史，不覆蓋最新指示。
 
 ## 目前階段
 
@@ -15,7 +15,7 @@
 | P7 | Complete（X12 補強） | X8＋X12：`a2019f5` 改序；自然 query 下 DDG 回 202 anomaly、Brave 回 429 驗證頁，`a75a754` 讓 Brave 4xx 立即放棄；同 6 個自然 query 最終引擎不變、Brave 段 4.4–5.4 s→1.4–1.9 s；已部署 | heuristic 對長學術 query 給低分（0.10–0.30）仍會觸發 fallback，未改（無證據顯示 fallback 結果較好） | — |
 | P8 | Complete | X9：live provider 分段＋離線故障反例；同 task 已耗盡重試的 provider 後續 query 跳過並明示；整次 deadline 有證據不需 | 自然 provider 故障樣本極少（1 次非暫時性） | — |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
-| P10 | Complete（附限制） | X13：重啟後自然 /citation 完成（112 s）；5 次 citation search、hash 全不同、每次皆有新候選與新摘要，無 web、無重複，回答列出剩餘缺口後停止 | 「無新證據即收斂」分支未在自然使用中觸發（僅離線驗證）；本次逐次補查目的無法回查；無摘要候選被以記憶描述 → 技能文字已收緊，效果未驗 | — |
+| P10 | Complete | X13：自然 /citation 5 次補查皆有新證據、無重複、列出剩餘缺口後停止；X14：載入 `20f1092` 後，回答列出每次 search 的目標缺口與 supported／unsupported／not assessable，無摘要候選未以記憶描述、未算作支持 | 「follow-up 後無新證據才收斂」分支只有離線驗證；X14 為測試性輸入，對知名但缺摘要文獻的記憶描述只是弱驗證 | — |
 
 問題出現時在下方追加穩定 ID、原因／假說、已嘗試命令、結果／證據、採用替代方案、剩餘限制與下一步。保留 Not started／In progress／Blocked／Complete 狀態；有證據不需修改時於結果欄明列，缺證或待驗不能算 Complete。問題不會自動停止其他工作。
 
@@ -266,3 +266,34 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
   - `tests/test_citation_e2e.py` 斷言模型 prompt 含新規則；相關 75 passed，完整 pytest 1495 passed。
 - **給使用者的設定建議**：若要讓更多候選帶有可評估的摘要，可設定 `OPENALEX_API_KEY`（hub 已支援，未設時 OpenAlex 停用）。
 - **論文評估注意**：本次技能文字收緊屬於實驗條件的一部分；比較 Citation 與一般代理時，應註明使用的 SKILL.md 版本（本 commit 之後）。
+
+### X14 — 2026-10-19 23:20：第三次自然 /citation 與 P10 收尾
+
+後端 pid 103922 於 23:19 啟動，晚於 `20f1092`（23:13），因此已載入收緊後的 SKILL.md。回合 `fa31260b`（新對話第 1 回合）：使用者以 `/citation Main request:…` 選取稿件中的格式 TODO 段落，留言為測試字樣。
+
+- **trace**：29.5 s、completed。模型 2 次 28.2 s；citation search 1 次 1.2 s（10 候選、0 摘要、provider 皆成功）；沒有 web、沒有重試。
+- **行為核對**：
+  - 回答判斷選取內容是格式／流程清單，不是可由文獻支持的研究主張。
+  - 列出 "Searches run"：唯一一次 search 與它的目標缺口；接著列 Supported: None、Unsupported／Not Assessable。這是 X13 缺少的「每次補查的具體缺口」，在新規則下出現在使用者可見的回答中。
+  - 兩筆列出的候選都標為「無摘要、無法評估」；只有依 venue／書名（metadata）的一句推測，沒有以記憶描述內容，也沒有算作支持。
+  - 另 8 筆以標題判定離題並說明省略。這略偏離「逐筆呈現」，但有揭露；不影響 G10。
+  - 沒有可追的具名缺口，因此只搜 1 次就收斂、沒有改寫重查。
+- **P10 判定：Complete**。
+  - X13 的自然 trace 證明：補查帶新證據、無重複、列出剩餘缺口後停止。
+  - X14 證明：每次 search 的目標缺口與已支持／未支持／無法評估的部分，已對使用者可見。
+  - X10 的離線驗證涵蓋「重複候選無新證據」的訊號與規則。
+- **限制**：
+  - 「follow-up 後無新證據才收斂」只有離線驗證。
+  - X14 是測試性輸入，候選與主題無關，對「知名但缺摘要文獻被以記憶描述」只是弱驗證；論文評估時仍應把它當作需觀察的失敗模式。
+
+### X15 — 全計劃完成
+
+P1–P10 皆為 Complete，所有修改都已在所屬 repo 提交，安裝目錄與 source build 一致。
+
+- **主專案**：`2bc784a`、`57c31dd`、`2bfdb22`、`7eddb30`、`37a448c`、`868b5a2`、`b1e3d20`、`1de6c62`、`1f1fa78`、`022bdcb`、`bfabc84`、`ccb0c40`、`496826b`、`20f1092`（含本紀錄的 commit）。
+- **外部 repo**：`ddb2dba`、`a2019f5`、`a75a754`。
+- **安裝**：`search-engine.js` 為 `c76e400e…231f`，備份三份（P2、P7、P7b）。
+- **計劃外仍開著**：
+  - I1：完整 pytest 會寫入使用者 `~/.cache/agent-mcp`，需要測試隔離。
+  - I4：DataCite 偶發 `error`，原因未明。
+  - `for_agents/` 可能已過時。
