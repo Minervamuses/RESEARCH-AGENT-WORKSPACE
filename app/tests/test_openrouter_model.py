@@ -140,14 +140,11 @@ def test_invoke_text_invokes_chat_model_with_human_message():
 
 
 class _VirtualClock:
-    """Stand in for the SDK retry loop's wall clock and sleeps; nothing waits."""
+    """Stand in for the retry waits and slow upstream failures; nothing waits."""
 
     def __init__(self):
         self.now = 1_000.0
         self.sleeps: list[float] = []
-
-    def time(self) -> float:
-        return self.now
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
@@ -166,27 +163,23 @@ def _completion(content: str = "ok") -> dict:
     }
 
 
-def _unavailable(**headers) -> httpx.Response:
-    return httpx.Response(503, json={"error": {"code": 503, "message": "fixture outage"}}, headers=headers)
+def _upstream_error(status: int = 503, **headers) -> httpx.Response:
+    return httpx.Response(status, json={"error": {"code": status, "message": "fixture outage"}}, headers=headers)
 
 
 @pytest.fixture
 def offline_openrouter(monkeypatch, tmp_path):
     """Real factory, ChatOpenRouter and SDK over an httpx MockTransport."""
-    from openrouter.utils import retries
-
     clock = _VirtualClock()
-    monkeypatch.setattr(retries, "time", SimpleNamespace(time=clock.time, sleep=clock.sleep))
-    monkeypatch.setattr(retries, "asyncio", SimpleNamespace(sleep=clock.async_sleep))
-    monkeypatch.setattr(retries, "random", SimpleNamespace(uniform=lambda _low, _high: 0.0))
+    monkeypatch.setattr(openrouter, "_sleep", clock.sleep)
+    monkeypatch.setattr(openrouter, "_async_sleep", clock.async_sleep)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     requests: list[httpx.Request] = []
 
     def build(responses, **overrides):
         def handler(request):
             requests.append(request)
-            step = responses(request, len(requests)) if callable(responses) else responses[len(requests) - 1]
-            return step
+            return responses(request, len(requests)) if callable(responses) else responses[len(requests) - 1]
 
         cfg = AgentConfig(persist_dir=str(tmp_path), **overrides)
         model = get_openrouter_chat_model(cfg)
@@ -198,50 +191,70 @@ def offline_openrouter(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("path", ["async", "sync"])
-def test_persistent_503_stops_inside_the_bounded_retry_window(offline_openrouter, path):
-    model = offline_openrouter.build(lambda _request, _count: _unavailable())
-    start = offline_openrouter.clock.now
-    with pytest.raises(OpenRouterError) as failure:
+def test_persistent_503_stops_after_the_counted_retries(offline_openrouter, path, caplog):
+    model = offline_openrouter.build(lambda _request, _count: _upstream_error())
+    with caplog.at_level("INFO", logger="agent.llm.openrouter"), pytest.raises(OpenRouterError) as failure:
         if path == "async":
             asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
         else:
             model.invoke([HumanMessage(content="hi")])
 
     assert failure.value.status_code == 503
-    # Default llm_max_retries=4 gives a 20 s window: sleeps 1, 2, 4, 8, then one capped 8.
-    assert offline_openrouter.clock.sleeps == [1.0, 2.0, 4.0, 8.0, 8.0]
-    assert len(offline_openrouter.requests) == 6
-    elapsed = offline_openrouter.clock.now - start
-    assert elapsed == 23 <= 20 + openrouter.RETRY_MAX_INTERVAL_MS / 1000
+    # Default llm_max_retries=2: three HTTP attempts, waits 1 s and 2 s, and no SDK retry on top.
+    assert len(offline_openrouter.requests) == 3
+    assert offline_openrouter.clock.sleeps == [1.0, 2.0]
+    assert [record.getMessage() for record in caplog.records] == [
+        "openrouter request retry 1/2 after HTTP 503 in 1.0s",
+        "openrouter request retry 2/2 after HTTP 503 in 2.0s",
+    ]
 
 
-def test_request_timeout_is_finite_milliseconds_and_not_retried_past_the_window(offline_openrouter):
+def test_slow_gateway_failure_is_still_retried(offline_openrouter):
+    """2026-10-19: OpenRouter returned 504 after 32 s and 51 s; a time window never retried them."""
+    def slow_then_ok(_request, count):
+        offline_openrouter.clock.now += 50.0  # The upstream gives up only after a long wait.
+        if count == 1:
+            return _upstream_error(504)
+        return httpx.Response(200, json=_completion("recovered"))
+
+    model = offline_openrouter.build(slow_then_ok)
+    message = asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
+    assert message.content == "recovered"
+    assert len(offline_openrouter.requests) == 2 and offline_openrouter.clock.sleeps == [1.0]
+
+
+def test_request_timeout_is_finite_milliseconds_and_not_retried(offline_openrouter):
     def timed_out(request, _count):
-        offline_openrouter.clock.now += request.extensions["timeout"]["read"]
         raise httpx.ReadTimeout("fixture read timeout", request=request)
 
     model = offline_openrouter.build(timed_out, llm_request_timeout_ms=1_500)
-    start = offline_openrouter.clock.now
     with pytest.raises(httpx.ReadTimeout):
         asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
     assert offline_openrouter.requests[0].extensions["timeout"] == {
         "connect": 1.5, "read": 1.5, "write": 1.5, "pool": 1.5,
     }
-    # Short timeouts retry only while the 20 s window is open: ends at 1.5, 4, 7.5, 13, 22.5 s.
-    assert len(offline_openrouter.requests) == 5
-    assert offline_openrouter.clock.now - start == 22.5 <= 20 + 8 + 1.5
+    assert len(offline_openrouter.requests) == 1 and offline_openrouter.clock.sleeps == []
 
     offline_openrouter.requests.clear()
     model = offline_openrouter.build(timed_out)
     with pytest.raises(httpx.ReadTimeout):
         asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
     assert offline_openrouter.requests[0].extensions["timeout"]["read"] == 600.0
-    assert len(offline_openrouter.requests) == 1  # A 600 s attempt already exceeds the window.
+
+
+def test_connection_errors_are_retried_then_raised(offline_openrouter):
+    def refused(request, _count):
+        raise httpx.ConnectError("fixture refused", request=request)
+
+    model = offline_openrouter.build(refused)
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
+    assert len(offline_openrouter.requests) == 3 and offline_openrouter.clock.sleeps == [1.0, 2.0]
 
 
 def test_long_retry_after_is_capped_and_a_later_success_keeps_usage(offline_openrouter):
     model = offline_openrouter.build([
-        _unavailable(**{"retry-after": "3600"}),
+        _upstream_error(**{"retry-after": "3600"}),
         httpx.Response(200, json=_completion("recovered")),
     ])
     message = asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
@@ -255,17 +268,18 @@ def test_long_retry_after_is_capped_and_a_later_success_keeps_usage(offline_open
 
 
 def test_one_transient_503_then_success(offline_openrouter):
-    model = offline_openrouter.build([_unavailable(), httpx.Response(200, json=_completion())])
+    model = offline_openrouter.build([_upstream_error(), httpx.Response(200, json=_completion())])
     assert model.invoke([HumanMessage(content="hi")]).content == "ok"
     assert offline_openrouter.clock.sleeps == [1.0] and len(offline_openrouter.requests) == 2
 
 
 @pytest.mark.parametrize("response", [
-    _unavailable(),
+    _upstream_error(),
     httpx.Response(400, json={"error": {"code": 400, "message": "bad request"}}),
+    httpx.Response(429, json={"error": {"code": 429, "message": "rate limited"}}),
 ])
-def test_disabled_retries_and_permanent_errors_make_one_attempt(offline_openrouter, response):
-    retries = 0 if response.status_code == 503 else 4
+def test_disabled_retries_and_non_server_errors_make_one_attempt(offline_openrouter, response):
+    retries = 0 if response.status_code == 503 else 2
     model = offline_openrouter.build(lambda _request, _count: response, llm_max_retries=retries)
     with pytest.raises(OpenRouterError) as failure:
         asyncio.run(model.ainvoke([HumanMessage(content="hi")]))
