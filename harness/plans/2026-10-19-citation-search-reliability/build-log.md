@@ -12,7 +12,7 @@
 | P4 | Complete | X4：per-attempt callback → INFO `turn_trace` 持久 log；並行／例外／拒絕／取消／重試／Citation 計數均驗 | 自然使用樣本尚無（使用者下次正常使用即產生） | P6–P10 讀 trace |
 | P5 | Complete | X5：顯式 SDK client；每次 HTTP 600 s、重試窗 4×5 s、Retry-After ≤8 s、0＝真停用；真 wrapper/SDK＋MockTransport＋假時鐘驗 7 情境 | 真 provider 行為未打（無付費呼叫） | — |
 | P6 | Complete（有證據不需修改） | X7：真 server 每次呼叫程序開銷 0.39 s；重用會讓 server 內 10 次／分 limiter 開始拒絕 | 無 | — |
-| P7 | Not started | E7／source 機制 | P2、P4 與 engine/browser 資料 | 逐一選有證據的主變數並驗證 |
+| P7 | Complete | X8：外部 commit `a2019f5`（引擎順序 Bing→DDG→Brave）；同 5 query 前後最終引擎／品質相同，fallback 段 5.2–6.1 s→0.6–1.1 s；已部署 | 樣本小（5 query、單一網路環境）；heuristic 與 deadline 有證據不需改 | — |
 | P8 | Not started | E8／gather/retry 機制 | P1、P4 與 Citation/provider 資料 | 分段歸因、選保守政策並驗證 |
 | P9 | Complete | X6：service 截斷前套用年份資格；真 service＋tool 反例由 2/5 變 5/5 | 無；排序未改 | — |
 | P10 | Not started | E10／工具與技能邊界 | P1、P3、P4 與新 action trace | 分析缺口、調整並驗證停止行為 |
@@ -148,3 +148,14 @@ turn_trace event=turn_end … state=completed duration_ms=1020 model_calls=3 too
 - **重用的具體風險**：外部 server 的 `RateLimiter` 是程序內「每分鐘 10 次、超過直接丟錯」。現在每次呼叫是新程序，limiter 每次重置所以從未觸發；離線 stub 驗證同一 `SearchEngine` 實例第 11 次即 `Failed to perform search: Rate limit exceeded`。改為持續 session 會把 10/19 這種 14 次搜尋的回合推向 limiter 失敗，另外 session 擁有者須貫穿 ChatSession／desktop shutdown／取消／崩潰（至少 mcp.py、startup.py、session.py、desktop service 四檔）。
 - **判定**：省下約 0.39 s／次，不值得改變 server 實際行為（引入 rate-limit 失敗）並增加跨四檔的生命週期。依計劃完成定義記為「有證據不需修改」；沒有實作或宣稱加速。MCP 程序重用與 browser 重用無關（P7 另判）。
 - **附帶發現（I1）**：在 sandbox 外跑完整 pytest 時，部分測試會在使用者真實的 `~/.cache/agent-mcp/*.stderr.log` 追加 run header（今日 12:44／12:51 UTC 共 4 行，並建立 alpha／beta／dropin／legacy 等測試 server 的 log）。這是既有測試隔離缺口，非本計劃引入；未刪除任何檔案。之後讀 web_search.stderr.log 時，這些 header 不是使用者回合。建議另案讓 conftest 隔離 `XDG_CACHE_HOME`。
+
+### X8 — P7：以引擎／瀏覽器證據選定搜尋改善
+
+- **自然使用證據**（10/19 回合，只讀 stderr log 結構，不複製 query）：14 次 `get-web-search-summaries` 都是 Bing 段：Chromium 啟動 43–50 ms（首次 200 ms）；7/14 次 enhanced 首頁流程成功、搜尋 1.46–1.95 s；7/14 次 enhanced `page.goto` 在 3.33 s（或 1.67 s）逾時後改 direct URL（0.33–0.70 s）；13/14 次 Bing 解析到結果（1 次 0 筆）。Brave／DDG 與品質分數走 `console.log`（stdout），被 app 的 `grep '^{'` 過濾，因此自然 log 看不到 fallback。
+- **量測**（scratchpad `p7-measure.mjs`，直接 import 安裝版 dist 的 `SearchEngine`，為每行 log 加相對時間；計劃允許的免費公開搜尋小樣本；5 個通用代表 query：英文學術、中文 ×2、含 large-scale／score 的學術詞、英文簡單 query；未使用使用者文字）：
+  - 修改前（Bing→Brave→DDG）：總時間 8.5／7.9／12.7／3.6／13.9 s。Bing 品質未達 0.8 的 4/5 個 query 都進 fallback：Brave 每次 4.4–5.3 s 且 **4/4 解析 0 筆**（頁面 86 KB、結果 selector 不符，疑似 bot 驗證或改版），DDG 每次 0.8–1.0 s 且 4/4 有 5 筆。中文 query 的 Bing 分數固定 0.50（heuristic 移除 CJK 關鍵字後的預設值），最後仍回 Bing。
+  - 決策（單一變數）：只改引擎順序為 Bing → DDG → Brave，Brave 留作 DDG 無可用結果時的最後備援。瀏覽器重用不做（啟動僅 32–270 ms）；整次 deadline 不做（修改後各次 ≤9 s、無失控跡象）；heuristic（CJK 與 `/car/`、`/sale/`、`/score/` 無詞界懲罰）確實有缺陷，但改序後中文 query 的 fallback 只剩約 0.6 s、Q3 的 0.00 分主要來自 Bing 結果本身不相關，沒有新證據顯示改 heuristic 有實益，依「第二條改善需新證據」不改，列為已知限制。
+  - 修改後（同 5 query、新 source dist）：總時間 9.0／2.8／6.5／1.8／2.2 s；**最終引擎與品質分數與修改前逐一相同**（DDG 0.92、Bing 0.50、DDG 0.75、Bing 0.90、Bing 0.50），皆 5 筆；Brave 未被呼叫。Bing 之後的 fallback 段由 5.9／5.3／5.2／—／6.1 s 降為 1.1／0.6／0.85／—／0.6 s。Bing 段本身前後 1.6–7.9 s 的差異來自網路與 enhanced 逾時的隨機性，不歸功於本修改。
+- **外部 repo**：`a2019f5 perf(search): try DuckDuckGo before the Brave browser fallback [P7]`（`src/search-engine.ts` 順序與註解；回歸檔改順序斷言並新增「DDG 可用時不跑 Brave」「DDG 無結果時仍跑 Brave」，15/15）。`package-lock.json` 使用者修改仍未 stage。ESLint 仍只有既有 `debugBing` 1 error。
+- **安裝交付**：備份 `~/.local/share/mcp-servers/.backups/web-search-mcp/20261019T130058Z-P7/dist/`（即 P2 版本：js `54edc6ae…be48b`）；替換 `search-engine.js`（新 `7622c778c8cf7b78fc84ffade9b308f43e9b94525e105d3249268413eaa36e7c`）、`.js.map`、`.d.ts.map`；安裝與 source dist `diff -rq` 相同；回歸檔指向安裝 dist 15/15；以 app 實際 launch spec 經 MCP 做 2 次真實搜尋（中文、英文）各回 5 筆（7.3 s、2.5 s；stderr 寫到 `$TMPDIR`）。部署前後無執行中的 web-search 程序。還原：把 P7 備份三檔複製回安裝 dist（回到 P2 版）。
+- **限制**：樣本只有 5 個 query、單一時段與網路；Brave 在其他網路可能可用（此時它只在 DDG 無可用結果時才跑）。DDG 以 axios 抓 html 版，若被限流會回 0 筆而落到 Brave，行為同修改前。
