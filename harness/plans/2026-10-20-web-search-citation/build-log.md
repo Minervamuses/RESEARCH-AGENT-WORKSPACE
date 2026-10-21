@@ -183,3 +183,11 @@
 - 引擎attempt計數改為本次呼叫state，不共用Map；移除未再呼叫且會額外建立context的health helpers。Bing保留既有homepage/form及direct fallback，各取同一受管page。
 - 驗證：npm run build；新node tests/test-browser-lifecycle.mjs；content-contract；retention，皆exit 0。並行3次getBrowser僅launch1；7工作context峰值2、HTTP峰值2；工作期間不提前close；launch失敗恢復；預設search/extractor同pool；Brave403/429快速失敗與Chromium stub通過。
 - 以上為受控stub，不當作實機Chromium／公開引擎可用證明。排隊deadline、真實abort及每次summaries的closeAll由S2/S3完成。
+
+### P4-S2a — 共用單調預算與可取消資源等待（G5/G8，AC10）
+- S2依相依拆a（pool預算primitive）、b（搜尋/正文/限流）、c（server邊界），每步可build/檢查/commit；本步只改browser-pool.ts與既有生命週期測試，沒有新模組。
+- CallBudget用performance.now期限、AbortController與可清timer；子預算繼承取消。具名操作上限集中；DEFAULT_TIMEOUT僅整次總預算，內建300000、工作285000／清理15000。
+- pool等待／launch／context建立均檢查同一budget；取消後queued callback不開始工作；不可取消launch晚完成時若已無等待者立即納管關閉。context取消時關自有資源；close有界且錯誤只診斷，cleanup不完整時拒絕新context。
+- 初次Node生命週期測試因deadline timer使用unref且stub只剩pending promise，Node以unsettled top-level await提前退出；移除unref，保留明確dispose後修復。
+- 重驗npm run build及三份Node測試皆exit 0；短排隊deadline後spy請求0、取消前不開page、慢launch晚完成關閉1、所有CallBudget dispose後Timeout資源0。全程毫秒級，不等五分鐘。
+- 本步尚未把budget傳入各引擎/正文操作；續S2b。
