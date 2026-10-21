@@ -9,7 +9,7 @@
 | P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
 | P4 | Complete | pool/deadline/取消離線通過；真stdio EOF無殘留 | 公開引擎續P6 | P5-S1 |
 | P5 | Complete | env真入口、故障隔離、父層期限與程序收尾通過 | 公開網路續P6 | P6-S1 |
-| P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
+| P6 | In progress | P6-S1本機整合／4組公開觀測通過 | DDG零解析、Brave429為外部限制 | P6-S2量測及S3完整suite |
 
 ## Authoring A0（2026-10-20，Asia/Taipei）
 - 已讀完整原spec、使用者annotation及Citation/連續執行/commit追加指令；將原spec以LF保存於context/source-spec.md。最新決策集中GOALS，沒有覆寫來源快照。
@@ -245,3 +245,17 @@
 - 最新真Node、DEFAULT_TIMEOUT=5000：本機HTTP空字→Chromium正文0.789s；慢HTTP3.394s回明確timeout，兩者均<5s；同腳本15個wrapper/Node/Chromium PID殘留[]。
 - 另以故意忽略EOF/SIGTERM的本機Node＋真Chromium驗父層強制收尾：DEFAULT_TIMEOUT=3000，結果先取得，2.504s內返回known browser result並warning；同腳本追蹤sh44975/Node44977/grep44978/Chromium獨立群44990及子程序，殘留[]，無需腳本額外補殺。
 - 沒有公開網路或付費呼叫。測試工具JS拼接曾誤用index而非indexOf，工具腳本在啟動檢查前失敗；修正後執行，產品不受影響。下一步P6-S1真入口整合與有限公開smoke。
+
+### P6-S1 — 新dist、實際Python入口與公開觀測（G7/G8，AC03–11/14）
+- 續跑gate：仍GUI，HEAD741e5f4，tracked/index乾淨、僅原app/store/未追蹤。重新npm run build exit0；retention14/14、content-contract、browser-lifecycle皆exit0（兩個cleanup故障注入診斷屬預期）。
+- 本機整合只控制引擎的HTTP邊界，MCP client、resolver/loader、shell wrapper、新dist、策略B、formatter、HTTP/browser均為實際實作；以暫存Node --import覆寫兩個引擎方法回指定候選，沒有改產品或mock MCP client。
+- 受控2+重複+3候選：redirect、無.pdf的PDF、404、動態DOM、缺Content-Type五筆。full(false)/full(true)/summaries URL與順序相同，false正文請求0；true0.879s，實際HTTP5＋browser1次，text2/unsupported_media2/http_error1、returned5，第三引擎策略停止。HTTP redirect的兩跳仍是一個來源HTTP讀取，未當作重試；server觀察7個HTTP請求（含redirect下一跳及browser導覽）。
+- 實際finalURL /landing?encoded=%252F、自己的page title、有效base解析 /next?q=%252F 均正確；PDF bytes不出現在正文；動態頁script插入Actual DOM text，Axios無文字後真正Chromium取得，兩個attempt可見。相同腳本18個wrapper/Node/Chromium PID、殘留[]。
+- 以下四組為唯一已做的公開請求組；工具組皆經agent.mcp→新dist，沒有LLM：
+  1. full-web-search：Python 3.13 asyncio task cancellation documentation，limit3、部署正文500；5.153s，Bing3候選，其他兩引擎足額策略停止。三來源HTTP200皆是Bing導向中介頁，輸出實際中介文字與href、未知page title，未冒稱目標文章或核實內容。
+  2. get-web-search-summaries：technology news 2026-10-21，limit3；2.225s，Bing3候選、正文0次，來源與引擎狀態可見。返回的是字典／百科等廣泛結果，不是已驗證新聞。
+  3. get-single-web-page-content：https://docs.python.org/3.13/library/asyncio-task.html；0.957s，HTTP200 text/html、真正title/finalURL，原正文62510 code points，因完整連結邊界實際交付453≤500，明確truncated。三組discovery0.861s、24個本次PID、殘留[]。完整可讀輸出在/tmp/web-search-p6-public-SM9W9z/public-results.json。
+  4. 同dist adapter（清楚不等同Python tool call）的三引擎觀測，共4.726s：Bing3.438s、2次傳輸／3筆；DDG0.366s、1次／0解析；Brave0.316s、Chromium實際導覽回HTTP429、不重試。Chromium139.0.7258.5、無Firefox；同腳本8個PID殘留[]。完整觀測在/tmp/web-search-p6-public-iuAwuk/public-results.json；只在log記必要查詢與status，不複製匿名登入導覽的nonce等冗餘參數。
+- Bing實際search導航q仍是完整技術查詢（含3.13/asyncio/cancellation），沒有程式截成單詞；排序偏廣是本次引擎結果，沒有新增語意過濾或猜redirect目的地。DDG本次零解析與Brave429各自如實記錄，沒有以一次觀測推斷永久不可用或擅自停用。
+- 公開組累計13.061s（4/6組，低於480s）；沒有環境網路阻塞。引擎結果能否回答技術／新聞問題不在MCP保證內，不把這次資料取得驗收當作研究相關性或新聞準確性驗收。
+- 真env37/71/0/10001、真timeout/cancel/EOF與強制收尾復用P5-S3最新證據；無未滿足的本步技術驗收。下一步量測分段及D05，最後完整suite。
