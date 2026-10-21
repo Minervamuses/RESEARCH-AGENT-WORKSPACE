@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
 | P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
-| P3 | Not started | 無 | 相依P2 | P3-S1轉換 |
+| P3 | In progress | P3-S1：build／正文契約通過 | 無 | P3-S2 |
 | P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
 | P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
@@ -151,3 +151,11 @@
 - npm run build exit 0。初次 Node 測試12/13：靜態禁止 parseInt 的正則誤中本步 helper 名稱 parseInteger；改成匹配 parseInt( 後重跑13/13，exit 0，沒有產品行為失敗。
 - 案例覆蓋省略、0、7/'7'、部署預設9、10001/負值/NaN/非整數/部分數字拒絕、中文emoji，以及兩入口共用resolver與參數傳遞。
 - 截斷標記、原長度與保留連結目的地、PDF候選及真正文資料仍由P3完成；未提前宣稱這些驗收通過。
+
+### P3-S1 — 保守 Markdown 與連結截斷（G3/G4/G8，AC02/03/07）
+- 產品範圍 src/enhanced-content-extractor.ts、src/utils.ts；新增計劃指定的少量原生 assert 檔 tests/test-content-contract.mjs，inline HTML、沒有依賴／fixture framework。
+- 以有限 Cheerio DOM 走訪保留 heading、段落、list、pre/code、table逐列（明示span簡化）、圖像alt來源文字與caption、實際公式文字；只移除script/style/noscript/template。移除class/id子字串、topic words刪除與短文品質判斷。
+- href 依實際最終URL及有效base解析，保留百分比參數；非HTTP協定只列來源文字並標不可導覽。HTTP空文字可有限fallback，短文和robotics/captcha/privacy/legal等詞不再觸發。
+- truncateMarkdown 按Unicode code points，邊界落在連結或URL內就捨去整個該連結，回原長度／交付長度／truncated；不補造新目的地。P3-S2將把資料與截斷標記接上文字輸出。
+- 驗證：npm run build exit 0；node tests/test-content-contract.mjs exit 0（來源詞、shadow/metadata、結構、alt/caption、base、百分比、短文、emoji、10000、連結邊界）；既有retention 13/13，exit 0。
+- 沒有改未呼叫的content-extractor.ts；無需型別相容例外。下一步P3-S2。

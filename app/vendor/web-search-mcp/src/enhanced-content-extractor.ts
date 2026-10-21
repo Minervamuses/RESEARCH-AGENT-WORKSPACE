@@ -63,13 +63,10 @@ export class EnhancedContentExtractor {
       validateStatus: (status: number) => status < 400,
     });
 
-    let content = this.parseContent(response.data);
+    let content = this.parseContent(response.data, response.request?.res?.responseUrl ?? url);
     
-    // Check if we got a meaningful response
-    if (this.isLowQualityContent(content)) {
-      throw new Error('Low quality content detected - likely bot detection');
-    }
-    
+    if (!content.trim()) throw Object.assign(new Error('No text extracted from HTTP response'), { reason: 'empty_text' });
+
     return content;
   }
 
@@ -197,7 +194,7 @@ export class EnhancedContentExtractor {
           
           // Quick content extraction
           const html = await http1Page.content();
-          const content = this.parseContent(html);
+          const content = this.parseContent(html, http1Page.url());
           await http1Context.close();
           return content;
         } else {
@@ -222,7 +219,7 @@ export class EnhancedContentExtractor {
 
       // Extract content using the same logic as axios version
       const html = await page.content();
-      const content = this.parseContent(html);
+      const content = this.parseContent(html, page.url());
 
       await context.close();
       return content;
@@ -262,51 +259,10 @@ export class EnhancedContentExtractor {
     }
   }
 
-  private shouldUseBrowser(error: any, url: string): boolean {
-    // Conditions where browser is likely to succeed where axios failed
-    const indicators = [
-      // HTTP status codes that suggest bot detection
-      error.response?.status === 403,
-      error.response?.status === 429,
-      error.response?.status === 503,
-      
-      // Error messages suggesting JS requirement
-      error.message?.includes('timeout'),
-      error.message?.includes('Access denied'),
-      error.message?.includes('Forbidden'),
-      error.message?.includes('Low quality content detected'),
-      
-      // Response content suggesting bot detection
-      error.response?.data?.includes('Please enable JavaScript'),
-      error.response?.data?.includes('captcha'),
-      error.response?.data?.includes('unusual traffic'),
-      error.response?.data?.includes('robot'),
-      
-      // Sites known to be JS-heavy
-      url.includes('twitter.com'),
-      url.includes('facebook.com'),
-      url.includes('instagram.com'),
-      url.includes('linkedin.com'),
-      url.includes('reddit.com'),
-      url.includes('medium.com'),
-    ];
-
-    return indicators.some(indicator => indicator === true);
-  }
-
-  private isLowQualityContent(content: string): boolean {
-    const lowQualityIndicators = [
-      content.length < 100,
-      content.includes('Please enable JavaScript'),
-      content.includes('Access Denied'),
-      content.includes('403 Forbidden'),
-      content.includes('captcha'),
-      content.includes('unusual traffic'),
-      content.includes('robot'),
-      content.trim() === '',
-    ];
-
-    return lowQualityIndicators.some(indicator => indicator === true);
+  private shouldUseBrowser(error: any, _url: string): boolean {
+    return error.reason === 'empty_text'
+      || [403, 429, 503].includes(error.response?.status)
+      || ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET'].includes(error.code);
   }
 
   private getRandomHeaders(): Record<string, string> {
@@ -450,103 +406,68 @@ export class EnhancedContentExtractor {
     return enhancedResults;
   }
 
-  private parseContent(html: string): string {
+  private parseContent(html: string, finalUrl?: string): string {
     const $ = cheerio.load(html);
-    
-    // Remove all script, style, and other non-content elements
-    $('script, style, noscript, iframe, img, video, audio, canvas, svg, object, embed, applet, form, input, textarea, select, button, label, fieldset, legend, optgroup, option').remove();
-    
-    // Remove navigation, header, footer, and other non-content elements
-    $('nav, header, footer, .nav, .header, .footer, .sidebar, .menu, .breadcrumb, aside, .ad, .advertisement, .ads, .advertisement-container, .social-share, .share-buttons, .comments, .comment-section, .related-posts, .recommendations, .newsletter-signup, .cookie-notice, .privacy-notice, .terms-notice, .disclaimer, .legal, .copyright, .meta, .metadata, .author-info, .publish-date, .tags, .categories, .navigation, .pagination, .search-box, .search-form, .login-form, .signup-form, .newsletter, .popup, .modal, .overlay, .tooltip, .toolbar, .ribbon, .banner, .promo, .sponsored, .affiliate, .tracking, .analytics, .pixel, .beacon').remove();
-    
-    // Remove elements with common ad/tracking classes
-    $('[class*="ad"], [class*="ads"], [class*="advertisement"], [class*="tracking"], [class*="analytics"], [class*="pixel"], [class*="beacon"], [class*="sponsored"], [class*="affiliate"], [class*="promo"], [class*="banner"], [class*="popup"], [class*="modal"], [class*="overlay"], [class*="tooltip"], [class*="toolbar"], [class*="ribbon"]').remove();
-    
-    // Remove elements with common non-content IDs
-    $('[id*="ad"], [id*="ads"], [id*="advertisement"], [id*="tracking"], [id*="analytics"], [id*="pixel"], [id*="beacon"], [id*="sponsored"], [id*="affiliate"], [id*="promo"], [id*="banner"], [id*="popup"], [id*="modal"], [id*="overlay"], [id*="tooltip"], [id*="toolbar"], [id*="ribbon"], [id*="sidebar"], [id*="navigation"], [id*="menu"], [id*="footer"], [id*="header"]').remove();
-    
-    // Remove image-related elements and attributes
-    $('picture, source, figure, figcaption, .image, .img, .photo, .picture, .media, .gallery, .slideshow, .carousel').remove();
-    $('[data-src*="image"], [data-src*="img"], [data-src*="photo"], [data-src*="picture"]').remove();
-    $('[style*="background-image"]').remove();
-    
-    // Remove empty elements and whitespace-only elements
-    $('*').each(function() {
-      const $this = $(this);
-      if ($this.children().length === 0 && $this.text().trim() === '') {
-        $this.remove();
-      }
-    });
-    
-    // Try to find the main content area first
-    let mainContent = '';
-    
-    // Priority selectors for main content
-    const contentSelectors = [
-      'article',
-      'main',
-      '[role="main"]',
-      '.content',
-      '.post-content',
-      '.entry-content',
-      '.article-content',
-      '.story-content',
-      '.news-content',
-      '.main-content',
-      '.page-content',
-      '.text-content',
-      '.body-content',
-      '.copy',
-      '.text',
-      '.body'
-    ];
-    
-    for (const selector of contentSelectors) {
-      const $content = $(selector).first();
-      if ($content.length > 0) {
-        mainContent = $content.text().trim();
-        if (mainContent.length > 100) { // Ensure we have substantial content
-          console.log(`[EnhancedContentExtractor] Found content with selector: ${selector} (${mainContent.length} chars)`);
-          break;
-        }
-      }
+    $('script, style, noscript, template').remove();
+    let baseUrl = finalUrl;
+    const declaredBase = $('base[href]').first().attr('href');
+    if (declaredBase) {
+      try {
+        const resolved = new URL(declaredBase, finalUrl);
+        if (['http:', 'https:'].includes(resolved.protocol)) baseUrl = resolved.href;
+      } catch { /* Retain the actual final URL when the declared base is invalid. */ }
     }
-    
-    // If no main content found, try body content
-    if (!mainContent || mainContent.length < 100) {
-      console.log(`[EnhancedContentExtractor] No main content found, using body content`);
-      mainContent = $('body').text().trim();
-    }
-    
-    // Clean up the text
-    const cleanedContent = this.cleanTextContent(mainContent);
-    
-    return cleanText(cleanedContent, Number.MAX_SAFE_INTEGER);
-  }
-  
-  private cleanTextContent(text: string): string {
-    // Remove excessive whitespace
-    text = text.replace(/\s+/g, ' ');
-    
-    // Remove image-related text and data URLs
-    text = text.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, ''); // Remove base64 image data
-    text = text.replace(/https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|svg|ico|bmp|tiff)(\?[^\s]*)?/gi, ''); // Remove image URLs
-    text = text.replace(/\.(jpg|jpeg|png|gif|webp|svg|ico|bmp|tiff)/gi, ''); // Remove image file extensions
-    text = text.replace(/image|img|photo|picture|gallery|slideshow|carousel/gi, ''); // Remove image-related words
-    text = text.replace(/click to enlarge|click for full size|view larger|download image/gi, ''); // Remove image action text
-    
-    // Remove common non-content patterns
-    text = text.replace(/cookie|privacy|terms|conditions|disclaimer|legal|copyright|all rights reserved/gi, '');
-    
-    // Remove excessive line breaks and spacing
-    text = text.replace(/\n\s*\n/g, '\n');
-    text = text.replace(/\r\n/g, '\n');
-    text = text.replace(/\r/g, '\n');
-    
-    // Remove leading/trailing whitespace
-    text = text.trim();
-    
-    return text;
+    const children = (node: any): string => (node.children ?? []).map(render).join('');
+    const render = (node: any): string => {
+      if (node.type === 'text') return (node.data ?? '').replace(/\s+/g, ' ');
+      if (!node.tagName) return children(node);
+      const tag = node.tagName.toLowerCase();
+      const element = $(node);
+      if (tag === 'pre') {
+        const text = element.text().replace(/\r\n?/g, '\n');
+        const runs = text.match(/`+/g) ?? [];
+        const fence = '`'.repeat(Math.max(3, ...runs.map(run => run.length + 1)));
+        return `\n\n${fence}\n${text}\n${fence}\n\n`;
+      }
+      if (tag === 'code') {
+        const text = element.text();
+        const fence = '`'.repeat(Math.max(1, ...(text.match(/`+/g) ?? []).map(run => run.length + 1)));
+        return `${fence}${text}${fence}`;
+      }
+      if (tag === 'img') {
+        const alt = element.attr('alt');
+        return alt ? `[Image alt text: ${alt}]` : '';
+      }
+      if (tag === 'table') {
+        const rows = element.find('tr').map((_i, row) =>
+          $(row).children('th, td').map((_j, cell) => children(cell).trim()).get().join(' | '),
+        ).get();
+        return `\n\n[Table rows; span structure simplified]\n${rows.join('\n')}\n\n`;
+      }
+      const text = children(node);
+      if (tag === 'a') {
+        const href = element.attr('href');
+        if (!href) return text;
+        try {
+          const url = new URL(href, baseUrl);
+          if (['http:', 'https:'].includes(url.protocol)) {
+            return `[${text.trim() || href}](<${url.href}>)`;
+          }
+        } catch { /* Unsupported or invalid addresses are source text, not navigation. */ }
+        return `${text} [non-navigable href: ${href}]`;
+      }
+      if (/^h[1-6]$/.test(tag)) return `\n\n${'#'.repeat(Number(tag[1]))} ${text.trim()}\n\n`;
+      if (tag === 'br') return '\n';
+      if (tag === 'li') return `\n- ${text.trim()}\n`;
+      if (tag === 'figcaption') return `\nCaption: ${text.trim()}\n`;
+      if (['p', 'div', 'section', 'article', 'main', 'blockquote', 'ul', 'ol', 'figure', 'tr'].includes(tag)) {
+        return `\n\n${text.trim()}\n\n`;
+      }
+      return text;
+    };
+    const main = $('main, article, [role="main"]').first();
+    const root = main.length ? main : $('body');
+    return children(root[0]).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   private getSpecificErrorMessage(error: unknown): string {

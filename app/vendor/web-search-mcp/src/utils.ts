@@ -120,6 +120,27 @@ export function validateSearchInput(args: unknown): WebSearchToolInput {
   };
 }
 
+export function truncateMarkdown(text: string, limit: number): {
+  content: string; truncated: boolean; originalLength: number; returnedLength: number;
+} {
+  const points = Array.from(text);
+  let content = points.slice(0, limit).join('');
+  let boundary = content.length;
+  // A clipped destination would be a different, fabricated link. Omit that whole link.
+  const links = /\[[^\]\n]*\]\((?:<[^>]*>|[^)\n]*)\)|https?:\/\/[^\s<>]+/g;
+  for (const match of text.matchAll(links)) {
+    if (match.index < boundary && boundary < match.index + match[0].length) {
+      boundary = match.index;
+      break;
+    }
+  }
+  content = text.slice(0, boundary);
+  return {
+    content, truncated: content.length < text.length,
+    originalLength: points.length, returnedLength: Array.from(content).length,
+  };
+}
+
 export function limitContent(text: string, limit: number): string {
-  return Array.from(text).slice(0, limit).join('');
+  return truncateMarkdown(text, limit).content;
 }
