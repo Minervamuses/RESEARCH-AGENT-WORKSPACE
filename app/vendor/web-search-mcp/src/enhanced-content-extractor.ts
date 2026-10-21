@@ -2,12 +2,13 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
 import { getWordCount, getContentPreview, resolveContentLimit, truncateMarkdown } from './utils.js';
-import { BrowserPool, sharedBrowserPool } from './browser-pool.js';
+import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
 
 export class EnhancedContentExtractor {
   constructor(private browserPool: BrowserPool = sharedBrowserPool) {}
 
-  async extractContent(options: ContentExtractionOptions): Promise<PageRead> {
+  async extractContent(options: ContentExtractionOptions & { budget?: CallBudget }): Promise<PageRead> {
+    const budget = options.budget ?? new CallBudget();
     const state: PageRead = {
       requestedUrl: options.url, status: 'not_attempted', attempts: [], content: '',
       maxContentLength: resolveContentLimit(options.maxContentLength),
@@ -15,22 +16,25 @@ export class EnhancedContentExtractor {
     };
     const attempt = async (transport: 'http' | 'browser'): Promise<boolean> => {
       const event: PageRead['attempts'][number] = { transport };
-      state.attempts.push(event);
+      const started = () => { budget.remaining(); state.attempts.push(event); };
       delete state.httpStatus;
       delete state.contentType;
       delete state.finalUrl;
       delete state.pageTitle;
       try {
         const text = transport === 'http'
-          ? await this.extractWithAxios(options, state)
-          : await this.extractWithBrowser(options, state);
+          ? await this.browserPool.withHttp(() => {
+              started();
+              return this.extractWithAxios({ ...options, budget }, state);
+            }, budget)
+          : await this.extractWithBrowser({ ...options, budget }, state, started);
         event.status = state.httpStatus;
         if (state.status === 'unsupported_media') return true;
         Object.assign(state, truncateMarkdown(text, state.maxContentLength));
         state.status = text.trim() ? 'text' : 'empty_text';
         return state.status === 'text';
       } catch (error) {
-        const err = error as any;
+        const err = (budget.signal.aborted ? budget.signal.reason : error) as any;
         const response = err.response;
         if (response) {
           state.httpStatus = response.status;
@@ -40,29 +44,34 @@ export class EnhancedContentExtractor {
         event.status = state.httpStatus;
         event.error = error instanceof Error ? error.message : String(error);
         state.error = event.error;
-        state.status = err.code === 'ERR_CANCELED' ? 'cancelled'
-          : ['ECONNABORTED', 'ETIMEDOUT'].includes(err.code) ? 'timeout'
+        state.status = !state.attempts.length ? 'not_attempted'
+          : budget.signal.aborted && err.code !== 'ETIMEDOUT' ? 'cancelled'
+          : err.code === 'ERR_CANCELED' ? 'cancelled'
+          : ['ECONNABORTED', 'ETIMEDOUT'].includes(err.code) || err.name === 'TimeoutError' ? 'timeout'
           : err.reason === 'conversion_error' ? 'conversion_error' : 'http_error';
         return false;
       }
     };
-    const complete = await attempt('http');
-    if (!complete && !['cancelled', 'conversion_error'].includes(state.status)
-      && (state.status === 'empty_text' || state.status === 'timeout'
-        || [403, 429, 503].includes(state.httpStatus ?? 0))) {
-      await attempt('browser');
-    }
-    if (state.status === 'text') delete state.error;
-    return state;
+    try {
+      const complete = await attempt('http');
+      if (!complete && !budget.signal.aborted && !['cancelled', 'conversion_error'].includes(state.status)
+        && (state.status === 'empty_text' || state.status === 'timeout'
+          || [403, 429, 503].includes(state.httpStatus ?? 0))) {
+        await attempt('browser');
+      }
+      if (state.status === 'text') delete state.error;
+      return state;
+    } finally { if (!options.budget) budget.dispose(); }
   }
 
-  private async extractWithAxios(options: ContentExtractionOptions, state: PageRead): Promise<string> {
-    const response = await this.browserPool.withHttp(() => axios.get(options.url, {
-      responseType: 'arraybuffer', timeout: options.timeout ?? 6000,
+  private async extractWithAxios(options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead): Promise<string> {
+    const response = await axios.get(options.url, {
+      responseType: 'arraybuffer', signal: options.budget.signal,
+      timeout: options.budget.timeout(Math.min(options.timeout ?? OPERATION_TIMEOUTS.pageRequest, OPERATION_TIMEOUTS.pageRequest)),
       headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
       maxContentLength: 10 * 1024 * 1024,
       validateStatus: status => status < 400,
-    }));
+    });
     state.httpStatus = response.status;
     state.contentType = response.headers['content-type']?.toString();
     state.finalUrl = response.request?.res?.responseUrl ?? options.url;
@@ -87,10 +96,11 @@ export class EnhancedContentExtractor {
     }
   }
 
-  private async extractWithBrowser(options: ContentExtractionOptions, state: PageRead): Promise<string> {
+  private async extractWithBrowser(options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead, started: () => void): Promise<string> {
     return this.browserPool.withPage(async page => {
+      started();
       const response = await page.goto(options.url, {
-        waitUntil: 'domcontentloaded', timeout: options.timeout ?? 6000,
+        waitUntil: 'domcontentloaded', timeout: options.budget.timeout(OPERATION_TIMEOUTS.pageRequest),
       });
       state.finalUrl = page.url();
       state.httpStatus = response?.status();
@@ -107,20 +117,27 @@ export class EnhancedContentExtractor {
       state.pageTitle = await page.title() || undefined;
       return media === 'text/plain' ? await page.locator('body').innerText()
         : this.parseContent(await page.content(), state.finalUrl);
-    });
+    }, options.budget);
   }
 
   async extractContentForResults(
-    results: SearchResult[], targetCount = results.length, maxContentLength?: number,
+    results: SearchResult[], targetCount = results.length, maxContentLength?: number, supplied?: CallBudget,
   ): Promise<SearchResult[]> {
-    return Promise.all(results.slice(0, targetCount).map(async result => {
-      const read = await this.extractContent({ url: result.url, maxContentLength });
-      return {
-        ...result, read, fetchStatus: read.status, fullContent: read.content,
-        contentPreview: getContentPreview(read.content), wordCount: getWordCount(read.content),
-        error: read.error,
-      };
-    }));
+    const budget = supplied ?? new CallBudget();
+    try {
+      return await Promise.all(results.slice(0, targetCount).map(async result => {
+        let child = budget;
+        try { child = budget.child(OPERATION_TIMEOUTS.pageTotal); } catch { /* Keep cancelled candidates. */ }
+        try {
+          const read = await this.extractContent({ url: result.url, maxContentLength, budget: child });
+          return {
+            ...result, read, fetchStatus: read.status, fullContent: read.content,
+            contentPreview: getContentPreview(read.content), wordCount: getWordCount(read.content),
+            error: read.error,
+          };
+        } finally { if (child !== budget) child.dispose(); }
+      }));
+    } finally { if (!supplied) budget.dispose(); }
   }
 
   private parseContent(html: string, finalUrl?: string): string {

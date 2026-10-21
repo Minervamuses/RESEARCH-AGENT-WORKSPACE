@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import { SearchOptions, SearchResult, SearchResultWithMetadata, SearchEngineState } from './types.js';
 import { generateTimestamp, sanitizeQuery } from './utils.js';
 import { RateLimiter } from './rate-limiter.js';
-import { BrowserPool, sharedBrowserPool } from './browser-pool.js';
+import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
 
 export class SearchEngine {
   private readonly rateLimiter: RateLimiter;
@@ -14,28 +14,30 @@ export class SearchEngine {
     this.browserPool = pool;
   }
 
-  async search(options: SearchOptions): Promise<SearchResultWithMetadata> {
-    const { query, numResults = 5, timeout = 10000 } = options;
-    const sanitizedQuery = sanitizeQuery(query);
-    return this.rateLimiter.execute(async () => {
-      const approaches = [
-        { method: this.tryBrowserBingSearch.bind(this), name: 'Browser Bing' },
-        { method: this.tryDuckDuckGoSearch.bind(this), name: 'Axios DuckDuckGo' },
-        { method: this.tryBrowserBraveSearch.bind(this), name: 'Browser Brave' },
-      ];
-      const results: SearchResult[] = [];
-      const byUrl = new Map<string, SearchResult>();
-      const engines: SearchEngineState[] = [];
-      for (const approach of approaches) {
-        const state: SearchEngineState = {
-          name: approach.name, attempted: false, attempts: 0,
-          parsedCount: 0, status: 'strategy_stopped',
-        };
-        engines.push(state);
+  async search(options: SearchOptions & { budget?: CallBudget }): Promise<SearchResultWithMetadata> {
+    const { query, numResults = 5 } = options;
+    const budget = options.budget ?? new CallBudget(options.timeout);
+    const approaches = [
+      { method: this.tryBrowserBingSearch.bind(this), name: 'Browser Bing' },
+      { method: this.tryDuckDuckGoSearch.bind(this), name: 'Axios DuckDuckGo' },
+      { method: this.tryBrowserBraveSearch.bind(this), name: 'Browser Brave' },
+    ];
+    const engines: SearchEngineState[] = approaches.map(({ name }) => ({
+      name, attempted: false, attempts: 0, parsedCount: 0, status: 'strategy_stopped',
+    }));
+    const results: SearchResult[] = [];
+    const byUrl = new Map<string, SearchResult>();
+    let running: Promise<void> | undefined;
+    const work = async () => {
+      for (const [index, approach] of approaches.entries()) {
+        const state = engines[index];
         if (results.length >= numResults) continue;
+        if (budget.signal.aborted) { state.error = String(budget.signal.reason); continue; }
         state.attempted = true;
         try {
-          const batch = await approach.method(sanitizedQuery, numResults, Math.min(timeout, 4000), state);
+          const batch = await budget.wait(approach.method(
+            sanitizeQuery(query), numResults, budget.timeout(OPERATION_TIMEOUTS.searchRequest), state, budget,
+          ));
           state.parsedCount = batch.length;
           state.status = batch.length ? 'completed' : 'zero_parsed';
           for (const item of batch) {
@@ -44,198 +46,114 @@ export class SearchEngine {
               url = new URL(item.url);
               if (!['http:', 'https:'].includes(url.protocol)) continue;
             } catch { continue; }
-            const key = url.href;
-            const previous = byUrl.get(key);
+            const previous = byUrl.get(url.href);
             if (previous) {
               if (!previous.sourceEngines!.includes(approach.name)) previous.sourceEngines!.push(approach.name);
               continue;
             }
             if (results.length >= numResults) continue;
             const candidate: SearchResult = {
-              ...item, url: key, observedUrl: item.observedUrl ?? item.url,
+              ...item, url: url.href, observedUrl: item.observedUrl ?? item.url,
               sourceEngines: [approach.name], fetchStatus: 'not_requested',
               fullContent: '', contentPreview: '', wordCount: 0,
             };
             results.push(candidate);
-            byUrl.set(key, candidate);
+            byUrl.set(url.href, candidate);
           }
         } catch (error) {
           state.status = 'error';
           state.error = error instanceof Error ? error.message : String(error);
-        } finally {
-          state.attempts = Math.max(1, state.attempts);
-        }
+        } finally { state.attempts = Math.max(1, state.attempts); }
       }
-      const sources = [...new Set(results.flatMap(item => item.sourceEngines ?? []))];
-      return { results, engines, engine: sources.join(', ') || 'None' };
-    });
+    };
+    try {
+      await this.rateLimiter.execute(() => { running = work(); return running; }, budget);
+    } catch (error) {
+      // A queued call can expire before starting. A running loop settles its facts before return.
+      if (running) await running.catch(() => undefined);
+      for (const state of engines) {
+        if (!state.attempted) state.error = error instanceof Error ? error.message : String(error);
+      }
+    } finally { if (!options.budget) budget.dispose(); }
+    const sources = [...new Set(results.flatMap(item => item.sourceEngines ?? []))];
+    return { results, engines, engine: sources.join(', ') || 'None' };
   }
 
-  private async tryBrowserBraveSearch(query: string, numResults: number, timeout: number, state?: SearchEngineState): Promise<SearchResult[]> {
+  private async tryBrowserBraveSearch(
+    query: string, numResults: number, timeout: number, state: SearchEngineState | undefined, budget: CallBudget,
+  ): Promise<SearchResult[]> {
     for (let attempt = 1; attempt <= 2; attempt++) {
-      if (state) state.attempts = attempt;
+      budget.remaining();
       try {
         return await this.browserPool.withPage(async page => {
+          budget.remaining();
+          if (state) state.attempts = attempt;
           const response = await page.goto(`https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web`, {
-            waitUntil: 'domcontentloaded', timeout,
+            waitUntil: 'domcontentloaded', timeout: budget.timeout(timeout),
           });
           const status = response?.status();
           if (status !== undefined && status >= 400) {
             throw Object.assign(new Error(`Brave returned HTTP ${status}`), { braveBlocked: true });
           }
-          await page.waitForSelector('[data-type="web"]', { timeout: 3000 }).catch(() => undefined);
+          await page.waitForSelector('[data-type="web"]', {
+            timeout: budget.timeout(OPERATION_TIMEOUTS.searchSelector),
+          }).catch(() => undefined);
+          budget.remaining();
           return this.parseBraveResults(await page.content(), numResults);
-        });
+        }, budget);
       } catch (error) {
-        if (attempt === 2 || (error as { braveBlocked?: boolean })?.braveBlocked) throw error;
+        const err = error as any;
+        if (attempt === 2 || budget.signal.aborted || err.braveBlocked
+          || !['TimeoutError'].includes(err.name) && !['ECONNRESET', 'ETIMEDOUT'].includes(err.code)) throw error;
       }
     }
     return [];
   }
 
-  private async tryBrowserBingSearch(query: string, numResults: number, timeout: number, state?: SearchEngineState): Promise<SearchResult[]> {
+  private async tryBrowserBingSearch(
+    query: string, numResults: number, timeout: number, state: SearchEngineState | undefined, budget: CallBudget,
+  ): Promise<SearchResult[]> {
     return this.browserPool.withPage(async page => {
       if (state) state.attempts = 1;
       try {
-        return await this.tryEnhancedBingSearch(page, query, numResults, timeout);
-      } catch {
+        return await this.tryEnhancedBingSearch(page, query, numResults, budget);
+      } catch (error) {
+        budget.remaining();
         if (state) state.attempts = 2;
-        return this.tryDirectBingSearch(page, query, numResults, timeout);
+        return this.tryDirectBingSearch(page, query, numResults, budget);
       }
-    });
+    }, budget);
   }
 
-  private async tryEnhancedBingSearch(page: any, query: string, numResults: number, timeout: number, state?: SearchEngineState): Promise<SearchResult[]> {
-    const debugBing = process.env.DEBUG_BING_SEARCH === 'true';
-    console.error(`[SearchEngine] BING: Enhanced search - navigating to Bing homepage...`);
-    
-    // Navigate to Bing homepage first to establish proper session
-    const startTime = Date.now();
-    await page.goto('https://www.bing.com', { 
-      waitUntil: 'domcontentloaded',
-      timeout: timeout / 2
+  private async tryEnhancedBingSearch(page: any, query: string, numResults: number, budget: CallBudget): Promise<SearchResult[]> {
+    const response = await page.goto('https://www.bing.com', {
+      waitUntil: 'domcontentloaded', timeout: budget.timeout(OPERATION_TIMEOUTS.searchRequest),
     });
-    
-    const loadTime = Date.now() - startTime;
-    const pageTitle = await page.title();
-    const currentUrl = page.url();
-    console.error(`[SearchEngine] BING: Homepage loaded in ${loadTime}ms, title: "${pageTitle}", URL: ${currentUrl}`);
-    
-    // Wait a moment for page to fully load
-    await page.waitForTimeout(500);
-    
-    // Find and use the search box (more realistic than direct URL)
-    try {
-      console.error(`[SearchEngine] BING: Looking for search form elements...`);
-      await page.waitForSelector('#sb_form_q', { timeout: 2000 });
-      console.error(`[SearchEngine] BING: Search box found, filling with query: "${query}"`);
-      await page.fill('#sb_form_q', query);
-      
-      console.error(`[SearchEngine] BING: Clicking search button and waiting for navigation...`);
-      // Submit the search form
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: timeout }),
-        page.click('#search_icon')
-      ]);
-      
-      const searchLoadTime = Date.now() - startTime;
-      const searchPageTitle = await page.title();
-      const searchPageUrl = page.url();
-      console.error(`[SearchEngine] BING: Search completed in ${searchLoadTime}ms total, title: "${searchPageTitle}", URL: ${searchPageUrl}`);
-      
-    } catch (formError) {
-      const errorMessage = formError instanceof Error ? formError.message : 'Unknown error';
-      console.error(`[SearchEngine] BING: Search form submission failed: ${errorMessage}`);
-      
-      if (debugBing) {
-        console.error(`[SearchEngine] BING: Form error details:`, formError);
-      }
-      
-      throw formError;
-    }
-    
-    // Wait for search results to load
-    try {
-      console.error(`[SearchEngine] BING: Waiting for search results to appear...`);
-      await page.waitForSelector('.b_algo, .b_result', { timeout: 3000 });
-      console.error(`[SearchEngine] BING: Search results selector found`);
-    } catch {
-      console.error(`[SearchEngine] BING: Search results selector not found, proceeding with page content anyway`);
-    }
-
-    const html = await page.content();
-    console.error(`[SearchEngine] BING: Got page HTML with length: ${html.length} characters`);
-    
-    if (debugBing && html.length < 10000) {
-      console.error(`[SearchEngine] BING: WARNING - HTML seems short, possible bot detection or error page`);
-    }
-    
-    const results = this.parseBingResults(html, numResults);
-    console.error(`[SearchEngine] BING: Enhanced search parsed ${results.length} results`);
-    
-    if (results.length === 0) {
-      console.error(`[SearchEngine] BING: WARNING - No results found, possible parsing failure or empty search`);
-      
-      if (debugBing) {
-        const sampleHtml = html.substring(0, 1000);
-        console.error(`[SearchEngine] BING: Sample HTML for debugging:`, sampleHtml);
-      }
-    }
-    
-    return results;
+    if (response?.status() >= 400) throw new Error(`Bing returned HTTP ${response.status()}`);
+    await page.waitForSelector('#sb_form_q', { timeout: budget.timeout(OPERATION_TIMEOUTS.formSelector) });
+    await page.fill('#sb_form_q', query, { timeout: budget.timeout(OPERATION_TIMEOUTS.formSelector) });
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: budget.timeout(OPERATION_TIMEOUTS.searchRequest) }),
+      page.click('#search_icon', { timeout: budget.timeout(OPERATION_TIMEOUTS.formSelector) }),
+    ]);
+    await page.waitForSelector('.b_algo, .b_result', {
+      timeout: budget.timeout(OPERATION_TIMEOUTS.searchSelector),
+    }).catch(() => undefined);
+    budget.remaining();
+    return this.parseBingResults(await page.content(), numResults);
   }
 
-  private async tryDirectBingSearch(page: any, query: string, numResults: number, timeout: number): Promise<SearchResult[]> {
-    const debugBing = process.env.DEBUG_BING_SEARCH === 'true';
-    console.error(`[SearchEngine] BING: Direct search with enhanced parameters...`);
-    
-    // Generate a conversation ID (cvid) similar to what Bing uses
-    const cvid = this.generateConversationId();
-    
-    // Construct URL with enhanced parameters based on successful manual searches
-    const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${Math.min(numResults, 10)}&form=QBLH&sp=-1&qs=n&cvid=${cvid}`;
-    console.error(`[SearchEngine] BING: Navigating to direct URL: ${searchUrl}`);
-    
-    const startTime = Date.now();
-    await page.goto(searchUrl, { 
-      waitUntil: 'domcontentloaded',
-      timeout: timeout
+  private async tryDirectBingSearch(page: any, query: string, numResults: number, budget: CallBudget): Promise<SearchResult[]> {
+    const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${Math.min(numResults, 10)}&cvid=${this.generateConversationId()}`;
+    const response = await page.goto(searchUrl, {
+      waitUntil: 'domcontentloaded', timeout: budget.timeout(OPERATION_TIMEOUTS.searchRequest),
     });
-    
-    const loadTime = Date.now() - startTime;
-    const pageTitle = await page.title();
-    const currentUrl = page.url();
-    console.error(`[SearchEngine] BING: Direct page loaded in ${loadTime}ms, title: "${pageTitle}", URL: ${currentUrl}`);
-
-    // Wait for search results to load
-    try {
-      console.error(`[SearchEngine] BING: Waiting for search results to appear...`);
-      await page.waitForSelector('.b_algo, .b_result', { timeout: 3000 });
-      console.error(`[SearchEngine] BING: Search results selector found`);
-    } catch {
-      console.error(`[SearchEngine] BING: Search results selector not found, proceeding with page content anyway`);
-    }
-
-    const html = await page.content();
-    console.error(`[SearchEngine] BING: Got page HTML with length: ${html.length} characters`);
-    
-    if (debugBing && html.length < 10000) {
-      console.error(`[SearchEngine] BING: WARNING - HTML seems short, possible bot detection or error page`);
-    }
-    
-    const results = this.parseBingResults(html, numResults);
-    console.error(`[SearchEngine] BING: Direct search parsed ${results.length} results`);
-    
-    if (results.length === 0) {
-      console.error(`[SearchEngine] BING: WARNING - No results found, possible parsing failure or empty search`);
-      
-      if (debugBing) {
-        const sampleHtml = html.substring(0, 1000);
-        console.error(`[SearchEngine] BING: Sample HTML for debugging:`, sampleHtml);
-      }
-    }
-    
-    return results;
+    if (response?.status() >= 400) throw new Error(`Bing returned HTTP ${response.status()}`);
+    await page.waitForSelector('.b_algo, .b_result', {
+      timeout: budget.timeout(OPERATION_TIMEOUTS.searchSelector),
+    }).catch(() => undefined);
+    budget.remaining();
+    return this.parseBingResults(await page.content(), numResults);
   }
 
   private generateConversationId(): string {
@@ -249,36 +167,20 @@ export class SearchEngine {
   }
 
 
-  private async tryDuckDuckGoSearch(query: string, numResults: number, timeout: number, state?: SearchEngineState): Promise<SearchResult[]> {
-    console.log(`[SearchEngine] Trying DuckDuckGo as fallback...`);
-    
-    try {
-      const response = await this.browserPool.withHttp(() => axios.get('https://html.duckduckgo.com/html/', {
-        params: {
-          q: query,
-        },
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'DNT': '1',
-          'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
-        },
-        timeout,
-        validateStatus: (status: number) => status < 400,
-      }));
-
-      console.log(`[SearchEngine] DuckDuckGo got response with status: ${response.status}`);
-      
-      const results = this.parseDuckDuckGoResults(response.data, numResults);
-      console.log(`[SearchEngine] DuckDuckGo parsed ${results.length} results`);
-      
-      return results;
-    } catch (error) {
-      throw error;
-    }
+  private async tryDuckDuckGoSearch(
+    query: string, numResults: number, timeout: number, state: SearchEngineState | undefined, budget: CallBudget,
+  ): Promise<SearchResult[]> {
+    return this.browserPool.withHttp(async () => {
+      budget.remaining();
+      if (state) state.attempts = 1;
+      const response = await axios.get('https://html.duckduckgo.com/html/', {
+        params: { q: query }, signal: budget.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
+        timeout: budget.timeout(timeout), maxContentLength: 10 * 1024 * 1024,
+        validateStatus: status => status < 400,
+      });
+      return this.parseDuckDuckGoResults(response.data, numResults);
+    }, budget);
   }
 
   private parseSearchResults(html: string, maxResults: number): SearchResult[] {

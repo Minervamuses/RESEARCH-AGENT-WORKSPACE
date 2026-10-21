@@ -53,7 +53,7 @@ extractor.extractWithAxios = async (options, state) => {
   if (id === 'cancelled') throw Object.assign(new Error('aborted'), { code: 'ERR_CANCELED' });
   return extractor.convertResponse(Buffer.from(id === 'pdf-without-extension' ? '%PDF-1.7' : id === 'empty' ? '<html></html>' : '<title>Own page</title><p>OK.</p>'), state);
 };
-extractor.extractWithBrowser = async () => { events.push('browser-empty'); return ''; };
+extractor.extractWithBrowser = async (_options, _state, started) => { started(); events.push('browser-empty'); return ''; };
 const results = await extractor.extractContentForResults(candidates, 5, 7);
 assert.deepEqual(results.map(r => r.url), candidates.map(r => r.url));
 assert.deepEqual(results.map(r => r.fetchStatus), ['unsupported_media', 'http_error', 'text', 'empty_text', 'cancelled']);

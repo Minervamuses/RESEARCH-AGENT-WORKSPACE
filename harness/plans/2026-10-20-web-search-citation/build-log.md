@@ -191,3 +191,11 @@
 - 初次Node生命週期測試因deadline timer使用unref且stub只剩pending promise，Node以unsettled top-level await提前退出；移除unref，保留明確dispose後修復。
 - 重驗npm run build及三份Node測試皆exit 0；短排隊deadline後spy請求0、取消前不開page、慢launch晚完成關閉1、所有CallBudget dispose後Timeout資源0。全程毫秒級，不等五分鐘。
 - 本步尚未把budget傳入各引擎/正文操作；續S2b。
+
+### P4-S2b — 搜尋與正文全程傳遞預算（G5/G8，AC10）
+- 產品範圍search-engine.ts、enhanced-content-extractor.ts、rate-limiter.ts；入口可接既有CallBudget，獨立使用也有自有budget/finally dispose。排隊、每引擎／重試不重設整段期限。
+- 引擎單次導覽/HTTP≤4s，form selector≤2s、results selector≤3s；正文HTTP/導覽≤6s，搜尋後每頁總計≤8s（含排隊）。所有timeout再取剩餘budget最小值；Brave只對明確暫態錯誤重試一次，403/429不重試。
+- HTTP把同一signal交Axios，browser透過受管context取消；fallback前檢查剩餘預算。HTTP讀取事件在真正取得slot才計數；未開始候選not_attempted，已取得候選在deadline後仍回傳；剩餘引擎標策略停止及deadline原因。
+- rate-limiter排隊也受budget控制，queued callback再次檢查；沒有另建全域限流／新worker。
+- 驗證：build與三份Node測試exit 0；retention新增到14/14，短deadline保留既有候選且第三引擎不啟動。生命週期測試用20ms selector上限，實際等待逾時後仍進DDG並有剩餘預算；本機真HTTP慢回應35ms取消，收到1次、socket已close、fallback0；timer最後0。
+- Node server跨search/body共用budget尚待S2c；Python程序啟動與stdio收尾在P5。

@@ -17,7 +17,7 @@ const playwright = await import(pathToFileURL(path.join(dist, '..', 'node_module
 for (const browserType of [playwright.chromium, playwright.firefox, playwright.webkit]) {
   browserType.launch = async () => { throw new Error('browser launch blocked in offline test'); };
 }
-const { BrowserPool } = await import(pathToFileURL(path.join(dist, 'browser-pool.js')).href);
+const { BrowserPool, CallBudget } = await import(pathToFileURL(path.join(dist, 'browser-pool.js')).href);
 const { SearchEngine } = await import(pathToFileURL(path.join(dist, 'search-engine.js')).href);
 
 const logs = [];
@@ -113,13 +113,15 @@ for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'par
     playwright.chromium.launch = async () => { events.push('launch'); return fakeBrowser(status, events); };
     try {
       const engine = new SearchEngine(new BrowserPool());
+      const budget = new CallBudget(1000);
       if (expected === 'blocked') {
-        await assert.rejects(engine.tryBrowserBraveSearch('alpha', 5, 1000), new RegExp(`Brave returned HTTP ${status}`));
+        await assert.rejects(engine.tryBrowserBraveSearch('alpha', 5, 1000, undefined, budget), new RegExp(`Brave returned HTTP ${status}`));
         assert.deepEqual(events, ['launch', 'goto', 'context-close']);
       } else {
-        assert.deepEqual(await engine.tryBrowserBraveSearch('alpha', 5, 1000), []);
+        assert.deepEqual(await engine.tryBrowserBraveSearch('alpha', 5, 1000, undefined, budget), []);
         assert.deepEqual(events, ['launch', 'goto', 'wait', 'content', 'context-close']);
       }
+      budget.dispose();
       await engine.closeAll();
       assert.equal(events.at(-1), 'browser-close');
     } finally {
@@ -181,6 +183,22 @@ check('strict content limits, deployment precedence, booleans and Unicode', asyn
     if (previous === undefined) delete process.env.MAX_CONTENT_LENGTH;
     else process.env.MAX_CONTENT_LENGTH = previous;
   }
+});
+
+check('call expiry preserves fixed candidates and stops remaining engines', async () => {
+  const { engine, attempts } = engineWith({ bing: [record('known', 'known')] });
+  engine.tryDuckDuckGoSearch = async (_q, _n, _timeout, _state, budget) => {
+    attempts.push('ddg');
+    return budget.wait(new Promise(() => {}));
+  };
+  const budget = new CallBudget(20);
+  const result = await engine.search({ query: 'x', budget });
+  budget.dispose();
+  assert.equal(result.results[0].title, 'known');
+  assert.deepEqual(attempts, ['bing', 'ddg']);
+  assert.equal(result.engines.length, 3);
+  assert.equal(result.engines[2].attempted, false);
+  assert.match(result.engines[2].error, /deadline/);
 });
 
 let failed = 0;

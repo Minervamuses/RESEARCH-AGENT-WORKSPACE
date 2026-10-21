@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { chromium, firefox } from 'playwright';
-import { BrowserPool, CallBudget } from '../dist/browser-pool.js';
+import { BrowserPool, CallBudget, OPERATION_TIMEOUTS } from '../dist/browser-pool.js';
 import { SearchEngine } from '../dist/search-engine.js';
 import { EnhancedContentExtractor } from '../dist/enhanced-content-extractor.js';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -74,6 +74,56 @@ try {
   await assert.rejects(queuedPool.withPage(async () => { lateRequests++; }, cancelled), /cancelled/);
   cancelled.dispose();
   assert.equal(lateRequests, 0);
+
+  const selectorCap = OPERATION_TIMEOUTS.searchSelector;
+  const formCap = OPERATION_TIMEOUTS.formSelector;
+  OPERATION_TIMEOUTS.searchSelector = 20;
+  OPERATION_TIMEOUTS.formSelector = 20;
+  const selectorEvents = [];
+  const selectorPage = {
+    goto: async (_url, options) => { assert.ok(options.timeout <= 4000); return { status: () => 200 }; },
+    waitForSelector: async (_selector, options) => {
+      selectorEvents.push(options.timeout);
+      await pause(options.timeout);
+      throw Object.assign(new Error('selector timeout'), { name: 'TimeoutError' });
+    },
+    content: async () => '<html></html>',
+  };
+  const selectorEngine = new SearchEngine({ withPage: (fn, _budget) => fn(selectorPage) });
+  selectorEngine.tryDuckDuckGoSearch = async (_query, _n, _timeout, _state, budget) => {
+    assert.ok(budget.remaining() > 100);
+    return [{ title: 'next engine', url: 'https://example.org', description: '' }];
+  };
+  const selectorBudget = new CallBudget(300);
+  const selectorResult = await selectorEngine.search({ query: 'x', numResults: 1, budget: selectorBudget });
+  selectorBudget.dispose();
+  OPERATION_TIMEOUTS.searchSelector = selectorCap;
+  OPERATION_TIMEOUTS.formSelector = formCap;
+  assert.equal(selectorResult.results[0].title, 'next engine');
+  assert.deepEqual(selectorEvents, [20, 20]);
+  const { createServer } = await import('node:http');
+  let received = 0, socketClosed = 0, fallback = 0;
+  const server = createServer((request, _response) => {
+    received++;
+    request.socket.once('close', () => { socketClosed++; });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const reader = new EnhancedContentExtractor(new BrowserPool());
+    reader.extractWithBrowser = async () => { fallback++; return ''; };
+    const httpBudget = new CallBudget(35);
+    const read = await reader.extractContent({ url: `http://127.0.0.1:${server.address().port}/slow`, budget: httpBudget });
+    httpBudget.dispose();
+    await pause(20);
+    assert.equal(read.status, 'timeout');
+    assert.equal(read.attempts.length, 1);
+    assert.equal(received, 1);
+    assert.equal(socketClosed, 1);
+    assert.equal(fallback, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, 0);
   process.stdout.write('single launch, bounded contexts/HTTP, shared ownership and failed launch recovery: passed\n');
 } finally {

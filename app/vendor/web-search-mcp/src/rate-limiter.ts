@@ -1,3 +1,4 @@
+import type { CallBudget } from './browser-pool.js';
 import pLimit from 'p-limit';
 
 export class RateLimiter {
@@ -12,7 +13,8 @@ export class RateLimiter {
     this.limit = pLimit(5); // Max 5 concurrent requests
   }
 
-  async execute<T>(fn: () => Promise<T>): Promise<T> {
+  async execute<T>(fn: () => Promise<T>, budget?: CallBudget): Promise<T> {
+    budget?.remaining();
     // Check if we need to reset the counter
     const now = Date.now();
     if (now - this.lastResetTime >= this.resetIntervalMs) {
@@ -27,12 +29,13 @@ export class RateLimiter {
     }
 
     // Execute with concurrency limit
-    const result = await this.limit(async () => {
+    const task = this.limit(async () => {
+      budget?.remaining();
       this.requestCount++;
       return await fn();
     });
 
-    return result;
+    return budget ? budget.wait(task) : task;
   }
 
   getStatus(): { requestCount: number; maxRequests: number; resetTime: number } {
