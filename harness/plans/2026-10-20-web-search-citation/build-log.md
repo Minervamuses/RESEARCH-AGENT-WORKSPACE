@@ -7,7 +7,7 @@
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
 | P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
 | P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
-| P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
+| P4 | In progress | P4-S1：共用pool與資源峰值通過 | 真Chromium續P6 | P4-S2a |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
 | P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
 
@@ -176,3 +176,10 @@
 - 三工具描述指明Citation責任，不再承諾完整全文／已驗證摘要或支持。
 - 驗證npm run build、正文契約與retention皆exit 0：混合5候選實際6來源讀取與spy一致、false=0、URL順序一致、兩入口共享頁面文字、標記/Unicode長度一致；retention13/13。
 - 尚未將stub當實機；實際Python→Node及HTTP/Chromium媒體驗證依P5/P6。
+
+### P4-S1 — 程序唯一 Chromium pool（G5/G8，AC08/09）
+- 產品範圍browser-pool.ts、search-engine.ts、enhanced-content-extractor.ts共3檔，預設注入sharedBrowserPool，無需第四檔index。所有實際建立路徑改由pool：同時launch合併promise；失敗清promise可重試；context/page與HTTP各最多2。
+- 移除所有src內Firefox/WebKit launch、browser rotation/MAX_BROWSERS/BROWSER_TYPES/last-used及dedicated browsers；Brave改Chromium。每項工作用自己的context並finally釋放，close失敗只記錄；不因滿載evict。
+- 引擎attempt計數改為本次呼叫state，不共用Map；移除未再呼叫且會額外建立context的health helpers。Bing保留既有homepage/form及direct fallback，各取同一受管page。
+- 驗證：npm run build；新node tests/test-browser-lifecycle.mjs；content-contract；retention，皆exit 0。並行3次getBrowser僅launch1；7工作context峰值2、HTTP峰值2；工作期間不提前close；launch失敗恢復；預設search/extractor同pool；Brave403/429快速失敗與Chromium stub通過。
+- 以上為受控stub，不當作實機Chromium／公開引擎可用證明。排隊deadline、真實abort及每次summaries的closeAll由S2/S3完成。

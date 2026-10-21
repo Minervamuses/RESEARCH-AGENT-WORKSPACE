@@ -17,6 +17,7 @@ const playwright = await import(pathToFileURL(path.join(dist, '..', 'node_module
 for (const browserType of [playwright.chromium, playwright.firefox, playwright.webkit]) {
   browserType.launch = async () => { throw new Error('browser launch blocked in offline test'); };
 }
+const { BrowserPool } = await import(pathToFileURL(path.join(dist, 'browser-pool.js')).href);
 const { SearchEngine } = await import(pathToFileURL(path.join(dist, 'search-engine.js')).href);
 
 const logs = [];
@@ -108,19 +109,21 @@ for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'par
   check(`Brave HTTP ${status} ${expected === 'blocked' ? 'fails at once without a second browser' : 'still waits for results'}`, async () => {
     configure();
     const events = [];
-    const launch = playwright.firefox.launch;
-    playwright.firefox.launch = async () => { events.push('launch'); return fakeBrowser(status, events); };
+    const launch = playwright.chromium.launch;
+    playwright.chromium.launch = async () => { events.push('launch'); return fakeBrowser(status, events); };
     try {
-      const engine = new SearchEngine();
+      const engine = new SearchEngine(new BrowserPool());
       if (expected === 'blocked') {
         await assert.rejects(engine.tryBrowserBraveSearch('alpha', 5, 1000), new RegExp(`Brave returned HTTP ${status}`));
-        assert.deepEqual(events, ['launch', 'goto', 'context-close', 'browser-close']);
+        assert.deepEqual(events, ['launch', 'goto', 'context-close']);
       } else {
         assert.deepEqual(await engine.tryBrowserBraveSearch('alpha', 5, 1000), []);
-        assert.deepEqual(events, ['launch', 'goto', 'wait', 'content', 'context-close', 'browser-close']);
+        assert.deepEqual(events, ['launch', 'goto', 'wait', 'content', 'context-close']);
       }
+      await engine.closeAll();
+      assert.equal(events.at(-1), 'browser-close');
     } finally {
-      playwright.firefox.launch = launch;
+      playwright.chromium.launch = launch;
     }
   });
 }

@@ -2,10 +2,10 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
 import { getWordCount, getContentPreview, resolveContentLimit, truncateMarkdown } from './utils.js';
-import { BrowserPool } from './browser-pool.js';
+import { BrowserPool, sharedBrowserPool } from './browser-pool.js';
 
 export class EnhancedContentExtractor {
-  private browserPool = new BrowserPool();
+  constructor(private browserPool: BrowserPool = sharedBrowserPool) {}
 
   async extractContent(options: ContentExtractionOptions): Promise<PageRead> {
     const state: PageRead = {
@@ -57,12 +57,12 @@ export class EnhancedContentExtractor {
   }
 
   private async extractWithAxios(options: ContentExtractionOptions, state: PageRead): Promise<string> {
-    const response = await axios.get(options.url, {
+    const response = await this.browserPool.withHttp(() => axios.get(options.url, {
       responseType: 'arraybuffer', timeout: options.timeout ?? 6000,
       headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
       maxContentLength: 10 * 1024 * 1024,
       validateStatus: status => status < 400,
-    });
+    }));
     state.httpStatus = response.status;
     state.contentType = response.headers['content-type']?.toString();
     state.finalUrl = response.request?.res?.responseUrl ?? options.url;
@@ -88,10 +88,7 @@ export class EnhancedContentExtractor {
   }
 
   private async extractWithBrowser(options: ContentExtractionOptions, state: PageRead): Promise<string> {
-    const browser = await this.browserPool.getBrowser();
-    const context = await browser.newContext();
-    try {
-      const page = await context.newPage();
+    return this.browserPool.withPage(async page => {
       const response = await page.goto(options.url, {
         waitUntil: 'domcontentloaded', timeout: options.timeout ?? 6000,
       });
@@ -110,9 +107,7 @@ export class EnhancedContentExtractor {
       state.pageTitle = await page.title() || undefined;
       return media === 'text/plain' ? await page.locator('body').innerText()
         : this.parseContent(await page.content(), state.finalUrl);
-    } finally {
-      await context.close().catch(error => console.error('Page context cleanup:', error));
-    }
+    });
   }
 
   async extractContentForResults(
