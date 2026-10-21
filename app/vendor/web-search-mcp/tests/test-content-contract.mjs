@@ -36,3 +36,35 @@ assert.equal(truncateMarkdown('😀中文abc', 4).content, '😀中文a');
 assert.equal(Array.from(truncateMarkdown('😀'.repeat(10001), 10000).content).length, 10000);
 assert.equal(resolveContentLimit(0), resolveContentLimit());
 process.stdout.write('content conversion and Unicode/link truncation: passed\n');
+
+// Every fixed candidate survives media/error/empty outcomes, in original order.
+const candidates = ['pdf-without-extension', 'error', 'short', 'empty', 'cancelled'].map(id => ({
+  title: id, url: `https://example.org/${id}`, description: `snippet-${id}`,
+  fullContent: '', contentPreview: '', wordCount: 0, timestamp: 'fixed', fetchStatus: 'not_requested',
+}));
+const events = [];
+extractor.extractWithAxios = async (options, state) => {
+  const id = new URL(options.url).pathname.slice(1);
+  events.push(id);
+  state.httpStatus = 200;
+  state.finalUrl = options.url + '?final=1';
+  state.contentType = id === 'pdf-without-extension' ? 'application/pdf' : 'text/html';
+  if (id === 'error') throw Object.assign(new Error('HTTP 404'), { response: { status: 404 } });
+  if (id === 'cancelled') throw Object.assign(new Error('aborted'), { code: 'ERR_CANCELED' });
+  return extractor.convertResponse(Buffer.from(id === 'pdf-without-extension' ? '%PDF-1.7' : id === 'empty' ? '<html></html>' : '<title>Own page</title><p>OK.</p>'), state);
+};
+extractor.extractWithBrowser = async () => { events.push('browser-empty'); return ''; };
+const results = await extractor.extractContentForResults(candidates, 5, 7);
+assert.deepEqual(results.map(r => r.url), candidates.map(r => r.url));
+assert.deepEqual(results.map(r => r.fetchStatus), ['unsupported_media', 'http_error', 'text', 'empty_text', 'cancelled']);
+assert.equal(results[2].read.pageTitle, 'Own page');
+assert.equal(results[2].fullContent, 'OK.');
+assert.ok(results.every(r => r.description.startsWith('snippet-')));
+assert.equal(results.reduce((n, r) => n + r.read.attempts.length, 0), events.length);
+const unknown = { contentType: undefined, status: 'not_attempted' };
+assert.equal(extractor.convertResponse(Buffer.from('<p>Cannot assume HTML</p>'), unknown), '');
+assert.equal(unknown.status, 'unsupported_media');
+const wrong = { contentType: 'text/html', status: 'not_attempted' };
+extractor.convertResponse(Buffer.from('%PDF-1.7'), wrong);
+assert.equal(wrong.status, 'unsupported_media');
+process.stdout.write('candidate retention, media and actual attempts: passed\n');

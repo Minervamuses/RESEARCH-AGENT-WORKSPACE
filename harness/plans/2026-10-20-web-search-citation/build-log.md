@@ -159,3 +159,12 @@
 - truncateMarkdown 按Unicode code points，邊界落在連結或URL內就捨去整個該連結，回原長度／交付長度／truncated；不補造新目的地。P3-S2將把資料與截斷標記接上文字輸出。
 - 驗證：npm run build exit 0；node tests/test-content-contract.mjs exit 0（來源詞、shadow/metadata、結構、alt/caption、base、百分比、短文、emoji、10000、連結邊界）；既有retention 13/13，exit 0。
 - 沒有改未呼叫的content-extractor.ts；無需型別相容例外。下一步P3-S2。
+
+### P3-S2a — 固定候選與每頁取得事實（G3/G4/G8，AC04/06）
+- 為每步維持最多3個產品檔，S2細分a（extractor/types/index最小接線）與b（純文字格式與統計）；不改後置條件。
+- 新增小型PageRead資料（不是持久格式）：requested/final URL、真正page title、HTTP status/media、技術狀態、逐HTTP/browser嘗試與錯誤、截斷長度；每次attempt資訊屬於本次呼叫。
+- 移除PDF預過濾、成功優先、補換候選與未取消的race；所有候選原順序交付。依實際Content-Type及PDF magic判斷，未知media不猜HTML；PDF bytes不送HTML parser，.pdf後綴也不決定媒體。HTTP最多10MiB讀取，超額為明確失敗。
+- extractor保留同一條HTTP→有限browser fallback路徑，回傳實際metadata；移除與新媒體讀取衝突的舊隨機指紋／重複browser分支。單頁最小接線使用真正page title，未知不再從URL捏造。
+- 驗證：npm run build exit 0；正文契約與混合PDF(無後綴)/404/短文/空文字/取消/缺失及錯誤media案例通過，來源嘗試總計等於spy事件；retention 13/13，exit 0。
+- 可見統計、截斷標記與兩入口一致輸出在S2b；資源併發／取消清理由P4完成。
+- 首次stage命令因cd層級錯誤把明確路徑算到repo外，exit 1；沒有改分支／index污染，改用repo-root完整相對路徑後重新檢查。

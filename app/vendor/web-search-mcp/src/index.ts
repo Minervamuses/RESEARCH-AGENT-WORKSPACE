@@ -165,26 +165,25 @@ class WebSearchMCPServer {
           console.log(`[MCP] Starting single page content extraction for: ${obj.url}`);
           
           // Use existing content extractor to get page content
-          const content = await this.contentExtractor.extractContent({
+          const pageRead = await this.contentExtractor.extractContent({
             url: obj.url,
             maxContentLength,
           });
 
-          // Get page title from URL (simple extraction)
-          const urlObj = new URL(obj.url);
-          const title = urlObj.hostname + urlObj.pathname;
+          const content = pageRead.content;
+          const title = pageRead.pageTitle ?? 'unknown';
 
           // Create content preview and word count
           // const contentPreview = content.length > 200 ? content.substring(0, 200) + '...' : content; // Unused for now
           const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
 
-          console.log(`[MCP] Single page content extraction completed, extracted ${content.length} characters`);
+          console.log(`[MCP] Single page content extraction completed, extracted ${pageRead.returnedLength} Unicode code points`);
 
           // Format the result as text
           let responseText = `**Page Content from: ${obj.url}**\n\n`;
           responseText += `**Title:** ${title}\n`;
           responseText += `**Word Count:** ${wordCount}\n`;
-          responseText += `**Content Length:** ${content.length} characters\n\n`;
+          responseText += `**Content Length:** ${pageRead.returnedLength} Unicode code points\n\n`;
           
           responseText += `**Content:**\n${content}`;
 

@@ -160,7 +160,7 @@ check('strict content limits, deployment precedence, booleans and Unicode', asyn
       const extractor = new EnhancedContentExtractor();
       const text = '😀中文😀abcXYZ';
       extractor.extractWithAxios = async () => text;
-      assert.equal(await extractor.extractContent({ url: 'https://example.org', maxContentLength: args.maxContentLength }), limitContent(text, 7));
+      assert.equal((await extractor.extractContent({ url: 'https://example.org', maxContentLength: args.maxContentLength })).content, limitContent(text, 7));
     }
     for (const value of [10001, -1, 1.5, NaN, '7junk', '7.5', '']) {
       assert.throws(() => resolveContentLimit(value), /integer between 0 and 10000/);

@@ -1,3 +1,22 @@
+export type PageReadStatus = 'not_attempted' | 'http_error' | 'timeout' | 'cancelled'
+  | 'unsupported_media' | 'conversion_error' | 'empty_text' | 'text';
+
+export interface PageRead {
+  requestedUrl: string;
+  finalUrl?: string;
+  pageTitle?: string;
+  httpStatus?: number;
+  contentType?: string;
+  status: PageReadStatus;
+  attempts: { transport: 'http' | 'browser'; status?: number; error?: string }[];
+  content: string;
+  maxContentLength: number;
+  originalLength?: number;
+  returnedLength: number;
+  truncated: boolean;
+  error?: string;
+}
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -6,7 +25,8 @@ export interface SearchResult {
   contentPreview: string;
   wordCount: number;
   timestamp: string;
-  fetchStatus: 'success' | 'error' | 'timeout' | 'not_requested';
+  fetchStatus: 'success' | 'error' | 'timeout' | 'not_requested' | PageReadStatus;
+  read?: PageRead;
   sourceEngines?: string[];
   observedUrl?: string;
   error?: string;

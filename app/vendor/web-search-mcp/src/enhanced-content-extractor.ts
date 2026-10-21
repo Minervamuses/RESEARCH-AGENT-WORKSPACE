@@ -1,409 +1,131 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { Page } from 'playwright';
-import { ContentExtractionOptions, SearchResult } from './types.js';
-import { cleanText, getWordCount, getContentPreview, generateTimestamp, isPdfUrl, resolveContentLimit, limitContent } from './utils.js';
+import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
+import { getWordCount, getContentPreview, resolveContentLimit, truncateMarkdown } from './utils.js';
 import { BrowserPool } from './browser-pool.js';
 
 export class EnhancedContentExtractor {
-  private readonly defaultTimeout: number;
-  private readonly maxContentLength: number;
-  private browserPool: BrowserPool;
-  private fallbackThreshold: number;
+  private browserPool = new BrowserPool();
 
-  constructor() {
-    this.defaultTimeout = parseInt(process.env.DEFAULT_TIMEOUT || '6000', 10);
-    
-    this.maxContentLength = resolveContentLimit();
-
-    this.browserPool = new BrowserPool();
-    this.fallbackThreshold = parseInt(process.env.BROWSER_FALLBACK_THRESHOLD || '3', 10);
-    
-    console.log(`[EnhancedContentExtractor] Configuration: timeout=${this.defaultTimeout}, maxContentLength=${this.maxContentLength}, fallbackThreshold=${this.fallbackThreshold}`);
-  }
-
-  async extractContent(options: ContentExtractionOptions): Promise<string> {
-    const { url } = options;
-    const effectiveLimit = resolveContentLimit(options.maxContentLength);
-    
-    console.log(`[EnhancedContentExtractor] Starting extraction for: ${url}`);
-    
-    // First, try with regular HTTP client (faster)
-    try {
-      const content = await this.extractWithAxios(options);
-      console.log(`[EnhancedContentExtractor] Successfully extracted with axios: ${content.length} chars`);
-      return limitContent(content, effectiveLimit);
-    } catch (error) {
-      console.log(`[EnhancedContentExtractor] Axios failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      
-      // Check if this looks like a case where browser would help
-      if (this.shouldUseBrowser(error, url)) {
-        console.log(`[EnhancedContentExtractor] Falling back to headless browser for: ${url}`);
-        try {
-          const content = await this.extractWithBrowser(options);
-          console.log(`[EnhancedContentExtractor] Successfully extracted with browser: ${content.length} chars`);
-          return limitContent(content, effectiveLimit);
-        } catch (browserError) {
-          console.error(`[EnhancedContentExtractor] Browser extraction also failed:`, browserError);
-          throw new Error(`Both axios and browser extraction failed for ${url}`);
-        }
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  private async extractWithAxios(options: ContentExtractionOptions): Promise<string> {
-    const { url, timeout = this.defaultTimeout, maxContentLength = this.maxContentLength } = options;
-    
-    const response = await axios.get(url, {
-      headers: this.getRandomHeaders(),
-      timeout,
-      // Remove maxContentLength from axios config - handle truncation manually
-      validateStatus: (status: number) => status < 400,
-    });
-
-    let content = this.parseContent(response.data, response.request?.res?.responseUrl ?? url);
-    
-    if (!content.trim()) throw Object.assign(new Error('No text extracted from HTTP response'), { reason: 'empty_text' });
-
-    return content;
-  }
-
-  private async extractWithBrowser(options: ContentExtractionOptions): Promise<string> {
-    const { url, timeout = this.defaultTimeout } = options;
-    
-    const browser = await this.browserPool.getBrowser();
-    const browserType = this.browserPool.getLastUsedBrowserType();
-    
-    try {
-      // Create context options based on browser capabilities
-      const baseContextOptions = {
-        userAgent: this.getRandomUserAgent(),
-        viewport: this.getRandomViewport(),
-        locale: 'en-US',
-        timezoneId: this.getRandomTimezone(),
-        // Simulate real device characteristics
-        deviceScaleFactor: Math.random() > 0.5 ? 1 : 2,
-        hasTouch: Math.random() > 0.7,
-      };
-
-      // Firefox doesn't support isMobile option - check multiple ways to ensure detection
-      const isFirefox = browserType === 'firefox' || 
-                       browserType.includes('firefox') || 
-                       browser.constructor.name.toLowerCase().includes('firefox');
-      
-      const contextOptions = isFirefox
-        ? baseContextOptions 
-        : { ...baseContextOptions, isMobile: Math.random() > 0.8 };
-
-      // Create a new context for each request (isolation)
-      const context = await browser.newContext(contextOptions);
-
-      // Add stealth scripts to avoid detection
-      await context.addInitScript(() => {
-        // Remove webdriver property
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined,
-        });
-
-        // Mock plugins
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => [1, 2, 3, 4, 5],
-        });
-
-        // Mock languages
-        Object.defineProperty(navigator, 'languages', {
-          get: () => ['en-US', 'en'],
-        });
-
-        // Mock permissions
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) => (
-          parameters.name === 'notifications' ?
-            Promise.resolve({ state: 'default' } as unknown as PermissionStatus) :
-            originalQuery(parameters)
-        );
-
-        // Remove automation indicators
-        const windowWithChrome = window as any;
-        if (windowWithChrome.chrome) {
-          delete windowWithChrome.chrome.app;
-          delete windowWithChrome.chrome.runtime;
-        }
-      });
-
-      const page = await context.newPage();
-      
-      // Set up request interception to block unnecessary resources
-      await page.route('**/*', (route) => {
-        const resourceType = route.request().resourceType();
-        
-        // Block images, fonts, and other non-essential resources for faster loading
-        if (['image', 'font', 'media'].includes(resourceType)) {
-          route.abort();
-        } else {
-          route.continue();
-        }
-      });
-
-      // Navigate with realistic options and better error handling
-      console.log(`[BrowserExtractor] Navigating to ${url}`);
-      
-      try {
-        await page.goto(url, { 
-          waitUntil: 'domcontentloaded', // Don't wait for all resources
-          timeout: Math.min(timeout, 8000) // Reduced timeout, max 8 seconds
-        });
-      } catch (gotoError) {
-        // Handle specific protocol errors
-        const errorMessage = gotoError instanceof Error ? gotoError.message : String(gotoError);
-        
-        if (errorMessage.includes('ERR_HTTP2_PROTOCOL_ERROR') || errorMessage.includes('HTTP2')) {
-          console.log(`[BrowserExtractor] HTTP/2 error detected, trying with HTTP/1.1`);
-          
-          // Create a new context with HTTP/1.1 preference
-          await context.close();
-          const http1Context = await browser.newContext({
-            userAgent: this.getRandomUserAgent(),
-            viewport: this.getRandomViewport(),
-            locale: 'en-US',
-            timezoneId: this.getRandomTimezone(),
-            extraHTTPHeaders: {
-              'Connection': 'keep-alive',
-              'Upgrade-Insecure-Requests': '1'
-            }
-          });
-          
-          const http1Page = await http1Context.newPage();
-          
-          // Disable HTTP/2 by intercepting requests
-          await http1Page.route('**/*', (route) => {
-            const resourceType = route.request().resourceType();
-            if (['image', 'font', 'media'].includes(resourceType)) {
-              route.abort();
-            } else {
-              route.continue();
-            }
-          });
-          
-          await http1Page.goto(url, { 
-            waitUntil: 'domcontentloaded',
-            timeout: Math.min(timeout, 6000)
-          });
-          
-          // Quick content extraction
-          const html = await http1Page.content();
-          const content = this.parseContent(html, http1Page.url());
-          await http1Context.close();
-          return content;
-        } else {
-          throw gotoError;
-        }
-      }
-
-      // Quick human simulation - reduced time
-      await page.mouse.move(Math.random() * 100, Math.random() * 100);
-      
-      // Reduced wait time for dynamic content
-      await page.waitForTimeout(500 + Math.random() * 1000);
-
-      // Quick check for main content without long wait
-      try {
-        await page.waitForSelector('article, main, .content, .post-content, .entry-content', {
-          timeout: 2000
-        });
-      } catch {
-        console.log(`[BrowserExtractor] No main content selector found, proceeding anyway`);
-      }
-
-      // Extract content using the same logic as axios version
-      const html = await page.content();
-      const content = this.parseContent(html, page.url());
-
-      await context.close();
-      return content;
-
-    } catch (error) {
-      console.error(`[BrowserExtractor] Browser extraction failed for ${url}:`, error);
-      throw error;
-    }
-  }
-
-  private async simulateHumanBehavior(page: Page): Promise<void> {
-    try {
-      // Random mouse movements
-      await page.mouse.move(
-        Math.random() * 800,
-        Math.random() * 600
-      );
-
-      // Random scroll (common human behavior)
-      const scrollY = Math.random() * 500;
-      await page.evaluate((y) => window.scrollTo(0, y), scrollY);
-
-      // Small random delay
-      await page.waitForTimeout(500 + Math.random() * 1000);
-
-      // Sometimes click somewhere innocuous
-      if (Math.random() > 0.7) {
-        try {
-          await page.click('body', { timeout: 1000 });
-        } catch {
-          // Ignore click failures
-        }
-      }
-    } catch {
-      // Ignore simulation errors
-      console.log(`[BrowserExtractor] Behavior simulation failed, continuing`);
-    }
-  }
-
-  private shouldUseBrowser(error: any, _url: string): boolean {
-    return error.reason === 'empty_text'
-      || [403, 429, 503].includes(error.response?.status)
-      || ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET'].includes(error.code);
-  }
-
-  private getRandomHeaders(): Record<string, string> {
-    const browsers = [
-      {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-        'sec-ch-ua-platform': '"Windows"',
-      },
-      {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-        'sec-ch-ua-platform': '"macOS"',
-      },
-      {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-        'sec-ch-ua-platform': '"Linux"',
-      }
-    ];
-
-    const browser = browsers[Math.floor(Math.random() * browsers.length)];
-    
-    return {
-      ...browser,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'DNT': '1',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Cache-Control': 'max-age=0',
-      'sec-ch-ua-mobile': '?0',
+  async extractContent(options: ContentExtractionOptions): Promise<PageRead> {
+    const state: PageRead = {
+      requestedUrl: options.url, status: 'not_attempted', attempts: [], content: '',
+      maxContentLength: resolveContentLimit(options.maxContentLength),
+      returnedLength: 0, truncated: false,
     };
-  }
-
-  private getRandomUserAgent(): string {
-    const userAgents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
-    ];
-    
-    return userAgents[Math.floor(Math.random() * userAgents.length)];
-  }
-
-  private getRandomViewport(): { width: number; height: number } {
-    const viewports = [
-      { width: 1920, height: 1080 },
-      { width: 1366, height: 768 },
-      { width: 1440, height: 900 },
-      { width: 1536, height: 864 },
-      { width: 1280, height: 720 },
-    ];
-    
-    return viewports[Math.floor(Math.random() * viewports.length)];
-  }
-
-  private getRandomTimezone(): string {
-    const timezones = [
-      'America/New_York',
-      'America/Los_Angeles',
-      'America/Chicago',
-      'Europe/London',
-      'Europe/Berlin',
-      'Asia/Tokyo',
-    ];
-    
-    return timezones[Math.floor(Math.random() * timezones.length)];
-  }
-
-  async extractContentForResults(results: SearchResult[], targetCount: number = results.length, maxContentLength?: number): Promise<SearchResult[]> {
-    console.log(`[EnhancedContentExtractor] Processing up to ${results.length} results to get ${targetCount} non-PDF results`);
-    
-    // Filter out PDF files first
-    const nonPdfResults = results.filter(result => !isPdfUrl(result.url));
-    const resultsToProcess = nonPdfResults.slice(0, Math.min(targetCount * 2, 10)); // Process extra to account for failures
-    
-    console.log(`[EnhancedContentExtractor] Processing ${resultsToProcess.length} non-PDF results concurrently`);
-    
-    // Process results concurrently with timeout
-    const extractionPromises = resultsToProcess.map(async (result): Promise<SearchResult> => {
+    const attempt = async (transport: 'http' | 'browser'): Promise<boolean> => {
+      const event: PageRead['attempts'][number] = { transport };
+      state.attempts.push(event);
+      delete state.httpStatus;
+      delete state.contentType;
+      delete state.finalUrl;
+      delete state.pageTitle;
       try {
-        // Use a race condition with timeout to prevent hanging
-        const extractionPromise = this.extractContent({ 
-          url: result.url, 
-          timeout: 6000,
-          maxContentLength
-        });
-        
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Content extraction timeout')), 8000);
-        });
-        
-        const content = await Promise.race([extractionPromise, timeoutPromise]);
-        const cleanedContent = content;
-        
-        console.log(`[EnhancedContentExtractor] Successfully extracted: ${result.url}`);
-        return {
-          ...result,
-          fullContent: cleanedContent,
-          contentPreview: getContentPreview(cleanedContent),
-          wordCount: getWordCount(cleanedContent),
-          timestamp: generateTimestamp(),
-          fetchStatus: 'success' as const,
-        };
+        const text = transport === 'http'
+          ? await this.extractWithAxios(options, state)
+          : await this.extractWithBrowser(options, state);
+        event.status = state.httpStatus;
+        if (state.status === 'unsupported_media') return true;
+        Object.assign(state, truncateMarkdown(text, state.maxContentLength));
+        state.status = text.trim() ? 'text' : 'empty_text';
+        return state.status === 'text';
       } catch (error) {
-        console.log(`[EnhancedContentExtractor] Failed to extract: ${result.url} - ${error instanceof Error ? error.message : 'Unknown error'}`);
-        return {
-          ...result,
-          fullContent: '',
-          contentPreview: '',
-          wordCount: 0,
-          timestamp: generateTimestamp(),
-          fetchStatus: 'error' as const,
-          error: this.getSpecificErrorMessage(error),
-        };
+        const err = error as any;
+        const response = err.response;
+        if (response) {
+          state.httpStatus = response.status;
+          state.contentType = response.headers?.['content-type'];
+          state.finalUrl = response.request?.res?.responseUrl;
+        }
+        event.status = state.httpStatus;
+        event.error = error instanceof Error ? error.message : String(error);
+        state.error = event.error;
+        state.status = err.code === 'ERR_CANCELED' ? 'cancelled'
+          : ['ECONNABORTED', 'ETIMEDOUT'].includes(err.code) ? 'timeout'
+          : err.reason === 'conversion_error' ? 'conversion_error' : 'http_error';
+        return false;
       }
+    };
+    const complete = await attempt('http');
+    if (!complete && !['cancelled', 'conversion_error'].includes(state.status)
+      && (state.status === 'empty_text' || state.status === 'timeout'
+        || [403, 429, 503].includes(state.httpStatus ?? 0))) {
+      await attempt('browser');
+    }
+    if (state.status === 'text') delete state.error;
+    return state;
+  }
+
+  private async extractWithAxios(options: ContentExtractionOptions, state: PageRead): Promise<string> {
+    const response = await axios.get(options.url, {
+      responseType: 'arraybuffer', timeout: options.timeout ?? 6000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
+      maxContentLength: 10 * 1024 * 1024,
+      validateStatus: status => status < 400,
     });
-    
-    // Wait for all extractions to complete
-    const allResults = await Promise.all(extractionPromises);
-    
-    // Return successful results first, up to targetCount
-    const successfulResults = allResults.filter(r => r.fetchStatus === 'success');
-    const failedResults = allResults.filter(r => r.fetchStatus === 'error');
-    
-    // Combine successful and failed results, prioritizing successful ones
-    const enhancedResults = [
-      ...successfulResults.slice(0, targetCount),
-      ...failedResults.slice(0, Math.max(0, targetCount - successfulResults.length))
-    ].slice(0, targetCount);
-    
-    console.log(`[EnhancedContentExtractor] Completed processing ${resultsToProcess.length} results, extracted ${successfulResults.length} successful/${failedResults.length} failed`);
-    return enhancedResults;
+    state.httpStatus = response.status;
+    state.contentType = response.headers['content-type']?.toString();
+    state.finalUrl = response.request?.res?.responseUrl ?? options.url;
+    return this.convertResponse(Buffer.from(response.data), state);
+  }
+
+  private convertResponse(bytes: Buffer, state: PageRead): string {
+    const media = state.contentType?.split(';')[0].trim().toLowerCase();
+    if (bytes.subarray(0, 5).toString('ascii') === '%PDF-'
+      || !['text/html', 'application/xhtml+xml', 'text/plain'].includes(media ?? '')) {
+      state.status = 'unsupported_media';
+      state.error = `Unsupported media: ${state.contentType ?? 'unknown'}`;
+      return '';
+    }
+    const text = bytes.toString('utf8');
+    if (media === 'text/plain') return text.replace(/\r\n?/g, '\n').trim();
+    try {
+      state.pageTitle = cheerio.load(text)('title').first().text().trim() || undefined;
+      return this.parseContent(text, state.finalUrl);
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { reason: 'conversion_error' });
+    }
+  }
+
+  private async extractWithBrowser(options: ContentExtractionOptions, state: PageRead): Promise<string> {
+    const browser = await this.browserPool.getBrowser();
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const response = await page.goto(options.url, {
+        waitUntil: 'domcontentloaded', timeout: options.timeout ?? 6000,
+      });
+      state.finalUrl = page.url();
+      state.httpStatus = response?.status();
+      state.contentType = response?.headers()['content-type'];
+      if (state.httpStatus !== undefined && state.httpStatus >= 400) {
+        throw new Error(`HTTP ${state.httpStatus}`);
+      }
+      const media = state.contentType?.split(';')[0].trim().toLowerCase();
+      if (!['text/html', 'application/xhtml+xml', 'text/plain'].includes(media ?? '')) {
+        state.status = 'unsupported_media';
+        state.error = `Unsupported media: ${state.contentType ?? 'unknown'}`;
+        return '';
+      }
+      state.pageTitle = await page.title() || undefined;
+      return media === 'text/plain' ? await page.locator('body').innerText()
+        : this.parseContent(await page.content(), state.finalUrl);
+    } finally {
+      await context.close().catch(error => console.error('Page context cleanup:', error));
+    }
+  }
+
+  async extractContentForResults(
+    results: SearchResult[], targetCount = results.length, maxContentLength?: number,
+  ): Promise<SearchResult[]> {
+    return Promise.all(results.slice(0, targetCount).map(async result => {
+      const read = await this.extractContent({ url: result.url, maxContentLength });
+      return {
+        ...result, read, fetchStatus: read.status, fullContent: read.content,
+        contentPreview: getContentPreview(read.content), wordCount: getWordCount(read.content),
+        error: read.error,
+      };
+    }));
   }
 
   private parseContent(html: string, finalUrl?: string): string {
@@ -468,29 +190,6 @@ export class EnhancedContentExtractor {
     const main = $('main, article, [role="main"]').first();
     const root = main.length ? main : $('body');
     return children(root[0]).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  }
-
-  private getSpecificErrorMessage(error: unknown): string {
-    if (axios.isAxiosError(error)) {
-      if (error.code === 'ECONNABORTED') {
-        return 'Request timeout';
-      }
-      if (error.response?.status === 403) {
-        return '403 Forbidden - Access denied';
-      }
-      if (error.response?.status === 404) {
-        return '404 Not found';
-      }
-      if (error.message.includes('maxContentLength')) {
-        return 'Content too long';
-      }
-      if (error.response?.status) {
-        return `HTTP ${error.response.status}: ${error.message}`;
-      }
-      return `Network error: ${error.message}`;
-    }
-    
-    return error instanceof Error ? error.message : 'Unknown error';
   }
 
   async closeAll(): Promise<void> {
