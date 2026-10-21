@@ -9,7 +9,7 @@
 | P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
 | P4 | Complete | pool/deadline/取消離線通過；真stdio EOF無殘留 | 公開引擎續P6 | P5-S1 |
 | P5 | Complete | env真入口、故障隔離、父層期限與程序收尾通過 | 公開網路續P6 | P6-S1 |
-| P6 | In progress | P6-S1本機整合／4組公開觀測通過 | DDG零解析、Brave429為外部限制 | P6-S2量測及S3完整suite |
+| P6 | In progress | P6-S1本機整合／4組公開觀測通過 | DDG零解析、Brave429為外部限制 | P6-S3完整suite與結案 |
 
 ## Authoring A0（2026-10-20，Asia/Taipei）
 - 已讀完整原spec、使用者annotation及Citation/連續執行/commit追加指令；將原spec以LF保存於context/source-spec.md。最新決策集中GOALS，沒有覆寫來源快照。
@@ -259,3 +259,19 @@
 - Bing實際search導航q仍是完整技術查詢（含3.13/asyncio/cancellation），沒有程式截成單詞；排序偏廣是本次引擎結果，沒有新增語意過濾或猜redirect目的地。DDG本次零解析與Brave429各自如實記錄，沒有以一次觀測推斷永久不可用或擅自停用。
 - 公開組累計13.061s（4/6組，低於480s）；沒有環境網路阻塞。引擎結果能否回答技術／新聞問題不在MCP保證內，不把這次資料取得驗收當作研究相關性或新聞準確性驗收。
 - 真env37/71/0/10001、真timeout/cancel/EOF與強制收尾復用P5-S3最新證據；無未滿足的本步技術驗收。下一步量測分段及D05，最後完整suite。
+
+### P6-S2 — 分段生命週期與D05（G7/G8，R12，AC14）
+- 量測沿agent.mcp resolver/loader→wrapper→新dist。只在repo外暫存Node --import以方法wrapper寫stderr計時、Python暫存context wrapper記native session階段；未改產品／site-packages，沒有MCP stdout診斷。三類各取一次，沒有benchmark campaign或第二輪測量。
+- discovery總0.704s，其中stdio建立3.825ms、Node初始化681.344ms、close9.079ms；測量含首次module/程序冷啟動，不當成穩定分布。
+
+| 路徑 | stdio＋initialize ms | search ms | body ms | SDK/session close ms | 端到端 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 搜尋資訊（公開第5組，同technology news 2026-10-21、limit3） | 328.155 | 6319.365 | 不適用 | 28.084 | 6686.912 |
+| 本機純HTTP | 314.958 | 不適用 | 23.865（HTTP23.338） | 5.974 | 350.593 |
+| 本機動態DOM／真Chromium | 344.932 | 不適用 | 90.437（HTTP11.914＋browser77.909） | 35.596 | 480.284 |
+
+- Chromium取得另量search201.474ms、正文35.195ms，已含相應search/body時間，不重複加總。Node pool close分別20.770/0.194/30.010ms；SDK close另含stdin/wrapper返回。
+- 同一腳本24個本次wrapper/Node/Chromium PID，存活殘留[]；實際browser讀到Actual DOM timing text、attempts2。完整輸出與數據在/tmp/web-search-p6-timings-1L7BIF/timings.json。暫存diagnostics只在該次child命令生效，產品src/dist沒有加入量測程式。
+- 公開第5組6.687s，累計5/6組、19.748s<480s；未使用第6組，不再追加公開請求。
+- **D05決策：保留逐次session，不實作重用。** 本樣本startup/init約0.315–0.345s，在極快本機HTTP路徑佔大部分，但絕對耗時小；close6–36ms，沒有本樣本長timer收尾。使用頻率與真實任務收益未知，現有證據不足支持新增ChatSession持久client及其狀態管理。這是量測後取捨，不宣稱相對基線的性能改善或普遍延遲分布。
+- 下一步P6-S3：最終完整app suite（最多兩次授權，尚未執行本次完整suite）與AC/commit/範圍核對。
