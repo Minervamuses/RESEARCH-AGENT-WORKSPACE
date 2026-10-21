@@ -5,7 +5,7 @@
 | 階段 | 狀態 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- |
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
-| P2 | In progress | P2-S1a/b：build／12個離線案例通過 | 無 | P2-S2 長度參數 |
+| P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
 | P3 | Not started | 無 | 相依P2 | P3-S1轉換 |
 | P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
@@ -143,3 +143,11 @@
 - node tests/test-search-result-retention.mjs exit 0，12/12；新增輸出文字差異、候選來源斷言，靜態讀 index.ts 確認兩個 handler 都調用 formatter。未 import index 啟動 server。
 - P3 仍須修復既有 extractor 的 PDF 過濾與成功優先；本步未將它宣稱通過。下一步 P2-S2。
 - 提交前 git diff --check 首次指出 utils.ts 原檔尾端的空白在追加內容後成為變更行；已移除該處空白後重驗。
+
+### P2-S2 — 明確長度與入口傳遞（G4/G8，R07，AC06）
+- 產品範圍 src/index.ts、src/utils.ts、src/enhanced-content-extractor.ts；沿既有 Node 回歸檔增加單一參數案例。
+- 移除模型型態猜測與自動覆寫；limit 嚴格整數1–10、includeContent 只接受 boolean 或 true/false 字串，預設5/true。maxContentLength 嚴格0–10000，省略／0使用嚴格1–10000的 MAX_CONTENT_LENGTH，內建10000；兩工具 schema/handler 共用 resolver。
+- 參數一路送至搜尋後與單頁擷取；以 Unicode code points 單次裁正文，HTTP 品質檢查在裁切之前，不因小上限觸發 fallback。舊 parseContent 的部署上限提前裁切已移除；Markdown/品質判斷本體在P3處理。
+- npm run build exit 0。初次 Node 測試12/13：靜態禁止 parseInt 的正則誤中本步 helper 名稱 parseInteger；改成匹配 parseInt( 後重跑13/13，exit 0，沒有產品行為失敗。
+- 案例覆蓋省略、0、7/'7'、部署預設9、10001/負值/NaN/非整數/部分數字拒絕、中文emoji，以及兩入口共用resolver與參數傳遞。
+- 截斷標記、原長度與保留連結目的地、PDF候選及真正文資料仍由P3完成；未提前宣稱這些驗收通過。

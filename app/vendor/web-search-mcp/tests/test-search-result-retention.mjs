@@ -144,6 +144,42 @@ check('both search tools share distinguishable engine and provenance text', asyn
   assert.match(source, /numResults: limit/);
 });
 
+check('strict content limits, deployment precedence, booleans and Unicode', async () => {
+  const { validateSearchInput, resolveContentLimit, limitContent } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
+  const { EnhancedContentExtractor } = await import(pathToFileURL(path.join(dist, 'enhanced-content-extractor.js')).href);
+  const previous = process.env.MAX_CONTENT_LENGTH;
+  try {
+    delete process.env.MAX_CONTENT_LENGTH;
+    assert.deepEqual(validateSearchInput({ query: 'x' }), { query: 'x', limit: 5, includeContent: true, maxContentLength: 10000 });
+    process.env.MAX_CONTENT_LENGTH = '9';
+    for (const value of [undefined, 0, '0']) assert.equal(resolveContentLimit(value), 9);
+    for (const value of [7, '7']) {
+      const args = validateSearchInput({ query: 'x', maxContentLength: value, includeContent: 'false' });
+      assert.equal(args.maxContentLength, 7);
+      assert.equal(args.includeContent, false);
+      const extractor = new EnhancedContentExtractor();
+      const text = '😀中文😀abcXYZ';
+      extractor.extractWithAxios = async () => text;
+      assert.equal(await extractor.extractContent({ url: 'https://example.org', maxContentLength: args.maxContentLength }), limitContent(text, 7));
+    }
+    for (const value of [10001, -1, 1.5, NaN, '7junk', '7.5', '']) {
+      assert.throws(() => resolveContentLimit(value), /integer between 0 and 10000/);
+    }
+    assert.throws(() => validateSearchInput({ query: 'x', includeContent: 'yes' }), /true or false/);
+    assert.throws(() => validateSearchInput({ query: 'x', limit: '2junk' }), /integer/);
+    process.env.MAX_CONTENT_LENGTH = '10001';
+    assert.throws(() => resolveContentLimit(7), /MAX_CONTENT_LENGTH/);
+    const { readFile } = await import('node:fs/promises');
+    const source = await readFile(path.join(dist, '..', 'src', 'index.ts'), 'utf8');
+    assert.equal((source.match(/transform\(resolveContentLimit\)/g) ?? []).length, 2);
+    assert.match(source, /extractContentForResults\(searchResponse.results, limit, maxContentLength\)/);
+    assert.doesNotMatch(source, /isLikelyLlama|isLikelyRobustModel|parseInt\(|0 = no limit/);
+  } finally {
+    if (previous === undefined) delete process.env.MAX_CONTENT_LENGTH;
+    else process.env.MAX_CONTENT_LENGTH = previous;
+  }
+});
+
 let failed = 0;
 for (const { name, fn } of cases) {
   logs.length = 0;

@@ -1,4 +1,4 @@
-import type { SearchResult, SearchEngineState } from './types.js';
+import type { SearchResult, SearchEngineState, WebSearchToolInput } from './types.js';
 
 /**
  * Utility functions for the web search MCP server
@@ -83,4 +83,43 @@ export function formatSearchResponse(
     if (includeContent && result.fullContent) lines.push('', '**Page content:**', result.fullContent);
   });
   return lines.join('\n');
+}
+
+export function parseInteger(value: unknown, name: string, min: number, max: number): number {
+  const converted = typeof value === 'string' && /^\d+$/.test(value.trim())
+    ? Number(value.trim()) : value;
+  if (typeof converted !== 'number' || !Number.isSafeInteger(converted) || converted < min || converted > max) {
+    throw new Error(`Invalid ${name}: must be an integer between ${min} and ${max}`);
+  }
+  return converted;
+}
+
+export function parseBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string' && /^(true|false)$/i.test(value)) return value.toLowerCase() === 'true';
+  throw new Error('Invalid includeContent: must be true or false');
+}
+
+export function resolveContentLimit(value?: unknown): number {
+  const deployed = process.env.MAX_CONTENT_LENGTH === undefined
+    ? 10000 : parseInteger(process.env.MAX_CONTENT_LENGTH, 'MAX_CONTENT_LENGTH', 1, 10000);
+  if (value === undefined) return deployed;
+  const explicit = parseInteger(value, 'maxContentLength', 0, 10000);
+  return explicit === 0 ? deployed : explicit;
+}
+
+export function validateSearchInput(args: unknown): WebSearchToolInput {
+  if (typeof args !== 'object' || args === null) throw new Error('Invalid arguments: expected object');
+  const obj = args as Record<string, unknown>;
+  if (typeof obj.query !== 'string' || !obj.query.trim()) throw new Error('Invalid query: expected non-empty string');
+  return {
+    query: obj.query,
+    limit: obj.limit === undefined ? 5 : parseInteger(obj.limit, 'limit', 1, 10),
+    includeContent: obj.includeContent === undefined ? true : parseBoolean(obj.includeContent),
+    maxContentLength: resolveContentLimit(obj.maxContentLength),
+  };
+}
+
+export function limitContent(text: string, limit: number): string {
+  return Array.from(text).slice(0, limit).join('');
 }

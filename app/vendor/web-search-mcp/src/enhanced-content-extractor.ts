@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { Page } from 'playwright';
 import { ContentExtractionOptions, SearchResult } from './types.js';
-import { cleanText, getWordCount, getContentPreview, generateTimestamp, isPdfUrl } from './utils.js';
+import { cleanText, getWordCount, getContentPreview, generateTimestamp, isPdfUrl, resolveContentLimit, limitContent } from './utils.js';
 import { BrowserPool } from './browser-pool.js';
 
 export class EnhancedContentExtractor {
@@ -14,16 +14,8 @@ export class EnhancedContentExtractor {
   constructor() {
     this.defaultTimeout = parseInt(process.env.DEFAULT_TIMEOUT || '6000', 10);
     
-    // Read MAX_CONTENT_LENGTH from environment variable, fallback to 500KB
-    const envMaxLength = process.env.MAX_CONTENT_LENGTH;
-    this.maxContentLength = envMaxLength ? parseInt(envMaxLength, 10) : 500000;
-    
-    // Validate the parsed value
-    if (isNaN(this.maxContentLength) || this.maxContentLength < 0) {
-      console.warn(`[EnhancedContentExtractor] Invalid MAX_CONTENT_LENGTH value: ${envMaxLength}, using default 500000`);
-      this.maxContentLength = 500000;
-    }
-    
+    this.maxContentLength = resolveContentLimit();
+
     this.browserPool = new BrowserPool();
     this.fallbackThreshold = parseInt(process.env.BROWSER_FALLBACK_THRESHOLD || '3', 10);
     
@@ -32,6 +24,7 @@ export class EnhancedContentExtractor {
 
   async extractContent(options: ContentExtractionOptions): Promise<string> {
     const { url } = options;
+    const effectiveLimit = resolveContentLimit(options.maxContentLength);
     
     console.log(`[EnhancedContentExtractor] Starting extraction for: ${url}`);
     
@@ -39,7 +32,7 @@ export class EnhancedContentExtractor {
     try {
       const content = await this.extractWithAxios(options);
       console.log(`[EnhancedContentExtractor] Successfully extracted with axios: ${content.length} chars`);
-      return content;
+      return limitContent(content, effectiveLimit);
     } catch (error) {
       console.log(`[EnhancedContentExtractor] Axios failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       
@@ -49,7 +42,7 @@ export class EnhancedContentExtractor {
         try {
           const content = await this.extractWithBrowser(options);
           console.log(`[EnhancedContentExtractor] Successfully extracted with browser: ${content.length} chars`);
-          return content;
+          return limitContent(content, effectiveLimit);
         } catch (browserError) {
           console.error(`[EnhancedContentExtractor] Browser extraction also failed:`, browserError);
           throw new Error(`Both axios and browser extraction failed for ${url}`);
@@ -71,12 +64,6 @@ export class EnhancedContentExtractor {
     });
 
     let content = this.parseContent(response.data);
-    
-    // Truncate content if it exceeds the limit (instead of axios throwing an error)
-    if (maxContentLength && content.length > maxContentLength) {
-      console.log(`[EnhancedContentExtractor] Content truncated from ${content.length} to ${maxContentLength} characters for ${url}`);
-      content = content.substring(0, maxContentLength);
-    }
     
     // Check if we got a meaningful response
     if (this.isLowQualityContent(content)) {
@@ -397,7 +384,7 @@ export class EnhancedContentExtractor {
     return timezones[Math.floor(Math.random() * timezones.length)];
   }
 
-  async extractContentForResults(results: SearchResult[], targetCount: number = results.length): Promise<SearchResult[]> {
+  async extractContentForResults(results: SearchResult[], targetCount: number = results.length, maxContentLength?: number): Promise<SearchResult[]> {
     console.log(`[EnhancedContentExtractor] Processing up to ${results.length} results to get ${targetCount} non-PDF results`);
     
     // Filter out PDF files first
@@ -412,7 +399,8 @@ export class EnhancedContentExtractor {
         // Use a race condition with timeout to prevent hanging
         const extractionPromise = this.extractContent({ 
           url: result.url, 
-          timeout: 6000 // Reduced timeout to 6 seconds per page
+          timeout: 6000,
+          maxContentLength
         });
         
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -420,7 +408,7 @@ export class EnhancedContentExtractor {
         });
         
         const content = await Promise.race([extractionPromise, timeoutPromise]);
-        const cleanedContent = cleanText(content, this.maxContentLength);
+        const cleanedContent = content;
         
         console.log(`[EnhancedContentExtractor] Successfully extracted: ${result.url}`);
         return {
@@ -533,7 +521,7 @@ export class EnhancedContentExtractor {
     // Clean up the text
     const cleanedContent = this.cleanTextContent(mainContent);
     
-    return cleanText(cleanedContent, this.maxContentLength);
+    return cleanText(cleanedContent, Number.MAX_SAFE_INTEGER);
   }
   
   private cleanTextContent(text: string): string {
