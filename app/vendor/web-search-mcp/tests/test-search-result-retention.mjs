@@ -1,4 +1,4 @@
-// Offline regression for SearchEngine.search(): every exit keeps the best result found.
+// Offline regression for SearchEngine.search(): strategy B retains candidates and execution facts.
 // Usage: node tests/test-search-result-retention.mjs [dist-directory]
 // Network, TLS, fetch and Playwright browser launches are blocked; engines are stubbed.
 import assert from 'node:assert/strict';
@@ -24,154 +24,73 @@ console.log = (...args) => logs.push(args.join(' '));
 console.error = (...args) => logs.push(args.join(' '));
 
 const record = (title, id) => ({ title, description: '', url: `https://example.org/${id}`, timestamp: 'fixed' });
-const outcome = (behaviour, attempts, name) => async () => {
-  attempts.push(name);
-  if (behaviour instanceof Error) throw behaviour;
-  return behaviour;
-};
-
-function engineWith({ bing = [], brave = [], ddg = [], handlingFails = false }) {
+function engineWith({ bing = [], ddg = [], brave = [] } = {}) {
   const engine = new SearchEngine();
   const attempts = [];
-  engine.tryBrowserBingSearch = outcome(bing, attempts, 'bing');
-  engine.tryBrowserBraveSearch = outcome(brave, attempts, 'brave');
-  engine.tryDuckDuckGoSearch = outcome(ddg, attempts, 'ddg');
-  if (handlingFails) {
-    engine.handleBrowserError = async () => { throw new Error('injected error-handling failure'); };
+  for (const [method, name, value] of [
+    ['tryBrowserBingSearch', 'bing', bing],
+    ['tryDuckDuckGoSearch', 'ddg', ddg],
+    ['tryBrowserBraveSearch', 'brave', brave],
+  ]) {
+    engine[method] = async () => {
+      attempts.push(name);
+      if (value instanceof Error) throw value;
+      return value;
+    };
   }
   return { engine, attempts };
 }
-
-function configure({ quality = 'true', force = 'false' } = {}) {
-  process.env.ENABLE_RELEVANCE_CHECKING = quality;
-  process.env.RELEVANCE_THRESHOLD = '0.3';
-  process.env.FORCE_MULTI_ENGINE_SEARCH = force;
-}
-
-const scorer = new SearchEngine();
-const score = (results, query) => scorer.assessResultQuality(results, query);
-const failure = () => new Error('injected engine failure');
 const cases = [];
 const check = (name, fn) => cases.push({ name, fn });
+const configure = () => {};
 
-// Core four (engine order Bing -> DuckDuckGo -> Brave): a Chinese Bing result (the heuristic drops CJK keywords and scores it 0.5) must
-// survive later engines that return nothing or fail.
-const chineseQuery = '中文查詢';
-const chineseBing = [record('中文相關內容', 'bing')];
-for (const [name, brave, ddg] of [
-  ['bing kept when brave and ddg are empty', [], []],
-  ['bing kept when brave and ddg throw', failure(), failure()],
-  ['bing kept when brave is empty and ddg throws', [], failure()],
-]) {
-  check(name, async () => {
-    configure();
-    assert.equal(score(chineseBing, chineseQuery), 0.5);
-    const { engine, attempts } = engineWith({ bing: chineseBing, brave, ddg });
-    const result = await engine.search({ query: chineseQuery });
-    assert.deepEqual(result, { results: chineseBing, engine: 'Browser Bing' });
-    assert.deepEqual(attempts, ['bing', 'ddg', 'brave']);
+check('strategy B fills five stable candidates and merges duplicate provenance', async () => {
+  const { engine, attempts } = engineWith({
+    bing: [record('first', '1'), record('second', '2')],
+    ddg: [record('changed duplicate', '2'), record('third', '3'), record('fourth', '4'), record('fifth', '5')],
+  });
+  const result = await engine.search({ query: '中文', numResults: 5 });
+  assert.deepEqual(result.results.map(r => r.title), ['first', 'second', 'third', 'fourth', 'fifth']);
+  assert.deepEqual(result.results[1].sourceEngines, ['Browser Bing', 'Axios DuckDuckGo']);
+  assert.deepEqual(attempts, ['bing', 'ddg']);
+  assert.equal(result.engines[2].status, 'strategy_stopped');
+  assert.equal(result.engines[2].attempted, false);
+  assert.ok(result.results.every(r => r.fetchStatus === 'not_requested'));
+});
+check('later failures retain earlier candidates and expose errors', async () => {
+  const { engine } = engineWith({ bing: [record('one', '1'), record('two', '2')], ddg: new Error('HTTP 403'), brave: new Error('HTTP 429') });
+  const result = await engine.search({ query: 'AI' });
+  assert.equal(result.results.length, 2);
+  assert.equal(result.engines[1].error, 'HTTP 403');
+  assert.equal(result.engines[2].status, 'error');
+});
+check('all failures and all zero parses remain distinguishable', async () => {
+  const empty = await engineWith().engine.search({ query: 'x' });
+  const error = new Error('unavailable');
+  const failed = await engineWith({ bing: error, ddg: error, brave: error }).engine.search({ query: 'x' });
+  assert.ok(empty.engines.every(e => e.status === 'zero_parsed'));
+  assert.ok(failed.engines.every(e => e.status === 'error'));
+});
+for (const query of ['中文查詢', 'AI', 'sports', 'weather']) {
+  check(`query ${query} has no semantic scoring`, async () => {
+    const { engine, attempts } = engineWith({ bing: [record('unrelated', '1')], ddg: [record('other', '2')] });
+    assert.equal(engine.assessResultQuality, undefined);
+    const result = await engine.search({ query, numResults: 2 });
+    assert.deepEqual(result.results.map(r => r.title), ['unrelated', 'other']);
+    assert.deepEqual(attempts, ['bing', 'ddg']);
   });
 }
-
-check('a non-empty bing result scored 0 is kept', async () => {
-  configure();
-  const bing = [record('food hotel recipe', 'bing')];
-  assert.equal(score(bing, 'alpha'), 0, 'fixture must cover a zero-scored non-empty result');
-  const { engine } = engineWith({ bing, brave: failure() });
-  assert.deepEqual(await engine.search({ query: 'alpha' }), { results: bing, engine: 'Browser Bing' });
-});
-
-check('higher bing beats a lower brave that meets the threshold', async () => {
-  configure();
-  const query = 'alpha beta gamma';
-  const bing = [record('alpha gamma', 'bing')];
-  const brave = [record('beta', 'brave')];
-  const bingScore = score(bing, query);
-  const braveScore = score(brave, query);
-  assert.ok(bingScore > braveScore && bingScore < 0.8 && braveScore >= 0.3, `${bingScore} ${braveScore}`);
-  const { engine, attempts } = engineWith({ bing, brave });
-  assert.deepEqual(await engine.search({ query }), { results: bing, engine: 'Browser Bing' });
-  assert.deepEqual(attempts, ['bing', 'ddg', 'brave']);
-});
-
-check('a later, truly better result replaces bing with its own engine name', async () => {
-  configure();
-  const query = 'alpha beta gamma';
-  const bing = [record('beta', 'bing')];
-  const brave = [record('alpha beta gamma', 'brave')];
-  assert.ok(score(brave, query) > score(bing, query));
-  const { engine } = engineWith({ bing, brave });
-  assert.deepEqual(await engine.search({ query }), { results: brave, engine: 'Browser Brave' });
-});
-
-check('equal scores keep the earlier engine', async () => {
-  configure();
-  const query = 'alpha beta gamma';
-  const bing = [record('beta', 'bing')];
-  const ddg = [record('beta', 'ddg')];
-  assert.equal(score(bing, query), score(ddg, query));
-  const { engine } = engineWith({ bing, ddg });
-  assert.deepEqual(await engine.search({ query }), { results: bing, engine: 'Browser Bing' });
-});
-
-check('all engines empty still return the empty contract', async () => {
-  configure();
-  const { engine, attempts } = engineWith({});
-  assert.deepEqual(await engine.search({ query: 'alpha' }), { results: [], engine: 'None' });
-  assert.deepEqual(attempts, ['bing', 'ddg', 'brave']);
-});
-
-check('all engines failing still return the empty contract', async () => {
-  configure();
-  const { engine } = engineWith({ bing: failure(), brave: failure(), ddg: failure() });
-  assert.deepEqual(await engine.search({ query: 'alpha' }), { results: [], engine: 'None' });
-});
-
-check('failed error handling keeps an earlier best result', async () => {
-  configure();
-  const { engine, attempts } = engineWith({ bing: chineseBing, ddg: failure(), handlingFails: true });
-  assert.deepEqual(await engine.search({ query: chineseQuery }), { results: chineseBing, engine: 'Browser Bing' });
-  assert.deepEqual(attempts, ['bing', 'ddg']);
-});
-
-check('failed error handling without a result keeps the failure contract', async () => {
-  configure();
-  const { engine } = engineWith({ bing: failure(), handlingFails: true });
-  await assert.rejects(engine.search({ query: 'alpha' }), /Failed to perform search: injected error-handling failure/);
-});
-
-check('forced multi-engine search keeps bing when later engines add nothing', async () => {
-  configure({ force: 'true' });
-  const query = 'alpha beta gamma';
-  const bing = [record('alpha beta gamma', 'bing')];
-  const { engine, attempts } = engineWith({ bing, brave: [record('beta', 'brave')], ddg: failure() });
-  assert.deepEqual(await engine.search({ query }), { results: bing, engine: 'Browser Bing' });
-  assert.deepEqual(attempts, ['bing', 'ddg', 'brave']);
-});
-
-check('a usable DuckDuckGo result is returned before the slower Brave browser runs', async () => {
-  configure();
-  const query = 'alpha beta gamma';
-  const ddg = [record('alpha beta gamma', 'ddg')];
-  const { engine, attempts } = engineWith({ bing: [record('zzz', 'bing')], ddg, brave: [record('alpha beta gamma', 'brave')] });
-  assert.deepEqual(await engine.search({ query }), { results: ddg, engine: 'Axios DuckDuckGo' });
-  assert.deepEqual(attempts, ['bing', 'ddg']);
-});
-
-check('Brave still runs when DuckDuckGo has nothing usable', async () => {
-  configure();
-  const query = 'alpha beta gamma';
-  const brave = [record('alpha beta gamma', 'brave')];
-  const { engine, attempts } = engineWith({ bing: [record('zzz', 'bing')], ddg: failure(), brave });
-  assert.deepEqual(await engine.search({ query }), { results: brave, engine: 'Browser Brave' });
-  assert.deepEqual(attempts, ['bing', 'ddg', 'brave']);
-});
-
-check('disabled quality checking returns the first non-empty engine', async () => {
-  configure({ quality: 'false' });
-  const { engine, attempts } = engineWith({ bing: chineseBing, brave: [record('other', 'brave')] });
-  assert.deepEqual(await engine.search({ query: chineseQuery }), { results: chineseBing, engine: 'Browser Bing' });
-  assert.deepEqual(attempts, ['bing']);
+check('URL handling validates schemes, preserves query/encoding and resolves relative paths', async () => {
+  const { engine } = engineWith({ bing: [
+    record('encoded', 'a%252Fb?q=1&tracking=2'),
+    { ...record('bad', 'bad'), url: 'javascript:alert(1)' },
+    record('distinct query', 'a%252Fb?q=2&tracking=2'),
+  ] });
+  const result = await engine.search({ query: 'x' });
+  assert.equal(result.results.length, 2);
+  assert.match(result.results[0].url, /a%252Fb\?q=1&tracking=2$/);
+  assert.equal(engine.cleanBingUrl('/relative?q=%252F'), 'https://www.bing.com/relative?q=%252F');
+  assert.equal(engine.cleanDuckDuckGoUrl('//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fa%252Fb'), 'https://example.org/a%2Fb');
 });
 
 // Brave internals with a fake Playwright browser: a blocked page fails at once, without retry.
@@ -205,15 +124,6 @@ for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'par
     }
   });
 }
-
-check('a blocked Brave fallback keeps the earlier Bing result', async () => {
-  configure();
-  const query = 'alpha beta gamma';
-  const bing = [record('alpha', 'bing')];
-  const { engine, attempts } = engineWith({ bing, ddg: [], brave: Object.assign(new Error('Brave returned HTTP 429'), { braveBlocked: true }) });
-  assert.deepEqual(await engine.search({ query }), { results: bing, engine: 'Browser Bing' });
-  assert.deepEqual(attempts, ['bing', 'ddg', 'brave']);
-});
 
 let failed = 0;
 for (const { name, fn } of cases) {

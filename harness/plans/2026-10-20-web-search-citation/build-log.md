@@ -5,7 +5,7 @@
 | 階段 | 狀態 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- |
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
-| P2 | Not started | 無 | 無 | P2-S1搜尋候選契約（必要時拆P2-S1a/b） |
+| P2 | In progress | P2-S1a：build／11個離線案例通過 | 無 | P2-S1b 兩工具輸出 |
 | P3 | Not started | 無 | 相依P2 | P3-S1轉換 |
 | P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
@@ -128,3 +128,10 @@
 - 實際檢查：在 app/、Conda app 啟用後，隔離 XDG_CACHE_HOME/AGENT_LOG_DIR/TMPDIR，PYTHONDONTWRITEBYTECODE=1；poetry run pytest tests/test_citation_skill_activation.py tests/test_tool_access_matrix.py -q -p no:cacheprovider，exit 0：21 passed，0.57s；一個既有 LangChainPendingDeprecationWarning。
 - 模型遵循沒有動態驗證，沒有付費呼叫；prompt-only 不保證消除違規。
 - 下一步：P2-S1，先讀階段檔與相關搜尋原始碼。
+
+### P2-S1a — 跨引擎候選與執行事實（G2/G4/G8，R02/04/06）
+- 因共用文字 formatter 需 utils.ts，採原計劃允許的 S1a/b 拆步；本步產品檔案為 src/search-engine.ts、src/types.ts，修改既有 tests/test-search-result-retention.mjs。
+- 刪除 query 詞彙評分、閾值與勝出批次路徑；Bing→DDG→Brave 依原排序附加到 limit，URL 標準解析後完全相同才合併來源，保留首筆 metadata；足額引擎標 strategy_stopped。
+- 引擎回傳 attempted、實際傳輸 attempts、parsedCount、completed/zero_parsed/error；候選正文初始 not_requested。保留現有最多一次傳輸重試與 Brave 403/429 快失敗，移除 DDG 二次 URL decode、無效 scheme 與依 captcha/title 詞彙猜測的診斷。
+- 驗證：Conda app 中於 vendor 執行 npm run build（exit 0）；node tests/test-search-result-retention.mjs（exit 0，11/11）。涵蓋2+重複+3補足5、第三引擎未呼叫、失敗保留、全失敗/全零解析、中文/AI/運動/天氣、URL、403/429。
+- 目前工具文字與候選過量取回仍待 S1b 接通；Firefox／共享資源與 deadline 依 P4。未作網路 smoke。

@@ -6,7 +6,9 @@ export interface SearchResult {
   contentPreview: string;
   wordCount: number;
   timestamp: string;
-  fetchStatus: 'success' | 'error' | 'timeout';
+  fetchStatus: 'success' | 'error' | 'timeout' | 'not_requested';
+  sourceEngines?: string[];
+  observedUrl?: string;
   error?: string;
 }
 
@@ -73,8 +75,18 @@ export interface SinglePageContentOutput {
   error?: string;
 }
 
-// Search result with metadata about which search engine was used
+export interface SearchEngineState {
+  name: string;
+  attempted: boolean;
+  attempts: number;
+  parsedCount: number;
+  status: 'completed' | 'zero_parsed' | 'error' | 'strategy_stopped';
+  error?: string;
+}
+
+// Search results retain per-engine execution facts independently of page reads.
 export interface SearchResultWithMetadata {
   results: SearchResult[];
   engine: string;
+  engines: SearchEngineState[];
 }
