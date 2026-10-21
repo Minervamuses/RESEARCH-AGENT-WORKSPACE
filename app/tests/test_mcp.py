@@ -147,7 +147,7 @@ def test_load_mcp_tools_with_families_skips_failing_server(monkeypatch):
         raise RuntimeError("mcp server crashed")
 
     class FakeClient:
-        def __init__(self, connections=None):
+        def __init__(self, connections=None, **_kwargs):
             self.connections = connections
             server = next(iter(connections.keys()))
             if server == "github":
@@ -188,7 +188,7 @@ def test_load_mcp_tools_with_families_maps_loaded_tools(monkeypatch):
         return [fake_web] if server == "web_search" else [fake_github]
 
     class FakeClient:
-        def __init__(self, connections=None):
+        def __init__(self, connections=None, **_kwargs):
             self.connections = connections
             self.get_tools = get_tools.__get__(self, FakeClient)
 
@@ -212,7 +212,7 @@ def test_two_dropins_with_same_tool_are_both_excluded(monkeypatch):
         return value
 
     class FakeClient:
-        def __init__(self, connections=None):
+        def __init__(self, connections=None, **_kwargs):
             self.connections = connections
 
         async def get_tools(self):
@@ -260,7 +260,7 @@ def test_builtin_server_wins_tool_collision_with_dropin(monkeypatch):
         return value
 
     class FakeClient:
-        def __init__(self, connections=None):
+        def __init__(self, connections=None, **_kwargs):
             self.connections = connections
 
         async def get_tools(self):
@@ -510,7 +510,7 @@ def test_connection_preparation_failure_keeps_other_server(monkeypatch):
         return {"transport": "stdio", "command": spec.command}
 
     class FakeClient:
-        def __init__(self, connections=None):
+        def __init__(self, connections=None, **_kwargs):
             pass
         async def get_tools(self):
             return [healthy_fetch]
@@ -557,7 +557,7 @@ def test_startup_keeps_local_and_healthy_tools_and_diagnostics(monkeypatch, tmp_
     ))
     monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: make_astream_graph())
     class FakeClient:
-        def __init__(self, connections=None):
+        def __init__(self, connections=None, **_kwargs):
             self.name = next(iter(connections))
         async def get_tools(self):
             return [extension_fetch] if self.name == "extension" else [healthy_fetch]
@@ -570,3 +570,115 @@ def test_startup_keeps_local_and_healthy_tools_and_diagnostics(monkeypatch, tmp_
     assert {"read_file", "bash", "rag_search", "healthy_fetch"}.issubset(effective)
     assert any("web_search: resolve: RuntimeError: resolver failed" in item
                for item in session.extension_startup_diagnostics)
+
+
+def _lifecycle_server(tmp_path, mode):
+    import sys
+
+    source = tmp_path / "lifecycle_server.py"
+    pid_file = tmp_path / "lifecycle.pid"
+    source.write_text(
+        """
+import json, os, signal, sys, time
+from pathlib import Path
+mode, pid_file = sys.argv[1:]
+fields = Path(f"/proc/{os.getpid()}/stat").read_text().split(") ", 1)[1].split()
+Path(pid_file).write_text(f"{os.getpid()} {os.getpgrp()} {fields[19]}")
+signal.signal(signal.SIGTERM, lambda *_args: None)
+if mode == "startup": time.sleep(2)
+called = False
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message: continue
+    method = message["method"]
+    if method == "initialize":
+        if mode == "initialize": time.sleep(2)
+        if mode == "meta": time.sleep(.05)
+        result = {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "local", "version": "1"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "local_probe", "inputSchema": {"type": "object", "properties": {}}}]}
+    else:
+        called = True
+        if mode == "tool": time.sleep(2)
+        if mode == "tool_error":
+            print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "explicit invalid argument"}}), flush=True)
+            continue
+        text = json.dumps(message["params"].get("_meta", {})) if mode == "meta" else "known result"
+        result = {"content": [{"type": "text", "text": text}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+if called and mode == "close": time.sleep(2)
+""",
+        encoding="utf-8",
+    )
+    return {"transport": "stdio", "command": sys.executable, "args": [str(source), mode, str(pid_file)]}, pid_file
+
+
+def _assert_lifecycle_pid_gone(pid_file):
+    from pathlib import Path
+
+    pid, group, started = pid_file.read_text().split()
+    stat = Path(f"/proc/{pid}/stat")
+    if stat.exists():
+        fields = stat.read_text().split(") ", 1)[1].split()
+        assert fields[19] != started or fields[0] == "Z", f"live child {pid}, pgid {group}"
+
+
+@pytest.mark.parametrize("mode", ["startup", "initialize", "tool", "close", "meta"])
+def test_web_search_real_session_budget_and_cleanup(tmp_path, mode):
+    import json
+    import time
+
+    connection, pid_file = _lifecycle_server(tmp_path, mode)
+    async def run():
+        started = time.monotonic()
+        if mode in ("startup", "initialize"):
+            with pytest.raises(TimeoutError, match="before a result"):
+                await mcp_module._load_web_search_tools(connection, 800)
+        else:
+            tools = await mcp_module._load_web_search_tools(connection, 800)
+            started = time.monotonic()
+            if mode == "tool":
+                with pytest.raises(TimeoutError, match="before a result"):
+                    await tools[0].ainvoke({})
+            else:
+                response = await tools[0].ainvoke({})
+                text = response if isinstance(response, str) else response[0]["text"]
+                if mode == "close":
+                    assert text == "known result"
+                else:
+                    assert 0 < json.loads(text)["web_search_work_ms"] < 350
+        elapsed = time.monotonic() - started
+        assert elapsed < .8, elapsed
+        _assert_lifecycle_pid_gone(pid_file)
+        assert not [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+    asyncio.run(run())
+
+
+def test_web_search_cancellation_during_cleanup_is_bounded(tmp_path, caplog):
+    import logging
+    import time
+
+    connection, pid_file = _lifecycle_server(tmp_path, "close")
+    async def run():
+        tools = await mcp_module._load_web_search_tools(connection, 800)
+        started = time.monotonic()
+        task = asyncio.create_task(tools[0].ainvoke({}))
+        await asyncio.sleep(.15)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert time.monotonic() - started < .8
+        _assert_lifecycle_pid_gone(pid_file)
+    with caplog.at_level(logging.INFO, logger="agent.mcp"):
+        asyncio.run(run())
+    assert "result_received=True" in caplog.text
+
+
+def test_web_search_preserves_protocol_error_message(tmp_path):
+    connection, pid_file = _lifecycle_server(tmp_path, "tool_error")
+    async def run():
+        tools = await mcp_module._load_web_search_tools(connection, 800)
+        with pytest.raises(Exception, match="explicit invalid argument"):
+            await tools[0].ainvoke({})
+        _assert_lifecycle_pid_gone(pid_file)
+    asyncio.run(run())

@@ -12,11 +12,13 @@ still works with the local KB tools only.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 import shlex
 import shutil
+import signal
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -273,6 +275,166 @@ def _spec_to_connection(spec: MCPServerSpec) -> dict:
         conn["env"] = dict(spec.env)
     return conn
 
+
+async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
+    """Bound one web-search session, retaining a received result across cleanup."""
+    if not 1 <= timeout_ms <= 300000:
+        raise ValueError("Invalid DEFAULT_TIMEOUT: integer milliseconds 1–300000 required")
+    loop = asyncio.get_running_loop()
+    total = timeout_ms / 1000
+    reserve = min(15, max(1.5, total * 0.05), total / 2)
+    deadline = loop.time() + total
+    work_deadline = deadline - reserve
+    kill_deadline = deadline - min(0.5, reserve / 2)
+    call_id = uuid.uuid4().hex
+    connection = {
+        **connection,
+        "env": {**connection.get("env", {}), "_AGENT_WEB_SEARCH_CALL_ID": call_id},
+    }
+    owned: dict[int, tuple[str, int]] = {}
+    result: list = []
+    stop = asyncio.Event()
+
+    def remember_processes() -> None:
+        # Read metadata globally, but inspect env only on this Python process's children.
+        records = {}
+        for path in Path("/proc").glob("[0-9]*/stat"):
+            try:
+                fields = path.read_text().split(") ", 1)[1].split()
+                records[int(path.parent.name)] = fields
+            except (OSError, ValueError, IndexError):
+                continue
+        roots = set()
+        marker = f"_AGENT_WEB_SEARCH_CALL_ID={call_id}".encode()
+        for pid, fields in records.items():
+            if int(fields[1]) != os.getpid():
+                continue
+            try:
+                if marker in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0"):
+                    roots.add(pid)
+            except OSError:
+                continue
+        family = roots | {
+            pid for pid, (started, _group) in owned.items()
+            if pid in records and records[pid][19] == started
+        }
+        while True:
+            expanded = family | {pid for pid, fields in records.items() if int(fields[1]) in family}
+            if expanded == family:
+                break
+            family = expanded
+        for pid in family:
+            if pid in records and pid not in owned:
+                owned[pid] = (records[pid][19], int(records[pid][2]))
+
+    def kill_owned() -> None:
+        remember_processes()
+        for pid, (started, group) in sorted(owned.items(), reverse=True):
+            try:
+                fields = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].split()
+                if fields[19] != started or fields[0] == "Z":
+                    continue
+                if group == pid and int(fields[2]) == pid:
+                    os.killpg(pid, signal.SIGKILL)
+                else:
+                    os.kill(pid, signal.SIGKILL)
+            except (OSError, IndexError):
+                continue
+
+    async def observe() -> None:
+        while not stop.is_set():
+            remember_processes()
+            try:
+                await asyncio.wait_for(stop.wait(), 0.02)
+            except TimeoutError:
+                pass
+
+    def publish(value) -> None:
+        result[:] = [value]
+
+    task = asyncio.create_task(operation(connection, publish, work_deadline))
+    watcher = asyncio.create_task(observe())
+
+    async def settle() -> None:
+        if not task.done():
+            await asyncio.wait({task}, timeout=max(0, kill_deadline - loop.time()))
+        if not task.done():
+            kill_owned()
+            task.cancel()
+            await asyncio.wait({task}, timeout=max(0, deadline - loop.time()))
+        if not task.done():
+            # Consume its eventual exception without extending the caller's budget.
+            task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+
+    try:
+        await asyncio.wait({task}, timeout=max(0, work_deadline - loop.time()))
+        if not task.done() and not result:
+            task.cancel()
+        await settle()
+        if result:
+            if task.cancelled() or not task.done() or task.exception() is not None:
+                logger.warning("Web Search cleanup failed after a result was received; retaining result")
+            return result[0]
+        if task.done() and not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                raise error
+        raise TimeoutError(
+            "Web Search timed out before a result was received "
+            "(startup, initialization, call and cleanup included)"
+        )
+    except asyncio.CancelledError:
+        logger.info(
+            "Web Search caller cancelled; result_received=%s", bool(result),
+        )
+        task.cancel()
+        await settle()
+        raise
+    finally:
+        stop.set()
+        await watcher
+
+
+async def _load_web_search_tools(connection: dict, timeout_ms: int) -> list:
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+    from langchain_mcp_adapters.sessions import create_session
+
+    async def intercept(request, _handler):
+        # The installed adapter does not expose call_tool(meta=...) or a result
+        # before __aexit__. Keep its interceptor and native session API locally.
+        async def execute(call_connection, publish, work_deadline):
+            captured_error = None
+            async with create_session(call_connection) as session:
+                try:
+                    await session.initialize()
+                    remaining = max(
+                        0,
+                        (work_deadline - asyncio.get_running_loop().time()) * 1000
+                        - min(250, timeout_ms * 0.025),
+                    )
+                    response = await session.call_tool(
+                        request.name, request.args,
+                        meta={"web_search_work_ms": remaining},
+                    )
+                    publish(response)
+                except Exception as exc:
+                    captured_error = exc
+            # Match the adapter's existing behavior: do not let the session's
+            # TaskGroup wrap a useful protocol error during context exit.
+            if captured_error is not None:
+                raise captured_error
+        return await _bounded_web_search(connection, execute, timeout_ms)
+
+    async def discover(call_connection, publish, _work_deadline):
+        client = MultiServerMCPClient(
+            connections={"web_search": call_connection},
+            tool_interceptors=[intercept],
+        )
+        publish(await client.get_tools())
+
+    return await _bounded_web_search(connection, discover, timeout_ms)
+
+
 async def load_mcp_tools_with_families(
     specs: list[MCPServerSpec] | None = None,
     *,
@@ -306,8 +468,13 @@ async def load_mcp_tools_with_families(
         try:
             connections = {spec.name: _spec_to_connection(spec)}
             stage = "load"
-            client = MultiServerMCPClient(connections=connections)
-            server_tools = await client.get_tools()
+            if spec.name == "web_search":
+                server_tools = await _load_web_search_tools(
+                    connections[spec.name], int(spec.env.get("DEFAULT_TIMEOUT", "300000")),
+                )
+            else:
+                client = MultiServerMCPClient(connections=connections)
+                server_tools = await client.get_tools()
         except Exception as exc:
             logger.warning("MCP server %r failed during %s: %s", spec.name, stage, exc)
             if diagnostics is not None:

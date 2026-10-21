@@ -8,7 +8,7 @@
 | P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
 | P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
 | P4 | Complete | pool/deadline/取消離線通過；真stdio EOF無殘留 | 公開引擎續P6 | P5-S1 |
-| P5 | In progress | P5-S1a：Node設定驗證通過 | 無 | P5-S1b Python傳遞 |
+| P5 | Complete | env真入口、故障隔離、父層期限與程序收尾通過 | 公開網路續P6 | P6-S1 |
 | P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
 
 ## Authoring A0（2026-10-20，Asia/Taipei）
@@ -234,3 +234,14 @@
 - 最少回歸覆蓋resolver拋錯、prepare PermissionError、get_tools RuntimeError、missing build診斷、有/無extension兩情境仍保留healthy MCP與read_file/bash/rag_search。
 - 隔離環境執行pytest tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py -q -p no:cacheprovider：exit0、39 passed、0.77s；補強既有失敗stage斷言後tests/test_mcp.py重驗exit0、24 passed。只有既有LangChain deprecation warning。
 - 下一步P5-S3：按installed adapter hook實際能力涵蓋startup/initialize/call/cleanup。
+
+### P5-S3 — Python完整呼叫與收尾預算（G5/G6/G8，AC10/11）
+- 已讀installed MultiServerMCPClient/convert_mcp_tool_to_langchain_tool/create_session及mcp1.27 stdio_client。實驗重現原handler：結果已發送、取消落SDK收尾後0.5s仍pending（總0.809s）；同腳本僅清理本次PID44005群組。也確認adapter的request hook不傳call_tool(meta)，且handler直到session退出才交付結果。
+- 依具體證據在mcp.py的既有tool_interceptor局部接native create_session：沒有新client框架／持久session／site-packages修改。discovery及每次call從啟動前計單調期限，預留清理、把剩餘工作時間用標準_meta交Node；Node再提前最多250ms回傳，避免deadline競速丟掉已知候選。
+- 每call用opaque內部ID標記自有stdio子程序；只檢查本Python直接子程序env並沿其後代記PID/starttime/pgid，取消／逾時清理保留到總預算內，必要時僅終止本次原身分群組。已接收結果先保存，清理失敗只記warning；未收到結果則明確timeout，不偽造部分資料。
+- 首次真37/71/0/10001複驗在10001遇到SDK TaskGroup把McpError包成ExceptionGroup，錯誤文字不再可見（exit1）。仿adapter原本既有的capture-then-reraise方式，在context外重拋原協定錯誤；新增最小回歸後修復，沒有掩蓋失敗歷史。
+- 隔離focused pytest三模組最後exit0、46 passed（新增7個本機真程序案例：slow startup/initialize/tool/close、剩餘meta、cleanup期caller cancellation、協定錯誤）；800ms部署案例皆斷言<0.8s、同腳本記錄PID已退出。caller取消與已收結果以result_received診斷區分。
+- 最新真Agent env複驗：37/71/0與10001拒絕通過，0.359/0.400/0.353s，15個本次PID，殘留[]。
+- 最新真Node、DEFAULT_TIMEOUT=5000：本機HTTP空字→Chromium正文0.789s；慢HTTP3.394s回明確timeout，兩者均<5s；同腳本15個wrapper/Node/Chromium PID殘留[]。
+- 另以故意忽略EOF/SIGTERM的本機Node＋真Chromium驗父層強制收尾：DEFAULT_TIMEOUT=3000，結果先取得，2.504s內返回known browser result並warning；同腳本追蹤sh44975/Node44977/grep44978/Chromium獨立群44990及子程序，殘留[]，無需腳本額外補殺。
+- 沒有公開網路或付費呼叫。測試工具JS拼接曾誤用index而非indexOf，工具腳本在啟動檢查前失敗；修正後執行，產品不受影響。下一步P6-S1真入口整合與有限公開smoke。
