@@ -11,6 +11,8 @@ the conversational decision about which work/version the user requested and
 whether they authorized a write; the tool owns metadata retrieval, BibTeX,
 storage, and the factual save outcome.
 
+For paper discovery and citation work, use only citation_workflow and its existing Crossref, DataCite, and optional OpenAlex providers, preserving the workflow's existing authoritative identifier resolution and save behavior. Do not use Web Search or browse other websites to find papers, fill missing metadata or abstracts, or repair failed, incomplete, or ambiguous provider results. When the workflow cannot provide a reliable result, honestly report the returned failure, uncertainty, or missing information and present any usable results with their limitations; follow the existing bounded retry rules instead of searching the web. This instruction applies even when Web Search tools remain available.
+
 `/citation <prompt>` starts one task, which may use multiple tool calls.
 The host uses normal thinking for this task and restores the session's mode
 afterward. Its source registry is released after finalization or failure.

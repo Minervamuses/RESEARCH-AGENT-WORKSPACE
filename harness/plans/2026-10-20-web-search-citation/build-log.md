@@ -1,11 +1,11 @@
 # 執行狀態與證據
-本文件是唯一動態狀態擁有者。規劃交付不代表產品實作；目前沒有實作階段、產品build、產品測試、網路smoke或模型遵循驗收已完成。
+本文件是唯一動態狀態擁有者。規劃與修正前審查不代表產品驗收；本次實際執行結果見下方各步驟事件。
 
 ## 階段狀態
 | 階段 | 狀態 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- |
-| P1 | Not started | 無 | 尚未收到執行計劃指令 | 讀P1並完成P1-S1 |
-| P2 | Not started | 無 | 同上 | P2-S1搜尋候選契約（必要時拆P2-S1a/b） |
+| P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
+| P2 | Not started | 無 | 無 | P2-S1搜尋候選契約（必要時拆P2-S1a/b） |
 | P3 | Not started | 無 | 相依P2 | P3-S1轉換 |
 | P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
@@ -114,3 +114,17 @@
 - validate_plan.py --json：退出0，ok=true，checked_files=13，零errors／warnings。git diff --check 退出0，沒有CR。
 - 用 grep 掃舊規則殘留（最多一次、不修改未使用、尚未確認、所有局部timeout取剩餘預算、每引擎嘗試、首次新增此計劃、外部阻塞、人工逐句、需你核准），只剩兩處合理用法：P2-S1「每引擎最多一次策略嘗試」、P6-S2「必要重跑同一小例最多一次」。
 - 計劃準備狀態：可啟動。所有 implementation phase 維持 Not started。提交使用 [A1]，可由 git log 查實際 commit。
+
+## Execution（2026-10-21，Asia/Taipei）
+### E0 — 環境與續跑對帳
+- 使用者已明確啟動整個計劃並授權範圍內本地 commit；禁止新依賴、付費呼叫、push、發佈、建／切分支。宿主 danger-full-access，檢查直接在無沙箱的 WSL Linux 執行。
+- root /home/minervamuses/research-agent-workspace；分支 GUI，起始 HEAD 3225a90f4d482ccabdabcd2adaa447852741be7c（A1），A0＝49d7048。沒有已完成 P?-S? commit，與原進度表相符。
+- 起始 tracked/index 乾淨，只有既存未追蹤 app/store/；不讀改或提交該資料。沒有下層 AGENTS.md。
+- WSL Ubuntu-24.04；/usr/bin/bash、/usr/bin/git；Conda app 的 Python 3.13.14、Poetry 2.4.1、Node v24.18.0、npm 11.16.0，工具均為 Linux。以既有 conda.sh 啟用 app，未安裝任何工具。rg 缺少，使用 git ls-files/find/grep。
+
+### P1-S1 — Provider-only Citation prompt（G1/G8，R01，AC13/15）
+- 唯一產品改動：app/skills/citation/SKILL.md introduction 後增加計劃所列一段，禁止找論文、補 metadata/abstract 或修復失敗／不完整／歧義 provider 結果時轉 Web Search；要求誠實呈現可用結果與限制。
+- 執行者逐句對照原文，保留可見 DOI/arXiv、doi.org、儲存授權、既有 provider／摘要／重試規則及工具可見性；沒有 runtime 封鎖。
+- 實際檢查：在 app/、Conda app 啟用後，隔離 XDG_CACHE_HOME/AGENT_LOG_DIR/TMPDIR，PYTHONDONTWRITEBYTECODE=1；poetry run pytest tests/test_citation_skill_activation.py tests/test_tool_access_matrix.py -q -p no:cacheprovider，exit 0：21 passed，0.57s；一個既有 LangChainPendingDeprecationWarning。
+- 模型遵循沒有動態驗證，沒有付費呼叫；prompt-only 不保證消除違規。
+- 下一步：P2-S1，先讀階段檔與相關搜尋原始碼。
