@@ -431,7 +431,6 @@ export class SearchEngine {
   }
 
   private parseBingResults(html: string, maxResults: number): SearchResult[] {
-    const debugBing = process.env.DEBUG_BING_SEARCH === 'true';
     console.error(`[SearchEngine] BING: Parsing HTML with length: ${html.length}`);
     
     const $ = cheerio.load(html);

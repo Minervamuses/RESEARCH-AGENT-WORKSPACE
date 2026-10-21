@@ -1,6 +1,7 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import pLimit from 'p-limit';
 import { readFileSync } from 'node:fs';
+import { parseInteger } from './utils.js';
 
 export const OPERATION_TIMEOUTS = {
   launch: 10000, searchRequest: 4000, searchSelector: 3000,
@@ -95,8 +96,15 @@ export class BrowserPool {
   private closing?: Promise<void>;
   private owned = new Map<number, string>();
   private readonly ownerFlag = `--web-search-owner=${process.pid}`;
-  private readonly pages = pLimit(2);
-  private readonly http = pLimit(2);
+  private readonly pages = pLimit(parseInteger(process.env.MAX_CONCURRENT_PAGES ?? 2, 'MAX_CONCURRENT_PAGES', 1, Number.MAX_SAFE_INTEGER));
+  private readonly http = pLimit(parseInteger(process.env.MAX_CONCURRENT_HTTP ?? 2, 'MAX_CONCURRENT_HTTP', 1, Number.MAX_SAFE_INTEGER));
+
+  constructor() {
+    const headless = process.env.BROWSER_HEADLESS;
+    if (headless !== undefined && !['true', 'false'].includes(headless)) {
+      throw new Error('Invalid BROWSER_HEADLESS: true or false required');
+    }
+  }
 
   async getBrowser(budget?: CallBudget): Promise<Browser> {
     budget?.remaining();

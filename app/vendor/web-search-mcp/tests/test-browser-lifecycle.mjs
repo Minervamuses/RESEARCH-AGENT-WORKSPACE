@@ -149,6 +149,26 @@ try {
   await closingLaunch;
   pendingBudget.dispose();
   assert.equal(pendingClosed, 1);
+
+  const oldPages = process.env.MAX_CONCURRENT_PAGES, oldHttp = process.env.MAX_CONCURRENT_HTTP;
+  try {
+    process.env.MAX_CONCURRENT_PAGES = '1';
+    process.env.MAX_CONCURRENT_HTTP = '1';
+    const configuredPool = new BrowserPool();
+    let runningHttp = 0, configuredPeak = 0;
+    await Promise.all(Array.from({ length: 3 }, () => configuredPool.withHttp(async () => {
+      runningHttp++; configuredPeak = Math.max(configuredPeak, runningHttp); await pause(5); runningHttp--;
+    })));
+    assert.equal(configuredPeak, 1);
+    process.env.MAX_CONCURRENT_PAGES = '0';
+    assert.throws(() => new BrowserPool(), /MAX_CONCURRENT_PAGES/);
+    process.env.MAX_CONCURRENT_PAGES = '1';
+    process.env.MAX_CONCURRENT_HTTP = '1junk';
+    assert.throws(() => new BrowserPool(), /MAX_CONCURRENT_HTTP/);
+  } finally {
+    if (oldPages === undefined) delete process.env.MAX_CONCURRENT_PAGES; else process.env.MAX_CONCURRENT_PAGES = oldPages;
+    if (oldHttp === undefined) delete process.env.MAX_CONCURRENT_HTTP; else process.env.MAX_CONCURRENT_HTTP = oldHttp;
+  }
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, 0);
   process.stdout.write('single launch, bounded contexts/HTTP, shared ownership and failed launch recovery: passed\n');
 } finally {

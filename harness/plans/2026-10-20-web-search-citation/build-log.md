@@ -8,7 +8,7 @@
 | P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
 | P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
 | P4 | Complete | pool/deadline/取消離線通過；真stdio EOF無殘留 | 公開引擎續P6 | P5-S1 |
-| P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
+| P5 | In progress | P5-S1a：Node設定驗證通過 | 無 | P5-S1b Python傳遞 |
 | P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
 
 ## Authoring A0（2026-10-20，Asia/Taipei）
@@ -214,3 +214,9 @@
 - 同一腳本在呼叫中記錄sh PID42814/PGID42814、Node42816、grep42817及Chromium group42830（含42832/42833/42846/42850/42863）；返回後同腳本核對原starttime，存活殘留[]，無需補殺。沒有公開網路請求。
 - 後續檢查補上pending launch＋shutdown不能互等、close failure保留known result、重複close一次；build及三Node檔exit0（retention14/14），最後Timeout資源0。故障注入輸出兩條Resource cleanup診斷屬預期。
 - P5真入口將在最新程式上複驗；父層startup/initialize/cleanup總上限仍待P5-S3。
+
+### P5-S1a — Node設定消費群（G5/G6/G8，AC07/09/11）
+- S1按設定群拆a（Node三消費處）與b（Python allowlist／README）；本步只改browser-pool.ts、index.ts、search-engine.ts，遵守3產品檔上限。
+- MAX_CONCURRENT_PAGES/HTTP從部署設定取正整數，預設各2；BROWSER_HEADLESS只接受true/false。server啟動即驗DEFAULT_TIMEOUT及MAX_CONTENT_LENGTH，不留silent NaN。
+- 原DEBUG_BING_SEARCH只剩未使用變數、DEBUG_BROWSER_LIFECYCLE已無consumer，依計劃刪除而非留假開關；P5-S1b清楚列不支援。
+- build與browser-lifecycle、retention皆exit0（14/14）。新增部署HTTP=1實際peak1、pages=0及HTTP=1junk明確拒絕；沒有新增環境依賴。

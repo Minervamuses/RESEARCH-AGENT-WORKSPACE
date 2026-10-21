@@ -18,6 +18,8 @@ class WebSearchMCPServer {
   private shuttingDown?: Promise<void>;
 
   constructor() {
+    configuredTimeout();
+    resolveContentLimit();
     this.server = new McpServer({
       name: 'web-search-mcp',
       version: '0.3.1',
