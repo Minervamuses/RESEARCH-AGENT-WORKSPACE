@@ -5,20 +5,27 @@
 每個必要結果都有足夠證據或清楚的未滿足紀錄；實際主Agent使用的新dist被驗證，分段成本已量測，所有改動步驟commit並一次統一彙報。不因走到本階段就自動宣稱完成。
 
 ## P6-S1：建置新dist並走真Python入口
+本步所有真實入口、Chromium、公開網路與殘留程序檢查，都依PLANS「宿主沙箱與執行環境」在沙箱外執行並套用暫存與日誌隔離；這已由U11授權，不再詢問使用者。
 1. 對帳改動、環境與分支。vendor執行conda run -n app --no-capture-output npm run build，確定測的是剛產生的dist/index.js；不commit生成dist或node_modules。
 2. 重用已通過的focused evidence，僅因新改動或整合風險重跑受影響項。新測試真實存在才用實際命令，不能把草擬名稱冒充已有腳本。
 3. 實作一次性或現有test內最小整合程序（目前沒有已驗證專用腳本）：由agent.mcp的既有resolver/loader取得真tool，再ainvoke，確實啟動vendored dist，經現有wrapper與env。不用LLM、不呼叫付費provider、不以mock MCP client冒充全鏈路。
 4. 控制本地HTML/redirect/PDF/慢回應，保存可讀結果及設定對照；靜態HTML route驗HTTP，需瀏覽器的route以DOM動態插入可辨識文字驗browser path。後者若現有「非空HTML」先返回而未啟browser，使用同一現行內部browser入口作受控驗證並另記證據路徑，不誤標為Agent已走browser；AC14要求的Agent browser path仍需實際觸發並證明。可短暫啟動僅綁loopback、當次finally關閉的測試頁面，這不是部署服務或持久存儲。
 5. 驗MAX_CONTENT_LENGTH=37、省略參數的實際Node截斷；顯式71覆寫部署值，0採37的部署預設，10001明確拒絕；觀察有效上限、body與truncated。同候選includeContent=false正文request數0。PDF/HTTP失敗候選保留，final URL和title屬實際頁面。
-6. 真程序成功、timeout、cancel、connection close後確認該次子程序/contexts/timers無殘留，close錯誤不覆寫結果。不能只看狀態碼宣稱成功。
-7. 普通網路實機：在執行當日選一般技術問題與新聞查詢，必要時一筆研究主題的Citation既有recorded資料檢查。使用者不需預給URL；記下當次選例供重現，不寫入產品規則。每個保留搜尋引擎至少有一次可用性觀測；可直接測同一dist adapter，但需標明不等於Python全鏈路。至少有一個完整搜尋和單頁讀取經Python入口；所有保留engine路徑無Firefox由實際可用性＋受控從入口分支驗證覆蓋。保留Brave必須有Chromium實測；無法工作就記原因、停用該engine並重驗候選策略。
+6. 真程序成功、timeout、cancel、connection close後確認該次子程序/contexts/timers無殘留，close錯誤不覆寫結果。殘留檢查在同一腳本內取證。不能只看狀態碼宣稱成功。
+7. 普通網路實機：
+   - 選例：在執行當日選一般技術問題與新聞查詢，必要時一筆研究主題的Citation既有recorded資料檢查。使用者不需預給URL；記下當次選例供重現，不寫入產品規則。
+   - 引擎可用性：每個保留搜尋引擎至少有一次可用性觀測；可直接測同一dist adapter，但需標明不等於Python全鏈路。
+   - 經Python入口：至少一個full-web-search、一個get-web-search-summaries、一個單頁讀取經Python入口，確認兩個搜尋工具的輸出都帶出各引擎狀態與來源引擎（U12）。這些都計入第8點的六組預算。
+   - 無Firefox：所有保留engine路徑無Firefox，由實際可用性＋受控從入口分支驗證覆蓋。
+   - Brave：保留Brave必須有Chromium實測。
+   - 停用引擎的條件：只有在沙箱外實測，且失敗屬於引擎本身（HTTP狀態、挑戰頁、解析）時，才可記原因、停用該engine並重驗候選策略。EROFS、proxy、DNS或宿主拒絕屬環境阻塞，記錄後繼續，不能據此停用。
 8. 六組公開唯讀請求、累計八分鐘上限依PLANS。外網封鎖/結構變動區分實作錯誤與未知，不為湊成功一直換案例、引擎或大重試。各失敗如實記錄，無法完成必要實機項不得標通過。
 
 本步若需要修正，回對應階段新增有穩定ID的最小修復步驟，單獨檢查、commit，再重驗受影響項。一次性診斷清理後不留無用production程式。驗收紀錄提交：test(web-search): record actual Agent-to-Node behavior [P6-S1]。
 
 ## P6-S2：生命週期量測與D05決策
 完成P4後才量測。沿P6-S1相同實際路徑分別觀察：
-- 只取搜尋資訊；
+- 只取搜尋資訊（get-web-search-summaries）；
 - 純HTTP讀取；
 - 真實瀏覽器讀取。
 
@@ -28,9 +35,10 @@ D05決策：記錄修正後startup/discovery/close佔比、使用頻率未知等
 
 證據、限制及決策寫build-log，commit：docs(web-search): record lifecycle timings and session decision [P6-S2]。
 
-## P6-S3：一次完整suite與最後核對
-- 最終程式改動穩定後，從app執行完整現有suite一次。命令見PLANS；先檢查現有設定是否會觸發live付費資源，不讀取或輸出密鑰。若預估／已知超十分鐘，依限制記錄未跑；可用Linux timeout給現有pytest一次600秒上限，逾時就是未完成不是通過，不再跑第二輪全suite。
+## P6-S3：完整suite與最後核對
+- 最終程式改動穩定後，從app在沙箱外執行完整現有suite，命令與暫存／日誌隔離見PLANS；先檢查現有設定是否會觸發live付費資源，不讀取或輸出密鑰。用Linux timeout給一次600秒上限，逾時就是未完成不是通過。若發現regression或環境設定錯誤並修正，修正後可再跑一次（全計劃最多兩次）。
+- 列出被.gitignore涵蓋、依U15未commit的工作樹修改（例如修訂過的build/ phase檔），對應build-log中的修訂紀錄。
 - 每個AC對照結果、命令、輸出摘要/證據位置、錯誤與未驗證項。純provider prompt檢查不保證模型遵守；付費或大規模遵循觀察留未來。
 - git diff --check、staged範圍檢查，確保只有因果範圍；無AGENTS/lock/env變更、無生成store/dist、無無關清理；GUI分支不變，逐步commit可由ID對帳。未修改production的pure-read驗證只有證據文檔要commit。
 - 更新build-log各階段：必要條件未成立留Blocked或In progress，不以總結取代事實。證據/結案commit建議docs(plan): record verification results and remaining limits [P6-S3]。
-- 最終一次彙報：已完成行為與檔案、實際測試和失敗、量測結果及D05、commit對照、仍有的阻塞/恢復前提。明說沒有push、沒有建立／切換branch。可提出最多三個具體後續選項，不能自行擴張或替使用者啟動硬限制。
+- 最終一次彙報：已完成行為與檔案、實際測試和失敗、量測結果及D05、commit對照、仍有的阻塞/恢復前提（含環境阻塞）。明說沒有push、沒有建立／切換branch、執行中沒有停下要求授權或review。可提出最多三個具體後續選項，不能自行擴張或替使用者啟動硬限制。

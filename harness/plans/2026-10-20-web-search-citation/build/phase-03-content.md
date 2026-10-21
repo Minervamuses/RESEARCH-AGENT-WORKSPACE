@@ -5,7 +5,7 @@
 主 Agent 收到固定候選集合、搜尋資料及每個候選此次真正取得的內容／失敗事實；正常文字不被黑名單破壞，連結可供選擇下一步。
 
 ## P3-S1：實際 extractor 的保守轉換
-主要 production 範圍 enhanced-content-extractor.ts、utils.ts（必要時 types.ts）；不修改未使用的 content-extractor.ts。
+主要 production 範圍 enhanced-content-extractor.ts、utils.ts（必要時 types.ts）。不整理未使用的 content-extractor.ts；但它仍被 tsc 編譯，並匯入 types.ts／utils.ts，所以本步變更若使它無法編譯，依 U14 只做讓建置通過的最小型別相容修改。
 - 使用既有 Cheerio，在現有 extractor 內做有限 DOM 走訪，保留段落、標題、清單、code、表格可讀列、figure/figcaption、文字與真正 href。可移除 script/style 等非正文、做基本空白整理；不可用廣泛 class/id 子字串或 topic words 刪內容，不自創主文品質分數。
 - 移除 robotics/captcha/privacy/legal/photo 等字詞及短文品質判定。移除任何因短正文而觸發的 fallback；HTTP 成功但正文無文字可走明確、有限且仍有預算的瀏覽器讀取，不能宣稱判定為低品質。
 - 圖片保留來源存在的 alt/caption（標明只是文字）；公式只保留實際文字／標記，不能補造視覺語意。表格若無法呈現 colspan/rowspan，逐列保留文字並一致註明結構簡化。
