@@ -99,7 +99,7 @@ export class SearchEngine {
             timeout: budget.timeout(OPERATION_TIMEOUTS.searchSelector),
           }).catch(() => undefined);
           budget.remaining();
-          return this.parseBraveResults(await page.content(), numResults);
+          return this.parseBraveResults(await page.content(), numResults, page.url());
         }, budget);
       } catch (error) {
         const err = error as any;
@@ -140,7 +140,7 @@ export class SearchEngine {
       timeout: budget.timeout(OPERATION_TIMEOUTS.searchSelector),
     }).catch(() => undefined);
     budget.remaining();
-    return this.parseBingResults(await page.content(), numResults);
+    return this.parseBingResults(await page.content(), numResults, page.url());
   }
 
   private async tryDirectBingSearch(page: any, query: string, numResults: number, budget: CallBudget): Promise<SearchResult[]> {
@@ -153,7 +153,7 @@ export class SearchEngine {
       timeout: budget.timeout(OPERATION_TIMEOUTS.searchSelector),
     }).catch(() => undefined);
     budget.remaining();
-    return this.parseBingResults(await page.content(), numResults);
+    return this.parseBingResults(await page.content(), numResults, page.url());
   }
 
   private generateConversationId(): string {
@@ -179,7 +179,7 @@ export class SearchEngine {
         timeout: budget.timeout(timeout), maxContentLength: 10 * 1024 * 1024,
         validateStatus: status => status < 400,
       });
-      return this.parseDuckDuckGoResults(response.data, numResults);
+      return this.parseDuckDuckGoResults(response.data, numResults, response.request?.res?.responseUrl ?? 'https://html.duckduckgo.com/html/');
     }, budget);
   }
 
@@ -329,10 +329,11 @@ export class SearchEngine {
     return results;
   }
 
-  private parseBraveResults(html: string, maxResults: number): SearchResult[] {
+  private parseBraveResults(html: string, maxResults: number, baseUrl = 'https://search.brave.com/'): SearchResult[] {
     console.log(`[SearchEngine] Parsing Brave HTML with length: ${html.length}`);
     
     const $ = cheerio.load(html);
+    baseUrl = this.searchPageBase($, baseUrl);
     const results: SearchResult[] = [];
     const timestamp = generateTimestamp();
 
@@ -381,16 +382,6 @@ export class SearchEngine {
           }
         }
         
-        // If still no title, try getting it from any text content
-        if (!title) {
-          const textContent = $element.text().trim();
-          const lines = textContent.split('\n').filter(line => line.trim().length > 0);
-          if (lines.length > 0) {
-            title = lines[0].trim();
-            console.log(`[SearchEngine] Brave found title from text content: "${title}"`);
-          }
-        }
-        
         // Try multiple snippet selectors for Brave
         const snippetSelectors = [
           '.snippet-content',      // Brave specific
@@ -408,11 +399,11 @@ export class SearchEngine {
           }
         }
         
-        if (title && url && this.isValidSearchUrl(url)) {
+        if (url && this.isValidSearchUrl(url)) {
           console.log(`[SearchEngine] Brave found: "${title}" -> "${url}"`);
           results.push({
             title,
-            url: this.cleanBraveUrl(url),
+            url: this.cleanBraveUrl(url, baseUrl),
             observedUrl: url,
             description: snippet,
             fullContent: '',
@@ -430,10 +421,11 @@ export class SearchEngine {
     return results;
   }
 
-  private parseBingResults(html: string, maxResults: number): SearchResult[] {
+  private parseBingResults(html: string, maxResults: number, baseUrl = 'https://www.bing.com/'): SearchResult[] {
     console.error(`[SearchEngine] BING: Parsing HTML with length: ${html.length}`);
     
     const $ = cheerio.load(html);
+    baseUrl = this.searchPageBase($, baseUrl);
     const results: SearchResult[] = [];
     const timestamp = generateTimestamp();
 
@@ -505,8 +497,7 @@ export class SearchEngine {
           const $snippetElement = $element.find(snippetSelector).first();
           if ($snippetElement.length) {
             const candidateSnippet = $snippetElement.text().trim();
-            // Skip very short snippets or those that look like metadata
-            if (candidateSnippet.length > 20 && !candidateSnippet.match(/^\d+\s*(min|sec|hour|day|week|month|year)/i)) {
+            if (candidateSnippet) {
               snippet = candidateSnippet;
               console.log(`[SearchEngine] Bing found snippet with ${snippetSelector}: "${snippet.substring(0, 100)}..."`);
               break;
@@ -514,11 +505,11 @@ export class SearchEngine {
           }
         }
         
-        if (title && url && this.isValidSearchUrl(url)) {
+        if (url && this.isValidSearchUrl(url)) {
           console.log(`[SearchEngine] Bing found: "${title}" -> "${url}"`);
           results.push({
             title,
-            url: this.cleanBingUrl(url),
+            url: this.cleanBingUrl(url, baseUrl),
             observedUrl: url,
             description: snippet,
             fullContent: '',
@@ -536,10 +527,11 @@ export class SearchEngine {
     return results;
   }
 
-  private parseDuckDuckGoResults(html: string, maxResults: number): SearchResult[] {
+  private parseDuckDuckGoResults(html: string, maxResults: number, baseUrl = 'https://html.duckduckgo.com/html/'): SearchResult[] {
     console.log(`[SearchEngine] Parsing DuckDuckGo HTML with length: ${html.length}`);
     
     const $ = cheerio.load(html);
+    baseUrl = this.searchPageBase($, baseUrl);
     const results: SearchResult[] = [];
     const timestamp = generateTimestamp();
 
@@ -557,11 +549,11 @@ export class SearchEngine {
       // Extract snippet
       const snippet = $element.find('.result__snippet').text().trim();
       
-      if (title && url && this.isValidSearchUrl(url)) {
+      if (url && this.isValidSearchUrl(url)) {
         console.log(`[SearchEngine] DuckDuckGo found: "${title}" -> "${url}"`);
         results.push({
           title,
-          url: this.cleanDuckDuckGoUrl(url),
+          url: this.cleanDuckDuckGoUrl(url, baseUrl),
           observedUrl: url,
           description: snippet,
           fullContent: '',
@@ -575,6 +567,14 @@ export class SearchEngine {
 
     console.log(`[SearchEngine] DuckDuckGo found ${results.length} results`);
     return results;
+  }
+
+  private searchPageBase($: cheerio.CheerioAPI, finalUrl: string): string {
+    const href = $('base[href]').first().attr('href');
+    try {
+      const base = new URL(href ?? finalUrl, finalUrl);
+      return ['http:', 'https:'].includes(base.protocol) ? base.href : finalUrl;
+    } catch { return finalUrl; }
   }
 
   private isValidSearchUrl(url: string): boolean {
@@ -605,38 +605,23 @@ export class SearchEngine {
     return url;
   }
 
-  private cleanBraveUrl(url: string): string {
-    return new URL(url, 'https://search.brave.com').href;
+  private cleanBraveUrl(url: string, baseUrl = 'https://search.brave.com/'): string {
+    return new URL(url, baseUrl).href;
   }
 
-  private cleanBingUrl(url: string): string {
-    return new URL(url, 'https://www.bing.com').href;
+  private cleanBingUrl(url: string, baseUrl = 'https://www.bing.com/'): string {
+    return new URL(url, baseUrl).href;
   }
 
-  private cleanDuckDuckGoUrl(url: string): string {
-    // DuckDuckGo URLs are redirect URLs that need to be decoded
-    if (url.startsWith('//duckduckgo.com/l/')) {
-      try {
-        // Extract the uddg parameter which contains the actual URL
-        const urlParams = new URLSearchParams(url.substring(url.indexOf('?') + 1));
-        const actualUrl = urlParams.get('uddg');
-        if (actualUrl) {
-          // Decode the URL
-          const decodedUrl = actualUrl;
-          console.log(`[SearchEngine] Decoded DuckDuckGo URL: ${decodedUrl}`);
-          return decodedUrl;
-        }
-      } catch {
-        console.log(`[SearchEngine] Failed to decode DuckDuckGo URL: ${url}`);
-      }
+  private cleanDuckDuckGoUrl(url: string, baseUrl = 'https://html.duckduckgo.com/html/'): string {
+    const parsed = new URL(url, baseUrl);
+    const target = parsed.searchParams.get('uddg');
+    if ((parsed.hostname === 'duckduckgo.com' || parsed.hostname.endsWith('.duckduckgo.com'))
+      && parsed.pathname === '/l/' && target) {
+      // URLSearchParams has already decoded this observed target once.
+      return new URL(target, parsed).href;
     }
-    
-    // If it's a protocol-relative URL, add https:
-    if (url.startsWith('//')) {
-      return 'https:' + url;
-    }
-    
-    return url;
+    return parsed.href;
   }
 
   async closeAll(): Promise<void> {

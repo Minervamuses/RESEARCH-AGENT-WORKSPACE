@@ -100,6 +100,7 @@ function fakeBrowser(status, events) {
     goto: async () => { events.push('goto'); return { status: () => status }; },
     waitForSelector: async () => { events.push('wait'); throw new Error('no results selector'); },
     content: async () => { events.push('content'); return '<html></html>'; },
+    url: () => 'https://search.brave.com/search',
   };
   const context = { newPage: async () => page, close: async () => events.push('context-close') };
   return { isConnected: () => true, newContext: async () => context, close: async () => events.push('browser-close') };
@@ -199,6 +200,23 @@ check('call expiry preserves fixed candidates and stops remaining engines', asyn
   assert.equal(result.engines.length, 3);
   assert.equal(result.engines[2].attempted, false);
   assert.match(result.engines[2].error, /deadline/);
+});
+
+check('parsers retain short snippets and unknown titles and resolve the actual page base', async () => {
+  const engine = new SearchEngine();
+  const html = '<li class="b_algo"><h2><a href="../item?q=%252F">AI</a></h2><div class="b_caption"><p>AI.</p></div></li>';
+  const [bing] = engine.parseBingResults(html, 1, 'https://www.bing.com/search/path/');
+  assert.equal(bing.description, 'AI.');
+  assert.equal(bing.url, 'https://www.bing.com/search/item?q=%252F');
+  const [missing] = engine.parseBingResults('<li class="b_algo"><h2><a href="/unknown"></a></h2><p>Known snippet.</p></li>', 1);
+  assert.equal(missing.title, '');
+  assert.equal(missing.description, 'Known snippet.');
+  const [brave] = engine.parseBraveResults('<base href="/docs/"><div class="result"><h2><a href="next"></a></h2><p>Actual snippet.</p></div>', 1, 'https://search.brave.com/search');
+  assert.equal(brave.title, '');
+  assert.equal(brave.url, 'https://search.brave.com/docs/next');
+  const [ddg] = engine.parseDuckDuckGoResults('<div class="result"><div class="result__title"><a href="/l/?uddg=https%3A%2F%2Fexample.org%2Fa%252Fb">AI</a></div><div class="result__snippet">AI.</div></div>', 1);
+  assert.equal(ddg.url, 'https://example.org/a%2Fb');
+  assert.equal(ddg.description, 'AI.');
 });
 
 let failed = 0;

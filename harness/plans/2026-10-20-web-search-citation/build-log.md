@@ -275,3 +275,17 @@
 - 公開第5組6.687s，累計5/6組、19.748s<480s；未使用第6組，不再追加公開請求。
 - **D05決策：保留逐次session，不實作重用。** 本樣本startup/init約0.315–0.345s，在極快本機HTTP路徑佔大部分，但絕對耗時小；close6–36ms，沒有本樣本長timer收尾。使用頻率與真實任務收益未知，現有證據不足支持新增ChatSession持久client及其狀態管理。這是量測後取捨，不宣稱相對基線的性能改善或普遍延遲分布。
 - 下一步P6-S3：最終完整app suite（最多兩次授權，尚未執行本次完整suite）與AC/commit/範圍核對。
+
+### P6-S3-V1 — 首次完整suite與最終對照
+- 已檢查pytest設定／shared fakes及既有baseline；沒有需live付費provider的前提。Conda app、repo外/tmp/web-search-p6-suite-o3AVPX的cache/log/tmp隔離，PYTHONDONTWRITEBYTECODE=1。
+- 從app實際執行timeout 600 poetry run pytest -q -p no:cacheprovider：exit0、1512 passed、43.62s；兩個warning為LangChain既有deprecation及既有zip重複member故障fixture。完整輸出/tmp/web-search-p6-suite-o3AVPX/pytest.log。
+- 同指令在suite前後只讀app/store路徑/型別/size/mtime/mode指紋，比對相同；tracked/index仍乾淨，只有原app/store/未追蹤。
+- structural lint：Conda app Python執行既有validate_plan.py --json，exit0，13檔、0 errors/warnings。16個變更檔案無CR；沒有AGENTS/依賴/lock/env/store改動。
+- 對照P2資料契約時發現兩處尚存缺口，以下P2-S3最小修補後，才將第二次完整suite當作最終證據；本次通過歷史保留。
+
+### P2-S3 — 驗收發現的搜尋metadata／相對URL缺口（G2/G4/G8，R04/05/06，AC03/05）
+- 修補前在當時dist直接離線重現：Bing snippet「AI.」被既有>20字門檻丟成空字串；以實際base https://www.bing.com/search/path/ 解析../item?q=%252F，原程式錯成根目錄/item，正確應/search/item。
+- 只改產品search-engine.ts：移除搜尋snippet長度／時間詞門檻；所有實際引擎parser傳實際final URL及有效HTML base作標準解析；DDG相對/l/?uddg也只解碼一次。依原「未知留空」契約保留沒有title但有URL的候選，不再從snippet捏造Brave title。
+- 在既有retention檔新增單一inline parser案例，覆蓋短snippet、缺title、實際頁面base／base href、DDG相對wrapper和%252F；兩份既有fake page補url()接點，沒有新測試框架。
+- npm run build及三份Node檢查exit0；retention15/15、正文契約與資源/取消/清理檢查通過。公開觀測的絕對URL／正常snippet與Python/正文/生命週期路徑未改，不再追加公開請求；仍5/6組、19.748s。
+- 本步檢查與紀錄後獨立commit，再跑最後一次完整suite；未改計劃phase檔或擴大目標。

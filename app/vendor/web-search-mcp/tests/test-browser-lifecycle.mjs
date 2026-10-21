@@ -88,6 +88,7 @@ try {
       throw Object.assign(new Error('selector timeout'), { name: 'TimeoutError' });
     },
     content: async () => '<html></html>',
+    url: () => 'https://www.bing.com/search',
   };
   const selectorEngine = new SearchEngine({ withPage: (fn, _budget) => fn(selectorPage) });
   selectorEngine.tryDuckDuckGoSearch = async (_query, _n, _timeout, _state, budget) => {
