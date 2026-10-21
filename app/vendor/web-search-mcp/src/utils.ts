@@ -1,4 +1,4 @@
-import type { SearchResult, SearchEngineState, WebSearchToolInput } from './types.js';
+import type { SearchResult, SearchEngineState, WebSearchToolInput, PageRead } from './types.js';
 
 /**
  * Utility functions for the web search MCP server
@@ -78,10 +78,25 @@ export function formatSearchResponse(
     lines.push('', `**${index + 1}. Search title: ${result.title}**`,
       `URL: ${result.url}`, `Search snippet: ${result.description}`,
       `Source engines: ${(result.sourceEngines ?? []).join(', ')}`,
-      `Read status: ${result.fetchStatus}`);
-    if (result.error) lines.push(`Read error: ${result.error}`);
-    if (includeContent && result.fullContent) lines.push('', '**Page content:**', result.fullContent);
+      `Read status: ${result.read?.status ?? 'not_attempted'}`);
+    if (includeContent && result.read) lines.push(formatPageRead(result.read));
+    else if (result.error) lines.push(`Read error: ${result.error}`);
   });
+  const counts: Record<string, number> = {};
+  let attempts = 0, http = 0, browser = 0, retries = 0, started = 0;
+  for (const result of results) {
+    const status = result.read?.status ?? 'not_attempted';
+    counts[status] = (counts[status] ?? 0) + 1;
+    const events = result.read?.attempts ?? [];
+    const httpCount = events.filter(a => a.transport === 'http').length;
+    const browserCount = events.filter(a => a.transport === 'browser').length;
+    attempts += events.length;
+    http += httpCount;
+    browser += browserCount;
+    retries += Math.max(0, httpCount - 1) + Math.max(0, browserCount - 1);
+    if (events.length) started++;
+  }
+  lines.push('', `Read statistics: selected=${results.length}; candidates_attempted=${started}; source_read_attempts=${attempts}; http_attempts=${http}; browser_attempts=${browser}; transport_retries=${retries}; returned=${results.length}; states=${JSON.stringify(counts)}`);
   return lines.join('\n');
 }
 
@@ -143,4 +158,26 @@ export function truncateMarkdown(text: string, limit: number): {
 
 export function limitContent(text: string, limit: number): string {
   return truncateMarkdown(text, limit).content;
+}
+
+export function formatPageRead(read: PageRead): string {
+  const lines = [
+    `Requested URL: ${read.requestedUrl}`,
+    `Final URL: ${read.finalUrl ?? 'unknown'}`,
+    `Page title: ${read.pageTitle ?? 'unknown'}`,
+    `HTTP status: ${read.httpStatus ?? 'unknown'}; Content-Type: ${read.contentType ?? 'unknown'}`,
+    `Page read status: ${read.status}; attempts=${read.attempts.length}`,
+  ];
+  for (const event of read.attempts) {
+    lines.push(`- ${event.transport}: status=${event.status ?? 'unknown'}${event.error ? `; error=${event.error}` : ''}`);
+  }
+  if (read.error) lines.push(`Read error: ${read.error}`);
+  if (read.originalLength !== undefined) {
+    lines.push(`Markdown length: returned=${read.returnedLength}; original=${read.originalLength}; limit=${read.maxContentLength} Unicode code points`);
+  }
+  if (read.content) lines.push('', '**Page content:**', read.content);
+  if (read.truncated) {
+    lines.push(`[Content truncated: ${read.returnedLength} of ${read.originalLength ?? 'unknown'} Unicode code points delivered; limit=${read.maxContentLength}; remainder not delivered]`);
+  }
+  return lines.join('\n');
 }

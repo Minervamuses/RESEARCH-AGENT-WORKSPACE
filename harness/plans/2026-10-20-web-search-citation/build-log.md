@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
 | P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
-| P3 | In progress | P3-S1：build／正文契約通過 | 無 | P3-S2 |
+| P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
 | P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
 | P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
@@ -168,3 +168,11 @@
 - 驗證：npm run build exit 0；正文契約與混合PDF(無後綴)/404/短文/空文字/取消/缺失及錯誤media案例通過，來源嘗試總計等於spy事件；retention 13/13，exit 0。
 - 可見統計、截斷標記與兩入口一致輸出在S2b；資源併發／取消清理由P4完成。
 - 首次stage命令因cd層級錯誤把明確路徑算到repo外，exit 1；沒有改分支／index污染，改用repo-root完整相對路徑後重新檢查。
+
+### P3-S2b — 可見頁面資訊與真實統計（G3/G4/G8，AC04/06/07/13）
+- 產品範圍src/index.ts、src/utils.ts；single與full共用formatPageRead，逐頁列真實requested/final URL、page title、HTTP/media、狀態、實際各transport嘗試與失敗、原長度/交付長度/有效limit。
+- 截斷標記在正文外，明示未交付範圍；metadata不計入Unicode正文上限。來源搜尋snippet與Page content分開，unsupported/失敗候選保留。
+- 文字統計來自實際attempt陣列：selected、開始讀取候選數、source/HTTP/browser attempts、同transport retries、各狀態與returned；includeContent=false不呼叫extractor，固定候選不改。
+- 三工具描述指明Citation責任，不再承諾完整全文／已驗證摘要或支持。
+- 驗證npm run build、正文契約與retention皆exit 0：混合5候選實際6來源讀取與spy一致、false=0、URL順序一致、兩入口共享頁面文字、標記/Unicode長度一致；retention13/13。
+- 尚未將stub當實機；實際Python→Node及HTTP/Chromium媒體驗證依P5/P6。

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
 import { WebSearchToolInput, WebSearchToolOutput, SearchResult } from './types.js';
-import { formatSearchResponse, parseInteger, parseBoolean, resolveContentLimit, validateSearchInput } from './utils.js';
+import { formatSearchResponse, formatPageRead, parseInteger, parseBoolean, resolveContentLimit, validateSearchInput } from './utils.js';
 
 class WebSearchMCPServer {
   private server: McpServer;
@@ -31,10 +31,10 @@ class WebSearchMCPServer {
     // Register the main web search tool (primary choice for comprehensive searches)
     this.server.tool(
       'full-web-search',
-      'Search the web and by default read top candidates as conservative Markdown, up to 10000 Unicode code points per page. Failed, unsupported or truncated pages are reported; search snippets remain separate. Use get-web-search-summaries for snippets only.',
+      'Search the web and by default read top candidates as conservative Markdown, up to 10000 Unicode code points per page. Failed, unsupported or truncated pages are reported; search snippets remain separate. Use get-web-search-summaries for snippets only. Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations.',
       {
         query: z.string().describe('Search query to execute (recommended for comprehensive research)'),
-        limit: z.union([z.number(), z.string()]).transform(val => parseInteger(val, 'limit', 1, 10)).default(5).describe('Number of results to return with full content (1-10)'),
+        limit: z.union([z.number(), z.string()]).transform(val => parseInteger(val, 'limit', 1, 10)).default(5).describe('Number of fixed candidates to return (1-10)'),
         includeContent: z.union([z.boolean(), z.string()]).transform(parseBoolean).default(true)
           .describe('Whether to read page content (default true)'),
         maxContentLength: z.union([z.number(), z.string()]).transform(resolveContentLimit).optional()
@@ -77,7 +77,7 @@ class WebSearchMCPServer {
     // Register the lightweight web search summaries tool (secondary choice for quick results)
     this.server.tool(
       'get-web-search-summaries',
-      'Search the web and return only the search result snippets/descriptions without following links to extract full page content. This is a lightweight alternative to full-web-search for when you only need brief search results. For comprehensive information, use full-web-search instead.',
+      'Search the web and return only the search result snippets/descriptions without following links to extract full page content. This is a lightweight alternative to full-web-search for when you only need brief search results. Use full-web-search to read pages. Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations.',
       {
         query: z.string().describe('Search query to execute (lightweight alternative)'),
         limit: z.union([z.number(), z.string()]).transform(val => parseInteger(val, 'limit', 1, 10)).default(5).describe('Number of search results to return (1-10)'),
@@ -139,7 +139,7 @@ class WebSearchMCPServer {
     // Register the single page content extraction tool
     this.server.tool(
       'get-single-web-page-content',
-      'Read a provided web page URL as conservative Markdown, up to 10000 Unicode code points. Report failures and truncation without treating search snippets as page content.',
+      'Read a provided web page URL as conservative Markdown, up to 10000 Unicode code points. Report failures and truncation without treating search snippets as page content. Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations.',
       {
         url: z.string().url().describe('The URL of the web page to extract content from'),
         maxContentLength: z.union([z.number(), z.string()]).transform(resolveContentLimit).optional()
@@ -170,22 +170,7 @@ class WebSearchMCPServer {
             maxContentLength,
           });
 
-          const content = pageRead.content;
-          const title = pageRead.pageTitle ?? 'unknown';
-
-          // Create content preview and word count
-          // const contentPreview = content.length > 200 ? content.substring(0, 200) + '...' : content; // Unused for now
-          const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
-
-          console.log(`[MCP] Single page content extraction completed, extracted ${pageRead.returnedLength} Unicode code points`);
-
-          // Format the result as text
-          let responseText = `**Page Content from: ${obj.url}**\n\n`;
-          responseText += `**Title:** ${title}\n`;
-          responseText += `**Word Count:** ${wordCount}\n`;
-          responseText += `**Content Length:** ${pageRead.returnedLength} Unicode code points\n\n`;
-          
-          responseText += `**Content:**\n${content}`;
+          const responseText = formatPageRead(pageRead);
 
           return {
             content: [
