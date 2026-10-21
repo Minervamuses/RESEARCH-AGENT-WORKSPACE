@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
@@ -10,6 +12,11 @@ from agent import mcp as mcp_module
 
 def _clear_mcp_env(monkeypatch):
     for key in [
+        "MAX_CONTENT_LENGTH",
+        "DEFAULT_TIMEOUT",
+        "MAX_CONCURRENT_PAGES",
+        "MAX_CONCURRENT_HTTP",
+        "BROWSER_HEADLESS",
         "AGENT_ENABLE_MCP_WEB_SEARCH",
         "AGENT_MCP_WEB_SEARCH_COMMAND",
         "AGENT_MCP_WEB_SEARCH_ARGS",
@@ -440,3 +447,37 @@ def test_session_create_survives_mcp_failure(monkeypatch, tmp_path):
         "read_file",
         "bash",
     ]
+
+
+def test_web_search_passes_only_supported_settings_to_both_commands(monkeypatch, tmp_path):
+    _clear_mcp_env(monkeypatch)
+    _install_default_web_search(tmp_path, monkeypatch)
+    expected = {
+        "MAX_CONTENT_LENGTH": "37", "DEFAULT_TIMEOUT": "9000",
+        "MAX_CONCURRENT_PAGES": "1", "MAX_CONCURRENT_HTTP": "2", "BROWSER_HEADLESS": "false",
+    }
+    for key, value in expected.items():
+        monkeypatch.setenv(key, value)
+    for key in ("TMPDIR", "HTTPS_PROXY", "OTHER_PROVIDER_SECRET", "ENABLE_RELEVANCE_CHECKING", "DEBUG_BING_SEARCH"):
+        monkeypatch.setenv(key, "must-not-forward")
+    assert mcp_module._web_search_spec().env == expected
+    monkeypatch.setenv("AGENT_MCP_WEB_SEARCH_COMMAND", "custom-server")
+    monkeypatch.setenv("AGENT_MCP_WEB_SEARCH_ARGS", "--custom")
+    spec = mcp_module._web_search_spec()
+    assert spec.env == expected
+    assert spec.command == "custom-server"
+    assert spec.args == ["--custom"]
+    monkeypatch.setenv("MAX_CONTENT_LENGTH", "invalid")
+    monkeypatch.setenv("AGENT_ENABLE_MCP_WEB_SEARCH", "false")
+    assert mcp_module._web_search_spec() is None
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("MAX_CONTENT_LENGTH", "10001"), ("DEFAULT_TIMEOUT", "300001"),
+    ("MAX_CONCURRENT_PAGES", "0"), ("MAX_CONCURRENT_HTTP", "2junk"), ("BROWSER_HEADLESS", "yes"),
+])
+def test_web_search_rejects_invalid_settings(monkeypatch, name, value):
+    _clear_mcp_env(monkeypatch)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        mcp_module._web_search_spec()

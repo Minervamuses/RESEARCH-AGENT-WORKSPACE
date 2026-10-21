@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shlex
 import shutil
 import uuid
@@ -65,17 +66,43 @@ def _default_web_search_entrypoint() -> Path:
     return find_app_root() / "vendor/web-search-mcp/dist/index.js"
 
 
+def _web_search_env() -> dict[str, str]:
+    """Pass only settings implemented by the vendored web-search server."""
+    env: dict[str, str] = {}
+    for name, maximum in (
+        ("MAX_CONTENT_LENGTH", 10000),
+        ("DEFAULT_TIMEOUT", 300000),
+        ("MAX_CONCURRENT_PAGES", 2**53 - 1),
+        ("MAX_CONCURRENT_HTTP", 2**53 - 1),
+    ):
+        raw = os.environ.get(name)
+        if raw is None:
+            continue
+        raw = raw.strip()
+        if re.fullmatch(r"[0-9]+", raw) is None or not 1 <= int(raw) <= maximum:
+            raise ValueError(f"Invalid {name}: integer between 1 and {maximum} required")
+        env[name] = str(int(raw))
+    headless = os.environ.get("BROWSER_HEADLESS")
+    if headless is not None:
+        headless = headless.strip().lower()
+        if headless not in ("true", "false"):
+            raise ValueError("Invalid BROWSER_HEADLESS: true or false required")
+        env["BROWSER_HEADLESS"] = headless
+    return env
+
+
 def _web_search_spec() -> MCPServerSpec | None:
     if not _env_flag("AGENT_ENABLE_MCP_WEB_SEARCH", default=True):
         return None
 
+    env = _web_search_env()
     command = os.environ.get("AGENT_MCP_WEB_SEARCH_COMMAND", "").strip()
     if command:
         return MCPServerSpec(
             name="web_search",
             command=command,
             args=_parse_args(os.environ.get("AGENT_MCP_WEB_SEARCH_ARGS")),
-            env={},
+            env=env,
         )
 
     entrypoint = _default_web_search_entrypoint()
@@ -98,7 +125,7 @@ def _web_search_spec() -> MCPServerSpec | None:
         name="web_search",
         command=node,
         args=[str(entrypoint)],
-        env={},
+        env=env,
     )
 
 

@@ -220,3 +220,10 @@
 - MAX_CONCURRENT_PAGES/HTTP從部署設定取正整數，預設各2；BROWSER_HEADLESS只接受true/false。server啟動即驗DEFAULT_TIMEOUT及MAX_CONTENT_LENGTH，不留silent NaN。
 - 原DEBUG_BING_SEARCH只剩未使用變數、DEBUG_BROWSER_LIFECYCLE已無consumer，依計劃刪除而非留假開關；P5-S1b清楚列不支援。
 - build與browser-lifecycle、retention皆exit0（14/14）。新增部署HTTP=1實際peak1、pages=0及HTTP=1junk明確拒絕；沒有新增環境依賴。
+
+### P5-S1b — Python allowlist與真env行為（G5/G6/G8，AC07/11）
+- 產品app/agent/mcp.py只傳MAX_CONTENT_LENGTH/DEFAULT_TIMEOUT/BROWSER_HEADLESS/MAX_CONCURRENT_PAGES/MAX_CONCURRENT_HTTP；嚴格驗值。停用最優先，自訂command不混入dist參數，收到同一allowlist；不轉TMPDIR/proxy、舊開關或其他provider秘密。
+- vendor README新增直接設定表、優先序與Unicode/0/timeout語意，修正Firefox安裝與評分敘述；列出失去consumer的debug及舊設定不再支援。未執行安裝。
+- 首次編輯腳本Python字串嵌套docstring語法錯誤，exit1，未修改檔案；修正編輯腳本後完成。focused pytest隔離執行tests/test_mcp.py tests/test_mcp_stderr_log.py -q -p no:cacheprovider：exit0、26 passed、0.74s。
+- 真Agent MCP loader→vendored dist→本機長HTML：MAX_CONTENT_LENGTH=37，省略返回37、顯式71返回71、0返回37，original=699且實際Unicode正文長度一致，10001明確拒絕；呼叫各0.359/0.365/0.346s。這不是只查spec.env。
+- 同一腳本監測discovery與4次call共15個wrapper/Node/grep PID，返回後存活殘留[]；無公開網路請求、無需補殺。下一步P5-S2故障隔離。
