@@ -63,9 +63,11 @@ def test_resolve_mcp_specs_skips_missing_default_web_search(
     monkeypatch.setattr(mcp_module, "find_app_root", lambda: tmp_path)
     monkeypatch.setattr(mcp_module.shutil, "which", lambda name: "/usr/bin/node")
 
-    specs = mcp_module.resolve_mcp_specs()
+    diagnostics = []
+    specs = mcp_module.resolve_mcp_specs(diagnostics=diagnostics)
 
     assert specs == []
+    assert "entrypoint/node" in diagnostics[0]
     assert "enabled by default" in caplog.text
     assert "app/vendor/web-search-mcp" in caplog.text
 
@@ -160,9 +162,11 @@ def test_load_mcp_tools_with_families_skips_failing_server(monkeypatch):
         mcp_module.MCPServerSpec(name="web_search", command="x", args=[], env={}),
         mcp_module.MCPServerSpec(name="github", command="y", args=[], env={}),
     ]
+    diagnostics = []
     tools, families = asyncio.run(
-        mcp_module.load_mcp_tools_with_families(specs=specs)
+        mcp_module.load_mcp_tools_with_families(specs=specs, diagnostics=diagnostics)
     )
+    assert "load: RuntimeError: mcp server crashed" in diagnostics[0]
     assert len(tools) == 1
     assert tools[0].name == "web_fetch"
     assert families == {"web_fetch": "web_search"}
@@ -376,7 +380,7 @@ def test_session_create_loads_mcp_tools(monkeypatch, tmp_path):
         "agent.tools.inventory.create_rag_tools",
         lambda _c: [fake_explore, fake_search, fake_context],
     )
-    async def fake_load():
+    async def fake_load(**_kwargs):
         return [fake_web], {"web_fetch": "web_search"}
 
     monkeypatch.setattr("agent.mcp.load_mcp_tools_with_families", fake_load)
@@ -431,7 +435,7 @@ def test_session_create_survives_mcp_failure(monkeypatch, tmp_path):
         "agent.tools.inventory.create_rag_tools",
         lambda _c: [fake_explore, fake_search, fake_context],
     )
-    async def failing_load():
+    async def failing_load(**_kwargs):
         raise RuntimeError("mcp unavailable")
 
     monkeypatch.setattr("agent.mcp.load_mcp_tools_with_families", failing_load)
@@ -481,3 +485,88 @@ def test_web_search_rejects_invalid_settings(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     with pytest.raises(ValueError, match=name):
         mcp_module._web_search_spec()
+
+
+def test_resolvers_fail_independently_with_stage_diagnostics(monkeypatch):
+    def broken():
+        raise ValueError("app root unavailable")
+    healthy = mcp_module.MCPServerSpec("helper", "helper", [], {})
+    monkeypatch.setattr(mcp_module, "_web_search_spec", broken)
+    monkeypatch.setattr(mcp_module, "_github_spec", lambda: healthy)
+    diagnostics = []
+    assert mcp_module.resolve_mcp_specs(diagnostics=diagnostics) == [healthy]
+    assert diagnostics == ["mcp:web_search: resolve: ValueError: app root unavailable"]
+
+
+def test_connection_preparation_failure_keeps_other_server(monkeypatch):
+    @tool("healthy_fetch")
+    def healthy_fetch(query: str) -> str:
+        """Healthy MCP."""
+        return query
+
+    def prepare(spec):
+        if spec.name == "broken":
+            raise PermissionError("log directory unwritable")
+        return {"transport": "stdio", "command": spec.command}
+
+    class FakeClient:
+        def __init__(self, connections=None):
+            pass
+        async def get_tools(self):
+            return [healthy_fetch]
+
+    import langchain_mcp_adapters.client as client_module
+    monkeypatch.setattr(client_module, "MultiServerMCPClient", FakeClient)
+    monkeypatch.setattr(mcp_module, "_spec_to_connection", prepare)
+    diagnostics = []
+    specs = [mcp_module.MCPServerSpec(name, name, [], {}) for name in ("broken", "healthy")]
+    tools, families = asyncio.run(mcp_module.load_mcp_tools_with_families(
+        specs=specs, diagnostics=diagnostics,
+    ))
+    assert [item.name for item in tools] == ["healthy_fetch"]
+    assert families == {"healthy_fetch": "healthy"}
+    assert "prepare: PermissionError: log directory unwritable" in diagnostics[0]
+
+
+@pytest.mark.parametrize("with_extension", [False, True])
+def test_startup_keeps_local_and_healthy_tools_and_diagnostics(monkeypatch, tmp_path, with_extension):
+    from types import SimpleNamespace
+    from conftest import make_astream_graph
+    from agent.config import AgentConfig
+    from agent.session import ChatSession
+
+    @tool("healthy_fetch")
+    def healthy_fetch(query: str) -> str:
+        """Healthy MCP."""
+        return query
+
+    @tool("extension_fetch")
+    def extension_fetch(query: str) -> str:
+        """Extension MCP."""
+        return query
+
+    def broken():
+        raise RuntimeError("resolver failed")
+    healthy = mcp_module.MCPServerSpec("healthy", "healthy", [], {})
+    dropin = mcp_module.MCPServerSpec("extension", "extension", [], {}, dropin=True)
+    monkeypatch.setattr(mcp_module, "_web_search_spec", broken)
+    monkeypatch.setattr(mcp_module, "_github_spec", lambda: healthy)
+    monkeypatch.setattr("agent.extensions.startup.load_extension_startup", lambda *_args, **_kwargs: SimpleNamespace(
+        skills=[], diagnostics=(), mcp_specs=[dropin] if with_extension else [],
+        global_mcp_families={"healthy", "extension"}, revision=0,
+    ))
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: make_astream_graph())
+    class FakeClient:
+        def __init__(self, connections=None):
+            self.name = next(iter(connections))
+        async def get_tools(self):
+            return [extension_fetch] if self.name == "extension" else [healthy_fetch]
+    import langchain_mcp_adapters.client as client_module
+    monkeypatch.setattr(client_module, "MultiServerMCPClient", FakeClient)
+    session = asyncio.run(ChatSession.create(AgentConfig(persist_dir=str(tmp_path/"persist"))))
+    expected = ["healthy_fetch", "extension_fetch"] if with_extension else ["healthy_fetch"]
+    assert [item.name for item in session.extra_tools] == expected
+    effective = session.tool_access_resolution().effective_tools
+    assert {"read_file", "bash", "rag_search", "healthy_fetch"}.issubset(effective)
+    assert any("web_search: resolve: RuntimeError: resolver failed" in item
+               for item in session.extension_startup_diagnostics)

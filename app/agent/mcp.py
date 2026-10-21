@@ -161,13 +161,28 @@ def _github_spec() -> MCPServerSpec | None:
     )
 
 
-def resolve_mcp_specs() -> list[MCPServerSpec]:
+def resolve_mcp_specs(*, diagnostics: list[str] | None = None) -> list[MCPServerSpec]:
     """Collect default and explicitly configured MCP server launch specs."""
     specs = []
-    for resolver in (_web_search_spec, _github_spec):
-        spec = resolver()
+    for name, resolver in (("web_search", _web_search_spec), ("github", _github_spec)):
+        try:
+            spec = resolver()
+        except Exception as exc:
+            detail = f"mcp:{name}: resolve: {type(exc).__name__}: {exc}"
+            logger.warning("%s", detail)
+            if diagnostics is not None:
+                diagnostics.append(detail)
+            continue
         if spec is not None:
             specs.append(spec)
+        elif _env_flag(
+            "AGENT_ENABLE_MCP_" + name.upper(),
+            default=name == "web_search",
+        ) and diagnostics is not None:
+            diagnostics.append(
+                f"mcp:{name}: resolve: enabled but launch prerequisites are missing "
+                "(entrypoint/node or configured command)"
+            )
     return specs
 
 
@@ -266,7 +281,7 @@ async def load_mcp_tools_with_families(
 ) -> tuple[list, dict[str, str]]:
     """Load MCP tools and return a tool-name to server-family map."""
     if specs is None:
-        specs = resolve_mcp_specs()
+        specs = resolve_mcp_specs(diagnostics=diagnostics)
     if not specs:
         return [], {}
 
@@ -287,16 +302,18 @@ async def load_mcp_tools_with_families(
         claimed_names = set(reserved_tool_names)
     loaded: list[tuple[MCPServerSpec, list, tuple[str, ...]]] = []
     for spec in specs:
-        connections = {spec.name: _spec_to_connection(spec)}
+        stage = "prepare"
         try:
+            connections = {spec.name: _spec_to_connection(spec)}
+            stage = "load"
             client = MultiServerMCPClient(connections=connections)
             server_tools = await client.get_tools()
         except Exception as exc:
-            logger.warning("MCP server %r failed to load: %s", spec.name, exc)
+            logger.warning("MCP server %r failed during %s: %s", spec.name, stage, exc)
             if diagnostics is not None:
                 diagnostics.append(
                     f"mcp:{spec.name}: applied_but_unavailable: "
-                    f"{type(exc).__name__}"
+                    f"{stage}: {type(exc).__name__}: {exc}"
                 )
             continue
         server_names = tuple(

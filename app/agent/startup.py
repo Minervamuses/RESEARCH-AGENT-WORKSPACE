@@ -47,17 +47,14 @@ async def load_session_startup(
         )
 
         try:
-            if extension_startup.mcp_specs:
-                specs = [
-                    *resolve_mcp_specs(),
-                    *extension_startup.mcp_specs,
-                ]
-                extra_tools, families = await load_mcp_tools_with_families(
-                    specs=specs,
-                    diagnostics=runtime_diagnostics,
-                )
-            else:
-                extra_tools, families = await load_mcp_tools_with_families()
+            specs = [
+                *resolve_mcp_specs(diagnostics=runtime_diagnostics),
+                *extension_startup.mcp_specs,
+            ]
+            extra_tools, families = await load_mcp_tools_with_families(
+                specs=specs,
+                diagnostics=runtime_diagnostics,
+            )
         except Exception as exc:
             extra_tools = []
             families = {}

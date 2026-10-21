@@ -227,3 +227,10 @@
 - 首次編輯腳本Python字串嵌套docstring語法錯誤，exit1，未修改檔案；修正編輯腳本後完成。focused pytest隔離執行tests/test_mcp.py tests/test_mcp_stderr_log.py -q -p no:cacheprovider：exit0、26 passed、0.74s。
 - 真Agent MCP loader→vendored dist→本機長HTML：MAX_CONTENT_LENGTH=37，省略返回37、顯式71返回71、0返回37，original=699且實際Unicode正文長度一致，10001明確拒絕；呼叫各0.359/0.365/0.346s。這不是只查spec.env。
 - 同一腳本監測discovery與4次call共15個wrapper/Node/grep PID，返回後存活殘留[]；無公開網路請求、無需補殺。下一步P5-S2故障隔離。
+
+### P5-S2 — Resolver／準備／載入各別隔離（G6/G8，AC12）
+- 只改產品app/agent/mcp.py與startup.py。每resolver捕捉並列server/resolve/原因；缺dist或node與enabled卻缺command進diagnostics。_spec_to_connection與stderr準備放進per-server try，load錯誤保留原隔離並標stage。
+- startup有無extension一律共用同一diagnostics與spec合併入口；單server失敗不清空其他已載工具。沒有改paths.py／stdout filter／log rotation。
+- 最少回歸覆蓋resolver拋錯、prepare PermissionError、get_tools RuntimeError、missing build診斷、有/無extension兩情境仍保留healthy MCP與read_file/bash/rag_search。
+- 隔離環境執行pytest tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py -q -p no:cacheprovider：exit0、39 passed、0.77s；補強既有失敗stage斷言後tests/test_mcp.py重驗exit0、24 passed。只有既有LangChain deprecation warning。
+- 下一步P5-S3：按installed adapter hook實際能力涵蓋startup/initialize/call/cleanup。
