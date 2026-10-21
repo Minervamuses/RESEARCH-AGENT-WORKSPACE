@@ -4,12 +4,12 @@
 ## 階段狀態
 | 階段 | 狀態 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- |
-| P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
-| P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
-| P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
-| P4 | Complete | pool/deadline/取消離線通過；真stdio EOF無殘留 | 公開引擎續P6 | P5-S1 |
-| P5 | Complete | env真入口、故障隔離、父層期限與程序收尾通過 | 公開網路續P6 | P6-S1 |
-| P6 | In progress | P6-S1本機整合／4組公開觀測通過 | DDG零解析、Brave429為外部限制 | P6-S3完整suite與結案 |
+| P1 | Complete | provider-only單段prompt；21 focused＋完整suite | 模型遵循不作零違規宣告 | 結案 |
+| P2 | Complete | 策略B、可見來源/狀態、長度、parser補修；15/15 Node | 引擎本次外部限制見S1 | 結案 |
+| P3 | Complete | 正文/連結/媒體/候選/統計；受控真讀取通過 | 無必要工程阻塞 | 結案 |
+| P4 | Complete | Chromium/併發/deadline/取消/EOF/自有PID收尾通過 | 無必要工程阻塞 | 結案 |
+| P5 | Complete | 真env、故障隔離、完整呼叫預算；46 focused | 無必要工程阻塞 | 結案 |
+| P6 | Complete | 新dist、真入口、分段量測、最終1512 passed | 外部結果品質與prompt遵循界線見下 | 結案 |
 
 ## Authoring A0（2026-10-20，Asia/Taipei）
 - 已讀完整原spec、使用者annotation及Citation/連續執行/commit追加指令；將原spec以LF保存於context/source-spec.md。最新決策集中GOALS，沒有覆寫來源快照。
@@ -289,3 +289,60 @@
 - 在既有retention檔新增單一inline parser案例，覆蓋短snippet、缺title、實際頁面base／base href、DDG相對wrapper和%252F；兩份既有fake page補url()接點，沒有新測試框架。
 - npm run build及三份Node檢查exit0；retention15/15、正文契約與資源/取消/清理檢查通過。公開觀測的絕對URL／正常snippet與Python/正文/生命週期路徑未改，不再追加公開請求；仍5/6組、19.748s。
 - 本步檢查與紀錄後獨立commit，再跑最後一次完整suite；未改計劃phase檔或擴大目標。
+
+### P6-S3 — 最終完整suite、AC與提交結案（G1–G8，AC01–16）
+- 最終產品改動P2-S3提交後，再執行同一隔離命令timeout 600 poetry run pytest -q -p no:cacheprovider：exit0、1512 passed、44.99s，仍只有兩個既有warning。這是本計劃第2/2次完整suite，未再重跑。完整輸出/tmp/web-search-p6-suite-frAgX3/pytest.log。
+- 同指令前後app/store的path/type/size/mtime/mode指紋一致；指紋檢查只讀metadata、不讀資料內容，未觀察到原資料改動。新dist已在P2-S3重build，15/15 retention及正文/生命週期Node檢查皆通過；最後沒有再改產品。
+- 13檔計劃結構檢查exit0、0 errors/warnings；基準3225a90到目前的全diff whitespace檢查exit0、16個變更檔案均LF。依賴、lock、環境定義、AGENTS及既有store均未納入diff。
+- .gitignore涵蓋而未commit：本機重新產生的vendor dist/（含JS/declarations/maps）；沒有force-add產物。六份已追蹤且受build/ ignore的phase檔均未修改，沒有需列為未提交的phase修訂；node_modules沒有安裝／升版。
+- 分支一直GUI，無建／切分支、worktree修改、push、發佈、Git identity修改、付費呼叫或新依賴；執行中沒有要求使用者授權、review或確認。每個改動步驟先focused/check/log，再本地commit成功才續作。
+- 最終改動檔案共16：Python產品mcp.py/startup.py；citation/SKILL.md；vendor七個現行TS檔（browser-pool、enhanced-content-extractor、index、rate-limiter、search-engine、types、utils）與README；test_mcp.py和三份Node測試；本build-log。沒有修改legacy content-extractor.ts或其他子系統。
+
+| AC | 最終結果與證據 |
+| --- | --- |
+| AC01 | Pass：策略B與中文/AI/運動/天氣無語意打分，retention15/15 |
+| AC02 | Pass：來源詞、shadow/metadata、caption、list/table/code/href等inline正文契約 |
+| AC03 | Pass：P2-S3實際page base＋單次解碼；P6真redirect/finalURL/base link與200中介頁自身內容 |
+| AC04 | Pass：無.pdf的PDF、404、空／缺media仍保留候選與snippet，沒有PDF parser |
+| AC05 | Pass：全失敗/零解析/部分成功文字可區分；兩handler共用formatter；真入口可見來源 |
+| AC06 | Pass：full(false)正文0，候選同序；logical transport reads與實際事件／redirect口徑明示 |
+| AC07 | Pass：10000硬上限、0/省略部署預設、數字/字串、Unicode/link截斷；真37/71/0/10001 |
+| AC08 | Pass：src無Firefox路徑；Bing/單頁真Chromium；Brave真Chromium回429也已觀測 |
+| AC09 | Pass：受控同時launch1、context/page峰值2、HTTP峰值2；資訊依本次state/lease |
+| AC10 | Pass：短deadline、真HTTP取消、真stdio EOF、800ms程序故障、3/5s完整入口、強制關自有Chromium；同腳本無存活殘留／timer |
+| AC11 | Pass：真Python→Node env37/71/0，停用/自訂command/args/missing build回歸 |
+| AC12 | Pass：resolver/prepare/load故障各別隔離，兩extension情境保留其他MCP/local tools及診斷 |
+| AC13 | Pass：既有摘要/metadata/支持界線與Citation runtime保留，工具文案準確；完整suite |
+| AC14 | Pass：新dist、真三路徑與分段量測；D05維持逐次session，沒有未做的重用實作宣告 |
+| AC15 | Pass（prompt-only契約）：單段provider限制與載入／工具可見性測試；不等於模型零違規 |
+| AC16 | Pass：以下step/commit對帳；S3結案提交按ID從git log查；沒有忽略路徑提交缺口 |
+
+#### 步驟與本地commit對照
+| Step ID | Commit |
+| --- | --- |
+| P1-S1 | a51bce2 |
+| P2-S1a | 62f7090 |
+| P2-S1b | 71875c3 |
+| P2-S2 | 519d19c |
+| P3-S1 | cbae2aa |
+| P3-S2a | 9d16963 |
+| P3-S2b | ea5142f |
+| P4-S1 | c62868e |
+| P4-S2a | 722c68d |
+| P4-S2b | 2cc77f6 |
+| P4-S2c | 002abf9 |
+| P4-S3 | b7011f0 |
+| P5-S1a | cc8b804 |
+| P5-S1b | 0f8913a |
+| P5-S2 | 640f8a9 |
+| P5-S3 | 741e5f4 |
+| P6-S1 | eace003 |
+| P6-S2 | 3da6a23 |
+| P2-S3 | 7b34c25 |
+| P6-S3 | 本結案提交，以subject中的[P6-S3]從git log查實際hash，不預填自身hash |
+
+#### 尚存限制與未執行範圍
+- 公開5/6組、19.748s：DDG本次0解析，Brave429；Bing排序偏廣、讀到部分200中介頁。本次確保忠實交付、狀態與導覽證據，不聲稱這些結果已回答研究／技術／新聞問題；沒有擅自加入評分／新engine或停用引擎。
+- Citation僅prompt小改；沒有付費LLM遵循試驗，不保證模型永遠不違規。真正模型行為依使用者既定後續觀察，不屬本次必要硬封鎖交付。
+- 300秒總上限以既有邏輯與縮短預算實驗驗證，沒有做多輪實等五分鐘／大規模或GPU試驗。資源限制是每Node程序，沒有跨ChatSession全域限流或32GB實測RAM保證。
+- 沒有尚待執行的必要工程步驟或硬阻塞；P1–P6結案。D05保留逐次session；不自動開始後續優化、硬封鎖或公開搜尋品質工程。
