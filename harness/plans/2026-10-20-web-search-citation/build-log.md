@@ -199,3 +199,9 @@
 - rate-limiter排隊也受budget控制，queued callback再次檢查；沒有另建全域限流／新worker。
 - 驗證：build與三份Node測試exit 0；retention新增到14/14，短deadline保留既有候選且第三引擎不啟動。生命週期測試用20ms selector上限，實際等待逾時後仍進DDG並有剩餘預算；本機真HTTP慢回應35ms取消，收到1次、socket已close、fallback0；timer最後0。
 - Node server跨search/body共用budget尚待S2c；Python程序啟動與stdio收尾在P5。
+
+### P4-S2c — Node三入口共用同一呼叫budget（G5/G8，AC10）
+- 只改產品src/index.ts，所有tool callback在驗參前建立budget、finally dispose；full的search/body、summaries與single均傳相同實例，不分段重開DEFAULT_TIMEOUT。
+- 保留預設總300000／工作285000；接受標準MCP _meta.web_search_work_ms縮短為Python父層剩餘工作預算，不能放寬部署上限。傳輸signal也連到budget，active集合供S3斷線取消。
+- 驗證npm run build與三份Node回歸均exit 0，retention14/14；靜態入口斷言已隨明確budget傳遞更新。
+- 真stdin/程序收尾依S3，Python啟動與初始化有界依P5-S3；目前沒有宣稱父層300秒已驗證。

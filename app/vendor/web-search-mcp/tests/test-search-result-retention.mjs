@@ -177,7 +177,7 @@ check('strict content limits, deployment precedence, booleans and Unicode', asyn
     const { readFile } = await import('node:fs/promises');
     const source = await readFile(path.join(dist, '..', 'src', 'index.ts'), 'utf8');
     assert.equal((source.match(/transform\(resolveContentLimit\)/g) ?? []).length, 2);
-    assert.match(source, /extractContentForResults\(searchResponse.results, limit, maxContentLength\)/);
+    assert.match(source, /extractContentForResults\(searchResponse.results, limit, maxContentLength, budget\)/);
     assert.doesNotMatch(source, /isLikelyLlama|isLikelyRobustModel|parseInt\(|0 = no limit/);
   } finally {
     if (previous === undefined) delete process.env.MAX_CONTENT_LENGTH;

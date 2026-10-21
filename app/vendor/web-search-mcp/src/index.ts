@@ -4,15 +4,17 @@ console.log('Web Search MCP Server starting...');
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { CallBudget, configuredTimeout, cleanupReserve } from './browser-pool.js';
 import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
-import { WebSearchToolInput, WebSearchToolOutput, SearchResult } from './types.js';
+import { WebSearchToolInput, WebSearchToolOutput } from './types.js';
 import { formatSearchResponse, formatPageRead, parseInteger, parseBoolean, resolveContentLimit, validateSearchInput } from './utils.js';
 
 class WebSearchMCPServer {
   private server: McpServer;
   private searchEngine: SearchEngine;
   private contentExtractor: EnhancedContentExtractor;
+  private activeBudgets = new Set<CallBudget>();
 
   constructor() {
     this.server = new McpServer({
@@ -40,7 +42,7 @@ class WebSearchMCPServer {
         maxContentLength: z.union([z.number(), z.string()]).transform(resolveContentLimit).optional()
           .describe('Per-page Markdown Unicode code point limit, 1–10000; omitted or 0 uses MAX_CONTENT_LENGTH (default 10000). Truncation is reported; metadata is excluded.'),
       },
-      async (args: unknown) => {
+      async (args: unknown, extra) => this.withBudget(extra, async budget => {
         console.log(`[MCP] Tool call received: full-web-search`);
         console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
@@ -51,7 +53,7 @@ class WebSearchMCPServer {
           console.log(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
           
           console.log(`[MCP] Starting web search...`);
-          const result = await this.handleWebSearch(validatedArgs);
+          const result = await this.handleWebSearch(validatedArgs, budget);
           
           console.log(`[MCP] Search completed, found ${result.results.length} results`);
           
@@ -71,7 +73,7 @@ class WebSearchMCPServer {
           console.error(`[MCP] Error in tool handler:`, error);
           throw error;
         }
-      }
+      })
     );
 
     // Register the lightweight web search summaries tool (secondary choice for quick results)
@@ -82,7 +84,7 @@ class WebSearchMCPServer {
         query: z.string().describe('Search query to execute (lightweight alternative)'),
         limit: z.union([z.number(), z.string()]).transform(val => parseInteger(val, 'limit', 1, 10)).default(5).describe('Number of search results to return (1-10)'),
       },
-      async (args: unknown) => {
+      async (args: unknown, extra) => this.withBudget(extra, async budget => {
         console.log(`[MCP] Tool call received: get-web-search-summaries`);
         console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
@@ -106,6 +108,7 @@ class WebSearchMCPServer {
             const searchResponse = await this.searchEngine.search({
               query: obj.query,
               numResults: limit,
+              budget,
             });
 
             const responseText = formatSearchResponse(
@@ -133,7 +136,7 @@ class WebSearchMCPServer {
           console.error(`[MCP] Error in get-web-search-summaries tool handler:`, error);
           throw error;
         }
-      }
+      })
     );
 
     // Register the single page content extraction tool
@@ -145,7 +148,7 @@ class WebSearchMCPServer {
         maxContentLength: z.union([z.number(), z.string()]).transform(resolveContentLimit).optional()
           .describe('Markdown Unicode code point limit 1–10000; omitted or 0 uses MAX_CONTENT_LENGTH (default 10000). Metadata and truncation marker are excluded.'),
       },
-      async (args: unknown) => {
+      async (args: unknown, extra) => this.withBudget(extra, async budget => {
         console.log(`[MCP] Tool call received: get-single-web-page-content`);
         console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
@@ -168,6 +171,7 @@ class WebSearchMCPServer {
           const pageRead = await this.contentExtractor.extractContent({
             url: obj.url,
             maxContentLength,
+            budget,
           });
 
           const responseText = formatPageRead(pageRead);
@@ -184,24 +188,39 @@ class WebSearchMCPServer {
           console.error(`[MCP] Error in get-single-web-page-content tool handler:`, error);
           throw error;
         }
-      }
+      })
     );
+  }
+
+  private async withBudget<T>(
+    extra: { signal?: AbortSignal; _meta?: Record<string, unknown> },
+    fn: (budget: CallBudget) => Promise<T>,
+  ): Promise<T> {
+    const total = configuredTimeout();
+    const remaining = extra._meta?.web_search_work_ms;
+    const work = total - cleanupReserve(total);
+    const duration = typeof remaining === 'number' && Number.isFinite(remaining)
+      ? Math.max(0, Math.min(work, remaining)) : work;
+    const budget = new CallBudget(duration, extra.signal);
+    this.activeBudgets.add(budget);
+    try { return await fn(budget); }
+    finally { budget.dispose(); this.activeBudgets.delete(budget); }
   }
 
   private validateAndConvertArgs(args: unknown): WebSearchToolInput {
     return validateSearchInput(args);
   }
 
-  private async handleWebSearch(input: WebSearchToolInput): Promise<WebSearchToolOutput> {
+  private async handleWebSearch(input: WebSearchToolInput, budget: CallBudget): Promise<WebSearchToolOutput> {
     const startTime = Date.now();
     const { query, limit = 5, includeContent = true, maxContentLength } = input;
     
     console.error(`[web-search-mcp] DEBUG: handleWebSearch called with limit=${limit}, includeContent=${includeContent}`);
 
     try {
-      const searchResponse = await this.searchEngine.search({ query, numResults: limit });
+      const searchResponse = await this.searchEngine.search({ query, numResults: limit, budget });
       const enhancedResults = includeContent
-        ? await this.contentExtractor.extractContentForResults(searchResponse.results, limit, maxContentLength)
+        ? await this.contentExtractor.extractContentForResults(searchResponse.results, limit, maxContentLength, budget)
         : searchResponse.results;
 
       const searchTime = Date.now() - startTime;
