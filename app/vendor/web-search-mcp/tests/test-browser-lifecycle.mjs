@@ -124,6 +124,31 @@ try {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   }
+
+  let closeFailures = 0;
+  chromium.launch = async () => ({
+    isConnected: () => true,
+    newContext: async () => ({
+      newPage: async () => ({}),
+      close: async () => { throw new Error('injected context close failure'); },
+    }),
+    close: async () => { closeFailures++; throw new Error('injected browser close failure'); },
+  });
+  const brokenPool = new BrowserPool();
+  assert.equal(await brokenPool.withPage(async () => 'known result'), 'known result');
+  await Promise.all([brokenPool.closeAll(), brokenPool.closeAll()]);
+  assert.equal(closeFailures, 1);
+  let pendingClosed = 0;
+  chromium.launch = async () => { await pause(30); return { ...browser, close: async () => { pendingClosed++; } }; };
+  const closingPool = new BrowserPool();
+  const pendingBudget = new CallBudget(10);
+  const pendingLaunch = closingPool.getBrowser(pendingBudget);
+  await pause(5);
+  const closingLaunch = closingPool.closeAll();
+  await assert.rejects(pendingLaunch, /deadline/);
+  await closingLaunch;
+  pendingBudget.dispose();
+  assert.equal(pendingClosed, 1);
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, 0);
   process.stdout.write('single launch, bounded contexts/HTTP, shared ownership and failed launch recovery: passed\n');
 } finally {

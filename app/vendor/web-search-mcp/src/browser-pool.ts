@@ -1,5 +1,6 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import pLimit from 'p-limit';
+import { readFileSync } from 'node:fs';
 
 export const OPERATION_TIMEOUTS = {
   launch: 10000, searchRequest: 4000, searchSelector: 3000,
@@ -15,7 +16,7 @@ export function configuredTimeout(): number {
 }
 
 export function cleanupReserve(total: number): number {
-  return Math.min(15000, total * 0.05);
+  return Math.min(15000, Math.max(1500, total * 0.05), total / 2);
 }
 
 /** One call's monotonic work deadline and cancellation; no session state. */
@@ -91,6 +92,9 @@ export class BrowserPool {
   private browserWaiters = 0;
   private contexts = new Set<BrowserContext>();
   private damaged = false;
+  private closing?: Promise<void>;
+  private owned = new Map<number, string>();
+  private readonly ownerFlag = `--web-search-owner=${process.pid}`;
   private readonly pages = pLimit(2);
   private readonly http = pLimit(2);
 
@@ -104,10 +108,11 @@ export class BrowserPool {
         this.launching = chromium.launch({
           headless: process.env.BROWSER_HEADLESS !== 'false',
           timeout: budget?.timeout(OPERATION_TIMEOUTS.launch) ?? OPERATION_TIMEOUTS.launch,
-          args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+          args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled', this.ownerFlag],
         }).then(async browser => {
           this.browser = browser;
-          if (!this.browserWaiters && !this.contexts.size) await this.closeAll();
+          this.rememberBrowserProcesses();
+          if (!this.closing && !this.browserWaiters && !this.contexts.size) await this.closeAll();
           return browser;
         }).finally(() => { this.launching = undefined; });
       }
@@ -164,13 +169,49 @@ export class BrowserPool {
     } finally { if (!supplied) budget.dispose(); }
   }
 
+  private rememberBrowserProcesses(): void {
+    try {
+      const children = readFileSync(`/proc/self/task/${process.pid}/children`, 'utf8').trim().split(/\s+/);
+      for (const raw of children) {
+        const pid = Number(raw);
+        if (!pid) continue;
+        const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+        if (!args.includes(this.ownerFlag)) continue;
+        const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ');
+        // Playwright launches Chromium in its own process group. Never kill a shared group.
+        if (Number(fields[2]) === pid) this.owned.set(pid, fields[19]);
+      }
+    } catch (error) { console.error('Browser PID observation:', error); }
+  }
+
+  private killOwnedBrowsers(): void {
+    for (const [pid, started] of this.owned) {
+      try {
+        const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ');
+        const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+        if (fields[19] === started && Number(fields[2]) === pid && args.includes(this.ownerFlag)) {
+          process.kill(-pid, 'SIGKILL');
+        }
+      } catch { /* Already exited. Identity mismatches are never terminated. */ }
+    }
+    this.owned.clear();
+  }
+
   async closeAll(): Promise<void> {
-    const browser = this.browser ?? await this.launching?.catch(() => undefined);
-    if (browser && await boundedClose(() => browser.close())) {
+    if (this.closing) return this.closing;
+    this.closing = (async () => {
+      this.rememberBrowserProcesses();
+      let browser = this.browser;
+      if (!browser && this.launching) {
+        await boundedClose(async () => { browser = await this.launching; });
+      }
+      if (browser) await boundedClose(() => browser!.close());
+      this.killOwnedBrowsers();
       this.browser = undefined;
       this.contexts.clear();
       this.damaged = false;
-    }
+    })().finally(() => { this.closing = undefined; });
+    return this.closing;
   }
 }
 

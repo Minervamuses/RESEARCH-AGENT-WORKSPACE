@@ -7,7 +7,7 @@
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
 | P2 | Complete | P2-S1a/b/S2：build／13個離線案例通過 | 正文政策續於P3 | P3-S1 |
 | P3 | Complete | P3-S1/S2a/S2b：正文、候選、輸出契約通過 | 真讀取續於P6 | P4-S1 |
-| P4 | In progress | P4-S1：共用pool與資源峰值通過 | 真Chromium續P6 | P4-S2a |
+| P4 | Complete | pool/deadline/取消離線通過；真stdio EOF無殘留 | 公開引擎續P6 | P5-S1 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
 | P6 | Not started | 無 | 相依P1/P3/P5 | P6-S1真實入口驗收 |
 
@@ -205,3 +205,12 @@
 - 保留預設總300000／工作285000；接受標準MCP _meta.web_search_work_ms縮短為Python父層剩餘工作預算，不能放寬部署上限。傳輸signal也連到budget，active集合供S3斷線取消。
 - 驗證npm run build與三份Node回歸均exit 0，retention14/14；靜態入口斷言已隨明確budget傳遞更新。
 - 真stdin/程序收尾依S3，Python啟動與初始化有界依P5-S3；目前沒有宣稱父層300秒已驗證。
+
+### P4-S3 — stdin EOF與有界程序收尾（G5/G8，AC08/10）
+- 產品範圍index.ts、browser-pool.ts。stdin end/close、SIGINT/SIGTERM中止active budgets，再關唯一pool後退出；重複shutdown/close共用promise。summaries不再每次closeAll，正常工具只釋放自己的lease，不關其他呼叫的browser。
+- pool有界等待launch與browser.close；close失敗不蓋既有結果。Linux /proc只記錄本Node直接子程序、帶本process專屬ownerFlag的Chromium及其starttime/獨立pgid；有界close後僅對仍符合原身分的自有程序群組收尾，不碰其他browser。
+- 縮短部署timeout的reserve採min(15000,max(1500,total×5%),total/2)，預設仍285000/15000；讓可控短期限留合理清理時間。
+- 真實檢查：Conda app、隔離暫存/日誌、timeout40 Python create_session(_spec_to_connection(_web_search_spec()))，本機HTTP空HTML→真Chromium fallback；回Page read status=text、HTTP/browser共2次、真正title及22字內容。call含startup 1.290s；退出session關stdin後0.023s返回（未等SDK2秒SIGTERM）。
+- 同一腳本在呼叫中記錄sh PID42814/PGID42814、Node42816、grep42817及Chromium group42830（含42832/42833/42846/42850/42863）；返回後同腳本核對原starttime，存活殘留[]，無需補殺。沒有公開網路請求。
+- 後續檢查補上pending launch＋shutdown不能互等、close failure保留known result、重複close一次；build及三Node檔exit0（retention14/14），最後Timeout資源0。故障注入輸出兩條Resource cleanup診斷屬預期。
+- P5真入口將在最新程式上複驗；父層startup/initialize/cleanup總上限仍待P5-S3。

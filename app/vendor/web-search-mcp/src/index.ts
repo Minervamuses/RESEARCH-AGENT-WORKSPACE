@@ -4,7 +4,7 @@ console.log('Web Search MCP Server starting...');
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { CallBudget, configuredTimeout, cleanupReserve } from './browser-pool.js';
+import { CallBudget, configuredTimeout, cleanupReserve, sharedBrowserPool } from './browser-pool.js';
 import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
 import { WebSearchToolInput, WebSearchToolOutput } from './types.js';
@@ -15,6 +15,7 @@ class WebSearchMCPServer {
   private searchEngine: SearchEngine;
   private contentExtractor: EnhancedContentExtractor;
   private activeBudgets = new Set<CallBudget>();
+  private shuttingDown?: Promise<void>;
 
   constructor() {
     this.server = new McpServer({
@@ -103,35 +104,25 @@ class WebSearchMCPServer {
 
           console.log(`[MCP] Starting web search summaries...`);
           
-          try {
-            // Use existing search engine to get results with snippets
-            const searchResponse = await this.searchEngine.search({
-              query: obj.query,
-              numResults: limit,
-              budget,
-            });
+          // Use existing search engine to get results with snippets
+          const searchResponse = await this.searchEngine.search({
+            query: obj.query,
+            numResults: limit,
+            budget,
+          });
 
-            const responseText = formatSearchResponse(
-              obj.query, searchResponse.results, searchResponse.engines,
-            );
+          const responseText = formatSearchResponse(
+            obj.query, searchResponse.results, searchResponse.engines,
+          );
 
-            return {
-              content: [
-                {
-                  type: 'text' as const,
-                  text: responseText,
-                },
-              ],
-            };
-          } finally {
-            // Ensure browsers are cleaned up after search-only operations
-            // This prevents EventEmitter memory leaks when browsers accumulate listeners
-            try {
-              await this.searchEngine.closeAll();
-            } catch (cleanupError) {
-              console.error(`[MCP] Error during browser cleanup:`, cleanupError);
-            }
-          }
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: responseText,
+              },
+            ],
+          };
         } catch (error) {
           console.error(`[MCP] Error in get-web-search-summaries tool handler:`, error);
           throw error;
@@ -238,44 +229,29 @@ class WebSearchMCPServer {
     }
   }
 
+  private shutdown(): Promise<void> {
+    if (this.shuttingDown) return this.shuttingDown;
+    this.shuttingDown = (async () => {
+      for (const budget of this.activeBudgets) budget.abort();
+      try { await sharedBrowserPool.closeAll(); }
+      catch (error) { console.error('Shutdown cleanup:', error); }
+    })();
+    return this.shuttingDown;
+  }
+
   private setupGracefulShutdown(): void {
-    // Handle unhandled promise rejections
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      // Don't exit on unhandled rejections, just log them
+    const stop = () => { void this.shutdown().finally(() => process.exit(0)); };
+    process.stdin.once('end', stop);
+    process.stdin.once('close', stop);
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    process.once('uncaughtException', error => {
+      console.error('Uncaught exception:', error);
+      void this.shutdown().finally(() => process.exit(1));
     });
-
-    // Handle uncaught exceptions
-    process.on('uncaughtException', (error) => {
-      console.error('Uncaught Exception:', error);
-      // Don't exit on uncaught exceptions in MCP context
-    });
-
-    // Graceful shutdown - close browsers when process exits
-    process.on('SIGINT', async () => {
-      console.log('Shutting down gracefully...');
-      try {
-        await Promise.all([
-          this.contentExtractor.closeAll(),
-          this.searchEngine.closeAll()
-        ]);
-      } catch (error) {
-        console.error('Error during graceful shutdown:', error);
-      }
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-      console.log('Shutting down gracefully...');
-      try {
-        await Promise.all([
-          this.contentExtractor.closeAll(),
-          this.searchEngine.closeAll()
-        ]);
-      } catch (error) {
-        console.error('Error during graceful shutdown:', error);
-      }
-      process.exit(0);
+    process.once('unhandledRejection', error => {
+      console.error('Unhandled rejection:', error);
+      void this.shutdown().finally(() => process.exit(1));
     });
   }
 
