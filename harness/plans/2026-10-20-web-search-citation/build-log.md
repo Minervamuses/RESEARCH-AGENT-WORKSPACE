@@ -5,7 +5,7 @@
 | 階段 | 狀態 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- |
 | P1 | Complete | P1-S1：21 passed，逐句核對通過 | 模型遵循未做付費驗收 | 依步驟 ID 查 commit |
-| P2 | In progress | P2-S1a：build／11個離線案例通過 | 無 | P2-S1b 兩工具輸出 |
+| P2 | In progress | P2-S1a/b：build／12個離線案例通過 | 無 | P2-S2 長度參數 |
 | P3 | Not started | 無 | 相依P2 | P3-S1轉換 |
 | P4 | Not started | 無 | 相依P3 | P4-S1資源擁有 |
 | P5 | Not started | 無 | 相依P4；P5-S2可獨立 | P5-S1設定傳遞 |
@@ -135,3 +135,11 @@
 - 引擎回傳 attempted、實際傳輸 attempts、parsedCount、completed/zero_parsed/error；候選正文初始 not_requested。保留現有最多一次傳輸重試與 Brave 403/429 快失敗，移除 DDG 二次 URL decode、無效 scheme 與依 captcha/title 詞彙猜測的診斷。
 - 驗證：Conda app 中於 vendor 執行 npm run build（exit 0）；node tests/test-search-result-retention.mjs（exit 0，11/11）。涵蓋2+重複+3補足5、第三引擎未呼叫、失敗保留、全失敗/全零解析、中文/AI/運動/天氣、URL、403/429。
 - 目前工具文字與候選過量取回仍待 S1b 接通；Firefox／共享資源與 deadline 依 P4。未作網路 smoke。
+
+### P2-S1b — 兩搜尋工具的可見輸出（G2/G4/G8，AC01/03/05）
+- src/utils.ts 增加無 stdio 副作用的 formatSearchResponse；src/index.ts 的 full-web-search／get-web-search-summaries 均使用同一 formatter，src/types.ts 最小增加 engines 交付欄位。
+- 文字區分全失敗、零解析、部分成功，逐引擎列 attempted/attempts/parsed_count/status/error，逐候選列來源引擎、搜尋 title/snippet 與 read status。移除 index 的錯誤詞彙分類與正文模式過量取候選；不再以正文成功補換搜尋候選。
+- 初次 build exit 1：新增 formatter 的換行字串被編輯腳本展成實際換行（TS1002）；針對字串修正後 npm run build exit 0。
+- node tests/test-search-result-retention.mjs exit 0，12/12；新增輸出文字差異、候選來源斷言，靜態讀 index.ts 確認兩個 handler 都調用 formatter。未 import index 啟動 server。
+- P3 仍須修復既有 extractor 的 PDF 過濾與成功優先；本步未將它宣稱通過。下一步 P2-S2。
+- 提交前 git diff --check 首次指出 utils.ts 原檔尾端的空白在追加內容後成為變更行；已移除該處空白後重驗。

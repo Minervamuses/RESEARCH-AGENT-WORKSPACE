@@ -125,6 +125,25 @@ for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'par
   });
 }
 
+const { formatSearchResponse } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
+check('both search tools share distinguishable engine and provenance text', async () => {
+  const error = new Error('HTTP 429');
+  const failed = await engineWith({ bing: error, ddg: error, brave: error }).engine.search({ query: 'x' });
+  const empty = await engineWith().engine.search({ query: 'x' });
+  const partial = await engineWith({ bing: [record('one', '1')], ddg: error }).engine.search({ query: 'x' });
+  const render = r => formatSearchResponse('x', r.results, r.engines);
+  const texts = [failed, empty, partial].map(render);
+  assert.equal(new Set(texts).size, 3);
+  assert.match(texts[0], /All attempted engines failed/);
+  assert.match(texts[1], /status=zero_parsed/);
+  assert.match(texts[2], /Source engines: Browser Bing/);
+  assert.match(texts[2], /Axios DuckDuckGo: attempted=true; attempts=1; parsed_count=0; status=error/);
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(path.join(dist, '..', 'src', 'index.ts'), 'utf8');
+  assert.equal((source.match(/const responseText = formatSearchResponse\(/g) ?? []).length, 2);
+  assert.match(source, /numResults: limit/);
+});
+
 let failed = 0;
 for (const { name, fn } of cases) {
   logs.length = 0;

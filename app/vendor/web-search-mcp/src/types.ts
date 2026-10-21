@@ -46,6 +46,7 @@ export interface WebSearchToolOutput {
   search_time_ms: number;
   query: string;
   status?: string;
+  engines?: SearchEngineState[];
 }
 
 // New types for search summaries (snippets only)

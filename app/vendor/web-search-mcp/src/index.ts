@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
 import { WebSearchToolInput, WebSearchToolOutput, SearchResult } from './types.js';
-import { isPdfUrl } from './utils.js';
+import { formatSearchResponse } from './utils.js';
 
 class WebSearchMCPServer {
   private server: McpServer;
@@ -97,40 +97,10 @@ class WebSearchMCPServer {
           
           console.log(`[MCP] Search completed, found ${result.results.length} results`);
           
-          // Format the results as a comprehensive text response
-          let responseText = `Search completed for "${result.query}" with ${result.total_results} results:\n\n`;
-          
-          // Add status line if available
-          if (result.status) {
-            responseText += `**Status:** ${result.status}\n\n`;
-          }
-          
-          const maxLength = validatedArgs.maxContentLength;
-          
-          result.results.forEach((searchResult, idx) => {
-            responseText += `**${idx + 1}. ${searchResult.title}**\n`;
-            responseText += `URL: ${searchResult.url}\n`;
-            responseText += `Description: ${searchResult.description}\n`;
-            
-            if (searchResult.fullContent && searchResult.fullContent.trim()) {
-              let content = searchResult.fullContent;
-              if (maxLength && maxLength > 0 && content.length > maxLength) {
-                content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
-              }
-              responseText += `\n**Full Content:**\n${content}\n`;
-            } else if (searchResult.contentPreview && searchResult.contentPreview.trim()) {
-              let content = searchResult.contentPreview;
-              if (maxLength && maxLength > 0 && content.length > maxLength) {
-                content = content.substring(0, maxLength) + `\n\n[Content truncated at ${maxLength} characters]`;
-              }
-              responseText += `\n**Content Preview:**\n${content}\n`;
-            } else if (searchResult.fetchStatus === 'error') {
-              responseText += `\n**Content Extraction Failed:** ${searchResult.error}\n`;
-            }
-            
-            responseText += `\n---\n\n`;
-          });
-          
+          const responseText = formatSearchResponse(
+            result.query, result.results, result.engines ?? [], validatedArgs.includeContent,
+          );
+
           return {
             content: [
               {
@@ -193,27 +163,9 @@ class WebSearchMCPServer {
               numResults: limit,
             });
 
-            // const searchTime = Date.now() - startTime; // Unused for now
-
-            // Convert to summary format (no content extraction)
-            const summaryResults = searchResponse.results.map(item => ({
-              title: item.title,
-              url: item.url,
-              description: item.description,
-              timestamp: item.timestamp,
-            }));
-
-            console.log(`[MCP] Search summaries completed, found ${summaryResults.length} results`);
-            
-            // Format the results as text
-            let responseText = `Search summaries for "${obj.query}" with ${summaryResults.length} results:\n\n`;
-            
-            summaryResults.forEach((summary, i) => {
-              responseText += `**${i + 1}. ${summary.title}**\n`;
-              responseText += `URL: ${summary.url}\n`;
-              responseText += `Description: ${summary.description}\n`;
-              responseText += `\n---\n\n`;
-            });
+            const responseText = formatSearchResponse(
+              obj.query, searchResponse.results, searchResponse.engines,
+            );
 
             return {
               content: [
@@ -368,45 +320,10 @@ class WebSearchMCPServer {
     console.error(`[web-search-mcp] DEBUG: handleWebSearch called with limit=${limit}, includeContent=${includeContent}`);
 
     try {
-      // Request extra search results to account for potential PDF files that will be skipped
-      // Request up to 2x the limit or at least 5 extra results, capped at 10 (Google's max)
-      const searchLimit = includeContent ? Math.min(limit * 2 + 2, 10) : limit;
-      
-      console.log(`[web-search-mcp] DEBUG: Requesting ${searchLimit} search results to get ${limit} non-PDF content results`);
-      
-      // Perform the search
-      const searchResponse = await this.searchEngine.search({
-        query,
-        numResults: searchLimit,
-      });
-      const searchResults = searchResponse.results;
-      
-      // Log search summary
-      const pdfCount = searchResults.filter(result => isPdfUrl(result.url)).length;
-      const followedCount = searchResults.length - pdfCount;
-      console.error(`[web-search-mcp] DEBUG: Search engine: ${searchResponse.engine}; ${limit} requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed.`);
-
-      // Extract content from each result if requested, with target count
-      const enhancedResults = includeContent 
-        ? await this.contentExtractor.extractContentForResults(searchResults, limit)
-        : searchResults.slice(0, limit); // If not extracting content, just take the first 'limit' results
-      
-      // Log extraction summary with failure reasons and generate combined status
-      let combinedStatus = `Search engine: ${searchResponse.engine}; ${limit} result requested/${searchResults.length} obtained; PDF: ${pdfCount}; ${followedCount} followed`;
-      
-      if (includeContent) {
-        const successCount = enhancedResults.filter(r => r.fetchStatus === 'success').length;
-        const failedResults = enhancedResults.filter(r => r.fetchStatus === 'error');
-        const failedCount = failedResults.length;
-        
-        const failureReasons = this.categorizeFailureReasons(failedResults);
-        const failureReasonText = failureReasons.length > 0 ? ` (${failureReasons.join(', ')})` : '';
-        
-        console.error(`[web-search-mcp] DEBUG: Links requested: ${limit}; Successfully extracted: ${successCount}; Failed: ${failedCount}${failureReasonText}; Results: ${enhancedResults.length}.`);
-        
-        // Add extraction info to combined status
-        combinedStatus += `; Successfully extracted: ${successCount}; Failed: ${failedCount}; Results: ${enhancedResults.length}`;
-      }
+      const searchResponse = await this.searchEngine.search({ query, numResults: limit });
+      const enhancedResults = includeContent
+        ? await this.contentExtractor.extractContentForResults(searchResponse.results, limit)
+        : searchResponse.results;
 
       const searchTime = Date.now() - startTime;
 
@@ -415,58 +332,12 @@ class WebSearchMCPServer {
         total_results: enhancedResults.length,
         search_time_ms: searchTime,
         query,
-        status: combinedStatus,
+        engines: searchResponse.engines,
       };
     } catch (error) {
       console.error('Web search error:', error);
       throw new Error(`Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }
-
-  private categorizeFailureReasons(failedResults: SearchResult[]): string[] {
-    const reasonCounts = new Map<string, number>();
-    
-    failedResults.forEach(result => {
-      if (result.error) {
-        const category = this.categorizeError(result.error);
-        reasonCounts.set(category, (reasonCounts.get(category) || 0) + 1);
-      }
-    });
-    
-    return Array.from(reasonCounts.entries()).map(([reason, count]) => 
-      count > 1 ? `${reason} (${count})` : reason
-    );
-  }
-
-  private categorizeError(errorMessage: string): string {
-    const lowerError = errorMessage.toLowerCase();
-    
-    if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
-      return 'Timeout';
-    }
-    if (lowerError.includes('403') || lowerError.includes('forbidden')) {
-      return 'Access denied';
-    }
-    if (lowerError.includes('404') || lowerError.includes('not found')) {
-      return 'Not found';
-    }
-    if (lowerError.includes('bot') || lowerError.includes('captcha') || lowerError.includes('unusual traffic')) {
-      return 'Bot detection';
-    }
-    if (lowerError.includes('too large') || lowerError.includes('content length') || lowerError.includes('maxcontentlength')) {
-      return 'Content too long';
-    }
-    if (lowerError.includes('ssl') || lowerError.includes('certificate') || lowerError.includes('tls')) {
-      return 'SSL error';
-    }
-    if (lowerError.includes('network') || lowerError.includes('connection') || lowerError.includes('econnrefused')) {
-      return 'Network error';
-    }
-    if (lowerError.includes('dns') || lowerError.includes('hostname')) {
-      return 'DNS error';
-    }
-    
-    return 'Other error';
   }
 
   private setupGracefulShutdown(): void {

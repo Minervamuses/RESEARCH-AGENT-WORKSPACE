@@ -1,3 +1,5 @@
+import type { SearchResult, SearchEngineState } from './types.js';
+
 /**
  * Utility functions for the web search MCP server
  */
@@ -58,4 +60,27 @@ export function isPdfUrl(url: string): boolean {
     // If URL parsing fails, check the raw string as fallback
     return url.toLowerCase().endsWith('.pdf');
   }
-} 
+}
+/** Agent-visible facts shared by both search tools; importing this never starts stdio. */
+export function formatSearchResponse(
+  query: string, results: SearchResult[], engines: SearchEngineState[], includeContent = false,
+): string {
+  const lines = [`Search for "${query}": ${results.length} candidates`, 'Engine execution:'];
+  for (const engine of engines) {
+    lines.push(`- ${engine.name}: attempted=${engine.attempted}; attempts=${engine.attempts}; parsed_count=${engine.parsedCount}; status=${engine.status}${engine.error ? `; error=${engine.error}` : ''}`);
+  }
+  if (!results.length) {
+    lines.push(engines.every(e => e.status === 'error')
+      ? 'All attempted engines failed; no candidates are available.'
+      : 'No candidates parsed in this call; this is not evidence of no matching pages.');
+  }
+  results.forEach((result, index) => {
+    lines.push('', `**${index + 1}. Search title: ${result.title}**`,
+      `URL: ${result.url}`, `Search snippet: ${result.description}`,
+      `Source engines: ${(result.sourceEngines ?? []).join(', ')}`,
+      `Read status: ${result.fetchStatus}`);
+    if (result.error) lines.push(`Read error: ${result.error}`);
+    if (includeContent && result.fullContent) lines.push('', '**Page content:**', result.fullContent);
+  });
+  return lines.join('\n');
+}
