@@ -786,3 +786,19 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - Google 在較高用量或較長時間下的穩定性；
   - Bing 中文市場的實際結果。
 - 依完成判準，本計劃為「完成，附未驗證項與一項流程偏離」。
+
+## 交付後變更（2026-10-22，使用者決定）
+- 使用者看過 F7-S4 的最終彙報後回覆：「直接把bing拿掉好了」；對「以實際請求時點重做公開觀測」回覆「先不用，原因同上」；並要求「修改README以符合最新狀態，改完後push」。
+- `feat(web-search): search Google only and drop Bing`：
+  - 移除 Bing 的方法、解析器、搜尋位址與市場參數，以及只為第二個引擎存在的 strategy_stopped 狀態、跨引擎來源合併與「部分失敗」零候選句；
+  - Google 的行為不變，不足 limit 時如實回報。
+  - 取代 FU01 中「Bing 依語言為備援」的部分（GOALS 為計劃當時的決策紀錄，未改寫）。
+- **檢查**：
+  - `npm run build` exit 0；retention 29/29、content-contract、browser-lifecycle、test-server-entry 7/7 都是 exit 0；focused pytest 80 passed；
+  - evidence/F3-S3/resolve-real.mjs 以真實完整版 Chromium、本機假 Google 重跑：JavaScript、302、PDF、不回應目標都解開（7–15 ms），不跳轉的包裝為 stayed_on_engine_host，沒有殘留程序。
+- `docs(web-search): describe Google-only search`：vendor README 改為只搜尋 Google，並寫明移除三個引擎的理由；root README 不需修改。
+- **對既有紀錄的影響**：
+  - F6-S3 的突變 N02d（省略 strategy_stopped 引擎）與 N02g（合併來源只印第一個）所在的程式已不存在，現在屬於不再適用；
+  - F7-S3 中與 Bing 相關的觀測與 FG9 的 Bing 未驗證項不再適用；
+  - evidence/F7-S2、F7-S3 的腳本保留為歷史證據，其中設定 Bing 的部分不會再被產品使用。
+- 公開觀測不重做（使用者決定）；Google 請求間隔的偏離仍維持原紀錄。
