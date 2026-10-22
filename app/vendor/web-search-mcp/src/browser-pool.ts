@@ -161,13 +161,18 @@ export class BrowserPool {
     } finally { this.browserWaiters--; }
   }
 
+  /**
+   * onStart runs once the page slot is held, right before the browser launch or context creation
+   * begins (FA07's "started"); a lease that expires while queued never calls it.
+   */
   async withPage<T>(
-    fn: (page: Page, context: BrowserContext) => Promise<T>, supplied?: CallBudget,
+    fn: (page: Page, context: BrowserContext) => Promise<T>, supplied?: CallBudget, onStart?: () => void,
   ): Promise<T> {
     const budget = supplied ?? new CallBudget();
     try {
       return await budget.wait(this.pages(async () => {
         budget.remaining();
+        onStart?.();
         const browser = await this.getBrowser(budget);
         const pendingContext = browser.newContext({ userAgent: normalUserAgent(browser.version()) }).then(async context => {
           this.contexts.add(context);

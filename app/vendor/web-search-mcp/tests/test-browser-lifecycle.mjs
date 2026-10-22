@@ -330,6 +330,31 @@ try {
   }
   await pause(120);
 
+  // FA07: withPage reports a start once its slot is held, before launch; a queued lease never does.
+  {
+    let starts = 0, failing = true;
+    chromium.launch = async () => { if (failing) throw new Error('launch failed before any page'); return browser; };
+    const startPool = new BrowserPool();
+    const launchBudget = new CallBudget(1000);
+    await assert.rejects(startPool.withPage(async () => 'never', launchBudget, () => { starts++; }), /launch failed/);
+    launchBudget.dispose();
+    assert.equal(starts, 1, 'a failed launch still started');
+    failing = false;
+    let release;
+    const holding = new Promise(resolve => { release = resolve; });
+    const busy = [startPool.withPage(() => holding), startPool.withPage(() => holding)];
+    const queuedBudget = new CallBudget(30);
+    let queuedStarts = 0;
+    await assert.rejects(startPool.withPage(async () => 'late', queuedBudget, () => { queuedStarts++; }), /deadline/);
+    queuedBudget.dispose();
+    release();
+    await Promise.all(busy);
+    await pause(5);
+    assert.equal(queuedStarts, 0, 'a lease that expired in the queue never started');
+    await startPool.closeAll();
+    chromium.launch = original;
+  }
+
   // FA10: owned Chromium is recognised after argv/comm rewrites; a stuck close still ends with SIGKILL.
   {
     const { spawn } = await import('node:child_process');

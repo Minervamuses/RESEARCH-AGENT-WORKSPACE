@@ -9,7 +9,7 @@
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
-| F5 | Not started | — | — | — | F5-S1（F4 已完成） |
+| F5 | In progress | F5-S0 | build-log（已提交測試） | — | F5-S1 |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
 | F7 | Not started | — | — | 相依 F6 | — |
 
@@ -440,4 +440,11 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
     - 9f3867b 的乾淨重建失敗於「rewritten owner process recognised」（AF22 重現）。
   - 真實完整版 Chromium（沙箱外、短 TMPDIR、環境含 DBUS_SESSION_BUS_ADDRESS；同一個 evidence/F3-S1/full-chromium.mjs → evidence/F4-S2/full-chromium-owned.json）：browser 根程序的 cmdline 仍只有 1 個 NUL 欄位，但 poolOwned 已記錄該 pid（exe 在 chromium-1181/，pgid=pid，starttime 相符）；收尾後沒有存活程序。F3-S1 時同一腳本的 poolOwned 是空的。
 - **F4 階段結論**：FG3 的四項（HTTP 總時間、讀取上限、每頁視窗、自有 Chromium 辨識與有界收尾）都有離線與本機證據；真實 Agent 入口的觀測留給 F7-S2。
+- **下一步**：F5-S1。
+
+### F5-S0 BrowserPool 的開始通知（執行中新增的步驟）
+- **新增原因**：F5-S1（引擎 attempts）與 F5-S2（瀏覽器 fallback 在取得 page 之前失敗也要計數）都要用 FA07 的「開始」定義。這個時點只有 BrowserPool.withPage 知道，但兩步都已各有 3 個 production 檔，所以把介面獨立成一步。phase-5 已補上本步的說明。
+- **改動**：src/browser-pool.ts 的 withPage 新增可選的第三個參數 onStart。取得 page slot 並通過 `budget.remaining()` 之後、getBrowser 與建立 context 之前呼叫一次；在佇列中逾期的 lease 不呼叫。既有呼叫端不受影響。
+- **測試**：tests/test-browser-lifecycle.mjs：launch 失敗時 onStart 為 1 次；兩個 slot 被占住時，第三個 lease 在 30 ms 期限內逾期，onStart 為 0 次。
+- **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；browser-lifecycle 連跑 3 次 exit 0；retention 26/26、content-contract 5 組 exit 0。
 - **下一步**：F5-S1。

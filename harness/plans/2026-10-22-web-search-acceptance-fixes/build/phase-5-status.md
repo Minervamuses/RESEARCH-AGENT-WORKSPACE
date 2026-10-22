@@ -14,6 +14,13 @@
 
 本階段引擎與頁面採用同一個「開始」定義（FA07、FA08）：已發出 HTTP 請求，或已開始為這次讀取啟動瀏覽器、建立 context，才算開始。只在佇列中等待、從未取得 slot 的，不算開始，改以原因呈現。
 
+## F5-S0：BrowserPool 的開始通知（執行中新增）
+- **新增原因**：F5-S1、F5-S2 都要依上面的「開始」定義計數，但只有 BrowserPool.withPage 知道 page slot 何時取得、何時開始啟動瀏覽器或建立 context。這兩步已各有 3 個 production 檔，所以把這個介面獨立成一步。
+- **production 檔**：src/browser-pool.ts。
+- **工作**：withPage 新增可選的 onStart 回呼。取得 page slot 並通過預算檢查後、開始 getBrowser（啟動或重用 browser）與建立 context 之前呼叫一次；在佇列中就逾期的 lease 不呼叫。既有行為不變。
+- **最少檢查**（tests/test-browser-lifecycle.mjs）：launch 失敗時 onStart 已被呼叫 1 次；兩個 slot 被占住、第三個 lease 在佇列中逾期時，onStart 為 0 次。
+- commit：`feat(web-search): report when a page lease starts [F5-S0]`。
+
 ## F5-S1：引擎執行事實
 - **production 檔**：src/types.ts、src/search-engine.ts、src/utils.ts。
 - **處理**：AF11、AF12、AF13、AF32、AF37（N03b）。
