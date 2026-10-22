@@ -83,14 +83,14 @@
    - FA0 只撰寫、驗證並本地 commit 本計劃。
    - 使用者送出 PROMPTS 的啟動提示後，執行者持續完成計劃列明的必要工作：範圍內修正、測試、計劃維護與逐步 commit。
    - 同一個啟動同時授權依下方「宿主沙箱與執行環境」在沙箱外執行列明的檢查並連網。
-   - 從啟動到最終彙報之間，任何時點都不停下來要求授權、review 或確認。遇到問題就記錄、隔離受影響的步驟，繼續其他可做的工作，最後統一彙報。
+   - 從啟動到最終彙報之間，任何時點都不停下來等待使用者驗證、review、確認或授權（S8）。所有檢查由執行者自己執行並記錄證據；需要使用者決定的事項，只列入最終彙報的後續選項，不等待回覆。遇到問題就記錄、隔離受影響的步驟，繼續其他可做的工作，最後統一彙報。
    - 本文件的文字本身不授予任何權限。
 2. **第一個動作**：
    - 讀適用的 AGENTS.md、GOALS、本文件、build-log。
    - 唯讀核對 pwd、branch（必須是 GUI）、HEAD、`git status --short`、`git diff --cached --name-only`，以及 Conda 工具路徑。
-   - 記錄原有的 dirty／index 項目。不得 reset、stash、clean、amend、rebase，也不更動 worktree。若分支已不是 GUI，不自行切回，記錄為硬阻塞。
+   - 記錄原有的 dirty／index 項目。不得 reset、stash、clean、amend、rebase，也不更動 worktree。若分支已不是 GUI，不自行切回（S8 不準切換 branch），記錄為硬阻塞。
    - 確認本計劃已在 HEAD 中被追蹤：GOALS、PLANS、PROMPTS、build-log、plan-index.json、context/ 下的四份檔案，以及 plan-index.json 中每個 phases[].file（共七份 build/phase-*.md），都要通過 `git ls-files --error-unmatch -- <路徑>`。任何一份沒有通過，代表 [FA0] 或 [FA1] 尚未提交，記錄為硬阻塞，不開始實作。
-   - 在 vendor 目錄 build，並跑三份既有 Node 測試，確認基線仍綠，結果記入 build-log。
+   - 在 vendor 目錄 build，並跑三份既有 Node 測試，確認基線仍綠，結果記入 build-log。這份唯讀核對紀錄併入下一個步驟的 commit。
 3. **檔案範圍**：
    - 各步驟列出的 production 檔，每步最多 3 個：app/vendor/web-search-mcp/src/*.ts、app/agent/mcp.py、app/agent/startup.py。
    - 既有與新增的測試、README、本計劃目錄都不計入這個數量。
@@ -100,11 +100,11 @@
      - app/agent 只能修改 MCP client 端的啟動、生命週期與診斷（F2）；
      - app/agent 不 import vendor 程式，vendor 也不 import app/agent；
      - 不新增 Python 依賴，也不新增引擎或瀏覽器相關的環境設定。
-4. **每步 commit，狀態同步**：
-   - 每個 F?-S? 是一個完整、可檢查的改動單位。完成 focused 檢查並更新 build-log（事件紀錄與頂端狀態表都要更新）後，立即在 GUI 本地 commit，成功後才開始下一個改動步驟。
-   - 不累積多步再一起提交。
-   - 測試失敗時，可以 commit 一個標示未完成、保留失敗證據的 checkpoint，subject 寫成 `[F?-S? checkpoint]`；依賴該成功條件的步驟不得繼續。
-   - 純唯讀的檢查不製造空 commit。
+4. **每一步強制 commit，狀態同步（S8）**：
+   - 每個 F?-S? 是一個完整、可檢查的改動單位，包括執行中新增的修正步驟。完成 focused 檢查並更新 build-log（事件紀錄與頂端狀態表都要更新）後，立即在 GUI 本地 commit，成功後才開始下一步。沒有例外：任何步驟都不得在沒有 commit 的情況下結束。
+   - 不累積多步再一起提交，也不把多步合併成一個 commit。
+   - 檢查失敗、步驟被隔離或阻塞時，同樣必須 commit：提交一個標示未完成、保留失敗證據與 build-log 紀錄的 checkpoint，subject 寫成 `[F?-S? checkpoint]`；依賴該成功條件的步驟不得繼續。
+   - 每一步至少會更新 build-log，所以一定有內容可提交，不製造空 commit。
    - 狀態表只用四種狀態：Not started、In progress、Blocked、Complete。
 5. **commit 作法**：
    - 先看 `git status --short`、`git diff`、`git diff --cached --name-only`。
@@ -112,15 +112,17 @@
    - 不使用 `git add .`，不帶入別人已 staged 的變更。
    - root .gitignore 忽略 build/。本計劃的七份 build/phase-*.md 已在 [FA0] 與 [FA1] 以 `git add -f` 逐檔追蹤：
      - 對它們執行一般的 `git add --` 時，雖然已 stage，仍會回 exit 1 並提示 Use -f。因此修訂 phase 檔時，改用 `git add -f -- <確切的 phase 檔路徑>` 一併提交。它們是已追蹤的計劃文件，不是生成資料。
-     - 依 S4，也可以不提交 phase 檔的修訂，但必須在 build-log 記錄摘要與原因，最終彙報列出未提交的修訂。
-   - 其他被 .gitignore 涵蓋的路徑（dist/、node_modules/、cache）不必 commit。用 `git check-ignore --no-index -v <path>` 判斷。
+     - 依 S8，phase 檔的修訂一律提交，不再適用 S4「gitignore 內的東西不必commit」的例外。
+   - 其他被 .gitignore 涵蓋的路徑（dist/、node_modules/、cache）是生成資料，不提交。用 `git check-ignore --no-index -v <path>` 判斷。
    - 絕不 force-add dist 或生成資料。
    - 需要 hash 時，從 git log 以步驟 ID 反查，不為記錄自己的 hash 再 commit 一次。
 6. **禁止事項**：
-   - 不 push，不建立或切換 branch，不 fork worktree，不改 Git identity，不繞過 hooks，不刪除未追蹤資料，不代使用者發佈。
+   - 不 push。全程只在 GUI 分支上工作（S8）：不建立、切換、刪除或重新命名 branch，不切到其他分支或 detached HEAD，不建立或 fork worktree。
+   - 不改 Git identity，不繞過 hooks，不刪除未追蹤資料，不代使用者發佈。
    - 不使用付費模型或服務，不新增依賴或服務，不建立通用框架。
    - 外部請求只限下方預算內的公開唯讀 smoke。
 7. **問題處理**：
+   - 任何問題都不停下來等待使用者（S8「有問題記錄下來就好」）：記錄在 build-log，依下列規則處理或隔離，然後繼續。
    - 一般失敗先記錄，提出單一因果假設，做最小修正，再 focused 重驗。
    - 同一問題最多兩次 focused 修正；仍失敗就隔離該問題，繼續互不相依的工作。
    - 環境類失敗依下方歸類處理，不消耗修正額度。
@@ -203,6 +205,6 @@ pytest 與真實路徑命令都套用上一節的隔離。以下命令都已存�
 - mutation-survivors 的必殺項全部被殺死，或依 GOALS FA12 記錄等效／不再適用的理由。
 - 受影響的 focused 檢查與完整 suite 都通過。
 - 真實 Python→Node 入口重現各項修正。
-- 所有改動步驟都已 commit（.gitignore 涵蓋的路徑除外）；分支仍是 GUI，沒有 push；執行中沒有停下要求授權或 review。
+- 每一步都已 commit（只有 dist 等 .gitignore 涵蓋的生成資料除外）；分支仍是 GUI，沒有建立或切換 branch，沒有 push；執行中沒有停下等待使用者驗證、授權或 review。
 
 若仍有失敗或無法執行的必要檢查，交付時必須寫「部分完成／有阻塞」，不得因為已走到 F7 就宣稱完成。計劃的「可啟動」只代表路線足以開始執行。

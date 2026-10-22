@@ -113,7 +113,7 @@
   - 解析成功率不低於 80% 才算通過；
   - 低於 80%，或有任何一筆在包裝頁正常回應的情況下記為 stayed on engine host，就保存該包裝頁的摘錄並判斷：屬於轉接器缺陷時，依上一條回到 F3 修正；屬於引擎事實（例如需要點擊的中介頁）時，記錄理由。
 
-不把搜尋相關性當成缺陷。被擋時不改變引擎設定，變更需另經使用者決策。環境失敗依 PLANS 歸類。
+不把搜尋相關性當成缺陷。被擋時不改變引擎設定，也不停下來等待；是否調整列入最終彙報的後續選項，由使用者事後決定。環境失敗依 PLANS 歸類。
 
 外部頁面每頁只保存 ≤2000 code points 的摘錄，以 JSON 字串保存，避免尾端空白讓 `git diff --cached --check` 失敗；不保存 cookie 或 nonce。commit：`test(web-search): record public engine observations [F7-S3]`。
 
@@ -128,7 +128,7 @@
    - 以 `git log --grep='\[FA0\]' -1 --format=%H` 找到撰寫 commit，對它之後的全部 diff 執行 `git diff --check`。
    - 變更檔案都是 LF。
    - 沒有依賴、lock、環境定義或 AGENTS.md 變更（規劃後清理中經使用者同意移除的兩個依賴除外）。
-   - 列出 .gitignore 涵蓋而未提交的修改，例如 dist，以及未以 -f 提交的 phase 檔修訂。
+   - 列出 .gitignore 涵蓋而未提交的生成資料，例如 dist；並確認計劃檔（包括 build/ 下的 phase 檔）沒有未提交的修訂（S8）。
    - FU06：
      - `git diff --name-only <FA0 commit>..HEAD -- app/agent` 只列出 app/agent/mcp.py；F2-S2 確實需要時，再加 app/agent/startup.py；
      - 在 app/agent 的 diff 中以 grep 檢查 google、bing、chromium、playwright、engine、channel、user-agent 等字樣，不得出現搜尋相關邏輯，命中時逐一說明；
@@ -147,6 +147,6 @@
    - commit 對照；
    - 最多三個具體的後續選項。
 
-   明說沒有 push、沒有建立或切換 branch、執行中沒有停下要求授權或 review。
+   明說沒有 push、沒有建立或切換 branch、執行中沒有停下等待使用者驗證、授權或 review，並確認每一步都有對應的 commit。
 
 commit：`docs(plan): close web search acceptance fixes [F7-S4]`。

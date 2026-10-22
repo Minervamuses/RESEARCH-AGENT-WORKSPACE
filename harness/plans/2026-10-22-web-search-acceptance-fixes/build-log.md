@@ -1,5 +1,5 @@
 # 執行狀態與證據
-本文件是唯一的動態狀態擁有者。規劃與驗收的觀察不代表修正已完成；實際結果見下方各步驟事件。每個改動步驟的 commit，都必須同時更新本表與事件紀錄。狀態只用 Not started、In progress、Blocked、Complete。
+本文件是唯一的動態狀態擁有者。規劃與驗收的觀察不代表修正已完成；實際結果見下方各步驟事件。每一步都強制 commit（見 PLANS 執行契約第 4 項），每個 commit 都必須同時更新本表與事件紀錄。狀態只用 Not started、In progress、Blocked、Complete。
 
 ## 階段狀態
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
@@ -128,4 +128,19 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - FG9：PLANS 完成判準改為 FG1–FG9；F7-S3 加入被擋、轉接器缺陷、零結果的判定與 80% 解析成功率門檻；F7-S4 加入 FU01–FU06 與 FG9 的證據表；F7-S2 案例 9、10 改以真實完整版 Chromium 與本機假引擎，執行真實的引擎方法與連結解析。
   - 其餘：第一個動作改為逐檔核對 plan-index 列出的 phase 檔；AutomationControlled 啟動參數列為保留的基線行為；列出 F3-S1、F3-S2 必須更新的既有斷言；Google 相對 href 依 R04 以頁面基底解析；F6-S1 案例 13 改用會記錄 newContext 選項的 fake browser；FU06 改為具體的 Git 與 grep 檢查；F3-S1 以完整版 Chromium 重跑 F1-S2 的晚渲染矩陣。
 - **Git**：新的五份 phase 檔（phase-3-engines 到 phase-7-delivery）以 `git add -f` 逐檔追蹤；舊檔名 phase-3-timeouts、phase-4-status、phase-5-regression、phase-6-delivery 在同一個 commit 中移除。
+- 所有階段仍為 Not started。
+
+## Revision FA2（2026-10-22，執行方式）
+- 依使用者要求（GOALS S8）：「修改一下prompt，不要停下來等我驗證，一次執行到底，有問題記錄下來就好，每一步皆強制commit，不準切換/創造branch」。只改計劃，不執行。
+- PROMPTS：重寫啟動提示，逐條寫明不等使用者驗證、問題記錄後繼續、每一步強制 commit、只在 GUI 分支上工作；使用者端前提補充「執行者本身不會停下來等你」。
+- GOALS：新增 S8，優先序改為 S8 > S7 > …；改寫 FG8 與 Git 的不變條件。
+- PLANS：
+  - 授權邊界：不停下等待使用者驗證；需要使用者決定的事項只列入最終彙報；
+  - 第一個動作的唯讀核對紀錄，併入下一個步驟的 commit；
+  - 每一步強制 commit，沒有例外；失敗、隔離或阻塞的步驟也要提交 checkpoint；
+  - 刪除「phase 檔修訂可以不提交」的選項；
+  - branch 限制擴充為不建立、切換、刪除、重新命名，不切到 detached HEAD，不建立 worktree；
+  - 問題處理：任何問題都不停下來等待；
+  - 完成判準同步改寫。
+- F3-S3、F7-S3：引擎被擋時「交給使用者決定」改為列入最終彙報的後續選項，執行中不等待。F7-S4：確認沒有未提交的計劃檔，並確認每一步都有對應的 commit。
 - 所有階段仍為 Not started。

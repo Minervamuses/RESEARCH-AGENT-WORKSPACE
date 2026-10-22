@@ -4,10 +4,17 @@
 以下是使用者日後可以直接送出的啟動提示，不是撰寫階段的執行指令。
 
 > **使用者端前提**（給使用者看，不是給執行者的指令）：
-> - 宿主對沙箱外指令的權限提示不受本計劃控制。若希望啟動後離開、回來時已經跑完，請以不逐次詢問沙箱外指令的權限模式啟動；否則執行會停在第一個沙箱外檢查（最早可能是 F1-S2 的真實 Chromium 檢查），等待宿主的提示。執行者不會另外用文字詢問；宿主拒絕時，依 PLANS 記為環境阻塞並繼續。
+> - 執行者本身不會停下來等你；但宿主對沙箱外指令的權限提示不受本計劃控制。若希望啟動後離開、回來時已經跑完，請以不逐次詢問沙箱外指令的權限模式啟動；否則執行會停在第一個沙箱外檢查（最早可能是 F1-S2 的真實 Chromium 檢查），等待宿主的提示。宿主拒絕時，依 PLANS 記為環境阻塞並繼續。
 > - 執行可能因宿主的用量上限而中斷。再次送出同一段提示即可續作。
 
-> 執行 harness/plans/2026-10-22-web-search-acceptance-fixes/ 計劃。先讀適用的 AGENTS.md、[GOALS.md](GOALS.md)、[PLANS.md](PLANS.md)、[build-log.md](build-log.md)，再讀下一個相依已滿足的 build 階段檔與 [驗收發現](context/acceptance-findings.md)。先核對目前的 GUI 分支、HEAD、dirty/index、Conda app 與 Linux 工具鏈，以步驟 ID 對帳已完成的步驟與 commit；保留既有的 app/store/、note/ 等無關工作。依 PLANS 的執行契約，在授權範圍內 end-to-end 執行到底：一般問題先記錄並做最小修正，完成可做的工作後統一彙報；中途任何時點都不停下來要求授權、review 或確認，阻塞只隔離受影響的步驟並如實記錄。每個改動步驟完成檢查、更新 build-log 事件與狀態表後，都必須在本地 commit（.gitignore 涵蓋的路徑不必 commit），成功後才進入下一步；禁止 push、建立或切換 branch。真實程序、量測與公開請求的證據存入計劃目錄 evidence/，不依賴 /tmp。沒有硬阻塞時，持續完成所有必要階段，不得把未驗證的項目宣稱為通過。這個請求授權執行計劃列明的改動與本地 commit，也授權依 PLANS「宿主沙箱與執行環境」在沙箱外執行列明的檢查與連網（公開請求最多六組、八分鐘）；沙箱外仍失敗就記錄後繼續。不授權新依賴、付費呼叫、push 或發佈。
+> 執行 harness/plans/2026-10-22-web-search-acceptance-fixes/ 計劃，一次執行到底。先讀適用的 AGENTS.md、[GOALS.md](GOALS.md)、[PLANS.md](PLANS.md)、[build-log.md](build-log.md)，再讀下一個相依已滿足的 build 階段檔與 [驗收發現](context/acceptance-findings.md)。先唯讀核對目前的 GUI 分支、HEAD、dirty/index、Conda app 與 Linux 工具鏈，以步驟 ID 對帳已完成的步驟與 commit；保留既有的 app/store/、note/ 等無關工作。依 PLANS 的執行契約做事，並遵守以下要求：
+>
+> - **不要停下來等我驗證**：從啟動到最終彙報，任何時點都不停下來等我驗證、review、確認或授權。所有檢查由你自己執行並把證據記錄下來；需要我決定的事項（例如引擎被擋後要不要調整），只列入最終彙報的後續選項，不等我回覆。我會在全部完成後才回來人工檢查。
+> - **有問題記錄下來就好**：遇到問題就記錄在 build-log，依 PLANS 的問題處理規則做最小修正，或隔離受影響的步驟，然後繼續其他可做的工作，最後統一彙報。不得把未驗證的項目宣稱為通過。
+> - **每一步皆強制 commit**：每個步驟（包括執行中新增的修正步驟，以及檢查失敗時保留證據的 checkpoint）完成檢查、更新 build-log 事件與狀態表後，都必須在本地 commit，成功後才進入下一步；不得把多步合併成一個 commit。計劃檔一律提交，包括 build/ 下的 phase 檔（用 `git add -f`）；只有 dist、node_modules 等 .gitignore 涵蓋的生成資料不提交。commit 失敗時依 PLANS 的硬阻塞規則處理，不得宣稱已提交。
+> - **不準切換或建立 branch**：全程只在 GUI 分支上工作。不建立、切換、刪除或重新命名 branch，不切到其他分支或 detached HEAD，不建立 worktree，也不 push。啟動時若分支不是 GUI，不自行切換，依 PLANS 記為硬阻塞。
+>
+> 真實程序、量測與公開請求的證據存入計劃目錄 evidence/，不依賴 /tmp。沒有硬阻塞時，持續完成所有必要階段。這個請求授權執行計劃列明的改動與本地 commit，也授權依 PLANS「宿主沙箱與執行環境」在沙箱外執行列明的檢查與連網（公開請求最多六組、八分鐘）；沙箱外仍失敗就記錄後繼續。不授權新依賴、付費呼叫、push 或發佈。
 
 第一個可執行動作：PLANS 執行契約第 2 項的唯讀環境與 Git 核對，加上基線 build 與 Node 測試。
 - 尚無實作證據時，從 [F1](build/phase-1-content.md) 的 F1-S1 開始。

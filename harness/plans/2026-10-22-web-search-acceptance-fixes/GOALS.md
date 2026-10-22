@@ -16,8 +16,12 @@
   - 啟動上限 15 秒：「我同意」。
 
   另聲明：「為了維持工具的獨立性、以利維護和開發，web search仍然要維持一個mcp的形式，不要和我原本的專案交叉汙染」。歸納為下方 FU01–FU06。
+- **S8 使用者對執行方式的要求（2026-10-22）**：「修改一下prompt，不要停下來等我驗證，一次執行到底，有問題記錄下來就好，每一步皆強制commit，不準切換/創造branch」。
+  - 這延續 S4，並收緊兩點：執行中不等使用者驗證；每一步都必須 commit，計劃檔（包括 build/ 下的 phase 檔）不再適用 S4「存在於gitignore內的東西不必commit」的例外，也取代舊 U15 中「包括本計劃 build/ 下已追蹤的 phase 檔」的部分。
+  - dist、node_modules 等生成資料仍不提交（S5 的 AGENTS.md）。
+  - 已寫入 [PROMPTS.md](PROMPTS.md) 的啟動提示與 PLANS 的執行契約。
 
-優先序：S7 > S1 > S3 的使用者決策（被 S7 取代的部分除外） > S2 > S4 > S5 > S6。S2 的發現描述的是現況，不會擴大 S3 的需求。
+優先序：S8 > S7 > S1 > S3 的使用者決策（被 S7 取代的部分除外） > S2 > S4 > S5 > S6。S2 的發現描述的是現況，不會擴大 S3 的需求。
 
 ## 目標與驗收
 | 目標 | 必須可觀察的結果 | 擁有階段 | 來源 |
@@ -29,7 +33,7 @@
 | FG5 | Python 包裝穩健：任何程序名稱都不會讓 /proc 解析出錯；觀察者的錯誤不會取代已收到的結果；取消時不留未取回的例外；診斷顯示階段、根因與 log 位置；工作期限後才到的回應如實報告為「未取得」並附有效預算；啟動（discovery）以 15 秒為上限，卡住時不拖住整個 session | F2 | G6/A03、R11、AF24–28、FU05 |
 | FG6 | 已提交的測試真正守護驗收項：入口生命週期、handler 接線、Node 與 Python 的預算／設定契約、舊 P4-S2 聚焦案例、程序樹回收、診斷、Citation 段落、工具文案，以及新的引擎、瀏覽器與連結解析都有斷言；突變清單中的「必殺」項全部被殺死，或依 FA12 記錄等效／不再適用的理由 | F2、F3、F4、F5、F6 | AF29–39、mutation-survivors |
 | FG7 | 文件與實際行為一致；真實 Python→Node 入口逐項重現修正；Google 與 Bing 在本計劃修改後重新觀測；完整 suite 通過；證據保存在 repository 內；最後一次統一彙報 | F7 | R08/R12、AF40–44 |
-| FG8 | GUI 分支逐步本地 commit（.gitignore 涵蓋路徑除外），每個 commit 同步更新 build-log 狀態表；end-to-end 執行，中途不停下等待授權或 review；不 push、不建立或切換 branch | F1–F7 | S4、S5 |
+| FG8 | 在 GUI 分支上每一步強制本地 commit（只有 dist 等 .gitignore 涵蓋的生成資料除外，計劃檔一律提交），每個 commit 同步更新 build-log 狀態表；一次執行到底，中途不停下等待使用者驗證、授權或 review，問題記錄後繼續；不 push、不建立或切換 branch | F1–F7 | S8、S4、S5 |
 | FG9 | 搜尋以 Google 為主、Bing 依查詢語言作為備援，DuckDuckGo 與 Brave 的程式移除；瀏覽器為完整版 Chromium 加一般 UA；回傳的網址是經實際導覽解開的真實網址，解不開時如實標示；全部只在 web search MCP 內完成 | F3 | FU01–FU04、FU06、OD1 實測、AF41、X13 |
 
 ## 範圍
@@ -88,5 +92,5 @@
 - 除 FU03 的固定一般 UA 外，不做隨機延遲或其他指紋擬態；既有的 `--disable-blink-features=AutomationControlled` 啟動參數是基線行為，保留不動，也不新增同類參數。Google 被擋時不重試、不繞過，如實回報並交給 Bing。
 - FU06：web search 維持獨立 MCP。搜尋相關的變更只在 app/vendor/web-search-mcp；app/agent 只能修改 MCP client 端的啟動、生命週期與診斷；兩邊不互相 import，不新增 Python 依賴，不新增引擎或瀏覽器相關的環境設定。
 - 不修改 AGENTS.md，不修改 site-packages。舊 content-extractor.ts 已於規劃後的清理中刪除（OD3）。
-- 不 push，不建立或切換 branch，不改 Git identity，不繞過 hooks，不使用付費模型或服務。
+- 不 push。全程只在 GUI 分支上（S8）：不建立、切換、刪除或重新命名 branch，不切到其他分支或 detached HEAD，不建立 worktree。不改 Git identity，不繞過 hooks，不使用付費模型或服務。
 - app/store/ 與 note/20261022/ 是規劃前就已存在的未追蹤使用者資料，不修改、不提交。app/store/ 不讀取內容；note/20261022/ 只作背景閱讀（S6）。

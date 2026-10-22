@@ -127,7 +127,7 @@ commit：`feat(web-search): search Google first with Bing as fallback [F3-S2]`�
    - 不猜測、不解碼。
 5. **去重**：跨引擎去重改以解析後的網址進行。A05 的「完全相同 URL 才合併」套用在解析後的網址上，所以 Google 與 Bing 指向同一目標的結果會合併來源。
 6. **使用範圍**：兩個搜尋工具都輸出解析後的網址；includeContent=true 時，正文直接讀解析後的網址。
-7. **已知風險**：解析會對搜尋主機送出額外的請求。F7-S3 記錄解析之後的 Google 搜尋是否被擋；被擋時如實記錄，交給使用者決定，不自行加入延遲或改變流程。
+7. **已知風險**：解析會對搜尋主機送出額外的請求。F7-S3 記錄解析之後的 Google 搜尋是否被擋。被擋時如實記錄，列入最終彙報的後續選項，由使用者事後決定；執行中不停下來等待，也不自行加入延遲或改變流程。
 
 最少檢查（stub page，放在 browser-lifecycle 或 retention 測試）：
 - 包裝網址被替換為解析出的網址，observedUrl 與解析紀錄都在，耗時有紀錄；非包裝網址（包括 support.google.com）不導覽。
