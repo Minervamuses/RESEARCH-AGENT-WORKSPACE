@@ -22,8 +22,14 @@ export function formatSearchResponse(
       : 'No candidates parsed in this call; this is not evidence of no matching pages.');
   }
   results.forEach((result, index) => {
-    lines.push('', `**${index + 1}. Search title: ${result.title}**`,
-      `URL: ${result.url}`, `Search snippet: ${result.description}`,
+    lines.push('', `**${index + 1}. Search title: ${result.title}**`, `URL: ${result.url}`);
+    const link = result.resolution;
+    if (link?.outcome === 'resolved') {
+      lines.push(`Link: engine redirect from ${new URL(link.wrapperUrl).host} resolved by navigation in ${link.ms} ms`);
+    } else if (link) {
+      lines.push(`Link: engine redirect not resolved (${link.outcome}${link.reason ? `: ${link.reason}` : ''}); this URL is the engine's redirect wrapper, not the source page`);
+    }
+    lines.push(`Search snippet: ${result.description}`,
       `Source engines: ${(result.sourceEngines ?? []).join(', ')}`,
       `Read status: ${result.read?.status ?? 'not_attempted'}`);
     if (includeContent && result.read) lines.push(formatPageRead(result.read));
@@ -42,7 +48,9 @@ export function formatSearchResponse(
     retries += Math.max(0, httpCount - 1) + Math.max(0, browserCount - 1);
     if (events.length) started++;
   }
-  lines.push('', `Read statistics: selected=${results.length}; candidates_attempted=${started}; source_read_attempts=${attempts}; http_attempts=${http}; browser_attempts=${browser}; transport_retries=${retries}; returned=${results.length}; states=${JSON.stringify(counts)}`);
+  const redirects = results.filter(result => result.resolution);
+  const resolved = redirects.filter(result => result.resolution!.outcome === 'resolved').length;
+  lines.push('', `Read statistics: selected=${results.length}; candidates_attempted=${started}; source_read_attempts=${attempts}; http_attempts=${http}; browser_attempts=${browser}; transport_retries=${retries}; returned=${results.length}; states=${JSON.stringify(counts)}; engine_redirects_resolved=${resolved}; engine_redirects_unresolved=${redirects.length - resolved}`);
   return lines.join('\n');
 }
 

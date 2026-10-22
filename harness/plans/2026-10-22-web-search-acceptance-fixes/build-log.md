@@ -5,9 +5,9 @@
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
-| F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3（建議順序中先做 F2-S1） |
+| F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3 |
 | F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
-| F3 | In progress | F3-S1、F3-S2、F3-S3 | evidence/F3-S1/、evidence/F3-S3/ | — | F3-S4 |
+| F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
@@ -275,3 +275,15 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 對搜尋主機的額外請求是否讓 Google 改為封鎖，由 F7-S3 觀測。
   - 可見文字留給 F3-S4。
 - **下一步**：F3-S4。
+
+### F3-S4 可見的解析事實
+- **改動**（FG9；FU04）：src/utils.ts 的 formatSearchResponse（兩個搜尋工具共用，U12）。
+  - 每筆候選的 `URL:` 是解析後的網址；解析失敗時是包裝網址。
+  - 有解析紀錄時，`URL:` 之後加一行：
+    - resolved：`Link: engine redirect from <包裝網址的 host> resolved by navigation in <ms> ms`；
+    - 其他：`Link: engine redirect not resolved (<結果種類>: <原因>); this URL is the engine's redirect wrapper, not the source page`。
+  - Read statistics 行尾加 `engine_redirects_resolved=<n>; engine_redirects_unresolved=<n>`；既有欄位與順序不變（F5-S2 再整理口徑）。
+- **測試**：retention 新增 formatter 案例：resolved、timeout、stayed_on_engine_host 與非包裝四筆候選的文字互不相同，各自的 Link 行正確，非包裝者沒有 Link 行；統計為 resolved=1、unresolved=2；沒有包裝時兩者都是 0。
+- **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 26/26、content-contract 4 組（既有統計 regex 仍符合）、browser-lifecycle 全部 exit 0。
+- **F3 階段結論**：FG9 的離線與本機真實 Chromium 證據齊備（F3-S1 完整版 Chromium 與 UA、F3-S2 引擎順序與移除、F3-S3 解析、F3-S4 可見事實）。真實 Google／Bing 頁面由 F7-S3 觀測，未觀測前不寫成已驗證。
+- **下一步**：依建議順序做 F1-S3。

@@ -321,6 +321,24 @@ check('query language selects Google hl and Bing setlang/cc, at overridable addr
   } finally { [SearchEngine.googleSearchUrl, SearchEngine.bingSearchUrl] = saved; }
 });
 
+check('resolved, unresolved and ordinary links read differently and are counted', async () => {
+  const wrapper = 'https://www.google.com/goto?url=abc';
+  const results = [
+    { ...record('resolved', 'r'), sourceEngines: ['Google'], resolution: { wrapperUrl: wrapper, outcome: 'resolved', ms: 412 } },
+    { ...record('timeout', 't'), url: wrapper, sourceEngines: ['Google'], resolution: { wrapperUrl: wrapper, outcome: 'timeout', ms: 6000, reason: 'the redirect page did not respond within 6000 ms' } },
+    { ...record('stayed', 's'), url: 'https://www.bing.com/ck/a?u=1', sourceEngines: ['Bing'], resolution: { wrapperUrl: 'https://www.bing.com/ck/a?u=1', outcome: 'stayed_on_engine_host', ms: 6001, reason: 'the redirect page responded but no navigation left www.bing.com within 6000 ms' } },
+    { ...record('plain', 'p'), sourceEngines: ['Google'] },
+  ];
+  const text = formatSearchResponse('x', results, []);
+  const blocks = text.split('\n\n**').slice(1);
+  assert.equal(new Set(blocks.map(b => b.split('\n').slice(1).join('\n').replace(/Search title: \w+/, ''))).size, 4);
+  assert.match(blocks[0], /URL: https:\/\/example\.org\/r\nLink: engine redirect from www\.google\.com resolved by navigation in 412 ms\n/);
+  assert.match(blocks[1], /URL: https:\/\/www\.google\.com\/goto\?url=abc\nLink: engine redirect not resolved \(timeout: the redirect page did not respond within 6000 ms\); this URL is the engine's redirect wrapper, not the source page/);
+  assert.match(blocks[2], /Link: engine redirect not resolved \(stayed_on_engine_host: the redirect page responded but no navigation left www\.bing\.com within 6000 ms\)/);
+  assert.doesNotMatch(blocks[3], /Link:/);
+  assert.match(text, /engine_redirects_resolved=1; engine_redirects_unresolved=2$/m);
+  assert.match(formatSearchResponse('x', [results[3]], []), /engine_redirects_resolved=0; engine_redirects_unresolved=0/);
+});
 check('both search tools share distinguishable engine and provenance text', async () => {
   const error = new Error('HTTP 429');
   const failed = await engineWith({ google: error, bing: error }).engine.search({ query: 'x' });
