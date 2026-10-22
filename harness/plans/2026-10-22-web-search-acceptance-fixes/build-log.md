@@ -10,7 +10,7 @@
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
-| F6 | Not started | — | — | — | F6-S1（F2、F5 已完成） |
+| F6 | In progress | F6-S1 | build-log（已提交測試） | — | F6-S2 |
 | F7 | Not started | — | — | 相依 F6 | — |
 
 ## 事件格式
@@ -529,3 +529,38 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
 - **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 31/31、content-contract 6 組、browser-lifecycle 全部 exit 0。
 - **F5 階段結論**：FG4 的引擎事實、頁面事實、統計口徑與入口一致性都有離線證據；README 口徑由 F7-S1 同步。
 - **下一步**：F6-S1。
+
+### F6-S1 Server 入口測試
+- **新檔**：
+  - tests/fixtures/stub-engines.mjs：測試專用 preload，以 `node --import` 載入；dist 位置由 `process.argv[1]` 推得，所以複本也適用。
+    - Google（3 筆）與 Bing（1 筆）方法換成回傳本機直接網址，記錄呼叫並經 admit 接納；
+    - 包裝 BrowserPool.prototype.closeAll（可延遲）與 CallBudget.prototype.abort 並記錄；
+    - chromium.launch 先記錄 channel 與 headless，預設拋例外，STUB_FAKE_BROWSER=1 時回傳 version 777.0.0.0 的 fake browser，並記錄 newContext 的 UA；
+    - 封鎖非 loopback 連線；以 JSON lines 寫入 STUB_LOG。
+    - 設定只用測試的 STUB_* 變數，不是產品設定。
+  - tests/test-server-entry.mjs：經真實的 dist/index.js，7 組：
+    1. 呼叫類（SDK 1.15 client，command 為 process.execPath）：
+       - includeContent=false 時本機頁面請求 0 次，4 筆都是 not_attempted；true 時同樣的 URL 與順序、讀 4 次（AF29、N13、N14f）；
+       - summaries 頁面請求 0 次，limit=2 恰為 2 筆，兩工具都有引擎行（N13b、N14g、N14h、N14i）；
+       - limit 11（兩工具）與純空白 query（summaries）都失敗，且引擎沒有被呼叫（AF14）；
+       - 單頁 maxContentLength=7 → returned=7（N14d）；
+       - tools/list 三個工具的描述與參數說明不含承諾性字樣，且都含 citation 分流句（AF39 Node 部分）；
+       - handler 期間不呼叫 closeAll，shutdown 時恰好一次（N12、N11e）。
+    2. 部署值 MAX_CONTENT_LENGTH=9 且省略參數 → returned=9。
+    3. 卡住的頁面：
+       - `_meta.web_search_work_ms=300` 時 1 s 內回 timeout（N14、N14b）；
+       - client 以 AbortSignal 取消後，伺服器端連線在 500 ms 內關閉（N14c）；
+       - DEFAULT_TIMEOUT=2000 時在 800–1500 ms 之間返回（保留額度 1000 ms；N42 會接近 2000）。
+    4. fake browser：BROWSER_HEADLESS=false 時 launch 為 `{channel: 'chromium', headless: false}`，未設定時 headless 為 true（N08h、FU02）；newContext 的 UA 含 `Chrome/777.0.0.0` 且不含 Headless（FU03）。
+    5–6. 自行 spawn、以換行 JSON-RPC 收發：讀取卡住時關閉 stdin 或送 SIGTERM，preload 讓 closeAll 延遲 1500 ms。
+       - 讀取連線在 300 ms 內關閉；
+       - abort 早於 closeAll 返回；
+       - 程序在 closeAll 之後以 0 結束（N11b、N11d、N11c）。
+    7. DEFAULT_TIMEOUT=300001、MAX_CONTENT_LENGTH=0、BROWSER_HEADLESS=maybe 都在啟動時以非 0 結束（N43、N05d、N08i）。
+- **修改**：app/tests/test_citation_skill_activation.py 新增 test_citation_runtime_keeps_the_web_search_boundary_once。載入的 citation runtime instructions 中，「Do not use Web Search or browse other websites to find papers」、「honestly report the returned failure, uncertainty, or missing information」與「This instruction applies even when Web Search tools remain available.」各恰好出現 1 次（AF39）。
+- **檢查**：
+  - vendor 目錄，沙箱內：`node tests/test-server-entry.mjs` 連跑 3 次 7/7 exit 0（約 13 s，不需 Chromium 與網路）；retention、content-contract、browser-lifecycle exit 0。
+  - app 目錄，沙箱內，隔離：`pytest tests/test_citation_skill_activation.py tests/test_tool_access_matrix.py -q -p no:cacheprovider`：22 passed。
+  - 判別力：在 `$TMPDIR` 複本刪掉 SKILL.md 的整段邊界文字後，新的 Python 測試失敗（1 failed, 15 passed）。
+  - 各突變由 F6-S3 正式複驗。
+- **下一步**：F6-S2。

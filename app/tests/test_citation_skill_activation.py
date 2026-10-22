@@ -55,6 +55,17 @@ def test_citation_skill_text_is_free_of_protocol_artifacts():
     assert find_tool_protocol_artifact(text, tool_names=tool_names) is None
 
 
+def test_citation_runtime_keeps_the_web_search_boundary_once(make_session):
+    # AF39: deleting the boundary paragraph from SKILL.md must fail a test.
+    runtime = make_session().activate_citation_skill()
+    for sentence in (
+        "Do not use Web Search or browse other websites to find papers",
+        "honestly report the returned failure, uncertainty, or missing information",
+        "This instruction applies even when Web Search tools remain available.",
+    ):
+        assert runtime.instructions.count(sentence) == 1, sentence
+
+
 def test_activation_adds_only_the_workflow_tool(make_session):
     session = make_session()
     normal_effective = session.tool_access_resolution().effective_tools
