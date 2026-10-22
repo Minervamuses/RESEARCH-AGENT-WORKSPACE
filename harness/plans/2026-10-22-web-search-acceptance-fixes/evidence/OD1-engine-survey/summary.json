@@ -1,0 +1,314 @@
+{
+  "startedAt": "2026-10-22T10:23:39.205Z",
+  "finishedAt": "2026-10-22T10:28:54.971Z",
+  "seconds": 316,
+  "browserVersions": {
+    "headless_shell": "139.0.7258.5",
+    "full_chromium": "139.0.7258.5",
+    "system_chrome": "145.0.7632.116",
+    "system_chrome+ua": "145.0.7632.116"
+  },
+  "searches": 68,
+  "combos": [
+    {
+      "id": "B-shell",
+      "engine": "bing",
+      "mode": "headless_shell",
+      "ua": false,
+      "round1": {
+        "tried": 6,
+        "results": 6,
+        "blocked": 0
+      },
+      "round2": {
+        "tried": 6,
+        "results": 5,
+        "blocked": 0
+      },
+      "avgResults": 9.3,
+      "directRatio": 0,
+      "relevance": 0.28,
+      "medianMs": 4544
+    },
+    {
+      "id": "B-chromium",
+      "engine": "bing",
+      "mode": "full_chromium",
+      "ua": false,
+      "round1": {
+        "tried": 6,
+        "results": 5,
+        "blocked": 0
+      },
+      "round2": {
+        "tried": 6,
+        "results": 5,
+        "blocked": 0
+      },
+      "avgResults": 9.9,
+      "directRatio": 0,
+      "relevance": 0.31,
+      "medianMs": 5519
+    },
+    {
+      "id": "B-chrome",
+      "engine": "bing",
+      "mode": "system_chrome",
+      "ua": false,
+      "round1": {
+        "tried": 6,
+        "results": 5,
+        "blocked": 0
+      },
+      "round2": {
+        "tried": 6,
+        "results": 5,
+        "blocked": 0
+      },
+      "avgResults": 9.9,
+      "directRatio": 0,
+      "relevance": 0.31,
+      "medianMs": 5139
+    },
+    {
+      "id": "R-shell",
+      "engine": "brave",
+      "mode": "headless_shell",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 336
+    },
+    {
+      "id": "R-chromium",
+      "engine": "brave",
+      "mode": "full_chromium",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 5085
+    },
+    {
+      "id": "R-chrome",
+      "engine": "brave",
+      "mode": "system_chrome",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 5301
+    },
+    {
+      "id": "D-get",
+      "engine": "ddg",
+      "mode": "http_get",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 975
+    },
+    {
+      "id": "D-post",
+      "engine": "ddg",
+      "mode": "http_post",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 4813
+    },
+    {
+      "id": "D-lite",
+      "engine": "ddg",
+      "mode": "http_lite",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 5397
+    },
+    {
+      "id": "D-chrome",
+      "engine": "ddg",
+      "mode": "system_chrome",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 4890
+    },
+    {
+      "id": "M-get",
+      "engine": "mojeek",
+      "mode": "http_get",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 1426
+    },
+    {
+      "id": "G-chrome",
+      "engine": "google",
+      "mode": "system_chrome",
+      "ua": false,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 4870
+    },
+    {
+      "id": "B-chrome-ua",
+      "engine": "bing",
+      "mode": "system_chrome",
+      "ua": true,
+      "round1": {
+        "tried": 3,
+        "results": 3,
+        "blocked": 0
+      },
+      "round2": {
+        "tried": 6,
+        "results": 4,
+        "blocked": 0
+      },
+      "avgResults": 10,
+      "directRatio": 0,
+      "relevance": 0.43,
+      "medianMs": 5200
+    },
+    {
+      "id": "R-chrome-ua",
+      "engine": "brave",
+      "mode": "system_chrome",
+      "ua": true,
+      "round1": {
+        "tried": 2,
+        "results": 0,
+        "blocked": 2
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 330
+    },
+    {
+      "id": "G-chrome-ua",
+      "engine": "google",
+      "mode": "system_chrome",
+      "ua": true,
+      "round1": {
+        "tried": 3,
+        "results": 0,
+        "blocked": 0
+      },
+      "round2": {
+        "tried": 0,
+        "results": 0,
+        "blocked": 0
+      },
+      "avgResults": 0,
+      "directRatio": 0,
+      "relevance": 0,
+      "medianMs": 1154
+    }
+  ]
+}

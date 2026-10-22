@@ -47,7 +47,7 @@
 ## 待使用者決策（非阻塞，不在本次範圍）
 | ID | 事項 | 現況與後果 |
 | --- | --- | --- |
-| OD1 | Bing `ck/a` 中介頁：Bing 候選的正文讀取實際上只拿到中介頁，而中介頁裡的 href 又是 ck/a | R04 明文禁止擴建 Bing 專用的網址清洗。若要解開 Bing 自家的包裝，或改用真實瀏覽器導覽中介頁，須先修訂 R04。本計劃只在 F6-S3 觀測並記錄 |
+| OD1 | 搜尋引擎與瀏覽器組合（含 Bing ck/a 中介頁） | 使用者 2026-10-22：「沒必要死嗑bing」，並同意實測。實測見 [evidence/OD1-engine-survey/README.md](evidence/OD1-engine-survey/README.md)：本機與本 IP 上，DuckDuckGo、Brave、Mojeek 全被擋；Bing 可用，但品質不穩、連結全是 ck/a；Google 以完整版 Chromium 加一般 UA 10/10 成功，品質最好，連結需實際導覽（每筆一次、有上限，屬 R04「重新導向交由瀏覽器處理、最終網址來自實際導覽」）。是否採用，涉及新增引擎（A06）、一般 UA（擬態）與 Google 條款，待使用者決定；本計劃目前沒有任何引擎或瀏覽器變更 |
 | OD2 | web_search 在啟動時卡住，session 要等整個 DEFAULT_TIMEOUT（預設最長 5 分鐘） | 目前 discovery 與呼叫共用同一個預算上限。是否另設較短的啟動預算屬於產品取捨 |
 | OD3 | 舊計劃目錄、未被呼叫的 Google parser 與舊 content-extractor.ts 的去留 | 已決定：使用者 2026-10-22「舊的用不到的就可以清理了」。已在 FA0 之後清理（見 build-log「規劃後的清理」）：舊計劃目錄移除，需求基準保留為 context 快照；web search MCP 的死碼刪除；孤兒依賴 p-retry、esbuild 經使用者同意（「確定沒有的話我同意你刪」）後移除 |
 

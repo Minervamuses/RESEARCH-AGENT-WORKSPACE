@@ -1,0 +1,241 @@
+{
+  "at": "2026-10-22T10:34:52.786Z",
+  "seconds": 138,
+  "results": [
+    {
+      "kind": "google",
+      "mode": "headless_shell",
+      "query": "python asyncio cancel task",
+      "status": 200,
+      "blocked": true,
+      "ms": 5476,
+      "n": 0,
+      "wrapped": 0,
+      "relevance": 0,
+      "titles": []
+    },
+    {
+      "kind": "bing",
+      "mode": "headless_shell+normal UA",
+      "market": "setlang=en&cc=US",
+      "query": "python asyncio cancel task",
+      "status": 200,
+      "ms": 1325,
+      "organic": 10,
+      "n": 10,
+      "relevance": 0,
+      "titles": [
+        "Welcome to Python.org",
+        "Introduction to Python - W3Schools",
+        "Download Python | Python.org"
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "full_chromium",
+      "query": "機器學習 過擬合 解決方法",
+      "status": 200,
+      "blocked": false,
+      "ms": 688,
+      "n": 9,
+      "wrapped": 8,
+      "relevance": 0.67,
+      "titles": [
+        "【資料分析】python機器學習-Overfitting的判斷與處理",
+        "什麼是過度擬合？",
+        "[Day 24] 機器學習- 不能忽視的過擬合與欠擬合 - iT 邦幫忙"
+      ]
+    },
+    {
+      "kind": "bing",
+      "mode": "headless_shell+normal UA",
+      "market": "setlang=zh-Hant&cc=TW",
+      "query": "機器學習 過擬合 解決方法",
+      "status": 200,
+      "ms": 866,
+      "organic": 2,
+      "n": 2,
+      "relevance": 0,
+      "titles": [
+        "Google 翻譯",
+        "Google 翻譯"
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "system_chrome",
+      "query": "台灣 颱風 最新消息",
+      "status": 200,
+      "blocked": false,
+      "ms": 752,
+      "n": 8,
+      "wrapped": 8,
+      "relevance": 1,
+      "titles": [
+        "颱風消息| 交通部中央氣象署",
+        "颱風最新動態｜停班課｜即時新聞",
+        "台灣颱風論壇｜天氣特急| Tainan"
+      ]
+    },
+    {
+      "kind": "bing",
+      "mode": "headless_shell+normal UA",
+      "market": "setlang=zh-Hant&cc=TW",
+      "query": "台灣 颱風 最新消息",
+      "status": 200,
+      "ms": 1295,
+      "organic": 10,
+      "n": 10,
+      "relevance": 0.8,
+      "titles": [
+        "颱風消息 | 交通部中央氣象署",
+        "颱風即時通｜東森新聞",
+        "台灣颱風論壇｜天氣特急 | Tainan - Facebook"
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "headless_shell",
+      "query": "how does photosynthesis work",
+      "status": 200,
+      "blocked": true,
+      "ms": 5592,
+      "n": 0,
+      "wrapped": 0,
+      "relevance": 0,
+      "titles": []
+    },
+    {
+      "kind": "bing",
+      "mode": "headless_shell+normal UA",
+      "market": "setlang=en&cc=US",
+      "query": "how does photosynthesis work",
+      "status": 200,
+      "ms": 440,
+      "organic": 7,
+      "n": 7,
+      "relevance": 1,
+      "titles": [
+        "Photosynthesis - Education | National Geographic Society",
+        "Photosynthesis – Definition, Steps, and Formula with Diagram",
+        "Photosynthesis: What is it and how does it work? - BBC Science Focus ."
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "full_chromium",
+      "query": "Playwright headless detection",
+      "status": 200,
+      "blocked": false,
+      "ms": 567,
+      "n": 9,
+      "wrapped": 9,
+      "relevance": 0.89,
+      "titles": [
+        "What Playwright Configurations or another method? fix bot ...",
+        "Running and debugging tests",
+        "feder-cr/invisible_playwright: Playwright that anti-bots ..."
+      ]
+    },
+    {
+      "kind": "bing",
+      "mode": "headless_shell+normal UA",
+      "market": "setlang=en&cc=US",
+      "query": "Playwright headless detection",
+      "status": 200,
+      "ms": 5228,
+      "organic": 0,
+      "n": 0,
+      "relevance": 0,
+      "titles": []
+    },
+    {
+      "kind": "google",
+      "mode": "system_chrome",
+      "query": "台北 捷運 路線圖",
+      "status": 200,
+      "blocked": false,
+      "ms": 968,
+      "n": 8,
+      "wrapped": 8,
+      "relevance": 0.63,
+      "titles": [
+        "路網圖、各站資訊及時刻表",
+        "臺北捷運",
+        "臺北大眾捷運股份有限公司"
+      ]
+    },
+    {
+      "kind": "bing",
+      "mode": "headless_shell+normal UA",
+      "market": "setlang=zh-Hant&cc=TW",
+      "query": "台北 捷運 路線圖",
+      "status": 200,
+      "ms": 1160,
+      "organic": 10,
+      "n": 10,
+      "relevance": 1,
+      "titles": [
+        "臺北大眾捷運股份有限公司-路網圖、各站資訊及時刻表-路網圖、各站 …",
+        "臺北大眾捷運股份有限公司",
+        "台灣交通網 - 台北捷運路線圖"
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "headless_shell",
+      "query": "機器學習 過擬合 解決方法",
+      "status": 200,
+      "blocked": true,
+      "ms": 5718,
+      "n": 0,
+      "wrapped": 0,
+      "relevance": 0,
+      "titles": []
+    },
+    {
+      "kind": "google",
+      "mode": "full_chromium",
+      "query": "台灣 颱風 最新消息",
+      "status": 200,
+      "blocked": false,
+      "ms": 627,
+      "n": 9,
+      "wrapped": 9,
+      "relevance": 0.89,
+      "titles": [
+        "颱風消息| 交通部中央氣象署",
+        "颱風最新動態｜停班課｜即時新聞",
+        "台灣颱風論壇｜天氣特急| Tainan"
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "system_chrome",
+      "query": "python asyncio cancel task",
+      "status": 200,
+      "blocked": false,
+      "ms": 546,
+      "n": 9,
+      "wrapped": 9,
+      "relevance": 0.89,
+      "titles": [
+        "Coroutines and tasks",
+        "How to schedule and cancel tasks with asyncio",
+        "Asyncio Task Cancellation Best Practices"
+      ]
+    },
+    {
+      "kind": "google",
+      "mode": "headless_shell",
+      "query": "Playwright headless detection",
+      "status": 200,
+      "blocked": true,
+      "ms": 4858,
+      "n": 0,
+      "wrapped": 0,
+      "relevance": 0,
+      "titles": []
+    }
+  ]
+}

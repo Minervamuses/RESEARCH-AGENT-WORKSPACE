@@ -90,3 +90,15 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 以 `npm uninstall --offline --no-audit --no-fund p-retry esbuild` 移除，lockfile 只刪除 p-retry、retry、@types/retry、is-network-error 與兩個根目錄宣告，沒有升級。
   - 檢查：`npm ls --all` exit 0；`npm ci --dry-run --offline` exit 0；build exit 0；三份 Node 測試通過；沙箱外 tsx 4.20.3 可轉譯執行 TypeScript。
   - 本計劃執行時「不新增或升級依賴、不改 lock」的不變條件照舊。
+
+## OD1 引擎與瀏覽器實測（2026-10-22，使用者同意）
+- 使用者：「我同意你作實測，幫我找出比較穩又真的實用的組合」。只觀察，不改產品程式。
+- 方法與原始資料見 evidence/OD1-engine-survey/（README.md、survey.mjs、followup*.mjs 與其輸出）。
+  - 量：約 93 次搜尋請求、9 次連結導覽，循序執行；同一引擎至少間隔 5 秒；連續被擋 2 次即停止該組合。實際執行約 9 分鐘，沒有殘留程序。
+  - 環境前提：完整版 Chromium 與系統 Chrome 需要很短的 TMPDIR，否則以 SIGTRAP 崩潰（unix socket 路徑上限）。產品經 Python 啟動時使用 /tmp，不受影響。
+- 結果：
+  - Google 以完整版 Chromium 或系統 Chrome 加一般 UA，10/10 成功，品質最好；headless shell 0/6。
+  - Google `/goto` 與 Bing `ck/a` 都能經實際導覽到達目標頁（6/6、3/3）。
+  - Bing 依語言設定市場後只有 3/6 可用。
+  - DuckDuckGo（202）、Brave（429）、Mojeek（403）不論方式全被擋。
+- 下一步：等使用者決定 OD1 是否採用與採用範圍，再修訂本計劃，例如新增一個引擎與瀏覽器階段。目前所有階段仍為 Not started。

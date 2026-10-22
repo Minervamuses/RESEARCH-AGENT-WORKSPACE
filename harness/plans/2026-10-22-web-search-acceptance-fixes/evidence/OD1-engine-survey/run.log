@@ -1,0 +1,75 @@
+survey start 2026-10-22T10:23:39.205Z
+A/r1 B-shell      q0 results n=10 direct=0 rel=0 status=200 ext=- 4544ms
+A/r1 B-chromium   q0 results n=10 direct=0 rel=0 status=200 ext=- 3859ms
+A/r1 B-chrome     q0 results n=10 direct=0 rel=0 status=200 ext=- 3844ms
+A/r1 R-shell      q0 blocked n=0 direct=0 rel=0 status=- ext=- 336ms Brave returned HTTP 429
+A/r1 R-chromium   q0 blocked n=0 direct=0 rel=0 status=- ext=- 5001ms Brave returned HTTP 429
+A/r1 R-chrome     q0 blocked n=0 direct=0 rel=0 status=- ext=- 5301ms Brave returned HTTP 429
+A/r1 D-get        q0 blocked n=0 direct=0 rel=0 status=202 ext=0 740ms
+A/r1 D-post       q0 blocked n=0 direct=0 rel=0 status=202 ext=0 4809ms
+A/r1 D-lite       q0 blocked n=0 direct=0 rel=0 status=202 ext=0 5231ms
+A/r1 D-chrome     q0 blocked n=0 direct=0 rel=0 status=202 ext=0 4218ms
+A/r1 M-get        q0 blocked n=0 direct=0 rel=0 status=403 ext=0 1359ms
+A/r1 G-chrome     q0 blocked n=0 direct=0 rel=0 status=429 ext=0 4870ms
+A/r1 B-shell      q1 results n=9 direct=0 rel=0.11 status=200 ext=- 5868ms
+A/r1 B-chromium   q1 results n=9 direct=0 rel=0.11 status=200 ext=- 5854ms
+A/r1 B-chrome     q1 results n=9 direct=0 rel=0.11 status=200 ext=- 4338ms
+A/r1 R-shell      q1 blocked n=0 direct=0 rel=0 status=- ext=- 276ms Brave returned HTTP 429
+A/r1 R-chromium   q1 blocked n=0 direct=0 rel=0 status=- ext=- 5085ms Brave returned HTTP 429
+A/r1 R-chrome     q1 blocked n=0 direct=0 rel=0 status=- ext=- 4176ms Brave returned HTTP 429
+A/r1 D-get        q1 blocked n=0 direct=0 rel=0 status=202 ext=0 975ms
+A/r1 D-post       q1 blocked n=0 direct=0 rel=0 status=202 ext=0 4813ms
+A/r1 D-lite       q1 blocked n=0 direct=0 rel=0 status=202 ext=0 5397ms
+A/r1 D-chrome     q1 blocked n=0 direct=0 rel=0 status=202 ext=0 4890ms
+A/r1 M-get        q1 blocked n=0 direct=0 rel=0 status=403 ext=0 1426ms
+A/r1 G-chrome     q1 blocked n=0 direct=0 rel=0 status=429 ext=0 4669ms
+A/r1 B-shell      q2 results n=10 direct=0 rel=0 status=200 ext=- 4352ms
+A/r1 B-chromium   q2 results n=10 direct=0 rel=0 status=200 ext=- 1744ms
+A/r1 B-chrome     q2 zero    n=0 direct=0 rel=0 status=200 ext=- 12061ms
+A/r1 B-shell      q3 results n=10 direct=0 rel=0 status=200 ext=- 1781ms
+A/r1 B-chromium   q3 results n=10 direct=0 rel=0 status=200 ext=- 3967ms
+A/r1 B-chrome     q3 results n=10 direct=0 rel=0 status=200 ext=- 6676ms
+A/r1 B-shell      q4 results n=3 direct=0 rel=0 status=200 ext=- 5919ms
+A/r1 B-chromium   q4 zero    n=0 direct=0 rel=0 status=200 ext=- 9965ms
+A/r1 B-chrome     q4 results n=10 direct=0 rel=0 status=200 ext=- 1211ms
+A/r1 B-shell      q5 results n=10 direct=0 rel=1 status=200 ext=- 7612ms
+A/r1 B-chromium   q5 results n=10 direct=0 rel=1 status=200 ext=- 2208ms
+A/r1 B-chrome     q5 results n=10 direct=0 rel=1 status=200 ext=- 6774ms
+B/r1 B-chrome-ua  q0 results n=10 direct=0 rel=0 status=200 ext=- 5529ms
+B/r1 R-chrome-ua  q0 blocked n=0 direct=0 rel=0 status=- ext=- 293ms Brave returned HTTP 429
+B/r1 G-chrome-ua  q0 zero    n=0 direct=0 rel=0 status=200 ext=1 381ms
+B/r1 B-chrome-ua  q1 results n=10 direct=0 rel=1 status=200 ext=- 4606ms
+B/r1 R-chrome-ua  q1 blocked n=0 direct=0 rel=0 status=- ext=- 330ms Brave returned HTTP 429
+B/r1 G-chrome-ua  q1 zero    n=0 direct=0 rel=0 status=200 ext=1 1386ms
+B/r1 B-chrome-ua  q2 results n=10 direct=0 rel=0 status=200 ext=- 4062ms
+B/r1 G-chrome-ua  q2 zero    n=0 direct=0 rel=0 status=200 ext=1 1154ms
+round 2 combos: B-shell, B-chromium, B-chrome, B-chrome-ua
+C/r2 B-shell      q0 results n=10 direct=0 rel=0 status=200 ext=- 2185ms
+C/r2 B-chromium   q0 results n=10 direct=0 rel=0 status=200 ext=- 6505ms
+C/r2 B-chrome     q0 results n=10 direct=0 rel=0 status=200 ext=- 5304ms
+C/r2 B-chrome-ua  q0 results n=10 direct=0 rel=0 status=200 ext=- 4070ms
+C/r2 B-shell      q1 results n=10 direct=0 rel=1 status=200 ext=- 5608ms
+C/r2 B-chromium   q1 results n=10 direct=0 rel=1 status=200 ext=- 5532ms
+C/r2 B-chrome     q1 results n=10 direct=0 rel=1 status=200 ext=- 1678ms
+C/r2 B-chrome-ua  q1 results n=10 direct=0 rel=1 status=200 ext=- 7850ms
+C/r2 B-shell      q2 results n=10 direct=0 rel=0 status=200 ext=- 5194ms
+C/r2 B-chromium   q2 zero    n=0 direct=0 rel=0 status=200 ext=- 6861ms
+C/r2 B-chrome     q2 zero    n=0 direct=0 rel=0 status=200 ext=- 5911ms
+C/r2 B-chrome-ua  q2 results n=10 direct=0 rel=0 status=200 ext=- 3959ms
+C/r2 B-shell      q3 zero    n=0 direct=0 rel=0 status=200 ext=- 2310ms
+C/r2 B-chromium   q3 results n=10 direct=0 rel=0 status=200 ext=- 5519ms
+C/r2 B-chrome     q3 results n=10 direct=0 rel=0 status=200 ext=- 5078ms
+C/r2 B-chrome-ua  q3 zero    n=0 direct=0 rel=0 status=200 ext=- 8133ms
+C/r2 B-shell      q4 results n=10 direct=0 rel=0 status=200 ext=- 3425ms
+C/r2 B-chromium   q4 results n=10 direct=0 rel=0 status=200 ext=- 5240ms
+C/r2 B-chrome     q4 results n=10 direct=0 rel=0 status=200 ext=- 4083ms
+C/r2 B-chrome-ua  q4 zero    n=0 direct=0 rel=0 status=200 ext=- 8060ms
+C/r2 B-shell      q5 results n=10 direct=0 rel=1 status=200 ext=- 2110ms
+C/r2 B-chromium   q5 results n=10 direct=0 rel=1 status=200 ext=- 5404ms
+C/r2 B-chrome     q5 results n=10 direct=0 rel=1 status=200 ext=- 5139ms
+C/r2 B-chrome-ua  q5 results n=10 direct=0 rel=1 status=200 ext=- 5200ms
+practicality combos: B-shell, B-chromium, B-chrome
+ck/a nav -> {"host":"www.python.org","path":"/"} 737ms
+ck/a nav -> {"host":"steam.oxxostudio.tw","path":"/category/python/info/start.html"} 982ms
+ck/a nav -> {"host":"www.lccnet.com.tw","path":"/lccnet/article/details/1706"} 4222ms
+survey done in 316s; 68 searches
