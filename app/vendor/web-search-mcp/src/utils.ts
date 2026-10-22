@@ -110,14 +110,24 @@ export function truncateMarkdown(text: string, limit: number): {
   };
 }
 
+/** One short line for the Agent: no ANSI escapes, no Playwright call log, first line kept. */
+export function sanitizeErrorMessage(error: unknown): string {
+  const text = (error instanceof Error ? error.message : String(error)).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  const reason = text.split(/\n\s*Call log:/)[0].split('\n').map(line => line.trim()).find(Boolean) ?? '';
+  return Array.from(reason).length > 300 ? `${Array.from(reason).slice(0, 300).join('')}…` : reason;
+}
+
 export function formatPageRead(read: PageRead): string {
   const lines = [
     `Requested URL: ${read.requestedUrl}`,
     `Final URL: ${read.finalUrl ?? 'unknown'}`,
     `Page title: ${read.pageTitle ?? 'unknown'}`,
     `HTTP status: ${read.httpStatus ?? 'unknown'}; Content-Type: ${read.contentType ?? 'unknown'}`,
-    `Page read status: ${read.status}; attempts=${read.attempts.length}`,
   ];
+  if (read.encoding) {
+    lines.push(`Character encoding: ${read.encoding.name} (${read.encoding.source}${read.encoding.note ? `; ${read.encoding.note}` : ''})`);
+  }
+  lines.push(`Page read status: ${read.status}; attempts=${read.attempts.length}`);
   for (const event of read.attempts) {
     lines.push(`- ${event.transport}: status=${event.status ?? 'unknown'}${event.error ? `; error=${event.error}` : ''}`);
   }

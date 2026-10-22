@@ -7,6 +7,8 @@ export interface PageRead {
   pageTitle?: string;
   httpStatus?: number;
   contentType?: string;
+  /** HTTP reads only: the decoder used and how it was chosen (FA03). */
+  encoding?: { name: string; source: 'BOM' | 'Content-Type charset' | 'meta charset' | 'default'; note?: string };
   status: PageReadStatus;
   attempts: { transport: 'http' | 'browser'; status?: number; error?: string }[];
   content: string;

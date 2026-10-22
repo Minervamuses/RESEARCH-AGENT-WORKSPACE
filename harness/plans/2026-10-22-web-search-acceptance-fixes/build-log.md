@@ -5,7 +5,7 @@
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
-| F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3 |
+| F1 | In progress | F1-S1、F1-S2、F1-S3 | evidence/F1-S1/、evidence/F1-S2/、evidence/F1-S3/ | AF10(b) 待 F7-S2 案例 7 | F1-S4 |
 | F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
@@ -287,3 +287,31 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
 - **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 26/26、content-contract 4 組（既有統計 regex 仍符合）、browser-lifecycle 全部 exit 0。
 - **F3 階段結論**：FG9 的離線與本機真實 Chromium 證據齊備（F3-S1 完整版 Chromium 與 UA、F3-S2 引擎順序與移除、F3-S3 解析、F3-S4 可見事實）。真實 Google／Bing 頁面由 F7-S3 觀測，未觀測前不寫成已驗證。
 - **下一步**：依建議順序做 F1-S3。
+
+### F1-S3 字元編碼與媒體事實
+- **改動**（FG1；AF06、AF10）：
+  - src/enhanced-content-extractor.ts：
+    - **編碼**：新增 decodeBody（FA03）：BOM（UTF-8、UTF-16BE/LE）→ Content-Type charset → HTML 前 4096 bytes 的 `<meta charset>`／http-equiv（以 latin1 掃描）→ UTF-8，用 Node 內建 TextDecoder 解碼；text/plain 只看 BOM 與 header。不支援的 label 以 UTF-8 解碼並記下說明。
+    - **過大回應**：axios 超過 10 MiB（`ERR_BAD_RESPONSE`、maxContentLength）時，從 `error.request.res` 取回 statusCode、Content-Type 與 responseUrl。媒體不受支援（含 PDF）→ unsupported_media，錯誤 `Unsupported media: <type> (response body exceeds 10 MiB read limit)`；否則 http_error，錯誤 `response body exceeds 10 MiB read limit`。
+    - **瀏覽器下載**：goto 之前註冊 response（只記主框架導覽回應）與 download（立即 cancel）監聽，goto 後移除。goto 拋錯時，若主框架回應是不支援的媒體，或已開始下載，標為 unsupported_media；有回應就保留 status、Content-Type 與 URL，沒有回應時標頭維持 unknown 並註明 `(download started)`；兩者都沒有就照舊拋錯。
+    - **轉換失敗**：converting() 讓兩條路徑的 parseContent 與截斷例外一律成為 conversion_error。
+    - 每次嘗試開始時清除 encoding；catch 中若本次已判定為 unsupported_media，就保留該狀態。
+  - src/types.ts：PageRead 新增 encoding（name、source、note）。
+  - src/utils.ts：
+    - 新增 sanitizeErrorMessage：去 ANSI、去 Playwright `Call log:` 區塊、只留第一行、上限 300 code points；用於所有 transport 的嘗試錯誤。
+    - formatPageRead 在 HTTP 行之後輸出 `Character encoding: <name> (<來源>[; <說明>])`。
+- **測試**：
+  - content-contract 新增一組（本機 node:http 伺服器）：
+    - 寫死 byte 的 Big5「中文」（header charset）、Shift_JIS「日本」（`<meta charset>`）、windows-1252「café」（http-equiv）、UTF-8 BOM「中文」（header 宣稱 iso-8859-1），四者都解碼正確，且輸出含編碼與來源；
+    - 未知 charset 有明示說明；
+    - 約 11 MiB application/pdf → unsupported_media，200 與 Content-Type 保留；約 11 MiB text/html → http_error，附讀取上限原因與已知標頭；
+    - 錯誤淨化為單行並保留第一行原因；
+    - stub 瀏覽器：主框架回應 application/pdf 加 ERR_ABORTED、下載但沒有回應，兩者都是 unsupported_media；沒有下載也沒有回應的 ERR_ABORTED 仍是 http_error，錯誤已淨化；
+    - parseContent 拋例外時，HTTP 與 browser 兩條路徑都是 conversion_error。
+  - browser-lifecycle 的晚渲染 stub page 補上 on/off/mainFrame。
+- **檢查**：
+  - 沙箱內：`npm run build` exit 0；retention 26/26、content-contract 5 組、browser-lifecycle 全部 exit 0。
+  - 判別力：新的 content-contract 在上一個 commit（2e40b1a）的乾淨重建上失敗於第一個編碼案例，Big5 得到 `����`（AF06 重現）。
+  - 真實完整版 Chromium 的提前探測（沙箱外、短 TMPDIR；evidence/F1-S3/download-real.mjs → download-real.json）：HTTP 讀取得到 403 後，瀏覽器讀到 application/pdf 或 attachment 的 application/octet-stream，兩者都是 unsupported_media，保留 200 與 Content-Type。依 phase-1，AF10(b) 仍要等 F7-S2 案例 7 經真實入口通過才記為已修正。
+- **限制**：瀏覽器路徑不記錄編碼（由瀏覽器自行解碼）。HTML 標準中 meta 宣告 UTF-16 時改用 UTF-8 的細則沒有實作；本步只處理 FA03 列出的順序。
+- **下一步**：F1-S4。

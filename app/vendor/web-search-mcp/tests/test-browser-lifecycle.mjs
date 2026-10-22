@@ -188,6 +188,7 @@ try {
   const renderPage = (overrides = {}) => ({
     goto: async () => ({ status: () => 200, headers: () => ({ 'content-type': 'text/html' }) }),
     url: () => 'https://example.org/app', title: async () => 'App', content: async () => '<html><body></body></html>',
+    on: () => undefined, off: () => undefined, mainFrame: () => undefined,
     evaluate: async () => '',
     waitForLoadState: (_state, options) => { settleTimeouts.push(options.timeout); return new Promise(() => undefined); },
     ...overrides,

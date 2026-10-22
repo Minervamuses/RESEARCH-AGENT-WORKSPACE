@@ -1,0 +1,40 @@
+[
+ {
+  "route": "/doc.pdf",
+  "status": "unsupported_media",
+  "httpStatus": 200,
+  "contentType": "application/pdf",
+  "error": "Unsupported media: application/pdf",
+  "attempts": [
+   {
+    "transport": "http",
+    "status": 403,
+    "error": "Request failed with status code 403"
+   },
+   {
+    "transport": "browser",
+    "status": 200,
+    "error": null
+   }
+  ]
+ },
+ {
+  "route": "/file.bin",
+  "status": "unsupported_media",
+  "httpStatus": 200,
+  "contentType": "application/octet-stream",
+  "error": "Unsupported media: application/octet-stream",
+  "attempts": [
+   {
+    "transport": "http",
+    "status": 403,
+    "error": "Request failed with status code 403"
+   },
+   {
+    "transport": "browser",
+    "status": 200,
+    "error": null
+   }
+  ]
+ }
+]

@@ -1,8 +1,8 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import type { Page } from 'playwright';
+import type { Page, Response } from 'playwright';
 import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
-import { resolveContentLimit, truncateMarkdown } from './utils.js';
+import { resolveContentLimit, sanitizeErrorMessage, truncateMarkdown } from './utils.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
 
 // Elements rendered as blocks by default; they only add separators and never remove text.
@@ -15,6 +15,41 @@ const BLOCK_TAGS = new Set([
 const singleLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+const READ_LIMIT_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_MEDIA = ['text/html', 'application/xhtml+xml', 'text/plain'];
+const mediaType = (contentType?: string) => contentType?.split(';')[0].trim().toLowerCase();
+
+/** Rethrows a conversion or truncation failure as conversion_error, never as a transport error. */
+function converting<T>(convert: () => T): T {
+  try { return convert(); } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { reason: 'conversion_error' });
+  }
+}
+
+/** FA03, after the HTML encoding sniffing order: BOM, Content-Type charset, meta prescan (HTML), UTF-8. */
+function decodeBody(bytes: Buffer, contentType: string | undefined, html: boolean): { text: string; encoding: NonNullable<PageRead['encoding']> } {
+  const bom: [number[], string][] = [[[0xef, 0xbb, 0xbf], 'utf-8'], [[0xfe, 0xff], 'utf-16be'], [[0xff, 0xfe], 'utf-16le']];
+  const marked = bom.find(([mark]) => mark.every((byte, index) => bytes[index] === byte));
+  let label: string | undefined = marked?.[1];
+  let source: NonNullable<PageRead['encoding']>['source'] = 'BOM';
+  if (!label) {
+    label = /charset\s*=\s*["']?([^\s;"']+)/i.exec(contentType ?? '')?.[1];
+    source = 'Content-Type charset';
+  }
+  if (!label && html) {
+    // Covers <meta charset> and <meta http-equiv="Content-Type" content="...; charset=...">.
+    label = /<meta[^>]*?charset\s*=\s*["']?([^\s"'\/>;]+)/i.exec(bytes.subarray(0, 4096).toString('latin1'))?.[1];
+    source = 'meta charset';
+  }
+  let decoder: TextDecoder;
+  let note: string | undefined;
+  try { decoder = new TextDecoder(label ?? 'utf-8'); } catch {
+    decoder = new TextDecoder('utf-8');
+    note = `unsupported charset label "${label}"; decoded as UTF-8`;
+  }
+  return { text: decoder.decode(bytes), encoding: { name: decoder.encoding, source: label && !note ? source : 'default', note } };
+}
 
 /** Settles to undefined when the promise fails or outlives a local cap. */
 async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
@@ -51,6 +86,7 @@ export class EnhancedContentExtractor {
       delete state.contentType;
       delete state.finalUrl;
       delete state.pageTitle;
+      delete state.encoding;
       try {
         const text = transport === 'http'
           ? await this.browserPool.withHttp(() => {
@@ -60,7 +96,7 @@ export class EnhancedContentExtractor {
           : await this.extractWithBrowser({ ...options, budget }, state, started, event);
         event.status = state.httpStatus;
         if (state.status === 'unsupported_media') return true;
-        Object.assign(state, truncateMarkdown(text, state.maxContentLength));
+        Object.assign(state, converting(() => truncateMarkdown(text, state.maxContentLength)));
         state.status = text.trim() ? 'text' : 'empty_text';
         return state.status === 'text';
       } catch (error) {
@@ -72,8 +108,9 @@ export class EnhancedContentExtractor {
           state.finalUrl = response.request?.res?.responseUrl;
         }
         event.status = state.httpStatus;
-        event.error = error instanceof Error ? error.message : String(error);
+        event.error = sanitizeErrorMessage(error);
         state.error = event.error;
+        if (state.status === 'unsupported_media') return true;
         state.status = !state.attempts.length ? 'not_attempted'
           : budget.signal.aborted && err.code !== 'ETIMEDOUT' ? 'cancelled'
           : err.code === 'ERR_CANCELED' ? 'cancelled'
@@ -95,13 +132,29 @@ export class EnhancedContentExtractor {
   }
 
   private async extractWithAxios(options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead): Promise<string> {
-    const response = await axios.get(options.url, {
-      responseType: 'arraybuffer', signal: options.budget.signal,
-      timeout: options.budget.timeout(Math.min(options.timeout ?? OPERATION_TIMEOUTS.pageRequest, OPERATION_TIMEOUTS.pageRequest)),
-      headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
-      maxContentLength: 10 * 1024 * 1024,
-      validateStatus: status => status < 400,
-    });
+    let response;
+    try {
+      response = await axios.get(options.url, {
+        responseType: 'arraybuffer', signal: options.budget.signal,
+        timeout: options.budget.timeout(Math.min(options.timeout ?? OPERATION_TIMEOUTS.pageRequest, OPERATION_TIMEOUTS.pageRequest)),
+        headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
+        maxContentLength: READ_LIMIT_BYTES,
+        validateStatus: status => status < 400,
+      });
+    } catch (error) {
+      // Over the read limit the headers were already received; keep them as facts.
+      const received = (error as any)?.request?.res;
+      if ((error as any)?.code !== 'ERR_BAD_RESPONSE' || !/maxContentLength/.test((error as any)?.message) || !received) throw error;
+      state.httpStatus = received.statusCode;
+      state.contentType = received.headers?.['content-type']?.toString();
+      state.finalUrl = received.responseUrl ?? options.url;
+      const limit = 'response body exceeds 10 MiB read limit';
+      if (!SUPPORTED_MEDIA.includes(mediaType(state.contentType) ?? '')) {
+        state.status = 'unsupported_media';
+        throw new Error(`Unsupported media: ${state.contentType ?? 'unknown'} (${limit})`);
+      }
+      throw new Error(limit);
+    }
     state.httpStatus = response.status;
     state.contentType = response.headers['content-type']?.toString();
     state.finalUrl = response.request?.res?.responseUrl ?? options.url;
@@ -109,21 +162,19 @@ export class EnhancedContentExtractor {
   }
 
   private convertResponse(bytes: Buffer, state: PageRead): string {
-    const media = state.contentType?.split(';')[0].trim().toLowerCase();
-    if (bytes.subarray(0, 5).toString('ascii') === '%PDF-'
-      || !['text/html', 'application/xhtml+xml', 'text/plain'].includes(media ?? '')) {
+    const media = mediaType(state.contentType);
+    if (bytes.subarray(0, 5).toString('ascii') === '%PDF-' || !SUPPORTED_MEDIA.includes(media ?? '')) {
       state.status = 'unsupported_media';
       state.error = `Unsupported media: ${state.contentType ?? 'unknown'}`;
       return '';
     }
-    const text = bytes.toString('utf8');
+    const { text, encoding } = decodeBody(bytes, state.contentType, media !== 'text/plain');
+    state.encoding = encoding;
     if (media === 'text/plain') return text.replace(/\r\n?/g, '\n').trim();
-    try {
+    return converting(() => {
       state.pageTitle = documentTitle(cheerio.load(text));
       return this.parseContent(text, state.finalUrl);
-    } catch (error) {
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { reason: 'conversion_error' });
-    }
+    });
   }
 
   private async extractWithBrowser(
@@ -132,17 +183,46 @@ export class EnhancedContentExtractor {
   ): Promise<string> {
     return this.browserPool.withPage(async page => {
       started();
-      const response = await page.goto(options.url, {
-        waitUntil: 'domcontentloaded', timeout: options.budget.timeout(OPERATION_TIMEOUTS.pageRequest),
-      });
+      // Main-frame navigation facts survive a navigation that turns into a download.
+      let observed: Response | undefined;
+      let downloadStarted = false;
+      const onResponse = (candidate: Response) => {
+        try {
+          if (candidate.request().isNavigationRequest() && candidate.frame() === page.mainFrame()) observed = candidate;
+        } catch { /* Not a navigation of this page. */ }
+      };
+      const onDownload = (download: { cancel(): Promise<void> }) => {
+        downloadStarted = true;
+        void download.cancel().catch(() => undefined);
+      };
+      page.on('response', onResponse);
+      page.on('download', onDownload);
+      let response: Response | null;
+      try {
+        response = await page.goto(options.url, {
+          waitUntil: 'domcontentloaded', timeout: options.budget.timeout(OPERATION_TIMEOUTS.pageRequest),
+        });
+      } catch (error) {
+        const unsupported = observed && !SUPPORTED_MEDIA.includes(mediaType(observed.headers()['content-type']) ?? '');
+        if (!unsupported && !downloadStarted) throw error;
+        state.finalUrl = observed?.url();
+        state.httpStatus = observed?.status();
+        state.contentType = observed?.headers()['content-type'];
+        state.status = 'unsupported_media';
+        state.error = `Unsupported media: ${state.contentType ?? 'unknown'}${observed ? '' : ' (download started)'}`;
+        return '';
+      } finally {
+        page.off('response', onResponse);
+        page.off('download', onDownload);
+      }
       state.finalUrl = page.url();
       state.httpStatus = response?.status();
       state.contentType = response?.headers()['content-type'];
       if (state.httpStatus !== undefined && state.httpStatus >= 400) {
         throw new Error(`HTTP ${state.httpStatus}`);
       }
-      const media = state.contentType?.split(';')[0].trim().toLowerCase();
-      if (!['text/html', 'application/xhtml+xml', 'text/plain'].includes(media ?? '')) {
+      const media = mediaType(state.contentType);
+      if (!SUPPORTED_MEDIA.includes(media ?? '')) {
         state.status = 'unsupported_media';
         state.error = `Unsupported media: ${state.contentType ?? 'unknown'}`;
         return '';
@@ -150,7 +230,7 @@ export class EnhancedContentExtractor {
       const settle = media === 'text/plain' ? undefined : await this.settleRendering(page, options.budget);
       state.pageTitle = singleLine(await page.title()) || undefined;
       const text = media === 'text/plain' ? await page.locator('body').innerText()
-        : this.parseContent(await page.content(), state.finalUrl);
+        : await page.content().then(html => converting(() => this.parseContent(html, state.finalUrl)));
       if (settle && !text.trim()) {
         event.error = state.error = `No visible text after waiting ${settle.waitedMs} ms for client rendering (limit ${settle.limitMs} ms)`;
       }

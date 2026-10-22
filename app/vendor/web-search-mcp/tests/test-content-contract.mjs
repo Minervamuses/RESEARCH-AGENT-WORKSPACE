@@ -75,6 +75,107 @@ assert.equal(titled('<html><head></head><body><svg><title>Icon</title></svg><p>x
 assert.equal(titled('<html><head><title>  A\n  B </title></head><body><svg><title>Icon</title></svg></body></html>'), 'A B');
 process.stdout.write('whole-page conversion, tables once, block separators, base and title: passed\n');
 
+// Declared charsets, read-limit facts, browser downloads and conversion failures (local server only).
+{
+  const { createServer } = await import('node:http');
+  const { formatPageRead, sanitizeErrorMessage } = await import('../dist/utils.js');
+  const bytes = (...parts) => Buffer.concat(parts.map(part => typeof part === 'string' ? Buffer.from(part, 'latin1') : Buffer.from(part)));
+  const big = 11 * 1024 * 1024;
+  const routes = {
+    '/big5': ['text/html; charset=big5', bytes('<p>', [0xa4, 0xa4, 0xa4, 0xe5], '</p>')],
+    '/sjis': ['text/html', bytes('<meta charset="shift_jis"><p>', [0x93, 0xfa, 0x96, 0x7b], '</p>')],
+    '/cp1252': ['text/html', bytes('<meta http-equiv="Content-Type" content="text/html; charset=windows-1252"><p>caf', [0xe9], '</p>')],
+    '/bom': ['text/html; charset=iso-8859-1', bytes([0xef, 0xbb, 0xbf, 0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87])],
+    '/unknown': ['text/plain; charset=x-no-such-charset', bytes('plain text')],
+    '/big.pdf': ['application/pdf', Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(big)])],
+    '/big.html': ['text/html', Buffer.alloc(big, 0x61)],
+    '/page': ['text/html', bytes('<p>convert me</p>')],
+  };
+  const server = createServer((request, response) => {
+    const [type, body] = routes[request.url];
+    response.writeHead(200, { 'content-type': type });
+    response.end(body);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const reader = new EnhancedContentExtractor();
+  reader.extractWithBrowser = async () => { throw new Error('browser fallback not expected'); };
+  const read = async route => reader.extractContent({ url: `${base}${route}` });
+  try {
+    for (const [route, text, line] of [
+      ['/big5', '中文', 'Character encoding: big5 (Content-Type charset)'],
+      ['/sjis', '日本', 'Character encoding: shift_jis (meta charset)'],
+      ['/cp1252', 'café', 'Character encoding: windows-1252 (meta charset)'],
+      ['/bom', '中文', 'Character encoding: utf-8 (BOM)'],
+    ]) {
+      const result = await read(route);
+      assert.equal(result.status, 'text', route);
+      assert.equal(result.content, text, route);
+      assert.ok(formatPageRead(result).includes(line), `${route}: ${formatPageRead(result)}`);
+    }
+    const unknownCharset = await read('/unknown');
+    assert.equal(unknownCharset.content, 'plain text');
+    assert.ok(formatPageRead(unknownCharset).includes('Character encoding: utf-8 (default; unsupported charset label "x-no-such-charset"; decoded as UTF-8)'));
+    const pdf = await read('/big.pdf');
+    assert.deepEqual([pdf.status, pdf.httpStatus, pdf.contentType], ['unsupported_media', 200, 'application/pdf']);
+    assert.match(pdf.error, /Unsupported media: application\/pdf \(response body exceeds 10 MiB read limit\)/);
+    const html = await read('/big.html');
+    assert.deepEqual([html.status, html.httpStatus, html.contentType], ['http_error', 200, 'text/html']);
+    assert.equal(html.error, 'response body exceeds 10 MiB read limit');
+    assert.match(formatPageRead(html), /HTTP status: 200; Content-Type: text\/html/);
+    const failing = new EnhancedContentExtractor();
+    failing.parseContent = () => { throw new Error('parse boom'); };
+    failing.extractWithBrowser = async () => { throw new Error('browser fallback not expected'); };
+    const httpConversion = await failing.extractContent({ url: `${base}/page` });
+    assert.deepEqual([httpConversion.status, httpConversion.error, httpConversion.attempts.length], ['conversion_error', 'parse boom', 1]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+  const ansi = '\x1b[31mpage.goto: net::ERR_ABORTED at https://example.org/file\x1b[39m\nCall log:\n  - navigating to "https://example.org/file"';
+  assert.equal(sanitizeErrorMessage(new Error(ansi)), 'page.goto: net::ERR_ABORTED at https://example.org/file');
+
+  // Browser fallback: a navigation that becomes a download is unsupported media, not an HTTP error.
+  const mainFrame = {};
+  const browserPage = ({ response, download, failing: fails, html: pageHtml }) => {
+    const listeners = {};
+    return {
+      on: (event, listener) => { (listeners[event] ??= []).push(listener); },
+      off: () => undefined,
+      mainFrame: () => mainFrame,
+      goto: async () => {
+        for (const listener of response ? listeners.response ?? [] : []) {
+          listener({ request: () => ({ isNavigationRequest: () => true }), frame: () => mainFrame, url: () => 'https://example.org/file.pdf', status: () => 200, headers: () => ({ 'content-type': response }) });
+        }
+        for (const listener of download ? listeners.download ?? [] : []) listener({ cancel: async () => undefined });
+        if (fails) throw new Error(ansi);
+        return { status: () => 200, headers: () => ({ 'content-type': 'text/html' }) };
+      },
+      url: () => 'https://example.org/file',
+      evaluate: async () => 'text', waitForLoadState: async () => undefined, title: async () => '',
+      content: async () => pageHtml ?? '<p>x</p>',
+    };
+  };
+  const viaBrowser = async (page, parseFails = false) => {
+    const fallback = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, budget) => budget.wait(fn(page)) });
+    fallback.extractWithAxios = async (_options, state) => { state.httpStatus = 403; state.contentType = 'text/html'; return ''; };
+    if (parseFails) fallback.parseContent = () => { throw new Error('parse boom'); };
+    return fallback.extractContent({ url: 'https://example.org/file' });
+  };
+  const pdfDownload = await viaBrowser(browserPage({ response: 'application/pdf', download: true, failing: true }));
+  assert.deepEqual([pdfDownload.status, pdfDownload.httpStatus, pdfDownload.contentType], ['unsupported_media', 200, 'application/pdf']);
+  const silentDownload = await viaBrowser(browserPage({ download: true, failing: true }));
+  assert.deepEqual([silentDownload.status, silentDownload.httpStatus, silentDownload.contentType], ['unsupported_media', undefined, undefined]);
+  assert.equal(silentDownload.error, 'Unsupported media: unknown (download started)');
+  const aborted = await viaBrowser(browserPage({ failing: true }));
+  assert.equal(aborted.status, 'http_error');
+  assert.equal(aborted.attempts.at(-1).error, 'page.goto: net::ERR_ABORTED at https://example.org/file');
+  const browserConversion = await viaBrowser(browserPage({}), true);
+  assert.deepEqual([browserConversion.status, browserConversion.error], ['conversion_error', 'parse boom']);
+  assert.deepEqual(browserConversion.attempts.map(a => a.transport), ['http', 'browser']);
+}
+process.stdout.write('declared charsets, read-limit facts, downloads, error lines and conversion errors: passed\n');
+
 // Every fixed candidate survives media/error/empty outcomes, in original order.
 const candidates = ['pdf-without-extension', 'error', 'short', 'empty', 'cancelled'].map(id => ({
   title: id, url: `https://example.org/${id}`, description: `snippet-${id}`,
