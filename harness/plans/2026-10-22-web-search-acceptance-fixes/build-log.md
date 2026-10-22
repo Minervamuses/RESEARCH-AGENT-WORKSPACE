@@ -6,7 +6,7 @@
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
 | F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3（建議順序中先做 F2-S1） |
-| F2 | Not started | — | — | — | F2-S1（F1-S2 之後） |
+| F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
 | F3 | Not started | — | — | — | F3-S1（F2-S1 之後） |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
@@ -186,3 +186,25 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 驅動腳本在結尾 closeAll 並關閉伺服器；每條沙箱指令有自己的 PID namespace，本次沒有另外的殘留程序取證（真實程序生命週期屬 F4、F7）。
 - **限制**：F3-S1 改用完整版 Chromium 後要在沙箱外以短 TMPDIR 重跑這個矩陣（phase-3 已列）。每次瀏覽器讀取 HTML 至少多等約 500 ms 的 networkidle 窗。
 - **下一步**：依建議順序做 F2-S1。
+
+### F2-S1 /proc 解析與程序樹回收
+- **改動**（FG5、FG6；AF24、AF35；突變 P07、P27）：app/agent/mcp.py。
+  - 新增模組層級 `_proc_stat(path)`：從最後一個「)」之後取欄位，回傳 (state, ppid, pgrp, starttime)；讀檔、int 轉換與索引都在 try 之內，解析不了就回 None（該列略過）。remember_processes 與 kill_owned 共用它；/proc 目錄名不是純數字就略過。
+  - observe 迴圈與 kill_owned 經 observe_once 呼叫 remember_processes：非預期例外只記一次 warning（`Web Search process observation failed; continuing`），迴圈繼續。kill_owned 的逐程序收尾任何例外都略過該程序。
+  - `finally` 中 `await watcher` 的例外只記 warning，不會取代已發布的結果或原本的例外。
+  - 身分判定規則與收尾時機都沒變：直接子程序帶呼叫標記、starttime 一致、只在 pgid 等於 pid 時群組 kill；仍只在期限到時強制收尾（X14 不在範圍）。
+- **測試**（app/tests/test_mcp.py）：
+  - lifecycle server 新增 `plain`（回 known result）與 `grandchild` 模式：server 收到 tools/call 後卡住；中介子程序以 start_new_session 產生忽略 SIGTERM 的 `/bin/sleep` 孫程序，寫下 pid 與 starttime，150 ms 後自行結束。`_assert_lifecycle_pid_gone` 改用 `_proc_stat` 的 `_alive`。
+  - `test_web_search_survives_host_process_names_with_parentheses`：把 /bin/sleep 複製為 `a) b c d` 執行，其存活期間 discovery 與呼叫都回 known result；finally 只終止自己的 sleeper。
+  - `test_web_search_observer_failure_keeps_received_result`：monkeypatch `_proc_stat` 第一次呼叫拋例外；結果仍為 known result，warning 恰好一次，之後的觀察繼續。
+  - `test_web_search_reaps_detached_grandchild_after_intermediate_exits`：逾時收尾後孫程序（以 starttime 確認身分）已不存活，呼叫 0.8 s 內返回；finally 只清理自己記錄的孫程序。
+- **檢查**（app 目錄，沙箱內，XDG_CACHE_HOME、AGENT_LOG_DIR、TMPDIR 指到 `$TMPDIR` 子目錄，PYTHONDONTWRITEBYTECODE=1）：
+  - 三個新測試 3 passed。
+  - focused `pytest tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py -q -p no:cacheprovider`：49 passed。
+  - 判別力（evidence/F2-S1/mutate.py 在 `$TMPDIR` 複本套用，複本不含 app/desktop 與 app/store，以 PYTHONPATH 指向複本並確認 import 的是複本）：
+    - HEAD 邏輯（只多了測試用的 `_proc_stat`）：怪名程序測試失敗（`ValueError: invalid literal for int() with base 10: 'c'`，即 AF24），觀察者故障測試失敗；孫程序測試通過（HEAD 本來就有展開與週期觀察）。
+    - P07（不展開後代）：孫程序測試失敗，孫程序存活。
+    - P27（移除週期觀察）：孫程序測試失敗；觀察者故障測試也失敗。
+    - 結果在 evidence/F2-S1/variant-{old,P07,P27}.txt。
+- **限制**：P07b、P07d（可選）未另加測試；PID 重用難以穩定重現。快速失敗路徑的後代回收仍不在範圍（X14）。
+- **下一步**：依建議順序做 F3-S1。

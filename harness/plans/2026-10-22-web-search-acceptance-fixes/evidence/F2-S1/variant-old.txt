@@ -1,0 +1,5 @@
+FAILED tests/test_mcp.py::test_web_search_survives_host_process_names_with_parentheses
+FAILED tests/test_mcp.py::test_web_search_observer_failure_keeps_received_result
+2 failed, 1 passed, 31 deselected, 1 warning in 1.26s
+imported <copy>/agent/mcp.py
+old: E ValueError: invalid literal for int() with base 10: 'c' (parentheses test)

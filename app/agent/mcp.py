@@ -276,6 +276,20 @@ def _spec_to_connection(spec: MCPServerSpec) -> dict:
     return conn
 
 
+def _proc_stat(path) -> tuple[str, int, int, str] | None:
+    """Return (state, ppid, pgrp, starttime) from a /proc stat file, or None.
+
+    The comm field may contain spaces and ") ", so fields start after the
+    last ")"; any unreadable or malformed record is skipped.
+    """
+    try:
+        text = Path(path).read_text()
+        fields = text[text.rindex(")") + 1:].split()
+        return fields[0], int(fields[1]), int(fields[2]), fields[19]
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
     """Bound one web-search session, retaining a received result across cleanup."""
     if not 1 <= timeout_ms <= 300000:
@@ -299,15 +313,13 @@ async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
         # Read metadata globally, but inspect env only on this Python process's children.
         records = {}
         for path in Path("/proc").glob("[0-9]*/stat"):
-            try:
-                fields = path.read_text().split(") ", 1)[1].split()
-                records[int(path.parent.name)] = fields
-            except (OSError, ValueError, IndexError):
-                continue
+            record = _proc_stat(path) if path.parent.name.isdigit() else None
+            if record is not None:
+                records[int(path.parent.name)] = record
         roots = set()
         marker = f"_AGENT_WEB_SEARCH_CALL_ID={call_id}".encode()
-        for pid, fields in records.items():
-            if int(fields[1]) != os.getpid():
+        for pid, (_state, ppid, _group, _started) in records.items():
+            if ppid != os.getpid():
                 continue
             try:
                 if marker in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0"):
@@ -316,34 +328,46 @@ async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
                 continue
         family = roots | {
             pid for pid, (started, _group) in owned.items()
-            if pid in records and records[pid][19] == started
+            if pid in records and records[pid][3] == started
         }
         while True:
-            expanded = family | {pid for pid, fields in records.items() if int(fields[1]) in family}
+            expanded = family | {pid for pid, record in records.items() if record[1] in family}
             if expanded == family:
                 break
             family = expanded
         for pid in family:
             if pid in records and pid not in owned:
-                owned[pid] = (records[pid][19], int(records[pid][2]))
+                owned[pid] = (records[pid][3], records[pid][2])
+
+    observer_failed = False
+
+    def observe_once() -> None:
+        # An observer fault is logged once; it never replaces a result or the original error.
+        nonlocal observer_failed
+        try:
+            remember_processes()
+        except Exception:
+            if not observer_failed:
+                observer_failed = True
+                logger.warning("Web Search process observation failed; continuing", exc_info=True)
 
     def kill_owned() -> None:
-        remember_processes()
+        observe_once()
         for pid, (started, group) in sorted(owned.items(), reverse=True):
             try:
-                fields = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].split()
-                if fields[19] != started or fields[0] == "Z":
+                record = _proc_stat(f"/proc/{pid}/stat")
+                if record is None or record[3] != started or record[0] == "Z":
                     continue
-                if group == pid and int(fields[2]) == pid:
+                if group == pid and record[2] == pid:
                     os.killpg(pid, signal.SIGKILL)
                 else:
                     os.kill(pid, signal.SIGKILL)
-            except (OSError, IndexError):
+            except Exception:
                 continue
 
     async def observe() -> None:
         while not stop.is_set():
-            remember_processes()
+            observe_once()
             try:
                 await asyncio.wait_for(stop.wait(), 0.02)
             except TimeoutError:
@@ -392,7 +416,10 @@ async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
         raise
     finally:
         stop.set()
-        await watcher
+        try:
+            await watcher
+        except Exception:
+            logger.warning("Web Search process observer ended with an error", exc_info=True)
 
 
 async def _load_web_search_tools(connection: dict, timeout_ms: int) -> list:

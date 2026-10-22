@@ -582,6 +582,15 @@ def _lifecycle_server(tmp_path, mode):
 import json, os, signal, sys, time
 from pathlib import Path
 mode, pid_file = sys.argv[1:]
+GRANDCHILD = '''
+import signal, subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True,
+                         preexec_fn=lambda: signal.signal(signal.SIGTERM, signal.SIG_IGN))
+text = Path(f"/proc/{child.pid}/stat").read_text()
+Path(sys.argv[1]).write_text(f"{child.pid} {text[text.rindex(')') + 1:].split()[19]}")
+time.sleep(.15)
+'''
 fields = Path(f"/proc/{os.getpid()}/stat").read_text().split(") ", 1)[1].split()
 Path(pid_file).write_text(f"{os.getpid()} {os.getpgrp()} {fields[19]}")
 signal.signal(signal.SIGTERM, lambda *_args: None)
@@ -600,6 +609,12 @@ for line in sys.stdin:
     else:
         called = True
         if mode == "tool": time.sleep(2)
+        if mode == "grandchild":
+            # Stay stuck while an intermediate child detaches a SIGTERM-ignoring grandchild and exits.
+            import subprocess
+            subprocess.Popen([sys.executable, "-c", GRANDCHILD, pid_file + ".grandchild"])
+            time.sleep(5)
+            continue
         if mode == "tool_error":
             print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "explicit invalid argument"}}), flush=True)
             continue
@@ -613,14 +628,14 @@ if called and mode == "close": time.sleep(2)
     return {"transport": "stdio", "command": sys.executable, "args": [str(source), mode, str(pid_file)]}, pid_file
 
 
-def _assert_lifecycle_pid_gone(pid_file):
-    from pathlib import Path
+def _alive(pid, started):
+    record = mcp_module._proc_stat(f"/proc/{pid}/stat")
+    return record is not None and record[3] == started and record[0] != "Z"
 
+
+def _assert_lifecycle_pid_gone(pid_file):
     pid, group, started = pid_file.read_text().split()
-    stat = Path(f"/proc/{pid}/stat")
-    if stat.exists():
-        fields = stat.read_text().split(") ", 1)[1].split()
-        assert fields[19] != started or fields[0] == "Z", f"live child {pid}, pgid {group}"
+    assert not _alive(pid, started), f"live child {pid}, pgid {group}"
 
 
 @pytest.mark.parametrize("mode", ["startup", "initialize", "tool", "close", "meta"])
@@ -682,3 +697,74 @@ def test_web_search_preserves_protocol_error_message(tmp_path):
             await tools[0].ainvoke({})
         _assert_lifecycle_pid_gone(pid_file)
     asyncio.run(run())
+
+
+def test_web_search_survives_host_process_names_with_parentheses(tmp_path):
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    binary = tmp_path / "a) b c d"
+    shutil.copy("/bin/sleep", binary)
+    sleeper = subprocess.Popen([str(binary), "30"])
+    try:
+        assert "(a) b c d)" in Path(f"/proc/{sleeper.pid}/stat").read_text()
+        connection, pid_file = _lifecycle_server(tmp_path, "plain")
+        async def run():
+            tools = await mcp_module._load_web_search_tools(connection, 800)
+            response = await tools[0].ainvoke({})
+            assert (response if isinstance(response, str) else response[0]["text"]) == "known result"
+            _assert_lifecycle_pid_gone(pid_file)
+        asyncio.run(run())
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+
+def test_web_search_observer_failure_keeps_received_result(tmp_path, monkeypatch, caplog):
+    import logging
+
+    original = mcp_module._proc_stat
+    calls = []
+    def flaky(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise RuntimeError("injected observer failure")
+        return original(path)
+    monkeypatch.setattr(mcp_module, "_proc_stat", flaky)
+    connection, pid_file = _lifecycle_server(tmp_path, "plain")
+    async def run():
+        tools = await mcp_module._load_web_search_tools(connection, 800)
+        response = await tools[0].ainvoke({})
+        assert (response if isinstance(response, str) else response[0]["text"]) == "known result"
+    with caplog.at_level(logging.WARNING, logger="agent.mcp"):
+        asyncio.run(run())
+    warnings = [r for r in caplog.records if "process observation failed" in r.getMessage()]
+    assert len(warnings) == 1
+    assert len(calls) > 1
+    _assert_lifecycle_pid_gone(pid_file)
+
+
+def test_web_search_reaps_detached_grandchild_after_intermediate_exits(tmp_path):
+    import os
+    import signal
+    import time
+
+    connection, pid_file = _lifecycle_server(tmp_path, "grandchild")
+    marker = tmp_path / "lifecycle.pid.grandchild"
+    async def run():
+        tools = await mcp_module._load_web_search_tools(connection, 800)
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="before a result"):
+            await tools[0].ainvoke({})
+        assert time.monotonic() - started < .8
+    try:
+        asyncio.run(run())
+        pid, started = marker.read_text().split()
+        assert not _alive(pid, started), f"detached grandchild {pid} survived"
+        _assert_lifecycle_pid_gone(pid_file)
+    finally:
+        if marker.exists():
+            pid, started = marker.read_text().split()
+            if _alive(pid, started):
+                os.killpg(int(pid), signal.SIGKILL)

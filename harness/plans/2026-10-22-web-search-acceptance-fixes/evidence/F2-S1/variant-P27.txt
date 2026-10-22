@@ -1,0 +1,4 @@
+FAILED tests/test_mcp.py::test_web_search_observer_failure_keeps_received_result
+FAILED tests/test_mcp.py::test_web_search_reaps_detached_grandchild_after_intermediate_exits
+2 failed, 1 passed, 31 deselected, 1 warning in 1.44s
+imported <copy>/agent/mcp.py
