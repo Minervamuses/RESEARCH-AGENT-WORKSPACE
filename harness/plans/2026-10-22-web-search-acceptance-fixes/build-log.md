@@ -8,7 +8,7 @@
 | F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/ | AF10(b) 待 F7-S2 案例 7 以真實入口確認 | — |
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
-| F4 | Not started | — | — | — | F4-S1（F1、F3 已完成） |
+| F4 | In progress | F4-S1 | build-log（已提交測試） | — | F4-S2 |
 | F5 | Not started | — | — | 相依 F4 | — |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
 | F7 | Not started | — | — | 相依 F6 | — |
@@ -388,3 +388,33 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 判別力（evidence/F2-S3/mutate.py、results.jsonl）：呼叫改用啟動上限的「陷阱」變體被完整預算測試殺死；discovery 不套上限的變體被啟動上限測試殺死。
 - **F2 階段結論**：FG5 的 AF24–AF28、AF35、AF36、AF38、FU05 都有離線真實程序證據；P07、P13、P13c、P18、P18b、P26、P27 已被殺死，F6-S3 會依清單正式複驗。
 - **下一步**：F4-S1（F1、F3 已完成）。
+
+### F4-S1 總時間上限與每頁視窗
+- **改動**（FG3；AF19、AF20、AF21）：
+  - src/browser-pool.ts：
+    - OPERATION_TIMEOUTS 新增 pageRead: 6000（FA06）；
+    - CallBudget 新增 expiry 訊息參數；`child(cap, expiry)` 只有在子上限早於父預算時才使用自己的 expiry，否則沿用「Call deadline exceeded」；
+    - 新增 `boundedRead(read, budget, what)`：以 min(pageRead, 剩餘預算) 約束導覽後的一次讀取，到期拋 `<what> exceeded its <ms> ms page read limit`（ETIMEDOUT）；呼叫端的 withPage 隨即以既有的有界收尾關閉 context，被放棄的讀取也一併結束，且其 rejection 已處理。
+  - src/enhanced-content-extractor.ts：
+    - **HTTP 總時間上限**：單頁 HTTP 以 `AbortSignal.any([呼叫預算, 操作計時])` 交給 axios，閒置 timeout 照舊。操作計時在區域變數；操作計時觸發而呼叫預算未中止時，改拋 `HTTP page read exceeded its <ms> ms operation limit`（ETIMEDOUT → timeout），照既有規則進 fallback。
+    - **每頁視窗**：8 s 視窗改在該頁取得第一個 HTTP slot 時才開（extractContent 的 windowMs，由 extractContentForResults 傳入 pageTotal），涵蓋該頁的 HTTP 與 fallback；排隊只受整次預算約束。視窗到期的原因為 `page read window exceeded (<ms> ms)`。嘗試錯誤改用實際生效的預算原因，所以能和 Call deadline 區分。
+    - page.title、page.content 與 text/plain 的 body innerText 都經 boundedRead。
+    - 單頁工具（get-single-web-page-content）不帶 windowMs，行為不變。
+  - src/search-engine.ts：Google、Bing 解析前的 page.content 經 boundedRead。連結解析沿用自己的 linkResolve。
+  - **同一上限**：nominal 上限不小於剩餘預算時，不另設操作計時，由呼叫期限本身結束並說明原因。第一版沒有這條規則，既有的「35 ms 預算、伺服器不回應」案例因此不穩定：操作計時比呼叫期限早不到 1 ms 觸發，被當成操作逾時而進了 fallback。這是本步自己引入的問題，已在提交前以這條規則修正，連跑 5 次通過。
+- **測試**（tests/test-browser-lifecycle.mjs，本機伺服器與 stub）：
+  - 慢送：伺服器每 100 ms 送 1 byte，pageRequest 縮為 600 ms。讀取在 550–1500 ms 內結束，錯誤為 `HTTP page read exceeded its 600 ms operation limit`；讀取期間 HTTP slot 為 1，結束後 0；stub fallback 恰好 1 次。
+  - 讀取卡住：pageRead 縮為 80 ms，經真實 BrowserPool（stub chromium）：
+    - title()、content()、text/plain 的 innerText 各自永不返回 → 1 s 內 timeout，錯誤為 `<what> exceeded its 80 ms page read limit`，context 關閉 1 次；
+    - Google、Bing 結果頁的 content() 永不返回 → 方法以 `<engine> results page.content() exceeded its 80 ms page read limit` 拒絕，context 關閉。
+  - 每頁視窗：pageTotal 縮為 400 ms。
+    - 10 頁、每頁 HTTP 200 ms、2 個 slot：10 頁全部 text；
+    - HTTP 250 ms 回空、fallback 250 ms：該頁 timeout，錯誤為 `page read window exceeded (400 ms)`，HTTP 那次嘗試沒有錯誤。
+  - 既有的 selector 卡住、短期限、取消後不 fallback 等案例全部通過。
+- **檢查**（vendor 目錄，沙箱內）：
+  - `npm run build` exit 0；retention 26/26、content-contract 5 組、browser-lifecycle（連跑 5 次）全部 exit 0。
+  - 判別力（958ce37 的乾淨重建，在 `$TMPDIR` 複本中把測試切成三段執行）：
+    - 慢送讀取跑到整次預算 5001 ms，結束後 HTTP slot 仍占用（AF19 重現）；
+    - 去掉慢送段後，卡住的 page.title() 超過 1 s（AF20 重現）；
+    - 只留視窗段時，10 頁中排在後面的頁面為 timeout（AF21 重現）。
+- **下一步**：F4-S2。

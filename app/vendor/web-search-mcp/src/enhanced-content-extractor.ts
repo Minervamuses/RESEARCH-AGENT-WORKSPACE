@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import type { Page, Response } from 'playwright';
 import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
 import { resolveContentLimit, sanitizeErrorMessage, truncateMarkdown } from './utils.js';
-import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
+import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS, boundedRead } from './browser-pool.js';
 
 // Elements rendered as blocks by default; they only add separators and never remove text.
 const BLOCK_TAGS = new Set([
@@ -81,8 +81,13 @@ function documentTitle($: cheerio.CheerioAPI): string | undefined {
 export class EnhancedContentExtractor {
   constructor(private browserPool: BrowserPool = sharedBrowserPool) {}
 
-  async extractContent(options: ContentExtractionOptions & { budget?: CallBudget }): Promise<PageRead> {
-    const budget = options.budget ?? new CallBudget();
+  async extractContent(options: ContentExtractionOptions & { budget?: CallBudget; windowMs?: number }): Promise<PageRead> {
+    const call = options.budget ?? new CallBudget();
+    // FA05: a page window opens when the page gets its first read slot; queueing only spends the call budget.
+    let window: CallBudget | undefined;
+    const active = () => window ?? call;
+    const open = () => window ??= options.windowMs === undefined ? call
+      : call.child(options.windowMs, `page read window exceeded (${options.windowMs} ms)`);
     const state: PageRead = {
       requestedUrl: options.url, status: 'not_attempted', attempts: [], content: '',
       maxContentLength: resolveContentLimit(options.maxContentLength),
@@ -90,7 +95,7 @@ export class EnhancedContentExtractor {
     };
     const attempt = async (transport: 'http' | 'browser'): Promise<boolean> => {
       const event: PageRead['attempts'][number] = { transport };
-      const started = () => { budget.remaining(); state.attempts.push(event); };
+      const started = () => { active().remaining(); state.attempts.push(event); };
       delete state.httpStatus;
       delete state.contentType;
       delete state.finalUrl;
@@ -99,16 +104,18 @@ export class EnhancedContentExtractor {
       try {
         const text = transport === 'http'
           ? await this.browserPool.withHttp(() => {
+              const budget = open();
               started();
               return this.extractWithAxios({ ...options, budget }, state);
-            }, budget)
-          : await this.extractWithBrowser({ ...options, budget }, state, started, event);
+            }, call)
+          : await this.extractWithBrowser({ ...options, budget: open() }, state, started, event);
         event.status = state.httpStatus;
         if (state.status === 'unsupported_media') return true;
         Object.assign(state, converting(() => truncateMarkdown(text, state.maxContentLength)));
         state.status = text.trim() ? 'text' : 'empty_text';
         return state.status === 'text';
       } catch (error) {
+        const budget = active();
         const err = (budget.signal.aborted ? budget.signal.reason : error) as any;
         const response = err.response;
         if (response) {
@@ -117,7 +124,7 @@ export class EnhancedContentExtractor {
           state.finalUrl = response.request?.res?.responseUrl;
         }
         event.status = state.httpStatus;
-        event.error = sanitizeErrorMessage(error);
+        event.error = sanitizeErrorMessage(err);
         state.error = event.error;
         if (state.status === 'unsupported_media') return true;
         state.status = !state.attempts.length ? 'not_attempted'
@@ -130,27 +137,38 @@ export class EnhancedContentExtractor {
     };
     try {
       const complete = await attempt('http');
-      if (!complete && !budget.signal.aborted && !['cancelled', 'conversion_error'].includes(state.status)
+      if (!complete && !active().signal.aborted && !['cancelled', 'conversion_error'].includes(state.status)
         && (state.status === 'empty_text' || state.status === 'timeout'
           || [403, 429, 503].includes(state.httpStatus ?? 0))) {
         await attempt('browser');
       }
       if (state.status === 'text') delete state.error;
       return state;
-    } finally { if (!options.budget) budget.dispose(); }
+    } finally {
+      if (window && window !== call) window.dispose();
+      if (!options.budget) call.dispose();
+    }
   }
 
   private async extractWithAxios(options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead): Promise<string> {
+    const nominal = Math.min(options.timeout ?? OPERATION_TIMEOUTS.pageRequest, OPERATION_TIMEOUTS.pageRequest);
+    const capMs = options.budget.timeout(nominal);
+    // FA05: a total cap, not only axios's idle timeout. Axios drops abort reasons, so the timer stays local.
+    // When the remaining budget is shorter, the call deadline itself ends the read and names the cause.
+    const operation = new AbortController();
+    const timer = nominal < options.budget.remaining() ? setTimeout(() => operation.abort(), capMs) : undefined;
     let response;
     try {
       response = await axios.get(options.url, {
-        responseType: 'arraybuffer', signal: options.budget.signal,
-        timeout: options.budget.timeout(Math.min(options.timeout ?? OPERATION_TIMEOUTS.pageRequest, OPERATION_TIMEOUTS.pageRequest)),
+        responseType: 'arraybuffer', signal: AbortSignal.any([options.budget.signal, operation.signal]), timeout: capMs,
         headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36' },
         maxContentLength: READ_LIMIT_BYTES,
         validateStatus: status => status < 400,
       });
     } catch (error) {
+      if (operation.signal.aborted && !options.budget.signal.aborted) {
+        throw Object.assign(new Error(`HTTP page read exceeded its ${capMs} ms operation limit`), { code: 'ETIMEDOUT' });
+      }
       // Over the read limit the headers were already received; keep them as facts.
       const received = (error as any)?.request?.res;
       if ((error as any)?.code !== 'ERR_BAD_RESPONSE' || !/maxContentLength/.test((error as any)?.message) || !received) throw error;
@@ -163,7 +181,7 @@ export class EnhancedContentExtractor {
         throw new Error(`Unsupported media: ${state.contentType ?? 'unknown'} (${limit})`);
       }
       throw new Error(limit);
-    }
+    } finally { if (timer) clearTimeout(timer); }
     state.httpStatus = response.status;
     state.contentType = response.headers['content-type']?.toString();
     state.finalUrl = response.request?.res?.responseUrl ?? options.url;
@@ -237,9 +255,9 @@ export class EnhancedContentExtractor {
         return '';
       }
       const settle = media === 'text/plain' ? undefined : await this.settleRendering(page, options.budget);
-      state.pageTitle = singleLine(await page.title()) || undefined;
-      const text = media === 'text/plain' ? await page.locator('body').innerText()
-        : await page.content().then(html => converting(() => this.parseContent(html, state.finalUrl)));
+      state.pageTitle = singleLine(await boundedRead(page.title(), options.budget, 'page.title()')) || undefined;
+      const text = media === 'text/plain' ? await boundedRead(page.locator('body').innerText(), options.budget, 'body innerText')
+        : await boundedRead(page.content(), options.budget, 'page.content()').then(html => converting(() => this.parseContent(html, state.finalUrl)));
       if (settle && !text.trim()) {
         event.error = state.error = `No visible text after waiting ${settle.waitedMs} ms for client rendering (limit ${settle.limitMs} ms)`;
       }
@@ -268,14 +286,10 @@ export class EnhancedContentExtractor {
   ): Promise<SearchResult[]> {
     const budget = supplied ?? new CallBudget();
     try {
-      return await Promise.all(results.slice(0, targetCount).map(async result => {
-        let child = budget;
-        try { child = budget.child(OPERATION_TIMEOUTS.pageTotal); } catch { /* Keep cancelled candidates. */ }
-        try {
-          const read = await this.extractContent({ url: result.url, maxContentLength, budget: child });
-          return { ...result, read };
-        } finally { if (child !== budget) child.dispose(); }
-      }));
+      return await Promise.all(results.slice(0, targetCount).map(async result => ({
+        ...result,
+        read: await this.extractContent({ url: result.url, maxContentLength, budget, windowMs: OPERATION_TIMEOUTS.pageTotal }),
+      })));
     } finally { if (!supplied) budget.dispose(); }
   }
 

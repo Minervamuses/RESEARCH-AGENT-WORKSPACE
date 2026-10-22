@@ -5,7 +5,7 @@ import { parseInteger } from './utils.js';
 
 export const OPERATION_TIMEOUTS = {
   launch: 10000, searchRequest: 4000, searchSelector: 3000,
-  pageRequest: 6000, pageTotal: 8000, cleanup: 1000, renderSettle: 3000, linkResolve: 6000,
+  pageRequest: 6000, pageTotal: 8000, cleanup: 1000, renderSettle: 3000, linkResolve: 6000, pageRead: 6000,
 } as const;
 
 export function configuredTimeout(): number {
@@ -33,9 +33,12 @@ export class CallBudget {
   private parentAbort?: () => void;
   readonly signal = this.controller.signal;
 
-  constructor(durationMs = configuredTimeout() - cleanupReserve(configuredTimeout()), parent?: AbortSignal) {
+  constructor(
+    durationMs = configuredTimeout() - cleanupReserve(configuredTimeout()), parent?: AbortSignal,
+    private readonly expiry = 'Call deadline exceeded',
+  ) {
     this.deadline = performance.now() + Math.max(0, durationMs);
-    this.timer = setTimeout(() => this.abort(Object.assign(new Error('Call deadline exceeded'), { code: 'ETIMEDOUT' })), Math.max(0, durationMs));
+    this.timer = setTimeout(() => this.abort(this.expired()), Math.max(0, durationMs));
     if (parent) {
       this.parentAbort = () => this.abort(parent.reason);
       if (parent.aborted) this.parentAbort();
@@ -45,6 +48,8 @@ export class CallBudget {
   }
   private parent?: AbortSignal;
 
+  private expired(): Error { return Object.assign(new Error(this.expiry), { code: 'ETIMEDOUT' }); }
+
   abort(reason?: unknown): void {
     this.controller.abort(reason ?? Object.assign(new Error('Call cancelled'), { code: 'ERR_CANCELED' }));
   }
@@ -52,7 +57,7 @@ export class CallBudget {
     if (this.signal.aborted) throw this.signal.reason;
     const remaining = this.deadline - performance.now();
     if (remaining <= 0) {
-      this.abort(Object.assign(new Error('Call deadline exceeded'), { code: 'ETIMEDOUT' }));
+      this.abort(this.expired());
       throw this.signal.reason;
     }
     return remaining;
@@ -69,11 +74,32 @@ export class CallBudget {
     try { return await Promise.race([promise, cancelled]); }
     finally { this.signal.removeEventListener('abort', onAbort); }
   }
-  child(cap: number): CallBudget { return new CallBudget(Math.min(cap, this.remaining()), this.signal); }
+  /** A sub-budget; its own expiry message applies only when its cap ends before this budget does. */
+  child(cap: number, expiry?: string): CallBudget {
+    const remaining = this.remaining();
+    return new CallBudget(Math.min(cap, remaining), this.signal, cap < remaining ? expiry : undefined);
+  }
   dispose(): void {
     clearTimeout(this.timer);
     if (this.parentAbort) this.parent?.removeEventListener('abort', this.parentAbort);
   }
+}
+
+/**
+ * FA06: bounds one post-navigation page read by min(pageRead, remaining budget). On expiry it throws;
+ * the caller's withPage lease then closes the context, which also ends the abandoned read.
+ */
+export async function boundedRead<T>(read: Promise<T>, budget: CallBudget, what: string): Promise<T> {
+  read.catch(() => undefined);
+  // When the remaining budget is shorter, the call deadline itself ends the read and names the cause.
+  if (OPERATION_TIMEOUTS.pageRead >= budget.remaining()) return budget.wait(read);
+  const capMs = budget.timeout(OPERATION_TIMEOUTS.pageRead);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([read, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error(`${what} exceeded its ${capMs} ms page read limit`), { code: 'ETIMEDOUT' })), capMs);
+    })]);
+  } finally { if (timer) clearTimeout(timer); }
 }
 
 async function boundedClose(close: () => Promise<void>): Promise<boolean> {

@@ -230,6 +230,106 @@ try {
     await pause(120);
   } finally { OPERATION_TIMEOUTS.renderSettle = renderCap; }
 
+  // FA05/FA06: operation caps are total caps, page windows start at the first read slot.
+  const savedCaps = { ...OPERATION_TIMEOUTS };
+  try {
+    OPERATION_TIMEOUTS.pageRequest = 600;
+    const dripServer = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      const drip = setInterval(() => response.write('a'), 100);
+      response.on('close', () => clearInterval(drip));
+    });
+    await new Promise(resolve => dripServer.listen(0, '127.0.0.1', resolve));
+    try {
+      const dripPool = new BrowserPool();
+      const dripReader = new EnhancedContentExtractor(dripPool);
+      let dripFallback = 0, slotsMid;
+      dripReader.extractWithBrowser = async (_options, _state, started) => { started(); dripFallback++; return ''; };
+      setTimeout(() => { slotsMid = dripPool.http.activeCount; }, 300);
+      const dripBudget = new CallBudget(5000);
+      const begin = performance.now();
+      const dripRead = await dripReader.extractContent({ url: `http://127.0.0.1:${dripServer.address().port}/drip`, budget: dripBudget });
+      const dripMs = performance.now() - begin;
+      dripBudget.dispose();
+      assert.ok(dripMs >= 550 && dripMs < 1500, `slow drip ended after ${dripMs} ms`);
+      assert.match(dripRead.attempts[0].error, /^HTTP page read exceeded its 600 ms operation limit$/);
+      assert.equal(slotsMid, 1);
+      assert.equal(dripPool.http.activeCount, 0);
+      assert.equal(dripFallback, 1);
+      assert.deepEqual(dripRead.attempts.map(a => a.transport), ['http', 'browser']);
+    } finally {
+      dripServer.closeAllConnections();
+      await new Promise(resolve => dripServer.close(resolve));
+    }
+
+    OPERATION_TIMEOUTS.pageRead = 80;
+    const never = () => new Promise(() => undefined);
+    let stuckCloses = 0;
+    const stuckPool = page => {
+      chromium.launch = async () => ({
+        isConnected: () => true, version: () => '777.0.0.0',
+        newContext: async () => ({ newPage: async () => page, close: async () => { stuckCloses++; } }),
+        close: async () => undefined,
+      });
+      return new BrowserPool();
+    };
+    const stuckPage = (media, overrides) => ({
+      on: () => undefined, off: () => undefined, mainFrame: () => undefined,
+      goto: async () => ({ status: () => 200, headers: () => ({ 'content-type': media }) }),
+      url: () => 'https://www.google.com/search?q=x', evaluate: async () => 'text', waitForLoadState: async () => undefined,
+      waitForSelector: async () => undefined, title: async () => 'T', content: async () => '<p>x</p>',
+      locator: () => ({ innerText: async () => 'plain' }), ...overrides,
+    });
+    for (const [media, overrides, what] of [
+      ['text/html', { title: never }, 'page.title()'],
+      ['text/html', { content: never }, 'page.content()'],
+      ['text/plain', { locator: () => ({ innerText: never }) }, 'body innerText'],
+    ]) {
+      const pool = stuckPool(stuckPage(media, overrides));
+      const reader = new EnhancedContentExtractor(pool);
+      reader.extractWithAxios = async (_options, state) => { state.httpStatus = 200; state.contentType = media; return ''; };
+      const before = stuckCloses, budget = new CallBudget(5000), begin = performance.now();
+      const read = await reader.extractContent({ url: 'https://example.org/stuck', budget });
+      budget.dispose();
+      assert.ok(performance.now() - begin < 1000, what);
+      assert.equal(read.status, 'timeout', what);
+      assert.equal(read.attempts[1].error, `${what} exceeded its 80 ms page read limit`);
+      assert.equal(stuckCloses, before + 1, `${what}: context closed`);
+      await pool.closeAll();
+    }
+    for (const [method, name] of [['tryGoogleSearch', 'Google'], ['tryBingSearch', 'Bing']]) {
+      const pool = stuckPool(stuckPage('text/html', { content: never }));
+      const before = stuckCloses, budget = new CallBudget(5000), begin = performance.now();
+      await assert.rejects(new SearchEngine(pool)[method]('x', 5, 1000, undefined, budget), new RegExp(`^Error: ${name} results page\\.content\\(\\) exceeded its 80 ms page read limit$`));
+      budget.dispose();
+      assert.ok(performance.now() - begin < 1000, name);
+      assert.equal(stuckCloses, before + 1, `${name}: context closed`);
+      await pool.closeAll();
+    }
+
+    OPERATION_TIMEOUTS.pageTotal = 400;
+    const windowReader = new EnhancedContentExtractor(new BrowserPool());
+    windowReader.extractWithAxios = async options => { await options.budget.wait(pause(200)); return 'read in time'; };
+    const ten = Array.from({ length: 10 }, (_v, i) => ({ title: `p${i}`, url: `https://example.org/${i}`, description: '' }));
+    const windowBudget = new CallBudget(5000);
+    const windowed = await windowReader.extractContentForResults(ten, 10, undefined, windowBudget);
+    windowBudget.dispose();
+    assert.deepEqual(windowed.map(r => r.read.status), Array(10).fill('text'));
+    const slowReader = new EnhancedContentExtractor(new BrowserPool());
+    slowReader.extractWithAxios = async options => { await options.budget.wait(pause(250)); return ''; };
+    slowReader.extractWithBrowser = async (options, _state, started) => { started(); await options.budget.wait(pause(250)); return 'too late'; };
+    const slowBudget = new CallBudget(5000);
+    const [overWindow] = await slowReader.extractContentForResults([ten[0]], 1, undefined, slowBudget);
+    slowBudget.dispose();
+    assert.equal(overWindow.read.status, 'timeout');
+    assert.equal(overWindow.read.error, 'page read window exceeded (400 ms)');
+    assert.deepEqual(overWindow.read.attempts.map(a => [a.transport, a.error ?? null]), [['http', null], ['browser', 'page read window exceeded (400 ms)']]);
+  } finally {
+    Object.assign(OPERATION_TIMEOUTS, savedCaps);
+    chromium.launch = original;
+  }
+  await pause(120);
+
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, 0);
   process.stdout.write('single launch, bounded contexts/HTTP, shared ownership and failed launch recovery: passed\n');
 } finally {

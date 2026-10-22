@@ -3,7 +3,7 @@ import type { Page, Request } from 'playwright';
 import { SearchOptions, SearchResult, SearchResultWithMetadata, SearchEngineState, LinkResolution } from './types.js';
 import { sanitizeQuery } from './utils.js';
 import { RateLimiter } from './rate-limiter.js';
-import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
+import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS, boundedRead } from './browser-pool.js';
 
 /** FA13: a fixed rule, not semantic detection. Han characters select Taiwan Chinese; all else English. */
 export function queryMarket(query: string): { googleHl: string; bingSetlang: string; bingCc: string } {
@@ -212,7 +212,7 @@ export class SearchEngine {
       const finalPath = new URL(page.url()).pathname;
       if (finalPath.startsWith('/sorry/')) throw new Error(`Google redirected to ${finalPath} (HTTP ${status ?? 'unknown'})`);
       await this.waitForResults(page, '#search a h3, #rso a h3', budget);
-      const batch = this.parseGoogleResults(await page.content(), page.url());
+      const batch = this.parseGoogleResults(await boundedRead(page.content(), budget, 'Google results page.content()'), page.url());
       await admit?.(batch, page);
       return batch;
     }, budget);
@@ -234,7 +234,7 @@ export class SearchEngine {
       const status = response?.status();
       if (status !== undefined && status >= 400) throw new Error(`Bing returned HTTP ${status}`);
       await this.waitForResults(page, '#b_results > li.b_algo', budget);
-      const batch = this.parseBingResults(await page.content(), page.url());
+      const batch = this.parseBingResults(await boundedRead(page.content(), budget, 'Bing results page.content()'), page.url());
       await admit?.(batch, page);
       return batch;
     }, budget);
