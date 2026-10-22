@@ -11,7 +11,7 @@
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
 | F6 | Complete | F6-S1、F6-S2、F6-S3 | evidence/F6-S3/ | — | — |
-| F7 | In progress | F7-S1、F7-S2 | evidence/F7-S2/ | — | F7-S3 |
+| F7 | In progress | F7-S1、F7-S2、F7-S3 | evidence/F7-S2/、evidence/F7-S3/ | Google 請求間隔偏離（見 F7-S3） | F7-S4 |
 
 ## 事件格式
 每個實際的 F?-S? 事件記錄以下內容：
@@ -670,3 +670,29 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 本步只用本機頁面與假引擎，真實 Google／Bing 由 F7-S3 觀測；
   - driver 的 stderr 有本機伺服器在客戶端中途斷線時的 BrokenPipeError，屬於測試伺服器本身，與產品無關。
 - **下一步**：F7-S3（公開請求，最多六組、八分鐘）。
+
+### F7-S3 公開引擎觀測
+- **作法**（FG7、FG9；AF41）：
+  - evidence/F7-S3/observe.py 依序執行組別，每組前後各在 groups.jsonl 追加 start／end 紀錄；
+  - 預算六組、八分鐘；各組 DEFAULT_TIMEOUT 60000–90000 ms；
+  - observe.mjs 包住兩個解析器，記錄同一份結果頁的結構計數，不另發請求；
+  - 第 1–3、5 組經 Python 入口（產品自訂 command 加 observe.mjs，產品的 loader、wrapper 與 allowlist）；第 4、6 組經 dist adapter，不等同 Python 全鏈路；
+  - 沙箱外執行。
+  - 正式執行前，以本機假引擎乾跑 group4.mjs 與 observe.mjs（不連網）：包裝可解開，結構計數正確，preload 可正常啟動與結束。
+- **結果**（evidence/F7-S3/README.md、groups.jsonl）：六組用完，組別時間合計 23.0 s。
+  - **Google**：4 次搜尋都是 200、`/search`，沒有 429 或 `/sorry/`，連結解析之後的下一次搜尋也沒有被擋。結構計數等於解析數（5/5、5/5、4/4、9/9），包裝解開 23/23（100%，25–90 ms）。
+  - **正文**：第 1 組 4/5 讀自目標頁；Stack Overflow 兩條路徑都是 Cloudflare 403。第 3 組讀 docs.python.org，utf-8（meta），交付 10000／71104 code points。
+  - **Bing**：
+    - 第 4、5 組為 200，`#b_results` 存在但沒有 `li.b_algo`，依規則記為零結果事實；
+    - 第 5 組 Google 只有 9 < 10，策略 B 確實呼叫了 Bing，但沒有補到候選；
+    - 第 6 組（只送 Bing）有 10 個 `li.b_algo`、解析 10，但標題全是「test」相關，與查詢無關。
+    - 中文市場沒有被觀測到（第 2 組 Google 已補滿）；Bing 包裝的真實解析沒有被觀測到。
+- **FG9 判定**：沒有被擋，沒有轉接器缺陷，沒有需要新增的 F3 修正步驟。
+  - 真實 Google 的引擎、完整版 Chromium、一般 UA、連結解析：**已驗證**。
+  - 真實 Bing 的備援已執行但沒有提供候選；Bing 包裝的真實解析：**未觀測**，只有本機證據（F3-S3、F7-S2 案例 10）。
+- **偏離（如實記錄）**：PLANS 要求 Google 兩次請求至少間隔 10 秒。腳本以「組別開始」間隔 10 秒控制，但實際送出搜尋的時點隨程序啟動而變。以結果頁的解析時點計算：
+  - 第 1→2 組 9.9 s、第 2→4 組 8.7 s，未達 10 秒；第 4→5 組 69.7 s；
+  - 第 2、4 組的開始紀錄只差 9.3 s，低於 sleep 應保證的 10 s，原因未查明（可能是 WSL 時鐘調整）。
+  - Google 沒有被擋，但這條規則沒有達成。不重做，因為六組預算已用完。
+- **另作的補充組別**：第 5、6 組依 phase-7「預算尚有剩餘時」的用途，用於觀察 Bing 補足與 Bing 的實際結構；目的與查詢都寫在 groups.jsonl 與 README。
+- **下一步**：F7-S4（完整 suite、對帳與結案）。
