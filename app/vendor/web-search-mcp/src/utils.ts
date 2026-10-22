@@ -45,22 +45,21 @@ export function formatSearchResponse(
     if (includeContent && result.read) lines.push(formatPageRead(result.read));
   });
   const counts: Record<string, number> = {};
-  let attempts = 0, http = 0, browser = 0, retries = 0, started = 0;
+  let attempts = 0, http = 0, browser = 0, started = 0;
   for (const result of results) {
     const status = result.read?.status ?? 'not_attempted';
     counts[status] = (counts[status] ?? 0) + 1;
     const events = result.read?.attempts ?? [];
-    const httpCount = events.filter(a => a.transport === 'http').length;
-    const browserCount = events.filter(a => a.transport === 'browser').length;
     attempts += events.length;
-    http += httpCount;
-    browser += browserCount;
-    retries += Math.max(0, httpCount - 1) + Math.max(0, browserCount - 1);
+    http += events.filter(a => a.transport === 'http').length;
+    browser += events.filter(a => a.transport === 'browser').length;
     if (events.length) started++;
   }
   const redirects = results.filter(result => result.resolution);
   const resolved = redirects.filter(result => result.resolution!.outcome === 'resolved').length;
-  lines.push('', `Read statistics: selected=${results.length}; candidates_attempted=${started}; source_read_attempts=${attempts}; http_attempts=${http}; browser_attempts=${browser}; transport_retries=${retries}; returned=${results.length}; states=${JSON.stringify(counts)}; engine_redirects_resolved=${resolved}; engine_redirects_unresolved=${redirects.length - resolved}`);
+  lines.push('', `Read statistics: selected=${results.length}; candidates_attempted=${started}; source_read_attempts=${attempts}; http_attempts=${http}; browser_attempts=${browser}; returned=${results.length}; states=${JSON.stringify(counts)}; engine_redirects_resolved=${resolved}; engine_redirects_unresolved=${redirects.length - resolved}`,
+    // FA08: the counting rules travel with the numbers.
+    'Statistics scope: source_read_attempts counts started HTTP and browser reads (a request sent, or a browser launch or context begun); reads that only queued are not counted. candidates_attempted counts candidates with at least one started read. Redirects followed within one HTTP read are not counted separately. parsed_count is the rows an engine returned before cross-engine deduplication and the limit. engine_redirects_resolved/unresolved count candidates whose search link was an engine redirect wrapper.');
   return lines.join('\n');
 }
 
@@ -184,8 +183,19 @@ export function formatPageRead(read: PageRead): string {
   }
   lines.push(`Page read status: ${read.status}; attempts=${read.attempts.length}`);
   for (const event of read.attempts) {
-    lines.push(`- ${event.transport}: status=${event.status ?? 'unknown'}${event.error ? `; error=${event.error}` : ''}`);
+    const facts = [
+      event.outcome && `read_status=${event.outcome}`,
+      event.contentType && `content_type=${event.contentType}`,
+      event.finalUrl && `final_url=${event.finalUrl}`,
+      event.encoding && `encoding=${event.encoding.name}`,
+      event.renderWaitMs !== undefined && `render_wait_ms=${event.renderWaitMs}`,
+      event.originalLength !== undefined && `markdown_length=${event.returnedLength}/${event.originalLength}`,
+      event.truncated && 'truncated=true',
+      event.error && `error=${event.error}`,
+    ].filter(Boolean).map(fact => `; ${fact}`).join('');
+    lines.push(`- ${event.transport}: status=${event.status ?? 'unknown'}${facts}`);
   }
+  if (read.notStarted) lines.push(`- ${read.notStarted.transport}: not started (${read.notStarted.reason})`);
   if (read.error) lines.push(`Read error: ${read.error}`);
   if (read.originalLength !== undefined) {
     lines.push(`Markdown length: returned=${read.returnedLength}; original=${read.originalLength}; limit=${read.maxContentLength} Unicode code points`);

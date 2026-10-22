@@ -181,7 +181,7 @@ process.stdout.write('whole-page conversion, tables once, block separators, base
     };
   };
   const viaBrowser = async (page, parseFails = false) => {
-    const fallback = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, budget) => budget.wait(fn(page)) });
+    const fallback = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, budget, onStart) => { onStart?.(); return budget.wait(fn(page)); } });
     fallback.extractWithAxios = async (_options, state) => { state.httpStatus = 403; state.contentType = 'text/html'; return ''; };
     if (parseFails) fallback.parseContent = () => { throw new Error('parse boom'); };
     return fallback.extractContent({ url: 'https://example.org/file' });
@@ -233,7 +233,9 @@ process.stdout.write('candidate retention, media and actual attempts: passed\n')
 
 const { formatSearchResponse, formatPageRead } = await import('../dist/utils.js');
 const withContent = formatSearchResponse('same query', results, [], true);
-assert.match(withContent, /selected=5; candidates_attempted=5; source_read_attempts=6; http_attempts=5; browser_attempts=1; transport_retries=0; returned=5/);
+assert.match(withContent, /selected=5; candidates_attempted=5; source_read_attempts=6; http_attempts=5; browser_attempts=1; returned=5/);
+assert.doesNotMatch(withContent, /transport_retries/);
+assert.match(withContent, /^Statistics scope: source_read_attempts counts started HTTP and browser reads .*Redirects followed within one HTTP read are not counted separately\. parsed_count is the rows an engine returned before cross-engine deduplication/m);
 assert.match(withContent, /unsupported_media/);
 const before = events.length;
 const withoutContent = formatSearchResponse('same query', candidates, [], false);
@@ -249,3 +251,80 @@ assert.ok(pageText.includes(limited.content));
 assert.equal(limited.returnedLength, Array.from(limited.content).length);
 assert.equal(formatSearchResponse('x', [{ ...results[2], read: limited }], [], true).includes(pageText), true);
 process.stdout.write('visible statistics, fixed candidates and transparent truncation: passed\n');
+
+// FA07/FA08: each started attempt keeps its own facts; the summary is the last started attempt.
+{
+  const { chromium } = await import('playwright');
+  const { BrowserPool, CallBudget } = await import('../dist/browser-pool.js');
+  const fakePage = { on: () => undefined, off: () => undefined, mainFrame: () => undefined,
+    goto: async () => { throw new Error('page.goto: net::ERR_CONNECTION_RESET'); }, url: () => 'https://example.org/p' };
+  const stubPool = { withHttp: fn => fn(), withPage: (fn, budget, onStart) => { onStart?.(); return budget.wait(fn(fakePage)); } };
+  const httpThen = (pool, http) => {
+    const reader = new EnhancedContentExtractor(pool);
+    reader.extractWithAxios = http;
+    return reader;
+  };
+  // HTTP empty text, then the browser fails: the summary has no HTTP lengths; both attempts keep their facts.
+  const emptyThenFail = await httpThen(stubPool, async (_options, state) => {
+    state.httpStatus = 200; state.contentType = 'text/html'; state.finalUrl = 'https://example.org/p?http'; return '';
+  }).extractContent({ url: 'https://example.org/p' });
+  assert.equal(emptyThenFail.status, 'http_error');
+  assert.equal(emptyThenFail.originalLength, undefined);
+  assert.equal(emptyThenFail.httpStatus, undefined);
+  assert.equal(emptyThenFail.error, 'page.goto: net::ERR_CONNECTION_RESET');
+  assert.deepEqual(emptyThenFail.attempts.map(a => [a.transport, a.outcome, a.status, a.originalLength]), [['http', 'empty_text', 200, 0], ['browser', 'http_error', undefined, undefined]]);
+  const emptyText = formatPageRead(emptyThenFail);
+  assert.match(emptyText, /- http: status=200; read_status=empty_text; content_type=text\/html; final_url=https:\/\/example\.org\/p\?http; markdown_length=0\/0\n- browser: status=unknown; read_status=http_error; error=page\.goto: net::ERR_CONNECTION_RESET/);
+  assert.doesNotMatch(emptyText, /Markdown length:/);
+  // HTTP 403, then an empty browser read: the summary error is not the replaced 403.
+  const deniedThenEmpty = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, budget, onStart) => {
+    onStart?.();
+    return budget.wait(fn({ ...fakePage, goto: async () => ({ status: () => 200, headers: () => ({ 'content-type': 'text/plain' }) }),
+      title: async () => '', locator: () => ({ innerText: async () => '' }) }));
+  } });
+  deniedThenEmpty.extractWithAxios = async (_options, state) => {
+    state.httpStatus = 403;
+    throw Object.assign(new Error('Request failed with status code 403'), { response: { status: 403, headers: { 'content-type': 'text/html' } } });
+  };
+  const denied = await deniedThenEmpty.extractContent({ url: 'https://example.org/p' });
+  assert.equal(denied.status, 'empty_text');
+  assert.equal(denied.error, undefined);
+  assert.doesNotMatch(formatPageRead(denied), /Read error/);
+  assert.deepEqual(denied.attempts.map(a => [a.transport, a.status, a.error ?? null]), [['http', 403, 'Request failed with status code 403'], ['browser', 200, null]]);
+  // A launch failure is a started browser attempt with its reason; a fallback that only queued is not.
+  const launch = chromium.launch;
+  try {
+    chromium.launch = async () => { throw new Error('browserType.launch: injected launch failure'); };
+    const launchReader = httpThen(new BrowserPool(), async () => '');
+    const launchRead = await launchReader.extractContent({ url: 'https://example.org/p' });
+    assert.deepEqual(launchRead.attempts.map(a => [a.transport, a.error ?? null]), [['http', null], ['browser', 'browserType.launch: injected launch failure']]);
+    assert.match(formatSearchResponse('x', [{ title: 't', url: 'https://example.org/p', description: '', read: launchRead }], [], true), /source_read_attempts=2; http_attempts=1; browser_attempts=1/);
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    chromium.launch = async () => ({ isConnected: () => true, version: () => '777.0.0.0', newContext: async () => ({ newPage: async () => ({}), close: async () => undefined }), close: async () => undefined });
+    const busyPool = new BrowserPool();
+    const busy = [busyPool.withPage(() => held), busyPool.withPage(() => held)];
+    const queueBudget = new CallBudget(60);
+    const queued = await httpThen(busyPool, async () => '').extractContent({ url: 'https://example.org/p', budget: queueBudget });
+    queueBudget.dispose();
+    release();
+    await Promise.all(busy);
+    await busyPool.closeAll();
+    assert.deepEqual(queued.attempts.map(a => a.transport), ['http']);
+    assert.equal(queued.status, 'empty_text');
+    assert.deepEqual(queued.notStarted, { transport: 'browser', reason: 'Call deadline exceeded' });
+    assert.match(formatPageRead(queued), /- browser: not started \(Call deadline exceeded\)/);
+  } finally { chromium.launch = launch; }
+  // targetCount reads only the first candidates; the others stay, unread.
+  const counted = [];
+  const targetReader = httpThen(stubPool, async options => { counted.push(options.url); return 'text'; });
+  targetReader.extractWithBrowser = async () => { throw new Error('no fallback expected'); };
+  const five = ['a', 'b', 'c', 'd', 'e'].map(id => ({ title: id, url: `https://example.org/${id}`, description: '' }));
+  const targeted = await targetReader.extractContentForResults(five, 2);
+  assert.deepEqual(counted, ['https://example.org/a', 'https://example.org/b']);
+  assert.deepEqual(targeted.map(r => r.url), five.map(r => r.url));
+  assert.deepEqual(targeted.map(r => r.read?.status ?? 'not_attempted'), ['text', 'text', 'not_attempted', 'not_attempted', 'not_attempted']);
+  const targetText = formatSearchResponse('x', targeted, [], true);
+  assert.match(targetText, new RegExp(`candidates_attempted=2; source_read_attempts=${counted.length}; http_attempts=2; browser_attempts=0; returned=5`));
+}
+process.stdout.write('per-attempt facts, started-attempt counting, targetCount and statistics scope: passed\n');

@@ -1,0 +1,1 @@
+{"mutation":"N20b","change":"extractContentForResults ignores targetCount","test":"test-content-contract.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: + actual - expected    ["}

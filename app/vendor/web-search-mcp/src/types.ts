@@ -1,6 +1,23 @@
 export type PageReadStatus = 'not_attempted' | 'http_error' | 'timeout' | 'cancelled'
   | 'unsupported_media' | 'conversion_error' | 'empty_text' | 'text';
 
+/** The facts of one started read attempt; later attempts never overwrite them. */
+export interface PageReadAttempt {
+  transport: 'http' | 'browser';
+  /** HTTP status of this attempt's response. */
+  status?: number;
+  outcome?: PageReadStatus;
+  contentType?: string;
+  finalUrl?: string;
+  encoding?: PageRead['encoding'];
+  /** Browser reads: how long the client-render wait lasted (FA04). */
+  renderWaitMs?: number;
+  originalLength?: number;
+  returnedLength?: number;
+  truncated?: boolean;
+  error?: string;
+}
+
 export interface PageRead {
   requestedUrl: string;
   finalUrl?: string;
@@ -10,7 +27,10 @@ export interface PageRead {
   /** HTTP reads only: the decoder used and how it was chosen (FA03). */
   encoding?: { name: string; source: 'BOM' | 'Content-Type charset' | 'meta charset' | 'default'; note?: string };
   status: PageReadStatus;
-  attempts: { transport: 'http' | 'browser'; status?: number; error?: string }[];
+  /** Started attempts only (FA07); the summary fields above describe the last of them. */
+  attempts: PageReadAttempt[];
+  /** A fallback that only queued and never started is not an attempt; its reason is kept here. */
+  notStarted?: { transport: 'http' | 'browser'; reason: string };
   content: string;
   maxContentLength: number;
   originalLength?: number;

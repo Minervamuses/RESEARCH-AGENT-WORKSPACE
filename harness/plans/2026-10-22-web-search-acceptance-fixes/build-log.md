@@ -9,7 +9,7 @@
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
-| F5 | In progress | F5-S0、F5-S1 | evidence/F5-S1/ | — | F5-S2 |
+| F5 | In progress | F5-S0、F5-S1、F5-S2 | evidence/F5-S1/、evidence/F5-S2/ | — | F5-S3 |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
 | F7 | Not started | — | — | 相依 F6 | — |
 
@@ -477,3 +477,32 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 突變（evidence/F5-S1/mutate.py、results.jsonl）：N02b、N02c、N02d、N02g、N03b 全部被 retention 殺死。
   - 判別力：0f2f25d 的乾淨重建跑新的 retention，5 項失敗（evidence/F5-S1/previous-build-0f2f25d.txt）。
 - **下一步**：F5-S2。
+
+### F5-S2 頁面讀取事實與統計口徑
+- **改動**（FG4；AF16、AF17、AF18；突變 N20b）：
+  - src/types.ts：
+    - 新增 PageReadAttempt：status（HTTP）、outcome、contentType、finalUrl、encoding、renderWaitMs、originalLength、returnedLength、truncated、error；
+    - PageRead.attempts 只收已開始的嘗試；
+    - 新增 notStarted（只在佇列中等待、從未開始的 fallback 及其原因）。
+  - src/enhanced-content-extractor.ts：
+    - **每次嘗試用新紀錄**：嘗試在 started() 時才清空摘要欄位（HTTP status、Content-Type、final URL、標題、編碼、錯誤、長度、truncated、狀態）並加入清單；結束時以 record() 把該次事實寫進自己的紀錄。摘要因此一律是最後一次已開始的嘗試，不沿用前一次的欄位（AF16）；HTTP 的事實在 fallback 之後仍留在清單（AF17）。
+    - **瀏覽器開始**：瀏覽器嘗試改經 withPage 的 onStart 開始（F5-S0），launch 或 context 失敗也計數並列出原因（AF17）。在佇列中逾期的 fallback 不計數，摘要維持 HTTP 那次，原因寫入 notStarted。
+    - 晚渲染等待的毫秒數改記在該次紀錄的 renderWaitMs；沒有文字時的說明仍寫在 Read error。
+    - **targetCount**：extractContentForResults 保留 targetCount。超過的候選原樣保留、不讀（以前會被 slice 掉，R05）。
+  - src/utils.ts：
+    - formatPageRead 的每次嘗試行以 `status=<HTTP>` 開頭，之後依序列出 read_status、content_type、final_url、encoding、render_wait_ms、markdown_length、truncated，error 在最後；notStarted 顯示為 `- browser: not started (<原因>)`。
+    - formatSearchResponse 移除恆為 0 的 transport_retries，Read statistics 之後加一行 `Statistics scope: …`，說明 source_read_attempts、candidates_attempted、redirect 不另計、parsed_count 與 engine_redirects 的口徑（FA08、AF18）。
+- **測試**：
+  - content-contract 新增一組：
+    - HTTP 空文字後 browser 失敗：摘要沒有 HTTP 的長度與 status，兩次嘗試各帶自己的事實，也沒有 Markdown length 行；
+    - HTTP 403 後 browser 為空：摘要沒有 Read error，403 留在 http 那次的紀錄；
+    - 真實 BrowserPool 的 launch 失敗：browser 嘗試被計數、帶 launch 錯誤，source_read_attempts=2；
+    - 兩個 page slot 被占住時 fallback 在佇列中逾期：attempts 只有 http，notStarted 為 `Call deadline exceeded` 且看得到；
+    - targetCount=2、5 個候選：只讀前 2 個，回傳全部 5 個，其餘為 not_attempted，統計等於 spy 計數；
+    - 統計行沒有 transport_retries，且有口徑說明。
+  - 預期更新：既有統計 regex 去掉 transport_retries；所有 fake pool 的 withPage 改為呼叫 onStart；F1-S2 的晚渲染斷言改為新的嘗試行格式。
+- **檢查**（vendor 目錄，沙箱內）：
+  - `npm run build` exit 0；retention 31/31、content-contract 6 組、browser-lifecycle 全部 exit 0。
+  - 突變 N20b（忽略 targetCount）被 content-contract 殺死（evidence/F5-S2/mutations.jsonl）。
+  - 11514e4 的乾淨重建跑新的 content-contract，失敗於更新後的統計斷言。
+- **下一步**：F5-S3。

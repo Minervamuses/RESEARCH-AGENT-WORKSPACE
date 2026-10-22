@@ -194,7 +194,7 @@ try {
     ...overrides,
   });
   const renderRead = async (page, budget) => {
-    const reader = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, b) => b.wait(fn(page)) });
+    const reader = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, b, onStart) => { onStart?.(); return b.wait(fn(page)); } });
     reader.extractWithAxios = async (_options, state) => { state.httpStatus = 200; state.contentType = 'text/html'; return ''; };
     const begin = performance.now();
     try { return { read: await reader.extractContent({ url: 'https://example.org/app', budget }), ms: performance.now() - begin }; }
@@ -206,7 +206,7 @@ try {
     assert.equal(capped.read.status, 'empty_text');
     assert.equal(settleTimeouts.at(-1), 120);
     assert.ok(capped.ms >= 100 && capped.ms < 1000, `render wait ${capped.ms}`);
-    assert.match(formatPageRead(capped.read), /- browser: status=200; error=No visible text after waiting \d+ ms for client rendering \(limit 120 ms\)/);
+    assert.match(formatPageRead(capped.read), /- browser: status=200; read_status=empty_text; .*render_wait_ms=\d+; .*error=No visible text after waiting \d+ ms for client rendering \(limit 120 ms\)/);
     OPERATION_TIMEOUTS.renderSettle = 5000;
     const short = await renderRead(renderPage(), new CallBudget(200));
     assert.ok(settleTimeouts.at(-1) <= 200, `render wait limited by budget: ${settleTimeouts.at(-1)}`);

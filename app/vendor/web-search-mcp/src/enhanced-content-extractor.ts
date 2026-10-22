@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import type { Page, Response } from 'playwright';
-import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
+import { ContentExtractionOptions, SearchResult, PageRead, PageReadAttempt } from './types.js';
 import { resolveContentLimit, sanitizeErrorMessage, truncateMarkdown } from './utils.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS, boundedRead } from './browser-pool.js';
 
@@ -94,13 +94,21 @@ export class EnhancedContentExtractor {
       returnedLength: 0, truncated: false,
     };
     const attempt = async (transport: 'http' | 'browser'): Promise<boolean> => {
-      const event: PageRead['attempts'][number] = { transport };
-      const started = () => { active().remaining(); state.attempts.push(event); };
-      delete state.httpStatus;
-      delete state.contentType;
-      delete state.finalUrl;
-      delete state.pageTitle;
-      delete state.encoding;
+      const event: PageReadAttempt = { transport };
+      const started = () => {
+        active().remaining();
+        // A started attempt owns the summary; earlier attempts keep their facts in the list.
+        for (const key of ['httpStatus', 'contentType', 'finalUrl', 'pageTitle', 'encoding', 'error', 'originalLength'] as const) {
+          delete state[key];
+        }
+        Object.assign(state, { status: 'not_attempted', content: '', returnedLength: 0, truncated: false });
+        state.attempts.push(event);
+      };
+      const record = () => Object.assign(event, {
+        status: state.httpStatus, outcome: state.status, contentType: state.contentType, finalUrl: state.finalUrl,
+        encoding: state.encoding, originalLength: state.originalLength, returnedLength: state.originalLength === undefined ? undefined : state.returnedLength,
+        truncated: state.truncated || undefined, error: state.error,
+      });
       try {
         const text = transport === 'http'
           ? await this.browserPool.withHttp(() => {
@@ -109,30 +117,36 @@ export class EnhancedContentExtractor {
               return this.extractWithAxios({ ...options, budget }, state);
             }, call)
           : await this.extractWithBrowser({ ...options, budget: open() }, state, started, event);
-        event.status = state.httpStatus;
-        if (state.status === 'unsupported_media') return true;
-        Object.assign(state, converting(() => truncateMarkdown(text, state.maxContentLength)));
-        state.status = text.trim() ? 'text' : 'empty_text';
-        return state.status === 'text';
+        if (state.status !== 'unsupported_media') {
+          Object.assign(state, converting(() => truncateMarkdown(text, state.maxContentLength)));
+          state.status = text.trim() ? 'text' : 'empty_text';
+        }
+        record();
+        return ['text', 'unsupported_media'].includes(state.status);
       } catch (error) {
         const budget = active();
         const err = (budget.signal.aborted ? budget.signal.reason : error) as any;
+        if (!state.attempts.includes(event)) {
+          // Only queued, never started: the summary stays the last started attempt's.
+          if (state.attempts.length) state.notStarted = { transport, reason: sanitizeErrorMessage(err) };
+          else Object.assign(state, { status: 'not_attempted', error: sanitizeErrorMessage(err) });
+          return false;
+        }
         const response = err.response;
         if (response) {
           state.httpStatus = response.status;
           state.contentType = response.headers?.['content-type'];
           state.finalUrl = response.request?.res?.responseUrl;
         }
-        event.status = state.httpStatus;
-        event.error = sanitizeErrorMessage(err);
-        state.error = event.error;
-        if (state.status === 'unsupported_media') return true;
-        state.status = !state.attempts.length ? 'not_attempted'
-          : budget.signal.aborted && err.code !== 'ETIMEDOUT' ? 'cancelled'
-          : err.code === 'ERR_CANCELED' ? 'cancelled'
-          : ['ECONNABORTED', 'ETIMEDOUT'].includes(err.code) || err.name === 'TimeoutError' ? 'timeout'
-          : err.reason === 'conversion_error' ? 'conversion_error' : 'http_error';
-        return false;
+        state.error = sanitizeErrorMessage(err);
+        if (state.status !== 'unsupported_media') {
+          state.status = budget.signal.aborted && err.code !== 'ETIMEDOUT' ? 'cancelled'
+            : err.code === 'ERR_CANCELED' ? 'cancelled'
+            : ['ECONNABORTED', 'ETIMEDOUT'].includes(err.code) || err.name === 'TimeoutError' ? 'timeout'
+            : err.reason === 'conversion_error' ? 'conversion_error' : 'http_error';
+        }
+        record();
+        return state.status === 'unsupported_media';
       }
     };
     try {
@@ -206,10 +220,10 @@ export class EnhancedContentExtractor {
 
   private async extractWithBrowser(
     options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead, started: () => void,
-    event: PageRead['attempts'][number],
+    event: PageReadAttempt,
   ): Promise<string> {
+    // The attempt starts when the launch or context creation begins, even if no page follows (FA07).
     return this.browserPool.withPage(async page => {
-      started();
       // Main-frame navigation facts survive a navigation that turns into a download.
       let observed: Response | undefined;
       let downloadStarted = false;
@@ -258,11 +272,12 @@ export class EnhancedContentExtractor {
       state.pageTitle = singleLine(await boundedRead(page.title(), options.budget, 'page.title()')) || undefined;
       const text = media === 'text/plain' ? await boundedRead(page.locator('body').innerText(), options.budget, 'body innerText')
         : await boundedRead(page.content(), options.budget, 'page.content()').then(html => converting(() => this.parseContent(html, state.finalUrl)));
+      if (settle) event.renderWaitMs = settle.waitedMs;
       if (settle && !text.trim()) {
-        event.error = state.error = `No visible text after waiting ${settle.waitedMs} ms for client rendering (limit ${settle.limitMs} ms)`;
+        state.error = `No visible text after waiting ${settle.waitedMs} ms for client rendering (limit ${settle.limitMs} ms)`;
       }
       return text;
-    }, options.budget);
+    }, options.budget, started);
   }
 
   /** FA04: wait until the network is idle and the body has visible text, at most min(renderSettle, remaining budget). */
@@ -286,10 +301,11 @@ export class EnhancedContentExtractor {
   ): Promise<SearchResult[]> {
     const budget = supplied ?? new CallBudget();
     try {
-      return await Promise.all(results.slice(0, targetCount).map(async result => ({
+      // Candidates past targetCount stay in place, unread (R05: no candidate disappears).
+      return await Promise.all(results.map(async (result, index) => index >= targetCount ? { ...result } : {
         ...result,
         read: await this.extractContent({ url: result.url, maxContentLength, budget, windowMs: OPERATION_TIMEOUTS.pageTotal }),
-      })));
+      }));
     } finally { if (!supplied) budget.dispose(); }
   }
 
