@@ -21,7 +21,7 @@ cd desktop
 npm ci
 cd ../vendor/web-search-mcp
 npm ci
-npx playwright install chromium firefox
+npx playwright install chromium
 npm run build
 cd ../../..
 ```

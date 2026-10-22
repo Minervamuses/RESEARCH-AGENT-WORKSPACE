@@ -11,7 +11,7 @@
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
 | F6 | Complete | F6-S1、F6-S2、F6-S3 | evidence/F6-S3/ | — | — |
-| F7 | Not started | — | — | — | F7-S1（F6 已完成） |
+| F7 | In progress | F7-S1 | build-log | — | F7-S2 |
 
 ## 事件格式
 每個實際的 F?-S? 事件記錄以下內容：
@@ -609,3 +609,20 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - results.jsonl 保留原始紀錄；N14j、P07b、P07d 的判定理由另以追加行記錄。
 - **測試缺口**：沒有。必殺項全部被既有或本計劃新增的測試殺死，本步沒有新增測試。
 - **下一步**：F7-S1。
+
+### F7-S1 文件同步
+- **改動**（FG7；AF40、AF18）：
+  - README.md（root）：安裝步驟改為 `npx playwright install chromium`，移除 firefox（AF40）。
+  - app/vendor/web-search-mcp/README.md：
+    - 開頭與「與 upstream 的差異」改為 Google 主力、Bing 依語言市場備援、已移除 DuckDuckGo 與 Brave，並說明連結以實際導覽解析；
+    - 新增完整版 Chromium 與一般 UA、自有程序辨識、Python 端只管 client 生命週期與 15 秒啟動上限；
+    - 建置與檢查列出四份測試，並寫入短 TMPDIR 的前提；
+    - 新增「正文讀取」（整頁、表格、區塊分隔、編碼、媒體、晚渲染、截斷）、「時間上限」（總時間上限、每頁視窗起算點、三種逾時原因）與「輸出中的狀態與統計」（引擎 status 與 not_attempted 原因、零候選四句、Link 行、每次嘗試行、Read statistics 口徑）。
+    - 既有的設定表與政策段落保留，只把 BROWSER_HEADLESS 的「三條瀏覽器路徑」改為「所有瀏覽器路徑」，並註明引擎、瀏覽器模式、UA 與上限是具名常數、不是環境設定。沒有新增或改名任何設定。
+- **檢查**：
+  - `git ls-files '*.md'`（不含 harness/plans 與 note）中，Firefox、DuckDuckGo、Brave 只剩 vendor README 的「已移除 DuckDuckGo 與 Brave」一句；兩份測試裡的 firefox 只是「Firefox 絕不可啟動」的守護 stub。
+  - README 的設定名稱與 src 實際讀取的 `process.env` 一致：MAX_CONTENT_LENGTH、DEFAULT_TIMEOUT、BROWSER_HEADLESS、MAX_CONCURRENT_PAGES、MAX_CONCURRENT_HTTP。
+  - README 寫出的上限與 OPERATION_TIMEOUTS 一致（pageRequest 6000、pageRead 6000、searchRequest 4000、searchSelector 3000、linkResolve 6000、renderSettle 3000、pageTotal 8000）。
+  - README 的 source_read_attempts、candidates_attempted、redirect 不另計、parsed_count、engine_redirects 定義與輸出中的 `Statistics scope:` 行逐項對應（AF18）。
+  - `git diff --check` 乾淨。
+- **下一步**：F7-S2（沙箱外，真實 Python→Node 入口）。
