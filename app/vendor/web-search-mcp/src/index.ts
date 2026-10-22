@@ -8,7 +8,7 @@ import { CallBudget, configuredTimeout, cleanupReserve, sharedBrowserPool } from
 import { SearchEngine } from './search-engine.js';
 import { EnhancedContentExtractor } from './enhanced-content-extractor.js';
 import { WebSearchToolInput, WebSearchToolOutput } from './types.js';
-import { formatSearchResponse, formatPageRead, parseInteger, parseBoolean, resolveContentLimit, validateSearchInput } from './utils.js';
+import { formatSearchResponse, formatPageRead, parseInteger, parseBoolean, resolveContentLimit, validateSearchInput, validateSearchQuery } from './utils.js';
 
 class WebSearchMCPServer {
   private server: McpServer;
@@ -33,12 +33,12 @@ class WebSearchMCPServer {
   }
 
   private setupTools(): void {
-    // Register the main web search tool (primary choice for comprehensive searches)
+    // Register the search tool that also reads the top candidates
     this.server.tool(
       'full-web-search',
       'Search the web and by default read top candidates as conservative Markdown, up to 10000 Unicode code points per page. Failed, unsupported or truncated pages are reported; search snippets remain separate. Use get-web-search-summaries for snippets only. Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations.',
       {
-        query: z.string().describe('Search query to execute (recommended for comprehensive research)'),
+        query: z.string().describe('Search query to execute'),
         limit: z.union([z.number(), z.string()]).transform(val => parseInteger(val, 'limit', 1, 10)).default(5).describe('Number of fixed candidates to return (1-10)'),
         includeContent: z.union([z.boolean(), z.string()]).transform(parseBoolean).default(true)
           .describe('Whether to read page content (default true)'),
@@ -79,12 +79,12 @@ class WebSearchMCPServer {
       })
     );
 
-    // Register the lightweight web search summaries tool (secondary choice for quick results)
+    // Register the search tool that returns snippets only
     this.server.tool(
       'get-web-search-summaries',
-      'Search the web and return only the search result snippets/descriptions without following links to extract full page content. This is a lightweight alternative to full-web-search for when you only need brief search results. Use full-web-search to read pages. Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations.',
+      'Search the web and return search result titles, URLs and snippets without reading the linked pages. Use full-web-search to read pages. Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations.',
       {
-        query: z.string().describe('Search query to execute (lightweight alternative)'),
+        query: z.string().describe('Search query to execute'),
         limit: z.union([z.number(), z.string()]).transform(val => parseInteger(val, 'limit', 1, 10)).default(5).describe('Number of search results to return (1-10)'),
       },
       async (args: unknown, extra) => this.withBudget(extra, async budget => {
@@ -92,29 +92,20 @@ class WebSearchMCPServer {
         console.log(`[MCP] Raw arguments:`, JSON.stringify(args, null, 2));
 
         try {
-          // Validate arguments
-          if (typeof args !== 'object' || args === null) {
-            throw new Error('Invalid arguments: args must be an object');
-          }
-          const obj = args as Record<string, unknown>;
-          
-          if (!obj.query || typeof obj.query !== 'string') {
-            throw new Error('Invalid arguments: query is required and must be a string');
-          }
-
-          const limit = obj.limit === undefined ? 5 : parseInteger(obj.limit, 'limit', 1, 10);
+          // Same query and limit rules as full-web-search.
+          const { query, limit } = validateSearchQuery(args);
 
           console.log(`[MCP] Starting web search summaries...`);
           
           // Use existing search engine to get results with snippets
           const searchResponse = await this.searchEngine.search({
-            query: obj.query,
+            query,
             numResults: limit,
             budget,
           });
 
           const responseText = formatSearchResponse(
-            obj.query, searchResponse.results, searchResponse.engines,
+            query, searchResponse.results, searchResponse.engines,
           );
 
           return {

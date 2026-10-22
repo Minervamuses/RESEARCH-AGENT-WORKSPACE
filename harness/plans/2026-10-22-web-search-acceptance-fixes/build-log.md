@@ -9,8 +9,8 @@
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
-| F5 | In progress | F5-S0、F5-S1、F5-S2 | evidence/F5-S1/、evidence/F5-S2/ | — | F5-S3 |
-| F6 | Not started | — | — | 相依 F2、F5 | — |
+| F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
+| F6 | Not started | — | — | — | F6-S1（F2、F5 已完成） |
 | F7 | Not started | — | — | 相依 F6 | — |
 
 ## 事件格式
@@ -506,3 +506,26 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 突變 N20b（忽略 targetCount）被 content-contract 殺死（evidence/F5-S2/mutations.jsonl）。
   - 11514e4 的乾淨重建跑新的 content-contract，失敗於更新後的統計斷言。
 - **下一步**：F5-S3。
+
+### F5-S3 工具入口一致性與文案
+- **改動**（FG4；AF14、AF15）：
+  - src/utils.ts：新增 validateSearchQuery（query 去空白後不可為空、limit 1–10），validateSearchInput 改為以它為基礎。
+  - src/index.ts：
+    - get-web-search-summaries 的 handler 改用 validateSearchQuery，純空白 query 也會被拒（AF14）；
+    - 移除 full-web-search query 描述的「recommended for comprehensive research」（AF15）；
+    - summaries 的描述改為 `Search the web and return search result titles, URLs and snippets without reading the linked pages.`，去掉「extract full page content」與「lightweight alternative」字樣；
+    - 兩段註冊註解改寫，不再寫「comprehensive」；
+    - 三個工具的 Citation 分流句逐字不變。逐一檢查三個工具與其參數的描述，沒有承諾完整全文、已驗證摘要、來源品質或研究支持。
+- **limit 驗證位置（供 F6-S3 判定 N14j）**：兩個搜尋工具的 limit 都在兩處驗證。
+  - schema：`z.union(...).transform(val => parseInteger(val, 'limit', 1, 10))`；
+  - handler：full-web-search 經 validateSearchInput，summaries 直接用 validateSearchQuery，兩者都呼叫 `parseInteger(..., 'limit', 1, 10)`。
+  - 所以 N14j（移除 summaries 的 schema transform）對外行為等效：handler 仍會拒絕無效 limit。
+- **測試**：retention 的入口靜態斷言加入：
+  - full-web-search 用 `validateSearchInput(args)`，summaries 用 `validateSearchQuery(args)`；
+  - index.ts 不含 comprehensive、complete information、full page content、verified summar、high-quality source；
+  - Citation 分流句恰好 3 處；
+  - validateSearchQuery 拒絕空字串與純空白 query，以及 limit 11，並接受字串 limit '3'。
+  - 實際的 handler 行為由 F6-S1 的入口測試驗證。
+- **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 31/31、content-contract 6 組、browser-lifecycle 全部 exit 0。
+- **F5 階段結論**：FG4 的引擎事實、頁面事實、統計口徑與入口一致性都有離線證據；README 口徑由 F7-S1 同步。
+- **下一步**：F6-S1。

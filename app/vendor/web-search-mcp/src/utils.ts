@@ -86,13 +86,19 @@ export function resolveContentLimit(value?: unknown): number {
   return explicit === 0 ? deployed : explicit;
 }
 
-export function validateSearchInput(args: unknown): WebSearchToolInput {
+/** Query and limit rules shared by both search tools. */
+export function validateSearchQuery(args: unknown): { query: string; limit: number } {
   if (typeof args !== 'object' || args === null) throw new Error('Invalid arguments: expected object');
   const obj = args as Record<string, unknown>;
   if (typeof obj.query !== 'string' || !obj.query.trim()) throw new Error('Invalid query: expected non-empty string');
+  return { query: obj.query, limit: obj.limit === undefined ? 5 : parseInteger(obj.limit, 'limit', 1, 10) };
+}
+
+export function validateSearchInput(args: unknown): WebSearchToolInput {
+  const { query, limit } = validateSearchQuery(args);
+  const obj = args as Record<string, unknown>;
   return {
-    query: obj.query,
-    limit: obj.limit === undefined ? 5 : parseInteger(obj.limit, 'limit', 1, 10),
+    query, limit,
     includeContent: obj.includeContent === undefined ? true : parseBoolean(obj.includeContent),
     maxContentLength: resolveContentLimit(obj.maxContentLength),
   };

@@ -358,6 +358,15 @@ check('both search tools share distinguishable engine and provenance text', asyn
   const source = await readFile(path.join(dist, '..', 'src', 'index.ts'), 'utf8');
   assert.equal((source.match(/const responseText = formatSearchResponse\(/g) ?? []).length, 2);
   assert.match(source, /numResults: limit/);
+  // AF14/AF15: both search entries share one query validation; no description promises completeness.
+  assert.match(source, /const validatedArgs = validateSearchInput\(args\);/);
+  assert.match(source, /const \{ query, limit \} = validateSearchQuery\(args\);/);
+  assert.doesNotMatch(source, /comprehensive|complete information|full page content|verified summar|high.quality source/i);
+  assert.equal((source.match(/Use citation_workflow for paper discovery, bibliographic metadata, abstracts and citations\./g) ?? []).length, 3);
+  const { validateSearchQuery } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
+  for (const query of ['', '   ', '\t\n']) assert.throws(() => validateSearchQuery({ query }), /non-empty string/);
+  assert.throws(() => validateSearchQuery({ query: 'x', limit: 11 }), /between 1 and 10/);
+  assert.deepEqual(validateSearchQuery({ query: ' x ', limit: '3' }), { query: ' x ', limit: 3 });
 });
 
 check('strict content limits, deployment precedence, booleans and Unicode', async () => {
