@@ -5,7 +5,7 @@ import { parseInteger } from './utils.js';
 
 export const OPERATION_TIMEOUTS = {
   launch: 10000, searchRequest: 4000, searchSelector: 3000,
-  formSelector: 2000, pageRequest: 6000, pageTotal: 8000, cleanup: 1000, renderSettle: 3000,
+  pageRequest: 6000, pageTotal: 8000, cleanup: 1000, renderSettle: 3000,
 } as const;
 
 export function configuredTimeout(): number {

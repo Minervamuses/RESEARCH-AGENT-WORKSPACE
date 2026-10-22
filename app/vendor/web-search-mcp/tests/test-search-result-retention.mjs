@@ -25,13 +25,12 @@ console.log = (...args) => logs.push(args.join(' '));
 console.error = (...args) => logs.push(args.join(' '));
 
 const record = (title, id) => ({ title, description: '', url: `https://example.org/${id}` });
-function engineWith({ bing = [], ddg = [], brave = [] } = {}) {
+function engineWith({ google = [], bing = [] } = {}) {
   const engine = new SearchEngine();
   const attempts = [];
   for (const [method, name, value] of [
-    ['tryBrowserBingSearch', 'bing', bing],
-    ['tryDuckDuckGoSearch', 'ddg', ddg],
-    ['tryBrowserBraveSearch', 'brave', brave],
+    ['tryGoogleSearch', 'google', google],
+    ['tryBingSearch', 'bing', bing],
   ]) {
     engine[method] = async () => {
       attempts.push(name);
@@ -43,46 +42,63 @@ function engineWith({ bing = [], ddg = [], brave = [] } = {}) {
 }
 const cases = [];
 const check = (name, fn) => cases.push({ name, fn });
-const configure = () => {};
+const { formatSearchResponse } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
 
+check('strategy B: a full Google batch never calls Bing', async () => {
+  const { engine, attempts } = engineWith({ google: ['1', '2', '3', '4', '5'].map(id => record(id, id)), bing: [record('bing', 'b')] });
+  const result = await engine.search({ query: 'x', numResults: 5 });
+  assert.equal(result.results.length, 5);
+  assert.deepEqual(attempts, ['google']);
+  assert.equal(result.engines[1].status, 'strategy_stopped');
+  assert.equal(result.engines[1].attempted, false);
+});
 check('strategy B fills five stable candidates and merges duplicate provenance', async () => {
   const { engine, attempts } = engineWith({
-    bing: [record('first', '1'), record('second', '2')],
-    ddg: [record('changed duplicate', '2'), record('third', '3'), record('fourth', '4'), record('fifth', '5')],
+    google: [record('first', '1'), record('second', '2')],
+    bing: [record('changed duplicate', '2'), record('third', '3'), record('fourth', '4'), record('fifth', '5')],
   });
   const result = await engine.search({ query: '中文', numResults: 5 });
   assert.deepEqual(result.results.map(r => r.title), ['first', 'second', 'third', 'fourth', 'fifth']);
-  assert.deepEqual(result.results[1].sourceEngines, ['Browser Bing', 'Axios DuckDuckGo']);
-  assert.deepEqual(attempts, ['bing', 'ddg']);
-  assert.equal(result.engines[2].status, 'strategy_stopped');
-  assert.equal(result.engines[2].attempted, false);
+  assert.deepEqual(result.results[1].sourceEngines, ['Google', 'Bing']);
+  assert.deepEqual(attempts, ['google', 'bing']);
   assert.ok(result.results.every(r => r.read === undefined));
 });
+for (const blocked of ['Google returned HTTP 429', 'Google redirected to /sorry/index (HTTP 200)']) {
+  check(`a blocked Google (${blocked}) is filled by Bing and keeps its facts`, async () => {
+    const { engine, attempts } = engineWith({ google: new Error(blocked), bing: [record('one', '1'), record('two', '2')] });
+    const result = await engine.search({ query: 'x', numResults: 2 });
+    assert.deepEqual(attempts, ['google', 'bing']);
+    assert.deepEqual(result.results.map(r => r.sourceEngines), [['Bing'], ['Bing']]);
+    assert.equal(result.engines[0].status, 'error');
+    assert.equal(result.engines[0].error, blocked);
+    assert.ok(formatSearchResponse('x', result.results, result.engines).includes(`- Google: attempted=true; attempts=1; parsed_count=0; status=error; error=${blocked}`));
+  });
+}
 check('later failures retain earlier candidates and expose errors', async () => {
-  const { engine } = engineWith({ bing: [record('one', '1'), record('two', '2')], ddg: new Error('HTTP 403'), brave: new Error('HTTP 429') });
+  const { engine } = engineWith({ google: [record('one', '1'), record('two', '2')], bing: new Error('Bing returned HTTP 403') });
   const result = await engine.search({ query: 'AI' });
   assert.equal(result.results.length, 2);
-  assert.equal(result.engines[1].error, 'HTTP 403');
-  assert.equal(result.engines[2].status, 'error');
+  assert.equal(result.engines[1].status, 'error');
+  assert.equal(result.engines[1].error, 'Bing returned HTTP 403');
 });
 check('all failures and all zero parses remain distinguishable', async () => {
   const empty = await engineWith().engine.search({ query: 'x' });
   const error = new Error('unavailable');
-  const failed = await engineWith({ bing: error, ddg: error, brave: error }).engine.search({ query: 'x' });
+  const failed = await engineWith({ google: error, bing: error }).engine.search({ query: 'x' });
   assert.ok(empty.engines.every(e => e.status === 'zero_parsed'));
   assert.ok(failed.engines.every(e => e.status === 'error'));
 });
 for (const query of ['中文查詢', 'AI', 'sports', 'weather']) {
   check(`query ${query} has no semantic scoring`, async () => {
-    const { engine, attempts } = engineWith({ bing: [record('unrelated', '1')], ddg: [record('other', '2')] });
+    const { engine, attempts } = engineWith({ google: [record('unrelated', '1')], bing: [record('other', '2')] });
     assert.equal(engine.assessResultQuality, undefined);
     const result = await engine.search({ query, numResults: 2 });
     assert.deepEqual(result.results.map(r => r.title), ['unrelated', 'other']);
-    assert.deepEqual(attempts, ['bing', 'ddg']);
+    assert.deepEqual(attempts, ['google', 'bing']);
   });
 }
-check('URL handling validates schemes, preserves query/encoding and resolves relative paths', async () => {
-  const { engine } = engineWith({ bing: [
+check('URL handling validates schemes and preserves query/encoding', async () => {
+  const { engine } = engineWith({ google: [
     record('encoded', 'a%252Fb?q=1&tracking=2'),
     { ...record('bad', 'bad'), url: 'javascript:alert(1)' },
     record('distinct query', 'a%252Fb?q=2&tracking=2'),
@@ -90,61 +106,112 @@ check('URL handling validates schemes, preserves query/encoding and resolves rel
   const result = await engine.search({ query: 'x' });
   assert.equal(result.results.length, 2);
   assert.match(result.results[0].url, /a%252Fb\?q=1&tracking=2$/);
-  assert.equal(engine.cleanBingUrl('/relative?q=%252F'), 'https://www.bing.com/relative?q=%252F');
-  assert.equal(engine.cleanDuckDuckGoUrl('//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fa%252Fb'), 'https://example.org/a%2Fb');
 });
 
-// Brave internals with a fake Playwright browser: a blocked page fails at once, without retry.
-function fakeBrowser(status, events) {
+// Engine methods with a fake Playwright browser: observed HTTP facts, no retry, no second browser.
+const GOOGLE_HTML = `<html><body><div id="search"><div id="rso">
+<div class="MjjYud"><div><a href="/goto?url=CAESabc&amp;x=1"><h3>Wrapped result</h3></a></div><div class="VwiC3b">Wrapped snippet.</div></div>
+<div class="MjjYud"><a href="https://direct.example/page"><h3>Direct result</h3></a></div>
+<div class="MjjYud"><a href="https://support.google.com/x"><h3></h3></a><div data-sncf="1">No title snippet.</div></div>
+</div></div><div id="rhs"><a href="https://side.example/"><h3>Side panel</h3></a></div></body></html>`;
+function fakeBrowser({ status = 200, finalUrl, html = '<html></html>', events, gotos = [] }) {
+  let current;
   const page = {
-    goto: async () => { events.push('goto'); return { status: () => status }; },
-    waitForSelector: async () => { events.push('wait'); throw new Error('no results selector'); },
-    content: async () => { events.push('content'); return '<html></html>'; },
-    url: () => 'https://search.brave.com/search',
+    goto: async (url, options) => { events.push('goto'); gotos.push({ url, options }); current = finalUrl ?? url; return { status: () => status }; },
+    waitForSelector: async () => { events.push('wait'); },
+    content: async () => { events.push('content'); return html; },
+    url: () => current,
   };
   const context = { newPage: async () => page, close: async () => events.push('context-close') };
   return { isConnected: () => true, version: () => '777.0.0.0', newContext: async () => context, close: async () => events.push('browser-close') };
 }
-
-for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'parsed']]) {
-  check(`Brave HTTP ${status} ${expected === 'blocked' ? 'fails at once without a second browser' : 'still waits for results'}`, async () => {
-    configure();
-    const events = [];
-    const launch = playwright.chromium.launch;
-    playwright.chromium.launch = async () => { events.push('launch'); return fakeBrowser(status, events); };
-    try {
-      const pool = new BrowserPool();
-      const engine = new SearchEngine(pool);
-      const budget = new CallBudget(1000);
-      if (expected === 'blocked') {
-        await assert.rejects(engine.tryBrowserBraveSearch('alpha', 5, 1000, undefined, budget), new RegExp(`Brave returned HTTP ${status}`));
-        assert.deepEqual(events, ['launch', 'goto', 'context-close']);
-      } else {
-        assert.deepEqual(await engine.tryBrowserBraveSearch('alpha', 5, 1000, undefined, budget), []);
-        assert.deepEqual(events, ['launch', 'goto', 'wait', 'content', 'context-close']);
-      }
-      budget.dispose();
-      await pool.closeAll();
-      assert.equal(events.at(-1), 'browser-close');
-    } finally {
-      playwright.chromium.launch = launch;
-    }
-  });
+async function withFakeBrowser(options, fn) {
+  const events = [];
+  const launch = playwright.chromium.launch;
+  playwright.chromium.launch = async () => { events.push('launch'); return fakeBrowser({ ...options, events }); };
+  const pool = new BrowserPool();
+  const budget = new CallBudget(1000);
+  try { return await fn(new SearchEngine(pool), budget, events); } finally {
+    budget.dispose();
+    await pool.closeAll();
+    playwright.chromium.launch = launch;
+  }
 }
+check('Google HTTP 429 fails at once without retry or a second browser', async () => {
+  await withFakeBrowser({ status: 429 }, async (engine, budget, events) => {
+    await assert.rejects(engine.tryGoogleSearch('alpha', 5, 1000, undefined, budget), /^Error: Google returned HTTP 429$/);
+    assert.deepEqual(events, ['launch', 'goto', 'context-close']);
+  });
+});
+check('Google /sorry/ redirect fails at once with the final path', async () => {
+  await withFakeBrowser({ finalUrl: 'https://www.google.com/sorry/index?continue=x' }, async (engine, budget, events) => {
+    await assert.rejects(engine.tryGoogleSearch('alpha', 5, 1000, undefined, budget), /Google redirected to \/sorry\/index \(HTTP 200\)/);
+    assert.deepEqual(events, ['launch', 'goto', 'context-close']);
+  });
+});
+check('Google HTTP 200 waits for results and parses the main results area', async () => {
+  await withFakeBrowser({ html: GOOGLE_HTML }, async (engine, budget, events) => {
+    const parsed = await engine.tryGoogleSearch('alpha', 5, 1000, undefined, budget);
+    assert.deepEqual(events, ['launch', 'goto', 'wait', 'content', 'context-close']);
+    assert.deepEqual(parsed.map(r => [r.title, r.url, r.observedUrl, r.description]), [
+      ['Wrapped result', 'https://www.google.com/goto?url=CAESabc&x=1', '/goto?url=CAESabc&x=1', 'Wrapped snippet.'],
+      ['Direct result', 'https://direct.example/page', 'https://direct.example/page', ''],
+      ['', 'https://support.google.com/x', 'https://support.google.com/x', 'No title snippet.'],
+    ]);
+  });
+});
+check('search() keeps a relative Google wrapper href as an absolute candidate', async () => {
+  await withFakeBrowser({ html: GOOGLE_HTML }, async (engine, budget) => {
+    engine.tryBingSearch = async () => [];
+    const result = await engine.search({ query: 'alpha', numResults: 5, budget });
+    assert.equal(result.results[0].url, 'https://www.google.com/goto?url=CAESabc&x=1');
+    assert.equal(result.results[0].observedUrl, '/goto?url=CAESabc&x=1');
+    assert.equal(result.results.length, 3);
+    assert.deepEqual(result.engines.map(e => e.status), ['completed', 'zero_parsed']);
+  });
+});
+check('query language selects Google hl and Bing setlang/cc, at overridable addresses', async () => {
+  const { queryMarket } = await import(pathToFileURL(path.join(dist, 'search-engine.js')).href);
+  assert.deepEqual(queryMarket('機器學習 過擬合'), { googleHl: 'zh-TW', bingSetlang: 'zh-Hant', bingCc: 'TW' });
+  assert.deepEqual(queryMarket('python asyncio'), { googleHl: 'en', bingSetlang: 'en', bingCc: 'US' });
+  const saved = [SearchEngine.googleSearchUrl, SearchEngine.bingSearchUrl];
+  try {
+    for (const [query, hl, setlang, cc] of [['颱風 消息', 'zh-TW', 'zh-Hant', 'TW'], ['typhoon news', 'en', 'en', 'US']]) {
+      const gotos = [];
+      await withFakeBrowser({ gotos }, async (engine, budget) => {
+        await engine.tryGoogleSearch(query, 4, 1000, undefined, budget);
+        await engine.tryBingSearch(query, 4, 1000, undefined, budget);
+      });
+      const [google, bing] = gotos.map(g => new URL(g.url));
+      assert.equal(`${google.origin}${google.pathname}`, 'https://www.google.com/search');
+      assert.deepEqual([google.searchParams.get('q'), google.searchParams.get('hl'), google.searchParams.get('num')], [query, hl, '4']);
+      assert.equal(`${bing.origin}${bing.pathname}`, 'https://www.bing.com/search');
+      assert.deepEqual([bing.searchParams.get('q'), bing.searchParams.get('count'), bing.searchParams.get('setlang'), bing.searchParams.get('cc')], [query, '4', setlang, cc]);
+      assert.equal(bing.searchParams.get('cvid'), null);
+    }
+    SearchEngine.googleSearchUrl = 'http://127.0.0.1:9/fake-google';
+    SearchEngine.bingSearchUrl = 'http://127.0.0.1:9/fake-bing';
+    const gotos = [];
+    await withFakeBrowser({ gotos }, async (engine, budget) => {
+      await engine.tryGoogleSearch('x', 1, 1000, undefined, budget);
+      await engine.tryBingSearch('x', 1, 1000, undefined, budget);
+    });
+    assert.deepEqual(gotos.map(g => g.url.split('?')[0]), ['http://127.0.0.1:9/fake-google', 'http://127.0.0.1:9/fake-bing']);
+  } finally { [SearchEngine.googleSearchUrl, SearchEngine.bingSearchUrl] = saved; }
+});
 
-const { formatSearchResponse } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
 check('both search tools share distinguishable engine and provenance text', async () => {
   const error = new Error('HTTP 429');
-  const failed = await engineWith({ bing: error, ddg: error, brave: error }).engine.search({ query: 'x' });
+  const failed = await engineWith({ google: error, bing: error }).engine.search({ query: 'x' });
   const empty = await engineWith().engine.search({ query: 'x' });
-  const partial = await engineWith({ bing: [record('one', '1')], ddg: error }).engine.search({ query: 'x' });
+  const partial = await engineWith({ google: [record('one', '1')], bing: error }).engine.search({ query: 'x' });
   const render = r => formatSearchResponse('x', r.results, r.engines);
   const texts = [failed, empty, partial].map(render);
   assert.equal(new Set(texts).size, 3);
   assert.match(texts[0], /All attempted engines failed/);
   assert.match(texts[1], /status=zero_parsed/);
-  assert.match(texts[2], /Source engines: Browser Bing/);
-  assert.match(texts[2], /Axios DuckDuckGo: attempted=true; attempts=1; parsed_count=0; status=error/);
+  assert.match(texts[2], /Source engines: Google/);
+  assert.match(texts[2], /- Bing: attempted=true; attempts=1; parsed_count=0; status=error/);
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(path.join(dist, '..', 'src', 'index.ts'), 'utf8');
   assert.equal((source.match(/const responseText = formatSearchResponse\(/g) ?? []).length, 2);
@@ -188,36 +255,51 @@ check('strict content limits, deployment precedence, booleans and Unicode', asyn
 });
 
 check('call expiry preserves fixed candidates and stops remaining engines', async () => {
-  const { engine, attempts } = engineWith({ bing: [record('known', 'known')] });
-  engine.tryDuckDuckGoSearch = async (_q, _n, _timeout, _state, budget) => {
-    attempts.push('ddg');
+  const { engine, attempts } = engineWith({ google: [record('known', 'known')] });
+  engine.tryBingSearch = async (_q, _n, _timeout, _state, budget) => {
+    attempts.push('bing');
     return budget.wait(new Promise(() => {}));
   };
   const budget = new CallBudget(20);
   const result = await engine.search({ query: 'x', budget });
   budget.dispose();
   assert.equal(result.results[0].title, 'known');
-  assert.deepEqual(attempts, ['bing', 'ddg']);
-  assert.equal(result.engines.length, 3);
-  assert.equal(result.engines[2].attempted, false);
-  assert.match(result.engines[2].error, /deadline/);
+  assert.deepEqual(attempts, ['google', 'bing']);
+  assert.equal(result.engines[1].status, 'error');
+  assert.match(result.engines[1].error, /deadline/);
+  const stuck = engineWith({ bing: [record('late', 'late')] });
+  stuck.engine.tryGoogleSearch = async (_q, _n, _timeout, _state, budget) => {
+    stuck.attempts.push('google');
+    return budget.wait(new Promise(() => {}));
+  };
+  const short = new CallBudget(20);
+  const stopped = await stuck.engine.search({ query: 'x', budget: short });
+  short.dispose();
+  assert.deepEqual(stuck.attempts, ['google']);
+  assert.equal(stopped.results.length, 0);
+  assert.equal(stopped.engines[1].attempted, false);
+  assert.match(stopped.engines[1].error, /deadline/);
 });
 
-check('parsers retain short snippets and unknown titles and resolve the actual page base', async () => {
+check('parsers keep organic results only, short snippets, unknown titles and the actual page base', async () => {
   const engine = new SearchEngine();
-  const html = '<li class="b_algo"><h2><a href="../item?q=%252F">AI</a></h2><div class="b_caption"><p>AI.</p></div></li>';
-  const [bing] = engine.parseBingResults(html, 1, 'https://www.bing.com/search/path/');
-  assert.equal(bing.description, 'AI.');
-  assert.equal(bing.url, 'https://www.bing.com/search/item?q=%252F');
-  const [missing] = engine.parseBingResults('<li class="b_algo"><h2><a href="/unknown"></a></h2><p>Known snippet.</p></li>', 1);
+  const sidebar = '<div id="b_context"><div class="b_card"><h2><a href="https://typhoon.example/">颱風消息</a></h2></div>'
+    + '<div class="b_result"><h2><a href="https://module.example/">Module</a></h2></div></div>';
+  const html = `<ol id="b_results"><li class="b_algo"><h2><a href="../item?q=%252F">AI</a></h2><div class="b_caption"><p>AI.</p></div></li>`
+    + `<li class="b_ans"><h2><a href="https://answer.example/">Answer</a></h2></li></ol>${sidebar}`;
+  const parsed = engine.parseBingResults(html, 5, 'https://www.bing.com/search/path/');
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].description, 'AI.');
+  assert.equal(parsed[0].url, 'https://www.bing.com/search/item?q=%252F');
+  assert.equal(parsed[0].observedUrl, '../item?q=%252F');
+  assert.deepEqual(engine.parseBingResults(`<ol id="b_results"><li class="b_ans"><h2><a href="https://answer.example/">Answer</a></h2></li></ol>${sidebar}`, 5), []);
+  const [missing] = engine.parseBingResults('<ol id="b_results"><li class="b_algo"><h2><a href="/unknown"></a></h2><p>Known snippet.</p></li></ol>', 1);
   assert.equal(missing.title, '');
   assert.equal(missing.description, 'Known snippet.');
-  const [brave] = engine.parseBraveResults('<base href="/docs/"><div class="result"><h2><a href="next"></a></h2><p>Actual snippet.</p></div>', 1, 'https://search.brave.com/search');
-  assert.equal(brave.title, '');
-  assert.equal(brave.url, 'https://search.brave.com/docs/next');
-  const [ddg] = engine.parseDuckDuckGoResults('<div class="result"><div class="result__title"><a href="/l/?uddg=https%3A%2F%2Fexample.org%2Fa%252Fb">AI</a></div><div class="result__snippet">AI.</div></div>', 1);
-  assert.equal(ddg.url, 'https://example.org/a%2Fb');
-  assert.equal(ddg.description, 'AI.');
+  assert.equal(missing.url, 'https://www.bing.com/unknown');
+  const [based] = engine.parseGoogleResults('<base href="/docs/"><div id="search"><a href="next"><h3>T</h3></a></div>', 1, 'https://www.google.com/search?q=x');
+  assert.equal(based.url, 'https://www.google.com/docs/next');
+  assert.deepEqual(engine.parseGoogleResults('<div id="rhs"><a href="https://side.example/"><h3>Side</h3></a></div>', 5), []);
 });
 
 let failed = 0;

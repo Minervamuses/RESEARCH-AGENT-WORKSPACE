@@ -7,7 +7,7 @@
 | --- | --- | --- | --- | --- | --- |
 | F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3（建議順序中先做 F2-S1） |
 | F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
-| F3 | In progress | F3-S1 | evidence/F3-S1/ | — | F3-S2 |
+| F3 | In progress | F3-S1、F3-S2 | evidence/F3-S1/ | — | F3-S3 |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
@@ -223,3 +223,20 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 晚渲染矩陣以完整版 Chromium 重跑（同一個 evidence/F1-S2/late-render.mjs，結果在 evidence/F3-S1/late-render-full-chromium.json）：與 F1-S2 相同，前八個案例都以 text 取得目標文字（575–1604 ms），5000 ms 者在 3068 ms 以 empty_text 返回並附等待時間，持續輪詢者在 3068 ms 以 text 返回；靜態頁直接走瀏覽器 585 ms，HTTP 已有文字 2 ms。結果相同，不需回到 F1。
 - **發現（屬 F4-S2，不在本步修正）**：沙箱外環境含 DBUS_SESSION_BUS_ADDRESS 時，pool 的 owned 記錄是空的：browser 根程序的 cmdline 只剩 1 個 NUL 欄位，owner flag 只能以空白切分找到（full-chromium.json 的 browserRoot.argv）。這直接重現 AF22；收尾仍無殘留，因為 Playwright 的 close 成功。
 - **下一步**：F3-S2。
+
+### F3-S2 Google 主力、Bing 備援，移除 DuckDuckGo 與 Brave
+- **改動**（FG9；FU01、AF41；FA13）：src/search-engine.ts，另從 src/browser-pool.ts 刪除只服務 Bing 首頁流程、已無使用者的 formSelector 常數。
+  - 引擎順序改為 `Google` → `Bing`；策略 B 與 URL 合併邏輯不變。
+  - 刪除 DuckDuckGo（axios 請求、解析器、uddg 清理）、Brave（方法、解析器、403/429 與暫態重試）、Bing 首頁輸入框流程與隨機 cvid；search-engine.ts 不再 import axios。
+  - 新增 `queryMarket(query)`：含漢字（`\p{Script=Han}`）→ Google hl=zh-TW、Bing setlang=zh-Hant&cc=TW；否則 hl=en、setlang=en&cc=US。
+  - SearchEngine 的 static 成員 googleSearchUrl、googleHost、bingSearchUrl、bingHost 可覆寫（不是環境設定）。
+  - tryGoogleSearch：導覽 `<googleSearchUrl>?q=&hl=&num=<limit>`；HTTP ≥400 → `Google returned HTTP <status>`；最終路徑以 `/sorry/` 開頭 → `Google redirected to <path> (HTTP <status>)`；兩者都不重試、不換方式。否則以 searchSelector 上限等待 `#search a h3, #rso a h3`，解析 `#search`（沒有時 `#rso`）內的 `a:has(h3)`：title 取 h3，url 以搜尋頁實際網址（含 `<base href>`）解成絕對網址，observedUrl 保存原始 href，snippet 取「只含這一個結果連結的最大祖先區塊」內的 `[data-sncf], .VwiC3b`，沒有就留空。
+  - tryBingSearch：直接導覽 `<bingSearchUrl>?q=&count=&setlang=&cc=`；HTTP ≥400 為錯誤；只解析 `#b_results > li.b_algo`，沒有正式結果就是零解析。
+  - 兩個方法 attempts 都是 1；每次解析在 stderr 留一行計數。
+- **測試**：
+  - retention 改寫為兩引擎（20 項）：Google 滿 5 筆時 Bing 不被呼叫；Google 2 筆 + Bing 1 筆重複 3 筆新 → 恰好 5 筆、合併來源 `Google, Bing`；Google 429 與 `/sorry/` 兩種錯誤由 Bing 補足且引擎行保留錯誤；後續失敗保留先前候選；全失敗與全零解析可區分；無語意評分；URL scheme 與編碼保留；fake browser 驗證 Google 429、`/sorry/` 都只有 launch→goto→context-close（不等待、不重試、不開第二個 browser），200 時等待並解析主結果區（相對 `/goto?url=` 包裝、直接 href、缺 snippet、缺 title，側欄 `#rhs` 不計）；經 `search()` 確認相對包裝 href 成為絕對候選且 observedUrl 為原始 href；中英文查詢的 hl、num、setlang、cc、count 與無 cvid；覆寫搜尋網址後兩個方法都導覽覆寫後的網址；呼叫期限保留先前候選，Google 卡住時 Bing 不再開始；Bing 只取 `#b_results > li.b_algo`（含 `<base>` 相對解析），只有側欄模組（`#b_context` 的 `.b_card`、`.b_result`）與 `li.b_ans` 時為零解析；Google 的 `<base href>` 解析與只有側欄時為零。
+  - browser-lifecycle 的 selector 上限案例改為 Google 等待結果卡住、由 stub 的 Bing 接手，斷言等待為 `[20]`。
+  - 刪除 DuckDuckGo、Brave 的測試與斷言；`grep -rni 'duckduckgo\|brave\|ddg\|uddg' src tests` 沒有結果。app/agent 沒有改動（FU06）。
+- **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 20/20、content-contract 4 組、browser-lifecycle 全部 exit 0。
+- **限制**：Google 的 snippet 選擇器（`[data-sncf]`、`.VwiC3b`）與結果區（`#search`／`#rso`）依頁面現況，日後結構變動時 snippet 會留空、或成為零解析；真實頁面由 F7-S3 觀測（FG9 閘門）。其他語言的查詢暫時歸為英文（FA13 已知限制）。
+- **下一步**：F3-S3。

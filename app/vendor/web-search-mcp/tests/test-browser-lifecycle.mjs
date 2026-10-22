@@ -85,10 +85,9 @@ try {
   cancelled.dispose();
   assert.equal(lateRequests, 0);
 
+  // Google's result wait is bounded by searchSelector; the next engine still has budget.
   const selectorCap = OPERATION_TIMEOUTS.searchSelector;
-  const formCap = OPERATION_TIMEOUTS.formSelector;
   OPERATION_TIMEOUTS.searchSelector = 20;
-  OPERATION_TIMEOUTS.formSelector = 20;
   const selectorEvents = [];
   const selectorPage = {
     goto: async (_url, options) => { assert.ok(options.timeout <= 4000); return { status: () => 200 }; },
@@ -98,10 +97,10 @@ try {
       throw Object.assign(new Error('selector timeout'), { name: 'TimeoutError' });
     },
     content: async () => '<html></html>',
-    url: () => 'https://www.bing.com/search',
+    url: () => 'https://www.google.com/search?q=x',
   };
   const selectorEngine = new SearchEngine({ withPage: (fn, _budget) => fn(selectorPage) });
-  selectorEngine.tryDuckDuckGoSearch = async (_query, _n, _timeout, _state, budget) => {
+  selectorEngine.tryBingSearch = async (_query, _n, _timeout, _state, budget) => {
     assert.ok(budget.remaining() > 100);
     return [{ title: 'next engine', url: 'https://example.org', description: '' }];
   };
@@ -109,9 +108,8 @@ try {
   const selectorResult = await selectorEngine.search({ query: 'x', numResults: 1, budget: selectorBudget });
   selectorBudget.dispose();
   OPERATION_TIMEOUTS.searchSelector = selectorCap;
-  OPERATION_TIMEOUTS.formSelector = formCap;
   assert.equal(selectorResult.results[0].title, 'next engine');
-  assert.deepEqual(selectorEvents, [20, 20]);
+  assert.deepEqual(selectorEvents, [20]);
   const { createServer } = await import('node:http');
   let received = 0, socketClosed = 0, fallback = 0;
   const server = createServer((request, _response) => {
