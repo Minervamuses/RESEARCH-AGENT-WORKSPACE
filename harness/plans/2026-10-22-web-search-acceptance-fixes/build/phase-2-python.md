@@ -1,5 +1,5 @@
 # F2：Python 包裝穩健性
-依據：[目標 FG5、FG6 與 FA09](../GOALS.md)、[執行契約](../PLANS.md)、[驗收發現](../context/acceptance-findings.md)。相依：無，與 F1 互不相依；建議順序見 PLANS。涵蓋 FG5、FG6、FG8；AF24–AF28、AF31（Python 部分）、AF35、AF36、AF38，突變 P07、P13、P13c、P18、P18b、P26、P27。
+依據：[目標 FG5、FG6 與 FA09](../GOALS.md)、[執行契約](../PLANS.md)、[驗收發現](../context/acceptance-findings.md)。相依：無，與 F1 互不相依；建議順序見 PLANS。涵蓋 FG5、FG6、FG8；AF24–AF28、AF31（Python 部分）、AF35、AF36、AF38，突變 P07、P13、P13c、P18、P18b、P26、P27；以及 FU05 的啟動上限。
 
 ## 後置條件
 - web_search 的 Python 包裝在任何主機程序組合下都能正確追蹤並回收本次呼叫自有的程序樹。
@@ -7,6 +7,7 @@
 - 呼叫端取消時，不留下未取回的例外。
 - 逾時、期限後才到的回應、載入失敗，都有可讀且如實的訊息。
 - 新增的真實程序測試與執行順序無關。
+- web_search 啟動以 15 秒為上限，卡住時不拖住整個 session（FU05）。
 
 五分鐘總上限、285/15 切分、環境 allowlist 與既有隔離行為都不變。
 
@@ -72,7 +73,30 @@
 
 隔離執行 focused pytest，記錄後 commit：`fix(mcp): report cancellation, late results and load failures plainly [F2-S2]`。
 
+## F2-S3：啟動上限 15 秒
+- **相依**：F2-S2。
+- **production 檔**：app/agent/mcp.py。
+- **處理**：FU05、FA15、X09。
+
+工作：
+1. 新增具名常數（例如 `WEB_SEARCH_STARTUP_TIMEOUT_MS = 15000`）。web_search 的 discovery（啟動程序、initialize、列出工具、收尾）以 min(15000, DEFAULT_TIMEOUT) ms 為整體上限。
+2. **陷阱**：現行 `_load_web_search_tools(connection, timeout_ms)` 用同一個 `timeout_ms`，同時管 discovery（`_bounded_web_search(connection, discover, timeout_ms)`）和之後每次工具呼叫的 interceptor。所以不能直接把較小的值傳給 timeout_ms，否則每次搜尋都會被限在 15 s 內。
+   - 必須另外傳入（或在函式內計算）discovery 專用的上限；interceptor 沿用 DEFAULT_TIMEOUT 的整體預算與 285/15 切分（A03）。
+3. 啟動逾時時，web_search 在本 session 標為不可用。診斷沿用 F2-S2 的英文格式，固定含 `startup timeout (<上限> ms)` 這段文字，並附 log 位置；本機工具與其他 MCP 照常載入。
+4. **FU06**：這是 MCP client 端的生命週期行為，只依據時間與程序狀態，不得加入任何搜尋相關的判斷，也不新增環境設定。
+
+最少檢查（tests/test_mcp.py；可在測試中以 monkeypatch 縮短常數）：
+- 慢啟動的 lifecycle server（啟動後睡 2 s）在常數縮短為 300 ms 時，discovery 約在 0.3 s（加合理餘裕）內返回空工具，診斷含 `startup timeout (300 ms)`。同一測試中，另一個正常的 MCP server 仍載入成功。
+- DEFAULT_TIMEOUT 小於常數時，以 DEFAULT_TIMEOUT 為準。
+- **呼叫不受啟動上限影響**（能抓到上述陷阱）：常數縮短為 300 ms、DEFAULT_TIMEOUT=2000，經 load_mcp_tools_with_families 以 meta 模式載入。
+  - 呼叫回報的 `_meta.web_search_work_ms` 必須大於 1000，而不是被限在 300 ms 以內；
+  - 另一個工具呼叫刻意花 600 ms（超過常數），仍必須成功返回。
+- 既有的 meta 測試仍通過。
+- 隔離執行 focused pytest。
+
+記錄後 commit：`fix(mcp): bound web search startup at 15 seconds [F2-S3]`。
+
 ## 階段界線
-- 不改環境 allowlist、預算數值、resolver 的分工、stdout 過濾或 log rotation。
+- 不改環境 allowlist、呼叫預算數值、resolver 的分工、stdout 過濾或 log rotation。
 - 不為其他 MCP server 加入時間上限（X10）。
-- 不改變 discovery 與呼叫共用的預算上限（OD2）。
+- 依 FU06，只改 MCP client 端的行為，不把任何搜尋邏輯放進 app/agent。

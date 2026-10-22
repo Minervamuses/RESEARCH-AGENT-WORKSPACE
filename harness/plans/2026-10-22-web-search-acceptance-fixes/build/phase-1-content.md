@@ -67,11 +67,11 @@ PDF、過大回應、下載與轉換失敗，都分類正確並保留已知事�
    - 不得依賴 `page.waitForFunction`：它在頁內以 eval 執行，遇到 CSP 不允許 unsafe-eval 的頁面會失敗，而錯誤可能被吞掉。
 4. 等待只涵蓋瀏覽器讀取；HTTP 已取得文字的頁面不受影響。靜態頁不需等滿上限。取消或呼叫期限到時，等待立即結束。
 5. 等滿上限後仍沒有文字時，維持 empty_text，並在該次嘗試的可見資訊中寫出已等待的毫秒數。這是給 Agent 的事實，不是「低品質」判定。
-6. 不使用隨機延遲或指紋擬態。不以特定站點的 selector 作為等待條件。
+6. 不使用隨機延遲。UA 依 FU03 由 F3-S1 統一設定，本步不另做擬態。不以特定站點的 selector 作為等待條件。
 
 最少檢查：
 - **離線**：在 tests/test-browser-lifecycle.mjs 用 stub page 驗證：等待受 min(上限, 剩餘預算) 約束；呼叫被取消時等待立即結束；等滿上限仍無文字時，可見資訊含等待時間。
-- **真實 Chromium**（直接以 node 匯入 dist 的 extractor；沙箱內須設可寫 TMPDIR，否則到沙箱外執行；設 PLAYWRIGHT_BROWSERS_PATH）。用本機 HTTP 伺服器，讓 HTTP 回應本身沒有文字，以觸發 fallback，測試以下頁面：
+- **真實 Chromium**（直接以 node 匯入 dist 的 extractor；設 PLAYWRIGHT_BROWSERS_PATH。F3-S1 之前產品用 headless shell，沙箱內只要 TMPDIR 可寫即可；F3-S1 之後是完整版 Chromium，必須在沙箱外以短 TMPDIR 執行，見 PLANS）。用本機 HTTP 伺服器，讓 HTTP 回應本身沒有文字，以觸發 fallback，測試以下頁面：
   - 計時器在 0、100、300、700、1500 ms 插入文字；
   - fetch 經 200 ms 延遲後渲染；
   - DOMContentLoaded 時已有導覽列文字、主要內容經 fetch 300 ms 後才插入；
@@ -103,7 +103,7 @@ build、三份 Node 測試、記錄後 commit：`fix(web-search): wait boundedly
    - 瀏覽器 fallback 在 goto 之前註冊 `page.on('response')`，只記錄主框架的導覽回應，取得 status 與 Content-Type。
    - 回應為 PDF、octet-stream 或其他不支援的類型，或 goto 因下載而拋 net::ERR_ABORTED 時，標為 unsupported_media。
    - 若下載時沒有任何回應事件，標頭維持 unknown，並註明「download started」。
-   - 必須等 F6-S2 案例 6 以真實 Chromium 通過後，才能把 AF10(b) 記為已修正。
+   - 必須等 F7-S2 案例 7 以真實 Chromium 通過後，才能把 AF10(b) 記為已修正。
 4. **錯誤淨化**：Agent 看得到的錯誤訊息要去掉 ANSI 跳脫碼與 Playwright 的「Call log」區塊，成為單行簡短文字。這套用在所有 transport 的錯誤。
 5. **轉換失敗分類**：parseContent（兩條路徑）與截斷時的例外一律歸為 conversion_error，不得落成 http_error。
 
@@ -152,4 +152,4 @@ build、Node 測試、記錄後 commit：`fix(web-search): truncate Markdown in 
 
 ## 階段界線
 - 不加入主文辨識、品質分數或任何刪除規則；不改候選選擇、長度上限或 includeContent 語意。
-- 操作總時間上限與每頁視窗屬於 F3，可見狀態欄位的整理屬於 F4。本階段只新增實作需要的 PageRead 欄位（編碼、等待時間）。
+- 操作總時間上限與每頁視窗屬於 F4，可見狀態欄位的整理屬於 F5。本階段只新增實作需要的 PageRead 欄位（編碼、等待時間）。

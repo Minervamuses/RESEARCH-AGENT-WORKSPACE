@@ -2,15 +2,16 @@
 本文件是唯一的動態狀態擁有者。規劃與驗收的觀察不代表修正已完成；實際結果見下方各步驟事件。每個改動步驟的 commit，都必須同時更新本表與事件紀錄。狀態只用 Not started、In progress、Blocked、Complete。
 
 ## 階段狀態
-建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F1-S3 → F1-S4 → F2-S2 → F3 → F4 → F5 → F6（見 PLANS）。
+建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
 | F1 | Not started | — | — | — | F1-S1 |
 | F2 | Not started | — | — | — | F2-S1（F1-S2 之後） |
-| F3 | Not started | — | — | 相依 F1 | — |
-| F4 | Not started | — | — | 相依 F3 | — |
-| F5 | Not started | — | — | 相依 F2、F4 | — |
-| F6 | Not started | — | — | 相依 F5 | — |
+| F3 | Not started | — | — | — | F3-S1（F2-S1 之後） |
+| F4 | Not started | — | — | 相依 F1、F3 | — |
+| F5 | Not started | — | — | 相依 F4 | — |
+| F6 | Not started | — | — | 相依 F2、F5 | — |
+| F7 | Not started | — | — | 相依 F6 | — |
 
 ## 事件格式
 每個實際的 F?-S? 事件記錄以下內容：
@@ -102,3 +103,29 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - Bing 依語言設定市場後只有 3/6 可用。
   - DuckDuckGo（202）、Brave（429）、Mojeek（403）不論方式全被擋。
 - 下一步：等使用者決定 OD1 是否採用與採用範圍，再修訂本計劃，例如新增一個引擎與瀏覽器階段。目前所有階段仍為 Not started。
+
+## Revision FA1（2026-10-22，使用者對 OD1／OD2 的決定）
+- 依使用者的逐項回覆（GOALS S7，歸納為 FU01–FU06）修訂本計劃；只改計劃，不執行產品修改：
+  - Google 主力、Bing 依查詢語言為備援，刪除 DuckDuckGo 與 Brave；
+  - 改用完整版 Chromium 與一般 Chrome UA；
+  - 搜尋時以實際導覽取得真實網址；
+  - 啟動上限 15 秒；
+  - web search 維持獨立 MCP，不與主專案交叉汙染。
+- **結構變更**：新增 F3「搜尋引擎與瀏覽器」（F3-S1–F3-S4），原 F3–F6 順延為 F4–F7；新增 F2-S3（啟動上限）。
+  - 新舊編號對照：舊 F3-S1／S2 → 新 F4-S1／S2；舊 F4-S1／S2／S3 → 新 F5-S1／S2／S3；舊 F5-S1／S2／S3 → 新 F6-S1／S2／S3；舊 F6-S1／S2／S3／S4 → 新 F7-S1／S2／S3／S4。
+  - phase 檔改名為 phase-4-timeouts、phase-5-status、phase-6-regression、phase-7-delivery，新增 phase-3-engines。
+  - 上方 Authoring FA0 等歷史紀錄仍沿用當時的編號，沒有改寫。
+- **內容變更**：
+  - GOALS：新增 S7、FU01–FU06、FG9、FA13–FA15；OD1、OD2 標為已決定；不變條件改為 Google→Bing、只限 UA 的擬態、FU06 的 MCP 邊界。
+  - PLANS：加入實測基線、七個階段的路線與建議順序、FU06 檔案範圍、完整版 Chromium 的短 TMPDIR 規則、Google 請求間隔。
+  - F4–F7：移除只對 DuckDuckGo、Brave 有意義的工作與測試。
+  - F6、F7：加入瀏覽器模式、UA、引擎備援與連結解析的入口測試與真實驗收。
+  - acceptance-findings：AF19、AF37、AF41、X09、X13 的處置。
+  - mutation-survivors：N04c、N15、N16b、N16e、N16f、N17 改為「不再適用」。
+- **獨立審查**：新 context 的審查者沒有發現 critical，提出 3 項 major、8 項 minor，全部已在本次修訂中修正：
+  - F2-S3：discovery 的上限與每次工具呼叫的預算分開；加入能抓到「呼叫被限在啟動上限內」的檢查；逾時診斷改用固定英文字串 `startup timeout (<上限> ms)`。
+  - F3-S3：解析改在引擎自己的 withPage 內、用同一個 page 依序進行，不巢狀占用 page 閘門（A04）；以主框架導覽請求認定網址，涵蓋 PDF 下載與慢速目標；新增 stayed on engine host 結果；搜尋主機改為精確主機，搜尋網址基底與搜尋主機改為可覆寫成員。
+  - FG9：PLANS 完成判準改為 FG1–FG9；F7-S3 加入被擋、轉接器缺陷、零結果的判定與 80% 解析成功率門檻；F7-S4 加入 FU01–FU06 與 FG9 的證據表；F7-S2 案例 9、10 改以真實完整版 Chromium 與本機假引擎，執行真實的引擎方法與連結解析。
+  - 其餘：第一個動作改為逐檔核對 plan-index 列出的 phase 檔；AutomationControlled 啟動參數列為保留的基線行為；列出 F3-S1、F3-S2 必須更新的既有斷言；Google 相對 href 依 R04 以頁面基底解析；F6-S1 案例 13 改用會記錄 newContext 選項的 fake browser；FU06 改為具體的 Git 與 grep 檢查；F3-S1 以完整版 Chromium 重跑 F1-S2 的晚渲染矩陣。
+- **Git**：新的五份 phase 檔（phase-3-engines 到 phase-7-delivery）以 `git add -f` 逐檔追蹤；舊檔名 phase-3-timeouts、phase-4-status、phase-5-regression、phase-6-delivery 在同一個 commit 中移除。
+- 所有階段仍為 Not started。
