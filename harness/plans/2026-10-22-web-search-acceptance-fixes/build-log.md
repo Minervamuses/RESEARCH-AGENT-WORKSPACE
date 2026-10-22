@@ -10,8 +10,8 @@
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
-| F6 | In progress | F6-S1、F6-S2 | build-log（已提交測試） | — | F6-S3 |
-| F7 | Not started | — | — | 相依 F6 | — |
+| F6 | Complete | F6-S1、F6-S2、F6-S3 | evidence/F6-S3/ | — | — |
+| F7 | Not started | — | — | — | F7-S1（F6 已完成） |
 
 ## 事件格式
 每個實際的 F?-S? 事件記錄以下內容：
@@ -582,3 +582,30 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
     - 移除 includeContent=false 的恆真斷言（events 計數與 source_read_attempts=0），註解指向 test-server-entry 案例 1（AF29）。formatter 層級的 URL 一致斷言保留。
 - **檢查**（vendor 目錄，沙箱內）：browser-lifecycle 連跑 3 次 exit 0；retention 31/31、content-contract 6 組、test-server-entry 7/7 exit 0。突變由 F6-S3 正式複驗。
 - **下一步**：F6-S3。
+
+### F6-S3 突變複驗
+- **作法**（FG6；FA12；context/mutation-survivors.md 全部項目）：
+  - evidence/F6-S3/run_mutations.py 以語意定義每個突變，用精確文字替換重建單點改動（每段原文必須恰好出現一次）。
+  - 暫存複本在 repository 外（`$TMPDIR/f6s3`）：
+    - Node 複本含 src、tests、package.json、tsconfig.json，node_modules 為 symlink，以複本自己的 tsc 編出 dist；
+    - Python 複本含 app/agent、skills、rag、tests、pyproject.toml、poetry.toml，app/vendor 為 symlink，不含 app/desktop 與 app/store。
+  - 每個突變前重建複本。對照組：Node 四份測試、Python focused pytest 都全綠。
+  - 至少一個測試非 0 退出（含逾時）即為殺死；結果逐筆追加到 results.jsonl。整個過程沒有修改 repo 的 dist 或 production 檔（`git status` 只有本步的 evidence）。
+  - 執行時間約 25 分鐘，沙箱內。
+- **結果**（evidence/F6-S3/summary.md）：
+  - 必殺 42 項全部被殺死：N02b、N02c、N02d、N02g、N03b、N05d、N06d、N07c、N07e、N07f、N08h、N08i、N09g、N11b、N11c、N11d、N11e、N12、N13、N13b、N14、N14b、N14c、N14d、N14f、N14g、N14h、N14i、N16c、N20b、N26、N28、N29、N42、N43、P07、P27、P13、P13c、P18、P18b、P26。
+  - N14j（條件必殺）存活，判為**等效**：F5-S3 之後兩個搜尋工具的 limit 都在 schema transform 與 handler（validateSearchQuery）兩處驗證，移除 summaries 的 schema transform 後，handler 仍在任何引擎執行前拒絕 limit 11（test-server-entry 案例 3 在該突變上通過）。
+  - 可選 3 項：
+    - N09b 被殺死；
+    - P07b 存活：測試回收的程序都自成 process group，只殺 PID 也會結束；
+    - P07d 存活：只有 PID 重用時才有差別，無法穩定重現。
+  - 不再適用 6 項：N04c、N15、N16b、N16e、N16f、N17，它們的程式已在 F3-S2 隨 DuckDuckGo、Brave 與 Bing 首頁流程刪除，理由逐項寫在 results.jsonl。
+- **原因紀錄的修正**：runner 的 first_failure 是啟發式的「第一行像錯誤的輸出」。lifecycle 測試既有的注入失敗日誌（`Resource cleanup: Error: injected context close failure`）與 pytest 印出的原始碼行，讓 N16c、N26、N28、N29、N09b、N09g、P13c、P26 等的原因文字不準確，但判定（非 0 退出）不受影響。
+  - 以 `--reasons` 模式只對這些 id 重跑一次，記錄真正失敗的斷言（reasons.jsonl），例如：
+    - N16c：`page goto ended after 2005 ms`；
+    - N29：`'hung' !== 'closed'`；
+    - N09g：content-contract 的佇列案例 150 s 逾時；
+    - N26：explicit-abort 案例 `condition not reached`（中止後 1 s 內 socket 沒有關閉，手動在複本中確認）。
+  - results.jsonl 保留原始紀錄；N14j、P07b、P07d 的判定理由另以追加行記錄。
+- **測試缺口**：沒有。必殺項全部被既有或本計劃新增的測試殺死，本步沒有新增測試。
+- **下一步**：F7-S1。

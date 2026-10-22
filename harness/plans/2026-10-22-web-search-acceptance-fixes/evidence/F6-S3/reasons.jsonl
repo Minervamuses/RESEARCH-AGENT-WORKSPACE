@@ -1,0 +1,12 @@
+{"id": "P26", "test": "tests/test_mcp.py", "exit": 1, "reason": "test_mcp.py:832: AssertionError: Regex pattern did not match."}
+{"id": "P07", "test": "tests/test_mcp.py", "exit": 1, "reason": "test_mcp.py:767: AssertionError: assert (41690.824047258 - 41690.022838168) < 0.8"}
+{"id": "N26", "test": "test-browser-lifecycle.mjs", "exit": 1, "reason": "Resource cleanup: Error: injected context close failure"}
+{"id": "N09g", "test": "test-content-contract.mjs", "exit": "timeout", "reason": "timed out after 150.1 s"}
+{"id": "P27", "test": "tests/test_mcp.py", "exit": 1, "reason": "test_mcp.py:750: assert 0 == 1"}
+{"id": "N29", "test": "test-browser-lifecycle.mjs", "exit": 1, "reason": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: 'hung' !== 'closed'"}
+{"id": "N28", "test": "test-browser-lifecycle.mjs", "exit": 1, "reason": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: null !== 'SIGKILL'"}
+{"id": "N16c", "test": "test-browser-lifecycle.mjs", "exit": 1, "reason": "AssertionError [ERR_ASSERTION]: page goto ended after 2005.8888809999999 ms code: 'ERR_ASSERTION', actual: false, expected: true,"}
+{"id": "P13c", "test": "tests/test_mcp.py", "exit": 1, "reason": "test_mcp.py:914: AssertionError: assert 'MCP loader unavailable: RuntimeError' in ('mcp:web_search: resolve: enabled but launch prerequisites are missing (entrypoint/node or configured command)',)"}
+{"id": "N09b", "test": "test-browser-lifecycle.mjs", "exit": 1, "reason": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: 1 !== 0"}
+{"id": "N11c", "test": "test-server-entry.mjs", "exit": 1, "reason": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: null !== 0"}
+{"id": "N26", "test": "test-browser-lifecycle.mjs", "exit": 1, "reason": "Error: condition not reached (the explicit-abort case: the stalled socket was not closed within 1000 ms after budget.abort())", "source": "manual re-run in a scratch copy; the --reasons extractor found no AssertionError line"}
