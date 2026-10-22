@@ -88,6 +88,12 @@ for (const word of ['Lead', 'Addr', 'Side', 'Term', 'Def', 'Sum', 'Detail', 'Dlg
   assert.ok(tokens.includes(word), `glued block text around ${word}: ${JSON.stringify(glued)}`);
 }
 assert.doesNotMatch(glued, /TermDef/);
+// No text is removed because of class or id names (N07c).
+const named = parse(['nav', 'footer', 'comment', 'sidebar', 'menu', 'banner', 'cookie'].map((name, i) =>
+  `<div class="site-${name}-x">Class${name}</div><section id="${name}-${i}">Id${name}</section>`).join(''));
+for (const name of ['nav', 'footer', 'comment', 'sidebar', 'menu', 'banner', 'cookie']) {
+  assert.ok(named.includes(`Class${name}`) && named.includes(`Id${name}`), `text removed for ${name}`);
+}
 const captioned = parse('<table><caption>Cap text</caption><tr><td><p>One</p><p>Two</p></td><td>Three</td></tr><tr><td>Four</td></tr></table>');
 assert.equal(count(captioned, 'Cap text'), 1);
 assert.match(captioned, /Cap text[^]*span structure simplified\]\nOne Two \| Three\nFour/);
@@ -237,10 +243,8 @@ assert.match(withContent, /selected=5; candidates_attempted=5; source_read_attem
 assert.doesNotMatch(withContent, /transport_retries/);
 assert.match(withContent, /^Statistics scope: source_read_attempts counts started HTTP and browser reads .*Redirects followed within one HTTP read are not counted separately\. parsed_count is the rows an engine returned before cross-engine deduplication/m);
 assert.match(withContent, /unsupported_media/);
-const before = events.length;
+// includeContent=false reading nothing is guarded at the real handler by tests/test-server-entry.mjs (case 1, AF29).
 const withoutContent = formatSearchResponse('same query', candidates, [], false);
-assert.equal(events.length, before);
-assert.match(withoutContent, /source_read_attempts=0/);
 const urls = value => [...value.matchAll(/^URL: (.+)$/gm)].map(match => match[1]);
 assert.deepEqual(urls(withContent), urls(withoutContent));
 const limited = { ...results[2].read, ...truncateMarkdown('😀中文 [link](<https://example.org/path>) tail', 12) };

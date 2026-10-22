@@ -4,6 +4,13 @@ import { BrowserPool, CallBudget, OPERATION_TIMEOUTS } from '../dist/browser-poo
 import { SearchEngine } from '../dist/search-engine.js';
 import { EnhancedContentExtractor } from '../dist/enhanced-content-extractor.js';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const waitUntil = async (check, ms = 2000) => {
+  const end = performance.now() + ms;
+  while (!check()) {
+    if (performance.now() > end) throw new Error('condition not reached');
+    await pause(5);
+  }
+};
 const original = chromium.launch;
 const originalFirefox = firefox.launch;
 firefox.launch = async () => { throw new Error('Firefox must never launch'); };
@@ -329,6 +336,115 @@ try {
     chromium.launch = original;
   }
   await pause(120);
+
+  // Old P4-S2 focus cases: hung navigation ends at its operation cap, queued pages expire, aborts close sockets.
+  {
+    const saved = { ...OPERATION_TIMEOUTS };
+    const { getEventListeners } = await import('node:events');
+    const hangs = (_target, options) => options?.timeout
+      ? new Promise((_resolve, reject) => setTimeout(() => reject(Object.assign(new Error(`Timeout ${options.timeout}ms exceeded.`), { name: 'TimeoutError' })), options.timeout))
+      : new Promise(() => undefined);
+    const okResponse = { status: () => 200, headers: () => ({ 'content-type': 'text/html' }) };
+    const hungPage = overrides => ({
+      on: () => undefined, off: () => undefined, mainFrame: () => undefined, url: () => 'https://www.google.com/search?q=x',
+      goto: async () => okResponse, waitForSelector: async () => undefined, content: async () => '<html></html>',
+      title: async () => '', evaluate: async () => 'text', waitForLoadState: async () => undefined, ...overrides,
+    });
+    const leasePool = page => ({ withPage: (fn, budget, onStart) => { onStart?.(); return budget.wait(fn(page)); }, withHttp: fn => fn() });
+    const elapsed = async fn => { const begin = performance.now(); await fn(); return performance.now() - begin; };
+    try {
+      Object.assign(OPERATION_TIMEOUTS, { pageRequest: 50, searchRequest: 50, searchSelector: 50, linkResolve: 50 });
+      // Page read navigation (N16c).
+      const navReader = new EnhancedContentExtractor(leasePool(hungPage({ goto: hangs })));
+      navReader.extractWithAxios = async () => '';
+      let read;
+      const navMs = await elapsed(async () => { const b = new CallBudget(2000); read = await navReader.extractContent({ url: 'https://example.org/hung', budget: b }); b.dispose(); });
+      assert.ok(navMs < 500, `page goto ended after ${navMs} ms`);
+      assert.equal(read.status, 'timeout');
+      assert.match(read.attempts[1].error, /Timeout 50ms exceeded/);
+      // Google and Bing: a hung goto, and a hung result wait that still lets the engine finish.
+      for (const method of ['tryGoogleSearch', 'tryBingSearch']) {
+        const gotoEngine = new SearchEngine(leasePool(hungPage({ goto: hangs })));
+        let gotoMs = await elapsed(async () => { const b = new CallBudget(2000); await assert.rejects(gotoEngine[method]('x', 5, b.timeout(OPERATION_TIMEOUTS.searchRequest), undefined, b), /Timeout 50ms/); b.dispose(); });
+        assert.ok(gotoMs < 500, `${method} goto ended after ${gotoMs} ms`);
+        const waitEngine = new SearchEngine(leasePool(hungPage({ waitForSelector: hangs })));
+        gotoMs = await elapsed(async () => { const b = new CallBudget(2000); assert.deepEqual(await waitEngine[method]('x', 5, 50, undefined, b), []); b.dispose(); });
+        assert.ok(gotoMs < 500, `${method} result wait ended after ${gotoMs} ms`);
+      }
+      // Engine redirect resolution navigation.
+      const wrapperPage = hungPage({
+        goto: async (target, options) => target.includes('/goto') ? hangs(target, options) : okResponse,
+        content: async () => '<div id="search"><a href="/goto?u=1"><h3>Wrapped</h3></a></div>',
+      });
+      const resolver = new SearchEngine(leasePool(wrapperPage));
+      resolver.tryBingSearch = async () => [];
+      let resolved;
+      const resolveMs = await elapsed(async () => { const b = new CallBudget(2000); resolved = await resolver.search({ query: 'x', numResults: 1, budget: b }); b.dispose(); });
+      assert.ok(resolveMs < 500, `link resolution ended after ${resolveMs} ms`);
+      assert.equal(resolved.results[0].resolution.outcome, 'timeout');
+      Object.assign(OPERATION_TIMEOUTS, saved);
+
+      // A queued page lease expires at its deadline and never opens a page (N09g).
+      const previousPages = process.env.MAX_CONCURRENT_PAGES;
+      process.env.MAX_CONCURRENT_PAGES = '1';
+      let pagesOpened = 0;
+      chromium.launch = async () => ({ ...browser, newContext: async () => ({ newPage: async () => { pagesOpened++; return {}; }, close: async () => undefined }) });
+      const onePage = new BrowserPool();
+      if (previousPages === undefined) delete process.env.MAX_CONCURRENT_PAGES; else process.env.MAX_CONCURRENT_PAGES = previousPages;
+      let releasePage;
+      const holding = onePage.withPage(() => new Promise(resolve => { releasePage = resolve; }));
+      await waitUntil(() => pagesOpened === 1);
+      const queueBudget = new CallBudget(50);
+      let ranLate = false;
+      const queueMs = await elapsed(() => assert.rejects(onePage.withPage(async () => { ranLate = true; }, queueBudget), /deadline/));
+      queueBudget.dispose();
+      assert.ok(queueMs < 300, `queued page expired after ${queueMs} ms`);
+      releasePage();
+      await holding;
+      await pause(10);
+      assert.equal(ranLate, false);
+      assert.equal(pagesOpened, 1);
+      assert.deepEqual([onePage.pages.activeCount, onePage.pages.pendingCount], [0, 0]);
+      await onePage.closeAll();
+      chromium.launch = original;
+
+      // An explicit abort closes an in-flight HTTP read long before any deadline (N26).
+      const sockets = [];
+      const stalled = createServer(request => { const entry = { closed: undefined }; sockets.push(entry); request.socket.once('close', () => { entry.closed = performance.now(); }); });
+      await new Promise(resolve => stalled.listen(0, '127.0.0.1', resolve));
+      try {
+        const abortPool = new BrowserPool();
+        const abortReader = new EnhancedContentExtractor(abortPool);
+        abortReader.extractWithBrowser = async () => { throw new Error('no fallback after an explicit abort'); };
+        const abortBudget = new CallBudget(5000);
+        const pending = abortReader.extractContent({ url: `http://127.0.0.1:${stalled.address().port}/stalled`, budget: abortBudget });
+        await waitUntil(() => sockets.length === 1);
+        const abortedAt = performance.now();
+        abortBudget.abort();
+        const abortedRead = await pending;
+        abortBudget.dispose();
+        await waitUntil(() => sockets[0].closed !== undefined, 1000);
+        assert.ok(sockets[0].closed - abortedAt < 250, `socket closed ${sockets[0].closed - abortedAt} ms after abort`);
+        assert.equal(abortedRead.status, 'cancelled');
+        assert.deepEqual([abortPool.http.activeCount, abortPool.http.pendingCount, abortPool.pages.activeCount], [0, 0, 0]);
+      } finally {
+        stalled.closeAllConnections();
+        await new Promise(resolve => stalled.close(resolve));
+      }
+
+      // A disposed child budget leaves no abort listener on its parent (N09b).
+      const parent = new CallBudget(1000);
+      const listeners = getEventListeners(parent.signal, 'abort').length;
+      const childBudget = parent.child(100);
+      assert.equal(getEventListeners(parent.signal, 'abort').length, listeners + 1);
+      childBudget.dispose();
+      assert.equal(getEventListeners(parent.signal, 'abort').length, listeners);
+      parent.dispose();
+    } finally {
+      Object.assign(OPERATION_TIMEOUTS, saved);
+      chromium.launch = original;
+    }
+  }
 
   // FA07: withPage reports a start once its slot is held, before launch; a queued lease never does.
   {

@@ -10,7 +10,7 @@
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
-| F6 | In progress | F6-S1 | build-log（已提交測試） | — | F6-S2 |
+| F6 | In progress | F6-S1、F6-S2 | build-log（已提交測試） | — | F6-S3 |
 | F7 | Not started | — | — | 相依 F6 | — |
 
 ## 事件格式
@@ -564,3 +564,21 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 判別力：在 `$TMPDIR` 複本刪掉 SKILL.md 的整段邊界文字後，新的 Python 測試失敗（1 failed, 15 passed）。
   - 各突變由 F6-S3 正式複驗。
 - **下一步**：F6-S2。
+
+### F6-S2 生命週期聚焦案例
+- **改動**（FG6；AF29、AF33；突變 N16c、N09g、N26、N07c、N09b）：只改測試。
+  - tests/test-browser-lifecycle.mjs 新增一組舊 P4-S2 聚焦案例（另加 waitUntil 輔助函式）：
+    1. 導覽卡住：stub 的 goto／waitForSelector 只有帶 timeout 才會逾時，否則永不返回。操作上限縮為 50 ms、呼叫預算 2000 ms 時，下列各在 500 ms 內結束：
+       - 頁面讀取的 goto（timeout，錯誤含 `Timeout 50ms exceeded`）；
+       - Google 與 Bing 的 goto（拒絕）；
+       - Google 與 Bing 的結果等待（回空批次）；
+       - 連結解析導覽（timeout）。
+    2. page 排隊逾期：MAX_CONCURRENT_PAGES=1，第一個 lease 占住 page，第二個以 50 ms 預算排隊，在 300 ms 內以 deadline 拒絕；釋放後它的回呼從未執行、newPage 只開過 1 次，pages 的 active／pending 歸零。
+    3. 明確中止：本機伺服器卡住，預算 5000 ms 時呼叫 budget.abort()，socket 在 250 ms 內關閉，狀態 cancelled；http 與 pages 的 active／pending 都是 0。
+    4. 子預算 dispose 後，父 signal 的 abort listener 數回到原值（以 events.getEventListeners 計）。
+    5. 既有的最後一條斷言（沒有殘留 Timeout）照舊通過。
+  - tests/test-content-contract.mjs：
+    - class 或 id 含 nav、footer、comment、sidebar、menu、banner、cookie 的元素，文字全部保留；
+    - 移除 includeContent=false 的恆真斷言（events 計數與 source_read_attempts=0），註解指向 test-server-entry 案例 1（AF29）。formatter 層級的 URL 一致斷言保留。
+- **檢查**（vendor 目錄，沙箱內）：browser-lifecycle 連跑 3 次 exit 0；retention 31/31、content-contract 6 組、test-server-entry 7/7 exit 0。突變由 F6-S3 正式複驗。
+- **下一步**：F6-S3。
