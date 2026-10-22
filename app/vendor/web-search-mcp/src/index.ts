@@ -51,7 +51,7 @@ class WebSearchMCPServer {
 
         try {
           // Convert and validate arguments
-          const validatedArgs = this.validateAndConvertArgs(args);
+          const validatedArgs = validateSearchInput(args);
           
           console.log(`[MCP] Validated args:`, JSON.stringify(validatedArgs, null, 2));
           
@@ -200,12 +200,7 @@ class WebSearchMCPServer {
     finally { budget.dispose(); this.activeBudgets.delete(budget); }
   }
 
-  private validateAndConvertArgs(args: unknown): WebSearchToolInput {
-    return validateSearchInput(args);
-  }
-
   private async handleWebSearch(input: WebSearchToolInput, budget: CallBudget): Promise<WebSearchToolOutput> {
-    const startTime = Date.now();
     const { query, limit = 5, includeContent = true, maxContentLength } = input;
     
     console.error(`[web-search-mcp] DEBUG: handleWebSearch called with limit=${limit}, includeContent=${includeContent}`);
@@ -216,12 +211,8 @@ class WebSearchMCPServer {
         ? await this.contentExtractor.extractContentForResults(searchResponse.results, limit, maxContentLength, budget)
         : searchResponse.results;
 
-      const searchTime = Date.now() - startTime;
-
       return {
         results: enhancedResults,
-        total_results: enhancedResults.length,
-        search_time_ms: searchTime,
         query,
         engines: searchResponse.engines,
       };

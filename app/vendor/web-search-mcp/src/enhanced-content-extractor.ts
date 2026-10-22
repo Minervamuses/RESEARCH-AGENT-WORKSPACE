@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
-import { getWordCount, getContentPreview, resolveContentLimit, truncateMarkdown } from './utils.js';
+import { resolveContentLimit, truncateMarkdown } from './utils.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
 
 export class EnhancedContentExtractor {
@@ -130,11 +130,7 @@ export class EnhancedContentExtractor {
         try { child = budget.child(OPERATION_TIMEOUTS.pageTotal); } catch { /* Keep cancelled candidates. */ }
         try {
           const read = await this.extractContent({ url: result.url, maxContentLength, budget: child });
-          return {
-            ...result, read, fetchStatus: read.status, fullContent: read.content,
-            contentPreview: getContentPreview(read.content), wordCount: getWordCount(read.content),
-            error: read.error,
-          };
+          return { ...result, read };
         } finally { if (child !== budget) child.dispose(); }
       }));
     } finally { if (!supplied) budget.dispose(); }
@@ -202,9 +198,5 @@ export class EnhancedContentExtractor {
     const main = $('main, article, [role="main"]').first();
     const root = main.length ? main : $('body');
     return children(root[0]).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  }
-
-  async closeAll(): Promise<void> {
-    await this.browserPool.closeAll();
   }
 }

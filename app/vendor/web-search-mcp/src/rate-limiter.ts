@@ -37,12 +37,4 @@ export class RateLimiter {
 
     return budget ? budget.wait(task) : task;
   }
-
-  getStatus(): { requestCount: number; maxRequests: number; resetTime: number } {
-    return {
-      requestCount: this.requestCount,
-      maxRequests: this.maxRequestsPerMinute,
-      resetTime: this.lastResetTime + this.resetIntervalMs,
-    };
-  }
 } 

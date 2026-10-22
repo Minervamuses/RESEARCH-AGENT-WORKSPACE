@@ -24,7 +24,7 @@ const logs = [];
 console.log = (...args) => logs.push(args.join(' '));
 console.error = (...args) => logs.push(args.join(' '));
 
-const record = (title, id) => ({ title, description: '', url: `https://example.org/${id}`, timestamp: 'fixed' });
+const record = (title, id) => ({ title, description: '', url: `https://example.org/${id}` });
 function engineWith({ bing = [], ddg = [], brave = [] } = {}) {
   const engine = new SearchEngine();
   const attempts = [];
@@ -56,7 +56,7 @@ check('strategy B fills five stable candidates and merges duplicate provenance',
   assert.deepEqual(attempts, ['bing', 'ddg']);
   assert.equal(result.engines[2].status, 'strategy_stopped');
   assert.equal(result.engines[2].attempted, false);
-  assert.ok(result.results.every(r => r.fetchStatus === 'not_requested'));
+  assert.ok(result.results.every(r => r.read === undefined));
 });
 check('later failures retain earlier candidates and expose errors', async () => {
   const { engine } = engineWith({ bing: [record('one', '1'), record('two', '2')], ddg: new Error('HTTP 403'), brave: new Error('HTTP 429') });
@@ -113,7 +113,8 @@ for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'par
     const launch = playwright.chromium.launch;
     playwright.chromium.launch = async () => { events.push('launch'); return fakeBrowser(status, events); };
     try {
-      const engine = new SearchEngine(new BrowserPool());
+      const pool = new BrowserPool();
+      const engine = new SearchEngine(pool);
       const budget = new CallBudget(1000);
       if (expected === 'blocked') {
         await assert.rejects(engine.tryBrowserBraveSearch('alpha', 5, 1000, undefined, budget), new RegExp(`Brave returned HTTP ${status}`));
@@ -123,7 +124,7 @@ for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'par
         assert.deepEqual(events, ['launch', 'goto', 'wait', 'content', 'context-close']);
       }
       budget.dispose();
-      await engine.closeAll();
+      await pool.closeAll();
       assert.equal(events.at(-1), 'browser-close');
     } finally {
       playwright.chromium.launch = launch;
@@ -151,7 +152,7 @@ check('both search tools share distinguishable engine and provenance text', asyn
 });
 
 check('strict content limits, deployment precedence, booleans and Unicode', async () => {
-  const { validateSearchInput, resolveContentLimit, limitContent } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
+  const { validateSearchInput, resolveContentLimit, truncateMarkdown } = await import(pathToFileURL(path.join(dist, 'utils.js')).href);
   const { EnhancedContentExtractor } = await import(pathToFileURL(path.join(dist, 'enhanced-content-extractor.js')).href);
   const previous = process.env.MAX_CONTENT_LENGTH;
   try {
@@ -166,7 +167,7 @@ check('strict content limits, deployment precedence, booleans and Unicode', asyn
       const extractor = new EnhancedContentExtractor();
       const text = '😀中文😀abcXYZ';
       extractor.extractWithAxios = async () => text;
-      assert.equal((await extractor.extractContent({ url: 'https://example.org', maxContentLength: args.maxContentLength })).content, limitContent(text, 7));
+      assert.equal((await extractor.extractContent({ url: 'https://example.org', maxContentLength: args.maxContentLength })).content, truncateMarkdown(text, 7).content);
     }
     for (const value of [10001, -1, 1.5, NaN, '7junk', '7.5', '']) {
       assert.throws(() => resolveContentLimit(value), /integer between 0 and 10000/);

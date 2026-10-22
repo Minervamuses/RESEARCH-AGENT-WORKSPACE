@@ -40,7 +40,6 @@ process.stdout.write('content conversion and Unicode/link truncation: passed\n')
 // Every fixed candidate survives media/error/empty outcomes, in original order.
 const candidates = ['pdf-without-extension', 'error', 'short', 'empty', 'cancelled'].map(id => ({
   title: id, url: `https://example.org/${id}`, description: `snippet-${id}`,
-  fullContent: '', contentPreview: '', wordCount: 0, timestamp: 'fixed', fetchStatus: 'not_requested',
 }));
 const events = [];
 extractor.extractWithAxios = async (options, state) => {
@@ -56,9 +55,9 @@ extractor.extractWithAxios = async (options, state) => {
 extractor.extractWithBrowser = async (_options, _state, started) => { started(); events.push('browser-empty'); return ''; };
 const results = await extractor.extractContentForResults(candidates, 5, 7);
 assert.deepEqual(results.map(r => r.url), candidates.map(r => r.url));
-assert.deepEqual(results.map(r => r.fetchStatus), ['unsupported_media', 'http_error', 'text', 'empty_text', 'cancelled']);
+assert.deepEqual(results.map(r => r.read.status), ['unsupported_media', 'http_error', 'text', 'empty_text', 'cancelled']);
 assert.equal(results[2].read.pageTitle, 'Own page');
-assert.equal(results[2].fullContent, 'OK.');
+assert.equal(results[2].read.content, 'OK.');
 assert.ok(results.every(r => r.description.startsWith('snippet-')));
 assert.equal(results.reduce((n, r) => n + r.read.attempts.length, 0), events.length);
 const unknown = { contentType: undefined, status: 'not_attempted' };

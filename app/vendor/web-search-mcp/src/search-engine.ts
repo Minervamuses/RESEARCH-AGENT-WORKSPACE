@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchOptions, SearchResult, SearchResultWithMetadata, SearchEngineState } from './types.js';
-import { generateTimestamp, sanitizeQuery } from './utils.js';
+import { sanitizeQuery } from './utils.js';
 import { RateLimiter } from './rate-limiter.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
 
@@ -54,8 +54,7 @@ export class SearchEngine {
             if (results.length >= numResults) continue;
             const candidate: SearchResult = {
               ...item, url: url.href, observedUrl: item.observedUrl ?? item.url,
-              sourceEngines: [approach.name], fetchStatus: 'not_requested',
-              fullContent: '', contentPreview: '', wordCount: 0,
+              sourceEngines: [approach.name],
             };
             results.push(candidate);
             byUrl.set(url.href, candidate);
@@ -75,8 +74,7 @@ export class SearchEngine {
         if (!state.attempted) state.error = error instanceof Error ? error.message : String(error);
       }
     } finally { if (!options.budget) budget.dispose(); }
-    const sources = [...new Set(results.flatMap(item => item.sourceEngines ?? []))];
-    return { results, engines, engine: sources.join(', ') || 'None' };
+    return { results, engines };
   }
 
   private async tryBrowserBraveSearch(
@@ -183,159 +181,12 @@ export class SearchEngine {
     }, budget);
   }
 
-  private parseSearchResults(html: string, maxResults: number): SearchResult[] {
-    console.log(`[SearchEngine] Parsing HTML with length: ${html.length}`);
-    
-    const $ = cheerio.load(html);
-    const results: SearchResult[] = [];
-    const timestamp = generateTimestamp();
-
-    // Log what selectors we find - more comprehensive debugging
-    const gElements = $('div.g');
-    const sokobanElements = $('div[data-sokoban-container]');
-    const tF2CxcElements = $('.tF2Cxc');
-    const rcElements = $('.rc');
-    const vedElements = $('[data-ved]');
-    const h3Elements = $('h3');
-    const linkElements = $('a[href]');
-    
-    console.log(`[SearchEngine] Found elements:`);
-    console.log(`  - div.g: ${gElements.length}`);
-    console.log(`  - div[data-sokoban-container]: ${sokobanElements.length}`);
-    console.log(`  - .tF2Cxc: ${tF2CxcElements.length}`);
-    console.log(`  - .rc: ${rcElements.length}`);
-    console.log(`  - [data-ved]: ${vedElements.length}`);
-    console.log(`  - h3: ${h3Elements.length}`);
-    console.log(`  - a[href]: ${linkElements.length}`);
-    
-    // Try multiple approaches to find search results
-    const searchResultSelectors = [
-      'div.g',
-      'div[data-sokoban-container]',
-      '.tF2Cxc',
-      '.rc',
-      '[data-ved]',
-      'div[jscontroller]'
-    ];
-    
-    let foundResults = false;
-    
-    for (const selector of searchResultSelectors) {
-      if (foundResults) break;
-      
-      console.log(`[SearchEngine] Trying selector: ${selector}`);
-      const elements = $(selector);
-      console.log(`[SearchEngine] Found ${elements.length} elements with selector ${selector}`);
-      
-      elements.each((_index, element) => {
-        if (results.length >= maxResults) return false;
-        
-        const $element = $(element);
-        
-        // Try multiple title selectors
-        const titleSelectors = ['h3', '.LC20lb', '.DKV0Md', 'a[data-ved]', '.r', '.s'];
-        let title = '';
-        let url = '';
-        
-        for (const titleSelector of titleSelectors) {
-          const $title = $element.find(titleSelector).first();
-          if ($title.length) {
-            title = $title.text().trim();
-            console.log(`[SearchEngine] Found title with ${titleSelector}: "${title}"`);
-            
-            // Try to find the link
-            const $link = $title.closest('a');
-            if ($link.length) {
-              url = $link.attr('href') || '';
-              console.log(`[SearchEngine] Found URL: "${url}"`);
-            } else {
-              // Try to find any link in the element
-              const $anyLink = $element.find('a[href]').first();
-              if ($anyLink.length) {
-                url = $anyLink.attr('href') || '';
-                console.log(`[SearchEngine] Found URL from any link: "${url}"`);
-              }
-            }
-            break;
-          }
-        }
-        
-        // Try multiple snippet selectors
-        const snippetSelectors = ['.VwiC3b', '.st', '.aCOpRe', '.IsZvec', '.s3v9rd', '.MUxGbd', '.aCOpRe', '.snippet-content'];
-        let snippet = '';
-        
-        for (const snippetSelector of snippetSelectors) {
-          const $snippet = $element.find(snippetSelector).first();
-          if ($snippet.length) {
-            snippet = $snippet.text().trim();
-            console.log(`[SearchEngine] Found snippet with ${snippetSelector}: "${snippet.substring(0, 100)}..."`);
-            break;
-          }
-        }
-        
-        if (title && url && this.isValidSearchUrl(url)) {
-          console.log(`[SearchEngine] Adding result: ${title}`);
-          results.push({
-            title,
-            url: this.cleanGoogleUrl(url),
-            description: snippet,
-            fullContent: '',
-            contentPreview: '',
-            wordCount: 0,
-            timestamp,
-            fetchStatus: 'not_requested',
-          });
-          foundResults = true;
-        } else {
-          console.log(`[SearchEngine] Skipping result: title="${title}", url="${url}", isValid=${this.isValidSearchUrl(url)}`);
-        }
-      });
-    }
-
-    console.log(`[SearchEngine] Found ${results.length} results with all selectors`);
-
-    // If still no results, try a more aggressive approach - look for any h3 with links
-    if (results.length === 0) {
-      console.log(`[SearchEngine] No results found, trying aggressive h3 search...`);
-      $('h3').each((_index, element) => {
-        if (results.length >= maxResults) return false;
-        
-        const $h3 = $(element);
-        const title = $h3.text().trim();
-        const $link = $h3.closest('a');
-        
-        if ($link.length && title) {
-          const url = $link.attr('href') || '';
-          console.log(`[SearchEngine] Aggressive search found: "${title}" -> "${url}"`);
-          
-          if (this.isValidSearchUrl(url)) {
-            results.push({
-              title,
-              url: this.cleanGoogleUrl(url),
-              description: '',
-              fullContent: '',
-              contentPreview: '',
-              wordCount: 0,
-              timestamp,
-              fetchStatus: 'not_requested',
-            });
-          }
-        }
-      });
-      
-      console.log(`[SearchEngine] Aggressive search found ${results.length} results`);
-    }
-
-    return results;
-  }
-
   private parseBraveResults(html: string, maxResults: number, baseUrl = 'https://search.brave.com/'): SearchResult[] {
     console.log(`[SearchEngine] Parsing Brave HTML with length: ${html.length}`);
     
     const $ = cheerio.load(html);
     baseUrl = this.searchPageBase($, baseUrl);
     const results: SearchResult[] = [];
-    const timestamp = generateTimestamp();
 
     // Brave result selectors
     const resultSelectors = [
@@ -406,11 +257,6 @@ export class SearchEngine {
             url: this.cleanBraveUrl(url, baseUrl),
             observedUrl: url,
             description: snippet,
-            fullContent: '',
-            contentPreview: '',
-            wordCount: 0,
-            timestamp,
-            fetchStatus: 'not_requested',
           });
           foundResults = true;
         }
@@ -427,7 +273,6 @@ export class SearchEngine {
     const $ = cheerio.load(html);
     baseUrl = this.searchPageBase($, baseUrl);
     const results: SearchResult[] = [];
-    const timestamp = generateTimestamp();
 
 
     // Bing result selectors
@@ -512,11 +357,6 @@ export class SearchEngine {
             url: this.cleanBingUrl(url, baseUrl),
             observedUrl: url,
             description: snippet,
-            fullContent: '',
-            contentPreview: '',
-            wordCount: 0,
-            timestamp,
-            fetchStatus: 'not_requested',
           });
           foundResults = true;
         }
@@ -533,7 +373,6 @@ export class SearchEngine {
     const $ = cheerio.load(html);
     baseUrl = this.searchPageBase($, baseUrl);
     const results: SearchResult[] = [];
-    const timestamp = generateTimestamp();
 
     // DuckDuckGo results are in .result elements
     $('.result').each((_index, element) => {
@@ -556,11 +395,6 @@ export class SearchEngine {
           url: this.cleanDuckDuckGoUrl(url, baseUrl),
           observedUrl: url,
           description: snippet,
-          fullContent: '',
-          contentPreview: '',
-          wordCount: 0,
-          timestamp,
-          fetchStatus: 'not_requested',
         });
       }
     });
@@ -583,28 +417,6 @@ export class SearchEngine {
     } catch { return false; }
   }
 
-  private cleanGoogleUrl(url: string): string {
-    // Handle Google's redirect URLs
-    if (url.startsWith('/url?')) {
-      try {
-        const urlParams = new URLSearchParams(url.substring(5));
-        const actualUrl = urlParams.get('q') || urlParams.get('url');
-        if (actualUrl) {
-          return actualUrl;
-        }
-      } catch {
-        console.warn('Failed to parse Google redirect URL:', url);
-      }
-    }
-
-    // Handle protocol-relative URLs
-    if (url.startsWith('//')) {
-      return 'https:' + url;
-    }
-
-    return url;
-  }
-
   private cleanBraveUrl(url: string, baseUrl = 'https://search.brave.com/'): string {
     return new URL(url, baseUrl).href;
   }
@@ -622,9 +434,5 @@ export class SearchEngine {
       return new URL(target, parsed).href;
     }
     return parsed.href;
-  }
-
-  async closeAll(): Promise<void> {
-    await this.browserPool.closeAll();
   }
 }
