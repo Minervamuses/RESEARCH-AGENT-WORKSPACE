@@ -1,0 +1,2 @@
+{"variant": "trap", "exit": 1, "failed": ["test_web_search_calls_keep_the_full_budget_after_a_short_startup_cap"], "summary": ["1 failed, 1 passed, 41 deselected, 1 warning in 1.36s"]}
+{"variant": "uncapped", "exit": 1, "failed": ["test_web_search_startup_is_capped_without_blocking_other_servers"], "summary": ["1 failed, 1 passed, 41 deselected, 1 warning in 3.35s"]}

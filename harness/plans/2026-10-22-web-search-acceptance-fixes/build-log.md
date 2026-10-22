@@ -6,9 +6,9 @@
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
 | F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/ | AF10(b) 待 F7-S2 案例 7 以真實入口確認 | — |
-| F2 | In progress | F2-S1、F2-S2 | evidence/F2-S1/、evidence/F2-S2/ | — | F2-S3 |
+| F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
-| F4 | Not started | — | — | 相依 F1、F3 | — |
+| F4 | Not started | — | — | — | F4-S1（F1、F3 已完成） |
 | F5 | Not started | — | — | 相依 F4 | — |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
 | F7 | Not started | — | — | 相依 F6 | — |
@@ -369,3 +369,22 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
     - P13、P13c 被 startup 診斷測試殺死（兩個參數各失敗）；P18、P18b 被預算來源測試殺死；P26 被卡住的取消測試殺死。
   - 順序無關：單獨執行 `[startup]` 與 `[initialize]` 各連跑 3 次全部 1 passed（約 1.03 s）；整個 test_mcp.py 連跑 3 次全部 41 passed。
 - **下一步**：F2-S3。
+
+### F2-S3 啟動上限 15 秒
+- **改動**（FG5；FU05、FA15、X09）：app/agent/mcp.py。
+  - 新增具名常數 `WEB_SEARCH_STARTUP_TIMEOUT_MS = 15000`。
+  - `_load_web_search_tools` 的 discovery（啟動程序、initialize、列出工具、收尾）改以 `min(15000, DEFAULT_TIMEOUT)` 為 `_bounded_web_search` 的整體上限；intercept 中每次工具呼叫仍用 DEFAULT_TIMEOUT 與既有切分（A03 不變）。
+  - 啟動逾時改拋 `Web Search startup timeout (<上限> ms) before a result was received (startup, initialization, tool listing and cleanup included; limit is min(15000 ms, DEFAULT_TIMEOUT=<ms> ms))`。經 F2-S2 的診斷格式，web_search 在本 session 標為 applied_but_unavailable（sanitize_stdout 時附 log 位置），其他 MCP 照常載入。
+  - 只依時間與程序狀態，沒有搜尋判斷，沒有新增環境設定（FU06）。
+- **測試**（app/tests/test_mcp.py）：
+  - lifecycle server 新增 `slow_meta` 模式（呼叫花 600 ms 後回傳 `_meta`）；
+  - `test_web_search_startup_is_capped_without_blocking_other_servers`：常數縮為 300 ms、DEFAULT_TIMEOUT=300000，啟動卡 2 s 的 server 在 0.6 s 內以 `startup timeout (300 ms)` 結束且無殘留；同一次 load_mcp_tools_with_families 中，另一個正常 MCP server 的 local_probe 仍載入成功，總時間 < 2 s；
+  - F2-S2 的預算來源測試加上斷言：DEFAULT_TIMEOUT=800 小於常數時，診斷為 `startup timeout (800 ms)`；
+  - `test_web_search_calls_keep_the_full_budget_after_a_short_startup_cap`：常數 300 ms 時，呼叫回報的 `web_search_work_ms` > 1000，且花 600 ms 的呼叫成功返回；既有 meta 測試照舊通過。
+- **計劃更正**：phase-2 原寫 DEFAULT_TIMEOUT=2000。2000 ms 時 `reserve = min(15, max(1.5, 0.1), 1.0) = 1.0 s`，工作時間只有 1000 ms，`web_search_work_ms` 一定小於 1000，「大於 1000」不可能成立。改用 4000（工作時間 2500 ms），測試仍能分辨「被限在 300 ms 啟動上限」（約 150 ms 以內）。phase-2 該行已同步更正。
+- **檢查**（app 目錄，沙箱內，XDG_CACHE_HOME、AGENT_LOG_DIR、TMPDIR 隔離）：
+  - 量測：本機 lifecycle server 的 discovery 約 18–27 ms（8 次），300 ms 上限的 150 ms 工作窗足夠；
+  - focused `pytest tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py -q -p no:cacheprovider`：58 passed；
+  - 判別力（evidence/F2-S3/mutate.py、results.jsonl）：呼叫改用啟動上限的「陷阱」變體被完整預算測試殺死；discovery 不套上限的變體被啟動上限測試殺死。
+- **F2 階段結論**：FG5 的 AF24–AF28、AF35、AF36、AF38、FU05 都有離線真實程序證據；P07、P13、P13c、P18、P18b、P26、P27 已被殺死，F6-S3 會依清單正式複驗。
+- **下一步**：F4-S1（F1、F3 已完成）。

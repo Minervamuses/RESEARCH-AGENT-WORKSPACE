@@ -602,13 +602,14 @@ for line in sys.stdin:
     method = message["method"]
     if method == "initialize":
         if mode == "initialize": time.sleep(2)
-        if mode == "meta": time.sleep(.05)
+        if mode in ("meta", "slow_meta"): time.sleep(.05)
         result = {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "local", "version": "1"}}
     elif method == "tools/list":
         result = {"tools": [{"name": "local_probe", "inputSchema": {"type": "object", "properties": {}}}]}
     else:
         called = True
         if mode == "tool": time.sleep(2)
+        if mode == "slow_meta": time.sleep(.6)
         if mode == "late":
             # Answer only after the wrapper's work deadline, before its kill deadline.
             time.sleep((message["params"]["_meta"]["web_search_work_ms"] + 100) / 1000)
@@ -621,7 +622,7 @@ for line in sys.stdin:
         if mode == "tool_error":
             print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "explicit invalid argument"}}), flush=True)
             continue
-        text = json.dumps(message["params"].get("_meta", {})) if mode == "meta" else "known result"
+        text = json.dumps(message["params"].get("_meta", {})) if mode in ("meta", "slow_meta") else "known result"
         result = {"content": [{"type": "text", "text": text}]}
     print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
 if called and mode == "close": time.sleep(2)
@@ -849,6 +850,8 @@ def test_web_search_budget_comes_from_spec_env_and_is_capped(tmp_path):
     assert time.monotonic() - started < 1.2
     assert (tools, families) == ([], {})
     assert "applied_but_unavailable: load: TimeoutError" in diagnostics[0]
+    # DEFAULT_TIMEOUT below the startup cap bounds discovery.
+    assert "startup timeout (800 ms)" in diagnostics[0]
     assert "DEFAULT_TIMEOUT=800 ms" in diagnostics[0]
     async def never(_connection, _publish, _work_deadline):
         raise AssertionError("must not start")
@@ -910,3 +913,56 @@ def test_startup_reports_load_failures_and_unavailable_loader(monkeypatch, tmp_p
     session = asyncio.run(ChatSession.create(AgentConfig(persist_dir=str(tmp_path / "persist2"))))
     assert "MCP loader unavailable: RuntimeError" in session.extension_startup_diagnostics
     assert list(session.extra_tools) == []
+
+
+def test_web_search_startup_is_capped_without_blocking_other_servers(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setattr(mcp_module, "WEB_SEARCH_STARTUP_TIMEOUT_MS", 300)
+    (tmp_path / "slow").mkdir()
+    (tmp_path / "healthy").mkdir()
+    slow, slow_pid = _lifecycle_server(tmp_path / "slow", "startup")
+    healthy, _healthy_pid = _lifecycle_server(tmp_path / "healthy", "plain")
+    async def direct():
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match=r"startup timeout \(300 ms\)"):
+            await mcp_module._load_web_search_tools(slow, 300000)
+        return time.monotonic() - started
+    assert asyncio.run(direct()) < .6
+    _assert_lifecycle_pid_gone(slow_pid)
+    specs = [
+        mcp_module.MCPServerSpec("web_search", slow["command"], slow["args"], {"DEFAULT_TIMEOUT": "300000"}, sanitize_stdout=False),
+        mcp_module.MCPServerSpec("other", healthy["command"], healthy["args"], {}, sanitize_stdout=False),
+    ]
+    diagnostics = []
+    started = time.monotonic()
+    tools, families = asyncio.run(mcp_module.load_mcp_tools_with_families(
+        specs=specs, diagnostics=diagnostics, reserved_tool_names=set(),
+    ))
+    assert time.monotonic() - started < 2
+    assert [tool.name for tool in tools] == ["local_probe"]
+    assert families == {"local_probe": "other"}
+    [detail] = diagnostics
+    assert detail.startswith("mcp:web_search: applied_but_unavailable: load: TimeoutError: Web Search startup timeout (300 ms)")
+
+
+def test_web_search_calls_keep_the_full_budget_after_a_short_startup_cap(tmp_path, monkeypatch):
+    import json
+    import time
+
+    monkeypatch.setattr(mcp_module, "WEB_SEARCH_STARTUP_TIMEOUT_MS", 300)
+    connection, pid_file = _lifecycle_server(tmp_path, "slow_meta")
+    # 4000 ms leaves 2500 ms of call work after its 1500 ms cleanup reserve (2000 ms would leave only 1000).
+    spec = mcp_module.MCPServerSpec(
+        "web_search", connection["command"], connection["args"], {"DEFAULT_TIMEOUT": "4000"}, sanitize_stdout=False,
+    )
+    async def run():
+        tools, _families = await mcp_module.load_mcp_tools_with_families(specs=[spec], reserved_tool_names=set())
+        started = time.monotonic()
+        response = await tools[0].ainvoke({})
+        elapsed = time.monotonic() - started
+        text = response if isinstance(response, str) else response[0]["text"]
+        assert json.loads(text)["web_search_work_ms"] > 1000
+        assert .6 <= elapsed < 2.5, elapsed
+        _assert_lifecycle_pid_gone(pid_file)
+    asyncio.run(run())

@@ -88,7 +88,7 @@
 最少檢查（tests/test_mcp.py；可在測試中以 monkeypatch 縮短常數）：
 - 慢啟動的 lifecycle server（啟動後睡 2 s）在常數縮短為 300 ms 時，discovery 約在 0.3 s（加合理餘裕）內返回空工具，診斷含 `startup timeout (300 ms)`。同一測試中，另一個正常的 MCP server 仍載入成功。
 - DEFAULT_TIMEOUT 小於常數時，以 DEFAULT_TIMEOUT 為準。
-- **呼叫不受啟動上限影響**（能抓到上述陷阱）：常數縮短為 300 ms、DEFAULT_TIMEOUT=2000，經 load_mcp_tools_with_families 以 meta 模式載入。
+- **呼叫不受啟動上限影響**（能抓到上述陷阱）：常數縮短為 300 ms、DEFAULT_TIMEOUT=4000，經 load_mcp_tools_with_families 以 meta 模式載入。（執行時更正：原寫 2000，但 2000 時清理保留為 1000 ms，工作時間只剩 1000 ms，「大於 1000」不可能成立；見 build-log F2-S3。）
   - 呼叫回報的 `_meta.web_search_work_ms` 必須大於 1000，而不是被限在 300 ms 以內；
   - 另一個工具呼叫刻意花 600 ms（超過常數），仍必須成功返回。
 - 既有的 meta 測試仍通過。

@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 MCP_LOG_MAX_BYTES = 5 * 1024 * 1024
 MCP_LOG_KEEP_ROTATED = 3
 
+# FU05: web_search discovery (start, initialize, list tools, cleanup) is capped
+# at min(this, DEFAULT_TIMEOUT); each tool call keeps the full DEFAULT_TIMEOUT.
+WEB_SEARCH_STARTUP_TIMEOUT_MS = 15000
+
 
 @dataclass(frozen=True)
 class MCPServerSpec:
@@ -495,7 +499,16 @@ async def _load_web_search_tools(connection: dict, timeout_ms: int) -> list:
         )
         publish(await client.get_tools())
 
-    return await _bounded_web_search(connection, discover, timeout_ms)
+    # Only discovery uses the startup cap; intercept() above keeps timeout_ms for calls.
+    startup_ms = min(WEB_SEARCH_STARTUP_TIMEOUT_MS, timeout_ms)
+    try:
+        return await _bounded_web_search(connection, discover, startup_ms)
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"Web Search startup timeout ({startup_ms} ms) before a result was received "
+            "(startup, initialization, tool listing and cleanup included; limit is "
+            f"min({WEB_SEARCH_STARTUP_TIMEOUT_MS} ms, DEFAULT_TIMEOUT={timeout_ms} ms))"
+        ) from exc
 
 
 async def load_mcp_tools_with_families(
