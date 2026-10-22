@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "plan_id": "web-search-acceptance-fixes-2026-10-22",
+  "goals": [
+    {
+      "id": "FG1",
+      "text": "正文轉換忠實、線性且分類正確"
+    },
+    {
+      "id": "FG2",
+      "text": "瀏覽器fallback有界地讀到晚渲染文字"
+    },
+    {
+      "id": "FG3",
+      "text": "局部上限為真正總時間上限且自有Chromium可辨識"
+    },
+    {
+      "id": "FG4",
+      "text": "引擎與頁面讀取的可見事實與統計如實"
+    },
+    {
+      "id": "FG5",
+      "text": "Python包裝穩健且診斷可讀"
+    },
+    {
+      "id": "FG6",
+      "text": "已提交測試真正守護驗收項與突變清單"
+    },
+    {
+      "id": "FG7",
+      "text": "文件一致、真實入口與公開觀測、完整suite與交付"
+    },
+    {
+      "id": "FG8",
+      "text": "GUI逐步commit與連續執行、禁止push或分支操作"
+    }
+  ],
+  "phases": [
+    {
+      "id": "F1",
+      "file": "build/phase-1-content.md",
+      "depends_on": [],
+      "covers": [
+        "FG1",
+        "FG2",
+        "FG8"
+      ]
+    },
+    {
+      "id": "F2",
+      "file": "build/phase-2-python.md",
+      "depends_on": [],
+      "covers": [
+        "FG5",
+        "FG6",
+        "FG8"
+      ]
+    },
+    {
+      "id": "F3",
+      "file": "build/phase-3-timeouts.md",
+      "depends_on": [
+        "F1"
+      ],
+      "covers": [
+        "FG3",
+        "FG6",
+        "FG8"
+      ]
+    },
+    {
+      "id": "F4",
+      "file": "build/phase-4-status.md",
+      "depends_on": [
+        "F3"
+      ],
+      "covers": [
+        "FG4",
+        "FG6",
+        "FG8"
+      ]
+    },
+    {
+      "id": "F5",
+      "file": "build/phase-5-regression.md",
+      "depends_on": [
+        "F2",
+        "F4"
+      ],
+      "covers": [
+        "FG6",
+        "FG8"
+      ]
+    },
+    {
+      "id": "F6",
+      "file": "build/phase-6-delivery.md",
+      "depends_on": [
+        "F5"
+      ],
+      "covers": [
+        "FG7",
+        "FG8"
+      ]
+    }
+  ]
+}
