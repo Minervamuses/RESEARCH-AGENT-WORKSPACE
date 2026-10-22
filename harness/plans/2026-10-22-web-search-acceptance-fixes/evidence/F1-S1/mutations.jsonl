@@ -1,0 +1,2 @@
+{"mutation":"N07e","test":"test-content-contract.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: The input did not match the regular expression /\\[Observed destination\\]\\(<https:\\/\\/example.org\\/next\\?q=%252F&x=1>\\)/. Input:"}
+{"mutation":"N07f","test":"test-content-contract.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: The input did not match the regular expression /\\[Next\\]\\(<https:\\/\\/final\\.example\\/docs\\/sub\\/next>\\)/. Input:"}

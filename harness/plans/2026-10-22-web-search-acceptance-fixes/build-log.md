@@ -5,7 +5,7 @@
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
-| F1 | Not started | — | — | — | F1-S1 |
+| F1 | In progress | F1-S1 | evidence/F1-S1/ | — | F1-S2 |
 | F2 | Not started | — | — | — | F2-S1（F1-S2 之後） |
 | F3 | Not started | — | — | — | F3-S1（F2-S1 之後） |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
@@ -144,3 +144,29 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 完成判準同步改寫。
 - F3-S3、F7-S3：引擎被擋時「交給使用者決定」改為列入最終彙報的後續選項，執行中不等待。F7-S4：確認沒有未提交的計劃檔，並確認每一步都有對應的 commit。
 - 所有階段仍為 Not started。
+
+## 執行（2026-10-22 起，Asia/Taipei）
+
+### 啟動核對（唯讀，併入 F1-S1 的 commit）
+- 使用者以 PROMPTS 的啟動提示啟動本計劃，授權範圍照該提示。
+- pwd `/home/minervamuses/research-agent-workspace`；branch GUI；HEAD eaee132（[FA2]）；`git diff --cached --name-only` 為空。
+- 原有未追蹤項目：app/store/、note/20261022/（使用者資料，不動），以及宿主沙箱的掛載佔位項目（.bash_profile、.bashrc、.claude/、.gitconfig、.gitmodules、.idea、.mcp.json、.profile、.ripgreprc、.vscode、.zprofile、.zshrc；不是 repository 內容，絕不 stage）。
+- 計劃檔 16 份（GOALS、PLANS、PROMPTS、build-log、plan-index.json、context/ 四份、build/phase-1…7）都通過 `git ls-files --error-unmatch`。
+- 工具鏈：conda `/home/minervamuses/miniconda3/condabin/conda`；env app 的 Python 3.13.14、Poetry 2.4.1、Node v24.18.0、npm 11.16.0。
+- 基線（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 15/15 exit 0；content-contract 3 組 exit 0；browser-lifecycle exit 0（stderr 的 Resource cleanup 堆疊是既有的注入失敗案例）。
+- 以步驟 ID 對帳：git log 沒有任何 F?-S? commit，build-log 沒有執行事件；從 F1-S1 開始。
+
+### F1-S1 整頁轉換與結構修正
+- **改動**（FG1；AF01、AF02、AF04、AF05、AF07；突變 N07e、N07f）：src/enhanced-content-extractor.ts。
+  - 以 `<body>`（沒有時用整份文件）為根，依原順序轉換；移除 `main, article, [role="main"]` 的縮窄邏輯。只移除 script、style、noscript、template 照舊。
+  - 表格只取自己的 tr（直接子項，或 thead/tbody/tfoot 底下的 tr）；儲存格內容收成單行，巢狀表格只在該儲存格內輸出一次；`<caption>` 以 `Table caption:` 在列前輸出一次；保留「span structure simplified」說明。
+  - 區塊分隔清單改為具名常數 BLOCK_TAGS，加入 address、aside、dd、details、dialog、dl、dt、fieldset、footer、form、header、hgroup、hr、legend、menu、nav、optgroup、option、search、summary。
+  - HTTP 路徑標題取 `head > title`，沒有時取不在 svg 之內的第一個 title，否則 unknown；兩條路徑都把空白收成單一空格。
+  - 連結 label 的換行與連續空白收成單一空格。
+- **測試**：tests/test-content-contract.mjs 新增一組「whole-page conversion, tables once, block separators, base and title」：巢狀表格 1–6 層每段文字恰好一次、8→16 層長度線性、多篇 article 依序、aside+main、工作第 3 項全部元素不黏連（含 TermDef）、caption 一次且含兩個 `<p>` 的儲存格不斷行、`<base href="/docs/sub/">` 與無 base 兩個案例（final host 為 final.example）、svg title 不當頁面標題、標題空白正規化。既有 AC02 斷言未改。
+- **檢查**（vendor 目錄，沙箱內）：
+  - `npm run build` exit 0；retention 15/15 exit 0；content-contract 4 組 exit 0；browser-lifecycle exit 0；`git diff --check` exit 0。
+  - 判別力：evidence/F1-S1/discriminate.mjs 逐項對 eaee132 的乾淨重建（old-eaee132.json）與本步 dist（new.json）執行：舊碼 10/12 失敗（16 層巢狀 7034→1802361 字元），本步 12/12 通過；兩個 base 案例在舊碼也通過，因為它們守護的是突變而非舊缺陷。
+  - 突變（evidence/F1-S1/mutations.jsonl，在 `$TMPDIR` 暫存複本套用）：N07e（final URL 換成錯誤 host）被 content-contract 殺死（exit 1）；N07f（忽略 `<base href>`）被新的 `/docs/sub/next` 案例殺死（exit 1）。F6-S3 仍會依清單正式複驗。
+- **限制**：儲存格收成單行後，巢狀表格的多列在該儲存格內以空格相連；`<pre>` 在儲存格內也會收成單行。這是 FA02 的退化。parseContent 結尾的 `/[ \t]+\n/g` 留給 F1-S4。
+- **下一步**：F1-S2。

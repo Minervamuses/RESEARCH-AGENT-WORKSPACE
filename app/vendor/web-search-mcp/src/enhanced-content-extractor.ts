@@ -4,6 +4,22 @@ import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
 import { resolveContentLimit, truncateMarkdown } from './utils.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
 
+// Elements rendered as blocks by default; they only add separators and never remove text.
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'dd', 'details', 'dialog', 'div', 'dl', 'dt',
+  'fieldset', 'figure', 'footer', 'form', 'header', 'hgroup', 'hr', 'legend', 'main', 'menu',
+  'nav', 'ol', 'optgroup', 'option', 'p', 'search', 'section', 'summary', 'tr', 'ul',
+]);
+
+const singleLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/** The page's own title: head title first, never an inline SVG title, never the URL. */
+function documentTitle($: cheerio.CheerioAPI): string | undefined {
+  const head = $('head > title').first();
+  const title = head.length ? head : $('title').filter((_i, node) => !$(node).parents('svg').length).first();
+  return singleLine(title.text()) || undefined;
+}
+
 export class EnhancedContentExtractor {
   constructor(private browserPool: BrowserPool = sharedBrowserPool) {}
 
@@ -89,7 +105,7 @@ export class EnhancedContentExtractor {
     const text = bytes.toString('utf8');
     if (media === 'text/plain') return text.replace(/\r\n?/g, '\n').trim();
     try {
-      state.pageTitle = cheerio.load(text)('title').first().text().trim() || undefined;
+      state.pageTitle = documentTitle(cheerio.load(text));
       return this.parseContent(text, state.finalUrl);
     } catch (error) {
       throw Object.assign(error instanceof Error ? error : new Error(String(error)), { reason: 'conversion_error' });
@@ -114,7 +130,7 @@ export class EnhancedContentExtractor {
         state.error = `Unsupported media: ${state.contentType ?? 'unknown'}`;
         return '';
       }
-      state.pageTitle = await page.title() || undefined;
+      state.pageTitle = singleLine(await page.title()) || undefined;
       return media === 'text/plain' ? await page.locator('body').innerText()
         : this.parseContent(await page.content(), state.finalUrl);
     }, options.budget);
@@ -169,10 +185,12 @@ export class EnhancedContentExtractor {
         return alt ? `[Image alt text: ${alt}]` : '';
       }
       if (tag === 'table') {
-        const rows = element.find('tr').map((_i, row) =>
-          $(row).children('th, td').map((_j, cell) => children(cell).trim()).get().join(' | '),
-        ).get();
-        return `\n\n[Table rows; span structure simplified]\n${rows.join('\n')}\n\n`;
+        // Only this table's own rows; a nested table renders once, inside its cell's single line.
+        const rows = element.children('thead, tbody, tfoot, tr').get()
+          .flatMap((group: any) => group.tagName.toLowerCase() === 'tr' ? [group] : $(group).children('tr').get())
+          .map((row: any) => $(row).children('th, td').get().map((cell: any) => singleLine(children(cell))).join(' | '));
+        const caption = singleLine(element.children('caption').get().map(children).join(' '));
+        return `\n\n${caption ? `Table caption: ${caption}\n` : ''}[Table rows; span structure simplified]\n${rows.join('\n')}\n\n`;
       }
       const text = children(node);
       if (tag === 'a') {
@@ -181,7 +199,7 @@ export class EnhancedContentExtractor {
         try {
           const url = new URL(href, baseUrl);
           if (['http:', 'https:'].includes(url.protocol)) {
-            return `[${text.trim() || href}](<${url.href}>)`;
+            return `[${singleLine(text) || href}](<${url.href}>)`;
           }
         } catch { /* Unsupported or invalid addresses are source text, not navigation. */ }
         return `${text} [non-navigable href: ${href}]`;
@@ -190,13 +208,11 @@ export class EnhancedContentExtractor {
       if (tag === 'br') return '\n';
       if (tag === 'li') return `\n- ${text.trim()}\n`;
       if (tag === 'figcaption') return `\nCaption: ${text.trim()}\n`;
-      if (['p', 'div', 'section', 'article', 'main', 'blockquote', 'ul', 'ol', 'figure', 'tr'].includes(tag)) {
-        return `\n\n${text.trim()}\n\n`;
-      }
+      if (BLOCK_TAGS.has(tag)) return `\n\n${text.trim()}\n\n`;
       return text;
     };
-    const main = $('main, article, [role="main"]').first();
-    const root = main.length ? main : $('body');
-    return children(root[0]).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    // The whole body in source order; no main-content guess decides which text has value.
+    const root = $('body').first()[0] ?? $.root()[0];
+    return children(root).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 }

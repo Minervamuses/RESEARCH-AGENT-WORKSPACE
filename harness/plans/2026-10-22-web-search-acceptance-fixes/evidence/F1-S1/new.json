@@ -1,0 +1,17 @@
+{
+ "dist": "<repo>/app/vendor/web-search-mcp/dist",
+ "checks": {
+  "nested_once_1_to_6": "pass",
+  "nested_linear_16": "pass",
+  "articles_in_order": "pass",
+  "aside_and_main": "pass",
+  "no_glued_dl": "pass",
+  "no_glued_nav_footer": "pass",
+  "caption_once_and_one_line_row": "pass",
+  "base_relative_to_final": "pass",
+  "no_base_uses_final": "pass",
+  "link_label_single_line": "pass",
+  "svg_title_not_page_title": "pass",
+  "title_whitespace": "pass"
+ }
+}

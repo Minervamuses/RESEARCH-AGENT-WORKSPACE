@@ -37,6 +37,44 @@ assert.equal(Array.from(truncateMarkdown('😀'.repeat(10001), 10000).content).l
 assert.equal(resolveContentLimit(0), resolveContentLimit());
 process.stdout.write('content conversion and Unicode/link truncation: passed\n');
 
+// Whole-page conversion: each source text once, in order, without glued blocks.
+const parse = (source, url = 'https://final.example/redirected/page') => extractor.parseContent(source, url);
+const count = (haystack, needle) => haystack.split(needle).length - 1;
+const nest = depth => depth === 0 ? 'LEAF' : `<table><tr><td>L${depth}</td><td>${nest(depth - 1)}</td></tr></table>`;
+for (let depth = 1; depth <= 6; depth++) {
+  const nested = parse(nest(depth));
+  assert.equal(count(nested, 'LEAF'), 1, `nested depth ${depth}`);
+  for (let level = 1; level <= depth; level++) assert.equal(nested.match(new RegExp(`\\bL${level}\\b`, 'g'))?.length, 1);
+}
+const [len8, len16] = [8, 16].map(depth => parse(nest(depth)).length);
+assert.ok(len16 < 2.5 * len8, `nested output grows linearly: ${len8} -> ${len16}`);
+const stories = parse('<p>Intro</p><article><h2>Story 1</h2></article><article><h2>Story 2</h2></article><p>Tail</p>');
+const order = ['Intro', 'Story 1', 'Story 2', 'Tail'].map(word => stories.indexOf(word));
+assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), stories);
+const aside = parse('<aside><article>Related</article></aside><main>Main</main>');
+assert.ok(aside.includes('Related') && aside.includes('Main'), aside);
+const glued = parse('<p>Lead</p><address>Addr</address><aside>Side</aside><dl><dt>Term</dt><dd>Def</dd></dl>'
+  + '<details><summary>Sum</summary>Detail</details><dialog>Dlg</dialog><fieldset><legend>Leg</legend>Field</fieldset>'
+  + '<footer>Foot</footer><form>Form</form><header>Head</header><hgroup>Hgr</hgroup>Left<hr>Right<menu>Menu</menu><nav>Nav</nav>'
+  + '<select><optgroup label="g"><option>OptA</option><option>OptB</option></optgroup><optgroup label="h"><option>OptC</option></optgroup></select>'
+  + '<search>Srch</search>End');
+const tokens = glued.split(/\s+/);
+for (const word of ['Lead', 'Addr', 'Side', 'Term', 'Def', 'Sum', 'Detail', 'Dlg', 'Leg', 'Field', 'Foot', 'Form', 'Head', 'Hgr',
+  'Left', 'Right', 'Menu', 'Nav', 'OptA', 'OptB', 'OptC', 'Srch', 'End']) {
+  assert.ok(tokens.includes(word), `glued block text around ${word}: ${JSON.stringify(glued)}`);
+}
+assert.doesNotMatch(glued, /TermDef/);
+const captioned = parse('<table><caption>Cap text</caption><tr><td><p>One</p><p>Two</p></td><td>Three</td></tr><tr><td>Four</td></tr></table>');
+assert.equal(count(captioned, 'Cap text'), 1);
+assert.match(captioned, /Cap text[^]*span structure simplified\]\nOne Two \| Three\nFour/);
+assert.match(parse('<base href="/docs/sub/"><a href="next">Next</a>'), /\[Next\]\(<https:\/\/final\.example\/docs\/sub\/next>\)/);
+assert.match(parse('<a href="next">Next</a>'), /\[Next\]\(<https:\/\/final\.example\/redirected\/next>\)/);
+assert.match(parse('<a href="/x">Line\n one   <p>two</p></a>'), /\[Line one two\]\(<https:\/\/final\.example\/x>\)/);
+const titled = html => { const state = { contentType: 'text/html', status: 'not_attempted' }; extractor.convertResponse(Buffer.from(html), state); return state.pageTitle; };
+assert.equal(titled('<html><head></head><body><svg><title>Icon</title></svg><p>x</p></body></html>'), undefined);
+assert.equal(titled('<html><head><title>  A\n  B </title></head><body><svg><title>Icon</title></svg></body></html>'), 'A B');
+process.stdout.write('whole-page conversion, tables once, block separators, base and title: passed\n');
+
 // Every fixed candidate survives media/error/empty outcomes, in original order.
 const candidates = ['pdf-without-extension', 'error', 'short', 'empty', 'cancelled'].map(id => ({
   title: id, url: `https://example.org/${id}`, description: `snippet-${id}`,

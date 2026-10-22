@@ -1,0 +1,17 @@
+{
+ "dist": "<scratch-copy-of-eaee132>/app/vendor/web-search-mcp/dist",
+ "checks": {
+  "nested_once_1_to_6": "fail: Expected values to be strictly equal:",
+  "nested_linear_16": "fail: 7034->1802361",
+  "articles_in_order": "fail: The expression evaluated to a falsy value:",
+  "aside_and_main": "fail: The expression evaluated to a falsy value:",
+  "no_glued_dl": "fail: The input was expected to not match the regular expression /TermDef/. Input:",
+  "no_glued_nav_footer": "fail: The input was expected to not match the regular expression /NavFoot/. Input:",
+  "caption_once_and_one_line_row": "fail: Expected values to be strictly equal:",
+  "base_relative_to_final": "pass",
+  "no_base_uses_final": "pass",
+  "link_label_single_line": "fail: The input did not match the regular expression /\\[Line one two\\]/. Input:",
+  "svg_title_not_page_title": "fail: Expected values to be strictly equal:",
+  "title_whitespace": "fail: Expected values to be strictly equal:"
+ }
+}
