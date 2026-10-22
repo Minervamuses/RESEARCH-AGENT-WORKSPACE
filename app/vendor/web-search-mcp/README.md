@@ -1,15 +1,15 @@
 # Web Search MCP server（內附修改版）
 
-這是 agent 的全域 `web_search` MCP server。原始專案為 [mrkrsl/web-search-mcp](https://github.com/mrkrsl/web-search-mcp)（MIT，見 [LICENSE](LICENSE)），以 upstream commit `eeb03f8`（package 0.3.1）為基礎，再加上本專案的修正；修正後以 Node 腳本直接啟動 `dist/index.js`，以單一 Playwright 完整版 Chromium 搜尋 Google，必要時以 Bing 補足，不需要 API key。
+這是 agent 的全域 `web_search` MCP server。原始專案為 [mrkrsl/web-search-mcp](https://github.com/mrkrsl/web-search-mcp)（MIT，見 [LICENSE](LICENSE)），以 upstream commit `eeb03f8`（package 0.3.1）為基礎，再加上本專案的修正；修正後以 Node 腳本直接啟動 `dist/index.js`，以單一 Playwright 完整版 Chromium 搜尋 Google，不需要 API key。
 
 ## 與 upstream 的差異
 
 - `src/search-engine.ts`：
-  - 先搜尋 Google，候選不足 limit 時才由 Bing 補足，不做詞彙評分或勝出批次選擇；URL 完全相同才合併來源。後續失敗保留既有候選，兩個搜尋工具都列出各引擎執行狀態與每筆來源。
-  - 市場依查詢語言：查詢含漢字時 Google `hl=zh-TW`、Bing `setlang=zh-Hant&cc=TW`，其他一律 `hl=en`、`setlang=en&cc=US`。這是固定規則，其他語言暫歸英文。
-  - Google 回 HTTP 4xx 或被導到 `/sorry/` 時，記錄 status 與最終路徑後交給 Bing，不重試、不繞過。Bing 只解析 `#b_results > li.b_algo` 正式結果，側欄模組不算結果。
-  - 已移除 DuckDuckGo 與 Brave：在本機與本 IP 上兩者都被擋（202／429）。
-  - 結果連結若是引擎自己的跳轉包裝（host 等於搜尋主機，例如 Google `/goto`、Bing `ck/a`），在同一個搜尋頁上以實際導覽解開：referer 為搜尋頁，第一個離開搜尋主機的主框架導覽請求就是目的地，不等目標回應，所以 PDF 與慢速目標也能取得網址。每筆上限 6 秒；不解碼參數，也沒有網址辭典。
+  - 只搜尋 Google，不做詞彙評分或勝出批次選擇；同一批結果中 URL 完全相同的只保留一筆。Google 回傳不足 limit 時如實回報，不以其他引擎補足。呼叫中途失敗時保留已接納的候選，兩個搜尋工具都列出引擎執行狀態與每筆來源。
+  - 介面語言依查詢：查詢含漢字時 `hl=zh-TW`，其他一律 `hl=en`。這是固定規則，其他語言暫歸英文。
+  - Google 回 HTTP 4xx 或被導到 `/sorry/` 時，記錄 status 與最終路徑並回報為引擎錯誤，不重試、不繞過；沒有備援引擎。
+  - 已移除 DuckDuckGo、Brave 與 Bing。在本機與本 IP 上，DuckDuckGo 與 Brave 一律被擋（202／429）；Bing 在 2026-10-22 的公開觀測中兩次沒有正式結果、一次回傳與查詢無關的結果，依使用者決定移除。
+  - 結果連結若是引擎自己的跳轉包裝（host 等於搜尋主機，例如 Google 的 `/goto`），在同一個搜尋頁上以實際導覽解開：referer 為搜尋頁，第一個離開搜尋主機的主框架導覽請求就是目的地，不等目標回應，所以 PDF 與慢速目標也能取得網址。每筆上限 6 秒；不解碼參數，也沒有網址辭典。
 - `src/browser-pool.ts`：所有瀏覽器工作使用 Playwright 完整版 Chromium（`channel: 'chromium'`，新 headless 模式），每個 context 用固定格式的一般 Chrome UA，主版號取自實際瀏覽器。自有 Chromium 以 owner flag、process group 與 start time 辨識；Chromium 把 argv 改寫成單一字串時仍可辨識，close 卡住時以 SIGKILL 有界收尾。
 - `src/enhanced-content-extractor.ts`：正文轉換與讀取，見下方「正文讀取」。
 - `tests/`：離線回歸，見「建置與檢查」。
@@ -76,17 +76,17 @@ ENABLE_RELEVANCE_CHECKING、RELEVANCE_THRESHOLD、FORCE_MULTI_ENGINE_SEARCH、MA
 ## 輸出中的狀態與統計
 
 - **引擎行**：`- <引擎>: attempted=…; attempts=…; parsed_count=…; status=…`，之後依序可能有 `reason=`、`http_status=`、`final_path=`，最後是 `error=`。
-  - status：completed（有解析結果）、zero_parsed（已執行但零解析）、error、strategy_stopped（前面的引擎已達 limit，所以不再執行）、not_attempted（沒有開始）。
+  - status：completed（有解析結果）、zero_parsed（已執行但零解析）、error、not_attempted（沒有開始）。
   - not_attempted 的 reason：deadline（呼叫期限已到）、cancelled（呼叫被取消）、rate_limited（程序內限流拒絕）、queue_expired（在佇列中等待時逾期）。
   - attempts 只計實際開始的嘗試：已取得 page slot、開始啟動瀏覽器或建立 context。
-- **零候選**：分別說明所有已嘗試的引擎都失敗、全部零解析、沒有引擎嘗試（附原因），或混合。
+- **零候選**：分別說明引擎失敗、零解析，或沒有開始（附原因）。
 - **連結**：解開的包裝顯示 `Link: engine redirect from <host> resolved by navigation in <ms> ms`；解不開時顯示 `Link: engine redirect not resolved (<結果>: <原因>)`，並註明該 URL 是引擎的包裝網址。結果為 stayed_on_engine_host（包裝頁已回應但沒有離開搜尋主機）、timeout、failed 或 not_started。
 - **頁面讀取**：摘要描述最後一次已開始的嘗試；每次嘗試另起一行，保留自己的 HTTP status、讀取狀態、Content-Type、final URL、編碼、等待時間、長度與錯誤。只在佇列中等待、從未開始的 fallback 顯示為 `not started` 與原因。
 - **Read statistics 口徑**：
   - `source_read_attempts`：實際開始的 HTTP 與瀏覽器讀取次數（已發出請求，或已開始啟動瀏覽器、建立 context）；只在佇列中等待的不計。
   - `candidates_attempted`：至少開始過一次讀取的候選數。
   - 同一次 HTTP 讀取內跟隨的 redirect 不另計。
-  - `parsed_count`（引擎行）是引擎回傳、尚未跨引擎去重與套用 limit 的列數。
+  - `parsed_count`（引擎行）是引擎回傳、尚未去重與套用 limit 的列數。
   - `engine_redirects_resolved`／`engine_redirects_unresolved`：搜尋連結是引擎包裝網址的候選中，解開與未解開的數量。
 
   輸出在統計行之後附同樣內容的一行 `Statistics scope:`。
