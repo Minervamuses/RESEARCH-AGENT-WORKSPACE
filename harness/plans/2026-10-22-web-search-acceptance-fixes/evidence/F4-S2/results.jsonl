@@ -1,0 +1,3 @@
+{"mutation":"N28","test":"test-browser-lifecycle.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:  null !== 'SIGKILL'"}
+{"mutation":"N29","test":"test-browser-lifecycle.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:  'hung' !== 'closed'"}
+{"variant":"9f3867b (F4-S1)","test":"test-browser-lifecycle.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: rewritten owner process recognised     at file:///tmp/claude-1000/f4s1-old/app/vendor/web-search-mcp/tests/test-browser-lifecycle.mjs:369:14 {   generatedMessage: false"}

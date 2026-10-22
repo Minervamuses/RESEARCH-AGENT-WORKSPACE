@@ -8,8 +8,8 @@
 | F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/ | AF10(b) 待 F7-S2 案例 7 以真實入口確認 | — |
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
-| F4 | In progress | F4-S1 | build-log（已提交測試） | — | F4-S2 |
-| F5 | Not started | — | — | 相依 F4 | — |
+| F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
+| F5 | Not started | — | — | — | F5-S1（F4 已完成） |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
 | F7 | Not started | — | — | 相依 F6 | — |
 
@@ -418,3 +418,26 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
     - 去掉慢送段後，卡住的 page.title() 超過 1 s（AF20 重現）；
     - 只留視窗段時，10 頁中排在後面的頁面為 timeout（AF21 重現）。
 - **下一步**：F4-S2。
+
+### F4-S2 自有 Chromium 辨識與有界收尾
+- **改動**（FG3；AF22、AF34；突變 N28、N29；FA10）：src/browser-pool.ts。
+  - 新增 identity(pid)：stat 從最後一個「)」之後解析，取 pgid 與 starttime；owner flag 在 cmdline 以 NUL 或空白切分後比對。讀不到或欄位不合就回 undefined。
+  - rememberBrowserProcesses 與 killOwnedBrowsers 共用它。只記錄帶 flag 且 pgid 等於 pid 的直接子程序；kill 前要求 starttime 一致、pgid 等於 pid、仍帶 flag。讀不到或身分不符一律不 kill。
+- **測試**（tests/test-browser-lifecycle.mjs，真實子程序，不需 Chromium）：
+  - 以 `process.execPath -e` 加 detached 產生三個直接子程序，各自設定 process.title：
+    - 帶 owner flag 的 `a) b c d --web-search-owner=<pid>`：情境本身也有斷言，cmdline 只剩 1 個字串，comm 為 `a) b c d --web-`；
+    - 不帶 flag 的 `a) b c d unrelated`；
+    - 另一個帶 flag 的。
+  - 經 stub chromium launch 後，pool 認得帶 flag 者、不認不帶 flag 者。
+  - 另一個 pool 把第三個子程序記成錯誤的 starttime，killOwnedBrowsers 不殺它。
+  - browser.close 永不返回、cleanup 縮為 100 ms 時：closeAll 在 1 s 內返回（2 s 上限偵測卡住），close 只呼叫一次；兩個帶 flag 的群組以 SIGKILL 結束，不帶 flag 者存活。closeAll 會重新讀取身分，所以第三個子程序此時被正確視為自有程序。
+  - finally 只清理自己產生的程序。連跑 5 次通過。
+- **檢查**：
+  - 沙箱內：`npm run build` exit 0；retention 26/26、content-contract 5 組、browser-lifecycle 全部 exit 0。
+  - 突變與判別力（evidence/F4-S2/mutate.py、results.jsonl）：
+    - N28（killOwnedBrowsers 不 kill）被殺死（帶 flag 的子程序沒有收到 SIGKILL）；
+    - N29（boundedClose 不與時限競速）被殺死（closeAll 卡住，回 'hung'）；
+    - 9f3867b 的乾淨重建失敗於「rewritten owner process recognised」（AF22 重現）。
+  - 真實完整版 Chromium（沙箱外、短 TMPDIR、環境含 DBUS_SESSION_BUS_ADDRESS；同一個 evidence/F3-S1/full-chromium.mjs → evidence/F4-S2/full-chromium-owned.json）：browser 根程序的 cmdline 仍只有 1 個 NUL 欄位，但 poolOwned 已記錄該 pid（exe 在 chromium-1181/，pgid=pid，starttime 相符）；收尾後沒有存活程序。F3-S1 時同一腳本的 poolOwned 是空的。
+- **F4 階段結論**：FG3 的四項（HTTP 總時間、讀取上限、每頁視窗、自有 Chromium 辨識與有界收尾）都有離線與本機證據；真實 Agent 入口的觀測留給 F7-S2。
+- **下一步**：F5-S1。

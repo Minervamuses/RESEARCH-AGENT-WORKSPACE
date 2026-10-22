@@ -330,6 +330,72 @@ try {
   }
   await pause(120);
 
+  // FA10: owned Chromium is recognised after argv/comm rewrites; a stuck close still ends with SIGKILL.
+  {
+    const { spawn } = await import('node:child_process');
+    const { readFileSync } = await import('node:fs');
+    const flag = `--web-search-owner=${process.pid}`;
+    const children = [];
+    const startChild = title => {
+      const child = spawn(process.execPath, ['-e', `process.title = ${JSON.stringify(title)}; setInterval(() => {}, 1000);`], { detached: true, stdio: 'ignore' });
+      children.push(child);
+      return child;
+    };
+    const exited = child => new Promise(resolve => { if (child.exitCode !== null || child.signalCode) resolve(); else child.once('exit', resolve); });
+    const within = (promise, ms, late) => {
+      let timer;
+      return Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => resolve(late), ms); })]).finally(() => clearTimeout(timer));
+    };
+    const statFields = pid => { const text = readFileSync(`/proc/${pid}/stat`, 'utf8'); return text.slice(text.lastIndexOf(')') + 1).trim().split(/\s+/); };
+    const cleanupCap = OPERATION_TIMEOUTS.cleanup;
+    try {
+      const owned = startChild(`a) b c d ${flag}`);
+      const plain = startChild('a) b c d unrelated');
+      const forged = startChild(`a) b c d ${flag}`);
+      for (const child of children) {
+        for (let i = 0; i < 100 && !readFileSync(`/proc/${child.pid}/cmdline`, 'utf8').startsWith('a) b c d'); i++) await pause(10);
+      }
+      // Scenario check: cmdline is one space-joined string and comm contains ") ".
+      assert.equal(readFileSync(`/proc/${owned.pid}/cmdline`, 'utf8').split('\0').filter(Boolean).length, 1);
+      assert.equal(readFileSync(`/proc/${owned.pid}/comm`, 'utf8').trim(), 'a) b c d --web-');
+      OPERATION_TIMEOUTS.cleanup = 100;
+      let closes = 0;
+      chromium.launch = async () => ({
+        isConnected: () => true, version: () => '777.0.0.0', newContext: async () => ({}),
+        close: () => { closes++; return new Promise(() => undefined); },
+      });
+      const ownerPool = new BrowserPool();
+      await ownerPool.getBrowser();
+      assert.ok(ownerPool.owned.has(owned.pid), 'rewritten owner process recognised');
+      assert.ok(!ownerPool.owned.has(plain.pid), 'process without the flag is not owned');
+      // A recorded identity whose start time no longer matches is never killed.
+      const checker = new BrowserPool();
+      checker.owned.set(forged.pid, `${statFields(forged.pid)[19]}0`);
+      checker.killOwnedBrowsers();
+      await pause(50);
+      assert.equal(forged.signalCode, null, 'start time mismatch must not be killed');
+      const begin = performance.now();
+      const outcome = await within(ownerPool.closeAll().then(() => 'closed'), 2000, 'hung');
+      assert.equal(outcome, 'closed');
+      assert.ok(performance.now() - begin < 1000, `bounded close took ${performance.now() - begin} ms`);
+      assert.equal(closes, 1);
+      await within(Promise.all([exited(owned), exited(forged)]), 1000);
+      // closeAll re-reads identities, so both flagged processes of this pool are owned groups.
+      assert.equal(owned.signalCode, 'SIGKILL');
+      assert.equal(forged.signalCode, 'SIGKILL');
+      await pause(50);
+      assert.equal(plain.exitCode, null);
+      assert.equal(plain.signalCode, null);
+    } finally {
+      OPERATION_TIMEOUTS.cleanup = cleanupCap;
+      chromium.launch = original;
+      for (const child of children) {
+        if (child.exitCode === null && !child.signalCode) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* exited */ } }
+      }
+      await Promise.all(children.map(exited));
+    }
+  }
+
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, 0);
   process.stdout.write('single launch, bounded contexts/HTTP, shared ownership and failed launch recovery: passed\n');
 } finally {

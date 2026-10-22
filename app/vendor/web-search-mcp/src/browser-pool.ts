@@ -210,30 +210,40 @@ export class BrowserPool {
     } finally { if (!supplied) budget.dispose(); }
   }
 
+  /**
+   * FA10: a process's group, start time and whether it carries this pool's owner flag. Stat fields are
+   * read after the last ')' (comm may contain ') '), and Chromium may rewrite argv into one
+   * space-joined string, so the flag is matched in NUL- or whitespace-separated tokens.
+   */
+  private identity(pid: number): { group: number; started: string; flagged: boolean } | undefined {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+      const group = Number(fields[2]);
+      if (!Number.isSafeInteger(group) || !fields[19]) return undefined;
+      const flagged = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split(/[\0\s]+/).includes(this.ownerFlag);
+      return { group, started: fields[19], flagged };
+    } catch { return undefined; }
+  }
+
   private rememberBrowserProcesses(): void {
     try {
       const children = readFileSync(`/proc/self/task/${process.pid}/children`, 'utf8').trim().split(/\s+/);
       for (const raw of children) {
         const pid = Number(raw);
-        if (!pid) continue;
-        const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
-        if (!args.includes(this.ownerFlag)) continue;
-        const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ');
+        const found = pid ? this.identity(pid) : undefined;
         // Playwright launches Chromium in its own process group. Never kill a shared group.
-        if (Number(fields[2]) === pid) this.owned.set(pid, fields[19]);
+        if (found?.flagged && found.group === pid) this.owned.set(pid, found.started);
       }
     } catch (error) { console.error('Browser PID observation:', error); }
   }
 
   private killOwnedBrowsers(): void {
     for (const [pid, started] of this.owned) {
-      try {
-        const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ');
-        const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
-        if (fields[19] === started && Number(fields[2]) === pid && args.includes(this.ownerFlag)) {
-          process.kill(-pid, 'SIGKILL');
-        }
-      } catch { /* Already exited. Identity mismatches are never terminated. */ }
+      const found = this.identity(pid);
+      // Unreadable records and identity mismatches are never terminated.
+      if (!found || found.started !== started || found.group !== pid || !found.flagged) continue;
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* Already exited. */ }
     }
     this.owned.clear();
   }
