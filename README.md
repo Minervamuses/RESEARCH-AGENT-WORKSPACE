@@ -101,6 +101,41 @@ Rename 適用於已保存的對話；新名稱會持續保存，重新開程式�
 
 Delete 會先確認範圍：**只刪這則對話紀錄，不刪研究專案或產出文件**。取消不改資料。刪除正在執行的對話時，會先 Stop 並等回合收束；停止失敗不會繼續刪除。成功後該對話及其清單項消失。若刪除目前選中的對話，會清除選中狀態，可手動選其他對話或新建；刪除其他對話則保留目前內容。
 
+## 記錄了哪些資訊
+
+所有紀錄都只存在本機。下表是目前實際寫入的位置與內容：
+
+| 紀錄 | 位置 | 內容 | 不包含 |
+| --- | --- | --- | --- |
+| 診斷 log | `$AGENT_LOG_DIR`；未設定時為 `$XDG_STATE_HOME/research-agent/logs`，預設 `~/.local/state/research-agent/logs`。CLI 寫 `cli.log`，桌面後端寫 `desktop-backend.log`，各自在 5 MiB 時輪替並保留 3 份 | agent、skills、rag 的 INFO 以上訊息，以及第三方套件的 WARNING 以上訊息；錯誤的 traceback 與 incident ID（畫面上的錯誤代碼可在這裡找到）；每回合的 `turn_trace`（見下節） | 訊息內容、工具參數、原始查詢。金鑰形式的字串在寫入前會換成 `[redacted]` |
+| 桌面後端 stderr | 同一目錄的 `desktop-backend.stderr.log`，5 MiB 時輪替一次 | 後端程序的 stderr，以及每次啟動的 generation 標頭 | — |
+| 對話 | 桌面：專案的 `historyDirectory`（寫在專案的 `RESEARCH.md`，預設 `app/store/projects/<專案 ID>/conversations/`）。CLI：`<persist_dir>/conversations/`（預設 `app/store/conversations/`，可用 `KMS_STORE_DIR` 改） | 每回合的輸入、送出時的專案規則與引用、思考模式、回答全文、狀態與失敗原因、時間，以及工具活動（呼叫 ID、工具名稱、成功或失敗） | 工具參數與工具回傳的內容 |
+| MCP server log | `$XDG_CACHE_HOME/agent-mcp/<server>.stderr.log`，預設 `~/.cache/agent-mcp/`，5 MiB 時輪替並保留 3 份 | MCP server 的 stderr：每次載入一行標頭；web_search 每次搜尋解析到的結果數、`handleWebSearch` 的 limit 與 includeContent，以及錯誤訊息（可能含網址） | 查詢文字與頁面內容。server 的 stdout 只轉送 JSON-RPC，其餘印出的文字都被丟棄 |
+| 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存的來源 | 搜尋過但沒有儲存的候選 |
+
+模型每次收到的完整 prompt、中間回覆，以及工具回傳的全文，都只存在記憶體裡，回合結束後不保存。所以事後只能從下面的長度、次數與時間判斷工具結果有沒有交給模型，不能還原內容。
+
+### turn_trace 欄位
+
+每個回合嘗試寫一組 `turn_trace` 行。`turn_id` 對應對話檔的 `turnId`，`attempt` 用來區分重試：
+
+- `turn_start`；`turn_end`：`state`、`duration_ms`、`model_calls`、`tool_calls`、`unfinished`。
+- `model_start`／`model_end`：`model_seq`、`at_ms`（距離嘗試開始的毫秒數）、`duration_ms`、`status`（ok、error、unfinished）、`tool_calls`、`input_tokens`、`output_tokens`（供應商回報的值）。
+- `tool_start`／`tool_end`：
+  - `tool`、`tool_call_id`、`model_seq`（由哪一次模型呼叫發出）；
+  - `query_hash`（工具有 `query` 參數時）：查詢的 SHA-256 前 16 碼，只能比對兩次查詢是否相同，無法還原查詢；
+  - Citation 的 `action`；`status`（ok、error、unfinished，失敗時另有 `error_type`）、`duration_ms`；
+  - `output_chars`：工具成功回傳時，交給模型的文字字元數；
+  - Citation 搜尋與儲存的計數，例如 `candidate_count`、`abstract_count`、`new_candidate_count`、`provider_count`、`failed_provider_count`。
+
+模型回覆異常（空回覆、格式錯誤的工具呼叫）時，另有 `model_response` 警告行；Citation 儲存完成時另有 `citation_save_finalized` 行，只含計數。
+
+查一個回合的所有事件：
+
+```bash
+grep -h turn_trace ~/.local/state/research-agent/logs/desktop-backend.log* | grep turn_id=<turnId>
+```
+
 ## 其他入口與開發檢查
 
 對話輸入 `/` 可查看目前後端提供的命令；可用命令與 skills 取決於該次 session。CLI 可用 `/help` 查看命令。
