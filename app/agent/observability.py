@@ -10,7 +10,8 @@ clearly separated from tool execution status.
 
 A per-attempt ``TurnTimingTrace`` callback additionally logs when each model
 call and admitted tool call actually ran, so a slow turn can be split into
-model and tool intervals from the persistent diagnostic log.
+model and tool intervals from the persistent diagnostic log, and how many
+characters each returned tool result handed to the model.
 
 Privacy contract: only counts, lengths, identifiers, hashes, durations, and
 enum-like fields are ever logged. Message content, tool-call arguments, raw
@@ -282,6 +283,12 @@ def _tool_result_counts(output: object) -> dict[str, object]:
     return {}
 
 
+def _tool_output_chars(output: object) -> int:
+    """Length of the tool result text the model receives; the text itself is never logged."""
+    content = output.content if isinstance(output, ToolMessage) else output
+    return len(normalize_content(content, drop_unknown_parts=False))
+
+
 class TurnTimingTrace(BaseCallbackHandler):
     """Log the real start and end of every model and tool run in one attempt.
 
@@ -388,7 +395,8 @@ class TurnTimingTrace(BaseCallbackHandler):
             status = getattr(output, "status", "success") if isinstance(output, ToolMessage) else "success"
             self._emit("tool_end", {
                 **fields, "status": "error" if status == "error" else "ok",
-                "at_ms": self._ms(), "duration_ms": self._ms(started), **_tool_result_counts(output),
+                "at_ms": self._ms(), "duration_ms": self._ms(started),
+                "output_chars": _tool_output_chars(output), **_tool_result_counts(output),
             })
 
     def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:

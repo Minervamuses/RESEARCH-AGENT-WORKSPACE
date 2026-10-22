@@ -511,6 +511,9 @@ def test_turn_trace_records_parallel_tool_intervals_and_model_order(monkeypatch,
     assert ends["rag_search"]["tool_call_id"] == "call-fast" and ends["rag_explore"]["tool_call_id"] == "call-slow"
     assert {record["model_seq"] for record in ends.values()} == {"1"}
     assert {record["status"] for record in ends.values()} == {"ok"}
+    # Only the size of what the model receives is logged, never the text.
+    assert ends["rag_search"]["output_chars"] == str(len("fast result"))
+    assert ends["rag_explore"]["output_chars"] == str(len("slow result"))
     # Both started before either finished, and the fast tool finished first.
     assert max(int(record["at_ms"]) for record in starts.values()) < int(ends["rag_search"]["at_ms"])
     assert int(ends["rag_search"]["at_ms"]) < int(ends["rag_explore"]["at_ms"])
@@ -636,3 +639,20 @@ def test_turn_trace_links_citation_actions_queries_and_counts(monkeypatch, tmp_p
     assert records[-1]["model_calls"] == "3" and records[-1]["tool_calls"] == "3"
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert "private topic" not in log_text and DOI_A not in log_text and "Paper A" not in log_text
+
+
+def test_turn_trace_counts_mcp_content_blocks_without_logging_them(caplog):
+    from uuid import uuid4
+    from langchain_core.messages import ToolMessage
+    from agent.observability import TurnTimingTrace
+
+    trace = TurnTimingTrace("turn-blocks")
+    run_id = uuid4()
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        trace.on_tool_start({"name": "full-web-search"}, "", run_id=run_id, inputs={"query": "q"}, tool_call_id="call-1")
+        # MCP tools return a list of text blocks; the model receives their joined text.
+        trace.on_tool_end(ToolMessage(content=[{"type": "text", "text": "secret page"}, {"type": "text", "text": "tail"}],
+                                      tool_call_id="call-1"), run_id=run_id)
+    [end] = [record for record in _trace_records(caplog, "turn-blocks") if record["event"] == "tool_end"]
+    assert end["output_chars"] == str(len("secret page\ntail"))
+    assert "secret page" not in "\n".join(record.getMessage() for record in caplog.records)
