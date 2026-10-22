@@ -89,25 +89,70 @@ export function validateSearchInput(args: unknown): WebSearchToolInput {
   };
 }
 
+// Code points scanned on each side of a cut; at least the 10000 point content limit.
+const LINK_SCAN = 10000;
+
+/**
+ * Moves a cut (in code points) back so that it never lands inside a [label](<url>) link or a bare
+ * http(s) URL: a clipped destination would be a different, fabricated link. One bounded local scan.
+ */
+function safeCut(p: string[], cut: number): number {
+  const low = Math.max(0, cut - LINK_SCAN), high = Math.min(p.length, cut + LINK_SCAN);
+  const breaks = (ch?: string) => ch === undefined || ch === '<' || ch === '>' || /\s/.test(ch);
+  const scheme = (i: number) => p[i] === 'h'
+    && ['http://', 'https://'].some(prefix => Array.from(prefix).every((ch, k) => p[i + k] === ch));
+  // The '[' that opens a label ending at `close`, balancing nested brackets such as [[1]].
+  const labelStart = (close: number): number | undefined => {
+    let depth = 0;
+    for (let i = close; i >= low; i--) {
+      if (p[i] === ']') depth++;
+      else if (p[i] === '[' && --depth === 0) return i;
+    }
+    return undefined;
+  };
+  // End (exclusive) of a link whose label closes at i: "](<...>)" or "](http...".
+  const linkEnd = (i: number): number | undefined => {
+    if (p[i] !== ']' || p[i + 1] !== '(') return undefined;
+    let close = i + 2;
+    if (p[close] === '<') {
+      while (close < high && p[close] !== '>') close++;
+      return close + 2;
+    }
+    if (!scheme(close)) return undefined;
+    while (close < high && !breaks(p[close])) close++;
+    return close;
+  };
+  for (let i = cut - 1; i >= low; i--) {
+    const end = linkEnd(i);
+    if (end === undefined) continue;
+    const start = cut < end ? labelStart(i) : undefined;
+    if (start !== undefined) return start;
+    break;
+  }
+  for (let i = cut; i < high; i++) {
+    if (linkEnd(i) === undefined) continue;
+    const start = labelStart(i);
+    if (start !== undefined && start < cut) return start;
+    break;
+  }
+  // A bare URL token around the cut is dropped from its scheme on.
+  if (cut > 0 && !breaks(p[cut - 1]) && !breaks(p[cut])) {
+    let token = cut;
+    while (token > low && !breaks(p[token - 1])) token--;
+    for (let i = cut - 1; i >= token; i--) if (scheme(i)) return i;
+  }
+  return cut;
+}
+
 export function truncateMarkdown(text: string, limit: number): {
   content: string; truncated: boolean; originalLength: number; returnedLength: number;
 } {
   const points = Array.from(text);
-  let content = points.slice(0, limit).join('');
-  let boundary = content.length;
-  // A clipped destination would be a different, fabricated link. Omit that whole link.
-  const links = /\[[^\]\n]*\]\((?:<[^>]*>|[^)\n]*)\)|https?:\/\/[^\s<>]+/g;
-  for (const match of text.matchAll(links)) {
-    if (match.index < boundary && boundary < match.index + match[0].length) {
-      boundary = match.index;
-      break;
-    }
+  if (points.length <= limit) {
+    return { content: text, truncated: false, originalLength: points.length, returnedLength: points.length };
   }
-  content = text.slice(0, boundary);
-  return {
-    content, truncated: content.length < text.length,
-    originalLength: points.length, returnedLength: Array.from(content).length,
-  };
+  const boundary = safeCut(points, limit);
+  return { content: points.slice(0, boundary).join(''), truncated: true, originalLength: points.length, returnedLength: boundary };
 }
 
 /** One short line for the Agent: no ANSI escapes, no Playwright call log, first line kept. */

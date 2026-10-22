@@ -35,6 +35,30 @@ assert.equal(tiny.truncated, true);
 assert.equal(truncateMarkdown('😀中文abc', 4).content, '😀中文a');
 assert.equal(Array.from(truncateMarkdown('😀'.repeat(10001), 10000).content).length, 10000);
 assert.equal(resolveContentLimit(0), resolveContentLimit());
+assert.equal(truncateMarkdown('😀中文abc', 4).originalLength, 6);
+assert.equal(truncateMarkdown('😀中文abc', 4).returnedLength, 4);
+// At every cut a link or URL is delivered whole or not at all; no strict prefix, no dangling opening.
+for (const [before, link, after] of [
+  ['Intro ', '[[1]](<https://example.org/a>)', ' tail'],
+  ['Intro ', '[line one\nline two](<https://example.org/b>)', ' tail'],
+  ['See ', 'https://en.wikipedia.org/wiki/Foo_(bar)_baz', ' now'],
+  ['Go ', '[x](https://example.org/c)', ' end'],
+]) {
+  const source = before + link + after;
+  for (let limit = 0; limit <= source.length; limit++) {
+    const { content } = truncateMarkdown(source, limit);
+    assert.ok(source.startsWith(content));
+    assert.ok(content.length <= before.length || content.length >= before.length + link.length,
+      `limit ${limit} clipped ${JSON.stringify(link)}: ${JSON.stringify(content)}`);
+  }
+}
+const timed = fn => { const begin = performance.now(); fn(); return performance.now() - begin; };
+const brackets = '['.repeat(150 * 1024) + ' tail';
+assert.ok(timed(() => truncateMarkdown(brackets, 10000)) < 1000, 'truncation of unclosed brackets is linear');
+assert.equal(truncateMarkdown(brackets, 10000).returnedLength, 10000);
+const spaces = `<pre>${' '.repeat(150 * 1024)}x</pre>`;
+assert.ok(timed(() => extractor.parseContent(spaces, 'https://example.org')) < 1000, 'line-end trimming is linear');
+assert.match(extractor.parseContent('<pre>a   \nb\t\t\nc</pre>', 'https://example.org'), /```\na\nb\nc\n```/);
 process.stdout.write('content conversion and Unicode/link truncation: passed\n');
 
 // Whole-page conversion: each source text once, in order, without glued blocks.

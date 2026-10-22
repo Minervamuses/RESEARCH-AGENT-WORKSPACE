@@ -5,8 +5,8 @@
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
-| F1 | In progress | F1-S1、F1-S2、F1-S3 | evidence/F1-S1/、evidence/F1-S2/、evidence/F1-S3/ | AF10(b) 待 F7-S2 案例 7 | F1-S4 |
-| F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
+| F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/ | AF10(b) 待 F7-S2 案例 7 以真實入口確認 | — |
+| F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2 |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
@@ -315,3 +315,32 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 真實完整版 Chromium 的提前探測（沙箱外、短 TMPDIR；evidence/F1-S3/download-real.mjs → download-real.json）：HTTP 讀取得到 403 後，瀏覽器讀到 application/pdf 或 attachment 的 application/octet-stream，兩者都是 unsupported_media，保留 200 與 Content-Type。依 phase-1，AF10(b) 仍要等 F7-S2 案例 7 經真實入口通過才記為已修正。
 - **限制**：瀏覽器路徑不記錄編碼（由瀏覽器自行解碼）。HTML 標準中 meta 宣告 UTF-16 時改用 UTF-8 的細則沒有實作；本步只處理 FA03 列出的順序。
 - **下一步**：F1-S4。
+
+### F1-S4 線性截斷與完整連結
+- **改動**（FG1；AF08、AF09、AF23；突變 N06d）：
+  - src/utils.ts：truncateMarkdown 改用 safeCut：在 code point 陣列上，從切點往前、往後各做一次有界局部掃描（LINK_SCAN = 10000 code points，不小於內容上限），不對全文跑 regex。
+    - 切點落在 `[label](<url>)` 或 `[label](http…)` 內（含 label 內有 `]`、巢狀 `[[1]]`、label 跨行）時，以括號配對找到 label 的 `[`，捨棄整個連結；
+    - 切點落在裸 http(s) 網址 token 內（以空白、`<`、`>` 為界，所以 `Foo_(bar)_baz` 這種含括號的網址算同一 token）時，從 scheme 起捨棄；
+    - 不補造目的地；沒有截斷時原樣返回；originalLength 與 returnedLength 都以 code points 計。
+  - src/enhanced-content-extractor.ts：parseContent 結尾的 `/[ \t]+\n/g` 改為 trimLineEnds，逐行以迴圈去掉行尾空白與 tab。
+- **測試**（content-contract 第一組）：
+  - `😀中文abc` 截為 4 時 originalLength=6、returnedLength=4；
+  - `[[1]](<https://example.org/a>)`、label 內有換行的連結、text/plain 的 `https://en.wikipedia.org/wiki/Foo_(bar)_baz`、`[x](https://example.org/c)` 四種輸入，前後加文字，每一個可能的切點都只交付完整連結或完全不交付，不留殘缺開頭；
+  - 150 KiB 未閉合 `[` 的截斷，以及 `<pre>` 內 150 KiB 空白的轉換，各在 1 s 內完成；
+  - `<pre>` 行尾空白與 tab 被去掉。既有截斷斷言照舊通過。
+- **檢查**：
+  - 沙箱內：`npm run build` exit 0；retention 26/26、content-contract 5 組、browser-lifecycle 全部 exit 0。
+  - 判別力：新的 content-contract 在 aa971aa 的乾淨重建上失敗於 `[[1]]` 在第 7 點的切點（得到 `Intro [`，AF08 重現）。
+  - 突變 N06d（originalLength 改以 UTF-16 code unit 計）被 content-contract 殺死（`7 !== 6`；evidence/F1-S4/mutations.jsonl）。
+  - 倍增量測（evidence/F1-S4/measure.mjs → measure.jsonl，每項一次）：
+    | 項目 | 版本 | 128 KiB | 256 KiB | 512 KiB | 1 MiB |
+    | --- | --- | --- | --- | --- | --- |
+    | 截斷 | aa971aa | 3835 ms | 15519 ms | — | — |
+    | 截斷 | F1-S4 | 2 ms | 3 ms | 5 ms | 11 ms |
+    | 轉換 | aa971aa | 3864 ms | 15524 ms | — | — |
+    | 轉換 | F1-S4 | 8 ms | 12 ms | 16 ms | 94 ms |
+
+    舊版每倍增約 4 倍（二次方），所以只量到 256 KiB；新版約為線性（1 MiB 轉換以 cheerio 解析為主）。
+- **限制**：連結或網址長於 10000 code points、橫跨切點時不受保護（掃描有界）；正文上限本身是 10000，實務上不會遇到。
+- **F1 階段結論**：FG1、FG2 的離線、本機與真實 Chromium 證據齊備；AF10(b) 依 phase-1 待 F7-S2 案例 7 經真實入口確認。
+- **下一步**：F2-S2。

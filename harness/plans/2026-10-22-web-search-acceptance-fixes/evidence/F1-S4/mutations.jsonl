@@ -1,0 +1,1 @@
+{"mutation":"N06d","change":"originalLength counts UTF-16 code units","test":"test-content-contract.mjs","exit":1,"first_error":"AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:  7 !== 6"}

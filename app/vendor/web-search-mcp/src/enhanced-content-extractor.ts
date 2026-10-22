@@ -16,6 +16,15 @@ const singleLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+/** Removes trailing spaces and tabs line by line in linear time (no backtracking regex). */
+function trimLineEnds(text: string): string {
+  return text.split('\n').map(line => {
+    let end = line.length;
+    while (end > 0 && (line[end - 1] === ' ' || line[end - 1] === '\t')) end--;
+    return line.slice(0, end);
+  }).join('\n');
+}
+
 const READ_LIMIT_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_MEDIA = ['text/html', 'application/xhtml+xml', 'text/plain'];
 const mediaType = (contentType?: string) => contentType?.split(';')[0].trim().toLowerCase();
@@ -331,6 +340,6 @@ export class EnhancedContentExtractor {
     };
     // The whole body in source order; no main-content guess decides which text has value.
     const root = $('body').first()[0] ?? $.root()[0];
-    return children(root).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    return trimLineEnds(children(root)).replace(/\n{3,}/g, '\n\n').trim();
   }
 }
