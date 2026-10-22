@@ -5,13 +5,13 @@
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
-| F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/ | AF10(b) 待 F7-S2 案例 7 以真實入口確認 | — |
+| F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/、evidence/F7-S2/ | — | — |
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
 | F6 | Complete | F6-S1、F6-S2、F6-S3 | evidence/F6-S3/ | — | — |
-| F7 | In progress | F7-S1 | build-log | — | F7-S2 |
+| F7 | In progress | F7-S1、F7-S2 | evidence/F7-S2/ | — | F7-S3 |
 
 ## 事件格式
 每個實際的 F?-S? 事件記錄以下內容：
@@ -626,3 +626,47 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - README 的 source_read_attempts、candidates_attempted、redirect 不另計、parsed_count、engine_redirects 定義與輸出中的 `Statistics scope:` 行逐項對應（AF18）。
   - `git diff --check` 乾淨。
 - **下一步**：F7-S2（沙箱外，真實 Python→Node 入口）。
+
+### F7-S2 真實 Python→Node 入口驗收（本機）
+- **作法**（FG7；evidence/F7-S2/drive.py、preload.mjs、mcp_helper.py → results.json）：
+  - **執行環境**：沙箱外，短暫存目錄 `mktemp -d /tmp/ws.XXXX`。XDG_CACHE_HOME 與 AGENT_LOG_DIR 指到該目錄；PATH 以 conda app 的 bin 優先。執行前 `npm run build`（dist 與 src 一致）。
+  - **載入路徑**：與 Agent 相同，`agent.mcp.resolve_mcp_specs` 加 `load_mcp_tools_with_families`，預設載入 repo 的 dist。
+  - **需要固定候選或假引擎的案例**（8、9、10），改用產品既有的 AGENT_MCP_WEB_SEARCH_COMMAND／ARGS：`node --import preload.mjs?<query> <dist>/index.js`。仍經過產品的 loader、wrapper 與環境 allowlist。preload 只由自己 URL 的 query string 設定，因為 allowlist 不會轉送測試變數；這點在 results.json 各案例的 note 註明。
+  - 案例 9、10 不取代引擎方法，只把 F3-S2 的可覆寫搜尋網址與主機指向本機假引擎，所以真實的 Google、Bing 方法、解析器與連結解析都在真實完整版 Chromium 上執行。
+  - 案例 13、14 的自訂 command 用 mcp_helper.py（hang_call、healthy）、`python -c 'sys.exit(3)'` 與 `/bin/sleep 120`。
+  - 本機伺服器只綁 127.0.0.1，結束時關閉；假引擎以 `localhost:<port>` 為搜尋主機，目標在 `127.0.0.1:<port>`。
+  - 每個案例在同一腳本內每 50 ms 取樣自己的後代程序（pid、pgid、starttime、comm），結束後 0.5 s 以 starttime 檢查存活；只終止自己記錄的程序。
+- **結果**：driver exit 0，15 個案例全部通過，各案例都沒有存活程序。
+  1. 巢狀表格 3 層與 20 層：每段文字恰好一次；20 層 387 ms（含 Node 啟動）。AF01、AF23。
+  2. 多篇 article 加 aside/main：Intro、Story 1、Story 2、Related、Main、Tail 依原順序。AF02。
+  3. Big5（`Character encoding: big5 (Content-Type charset)`）與 Shift_JIS（`shift_jis (meta charset)`）文字正確。AF06。
+  4. 晚渲染（真實完整版 Chromium）：計時器 300 ms 與「導覽列先、fetch 300 ms 後主要內容」都是 text（約 1.6 s）；5000 ms 才插入者為 empty_text，附 `waiting 3001 ms … (limit 3000 ms)`。AF03。
+  5. 經 browser fallback 回顯的 UA 為 `… Chrome/139.0.0.0 Safari/537.36`，不含 Headless。FU03。
+  6. 慢送：HTTP 在 `HTTP page read exceeded its 6000 ms operation limit` 結束後進 fallback，瀏覽器 goto 6000 ms 逾時，共 12.6 s，遠低於 285 s。AF19。
+  7. 媒體與下載：
+     - 11 MiB PDF 為 unsupported_media，`HTTP status: 200; Content-Type: application/pdf`，錯誤附 10 MiB 讀取上限；
+     - 11 MiB HTML 為 http_error，`response body exceeds 10 MiB read limit`；
+     - HTTP 403 之後瀏覽器遇到 PDF，為 unsupported_media，保留 200 與 application/pdf，403 留在 http 那次的紀錄；
+     - 錯誤都是單行。
+     - **AF10(b) 依 phase-1 至此記為已修正。**
+  8. full-web-search（stub 候選），limit 10、每頁 2 s：10 頁全部 text，沒有視窗逾時，10.6 s。`source_read_attempts=10; http_attempts=10; browser_attempts=0` 等於伺服器實際收到的 10 次讀取；Google completed、Bing strategy_stopped；有口徑說明行。AF11、AF18、AF21。
+  9. 引擎備援（真實方法、假引擎）：
+     - 假 Google 429 → `status=error; http_status=429`，由 Bing 補足 3 筆；
+     - 導到 `/sorry/` → `http_status=200; final_path=/sorry/index`，同樣由 Bing 補足；
+     - 中文查詢送出 hl=zh-TW、setlang=zh-Hant、cc=TW，英文為 en、en、US。FU01、FA13。
+  10. 連結解析（真實完整版 Chromium，linkResolve 縮為 2000 ms）：
+      - Google 相對 `/goto` 的 JavaScript 跳轉 14 ms、302 到 PDF 5 ms，Bing 絕對包裝 302 到永不回應的目標 4 ms、302 到一般目標 4 ms，全部 resolved；
+      - 不跳轉的包裝在上限記為 stayed_on_engine_host，候選保留；
+      - 正文讀取的請求都打到解析後的網址，只有 stayed 那筆讀自己的包裝網址；
+      - 統計 `engine_redirects_resolved=4; engine_redirects_unresolved=1`。FU04、X13。
+  11. 主機上有 comm 為 `a) b c d` 的程序時，discovery（364 ms、無診斷）與呼叫都正常。AF24。
+  12. 有真實 Chromium 時呼叫端取消：取消時 chrome 程序正在執行，取消後沒有「never retrieved」，沒有存活程序。AF25。
+  13. 預算與診斷：
+      - 卡住的自訂 server（DEFAULT_TIMEOUT=3000）在 2503 ms 以 `… (…; DEFAULT_TIMEOUT=3000 ms)` 的 TimeoutError 返回；
+      - 立即結束的自訂 command，診斷為 `… [causes: McpError: Connection closed]; stderr log: <scratch>/cache/agent-mcp/web_search.stderr.log`。AF26、AF28。
+  14. 啟動上限（實際常數 15000 ms）：啟動後卡住的 web_search 在 14523 ms 放棄，診斷含 `startup timeout (15000 ms)` 與 log 位置，另一個 MCP server 的 local_probe 照常載入。FU05。
+  15. 約 1 MiB、大量未閉合 `[` 的 text/plain：386 ms 返回 text，`returned=10000; original=1048581`。AF09。
+- **限制**：
+  - 本步只用本機頁面與假引擎，真實 Google／Bing 由 F7-S3 觀測；
+  - driver 的 stderr 有本機伺服器在客戶端中途斷線時的 BrokenPipeError，屬於測試伺服器本身，與產品無關。
+- **下一步**：F7-S3（公開請求，最多六組、八分鐘）。

@@ -1,0 +1,575 @@
+{
+ "dist": "app/vendor/web-search-mcp/dist/index.js",
+ "node": "node",
+ "port_note": "<port> replaces the local server port",
+ "cases": {
+  "c01_nested_tables": {
+   "pass": true,
+   "checks": {
+    "depth 3: each text once": true,
+    "depth 20: each text once": true,
+    "no surviving processes": true
+   },
+   "ms": 758,
+   "facts": {
+    "depth_3": {
+     "ms": 371,
+     "leaf_count": 1,
+     "labels_once": true
+    },
+    "depth_20": {
+     "ms": 387,
+     "leaf_count": 1,
+     "labels_once": true
+    }
+   },
+   "processes": {
+    "processes_seen": 6,
+    "commands_seen": [
+     "MainThread",
+     "grep",
+     "node",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c02_whole_page": {
+   "pass": true,
+   "checks": {
+    "all text in source order": true,
+    "no surviving processes": true
+   },
+   "ms": 396,
+   "facts": {
+    "order": [
+     1,
+     11,
+     23,
+     32,
+     41,
+     47
+    ],
+    "content": "\nIntro\n\n## Story 1\n\n## Story 2\n\nRelated\n\nMain\n\nTail"
+   },
+   "processes": {
+    "processes_seen": 3,
+    "commands_seen": [
+     "MainThread",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c03_encodings": {
+   "pass": true,
+   "checks": {
+    "big5 decoded with visible source": true,
+    "sjis decoded with visible source": true,
+    "no surviving processes": true
+   },
+   "ms": 763,
+   "facts": {
+    "big5": {
+     "encoding_line": "Character encoding: big5 (Content-Type charset)",
+     "has_text": true
+    },
+    "sjis": {
+     "encoding_line": "Character encoding: shift_jis (meta charset)",
+     "has_text": true
+    }
+   },
+   "processes": {
+    "processes_seen": 6,
+    "commands_seen": [
+     "MainThread",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c04_late_render": {
+   "pass": true,
+   "checks": {
+    "timer 300 ms read": true,
+    "nav first, fetch 300 ms read": true,
+    "5000 ms is empty_text with the waited time": true,
+    "no surviving processes": true
+   },
+   "ms": 6886,
+   "facts": {
+    "timer300": {
+     "ms": 1627,
+     "status": "Page read status: text; attempts=2",
+     "attempts": [
+      "- http: status=200; read_status=empty_text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/late/timer300; encoding=utf-8; markdown_length=0/0",
+      "- browser: status=200; read_status=text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/late/timer300; render_wait_ms=520; markdown_length=16/16"
+     ],
+     "read_error": null,
+     "target": true
+    },
+    "navfetch": {
+     "ms": 1608,
+     "status": "Page read status: text; attempts=2",
+     "attempts": [
+      "- http: status=200; read_status=empty_text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/late/navfetch; encoding=utf-8; markdown_length=0/0",
+      "- browser: status=200; read_status=text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/late/navfetch; render_wait_ms=937; markdown_length=43/43"
+     ],
+     "read_error": null,
+     "target": true
+    },
+    "late5000": {
+     "ms": 3650,
+     "status": "Page read status: empty_text; attempts=2",
+     "attempts": [
+      "- http: status=200; read_status=empty_text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/late/late5000; encoding=utf-8; markdown_length=0/0",
+      "- browser: status=200; read_status=empty_text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/late/late5000; render_wait_ms=3001; markdown_length=0/0; error=No visible text after waiting 3001 ms for client rendering (limit 3000 ms)"
+     ],
+     "read_error": "Read error: No visible text after waiting 3001 ms for client rendering (limit 3000 ms)",
+     "target": false
+    }
+   },
+   "processes": {
+    "processes_seen": 33,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "exe",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c05_browser_identity": {
+   "pass": true,
+   "checks": {
+    "fallback UA is a normal Chrome UA": true,
+    "no surviving processes": true
+   },
+   "ms": 1181,
+   "facts": {
+    "echoed": "UA: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "attempts": [
+     "- http: status=200; read_status=empty_text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/ua; encoding=utf-8; markdown_length=0/0",
+     "- browser: status=200; read_status=text; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/ua; render_wait_ms=523; markdown_length=105/105"
+    ]
+   },
+   "processes": {
+    "processes_seen": 11,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "exe",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c06_slow_drip": {
+   "pass": true,
+   "checks": {
+    "HTTP ends at its operation limit": true,
+    "fallback ran": true,
+    "far below the 285 s call budget": true,
+    "no surviving processes": true
+   },
+   "ms": 12633,
+   "facts": {
+    "ms": 12633,
+    "status": "Page read status: timeout; attempts=2",
+    "attempts": [
+     "- http: status=unknown; read_status=timeout; error=HTTP page read exceeded its 6000 ms operation limit",
+     "- browser: status=unknown; read_status=timeout; error=page.goto: Timeout 6000ms exceeded."
+    ]
+   },
+   "processes": {
+    "processes_seen": 11,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "exe",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c07_media_and_downloads": {
+   "pass": true,
+   "checks": {
+    "11 MiB PDF is unsupported_media with headers": true,
+    "11 MiB HTML is http_error with the read limit": true,
+    "403 then browser PDF is unsupported_media (AF10b)": true,
+    "error lines are single lines": true,
+    "no surviving processes": true
+   },
+   "ms": 1478,
+   "facts": {
+    "big.pdf": {
+     "status": "Page read status: unsupported_media; attempts=1",
+     "http": "HTTP status: 200; Content-Type: application/pdf",
+     "read_error": "Read error: Unsupported media: application/pdf (response body exceeds 10 MiB read limit)",
+     "attempts": [
+      "- http: status=200; read_status=unsupported_media; content_type=application/pdf; final_url=http://127.0.0.1:<port>/big.pdf; error=Unsupported media: application/pdf (response body exceeds 10 MiB read limit)"
+     ]
+    },
+    "big.html": {
+     "status": "Page read status: http_error; attempts=1",
+     "http": "HTTP status: 200; Content-Type: text/html",
+     "read_error": "Read error: response body exceeds 10 MiB read limit",
+     "attempts": [
+      "- http: status=200; read_status=http_error; content_type=text/html; final_url=http://127.0.0.1:<port>/big.html; error=response body exceeds 10 MiB read limit"
+     ]
+    },
+    "deny-pdf": {
+     "status": "Page read status: unsupported_media; attempts=2",
+     "http": "HTTP status: 200; Content-Type: application/pdf",
+     "read_error": "Read error: Unsupported media: application/pdf",
+     "attempts": [
+      "- http: status=403; read_status=http_error; content_type=text/html; charset=utf-8; final_url=http://127.0.0.1:<port>/deny-pdf; error=Request failed with status code 403",
+      "- browser: status=200; read_status=unsupported_media; content_type=application/pdf; final_url=http://127.0.0.1:<port>/deny-pdf; error=Unsupported media: application/pdf"
+     ]
+    }
+   },
+   "processes": {
+    "processes_seen": 17,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c08_full_search_statistics": {
+   "pass": true,
+   "checks": {
+    "all 10 read": true,
+    "no page window timeout": true,
+    "statistics equal server events": true,
+    "scope line present": true,
+    "no surviving processes": true
+   },
+   "ms": 11007,
+   "facts": {
+    "ms": 10612,
+    "engines": [
+     "- Google: attempted=true; attempts=1; parsed_count=10; status=completed",
+     "- Bing: attempted=false; attempts=0; parsed_count=0; status=strategy_stopped"
+    ],
+    "stats": "Read statistics: selected=10; candidates_attempted=10; source_read_attempts=10; http_attempts=10; browser_attempts=0; returned=10; states={\"text\":10}; engine_redirects_resolved=0; engine_redirects_unresolved=0",
+    "scope_line": "Statistics scope: source_read_attempts counts started HTTP and browser reads (a request sent, or a browser launch or context begun); reads that only queued are not counted. candidates_attempted counts candidates with at least one started read. Redirects followed within one HTTP read are not counted separately. parsed_count is the rows an engine returned before cross-engine deduplication and the limit. engine_redirects_resolved/unresolved count candidates whose search link was an engine redirect wrapper.",
+    "server_reads": 10,
+    "diagnostics": [],
+    "note": "custom command: node --import preload.mjs?mode=stub <dist>/index.js (product loader, wrapper and allowlist)"
+   },
+   "processes": {
+    "processes_seen": 6,
+    "commands_seen": [
+     "MainThread",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c09_engine_fallback": {
+   "pass": true,
+   "checks": {
+    "Google 429: Bing fills": true,
+    "Google 429: facts on the engine line": true,
+    "Google sorry: Bing fills": true,
+    "Google sorry: facts on the engine line": true,
+    "market by query language": true,
+    "no surviving processes": true
+   },
+   "ms": 10308,
+   "facts": {
+    "429": {
+     "engines": [
+      "- Google: attempted=true; attempts=1; parsed_count=0; status=error; http_status=429; error=Google returned HTTP 429",
+      "- Bing: attempted=true; attempts=1; parsed_count=3; status=completed; http_status=200"
+     ],
+     "candidates": "Search for \"fallback probe\": 3 candidates"
+    },
+    "sorry": {
+     "engines": [
+      "- Google: attempted=true; attempts=1; parsed_count=0; status=error; http_status=200; final_path=/sorry/index; error=Google redirected to /sorry/index (HTTP 200)",
+      "- Bing: attempted=true; attempts=1; parsed_count=3; status=completed; http_status=200"
+     ],
+     "candidates": "Search for \"fallback probe\": 3 candidates"
+    },
+    "market": {
+     "颱風 消息": {
+      "google_hl": "zh-TW",
+      "bing_setlang": "zh-Hant",
+      "bing_cc": "TW"
+     },
+     "typhoon news": {
+      "google_hl": "en",
+      "bing_setlang": "en",
+      "bing_cc": "US"
+     }
+    },
+    "note": "custom command: node --import preload.mjs?mode=engines (real Google/Bing methods on fake engine pages)"
+   },
+   "processes": {
+    "processes_seen": 62,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "exe",
+     "grep",
+     "node",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c10_link_resolution": {
+   "pass": true,
+   "checks": {
+    "JS redirect resolved": true,
+    "302 to PDF resolved quickly": true,
+    "302 to a silent target resolved quickly": true,
+    "no redirect is stayed_on_engine_host": true,
+    "page reads use resolved URLs": true,
+    "no surviving processes": true
+   },
+   "ms": 11190,
+   "facts": {
+    "ms": 10825,
+    "rows": [
+     {
+      "title": "1. Search title: Google js",
+      "url": "URL: http://127.0.0.1:<port>/target/a",
+      "link": "Link: engine redirect from localhost:<port> resolved by navigation in 14 ms",
+      "read_status": "Read status: text",
+      "final_url": "Final URL: http://127.0.0.1:<port>/target/a"
+     },
+     {
+      "title": "Page content:",
+      "url": "",
+      "link": "",
+      "read_status": null,
+      "final_url": ""
+     },
+     {
+      "title": "2. Search title: Google 302pdf",
+      "url": "URL: http://127.0.0.1:<port>/target/doc.pdf",
+      "link": "Link: engine redirect from localhost:<port> resolved by navigation in 5 ms",
+      "read_status": "Read status: unsupported_media",
+      "final_url": "Final URL: http://127.0.0.1:<port>/target/doc.pdf"
+     },
+     {
+      "title": "3. Search title: Google stay",
+      "url": "URL: http://localhost:<port>/goto?k=stay",
+      "link": "Link: engine redirect not resolved (stayed_on_engine_host: the redirect page responded but no navigation left localhost:<port> within 2000 ms); this URL is the engine's redirect wrapper, not the source page",
+      "read_status": "Read status: text",
+      "final_url": "Final URL: http://localhost:<port>/goto?k=stay"
+     },
+     {
+      "title": "Page content:",
+      "url": "",
+      "link": "",
+      "read_status": null,
+      "final_url": ""
+     },
+     {
+      "title": "4. Search title: Bing 302hang",
+      "url": "URL: http://127.0.0.1:<port>/target/hang",
+      "link": "Link: engine redirect from localhost:<port> resolved by navigation in 4 ms",
+      "read_status": "Read status: timeout",
+      "final_url": "Final URL: unknown"
+     },
+     {
+      "title": "5. Search title: Bing 302b",
+      "url": "URL: http://127.0.0.1:<port>/target/b",
+      "link": "Link: engine redirect from localhost:<port> resolved by navigation in 4 ms",
+      "read_status": "Read status: text",
+      "final_url": "Final URL: http://127.0.0.1:<port>/target/b"
+     },
+     {
+      "title": "Page content:",
+      "url": "",
+      "link": "",
+      "read_status": null,
+      "final_url": ""
+     }
+    ],
+    "http_reader_paths": [
+     [
+      "/target/a",
+      null
+     ],
+     [
+      "/target/doc.pdf",
+      null
+     ],
+     [
+      "/target/hang",
+      null
+     ],
+     [
+      "/goto",
+      "stay"
+     ],
+     [
+      "/target/b",
+      null
+     ]
+    ],
+    "stats": "Read statistics: selected=5; candidates_attempted=5; source_read_attempts=6; http_attempts=5; browser_attempts=1; returned=5; states={\"text\":3,\"unsupported_media\":1,\"timeout\":1}; engine_redirects_resolved=4; engine_redirects_unresolved=1",
+    "note": "custom command: node --import preload.mjs?mode=engines&linkResolve=2000; real full Chromium"
+   },
+   "processes": {
+    "processes_seen": 21,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "exe",
+     "grep",
+     "node",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c11_odd_process_name": {
+   "pass": true,
+   "checks": {
+    "discovery and call work": true,
+    "no surviving processes": true
+   },
+   "ms": 741,
+   "facts": {
+    "comm": "a) b c d",
+    "discovery_ms": 364,
+    "diagnostics": [],
+    "status": "Page read status: text; attempts=1"
+   },
+   "processes": {
+    "processes_seen": 7,
+    "commands_seen": [
+     "MainThread",
+     "a) b c d",
+     "grep",
+     "node",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c12_cancel_with_chromium": {
+   "pass": true,
+   "checks": {
+    "Chromium was running": true,
+    "caller cancelled": true,
+    "no 'never retrieved'": true,
+    "no surviving processes": true
+   },
+   "ms": 1948,
+   "facts": {
+    "chromium_running_at_cancel": true,
+    "cancelled": true,
+    "never_retrieved": []
+   },
+   "processes": {
+    "processes_seen": 11,
+    "commands_seen": [
+     "MainThread",
+     "chrome",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c13_timeout_and_load_diagnostics": {
+   "pass": true,
+   "checks": {
+    "timeout names the budget": true,
+    "load failure names the leaf and log": true,
+    "no surviving processes": true
+   },
+   "ms": 2540,
+   "facts": {
+    "timeout_ms": 2503,
+    "timeout_error": "TimeoutError: Web Search timed out before a result was received (startup, initialization, call and cleanup included; DEFAULT_TIMEOUT=3000 ms)",
+    "load_diagnostic": "mcp:web_search: applied_but_unavailable: load: ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception) [causes: McpError: Connection closed]; stderr log: <scratch>/cache/agent-mcp/web_search.stderr.log"
+   },
+   "processes": {
+    "processes_seen": 6,
+    "commands_seen": [
+     "grep",
+     "python",
+     "sh"
+    ],
+    "survivors": []
+   }
+  },
+  "c14_startup_cap": {
+   "pass": true,
+   "checks": {
+    "gives up within about 15 s": true,
+    "diagnostic names the cap and the log": true,
+    "other servers still load": true,
+    "no surviving processes": true
+   },
+   "ms": 14523,
+   "facts": {
+    "load_ms": 14523,
+    "tools": [
+     "local_probe"
+    ],
+    "diagnostic": "mcp:web_search: applied_but_unavailable: load: TimeoutError: Web Search startup timeout (15000 ms) before a result was received (startup, initialization, tool listing and cleanup included; limit is min(15000 ms, DEFAULT_TIMEOUT=300000 ms)); stderr log: <scratch>/cache/agent-mcp/web_search.stderr.log"
+   },
+   "processes": {
+    "processes_seen": 3,
+    "commands_seen": [
+     "grep",
+     "sh",
+     "sleep"
+    ],
+    "survivors": []
+   }
+  },
+  "c15_adversarial_plain_text": {
+   "pass": true,
+   "checks": {
+    "returns text": true,
+    "returns quickly": true,
+    "no surviving processes": true
+   },
+   "ms": 386,
+   "facts": {
+    "ms": 386,
+    "status": "Page read status: text; attempts=1",
+    "length": "Markdown length: returned=10000; original=1048581; limit=10000 Unicode code points"
+   },
+   "processes": {
+    "processes_seen": 3,
+    "commands_seen": [
+     "MainThread",
+     "grep",
+     "sh"
+    ],
+    "survivors": []
+   }
+  }
+ },
+ "default_load": {
+  "tools": [
+   "full-web-search",
+   "get-single-web-page-content",
+   "get-web-search-summaries"
+  ],
+  "diagnostics": [],
+  "ms": 514
+ }
+}
