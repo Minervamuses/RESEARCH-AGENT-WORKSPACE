@@ -6,7 +6,7 @@
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
 | F1 | Complete | F1-S1、F1-S2、F1-S3、F1-S4 | evidence/F1-S1/…F1-S4/ | AF10(b) 待 F7-S2 案例 7 以真實入口確認 | — |
-| F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2 |
+| F2 | In progress | F2-S1、F2-S2 | evidence/F2-S1/、evidence/F2-S2/ | — | F2-S3 |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
@@ -344,3 +344,28 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
 - **限制**：連結或網址長於 10000 code points、橫跨切點時不受保護（掃描有界）；正文上限本身是 10000，實務上不會遇到。
 - **F1 階段結論**：FG1、FG2 的離線、本機與真實 Chromium 證據齊備；AF10(b) 依 phase-1 待 F7-S2 案例 7 經真實入口確認。
 - **下一步**：F2-S2。
+
+### F2-S2 取消、期限後回應與診斷
+- **改動**（FG5、FG6；AF25–AF28、AF31 Python 部分、AF36、AF38；突變 P13、P13c、P18、P18b、P26）：app/agent/mcp.py（startup.py 不需改）。
+  - **取消**：新增 settled_error()：task 已結束且不是被取消時取回其例外。呼叫端取消路徑在 settle 之後取回並記 debug，不再出現「Task exception was never retrieved」（AF25）。
+  - **期限後回應**：work deadline 時沒有結果而取消 task，記為 timed_out。之後 task 不論以何種例外結束（例如遲到回應造成的 TaskGroup／BrokenResourceError），對外一律是 TimeoutError，原例外放在 `__cause__` 並記 debug（AF27）。期限前結束的協定錯誤照舊原樣傳出。
+  - **逾時訊息（FA09、AF28）**：`Web Search timed out before a result was received (startup, initialization, call and cleanup included; DEFAULT_TIMEOUT=<ms> ms)`。
+  - **載入診斷（FA09、AF26）**：新增 _describe_failure：保留 `<類型>: <訊息>`，ExceptionGroup 逐層展開，附 `[causes: …]`，最多 3 個葉例外，多的寫 `(+N more)`。sanitize_stdout 為真的 server 附 `; stderr log: <路徑>`。路徑由 `_mcp_log_dir(create=False)` 與 server 名稱組出，新增的 create 參數讓診斷不建立目錄。前綴 `mcp:<name>: applied_but_unavailable: <stage>:` 與 _spec_to_connection 的型別不變。
+- **測試**（app/tests/test_mcp.py）：
+  - lifecycle server 新增 `late` 模式：等 `_meta.web_search_work_ms` + 100 ms 才回應；
+  - test_web_search_real_session_budget_and_cleanup 在計時前先 import langchain_mcp_adapters.client 與 .sessions（AF38）；
+  - 新測試：
+    - 遲到回應得到含 `DEFAULT_TIMEOUT=800 ms` 的 TimeoutError，訊息不含「unhandled errors in a TaskGroup」，0.8 s 內返回且無殘留；
+    - 呼叫端取消後 task 以 RuntimeError 結束，gc.collect() 後 loop exception handler 沒有「never retrieved」；
+    - task 忽略取消 3 s 時，呼叫端在 1.0 s 內以 TimeoutError 返回（外層 wait_for 0.8+2 s 偵測卡死）；
+    - 經 load_mcp_tools_with_families 載入 spec.env DEFAULT_TIMEOUT=800 的慢啟動 server：1.2 s 內回空工具，診斷含 TimeoutError 與 800 ms；`_bounded_web_search(…, 300001)` 被拒；
+    - web_search 指向立刻 exit 的程式：空工具，診斷為 `…: load: ExceptionGroup: … [causes: McpError: Connection closed]; stderr log: <XDG_CACHE_HOME>/agent-mcp/web_search.stderr.log`；
+    - 有／無 extension 兩種 session 啟動：load 失敗的診斷出現在 extension_startup_diagnostics，load_mcp_tools_with_families 拋例外時出現「MCP loader unavailable: RuntimeError」。
+  - 新測試都把 XDG_CACHE_HOME 設到 tmp_path。
+- **檢查**（app 目錄，沙箱內，XDG_CACHE_HOME、AGENT_LOG_DIR、TMPDIR 隔離）：
+  - focused `pytest tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py -q -p no:cacheprovider`：56 passed。
+  - 判別力與突變（evidence/F2-S2/mutate.py 在 `$TMPDIR` 複本套用，複本不含 app/desktop、app/store；results.jsonl）：
+    - F2-S1 版 mcp.py 失敗 5 個新測試。其中遲到回應為 `ExceptionGroup … anyio.BrokenResourceError`（AF27 重現），取消為 `Task exception was never retrieved`（AF25 重現）。
+    - P13、P13c 被 startup 診斷測試殺死（兩個參數各失敗）；P18、P18b 被預算來源測試殺死；P26 被卡住的取消測試殺死。
+  - 順序無關：單獨執行 `[startup]` 與 `[initialize]` 各連跑 3 次全部 1 passed（約 1.03 s）；整個 test_mcp.py 連跑 3 次全部 41 passed。
+- **下一步**：F2-S3。

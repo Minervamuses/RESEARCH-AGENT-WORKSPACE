@@ -609,6 +609,9 @@ for line in sys.stdin:
     else:
         called = True
         if mode == "tool": time.sleep(2)
+        if mode == "late":
+            # Answer only after the wrapper's work deadline, before its kill deadline.
+            time.sleep((message["params"]["_meta"]["web_search_work_ms"] + 100) / 1000)
         if mode == "grandchild":
             # Stay stuck while an intermediate child detaches a SIGTERM-ignoring grandchild and exits.
             import subprocess
@@ -642,6 +645,9 @@ def _assert_lifecycle_pid_gone(pid_file):
 def test_web_search_real_session_budget_and_cleanup(tmp_path, mode):
     import json
     import time
+
+    import langchain_mcp_adapters.client  # noqa: F401  (first import is not part of the budget)
+    import langchain_mcp_adapters.sessions  # noqa: F401
 
     connection, pid_file = _lifecycle_server(tmp_path, mode)
     async def run():
@@ -768,3 +774,139 @@ def test_web_search_reaps_detached_grandchild_after_intermediate_exits(tmp_path)
             pid, started = marker.read_text().split()
             if _alive(pid, started):
                 os.killpg(int(pid), signal.SIGKILL)
+
+
+def test_web_search_late_response_is_a_plain_timeout(tmp_path):
+    import time
+
+    connection, pid_file = _lifecycle_server(tmp_path, "late")
+    async def run():
+        tools = await mcp_module._load_web_search_tools(connection, 800)
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match=r"before a result was received .*DEFAULT_TIMEOUT=800 ms") as caught:
+            await tools[0].ainvoke({})
+        assert "unhandled errors in a TaskGroup" not in str(caught.value)
+        assert time.monotonic() - started < .8
+        _assert_lifecycle_pid_gone(pid_file)
+    asyncio.run(run())
+
+
+def test_web_search_caller_cancellation_retrieves_late_task_errors():
+    import gc
+
+    seen = []
+    async def raises_on_cancel(_connection, _publish, _work_deadline):
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            await asyncio.sleep(.05)
+            raise RuntimeError("cleanup failed after cancellation")
+    async def run():
+        asyncio.get_running_loop().set_exception_handler(lambda _loop, context: seen.append(context))
+        caller = asyncio.create_task(mcp_module._bounded_web_search({}, raises_on_cancel, 2000))
+        await asyncio.sleep(.05)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        del caller
+        gc.collect()
+        await asyncio.sleep(0)
+    asyncio.run(run())
+    assert not [c for c in seen if "never retrieved" in str(c.get("message", ""))], seen
+
+
+def test_web_search_stuck_cancellation_still_returns_within_budget():
+    import time
+
+    async def ignores_cancellation(_connection, _publish, _work_deadline):
+        loop = asyncio.get_running_loop()
+        end = loop.time() + 3
+        while loop.time() < end:
+            try:
+                await asyncio.sleep(end - loop.time())
+            except asyncio.CancelledError:
+                pass
+    async def run():
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="DEFAULT_TIMEOUT=800 ms"):
+            await asyncio.wait_for(mcp_module._bounded_web_search({}, ignores_cancellation, 800), .8 + 2)
+        assert time.monotonic() - started < 1.0
+    asyncio.run(run())
+
+
+def test_web_search_budget_comes_from_spec_env_and_is_capped(tmp_path):
+    import time
+
+    connection, _pid_file = _lifecycle_server(tmp_path, "startup")
+    spec = mcp_module.MCPServerSpec(
+        "web_search", connection["command"], connection["args"], {"DEFAULT_TIMEOUT": "800"}, sanitize_stdout=False,
+    )
+    diagnostics = []
+    started = time.monotonic()
+    tools, families = asyncio.run(mcp_module.load_mcp_tools_with_families(
+        specs=[spec], diagnostics=diagnostics, reserved_tool_names=set(),
+    ))
+    assert time.monotonic() - started < 1.2
+    assert (tools, families) == ([], {})
+    assert "applied_but_unavailable: load: TimeoutError" in diagnostics[0]
+    assert "DEFAULT_TIMEOUT=800 ms" in diagnostics[0]
+    async def never(_connection, _publish, _work_deadline):
+        raise AssertionError("must not start")
+    with pytest.raises(ValueError, match="1–300000"):
+        asyncio.run(mcp_module._bounded_web_search({}, never, 300001))
+
+
+def test_web_search_load_failure_names_the_cause_and_log(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    spec = mcp_module.MCPServerSpec(
+        "web_search", sys.executable, ["-c", "import sys; sys.exit(3)"], {"DEFAULT_TIMEOUT": "5000"},
+    )
+    diagnostics = []
+    tools, families = asyncio.run(mcp_module.load_mcp_tools_with_families(
+        specs=[spec], diagnostics=diagnostics, reserved_tool_names=set(),
+    ))
+    assert (tools, families) == ([], {})
+    [detail] = diagnostics
+    assert detail.startswith("mcp:web_search: applied_but_unavailable: load: ")
+    assert "[causes: McpError: Connection closed]" in detail, detail
+    assert detail.endswith(f"; stderr log: {tmp_path}/agent-mcp/web_search.stderr.log")
+
+
+@pytest.mark.parametrize("with_extension", [False, True])
+def test_startup_reports_load_failures_and_unavailable_loader(monkeypatch, tmp_path, with_extension):
+    from types import SimpleNamespace
+    from conftest import make_astream_graph
+    from agent.config import AgentConfig
+    from agent.session import ChatSession
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    broken = mcp_module.MCPServerSpec("broken", "broken", [], {})
+    dropin = mcp_module.MCPServerSpec("extension", "extension", [], {}, dropin=True)
+    monkeypatch.setattr(mcp_module, "_web_search_spec", lambda: None)
+    monkeypatch.setattr(mcp_module, "_github_spec", lambda: broken)
+    monkeypatch.setattr("agent.extensions.startup.load_extension_startup", lambda *_args, **_kwargs: SimpleNamespace(
+        skills=[], diagnostics=(), mcp_specs=[dropin] if with_extension else [],
+        global_mcp_families={"broken", "extension"}, revision=0,
+    ))
+    monkeypatch.setattr("agent.session.build_graph", lambda *_args, **_kwargs: make_astream_graph())
+    class FakeClient:
+        def __init__(self, connections=None, **_kwargs):
+            self.name = next(iter(connections))
+        async def get_tools(self):
+            raise RuntimeError(f"{self.name} refused to load")
+    import langchain_mcp_adapters.client as client_module
+    monkeypatch.setattr(client_module, "MultiServerMCPClient", FakeClient)
+    session = asyncio.run(ChatSession.create(AgentConfig(persist_dir=str(tmp_path / "persist"))))
+    diagnostics = session.extension_startup_diagnostics
+    assert any(item.startswith("mcp:broken: applied_but_unavailable: load: RuntimeError: broken refused to load")
+               for item in diagnostics), diagnostics
+    assert any(item.startswith("mcp:extension: applied_but_unavailable: load:") for item in diagnostics) == with_extension
+
+    async def unavailable(*_args, **_kwargs):
+        raise RuntimeError("loader exploded")
+    monkeypatch.setattr(mcp_module, "load_mcp_tools_with_families", unavailable)
+    session = asyncio.run(ChatSession.create(AgentConfig(persist_dir=str(tmp_path / "persist2"))))
+    assert "MCP loader unavailable: RuntimeError" in session.extension_startup_diagnostics
+    assert list(session.extra_tools) == []

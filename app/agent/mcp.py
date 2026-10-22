@@ -188,11 +188,30 @@ def resolve_mcp_specs(*, diagnostics: list[str] | None = None) -> list[MCPServer
     return specs
 
 
-def _mcp_log_dir() -> str:
+def _mcp_log_dir(*, create: bool = True) -> str:
     base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     path = os.path.join(base, "agent-mcp")
-    os.makedirs(path, exist_ok=True)
+    if create:
+        os.makedirs(path, exist_ok=True)
     return path
+
+
+def _describe_failure(exc: BaseException) -> str:
+    """Type and message, plus up to three leaf causes of nested exception groups."""
+    text = f"{type(exc).__name__}: {exc}"
+    leaves: list[BaseException] = []
+    pending = [exc]
+    while pending:
+        current = pending.pop(0)
+        if isinstance(current, BaseExceptionGroup):
+            pending[:0] = list(current.exceptions)
+        elif current is not exc:
+            leaves.append(current)
+    if not leaves:
+        return text
+    causes = "; ".join(f"{type(leaf).__name__}: {leaf}" for leaf in leaves[:3])
+    more = f" (+{len(leaves) - 3} more)" if len(leaves) > 3 else ""
+    return f"{text} [causes: {causes}{more}]"
 
 
 def _rotate_log(log_path: str) -> None:
@@ -294,6 +313,10 @@ async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
     """Bound one web-search session, retaining a received result across cleanup."""
     if not 1 <= timeout_ms <= 300000:
         raise ValueError("Invalid DEFAULT_TIMEOUT: integer milliseconds 1–300000 required")
+    timeout_message = (
+        "Web Search timed out before a result was received "
+        f"(startup, initialization, call and cleanup included; DEFAULT_TIMEOUT={timeout_ms} ms)"
+    )
     loop = asyncio.get_running_loop()
     total = timeout_ms / 1000
     reserve = min(15, max(1.5, total * 0.05), total / 2)
@@ -390,29 +413,42 @@ async def _bounded_web_search(connection: dict, operation, timeout_ms: int):
             # Consume its eventual exception without extending the caller's budget.
             task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
 
+    def settled_error() -> BaseException | None:
+        # Retrieving the outcome also keeps asyncio from reporting it as never retrieved.
+        if task.done() and not task.cancelled():
+            return task.exception()
+        return None
+
+    timed_out = False
     try:
         await asyncio.wait({task}, timeout=max(0, work_deadline - loop.time()))
         if not task.done() and not result:
+            timed_out = True
             task.cancel()
         await settle()
+        error = settled_error()
         if result:
-            if task.cancelled() or not task.done() or task.exception() is not None:
+            if task.cancelled() or not task.done() or error is not None:
                 logger.warning("Web Search cleanup failed after a result was received; retaining result")
             return result[0]
-        if task.done() and not task.cancelled():
-            error = task.exception()
+        if timed_out:
+            # Whatever the cancelled session raised later (a late response can surface as a
+            # TaskGroup error), the fact is that no result arrived within the budget.
             if error is not None:
-                raise error
-        raise TimeoutError(
-            "Web Search timed out before a result was received "
-            "(startup, initialization, call and cleanup included)"
-        )
+                logger.debug("Web Search task ended after its timeout cancellation", exc_info=error)
+            raise TimeoutError(timeout_message) from error
+        if error is not None:
+            raise error
+        raise TimeoutError(timeout_message)
     except asyncio.CancelledError:
         logger.info(
             "Web Search caller cancelled; result_received=%s", bool(result),
         )
         task.cancel()
         await settle()
+        error = settled_error()
+        if error is not None:
+            logger.debug("Web Search task ended after caller cancellation", exc_info=error)
         raise
     finally:
         stop.set()
@@ -503,11 +539,14 @@ async def load_mcp_tools_with_families(
                 client = MultiServerMCPClient(connections=connections)
                 server_tools = await client.get_tools()
         except Exception as exc:
-            logger.warning("MCP server %r failed during %s: %s", spec.name, stage, exc)
+            detail = _describe_failure(exc)
+            if spec.sanitize_stdout:
+                log_path = os.path.join(_mcp_log_dir(create=False), f"{spec.name}.stderr.log")
+                detail += f"; stderr log: {log_path}"
+            logger.warning("MCP server %r failed during %s: %s", spec.name, stage, detail)
             if diagnostics is not None:
                 diagnostics.append(
-                    f"mcp:{spec.name}: applied_but_unavailable: "
-                    f"{stage}: {type(exc).__name__}: {exc}"
+                    f"mcp:{spec.name}: applied_but_unavailable: {stage}: {detail}"
                 )
             continue
         server_names = tuple(
