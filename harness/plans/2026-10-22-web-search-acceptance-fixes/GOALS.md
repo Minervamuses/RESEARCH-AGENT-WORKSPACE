@@ -49,7 +49,7 @@
 | --- | --- | --- |
 | OD1 | Bing `ck/a` 中介頁：Bing 候選的正文讀取實際上只拿到中介頁，而中介頁裡的 href 又是 ck/a | R04 明文禁止擴建 Bing 專用的網址清洗。若要解開 Bing 自家的包裝，或改用真實瀏覽器導覽中介頁，須先修訂 R04。本計劃只在 F6-S3 觀測並記錄 |
 | OD2 | web_search 在啟動時卡住，session 要等整個 DEFAULT_TIMEOUT（預設最長 5 分鐘） | 目前 discovery 與呼叫共用同一個預算上限。是否另設較短的啟動預算屬於產品取捨 |
-| OD3 | 舊計劃目錄、未被呼叫的 Google parser 與舊 content-extractor.ts 的去留 | 已決定：使用者 2026-10-22「舊的用不到的就可以清理了」。已在 FA0 之後清理（見 build-log「規劃後的清理」）：舊計劃目錄移除，需求基準保留為 context 快照；web search MCP 的死碼刪除。孤兒依賴 p-retry、esbuild 仍待決定（依賴變更須另行核准） |
+| OD3 | 舊計劃目錄、未被呼叫的 Google parser 與舊 content-extractor.ts 的去留 | 已決定：使用者 2026-10-22「舊的用不到的就可以清理了」。已在 FA0 之後清理（見 build-log「規劃後的清理」）：舊計劃目錄移除，需求基準保留為 context 快照；web search MCP 的死碼刪除；孤兒依賴 p-retry、esbuild 經使用者同意（「確定沒有的話我同意你刪」）後移除 |
 
 ## 不變條件
 - 舊計劃 S3 的使用者決策照舊：

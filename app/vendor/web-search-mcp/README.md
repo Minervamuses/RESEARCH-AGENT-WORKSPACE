@@ -11,7 +11,7 @@
 - `tests/test-search-result-retention.mjs`：上述行為的離線回歸。封鎖網路、fetch、TLS 與瀏覽器啟動，並以假 Playwright browser 驗證 Brave 被阻擋的情境。
 - `package-lock.json`：補上 `zod` 並對齊 0.3.1 的 lock（MCP SDK 1.15.0、Playwright 1.54.2、TypeScript 5.8.3）。upstream 提交的 lock 停在 0.2.2，而且缺 `zod`。較新的依賴（MCP SDK 1.29、TypeScript 5.9）會讓 `src/index.ts` 的 `server.tool()` 型別檢查出現 TS2589；兩者產生的 `dist` 相同，但為了讓 `npm run build` 乾淨通過，暫不升級。
 - 未帶入 upstream 的 README、`docs/`、`mcp.json` 範例、未使用的 `scripts/bundle.js`、舊式 `.eslintrc.json`，以及需要連網的手動測試腳本。
-- 已刪除 upstream 中從未被呼叫的程式：舊的 `src/content-extractor.ts`、Google 結果解析器、只有它們使用的工具函式與型別，以及沒有任何讀取者的結果欄位（如 `contentPreview`、`wordCount`、`fetchStatus`）。
+- 已刪除 upstream 中從未被呼叫的程式：舊的 `src/content-extractor.ts`、Google 結果解析器、只有它們使用的工具函式與型別，以及沒有任何讀取者的結果欄位（如 `contentPreview`、`wordCount`、`fetchStatus`）；也移除未使用的依賴 `p-retry` 與 `esbuild`（`tsx` 仍自帶 esbuild）。
 
 `app/agent/mcp.py` 預設以 Conda 環境的 `node` 啟動本目錄的 `dist/index.js`；設定 `AGENT_MCP_WEB_SEARCH_COMMAND`／`AGENT_MCP_WEB_SEARCH_ARGS` 可改用其他啟動方式，`AGENT_ENABLE_MCP_WEB_SEARCH=0` 則停用。
 

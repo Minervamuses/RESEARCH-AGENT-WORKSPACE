@@ -83,4 +83,10 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
 - 對執行的影響：
   - acceptance-findings 的行號以 f5cf123 為準，請用 `git show f5cf123:<路徑>` 對照；
   - 舊 content-extractor.ts 的型別相容條款已不再適用；
-  - 孤兒依賴 p-retry、esbuild 仍保留，待使用者決定。
+  - 孤兒依賴 p-retry、esbuild 經使用者同意後移除（見下）。
+- `chore(web-search): drop unused p-retry and esbuild dependencies`：
+  - 使用者回覆：「確定沒有的話我同意你刪」。
+  - 刪除前確認：沒有任何程式、npm script 或設定使用兩者；lockfile 中 p-retry 只有根目錄依賴；esbuild 另由 tsx 依賴，所以仍以 tsx 依賴的身分保留，版本 0.25.5 不變。
+  - 以 `npm uninstall --offline --no-audit --no-fund p-retry esbuild` 移除，lockfile 只刪除 p-retry、retry、@types/retry、is-network-error 與兩個根目錄宣告，沒有升級。
+  - 檢查：`npm ls --all` exit 0；`npm ci --dry-run --offline` exit 0；build exit 0；三份 Node 測試通過；沙箱外 tsx 4.20.3 可轉譯執行 TypeScript。
+  - 本計劃執行時「不新增或升級依賴、不改 lock」的不變條件照舊。
