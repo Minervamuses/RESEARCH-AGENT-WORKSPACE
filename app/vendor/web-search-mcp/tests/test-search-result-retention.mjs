@@ -103,7 +103,7 @@ function fakeBrowser(status, events) {
     url: () => 'https://search.brave.com/search',
   };
   const context = { newPage: async () => page, close: async () => events.push('context-close') };
-  return { isConnected: () => true, newContext: async () => context, close: async () => events.push('browser-close') };
+  return { isConnected: () => true, version: () => '777.0.0.0', newContext: async () => context, close: async () => events.push('browser-close') };
 }
 
 for (const [status, expected] of [[429, 'blocked'], [403, 'blocked'], [200, 'parsed']]) {

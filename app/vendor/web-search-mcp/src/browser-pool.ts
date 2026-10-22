@@ -16,6 +16,11 @@ export function configuredTimeout(): number {
   return Number(raw);
 }
 
+/** FU03: one fixed normal Chrome UA; only the major version comes from the launched browser. */
+export function normalUserAgent(browserVersion: string): string {
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browserVersion.split('.')[0]}.0.0.0 Safari/537.36`;
+}
+
 export function cleanupReserve(total: number): number {
   return Math.min(15000, Math.max(1500, total * 0.05), total / 2);
 }
@@ -114,6 +119,8 @@ export class BrowserPool {
       if (this.browser?.isConnected()) return this.browser;
       if (!this.launching) {
         this.launching = chromium.launch({
+          // FU02: Playwright's full Chromium in new headless mode, not the headless shell.
+          channel: 'chromium',
           headless: process.env.BROWSER_HEADLESS !== 'false',
           timeout: budget?.timeout(OPERATION_TIMEOUTS.launch) ?? OPERATION_TIMEOUTS.launch,
           args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled', this.ownerFlag],
@@ -136,7 +143,7 @@ export class BrowserPool {
       return await budget.wait(this.pages(async () => {
         budget.remaining();
         const browser = await this.getBrowser(budget);
-        const pendingContext = browser.newContext().then(async context => {
+        const pendingContext = browser.newContext({ userAgent: normalUserAgent(browser.version()) }).then(async context => {
           this.contexts.add(context);
           if (budget.signal.aborted) {
             if (await boundedClose(() => context.close())) this.contexts.delete(context);

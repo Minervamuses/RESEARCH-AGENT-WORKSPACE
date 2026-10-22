@@ -8,9 +8,12 @@ const original = chromium.launch;
 const originalFirefox = firefox.launch;
 firefox.launch = async () => { throw new Error('Firefox must never launch'); };
 let launches = 0, alive = 0, contextPeak = 0, closed = 0, http = 0, httpPeak = 0;
+const launchOptions = [], contextOptions = [];
 const browser = {
   isConnected: () => true,
-  newContext: async () => {
+  version: () => '777.0.0.0',
+  newContext: async options => {
+    contextOptions.push(options);
     alive++;
     contextPeak = Math.max(contextPeak, alive);
     let released = false;
@@ -21,7 +24,7 @@ const browser = {
   },
   close: async () => { assert.equal(alive, 0); closed++; },
 };
-chromium.launch = async () => { launches++; await pause(10); return browser; };
+chromium.launch = async options => { launchOptions.push(options); launches++; await pause(10); return browser; };
 try {
   const pool = new BrowserPool();
   const both = await Promise.all([pool.getBrowser(), pool.getBrowser(), pool.getBrowser()]);
@@ -33,6 +36,13 @@ try {
   })));
   assert.equal(contextPeak, 2);
   assert.equal(alive, 0);
+  // FU02/FU03: full Chromium (new headless) and a normal UA from the actual browser version.
+  assert.equal(launchOptions[0].channel, 'chromium');
+  assert.equal(contextOptions.length, 7);
+  for (const options of contextOptions) {
+    assert.match(options.userAgent, /^Mozilla\/5\.0 \(X11; Linux x86_64\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) Chrome\/777\.0\.0\.0 Safari\/537\.36$/);
+    assert.doesNotMatch(options.userAgent, /Headless/);
+  }
   await Promise.all(Array.from({ length: 7 }, () => pool.withHttp(async () => {
     http++; httpPeak = Math.max(httpPeak, http); await pause(5); http--;
   })));
@@ -129,6 +139,7 @@ try {
   let closeFailures = 0;
   chromium.launch = async () => ({
     isConnected: () => true,
+    version: () => '777.0.0.0',
     newContext: async () => ({
       newPage: async () => ({}),
       close: async () => { throw new Error('injected context close failure'); },

@@ -7,7 +7,7 @@
 | --- | --- | --- | --- | --- | --- |
 | F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3（建議順序中先做 F2-S1） |
 | F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
-| F3 | Not started | — | — | — | F3-S1（F2-S1 之後） |
+| F3 | In progress | F3-S1 | evidence/F3-S1/ | — | F3-S2 |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
@@ -208,3 +208,18 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
     - 結果在 evidence/F2-S1/variant-{old,P07,P27}.txt。
 - **限制**：P07b、P07d（可選）未另加測試；PID 重用難以穩定重現。快速失敗路徑的後代回收仍不在範圍（X14）。
 - **下一步**：依建議順序做 F3-S1。
+
+### F3-S1 完整版 Chromium 與一般 UA
+- **改動**（FG9；FU02、FU03）：src/browser-pool.ts。
+  - chromium.launch 加 `channel: 'chromium'`（Playwright 完整版 Chromium，新 headless 模式）；BROWSER_HEADLESS=false 的語意、launch 參數（含既有的 AutomationControlled）、單一 browser、併發上限、owner flag 與收尾都不變。
+  - 新增 `normalUserAgent(version)`：固定格式 `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<主版號>.0.0.0 Safari/537.36`，主版號取自 browser.version()；每個 newContext 都帶這個 UA。不隨機，不做其他擬態。
+- **測試**：browser-lifecycle 的 stub browser 加 `version()`='777.0.0.0' 並記錄 launch 與 newContext 選項，斷言 `channel: 'chromium'`、7 個 context 都收到 `Chrome/777.0.0.0` 且不含 Headless；brokenPool stub 與 retention 的 fakeBrowser 也加 `version()`（phase-3 列出的預期更新）。
+- **檢查**：
+  - 沙箱內：`npm run build` exit 0；retention 15/15、content-contract 4 組、browser-lifecycle 全部 exit 0。
+  - 沙箱外、短 TMPDIR（`mktemp -d /tmp/ws.XXXX`，用完刪除）、PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright：evidence/F3-S1/full-chromium.mjs 經 BrowserPool 開本機頁面（full-chromium.json）：
+    - browser.version() 139.0.7258.5；`navigator.userAgent` 與伺服器收到的 User-Agent 都是 `… Chrome/139.0.0.0 Safari/537.36`，不含 Headless；
+    - 自有 browser 程序（node 的直接子程序，pgid=pid）的 `/proc/<pid>/exe` 是 `~/.cache/ms-playwright/chromium-1181/chrome-linux/chrome`，呼叫期間 7 個後代都不是 headless_shell；
+    - closeAll 後同一腳本以 starttime 檢查：沒有存活的後代。
+  - 晚渲染矩陣以完整版 Chromium 重跑（同一個 evidence/F1-S2/late-render.mjs，結果在 evidence/F3-S1/late-render-full-chromium.json）：與 F1-S2 相同，前八個案例都以 text 取得目標文字（575–1604 ms），5000 ms 者在 3068 ms 以 empty_text 返回並附等待時間，持續輪詢者在 3068 ms 以 text 返回；靜態頁直接走瀏覽器 585 ms，HTTP 已有文字 2 ms。結果相同，不需回到 F1。
+- **發現（屬 F4-S2，不在本步修正）**：沙箱外環境含 DBUS_SESSION_BUS_ADDRESS 時，pool 的 owned 記錄是空的：browser 根程序的 cmdline 只剩 1 個 NUL 欄位，owner flag 只能以空白切分找到（full-chromium.json 的 browserRoot.argv）。這直接重現 AF22；收尾仍無殘留，因為 Playwright 的 close 成功。
+- **下一步**：F3-S2。

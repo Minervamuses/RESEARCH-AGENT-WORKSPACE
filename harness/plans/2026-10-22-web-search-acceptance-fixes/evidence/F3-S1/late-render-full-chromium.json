@@ -1,0 +1,143 @@
+{
+ "label": "after-F3-S1-full-chromium",
+ "node": "v24.18.0",
+ "rows": [
+  {
+   "case": "timer-0",
+   "status": "text",
+   "ms": 589,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET timer 0",
+   "error": null
+  },
+  {
+   "case": "timer-100",
+   "status": "text",
+   "ms": 583,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET timer 100",
+   "error": null
+  },
+  {
+   "case": "timer-300",
+   "status": "text",
+   "ms": 576,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET timer 300",
+   "error": null
+  },
+  {
+   "case": "timer-700",
+   "status": "text",
+   "ms": 785,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET timer 700",
+   "error": null
+  },
+  {
+   "case": "timer-1500",
+   "status": "text",
+   "ms": 1604,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET timer 1500",
+   "error": null
+  },
+  {
+   "case": "fetch-200",
+   "status": "text",
+   "ms": 791,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET fetch 200",
+   "error": null
+  },
+  {
+   "case": "nav-then-fetch-300",
+   "status": "text",
+   "ms": 901,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "Site menu Home About\n\nTARGET main after nav",
+   "error": null
+  },
+  {
+   "case": "csp-timer-300",
+   "status": "text",
+   "ms": 575,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET csp timer 300",
+   "error": null
+  },
+  {
+   "case": "timer-5000",
+   "status": "empty_text",
+   "ms": 3068,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": "No visible text after waiting 3002 ms for client rendering (limit 3000 ms)"
+  },
+  {
+   "case": "polling-forever",
+   "status": "text",
+   "ms": 3068,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET with endless polling",
+   "error": null
+  },
+  {
+   "case": "static-http-has-text",
+   "status": "text",
+   "ms": 2,
+   "attempts": [
+    "http"
+   ],
+   "target": true,
+   "content": "TARGET static text",
+   "error": null
+  },
+  {
+   "case": "static-browser-direct",
+   "ms": 585,
+   "target": true,
+   "content": "TARGET static text"
+  }
+ ]
+}

@@ -1,0 +1,27 @@
+{
+ "browserVersion": "139.0.7258.5",
+ "navigatorUa": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+ "headerUa": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+ "navigatorHasHeadless": false,
+ "headerHasHeadless": false,
+ "poolOwned": [],
+ "browserRoot": {
+  "pid": 148830,
+  "ppid": 148818,
+  "pgrp": 148830,
+  "start": "3767447",
+  "exe": "~/.cache/ms-playwright/chromium-1181/chrome-linux/chrome",
+  "argv": {
+   "nulFields": 1,
+   "ownerFlagAsNulField": false,
+   "ownerFlagAsSpaceToken": true
+  }
+ },
+ "fullChromium": true,
+ "descendantsDuringCall": 7,
+ "distinctExecutables": [
+  "~/.cache/ms-playwright/chromium-1181/chrome-linux/chrome",
+  null
+ ],
+ "survivorsAfterCleanup": []
+}
