@@ -42,6 +42,10 @@
   - test-content-contract.mjs 與 test-browser-lifecycle.mjs 都是靜態 import `../dist`。因此突變複驗必須在含 src、tests、dist 的暫存複本內執行（見 F5-S3）。
   - 只有 retention 會攔截網路與瀏覽器啟動；content-contract 使用本機伺服器，lifecycle 用 stub。
   - 目前沒有任何測試會啟動 dist/index.js。
+- **規劃後的清理（2026-10-22，使用者指示，見 build-log）**：FA0 之後另有清理 commit，移除舊計劃目錄與 web search MCP 的死碼：
+  - 舊 content-extractor.ts、Google parser、未使用的工具函式與型別、只寫不讀的結果欄位，都已刪除；
+  - acceptance-findings 的行號仍以 f5cf123 為準，可用 `git show f5cf123:<路徑>` 對照；utils.ts、types.ts、search-engine.ts 後段、enhanced-content-extractor.ts 後段的現行行號已移動；
+  - 清理後 build、三份 Node 測試、focused pytest 與真實入口 smoke 都通過。
 - **環境事件**：驗收期間主機重開機，`/tmp` 全部清空，舊計劃的 `/tmp/web-search-p*` 證據已不存在。驗收 session 曾三次撞到用量上限，背景工作的輸出檔也遺失（S6）。
 - **未觀察**：修正後的行為；公開引擎在 P2-S3 之後的解析；Bing ck/a 以外的中介頁型態。
 
@@ -76,8 +80,7 @@
 3. **檔案範圍**：
    - 各步驟列出的 production 檔，每步最多 3 個：app/vendor/web-search-mcp/src/*.ts、app/agent/mcp.py、app/agent/startup.py。
    - 既有與新增的測試、README、本計劃目錄都不計入這個數量。
-   - 不修改舊計劃目錄、AGENTS.md、依賴、lock、環境定義或 site-packages。
-   - 舊 content-extractor.ts 只在 tsc 失敗時，做讓建置通過的最小型別相容修改，並記入 build-log。
+   - 不修改 AGENTS.md、依賴、lock、環境定義或 site-packages。
 4. **每步 commit，狀態同步**：
    - 每個 F?-S? 是一個完整、可檢查的改動單位。完成 focused 檢查並更新 build-log（事件紀錄與頂端狀態表都要更新）後，立即在 GUI 本地 commit，成功後才開始下一個改動步驟。
    - 不累積多步再一起提交。

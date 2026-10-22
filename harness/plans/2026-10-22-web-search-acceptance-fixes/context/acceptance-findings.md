@@ -1,7 +1,7 @@
 # 驗收發現（2026-10-22）
 本文件是 2026-10-20 web search／citation 計劃驗收結果的持久紀錄，也是本修正計劃的工作清單。驗收當時的覆核紀錄與 `/tmp` 證據不在 repository 內，主機重開機後也已清除。執行者只依本文件與 repository 現況工作。
 
-- **驗收對象**：GUI 分支 3225a90..f5cf123 的 20 個執行 commit（舊計劃 [harness/plans/2026-10-20-web-search-citation/](../../2026-10-20-web-search-citation/GOALS.md)）。
+- **驗收對象**：GUI 分支 3225a90..f5cf123 的 20 個執行 commit（舊計劃 harness/plans/2026-10-20-web-search-citation/，已於 2026-10-22 移除；需求基準見 [baseline-2026-10-20-goals.md](baseline-2026-10-20-goals.md) 與 [baseline-2026-10-20-source-spec.md](baseline-2026-10-20-source-spec.md)，其他檔案以 `git show f5cf123:<路徑>` 讀取）。
 - **驗收方式**：唯讀。重建 dist 並與 repo dist 逐位元組比對，重跑 Node 測試、focused pytest 與完整 suite；在沙箱外以真實 Python→Node→Chromium 路徑重現；用 155 個單點突變檢查測試敏感度；每個發現至少經一次獨立重現。
 - **結論**：有條件通過。核心目標與流程紀律成立（下節）；下列缺陷沒有一項讓計劃規定的 AC 以其證據類型判為不通過，但多數未記錄在舊 build-log，部分 build-log 敘述與程式不符。
 - **嚴重度**：已依需求校正。minor 表示偏離需求或使用者會遇到的缺陷，但未讓整個目標失效；note 表示觀察。
@@ -103,6 +103,6 @@
 | X09 | web_search 卡住時，session 啟動要等整個 DEFAULT_TIMEOUT（discovery 用的是整次呼叫預算） | 產品取捨，見 GOALS OD2 |
 | X10 | 非 web_search 的 MCP 卡住時，啟動無上限 | 既有問題；舊計劃的時間上限只涵蓋 web_search |
 | X11 | Agent 看到的 URL 是 WHATWG 序列化後的形式，原始觀測值不顯示 | note |
-| X12 | 未被呼叫的 Google parser 死碼，以及舊 content-extractor.ts | 屬清理範圍，見 OD3 |
+| X12 | 未被呼叫的 Google parser 死碼，以及舊 content-extractor.ts | 已於 2026-10-22 依使用者指示清理（OD3），連同其他死碼與只寫不讀的欄位 |
 | X13 | Bing ck/a 中介頁讓 full-web-search 的正文讀取實際上拿不到目標頁 | R04 明文排除「擴建 Bing……網址清洗辭典」，見 OD1 |
 | X14 | 呼叫快速失敗時（server 自行結束、連線關閉），包裝層不會主動回收已自成 session 的後代程序；只有期限到時才強制收尾 | 規劃審查時發現。實際產品路徑中，Chromium 在 Node 結束、DevTools pipe 關閉時會自行退出，未觀察到殘留。屬於 R09 的強化，可列為後續 |

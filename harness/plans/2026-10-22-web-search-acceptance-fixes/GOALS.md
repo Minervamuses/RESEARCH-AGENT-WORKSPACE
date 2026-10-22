@@ -4,7 +4,7 @@
 ## 來源與優先序
 - **S1 使用者要求**：2026-10-22「撰寫修正計劃」。前一則驗收報告列出 14 類缺陷，建議優先處理正文（1–3）與 /proc 解析（8），並詢問是否另立修正計劃；這則要求即是回應。
 - **S2 驗收結果**：[context/acceptance-findings.md](context/acceptance-findings.md)（AF01–AF44、X01–X14）與 [context/mutation-survivors.md](context/mutation-survivors.md)。這兩份是驗收紀錄的持久副本。
-- **S3 需求基準**：舊計劃 [2026-10-20-web-search-citation](../2026-10-20-web-search-citation/GOALS.md) 的 GOALS（U01–U15、A01–A09）與 [原規格 R01–R12](../2026-10-20-web-search-citation/context/source-spec.md)。除本文件明示的衍生解讀外，全部照舊適用。若舊計劃目錄已被移除，可從 git 歷史讀取，例如 `git show f5cf123:harness/plans/2026-10-20-web-search-citation/GOALS.md`。
+- **S3 需求基準**：舊計劃 2026-10-20-web-search-citation 的 GOALS（U01–U15、A01–A09）與原規格 R01–R12，凍結快照為 [context/baseline-2026-10-20-goals.md](context/baseline-2026-10-20-goals.md) 與 [context/baseline-2026-10-20-source-spec.md](context/baseline-2026-10-20-source-spec.md)。除本文件明示的衍生解讀外，全部照舊適用。舊計劃目錄已於 2026-10-22 移除；其他舊計劃檔案（PLANS、phase、build-log）可用 `git show f5cf123:harness/plans/2026-10-20-web-search-citation/<路徑>` 讀取。
 - **S4 使用者在舊計劃的執行政策（S4/S6 原話）**：「完整模式」「一次執行到底」「有問題先紀錄，最後統一彙報」「每一步改動皆強制要求commit」「不準push」「不準創造、切換branch」「存在於gitignore內的東西不必commit」「計劃的精神是end2end執行完成，然後我才會回來人工check」，以及啟動即同步授權沙箱外與連網。本計劃把它們沿用為執行預設；實際授權仍來自使用者送出的啟動提示（[PROMPTS.md](PROMPTS.md)）。
 - **S5 規範**：repository AGENTS.md 與使用者全域規範：Linux、Conda `app`、Poetry、最小修正、新增依賴須經核准。
 - **S6 背景脈絡**：`note/20261022/session-510d4b09-acceptance-analysis/`，使用者對驗收 session 的成本分析，只作背景，不是實作範圍。它記錄了三件事：用量撞限造成大量重跑、`/tmp` 證據跨夜遺失、多代理平行覆核的成本結構。本計劃因此訂下證據入庫、可隨時中斷續作、不依賴大規模平行代理的規則。
@@ -49,7 +49,7 @@
 | --- | --- | --- |
 | OD1 | Bing `ck/a` 中介頁：Bing 候選的正文讀取實際上只拿到中介頁，而中介頁裡的 href 又是 ck/a | R04 明文禁止擴建 Bing 專用的網址清洗。若要解開 Bing 自家的包裝，或改用真實瀏覽器導覽中介頁，須先修訂 R04。本計劃只在 F6-S3 觀測並記錄 |
 | OD2 | web_search 在啟動時卡住，session 要等整個 DEFAULT_TIMEOUT（預設最長 5 分鐘） | 目前 discovery 與呼叫共用同一個預算上限。是否另設較短的啟動預算屬於產品取捨 |
-| OD3 | 舊計劃目錄、未被呼叫的 Google parser 與舊 content-extractor.ts 的去留 | 本計劃不修改舊計劃目錄（它的 build-log 宣稱由本計劃的 acceptance-findings 更正），也不清理死碼。使用者慣例是完成後另行要求移除 |
+| OD3 | 舊計劃目錄、未被呼叫的 Google parser 與舊 content-extractor.ts 的去留 | 已決定：使用者 2026-10-22「舊的用不到的就可以清理了」。已在 FA0 之後清理（見 build-log「規劃後的清理」）：舊計劃目錄移除，需求基準保留為 context 快照；web search MCP 的死碼刪除。孤兒依賴 p-retry、esbuild 仍待決定（依賴變更須另行核准） |
 
 ## 不變條件
 - 舊計劃 S3 的使用者決策照舊：
@@ -63,6 +63,6 @@
   - D05 維持逐次 session。
 - 不新增或升級依賴，不改 lock 與環境定義。只使用既有套件與 Node／Python 內建能力（TextDecoder、AbortSignal.any、AbortSignal.timeout）。
 - 不加入語意評分、詞彙黑名單、class/id 子字串刪除、主文品質分數或站點／引擎專用的網址辭典（R02/R03/R04）。不新增搜尋引擎，不加跨引擎融合。
-- 不修改 AGENTS.md。舊 content-extractor.ts 不整理，只在 tsc 需要時做最小的型別相容修改（沿用 U14）。不修改 site-packages。
+- 不修改 AGENTS.md，不修改 site-packages。舊 content-extractor.ts 已於規劃後的清理中刪除（OD3）。
 - 不 push，不建立或切換 branch，不改 Git identity，不繞過 hooks，不使用付費模型或服務。
 - app/store/ 與 note/20261022/ 是規劃前就已存在的未追蹤使用者資料，不修改、不提交。app/store/ 不讀取內容；note/20261022/ 只作背景閱讀（S6）。

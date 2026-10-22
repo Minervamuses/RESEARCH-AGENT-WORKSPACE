@@ -1,8 +1,10 @@
+> 凍結快照：取自 commit f5cf123 的 `harness/plans/2026-10-20-web-search-citation/GOALS.md`。舊計劃目錄已於 2026-10-22 依使用者指示（「舊的用不到的就可以清理了」）移除，本檔保留作為修正計劃的需求基準。內容逐字保留，只把指向舊計劃其他檔案的連結改為純文字。舊計劃的其他檔案（PLANS、PROMPTS、build/、build-log、context/acceptance.md）可用 `git show f5cf123:harness/plans/2026-10-20-web-search-citation/<路徑>` 讀取。
+
 # Web Search 與 Citation 工程目標
-日期：2026-10-20（Asia/Taipei），A1 修訂 2026-10-21。本文件擁有穩定需求與決策；執行狀態只見 [build-log.md](build-log.md)。
+日期：2026-10-20（Asia/Taipei），A1 修訂 2026-10-21。本文件擁有穩定需求與決策；執行狀態只見 build-log.md（舊計劃）。
 
 ## 來源與優先序
-- S1：[原工程規格完整快照](context/source-spec.md)，版本 1.0，原始檔 gui-web-search-engineering-spec.md，基準 GUI / 7026a70e1d3368d3fc1617cf735c44e9ff0c1b86。這是需求資料，不是執行授權。
+- S1：[原工程規格完整快照](baseline-2026-10-20-source-spec.md)，版本 1.0，原始檔 gui-web-search-engineering-spec.md，基準 GUI / 7026a70e1d3368d3fc1617cf735c44e9ff0c1b86。這是需求資料，不是執行授權。
 - S2：使用者 2026-10-20 回覆本次釐清問題的 annotation 1–8，短引文與歸納見下表。annotation 4 只有選取，沒有新增決策；annotation 5 才提出 10000。
 - S3：同次追加要求：「修改citation skill」「只需要小改」「加一段prompt層級的限制」「不要用web search」「當回傳有問題時誠實告知」「之後觀察違規狀況再決定是否需要更硬的限制」。
 - S4：同次規劃要求：「完整模式」「一次執行到底」「有問題先紀錄，最後統一彙報」「每一步改動皆強制要求commit」「不準push」「不準創造、切換branch」。
@@ -33,9 +35,9 @@
 | U06 | 以 32 GB CPU RAM 作資源背景 | S2-7。不是工具可獨占 32 GB，也不能推導允許無界並行 |
 | U07 | 無額外腳本／MCP 客戶端等相容性需求 | S2-8。仍保留 S1 指定的停用、自訂啟動、候選與 Citation 行為 |
 | U08 | Citation 僅 prompt 小改，不做 runtime 硬封鎖 | S3。「datasite」依 repository 現有名稱正規化為 DataCite；OpenAlex 保留既有 optional 條件 |
-| U09 | 預設一次連續執行，問題記錄後最後統一彙報；每步 commit；禁止 push 與建立／切換分支 | S4。詳見 [執行契約](PLANS.md) |
+| U09 | 預設一次連續執行，問題記錄後最後統一彙報；每步 commit；禁止 push 與建立／切換分支 | S4。詳見 執行契約（舊計劃 PLANS.md） |
 | U10 | end-to-end 執行到完成後才由使用者人工檢查；中途停下來要求授權或等待 review 是錯誤行為 | S6。阻塞只隔離受影響步驟並記錄，其餘工作繼續；最後統一彙報 |
-| U11 | 使用者授權執行本計劃時，同時授權在宿主沙箱外執行計劃列明的檢查並連網；沙箱外仍失敗時如實記錄、不停下等待，計劃繼續做完 | S6。範圍與環境設定見 [PLANS 宿主沙箱與執行環境](PLANS.md)；不擴大為新依賴、付費呼叫、push 或發佈授權；不為遷就沙箱把 TMPDIR 或 proxy 變數加入產品 web_search 環境 allowlist |
+| U11 | 使用者授權執行本計劃時，同時授權在宿主沙箱外執行計劃列明的檢查並連網；沙箱外仍失敗時如實記錄、不停下等待，計劃繼續做完 | S6。範圍與環境設定見 PLANS 宿主沙箱與執行環境（舊計劃 PLANS.md）；不擴大為新依賴、付費呼叫、push 或發佈授權；不為遷就沙箱把 TMPDIR 或 proxy 變數加入產品 web_search 環境 allowlist |
 | U12 | full-web-search 與 get-web-search-summaries 的文字輸出都帶出各引擎狀態與每筆候選來源引擎，並有檢查輸出文字的斷言；AC05 驗收類型為「離線＋輸出文字」；P4-S3 點名 summaries 每次呼叫的 closeAll | S6「同意」 |
 | U13 | 局部 timeout = min(該操作上限, 剩餘預算)；現有局部上限（使用者所說的 3／4／6／8 秒）依現行語意作為可調整初始值 | S6「同意」。語意對照（PLANS 基線）：引擎內單次導覽／HTTP 請求 4 秒（search-engine.ts:58 min(timeout/3, 4000)，呼叫端未傳 timeout 時實為約 3.3 秒）；selector 等待 2–3 秒；單頁 HTTP／導覽 6 秒；搜尋後正文單頁整體 8 秒。4 秒不是含 launch 與重試的整個引擎嘗試上限；整個引擎嘗試與整次呼叫只受剩餘預算限制。具名常數集中保存，不新增環境設定；DEFAULT_TIMEOUT 只表示整次呼叫總預算 |
 | U14 | vendor README 新增（而非更新）直接相關設定表；content-extractor.ts 允許為建置通過的最小型別相容修改 | S6。仍不整理或重構 content-extractor.ts |

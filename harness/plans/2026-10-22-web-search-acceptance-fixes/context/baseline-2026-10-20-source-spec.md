@@ -1,3 +1,5 @@
+> 凍結快照：取自 commit f5cf123 的 `harness/plans/2026-10-20-web-search-citation/context/source-spec.md`。舊計劃目錄已於 2026-10-22 依使用者指示（「舊的用不到的就可以清理了」）移除，本檔保留作為修正計劃的需求基準。內容逐字保留，只把指向舊計劃其他檔案的連結改為純文字。舊計劃的其他檔案（PLANS、PROMPTS、build/、build-log、context/acceptance.md）可用 `git show f5cf123:harness/plans/2026-10-20-web-search-citation/<路徑>` 讀取。
+
 # GUI 分支 Web Search MCP 工程規格
 
 本次工程將 Web Search MCP 收斂為忠實的網頁資料取得工具，修正內容被改寫、候選來源被丟棄、執行結果被誤報，以及瀏覽器與程序收尾不可靠的問題。既有主 Agent 負責理解、相關性判斷與下一步選擇；論文搜尋與引用維持 Citation skill 的 Crossref／DataCite 主線。

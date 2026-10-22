@@ -152,5 +152,4 @@ build、Node 測試、記錄後 commit：`fix(web-search): truncate Markdown in 
 
 ## 階段界線
 - 不加入主文辨識、品質分數或任何刪除規則；不改候選選擇、長度上限或 includeContent 語意。
-- 舊 content-extractor.ts 只在 tsc 因 types.ts 變更而失敗時，做最小相容修改。
 - 操作總時間上限與每頁視窗屬於 F3，可見狀態欄位的整理屬於 F4。本階段只新增實作需要的 PageRead 欄位（編碼、等待時間）。

@@ -63,3 +63,24 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 18 個步驟章節與所有被引用的步驟 ID 一致；AF01–AF44 都有處置；plan-index 的目標覆蓋與 GOALS 一致。
   - 13 檔都是 UTF-8／LF，沒有 CR 與行尾空白。
 - 計劃準備狀態：可啟動。所有實作階段為 Not started。提交使用 [FA0]，可由 git log 查得實際 commit。
+
+## 規劃後的清理（2026-10-22，使用者指示）
+- 使用者對 OD3 的回覆：「舊的用不到的就可以清理了」，並要求除了清理以外，其他部分先不要動手（OD1 Bing、OD2 啟動上限都不變）。這次清理不屬於 F1–F6 的任何步驟，也沒有開始執行本計劃。
+- `refactor(web-search): remove dead code from the vendored server`（commit 由 git log 查得），行為不變：
+  - 刪除舊 src/content-extractor.ts、Google parser（parseSearchResults、cleanGoogleUrl）；
+  - 刪除未使用的工具函式與型別，以及只寫不讀的結果欄位（fullContent、contentPreview、wordCount、timestamp、fetchStatus、result.error、engine、total_results、search_time_ms）與只服務它們的函式；
+  - 刪除兩個 closeAll 轉呼叫與 RateLimiter.getStatus，內聯 validateAndConvertArgs；
+  - 測試改讀 read.status 與 read.content。
+- 該 commit 的檢查：
+  - npm run build exit 0；dist 的 .js、.d.ts 與乾淨重建一致；
+  - retention 15/15、content-contract 3 組、browser-lifecycle 通過；
+  - focused pytest 67 passed；
+  - 經真實 Python→Node 入口讀本機頁面成功（沙箱內，HTTP 路徑）。
+- `chore(plan): retire the completed web search citation plan`：
+  - 移除 harness/plans/2026-10-20-web-search-citation/；
+  - 需求基準以凍結快照保存為 context/baseline-2026-10-20-goals.md 與 context/baseline-2026-10-20-source-spec.md（內容逐字保留，只把指向舊計劃其他檔案的連結改為純文字）；
+  - 同步更新 GOALS（S3、OD3、不變條件）、PLANS（基線、檔案範圍）、phase-1 階段界線、acceptance-findings（連結、X12）。
+- 對執行的影響：
+  - acceptance-findings 的行號以 f5cf123 為準，請用 `git show f5cf123:<路徑>` 對照；
+  - 舊 content-extractor.ts 的型別相容條款已不再適用；
+  - 孤兒依賴 p-retry、esbuild 仍保留，待使用者決定。
