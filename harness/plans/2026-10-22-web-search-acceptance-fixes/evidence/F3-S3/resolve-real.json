@@ -1,0 +1,142 @@
+{
+ "linkResolveMs": 2000,
+ "searchElapsedMs": 2730,
+ "engines": [
+  {
+   "name": "Google",
+   "attempted": true,
+   "attempts": 1,
+   "parsedCount": 5,
+   "status": "completed"
+  },
+  {
+   "name": "Bing",
+   "attempted": false,
+   "attempts": 0,
+   "parsedCount": 0,
+   "status": "strategy_stopped"
+  }
+ ],
+ "results": [
+  {
+   "title": "js",
+   "url": "http://127.0.0.1:<port>/target/js",
+   "observedUrl": "/goto?k=js",
+   "resolution": {
+    "wrapperUrl": "http://localhost:<port>/goto?k=js",
+    "outcome": "resolved",
+    "ms": 13
+   }
+  },
+  {
+   "title": "302",
+   "url": "http://127.0.0.1:<port>/target/302",
+   "observedUrl": "/goto?k=302",
+   "resolution": {
+    "wrapperUrl": "http://localhost:<port>/goto?k=302",
+    "outcome": "resolved",
+    "ms": 7
+   }
+  },
+  {
+   "title": "pdf",
+   "url": "http://127.0.0.1:<port>/target/doc.pdf",
+   "observedUrl": "/goto?k=pdf",
+   "resolution": {
+    "wrapperUrl": "http://localhost:<port>/goto?k=pdf",
+    "outcome": "resolved",
+    "ms": 10
+   }
+  },
+  {
+   "title": "hang",
+   "url": "http://127.0.0.1:<port>/target/hang",
+   "observedUrl": "/goto?k=hang",
+   "resolution": {
+    "wrapperUrl": "http://localhost:<port>/goto?k=hang",
+    "outcome": "resolved",
+    "ms": 8
+   }
+  },
+  {
+   "title": "stay",
+   "url": "http://localhost:<port>/goto?k=stay",
+   "observedUrl": "/goto?k=stay",
+   "resolution": {
+    "wrapperUrl": "http://localhost:<port>/goto?k=stay",
+    "outcome": "stayed_on_engine_host",
+    "ms": 2001,
+    "reason": "the redirect page responded but no navigation left localhost:<port> within 2000 ms"
+   }
+  }
+ ],
+ "serverLog": [
+  {
+   "host": "localhost:<port>",
+   "path": "/search?q=x&hl=en&num=5",
+   "referer": null
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/favicon.ico",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/goto?k=js",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "127.0.0.1:<port>",
+   "path": "/target/js",
+   "referer": "http://localhost:<port>/"
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/goto?k=302",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "127.0.0.1:<port>",
+   "path": "/target/302",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/goto?k=pdf",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "127.0.0.1:<port>",
+   "path": "/target/doc.pdf",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/goto?k=hang",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "127.0.0.1:<port>",
+   "path": "/target/hang",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "127.0.0.1:<port>",
+   "path": "/favicon.ico",
+   "referer": "http://127.0.0.1:<port>/target/302"
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/goto?k=stay",
+   "referer": "http://localhost:<port>/search?q=x&hl=en&num=5"
+  },
+  {
+   "host": "localhost:<port>",
+   "path": "/favicon.ico",
+   "referer": "http://localhost:<port>/goto?k=stay"
+  }
+ ],
+ "descendantsDuringCall": 7,
+ "survivorsAfterCleanup": []
+}

@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
-import type { Page } from 'playwright';
-import { SearchOptions, SearchResult, SearchResultWithMetadata, SearchEngineState } from './types.js';
+import type { Page, Request } from 'playwright';
+import { SearchOptions, SearchResult, SearchResultWithMetadata, SearchEngineState, LinkResolution } from './types.js';
 import { sanitizeQuery } from './utils.js';
 import { RateLimiter } from './rate-limiter.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
@@ -11,6 +11,9 @@ export function queryMarket(query: string): { googleHl: string; bingSetlang: str
     ? { googleHl: 'zh-TW', bingSetlang: 'zh-Hant', bingCc: 'TW' }
     : { googleHl: 'en', bingSetlang: 'en', bingCc: 'US' };
 }
+
+/** Admits one engine's parsed batch; engine methods call it inside their own page lease. */
+type Admit = (batch: SearchResult[], page: Page) => Promise<void>;
 
 export class SearchEngine {
   // Search addresses are overridable static members (tests, local fake engines), not environment settings.
@@ -31,8 +34,8 @@ export class SearchEngine {
     const { query, numResults = 5 } = options;
     const budget = options.budget ?? new CallBudget(options.timeout);
     const approaches = [
-      { method: this.tryGoogleSearch.bind(this), name: 'Google' },
-      { method: this.tryBingSearch.bind(this), name: 'Bing' },
+      { method: this.tryGoogleSearch.bind(this), name: 'Google', host: SearchEngine.googleHost },
+      { method: this.tryBingSearch.bind(this), name: 'Bing', host: SearchEngine.bingHost },
     ];
     const engines: SearchEngineState[] = approaches.map(({ name }) => ({
       name, attempted: false, attempts: 0, parsedCount: 0, status: 'strategy_stopped',
@@ -46,35 +49,24 @@ export class SearchEngine {
         if (results.length >= numResults) continue;
         if (budget.signal.aborted) { state.error = String(budget.signal.reason); continue; }
         state.attempted = true;
+        // A method abandoned at the call deadline may still run; it must not change results afterwards.
+        let open = true;
+        const admit: Admit = (batch, page) => this.admitBatch(batch, page, approach, {
+          results, byUrl, numResults, budget, open: () => open,
+        });
         try {
           const batch = await budget.wait(approach.method(
-            sanitizeQuery(query), numResults, budget.timeout(OPERATION_TIMEOUTS.searchRequest), state, budget,
+            sanitizeQuery(query), numResults, budget.timeout(OPERATION_TIMEOUTS.searchRequest), state, budget, admit,
           ));
           state.parsedCount = batch.length;
           state.status = batch.length ? 'completed' : 'zero_parsed';
-          for (const item of batch) {
-            let url: URL;
-            try {
-              url = new URL(item.url);
-              if (!['http:', 'https:'].includes(url.protocol)) continue;
-            } catch { continue; }
-            const previous = byUrl.get(url.href);
-            if (previous) {
-              if (!previous.sourceEngines!.includes(approach.name)) previous.sourceEngines!.push(approach.name);
-              continue;
-            }
-            if (results.length >= numResults) continue;
-            const candidate: SearchResult = {
-              ...item, url: url.href, observedUrl: item.observedUrl ?? item.url,
-              sourceEngines: [approach.name],
-            };
-            results.push(candidate);
-            byUrl.set(url.href, candidate);
-          }
         } catch (error) {
           state.status = 'error';
           state.error = error instanceof Error ? error.message : String(error);
-        } finally { state.attempts = Math.max(1, state.attempts); }
+        } finally {
+          open = false;
+          state.attempts = Math.max(1, state.attempts);
+        }
       }
     };
     try {
@@ -89,8 +81,123 @@ export class SearchEngine {
     return { results, engines };
   }
 
+  /**
+   * Admits a batch in order: candidates fill to the limit at once (so a call deadline never loses
+   * them), then engine redirect wrappers are resolved on the engine's own page, one by one (FA14).
+   * A wrapper that resolves to a known URL merges its provenance and lets the next item in.
+   */
+  private async admitBatch(
+    batch: SearchResult[], page: Page, engine: { name: string; host: string },
+    call: { results: SearchResult[]; byUrl: Map<string, SearchResult>; numResults: number; budget: CallBudget; open: () => boolean },
+  ): Promise<void> {
+    const { results, byUrl, numResults, budget, open } = call;
+    const referer = page.url();
+    const queue: SearchResult[] = [];
+    for (const item of batch) {
+      try {
+        const url = new URL(item.url);
+        if (['http:', 'https:'].includes(url.protocol)) queue.push({ ...item, url: url.href });
+      } catch { /* Not a navigable result address. */ }
+    }
+    const isWrapper = (url: string) => new URL(url).host === engine.host;
+    const merge = (candidate: SearchResult, previous: SearchResult) => {
+      for (const name of candidate.sourceEngines!) if (!previous.sourceEngines!.includes(name)) previous.sourceEngines!.push(name);
+    };
+    const wrappers: SearchResult[] = [];
+    const fill = () => {
+      while (results.length < numResults && queue.length) {
+        const item = queue.shift()!;
+        const candidate: SearchResult = { ...item, observedUrl: item.observedUrl ?? item.url, sourceEngines: [engine.name] };
+        const previous = byUrl.get(candidate.url);
+        if (previous) { merge(candidate, previous); continue; }
+        if (isWrapper(candidate.url)) {
+          candidate.resolution = { wrapperUrl: candidate.url, outcome: 'not_started', reason: 'call deadline reached before resolution started' };
+          wrappers.push(candidate);
+        }
+        results.push(candidate);
+        byUrl.set(candidate.url, candidate);
+      }
+    };
+    fill();
+    for (let index = 0; index < wrappers.length && open(); index++) {
+      const candidate = wrappers[index];
+      let capMs: number;
+      try { capMs = budget.timeout(OPERATION_TIMEOUTS.linkResolve); } catch { break; }
+      const wrapperUrl = candidate.url;
+      candidate.resolution = { wrapperUrl, outcome: 'timeout', reason: 'call deadline reached during resolution' };
+      const found = await this.resolveWrapper(page, wrapperUrl, engine.host, referer, capMs);
+      if (!open()) return;
+      candidate.resolution = { wrapperUrl, ...found.resolution };
+      if (!found.url) continue;
+      const resolved = new URL(found.url).href;
+      byUrl.delete(wrapperUrl);
+      const previous = byUrl.get(resolved);
+      if (previous) {
+        merge(candidate, previous);
+        results.splice(results.indexOf(candidate), 1);
+        fill();
+      } else {
+        candidate.url = resolved;
+        byUrl.set(resolved, candidate);
+      }
+    }
+    // Items past the limit only add provenance when they are already known; wrappers are not followed.
+    for (const item of queue) {
+      const previous = byUrl.get(item.url);
+      if (previous && !previous.sourceEngines!.includes(engine.name)) previous.sourceEngines!.push(engine.name);
+    }
+  }
+
+  /**
+   * Follows one wrapper on the search page itself, referred by the search page. The first main-frame
+   * navigation request whose host is not the engine host is the destination; its response is not awaited.
+   */
+  private async resolveWrapper(
+    page: Page, wrapperUrl: string, host: string, referer: string, capMs: number,
+  ): Promise<{ url?: string; resolution: Omit<LinkResolution, 'wrapperUrl'> }> {
+    const begin = performance.now();
+    const ms = () => Math.round(performance.now() - begin);
+    let onRequest: (request: Request) => void = () => undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let committed = false;
+    try {
+      const destination = new Promise<string>(resolve => {
+        onRequest = request => {
+          try {
+            if (request.isNavigationRequest() && request.frame() === page.mainFrame()
+              && new URL(request.url()).host !== host) resolve(request.url());
+          } catch { /* Requests without a frame or URL are not navigations of this page. */ }
+        };
+        page.on('request', onRequest);
+      });
+      const failure = new Promise<unknown>(resolve => {
+        // The interrupted or late navigation promise is always handled here.
+        page.goto(wrapperUrl, { referer, waitUntil: 'commit', timeout: capMs }).then(
+          () => { committed = true; },
+          error => { if ((error as any)?.name !== 'TimeoutError') resolve(error); },
+        );
+      });
+      const expired = new Promise<void>(resolve => { timer = setTimeout(resolve, capMs); });
+      const outcome = await Promise.race([
+        destination.then(url => ({ url })), failure.then(error => ({ error })), expired.then(() => ({})),
+      ]);
+      if ('url' in outcome) return { url: outcome.url, resolution: { outcome: 'resolved', ms: ms() } };
+      if ('error' in outcome) {
+        const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+        return { resolution: { outcome: 'failed', ms: ms(), reason: message.split('\n')[0].replace(/\x1b\[[0-9;]*m/g, '').trim() } };
+      }
+      return committed
+        ? { resolution: { outcome: 'stayed_on_engine_host', ms: ms(), reason: `the redirect page responded but no navigation left ${host} within ${capMs} ms` } }
+        : { resolution: { outcome: 'timeout', ms: ms(), reason: `the redirect page did not respond within ${capMs} ms` } };
+    } finally {
+      page.off('request', onRequest);
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   private async tryGoogleSearch(
     query: string, numResults: number, timeout: number, state: SearchEngineState | undefined, budget: CallBudget,
+    admit?: Admit,
   ): Promise<SearchResult[]> {
     return this.browserPool.withPage(async page => {
       if (state) state.attempts = 1;
@@ -105,12 +212,15 @@ export class SearchEngine {
       const finalPath = new URL(page.url()).pathname;
       if (finalPath.startsWith('/sorry/')) throw new Error(`Google redirected to ${finalPath} (HTTP ${status ?? 'unknown'})`);
       await this.waitForResults(page, '#search a h3, #rso a h3', budget);
-      return this.parseGoogleResults(await page.content(), numResults, page.url());
+      const batch = this.parseGoogleResults(await page.content(), page.url());
+      await admit?.(batch, page);
+      return batch;
     }, budget);
   }
 
   private async tryBingSearch(
     query: string, numResults: number, timeout: number, state: SearchEngineState | undefined, budget: CallBudget,
+    admit?: Admit,
   ): Promise<SearchResult[]> {
     return this.browserPool.withPage(async page => {
       if (state) state.attempts = 1;
@@ -124,7 +234,9 @@ export class SearchEngine {
       const status = response?.status();
       if (status !== undefined && status >= 400) throw new Error(`Bing returned HTTP ${status}`);
       await this.waitForResults(page, '#b_results > li.b_algo', budget);
-      return this.parseBingResults(await page.content(), numResults, page.url());
+      const batch = this.parseBingResults(await page.content(), page.url());
+      await admit?.(batch, page);
+      return batch;
     }, budget);
   }
 
@@ -135,14 +247,14 @@ export class SearchEngine {
     budget.remaining();
   }
 
-  private parseGoogleResults(html: string, maxResults: number, pageUrl = SearchEngine.googleSearchUrl): SearchResult[] {
+  /** Every result link on the page; admission applies the limit, so duplicates can be replaced. */
+  private parseGoogleResults(html: string, pageUrl = SearchEngine.googleSearchUrl): SearchResult[] {
     const $ = cheerio.load(html);
     const baseUrl = this.searchPageBase($, pageUrl);
     const root = $('#search').length ? $('#search').first() : $('#rso').first();
     const anchors = root.find('a:has(h3)');
     const results: SearchResult[] = [];
     anchors.each((_index, anchor) => {
-      if (results.length >= maxResults) return false;
       const href = $(anchor).attr('href');
       if (!href || !this.isValidSearchUrl(href, baseUrl)) return;
       // The result block is the largest ancestor holding only this result link.
@@ -162,14 +274,13 @@ export class SearchEngine {
     return results;
   }
 
-  private parseBingResults(html: string, maxResults: number, pageUrl = SearchEngine.bingSearchUrl): SearchResult[] {
+  private parseBingResults(html: string, pageUrl = SearchEngine.bingSearchUrl): SearchResult[] {
     const $ = cheerio.load(html);
     const baseUrl = this.searchPageBase($, pageUrl);
     // Only organic results; sidebar modules are never counted as results.
     const items = $('#b_results > li.b_algo');
     const results: SearchResult[] = [];
     items.each((_index, element) => {
-      if (results.length >= maxResults) return false;
       const $element = $(element);
       const link = $element.find('h2 a, .b_title a, a[data-seid]').first();
       const href = link.attr('href');

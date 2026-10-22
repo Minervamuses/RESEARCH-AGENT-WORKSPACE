@@ -17,6 +17,14 @@ export interface PageRead {
   error?: string;
 }
 
+export interface LinkResolution {
+  /** Absolute engine redirect wrapper that was navigated (FA14). */
+  wrapperUrl: string;
+  outcome: 'resolved' | 'stayed_on_engine_host' | 'timeout' | 'failed' | 'not_started';
+  ms?: number;
+  reason?: string;
+}
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -24,6 +32,7 @@ export interface SearchResult {
   read?: PageRead;
   sourceEngines?: string[];
   observedUrl?: string;
+  resolution?: LinkResolution;
 }
 
 export interface SearchOptions {

@@ -7,7 +7,7 @@
 | --- | --- | --- | --- | --- | --- |
 | F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3（建議順序中先做 F2-S1） |
 | F2 | In progress | F2-S1 | evidence/F2-S1/ | — | F2-S2（建議順序中先做 F3-S1…S4、F1-S3、F1-S4） |
-| F3 | In progress | F3-S1、F3-S2 | evidence/F3-S1/ | — | F3-S3 |
+| F3 | In progress | F3-S1、F3-S2、F3-S3 | evidence/F3-S1/、evidence/F3-S3/ | — | F3-S4 |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
 | F5 | Not started | — | — | 相依 F4 | — |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
@@ -240,3 +240,38 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
 - **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 20/20、content-contract 4 組、browser-lifecycle 全部 exit 0。
 - **限制**：Google 的 snippet 選擇器（`[data-sncf]`、`.VwiC3b`）與結果區（`#search`／`#rso`）依頁面現況，日後結構變動時 snippet 會留空、或成為零解析；真實頁面由 F7-S3 觀測（FG9 閘門）。其他語言的查詢暫時歸為英文（FA13 已知限制）。
 - **下一步**：F3-S3。
+
+### F3-S3 以實際導覽解析結果網址
+- **改動**（FG9；FU04、X13；FA14）：
+  - src/types.ts：新增 LinkResolution（wrapperUrl、outcome：resolved／stayed_on_engine_host／timeout／failed／not_started、ms、reason），SearchResult 新增 resolution。
+  - src/browser-pool.ts：OPERATION_TIMEOUTS 新增 linkResolve: 6000。
+  - src/search-engine.ts：
+    - 候選的接納移到 admitBatch，由 Google、Bing 方法在自己的 withPage 回呼內、解析完結果後以同一個 page 呼叫（不巢狀 withPage，不開新分頁）。
+    - 第一輪立即依原順序把候選補到 limit；包裝網址（host 等於該引擎的可覆寫搜尋主機）先記為 not_started。所以呼叫期限到時，候選不會遺失。
+    - 第二輪依序解析包裝：referer 為解析前的搜尋頁網址，`goto(waitUntil: 'commit')`，監聽 page 的 request 事件。第一個主框架、host 不是搜尋主機的導覽請求網址就是結果，不等目標回應。上限 min(linkResolve, 剩餘預算)；監聽器與 timer 在 finally 移除，被中斷的 goto promise 都有處理。
+    - 解析出的網址若已存在，合併來源、移除這一筆並補入下一筆；去重以解析後的網址進行。
+    - 結果：committed 但到上限仍未離開搜尋主機 → stayed_on_engine_host；未 committed → timeout；goto 出錯 → failed（錯誤第一行，去掉 ANSI）；期限已到 → 剩餘的保留 not_started。未解析者 url 保留絕對包裝網址。
+    - search() 在每個引擎結束時關閉 admit（open 旗標），在呼叫期限後才結束的方法不能再改動結果。
+    - 解析器不再在 limit 截斷（parsedCount 是頁面上的結果數），由接納套用 limit，重複時才能由下一筆補上。
+- **測試**：
+  - retention（25 項）：engineWith 的 stub 改為呼叫 admit；fake browser 加入 on/off/mainFrame 與包裝行為。新增案例：
+    - 相對 `/goto` 包裝被替換為解析出的網址，observedUrl 為原始 href，resolution 有 wrapperUrl、resolved 與整數 ms；support.google.com 與直接連結不導覽；包裝導覽帶 referer＝搜尋頁網址、waitUntil commit；
+    - linkResolve 縮為 60 ms 時，stayed_on_engine_host、timeout、failed（只留第一行）、resolved 四種各自正確，未解析者保留包裝網址；
+    - 預算 150 ms、包裝都卡住時，4 筆候選都保留包裝網址，第一筆 timeout、最後一筆 not_started（原因含 deadline），1 s 內返回，包裝導覽 ≤2 次；
+    - Google 8 筆、limit 5、第 3 筆解析後與第 1 筆重複 → 只導覽前 6 筆，回傳 t1、t2、t4、t5、t6；
+    - Google 與 Bing 包裝解析到同一網址 → 一筆、來源 `Google, Bing`；
+    - MAX_CONCURRENT_PAGES=1 時搜尋與解析在 900 ms 內完成，不死鎖。
+    - 連跑 8 次全部 exit 0。
+  - browser-lifecycle 的 stub Bing 改為呼叫 admit。
+- **檢查**：
+  - 沙箱內：`npm run build` exit 0；retention 25/25、content-contract 4 組、browser-lifecycle 全部 exit 0。
+  - 真實完整版 Chromium（沙箱外、短 TMPDIR，用完刪除；evidence/F3-S3/resolve-real.mjs → resolve-real.json）：本機伺服器只綁 127.0.0.1，以 `localhost:<port>` 為搜尋主機、linkResolve 縮為 2000 ms，經 `SearchEngine.search()`：
+    - JavaScript 跳轉 13 ms、HTTP 302 7 ms、302 到 application/pdf 10 ms、302 到永不回應的目標 8 ms，全部 resolved 為 `127.0.0.1` 上的目標網址；PDF 與永不回應兩種遠低於上限；
+    - 不跳轉的包裝在 2001 ms 記為 stayed_on_engine_host，url 保留包裝網址；
+    - 伺服器紀錄：每個包裝請求的 Referer 都是搜尋頁網址；
+    - Google completed、Bing strategy_stopped；closeAll 後同一腳本以 starttime 檢查，7 個後代都沒有存活；stderr 沒有 unhandled rejection。
+- **限制**：
+  - 依 FA14，第一個離開搜尋主機的導覽就是結果；若引擎先導到同家的其他主機（例如 consent 頁），會被當成結果。本機（台灣 IP）在 OD1 沒有觀察到。
+  - 對搜尋主機的額外請求是否讓 Google 改為封鎖，由 F7-S3 觀測。
+  - 可見文字留給 F3-S4。
+- **下一步**：F3-S4。

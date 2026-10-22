@@ -17,7 +17,7 @@ const playwright = await import(pathToFileURL(path.join(dist, '..', 'node_module
 for (const browserType of [playwright.chromium, playwright.firefox, playwright.webkit]) {
   browserType.launch = async () => { throw new Error('browser launch blocked in offline test'); };
 }
-const { BrowserPool, CallBudget } = await import(pathToFileURL(path.join(dist, 'browser-pool.js')).href);
+const { BrowserPool, CallBudget, OPERATION_TIMEOUTS } = await import(pathToFileURL(path.join(dist, 'browser-pool.js')).href);
 const { SearchEngine } = await import(pathToFileURL(path.join(dist, 'search-engine.js')).href);
 
 const logs = [];
@@ -32,9 +32,10 @@ function engineWith({ google = [], bing = [] } = {}) {
     ['tryGoogleSearch', 'google', google],
     ['tryBingSearch', 'bing', bing],
   ]) {
-    engine[method] = async () => {
+    engine[method] = async (_query, _n, _timeout, _state, _budget, admit) => {
       attempts.push(name);
       if (value instanceof Error) throw value;
+      await admit(value, { url: () => `https://stub.example/${name}` });
       return value;
     };
   }
@@ -114,12 +115,30 @@ const GOOGLE_HTML = `<html><body><div id="search"><div id="rso">
 <div class="MjjYud"><a href="https://direct.example/page"><h3>Direct result</h3></a></div>
 <div class="MjjYud"><a href="https://support.google.com/x"><h3></h3></a><div data-sncf="1">No title snippet.</div></div>
 </div></div><div id="rhs"><a href="https://side.example/"><h3>Side panel</h3></a></div></body></html>`;
-function fakeBrowser({ status = 200, finalUrl, html = '<html></html>', events, gotos = [] }) {
+// wrappers maps an absolute wrapper URL to { to, delay } (redirect), { stay }, { hang } or { fail }.
+function fakeBrowser({ status = 200, finalUrl, html = '<html></html>', pages = {}, wrappers = {}, events, gotos = [] }) {
   let current;
+  const listeners = new Set();
+  const mainFrame = {};
+  const emit = url => { for (const listener of [...listeners]) listener({ isNavigationRequest: () => true, frame: () => mainFrame, url: () => url }); };
   const page = {
-    goto: async (url, options) => { events.push('goto'); gotos.push({ url, options }); current = finalUrl ?? url; return { status: () => status }; },
+    on: (event, listener) => { if (event === 'request') listeners.add(listener); },
+    off: (event, listener) => { listeners.delete(listener); },
+    mainFrame: () => mainFrame,
+    goto: async (url, options) => {
+      events.push('goto'); gotos.push({ url, options });
+      const behavior = wrappers[url];
+      if (!behavior) { current = finalUrl ?? url; return { status: () => status }; }
+      emit(url);
+      if (behavior.fail) throw new Error(behavior.fail);
+      if (behavior.hang) {
+        return new Promise((_resolve, reject) => setTimeout(() => reject(Object.assign(new Error('Timeout'), { name: 'TimeoutError' })), options.timeout));
+      }
+      if (behavior.to) setTimeout(() => emit(behavior.to), behavior.delay ?? 0);
+      return { status: () => 200 };
+    },
     waitForSelector: async () => { events.push('wait'); },
-    content: async () => { events.push('content'); return html; },
+    content: async () => { events.push('content'); return Object.entries(pages).find(([prefix]) => current.startsWith(prefix))?.[1] ?? html; },
     url: () => current,
   };
   const context = { newPage: async () => page, close: async () => events.push('context-close') };
@@ -160,15 +179,117 @@ check('Google HTTP 200 waits for results and parses the main results area', asyn
     ]);
   });
 });
-check('search() keeps a relative Google wrapper href as an absolute candidate', async () => {
-  await withFakeBrowser({ html: GOOGLE_HTML }, async (engine, budget) => {
+check('search() resolves a relative Google wrapper by navigation, referred by the search page', async () => {
+  const wrapper = 'https://www.google.com/goto?url=CAESabc&x=1';
+  const gotos = [];
+  await withFakeBrowser({ html: GOOGLE_HTML, gotos, wrappers: { [wrapper]: { to: 'https://target.example/a?b=%252F', delay: 5 } } }, async (engine, budget) => {
     engine.tryBingSearch = async () => [];
     const result = await engine.search({ query: 'alpha', numResults: 5, budget });
-    assert.equal(result.results[0].url, 'https://www.google.com/goto?url=CAESabc&x=1');
-    assert.equal(result.results[0].observedUrl, '/goto?url=CAESabc&x=1');
-    assert.equal(result.results.length, 3);
+    const [first, ...rest] = result.results;
+    assert.equal(first.url, 'https://target.example/a?b=%252F');
+    assert.equal(first.observedUrl, '/goto?url=CAESabc&x=1');
+    assert.equal(first.resolution.wrapperUrl, wrapper);
+    assert.equal(first.resolution.outcome, 'resolved');
+    assert.ok(Number.isInteger(first.resolution.ms) && first.resolution.ms >= 0);
+    // support.google.com and direct links are ordinary results, never navigated.
+    assert.deepEqual(rest.map(r => [r.url, r.resolution]), [['https://direct.example/page', undefined], ['https://support.google.com/x', undefined]]);
+    assert.deepEqual(gotos.slice(1).map(g => [g.url, g.options.referer, g.options.waitUntil]), [[wrapper, gotos[0].url, 'commit']]);
     assert.deepEqual(result.engines.map(e => e.status), ['completed', 'zero_parsed']);
   });
+});
+const googlePage = hrefs => `<div id="search">${hrefs.map((href, i) => `<div><a href="${href}"><h3>R${i + 1}</h3></a></div>`).join('')}</div>`;
+check('unresolved wrappers keep the wrapper URL with outcome and reason', async () => {
+  const cap = OPERATION_TIMEOUTS.linkResolve;
+  OPERATION_TIMEOUTS.linkResolve = 60;
+  const base = 'https://www.google.com/goto?k=';
+  try {
+    await withFakeBrowser({
+      html: googlePage(['/goto?k=stay', '/goto?k=hang', '/goto?k=fail', '/goto?k=ok']),
+      wrappers: { [`${base}stay`]: { stay: true }, [`${base}hang`]: { hang: true }, [`${base}fail`]: { fail: 'net::ERR_NAME_NOT_RESOLVED at x\nCall log: y' }, [`${base}ok`]: { to: 'https://ok.example/' } },
+    }, async (engine, budget) => {
+      engine.tryBingSearch = async () => [];
+      const result = await engine.search({ query: 'x', numResults: 4, budget });
+      assert.deepEqual(result.results.map(r => [r.url, r.resolution.outcome]), [
+        [`${base}stay`, 'stayed_on_engine_host'], [`${base}hang`, 'timeout'], [`${base}fail`, 'failed'], ['https://ok.example/', 'resolved'],
+      ]);
+      assert.match(result.results[0].resolution.reason, /responded but no navigation left www\.google\.com within 60 ms/);
+      assert.match(result.results[1].resolution.reason, /did not respond within 60 ms/);
+      assert.equal(result.results[2].resolution.reason, 'net::ERR_NAME_NOT_RESOLVED at x');
+    });
+  } finally { OPERATION_TIMEOUTS.linkResolve = cap; }
+});
+check('near the call deadline wrappers stay candidates and the rest are not started', async () => {
+  const base = 'https://www.google.com/goto?k=';
+  const gotos = [];
+  const keys = ['a', 'b', 'c', 'd'];
+  const begin = performance.now();
+  const events = [];
+  const launch = playwright.chromium.launch;
+  playwright.chromium.launch = async () => fakeBrowser({
+    html: googlePage(keys.map(k => `/goto?k=${k}`)), events, gotos, wrappers: Object.fromEntries(keys.map(k => [`${base}${k}`, { hang: true }])),
+  });
+  const pool = new BrowserPool();
+  const budget = new CallBudget(150);
+  try {
+    const result = await new SearchEngine(pool).search({ query: 'x', numResults: 4, budget });
+    assert.ok(performance.now() - begin < 1000);
+    assert.deepEqual(result.results.map(r => r.url), keys.map(k => `${base}${k}`));
+    const outcomes = result.results.map(r => r.resolution.outcome);
+    assert.equal(outcomes[0], 'timeout');
+    assert.equal(outcomes.at(-1), 'not_started');
+    assert.ok(outcomes.every(o => ['timeout', 'not_started'].includes(o)), outcomes.join());
+    assert.ok(gotos.length - 1 <= 2, `wrapper navigations after the deadline: ${gotos.length - 1}`);
+    assert.match(result.results.at(-1).resolution.reason, /deadline/);
+  } finally {
+    budget.dispose();
+    await pool.closeAll();
+    playwright.chromium.launch = launch;
+  }
+});
+check('only the needed wrappers are resolved; a duplicate lets the next one in, in order', async () => {
+  const base = 'https://www.google.com/goto?n=';
+  const wrappers = Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map(n => [`${base}${n}`, { to: `https://t.example/${n === 3 ? 1 : n}` }]));
+  const gotos = [];
+  await withFakeBrowser({ html: googlePage([1, 2, 3, 4, 5, 6, 7, 8].map(n => `/goto?n=${n}`)), wrappers, gotos }, async (engine, budget) => {
+    const result = await engine.search({ query: 'x', numResults: 5, budget });
+    assert.deepEqual(result.results.map(r => r.url), [1, 2, 4, 5, 6].map(n => `https://t.example/${n}`));
+    assert.deepEqual(gotos.slice(1).map(g => g.url), [1, 2, 3, 4, 5, 6].map(n => `${base}${n}`));
+    assert.deepEqual(result.results[0].sourceEngines, ['Google']);
+    assert.equal(result.engines[0].parsedCount, 8);
+  });
+});
+const BING_WRAPPED = '<ol id="b_results"><li class="b_algo"><h2><a href="https://www.bing.com/ck/a?u=1">T</a></h2></li>'
+  + '<li class="b_algo"><h2><a href="https://www.bing.com/ck/a?u=2">U</a></h2></li></ol>';
+const crossEngine = {
+  pages: { 'https://www.google.com/search': googlePage(['/goto?g=1']), 'https://www.bing.com/search': BING_WRAPPED },
+  wrappers: {
+    'https://www.google.com/goto?g=1': { to: 'https://same.example/target' },
+    'https://www.bing.com/ck/a?u=1': { to: 'https://same.example/target' },
+    'https://www.bing.com/ck/a?u=2': { to: 'https://other.example/' },
+  },
+};
+check('Google and Bing wrappers resolving to one URL merge into one candidate', async () => {
+  await withFakeBrowser(crossEngine, async (engine, budget) => {
+    const result = await engine.search({ query: 'x', numResults: 2, budget });
+    assert.deepEqual(result.results.map(r => [r.url, r.sourceEngines]), [
+      ['https://same.example/target', ['Google', 'Bing']], ['https://other.example/', ['Bing']],
+    ]);
+  });
+});
+check('one page slot (MAX_CONCURRENT_PAGES=1) searches and resolves without deadlock', async () => {
+  const previous = process.env.MAX_CONCURRENT_PAGES;
+  process.env.MAX_CONCURRENT_PAGES = '1';
+  try {
+    await withFakeBrowser(crossEngine, async (engine, budget) => {
+      const result = await Promise.race([
+        engine.search({ query: 'x', numResults: 2, budget }),
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error('deadlock')), 900)),
+      ]);
+      assert.deepEqual(result.results.map(r => r.url), ['https://same.example/target', 'https://other.example/']);
+    });
+  } finally {
+    if (previous === undefined) delete process.env.MAX_CONCURRENT_PAGES; else process.env.MAX_CONCURRENT_PAGES = previous;
+  }
 });
 check('query language selects Google hl and Bing setlang/cc, at overridable addresses', async () => {
   const { queryMarket } = await import(pathToFileURL(path.join(dist, 'search-engine.js')).href);
@@ -287,19 +408,19 @@ check('parsers keep organic results only, short snippets, unknown titles and the
     + '<div class="b_result"><h2><a href="https://module.example/">Module</a></h2></div></div>';
   const html = `<ol id="b_results"><li class="b_algo"><h2><a href="../item?q=%252F">AI</a></h2><div class="b_caption"><p>AI.</p></div></li>`
     + `<li class="b_ans"><h2><a href="https://answer.example/">Answer</a></h2></li></ol>${sidebar}`;
-  const parsed = engine.parseBingResults(html, 5, 'https://www.bing.com/search/path/');
+  const parsed = engine.parseBingResults(html, 'https://www.bing.com/search/path/');
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].description, 'AI.');
   assert.equal(parsed[0].url, 'https://www.bing.com/search/item?q=%252F');
   assert.equal(parsed[0].observedUrl, '../item?q=%252F');
-  assert.deepEqual(engine.parseBingResults(`<ol id="b_results"><li class="b_ans"><h2><a href="https://answer.example/">Answer</a></h2></li></ol>${sidebar}`, 5), []);
-  const [missing] = engine.parseBingResults('<ol id="b_results"><li class="b_algo"><h2><a href="/unknown"></a></h2><p>Known snippet.</p></li></ol>', 1);
+  assert.deepEqual(engine.parseBingResults(`<ol id="b_results"><li class="b_ans"><h2><a href="https://answer.example/">Answer</a></h2></li></ol>${sidebar}`), []);
+  const [missing] = engine.parseBingResults('<ol id="b_results"><li class="b_algo"><h2><a href="/unknown"></a></h2><p>Known snippet.</p></li></ol>');
   assert.equal(missing.title, '');
   assert.equal(missing.description, 'Known snippet.');
   assert.equal(missing.url, 'https://www.bing.com/unknown');
-  const [based] = engine.parseGoogleResults('<base href="/docs/"><div id="search"><a href="next"><h3>T</h3></a></div>', 1, 'https://www.google.com/search?q=x');
+  const [based] = engine.parseGoogleResults('<base href="/docs/"><div id="search"><a href="next"><h3>T</h3></a></div>', 'https://www.google.com/search?q=x');
   assert.equal(based.url, 'https://www.google.com/docs/next');
-  assert.deepEqual(engine.parseGoogleResults('<div id="rhs"><a href="https://side.example/"><h3>Side</h3></a></div>', 5), []);
+  assert.deepEqual(engine.parseGoogleResults('<div id="rhs"><a href="https://side.example/"><h3>Side</h3></a></div>'), []);
 });
 
 let failed = 0;

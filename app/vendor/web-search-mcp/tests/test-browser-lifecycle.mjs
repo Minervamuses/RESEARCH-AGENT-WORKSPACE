@@ -100,9 +100,11 @@ try {
     url: () => 'https://www.google.com/search?q=x',
   };
   const selectorEngine = new SearchEngine({ withPage: (fn, _budget) => fn(selectorPage) });
-  selectorEngine.tryBingSearch = async (_query, _n, _timeout, _state, budget) => {
+  selectorEngine.tryBingSearch = async (_query, _n, _timeout, _state, budget, admit) => {
     assert.ok(budget.remaining() > 100);
-    return [{ title: 'next engine', url: 'https://example.org', description: '' }];
+    const batch = [{ title: 'next engine', url: 'https://example.org', description: '' }];
+    await admit(batch, { url: () => 'https://www.bing.com/search' });
+    return batch;
   };
   const selectorBudget = new CallBudget(300);
   const selectorResult = await selectorEngine.search({ query: 'x', numResults: 1, budget: selectorBudget });
