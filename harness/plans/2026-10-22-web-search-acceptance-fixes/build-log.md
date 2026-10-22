@@ -9,7 +9,7 @@
 | F2 | Complete | F2-S1、F2-S2、F2-S3 | evidence/F2-S1/…F2-S3/ | — | — |
 | F3 | Complete | F3-S1、F3-S2、F3-S3、F3-S4 | evidence/F3-S1/、evidence/F3-S3/ | 真實 Google／Bing 的觀測留給 F7-S3（FG9 閘門） | — |
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
-| F5 | In progress | F5-S0 | build-log（已提交測試） | — | F5-S1 |
+| F5 | In progress | F5-S0、F5-S1 | evidence/F5-S1/ | — | F5-S2 |
 | F6 | Not started | — | — | 相依 F2、F5 | — |
 | F7 | Not started | — | — | 相依 F6 | — |
 
@@ -448,3 +448,32 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
 - **測試**：tests/test-browser-lifecycle.mjs：launch 失敗時 onStart 為 1 次；兩個 slot 被占住時，第三個 lease 在 30 ms 期限內逾期，onStart 為 0 次。
 - **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；browser-lifecycle 連跑 3 次 exit 0；retention 26/26、content-contract 5 組 exit 0。
 - **下一步**：F5-S1。
+
+### F5-S1 引擎執行事實
+- **改動**（FG4；AF11、AF12、AF13、AF32、AF37；突變 N02b、N02c、N02d、N02g、N03b）：
+  - src/types.ts：SearchEngineState 新增 not_attempted 狀態、reason（deadline／cancelled／rate_limited／queue_expired）、httpStatus 與 finalPath；attempted 改為「已有 page lease 開始」。
+  - src/search-engine.ts：
+    - 引擎初始為 not_attempted。前面引擎已達 limit 才標 strategy_stopped。
+    - 迴圈開始一個引擎前若預算已到，標 not_attempted／deadline。
+    - 方法在取得 page slot 之前就因預算中止 → not_attempted／queue_expired；取消一律為 cancelled。
+    - rate limiter 拒絕 → rate_limited；在 rate limiter 佇列中逾期 → queue_expired；進入時就已逾期 → deadline。原本的錯誤文字保留在 error。
+    - attempts 由 F5-S0 的 onStart 計數，移除 `Math.max(1, …)`。
+    - Google 與 Bing 記錄搜尋導覽的 HTTP status；Google 被導到 `/sorry/` 時另記 finalPath。
+  - src/utils.ts：
+    - 引擎行在 `status=` 之後依序加 `reason=`、`http_status=`、`final_path=`，error 維持在最後；
+    - 零候選時分四句：全部失敗、全部零解析、沒有引擎嘗試（附原因）、混合；
+    - strategy_stopped 與 not_attempted 的引擎都列出，合併來源照舊全列。
+  - 逐筆加入的 limit 防護不變（F3-S3 的 fill），本步補上測試。
+- **測試**（retention，31 項）：
+  - engineWith 與期限案例的 stub 改為自己記錄已開始的嘗試（phase-5 列出的預期更新）；期限案例另斷言 Bing 為 not_attempted／deadline／attempts=0。
+  - 新增：
+    - 四種零候選的文字互不相同，且各含對應句子；
+    - 引擎行含 error、含 strategy_stopped 的 Bing、含 reason=deadline，合併來源列出 `Google, Bing`；
+    - 經 fake browser 的真實方法：零解析時 `http_status=200`；Google 429 時 `http_status=429`；`/sorry/` 時 `http_status=200; final_path=/sorry/index`；
+    - rate limit 拒絕、rate limiter 佇列逾期、page slot 佇列逾期三種情形的原因、attempts=0，以及標題不是「No candidates parsed」；
+    - limit 5、Google 2 筆加 Bing 4 筆 → 恰為 5 筆。
+- **檢查**（vendor 目錄，沙箱內）：
+  - `npm run build` exit 0；retention 31/31、content-contract 5 組、browser-lifecycle 全部 exit 0。
+  - 突變（evidence/F5-S1/mutate.py、results.jsonl）：N02b、N02c、N02d、N02g、N03b 全部被 retention 殺死。
+  - 判別力：0f2f25d 的乾淨重建跑新的 retention，5 項失敗（evidence/F5-S1/previous-build-0f2f25d.txt）。
+- **下一步**：F5-S2。

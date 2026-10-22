@@ -1,0 +1,6 @@
+not ok - call expiry preserves fixed candidates and stops remaining engines
+not ok - four kinds of zero candidates read differently
+not ok - engine lines keep errors, strategy_stopped engines, reasons and merged provenance
+not ok - engine lines show the observed HTTP status and Google final path
+not ok - engines that never started say why: deadline, rate limit and queue expiry
+26/31 passed (<scratch>/app/vendor/web-search-mcp/dist)

@@ -1,0 +1,5 @@
+{"mutation":"N02b","test":"test-search-result-retention.mjs","exit":1,"failed":["four kinds of zero candidates read differently", "engines that never started say why: deadline, rate limit and queue expiry"]}
+{"mutation":"N02c","test":"test-search-result-retention.mjs","exit":1,"failed":["a blocked Google (Google returned HTTP 429) is filled by Bing and keeps its facts", "a blocked Google (Google redirected to /sorry/index (HTTP 200)) is filled by Bing and keeps its facts", "engine lines keep errors, strategy_stopped engines, reasons and merged provenance", "engine lines show the observed HTTP status and Google final path"]}
+{"mutation":"N02d","test":"test-search-result-retention.mjs","exit":1,"failed":["engine lines keep errors, strategy_stopped engines, reasons and merged provenance"]}
+{"mutation":"N02g","test":"test-search-result-retention.mjs","exit":1,"failed":["engine lines keep errors, strategy_stopped engines, reasons and merged provenance"]}
+{"mutation":"N03b","test":"test-search-result-retention.mjs","exit":1,"failed":["only the needed wrappers are resolved; a duplicate lets the next one in, in order", "a fill-up batch never exceeds the limit"]}

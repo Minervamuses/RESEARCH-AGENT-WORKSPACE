@@ -32,8 +32,11 @@ function engineWith({ google = [], bing = [] } = {}) {
     ['tryGoogleSearch', 'google', google],
     ['tryBingSearch', 'bing', bing],
   ]) {
-    engine[method] = async (_query, _n, _timeout, _state, _budget, admit) => {
+    engine[method] = async (_query, _n, _timeout, state, _budget, admit) => {
       attempts.push(name);
+      // A stub records its own started attempt (FA07); search() no longer pads attempts.
+      state.attempted = true;
+      state.attempts++;
       if (value instanceof Error) throw value;
       await admit(value, { url: () => `https://stub.example/${name}` });
       return value;
@@ -395,8 +398,10 @@ check('strict content limits, deployment precedence, booleans and Unicode', asyn
 
 check('call expiry preserves fixed candidates and stops remaining engines', async () => {
   const { engine, attempts } = engineWith({ google: [record('known', 'known')] });
-  engine.tryBingSearch = async (_q, _n, _timeout, _state, budget) => {
+  engine.tryBingSearch = async (_q, _n, _timeout, state, budget) => {
     attempts.push('bing');
+    state.attempted = true;
+    state.attempts++;
     return budget.wait(new Promise(() => {}));
   };
   const budget = new CallBudget(20);
@@ -407,8 +412,10 @@ check('call expiry preserves fixed candidates and stops remaining engines', asyn
   assert.equal(result.engines[1].status, 'error');
   assert.match(result.engines[1].error, /deadline/);
   const stuck = engineWith({ bing: [record('late', 'late')] });
-  stuck.engine.tryGoogleSearch = async (_q, _n, _timeout, _state, budget) => {
+  stuck.engine.tryGoogleSearch = async (_q, _n, _timeout, state, budget) => {
     stuck.attempts.push('google');
+    state.attempted = true;
+    state.attempts++;
     return budget.wait(new Promise(() => {}));
   };
   const short = new CallBudget(20);
@@ -417,7 +424,90 @@ check('call expiry preserves fixed candidates and stops remaining engines', asyn
   assert.deepEqual(stuck.attempts, ['google']);
   assert.equal(stopped.results.length, 0);
   assert.equal(stopped.engines[1].attempted, false);
+  assert.deepEqual([stopped.engines[1].status, stopped.engines[1].reason, stopped.engines[1].attempts], ['not_attempted', 'deadline', 0]);
   assert.match(stopped.engines[1].error, /deadline/);
+});
+
+// FA07: why each engine ran or stopped, with observed facts.
+const engineText = r => formatSearchResponse('x', r.results, r.engines);
+check('four kinds of zero candidates read differently', async () => {
+  const error = new Error('Google returned HTTP 429');
+  const failed = await engineWith({ google: error, bing: new Error('Bing returned HTTP 403') }).engine.search({ query: 'x' });
+  const zero = await engineWith().engine.search({ query: 'x' });
+  const expired = new CallBudget(0);
+  const none = await engineWith().engine.search({ query: 'x', budget: expired });
+  expired.dispose();
+  const mixed = await engineWith({ google: error }).engine.search({ query: 'x' });
+  const texts = [failed, zero, none, mixed].map(engineText);
+  assert.equal(new Set(texts).size, 4);
+  assert.match(texts[0], /All attempted engines failed; no candidates are available\./);
+  assert.match(texts[1], /No candidates parsed in this call; this is not evidence of no matching pages\./);
+  assert.match(texts[2], /No engine was attempted in this call \(deadline\); no candidates are available\./);
+  assert.match(texts[3], /Some engines failed and the others parsed no candidates; this is not evidence of no matching pages\./);
+  for (const text of [texts[0], texts[2], texts[3]]) assert.doesNotMatch(text, /No candidates parsed in this call/);
+});
+check('engine lines keep errors, strategy_stopped engines, reasons and merged provenance', async () => {
+  const full = await engineWith({ google: ['1', '2'].map(id => record(id, id)) }).engine.search({ query: 'x', numResults: 2 });
+  assert.match(engineText(full), /^- Bing: attempted=false; attempts=0; parsed_count=0; status=strategy_stopped$/m);
+  const failed = await engineWith({ google: new Error('Google returned HTTP 429'), bing: [record('b', 'b')] }).engine.search({ query: 'x' });
+  assert.match(engineText(failed), /^- Google: attempted=true; attempts=1; parsed_count=0; status=error; error=Google returned HTTP 429$/m);
+  const merged = await engineWith({ google: [record('one', '1')], bing: [record('same', '1'), record('two', '2')] }).engine.search({ query: 'x', numResults: 2 });
+  assert.match(engineText(merged), /Source engines: Google, Bing\n/);
+  const expired = new CallBudget(0);
+  const none = await engineWith().engine.search({ query: 'x', budget: expired });
+  expired.dispose();
+  assert.match(engineText(none), /^- Google: attempted=false; attempts=0; parsed_count=0; status=not_attempted; reason=deadline; error=Call deadline exceeded$/m);
+});
+check('engine lines show the observed HTTP status and Google final path', async () => {
+  for (const [options, line] of [
+    [{}, /^- Google: attempted=true; attempts=1; parsed_count=0; status=zero_parsed; http_status=200$/m],
+    [{ status: 429 }, /^- Google: attempted=true; attempts=1; parsed_count=0; status=error; http_status=429; error=Google returned HTTP 429$/m],
+    [{ finalUrl: 'https://www.google.com/sorry/index?continue=x' }, /^- Google: attempted=true; attempts=1; parsed_count=0; status=error; http_status=200; final_path=\/sorry\/index; error=Google redirected to \/sorry\/index \(HTTP 200\)$/m],
+  ]) {
+    await withFakeBrowser(options, async (engine, budget) => {
+      const result = await engine.search({ query: 'x', budget });
+      assert.match(engineText(result), line);
+      assert.match(engineText(result), /^- Bing: attempted=true; attempts=1; parsed_count=0; status=(zero_parsed|error); http_status=\d+/m);
+    });
+  }
+});
+check('engines that never started say why: deadline, rate limit and queue expiry', async () => {
+  const limited = engineWith();
+  limited.engine.rateLimiter.requestCount = 10;
+  limited.engine.rateLimiter.lastResetTime = Date.now();
+  const rate = await limited.engine.search({ query: 'x' });
+  assert.deepEqual(rate.engines.map(e => [e.status, e.reason, e.attempts]), [['not_attempted', 'rate_limited', 0], ['not_attempted', 'rate_limited', 0]]);
+  assert.match(rate.engines[0].error, /Rate limit exceeded/);
+  assert.deepEqual(limited.attempts, []);
+  const queued = engineWith();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const busy = Array.from({ length: 5 }, () => queued.engine.rateLimiter.execute(() => held));
+  const short = new CallBudget(30);
+  const expiredInQueue = await queued.engine.search({ query: 'x', budget: short });
+  short.dispose();
+  release();
+  await Promise.all(busy);
+  assert.deepEqual(expiredInQueue.engines.map(e => [e.status, e.reason, e.attempts]), [['not_attempted', 'queue_expired', 0], ['not_attempted', 'queue_expired', 0]]);
+  // A page slot that is never obtained does not count as a started attempt either.
+  let releasePages;
+  const pagesHeld = new Promise(resolve => { releasePages = resolve; });
+  await withFakeBrowser({}, async (engine, _budget) => {
+    const occupied = [engine.browserPool.withPage(() => pagesHeld), engine.browserPool.withPage(() => pagesHeld)];
+    const slotBudget = new CallBudget(40);
+    const slotExpired = await engine.search({ query: 'x', budget: slotBudget });
+    slotBudget.dispose();
+    releasePages();
+    await Promise.all(occupied);
+    assert.deepEqual(slotExpired.engines.map(e => [e.status, e.reason, e.attempts]), [['not_attempted', 'queue_expired', 0], ['not_attempted', 'deadline', 0]]);
+    assert.doesNotMatch(engineText(slotExpired), /No candidates parsed in this call/);
+    assert.match(engineText(slotExpired), /No engine was attempted in this call \(queue_expired, deadline\)/);
+  });
+});
+check('a fill-up batch never exceeds the limit', async () => {
+  const { engine } = engineWith({ google: [record('1', '1'), record('2', '2')], bing: ['3', '4', '5', '6'].map(id => record(id, id)) });
+  const result = await engine.search({ query: 'x', numResults: 5 });
+  assert.deepEqual(result.results.map(r => r.title), ['1', '2', '3', '4', '5']);
 });
 
 check('parsers keep organic results only, short snippets, unknown titles and the actual page base', async () => {

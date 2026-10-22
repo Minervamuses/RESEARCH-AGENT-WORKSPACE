@@ -38,7 +38,7 @@ export class SearchEngine {
       { method: this.tryBingSearch.bind(this), name: 'Bing', host: SearchEngine.bingHost },
     ];
     const engines: SearchEngineState[] = approaches.map(({ name }) => ({
-      name, attempted: false, attempts: 0, parsedCount: 0, status: 'strategy_stopped',
+      name, attempted: false, attempts: 0, parsedCount: 0, status: 'not_attempted',
     }));
     const results: SearchResult[] = [];
     const byUrl = new Map<string, SearchResult>();
@@ -46,39 +46,51 @@ export class SearchEngine {
     const work = async () => {
       for (const [index, approach] of approaches.entries()) {
         const state = engines[index];
-        if (results.length >= numResults) continue;
-        if (budget.signal.aborted) { state.error = String(budget.signal.reason); continue; }
-        state.attempted = true;
+        if (results.length >= numResults) { state.status = 'strategy_stopped'; continue; }
+        let timeout: number;
+        try { timeout = budget.timeout(OPERATION_TIMEOUTS.searchRequest); } catch (error) {
+          this.notAttempted(state, error, 'deadline');
+          continue;
+        }
         // A method abandoned at the call deadline may still run; it must not change results afterwards.
         let open = true;
         const admit: Admit = (batch, page) => this.admitBatch(batch, page, approach, {
           results, byUrl, numResults, budget, open: () => open,
         });
         try {
-          const batch = await budget.wait(approach.method(
-            sanitizeQuery(query), numResults, budget.timeout(OPERATION_TIMEOUTS.searchRequest), state, budget, admit,
-          ));
+          const batch = await budget.wait(approach.method(sanitizeQuery(query), numResults, timeout, state, budget, admit));
           state.parsedCount = batch.length;
           state.status = batch.length ? 'completed' : 'zero_parsed';
         } catch (error) {
-          state.status = 'error';
-          state.error = error instanceof Error ? error.message : String(error);
-        } finally {
-          open = false;
-          state.attempts = Math.max(1, state.attempts);
-        }
+          // A lease that never started only waited for a page slot: not an engine failure.
+          if (!state.attempts && budget.signal.aborted && error === budget.signal.reason) {
+            this.notAttempted(state, error, 'queue_expired');
+          } else {
+            state.status = 'error';
+            state.error = error instanceof Error ? error.message : String(error);
+          }
+        } finally { open = false; }
       }
     };
+    let expiredAtEntry = false;
+    try { budget.remaining(); } catch { expiredAtEntry = true; }
     try {
       await this.rateLimiter.execute(() => { running = work(); return running; }, budget);
     } catch (error) {
-      // A queued call can expire before starting. A running loop settles its facts before return.
+      // A running loop settles its own facts; otherwise no engine started at all.
       if (running) await running.catch(() => undefined);
-      for (const state of engines) {
-        if (!state.attempted) state.error = error instanceof Error ? error.message : String(error);
-      }
+      else for (const state of engines) this.notAttempted(state, error, expiredAtEntry ? 'deadline' : 'queue_expired');
     } finally { if (!options.budget) budget.dispose(); }
     return { results, engines };
+  }
+
+  /** FA07: why an engine never started; the original message stays in error. */
+  private notAttempted(state: SearchEngineState, error: unknown, otherwise: 'deadline' | 'queue_expired'): void {
+    const message = error instanceof Error ? error.message : String(error);
+    state.status = 'not_attempted';
+    state.reason = (error as any)?.code === 'ERR_CANCELED' ? 'cancelled'
+      : /^Rate limit exceeded/.test(message) ? 'rate_limited' : otherwise;
+    state.error = message;
   }
 
   /**
@@ -200,22 +212,29 @@ export class SearchEngine {
     admit?: Admit,
   ): Promise<SearchResult[]> {
     return this.browserPool.withPage(async page => {
-      if (state) state.attempts = 1;
       const url = new URL(SearchEngine.googleSearchUrl);
       url.searchParams.set('q', query);
       url.searchParams.set('hl', queryMarket(query).googleHl);
       url.searchParams.set('num', String(numResults));
       const response = await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: budget.timeout(timeout) });
       const status = response?.status();
+      if (state) state.httpStatus = status;
       // Observed HTTP facts only: no retry, no workaround, no challenge-page vocabulary.
       if (status !== undefined && status >= 400) throw new Error(`Google returned HTTP ${status}`);
       const finalPath = new URL(page.url()).pathname;
-      if (finalPath.startsWith('/sorry/')) throw new Error(`Google redirected to ${finalPath} (HTTP ${status ?? 'unknown'})`);
+      if (finalPath.startsWith('/sorry/')) {
+        if (state) state.finalPath = finalPath;
+        throw new Error(`Google redirected to ${finalPath} (HTTP ${status ?? 'unknown'})`);
+      }
       await this.waitForResults(page, '#search a h3, #rso a h3', budget);
       const batch = this.parseGoogleResults(await boundedRead(page.content(), budget, 'Google results page.content()'), page.url());
       await admit?.(batch, page);
       return batch;
-    }, budget);
+    }, budget, () => this.started(state));
+  }
+
+  private started(state?: SearchEngineState): void {
+    if (state) { state.attempted = true; state.attempts++; }
   }
 
   private async tryBingSearch(
@@ -223,7 +242,6 @@ export class SearchEngine {
     admit?: Admit,
   ): Promise<SearchResult[]> {
     return this.browserPool.withPage(async page => {
-      if (state) state.attempts = 1;
       const market = queryMarket(query);
       const url = new URL(SearchEngine.bingSearchUrl);
       url.searchParams.set('q', query);
@@ -232,12 +250,13 @@ export class SearchEngine {
       url.searchParams.set('cc', market.bingCc);
       const response = await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: budget.timeout(timeout) });
       const status = response?.status();
+      if (state) state.httpStatus = status;
       if (status !== undefined && status >= 400) throw new Error(`Bing returned HTTP ${status}`);
       await this.waitForResults(page, '#b_results > li.b_algo', budget);
       const batch = this.parseBingResults(await boundedRead(page.content(), budget, 'Bing results page.content()'), page.url());
       await admit?.(batch, page);
       return batch;
-    }, budget);
+    }, budget, () => this.started(state));
   }
 
   private async waitForResults(page: Page, selector: string, budget: CallBudget): Promise<void> {

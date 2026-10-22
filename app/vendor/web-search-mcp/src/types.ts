@@ -64,10 +64,16 @@ export interface WebSearchToolOutput {
 
 export interface SearchEngineState {
   name: string;
+  /** True once a page lease started for this engine (FA07); attempts counts those starts. */
   attempted: boolean;
   attempts: number;
   parsedCount: number;
-  status: 'completed' | 'zero_parsed' | 'error' | 'strategy_stopped';
+  /** strategy_stopped only means earlier engines already reached the limit. */
+  status: 'completed' | 'zero_parsed' | 'error' | 'strategy_stopped' | 'not_attempted';
+  reason?: 'deadline' | 'cancelled' | 'rate_limited' | 'queue_expired';
+  /** Observed facts of the engine's search navigation. */
+  httpStatus?: number;
+  finalPath?: string;
   error?: string;
 }
 

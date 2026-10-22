@@ -14,12 +14,22 @@ export function formatSearchResponse(
 ): string {
   const lines = [`Search for "${query}": ${results.length} candidates`, 'Engine execution:'];
   for (const engine of engines) {
-    lines.push(`- ${engine.name}: attempted=${engine.attempted}; attempts=${engine.attempts}; parsed_count=${engine.parsedCount}; status=${engine.status}${engine.error ? `; error=${engine.error}` : ''}`);
+    // New facts follow status= so the existing line prefix stays the same; the free-text error stays last.
+    const facts = [
+      engine.reason && `reason=${engine.reason}`,
+      engine.httpStatus !== undefined && `http_status=${engine.httpStatus}`,
+      engine.finalPath && `final_path=${engine.finalPath}`,
+      engine.error && `error=${engine.error}`,
+    ].filter(Boolean).map(fact => `; ${fact}`).join('');
+    lines.push(`- ${engine.name}: attempted=${engine.attempted}; attempts=${engine.attempts}; parsed_count=${engine.parsedCount}; status=${engine.status}${facts}`);
   }
   if (!results.length) {
-    lines.push(engines.every(e => e.status === 'error')
-      ? 'All attempted engines failed; no candidates are available.'
-      : 'No candidates parsed in this call; this is not evidence of no matching pages.');
+    const ran = engines.filter(e => ['completed', 'zero_parsed', 'error'].includes(e.status));
+    const reasons = [...new Set(engines.map(e => e.reason).filter(Boolean))].join(', ');
+    lines.push(!ran.length ? `No engine was attempted in this call (${reasons || 'unknown reason'}); no candidates are available.`
+      : ran.every(e => e.status === 'error') ? 'All attempted engines failed; no candidates are available.'
+      : ran.every(e => e.status !== 'error') ? 'No candidates parsed in this call; this is not evidence of no matching pages.'
+      : 'Some engines failed and the others parsed no candidates; this is not evidence of no matching pages.');
   }
   results.forEach((result, index) => {
     lines.push('', `**${index + 1}. Search title: ${result.title}**`, `URL: ${result.url}`);
