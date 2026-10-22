@@ -5,7 +5,7 @@
 建議的步驟順序：F1-S1 → F1-S2 → F2-S1 → F3-S1 → F3-S2 → F3-S3 → F3-S4 → F1-S3 → F1-S4 → F2-S2 → F2-S3 → F4 → F5 → F6 → F7（見 PLANS）。
 | 階段 | 狀態 | 已完成步驟 | 實際證據 | 阻塞 | 下一動作 |
 | --- | --- | --- | --- | --- | --- |
-| F1 | In progress | F1-S1 | evidence/F1-S1/ | — | F1-S2 |
+| F1 | In progress | F1-S1、F1-S2 | evidence/F1-S1/、evidence/F1-S2/ | — | F1-S3（建議順序中先做 F2-S1） |
 | F2 | Not started | — | — | — | F2-S1（F1-S2 之後） |
 | F3 | Not started | — | — | — | F3-S1（F2-S1 之後） |
 | F4 | Not started | — | — | 相依 F1、F3 | — |
@@ -170,3 +170,19 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - 突變（evidence/F1-S1/mutations.jsonl，在 `$TMPDIR` 暫存複本套用）：N07e（final URL 換成錯誤 host）被 content-contract 殺死（exit 1）；N07f（忽略 `<base href>`）被新的 `/docs/sub/next` 案例殺死（exit 1）。F6-S3 仍會依清單正式複驗。
 - **限制**：儲存格收成單行後，巢狀表格的多列在該儲存格內以空格相連；`<pre>` 在儲存格內也會收成單行。這是 FA02 的退化。parseContent 結尾的 `/[ \t]+\n/g` 留給 F1-S4。
 - **下一步**：F1-S2。
+
+### F1-S2 晚渲染等待
+- **改動**（FG2；AF03）：
+  - src/browser-pool.ts：OPERATION_TIMEOUTS 新增 renderSettle: 3000。
+  - src/enhanced-content-extractor.ts：瀏覽器讀取 HTML 時，在 `goto(domcontentloaded)` 與媒體檢查之後、讀取標題與內容之前，呼叫新的 settleRendering：等到「networkidle 且 body 有可見文字」或 min(renderSettle, 剩餘預算)。由 Node 端每約 100 ms 以 `page.evaluate` 讀 `document.body.innerText`（每次 evaluate 受剩餘等待時間約束），networkidle 以 `page.waitForLoadState` 加同一上限；不用 waitForFunction。每個等待都經 `budget.wait`，取消或期限到時立即結束。text/plain 與 HTTP 路徑不等待。
+  - 等滿仍沒有文字時維持 empty_text，該次 browser 嘗試的 error 與 Read error 寫出 `No visible text after waiting <實際> ms for client rendering (limit <上限> ms)`。
+  - extractWithBrowser 多一個 event 參數以寫入這個事實；沒有新增 PageRead 欄位（types.ts 未改，F5-S2 會整理每次嘗試的欄位）。
+- **測試**：tests/test-browser-lifecycle.mjs 新增 stub page 案例：上限 120 ms 時等待約 120 ms 且 waitForLoadState 收到 120、可見資訊含等待時間；上限 5000、預算 200 ms 時等待上限 ≤200 且 1 s 內返回（狀態為 empty_text 或 timeout，兩者都是預算邊界上的正確結果）；50 ms 時 abort 則 1 s 內以 cancelled 返回；文字出現且網路靜止時立即以 text 返回。
+- **檢查**（vendor 目錄，沙箱內）：`npm run build` exit 0；retention 15/15、content-contract 4 組、browser-lifecycle（連跑 3 次）全部 exit 0。
+- **真實 Chromium**（evidence/F1-S2/late-render.mjs，沙箱內直接以 node 匯入 dist、PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright；F3-S1 之前產品仍是 headless shell；本機 HTTP 伺服器，HTML 回應本身沒有文字以觸發 fallback）：
+  - 本步 dist（after.json）：計時器 0/100/300/700/1500 ms、fetch 200 ms、DCL 時已有導覽列且主要內容 fetch 300 ms 後插入、CSP `script-src 'unsafe-inline'` 加計時器 300 ms，全部以 text 取得目標文字（550–1584 ms）；5000 ms 才插入者在 3047 ms 以 empty_text 返回並附 `waiting 3002 ms … (limit 3000 ms)`；持續輪詢的頁面在 3037 ms 以 text 返回。
+  - eaee132 乾淨重建（before-eaee132.json）：同一矩陣只有計時器 0 ms 與持續輪詢（文字在 0 ms 插入）取得目標文字；導覽列案例只得到導覽列文字。
+  - 額外延遲：靜態頁直接走瀏覽器路徑 32 ms → 561 ms（約 +530 ms，即 networkidle 的 500 ms 靜止窗）；HTTP 已有文字的靜態頁 1–3 ms，不進瀏覽器，不受影響。
+  - 驅動腳本在結尾 closeAll 並關閉伺服器；每條沙箱指令有自己的 PID namespace，本次沒有另外的殘留程序取證（真實程序生命週期屬 F4、F7）。
+- **限制**：F3-S1 改用完整版 Chromium 後要在沙箱外以短 TMPDIR 重跑這個矩陣（phase-3 已列）。每次瀏覽器讀取 HTML 至少多等約 500 ms 的 networkidle 窗。
+- **下一步**：依建議順序做 F2-S1。

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import type { Page } from 'playwright';
 import { ContentExtractionOptions, SearchResult, PageRead } from './types.js';
 import { resolveContentLimit, truncateMarkdown } from './utils.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS } from './browser-pool.js';
@@ -12,6 +13,19 @@ const BLOCK_TAGS = new Set([
 ]);
 
 const singleLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/** Settles to undefined when the promise fails or outlives a local cap. */
+async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.catch(() => undefined),
+      new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, ms)); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+}
 
 /** The page's own title: head title first, never an inline SVG title, never the URL. */
 function documentTitle($: cheerio.CheerioAPI): string | undefined {
@@ -43,7 +57,7 @@ export class EnhancedContentExtractor {
               started();
               return this.extractWithAxios({ ...options, budget }, state);
             }, budget)
-          : await this.extractWithBrowser({ ...options, budget }, state, started);
+          : await this.extractWithBrowser({ ...options, budget }, state, started, event);
         event.status = state.httpStatus;
         if (state.status === 'unsupported_media') return true;
         Object.assign(state, truncateMarkdown(text, state.maxContentLength));
@@ -112,7 +126,10 @@ export class EnhancedContentExtractor {
     }
   }
 
-  private async extractWithBrowser(options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead, started: () => void): Promise<string> {
+  private async extractWithBrowser(
+    options: ContentExtractionOptions & { budget: CallBudget }, state: PageRead, started: () => void,
+    event: PageRead['attempts'][number],
+  ): Promise<string> {
     return this.browserPool.withPage(async page => {
       started();
       const response = await page.goto(options.url, {
@@ -130,10 +147,31 @@ export class EnhancedContentExtractor {
         state.error = `Unsupported media: ${state.contentType ?? 'unknown'}`;
         return '';
       }
+      const settle = media === 'text/plain' ? undefined : await this.settleRendering(page, options.budget);
       state.pageTitle = singleLine(await page.title()) || undefined;
-      return media === 'text/plain' ? await page.locator('body').innerText()
+      const text = media === 'text/plain' ? await page.locator('body').innerText()
         : this.parseContent(await page.content(), state.finalUrl);
+      if (settle && !text.trim()) {
+        event.error = state.error = `No visible text after waiting ${settle.waitedMs} ms for client rendering (limit ${settle.limitMs} ms)`;
+      }
+      return text;
     }, options.budget);
+  }
+
+  /** FA04: wait until the network is idle and the body has visible text, at most min(renderSettle, remaining budget). */
+  private async settleRendering(page: Page, budget: CallBudget): Promise<{ waitedMs: number; limitMs: number }> {
+    const limitMs = budget.timeout(OPERATION_TIMEOUTS.renderSettle);
+    const begin = performance.now();
+    const left = () => limitMs - (performance.now() - begin);
+    let idle = false;
+    page.waitForLoadState('networkidle', { timeout: limitMs }).then(() => { idle = true; }, () => undefined);
+    // Poll from Node: a page-side waitForFunction needs eval, which a page CSP may forbid.
+    while (left() > 0) {
+      const text = await budget.wait(within(page.evaluate(() => document.body?.innerText ?? ''), left()));
+      if (idle && text?.trim()) break;
+      await budget.wait(pause(Math.max(0, Math.min(100, left()))));
+    }
+    return { waitedMs: Math.round(performance.now() - begin), limitMs };
   }
 
   async extractContentForResults(

@@ -170,6 +170,54 @@ try {
     if (oldPages === undefined) delete process.env.MAX_CONCURRENT_PAGES; else process.env.MAX_CONCURRENT_PAGES = oldPages;
     if (oldHttp === undefined) delete process.env.MAX_CONCURRENT_HTTP; else process.env.MAX_CONCURRENT_HTTP = oldHttp;
   }
+  // The client-render wait is bounded by min(renderSettle, remaining budget) and ends on cancellation.
+  const renderCap = OPERATION_TIMEOUTS.renderSettle;
+  const { formatPageRead } = await import('../dist/utils.js');
+  const settleTimeouts = [];
+  const renderPage = (overrides = {}) => ({
+    goto: async () => ({ status: () => 200, headers: () => ({ 'content-type': 'text/html' }) }),
+    url: () => 'https://example.org/app', title: async () => 'App', content: async () => '<html><body></body></html>',
+    evaluate: async () => '',
+    waitForLoadState: (_state, options) => { settleTimeouts.push(options.timeout); return new Promise(() => undefined); },
+    ...overrides,
+  });
+  const renderRead = async (page, budget) => {
+    const reader = new EnhancedContentExtractor({ withHttp: fn => fn(), withPage: (fn, b) => b.wait(fn(page)) });
+    reader.extractWithAxios = async (_options, state) => { state.httpStatus = 200; state.contentType = 'text/html'; return ''; };
+    const begin = performance.now();
+    try { return { read: await reader.extractContent({ url: 'https://example.org/app', budget }), ms: performance.now() - begin }; }
+    finally { budget.dispose(); }
+  };
+  try {
+    OPERATION_TIMEOUTS.renderSettle = 120;
+    const capped = await renderRead(renderPage(), new CallBudget(5000));
+    assert.equal(capped.read.status, 'empty_text');
+    assert.equal(settleTimeouts.at(-1), 120);
+    assert.ok(capped.ms >= 100 && capped.ms < 1000, `render wait ${capped.ms}`);
+    assert.match(formatPageRead(capped.read), /- browser: status=200; error=No visible text after waiting \d+ ms for client rendering \(limit 120 ms\)/);
+    OPERATION_TIMEOUTS.renderSettle = 5000;
+    const short = await renderRead(renderPage(), new CallBudget(200));
+    assert.ok(settleTimeouts.at(-1) <= 200, `render wait limited by budget: ${settleTimeouts.at(-1)}`);
+    assert.ok(short.ms < 1000, `budget-bound render wait ${short.ms}`);
+    // The capped wait ends at the call deadline, so the read either just completes or times out.
+    assert.ok(['empty_text', 'timeout'].includes(short.read.status), short.read.status);
+    const cancelBudget = new CallBudget(5000);
+    setTimeout(() => cancelBudget.abort(), 50);
+    const cancelledRead = await renderRead(renderPage(), cancelBudget);
+    assert.ok(cancelledRead.ms < 1000, `cancelled render wait ${cancelledRead.ms}`);
+    assert.equal(cancelledRead.read.status, 'cancelled');
+    let polls = 0;
+    const ready = await renderRead(renderPage({
+      evaluate: async () => (++polls >= 2 ? 'Rendered' : ''),
+      waitForLoadState: async () => undefined,
+      content: async () => '<html><body><p>Rendered</p></body></html>',
+    }), new CallBudget(5000));
+    assert.equal(ready.read.status, 'text');
+    assert.equal(ready.read.content, 'Rendered');
+    assert.ok(ready.ms < 1000, `settled render wait ${ready.ms}`);
+    await pause(120);
+  } finally { OPERATION_TIMEOUTS.renderSettle = renderCap; }
+
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, 0);
   process.stdout.write('single launch, bounded contexts/HTTP, shared ownership and failed launch recovery: passed\n');
 } finally {

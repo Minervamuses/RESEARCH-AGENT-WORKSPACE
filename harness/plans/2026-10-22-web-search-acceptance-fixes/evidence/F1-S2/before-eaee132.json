@@ -1,0 +1,143 @@
+{
+ "label": "before-eaee132",
+ "node": "v24.18.0",
+ "rows": [
+  {
+   "case": "timer-0",
+   "status": "text",
+   "ms": 36,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET timer 0",
+   "error": null
+  },
+  {
+   "case": "timer-100",
+   "status": "empty_text",
+   "ms": 33,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "timer-300",
+   "status": "empty_text",
+   "ms": 35,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "timer-700",
+   "status": "empty_text",
+   "ms": 37,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "timer-1500",
+   "status": "empty_text",
+   "ms": 35,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "fetch-200",
+   "status": "empty_text",
+   "ms": 36,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "nav-then-fetch-300",
+   "status": "text",
+   "ms": 36,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "Site menu Home About",
+   "error": null
+  },
+  {
+   "case": "csp-timer-300",
+   "status": "empty_text",
+   "ms": 33,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "timer-5000",
+   "status": "empty_text",
+   "ms": 34,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": false,
+   "content": "",
+   "error": null
+  },
+  {
+   "case": "polling-forever",
+   "status": "text",
+   "ms": 35,
+   "attempts": [
+    "http",
+    "browser"
+   ],
+   "target": true,
+   "content": "TARGET with endless polling",
+   "error": null
+  },
+  {
+   "case": "static-http-has-text",
+   "status": "text",
+   "ms": 1,
+   "attempts": [
+    "http"
+   ],
+   "target": true,
+   "content": "TARGET static text",
+   "error": null
+  },
+  {
+   "case": "static-browser-direct",
+   "ms": 32,
+   "target": true,
+   "content": "TARGET static text"
+  }
+ ]
+}
