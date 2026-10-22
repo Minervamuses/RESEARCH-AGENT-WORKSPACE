@@ -241,7 +241,7 @@ const { formatSearchResponse, formatPageRead } = await import('../dist/utils.js'
 const withContent = formatSearchResponse('same query', results, [], true);
 assert.match(withContent, /selected=5; candidates_attempted=5; source_read_attempts=6; http_attempts=5; browser_attempts=1; returned=5/);
 assert.doesNotMatch(withContent, /transport_retries/);
-assert.match(withContent, /^Statistics scope: source_read_attempts counts started HTTP and browser reads .*Redirects followed within one HTTP read are not counted separately\. parsed_count is the rows an engine returned before cross-engine deduplication/m);
+assert.match(withContent, /^Statistics scope: source_read_attempts counts started HTTP and browser reads .*Redirects followed within one HTTP read are not counted separately\. parsed_count is the rows the engine returned before deduplication and the limit/m);
 assert.match(withContent, /unsupported_media/);
 // includeContent=false reading nothing is guarded at the real handler by tests/test-server-entry.mjs (case 1, AF29).
 const withoutContent = formatSearchResponse('same query', candidates, [], false);

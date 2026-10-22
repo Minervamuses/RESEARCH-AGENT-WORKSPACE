@@ -24,18 +24,16 @@ net.Socket.prototype.connect = function (...args) {
   return connect.apply(this, args);
 };
 
-// Both engines return fixed direct candidates, so no wrapper navigation happens.
+// The engine returns fixed direct candidates, so no wrapper navigation happens.
 const base = process.env.STUB_PAGE_BASE ?? 'http://127.0.0.1:9';
-for (const [method, name, ids] of [['tryGoogleSearch', 'Google', [1, 2, 3]], ['tryBingSearch', 'Bing', [4]]]) {
-  SearchEngine.prototype[method] = async function (query, numResults, _timeout, state, _budget, admit) {
-    record('engine', { name, query, numResults });
-    state.attempted = true;
-    state.attempts++;
-    const batch = ids.map(id => ({ title: `Stub ${id}`, url: `${base}/page/${id}`, description: `stub snippet ${id}` }));
-    await admit(batch, { url: () => `${base}/search` });
-    return batch;
-  };
-}
+SearchEngine.prototype.tryGoogleSearch = async function (query, numResults, _timeout, state, _budget, admit) {
+  record('engine', { name: 'Google', query, numResults });
+  state.attempted = true;
+  state.attempts++;
+  const batch = [1, 2, 3, 4].map(id => ({ title: `Stub ${id}`, url: `${base}/page/${id}`, description: `stub snippet ${id}` }));
+  await admit(batch, { url: () => `${base}/search` });
+  return batch;
+};
 
 const closeAll = BrowserPool.prototype.closeAll;
 BrowserPool.prototype.closeAll = async function () {

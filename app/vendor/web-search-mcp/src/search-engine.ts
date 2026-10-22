@@ -6,10 +6,8 @@ import { RateLimiter } from './rate-limiter.js';
 import { BrowserPool, sharedBrowserPool, CallBudget, OPERATION_TIMEOUTS, boundedRead } from './browser-pool.js';
 
 /** FA13: a fixed rule, not semantic detection. Han characters select Taiwan Chinese; all else English. */
-export function queryMarket(query: string): { googleHl: string; bingSetlang: string; bingCc: string } {
-  return /\p{Script=Han}/u.test(query)
-    ? { googleHl: 'zh-TW', bingSetlang: 'zh-Hant', bingCc: 'TW' }
-    : { googleHl: 'en', bingSetlang: 'en', bingCc: 'US' };
+export function queryLanguage(query: string): 'zh-TW' | 'en' {
+  return /\p{Script=Han}/u.test(query) ? 'zh-TW' : 'en';
 }
 
 /** Admits one engine's parsed batch; engine methods call it inside their own page lease. */
@@ -19,8 +17,6 @@ export class SearchEngine {
   // Search addresses are overridable static members (tests, local fake engines), not environment settings.
   static googleSearchUrl = 'https://www.google.com/search';
   static googleHost = 'www.google.com';
-  static bingSearchUrl = 'https://www.bing.com/search';
-  static bingHost = 'www.bing.com';
 
   private readonly rateLimiter: RateLimiter;
   private browserPool: BrowserPool;
@@ -33,55 +29,47 @@ export class SearchEngine {
   async search(options: SearchOptions & { budget?: CallBudget }): Promise<SearchResultWithMetadata> {
     const { query, numResults = 5 } = options;
     const budget = options.budget ?? new CallBudget(options.timeout);
-    const approaches = [
-      { method: this.tryGoogleSearch.bind(this), name: 'Google', host: SearchEngine.googleHost },
-      { method: this.tryBingSearch.bind(this), name: 'Bing', host: SearchEngine.bingHost },
-    ];
-    const engines: SearchEngineState[] = approaches.map(({ name }) => ({
-      name, attempted: false, attempts: 0, parsedCount: 0, status: 'not_attempted',
-    }));
+    // Google is the only search engine.
+    const engine = { name: 'Google', host: SearchEngine.googleHost };
+    const state: SearchEngineState = { name: engine.name, attempted: false, attempts: 0, parsedCount: 0, status: 'not_attempted' };
     const results: SearchResult[] = [];
     const byUrl = new Map<string, SearchResult>();
     let running: Promise<void> | undefined;
     const work = async () => {
-      for (const [index, approach] of approaches.entries()) {
-        const state = engines[index];
-        if (results.length >= numResults) { state.status = 'strategy_stopped'; continue; }
-        let timeout: number;
-        try { timeout = budget.timeout(OPERATION_TIMEOUTS.searchRequest); } catch (error) {
-          this.notAttempted(state, error, 'deadline');
-          continue;
-        }
-        // A method abandoned at the call deadline may still run; it must not change results afterwards.
-        let open = true;
-        const admit: Admit = (batch, page) => this.admitBatch(batch, page, approach, {
-          results, byUrl, numResults, budget, open: () => open,
-        });
-        try {
-          const batch = await budget.wait(approach.method(sanitizeQuery(query), numResults, timeout, state, budget, admit));
-          state.parsedCount = batch.length;
-          state.status = batch.length ? 'completed' : 'zero_parsed';
-        } catch (error) {
-          // A lease that never started only waited for a page slot: not an engine failure.
-          if (!state.attempts && budget.signal.aborted && error === budget.signal.reason) {
-            this.notAttempted(state, error, 'queue_expired');
-          } else {
-            state.status = 'error';
-            state.error = error instanceof Error ? error.message : String(error);
-          }
-        } finally { open = false; }
+      let timeout: number;
+      try { timeout = budget.timeout(OPERATION_TIMEOUTS.searchRequest); } catch (error) {
+        this.notAttempted(state, error, 'deadline');
+        return;
       }
+      // A search abandoned at the call deadline may still run; it must not change results afterwards.
+      let open = true;
+      const admit: Admit = (batch, page) => this.admitBatch(batch, page, engine, {
+        results, byUrl, numResults, budget, open: () => open,
+      });
+      try {
+        const batch = await budget.wait(this.tryGoogleSearch(sanitizeQuery(query), numResults, timeout, state, budget, admit));
+        state.parsedCount = batch.length;
+        state.status = batch.length ? 'completed' : 'zero_parsed';
+      } catch (error) {
+        // A lease that never started only waited for a page slot: not an engine failure.
+        if (!state.attempts && budget.signal.aborted && error === budget.signal.reason) {
+          this.notAttempted(state, error, 'queue_expired');
+        } else {
+          state.status = 'error';
+          state.error = error instanceof Error ? error.message : String(error);
+        }
+      } finally { open = false; }
     };
     let expiredAtEntry = false;
     try { budget.remaining(); } catch { expiredAtEntry = true; }
     try {
       await this.rateLimiter.execute(() => { running = work(); return running; }, budget);
     } catch (error) {
-      // A running loop settles its own facts; otherwise no engine started at all.
+      // A running search settles its own facts; otherwise it never started.
       if (running) await running.catch(() => undefined);
-      else for (const state of engines) this.notAttempted(state, error, expiredAtEntry ? 'deadline' : 'queue_expired');
+      else this.notAttempted(state, error, expiredAtEntry ? 'deadline' : 'queue_expired');
     } finally { if (!options.budget) budget.dispose(); }
-    return { results, engines };
+    return { results, engines: [state] };
   }
 
   /** FA07: why an engine never started; the original message stays in error. */
@@ -96,7 +84,7 @@ export class SearchEngine {
   /**
    * Admits a batch in order: candidates fill to the limit at once (so a call deadline never loses
    * them), then engine redirect wrappers are resolved on the engine's own page, one by one (FA14).
-   * A wrapper that resolves to a known URL merges its provenance and lets the next item in.
+   * A wrapper that resolves to a known URL is dropped and lets the next item in.
    */
   private async admitBatch(
     batch: SearchResult[], page: Page, engine: { name: string; host: string },
@@ -112,16 +100,12 @@ export class SearchEngine {
       } catch { /* Not a navigable result address. */ }
     }
     const isWrapper = (url: string) => new URL(url).host === engine.host;
-    const merge = (candidate: SearchResult, previous: SearchResult) => {
-      for (const name of candidate.sourceEngines!) if (!previous.sourceEngines!.includes(name)) previous.sourceEngines!.push(name);
-    };
     const wrappers: SearchResult[] = [];
     const fill = () => {
       while (results.length < numResults && queue.length) {
         const item = queue.shift()!;
         const candidate: SearchResult = { ...item, observedUrl: item.observedUrl ?? item.url, sourceEngines: [engine.name] };
-        const previous = byUrl.get(candidate.url);
-        if (previous) { merge(candidate, previous); continue; }
+        if (byUrl.has(candidate.url)) continue;
         if (isWrapper(candidate.url)) {
           candidate.resolution = { wrapperUrl: candidate.url, outcome: 'not_started', reason: 'call deadline reached before resolution started' };
           wrappers.push(candidate);
@@ -143,20 +127,13 @@ export class SearchEngine {
       if (!found.url) continue;
       const resolved = new URL(found.url).href;
       byUrl.delete(wrapperUrl);
-      const previous = byUrl.get(resolved);
-      if (previous) {
-        merge(candidate, previous);
+      if (byUrl.has(resolved)) {
         results.splice(results.indexOf(candidate), 1);
         fill();
       } else {
         candidate.url = resolved;
         byUrl.set(resolved, candidate);
       }
-    }
-    // Items past the limit only add provenance when they are already known; wrappers are not followed.
-    for (const item of queue) {
-      const previous = byUrl.get(item.url);
-      if (previous && !previous.sourceEngines!.includes(engine.name)) previous.sourceEngines!.push(engine.name);
     }
   }
 
@@ -214,7 +191,7 @@ export class SearchEngine {
     return this.browserPool.withPage(async page => {
       const url = new URL(SearchEngine.googleSearchUrl);
       url.searchParams.set('q', query);
-      url.searchParams.set('hl', queryMarket(query).googleHl);
+      url.searchParams.set('hl', queryLanguage(query));
       url.searchParams.set('num', String(numResults));
       const response = await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: budget.timeout(timeout) });
       const status = response?.status();
@@ -235,28 +212,6 @@ export class SearchEngine {
 
   private started(state?: SearchEngineState): void {
     if (state) { state.attempted = true; state.attempts++; }
-  }
-
-  private async tryBingSearch(
-    query: string, numResults: number, timeout: number, state: SearchEngineState | undefined, budget: CallBudget,
-    admit?: Admit,
-  ): Promise<SearchResult[]> {
-    return this.browserPool.withPage(async page => {
-      const market = queryMarket(query);
-      const url = new URL(SearchEngine.bingSearchUrl);
-      url.searchParams.set('q', query);
-      url.searchParams.set('count', String(numResults));
-      url.searchParams.set('setlang', market.bingSetlang);
-      url.searchParams.set('cc', market.bingCc);
-      const response = await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: budget.timeout(timeout) });
-      const status = response?.status();
-      if (state) state.httpStatus = status;
-      if (status !== undefined && status >= 400) throw new Error(`Bing returned HTTP ${status}`);
-      await this.waitForResults(page, '#b_results > li.b_algo', budget);
-      const batch = this.parseBingResults(await boundedRead(page.content(), budget, 'Bing results page.content()'), page.url());
-      await admit?.(batch, page);
-      return batch;
-    }, budget, () => this.started(state));
   }
 
   private async waitForResults(page: Page, selector: string, budget: CallBudget): Promise<void> {
@@ -290,28 +245,6 @@ export class SearchEngine {
       });
     });
     console.error(`[SearchEngine] Google: ${results.length} results from ${anchors.length} result links`);
-    return results;
-  }
-
-  private parseBingResults(html: string, pageUrl = SearchEngine.bingSearchUrl): SearchResult[] {
-    const $ = cheerio.load(html);
-    const baseUrl = this.searchPageBase($, pageUrl);
-    // Only organic results; sidebar modules are never counted as results.
-    const items = $('#b_results > li.b_algo');
-    const results: SearchResult[] = [];
-    items.each((_index, element) => {
-      const $element = $(element);
-      const link = $element.find('h2 a, .b_title a, a[data-seid]').first();
-      const href = link.attr('href');
-      if (!href || !this.isValidSearchUrl(href, baseUrl)) return;
-      let snippet = '';
-      for (const selector of ['.b_caption p', '.b_snippet', '.b_descript', '.b_caption', '.b_excerpt', 'p']) {
-        snippet = $element.find(selector).first().text().trim();
-        if (snippet) break;
-      }
-      results.push({ title: link.text().trim(), url: new URL(href, baseUrl).href, observedUrl: href, description: snippet });
-    });
-    console.error(`[SearchEngine] Bing: ${results.length} results from ${items.length} organic items`);
     return results;
   }
 

@@ -87,9 +87,9 @@ check('wiring: includeContent, summaries, engine lines, invalid input and single
     const summaries = text(await client.callTool({ name: 'get-web-search-summaries', arguments: { query: 'alpha', limit: 2 } }));
     assert.equal(pageRequests(), before);
     assert.match(summaries, /^Search for "alpha": 2 candidates$/m);
-    assert.match(summaries, /^- Google: attempted=true; attempts=1; parsed_count=3; status=completed$/m);
-    assert.match(summaries, /^- Bing: attempted=false; attempts=0; parsed_count=0; status=strategy_stopped$/m);
-    assert.match(read, /^- Google: attempted=true; attempts=1; parsed_count=3; status=completed$/m);
+    assert.match(summaries, /^- Google: attempted=true; attempts=1; parsed_count=4; status=completed$/m);
+    assert.equal(summaries.match(/^- \w+: attempted=/gm).length, 1);
+    assert.match(read, /^- Google: attempted=true; attempts=1; parsed_count=4; status=completed$/m);
     // 3/4. Invalid limit on both tools and a blank summaries query fail before any engine runs (AF14).
     const engineCalls = () => events(log).filter(e => e.event === 'engine').length;
     const calls = engineCalls();

@@ -92,7 +92,7 @@ try {
   cancelled.dispose();
   assert.equal(lateRequests, 0);
 
-  // Google's result wait is bounded by searchSelector; the next engine still has budget.
+  // Google's result wait is bounded by searchSelector, then the search ends as zero_parsed.
   const selectorCap = OPERATION_TIMEOUTS.searchSelector;
   OPERATION_TIMEOUTS.searchSelector = 20;
   const selectorEvents = [];
@@ -107,17 +107,14 @@ try {
     url: () => 'https://www.google.com/search?q=x',
   };
   const selectorEngine = new SearchEngine({ withPage: (fn, _budget) => fn(selectorPage) });
-  selectorEngine.tryBingSearch = async (_query, _n, _timeout, _state, budget, admit) => {
-    assert.ok(budget.remaining() > 100);
-    const batch = [{ title: 'next engine', url: 'https://example.org', description: '' }];
-    await admit(batch, { url: () => 'https://www.bing.com/search' });
-    return batch;
-  };
   const selectorBudget = new CallBudget(300);
+  const selectorBegin = performance.now();
   const selectorResult = await selectorEngine.search({ query: 'x', numResults: 1, budget: selectorBudget });
+  const selectorMs = performance.now() - selectorBegin;
   selectorBudget.dispose();
   OPERATION_TIMEOUTS.searchSelector = selectorCap;
-  assert.equal(selectorResult.results[0].title, 'next engine');
+  assert.equal(selectorResult.engines[0].status, 'zero_parsed');
+  assert.ok(selectorMs < 200, `selector wait took ${selectorMs} ms`);
   assert.deepEqual(selectorEvents, [20]);
   const { createServer } = await import('node:http');
   let received = 0, socketClosed = 0, fallback = 0;
@@ -304,7 +301,7 @@ try {
       assert.equal(stuckCloses, before + 1, `${what}: context closed`);
       await pool.closeAll();
     }
-    for (const [method, name] of [['tryGoogleSearch', 'Google'], ['tryBingSearch', 'Bing']]) {
+    for (const [method, name] of [['tryGoogleSearch', 'Google']]) {
       const pool = stuckPool(stuckPage('text/html', { content: never }));
       const before = stuckCloses, budget = new CallBudget(5000), begin = performance.now();
       await assert.rejects(new SearchEngine(pool)[method]('x', 5, 1000, undefined, budget), new RegExp(`^Error: ${name} results page\\.content\\(\\) exceeded its 80 ms page read limit$`));
@@ -362,8 +359,8 @@ try {
       assert.ok(navMs < 500, `page goto ended after ${navMs} ms`);
       assert.equal(read.status, 'timeout');
       assert.match(read.attempts[1].error, /Timeout 50ms exceeded/);
-      // Google and Bing: a hung goto, and a hung result wait that still lets the engine finish.
-      for (const method of ['tryGoogleSearch', 'tryBingSearch']) {
+      // Google: a hung goto, and a hung result wait that still lets the engine finish.
+      for (const method of ['tryGoogleSearch']) {
         const gotoEngine = new SearchEngine(leasePool(hungPage({ goto: hangs })));
         let gotoMs = await elapsed(async () => { const b = new CallBudget(2000); await assert.rejects(gotoEngine[method]('x', 5, b.timeout(OPERATION_TIMEOUTS.searchRequest), undefined, b), /Timeout 50ms/); b.dispose(); });
         assert.ok(gotoMs < 500, `${method} goto ended after ${gotoMs} ms`);
@@ -377,7 +374,6 @@ try {
         content: async () => '<div id="search"><a href="/goto?u=1"><h3>Wrapped</h3></a></div>',
       });
       const resolver = new SearchEngine(leasePool(wrapperPage));
-      resolver.tryBingSearch = async () => [];
       let resolved;
       const resolveMs = await elapsed(async () => { const b = new CallBudget(2000); resolved = await resolver.search({ query: 'x', numResults: 1, budget: b }); b.dispose(); });
       assert.ok(resolveMs < 500, `link resolution ended after ${resolveMs} ms`);

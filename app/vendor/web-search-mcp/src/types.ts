@@ -88,8 +88,7 @@ export interface SearchEngineState {
   attempted: boolean;
   attempts: number;
   parsedCount: number;
-  /** strategy_stopped only means earlier engines already reached the limit. */
-  status: 'completed' | 'zero_parsed' | 'error' | 'strategy_stopped' | 'not_attempted';
+  status: 'completed' | 'zero_parsed' | 'error' | 'not_attempted';
   reason?: 'deadline' | 'cancelled' | 'rate_limited' | 'queue_expired';
   /** Observed facts of the engine's search navigation. */
   httpStatus?: number;

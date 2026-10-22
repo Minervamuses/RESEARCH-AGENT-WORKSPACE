@@ -28,8 +28,7 @@ export function formatSearchResponse(
     const reasons = [...new Set(engines.map(e => e.reason).filter(Boolean))].join(', ');
     lines.push(!ran.length ? `No engine was attempted in this call (${reasons || 'unknown reason'}); no candidates are available.`
       : ran.every(e => e.status === 'error') ? 'All attempted engines failed; no candidates are available.'
-      : ran.every(e => e.status !== 'error') ? 'No candidates parsed in this call; this is not evidence of no matching pages.'
-      : 'Some engines failed and the others parsed no candidates; this is not evidence of no matching pages.');
+      : 'No candidates parsed in this call; this is not evidence of no matching pages.');
   }
   results.forEach((result, index) => {
     lines.push('', `**${index + 1}. Search title: ${result.title}**`, `URL: ${result.url}`);
@@ -59,7 +58,7 @@ export function formatSearchResponse(
   const resolved = redirects.filter(result => result.resolution!.outcome === 'resolved').length;
   lines.push('', `Read statistics: selected=${results.length}; candidates_attempted=${started}; source_read_attempts=${attempts}; http_attempts=${http}; browser_attempts=${browser}; returned=${results.length}; states=${JSON.stringify(counts)}; engine_redirects_resolved=${resolved}; engine_redirects_unresolved=${redirects.length - resolved}`,
     // FA08: the counting rules travel with the numbers.
-    'Statistics scope: source_read_attempts counts started HTTP and browser reads (a request sent, or a browser launch or context begun); reads that only queued are not counted. candidates_attempted counts candidates with at least one started read. Redirects followed within one HTTP read are not counted separately. parsed_count is the rows an engine returned before cross-engine deduplication and the limit. engine_redirects_resolved/unresolved count candidates whose search link was an engine redirect wrapper.');
+    'Statistics scope: source_read_attempts counts started HTTP and browser reads (a request sent, or a browser launch or context begun); reads that only queued are not counted. candidates_attempted counts candidates with at least one started read. Redirects followed within one HTTP read are not counted separately. parsed_count is the rows the engine returned before deduplication and the limit. engine_redirects_resolved/unresolved count candidates whose search link was an engine redirect wrapper.');
   return lines.join('\n');
 }
 
