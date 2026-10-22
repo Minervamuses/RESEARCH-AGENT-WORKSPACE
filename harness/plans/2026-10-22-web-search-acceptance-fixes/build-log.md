@@ -11,7 +11,7 @@
 | F4 | Complete | F4-S1、F4-S2 | evidence/F4-S2/ | — | — |
 | F5 | Complete | F5-S0、F5-S1、F5-S2、F5-S3 | evidence/F5-S1/、evidence/F5-S2/ | — | — |
 | F6 | Complete | F6-S1、F6-S2、F6-S3 | evidence/F6-S3/ | — | — |
-| F7 | In progress | F7-S1、F7-S2、F7-S3 | evidence/F7-S2/、evidence/F7-S3/ | Google 請求間隔偏離（見 F7-S3） | F7-S4 |
+| F7 | Complete | F7-S1、F7-S2、F7-S3、F7-S4 | evidence/F7-S2/、evidence/F7-S3/ | 未驗證項與偏離見 F7-S4 | — |
 
 ## 事件格式
 每個實際的 F?-S? 事件記錄以下內容：
@@ -696,3 +696,93 @@ commit 之前更新；commit subject 包含步驟 ID。需要 hash 時從 git lo
   - Google 沒有被擋，但這條規則沒有達成。不重做，因為六組預算已用完。
 - **另作的補充組別**：第 5、6 組依 phase-7「預算尚有剩餘時」的用途，用於觀察 Bing 補足與 Bing 的實際結構；目的與查詢都寫在 groups.jsonl 與 README。
 - **下一步**：F7-S4（完整 suite、對帳與結案）。
+
+### F7-S4 完整 suite、對帳與結案
+- **最終檢查**（程式改動在 F6-S3 之後已穩定；F7 只改文件與證據）：
+  - vendor 目錄，沙箱內：`npm run build` exit 0；retention 31/31、content-contract 6 組、browser-lifecycle、test-server-entry 7/7，全部 exit 0。
+  - focused pytest（沙箱內、隔離）：`tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py` 58 passed；`tests/test_citation_skill_activation.py tests/test_tool_access_matrix.py` 22 passed。
+  - 完整 suite：沙箱外，XDG_CACHE_HOME、AGENT_LOG_DIR、TMPDIR 指到 `mktemp -d /tmp/ws.XXXX`，PYTHONDONTWRITEBYTECODE=1。`timeout 600 conda run -n app --no-capture-output poetry run pytest -q -p no:cacheprovider`：**1525 passed**，exit 0，60 s，第一次就通過（全計劃只跑了這一次）。
+  - 同一條命令前後比對 app/store 的 metadata 指紋（只讀 path、type、size、mtime、mode）：前後都是 `fa46909177bd…beaebaea`，沒有變動。
+- **Git 檢查**：
+  - 分支仍為 GUI；HEAD 在 origin/GUI（49d7048）之後 51 個 commit、落後 0 個，沒有 push；沒有建立、切換、刪除或重新命名 branch，沒有 worktree。
+  - `git diff --check <FA0 f514feb>..HEAD` 乾淨；變更檔案沒有 CR（LF）。
+  - FA0 之後的依賴、lock、環境定義與 AGENTS.md 變更，只有規劃後清理中經使用者同意的 42593d2（移除 p-retry、esbuild）；執行期間沒有任何這類變更。
+  - .gitignore 涵蓋而未提交的生成資料：app/vendor/web-search-mcp/dist/、node_modules/。計劃檔（含 build/ 下的 phase 檔）沒有未提交的修訂。
+  - **FU06**：
+    - FA0 之後 app/agent 只改了 app/agent/mcp.py（startup.py 不需要改）；
+    - app/agent diff 的新增行中沒有 google、bing、chromium、playwright、engine、channel、user-agent；
+    - `_web_search_env` 的 allowlist、app/pyproject.toml、app/poetry.lock、app/env/ 都沒有變更；
+    - app/agent 沒有 import vendor 程式，vendor 的 src 與 tests 也沒有 import app/agent。
+  - 每個步驟恰有一個 commit：F1-S1…F7-S3（含執行中新增的 F5-S0）各 1 個，加上本步的 [F7-S4]，沒有合併多步。
+- **計劃結構**：long-horizon-plan-author 的 `validate_plan.py --json`：ok=true，0 errors，0 warnings。
+
+#### AF 最終對帳
+| AF | 結果 | 證據 | 步驟 |
+| --- | --- | --- | --- |
+| AF01 | 已修正 | content-contract 巢狀表格、evidence/F1-S1、F7-S2 案例 1 | F1-S1 |
+| AF02 | 已修正 | content-contract 整頁、F7-S2 案例 2 | F1-S1 |
+| AF03 | 已修正 | evidence/F1-S2、F3-S1 完整版 Chromium 重跑、F7-S2 案例 4 | F1-S2 |
+| AF04 | 已修正 | content-contract 區塊分隔 | F1-S1 |
+| AF05 | 已修正 | content-contract caption／儲存格 | F1-S1 |
+| AF06 | 已修正 | content-contract 四種編碼來源、F7-S2 案例 3、F7-S3 第 3 組 | F1-S3 |
+| AF07 | 已修正 | content-contract 標題 | F1-S1 |
+| AF08 | 已修正 | content-contract 逐切點檢查 | F1-S4 |
+| AF09 | 已修正 | evidence/F1-S4 倍增量測、F7-S2 案例 15 | F1-S4 |
+| AF10 | 已修正 | (a)(c) content-contract；(b) evidence/F1-S3 與 F7-S2 案例 7（真實入口） | F1-S3、F7-S2 |
+| AF11 | 已修正 | retention 未嘗試原因、F7-S2 案例 8 | F5-S0、F5-S1 |
+| AF12 | 已修正 | retention attempts 實際值 | F5-S0、F5-S1 |
+| AF13 | 已修正 | retention http_status／final_path、F7-S2 案例 9、F7-S3 引擎行 | F5-S1 |
+| AF14 | 已修正 | test-server-entry 空白 query | F5-S3、F6-S1 |
+| AF15 | 已修正 | retention 靜態斷言、test-server-entry 文案 | F5-S3、F6-S1 |
+| AF16 | 已修正 | content-contract 每次嘗試事實 | F5-S2 |
+| AF17 | 已修正 | content-contract launch 失敗與排隊逾期 | F5-S0、F5-S2 |
+| AF18 | 已修正 | Statistics scope 行、vendor README、F7-S2 案例 8 | F5-S2、F7-S1 |
+| AF19 | 已修正（DuckDuckGo 部分不再適用） | browser-lifecycle 慢送、F7-S2 案例 6 | F4-S1 |
+| AF20 | 已修正 | browser-lifecycle 讀取卡住 | F4-S1 |
+| AF21 | 已修正 | browser-lifecycle 每頁視窗、F7-S2 案例 8 | F4-S1 |
+| AF22 | 已修正 | browser-lifecycle 改寫程序、evidence/F4-S2/full-chromium-owned.json | F4-S2 |
+| AF23 | 已修正（由 F1 根除） | F1-S4 量測、F7-S2 案例 1、15 | F1-S1、F1-S4 |
+| AF24 | 已修正 | test_mcp 怪名程序、F7-S2 案例 11 | F2-S1 |
+| AF25 | 已修正 | test_mcp 取消、F7-S2 案例 12 | F2-S2 |
+| AF26 | 已修正 | test_mcp 載入失敗、F7-S2 案例 13 | F2-S2 |
+| AF27 | 已修正 | test_mcp 遲到回應 | F2-S2 |
+| AF28 | 已修正 | 逾時訊息含 DEFAULT_TIMEOUT、F7-S2 案例 13 | F2-S2 |
+| AF29 | 已修正 | test-server-entry 案例 1；移除恆真斷言 | F6-S1、F6-S2 |
+| AF30 | 已修正 | test-server-entry | F6-S1 |
+| AF31 | 已修正 | test-server-entry（Node）、test_mcp 預算來源（Python） | F2-S2、F6-S1 |
+| AF32 | 已修正 | retention 引擎行文字 | F5-S1 |
+| AF33 | 已修正 | browser-lifecycle 聚焦案例 | F6-S2 |
+| AF34 | 已修正 | browser-lifecycle close 卡住 | F4-S2 |
+| AF35 | 已修正 | test_mcp 孫程序 | F2-S1 |
+| AF36 | 已修正 | test_mcp startup 診斷 | F2-S2 |
+| AF37 | 已修正（Brave 部分不再適用） | base、N06d、N03b、targetCount 的測試與突變 | F1-S1、F1-S4、F5-S1、F5-S2 |
+| AF38 | 已修正 | 單獨與整模組各 3 次 | F2-S2 |
+| AF39 | 已修正 | test_citation_skill_activation、test-server-entry 文案 | F6-S1 |
+| AF40 | 已修正 | root README | F7-S1 |
+| AF41 | 已修正並重新觀測 | F3 引擎改寫；F7-S3 公開觀測（Google 已驗證，Bing 見下） | F3-S1…S4、F7-S3 |
+| AF42 | 已處理 | 所有證據都在 evidence/ 並已提交 | 各步 |
+| AF43 | 已處理 | 每個 commit 同步狀態表 | 各步 |
+| AF44 | 已處理 | acceptance-findings 為更正紀錄；舊計劃未修改 | — |
+
+#### FU01–FU06 與 FG9 證據
+| 項目 | 本機證據 | 公開證據 | 結果 |
+| --- | --- | --- | --- |
+| FU01 Google 主力、Bing 備援、刪除 DuckDuckGo／Brave | retention 兩引擎策略 B、F7-S2 案例 9、grep 無 duckduckgo／brave | F7-S3 第 1、2、4、5 組 Google；第 5 組 Bing 備援確實執行 | 已驗證（Bing 在公開觀測中沒有提供有用候選：兩次零正式結果、一次結果與查詢無關） |
+| FU02 完整版 Chromium | evidence/F3-S1（exe 在 chromium-1181/）、F6-S1 launch 選項 | F7-S3 經產品以完整版 Chromium 搜尋 Google，沒有被擋 | 已驗證 |
+| FU03 一般 UA | F3-S1 navigator／header UA、F6-S1、F7-S2 案例 5 | 同上 | 已驗證 |
+| FU04 以實際導覽解析網址 | retention 解析案例、evidence/F3-S3、F7-S2 案例 10 | Google 23/23 解開（25–90 ms） | Google 已驗證；Bing 包裝**未觀測**（只有本機證據） |
+| FU05 啟動 15 秒上限 | test_mcp 啟動上限與完整預算、F7-S2 案例 14（14.5 s 放棄） | 不需要 | 已驗證 |
+| FU06 獨立 MCP | 本步 Git 檢查 | 不需要 | 已驗證 |
+| FG9 | 上列 | F7-S3 README 的判定 | Google 部分已驗證；Bing 備援的實際效益與 Bing 包裝解析未驗證 |
+
+#### 突變複驗彙總
+必殺 42/42 被殺死；N14j 等效（limit 兩處驗證）；可選 N09b 被殺死，P07b、P07d 存活並記錄理由；不再適用 6 項（N04c、N15、N16b、N16e、N16f、N17）。詳見 evidence/F6-S3/summary.md。
+
+#### 交付狀態
+- FG1–FG8：完成。FG9：Google 部分完成；Bing 的實際效益未驗證（引擎事實，不是程式缺陷）。
+- **偏離**：F7-S3 的 Google 請求間隔以組別開始計算，實際結果頁相隔 9.9 s 與 8.7 s，未達 10 秒規則（Google 沒有被擋）。
+- **未驗證項與恢復條件**：
+  - 真實 Bing 的正式結果與 ck/a 包裝解析：需要一次 Bing 回傳正式結果、且 Google 不足額的公開觀測；
+  - Google 在較高用量或較長時間下的穩定性；
+  - Bing 中文市場的實際結果。
+- 依完成判準，本計劃為「完成，附未驗證項與一項流程偏離」。
