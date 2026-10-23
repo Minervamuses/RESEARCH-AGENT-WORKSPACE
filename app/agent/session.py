@@ -843,7 +843,7 @@ class ChatSession:
         if normalized == "extended" and self.citation_skill_active:
             raise ValueError(
                 "extended thinking is unavailable while the citation skill "
-                "is active; deactivate it first (/citation off)"
+                "is active; citation tasks run in normal thinking until they end"
             )
         self.thinking_mode = normalized
 
@@ -874,7 +874,11 @@ class ChatSession:
         )
 
     def activate_citation_skill(self) -> SkillRuntime:
-        """Activate the sole persistent Skill and force normal thinking."""
+        """Keep Citation active across turns and force normal thinking.
+
+        Supported entry points run Citation for one task through
+        ``/citation`` or ``@citation``; nothing in production calls this.
+        """
         runtime = self._load_skill_runtime(CITATION_SKILL_NAME)
         self.clear_skill_installer()
         self.active_skill_runtime = runtime

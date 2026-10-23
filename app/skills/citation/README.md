@@ -56,8 +56,7 @@ Search 與 save 是不同階段；discovery result 不會因被找到就自動�
 
 ## Related docs
 
-- [Workspace Citation Skill guide](../../../README.md)
+- [Workspace README](../../../README.md)
 - [Skill execution instructions](SKILL.md)
 - [Required tool declaration](manifest.yaml)
-- [Skills 規範與建立指南](../../SKILLS_GUIDE.md)
 - [Agent citation session policy](../../agent/skills/citation/session_policy.py)

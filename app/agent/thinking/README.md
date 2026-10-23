@@ -41,5 +41,4 @@ Model IDs、token limits 與 retry defaults 以 `agent.config` 與實作為準�
 
 - [Agent architecture](../README.md)
 - [Turn lifecycle](../turns/README.md)
-- [Workspace `/thinking` guide](../../../README.md)
-- [Skills 與 Extended Thinking](../../SKILLS_GUIDE.md)
+- [Workspace README](../../../README.md)

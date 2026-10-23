@@ -150,4 +150,4 @@ poetry build
 
 桌面前端檢查位於 `app/desktop/`：`npm test`、`npm run build`；Rust 檢查位於 `app/desktop/src-tauri/`：`cargo test --locked`。
 
-程式結構與開發入口見 [app/README.md](app/README.md)，知識庫 API 見 [RAG API](app/rag/docs/API.md)。本次桌面改版的分段實機驗收、檢查結果與限制記於 [build-log.md](harness/plans/2026-10-18-desktop-interaction/build-log.md)。
+程式結構與開發入口見 [app/README.md](app/README.md)，知識庫 API 見 [RAG API](app/rag/docs/API.md)。本次桌面改版的分段實機驗收、檢查結果與限制記在該計劃的 build log；計劃完成後已從工作樹移除，可用 `git show b4d56f1^:harness/plans/2026-10-18-desktop-interaction/build-log.md` 取回。

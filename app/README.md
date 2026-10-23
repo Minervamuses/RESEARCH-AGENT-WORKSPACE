@@ -40,7 +40,7 @@ Built-in skill 的 domain code 與 agent runtime 是不同邊界。例如 `skill
 - [Turn lifecycle](agent/turns/README.md)
 - [Extended thinking](agent/thinking/README.md)
 - [Tool definitions and enforcement](agent/tools/README.md)
-- [Drop-in extension management](agent/extensions/README.md)
 - [Citation subsystem](skills/citation/README.md)
-- [Skills 規範與建立指南](SKILLS_GUIDE.md)
 - [RAG package](rag/README.md) 與 [RAG API](rag/docs/API.md)
+
+舊的 Skills 指南與 extension README 已在 2026-10-15 的整理中移除，內容可能已過時；需要時可用 `git show d497bd9^:app/SKILLS_GUIDE.md`、`git show be9c46e^:app/agent/extensions/README.md` 取回。

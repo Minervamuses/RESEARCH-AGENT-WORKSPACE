@@ -12,7 +12,7 @@
 
 | Module | Responsibility |
 |---|---|
-| `bash.py` | 每次需使用者核准、以 app root 為預設 cwd 的 shell tool；不提供 filesystem sandbox |
+| `bash.py` | 需經核准才執行（CLI 每次詢問；桌面依 Ask／Bypass，Bypass 不逐次詢問）、以 app root 為預設 cwd 的 shell tool；不提供 filesystem sandbox |
 | `read_file.py` | Controlled local file reading tool with bounded 1 MiB chunks |
 | `inventory.py` | Base tool creation、names 與 system-prompt inventory |
 | `access.py` | Global/skill-scoped access resolution |
@@ -52,5 +52,4 @@ grep -lF -- <shell-quoted-escaped-phrase> <shell-quoted-root>/*.json | head -n 2
 ## Related docs
 
 - [Agent architecture](../README.md)
-- [Workspace tools、MCP 與 Skills](../../../README.md)
-- [Skill tool-access contract](../../SKILLS_GUIDE.md)
+- [Workspace README](../../../README.md)

@@ -26,7 +26,7 @@
 | `session.py` | Stateful public facade、turn lock 與跨子系統呼叫順序 |
 | `startup.py` | 整合 built-in skills、verified extensions 與 MCP 的 session bootstrap |
 | `paths.py` | 跨 extensions、tools、skills 的路徑解析 |
-| `ingest.py` | App 對 RAG ingest/sync 的 application entrypoint |
+| `ingest.py` | App 對 RAG ingest/sync 的 application entrypoint；也提供每回合的本地工作範圍 `LocalWorkScope`，Stop 靠它收束並取消可控制的本地工作 |
 | `mcp.py` | MCP specs、logging 與 async tool loading facade |
 | `observability.py` | 跨 turn/workflow 的 redaction-safe telemetry |
 
@@ -75,7 +75,5 @@ ChatSession.turn_outcome()  [session-wide async lock]
 - [Turn lifecycle](turns/README.md)
 - [Extended thinking](thinking/README.md)
 - [Tool policy](tools/README.md)
-- [Extensions](extensions/README.md)
 - [Citation subsystem](../skills/citation/README.md)
-- [Skills 規範](../SKILLS_GUIDE.md)
 - [RAG API](../rag/docs/API.md)

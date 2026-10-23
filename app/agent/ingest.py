@@ -2,6 +2,10 @@
 
 The CLI layer (slash commands) only parses arguments and renders messages;
 every rag call goes through here so cli/ never imports rag directly.
+
+This module also owns the per-turn local-work scope (``LocalWorkScope``,
+``await_sync_work``, ``run_local_work``) that Stop uses to drain and cancel
+controlled local work.
 """
 
 from __future__ import annotations

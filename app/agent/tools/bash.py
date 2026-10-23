@@ -1,8 +1,11 @@
 """LangChain tool factory for executing shell commands with user approval.
 
-Every call prompts the user for y/n approval before executing. Non-interactive
-environments (eval harness, pytest, piped stdin) auto-deny so that the tool
-cannot hang or silently execute commands without supervision.
+Without an injected approval handler, every call prompts the user for y/n
+approval before executing, and non-interactive environments (eval harness,
+pytest, piped stdin) auto-deny so that the tool cannot hang or silently
+execute commands without supervision. Hosts such as the desktop inject their
+own handler, which follows the session's Ask/Bypass permission and approves
+without prompting under Bypass.
 """
 
 from __future__ import annotations

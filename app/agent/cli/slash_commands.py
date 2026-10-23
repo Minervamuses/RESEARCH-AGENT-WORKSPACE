@@ -39,8 +39,7 @@ class SlashCommandResult:
     ``followup_input`` asks the chat loop to feed the given text through an
     agent turn (history, trace, and error handling included) right after the
     local command completes. ``skill_name`` selects a transient runtime for
-    that turn; Citation followups leave it unset and use their persistent
-    static handler.
+    that turn; ``/citation`` followups set it to the Citation Skill.
     """
 
     message: str = ""
