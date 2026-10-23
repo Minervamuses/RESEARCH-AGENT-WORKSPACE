@@ -59,11 +59,12 @@ to that namespace, so different roots may safely contain the same paths.
 
 ## Local Store Lifecycle
 
-The default `app/store/` is generated local state. The `store/` rule in
-`app/.gitignore` excludes the whole directory, so a normal fresh clone has no
-Chroma database, `raw.json`, `folder_meta.json`, canonical conversations, or
-legacy `chat_history/`. The RAG package never creates or reads conversation
-history; the legacy directory is preserved only for the agent migration reader.
+The default `app/store/` is generated local state. The `/app/store/` rule in
+the workspace `.gitignore` excludes the whole directory, so a normal fresh
+clone has no Chroma database, `raw.json`, `folder_meta.json`, canonical
+conversations, or legacy `chat_history/`. The RAG package never creates or
+reads conversation history, and no current code reads a leftover
+`chat_history/`; the agent migration reader that used it has been removed.
 Branches and commits do not carry different copies of this state. A new user can run
 `/init`, `/ingest`, or the ingest CLI directly; there is no old database to
 migrate or rebuild first.

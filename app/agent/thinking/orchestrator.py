@@ -593,8 +593,8 @@ class FusionOrchestrator:
         for trace in candidate_traces:
             flat_trace_events.extend(trace.trace_events)
         # Non-candidate graph messages (base fallback / reviser) stay out of
-        # the candidate segments so plan rendering never cross-pairs colliding
-        # tool_call_ids.
+        # the candidate segments so the reviewer evidence summary never
+        # cross-pairs colliding tool_call_ids.
         non_candidate_messages: list = []
 
         if draft is None:
