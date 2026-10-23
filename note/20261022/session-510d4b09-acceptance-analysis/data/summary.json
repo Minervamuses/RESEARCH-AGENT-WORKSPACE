@@ -1,0 +1,103 @@
+{
+ "workflows": [
+  {
+   "run_id": "wf_28a993f0-567",
+   "name": "accept-web-search-citation-followup",
+   "status": "completed",
+   "reported_agentCount": 34,
+   "reported_totalTokens": 2081569,
+   "reported_totalToolCalls": 521,
+   "durationMs_last_run": 3055851,
+   "phases": "Review → Verify → Critic → Gaps",
+   "summary": "Follow-up of the acceptance review: run the missing code-review dimension, verify the remaining unverified finding, then completeness critic and gap checks (no public network)"
+  },
+  {
+   "run_id": "wf_2d41714c-f20",
+   "name": "accept-web-search-citation-gap2",
+   "status": "completed",
+   "reported_agentCount": 13,
+   "reported_totalTokens": 1297796,
+   "reported_totalToolCalls": 320,
+   "durationMs_last_run": 2456263,
+   "phases": "Gaps → Verify → Critic",
+   "summary": "Retry the failed GAP-2 test-sensitivity check of the acceptance review and run the final completeness critic (no public network)"
+  },
+  {
+   "run_id": "wf_f82a84a2-a4e",
+   "name": "accept-web-search-citation-plan",
+   "status": "killed",
+   "reported_agentCount": 52,
+   "reported_totalTokens": 852824,
+   "reported_totalToolCalls": 126,
+   "durationMs_last_run": 36625,
+   "phases": "Review → Verify → Critic → Gaps",
+   "summary": "Independent acceptance review of the executed 2026-10-20 web search/citation plan: 10 dimension reviewers, adversarial verification, completeness critic"
+  }
+ ],
+ "main_usage": {
+  "input_tokens": 132,
+  "cache_creation_input_tokens": 814581,
+  "cache_read_input_tokens": 12378822,
+  "output_tokens": 84031,
+  "thinking_tokens": 35857,
+  "api_calls": 67
+ },
+ "stages": [
+  [
+   "2026-10-21T07:34:39",
+   "S01 載入 skill（workflow-authoring、long-horizon-plan-author）"
+  ],
+  [
+   "2026-10-21T07:34:47",
+   "S02 讀計劃檔、build-log、git 歷史"
+  ],
+  [
+   "2026-10-21T07:35:20",
+   "S03 協調者親自先驗（重編 dist、Node 測試、pytest）"
+  ],
+  [
+   "2026-10-21T07:37:00",
+   "S04 撰寫並啟動 workflow #1（主驗收）"
+  ],
+  [
+   "2026-10-21T07:42:12",
+   "S05 等待中讀 phase 檔、回報進度"
+  ],
+  [
+   "2026-10-21T08:01:50",
+   "S06 workflow #1 結束 → 撞 session limit #1"
+  ],
+  [
+   "2026-10-21T12:41:30",
+   "S07 續跑 #1（resume workflow）"
+  ],
+  [
+   "2026-10-21T13:37:15",
+   "S08 讀第一輪結果、親自重現巢狀表格缺陷"
+  ],
+  [
+   "2026-10-21T14:10:10",
+   "S09 workflow 結束 → 撞 session limit #2"
+  ],
+  [
+   "2026-10-21T17:41:30",
+   "S10 續跑 #2，檢查後中止，改寫補充 workflow #2"
+  ],
+  [
+   "2026-10-21T18:21:15",
+   "S11 補充 workflow 組裝失敗 → 修腳本、resume、親自驗 owner flag"
+  ],
+  [
+   "2026-10-21T19:13:00",
+   "S12 workflow 結束 → 撞 session limit #3"
+  ],
+  [
+   "2026-10-22T02:41:10",
+   "S13 Try again：從 journal 重建結果、啟動 GAP-2 workflow #3"
+  ],
+  [
+   "2026-10-22T03:24:10",
+   "S14 統整結果、寫 memory、最終驗收報告"
+  ]
+ ]
+}
