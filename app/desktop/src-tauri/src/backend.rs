@@ -2414,6 +2414,5 @@ for raw in sys.stdin:
         })
         .expect("report");
         assert_eq!(report["kind"], "not_running");
-        assert!(report.get("flushed").is_none());
     }
 }

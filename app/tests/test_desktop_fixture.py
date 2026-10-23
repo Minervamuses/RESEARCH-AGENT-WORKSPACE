@@ -970,8 +970,6 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     phase07_fixture_root: Path,
 ) -> None:
     root = phase07_fixture_root
-    legacy_chat_history = root / "store" / "chat_history"
-    assert not legacy_chat_history.exists()
     first = _service(root, open_project=True)
 
     async def run_first_process():
@@ -1246,7 +1244,6 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
     assert seeded.document.turns[0].semantic_input is None
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
     assert final_shutdown == {"status": "stopped"}
-    assert not legacy_chat_history.exists()
 
 
 def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(

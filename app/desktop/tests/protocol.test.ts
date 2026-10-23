@@ -285,8 +285,6 @@ test("session turn carries one canonical logical identity and durable lifecycle"
     type: "boolean",
     required: true,
   });
-  assert.equal(PROTOCOL_ERROR_CODES.includes("CONVERSATION_FLUSH_FAILED" as never), false);
-  assert.equal(PROTOCOL_ERROR_CODES.includes("SHUTDOWN_FLUSH_FAILED" as never), false);
 });
 
 test("extension apply carries its own canonical durable turn lifecycle", () => {

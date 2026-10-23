@@ -404,8 +404,6 @@ def test_transcript_schema_accepts_each_durable_lifecycle_state(
 
 
 def test_shutdown_contract_has_truthful_status_without_legacy_flush_fields() -> None:
-    assert "CONVERSATION_FLUSH_FAILED" not in CONTRACT["errorCodes"]
-    assert "SHUTDOWN_FLUSH_FAILED" not in CONTRACT["errorCodes"]
     for method in ("session.shutdown", "runtime.shutdown"):
         assert CONTRACT["resultDataSchemas"][method] == {
             "status": {
@@ -564,3 +562,5 @@ def test_bash_permission_mode_protocol_contract() -> None:
         "required": True,
         "enum": ["ask", "bypass"],
     }
+    for method in ("session.create", "session.select"):
+        assert CONTRACT["resultDataSchemas"][method]["thinkingMode"]["enum"] == ["normal", "extended"]

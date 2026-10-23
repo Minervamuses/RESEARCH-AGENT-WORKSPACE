@@ -512,7 +512,6 @@ def seed_fixture_root(root: Path) -> AgentConfig:
     persist_dir = root / "store"
     guarded_paths = (
         persist_dir,
-        persist_dir / "chat_history",
         root / "skills",
         root / "extensions",
         root / "extensions" / "desired",

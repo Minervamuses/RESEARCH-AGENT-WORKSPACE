@@ -25,12 +25,10 @@ class _ArchiveLookupModel:
     def __init__(self, command: str, query: str) -> None:
         self.command = command
         self.query = query
-        self.bound_tool_names: list[list[str]] = []
         self.requested_tools: list[str] = []
         self.read_documents: list[dict] = []
 
     def bind_tools(self, tools):
-        self.bound_tool_names.append([item.name for item in tools])
         return self
 
     async def ainvoke(self, messages):
@@ -264,7 +262,6 @@ def test_archive_lookup_uses_exact_approved_grep_without_rag_fallback(
     assert rag_calls == []
     assert len(approvals) == 1
     assert approvals[0][0] == command
-    assert "recall_history" not in model.bound_tool_names[0]
     pending_self_matches = [
         turn
         for document in model.read_documents

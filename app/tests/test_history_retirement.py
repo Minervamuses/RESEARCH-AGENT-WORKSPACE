@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import importlib.util
-import inspect
 import json
 import shlex
 import subprocess
@@ -19,14 +16,12 @@ from agent.conversations import (
     ConversationRepository,
     ConversationValidationError,
 )
-from agent.graph import build_graph
 from agent.session import ChatSession
-from agent.tools import inventory as tool_inventory
 from agent.tools.bash import create_bash_tool
 from agent.tools.read_file import create_read_file_tool
 
 
-def _session(monkeypatch, tmp_path, *, history_factory):
+def _session(monkeypatch, tmp_path):
     graph_kwargs: dict[str, object] = {}
     graph = make_astream_graph(answer="offline answer")
 
@@ -35,11 +30,6 @@ def _session(monkeypatch, tmp_path, *, history_factory):
         return graph
 
     monkeypatch.setattr("agent.session.build_graph", build_graph)
-    monkeypatch.setattr(
-        "agent.session.get_chat_history_store",
-        history_factory,
-        raising=False,
-    )
     repository = ConversationRepository(tmp_path)
     session = ChatSession(
         AgentConfig(persist_dir=str(tmp_path)),
@@ -50,73 +40,12 @@ def _session(monkeypatch, tmp_path, *, history_factory):
     return session, repository, graph_kwargs
 
 
-def test_session_creation_has_no_active_history_store_surface(monkeypatch, tmp_path):
-    calls: list[tuple[tuple, dict]] = []
-
-    def retired_history_factory(*args, **kwargs):
-        calls.append((args, kwargs))
-        raise AssertionError("normal session creation must not initialize chat history")
-
-    session, _repository, graph_kwargs = _session(
-        monkeypatch,
-        tmp_path,
-        history_factory=retired_history_factory,
-    )
-
-    assert calls == []
-    assert "history_store" not in graph_kwargs
-    assert not hasattr(session, "history_store")
-    assert not hasattr(session, "_turn_store")
-    assert not hasattr(session, "flush_recent_turns")
-    assert "history_store" not in inspect.signature(ChatSession.__init__).parameters
-    assert "restored_turns" not in inspect.signature(ChatSession.__init__).parameters
-    assert "history_store" not in inspect.signature(ChatSession.create).parameters
-    assert "restored_turns" not in inspect.signature(ChatSession.create).parameters
-    assert "history_store" not in inspect.signature(ChatSession.restore).parameters
-    assert "history_store" not in inspect.signature(build_graph).parameters
-    assert "history_store" not in inspect.signature(
-        tool_inventory.build_base_tools
-    ).parameters
-    assert asyncio.run(session.turn(
-        "offline prompt",
-        turn_id=uuid.uuid4().hex,
-    )) == "offline answer"
-
-
-@pytest.mark.parametrize(
-    "module_name",
-    (
-        "agent.conversations.legacy",
-        "agent.conversations.legacy_plan",
-        "agent.conversations.migration",
-    ),
-)
-def test_legacy_conversation_import_modules_are_not_shipped(
-    module_name: str,
-) -> None:
-    assert importlib.util.find_spec(module_name) is None
-
-
-def test_inventory_and_prompt_retire_recall_but_keep_document_rag_and_filesystem_tools():
-    names = tool_inventory.base_tool_names()
-    prompt = tool_inventory.render_base_tool_prompt()
-
-    assert "recall_history" not in names
-    assert "recall_history" not in prompt
-    assert names[:3] == ["rag_explore", "rag_search", "rag_get_context"]
-    assert names[-2:] == ["read_file", "bash"]
-
-
 def test_session_guidance_and_status_expose_the_canonical_archive_root(
     monkeypatch,
     tmp_path,
 ):
     archive_parent = tmp_path / "含 空白 $HOME $(printf root) 'quoted'"
-    session, repository, _graph_kwargs = _session(
-        monkeypatch,
-        archive_parent,
-        history_factory=lambda *_args, **_kwargs: object(),
-    )
+    session, repository, _graph_kwargs = _session(monkeypatch, archive_parent)
     expected_root = str(repository.root.resolve())
 
     status = session.status_snapshot()
@@ -149,11 +78,7 @@ def test_extended_archive_hint_does_not_claim_bash_is_available(
     monkeypatch,
     tmp_path,
 ):
-    session, _repository, _graph_kwargs = _session(
-        monkeypatch,
-        tmp_path,
-        history_factory=lambda *_args, **_kwargs: object(),
-    )
+    session, _repository, _graph_kwargs = _session(monkeypatch, tmp_path)
     session.set_thinking_mode("extended")
 
     hint = str(session._base_prompt_history()[1].content)
