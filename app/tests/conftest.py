@@ -225,6 +225,15 @@ def _isolated_diagnostic_log_dir(monkeypatch, tmp_path_factory):
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_mcp_log_cache(monkeypatch, tmp_path_factory):
+    """Keep MCP stderr logs prepared by tests or child backends out of the
+    real user cache directory."""
+    monkeypatch.setenv(
+        "XDG_CACHE_HOME", str(tmp_path_factory.getbasetemp() / "xdg-cache")
+    )
+
+
 @pytest.fixture
 def no_citation_backoff(monkeypatch):
     """Skip real retry backoff sleeps in citation provider calls."""
