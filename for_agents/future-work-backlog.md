@@ -1,6 +1,6 @@
 # Future-Work Backlog
 
-Freshness: every candidate was reconsidered on 2026-10-23 at `3f9176a` against current code, tests and records. BACKLOG-019 and BACKLOG-020 were updated at `d74065f` after the cleanup commits `c12470f`–`d74065f`. The RAG items BACKLOG-001, BACKLOG-002, BACKLOG-015 and BACKLOG-016 rest on code unchanged since `5a0fa7c`. A candidate is knowledge, not authorization: implementing anything here still needs the user's request, and dependency or ignore-rule changes need explicit approval (AGENTS.md). See [audit coverage](README.md#audit-coverage).
+Freshness: every candidate was reconsidered on 2026-10-23 at `3f9176a` against current code, tests and records. BACKLOG-019, BACKLOG-020 and BACKLOG-021 were resolved by the cleanup commits `c12470f`–`711bf03`. The RAG items BACKLOG-001, BACKLOG-002, BACKLOG-015 and BACKLOG-016 rest on code unchanged since `5a0fa7c`. A candidate is knowledge, not authorization: implementing anything here still needs the user's request, and dependency or ignore-rule changes need explicit approval (AGENTS.md). See [audit coverage](README.md#audit-coverage).
 
 ## Active backlog
 
@@ -80,33 +80,6 @@ Freshness: every candidate was reconsidered on 2026-10-23 at `3f9176a` against c
 - Related items: ASM-021.
 - Status: Not started
 
-### BACKLOG-019 — Repair references to deleted documentation and retired behavior
-
-- Priority: P2
-- Problem: eight relative links point at files deleted on 2026-10-15 or later (`SKILLS_GUIDE.md`, `agent/extensions/README.md`, the desktop-interaction build log). Several strings still describe retired behavior:
-  - "/citation off" and "persistent" Skill wording;
-  - bash prompting every call;
-  - `ingest.py` described as a plain RAG wrapper.
-- Evidence: FAIL-014 lists each file. The removed desktop plan log records that the stale `SKILLS_GUIDE` links were seen and deliberately left. The RAG store notes were already corrected in `d74065f`.
-- Why it matters: contributors and agents follow dead links or troubleshoot against removed interfaces.
-- Suggested scope: a documentation-only pass over the listed files. Either drop or redirect each link, or restore the deleted guide content the user still wants. Correct the listed strings without changing behavior.
-- Dependencies / blockers: the user removed these documents in an annotated cleanup, so confirm before restoring any of them.
-- Acceptance criteria: a relative-link check over tracked Markdown reports no missing targets, and none of the listed retired phrases remain in code comments or docs.
-- Related items: INV-019, FAIL-014.
-- Status: Not started
-
-### BACKLOG-021 — Isolate the MCP log cache in the pytest suite
-
-- Priority: P2
-- Problem: tests that prepare MCP connections write run headers into the user's real `$XDG_CACHE_HOME/agent-mcp/*.stderr.log`.
-- Evidence: FAIL-023 (incident I1, 2026-10-19); `app/tests/conftest.py` isolates only `AGENT_LOG_DIR`.
-- Why it matters: test noise pollutes the logs used to analyze real turns, and the suite writes outside its temporary roots.
-- Suggested scope: an autouse fixture that points `XDG_CACHE_HOME` at a per-session temp directory, mirroring `_isolated_diagnostic_log_dir`.
-- Dependencies / blockers: none known; keep the tests that set their own `XDG_CACHE_HOME`.
-- Acceptance criteria: a full run leaves the real `~/.cache/agent-mcp` byte-for-byte unchanged, verified by comparing a metadata fingerprint before and after.
-- Related items: INV-028, FAIL-023.
-- Status: Not started
-
 ### BACKLOG-022 — Make a failed Stop recoverable, or say that a restart is required
 
 - Priority: P2
@@ -175,6 +148,8 @@ IDs stay listed here so they are not reused. Durable lessons live in the referen
 
 | ID | Outcome | Lesson now lives in |
 |---|---|---|
+| BACKLOG-019 | Resolved 2026-10-23 (`33bc33f`): dead links to the removed guides and plan log dropped, with `git show` recovery notes kept; three misleading "related docs" labels and the retired-behavior strings corrected | FAIL-014 |
+| BACKLOG-021 | Resolved 2026-10-23 (`711bf03`): an autouse fixture isolates `XDG_CACHE_HOME`; a full run without any redirect left `~/.cache/agent-mcp` unchanged | FAIL-023 |
 | BACKLOG-020 | Resolved 2026-10-23 by user decision: `/app/store/` is ignored in the workspace `.gitignore` (`c12470f`); the plan-log stubs and `AgentConfig.plan_logs_dir` were removed (`73c8db1`) | INV-029, FAIL-021 |
 | BACKLOG-009 | Removed 2026-10-23: the README prose about the academic Skill's bash prohibition was deleted | ASM-011 (prose versus binding) |
 | BACKLOG-010 | Removed 2026-10-23: the per-project catalog reconciles from JSON on every open and list, so lost registrations self-heal | ASM-016 (residual resurrected-ID failure) |

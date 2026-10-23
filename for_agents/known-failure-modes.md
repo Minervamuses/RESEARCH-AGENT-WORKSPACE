@@ -1,6 +1,6 @@
 # Known Failure Modes
 
-Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source, test definitions, commit records and the plan build logs (current and recoverable from Git history). Nothing was reproduced this pass. The RAG failures FAIL-001 and FAIL-002 keep their original 2026-09-05 offline probes at `9745fd1`; their code is unchanged. FAIL-014 and FAIL-021 received a focused update at `d74065f` after the cleanup commits `c12470f`–`d74065f`. See [audit coverage](README.md#audit-coverage).
+Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source, test definitions, commit records and the plan build logs (current and recoverable from Git history). Nothing was reproduced this pass. The RAG failures FAIL-001 and FAIL-002 keep their original 2026-09-05 offline probes at `9745fd1`; their code is unchanged. FAIL-014, FAIL-021 and FAIL-023 received focused updates after the cleanup commits `c12470f`–`711bf03`. See [audit coverage](README.md#audit-coverage).
 
 ## Active failure modes
 
@@ -72,30 +72,6 @@ Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source, t
 - Evidence: `app/agent/desktop/service.py::_knowledge_init_workspace`, `_knowledge_ingest_folder`, `_knowledge_ingest_file`.
 - Status: Active compatibility limitation
 
-### FAIL-014 — Developer documentation references deleted or retired material
-
-- Symptom: eight relative links point at deleted files, and several strings still describe retired behavior.
-- Trigger / preconditions: following the links or wording instead of current code. The cleanup on 2026-10-15 deleted `app/SKILLS_GUIDE.md` (`d497bd9`) and `app/agent/extensions/README.md` (`be9c46e`); `b4d56f1` removed the desktop-interaction plan log.
-- Affected components or users: contributors and agents navigating the docs.
-- Root cause: Confirmed documentation drift. The broken links are:
-  - root `README.md` → `harness/plans/2026-10-18-desktop-interaction/build-log.md`;
-  - `app/README.md` → `agent/extensions/README.md` and `SKILLS_GUIDE.md`;
-  - `app/agent/README.md` → `extensions/README.md` and `../SKILLS_GUIDE.md`;
-  - `app/agent/tools/README.md`, `app/agent/thinking/README.md` and `app/skills/citation/README.md` → `SKILLS_GUIDE.md`.
-
-  The stale strings are:
-  - `ChatSession.set_thinking_mode` says "/citation off".
-  - `activate_citation_skill` and `SlashCommandResult` docstrings still say "persistent".
-  - The `bash.py` docstring and `tools/README.md` say every call prompts, which Bypass contradicts.
-  - `agent/README.md` describes `ingest.py` only as a RAG wrapper.
-
-  Corrected on 2026-10-23: the RAG store notes (`d74065f`); the `plan_logs_dir` comment went with the field (`73c8db1`).
-- Current handling / recovery: rely on current code, `SKILL.md` files and the root README. The deleted files are recoverable from their parent commits. The earlier stale `/skill`, `task_modes` and persistent Citation wording is gone.
-- Reproduction or detection: a relative-link check over tracked Markdown (run read-only this pass). The removed desktop plan log records that its README review saw the `SKILLS_GUIDE` links and deliberately left other historical docs unrepaired.
-- Related invariants / assumptions: INV-019.
-- Evidence: the files and commits above; `b4d56f1^:harness/plans/2026-10-18-desktop-interaction/build-log.md` (P6-S2 entry).
-- Status: Active documentation conflict
-
 ### FAIL-022 — Failed Stop cleanup keeps the backend busy until restart
 
 - Symptom: after a Stop, new turns, conversation selection, deletion, project open and backend shutdown all return `BUSY_TURN`. Retry Stop returns the same error each time.
@@ -106,18 +82,6 @@ Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source, t
 - Reproduction or detection: `test_desktop_document_service.py::test_failed_stop_cleanup_keeps_new_turn_blocked` pins the blocked state. No test covers a second Stop or the still-pending branch.
 - Related invariants / assumptions: INV-027, ASM-031.
 - Evidence: `app/agent/desktop/service.py::_session_turn`, `_session_stop`; `answer_stream.test.ts` ("Stop failure remains blocked…").
-- Status: Active
-
-### FAIL-023 — Full pytest appends to the user's real MCP stderr logs
-
-- Symptom: run headers and test-server logs appear in `~/.cache/agent-mcp/*.stderr.log` (alpha, beta, dropin, legacy and others).
-- Trigger / preconditions: running the suite without redirecting `XDG_CACHE_HOME`. Tests built on a default `MCPServerSpec` reach `_spec_to_connection`, which calls `prepare_stderr_log` under the real cache.
-- Affected components or users: the user's cache directory and later log forensics: those headers are not user turns.
-- Root cause: Confirmed — `tests/conftest.py` isolates only `AGENT_LOG_DIR`.
-- Current handling / recovery: run the full suite with `XDG_CACHE_HOME`, `AGENT_LOG_DIR` and `TMPDIR` pointing at temporary directories, as the 2026-10-22 plan's full run did. Lines already appended were deliberately not deleted.
-- Reproduction or detection: incident I1, recorded 2026-10-19 in `8d38151^:harness/plans/2026-10-19-citation-search-reliability/build-log.md`; static `conftest.py` inspection this pass.
-- Related invariants / assumptions: INV-028.
-- Evidence: `app/tests/conftest.py`; `app/agent/mcp.py::_spec_to_connection`.
 - Status: Active
 
 ### FAIL-024 — DataCite search errors with an opaque cause
@@ -174,6 +138,32 @@ Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source, t
 - Status: Active (low impact)
 
 ## Mitigated but still relevant
+
+### FAIL-014 — Developer documentation referenced deleted or retired material
+
+- Former symptom: eight relative links pointed at files deleted in the 2026-10-15 cleanup: `app/SKILLS_GUIDE.md` (`d497bd9`), `app/agent/extensions/README.md` (`be9c46e`) and the desktop-interaction plan log (`b4d56f1`). Several strings still described retired behavior:
+  - `set_thinking_mode` pointed to "/citation off".
+  - "Persistent" Citation docstrings.
+  - "Every call prompts" for bash.
+  - `ingest.py` described only as a RAG wrapper.
+  - The RAG store notes.
+- Resolution:
+  - `33bc33f` drops the dead list entries. `app/README.md` and the root README now say how to recover the removed guides and the plan log with `git show`, so the context stays.
+  - The same commit relabels three "related docs" links whose promised sections no longer exist, and corrects the strings.
+  - `d74065f` corrected the RAG store notes; the `plan_logs_dir` comment went with the field in `73c8db1`.
+- Detection/recovery: a relative-link check over tracked Markdown reports only placeholder text quoted inside one historical plan record.
+- Limits: nothing in the suites checks links; `activate_citation_skill` remains a test-only helper.
+- Related: INV-019.
+- Status: Mitigated
+
+### FAIL-023 — Full pytest appended to the user's real MCP stderr logs
+
+- Former symptom: run headers and test-server logs appeared in `~/.cache/agent-mcp/*.stderr.log` (incident I1, 2026-10-19, `8d38151^:harness/plans/2026-10-19-citation-search-reliability/build-log.md`).
+- Root cause: `tests/conftest.py` isolated only `AGENT_LOG_DIR`, while tests built on a default `MCPServerSpec` reach `_spec_to_connection`, which calls `prepare_stderr_log` under `$XDG_CACHE_HOME`.
+- Resolution: `711bf03` adds the autouse fixture `_isolated_mcp_log_cache`, pointing `XDG_CACHE_HOME` at the pytest base temp. Child backends inherit it.
+- Detection/recovery: on 2026-10-23 a full run without any `XDG_CACHE_HOME` redirect passed (1517) and left `~/.cache/agent-mcp` unchanged: same 6 files, same content and metadata fingerprint. Lines appended before the fix were deliberately not deleted.
+- Related: INV-028.
+- Status: Mitigated
 
 ### FAIL-021 — Generated stores and plan logs escaped the ignore policy
 
@@ -328,10 +318,10 @@ Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source, t
 | Search and list/context disagree, or a Stop interrupted ingest | Compare raw JSON with Chroma after the last failed or stopped ingest | FAIL-003 |
 | Tools missing, or a provider call failed | Desktop `runtime.diagnostics` / diagnostic log incident ID / `agent-mcp/*.stderr.log` | FAIL-009 |
 | `knowledge.init_workspace` says not enabled | Use `/init` or `/ingest` through `session.turn` | FAIL-013 |
-| A README link 404s, or the text mentions `/citation off` | Check whether the target was deleted on 2026-10-15; trust code and `SKILL.md` | FAIL-014 |
+| A README link 404s, or text still mentions `/citation off` | Run a relative-link check; check whether the target was deleted on 2026-10-15; trust code and `SKILL.md` | FAIL-014 |
 | `app/store/` files show up in `git status` again | `git check-ignore -v app/store/x` should name `/app/store/` | FAIL-021 |
 | Everything returns `BUSY_TURN` after a Stop | Check the Stop reply error; restart the backend | FAIL-022 |
-| Unexpected headers in `~/.cache/agent-mcp` logs | Check whether a test run lacked `XDG_CACHE_HOME` isolation | FAIL-023 |
+| Unexpected headers in `~/.cache/agent-mcp` logs | Check that `_isolated_mcp_log_cache` in `tests/conftest.py` still sets `XDG_CACHE_HOME` | FAIL-023 |
 | `datacite:error` in Citation results | Look up the provider line in the diagnostic log by `batch_id` or time | FAIL-024 |
 | `APPROVAL_DENIED` without any prompt | Size and content of the operation parameters under Ask | FAIL-025 |
 | A project will not open: "history scan is incomplete" or "ownership" | Inspect `<historyDirectory>/conversations` read-only for malformed or foreign files | FAIL-026 |

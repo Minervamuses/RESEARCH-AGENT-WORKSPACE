@@ -4,8 +4,16 @@
 
 ## Current audit
 
-- **Latest maintenance:** 2026-10-23T19:46+08:00, a focused update after the 2026-10-23 cleanup commits; the main pass ended at 18:32+08:00. This timestamps the passes; it does not revalidate every retained claim.
-- **Repository baseline:** `/home/minervamuses/research-agent-workspace`, branch `GUI` at `3f9176a75b1759c88898d1db6fbda5d7907d0e8b`. The local `origin/GUI...HEAD` count was `0 0` (no fetch). The previous knowledge baseline was `5a0fa7c` (2026-09-14); 268 commits and 232 changed files lie between the two. The focused update used `d74065f`, after `4366e20` (notes), `c12470f` (ignore `app/store/`), `73c8db1` (Plan-log retirement), `0fabe25` (retirement-guard tests) and `d74065f` (stale notes).
+- **Latest maintenance:** 2026-10-23T20:01+08:00, the second focused update after the 2026-10-23 cleanup commits. The first ended at 19:46 and the main pass at 18:32 (+08:00). This timestamps the passes; it does not revalidate every retained claim.
+- **Repository baseline:** `/home/minervamuses/research-agent-workspace`, branch `GUI` at `3f9176a75b1759c88898d1db6fbda5d7907d0e8b`. The local `origin/GUI...HEAD` count was `0 0` (no fetch). The previous knowledge baseline was `5a0fa7c` (2026-09-14); 268 commits and 232 changed files lie between the two. The focused updates used `d74065f` and then `711bf03`. The commits involved are:
+  - `4366e20`: notes.
+  - `c12470f`: ignore `app/store/`.
+  - `73c8db1`: Plan-log retirement.
+  - `0fabe25`: retirement-guard tests.
+  - `d74065f`: stale notes.
+  - `fde53e3`: this knowledge refresh.
+  - `33bc33f`: doc links and retired wording.
+  - `711bf03`: test cache isolation.
 - **Provenance:** this pass continues an interrupted OpenCode maintenance session, `ses_e9b3ceaa2ffebUxLDUG3wpfu9L`. That session stopped on a provider quota error before writing any knowledge, and its record is the untracked `infrastructure-mention-handoff.zip`, used here only as a lead. HEAD and index bytes matched that record when this pass began, and current files were re-read instead of trusting its tool outputs.
 - **Runtime used:** Claude Code inside WSL Ubuntu-24.04. Every Bash command ran in a bubblewrap sandbox: writes were limited to the working tree and scratch space, and `/tmp` was read-only. Conda `app` at `/home/minervamuses/miniconda3/envs/app` reported Python 3.13.14, Node v24.18.0 and cargo/rustc 1.97.1; Poetry is present (version not queried).
 - **Working-tree state reviewed:** no tracked modifications and nothing staged. Untracked items:
@@ -15,7 +23,7 @@
 
   Sandbox `/dev/null` mount points (`.bashrc`, `.mcp.json`, `.claude/*`, `.idea` and similar) appear as untracked only inside the sandbox and are not user files. Initial index SHA-256: `f5e487da89f3c745b0b95254332ddb330b21b0770c6aca255b93f370c36ccada`.
 
-  At the focused update only these nine knowledge files were modified (this session's uncommitted rewrite). `app/store/` was ignored, `note/20261022/` was committed and the handoff zip had been deleted. Index SHA-256 at that point: `0a9d7d722126cbcf0bddfbd1374ddf7b1d49ca1938edd9cce397c6500cb37298`.
+  At each focused update only these nine knowledge files were modified. `app/store/` was ignored, `note/20261022/` was committed and the handoff zip had been deleted. Index SHA-256 at the latest update (HEAD `711bf03`): `ac37c2d1cc0158d4486ce20df95b875c35913202d351b98eb6857a4f00d62ac2`.
 - **Areas inspected:**
   - AGENTS.md; root, app and subsystem READMEs, including a relative-link check; manifests and ignore rules; `main.py`.
   - Desktop Python backend and conversation store, protocol contract, Rust host and React client.
@@ -46,7 +54,7 @@
 | known-failure-modes.md (RAG and older mitigated items) | Focused check | FAIL-001 to FAIL-003 code unchanged; anchors for FAIL-004 to FAIL-008 and FAIL-010 to FAIL-012 still present | Original probes 2026-09-05 at `9745fd1`; mitigations 2026-09-13 at `a88d44d` | Probes not rerun |
 | testing-strategy.md | Revalidated | Commands from AGENTS.md, the root README, the two `package.json` files and plan records; per-area test definitions; historical execution records with provenance | Definitions 2026-10-23 at `3f9176a`; each execution record keeps its own date | Only helper and Git checks executed |
 | future-work-backlog.md | Revalidated | Every candidate reconsidered. BACKLOG-009, BACKLOG-010 and BACKLOG-013 removed; BACKLOG-011 broadened; BACKLOG-017 blocked; BACKLOG-019 to BACKLOG-025 added | 2026-10-23 at `3f9176a` | No candidate implemented in that pass |
-| Cleanup follow-up across invariants, failures, backlog, testing, responsibilities and architecture | Focused check | INV-029, FAIL-014, FAIL-021, BACKLOG-019, BACKLOG-020, the Plan-log and `app/store/` notes, and the 2026-10-23 execution records, checked against the diffs of `c12470f`–`d74065f` | 2026-10-23 at `d74065f` | All other claims keep their `3f9176a` validation |
+| Cleanup follow-up across invariants, failures, backlog, testing, responsibilities and architecture | Focused check | Checked against the diffs of `c12470f`–`711bf03`: INV-019 and INV-029; FAIL-014, FAIL-021 and FAIL-023 (now mitigated); BACKLOG-019, BACKLOG-020 and BACKLOG-021 (resolved); the Plan-log, `app/store/` and `ingest.py` notes; the 2026-10-23 execution records | 2026-10-23 at `711bf03` | All other claims keep their `3f9176a` validation |
 
 ## Documents
 
