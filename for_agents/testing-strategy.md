@@ -1,112 +1,110 @@
 # Testing Strategy
 
-Freshness: focused source/test-definition inspection on 2026-09-14 at `5a0fa7c` covers the five recent refactors and three changed test files. Other definitions and fixed-revision execution records retain the 2026-09-13 inspection at `a88d44d`. No application suite, build, import smoke, native journey or live provider was executed during this maintenance. Historical observations retain the date and scope below.
+Freshness: command definitions and test definitions were revalidated on 2026-10-23 at `3f9176a`, with a focused update at `d74065f` after the cleanup commits `c12470f`–`d74065f`. Those cleanup changes were verified on 2026-10-23 with full pytest, `npm test` and `cargo test --locked` (results below). The knowledge maintenance itself ran no application suite, build, native journey, provider call or network request. Each execution record keeps its own date, baseline and provenance. See [audit coverage](README.md#audit-coverage).
 
 ## Available verification commands
 
-Use Linux Conda `app`. From the indicated directory, commands below are defined by `AGENTS.md`, current manifests or the named tracked test files. Listing a command does not imply it was run.
+Use Linux and the Conda environment `app` (`conda activate app`, or `conda run -n app …`). Listing a command does not mean it ran.
 
-| Command | Scope / definition source | Preconditions / effects | Execution this pass and limits |
-|---|---|---|---|
-| `cd app && poetry run pytest tests/test_state.py -q` | Agent state; AGENTS | Active Conda, installed project; pytest/cache writes | Not run: unchanged state path; one-module evidence only |
-| `cd app && poetry run pytest tests/rag/test_config.py -q` | RAG config; AGENTS | Active Conda; possible cache writes | Not run: no config changes; no live semantic evidence |
-| `cd app && poetry run pytest` | Complete Agent/RAG; pyproject pytest testpaths | Tests write temporary stores/files, spawn fixtures/processes, and may cache imports | Not run: writes outside maintenance boundary; prior run below |
-| `cd app && poetry run pytest tests/test_skill_runtime.py tests/test_extension_skill_startup.py tests/test_extension_manager.py tests/test_skill_adherence.py -q` | Current Skill/installer/extension tests | Temporary bundles/registries, ZIP extraction and multiprocessing | Not run: effectful fixtures outside `for_agents/`; inspected definitions establish intended assertions only |
-| `cd app && poetry run pytest tests/test_citation_provider_openalex.py tests/test_citation_resolution.py tests/test_citation_authority.py tests/test_citation_e2e.py tests/test_citation_slash_command.py tests/test_citation_skill_activation.py -q` | Current Citation tests | Fake provider/model paths, temporary bundles/canonical JSON | Not run: effectful fixtures; no arbitrary live-model claim |
-| `cd app && poetry run pytest tests/test_desktop_service.py tests/test_desktop_conversations.py tests/test_desktop_protocol_contract.py -q` | Current routing/control/replay/contract tests | Temporary canonical/catalog state, fake runners/providers | Not run: fixtures outside boundary; native GUI not covered |
-| `cd app && poetry run pytest tests/test_desktop_crash_recovery.py tests/test_conversation_repository.py tests/test_session_lifecycle.py tests/test_history_retirement.py -q` | Canonical lifecycle and real child crash fixtures | Owned temporary state and processes | Not run: unchanged broad lifecycle evidence carried forward |
-| `cd app && poetry run pytest tests/test_openrouter_model.py -q` | Main default and max-token forwarding test | Fake client; import/cache effects possible | Not run: definition inspected; model availability/output acceptance unproven |
-| `cd app/desktop && npm test` | package.json: Node test runner with TypeScript stripping | Installed Conda Node/dependencies; conversations tests create a Vite SSR server and transform/import React source, with possible cache effects | Not run: effects beyond knowledge-only scope; source/SSR assertions do not prove native WebKit behavior |
-| `cd app/desktop && npm run build` | package.json: `tsc --noEmit && vite build` | Writes frontend `dist` | Not run: outside write boundary |
-| `cd app/desktop && cargo test --offline --manifest-path src-tauri/Cargo.toml` | Current Cargo/Rust tests; archived exact command | Compiles/writes `target`; supervisor tests spawn child processes | Not run: outside boundary; historical full red and focused green stay distinct |
-| `cd app/desktop && npm run tauri -- build --no-bundle` | README; Tauri beforeBuildCommand runs npm build | Frontend and Rust release writes; requires system native libraries | Not run: source-only build, no installer/native interaction proof |
-| `cd app && poetry build` | AGENTS/pyproject | Writes `app/dist` | Not run: no packaging change |
-| `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py preflight --root .` | Loaded infrastructure helper; repo cwd | Read-only paths, permissions and Git tracking/ignore checks | Executed before knowledge writes; passed |
-| `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py bootstrap --root .` | Loaded helper | Creates missing knowledge files only | Executed; all nine preserved, none created |
-| `python -B /mnt/c/Users/garyc/.codex/skills/infrastructure/scripts/manage_for_agents.py check --root .` | Loaded helper | Read-only structural/path/ID checks | Executed: Structural validation passed (exit 0); certifies structure only |
-| `git --no-optional-locks diff --no-ext-diff --no-textconv --check` | Git diff validation | Read-only | Executed: passed (exit 0); no application correctness claim |
-
-### Focused regression definitions inspected this pass
-
-All entries below are Confirmed test-definition evidence at `5a0fa7c` on 2026-09-14, not test executions. Use the repository's pytest invocation with the named module, or the existing Desktop `npm test` command.
-
-| Area / test source | What the assertions establish if they pass | Evidence limit |
-|---|---|---|
-| `app/tests/rag/test_json_store.py::test_failed_write_restores_memory_to_previous_file` | Both immediate and deferred writes: injected `os.replace` failure leaves previous disk and memory content, removes temporary files, and permits a later successful add | Expanded parameter coverage; temporary writes outside this maintenance boundary; no Chroma/folder-meta rollback or power-loss proof |
-| `app/tests/test_citation_provider_openalex.py::test_search_work_keeps_first_seen_order_when_a_later_pass_improves_rank`; conditional-pass and mixed-location tests | Later better rank updates the first-seen record without moving its position; provider records and DOI manifestations preserve expected ordering | New/strengthened assertions with synthetic fetch data; no global citation-ranking or live-service guarantee; imports not executed |
-| `app/desktop/tests/conversations.test.ts`: safe content preserves inline formatting and unmatched delimiters | Code, strong/emphasis and an unmatched backtick survive server rendering; existing HTML/URL and array-child tests remain relevant | New definition; SSR/Vite effects not run; native layout/resource limits remain ASM-025 |
-| `app/tests/test_skill_runtime.py` and `test_extension_skill_startup.py` | Existing resource/pinned-reference, post-startup tamper rejection and applied-revision-until-restart checks cover the unchanged load contract | Existing definitions only; temporary bundles/files; activation check-to-read race remains |
-| `app/tests/test_thinking_session.py`: invalid JSON/schema aggregation and quorum fallback tests | Existing assertions choose the first successful candidate, retain the correct diagnostic and continue review | Existing fake-provider/temp-root definitions; do not cover arbitrary raised aggregator/reviewer/reviser exceptions (ASM-013) |
+| Command | Scope / environment | Definition source | Preconditions / known side effects | Execution and result / not-run reason | Evidence limits |
+|---|---|---|---|---|---|
+| `cd app && poetry run pytest` | Complete Agent and RAG suite (78 top-level and 7 RAG test modules) | AGENTS.md; root README; `pyproject.toml#tool.pytest.ini_options` | Writes the pytest cache (avoid with `-p no:cacheprovider`), `__pycache__`, temporary stores and archives; spawns real child processes. The fixture and crash tests need a writable `/tmp`. MCP tests write to the real `$XDG_CACHE_HOME/agent-mcp` unless it is redirected (FAIL-023) | Executed 2026-10-23 on `0fabe25` code (`d74065f` changes only docs and one comment): 1517 passed, outside the sandbox with temp, cache and log directories redirected. Inside the sandbox the fixture tests error on the read-only `/tmp` | Offline and fake-provider only |
+| `cd app && poetry run pytest tests/test_state.py -q` | One Agent module | AGENTS.md | Cache writes | Not run separately; covered by the 2026-10-23 full run | One module |
+| `cd app && poetry run pytest tests/rag/test_config.py -q` | One RAG module | AGENTS.md | Cache writes | Not run separately; covered by the 2026-10-23 full run | No live semantic evidence |
+| `cd app && poetry run pytest tests/test_mcp.py tests/test_mcp_stderr_log.py tests/test_extension_mcp.py -q -p no:cacheprovider` | MCP lifecycle with real processes; several budgets are 0.8 s | 2026-10-22 plan build log, F7-S4 | Real child processes. Needs `XDG_CACHE_HOME`, `AGENT_LOG_DIR` and `TMPDIR` redirected | Not run separately; covered by the 2026-10-23 full run | Timing-sensitive on a loaded host |
+| `cd app && poetry run pytest tests/test_citation_skill_activation.py tests/test_tool_access_matrix.py -q` | Citation boundary text and tool binding | Same build log | Temporary state | Not run separately; covered by the 2026-10-23 full run | Checks text presence, not model compliance |
+| `poetry run pytest tests/<module> -q` with the focused module sets in the change matrix | Area-focused checks | AGENTS.md focused pattern; the named test files | Temporary files and processes. `test_inline_skills.py` runs Node on `conversations.ts` and is skipped when `node` is absent | Executed for the 2026-10-23 cleanup's affected modules (see historical records) | Those modules only |
+| `cd app/desktop && npm test` | `node --test --experimental-strip-types tests/*.test.ts` (8 files) | `app/desktop/package.json#scripts.test` | Conda Node 24. Conversation tests start a Vite SSR server and import React source | Executed 2026-10-23 on `0fabe25`: 260 passed inside the sandbox | Not the native WebKit engine |
+| `cd app/desktop && npm run build` | `tsc --noEmit && vite build` | `package.json#scripts.build` | Writes `app/desktop/dist` | Not run | Typecheck and bundle only |
+| `cd app/desktop/src-tauri && cargo test --locked` | 40 Rust tests (28 in `backend.rs`, 12 in `protocol.rs`) | Root README | Needs an activated env named exactly `app` (`CONDA_PREFIX`, `CONDA_DEFAULT_ENV`). Compiles into `target/`; supervisor tests spawn children and some use `/tmp` | Executed 2026-10-23 on `0fabe25`: 40 passed outside the sandbox. Inside it, `child_crash_fails_pending_and_restart_is_user_driven` fails | One run; child-process tests depend on host process behavior |
+| `cd app/vendor/web-search-mcp && npm ci && npx playwright install chromium && npm run build` | Build the Web Search server | Root README; vendored `package.json#scripts.build` | Network downloads; writes `node_modules`, `~/.cache/ms-playwright` and `dist/` | Not run: installs and network | — |
+| `cd app/vendor/web-search-mcp && node tests/test-search-result-retention.mjs` (also `test-content-contract.mjs`, `test-browser-lifecycle.mjs`, `test-server-entry.mjs`) | Offline stubs; a local HTTP server; a stub browser with real child processes; spawned `dist/index.js` with stub engines | Plan build log; test files. There is no `npm test` script | Needs a built `dist/`. Real-Chromium checks need a short `TMPDIR` and `PLAYWRIGHT_BROWSERS_PATH` | Not run | No real Google |
+| `python main.py` (`--rebuild`, `--dev`) | Build when stale and launch the release GUI | Root README; `main.py` | Writes `src-tauri/target/release`; opens a native window | Not run: GUI launch and build writes | No native evidence this pass |
+| `cd app && poetry build` | Wheel and sdist | AGENTS.md | Writes `app/dist` | Not run: no packaging change | — |
+| `python3 -B /home/minervamuses/.claude/skills/infrastructure/scripts/manage_for_agents.py preflight --root /home/minervamuses/research-agent-workspace` | Knowledge write boundary and Git policy | Loaded infrastructure helper | Read-only | Executed before every knowledge write this pass: passed each time | Paths and Git policy only |
+| `python3 -B /home/minervamuses/.claude/skills/infrastructure/scripts/manage_for_agents.py check --root /home/minervamuses/research-agent-workspace` | Knowledge structure, IDs and required links | Loaded helper | Read-only | Executed after the final edit: Structural validation passed (exit 0) | Proves structure, not claim accuracy |
+| `git --no-optional-locks diff --no-ext-diff --no-textconv --check -- for_agents` | Whitespace in the knowledge diff | Git | Read-only | Executed after the final edit: passed (exit 0) | No application claim |
 
 ### Historical verification with retrievable provenance
 
-The [archived results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-check-results.json), [Python/Node output tails](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-python-node-results.txt) and [final review](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/code_review/phase-06-regression-and-closure-review.md) were read from local Git during the 2026-09-13 pass and carried forward here without rereading. They are historical execution evidence, not current reruns or independent review.
+Commit messages are claims by their authors; the build logs are repository records. The 2026-10-23 rows were observed directly in this session.
 
-| Check / execution date | Baseline / actual result | Evidence limit |
-|---|---|---|
-| Full Python, 2026-09-13 | `ec9175f`: 1,138 passed, 2 warnings; exit 0, wrapper 44.359 s | Fake/offline scope; warnings are LangChain pending default and intentional duplicate ZIP member |
-| Node, 2026-09-13 | `ec9175f`: 165 passed, 0 failed; exit 0, wrapper 6.285 s | No fresh browser engine/native interaction |
-| Full Rust, 2026-09-13 | `ec9175f`: 35 passed, 1 failed; exit 101 | `a_new_generation_cannot_reuse_the_prior_shutdown_report` observed Degraded instead of Crashed |
-| Focused Rust after correction | `cf3183b`: exact shutdown-report target passed, 35 filtered; exit 0, wrapper 5.167 s | Test setup now kill/waits under child mutex; full suite was not rerun or declared green |
-| Tauri no-bundle build | `cf3183b`: exit 0, 79.553 s, offline Cargo; includes TypeScript/Vite build | Linux source release only; no installer or additional native journey |
-| Native menu and Citation, archived final-check Phase03 | Keyboard/mouse insertion, caret/focus, Linux AT-SPI exposure, zero-request insertion, new catalog, real session/Citation tool/save/output plus A/B/restart/failure/interruption observed | Model/fetch seams were fake; no screen-reader speech claim, IME skipped, no dedicated GUI task-cancel entry |
-| Prior typography account, 2026-09-06 | `743aaaf`: 151 Node tests/build and headless Chrome at 720/1080/1920/2560 reported in prior knowledge | Retained historical account, not a new native layout result |
+| Check / date | Baseline and recorded result | Provenance | Evidence limit |
+|---|---|---|---|
+| Full pytest, 2026-10-23 | `73c8db1` (after the Plan-log retirement): 1525 passed. `0fabe25`: 1517 passed in 62 s, exit 0; 8 retirement-guard test cases were removed. `d74065f` changes only docs and one comment | 2026-10-23 cleanup run, outside the sandbox with `TMPDIR`, `XDG_CACHE_HOME` and `AGENT_LOG_DIR` redirected and `-p no:cacheprovider` | Offline and fake-provider only |
+| Focused pytest, 2026-10-23 | Plan-log retirement: the 6 affected modules went from 166 passed to 165 passed (one test removed). Guard cleanup: 6 affected modules, 235 passed. Thinking tests after the comment fix: 70 passed | Same cleanup run | Affected modules only |
+| npm test and cargo test, 2026-10-23 | `0fabe25`: npm 260 passed inside the sandbox; `cargo test --locked` 40 passed outside it | Same cleanup run | Inside the sandbox one Rust child-crash test fails (see constraints) |
+| Full pytest, 2026-10-22 | `1834a85`: 1525 passed in 60 s, exit 0. Run outside the sandbox with `XDG_CACHE_HOME`, `AGENT_LOG_DIR` and `TMPDIR` redirected and `-p no:cacheprovider` | `harness/plans/2026-10-22-web-search-acceptance-fixes/build-log.md`, F7-S4 | Before the vendor-only Bing removal and before `92763e8` |
+| Focused checks after the Bing removal, 2026-10-22 | `1bc3bf2`: focused pytest 80 passed; vendor build OK; retention 29/29; content-contract, browser-lifecycle and server-entry 7/7 exit 0 | Same build log, post-delivery section | Offline and stubbed |
+| Full pytest, 2026-10-22 | `92763e8`: 1526 passed | Commit message only | Not verified; superseded by the 2026-10-23 runs |
+| Mutation re-check, 2026-10-22 | 42/42 must-kill mutations killed; P07b and P07d survived with stated reasons | Plan `evidence/F6-S3/summary.md` | Covers the listed mutants only |
+| Real Python→Node entry, 2026-10-22 | 15 local cases through the agent's own MCP path, with real `dist` and real Chromium, all passed with no surviving process | Plan build log, F7-S2; `evidence/F7-S2/results.json` | 127.0.0.1 servers. Public Google was observed separately (4 searches, F7-S3) |
+| npm test, 2026-10-19 | 260 passed in 5.6 s | `b4d56f1^:harness/plans/2026-10-18-desktop-interaction/build-log.md` (P6-S1); commit `2bc784a` message | Desktop TS sources and tests are unchanged since `2bc784a` |
+| Full pytest, 2026-10-19 | 1458 passed and 3 failed. The three adapted tests then passed individually; the suite was not rerun | Same removed log, P6-S1 | Superseded by the 2026-10-22 runs |
+| Rust, 2026-10-12 to 2026-10-19 | Full `cargo test`: 39 passed (3 runs) on 2026-10-12. Later only `cargo test --locked protocol::tests` (12), `cargo test protocol --lib` (14) and `picker_maps_wsl_unc` (1) | Commit `5fc0d74` message; removed desktop log | `backend.rs` changed afterwards (pickers, Stop, rename/delete, permissions). Superseded by the 2026-10-23 full run |
+| Native checkpoints, 2026-10-15 to 2026-10-19 | GUI and desktop-interaction plans recorded native checkpoints: picker shown, annotation flow, cancel preserving the draft. One HMR/maximize input stall under WSLg had an unproven root cause | Removed plan logs (`b4d56f1^`, GUI plan history) | Historical accounts, not current reruns |
 
-The prior `ec9175f..a88d44d` comparison contained only the Rust test setup correction; its Python/Node source-equivalence statement ended at `a88d44d`. Five later refactors change Skill loading, fusion fallback, JSON save, OpenAlex ordering and SafeContent, with three test files changed. The historical counts above therefore do not establish passing results at `5a0fa7c`. This maintenance changes knowledge only; no new application test result was obtained. A prior failure cannot be rewritten as a full passing run even when its one target later passes.
-
-The older RAG stale-inventory and empty-file probes (FAIL-001/002) remain the 2026-09-05 account at `9745fd1`. Prune/search anchors were checked during the 2026-09-13 pass; current RAG inspection covers JSON save and its ingest/DocumentStore callers. No new reproduction was made. Removed plans have no active status here; exact geometry/zoom and restarted IME are evidence gaps, not an instruction to reopen an old blocked plan.
+The 2026-09-13 records (Python 1,138, Node 165, Rust 35 passed / 1 failed followed by one focused pass) are superseded by the records above.
 
 ## Change-type verification matrix
 
-| Change type | Minimum relevant checks | Broader / environment evidence |
-|---|---|---|
-| Graph/session/finalization | State, graph, turn-finalizer, session lifecycle/persistence modules | One reasonably inexpensive full pytest near completion under project rules; live calls require authorization |
-| Canonical replay/persistence | Conversation repository, Desktop conversations/service, crash recovery and history retirement | Verify user-visible saved/replayed output and unchanged bytes; do not infer interprocess safety |
-| Tool/Bash/MCP | Access/policy-node, Bash, MCP and Desktop trust/service tests | Test ask and bypass separately; injected runner does not prove live shell/provider operation |
-| Skill/Citation/installer | Runtime/startup, adherence, manager, Citation activation/e2e/slash/resolution/authority | Cleanup, true effective mode, no extra model/save on completed replay, preserved source/backup bytes |
-| Extension apply | Existing manager multiprocessing and scoped preview tests | Use temporary roots; stable local lock inode, not arbitrary shared/network-FS safety |
-| RAG ingest/sync/store/search | Relevant `tests/rag` plus ingest/adapters | Small deterministic case first; live Ollama/OpenRouter only for an authorized integration need |
-| Desktop catalog/menu/permissions | Python service/protocol, Node conversations/trust, shared JSON/TS/Rust fixtures | Native key/mouse/ARIA checks when affected; stale generation/session and zero-effect insertion |
-| Desktop rendering/CSS | Node safe-content/styles tests and frontend build | Native WebKit/DPI/IME evidence is narrower and distinct from headless Chrome |
-| Runtime/packaging | Runtime/manifest/import checks; build only as needed | Respect Conda/Poetry, no dependency or environment edits without approval |
-| Knowledge only | Helper preflight/check, local links/IDs, diff and scope/index comparison | Static evidence sufficient; no application suite by default |
+| Change type | Minimum focused checks | Broader checks | Manual or environment-specific evidence |
+|---|---|---|---|
+| Session, graph, finalization, cancellation | `test_session_persistence.py`, `test_graph_skill_loader.py`, `test_turn_finalizer.py`, `test_thinking_session.py`, `test_ingest.py`, `test_bash_tool.py`, `test_observability.py` | Full pytest with isolated environment variables | Stop with real subprocesses; live providers only when authorized |
+| Conversation schema, persistence, replay | `test_conversation_repository.py`, `test_session_persistence.py`, `test_desktop_crash_recovery.py`, `test_desktop_conversations.py` | Full pytest; protocol suites in all three languages when DTOs change | Check v1/v2/v3 reads and byte preservation; never use user history as a fixture |
+| Project open, catalog, `RESEARCH.md` | `test_desktop_conversations.py`, `test_desktop_fixture.py`, `test_desktop_service.py` | Add direct `inspect_project`/`initialize_project` branch tests (none exist) | A disposable folder with its own `RESEARCH.md` |
+| Documents, comments, frozen submissions | `test_desktop_documents.py`, `test_desktop_document_service.py`, `test_inline_skills.py`; Node `documents`, `answer_stream`, `conversations` tests | `npm run build`; shared protocol fixtures | Monaco save in the native window, IME, size limits (ASM-030) |
+| Stop | Stop tests in `test_desktop_document_service.py`, `test_session_persistence.py`, `test_bash_tool.py`; `answer_stream.test.ts` | Full pytest | Failed-cleanup and still-pending branches (FAIL-022) |
+| Permission and approvals | `test_project_permissions.py`, `test_policy_tool_node.py`, `test_desktop_service.py::test_desktop_bash_*`; `trust.test.ts` | Full pytest | Exercise Ask and Bypass separately; summaries over 8 KiB (FAIL-025) |
+| Desktop protocol (any language) | `test_desktop_protocol_contract.py`, `test_desktop_server.py`; `protocol.test.ts`; `cargo test --locked protocol::tests` | All three suites | Add shared fixtures for every new shape (none exist yet for `workspace.select` or `submittedContext`) |
+| Rust host, pickers, launcher | `cargo test --locked` (in an activated `app` env); `test_desktop_launcher.py` | `npm run build`; `python main.py --rebuild` when release behavior matters | The picker needs Windows interop; release launch in WSLg |
+| MCP client | `test_mcp.py`, `test_mcp_stderr_log.py`, `test_extension_mcp.py` with an isolated `XDG_CACHE_HOME` | Full pytest | Real `dist` entry outside the sandbox |
+| Web Search server | `npm run build` plus the four Node test scripts | Focused MCP pytest | Real Chromium needs a short `TMPDIR`; public Google only with explicit authorization and pacing (at least 10 s apart) |
+| Citation | `tests/test_citation_*.py`, `test_citation_skill_activation.py`, `test_tool_access_matrix.py` | Full pytest | Live provider probes only when authorized; record the `SKILL.md` version for thesis runs |
+| Skills, inline references, installer, extensions | `test_inline_skills.py`, `test_skill_runtime.py`, `test_extension_skill_startup.py`, `test_extension_manager.py`, `test_skill_adherence.py` | Full pytest | Preserve source and backup bytes; Bypass consent behavior |
+| RAG | `tests/rag/*`, `test_ingest.py` | Full pytest | Ollama/OpenRouter live only when authorized; FAIL-001/002/003 lack tests |
+| Diagnostics, observability, privacy | `test_diagnostics.py`, `test_observability.py`, `test_chat_cli.py` | Full pytest | Prove that tool arguments and provider bodies stay out of logs (INV-028 gap) |
+| Rendering and CSS | Node `conversations` and `styles` tests | `npm run build` | Native WebKitGTK, DPI and IME behavior |
+| Knowledge only | Helper preflight/check, link and ID checks, scoped diff and index comparison | — | Static evidence is enough; no application suite by default |
 
 ## Invariant and failure-mode coverage
 
-These are mappings to existing checks, not fresh passing claims.
+These map existing test definitions; none was executed this pass.
 
 | Subject | Anchors / scope | Remaining limitation |
 |---|---|---|
-| Runtime/text/dependency (INV-001/002/003) | Runtime guard/config, .gitattributes, RAG adapter tests; current environment paths verified | Full dependency/import audit carried forward |
-| Tools/finalization (INV-004/005/010; FAIL-009/010/011) | Access matrix, policy node, turn finalizer, Citation gate/e2e | Duplicate tool IDs and raised extended-stage exceptions not comprehensively covered; live dependencies unknown |
-| Canonical authority (INV-006/016; FAIL-004/017/018) | Repository, lifecycle/crash, catalog restore and frontend logical-turn merge | Multi-process writers/catalog remain ASM-016/022 |
-| RAG identity/state (INV-007/008/012; FAIL-001/002/003) | Root identity, historical probes/prune source; current JSON immediate/deferred rollback definition above | No unified Chroma/raw/meta failure-injection proof; stale inventory/empty re-ingest remain |
-| Extension trust (INV-009/013; FAIL-005/006) | Changed-bundle startup/activation tests; manager multiprocessing/fsync/crash/exception tests | Activation check-to-read race and noncooperating writers remain |
-| Earliest resolution (INV-014; FAIL-007) | Same-year/all-missing ambiguity, DOI dedupe, unique known minimum with undated alternatives; authority/workflow propagation | Year precision only |
-| Desktop wire/trust (INV-011/015/017/018/023) | Shared fixtures, Python/TS/Rust validators, ask/bypass busy/ACK/trust tests; current inline-formatting and existing safe-renderer definitions | Source checkout only; no new native engine or cross-process test |
-| Skill lifecycle and installer (INV-019/024; FAIL-015) | Citation terminal cleanup/late save, installer authority/bytes/cancel/cleanup conflict/mode and completed replay tests | Fake model quality not a live-model guarantee; host pending state is not durable |
-| MCP defaults (INV-020) | CLI/Desktop default-on/opt-out tests | Live MCP availability not checked |
-| Typography/composer (INV-021/022; FAIL-019/020) | Source CSS tests, array-child regressions, current menu key predicate and archived native menu | Exact native geometry/zoom, fresh IME and resource exhaustion unproven |
-| Save reporting (ASM-014) | Strict ToolMessage statuses and four outcome journeys; archived scoped characterization | Model prose remains model-governed; no automatic new backlog |
-| Documentation drift (FAIL-014) | Root README / Skill-guide comparison against shared handler/current Citation Skill | Still outside this maintenance's write scope |
+| Runtime, text, dependency boundary (INV-001, INV-002, INV-003) | `test_runtime_env.py`; Rust Conda tests; `test_public_import_defers_vector_backends` | Launcher has no Conda check; the `rag/types.py` seam is undocumented |
+| Tool admission and finalization (INV-004, INV-005, INV-010; FAIL-010, FAIL-011) | `test_policy_tool_node.py`, `test_tool_access_matrix.py`, `test_turn_finalizer.py`, `test_citation_gate.py` | Duplicate tool IDs are unvalidated; extended errors complete as text |
+| Canonical persistence and conversation access (INV-006, INV-016, INV-026; FAIL-017, FAIL-018, FAIL-026) | `test_conversation_repository.py`, `test_session_persistence.py`, crash recovery, `test_desktop_conversations.py`, `test_desktop_document_service.py` | No cross-process test (ASM-016, ASM-022); no limit tests (ASM-024) |
+| RAG identity and state (INV-007, INV-008, INV-012; FAIL-001, FAIL-002, FAIL-003) | `tests/rag/test_root_identity.py`, `test_json_store.py`, `test_ingest.py` | No cross-store failure injection or post-Stop store check; FAIL-001/002 unpinned |
+| Extension trust and installer (INV-009, INV-013, INV-024; FAIL-005, FAIL-006) | `test_extension_skill_startup.py`, `test_extension_manager.py`, `test_project_permissions.py` | Check-to-read race; Bypass consent pinned as intended |
+| Citation (INV-010, INV-014, INV-030; FAIL-007, FAIL-015, FAIL-024, FAIL-028) | `test_citation_*`, `test_inline_skills.py::test_desktop_citation_command_survives_reference_comment_composition` | Prompt-only rules have no compliance test (ASM-035); DataCite cause unknown |
+| Desktop wire, topology and trust (INV-011, INV-015, INV-017, INV-018, INV-023) | Protocol suites in three languages, `test_project_permissions.py`, `trust.test.ts`, Rust supervisor tests | Rust trace validation is test-only; the picker entry points are untested; no shared fixtures for new shapes |
+| Documents and Stop (INV-025, INV-027; FAIL-022, FAIL-025) | `test_desktop_documents.py`, `test_desktop_document_service.py`, `answer_stream.test.ts` | Approval limits and a second Stop are untested |
+| Skills (INV-019) | `test_inline_skills.py`, `test_citation_slash_command.py`, `test_slash_commands.py` | CLI `@name` has no help or tests for accidental selection |
+| MCP and Web Search (INV-020, INV-031; FAIL-009, FAIL-023, FAIL-027, FAIL-030) | `test_mcp.py`, `test_chat_cli.py`, vendored Node tests | Non-web_search MCP is unbounded; Google live stability Unknown |
+| Typography and keyboard (INV-021, INV-022; FAIL-019, FAIL-020) | `styles.test.ts`, `conversations.test.ts`, `documents.test.ts`, `inline_skills.test.ts` | Fixed-px surfaces; no native IME run |
+| Records and hygiene (INV-028, INV-029; FAIL-014, FAIL-021) | `test_diagnostics.py`, `test_observability.py` | No test for log privacy on exception paths; no link or ignore checks in any suite |
 
 ## Test-data, fixture, and environment constraints
 
-- Conda `app` owns Python/Node/Rust; Poetry creates no separate virtualenv. Use repository LF policy.
-- Application tests visibly create temporary archives, stores, registries and child processes. They were inspected statically; none was run to evade the knowledge-only write boundary.
-- Do not use user stores, secrets, extension state, generated citation bundles or caches as fresh fixtures. The exact Desktop `phase02` fixture gate requires an owned root; it is not the production Citation model path.
-- Offline fake model/fetch results prove deterministic host behavior only. Real tagging/chat may contact OpenRouter; embedding requires Ollama/bge-m3.
-- Protocol assets are source-checkout-relative and Tauri bundling is disabled. The active protocol requires matching command catalog/permission fields across JSON/Python/TS/Rust.
-- New sessions/restart default to Normal/ask; same-process conversation controls are memory snapshots. Canonical historical thinking metadata is not a persisted next-turn preference.
-- No formatter/linter/coverage threshold or CI workflow was identified in the prior account; no new CI execution was inspected.
+- **Environment.** Conda `app` owns Python, Node and Rust; Poetry creates no virtualenv. `cargo test` needs `CONDA_DEFAULT_ENV=app` and `<CONDA_PREFIX>/bin/python`.
+- **Sandbox.** In the Claude Code Bash sandbox `/tmp` is read-only. `fixture_session.py` (`/tmp/research-agent-desktop-phase02-*`) and several supervisor tests then fail, so run them outside the sandbox. Use `TMPDIR`, `XDG_CACHE_HOME` and `AGENT_LOG_DIR` temp directories. `conftest.py` isolates only `AGENT_LOG_DIR` (FAIL-023). Observed on 2026-10-23 inside the sandbox: 19 fixture errors and 1 failure from the read-only `/tmp`, and the Rust test `child_crash_fails_pending_and_restart_is_user_driven` reporting `BACKEND_OUTPUT_CLOSED` instead of `BACKEND_CRASHED`. All of them pass outside it.
+- **Web Search outside the sandbox.** Node children receive only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER` plus five forwarded settings: no `TMPDIR`, no proxy. Real Chromium checks need a short writable temp path and, for direct `node` runs, `PLAYWRIGHT_BROWSERS_PATH`.
+- **Fixtures.** Never use user stores (`app/store`), real project histories, secrets, extension state, citation bundles or caches as fixtures. The exact `phase02` fixture requires an owned temp root.
+- **Scope of offline results.** Fake model and fetch results prove deterministic host behavior only. Real tagging and chat contact OpenRouter; embeddings need Ollama with bge-m3; Web Search contacts Google.
+- **Shared fixtures.** `fixtures.json` drives the Python, TypeScript and Rust protocol tests (104 messages, 43 traces), but has no `workspace.select` or `submittedContext` case.
+- **No CI and no linters.** No CI workflow, formatter, linter or coverage threshold is configured.
 
 ## Known gaps and unreliable checks
 
-- RAG partial-store writes, empty/unreadable re-ingest and stale folder metadata lack the targeted regression/failure-injection evidence described in the retained backlog.
-- Broader unversioned-store/embedding compatibility, root moves, filename-stem PID collisions, init/sync exclusions and prefix search completeness remain carried-forward gaps.
-- Desktop catalog and canonical conversation interprocess writes remain unproven; extension apply tests do not cover those stores.
-- Managed Skill activation validation is a precheck, not a lock/snapshot for all subsequent reads.
-- The Rust full-suite result is still 35 passed / 1 failed historically, followed by one focused pass after its test-only fix. No new full-suite run occurred.
-- Native menu/Citation acceptance does not prove screen-reader speech, live-model quality, exact 720x560/200% zoom, all DPI configurations, or restarted IME. The user accepted skipping restart-dependent IME work; do not turn that evidence gap into new scope.
-- Multi-level Thinking Effort remains explicitly [deferred](../issue/09-desktop-thinking-effort-control-deferred.md), not implemented by current Normal/Extended tests.
-- Structural validation can check Markdown/paths/IDs; it cannot establish claim accuracy, runtime correctness, or automatic future-agent loading.
+- **RAG.** FAIL-001/002/003 have no regression or failure-injection tests (BACKLOG-001, BACKLOG-002, BACKLOG-006). Init/sync exclusions and prefix-search completeness are untested (ASM-020, ASM-021).
+- **Desktop.**
+  - No tests cover `inspect_project`/`initialize_project` branches, the select-time unavailable conversation, item-count limits, oversized approval summaries, result lines over 2 MiB, or a second Stop after failed cleanup.
+  - The native picker, Monaco save in the release build, `window.confirm` and IME were not exercised in any current record.
+- **Sandbox-sensitive checks.** The fixture-based pytest modules and the Rust child-crash test fail falsely inside the Claude Code sandbox. Count only results from outside it.
+- **Cross-process.** There are no multi-instance tests for conversations, catalog, `RESEARCH.md` or documents.
+- **Logs.** No test proves the diagnostic-log privacy contract on exception paths (INV-028), and no test checks log rotation during a long-lived process.
+- **Timing.** MCP real-process tests use sub-second budgets and are load-sensitive.
+- **Model behavior.** Natural-model behavior (Citation rules, save prose) is evidenced only by a few recorded traces (ASM-014, ASM-035).
+- **Structural validation.** It checks Markdown structure, paths and IDs. It cannot establish claim accuracy, runtime correctness, or that future agents will read this folder.

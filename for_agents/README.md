@@ -1,34 +1,52 @@
 # Agent Repository Knowledge
 
-> Managed by `$infrastructure`. Current implementation and scoped observations describe behavior; applicable instructions and explicit contracts govern requirements. This folder grants no implementation authority.
+> Managed by `$infrastructure`. Verify current behavior against live evidence and requirements against applicable instructions/contracts. This folder grants no authority to change either.
 
 ## Current audit
 
-- Latest maintenance: 2026-09-14T12:32:05+08:00; this timestamps the pass, not every retained claim.
-- Repository: `/home/minervamuses/research-agent-workspace`; branch `GUI` at `5a0fa7c1241fe6932973338b353ec3c37281941b`.
-- Runtime verified: Windows-hosted agent delegates commands to Ubuntu-24.04 WSL; Linux Git, Conda `app` Python 3.13.14, Poetry 2.4.1, and Node 24.18.0. Repository instructions expressly permit this setup.
-- Working-tree state reviewed: clean at entry, no staged or untracked work. Compared the five source refactors since knowledge commit `5b6a194` (prior audit baseline `a88d44d`); branch was five commits ahead of its local upstream reference. All nine knowledge files were read and considered. Initial index SHA-256: `d4ef06711b85d275b28e4e15d03c5609356efbfa90ecab4b8108cb6403ce2d03`.
-- Areas inspected: applicable instructions, manifests/runtime, all eight changed source/test files, and direct callers/consumers for Skill loading, fusion aggregation, deferred JSON writes, OpenAlex records and Desktop safe text rendering. The deferred Thinking Effort card was also read. No application modules were imported.
-- Findings: the five refactors preserve the inspected contracts and ownership boundaries. The updated test definitions explicitly cover immediate/deferred JSON rollback, first-seen OpenAlex ordering and inline Markdown formatting. Historical passing counts do not validate these later revisions.
-- Evidence gaps: no application tests, builds, native UI, live providers, MCP/Ollama, user stores, or generated artifacts were run/inspected. Older native/fixture results and RAG probes were carried forward, not rerun. No new failure or backlog item was justified by this scope.
-- Git policy: all nine files tracked; no ignore-rule matches (0/9), no effective ignore (0/9). Ignore files stay unchanged. Maintenance preserves index bytes until the user's separately authorized commit/push step.
-- Historical evidence: [final-check log](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/build-log.md) and [check results](https://github.com/Minervamuses/RESEARCH-AGENT-WORKSPACE/blob/bc2c94d40562e9606a9872bc922a36423b6a10a2/issue/final_check/evidence/phase-06-check-results.json) were inspected during the prior pass. Their recorded scope/results remain in [testing strategy](testing-strategy.md); they were not reread this pass and removed plans are not active work.
+- **Latest maintenance:** 2026-10-23T19:46+08:00, a focused update after the 2026-10-23 cleanup commits; the main pass ended at 18:32+08:00. This timestamps the passes; it does not revalidate every retained claim.
+- **Repository baseline:** `/home/minervamuses/research-agent-workspace`, branch `GUI` at `3f9176a75b1759c88898d1db6fbda5d7907d0e8b`. The local `origin/GUI...HEAD` count was `0 0` (no fetch). The previous knowledge baseline was `5a0fa7c` (2026-09-14); 268 commits and 232 changed files lie between the two. The focused update used `d74065f`, after `4366e20` (notes), `c12470f` (ignore `app/store/`), `73c8db1` (Plan-log retirement), `0fabe25` (retirement-guard tests) and `d74065f` (stale notes).
+- **Provenance:** this pass continues an interrupted OpenCode maintenance session, `ses_e9b3ceaa2ffebUxLDUG3wpfu9L`. That session stopped on a provider quota error before writing any knowledge, and its record is the untracked `infrastructure-mention-handoff.zip`, used here only as a lead. HEAD and index bytes matched that record when this pass began, and current files were re-read instead of trusting its tool outputs.
+- **Runtime used:** Claude Code inside WSL Ubuntu-24.04. Every Bash command ran in a bubblewrap sandbox: writes were limited to the working tree and scratch space, and `/tmp` was read-only. Conda `app` at `/home/minervamuses/miniconda3/envs/app` reported Python 3.13.14, Node v24.18.0 and cargo/rustc 1.97.1; Poetry is present (version not queried).
+- **Working-tree state reviewed:** no tracked modifications and nothing staged. Untracked items:
+  - three files under `app/store/projects/p-c673e2df…/`: user conversation data, not ignored at that time (fixed in `c12470f`; FAIL-021);
+  - six files under `note/20261022/session-510d4b09-acceptance-analysis/`: user analysis material;
+  - `infrastructure-mention-handoff.zip`.
+
+  Sandbox `/dev/null` mount points (`.bashrc`, `.mcp.json`, `.claude/*`, `.idea` and similar) appear as untracked only inside the sandbox and are not user files. Initial index SHA-256: `f5e487da89f3c745b0b95254332ddb330b21b0770c6aca255b93f370c36ccada`.
+
+  At the focused update only these nine knowledge files were modified (this session's uncommitted rewrite). `app/store/` was ignored, `note/20261022/` was committed and the handoff zip had been deleted. Index SHA-256 at that point: `0a9d7d722126cbcf0bddfbd1374ddf7b1d49ca1938edd9cce397c6500cb37298`.
+- **Areas inspected:**
+  - AGENTS.md; root, app and subsystem READMEs, including a relative-link check; manifests and ignore rules; `main.py`.
+  - Desktop Python backend and conversation store, protocol contract, Rust host and React client.
+  - Agent session, graph, tools, Skills, thinking, LLM adapter, diagnostics and observability; RAG changes; Citation; the MCP client; the vendored Web Search server.
+  - Test definitions; the completed 2026-10-22 web-search plan, and removed plan logs recoverable from Git.
+
+  Static reading was split across four read-only delegated audits: desktop backend; desktop host, client and launcher; agent core and RAG; Citation, MCP and Web Search. Their findings were spot-checked at named anchors before being recorded. No application module was imported, and no application test, build, native UI, provider or network call ran.
+- **Known coverage gaps:**
+  - Extension discovery, registry, startup and ZIP-installer internals received a focused check only.
+  - RAG tagger, retriever and filters are unchanged and carried forward.
+  - `protocol.rs` and `protocol.ts` were read for structure; `App.tsx` and `trust.tsx` were partly skimmed.
+  - Native behavior, live providers, cross-process use and current test results are Unknown.
+  - User data under `app/store` was not inspected.
+- **Git policy:** all nine knowledge files are tracked. Ignore-rule matches: none (0/9). Effective ignore: none (0/9). This pass changed only `for_agents/**`; `.gitignore` and the index bytes were left unchanged (re-verified at the end of the pass).
 
 ## Audit coverage
 
 | Document | Mode | This pass scope / anchors | Last substantive validation / source baseline | Gaps |
 |---|---|---|---|---|
-| architecture-map.md | Focused check | Conda/Poetry/desktop manifests; five changed units and their direct consumers retain existing boundaries | Named anchors: 2026-09-14 at `5a0fa7c`; other claims retain prior dates below | No launch or full dependency audit |
-| invariants.md | Focused check | INV-008 JSON conflict/rollback, INV-013 activation precheck, INV-017 rendering, INV-005 fusion malformed-output versus provider-exception boundary | Named anchors: 2026-09-14 at `5a0fa7c`; other claims retain prior dates | No fresh tests; precheck races and raised-stage exceptions remain |
-| module-responsibilities.md | Focused check | `load_skill_runtime`/session caller; fusion orchestrator/review; JSONStore/DocumentStore/ingest; OpenAlex/resolver/service; SafeContent/App | Named owners: 2026-09-14 at `5a0fa7c`; others retain prior dates | No ownership or public-interface change found in scoped diff |
-| data-flow.md | Revalidated | Skill resource validation, fusion fallback, immediate/deferred raw-JSON save, OpenAlex ordering and Desktop inline rendering | Named source/definition scopes: 2026-09-14 at `5a0fa7c` | Other flows retain prior dates; no effects executed |
-| dangerous-assumptions.md | Focused check | ASM-003 multi-store limit, ASM-013 provider exceptions, ASM-025 native rendering limit, retired ASM-007 activation premise | Named anchors: 2026-09-14 at `5a0fa7c`; other premises retain prior dates | No new premise or runtime reproduction |
-| known-failure-modes.md | Focused check | FAIL-003 cross-store limit, FAIL-005 activation mitigation, FAIL-019 array-child mitigation remain applicable | Named source anchors: 2026-09-14 at `5a0fa7c`; incidents retain original dates | No failure reproduced or newly resolved |
-| testing-strategy.md | Revalidated | Three changed test files; unchanged Skill/fusion regressions; command effects and historical-result scope | Definitions: 2026-09-14 at `5a0fa7c`; execution records retain dates below | Only knowledge helper and Git checks executed |
-| future-work-backlog.md | Focused check | BACKLOG-006 still concerns cross-store failure injection; Issue09 remains explicitly deferred; all candidates considered against scoped changes | Named scope: 2026-09-14 at `5a0fa7c`; other candidates retain prior dates | No candidate added or implemented |
-| Other Skill/Citation/installer, extension, Desktop menu/permission/replay claims across subjects | Carried forward | Prior account retained; no changed dependency found outside the named scopes | 2026-09-13 source/contracts/tests at `a88d44d`; archived records at `bc2c94d` | Not substantively revalidated this pass |
-| Other RAG and Agent/MCP/thinking claims across subjects | Carried forward | Prior account retained outside JSON save and fusion fallback | Broad evidence 2026-09-05 at `9745fd1`; prune/search focused anchors 2026-09-13 at `a88d44d` | Stale-inventory/empty-file probes not rerun |
-| Other canonical-history, final-only, large-content and CSS claims | Carried forward | Prior account retained outside SafeContent parser/array-child checks | 2026-09-06 at `743aaaf` (older history evidence 2026-09-05) | Native geometry/zoom, resources and multi-process persistence not revalidated |
+| architecture-map.md | Revalidated | All component rows, external adapters and topology: launcher; Rust host (7 commands, pickers, stderr log); React client; protocol v1 counts; desktop backend split; conversation store v3; agent core, diagnostics, MCP client, Web Search server, Citation providers and RAG entry points | 2026-10-23 at `3f9176a` (source, manifests, contract, READMEs) | Extension-runtime row is a focused check; nothing was launched |
+| invariants.md | Revalidated | INV-001 to INV-031 checked against current contracts and enforcement. INV-015, INV-016, INV-018 and INV-019 were rewritten; INV-025 to INV-031 are new | 2026-10-23 at `3f9176a` | INV-009 and INV-024 internals are a focused check; enforcement evidence is test definitions, not runs |
+| module-responsibilities.md | Revalidated | Owners and "must not own" for every listed module, including catalog, documents, service, `ingest.py`, diagnostics, observability, `mcp.py`, the vendored server, the Rust host and React | 2026-10-23 at `3f9176a` | Extension discovery, registry and startup carried forward (2026-09-13 at `a88d44d`) |
+| data-flow.md | Revalidated | 13 flows: agent turn, project open, documents, frozen submissions, Stop, rename/delete, permissions, Skills, Citation, Web Search, RAG, desktop launch, diagnostics | 2026-10-23 at `3f9176a` | No flow was executed |
+| data-flow.md (extension apply and ZIP install) | Focused check | Bypass, inline-Skill and desktop-gating changes; the `manager.py` diff | Focused anchors 2026-10-23; other steps 2026-09-13 at `a88d44d` | Internal steps not re-read |
+| dangerous-assumptions.md | Revalidated | ASM-001, ASM-003, ASM-006, ASM-010 to ASM-016, ASM-018, ASM-019, ASM-022 and ASM-024 to ASM-035 against current code. ASM-026 to ASM-035 are new | 2026-10-23 at `3f9176a` | Nothing reproduced |
+| dangerous-assumptions.md (unchanged RAG premises) | Focused check | ASM-002, ASM-004, ASM-005, ASM-020 and ASM-021 confirmed at their anchors | Code unchanged since `5a0fa7c`; wording from 2026-09-05 at `9745fd1` and 2026-09-13 at `a88d44d` | No new RAG evidence |
+| known-failure-modes.md | Revalidated | FAIL-009 and FAIL-013 to FAIL-030 against source, tests and plan records. FAIL-014 and FAIL-017 were corrected; FAIL-021 to FAIL-030 are new | 2026-10-23 at `3f9176a` | No reproduction this pass |
+| known-failure-modes.md (RAG and older mitigated items) | Focused check | FAIL-001 to FAIL-003 code unchanged; anchors for FAIL-004 to FAIL-008 and FAIL-010 to FAIL-012 still present | Original probes 2026-09-05 at `9745fd1`; mitigations 2026-09-13 at `a88d44d` | Probes not rerun |
+| testing-strategy.md | Revalidated | Commands from AGENTS.md, the root README, the two `package.json` files and plan records; per-area test definitions; historical execution records with provenance | Definitions 2026-10-23 at `3f9176a`; each execution record keeps its own date | Only helper and Git checks executed |
+| future-work-backlog.md | Revalidated | Every candidate reconsidered. BACKLOG-009, BACKLOG-010 and BACKLOG-013 removed; BACKLOG-011 broadened; BACKLOG-017 blocked; BACKLOG-019 to BACKLOG-025 added | 2026-10-23 at `3f9176a` | No candidate implemented in that pass |
+| Cleanup follow-up across invariants, failures, backlog, testing, responsibilities and architecture | Focused check | INV-029, FAIL-014, FAIL-021, BACKLOG-019, BACKLOG-020, the Plan-log and `app/store/` notes, and the 2026-10-23 execution records, checked against the diffs of `c12470f`–`d74065f` | 2026-10-23 at `d74065f` | All other claims keep their `3f9176a` validation |
 
 ## Documents
 
@@ -45,18 +63,23 @@
 
 | Task | Read first |
 |---|---|
-| Change persistence or replay | [Invariants](invariants.md), [data flow](data-flow.md), [testing](testing-strategy.md) |
-| Change Skills, ZIP installation or Citation | [Responsibilities](module-responsibilities.md), [flows](data-flow.md), [invariants](invariants.md) |
-| Change Desktop menu or permissions | [Architecture](architecture-map.md), [invariants](invariants.md), [testing](testing-strategy.md) |
-| Diagnose a failure / select optional work | [Failures](known-failure-modes.md), [assumptions](dangerous-assumptions.md), [backlog](future-work-backlog.md) |
+| Change persistence, conversation schema or replay | [Invariants](invariants.md), [data flow](data-flow.md), [testing](testing-strategy.md) |
+| Change the desktop protocol, a Tauri command or IPC | [Architecture](architecture-map.md), [responsibilities](module-responsibilities.md), [data flow](data-flow.md) |
+| Change documents, comments, Stop or permissions | [Invariants](invariants.md), [data flow](data-flow.md), [failures](known-failure-modes.md) |
+| Change Skills, Citation, MCP or Web Search | [Responsibilities](module-responsibilities.md), [data flow](data-flow.md), [assumptions](dangerous-assumptions.md) |
+| Diagnose a failure or choose optional work | [Failures](known-failure-modes.md), [assumptions](dangerous-assumptions.md), [backlog](future-work-backlog.md) |
 
 ## Evidence labels
 
-- **Confirmed**: directly supported within the identified source/type/scope; source/test-definition inspection is not execution.
-- **Inferred**: supported interpretation, not an established guarantee.
-- **Unknown**: material evidence missing or uninspected.
-- Confidence, normative authority, and freshness are separate; use the coverage rows and claim-level limits.
+- **Confirmed**: directly supported within the identified source, type and scope. Source or test-definition inspection is not execution.
+- **Inferred**: a supported interpretation, not an established guarantee.
+- **Unknown**: material evidence is missing, inaccessible, contradictory or uninspected.
+- Confidence, normative authority and freshness are separate. Use the coverage rows and claim-level limits; a Confirmed label does not mean the claim was revalidated in this pass.
 
 ## Usage
 
-Read this index and relevant subjects explicitly before broad changes. Check current code for behavior and applicable instructions/contracts for obligations. Invoke `$infrastructure` after structural drift. These files are not automatically loaded by future agents. Backlog entries are candidates, and archived plans do not authorize work.
+- Nothing loads these files automatically. Read this index and the relevant subject files explicitly before broad changes.
+- Check current code for behavior, and AGENTS.md plus the explicit contracts (root README, `contract.json`, `SKILL.md` files) for obligations.
+- Backlog entries are candidates only. Plan records and removed issue cards grant no authority.
+- `app/store/` holds user conversations. `/app/store/` ignores it now (FAIL-021, mitigated), but still stage commits explicitly.
+- Invoke `$infrastructure` again after structural or contract changes.
