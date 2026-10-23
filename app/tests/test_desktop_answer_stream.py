@@ -68,7 +68,6 @@ async def _service(tmp_path: Path, session: _AnswerSession) -> DesktopService:
             citation_output_dir=str(tmp_path / "cite"),
             extension_dropin_dir=str(tmp_path / "dropin"),
             extension_state_dir=str(tmp_path / "extensions"),
-            plan_logs_dir=str(tmp_path / "plans"),
         ),
     )
     preview = await service.dispatch("workspace.select", {"rootPath": str(tmp_path), "action": "inspect"})

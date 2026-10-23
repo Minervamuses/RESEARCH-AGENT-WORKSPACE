@@ -8,7 +8,7 @@ Linux is the supported runtime. The working tree may be edited from Windows thro
 
 ## Project Structure & Module Organization
 
-This workspace contains one Python 3.12-3.13 Poetry project rooted at `app/`. Its single distribution contains the `agent`, `skills`, and `rag` import namespaces. `app/agent/` implements the LangGraph agent, CLI, tools, memory, and extension runtime; built-in skills live in `app/skills/`; the framework-neutral ingestion and retrieval subsystem lives in `app/rag/`; all tests live in `app/tests/`, with RAG-specific tests under `app/tests/rag/`. Use `issue/` and `note/` for project records. Treat `cite/`, `app/plan_logs/`, `app/store/`, `app/dist/`, and caches as generated output.
+This workspace contains one Python 3.12-3.13 Poetry project rooted at `app/`. Its single distribution contains the `agent`, `skills`, and `rag` import namespaces. `app/agent/` implements the LangGraph agent, CLI, tools, memory, and extension runtime; built-in skills live in `app/skills/`; the framework-neutral ingestion and retrieval subsystem lives in `app/rag/`; all tests live in `app/tests/`, with RAG-specific tests under `app/tests/rag/`. Use `issue/` and `note/` for project records. Treat `cite/`, `app/store/`, `app/dist/`, and caches as generated output.
 
 ## Build, Test, and Development Commands
 

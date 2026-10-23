@@ -39,7 +39,6 @@ SKIP_DIRS = {
     ".claude",
     ".opencode",
     ".cursor",
-    "plan_logs",
     "volumes",
     "dist",
     "build",

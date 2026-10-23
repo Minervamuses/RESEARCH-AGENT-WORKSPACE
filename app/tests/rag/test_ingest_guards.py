@@ -8,12 +8,12 @@ from rag import collect as collect_mod
 from rag.cli import ingest as ingest_mod
 
 
-def test_collect_folders_skips_plan_logs(tmp_path):
-    plan = tmp_path / "plan_logs" / "foo.md"
+def test_collect_folders_skips_node_modules(tmp_path):
+    dependency = tmp_path / "node_modules" / "foo.md"
     note = tmp_path / "notes" / "bar.md"
-    plan.parent.mkdir()
+    dependency.parent.mkdir()
     note.parent.mkdir()
-    plan.write_text("secret plan turn", encoding="utf-8")
+    dependency.write_text("vendored dependency notes", encoding="utf-8")
     note.write_text("regular note", encoding="utf-8")
 
     folders = collect_mod.collect_folders(tmp_path)
@@ -23,12 +23,12 @@ def test_collect_folders_skips_plan_logs(tmp_path):
 
 
 def test_ingest_single_refuses_skip_dir_lineage(tmp_path):
-    plan = tmp_path / "plan_logs" / "foo.md"
-    plan.parent.mkdir()
-    plan.write_text("secret plan turn", encoding="utf-8")
+    dependency = tmp_path / "node_modules" / "foo.md"
+    dependency.parent.mkdir()
+    dependency.write_text("vendored dependency notes", encoding="utf-8")
 
     with pytest.raises(ValueError, match="lies under skip dir"):
-        ingest_mod.ingest_single(str(plan))
+        ingest_mod.ingest_single(str(dependency))
 
 
 def test_main_reports_value_error_without_traceback(monkeypatch, capsys):

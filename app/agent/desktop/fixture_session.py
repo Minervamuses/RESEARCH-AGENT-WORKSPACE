@@ -510,11 +510,9 @@ def _seed_fixture_extensions(root: Path) -> Path:
 def seed_fixture_root(root: Path) -> AgentConfig:
     """Seed only the production catalog and canonical transcript formats."""
     persist_dir = root / "store"
-    plan_logs_dir = root / "plan_logs"
     guarded_paths = (
         persist_dir,
         persist_dir / "chat_history",
-        plan_logs_dir,
         root / "skills",
         root / "extensions",
         root / "extensions" / "desired",
@@ -540,11 +538,8 @@ def seed_fixture_root(root: Path) -> AgentConfig:
             "The fixture knowledge answer is local and deterministic.\n",
             encoding="utf-8",
         )
-    if plan_logs_dir.is_dir() and any(path.is_symlink() for path in plan_logs_dir.iterdir()):
-        raise FixtureConfigurationError("fixture persistence files must not be symlinks")
     config = AgentConfig(
         persist_dir=str(persist_dir),
-        plan_logs_dir=str(plan_logs_dir),
         extension_dropin_dir=str(root / "extensions" / "desired"),
         extension_state_dir=str(root / "extensions" / "state"),
         citation_output_dir=str(root / "citations"),

@@ -501,7 +501,6 @@ def _seed_coordinator(
     factory = _CoordinatorFactory(new_ids=new_ids)
     config = AgentConfig(
         persist_dir=str(tmp_path / "store"),
-        plan_logs_dir=str(tmp_path / "plans"),
     )
     service = DesktopService(
         original_cwd=tmp_path,
@@ -1528,7 +1527,6 @@ def test_first_prompt_registers_catalog_before_provider_failure(
 ):
     config = AgentConfig(
         persist_dir=str(tmp_path / "store"),
-        plan_logs_dir=str(tmp_path / "plans"),
     )
     _configure_project(tmp_path, Path(config.persist_dir))
     catalog = DesktopProjectCatalog(config.persist_dir)
@@ -1774,7 +1772,6 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
     catalog = DesktopProjectCatalog(persist_dir)
     config = AgentConfig(
         persist_dir=str(persist_dir),
-        plan_logs_dir="plans",
     )
     repository = ConversationRepository(persist_dir)
 

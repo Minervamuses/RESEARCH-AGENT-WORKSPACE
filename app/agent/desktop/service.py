@@ -3832,7 +3832,6 @@ class DesktopService:
         )
         roots = {
             Path(self.config.persist_dir).expanduser().resolve(),
-            (find_app_root() / self.config.plan_logs_dir).resolve(),
             skills_root,
             resolve_output_dir(self.config, self.environ).expanduser().resolve(),
             extension_paths.dropin_root.resolve(),

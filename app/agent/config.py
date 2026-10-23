@@ -49,9 +49,6 @@ class AgentConfig(RAGConfig):
     thinking_fusion_candidate_timeout_seconds: float = 180.0  # Per-candidate timeout.
     thinking_fusion_quorum: int = 2  # Required successful candidates.
 
-    # Legacy import
-    plan_logs_dir: str = "plan_logs"  # Legacy Plan-log import root.
-
     # Skill discovery
     skills_dir: str | None = None  # Skill-root override; None uses app/skills.
 

@@ -187,7 +187,6 @@ def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     assert projects["projects"] == [{
         "projectId": other["projectId"], "name": "project-two", "sessionCount": 1,
     }]
-    assert not Path(second.config.plan_logs_dir).exists()
 
 
 def test_fixture_status_reports_canonical_conversation_root(
@@ -466,10 +465,6 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
             "session.transcript",
             {"projectId": _project_id(fixture_root), "sessionId": SESSION_A, "limit": 20},
         )
-        plan_logs = {
-            path: path.read_bytes()
-            for path in Path(service.config.plan_logs_dir).glob("*.md")
-        }
         store_snapshot = {
             path.relative_to(service.config.persist_dir): path.read_bytes()
             for path in Path(service.config.persist_dir).rglob("*")
@@ -512,7 +507,6 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
             results,
             empty_preview,
             changed.value,
-            plan_logs,
             store_snapshot,
             source_snapshot,
         )
@@ -523,7 +517,6 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
         results,
         empty_preview,
         changed_error,
-        plan_logs,
         store_snapshot,
         source_snapshot,
     ) = asyncio.run(run())
@@ -554,10 +547,6 @@ def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes
     assert "Would prune 0 orphaned path(s)" in empty_preview["text"]
     assert changed_error.code == "PRUNE_PREVIEW_STALE"
     assert "previewId" not in repr(results)
-    assert {
-        path: path.read_bytes()
-        for path in Path(service.config.plan_logs_dir).glob("*.md")
-    } == plan_logs
     after_store = {
         path.relative_to(service.config.persist_dir): path.read_bytes()
         for path in Path(service.config.persist_dir).rglob("*")
@@ -813,42 +802,6 @@ def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
     restored, stopped = asyncio.run(run_second_process())
     assert restored["bashPermissionMode"] == "ask"
     assert stopped == {"status": "stopped"}
-
-
-def test_switch_and_shutdown_leave_existing_plan_logs_untouched(
-    fixture_root: Path,
-) -> None:
-    plan_dir = fixture_root / "plan_logs"
-    plan_dir.mkdir()
-    legacy_source = plan_dir / "plan-existing-user-source.md"
-    legacy_source.write_text("existing user data\n", encoding="utf-8")
-    legacy_before = legacy_source.read_bytes()
-    service = _service(fixture_root, open_project=True)
-    assert Path(service.config.plan_logs_dir) == plan_dir
-
-    async def run():
-        await service.dispatch(
-            "session.select",
-            {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
-        )
-        await service.dispatch(
-            "session.turn",
-            _turn_params("canonical before switch"),
-        )
-        selected = await service.dispatch(
-            "session.select",
-            {"projectId": _project_id(fixture_root), "sessionId": SESSION_B},
-        )
-        shutdown = await service.dispatch("session.shutdown", {})
-        return selected, shutdown
-
-    selected, shutdown = asyncio.run(run())
-    assert selected["sessionId"] == SESSION_B
-    assert shutdown == {"status": "stopped"}
-    assert legacy_source.read_bytes() == legacy_before
-    canonical = ConversationRepository(_history_root(service)).load(SESSION_A)
-    assert canonical.document.turns[-1].display_input == "canonical before switch"
-    assert canonical.document.turns[-1].state == "completed"
 
 
 def test_fixture_never_uses_chat_session_factory_or_exposes_credentials(

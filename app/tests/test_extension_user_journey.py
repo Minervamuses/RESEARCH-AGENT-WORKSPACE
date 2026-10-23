@@ -352,7 +352,6 @@ def test_conversational_zip_acceptance(entry, tmp_path, monkeypatch, capsys):
         persist_dir=str(tmp_path / "store"),
         extension_dropin_dir=str(tmp_path / "dropins"),
         extension_state_dir=str(tmp_path / "state"),
-        plan_logs_dir=str(tmp_path / "plans"),
     )
     root = Path(config.extension_dropin_dir)
     (root / "skill").mkdir(parents=True)

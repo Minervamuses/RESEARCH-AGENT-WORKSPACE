@@ -398,7 +398,6 @@ def _service(tmp_path: Path, **kwargs) -> DesktopService:
             citation_output_dir=str(tmp_path / "cite"),
             extension_dropin_dir=str(tmp_path / "dropin"),
             extension_state_dir=str(tmp_path / "state"),
-            plan_logs_dir=str(tmp_path / "plans"),
         ),
     )
     return DesktopService(
@@ -857,7 +856,6 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
         citation_output_dir=str(tmp_path / "cite"),
         extension_dropin_dir=str(tmp_path / "dropin"),
         extension_state_dir=str(tmp_path / "state"),
-        plan_logs_dir=str(tmp_path / "plans"),
     )
     repository = ConversationRepository(tmp_path / "history")
     factory, sessions = _canonical_session_factory(monkeypatch)
@@ -1157,7 +1155,6 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
 ) -> None:
     config = AgentConfig(
         persist_dir=str(tmp_path / "store"),
-        plan_logs_dir=str(tmp_path / "plans"),
     )
     project = initialize_project(
         str(tmp_path), config.persist_dir,
@@ -1246,7 +1243,6 @@ def test_session_list_reconciles_json_created_after_service_start(
 ) -> None:
     config = AgentConfig(
         persist_dir=str(tmp_path / "store"),
-        plan_logs_dir=str(tmp_path / "plans"),
     )
     project = initialize_project(
         str(tmp_path), config.persist_dir,
