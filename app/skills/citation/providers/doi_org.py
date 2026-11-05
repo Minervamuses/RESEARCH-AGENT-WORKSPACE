@@ -16,6 +16,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+from skills.citation.csl import sanitize_csl
 from skills.citation.doi import canonicalize_doi
 from skills.citation.providers.crossref import version_kind_from_metadata
 from skills.citation.providers.net import (
@@ -55,6 +56,8 @@ class StructuredRecord:
     url: str | None = None
     registration_agency: str = ""
     version_kind: str = "unknown"
+    # Sanitized CSL-JSON item (no ``id``, never an abstract); see citation.csl.
+    csl: dict = field(default_factory=dict)
 
 
 def _authors_from_csl(raw: list | None) -> list[str]:
@@ -88,6 +91,8 @@ def parse_csl(doi: str, payload: dict) -> StructuredRecord:
         except (TypeError, ValueError):
             year = None
     record_doi = canonicalize_doi(payload.get("DOI")) or doi
+    csl = sanitize_csl(payload)
+    csl["DOI"] = record_doi
     return StructuredRecord(
         doi=record_doi,
         title=_csl_text(payload.get("title")),
@@ -97,6 +102,7 @@ def parse_csl(doi: str, payload: dict) -> StructuredRecord:
         work_type=_csl_text(payload.get("type")),
         url=payload.get("URL") or None,
         version_kind=version_kind_from_metadata(payload),
+        csl=csl,
     )
 
 

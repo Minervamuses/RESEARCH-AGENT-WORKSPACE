@@ -138,6 +138,8 @@ class ProviderRecord:
     abstract: str = ""
     abstract_source: str = ""
     abstract_url: str | None = None
+    # Sanitized CSL-JSON from doi.org verification (None for search hits).
+    csl: dict | None = None
 
 
 class _AbstractTextParser(HTMLParser):

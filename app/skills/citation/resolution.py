@@ -499,6 +499,7 @@ class WorkResolver:
                 field: "doi.org"
                 for field in ("doi", "title", "authors", "year", "venue", "work_type")
             },
+            csl=dict(csl.csl),
         )
         return WorkResolution(
             ResolutionDecision(
@@ -633,6 +634,7 @@ class WorkResolver:
                 field: "doi.org"
                 for field in ("doi", "title", "authors", "year", "venue", "work_type")
             },
+            csl=dict(csl.csl),
         )
         return WorkResolution(
             ResolutionDecision(

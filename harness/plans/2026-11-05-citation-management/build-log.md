@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
-| C2 | Not started | — | — | C2-S1 |
+| C2 | In progress | C2-S1 見事件 | — | C2-S2 書目庫模組 |
 | C3 | Not started | — | 依賴 C2 | — |
 | C4 | Not started | — | — | C3 後進行 |
 | C5 | Not started | — | 依賴 C4 | — |
@@ -74,6 +74,15 @@
 - **小檔測試**：三筆 CSL-JSON + `[@smith2020deep; @lee2019robot]` 的 Markdown，`pandoc --citeproc -t plain` 輸出排好的引用與參考文獻（`smoke-plain.txt`，預設 Chicago author-date）；`pandoc -f csljson -t bibtex` 輸出三筆 `.bib`（`smoke-bibtex.bib`）。
 - **env-app.yml**：加入 `- pandoc>=3,<4`；`conda env create --dry-run -n cm-dryrun-check -f app/env/env-app.yml` exit 0，解出 `pandoc==3.13`（`env-dryrun.txt`），沒有建立環境。
 - **下一步**：C2-S1。
+
+### C2-S1 驗證流程保留清理過的 CSL-JSON（2026-11-05）
+
+- **改動**：
+  - 新增 `app/skills/citation/csl.py`：`sanitize_csl`（CSL 1.0.2 書目變數白名單；人名只留 family/given/literal/suffix/兩種 particle，Crossref 的 `name` 轉 `literal`；標題類欄位只留 `<i>`/`<b>`/`<sup>`/`<sub>`，其他標記去掉並解 HTML entity；舊式 `event` 轉 `event-title`；一律不含 abstract、reference、license、link、funder、assertion、ORCID、affiliation、`id`），`normalize_type`＋固定對應表 `TYPE_MAP`（例：posted-content → article、journal-article → article-journal、proceedings-article → paper-conference；不認得的 → `document`），`csl_from_authority`（arXiv：type `article`、URL、`number` = arXiv ID、`publisher` = arXiv；NeurIPS：paper-conference），`minimal_csl`（只用已驗證的顯示欄位，供拿不到 CSL 的路徑用）。
+  - `StructuredRecord.csl`（`parse_csl` 填入並把 `DOI` 設為正規 DOI；24 h 快取存的就是含 csl 的 record）；`ProviderRecord.csl`（預設 None；只有 doi.org 驗證後的 record 帶值）；`resolution.py` 兩處（精確 DOI、描述式複驗）把 csl 帶到 eligible record。
+  - bundle 格式與寫入完全未動。
+- **檢查**：新 `tests/test_citation_csl.py` 7 項通過（模擬 Crossref payload 含 abstract、reference、ORCID、`<i>`/`<scp>` 標題、posted-content；arXiv CSL；resolver 的 eligible record 帶 csl）。`test_citation_provider_doi_org.py`、`test_citation_authority.py`、`test_citation_storage.py`、`test_citation_save_outcomes.py` 與全部 `test_citation_*.py`：392 → 加入新檔後全部通過。`test_desktop_service.py` 在沙箱內有 1 項因 `/tmp` 唯讀失敗（既知環境限制，與本步無關；完整回歸在沙箱外跑）。
+- **下一步**：C2-S2。
 
 ## 最終彙報
 
