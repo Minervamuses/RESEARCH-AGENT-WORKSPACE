@@ -328,6 +328,24 @@ def export_docx(
     return _run(args, json.dumps(ast).encode("utf-8"), timeout=timeout)
 
 
+EXPORT_SUFFIXES = {"docx": ".docx", "markdown": ".md", "bib": ".bib"}
+
+
+def export_target(fmt: str, *, document_path: Path | None, library_path: Path, style_id: str) -> Path:
+    """Where an export goes (A5): beside the document, never the source itself.
+
+    ``<document stem>.<style>.docx|md`` for documents; ``<bibliography
+    stem>.bib`` beside the document (or the bibliography when no document).
+    """
+    if fmt == "bib":
+        folder = Path(document_path).parent if document_path is not None else Path(library_path).parent
+        return folder / f"{Path(library_path).stem}.bib"
+    if document_path is None:
+        raise RenderError("document_required", "Open a Markdown document to export it.")
+    document_path = Path(document_path)
+    return document_path.parent / f"{document_path.stem}.{style_id}{EXPORT_SUFFIXES[fmt]}"
+
+
 def export_bib(library_path: Path, *, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
     """BibTeX for the whole bibliography (readable by BibTeX and biblatex)."""
     library = _library_or_error(library_path)

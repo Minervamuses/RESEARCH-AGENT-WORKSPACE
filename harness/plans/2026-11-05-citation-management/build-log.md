@@ -11,8 +11,8 @@
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
-| C6 | In progress | C6-S1 見事件 | — | C6-S2 後端實作 |
-| C7 | Not started | — | 依賴 C6 | — |
+| C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
+| C7 | Not started | — | — | C7-S1 |
 | C8 | Not started | — | 依賴 C7 | — |
 
 ## 事件
@@ -217,6 +217,19 @@
 - **四份定義**：`contract.json`（以文字插入，未重排既有內容）、`src/protocol.ts`（由 contract 產生的 schema 文字、方法與錯誤碼清單）、`src-tauri/src/protocol.rs`（方法、錯誤碼、required/allowed params、參數檢查、`validate_bibliography_result`）、Python 由 contract 驅動。`fixtures.json` 新增 21 個 messages（每個方法合法 request/result 與非法例）與 8 個 traces（5 個非法 result 需要配對的 request 才能依方法驗證，另 3 個合法 trace）。
 - **檢查**：`tests/test_desktop_protocol_contract.py` 204 passed；`npm test` 289/289；`npm run build` 成功；`cargo test --locked`（沙箱外）40 passed（含由 contract 產生樣本與邊界值的測試、fixtures 測試）。三種驗證器對每個新 fixture 結果一致。
 - **下一步**：C6-S2。
+
+### C6-S2 後端實作（2026-11-05）
+
+- **轉接**（`agent/desktop/service.py`）：六個處理器，`bibliography.*` 列入需要已開啟專案的 project operation。共用：`_citation_settings`（書目路徑、有效樣式 ID；未設定或不在清單時用預設 `apa`，`styleConfigured=false`）、寫入類方法在回合進行中回 `BUSY_TURN`、`documentContext` 以 `DocumentWorkspace.validate_snapshot` 驗證（與文件回合相同）、錯誤對應（`library_conflict` → `BIBLIOGRAPHY_CONFLICT`；其他書目與 Pandoc 錯誤 → `BIBLIOGRAPHY_FAILED`；未知樣式、`.tex` 的 render/docx/markdown → `PROTOCOL_INVALID`，訊息建議改匯出 `.bib`）。
+  - `inspect`：`integrity.inspect` + 指紋 + 樣式清單；沒有文件時 `uses/order/missing/uncited` 為空、`citedCount` 為 0。
+  - `render`：`csl_render.render`，`segments` 攤平成頂層陣列。
+  - `set_style`：新增 `catalog.update_project_metadata`（只替換 metadata 區塊中的 JSON 物件：保留其他鍵與順序、保留原本的緊湊或縮排格式、區塊外文字逐位元組不變；寫入前重讀比對整檔指紋，衝突回 `CatalogConflictError`；暫存檔、fsync、保留權限、`os.replace`），之後以 `inspect_project` 更新快取的 `_project`。`_metadata_and_rules` 拆成 `_metadata_span` + `_parse_metadata`，行為不變。
+  - `remove`：比對 `libraryFingerprint`，以 `library.remove_entry` + `write_atomic` 寫入；bundle 不動。
+  - `add`：解析 DOI 或 arXiv ID；比照 `_knowledge_ingest_file` 在回合外呼叫 `_require_operation_approval("citation.save", <bundle 目錄>, …含書目路徑…)`；然後以 `CitationService(get_provider_hub(), config, library_path)` 走與 `citation_workflow` save 相同的驗證與儲存，再併入書目。拒絕或逾時不寫任何東西。
+  - `export`：`csl_render.export_target`（A5：`<文件主檔名>.<樣式>.docx|md`、`<書目主檔名>.bib`，在文件旁；沒有文件時 `.bib` 在書目旁）、`library.write_bytes_atomic`；docx 以文件資料夾為 resource path；不可能覆蓋原文件（另有檢查）。
+- **檢查**：新 `tests/test_desktop_bibliography.py` 10 項（每個結果都過 `validate_result_data`）：未開專案 → `SESSION_NOT_READY`；inspect（書目不存在、含未儲存文字、malformed）；render（IEEE/APA 不同、UTF-16 位置、未知樣式、`.tex` 拒絕且 inspect 可用）；set_style（只改 metadata、規則文字與雜湊不變、新指紋、未知樣式、`BUSY_TURN` 不寫入）；set_style 後送出新回合成功（R5）；remove（指紋衝突、未知 key 不寫、成功只少一筆）；add（Ask 拒絕 → `APPROVAL_DENIED` 且書目與 bundle 都不存在；Ask 同意 → added；Bypass 直接執行 → existing；不存在的 DOI → failed；非識別碼 → `PROTOCOL_INVALID`）；export（docx/markdown/bib 路徑與內容、原文件雜湊不變、`.tex` 的 docx 拒絕而 bib 可用）；錯誤分型（書目壞掉、Pandoc 不在）；`update_project_metadata` 單元測試（縮排 JSON 保留鍵序與區塊外文字、不可改其他鍵、寫入前檔案被改 → 衝突且無暫存檔殘留）。`test_project_permissions.py`、`test_citation_project_library.py` 通過；完整 pytest（沙箱外）1678 passed（加上新單元測試前），exit 0。
+- **交付給 C7**：方法與欄位見 C6-S1；預設樣式 `apa`；錯誤碼 `BIBLIOGRAPHY_CONFLICT`、`BIBLIOGRAPHY_FAILED`。
+- **下一步**：C7-S1。
 
 ## 最終彙報
 

@@ -450,6 +450,17 @@ def _research_bytes(path: Path) -> bytes | None:
 
 def _metadata_and_rules(raw: bytes | None) -> tuple[dict[str, Any] | None, str]:
     text = raw.decode("utf-8") if raw is not None else ""
+    span = _metadata_span(text)
+    if span is None:
+        return None, text
+    start, end = span
+    payload = text[start + len(_PROJECT_MARKER):end]
+    metadata = _parse_metadata(payload)
+    return metadata, text[:start] + text[end + 3:]
+
+
+def _metadata_span(text: str) -> tuple[int, int] | None:
+    """(marker start, "-->" start) of the single metadata block, or None."""
     visible = []
     offset = 0
     fence: tuple[str, int] | None = None
@@ -469,15 +480,17 @@ def _metadata_and_rules(raw: bytes | None) -> tuple[dict[str, Any] | None, str]:
         for match in re.finditer(re.escape(_PROJECT_MARKER), line)
     ]
     if not markers:
-        return None, text
+        return None
     if len(markers) != 1:
         raise CatalogMalformedError("RESEARCH.md must contain exactly one project metadata block")
     start = markers[0]
     end = text.find("-->", start)
     if end < 0:
         raise CatalogMalformedError("RESEARCH.md project metadata block is incomplete")
-    payload = text[start + len(_PROJECT_MARKER):end]
+    return start, end
 
+
+def _parse_metadata(payload: str) -> dict[str, Any]:
     def unique_keys(pairs):
         result = {}
         for key, value in pairs:
@@ -507,7 +520,7 @@ def _metadata_and_rules(raw: bytes | None) -> tuple[dict[str, Any] | None, str]:
         or len(metadata["citationStyle"]) > 128
     ):
         raise CatalogMalformedError("citationStyle must be a nonempty style ID")
-    return metadata, text[:start] + text[end + 3:]
+    return metadata
 
 
 _PROJECT_METADATA_KEYS = frozenset({"version", "historyDirectory", "bibliography", "citationStyle"})
@@ -547,6 +560,76 @@ def project_citation_settings(root_path: str | Path) -> dict[str, Any]:
     if not resolved.is_relative_to(root):
         raise CatalogMalformedError("bibliography must stay inside the project root")
     return {"bibliographyPath": resolved, "citationStyle": metadata.get("citationStyle")}
+
+
+_EDITABLE_METADATA_KEYS = frozenset({"citationStyle"})
+
+
+def update_project_metadata(root_path: str | Path, updates: dict[str, Any]) -> str:
+    """Rewrite only the metadata block's JSON object in RESEARCH.md.
+
+    Text outside the block (the project rules) stays byte for byte, and so do
+    the other keys and their order. The file is re-read before the atomic
+    replace; a concurrent change raises CatalogConflictError and nothing is
+    written. Returns the new researchFingerprint.
+    """
+    if not updates or set(updates) - _EDITABLE_METADATA_KEYS:
+        raise CatalogMalformedError("only citationStyle can be changed this way")
+    root = Path(root_path).resolve()
+    path = root / "RESEARCH.md"
+    if path.is_symlink():
+        raise CatalogConflictError("RESEARCH.md is a symbolic link; edit its metadata explicitly")
+    raw = _research_bytes(path)
+    if raw is None:
+        raise CatalogMalformedError("RESEARCH.md has no project metadata; initialize the project first")
+    fingerprint = hashlib.sha256(raw).hexdigest()
+    text = raw.decode("utf-8")
+    span = _metadata_span(text)
+    if span is None:
+        raise CatalogMalformedError("RESEARCH.md has no project metadata; initialize the project first")
+    start, end = span
+    payload_start = start + len(_PROJECT_MARKER)
+    payload = text[payload_start:end]
+    metadata = _parse_metadata(payload)
+    metadata.update(updates)
+    left = payload.index("{")
+    right = payload.rindex("}") + 1
+    pretty = "\n" in payload[left:right]
+    rendered = (
+        json.dumps(metadata, ensure_ascii=False, indent=2)
+        if pretty
+        else json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+    )
+    candidate_text = text[:payload_start] + payload[:left] + rendered + payload[right:] + text[end:]
+    candidate = candidate_text.encode("utf-8")
+    if len(candidate) > _PROJECT_MAX_BYTES:
+        raise CatalogMalformedError("metadata would exceed the 1 MiB input limit")
+    checked, rules_after = _metadata_and_rules(candidate)
+    _metadata, rules_before = _metadata_and_rules(raw)
+    if checked != metadata or rules_after != rules_before:
+        raise CatalogMalformedError("metadata rewrite would change text outside the metadata block")
+    temporary: Path | None = None
+    try:
+        mode = path.stat().st_mode & 0o7777
+        descriptor, name = tempfile.mkstemp(prefix=".RESEARCH.md.", suffix=".tmp", dir=root)
+        temporary = Path(name)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(candidate)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        current = _research_bytes(path)
+        if current is None or hashlib.sha256(current).hexdigest() != fingerprint:
+            raise CatalogConflictError("RESEARCH.md changed while saving the citation style; nothing was written")
+        os.replace(temporary, path)
+        temporary = None
+        _fsync_directory(root)
+    except OSError as exc:
+        raise CatalogUnavailableError(f"RESEARCH.md could not be saved: {exc}") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return hashlib.sha256(candidate).hexdigest()
 
 
 def _history_path(value: str, root: Path) -> Path:

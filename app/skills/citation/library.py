@@ -304,6 +304,14 @@ def search_bibliography(items: list[dict], query: str, *, limit: int = 20) -> li
     return [item for item in items if all(word in _search_text(item) for word in words)][:limit]
 
 
+def remove_entry(library: Library, key: str) -> Library:
+    """A new library without the entry ``key`` (other entries untouched)."""
+    if key not in library.keys():
+        raise LibraryError(LIBRARY_MALFORMED, f"{key!r} is not in {library.path.name}")
+    items = [item for item in library.items if item["id"] != key]
+    return Library(library.path, items, library.layout, library.fingerprint)
+
+
 # --- writing ------------------------------------------------------------
 
 
@@ -350,6 +358,25 @@ def write_atomic(library: Library) -> None:
         _unlink(temp)
         raise LibraryError(LIBRARY_WRITE_FAILED, f"cannot write {path}: {exc}") from exc
     library.fingerprint = hashlib.sha256(data).hexdigest()
+
+
+def write_bytes_atomic(path: Path, data: bytes, *, mode: int = NEW_FILE_MODE) -> None:
+    """Write a new or replacement file atomically (temp file, fsync, replace)."""
+    path = Path(path)
+    temp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.chmod(temp, mode)
+        os.replace(temp, path)
+        fsync_directory(path.parent)
+    except OSError as exc:
+        _unlink(temp)
+        raise LibraryError(LIBRARY_WRITE_FAILED, f"cannot write {path}: {exc}") from exc
 
 
 def add_item(path: Path, item: dict) -> MergeResult:
