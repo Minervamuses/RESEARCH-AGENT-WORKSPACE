@@ -13,7 +13,7 @@
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete | C7-S1–S3 見事件 | — | — |
-| C8 | Not started | — | — | C8-S1 |
+| C8 | In progress | C8-S1 見事件 | — | C8-S2 文件 |
 
 ## 事件
 
@@ -260,6 +260,14 @@
 - **檢查**：新 `tests/citation_preview.test.ts` 4 項（樣式請求的條件、`.tex` 只有 bib、segments 分組、SSR 渲染：`<em>`、HTML 被跳脫、只有 https 連結成為按鈕、`javascript:` 不成為按鈕）；`npm test` 305/305；`npm run build` 成功；`cargo test --locked`（沙箱外）40 passed。
 - **面板操作清單**（C8 手動檢查用）：開啟 .md/.tex → 面板出現；Refresh；展開條目 → Line 按鈕跳到並選取引用；Problems 顯示未知 key 與重複 DOI；Remove（被引用時確認對話框）；Verify and add（Ask 模式批准對話框；拒絕 → 未寫入）；Insert / Insert at cursor；在 `[@`、`\cite{` 後輸入看到補全；Style 選單（回合中停用）；Preview；Export Word/Markdown/BibTeX（.tex 只有 BibTeX）。
 - **下一步**：C8-S1。
+
+### C8-S1 端到端（真實桌面後端，不呼叫模型）（2026-11-05）
+
+- **作法**（`evidence/C8-S1/drive.py`）：在 `$TMPDIR/c8s1` 建暫存專案（合成的 `draft.md` 與含兩筆手寫條目的 `references.json`），依桌面主機的方式啟動 `python -m agent.desktop.server`（cwd = repo 根目錄、`PYTHONPATH=app`、`CONDA_PREFIX`/`CONDA_DEFAULT_ENV=app`），`KMS_STORE_DIR`、`CITATION_OUTPUT_DIR`、`AGENT_LOG_DIR`、`XDG_CACHE_HOME`、history 都導到暫存目錄。順序：`workspace.select` inspect → initialize（以後端流程建立 `RESEARCH.md`）→ `document.open` → `bibliography.inspect` → `bibliography.add` DOI `10.1038/s41586-021-03819-2` → 同一 DOI → arXiv `1706.03762` → `inspect` → `set_style` APA/IEEE/附件十七各 + `render` → `export` docx/markdown/bib → `remove` 未引用的手寫條目 → `inspect` → `runtime.shutdown`。
+- **與計劃不同**：計劃寫先 `session.create` 再 `set_bash_permission bypass`，因為「沒有 GUI 能回應批准」。這個環境沒有 `OPENROUTER_API_KEY`，`session.create` 會失敗；而 `approval.resolve` 不需要 session，所以改由驅動程式回應 `approval.required`（`citation.save`，3 次），走的是真實的 Ask 批准路徑。整個流程沒有任何 `session.*` 呼叫、沒有 `session.turn`、沒有模型呼叫。
+- **公開請求**（`requests.jsonl`，發出前寫入）：3 次存檔請求（預算 8）。網路經沙箱代理放行 doi.org、api.crossref.org、export.arxiv.org 等文獻主機；arXiv 的授權查詢走 export.arxiv.org（PLANS 主機清單未列，屬「公開文獻 API」）。一次成功，沒有重試。
+- **觀察**（`observations.json`、`transcript.jsonl`，長字串已截斷）：16 項檢查全部通過 —— 文件雜湊在所有步驟前後相同；手寫條目不變；第一個 DOI → `added jumper2021highly`；同 DOI → `existing` 同 key；arXiv → `added vaswani2017attention`；新增後沒有缺漏 key、新增的兩筆為 verified、手寫為 unverified；APA 與 IEEE 渲染不同（例：`(Jumper et al., 2021)` vs `[2]`，`(see Vaswani et al., 2017, p. 3)` vs `see [3, p. 3]`）；三個匯出檔存在，docx 含 `[1]`、Markdown 不含 `[@`；remove 後 `old1999notes` 消失，最終書目 = 手寫 FAO + 兩筆新條目；書目與 `citation.json` 都沒有 abstract；bundle 只寫在暫存的 cite 目錄，repo 的 `cite/` 未變。
+- **下一步**：C8-S2。
 
 ## 最終彙報
 
