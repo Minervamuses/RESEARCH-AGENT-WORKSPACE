@@ -1,0 +1,5 @@
+[
+ {"id":"smith2020deep","type":"article-journal","title":"Deep learning for crops","author":[{"family":"Smith","given":"Jane"}],"issued":{"date-parts":[[2020]]},"container-title":"Journal of Agri","volume":"12","page":"1-10","DOI":"10.1000/abc"},
+ {"id":"lee2019robot","type":"paper-conference","title":"Robot harvesting","author":[{"family":"Lee","given":"Min"},{"family":"Chen","given":"Wei"}],"issued":{"date-parts":[[2019]]},"container-title":"Proc. ICRA"},
+ {"id":"fao2021report","type":"report","title":"Food outlook","author":[{"literal":"FAO"}],"issued":{"date-parts":[[2021]]},"publisher":"FAO"}
+]

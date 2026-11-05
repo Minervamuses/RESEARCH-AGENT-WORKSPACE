@@ -6,10 +6,10 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| C1 | In progress | C1-S1 基線見事件 | — | C1-S2 安裝 Pandoc |
-| C2 | Not started | — | 依賴 C1 | — |
+| C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
+| C2 | Not started | — | — | C2-S1 |
 | C3 | Not started | — | 依賴 C2 | — |
-| C4 | Not started | — | 依賴 C1 | — |
+| C4 | Not started | — | — | C3 後進行 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
@@ -65,6 +65,15 @@
   - `cargo test --locked`（沙箱外）：40 passed，exit 0。
 - **既有失敗**：無。之後的回歸以此為準（全部通過）。
 - **下一步**：C1-S2。
+
+### C1-S2 Pandoc 3.13 已裝入 Conda app 並寫入 env-app.yml（2026-11-05）
+
+- **安裝**：`conda install -y -n app -c conda-forge --freeze-installed "pandoc>=3,<4"`。沙箱內執行失敗（`OSError: [Errno 30] Read-only file system: ~/.cache/conda-anaconda-tos/...`，環境阻塞，不消耗修正額度），改在沙箱外執行成功。
+- **路徑與版本**：`/home/minervamuses/miniconda3/envs/app/bin/pandoc`，pandoc 3.13（+server +lua）。
+- **清單差異**（`evidence/C1-S2/conda-diff.txt`）：新增 `pandoc=3.13`；另外 `--freeze-installed` 仍更新了 `ca-certificates` 2026.7.22 → 2026.10.23 與 `openssl` 3.6.3 → 3.6.5（pandoc 的相依要求）。python、poetry、nodejs、rust 都沒變。以 `import ssl, httpx` 與 `tests/test_state.py` 檢查，SSL 正常（OpenSSL 3.6.5）。
+- **小檔測試**：三筆 CSL-JSON + `[@smith2020deep; @lee2019robot]` 的 Markdown，`pandoc --citeproc -t plain` 輸出排好的引用與參考文獻（`smoke-plain.txt`，預設 Chicago author-date）；`pandoc -f csljson -t bibtex` 輸出三筆 `.bib`（`smoke-bibtex.bib`）。
+- **env-app.yml**：加入 `- pandoc>=3,<4`；`conda env create --dry-run -n cm-dryrun-check -f app/env/env-app.yml` exit 0，解出 `pandoc==3.13`（`env-dryrun.txt`），沒有建立環境。
+- **下一步**：C2-S1。
 
 ## 最終彙報
 

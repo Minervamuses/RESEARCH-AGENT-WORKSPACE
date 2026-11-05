@@ -1,0 +1,138 @@
+Channels:
+ - conda-forge
+ - defaults
+Platform: linux-64
+Collecting package metadata (repodata.json): - \ | / - done
+Solving environment: | done
+
+
+==> WARNING: A newer version of conda exists. <==
+    current version: 25.5.1
+    latest version: 26.9.4
+
+Please update conda by running
+
+    $ conda update -n base -c defaults conda
+
+
+name: app
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - conda-forge/linux-64::pandoc==3.13=ha770c72_0
+  - conda-forge/noarch::ca-certificates==2026.10.23=hbd8a1cb_0
+  - conda-forge/noarch::kernel-headers_linux-64==6.12.0=he073ed8_6
+  - conda-forge/noarch::libgcc-devel_linux-64==16.2.0=he3ce08f_107
+  - conda-forge/linux-64::libgomp==16.2.0=he0feb66_7
+  - conda-forge/noarch::libstdcxx-devel_linux-64==16.2.0=h86e191b_107
+  - conda-forge/linux-64::libzlib==1.3.2=h25fd6f3_3
+  - conda-forge/noarch::python_abi==3.13=9_cp313
+  - conda-forge/noarch::rust-std-x86_64-unknown-linux-gnu==1.97.1=h2c6d0dc_2
+  - conda-forge/noarch::tzdata==2026e=h5d301ff_0
+  - conda-forge/linux-64::_openmp_mutex==4.5=20_gnu
+  - conda-forge/noarch::sysroot_linux-64==2.39=hc4b9eeb_6
+  - conda-forge/linux-64::zstd==1.5.7=hb78ec9c_7
+  - conda-forge/linux-64::ld_impl_linux-64==2.46.1=default_hbd61a6d_103
+  - conda-forge/linux-64::libgcc==16.2.0=ha9f2e26_7
+  - conda-forge/linux-64::binutils_impl_linux-64==2.46.1=default_hfdba357_103
+  - conda-forge/linux-64::bzip2==1.0.8=hda65f42_10
+  - conda-forge/linux-64::c-ares==1.34.9=hebe6cf0_0
+  - conda-forge/linux-64::libev==4.33=h280c20c_3
+  - conda-forge/linux-64::libexpat==2.9.0=hd2095e1_0
+  - conda-forge/linux-64::libffi==3.7.0=h81df57d_1
+  - conda-forge/linux-64::libgfortran5==16.2.0=h6b99dfc_7
+  - conda-forge/linux-64::libiconv==1.18=h0cb94f2_3
+  - conda-forge/linux-64::liblzma==5.8.3=hb03c661_1
+  - conda-forge/linux-64::libmpdec==4.0.0=hb03c661_2
+  - conda-forge/linux-64::libpython==3.13.18=hd51c5da_100_cp313
+  - conda-forge/linux-64::libstdcxx==16.2.0=h934c35e_7
+  - conda-forge/linux-64::libuuid==2.42.4=hcfc3c73_0
+  - conda-forge/linux-64::libuv==1.52.1=h280c20c_1
+  - conda-forge/linux-64::ncurses==6.6=hdb14827_1
+  - conda-forge/linux-64::openssl==3.6.5=h781a0a9_0
+  - conda-forge/linux-64::tk==8.6.13=noxft_h1df4ec4_4
+  - conda-forge/linux-64::icu==78.3=py310h44b86e0_2
+  - conda-forge/linux-64::libgfortran==16.2.0=h69a702a_7
+  - conda-forge/linux-64::libnghttp2==1.71.0=hc5e5977_0
+  - conda-forge/linux-64::libsanitizer==16.2.0=h3048135_7
+  - conda-forge/linux-64::pcre2==10.47=h8b3dc9c_1
+  - conda-forge/linux-64::readline==8.3=hd6e31c0_1
+  - conda-forge/linux-64::gcc_impl_linux-64==16.2.0=h9891192_7
+  - conda-forge/linux-64::libglib==2.90.0=h569388d_0
+  - conda-forge/linux-64::libopenblas==0.3.34=pthreads_hf13c14d_2
+  - conda-forge/linux-64::libsqlite==3.54.1=h13e7031_0
+  - conda-forge/linux-64::dbus==1.16.2=he8c428d_2
+  - conda-forge/linux-64::libblas==3.11.0=12_h4a7cf45_openblas
+  - conda-forge/linux-64::nodejs==24.22.1=h5bd7f29_1
+  - conda-forge/linux-64::python==3.13.18=hf47f18c_100_cp313
+  - conda-forge/linux-64::rust==1.97.1=hc89c8c8_2
+  - conda-forge/noarch::backports==1.0=pyhd8ed1ab_5
+  - conda-forge/linux-64::backports.zstd==1.8.0=py313h524ba91_1
+  - conda-forge/linux-64::brotli-python==1.2.1=py313h2fc2bef_0
+  - conda-forge/noarch::certifi==2026.10.23=pyhd8ed1ab_3
+  - conda-forge/noarch::colorama==0.4.6=pyhd8ed1ab_1
+  - conda-forge/noarch::cpython==3.13.18=py313hd8ed1ab_100
+  - conda-forge/noarch::crashtest==0.4.1=pyhd8ed1ab_1
+  - conda-forge/noarch::distlib==0.4.4=pyh5ded981_0
+  - conda-forge/noarch::filelock==4.2.9=pyh5ded981_0
+  - conda-forge/noarch::hpack==4.2.0=pyhd8ed1ab_0
+  - conda-forge/noarch::hyperframe==6.1.0=pyhd8ed1ab_0
+  - conda-forge/noarch::idna==3.20=pyh5ded981_0
+  - conda-forge/noarch::jeepney==0.9.0=pyhd8ed1ab_0
+  - conda-forge/linux-64::libcblas==3.11.0=12_h0358290_openblas
+  - conda-forge/linux-64::liblapack==3.11.0=12_h47877c9_openblas
+  - conda-forge/noarch::more-itertools==11.2.1=pyh5ded981_0
+  - conda-forge/linux-64::msgpack-python==1.2.4=py313h2551ef2_0
+  - conda-forge/noarch::packaging==26.3=pyhc364b38_0
+  - conda-forge/noarch::pip==26.2.2=pyh145f28c_2
+  - conda-forge/noarch::pkginfo==1.13.3=pyhd8ed1ab_0
+  - conda-forge/noarch::platformdirs==4.14.5=pyh5ded981_0
+  - conda-forge/noarch::poetry-core==2.5.0=pyh5ded981_0
+  - conda-forge/noarch::pycparser==3.12=pyh5ded981_1
+  - conda-forge/noarch::pysocks==1.7.1=pyha55dd90_7
+  - conda-forge/noarch::python-fastjsonschema==2.22.3=pyh5ded981_0
+  - conda-forge/noarch::python-installer==1.1.0=pyhe730653_0
+  - conda-forge/noarch::setuptools==84.2.1=pyhe730653_0
+  - conda-forge/noarch::shellingham==1.5.4=pyhd8ed1ab_2
+  - conda-forge/noarch::sniffio==1.3.1=pyhd8ed1ab_2
+  - conda-forge/noarch::tomli==2.5.0=pyh5ded981_0
+  - conda-forge/noarch::tomlkit==0.15.2=pyh5ded981_0
+  - conda-forge/noarch::trove-classifiers==2026.9.21.13=pyh5ded981_0
+  - conda-forge/noarch::typing_extensions==4.16.0=pyhcf101f3_0
+  - conda-forge/noarch::zipp==4.1.2=pyh5ded981_0
+  - conda-forge/noarch::anyio==4.16.0=pyh5ded981_1
+  - conda-forge/noarch::backports.tarfile==1.2.0=pyhcf101f3_2
+  - conda-forge/linux-64::cffi==2.1.1=py313ha52865f_3
+  - conda-forge/noarch::findpython==0.8.0=pyhcf101f3_1
+  - conda-forge/noarch::h11==0.16.0=pyhcf101f3_1
+  - conda-forge/noarch::h2==4.4.1=pyhcf101f3_0
+  - conda-forge/noarch::importlib-metadata==10.0.0=pyh5ded981_0
+  - conda-forge/noarch::importlib_resources==7.1.0=pyhd8ed1ab_0
+  - conda-forge/noarch::jaraco.classes==3.4.0=pyhcf101f3_3
+  - conda-forge/noarch::jaraco.functools==4.6.0=pyhcf101f3_0
+  - conda-forge/linux-64::numpy==2.5.4=py313hb5f73ae_0
+  - conda-forge/noarch::pyproject_hooks==1.3.3=pyhd8ed1ab_0
+  - conda-forge/noarch::python-discovery==1.9.4=pyh5ded981_0
+  - conda-forge/noarch::python-gil==3.13.18=h4df99d1_100
+  - conda-forge/noarch::_python_abi3_support==1.0=hd8ed1ab_3
+  - conda-forge/noarch::httpcore==1.0.9=pyh29332c3_0
+  - conda-forge/noarch::jaraco.context==6.1.2=pyhcf101f3_0
+  - conda-forge/noarch::python-build==1.6.1=pyhc364b38_0
+  - conda-forge/linux-64::rapidfuzz==3.14.6=py313h901f96d_3
+  - conda-forge/noarch::urllib3==2.8.0=pyhd8ed1ab_0
+  - conda-forge/noarch::virtualenv==21.15.5=pyh5ded981_0
+  - conda-forge/linux-64::zstandard==0.25.0=py313hd42f317_4
+  - conda-forge/linux-64::charset-normalizer==3.5.2=h1114479_0
+  - conda-forge/noarch::cleo==2.1.0=pyhd8ed1ab_1
+  - conda-forge/linux-64::cryptography==50.0.2=py311hc91d8b8_0
+  - conda-forge/linux-64::dulwich==1.2.21=py313ha296275_0
+  - conda-forge/noarch::httpx==0.28.1=pyhd8ed1ab_0
+  - conda-forge/noarch::pbs-installer==2026.10.25=pyhd8ed1ab_0
+  - conda-forge/noarch::requests==2.34.2=pyhcf101f3_0
+  - conda-forge/noarch::secretstorage==3.5.0=pyhc9edb4d_3
+  - conda-forge/noarch::cachecontrol==0.14.4=pyha770c72_0
+  - conda-forge/noarch::keyring==25.7.0=pyha804496_0
+  - conda-forge/noarch::requests-toolbelt==1.0.0=pyhd8ed1ab_1
+  - conda-forge/noarch::cachecontrol-with-filecache==0.14.4=pyhd8ed1ab_0
+  - conda-forge/noarch::poetry==2.5.1=pyhc9edb4d_0

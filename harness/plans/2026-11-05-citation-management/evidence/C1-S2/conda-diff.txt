@@ -1,0 +1,10 @@
+20c20
+< ca-certificates=2026.7.22=hbd8a1cb_0
+---
+> ca-certificates=2026.10.23=hbd8a1cb_0
+130c130
+< openssl=3.6.3=h35e630c_1
+---
+> openssl=3.6.5=h781a0a9_0
+140a141
+> pandoc=3.13=ha770c72_0

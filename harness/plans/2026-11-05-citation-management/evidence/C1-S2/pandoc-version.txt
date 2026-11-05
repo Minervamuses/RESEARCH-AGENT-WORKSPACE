@@ -1,0 +1,3 @@
+pandoc 3.13
+Features: +server +lua
+Scripting engine: Lua 5.4

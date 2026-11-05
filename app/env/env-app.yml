@@ -7,3 +7,4 @@ dependencies:
   - poetry>=2.3,<3
   - nodejs>=20,<25
   - rust=1.97.1
+  - pandoc>=3,<4
