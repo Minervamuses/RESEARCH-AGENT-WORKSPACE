@@ -10,8 +10,8 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | In progress | C5-S1、C5-S2 見事件 | — | C5-S3 中日文合成測試 |
-| C6 | Not started | — | 依賴 C3、C5 | — |
+| C5 | Complete | C5-S1–S3 見事件 | — | — |
+| C6 | Not started | — | — | C6-S1 |
 | C7 | Not started | — | 依賴 C6 | — |
 | C8 | Not started | — | 依賴 C7 | — |
 
@@ -191,6 +191,17 @@
 - **連帶修正**：`csl_from_authority` 的 arXiv 條目改為 `number = "arXiv:<id>"`、不設 publisher（與論文既有條目的寫法一致，附件十七樣式照樣輸出 `arXiv:…`）；`library.item_arxiv` 對 `arXiv:` 前綴的 `number` 不再要求 arXiv 出版者。測試同步更新（`test_citation_csl.py`、`test_citation_library.py`）。
 - **檢查**：新 `tests/test_citation_appendix17.py` 4 項通過（附件十七原文英文範例：期刊 (a)、會議錄 (8)、網站 NSC、軟體 SAS、博士論文 Campbell，以及 (4) 的文中引用形式、排序）。第 4 輪的「Available at」修正就是這組測試發現的。
 - **下一步**：C5-S3。
+
+### C5-S3 附件十七中日文規則的合成測試（2026-11-05）
+
+- **作法**：論文語料沒有中日文條目，另建合成語料 `evidence/C5-S3/cjk_corpus.json`（二.8 例 (d)(e)(6)(8b)(10)(12) 的中文條目、一筆日文、一筆英文），以附件十七原文為預期；`run_cjk.py` 渲染並逐條判定，輸出 `results.md`、`output.json`。
+- **實測限制**：Pandoc 不會依條目 `language` 切換 locale 用詞；CSL-M 的多個 `<layout>` 被 Pandoc 拒絕（`CiteprocParseError: Multiple layout elements`）。標準 CSL 只能測「有沒有」某欄位，所以樣式以 `<if variable="language">` 切換中日文分支：姓名相連、`、` 分隔、`與`、`等人`（覆寫 `and others` 詞，只有中日文分支使用）、全形 `。`/`：`/`，`、`出自〝…〞`、`主編`、`網址：`、`上網日期：YYYY-MM-DD`；排序加上 `language` 降冪鍵（zh → ja → 其他 → 無 language 的英文）。
+- **連帶改動**：`sanitize_csl` 只保留 `zh`/`ja` 開頭的 `language`（Crossref 的 `en` 會被丟掉，否則英文條目會誤入中日文分支）；新增測試。使用者既有 `references.json` 沒有任何 `language` 欄位，所以論文比對不受影響（重跑 C5-S2：引用 46/46、參考文獻 32/42 不變）。
+- **結果**（14 條規則）：達成 11（中文二人 `與`、一人與機構、日文、中英混合、(5)(d)(e)(6)(8b)(10)(12) 六種中文條目格式、語言分組〔需 `language` 欄位〕）；部分達成 1：中文三人以上輸出 `(田 等人，1989)`，`等人` 前多一空白（處理器在 et-al 詞前固定加空白；改用 `and` 符號詞可讓 `等人` 緊接，但二人的 `與` 前後會多空白，兩者不能同時正確，實測後選擇讓二人形式正確）；無法以標準 CSL 表達 2：中日文依筆畫排序（Pandoc 只用 Unicode 排序規則）、全中文群組內以全形 `；` 分隔（layout 層級分隔符號）。
+- **檢查**：`tests/test_citation_appendix17.py` 新增中文分支測試（共 5 項）；`tests/test_citation_csl.py` 新增 language 測試；兩檔 13 項通過。
+- **補記**：C5-S2 所述 `library.item_arxiv` 對 `arXiv:` 前綴的改動與其測試，實際上已隨 `4f026b3`（`[C5-S2 fix]`）一起提交，不在 `4ded113`（`[C5-S2]`）中；內容相同，只是落在前一個 commit。
+- **交付**：樣式 ID `bime-appendix17`；已知限制見 `evidence/C5-S2/compare.md` 與 `evidence/C5-S3/results.md`。
+- **下一步**：C6-S1。
 
 ## 最終彙報
 

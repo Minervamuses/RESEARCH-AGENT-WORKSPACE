@@ -194,6 +194,11 @@ def sanitize_csl(payload: dict) -> dict:
         value = _first_text(payload.get(variable))
         if value:
             item[variable] = value
+    # "language" is kept only for Chinese/Japanese: the Appendix 17 style
+    # switches to its CJK branch on the field's presence (CSL cannot test
+    # the value), so English records must not carry it.
+    if not item.get("language", "").casefold().startswith(("zh", "ja")):
+        item.pop("language", None)
     if "DOI" in item:
         doi = canonicalize_doi(item["DOI"])
         if doi:

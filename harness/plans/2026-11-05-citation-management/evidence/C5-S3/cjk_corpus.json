@@ -1,0 +1,255 @@
+{
+ "note": "Synthetic entries from the Appendix 17 二.8 examples (d), (e), (6), (8b), (10), (12) plus one Japanese and one English entry. Only these synthetic entries carry a language field; the user's references.json has none.",
+ "items": [
+  {
+   "id": "tian1989",
+   "type": "article-journal",
+   "language": "zh-TW",
+   "title": "檸檬顏色選別裝置之研製",
+   "author": [
+    {
+     "family": "田",
+     "given": "秉才"
+    },
+    {
+     "family": "陳",
+     "given": "世銘"
+    },
+    {
+     "family": "馮",
+     "given": "丁樹"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      1989
+     ]
+    ]
+   },
+   "container-title": "農業工程學報",
+   "volume": "35",
+   "issue": "4",
+   "page": "73-82"
+  },
+  {
+   "id": "zhang1992",
+   "type": "article-journal",
+   "language": "zh-TW",
+   "title": "芋頭收穫機之研究",
+   "author": [
+    {
+     "family": "張",
+     "given": "福祥"
+    },
+    {
+     "family": "盧",
+     "given": "福明"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      1992
+     ]
+    ]
+   },
+   "container-title": "農業機械學刊",
+   "volume": "1",
+   "issue": "1",
+   "page": "50-59"
+  },
+  {
+   "id": "lu1986",
+   "type": "book",
+   "language": "zh-TW",
+   "title": "農產加工工程學",
+   "author": [
+    {
+     "family": "盧",
+     "given": "福明"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      1986
+     ]
+    ]
+   },
+   "edition": "初版",
+   "page": "143-214",
+   "publisher-place": "台北",
+   "publisher": "茂昌"
+  },
+  {
+   "id": "li1992",
+   "type": "paper-conference",
+   "language": "zh-TW",
+   "title": "台灣切花產業之發展策略規劃",
+   "author": [
+    {
+     "family": "李",
+     "given": "哖"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      1992
+     ]
+    ]
+   },
+   "container-title": "花卉栽培技術與產業規劃研討會專集",
+   "page": "207-235",
+   "editor": [
+    {
+     "family": "張",
+     "given": "學琨"
+    },
+    {
+     "family": "傅",
+     "given": "仰人"
+    }
+   ],
+   "publisher-place": "桃園",
+   "publisher": "台灣省桃園區農業改良場"
+  },
+  {
+   "id": "qiu1990",
+   "type": "thesis",
+   "language": "zh-TW",
+   "title": "分級機並列式出料之設計",
+   "author": [
+    {
+     "family": "邱",
+     "given": "奕志"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      1990
+     ]
+    ]
+   },
+   "genre": "碩士論文",
+   "publisher-place": "台北",
+   "publisher": "臺灣大學農業機械工程學研究所"
+  },
+  {
+   "id": "doh2001",
+   "type": "webpage",
+   "language": "zh-TW",
+   "title": "健康食品安全評估方法",
+   "author": [
+    {
+     "literal": "行政院衛生署"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      2001
+     ]
+    ]
+   },
+   "publisher-place": "台北",
+   "publisher": "行政院衛生署",
+   "URL": "http://www.doh.gov.tw/",
+   "accessed": {
+    "date-parts": [
+     [
+      2001,
+      2,
+      12
+     ]
+    ]
+   }
+  },
+  {
+   "id": "yamada2000",
+   "type": "article-journal",
+   "language": "ja",
+   "title": "果実選別装置の研究",
+   "author": [
+    {
+     "family": "山田",
+     "given": "太郎"
+    },
+    {
+     "family": "佐藤",
+     "given": "花子"
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      2000
+     ]
+    ]
+   },
+   "container-title": "農業機械学会誌",
+   "volume": "62",
+   "issue": "1",
+   "page": "10-20"
+  },
+  {
+   "id": "smith1985",
+   "type": "article-journal",
+   "title": "Grain moisture",
+   "author": [
+    {
+     "family": "Smith",
+     "given": "J."
+    }
+   ],
+   "issued": {
+    "date-parts": [
+     [
+      1985
+     ]
+    ]
+   },
+   "container-title": "Trans. ASAE",
+   "volume": "28",
+   "issue": "1",
+   "page": "1-5"
+  }
+ ],
+ "text": "[@tian1989] [@zhang1992] [@lu1986] [@li1992] [@qiu1990] [@doh2001] [@yamada2000] [@smith1985; @zhang1992] [@tian1989; @zhang1992]",
+ "expected": {
+  "citations": [
+   "(田等人，1989)",
+   "(張與盧，1992)",
+   "(盧，1986)",
+   "(李，1992)",
+   "(邱，1990)",
+   "(行政院衛生署，2001)",
+   "(山田與佐藤，2000)",
+   "(Smith, 1985; 張與盧，1992)",
+   "(田等人，1989；張與盧，1992)"
+  ],
+  "bibliography": {
+   "tian1989": "田秉才、陳世銘、馮丁樹。1989。檸檬顏色選別裝置之研製。農業工程學報 35(4): 73-82。",
+   "zhang1992": "張福祥、盧福明。1992。芋頭收穫機之研究。農業機械學刊 1(1): 50-59。",
+   "lu1986": "盧福明。1986。農產加工工程學。初版，143-214。台北：茂昌。",
+   "li1992": "李哖。1992。台灣切花產業之發展策略規劃。出自〝花卉栽培技術與產業規劃研討會專集〞，207-235。張學琨、傅仰人主編。桃園：台灣省桃園區農業改良場。",
+   "qiu1990": "邱奕志。1990。分級機並列式出料之設計。碩士論文。台北：臺灣大學農業機械工程學研究所。",
+   "doh2001": "行政院衛生署。2001。健康食品安全評估方法。台北：行政院衛生署。網址：http://www.doh.gov.tw/。上網日期：2001-02-12。"
+  },
+  "order": [
+   "tian1989",
+   "doh2001",
+   [
+    "li1992",
+    "qiu1990"
+   ],
+   "zhang1992",
+   "lu1986",
+   "yamada2000",
+   "smith1985"
+  ],
+  "order_note": "Chinese by first-character stroke count (Unihan kTotalStrokes: 田5, 行6, 李7, 邱7 (tie, order not asserted), 張11, 盧16), then Japanese, then English."
+ }
+}

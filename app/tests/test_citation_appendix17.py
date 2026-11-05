@@ -102,3 +102,38 @@ def test_reference_order_is_alphabetical_then_year(rendered):
         "anderson1998", "campbell1991", "miller1980", "nsc2000", "sas1990",
         "smith1985a", "smith1985b", "smith1968",
     ]
+
+
+CJK = [
+    {"id": "tian1989", "type": "article-journal", "language": "zh-TW", "title": "檸檬顏色選別裝置之研製",
+     "author": [{"family": "田", "given": "秉才"}, {"family": "陳", "given": "世銘"}, {"family": "馮", "given": "丁樹"}],
+     "issued": {"date-parts": [[1989]]}, "container-title": "農業工程學報", "volume": "35", "issue": "4", "page": "73-82"},
+    {"id": "zhang1992", "type": "article-journal", "language": "zh-TW", "title": "芋頭收穫機之研究",
+     "author": [{"family": "張", "given": "福祥"}, {"family": "盧", "given": "福明"}],
+     "issued": {"date-parts": [[1992]]}, "container-title": "農業機械學刊", "volume": "1", "issue": "1", "page": "50-59"},
+    {"id": "doh2001", "type": "webpage", "language": "zh-TW", "title": "健康食品安全評估方法",
+     "author": [{"literal": "行政院衛生署"}], "issued": {"date-parts": [[2001]]}, "publisher-place": "台北",
+     "publisher": "行政院衛生署", "URL": "http://www.doh.gov.tw/", "accessed": {"date-parts": [[2001, 2, 12]]}},
+    {"id": "yamada2000", "type": "article-journal", "language": "ja", "title": "果実選別装置の研究",
+     "author": [{"family": "山田", "given": "太郎"}], "issued": {"date-parts": [[2000]]},
+     "container-title": "農業機械学会誌", "volume": "62", "issue": "1", "page": "10-20"},
+]
+
+
+def test_chinese_branch_with_language_field(tmp_path):
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(CJK + ITEMS[:1], ensure_ascii=False), encoding="utf-8")
+    out = render("[@zhang1992] [@tian1989] [@doh2001] [@yamada2000] [@anderson1998]", path, "bime-appendix17")
+    assert [c["text"] for c in out.citations] == [
+        "(張與盧，1992)",
+        "(田 等人，1989)",  # known limit: the processor puts a space before the et-al term
+        "(行政院衛生署，2001)", "(山田，2000)", "(Anderson et al., 1998)",
+    ]
+    entries = {e["key"]: e["text"] for e in out.bibliography}
+    assert entries["tian1989"] == "田秉才、陳世銘、馮丁樹。1989。檸檬顏色選別裝置之研製。農業工程學報 35(4): 73-82。"
+    assert entries["doh2001"] == (
+        "行政院衛生署。2001。健康食品安全評估方法。台北：行政院衛生署。網址：http://www.doh.gov.tw/。上網日期：2001-02-12。"
+    )
+    order = [e["key"] for e in out.bibliography]
+    # zh before ja before untagged English; stroke order is not expressible.
+    assert order[-2:] == ["yamada2000", "anderson1998"]

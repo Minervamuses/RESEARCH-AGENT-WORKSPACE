@@ -166,3 +166,10 @@ def test_exact_doi_resolution_carries_csl_to_the_eligible_record():
     assert resolution.decision.status == "eligible"
     assert resolution.decision.record.csl["DOI"] == "10.1016/j.compag.2024.108999"
     assert "abstract" not in resolution.decision.record.csl
+
+
+def test_language_is_kept_only_for_chinese_and_japanese():
+    assert "language" not in sanitize_csl({"type": "article-journal", "language": "en"})
+    assert "language" not in sanitize_csl({"type": "article-journal", "language": "en-US"})
+    assert sanitize_csl({"type": "article-journal", "language": "zh-TW"})["language"] == "zh-TW"
+    assert sanitize_csl({"type": "article-journal", "language": "ja"})["language"] == "ja"

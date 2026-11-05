@@ -22,24 +22,53 @@
         <single>ed.</single>
         <multiple>eds.</multiple>
       </term>
+      <!-- Only the Chinese/Japanese branches use "and others" (二.8(4): 陳等人). -->
+      <term name="and others">等人</term>
     </terms>
   </locale>
   <!-- Names -->
+  <!-- Chinese/Japanese entries are recognised by having a "language" field
+       (standard CSL cannot test its value; English entries must not carry it). -->
   <macro name="author-bib">
-    <names variable="author">
-      <name and="text" delimiter=", " delimiter-precedes-last="always" initialize-with=". " name-as-sort-order="first" sort-separator=", "/>
-      <substitute>
-        <text variable="publisher"/>
-      </substitute>
-    </names>
+    <choose>
+      <if variable="language">
+        <names variable="author">
+          <name delimiter="、"/>
+          <substitute>
+            <text variable="publisher"/>
+          </substitute>
+        </names>
+      </if>
+      <else>
+        <names variable="author">
+          <name and="text" delimiter=", " delimiter-precedes-last="always" initialize-with=". " name-as-sort-order="first" sort-separator=", "/>
+          <substitute>
+            <text variable="publisher"/>
+          </substitute>
+        </names>
+      </else>
+    </choose>
   </macro>
   <macro name="author-short">
-    <names variable="author">
-      <name form="short" and="text" delimiter=", " delimiter-precedes-last="contextual" et-al-min="3" et-al-use-first="1"/>
-      <substitute>
-        <text variable="publisher"/>
-      </substitute>
-    </names>
+    <choose>
+      <if variable="language">
+        <names variable="author">
+          <name form="short" delimiter="與" et-al-min="3" et-al-use-first="1"/>
+          <et-al term="and others"/>
+          <substitute>
+            <text variable="publisher"/>
+          </substitute>
+        </names>
+      </if>
+      <else>
+        <names variable="author">
+          <name form="short" and="text" delimiter=", " delimiter-precedes-last="contextual" et-al-min="3" et-al-use-first="1"/>
+          <substitute>
+            <text variable="publisher"/>
+          </substitute>
+        </names>
+      </else>
+    </choose>
   </macro>
   <macro name="author-sort">
     <!-- Family names of every author in order (bime_word sorts by this tuple). -->
@@ -242,31 +271,133 @@
       </else>
     </choose>
   </macro>
+  <macro name="place-publisher-cjk">
+    <group delimiter="：">
+      <text variable="publisher-place"/>
+      <text variable="publisher"/>
+    </group>
+  </macro>
+  <macro name="body-cjk">
+    <choose>
+      <if type="article-journal article-magazine article-newspaper" match="any">
+        <group delimiter="。">
+          <text variable="title"/>
+          <text macro="volume-issue-pages"/>
+        </group>
+      </if>
+      <else-if type="book">
+        <group delimiter="。">
+          <text variable="title"/>
+          <group delimiter="，">
+            <text variable="edition"/>
+            <text variable="page"/>
+          </group>
+          <text macro="place-publisher-cjk"/>
+        </group>
+      </else-if>
+      <else-if type="chapter paper-conference entry-encyclopedia" match="any">
+        <group delimiter="。">
+          <text variable="title"/>
+          <group delimiter="，">
+            <group>
+              <text value="出自〝"/>
+              <text variable="container-title"/>
+              <text value="〞"/>
+            </group>
+            <text variable="page"/>
+          </group>
+          <names variable="editor" suffix="主編">
+            <name delimiter="、"/>
+          </names>
+          <text macro="place-publisher-cjk"/>
+        </group>
+      </else-if>
+      <else-if type="thesis">
+        <group delimiter="。">
+          <text variable="title"/>
+          <text variable="genre"/>
+          <text macro="place-publisher-cjk"/>
+        </group>
+      </else-if>
+      <else-if type="webpage post post-weblog software" match="any">
+        <group delimiter="。">
+          <text variable="title"/>
+          <text macro="place-publisher-cjk"/>
+          <group>
+            <text value="網址："/>
+            <text macro="link"/>
+          </group>
+          <date variable="accessed" prefix="上網日期：">
+            <date-part name="year" suffix="-"/>
+            <date-part name="month" form="numeric-leading-zeros" suffix="-"/>
+            <date-part name="day" form="numeric-leading-zeros"/>
+          </date>
+        </group>
+      </else-if>
+      <else-if type="patent">
+        <group delimiter="。">
+          <text variable="title"/>
+          <text variable="number"/>
+        </group>
+      </else-if>
+      <else>
+        <group delimiter="。">
+          <text variable="title"/>
+          <text variable="container-title"/>
+          <text macro="place-publisher-cjk"/>
+        </group>
+      </else>
+    </choose>
+  </macro>
   <citation et-al-min="3" et-al-use-first="1" disambiguate-add-year-suffix="true">
     <layout prefix="(" suffix=")" delimiter="; ">
-      <group delimiter=", ">
-        <text macro="author-short"/>
-        <text macro="year"/>
-        <group delimiter=" ">
-          <label variable="locator" form="short"/>
-          <text variable="locator"/>
-        </group>
-      </group>
+      <choose>
+        <if variable="language">
+          <group delimiter="，">
+            <text macro="author-short"/>
+            <text macro="year"/>
+            <text variable="locator"/>
+          </group>
+        </if>
+        <else>
+          <group delimiter=", ">
+            <text macro="author-short"/>
+            <text macro="year"/>
+            <group delimiter=" ">
+              <label variable="locator" form="short"/>
+              <text variable="locator"/>
+            </group>
+          </group>
+        </else>
+      </choose>
     </layout>
   </citation>
   <bibliography hanging-indent="true" entry-spacing="0">
     <sort>
+      <!-- zh before ja before other tagged languages; untagged (English) last. -->
+      <key variable="language" sort="descending"/>
       <key macro="author-sort" names-min="1" names-use-first="1"/>
       <key macro="author-sort" names-min="999" names-use-first="999"/>
       <key macro="year"/>
       <key variable="title"/>
     </sort>
-    <layout suffix=".">
-      <group delimiter=". ">
-        <text macro="author-bib"/>
-        <text macro="year"/>
-        <text macro="body"/>
-      </group>
+    <layout>
+      <choose>
+        <if variable="language">
+          <group delimiter="。" suffix="。">
+            <text macro="author-bib"/>
+            <text macro="year"/>
+            <text macro="body-cjk"/>
+          </group>
+        </if>
+        <else>
+          <group delimiter=". " suffix=".">
+            <text macro="author-bib"/>
+            <text macro="year"/>
+            <text macro="body"/>
+          </group>
+        </else>
+      </choose>
     </layout>
   </bibliography>
 </style>
