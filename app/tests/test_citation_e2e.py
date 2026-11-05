@@ -57,7 +57,9 @@ def _workflow_results(messages) -> list[ToolMessage]:
 def _save_content(message: ToolMessage) -> SaveBatchOutcome:
     prefix = "Actual citation save result:\n"
     assert message.content.startswith(prefix)
-    return SaveBatchOutcome.from_artifact(json.loads(message.content.removeprefix(prefix)))
+    # Desktop project saves append a plain-text bibliography note after the JSON.
+    artifact, _end = json.JSONDecoder().raw_decode(message.content.removeprefix(prefix))
+    return SaveBatchOutcome.from_artifact(artifact)
 
 
 def _save_call_from_search_result(
@@ -318,9 +320,9 @@ def _fixture_services(monkeypatch, tmp_path, fetcher=None):
     hub = CitationProviderHub(env={}, fetcher=fetcher or RoutingFetcher())
     services = []
 
-    def create(provider_hub, *, config):
+    def create(provider_hub, *, config, library_path=None):
         assert provider_hub is hub
-        service = CitationService(hub, output_dir=tmp_path / "cite")
+        service = CitationService(hub, output_dir=tmp_path / "cite", library_path=library_path)
         services.append(service)
         return service
 

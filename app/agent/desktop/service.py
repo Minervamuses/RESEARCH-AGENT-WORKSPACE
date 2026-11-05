@@ -58,6 +58,7 @@ from agent.desktop.catalog import (
     inspect_project,
     initialize_project,
     load_project_catalog,
+    project_citation_settings,
 )
 from agent.desktop.protocol import (
     PROTOCOL_VERSION,
@@ -1216,6 +1217,21 @@ class DesktopService:
         else:
             self._catalog = catalog
 
+    def _project_bibliography_path(self, project_id: str) -> Path | None:
+        """The opened project's CSL-JSON bibliography, or None when unusable.
+
+        A malformed ``bibliography`` metadata value leaves citation saves
+        bundle-only (logged) instead of failing the Citation task.
+        """
+        project = self._project
+        if project is None or project.get("projectId") != project_id:
+            return None
+        try:
+            return project_citation_settings(project["rootPath"])["bibliographyPath"]
+        except CatalogError as exc:
+            logger.warning("project bibliography unavailable: %s", exc)
+            return None
+
     def _require_project(self) -> dict[str, Any]:
         if self._project is None:
             raise DesktopServiceError(
@@ -1396,6 +1412,13 @@ class DesktopService:
             for parameter in factory_parameters.values()
         ):
             kwargs["operation_approval_handler"] = self._desktop_operation_approval
+        if "citation_bibliography_path" in factory_parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in factory_parameters.values()
+        ):
+            kwargs["citation_bibliography_path"] = (
+                lambda: self._project_bibliography_path(project_id)
+            )
         if session_id is not None:
             kwargs["session_id"] = session_id
         session = await self._session_factory(config, **kwargs)
@@ -2355,9 +2378,17 @@ class DesktopService:
             output_dir = getattr(loaded_service, "output_dir", None)
             if output_dir is None:
                 output_dir = resolve_output_dir(self.config)
+            if loaded_service is not None:
+                library_path = getattr(loaded_service, "library_path", None)
+            else:
+                resolve_library = getattr(policy, "bibliography_path", None)
+                library_path = resolve_library() if callable(resolve_library) else None
+            description = "Save this batch of citation candidates after source verification."
+            if library_path is not None:
+                description += f" Verified works are also added to the project bibliography {library_path}."
             return await self._operation_approval(
                 "citation.save", str(Path(output_dir).expanduser().resolve()),
-                "Save this batch of citation candidates after source verification.", parameters=args.get("works"),
+                description, parameters=args.get("works"),
             )
         if skill_install:
             context = getattr(self.session, "_installer_context", {})

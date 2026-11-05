@@ -10,6 +10,11 @@ from pathlib import Path
 
 from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
 from skills.citation.authority import AuthorityRecord, AuthorityRegistry, export_bibtex
+from skills.citation.csl import csl_from_authority, minimal_csl
+from skills.citation.library import LibraryError
+from skills.citation.library import load as load_library
+from skills.citation.library import merge as merge_library
+from skills.citation.library import write_atomic as write_library_atomic
 from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
 from skills.citation.doi import canonicalize_doi, doi_equal
 from skills.citation.providers.base import ProviderRecord
@@ -27,6 +32,7 @@ from skills.citation.resolution import (
 )
 from skills.citation.storage import StorageError, resolve_output_dir, source_id_for, write_identity_bundle
 from skills.citation.types import (
+    BibliographyLink,
     CanonicalIdentity,
     PublishedDateFilter,
     SaveAlternative,
@@ -40,10 +46,13 @@ logger = logging.getLogger(__name__)
 
 
 class CitationService:
-    def __init__(self, hub, *, config=None, output_dir=None):
+    def __init__(self, hub, *, config=None, output_dir=None, library_path=None):
         self.hub = hub
         self.registry = SourceRegistry()
         self.output_dir = Path(output_dir) if output_dir is not None else resolve_output_dir(config)
+        # Project CSL-JSON bibliography (desktop projects only). None keeps the
+        # bundle-only behavior the CLI has always had.
+        self.library_path = Path(library_path) if library_path is not None else None
         self.resolver = WorkResolver(
             crossref=hub.crossref,
             datacite=hub.datacite,
@@ -156,10 +165,17 @@ class CitationService:
             outcomes.append(None)
 
         # All resolution/provider verification completes before the first write.
+        csl_items: dict[int, dict] = {}
         for index, intent, record, resolution_reason in eligible:
             outcomes[index] = await self._persist_item(
                 batch_id, index, intent, record, resolution_reason
             )
+            if outcomes[index].status in {"saved", "reused"}:
+                csl_items[index] = self._csl_item(record, outcomes[index].receipt)
+        if self.library_path is not None and csl_items:
+            links = await asyncio.to_thread(self._link_library, csl_items)
+            for index, link in links.items():
+                outcomes[index] = replace(outcomes[index], bibliography=link)
         for item in outcomes:
             logger.info(
                 "citation save batch %s item %d: %s/%s",
@@ -397,6 +413,64 @@ class CitationService:
             )
         except Exception as exc:
             return self._internal_failure(batch_id, index, intent, stage, exc)
+
+    @staticmethod
+    def _csl_item(record, receipt: SaveReceipt) -> dict:
+        """CSL-JSON for a verified work, from verified metadata only."""
+        if isinstance(record, AuthorityRecord):
+            return csl_from_authority(record)
+        item = dict(record.csl) if getattr(record, "csl", None) else minimal_csl(
+            title=record.title,
+            authors=list(record.authors),
+            year=record.year,
+            venue=record.venue,
+            work_type=record.work_type,
+            doi=record.doi,
+            url=record.url,
+        )
+        if receipt.doi:
+            item["DOI"] = receipt.doi
+        item.pop("abstract", None)
+        return item
+
+    def _link_library(self, csl_items: dict[int, dict]) -> dict[int, BibliographyLink]:
+        """Merge saved works into the project bibliography in one write.
+
+        A bibliography failure never changes the bundle outcome; it is
+        reported on the item's ``bibliography`` link instead.
+        """
+        path = str(self.library_path)
+        try:
+            library = load_library(self.library_path)
+        except LibraryError as exc:
+            logger.warning("citation bibliography load failed: %s (%s)", exc.code, exc)
+            return {index: BibliographyLink("failed", path, reason_code=exc.code) for index in csl_items}
+        results = {}
+        for index, item in csl_items.items():
+            try:
+                merged = merge_library(library, item)
+            except LibraryError as exc:
+                results[index] = (None, exc.code)
+                continue
+            library = merged.library
+            results[index] = (merged, None)
+        added = [index for index, (merged, _code) in results.items() if merged and merged.status == "added"]
+        write_error = None
+        if added:
+            try:
+                write_library_atomic(library)
+            except LibraryError as exc:
+                logger.warning("citation bibliography write failed: %s (%s)", exc.code, exc)
+                write_error = exc.code
+        links = {}
+        for index, (merged, code) in results.items():
+            if merged is None:
+                links[index] = BibliographyLink("failed", path, reason_code=code)
+            elif merged.status == "added" and write_error is not None:
+                links[index] = BibliographyLink("failed", path, reason_code=write_error)
+            else:
+                links[index] = BibliographyLink(merged.status, path, key=merged.key)
+        return links
 
     @staticmethod
     def _internal_failure(

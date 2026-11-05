@@ -266,6 +266,39 @@ class SaveAlternative:
         return cls(value["title"], tuple(value["authors"]), value["year"], value["venue"], value["version_kind"], value["doi"], value["arxiv"])
 
 
+BIBLIOGRAPHY_LINK_STATUSES = frozenset({"added", "existing", "failed"})
+
+
+@dataclass(frozen=True)
+class BibliographyLink:
+    """What happened to one saved work in the project bibliography."""
+
+    status: Literal["added", "existing", "failed"]
+    path: str
+    key: str | None = None
+    reason_code: str | None = None
+
+    def __post_init__(self):
+        if self.status not in BIBLIOGRAPHY_LINK_STATUSES or not isinstance(self.path, str) or not self.path:
+            raise ValueError("invalid bibliography link")
+        if (self.status == "failed") != (self.key is None):
+            raise ValueError("bibliography link key/status mismatch")
+        if self.key is not None and not isinstance(self.key, str):
+            raise ValueError("invalid bibliography key")
+        if (self.status == "failed") != (self.reason_code is not None):
+            raise ValueError("bibliography link reason/status mismatch")
+        if self.reason_code is not None and not re.fullmatch(r"[a-z0-9_]+", self.reason_code):
+            raise ValueError("invalid bibliography reason code")
+
+    def to_artifact(self):
+        return {"status": self.status, "path": self.path, "key": self.key, "reason_code": self.reason_code}
+
+    @classmethod
+    def from_artifact(cls, value):
+        _strict_fields(value, {"status", "path", "key", "reason_code"}, "bibliography link")
+        return cls(value["status"], value["path"], value["key"], value["reason_code"])
+
+
 @dataclass(frozen=True)
 class SaveItemOutcome:
     request_index: int
@@ -274,6 +307,7 @@ class SaveItemOutcome:
     reason_code: str
     receipt: SaveReceipt | None = None
     alternatives: tuple[SaveAlternative, ...] = ()
+    bibliography: BibliographyLink | None = None
 
     def __post_init__(self):
         if (
@@ -289,13 +323,20 @@ class SaveItemOutcome:
             raise ValueError("invalid save item status")
         if (self.status in {"saved", "reused"}) != (self.receipt is not None):
             raise ValueError("save receipt/status mismatch")
+        if self.bibliography is not None and self.receipt is None:
+            raise ValueError("bibliography link requires a saved receipt")
 
     def to_artifact(self):
-        return {"request_index": self.request_index, "requested_label": self.requested_label, "status": self.status, "reason_code": self.reason_code, "receipt": self.receipt.to_artifact() if self.receipt else None, "alternatives": [x.to_artifact() for x in self.alternatives]}
+        artifact = {"request_index": self.request_index, "requested_label": self.requested_label, "status": self.status, "reason_code": self.reason_code, "receipt": self.receipt.to_artifact() if self.receipt else None, "alternatives": [x.to_artifact() for x in self.alternatives]}
+        if self.bibliography is not None:
+            # Only desktop project saves carry this key; CLI artifacts are unchanged.
+            artifact["bibliography"] = self.bibliography.to_artifact()
+        return artifact
 
     @classmethod
     def from_artifact(cls, value):
-        _strict_fields(value, {"request_index", "requested_label", "status", "reason_code", "receipt", "alternatives"}, "save item")
+        base = {"request_index", "requested_label", "status", "reason_code", "receipt", "alternatives"}
+        _strict_fields(value, base | {"bibliography"} if isinstance(value, Mapping) and "bibliography" in value else base, "save item")
         if (
             type(value["request_index"]) is not int
             or not isinstance(value["requested_label"], str)
@@ -306,7 +347,8 @@ class SaveItemOutcome:
         ):
             raise ValueError("invalid save item status")
         receipt = SaveReceipt.from_artifact(value["receipt"]) if value["receipt"] is not None else None
-        return cls(value["request_index"], value["requested_label"], value["status"], value["reason_code"], receipt, tuple(SaveAlternative.from_artifact(x) for x in value["alternatives"]))
+        bibliography = BibliographyLink.from_artifact(value["bibliography"]) if value.get("bibliography") is not None else None
+        return cls(value["request_index"], value["requested_label"], value["status"], value["reason_code"], receipt, tuple(SaveAlternative.from_artifact(x) for x in value["alternatives"]), bibliography)
 
 
 @dataclass(frozen=True)

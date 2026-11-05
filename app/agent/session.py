@@ -140,6 +140,7 @@ class ChatSession:
         bash_approval_handler=None,
         bash_command_runner=None,
         operation_approval_handler: Callable[[str, dict], Awaitable[bool]] | None = None,
+        citation_bibliography_path: Callable[[], Path | None] | None = None,
     ):
         self.config = config
         self.thinking_mode = "normal"
@@ -186,7 +187,9 @@ class ChatSession:
         self._active_turn_id: str | None = None
         self._turn_trace: TurnTimingTrace | None = None
         self._turn_journal = TurnJournal()
-        self._citation_policy = CitationSessionPolicy(config)
+        self._citation_policy = CitationSessionPolicy(
+            config, bibliography_path=citation_bibliography_path,
+        )
         self.citation_workflow_tool = self._citation_policy.workflow_tool
         self.extension_manager = ExtensionManager(config)
         self._skill_installer = SkillInstaller(
@@ -1453,6 +1456,7 @@ class ChatSession:
         bash_command_runner=None,
         extra_tools: list | None = None,
         operation_approval_handler: Callable[[str, dict], Awaitable[bool]] | None = None,
+        citation_bibliography_path: Callable[[], Path | None] | None = None,
     ) -> "ChatSession":
         """Async factory that loads MCP tools (if enabled) before graph construction.
 
@@ -1480,6 +1484,7 @@ class ChatSession:
             bash_approval_handler=bash_approval_handler,
             bash_command_runner=bash_command_runner,
             operation_approval_handler=operation_approval_handler,
+            citation_bibliography_path=citation_bibliography_path,
         )
 
     @classmethod

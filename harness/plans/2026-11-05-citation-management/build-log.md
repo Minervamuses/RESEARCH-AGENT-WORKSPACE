@@ -7,8 +7,8 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
-| C2 | In progress | C2-S1、C2-S2 見事件 | — | C2-S3 接上存檔流程 |
-| C3 | Not started | — | 依賴 C2 | — |
+| C2 | Complete | C2-S1–S3 見事件 | — | — |
+| C3 | Not started | — | — | C3-S1 |
 | C4 | Not started | — | — | C3 後進行 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
@@ -91,6 +91,21 @@
 - **檢查**：新 `tests/test_citation_library.py` 18 項通過（模仿使用者格式的 fixture：1 空格縮排、`–`、`’`、手寫 webpage 與 literal 作者、arXiv URL 條目）。新增一筆時與原檔的 diff **只有新增行**（新條目插在原最後一筆的 `}` 之前，沒有任何既有行被改）。
 - **論文副本驗證**（`$TMPDIR/thesis/`，論文 HEAD `59e9dc1`，只讀）：69 筆、偵測為 `indent=1`；在副本新增一筆得 `zed2025new`；以大寫 DOI 查第一筆得 `agrawal2024references`（重用）。產生規則對既有 69 筆有 23 筆與使用者手選 key 相同（其餘是使用者選了不同的標題字，例如 `agrawal2024references` vs 規則的 `agrawal2024language`）；既有 key 永不改，所以只影響新條目。
 - **下一步**：C2-S3。
+
+### C2-S3 存檔流程與桌面專案接上書目庫（2026-11-05）
+
+- **改動**：
+  - `skills/citation/types.py`：新增 `BibliographyLink`（`status` = `added`/`existing`/`failed`、`path`、`key`、`reason_code`）；`SaveItemOutcome.bibliography`（可選）。artifact 只在有書目結果時才多出 `bibliography` 鍵，所以 CLI 的 artifact 與工具文字不變；`from_artifact` 兩種形狀都接受。
+  - `skills/citation/service.py`：`CitationService(..., library_path=None)`。全部 bundle 寫完後，對 saved/reused 的項目以驗證過的 CSL（doi.org 的清理版；authority 用 `csl_from_authority`；沒有 CSL 時用 `minimal_csl` 只取已驗證欄位）一次載入、逐項 `merge`、最多寫入一次。書目失敗只記在該項的 `bibliography`（`failed` + 代碼），bundle 的 saved/reused 不變。
+  - `skills/citation/tool.py`：有書目結果時，在 JSON 之後附上「Project bibliography: <路徑>」、每項的 key 與狀態，並提示文件中用 `[@key]`（Markdown）或 `\cite{key}`（LaTeX），聊天回覆仍用 `[[cite:…]]`。
+  - `agent/skills/citation/session_policy.py`：`CitationSessionPolicy(config, bibliography_path=<callable>)`，每次建 service 時才呼叫（metadata 改了下一個 Citation 任務就生效）；`None` 時不傳 `library_path`（CLI 完全不變）。
+  - `agent/session.py`：`ChatSession.__init__`/`create` 只多一個轉接參數 `citation_bibliography_path`。
+  - `agent/desktop/catalog.py`：metadata 接受可選 `bibliography`（相對路徑、`.json`、不得含 `..`、`~`、`$`、反斜線、URL scheme）與 `citationStyle`（非空、≤128 字元）；其他未知鍵仍 malformed；新增 `project_citation_settings(root)` 回傳 `bibliographyPath`（預設 `references.json`，解析後含 symlink 也必須在根目錄內）與 `citationStyle`。`inspect_project` 的回傳鍵不變（Rust 端驗證確切鍵集合）；`initialize_project` 不變。
+  - `agent/desktop/service.py`：`_materialize_session` 在工廠接受時傳 `citation_bibliography_path`；`_project_bibliography_path` 只對已開啟的同一專案回傳路徑，metadata 有問題時記 log 並退回 bundle-only；`citation.save` 的批准描述在有書目時加上「Verified works are also added to the project bibliography <路徑>.」。
+  - 測試配合：`tests/test_citation_e2e.py` 的假 `CitationService` 工廠接受 `library_path`，`_save_content` 用 `raw_decode` 讀 JSON（專案存檔會在 JSON 後附文字）；`tests/test_desktop_conversations.py` 的 `_CoordinatorFactory` 接受新參數。
+- **檢查**：新 `tests/test_citation_project_library.py` 21 項通過：存一個 DOI → 書目只多尾端一筆、工具輸出含 key 與 `[@key]`/`\cite{key}`；再存 → 檔案逐位元組不變、同 key；手寫條目（大寫 DOI）被重用且不變；書目 malformed → bundle 仍 saved、書目回 `library_malformed`、檔案不變；CLI（無 library_path）→ artifact 無 `bibliography`、不產生 JSON 檔；policy 只在專案時傳 `library_path`；metadata：預設路徑、接受新鍵、10 種非法值與 symlink 逃逸皆 malformed、`initialize_project` 仍只寫兩鍵；桌面端到端（`/citation` 回合）→ 批准描述含書目路徑、`references.json` 建立且無 abstract。全部 `test_citation_*`、`test_desktop_*` 與完整 pytest（沙箱外）1563 passed，exit 0。
+- **交付**：書目結果欄位 `items[].bibliography = {status, path, key, reason_code}`；metadata 鍵 `bibliography`、`citationStyle`；`project_citation_settings`。
+- **下一步**：C3-S1。
 
 ## 最終彙報
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import SystemMessage, ToolMessage
@@ -24,8 +26,17 @@ logger = logging.getLogger(__name__)
 class CitationSessionPolicy:
     """Own the citation service, registry lifecycle, gate, and rendering."""
 
-    def __init__(self, config: AgentConfig) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        *,
+        bibliography_path: Callable[[], Path | None] | None = None,
+    ) -> None:
         self._config = config
+        # Desktop projects pass a callable that returns the project's CSL-JSON
+        # bibliography; it is read when each service is built so metadata
+        # edits apply to the next Citation task. The CLI passes nothing.
+        self._bibliography_path = bibliography_path
         self._service: CitationService | None = None
         self.workflow_tool = create_citation_workflow_tool(
             service_getter=lambda: self.service,
@@ -38,11 +49,20 @@ class CitationSessionPolicy:
             from skills.citation.hub import get_provider_hub
             from skills.citation.service import CitationService
 
+            library_path = self.bibliography_path()
+            extra = {"library_path": library_path} if library_path is not None else {}
             self._service = CitationService(
                 get_provider_hub(),
                 config=self._config,
+                **extra,
             )
         return self._service
+
+    def bibliography_path(self) -> Path | None:
+        """Return the project bibliography path, or None outside projects."""
+        if self._bibliography_path is None:
+            return None
+        return self._bibliography_path()
 
     @property
     def loaded_service(self) -> CitationService | None:

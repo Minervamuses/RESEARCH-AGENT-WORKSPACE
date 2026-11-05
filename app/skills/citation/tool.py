@@ -291,6 +291,32 @@ def _format_source(ref: SourceRef) -> str:
     ])
 
 
+def _format_bibliography_links(outcome) -> str:
+    """Tell the agent which project bibliography keys the saved works have."""
+    links = [
+        (item, item.bibliography)
+        for item in getattr(outcome, "items", ())
+        if getattr(item, "bibliography", None) is not None
+    ]
+    if not links:
+        return ""
+    lines = ["", f"Project bibliography: {links[0][1].path}"]
+    for item, link in links:
+        if link.key is not None:
+            lines.append(f"- {item.requested_label}: key {link.key} ({link.status})")
+        else:
+            lines.append(
+                f"- {item.requested_label}: not added to the bibliography ({link.reason_code}); "
+                "the bundle result above is unchanged"
+            )
+    if any(link.key is not None for _item, link in links):
+        lines.append(
+            "Cite these works in project documents by key: [@key] in Markdown, "
+            "\\cite{key} in LaTeX. In this chat reply keep using [[cite:...]] markers."
+        )
+    return "\n".join(lines)
+
+
 def format_explain(output_dir) -> str:
     return (
         "search is stateless and returns numbered record blocks with full "
@@ -391,7 +417,8 @@ def create_citation_workflow_tool(
             artifact = outcome.to_artifact()
             return (
                 "Actual citation save result:\n"
-                + json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                + json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+                + _format_bibliography_links(outcome),
                 artifact,
             )
         if action == "sources":

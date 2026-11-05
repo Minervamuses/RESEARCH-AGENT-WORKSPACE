@@ -10,7 +10,7 @@ import re
 import tempfile
 import uuid
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent.conversations import ConversationError, ConversationRepository, ConversationSummary
@@ -492,14 +492,61 @@ def _metadata_and_rules(raw: bytes | None) -> tuple[dict[str, Any] | None, str]:
         raise CatalogMalformedError("RESEARCH.md project metadata is not valid JSON") from exc
     if (
         not isinstance(metadata, dict)
-        or set(metadata) != {"version", "historyDirectory"}
+        or not {"version", "historyDirectory"} <= set(metadata) <= _PROJECT_METADATA_KEYS
         or type(metadata["version"]) is not int
         or metadata["version"] != 1
         or not isinstance(metadata["historyDirectory"], str)
         or not metadata["historyDirectory"].strip()
     ):
         raise CatalogMalformedError("project metadata requires version 1 and a nonempty historyDirectory")
+    if "bibliography" in metadata:
+        _bibliography_relative_path(metadata["bibliography"])
+    if "citationStyle" in metadata and (
+        not isinstance(metadata["citationStyle"], str)
+        or not metadata["citationStyle"].strip()
+        or len(metadata["citationStyle"]) > 128
+    ):
+        raise CatalogMalformedError("citationStyle must be a nonempty style ID")
     return metadata, text[:start] + text[end + 3:]
+
+
+_PROJECT_METADATA_KEYS = frozenset({"version", "historyDirectory", "bibliography", "citationStyle"})
+DEFAULT_BIBLIOGRAPHY = "references.json"
+
+
+def _bibliography_relative_path(value: Any) -> PurePosixPath:
+    """Validate the optional ``bibliography`` metadata value (shape only)."""
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value.encode("utf-8")) > 4096
+        or re.search(r"[\\$~\x00-\x1f\x7f]", value)
+        or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value)
+    ):
+        raise CatalogMalformedError("bibliography must be a relative project path without URL or expansion syntax")
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts or path.suffix.casefold() != ".json":
+        raise CatalogMalformedError("bibliography must be a .json path inside the project root")
+    return path
+
+
+def project_citation_settings(root_path: str | Path) -> dict[str, Any]:
+    """Return the project bibliography path and citation style from RESEARCH.md.
+
+    ``bibliography`` defaults to ``references.json`` in the project root; the
+    resolved path must stay inside the root (symbolic links included).
+    """
+    root = Path(root_path).resolve()
+    metadata, _rules = _metadata_and_rules(_research_bytes(root / "RESEARCH.md"))
+    metadata = metadata or {}
+    relative = _bibliography_relative_path(metadata.get("bibliography", DEFAULT_BIBLIOGRAPHY))
+    try:
+        resolved = (root / relative).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise CatalogUnavailableError(f"bibliography is unavailable: {exc}") from exc
+    if not resolved.is_relative_to(root):
+        raise CatalogMalformedError("bibliography must stay inside the project root")
+    return {"bibliographyPath": resolved, "citationStyle": metadata.get("citationStyle")}
 
 
 def _history_path(value: str, root: Path) -> Path:

@@ -337,8 +337,9 @@ class _CoordinatorFactory:
         extra_tools=None,
         operation_approval_handler=None,
         system_prompt=None,
+        citation_bibliography_path=None,
     ):
-        del extra_tools, operation_approval_handler, system_prompt
+        del extra_tools, operation_approval_handler, system_prompt, citation_bibliography_path
         self.load_mcp_calls.append(load_mcp)
         resolved_id = session_id or self.new_ids.pop(0)
         session = _CoordinatorSession(
