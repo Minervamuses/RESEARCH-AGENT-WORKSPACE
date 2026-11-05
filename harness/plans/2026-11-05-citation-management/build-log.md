@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
-| C2 | In progress | C2-S1 見事件 | — | C2-S2 書目庫模組 |
+| C2 | In progress | C2-S1、C2-S2 見事件 | — | C2-S3 接上存檔流程 |
 | C3 | Not started | — | 依賴 C2 | — |
 | C4 | Not started | — | — | C3 後進行 |
 | C5 | Not started | — | 依賴 C4 | — |
@@ -83,6 +83,14 @@
   - bundle 格式與寫入完全未動。
 - **檢查**：新 `tests/test_citation_csl.py` 7 項通過（模擬 Crossref payload 含 abstract、reference、ORCID、`<i>`/`<scp>` 標題、posted-content；arXiv CSL；resolver 的 eligible record 帶 csl）。`test_citation_provider_doi_org.py`、`test_citation_authority.py`、`test_citation_storage.py`、`test_citation_save_outcomes.py` 與全部 `test_citation_*.py`：392 → 加入新檔後全部通過。`test_desktop_service.py` 在沙箱內有 1 項因 `/tmp` 唯讀失敗（既知環境限制，與本步無關；完整回歸在沙箱外跑）。
 - **下一步**：C2-S2。
+
+### C2-S2 書目庫模組（2026-11-05）
+
+- **最終介面**（`app/skills/citation/library.py`）：`Library`（`path`、`items`、`layout`、`fingerprint`）、`MergeResult`（`status` = `added`/`existing`、`key`、`item`、`library`）、`load`、`fingerprint`、`serialize`、`parse_items`、`detect_layout`、`base_key`、`generate_key`、`item_doi`、`item_arxiv`、`find_existing`、`merge`、`write_atomic`、`add_item`；`LibraryError.code` ∈ `library_malformed`、`library_format_unsupported`、`library_conflict`、`library_write_failed`；`DEFAULT_LIBRARY_FILENAME = "references.json"`。
+- **規則**：排版依序試 `indent=1`、`2`、`4`、`"\t"`（`ensure_ascii=False` + 結尾換行），新檔用 1；key = 第一作者 family（或 literal 第一個字）ASCII 化 + 年份（缺則 `nd`）+ 標題第一個非停用字，只含 `[a-z0-9]`，作者部分為空用 `ref`，撞名加 `a`…`z`、`aa`…；同 DOI（不分大小寫）或 arXiv ID（DOI `10.48550/arXiv.*`、`arxiv.org/abs|pdf/*` URL、或 publisher/container-title/archive 含 arXiv 時的 `number`）重用既有條目且不改動；`write_atomic` 寫入前（暫存檔 fsync 後、`os.replace` 前）再比對指紋，不符就 `library_conflict` 並刪暫存檔；保留檔案權限；fsync 目錄。
+- **檢查**：新 `tests/test_citation_library.py` 18 項通過（模仿使用者格式的 fixture：1 空格縮排、`–`、`’`、手寫 webpage 與 literal 作者、arXiv URL 條目）。新增一筆時與原檔的 diff **只有新增行**（新條目插在原最後一筆的 `}` 之前，沒有任何既有行被改）。
+- **論文副本驗證**（`$TMPDIR/thesis/`，論文 HEAD `59e9dc1`，只讀）：69 筆、偵測為 `indent=1`；在副本新增一筆得 `zed2025new`；以大寫 DOI 查第一筆得 `agrawal2024references`（重用）。產生規則對既有 69 筆有 23 筆與使用者手選 key 相同（其餘是使用者選了不同的標題字，例如 `agrawal2024references` vs 規則的 `agrawal2024language`）；既有 key 永不改，所以只影響新條目。
+- **下一步**：C2-S3。
 
 ## 最終彙報
 
