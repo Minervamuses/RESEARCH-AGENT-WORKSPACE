@@ -3,7 +3,7 @@
 The file is the user's: existing entries, keys and layout are never changed.
 ``load`` accepts only an array of objects with unique string ``id`` values and
 detects which ``json.dumps`` layout reproduces the file byte for byte; a file
-no known layout reproduces is never rewritten. ``merge`` reuses an existing
+no known layout reproduces can be read but is never rewritten. ``merge`` reuses an existing
 entry with the same DOI (case-insensitive) or arXiv ID, otherwise appends one
 new entry at the end. ``write_atomic`` re-reads the file before replacing it
 and refuses when it changed since ``load``.
@@ -55,7 +55,8 @@ class Library:
 
     path: Path
     items: list[dict]
-    layout: int | str = NEW_FILE_LAYOUT
+    # json.dumps indent that reproduces the file; None = unknown (read-only).
+    layout: int | str | None = NEW_FILE_LAYOUT
     fingerprint: str | None = None  # sha256 of the bytes read; None = no file
 
     @property
@@ -124,12 +125,8 @@ def load(path: Path) -> Library:
     except UnicodeDecodeError as exc:
         raise LibraryError(LIBRARY_MALFORMED, f"{path} is not UTF-8") from exc
     items = parse_items(text, source=path.name)
+    # An unknown layout is fine for reading; write_atomic refuses to rewrite it.
     layout = detect_layout(items, text)
-    if layout is None:
-        raise LibraryError(
-            LIBRARY_FORMAT_UNSUPPORTED,
-            f"{path.name} uses a JSON layout this tool cannot reproduce; it is left unchanged",
-        )
     return Library(path, items, layout, hashlib.sha256(data).hexdigest())
 
 
@@ -243,8 +240,11 @@ def item_arxiv(item: dict) -> str | None:
     venue = " ".join(
         str(item.get(name, "")) for name in ("publisher", "container-title", "archive")
     ).casefold()
-    if isinstance(number, str) and "arxiv" in venue:
-        match = re.fullmatch(r"(?:arxiv:)?" + _ARXIV_ID, number.strip(), re.I)
+    if isinstance(number, str):
+        # "arXiv:<id>" is unambiguous; a bare id needs an arXiv venue.
+        match = re.fullmatch(r"arxiv:" + _ARXIV_ID, number.strip(), re.I)
+        if match is None and "arxiv" in venue:
+            match = re.fullmatch(_ARXIV_ID, number.strip(), re.I)
         if match:
             return match.group(1).casefold()
     return None
@@ -310,6 +310,11 @@ def search_bibliography(items: list[dict], query: str, *, limit: int = 20) -> li
 def write_atomic(library: Library) -> None:
     """Replace the file with ``library`` unless it changed since it was read."""
     path = library.path
+    if library.layout is None:
+        raise LibraryError(
+            LIBRARY_FORMAT_UNSUPPORTED,
+            f"{path.name} uses a JSON layout this tool cannot reproduce; it is left unchanged",
+        )
     current = fingerprint(path)
     if current != library.fingerprint:
         raise LibraryError(

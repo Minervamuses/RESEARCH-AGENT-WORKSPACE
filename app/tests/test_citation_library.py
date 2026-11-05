@@ -185,3 +185,19 @@ def test_merge_does_not_mutate_input_library(tmp_path):
     result = lib.merge(library, NEW)
     assert len(library.items) == 3
     assert len(result.library.items) == 4
+
+
+def test_arxiv_number_prefix_is_enough_to_match():
+    assert lib.item_arxiv({"number": "arXiv:2404.01268"}) == "2404.01268"
+    assert lib.item_arxiv({"number": "2404.01268"}) is None
+    assert lib.item_arxiv({"number": "2404.01268", "publisher": "arXiv"}) == "2404.01268"
+
+
+def test_unknown_layout_is_readable_and_reuse_needs_no_write(tmp_path):
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(USER_ITEMS, separators=(",", ":")), encoding="utf-8")
+    before = path.read_bytes()
+    library = lib.load(path)
+    assert library.layout is None and len(library.items) == 3
+    assert lib.add_item(path, {"DOI": "10.18653/v1/2024.findings-eacl.62"}).status == "existing"
+    assert path.read_bytes() == before

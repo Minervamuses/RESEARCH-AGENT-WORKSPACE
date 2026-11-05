@@ -178,6 +178,12 @@
 - **結果**（`evidence/C5-S1/oracle.json`，只含書目字串與引用字串，不含正文）：docx 參考文獻 42 條；Markdown 有 50 個引用群組、45 個不同 key；其中 4 個群組位在 TODO 註記內，`cohen1960kappa`、`mcnemar1947`、`wilson1927` 只出現在 TODO 中，所以 docx 沒有它們。TODO 以外 42 個不同 key = docx 42 條（相符）。46 個非 TODO 群組全部對齊，對不到的 key：無。
 - **下一步**：C5-S2。
 
+### C5-S2 fix：無法重現排版的書目仍可讀取（2026-11-05）
+
+- **問題**：C5-S2 以緊湊 JSON（無縮排）的書目測試附件十七樣式時，`render` 回 `library_format_unsupported`。原因：C2-S2 的 `load` 在偵測不到排版時直接拋錯，但預覽、檢查、查詢都是唯讀，排版只影響寫入。
+- **修正**（單一因果、最小改動）：`library.load` 對未知排版回傳 `layout=None`；`write_atomic` 在 `layout is None` 時才拋 `library_format_unsupported`，檔案不變。所以 C2 的「格式不明時不寫入」保持不變，而 `render`、`inspect`、`bibliography_lookup` 與同 DOI 重用（不需寫入）都能使用 Zotero 等匯出的緊湊檔。
+- **檢查**：`tests/test_citation_library.py` 新增 `test_unknown_layout_is_readable_and_reuse_needs_no_write`；原 `test_unknown_layout_is_not_written` 仍通過（新增條目時拋錯、檔案不變）。`test_citation_library.py`、`test_citation_project_library.py`、`test_citation_integrity.py`、`test_citation_csl_render.py` 共 60 項通過。
+
 ## 最終彙報
 
 （C8-S3 完成後填寫。）
