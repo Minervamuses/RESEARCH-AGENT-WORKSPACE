@@ -10,7 +10,7 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Not started | — | — | C5-S1 |
+| C5 | In progress | C5-S1 見事件 | — | C5-S2 撰寫 .csl |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
 | C8 | Not started | — | 依賴 C7 | — |
@@ -170,6 +170,13 @@
   4. 已排版 Markdown：`-t markdown-citations-smart` 並先拆掉 Div/Span 包裝（否則會留下 `:::`、`{.csl-…}` 或 HTML `<div>`）；Pandoc 會把 `[1]` 跳脫為 `\[1\]`（合法 Markdown）。
 - **檢查**：新 `tests/test_citation_csl_render.py` 13 項通過：APA 與 IEEE 的引用與參考文獻都不同、正文雜湊與書目檔位元組不變；IEEE 參考文獻 = 首次出現順序、APA 依作者排序；引用的 UTF-16 位置對回原文；segments 帶斜體與 DOI 連結；缺 key 回報 missing 不崩潰；書目檔不存在；docx 可用 `zipfile` 開啟、`word/document.xml` 含渲染後引用且無 `@key`；遠端圖片沒送進 writer 當 Image、docx 只嵌入本地圖；Markdown 匯出無 `[@`、無 div；`.bib` 可被 pybtex 解析且含 DOI；Pandoc 不存在 → `pandoc_unavailable`；未知樣式、書目 malformed。範例輸出在 `evidence/C4-S4/`（合成正文）。
 - **下一步**：C5-S1。
+
+### C5-S1 附件十七比對基準（2026-11-05）
+
+- **輸入**：論文 repo HEAD `59e9dc1d5096f5f0b7767a4654ca4753ca88012f` 的 `proposal.md`、`proposal.docx`、`references.json`（`git show` 複本放 `$TMPDIR/thesis/`，未寫回論文資料夾）。
+- **作法**（`evidence/C5-S1/build_oracle.py`，只用 `zipfile` + ElementTree + Pandoc）：參考文獻 = docx 中樣式為 `Bibliography` 的段落（依 docx 順序）。正文引用：把 `proposal.md` 的 Cite 節點換成哨兵字元後以 Pandoc 轉成純文字，每一行建成「字面文字 + `(.*?)`」的正則，與 docx 段落完全比對，取出各引用位置的字串。bime_word 會略過 `[TODO: …]` 註記與清單符號，比對時同樣去掉（不放寬其他規則）。
+- **結果**（`evidence/C5-S1/oracle.json`，只含書目字串與引用字串，不含正文）：docx 參考文獻 42 條；Markdown 有 50 個引用群組、45 個不同 key；其中 4 個群組位在 TODO 註記內，`cohen1960kappa`、`mcnemar1947`、`wilson1927` 只出現在 TODO 中，所以 docx 沒有它們。TODO 以外 42 個不同 key = docx 42 條（相符）。46 個非 TODO 群組全部對齊，對不到的 key：無。
+- **下一步**：C5-S2。
 
 ## 最終彙報
 

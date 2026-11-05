@@ -1,0 +1,623 @@
+{
+ "source": "thesis repo HEAD proposal.docx (bime_word) + proposal.md",
+ "bibliography": [
+  "Anthropic. 2024. Introducing Contextual Retrieval. Anthropic Engineering. Anthropic. Available at: https://www.anthropic.com/engineering/contextual-retrieval. Accessed 28 September 2026.",
+  "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D'Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W.-t. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
+  "Bhattacharyya, M., V. M. Miller, D. Bhattacharyya, and L. E. Miller. 2023. High Rates of Fabricated and Inaccurate References in ChatGPT-Generated Medical Content. Cureus 15(5): e39238.",
+  "Boteva, V., D. Gholipour, A. Sokolov, and S. Riezler. 2016. A Full-Text Learning to Rank Dataset for Medical Information Retrieval. In “Advances in Information Retrieval” (Lecture Notes in Computer Science), 716-722. N. Ferro, F. Crestani, M.-F. Moens, J. Mothe, F. Silvestri, G. M. Di Nunzio, C. Hauff, and G. Silvello, eds. Cham: Springer International Publishing.",
+  "Chen, J., S. Xiao, P. Zhang, K. Luo, D. Lian, and Z. Liu. 2024. M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation. In “Findings of the Association for Computational Linguistics: ACL 2024”, 2318-2335. L.-W. Ku, A. Martins, and V. Srikumar, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+  "Gero, K. I., V. Liu, and L. Chilton. 2022. Sparks: Inspiration for Science Writing using Language Models. In “Designing Interactive Systems Conference (DIS '22)”, 1002-1019. New York, NY: ACM.",
+  "Grattafiori, A., A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten, A. Vaughan, et al. 2024. The Llama 3 Herd of Models. arXiv:2407.21783. Available at: https://doi.org/10.48550/arXiv.2407.21783.",
+  "Hendricks, G., D. Tkaczyk, J. Lin, and P. Feeney. 2020. Crossref: The sustainable source of community-owned scholarly metadata. Quant. Sci. Stud. 1(1): 414-427.",
+  "Jakesch, M., A. Bhat, D. Buschek, L. Zalmanson, and M. Naaman. 2023. Co-Writing with Opinionated Language Models Affects Users' Views. In “Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems”, 1-15. New York, NY: ACM.",
+  "Järvelin, K., and J. Kekäläinen. 2002. Cumulated gain-based evaluation of IR techniques. ACM Trans. Inf. Syst. 20(4): 422-446.",
+  "Kapoor, S., B. Stroebl, Z. S. Siegel, N. Nadgir, and A. Narayanan. 2024. AI Agents That Matter. arXiv:2407.01502. Available at: https://doi.org/10.48550/arXiv.2407.01502.",
+  "Karpukhin, V., B. Oguz, S. Min, P. Lewis, L. Wu, S. Edunov, D. Chen, and W.-t. Yih. 2020. Dense Passage Retrieval for Open-Domain Question Answering. In “Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)”, 6769-6781. B. Webber, T. Cohn, Y. He, and Y. Liu, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+  "Kleppmann, M., A. Wiggins, P. van Hardenberg, and M. McGranaghan. 2019. Local-first software: you own your data, in spite of the cloud. In “Proceedings of the 2019 ACM SIGPLAN International Symposium on New Ideas, New Paradigms, and Reflections on Programming and Software (Onward! 2019)”, 154-178. New York, NY: ACM.",
+  "Kuzi, S., M. Zhang, C. Li, M. Bendersky, and M. Najork. 2020. Leveraging Semantic and Lexical Matching to Improve the Recall of Document Retrieval Systems: A Hybrid Approach. arXiv:2010.01195. Available at: https://doi.org/10.48550/arXiv.2010.01195.",
+  "Lála, J., O. O'Donoghue, A. Shtedritski, S. Cox, S. G. Rodriques, and A. D. White. 2023. PaperQA: Retrieval-Augmented Generative Agent for Scientific Research. arXiv:2312.07559. Available at: https://doi.org/10.48550/arXiv.2312.07559.",
+  "Lee, M., P. Liang, and Q. Yang. 2022. CoAuthor: Designing a Human-AI Collaborative Writing Dataset for Exploring Language Model Capabilities. In “CHI Conference on Human Factors in Computing Systems (CHI '22)”, 1-19. New York, NY: ACM.",
+  "Lee, H.-P., A. Sarkar, L. Tankelevitch, I. Drosos, S. Rintel, R. Banks, and N. Wilson. 2025. The Impact of Generative AI on Critical Thinking: Self-Reported Reductions in Cognitive Effort and Confidence Effects From a Survey of Knowledge Workers. In “Proceedings of the 2025 CHI Conference on Human Factors in Computing Systems”, 1-22. New York, NY: ACM.",
+  "Lewis, P., E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis, W.-t. Yih, T. Rocktäschel, S. Riedel, and D. Kiela. 2020. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In “Advances in Neural Information Processing Systems 33 (NeurIPS 2020)”, 9459-9474. H. Larochelle, M. Ranzato, R. Hadsell, M. F. Balcan, and H. Lin, eds. Curran Associates, Inc.",
+  "Li, H., H. Wu, Q. Li, and C. Zhao. 2025. A review on enhancing agricultural intelligence with large language models. Artif. Intell. Agric. 15(4): 671-685.",
+  "Liang, W., Y. Zhang, Z. Wu, H. Lepp, W. Ji, X. Zhao, H. Cao, S. Liu, S. He, Z. Huang, D. Yang, C. Potts, C. D. Manning, and J. Y. Zou. 2024. Mapping the Increasing Use of LLMs in Scientific Papers. arXiv:2404.01268. Available at: https://doi.org/10.48550/arXiv.2404.01268.",
+  "Liu, X., H. Yu, H. Zhang, Y. Xu, X. Lei, H. Lai, Y. Gu, H. Ding, K. Men, K. Yang, S. Zhang, X. Deng, A. Zeng, Z. Du, C. Zhang, S. Shen, T. Zhang, Y. Su, H. Sun, M. Huang, Y. Dong, and J. Tang. 2024. AgentBench: Evaluating LLMs as Agents. In “The Twelfth International Conference on Learning Representations (ICLR 2024)”. Available at: https://openreview.net/forum?id=zAdUB0aCTQ.",
+  "Liu, N., T. Zhang, and P. Liang. 2023. Evaluating Verifiability in Generative Search Engines. In “Findings of the Association for Computational Linguistics: EMNLP 2023”, 7001-7025. H. Bouamor, J. Pino, and K. Bali, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+  "Lu, C., C. Lu, R. T. Lange, J. Foerster, J. Clune, and D. Ha. 2024. The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery. arXiv:2408.06292. Available at: https://doi.org/10.48550/arXiv.2408.06292.",
+  "Magesh, V., F. Surani, M. Dahl, M. Suzgun, C. D. Manning, and D. E. Ho. 2025. Hallucination-Free? Assessing the Reliability of Leading AI Legal Research Tools. J. Empir. Leg. Stud. 22(2): 216-242.",
+  "Nagli, G. 2025. Wiz Research Uncovers Exposed DeepSeek Database Leaking Sensitive Information, Including Chat History. Wiz Blog. Wiz. Available at: https://www.wiz.io/blog/wiz-research-uncovers-exposed-deepseek-database-leak. Accessed 28 September 2026.",
+  "Nature. 2023. Tools such as ChatGPT threaten transparent science; here are our ground rules for their use [Editorial]. Nature 613(7945): 612.",
+  "Nogueira, R., and K. Cho. 2019. Passage Re-ranking with BERT. arXiv:1901.04085. Available at: https://doi.org/10.48550/arXiv.1901.04085.",
+  "Nous Research. 2026. Hermes Agent. Ver. 0.21.5. Nous Research. Available at: https://github.com/NousResearch/hermes-agent. Accessed 28 September 2026.",
+  "OpenAI. 2023. March 20 ChatGPT outage: Here's what happened. OpenAI. Available at: https://web.archive.org/web/20231229185333/https://openai.com/blog/march-20-chatgpt-outage. Accessed 6 October 2026.",
+  "Priem, J., H. Piwowar, and R. Orr. 2022. OpenAlex: A fully-open index of scholarly works, authors, venues, institutions, and concepts. arXiv:2205.01833. Available at: https://doi.org/10.48550/arXiv.2205.01833.",
+  "Rajpurkar, P., J. Zhang, K. Lopyrev, and P. Liang. 2016. SQuAD: 100,000+ Questions for Machine Comprehension of Text. In “Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing”, 2383-2392. J. Su, K. Duh, and X. Carreras, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+  "Robertson, S., and H. Zaragoza. 2009. The Probabilistic Relevance Framework: BM25 and Beyond. Found. Trends Inf. Retr. 4(1-2): 1-174.",
+  "Shao, Y., Y. Jiang, T. Kanell, P. Xu, O. Khattab, and M. Lam. 2024. Assisting in Writing Wikipedia-like Articles From Scratch with Large Language Models. In “Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)”, 6252-6278. K. Duh, H. Gomez, and S. Bethard, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+  "Skarlinski, M. D., S. Cox, J. M. Laurent, J. D. Braza, M. Hinks, M. J. Hammerling, M. Ponnapati, S. G. Rodriques, and A. D. White. 2024. Language agents achieve superhuman synthesis of scientific knowledge. arXiv:2409.13740. Available at: https://doi.org/10.48550/arXiv.2409.13740.",
+  "Sumers, T. R., S. Yao, K. Narasimhan, and T. L. Griffiths. 2024. Cognitive Architectures for Language Agents. Trans. Mach. Learn. Res. Available at: https://openreview.net/forum?id=1i6ZCvflQJ.",
+  "Thakur, N., N. Reimers, A. Rücklé, A. Srivastava, and I. Gurevych. 2021. BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models. In “Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks”. J. Vanschoren and S. Yeung, eds. Available at: https://datasets-benchmarks-proceedings.neurips.cc/paper_files/paper/2021/hash/65b9eea6e1cc6bb9f0cd2a47751a186f-Abstract-round2.html.",
+  "Tkaczyk, D., and A. Buttrick. 2024. The myth of perfect metadata matching. Crossref Blog. Crossref. Available at: https://www.crossref.org/blog/the-myth-of-perfect-metadata-matching/. Accessed 14 October 2026.",
+  "Wadden, D., S. Lin, K. Lo, L. L. Wang, M. van Zuylen, A. Cohan, and H. Hajishirzi. 2020. Fact or Fiction: Verifying Scientific Claims. In “Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)”, 7534-7550. B. Webber, T. Cohn, Y. He, and Y. Liu, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+  "Walters, W. H., and E. I. Wilder. 2023. Fabrication and errors in the bibliographic citations generated by ChatGPT. Sci. Rep. 13(1): 14045.",
+  "Wang, Y., Q. Guo, W. Yao, H. Zhang, X. Zhang, Z. Wu, M. Zhang, X. Dai, M. Zhang, Q. Wen, W. Ye, S. Zhang, and Y. Zhang. 2024. AutoSurvey: Large Language Models Can Automatically Write Surveys. In “Advances in Neural Information Processing Systems 37 (NeurIPS 2024)”, 115119-115145. A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak, and C. Zhang, eds. Curran Associates, Inc.",
+  "Yao, S., J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y. Cao. 2023. ReAct: Synergizing Reasoning and Acting in Language Models. In “The Eleventh International Conference on Learning Representations (ICLR 2023)”. Available at: https://openreview.net/forum?id=WE_vluYUL-X.",
+  "Zhang, B., K. Lazuka, and M. Murag. 2025. Equipping agents for the real world with Agent Skills. Anthropic Engineering. Anthropic. Available at: https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills. Accessed 28 September 2026."
+ ],
+ "citations": [
+  {
+   "index": 0,
+   "keys": [
+    "yao2023react",
+    "sumers2024coala"
+   ],
+   "modes": [
+    "NormalCitation",
+    "NormalCitation"
+   ],
+   "docx": "(Yao et al., 2023; Sumers et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 1,
+   "keys": [
+    "liang2024mapping"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Liang et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 2,
+   "keys": [
+    "walters2023fabrication"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Walters and Wilder, 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 3,
+   "keys": [
+    "kleppmann2019localfirst"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Kleppmann et al., 2019)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 4,
+   "keys": [
+    "openai2023outage"
+   ],
+   "modes": [
+    "SuppressAuthor"
+   ],
+   "docx": "(2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 5,
+   "keys": [
+    "nagli2025deepseek"
+   ],
+   "modes": [
+    "SuppressAuthor"
+   ],
+   "docx": "(2025)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 6,
+   "keys": [
+    "lewis2020rag"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Lewis et al., 2020)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 7,
+   "keys": [
+    "grattafiori2024llama3"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Grattafiori et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 8,
+   "keys": [
+    "kapoor2024agents"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Kapoor et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 9,
+   "keys": [
+    "walters2023fabrication",
+    "bhattacharyya2023fabricated"
+   ],
+   "modes": [
+    "NormalCitation",
+    "NormalCitation"
+   ],
+   "docx": "(Walters and Wilder, 2023; Bhattacharyya et al., 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 10,
+   "keys": [
+    "li2025agriculture"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Li et al., 2025)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 11,
+   "keys": [
+    "lala2023paperqa"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Lála et al., 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 12,
+   "keys": [
+    "skarlinski2024paperqa2"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Skarlinski et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 13,
+   "keys": [
+    "asai2026openscholar"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Asai et al., 2026)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 14,
+   "keys": [
+    "lewis2020rag"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Lewis et al., 2020)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 15,
+   "keys": [
+    "robertson2009bm25"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Robertson and Zaragoza, 2009)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 16,
+   "keys": [
+    "karpukhin2020dpr"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Karpukhin et al., 2020)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 17,
+   "keys": [
+    "kuzi2020hybrid"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Kuzi et al., 2020)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 18,
+   "keys": [
+    "nogueira2019rerank"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Nogueira and Cho, 2019)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 19,
+   "keys": [
+    "anthropic2024contextual"
+   ],
+   "modes": [
+    "SuppressAuthor"
+   ],
+   "docx": "(2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 20,
+   "keys": [
+    "thakur2021beir"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Thakur et al., 2021)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 21,
+   "keys": [
+    "lee2022coauthor"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Lee et al., 2022)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 22,
+   "keys": [
+    "gero2022sparks"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Gero et al., 2022)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 23,
+   "keys": [
+    "shao2024storm",
+    "wang2024autosurvey",
+    "lu2024aiscientist"
+   ],
+   "modes": [
+    "NormalCitation",
+    "NormalCitation",
+    "NormalCitation"
+   ],
+   "docx": "(Shao et al., 2024; Wang et al., 2024; Lu et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 24,
+   "keys": [
+    "nature2023groundrules"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Nature, 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 25,
+   "keys": [
+    "walters2023fabrication"
+   ],
+   "modes": [
+    "SuppressAuthor"
+   ],
+   "docx": "(2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 26,
+   "keys": [
+    "bhattacharyya2023fabricated"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Bhattacharyya et al., 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 27,
+   "keys": [
+    "liu2023verifiability"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Liu et al., 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 28,
+   "keys": [
+    "magesh2025legal"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Magesh et al., 2025)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 29,
+   "keys": [
+    "hendricks2020crossref"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Hendricks et al., 2020)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 30,
+   "keys": [
+    "priem2022openalex"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Priem et al., 2022)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 31,
+   "keys": [
+    "tkaczyk2024myth"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Tkaczyk and Buttrick, 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 32,
+   "keys": [
+    "jakesch2023cowriting"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Jakesch et al., 2023)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 33,
+   "keys": [
+    "lee2025critical"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Lee et al., 2025)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 34,
+   "keys": [
+    "anthropic2025skills"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Zhang et al., 2025)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 35,
+   "keys": [
+    "hermesagent"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Nous Research, 2026)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 36,
+   "keys": [
+    "kapoor2024agents"
+   ],
+   "modes": [
+    "SuppressAuthor"
+   ],
+   "docx": "(2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 37,
+   "keys": [
+    "liu2024agentbench"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Liu et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 38,
+   "keys": [
+    "chen2024m3"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Chen et al., 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 39,
+   "keys": [
+    "wadden2020scifact",
+    "boteva2016nfcorpus"
+   ],
+   "modes": [
+    "NormalCitation",
+    "NormalCitation"
+   ],
+   "docx": "(Wadden et al., 2020; Boteva et al., 2016)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 40,
+   "keys": [
+    "jarvelin2002cumulated"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Järvelin and Kekäläinen, 2002)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 41,
+   "keys": [
+    "mcnemar1947"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": null,
+   "omitted_in_docx": "todo_note"
+  },
+  {
+   "index": 42,
+   "keys": [
+    "cohen1960kappa"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": null,
+   "omitted_in_docx": "todo_note"
+  },
+  {
+   "index": 43,
+   "keys": [
+    "hermesagent"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Nous Research, 2026)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 44,
+   "keys": [
+    "wilson1927"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": null,
+   "omitted_in_docx": "todo_note"
+  },
+  {
+   "index": 45,
+   "keys": [
+    "mcnemar1947"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": null,
+   "omitted_in_docx": "todo_note"
+  },
+  {
+   "index": 46,
+   "keys": [
+    "anthropic2024contextual"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Anthropic, 2024)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 47,
+   "keys": [
+    "rajpurkar2016squad"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Rajpurkar et al., 2016)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 48,
+   "keys": [
+    "thakur2021beir"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Thakur et al., 2021)",
+   "omitted_in_docx": null
+  },
+  {
+   "index": 49,
+   "keys": [
+    "tkaczyk2024myth"
+   ],
+   "modes": [
+    "NormalCitation"
+   ],
+   "docx": "(Tkaczyk and Buttrick, 2024)",
+   "omitted_in_docx": null
+  }
+ ],
+ "counts": {
+  "bibliography_entries": 42,
+  "citation_groups": 50,
+  "distinct_cited_keys": 45,
+  "todo_note_groups": 4,
+  "keys_only_in_todo_notes": [
+   "cohen1960kappa",
+   "mcnemar1947",
+   "wilson1927"
+  ],
+  "distinct_keys_outside_todo": 42,
+  "aligned_groups": 46,
+  "unaligned_keys": []
+ }
+}
