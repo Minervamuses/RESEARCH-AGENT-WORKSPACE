@@ -7,16 +7,17 @@
 > **使用者端前提**（給使用者看，不是給執行者的指令）：
 > - 執行者不會停下來等你；但宿主對沙箱外指令與連網的權限提示不受本計劃控制。希望啟動後離開、回來時已經跑完，請以不逐次詢問的權限模式啟動；否則執行會停在第一個沙箱外檢查（C1-S1 的完整 pytest）或第一次連網（C1-S2 的 conda 安裝）。
 > - 執行可能因用量上限中斷；再次送出同一段提示即可續作。
-> - 啟動前，本計劃必須已以 [CA0] 本地提交（build/ 下的 phase 檔用 `git add -f`）；否則執行者會在第一步記為硬阻塞。
+> - 本計劃已以 [CA0] 本地提交；若計劃檔沒有被追蹤，執行者會自己補提交後繼續。
 
 > 執行 harness/plans/2026-11-05-citation-management/ 計劃，一次執行到底。先讀適用的 AGENTS.md、[GOALS.md](GOALS.md)、[PLANS.md](PLANS.md)、[build-log.md](build-log.md)，再讀下一個相依已滿足的 build 階段檔。先唯讀核對目前的 GUI 分支、HEAD、dirty/index、Conda app 工具，以步驟 ID 對帳已完成的步驟與 commit；保留無關的既有工作。依 PLANS 的執行契約做事，並遵守以下要求：
 >
+> - **我送出這段提示，就代表授權整份計劃**：執行中不要向我請求任何授權、確認或決定，也不要問我問題。
 > - **不要停下來等我驗證**：從啟動到最終彙報，任何時點都不停下來等我驗證、review、確認或授權。所有檢查由你自己執行並記錄證據；需要我決定的事只列入最終彙報。
 > - **有問題記錄下來就好**：記錄在 build-log，依 PLANS 的問題處理規則做最小修正或隔離受影響的步驟，繼續其他可做的工作，最後統一彙報。不得把未驗證的項目宣稱為通過。
-> - **每一步皆強制 commit**：每個步驟（包括執行中新增的修正步驟，以及檢查失敗時保留證據的 checkpoint）完成檢查、更新 build-log 後都必須在本地 commit，成功後才進入下一步；不合併多步。計劃檔一律提交，build/ 下的 phase 檔用 `git add -f`。
+> - **每一步皆強制 commit**：每個步驟（包括執行中新增的修正步驟、計劃修訂，以及檢查失敗時保留證據的 checkpoint）完成檢查、更新 build-log 後都必須在本地 commit，成功後才進入下一步；不合併多步，也不得以未提交的改動結束。計劃檔一律提交，build/ 下的 phase 檔用 `git add -f`。
 > - **不準切換或建立 branch**：只在 GUI 分支上工作；不建立、切換、刪除、重新命名 branch，不切到 detached HEAD，不建立 worktree，不 push。
 >
-> 這個請求授權：計劃列明的程式與文件改動和本地 commit；安裝 Pandoc 到 Conda app 並更新 env-app.yml；依 C4 在 $TMPDIR 安裝 citeproc-js 作比較基準；條件觸發時以 Poetry 暫時加入再移除 citeproc-py；下載 CSL 官方樣式；依 PLANS 在沙箱外執行完整測試；C8-S1 預算內的公開文獻 API 請求。不授權其他依賴、付費模型呼叫、push 或發佈，也不授權寫入我的論文資料夾。需保留的證據放計劃目錄 evidence/，不要只放在 /tmp。
+> 這個請求授權整份計劃列明的全部工作，包括：計劃列明的程式與文件改動和本地 commit；安裝 Pandoc 到 Conda app 並更新 env-app.yml；依 C4 在 $TMPDIR 安裝 citeproc-js 作比較基準；條件觸發時以 Poetry 暫時加入再移除 citeproc-py；下載 CSL 官方樣式；依 PLANS 在沙箱外執行完整測試；C8-S1 預算內的公開文獻 API 請求。不授權其他依賴、付費模型呼叫、push 或發佈，也不授權寫入我的論文資料夾。需保留的證據放計劃目錄 evidence/，不要只放在 /tmp。
 
 第一個可執行動作：[C1-S1](build/phase-1-preflight.md) 的唯讀核對與基線測試。
 - 尚無實作證據時，從 C1-S1 開始。

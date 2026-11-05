@@ -63,9 +63,10 @@
 1. **授權邊界**：
    - [CA0] 只撰寫、驗證並本地 commit 本計劃。
    - 使用者送出 PROMPTS 的啟動提示後，執行者持續完成計劃列明的工作：範圍內的實作、修正、測試、計劃維護、依賴安裝（D4 核准的 Pandoc、citeproc-py、citeproc-js，依各階段的方式）與逐步 commit。
-   - 從啟動到最終彙報，任何時點都不停下來等使用者驗證、review、確認或授權（D8）。需要使用者決定的事只列入最終彙報。
+   - **使用者送出啟動提示，就代表授權整份計劃列明的全部工作**。執行中不再向使用者請求任何授權、確認或決定，也不提問。
+   - 從啟動到最終彙報，任何時點都不停下來等使用者驗證、review、確認或授權（D8）。遇到問題就記錄在 build-log，依第 9、10 項處理後繼續；需要使用者決定的事只列入最終彙報。
    - 本文件的文字本身不授予權限；宿主的權限控制與使用者後來的指示優先。
-2. **第一個動作**：見 [C1-S1](build/phase-1-preflight.md)。若分支不是 GUI，不自行切換，記為硬阻塞。確認本計劃所有檔案（GOALS、PLANS、PROMPTS、build-log、plan-index.json、context/appendix17-references.md、八份 build/phase-*.md）都通過 `git ls-files --error-unmatch -- <路徑>`；任一份沒有，代表 [CA0] 未提交，記為硬阻塞，不開始實作。
+2. **第一個動作**：見 [C1-S1](build/phase-1-preflight.md)。若分支不是 GUI：依 D8 不得切換，也不得在其他分支 commit，所以記為硬阻塞，只做唯讀檢查並寫最終彙報，不向使用者提問。確認本計劃所有檔案（GOALS、PLANS、PROMPTS、build-log、plan-index.json、context/appendix17-references.md、八份 build/phase-*.md）都通過 `git ls-files --error-unmatch -- <路徑>`；任一份沒有，就由執行者自己把它們提交為 `docs(plan): track citation management plan [CA0]`（phase 檔用 `git add -f`），然後繼續。
 3. **檔案範圍**：
    - 可改：`app/skills/citation/**`（引用正確性）、`app/agent/skills/citation/**`、`app/agent/desktop/{service,catalog,documents}.py`（轉接）、`app/agent/session.py`（只限工具接線與把書目路徑傳給 citation 服務）、`app/desktop/protocol/v1/*`、`app/desktop/src/**`、`app/desktop/src-tauri/src/protocol.rs`、`app/desktop/tests/**`、`app/tests/**`、`app/env/env-app.yml`、`app/pyproject.toml`、`app/poetry.lock`、README 類文件、本計劃目錄。
    - 不改：`AGENTS.md`、`for_agents/**`（由 `$infrastructure` 管理，最終彙報提醒已過時）、`app/rag/**`、`app/agent/thinking/**`（D6）、`app/vendor/**`、desktop 的 `package.json`/`package-lock.json`（A8：citeproc-js 不進產品）。
@@ -73,6 +74,7 @@
 4. **每一步強制 commit（D8）**：
    - 每個 C?-S? 完成 focused 檢查、更新 build-log（事件與頂端狀態表）後，立即在 GUI 本地 commit，成功後才開始下一步。不合併多步。
    - 檢查失敗、步驟被隔離或阻塞時，同樣 commit 一個保留證據的 checkpoint，subject 寫 `[C?-S? checkpoint]`；依賴該成功條件的步驟不得繼續。
+   - 對 repository 的任何改動都要進入某個步驟的 commit：程式、測試、文件、manifest、evidence、build-log，以及第 12 項的計劃修訂。計劃修訂可以併入觸發它的步驟的 commit，或單獨提交為 `docs(plan): … [C?-S? replan]`。不得帶著未提交的改動進入下一步，整個執行也不得以未提交的改動結束。Conda 環境本身不在 repository 內，但記錄它的 `env-app.yml` 改動要提交。
    - subject 格式 `type(scope): outcome [C?-S?]`，body 說明改動、檢查與限制，結尾附 repository 規定的 attribution 行。
 5. **commit 作法**：先看 `git status --short`、`git diff`、`git diff --cached --name-only`；只 `git add --` 本步的明確路徑（phase 檔用 `git add -f --`）；`git diff --cached --check`；不用 `git add .`，不帶入別人已 staged 的變更；不 force-add 生成資料（dist、node_modules、cache）；需要 hash 時以步驟 ID 反查 git log，不為記錄 hash 再 commit。
 6. **禁止事項**：不 push；不建立、切換、刪除、重新命名 branch，不切到 detached HEAD，不建立 worktree；不改 Git identity、不繞過 hooks；不刪除未追蹤資料；不使用付費模型或服務（包括 OpenRouter 的模型回合）；不新增 D4 以外的依賴；不寫入使用者論文資料夾。
@@ -81,10 +83,10 @@
    - 需要連網的主機：`conda.anaconda.org`（Pandoc）、`registry.npmjs.org`（citeproc-js，只在 `$TMPDIR`）、`pypi.org` 與 `files.pythonhosted.org`（citeproc-py，僅條件步驟）、`raw.githubusercontent.com`（CSL 樣式檔）、`api.crossref.org`、`api.datacite.org`、`doi.org`（C8 的公開驗證存檔）。被宿主拒絕時記為環境阻塞，繼續其他工作。
    - 公開文獻 API 的預算：整個計劃最多 8 次存檔請求（每次一個 DOI 或 arXiv ID），全部在 C8-S1；已發出的請求記在 `evidence/C8-S1/requests.jsonl`，續作時不重發。
 8. **證據**：需保留的證據放在本計劃的 `evidence/<步驟ID>/`；`$TMPDIR` 只放可重建的複本與安裝（論文副本、citeproc-js 的 node_modules）。論文正文不得進入 `evidence/`；可以提交計數、書目字串、渲染後的引用字串與差異。
-9. **問題處理**：先記錄，提出單一因果假設，做最小修正，focused 重驗；同一問題最多兩次修正，仍失敗就隔離該步、記錄，繼續互不相依的工作。環境類失敗（沙箱、網路被拒）不消耗修正額度。不論上游是否阻塞，最後都執行 C8-S3 能做的部分與最終彙報。
-10. **硬阻塞**：commit 失敗時不宣稱已提交，也不累積下一步改動；先做不破壞他人狀態的修復，仍失敗就完成剩餘唯讀分析與紀錄，在最終彙報說明。
+9. **問題處理**：任何問題都不找使用者、不停下來等待。先記錄，提出單一因果假設，做最小修正，focused 重驗；同一問題最多兩次修正，仍失敗就隔離該步、記錄，繼續互不相依的工作。環境類失敗（沙箱、網路被拒）不消耗修正額度。不論上游是否阻塞，最後都執行 C8-S3 能做的部分與最終彙報。
+10. **硬阻塞**：只有兩種：分支不是 GUI（第 2 項），以及 commit 失敗。commit 失敗時不宣稱已提交，也不累積下一步改動；先做不破壞他人狀態的修復，仍失敗就完成剩餘唯讀分析與紀錄，在最終彙報說明。硬阻塞同樣只記錄、不向使用者提問。宿主的權限提示不受本計劃控制，被宿主拒絕的動作記為環境阻塞，然後繼續其他工作。
 11. **中斷與續作**：只依 build-log 與 git 實際狀態續作：以步驟 ID 對帳 git log；未提交的 diff 屬於哪一步，就從該步的檢查繼續；`$TMPDIR` 的複本與安裝不存在就依原步驟重建；公開請求以 `evidence/C8-S1/requests.jsonl` 為準。
-12. **重新規劃**：證據顯示路線要改（例如 Pandoc 的 `--sandbox` 擋住必要的讀取），可修改尚未開始或進行中的階段與相依，並在 build-log 記錄原因；不得更改 GOALS 的目標、決策 D1–D8、範圍外項目或驗收強度。
+12. **重新規劃**：證據顯示路線要改（例如 Pandoc 的 `--sandbox` 擋住必要的讀取），可直接修改尚未開始或進行中的階段與相依（不需問使用者），在 build-log 記錄原因，並依第 4 項提交；不得更改 GOALS 的目標、決策 D1–D8、範圍外項目或驗收強度。
 
 ## 檢查指令（從 `app/` 執行；實際路徑以 C1-S1 核對結果為準）
 

@@ -63,7 +63,7 @@
 | A7 | 內建樣式：APA 7（`apa.csl`）、MLA 9（`modern-language-association.csl`）、IEEE（`ieee.csl`）、Chicago author-date（`chicago-author-date.csl`），取自 CSL 官方樣式庫並保留其授權標頭；加上自訂附件十七 | 使用者舉例 APA、MLA；IEEE 代表數字制；Chicago 為常見作者年制 | 增減樣式只是加減檔案 |
 | A8 | Pandoc 是唯一的產品渲染器，預覽與匯出用同一個引擎，保證預覽 = 匯出；citeproc-js 只在比較測試中當參考基準，不進 desktop 的 `package.json`；citeproc-py 只在 Pandoc 於核心行為上與基準不一致時才拿來評估，評估後移除 | 匯出 docx 必須用 Pandoc；兩個引擎會讓預覽和匯出不一致 | 若比較結果顯示 Pandoc 不夠好，最終彙報列為使用者決策 |
 | A9 | 不新增正文佔位語法；`document_edit` 只拒絕新引入的未知 key，Agent 在回覆中說明哪些主張缺來源 | 使用者論文的 `[CITE: …]` 是該專案自己的規則，可寫在 `RESEARCH.md` 的規則文字 | 之後可加 |
-| A10 | 面板「刪除」與「匯出」是使用者在 GUI 的直接動作，不需批准；「以 DOI 新增」會連網並寫 bundle 與書目，沿用 `citation.save` 的批准（Ask 模式下詢問） | 與手動儲存、`knowledge.ingest_file` RPC 的既有政策一致 | 只影響 C6-S2 |
+| A10 | 面板「刪除」與「匯出」是使用者在 GUI 的直接動作，不需批准；「以 DOI 新增」會連網並寫 bundle 與書目，沿用 `citation.save` 的批准（這是產品的執行期行為：GUI 在 Ask 模式下跳出批准；與計劃執行者無關） | 與手動儲存、`knowledge.ingest_file` RPC 的既有政策一致 | 只影響 C6-S2 |
 
 ## 不變條件
 
