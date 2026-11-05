@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "plan_id": "citation-management-2026-11-05",
+  "goals": [
+    {"id": "CG1", "text": "專案CSL-JSON書目庫與存檔併入"},
+    {"id": "CG2", "text": "正文key解析、完整性檢查與Agent接線"},
+    {"id": "CG3", "text": "GUI引用面板的檢視、增刪與補全"},
+    {"id": "CG4", "text": "專案格式設定與預覽，正文不變"},
+    {"id": "CG5", "text": "docx、Markdown與bib匯出"},
+    {"id": "CG6", "text": "附件十七自訂CSL與基準比對"},
+    {"id": "CG7", "text": "依賴與manifest一致"},
+    {"id": "CG8", "text": "不退化、文件與最終彙報"}
+  ],
+  "phases": [
+    {"id": "C1", "file": "build/phase-1-preflight.md", "depends_on": [], "covers": ["CG7", "CG8"]},
+    {"id": "C2", "file": "build/phase-2-library.md", "depends_on": ["C1"], "covers": ["CG1"]},
+    {"id": "C3", "file": "build/phase-3-citations-in-documents.md", "depends_on": ["C2"], "covers": ["CG2"]},
+    {"id": "C4", "file": "build/phase-4-rendering.md", "depends_on": ["C1"], "covers": ["CG4", "CG5", "CG7"]},
+    {"id": "C5", "file": "build/phase-5-appendix17.md", "depends_on": ["C4"], "covers": ["CG6", "CG4"]},
+    {"id": "C6", "file": "build/phase-6-backend.md", "depends_on": ["C3", "C5"], "covers": ["CG3", "CG4", "CG5"]},
+    {"id": "C7", "file": "build/phase-7-gui.md", "depends_on": ["C6"], "covers": ["CG3", "CG4", "CG5"]},
+    {"id": "C8", "file": "build/phase-8-acceptance.md", "depends_on": ["C7"], "covers": ["CG1", "CG2", "CG3", "CG4", "CG5", "CG6", "CG7", "CG8"]}
+  ]
+}
