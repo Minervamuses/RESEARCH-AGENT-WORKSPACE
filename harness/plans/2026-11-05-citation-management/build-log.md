@@ -9,7 +9,7 @@
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
-| C4 | In progress | C4-S1、C4-S2 見事件 | — | C4-S3（條件）|
+| C4 | In progress | C4-S1–S3 見事件 | — | C4-S4 渲染與匯出模組 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
@@ -153,6 +153,11 @@
 - **腳本**：`citeproc_js.js`（`rebuildProcessorState` 取最終引用字串、`makeBibliography`）、`pandoc_run.py`（每個 cluster 一段，`--citeproc -t json` 取 Cite 節點與 `#refs`，再轉 plain）、`compare.py`（NFC 與空白正規化後逐字串比較、分類）。輸出 `out-citeproc-js.json`、`out-pandoc.json`、`comparison.json`、`summary.md`。
 - **結果**：64 組（4 樣式 × 16 案例）中 63 組完全一致；**Pandoc 在核心類別（作者清單/et al.、消歧、排序/編號、locator）的不一致數 = 0**。唯一差異：MLA 的 `[-@key]` 無頁碼時，Pandoc 輸出空字串、citeproc-js 輸出 `[NO_PRINTED_FORM]`（類別「其他」）。另記：此版 IEEE 樣式的多篇引用兩邊都是 `[1], [2], [3], [4]`（不合併成範圍），計劃寫的「[1]–[3]」與官方樣式不同，以樣式為準；APA 不會把小寫標題改成句首大寫（CSL 只能轉大寫），兩邊一致。
 - **下一步**：C4-S3 的觸發條件（核心類別不一致）未成立。
+
+### C4-S3 citeproc-py 評估：未觸發（2026-11-05）
+
+- **判定**：觸發條件是 C4-S2 中 Pandoc 在核心類別有不一致；實際為 0，所以不安裝 citeproc-py，`app/pyproject.toml`、`app/poetry.lock` 未動（`git diff --quiet HEAD` 確認）。產品照 A8 只用 Pandoc。
+- **下一步**：C4-S4。
 
 ## 最終彙報
 
