@@ -131,8 +131,7 @@ def test_arxiv_authority_record_builds_csl():
         ],
         "issued": {"date-parts": [[2024]]},
         "URL": "https://arxiv.org/abs/2401.01234",
-        "number": "2401.01234",
-        "publisher": "arXiv",
+        "number": "arXiv:2401.01234",
     }
 
 

@@ -6,9 +6,40 @@
   "license": "CC BY-SA 3.0 (each file keeps its own <rights> and author header)"
  },
  "styles": [
-  {"id": "apa", "name": "APA 7th edition", "file": "apa.csl", "kind": "author-date", "origin": "csl-styles"},
-  {"id": "modern-language-association", "name": "MLA 9th edition", "file": "modern-language-association.csl", "kind": "author", "origin": "csl-styles"},
-  {"id": "ieee", "name": "IEEE", "file": "ieee.csl", "kind": "numeric", "origin": "csl-styles"},
-  {"id": "chicago-author-date", "name": "Chicago author-date (18th edition)", "file": "chicago-author-date.csl", "kind": "author-date", "origin": "csl-styles"}
+  {
+   "id": "apa",
+   "name": "APA 7th edition",
+   "file": "apa.csl",
+   "kind": "author-date",
+   "origin": "csl-styles"
+  },
+  {
+   "id": "modern-language-association",
+   "name": "MLA 9th edition",
+   "file": "modern-language-association.csl",
+   "kind": "author",
+   "origin": "csl-styles"
+  },
+  {
+   "id": "ieee",
+   "name": "IEEE",
+   "file": "ieee.csl",
+   "kind": "numeric",
+   "origin": "csl-styles"
+  },
+  {
+   "id": "chicago-author-date",
+   "name": "Chicago author-date (18th edition)",
+   "file": "chicago-author-date.csl",
+   "kind": "author-date",
+   "origin": "csl-styles"
+  },
+  {
+   "id": "bime-appendix17",
+   "name": "NTU BIME Appendix 17 (author-year)",
+   "file": "bime-appendix17.csl",
+   "kind": "author-date",
+   "origin": "custom"
+  }
  ]
 }

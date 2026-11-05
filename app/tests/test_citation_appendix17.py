@@ -1,0 +1,104 @@
+"""bime-appendix17.csl against the English examples printed in Appendix 17 二.8."""
+
+import json
+
+import pytest
+
+from skills.citation import csl_render
+from skills.citation.csl_render import list_styles, render
+
+pytestmark = pytest.mark.skipif(csl_render.find_pandoc() is None, reason="Pandoc is not installed")
+
+ITEMS = [
+    {"id": "anderson1998", "type": "article-journal",
+     "title": "A new technique for rapid deployment of rollover protective structures",
+     "author": [{"family": "Anderson", "given": "G. T."}, {"family": "Renard", "given": "C. V."},
+                {"family": "Strein", "given": "L. M."}, {"family": "Cayo", "given": "E. C."},
+                {"family": "Mervin", "given": "M. M."}],
+     "issued": {"date-parts": [[1998]]}, "container-title": "Applied Engineering in Agriculture",
+     "container-title-short": "Applied Eng. in Agric.", "volume": "23", "issue": "2", "page": "34–42"},
+    {"id": "miller1980", "type": "paper-conference", "title": "Sorghum: A new fuel",
+     "author": [{"family": "Miller", "given": "F. R."}, {"family": "Creelman", "given": "R. A."}],
+     "issued": {"date-parts": [[1980]]},
+     "container-title": "Proc. 35th Annual Corn and Sorghum Industry Research Conference", "page": "219-232",
+     "editor": [{"family": "Londen", "given": "H. D."}, {"family": "Wilkinson", "given": "W."}],
+     "publisher-place": "Washington, DC", "publisher": "Am. Seed Trade Assoc."},
+    {"id": "nsc2000", "type": "webpage", "title": "Injury Facts Online",
+     "author": [{"literal": "NSC"}], "issued": {"date-parts": [[2000]]},
+     "publisher-place": "Itasca, Ill.", "publisher": "National Safety Council",
+     "URL": "www.nsc.org", "accessed": {"date-parts": [[2000, 12, 17]]}},
+    {"id": "sas1990", "type": "software", "title": "SAS User's Guide: Statistics",
+     "author": [{"literal": "SAS"}], "issued": {"date-parts": [[1990]]}, "version": "6a",
+     "publisher-place": "Cary, N.C.", "publisher": "SAS Institute, Inc."},
+    {"id": "campbell1991", "type": "thesis",
+     "title": "The lower limit of soil water potential for potato growth",
+     "author": [{"family": "Campbell", "given": "M. D."}], "issued": {"date-parts": [[1991]]},
+     "genre": "PhD dissertation", "publisher-place": "Pullman, Wash.",
+     "publisher": "Washington State University, Department of Agricultural Engineering"},
+    {"id": "smith1985a", "type": "article-journal", "title": "Alpha", "author": [{"family": "Smith", "given": "J."}],
+     "issued": {"date-parts": [[1985]]}, "container-title": "J. X", "volume": "1", "page": "1-2"},
+    {"id": "smith1985b", "type": "article-journal", "title": "Beta", "author": [{"family": "Smith", "given": "J."}],
+     "issued": {"date-parts": [[1985]]}, "container-title": "J. X", "volume": "1", "page": "3-4"},
+    {"id": "smith1968", "type": "article-journal", "title": "Gamma",
+     "author": [{"family": "Smith", "given": "A."}, {"family": "Kline", "given": "B."}],
+     "issued": {"date-parts": [[1968]]}, "container-title": "J. X", "volume": "1", "page": "5-6"},
+]
+TEXT = ("[@anderson1998] [@miller1980; @nsc2000] [@sas1990] [@campbell1991] "
+        "[@smith1985a; @smith1985b] [@smith1968] @smith1968 wrote. Later [-@nsc2000].\n")
+
+
+@pytest.fixture
+def rendered(tmp_path):
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(ITEMS, ensure_ascii=False), encoding="utf-8")
+    return render(TEXT, path, "bime-appendix17")
+
+
+def test_style_is_listed():
+    assert {"id": "bime-appendix17", "name": "NTU BIME Appendix 17 (author-year)",
+            "kind": "author-date", "origin": "custom"} in list_styles()
+
+
+def test_in_text_citations_follow_rule_4(rendered):
+    assert [c["text"] for c in rendered.citations] == [
+        "(Anderson et al., 1998)",
+        "(Miller and Creelman, 1980; NSC, 2000)",
+        "(SAS, 1990)",
+        "(Campbell, 1991)",
+        "(Smith, 1985a; Smith, 1985b)",
+        "(Smith and Kline, 1968)",
+        "Smith and Kline (1968)",
+        "(2000)",
+    ]
+
+
+def test_reference_entries_match_the_regulation_examples(rendered):
+    entries = {e["key"]: e["text"] for e in rendered.bibliography}
+    assert entries["anderson1998"] == (
+        "Anderson, G. T., C. V. Renard, L. M. Strein, E. C. Cayo, and M. M. Mervin. 1998. "
+        "A new technique for rapid deployment of rollover protective structures. "
+        "Applied Eng. in Agric. 23(2): 34-42."
+    )
+    assert entries["miller1980"] == (
+        "Miller, F. R., and R. A. Creelman. 1980. Sorghum: A new fuel. "
+        "In “Proc. 35th Annual Corn and Sorghum Industry Research Conference”, 219-232. "
+        "H. D. Londen and W. Wilkinson, eds. Washington, DC: Am. Seed Trade Assoc."
+    )
+    assert entries["nsc2000"] == (
+        "NSC. 2000. Injury Facts Online. Itasca, Ill.: National Safety Council. "
+        "Available at: www.nsc.org. Accessed 17 December 2000."
+    )
+    assert entries["sas1990"] == (
+        "SAS. 1990. SAS User’s Guide: Statistics. Ver. 6a. Cary, N.C.: SAS Institute, Inc."
+    )
+    assert entries["campbell1991"] == (
+        "Campbell, M. D. 1991. The lower limit of soil water potential for potato growth. "
+        "PhD dissertation. Pullman, Wash.: Washington State University, Department of Agricultural Engineering."
+    )
+
+
+def test_reference_order_is_alphabetical_then_year(rendered):
+    assert [e["key"] for e in rendered.bibliography] == [
+        "anderson1998", "campbell1991", "miller1980", "nsc2000", "sas1990",
+        "smith1985a", "smith1985b", "smith1968",
+    ]

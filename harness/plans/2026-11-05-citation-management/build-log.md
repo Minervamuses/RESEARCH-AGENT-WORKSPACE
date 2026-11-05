@@ -10,7 +10,7 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | In progress | C5-S1 見事件 | — | C5-S2 撰寫 .csl |
+| C5 | In progress | C5-S1、C5-S2 見事件 | — | C5-S3 中日文合成測試 |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
 | C8 | Not started | — | 依賴 C7 | — |
@@ -183,6 +183,14 @@
 - **問題**：C5-S2 以緊湊 JSON（無縮排）的書目測試附件十七樣式時，`render` 回 `library_format_unsupported`。原因：C2-S2 的 `load` 在偵測不到排版時直接拋錯，但預覽、檢查、查詢都是唯讀，排版只影響寫入。
 - **修正**（單一因果、最小改動）：`library.load` 對未知排版回傳 `layout=None`；`write_atomic` 在 `layout is None` 時才拋 `library_format_unsupported`，檔案不變。所以 C2 的「格式不明時不寫入」保持不變，而 `render`、`inspect`、`bibliography_lookup` 與同 DOI 重用（不需寫入）都能使用 Zotero 等匯出的緊湊檔。
 - **檢查**：`tests/test_citation_library.py` 新增 `test_unknown_layout_is_readable_and_reuse_needs_no_write`；原 `test_unknown_layout_is_not_written` 仍通過（新增條目時拋錯、檔案不變）。`test_citation_library.py`、`test_citation_project_library.py`、`test_citation_integrity.py`、`test_citation_csl_render.py` 共 60 項通過。
+
+### C5-S2 附件十七 `.csl` 與基準比對（2026-11-05）
+
+- **樣式**：`app/skills/citation/styles/bime-appendix17.csl`（ID `bime-appendix17`，列入 `styles.json`，`origin: custom`，CC BY-SA 3.0，結構參考 `chicago-author-date.csl`）。規則：作者全列、第一作者倒置、名字縮寫、`, and`；`年.`；期刊名 `container-title-short`（無則全名）、`卷(期): 頁`；頁碼用連字號（樣式內 locale 覆寫 `page-range-delimiter`，`page-range-format="expanded"`）；會議錄 `In “…” (叢書), 頁. 編者, eds. 地: 出版者`，無頁碼且無出版者時 `Available at:`；章節、書、學位論文、軟體 `Ver.`、網頁 `Available at:`/`Accessed 日 月 年`、專利、其他（arXiv 照 `number` 原樣）；沒有作者時以 publisher 代替；逗號在引號外（`punctuation-in-quote="false"`）。文中 `(Smith, 1985)`、`(Smith and Kline, 1968)`、三人以上 `et al.`、同作者同年 a/b、多篇以 `; ` 分隔且不合併。排序：第一作者姓氏、全部作者姓氏、年、標題。
+- **比對**（`evidence/C5-S2/compare_appendix17.py`、`comparison.json`、`compare.md`）：四輪。最後一輪引用 **46/46**、參考文獻 **32/42**（排序 42/42 全對）。其餘 10 條全屬四類無法以 CSL 表達者：撇號 `'`→`’`（6 條，Pandoc 與 citeproc-js 都會換）、`Wen-tau`→`W.`（3 條，兩個處理器相同）、literal `"et al."` 名字前多 `and`（1 條）、名字括號暱稱 `(Hank)`（1 條）；後三類可由資料修正，但依 D3 與「不改使用者 references.json」只記錄。
+- **連帶修正**：`csl_from_authority` 的 arXiv 條目改為 `number = "arXiv:<id>"`、不設 publisher（與論文既有條目的寫法一致，附件十七樣式照樣輸出 `arXiv:…`）；`library.item_arxiv` 對 `arXiv:` 前綴的 `number` 不再要求 arXiv 出版者。測試同步更新（`test_citation_csl.py`、`test_citation_library.py`）。
+- **檢查**：新 `tests/test_citation_appendix17.py` 4 項通過（附件十七原文英文範例：期刊 (a)、會議錄 (8)、網站 NSC、軟體 SAS、博士論文 Campbell，以及 (4) 的文中引用形式、排序）。第 4 輪的「Available at」修正就是這組測試發現的。
+- **下一步**：C5-S3。
 
 ## 最終彙報
 

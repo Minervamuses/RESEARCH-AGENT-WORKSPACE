@@ -248,8 +248,8 @@ def csl_from_authority(record) -> dict:
         "URL": record.url,
     }
     if record.provider == "arxiv":
-        item["number"] = record.identity.value
-        item["publisher"] = "arXiv"
+        # Same convention as hand-written thesis entries: "arXiv:<id>" in number.
+        item["number"] = f"arXiv:{record.identity.value}"
     elif record.venue:
         item["container-title"] = record.venue
     return item

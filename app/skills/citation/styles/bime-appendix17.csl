@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" demote-non-dropping-particle="never" page-range-format="expanded" default-locale="en-US">
+  <info>
+    <title>NTU BIME thesis format, Appendix 17 (author-year)</title>
+    <title-short>BIME Appendix 17</title-short>
+    <id>bime-appendix17</id>
+    <link href="https://github.com/citation-style-language/styles/blob/master/chicago-author-date.csl" rel="template"/>
+    <author>
+      <name>research-agent-workspace</name>
+    </author>
+    <category citation-format="author-date"/>
+    <category field="engineering"/>
+    <summary>Reference list and author-year citations following 二.8 of Appendix 17 (國立臺灣大學生物機電工程學研究所 博(碩)士班論文格式及撰寫要點) and the author's documented format decisions. Structure modelled on chicago-author-date.csl. Rules standard CSL cannot express (Chinese/Japanese grouping and stroke order, 等人/與, full-width punctuation, truncated author lists) are listed in the plan's evidence, not approximated.</summary>
+    <updated>2026-11-05T00:00:00+00:00</updated>
+    <rights license="http://creativecommons.org/licenses/by-sa/3.0/">This work is licensed under a Creative Commons Attribution-ShareAlike 3.0 License</rights>
+  </info>
+  <locale xml:lang="en">
+    <style-options punctuation-in-quote="false"/>
+    <terms>
+      <term name="page-range-delimiter">-</term>
+      <term name="editor" form="short">
+        <single>ed.</single>
+        <multiple>eds.</multiple>
+      </term>
+    </terms>
+  </locale>
+  <!-- Names -->
+  <macro name="author-bib">
+    <names variable="author">
+      <name and="text" delimiter=", " delimiter-precedes-last="always" initialize-with=". " name-as-sort-order="first" sort-separator=", "/>
+      <substitute>
+        <text variable="publisher"/>
+      </substitute>
+    </names>
+  </macro>
+  <macro name="author-short">
+    <names variable="author">
+      <name form="short" and="text" delimiter=", " delimiter-precedes-last="contextual" et-al-min="3" et-al-use-first="1"/>
+      <substitute>
+        <text variable="publisher"/>
+      </substitute>
+    </names>
+  </macro>
+  <macro name="author-sort">
+    <!-- Family names of every author in order (bime_word sorts by this tuple). -->
+    <names variable="author">
+      <name form="short" delimiter=", "/>
+      <substitute>
+        <text variable="publisher"/>
+      </substitute>
+    </names>
+  </macro>
+  <macro name="editors">
+    <names variable="editor">
+      <name and="text" delimiter=", " delimiter-precedes-last="contextual" initialize-with=". "/>
+      <label form="short" prefix=", "/>
+    </names>
+  </macro>
+  <!-- Dates and links -->
+  <macro name="year">
+    <choose>
+      <if variable="issued">
+        <date variable="issued">
+          <date-part name="year"/>
+        </date>
+      </if>
+      <else>
+        <text term="no date" form="short"/>
+      </else>
+    </choose>
+  </macro>
+  <macro name="link">
+    <choose>
+      <if variable="URL">
+        <text variable="URL"/>
+      </if>
+      <else-if variable="DOI">
+        <text variable="DOI" prefix="https://doi.org/"/>
+      </else-if>
+    </choose>
+  </macro>
+  <macro name="available">
+    <choose>
+      <if variable="URL DOI" match="any">
+        <group>
+          <text value="Available at: "/>
+          <text macro="link"/>
+        </group>
+      </if>
+    </choose>
+  </macro>
+  <macro name="accessed">
+    <date variable="accessed" prefix="Accessed ">
+      <date-part name="day" suffix=" "/>
+      <date-part name="month" suffix=" "/>
+      <date-part name="year"/>
+    </date>
+  </macro>
+  <macro name="place-publisher">
+    <group delimiter=": ">
+      <text variable="publisher-place"/>
+      <text variable="publisher"/>
+    </group>
+  </macro>
+  <macro name="volume-issue-pages">
+    <group delimiter=": ">
+      <group delimiter=" ">
+        <text variable="container-title" form="short"/>
+        <group>
+          <text variable="volume"/>
+          <text variable="issue" prefix="(" suffix=")"/>
+        </group>
+      </group>
+      <text variable="page"/>
+    </group>
+  </macro>
+  <macro name="in-container">
+    <group delimiter=" ">
+      <text value="In"/>
+      <text variable="container-title" quotes="true"/>
+      <text variable="collection-title" prefix="(" suffix=")"/>
+    </group>
+  </macro>
+  <!-- Type bodies -->
+  <macro name="body">
+    <choose>
+      <if type="article-journal article-magazine article-newspaper" match="any">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <text macro="volume-issue-pages"/>
+          <choose>
+            <if variable="volume page" match="none">
+              <text macro="available"/>
+            </if>
+          </choose>
+        </group>
+      </if>
+      <else-if type="book">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <group delimiter=", ">
+            <number variable="edition" form="ordinal" suffix=" ed."/>
+            <text variable="page"/>
+          </group>
+          <text macro="place-publisher"/>
+        </group>
+      </else-if>
+      <else-if type="chapter entry-encyclopedia" match="any">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <group delimiter=", ">
+            <text macro="in-container"/>
+            <names variable="editor">
+              <label form="short" suffix=" "/>
+              <name and="text" delimiter=", " delimiter-precedes-last="contextual" initialize-with=". "/>
+            </names>
+            <text variable="page"/>
+          </group>
+          <text macro="place-publisher"/>
+        </group>
+      </else-if>
+      <else-if type="paper-conference">
+        <choose>
+          <if variable="container-title">
+            <group delimiter=". ">
+              <text variable="title"/>
+              <group delimiter=", ">
+                <text macro="in-container"/>
+                <text variable="page"/>
+              </group>
+              <text macro="editors"/>
+              <text macro="place-publisher"/>
+              <choose>
+                <if variable="page publisher" match="none">
+                  <text macro="available"/>
+                </if>
+              </choose>
+            </group>
+          </if>
+          <else>
+            <group delimiter=". ">
+              <text variable="title"/>
+              <group delimiter=" No. ">
+                <text variable="genre"/>
+                <text variable="number"/>
+              </group>
+              <text macro="place-publisher"/>
+            </group>
+          </else>
+        </choose>
+      </else-if>
+      <else-if type="thesis">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <text variable="genre"/>
+          <text macro="place-publisher"/>
+        </group>
+      </else-if>
+      <else-if type="software">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <text variable="version" prefix="Ver. "/>
+          <text macro="place-publisher"/>
+          <text macro="available"/>
+          <text macro="accessed"/>
+        </group>
+      </else-if>
+      <else-if type="webpage post post-weblog" match="any">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <text variable="container-title"/>
+          <text macro="place-publisher"/>
+          <text macro="available"/>
+          <text macro="accessed"/>
+        </group>
+      </else-if>
+      <else-if type="patent">
+        <group delimiter=". ">
+          <text variable="title"/>
+          <text variable="number"/>
+        </group>
+      </else-if>
+      <else>
+        <!-- article (arXiv and other preprints keep number as given), report, others -->
+        <group delimiter=". ">
+          <text variable="title"/>
+          <text variable="container-title"/>
+          <choose>
+            <if variable="genre">
+              <group delimiter=" No. ">
+                <text variable="genre"/>
+                <text variable="number"/>
+              </group>
+            </if>
+            <else>
+              <text variable="number"/>
+            </else>
+          </choose>
+          <text macro="place-publisher"/>
+          <text macro="available"/>
+        </group>
+      </else>
+    </choose>
+  </macro>
+  <citation et-al-min="3" et-al-use-first="1" disambiguate-add-year-suffix="true">
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <group delimiter=", ">
+        <text macro="author-short"/>
+        <text macro="year"/>
+        <group delimiter=" ">
+          <label variable="locator" form="short"/>
+          <text variable="locator"/>
+        </group>
+      </group>
+    </layout>
+  </citation>
+  <bibliography hanging-indent="true" entry-spacing="0">
+    <sort>
+      <key macro="author-sort" names-min="1" names-use-first="1"/>
+      <key macro="author-sort" names-min="999" names-use-first="999"/>
+      <key macro="year"/>
+      <key variable="title"/>
+    </sort>
+    <layout suffix=".">
+      <group delimiter=". ">
+        <text macro="author-bib"/>
+        <text macro="year"/>
+        <text macro="body"/>
+      </group>
+    </layout>
+  </bibliography>
+</style>
