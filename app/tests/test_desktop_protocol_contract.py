@@ -57,6 +57,12 @@ def test_protocol_manifest_safety_invariants() -> None:
         "extensions.apply",
         "approval.resolve",
         "session.set_bash_permission",
+        "bibliography.inspect",
+        "bibliography.render",
+        "bibliography.set_style",
+        "bibliography.remove",
+        "bibliography.add",
+        "bibliography.export",
     }
     assert len(METHODS) == len(CONTRACT["methods"])
     assert not {

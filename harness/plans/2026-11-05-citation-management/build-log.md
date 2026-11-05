@@ -11,7 +11,7 @@
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
-| C6 | Not started | — | — | C6-S1 |
+| C6 | In progress | C6-S1 見事件 | — | C6-S2 後端實作 |
 | C7 | Not started | — | 依賴 C6 | — |
 | C8 | Not started | — | 依賴 C7 | — |
 
@@ -202,6 +202,21 @@
 - **補記**：C5-S2 所述 `library.item_arxiv` 對 `arXiv:` 前綴的改動與其測試，實際上已隨 `4f026b3`（`[C5-S2 fix]`）一起提交，不在 `4ded113`（`[C5-S2]`）中；內容相同，只是落在前一個 commit。
 - **交付**：樣式 ID `bime-appendix17`；已知限制見 `evidence/C5-S2/compare.md` 與 `evidence/C5-S3/results.md`。
 - **下一步**：C6-S1。
+
+### C6-S1 協定定義（2026-11-05）
+
+- **方法**（`protocolVersion` 仍為 1，加法式成長；contract 方法 34 → 40、resultDataSchemas 22 → 28）：
+  - `bibliography.inspect`（read）：params `documentContext?`；result `libraryPath`、`libraryStatus` (`ok`/`missing`/`error`)、`libraryFingerprint?`、`libraryErrorCode?`、`libraryError?`、`styleId`、`styleConfigured`、`styles[] {id, name, kind, origin}`、`documentFormat?` (`markdown`/`latex`)、`entries[] {key, authors[], year?, title, doi?, type, verification, citedCount}`、`uses[] {key, start, end, line, group, known?}`、`order[]`、`missing[]`、`uncited[]`、`duplicateDois[] {doi, keys[]}`。
+  - `bibliography.render`（read）：params `documentContext`、`styleId?`；result `styleId`、`citations[] {index, keys[], start?, end?, text}`、`entries[] {key, text}`、`segments[] {entry, text, italic, bold, url?}`、`missing[]`。
+  - `bibliography.set_style`（mutation）：`styleId` → `{styleId, researchFingerprint}`。
+  - `bibliography.remove`（mutation）：`key`、`libraryFingerprint` → `{key, libraryFingerprint}`。
+  - `bibliography.add`（mutation）：`identifier` → `{status: added|existing|failed, key?, reasonCode?, libraryFingerprint?}`。
+  - `bibliography.export`（mutation）：`documentContext?`、`format` (`docx`/`markdown`/`bib`)、`styleId?` → `{format, path}`。
+  - 新錯誤碼 2 個：`BIBLIOGRAPHY_CONFLICT`（書目檔在讀取後被改動）、`BIBLIOGRAPHY_FAILED`（書目讀不到/無法寫入、Pandoc 不可用或失敗）。其餘沿用 `PROTOCOL_INVALID`、`BUSY_TURN`、`APPROVAL_DENIED`、`SESSION_NOT_READY`。
+- **與擬定形狀的差異**：Rust 的結果驗證是手寫的，契約測試只檢查一層 objectArray，所以結果都保持「頂層欄位 + 平坦的 objectArray」：參考文獻格式以頂層 `segments`（以 `entry` 索引對應）表示，不巢狀；`inspect` 不回 `firstUse`（GUI 由 `order` 取得）、`missing` 只列 key（位置由 `uses` 中 `known=false` 取得）；`year` 用 nullableString。
+- **四份定義**：`contract.json`（以文字插入，未重排既有內容）、`src/protocol.ts`（由 contract 產生的 schema 文字、方法與錯誤碼清單）、`src-tauri/src/protocol.rs`（方法、錯誤碼、required/allowed params、參數檢查、`validate_bibliography_result`）、Python 由 contract 驅動。`fixtures.json` 新增 21 個 messages（每個方法合法 request/result 與非法例）與 8 個 traces（5 個非法 result 需要配對的 request 才能依方法驗證，另 3 個合法 trace）。
+- **檢查**：`tests/test_desktop_protocol_contract.py` 204 passed；`npm test` 289/289；`npm run build` 成功；`cargo test --locked`（沙箱外）40 passed（含由 contract 產生樣本與邊界值的測試、fixtures 測試）。三種驗證器對每個新 fixture 結果一致。
+- **下一步**：C6-S2。
 
 ## 最終彙報
 

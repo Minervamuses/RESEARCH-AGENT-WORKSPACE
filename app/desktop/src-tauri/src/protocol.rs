@@ -47,6 +47,12 @@ pub const PROTOCOL_METHODS: &[&str] = &[
     "extensions.apply",
     "approval.resolve",
     "runtime.shutdown",
+    "bibliography.inspect",
+    "bibliography.render",
+    "bibliography.set_style",
+    "bibliography.remove",
+    "bibliography.add",
+    "bibliography.export",
 ];
 
 pub const REQUEST_EVENTS: &[&str] = &[
@@ -102,6 +108,8 @@ pub const PROTOCOL_ERROR_CODES: &[&str] = &[
     "APPROVAL_DENIED",
     "PROVIDER_RATE_LIMITED",
     "PROVIDER_REQUEST_FAILED",
+    "BIBLIOGRAPHY_CONFLICT",
+    "BIBLIOGRAPHY_FAILED",
     "INTERNAL_ERROR",
 ];
 
@@ -304,6 +312,12 @@ fn required_params(method: &str) -> Option<&'static [&'static str]> {
         "extensions.apply" => Some(&["previewId", "approvedBindingHashes", "turnId", "retry"]),
         "approval.resolve" => Some(&["approvalId", "approved"]),
         "runtime.shutdown" => Some(&[]),
+        "bibliography.inspect" => Some(&[]),
+        "bibliography.render" => Some(&["documentContext"]),
+        "bibliography.set_style" => Some(&["styleId"]),
+        "bibliography.remove" => Some(&["key", "libraryFingerprint"]),
+        "bibliography.add" => Some(&["identifier"]),
+        "bibliography.export" => Some(&["format"]),
         _ => None,
     }
 }
@@ -365,6 +379,12 @@ fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
             "approved",
             "documentContext",
         ]),
+        "bibliography.inspect" => Some(&["documentContext"]),
+        "bibliography.render" => Some(&["documentContext", "styleId"]),
+        "bibliography.set_style" => Some(&["styleId"]),
+        "bibliography.remove" => Some(&["key", "libraryFingerprint"]),
+        "bibliography.add" => Some(&["identifier"]),
+        "bibliography.export" => Some(&["documentContext", "format", "styleId"]),
         _ => None,
     }
 }
@@ -970,6 +990,21 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
                 ));
             }
         }
+        "bibliography.inspect" | "bibliography.render" | "bibliography.export" => {
+            if let Some(context) = params.get("documentContext") {
+                validate_document_context(context, "params.documentContext")?;
+            }
+            validate_optional_string(params, "styleId", 128)?;
+            if let Some(format) = params.get("format") {
+                validate_enum(format, "params.format", &["docx", "markdown", "bib"])?;
+            }
+        }
+        "bibliography.set_style" => validate_optional_string(params, "styleId", 128)?,
+        "bibliography.remove" => {
+            validate_optional_string(params, "key", 512)?;
+            validate_fingerprint(&params["libraryFingerprint"], "params.libraryFingerprint")?;
+        }
+        "bibliography.add" => validate_optional_string(params, "identifier", 2_048)?,
         _ => {}
     }
     Ok(())
@@ -2253,6 +2288,172 @@ pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolV
                 "data.bashPermissionMode",
                 &["ask", "bypass"],
             )?;
+        }
+        "bibliography.inspect"
+        | "bibliography.render"
+        | "bibliography.set_style"
+        | "bibliography.remove"
+        | "bibliography.add"
+        | "bibliography.export" => validate_bibliography_result(method, data)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+fn expect_text(value: &Value, field: &str, max_bytes: usize) -> Result<(), ProtocolViolation> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be a string")))?;
+    if text.len() > max_bytes {
+        return Err(ProtocolViolation::invalid(format!("{field} is too large")));
+    }
+    Ok(())
+}
+
+fn expect_object_array<'a>(
+    value: &'a Value,
+    field: &str,
+    max_items: usize,
+) -> Result<Vec<&'a Map<String, Value>>, ProtocolViolation> {
+    let items = value
+        .as_array()
+        .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be an array")))?;
+    if items.len() > max_items {
+        return Err(ProtocolViolation::invalid(format!("{field} contains too many items")));
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| expect_object(item, &format!("{field}[{index}]")))
+        .collect()
+}
+
+fn validate_nullable_fingerprint(data: &Map<String, Value>, field: &str) -> Result<(), ProtocolViolation> {
+    if !data[field].is_null() {
+        validate_fingerprint(&data[field], &format!("data.{field}"))?;
+    }
+    Ok(())
+}
+
+/// Result shapes for the bibliography.* methods (contract.json resultDataSchemas).
+fn validate_bibliography_result(method: &str, data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
+    const KEY_ITEMS: usize = 100_000;
+    match method {
+        "bibliography.inspect" => {
+            validate_exact_data_keys(data, &[
+                "libraryPath", "libraryStatus", "libraryFingerprint", "libraryErrorCode", "libraryError",
+                "styleId", "styleConfigured", "styles", "documentFormat", "entries", "uses", "order",
+                "missing", "uncited", "duplicateDois",
+            ])?;
+            expect_bounded_string(&data["libraryPath"], "data.libraryPath", 8_192)?;
+            validate_enum(&data["libraryStatus"], "data.libraryStatus", &["ok", "missing", "error"])?;
+            validate_nullable_fingerprint(data, "libraryFingerprint")?;
+            validate_nullable_string(data, "libraryErrorCode", 64)?;
+            validate_nullable_string(data, "libraryError", 4_096)?;
+            expect_bounded_string(&data["styleId"], "data.styleId", 128)?;
+            if !data["styleConfigured"].is_boolean() {
+                return Err(ProtocolViolation::invalid("data.styleConfigured must be a boolean"));
+            }
+            for (index, style) in expect_object_array(&data["styles"], "data.styles", 64)?.into_iter().enumerate() {
+                let field = format!("data.styles[{index}]");
+                validate_exact_data_keys(style, &["id", "name", "kind", "origin"])?;
+                expect_bounded_string(&style["id"], &format!("{field}.id"), 128)?;
+                expect_bounded_string(&style["name"], &format!("{field}.name"), 256)?;
+                validate_enum(&style["kind"], &format!("{field}.kind"), &["author-date", "author", "numeric"])?;
+                validate_enum(&style["origin"], &format!("{field}.origin"), &["csl-styles", "custom"])?;
+            }
+            if !data["documentFormat"].is_null() {
+                expect_bounded_string(&data["documentFormat"], "data.documentFormat", 16)?;
+                validate_enum(&data["documentFormat"], "data.documentFormat", &["markdown", "latex"])?;
+            }
+            for (index, entry) in expect_object_array(&data["entries"], "data.entries", 10_000)?.into_iter().enumerate() {
+                let field = format!("data.entries[{index}]");
+                validate_exact_data_keys(entry, &["key", "authors", "year", "title", "doi", "type", "verification", "citedCount"])?;
+                expect_bounded_string(&entry["key"], &format!("{field}.key"), 512)?;
+                validate_string_array(&entry["authors"], &format!("{field}.authors"), 1_000, 1_024)?;
+                validate_nullable_string(entry, "year", 16)?;
+                expect_text(&entry["title"], &format!("{field}.title"), 8_192)?;
+                validate_nullable_string(entry, "doi", 1_024)?;
+                expect_text(&entry["type"], &format!("{field}.type"), 64)?;
+                validate_enum(&entry["verification"], &format!("{field}.verification"), &["verified", "unverified"])?;
+                expect_integer_range(&entry["citedCount"], &format!("{field}.citedCount"), 0, 1_000_000)?;
+            }
+            for (index, used) in expect_object_array(&data["uses"], "data.uses", 100_000)?.into_iter().enumerate() {
+                let field = format!("data.uses[{index}]");
+                validate_exact_data_keys(used, &["key", "start", "end", "line", "group", "known"])?;
+                expect_bounded_string(&used["key"], &format!("{field}.key"), 512)?;
+                for name in ["start", "end", "group"] {
+                    expect_integer_range(&used[name], &format!("{field}.{name}"), 0, MAX_SAFE_INTEGER)?;
+                }
+                expect_integer_range(&used["line"], &format!("{field}.line"), 1, MAX_SAFE_INTEGER)?;
+                validate_nullable_boolean(used, "known")?;
+            }
+            for name in ["order", "missing", "uncited"] {
+                validate_string_array(&data[name], &format!("data.{name}"), KEY_ITEMS, 512)?;
+            }
+            for (index, group) in expect_object_array(&data["duplicateDois"], "data.duplicateDois", 10_000)?.into_iter().enumerate() {
+                let field = format!("data.duplicateDois[{index}]");
+                validate_exact_data_keys(group, &["doi", "keys"])?;
+                expect_bounded_string(&group["doi"], &format!("{field}.doi"), 1_024)?;
+                validate_string_array(&group["keys"], &format!("{field}.keys"), 1_000, 512)?;
+            }
+        }
+        "bibliography.render" => {
+            validate_exact_data_keys(data, &["styleId", "citations", "entries", "segments", "missing"])?;
+            expect_bounded_string(&data["styleId"], "data.styleId", 128)?;
+            for (index, citation) in expect_object_array(&data["citations"], "data.citations", 100_000)?.into_iter().enumerate() {
+                let field = format!("data.citations[{index}]");
+                validate_data_keys(citation, &["index", "keys", "start", "end", "text"], &["index", "keys", "text"])?;
+                expect_integer_range(&citation["index"], &format!("{field}.index"), 0, MAX_SAFE_INTEGER)?;
+                validate_string_array(&citation["keys"], &format!("{field}.keys"), 1_000, 512)?;
+                for name in ["start", "end"] {
+                    if let Some(value) = citation.get(name) {
+                        expect_integer_range(value, &format!("{field}.{name}"), 0, MAX_SAFE_INTEGER)?;
+                    }
+                }
+                expect_text(&citation["text"], &format!("{field}.text"), 65_536)?;
+            }
+            for (index, entry) in expect_object_array(&data["entries"], "data.entries", 10_000)?.into_iter().enumerate() {
+                let field = format!("data.entries[{index}]");
+                validate_exact_data_keys(entry, &["key", "text"])?;
+                expect_bounded_string(&entry["key"], &format!("{field}.key"), 512)?;
+                expect_text(&entry["text"], &format!("{field}.text"), 65_536)?;
+            }
+            for (index, segment) in expect_object_array(&data["segments"], "data.segments", 1_000_000)?.into_iter().enumerate() {
+                let field = format!("data.segments[{index}]");
+                validate_exact_data_keys(segment, &["entry", "text", "italic", "bold", "url"])?;
+                expect_integer_range(&segment["entry"], &format!("{field}.entry"), 0, MAX_SAFE_INTEGER)?;
+                expect_bounded_string(&segment["text"], &format!("{field}.text"), 65_536)?;
+                for name in ["italic", "bold"] {
+                    if !segment[name].is_boolean() {
+                        return Err(ProtocolViolation::invalid(format!("{field}.{name} must be a boolean")));
+                    }
+                }
+                validate_nullable_string(segment, "url", 8_192)?;
+            }
+            validate_string_array(&data["missing"], "data.missing", KEY_ITEMS, 512)?;
+        }
+        "bibliography.set_style" => {
+            validate_exact_data_keys(data, &["styleId", "researchFingerprint"])?;
+            expect_bounded_string(&data["styleId"], "data.styleId", 128)?;
+            validate_fingerprint(&data["researchFingerprint"], "data.researchFingerprint")?;
+        }
+        "bibliography.remove" => {
+            validate_exact_data_keys(data, &["key", "libraryFingerprint"])?;
+            expect_bounded_string(&data["key"], "data.key", 512)?;
+            validate_fingerprint(&data["libraryFingerprint"], "data.libraryFingerprint")?;
+        }
+        "bibliography.add" => {
+            validate_exact_data_keys(data, &["status", "key", "reasonCode", "libraryFingerprint"])?;
+            validate_enum(&data["status"], "data.status", &["added", "existing", "failed"])?;
+            validate_nullable_string(data, "key", 512)?;
+            validate_nullable_string(data, "reasonCode", 128)?;
+            validate_nullable_fingerprint(data, "libraryFingerprint")?;
+        }
+        "bibliography.export" => {
+            validate_exact_data_keys(data, &["format", "path"])?;
+            validate_enum(&data["format"], "data.format", &["docx", "markdown", "bib"])?;
+            expect_bounded_string(&data["path"], "data.path", 8_192)?;
         }
         _ => {}
     }

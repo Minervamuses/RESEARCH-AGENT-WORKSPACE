@@ -39,6 +39,12 @@ export const PROTOCOL_METHODS = [
   "extensions.apply",
   "approval.resolve",
   "runtime.shutdown",
+  "bibliography.inspect",
+  "bibliography.render",
+  "bibliography.set_style",
+  "bibliography.remove",
+  "bibliography.add",
+  "bibliography.export",
 ] as const;
 
 export const REQUEST_EVENTS = [
@@ -94,6 +100,8 @@ export const PROTOCOL_ERROR_CODES = [
   "APPROVAL_DENIED",
   "PROVIDER_RATE_LIMITED",
   "PROVIDER_REQUEST_FAILED",
+  "BIBLIOGRAPHY_CONFLICT",
+  "BIBLIOGRAPHY_FAILED",
   "INTERNAL_ERROR",
 ] as const;
 
@@ -885,6 +893,108 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     sessionId: { type: "string", required: true, maxBytes: 256 },
     bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
   },
+  "bibliography.inspect": {
+    libraryPath: { type: "string", required: true, maxBytes: 8192 },
+    libraryStatus: { type: "string", required: true, enum: ["ok", "missing", "error"] },
+    libraryFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+    libraryErrorCode: { type: "nullableString", required: true, maxBytes: 64 },
+    libraryError: { type: "nullableString", required: true, maxBytes: 4096 },
+    styleId: { type: "string", required: true, maxBytes: 128 },
+    styleConfigured: { type: "boolean", required: true },
+    styles: {
+      type: "objectArray", required: true, maxItems: 64,
+      items: {
+        id: { type: "string", required: true, maxBytes: 128 },
+        name: { type: "string", required: true, maxBytes: 256 },
+        kind: { type: "string", required: true, enum: ["author-date", "author", "numeric"] },
+        origin: { type: "string", required: true, enum: ["csl-styles", "custom"] },
+      },
+    },
+    documentFormat: { type: "nullableString", required: true, maxBytes: 16, enum: ["markdown", "latex"] },
+    entries: {
+      type: "objectArray", required: true, maxItems: 10_000,
+      items: {
+        key: { type: "string", required: true, maxBytes: 512 },
+        authors: { type: "stringArray", required: true, maxItems: 1000, itemMaxBytes: 1024 },
+        year: { type: "nullableString", required: true, maxBytes: 16 },
+        title: { type: "string", required: true, maxBytes: 8192, allowEmpty: true },
+        doi: { type: "nullableString", required: true, maxBytes: 1024 },
+        type: { type: "string", required: true, maxBytes: 64, allowEmpty: true },
+        verification: { type: "string", required: true, enum: ["verified", "unverified"] },
+        citedCount: { type: "integer", required: true, minimum: 0, maximum: 1_000_000 },
+      },
+    },
+    uses: {
+      type: "objectArray", required: true, maxItems: 100_000,
+      items: {
+        key: { type: "string", required: true, maxBytes: 512 },
+        start: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
+        end: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
+        line: { type: "integer", required: true, minimum: 1, maximum: 9_007_199_254_740_991 },
+        group: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
+        known: { type: "nullableBoolean", required: true },
+      },
+    },
+    order: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
+    missing: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
+    uncited: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
+    duplicateDois: {
+      type: "objectArray", required: true, maxItems: 10_000,
+      items: {
+        doi: { type: "string", required: true, maxBytes: 1024 },
+        keys: { type: "stringArray", required: true, maxItems: 1000, itemMaxBytes: 512 },
+      },
+    },
+  },
+  "bibliography.render": {
+    styleId: { type: "string", required: true, maxBytes: 128 },
+    citations: {
+      type: "objectArray", required: true, maxItems: 100_000,
+      items: {
+        index: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
+        keys: { type: "stringArray", required: true, maxItems: 1000, itemMaxBytes: 512 },
+        start: { type: "integer", required: false, minimum: 0, maximum: 9_007_199_254_740_991 },
+        end: { type: "integer", required: false, minimum: 0, maximum: 9_007_199_254_740_991 },
+        text: { type: "string", required: true, maxBytes: 65_536, allowEmpty: true },
+      },
+    },
+    entries: {
+      type: "objectArray", required: true, maxItems: 10_000,
+      items: {
+        key: { type: "string", required: true, maxBytes: 512 },
+        text: { type: "string", required: true, maxBytes: 65_536, allowEmpty: true },
+      },
+    },
+    segments: {
+      type: "objectArray", required: true, maxItems: 1_000_000,
+      items: {
+        entry: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
+        text: { type: "string", required: true, maxBytes: 65_536 },
+        italic: { type: "boolean", required: true },
+        bold: { type: "boolean", required: true },
+        url: { type: "nullableString", required: true, maxBytes: 8192 },
+      },
+    },
+    missing: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
+  },
+  "bibliography.set_style": {
+    styleId: { type: "string", required: true, maxBytes: 128 },
+    researchFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  },
+  "bibliography.remove": {
+    key: { type: "string", required: true, maxBytes: 512 },
+    libraryFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  },
+  "bibliography.add": {
+    status: { type: "string", required: true, enum: ["added", "existing", "failed"] },
+    key: { type: "nullableString", required: true, maxBytes: 512 },
+    reasonCode: { type: "nullableString", required: true, maxBytes: 128 },
+    libraryFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  },
+  "bibliography.export": {
+    format: { type: "string", required: true, enum: ["docx", "markdown", "bib"] },
+    path: { type: "string", required: true, maxBytes: 8192 },
+  },
 };
 
 export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
@@ -1037,6 +1147,28 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
     approved: { type: "boolean", required: true },
   },
   "runtime.shutdown": {},
+  "bibliography.inspect": {
+    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
+  },
+  "bibliography.render": {
+    documentContext: { type: "object", required: true, items: DOCUMENT_CONTEXT_SCHEMA },
+    styleId: { type: "string", required: false, maxBytes: 128 },
+  },
+  "bibliography.set_style": {
+    styleId: { type: "string", required: true, maxBytes: 128 },
+  },
+  "bibliography.remove": {
+    key: { type: "string", required: true, maxBytes: 512 },
+    libraryFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
+  },
+  "bibliography.add": {
+    identifier: { type: "string", required: true, maxBytes: 2048 },
+  },
+  "bibliography.export": {
+    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
+    format: { type: "string", required: true, enum: ["docx", "markdown", "bib"] },
+    styleId: { type: "string", required: false, maxBytes: 128 },
+  },
 };
 
 export const METHOD_REQUIRED_PARAMS = Object.fromEntries(

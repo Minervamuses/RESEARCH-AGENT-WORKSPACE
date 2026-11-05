@@ -1810,6 +1810,449 @@
           "path": "output.md"
         }
       }
+    },
+    {
+      "name": "bibliography-inspect-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000201",
+        "method": "bibliography.inspect",
+        "params": {
+          "documentContext": {
+            "rootPath": "/home/u/thesis",
+            "path": "/home/u/thesis/proposal.md",
+            "editorRevision": 3,
+            "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+            "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      }
+    },
+    {
+      "name": "bibliography-inspect-without-document",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000202",
+        "method": "bibliography.inspect",
+        "params": {}
+      }
+    },
+    {
+      "name": "bibliography-inspect-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000201",
+        "ok": true,
+        "data": {
+          "libraryPath": "/home/u/thesis/references.json",
+          "libraryStatus": "ok",
+          "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "libraryErrorCode": null,
+          "libraryError": null,
+          "styleId": "bime-appendix17",
+          "styleConfigured": true,
+          "styles": [
+            {
+              "id": "apa",
+              "name": "APA 7th edition",
+              "kind": "author-date",
+              "origin": "csl-styles"
+            },
+            {
+              "id": "bime-appendix17",
+              "name": "NTU BIME Appendix 17 (author-year)",
+              "kind": "author-date",
+              "origin": "custom"
+            }
+          ],
+          "documentFormat": "markdown",
+          "entries": [
+            {
+              "key": "smith2020deep",
+              "authors": [
+                "Smith"
+              ],
+              "year": "2020",
+              "title": "Deep learning for crops",
+              "doi": "10.1000/abc",
+              "type": "article-journal",
+              "verification": "verified",
+              "citedCount": 1
+            },
+            {
+              "key": "fao2021",
+              "authors": [],
+              "year": null,
+              "title": "",
+              "doi": null,
+              "type": "",
+              "verification": "unverified",
+              "citedCount": 0
+            }
+          ],
+          "uses": [
+            {
+              "key": "smith2020deep",
+              "start": 14,
+              "end": 28,
+              "line": 1,
+              "group": 0,
+              "known": true
+            },
+            {
+              "key": "lee2019robot",
+              "start": 30,
+              "end": 43,
+              "line": 1,
+              "group": 0,
+              "known": false
+            }
+          ],
+          "order": [
+            "smith2020deep",
+            "lee2019robot"
+          ],
+          "missing": [
+            "lee2019robot"
+          ],
+          "uncited": [
+            "fao2021"
+          ],
+          "duplicateDois": [
+            {
+              "doi": "10.1000/abc",
+              "keys": [
+                "smith2020deep",
+                "smith2020deepa"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "bibliography-render-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000203",
+        "method": "bibliography.render",
+        "params": {
+          "documentContext": {
+            "rootPath": "/home/u/thesis",
+            "path": "/home/u/thesis/proposal.md",
+            "editorRevision": 3,
+            "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+            "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "styleId": "apa"
+        }
+      }
+    },
+    {
+      "name": "bibliography-render-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000203",
+        "ok": true,
+        "data": {
+          "styleId": "apa",
+          "citations": [
+            {
+              "index": 0,
+              "keys": [
+                "smith2020deep",
+                "lee2019robot"
+              ],
+              "start": 14,
+              "end": 43,
+              "text": "(Smith, 2020; lee2019robot?)"
+            },
+            {
+              "index": 1,
+              "keys": [
+                "x"
+              ],
+              "text": ""
+            }
+          ],
+          "entries": [
+            {
+              "key": "smith2020deep",
+              "text": "Smith, J. (2020). Deep learning for crops. Journal of Agri, 12, 1–10."
+            }
+          ],
+          "segments": [
+            {
+              "entry": 0,
+              "text": "Smith, J. (2020). Deep learning for crops. ",
+              "italic": false,
+              "bold": false,
+              "url": null
+            },
+            {
+              "entry": 0,
+              "text": "Journal of Agri",
+              "italic": true,
+              "bold": false,
+              "url": null
+            },
+            {
+              "entry": 0,
+              "text": "https://doi.org/10.1000/abc",
+              "italic": false,
+              "bold": false,
+              "url": "https://doi.org/10.1000/abc"
+            }
+          ],
+          "missing": [
+            "lee2019robot"
+          ]
+        }
+      }
+    },
+    {
+      "name": "bibliography-render-requires-document",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000203",
+        "method": "bibliography.render",
+        "params": {
+          "styleId": "apa"
+        }
+      }
+    },
+    {
+      "name": "bibliography-set-style-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000204",
+        "method": "bibliography.set_style",
+        "params": {
+          "styleId": "ieee"
+        }
+      }
+    },
+    {
+      "name": "bibliography-set-style-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000204",
+        "ok": true,
+        "data": {
+          "styleId": "ieee",
+          "researchFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "bibliography-set-style-rejects-long-id",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000204",
+        "method": "bibliography.set_style",
+        "params": {
+          "styleId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "bibliography-remove-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000205",
+        "method": "bibliography.remove",
+        "params": {
+          "key": "smith2020deep",
+          "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "bibliography-remove-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000205",
+        "ok": true,
+        "data": {
+          "key": "smith2020deep",
+          "libraryFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    },
+    {
+      "name": "bibliography-remove-requires-fingerprint",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000205",
+        "method": "bibliography.remove",
+        "params": {
+          "key": "smith2020deep"
+        }
+      }
+    },
+    {
+      "name": "bibliography-remove-rejects-bad-fingerprint",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000205",
+        "method": "bibliography.remove",
+        "params": {
+          "key": "smith2020deep",
+          "libraryFingerprint": "ABC"
+        }
+      }
+    },
+    {
+      "name": "bibliography-add-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000206",
+        "method": "bibliography.add",
+        "params": {
+          "identifier": "10.1038/s41586-021-03819-2"
+        }
+      }
+    },
+    {
+      "name": "bibliography-add-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000206",
+        "ok": true,
+        "data": {
+          "status": "added",
+          "key": "jumper2021highly",
+          "reasonCode": null,
+          "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "bibliography-add-failed-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000206",
+        "ok": true,
+        "data": {
+          "status": "failed",
+          "key": null,
+          "reasonCode": "exact_doi_not_found",
+          "libraryFingerprint": null
+        }
+      }
+    },
+    {
+      "name": "bibliography-export-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000207",
+        "method": "bibliography.export",
+        "params": {
+          "documentContext": {
+            "rootPath": "/home/u/thesis",
+            "path": "/home/u/thesis/proposal.md",
+            "editorRevision": 3,
+            "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+            "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "format": "docx",
+          "styleId": "apa"
+        }
+      }
+    },
+    {
+      "name": "bibliography-export-bib-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000208",
+        "method": "bibliography.export",
+        "params": {
+          "format": "bib"
+        }
+      }
+    },
+    {
+      "name": "bibliography-export-result",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "result",
+        "requestId": "00000000-0000-4000-8000-000000000207",
+        "ok": true,
+        "data": {
+          "format": "docx",
+          "path": "/home/u/thesis/proposal.apa.docx"
+        }
+      }
+    },
+    {
+      "name": "bibliography-export-rejects-unknown-format",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000207",
+        "method": "bibliography.export",
+        "params": {
+          "format": "pdf"
+        }
+      }
+    },
+    {
+      "name": "bibliography-export-rejects-unknown-param",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000207",
+        "method": "bibliography.export",
+        "params": {
+          "format": "bib",
+          "outputPath": "/etc/passwd"
+        }
+      }
     }
   ],
   "rawLines": [
@@ -3723,6 +4166,654 @@
           "data": {
             "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
             "turnId": "123e4567e89b42d3a456426614174000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-inspect-rejects-unknown-status",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "method": "bibliography.inspect",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "ok": true,
+          "data": {
+            "libraryPath": "/home/u/thesis/references.json",
+            "libraryStatus": "broken",
+            "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "libraryErrorCode": null,
+            "libraryError": null,
+            "styleId": "bime-appendix17",
+            "styleConfigured": true,
+            "styles": [
+              {
+                "id": "apa",
+                "name": "APA 7th edition",
+                "kind": "author-date",
+                "origin": "csl-styles"
+              },
+              {
+                "id": "bime-appendix17",
+                "name": "NTU BIME Appendix 17 (author-year)",
+                "kind": "author-date",
+                "origin": "custom"
+              }
+            ],
+            "documentFormat": "markdown",
+            "entries": [
+              {
+                "key": "smith2020deep",
+                "authors": [
+                  "Smith"
+                ],
+                "year": "2020",
+                "title": "Deep learning for crops",
+                "doi": "10.1000/abc",
+                "type": "article-journal",
+                "verification": "verified",
+                "citedCount": 1
+              },
+              {
+                "key": "fao2021",
+                "authors": [],
+                "year": null,
+                "title": "",
+                "doi": null,
+                "type": "",
+                "verification": "unverified",
+                "citedCount": 0
+              }
+            ],
+            "uses": [
+              {
+                "key": "smith2020deep",
+                "start": 14,
+                "end": 28,
+                "line": 1,
+                "group": 0,
+                "known": true
+              },
+              {
+                "key": "lee2019robot",
+                "start": 30,
+                "end": 43,
+                "line": 1,
+                "group": 0,
+                "known": false
+              }
+            ],
+            "order": [
+              "smith2020deep",
+              "lee2019robot"
+            ],
+            "missing": [
+              "lee2019robot"
+            ],
+            "uncited": [
+              "fao2021"
+            ],
+            "duplicateDois": [
+              {
+                "doi": "10.1000/abc",
+                "keys": [
+                  "smith2020deep",
+                  "smith2020deepa"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-inspect-rejects-bad-fingerprint",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "method": "bibliography.inspect",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "ok": true,
+          "data": {
+            "libraryPath": "/home/u/thesis/references.json",
+            "libraryStatus": "ok",
+            "libraryFingerprint": "not-a-hash",
+            "libraryErrorCode": null,
+            "libraryError": null,
+            "styleId": "bime-appendix17",
+            "styleConfigured": true,
+            "styles": [
+              {
+                "id": "apa",
+                "name": "APA 7th edition",
+                "kind": "author-date",
+                "origin": "csl-styles"
+              },
+              {
+                "id": "bime-appendix17",
+                "name": "NTU BIME Appendix 17 (author-year)",
+                "kind": "author-date",
+                "origin": "custom"
+              }
+            ],
+            "documentFormat": "markdown",
+            "entries": [
+              {
+                "key": "smith2020deep",
+                "authors": [
+                  "Smith"
+                ],
+                "year": "2020",
+                "title": "Deep learning for crops",
+                "doi": "10.1000/abc",
+                "type": "article-journal",
+                "verification": "verified",
+                "citedCount": 1
+              },
+              {
+                "key": "fao2021",
+                "authors": [],
+                "year": null,
+                "title": "",
+                "doi": null,
+                "type": "",
+                "verification": "unverified",
+                "citedCount": 0
+              }
+            ],
+            "uses": [
+              {
+                "key": "smith2020deep",
+                "start": 14,
+                "end": 28,
+                "line": 1,
+                "group": 0,
+                "known": true
+              },
+              {
+                "key": "lee2019robot",
+                "start": 30,
+                "end": 43,
+                "line": 1,
+                "group": 0,
+                "known": false
+              }
+            ],
+            "order": [
+              "smith2020deep",
+              "lee2019robot"
+            ],
+            "missing": [
+              "lee2019robot"
+            ],
+            "uncited": [
+              "fao2021"
+            ],
+            "duplicateDois": [
+              {
+                "doi": "10.1000/abc",
+                "keys": [
+                  "smith2020deep",
+                  "smith2020deepa"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-inspect-rejects-extra-entry-field",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "method": "bibliography.inspect",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "ok": true,
+          "data": {
+            "libraryPath": "/home/u/thesis/references.json",
+            "libraryStatus": "ok",
+            "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "libraryErrorCode": null,
+            "libraryError": null,
+            "styleId": "bime-appendix17",
+            "styleConfigured": true,
+            "styles": [
+              {
+                "id": "apa",
+                "name": "APA 7th edition",
+                "kind": "author-date",
+                "origin": "csl-styles"
+              },
+              {
+                "id": "bime-appendix17",
+                "name": "NTU BIME Appendix 17 (author-year)",
+                "kind": "author-date",
+                "origin": "custom"
+              }
+            ],
+            "documentFormat": "markdown",
+            "entries": [
+              {
+                "key": "smith2020deep",
+                "authors": [
+                  "Smith"
+                ],
+                "year": "2020",
+                "title": "Deep learning for crops",
+                "doi": "10.1000/abc",
+                "type": "article-journal",
+                "verification": "verified",
+                "citedCount": 1,
+                "abstract": "x"
+              }
+            ],
+            "uses": [
+              {
+                "key": "smith2020deep",
+                "start": 14,
+                "end": 28,
+                "line": 1,
+                "group": 0,
+                "known": true
+              },
+              {
+                "key": "lee2019robot",
+                "start": 30,
+                "end": 43,
+                "line": 1,
+                "group": 0,
+                "known": false
+              }
+            ],
+            "order": [
+              "smith2020deep",
+              "lee2019robot"
+            ],
+            "missing": [
+              "lee2019robot"
+            ],
+            "uncited": [
+              "fao2021"
+            ],
+            "duplicateDois": [
+              {
+                "doi": "10.1000/abc",
+                "keys": [
+                  "smith2020deep",
+                  "smith2020deepa"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-render-rejects-empty-segment",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000203",
+          "method": "bibliography.render",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "styleId": "apa"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000203",
+          "ok": true,
+          "data": {
+            "styleId": "apa",
+            "citations": [
+              {
+                "index": 0,
+                "keys": [
+                  "smith2020deep",
+                  "lee2019robot"
+                ],
+                "start": 14,
+                "end": 43,
+                "text": "(Smith, 2020; lee2019robot?)"
+              },
+              {
+                "index": 1,
+                "keys": [
+                  "x"
+                ],
+                "text": ""
+              }
+            ],
+            "entries": [
+              {
+                "key": "smith2020deep",
+                "text": "Smith, J. (2020). Deep learning for crops. Journal of Agri, 12, 1–10."
+              }
+            ],
+            "segments": [
+              {
+                "entry": 0,
+                "text": "",
+                "italic": false,
+                "bold": false,
+                "url": null
+              }
+            ],
+            "missing": [
+              "lee2019robot"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-add-rejects-unknown-status",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000206",
+          "method": "bibliography.add",
+          "params": {
+            "identifier": "10.1038/s41586-021-03819-2"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000206",
+          "ok": true,
+          "data": {
+            "status": "saved",
+            "key": "k",
+            "reasonCode": null,
+            "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-inspect-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "method": "bibliography.inspect",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000201",
+          "ok": true,
+          "data": {
+            "libraryPath": "/home/u/thesis/references.json",
+            "libraryStatus": "ok",
+            "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "libraryErrorCode": null,
+            "libraryError": null,
+            "styleId": "bime-appendix17",
+            "styleConfigured": true,
+            "styles": [
+              {
+                "id": "apa",
+                "name": "APA 7th edition",
+                "kind": "author-date",
+                "origin": "csl-styles"
+              },
+              {
+                "id": "bime-appendix17",
+                "name": "NTU BIME Appendix 17 (author-year)",
+                "kind": "author-date",
+                "origin": "custom"
+              }
+            ],
+            "documentFormat": "markdown",
+            "entries": [
+              {
+                "key": "smith2020deep",
+                "authors": [
+                  "Smith"
+                ],
+                "year": "2020",
+                "title": "Deep learning for crops",
+                "doi": "10.1000/abc",
+                "type": "article-journal",
+                "verification": "verified",
+                "citedCount": 1
+              },
+              {
+                "key": "fao2021",
+                "authors": [],
+                "year": null,
+                "title": "",
+                "doi": null,
+                "type": "",
+                "verification": "unverified",
+                "citedCount": 0
+              }
+            ],
+            "uses": [
+              {
+                "key": "smith2020deep",
+                "start": 14,
+                "end": 28,
+                "line": 1,
+                "group": 0,
+                "known": true
+              },
+              {
+                "key": "lee2019robot",
+                "start": 30,
+                "end": 43,
+                "line": 1,
+                "group": 0,
+                "known": false
+              }
+            ],
+            "order": [
+              "smith2020deep",
+              "lee2019robot"
+            ],
+            "missing": [
+              "lee2019robot"
+            ],
+            "uncited": [
+              "fao2021"
+            ],
+            "duplicateDois": [
+              {
+                "doi": "10.1000/abc",
+                "keys": [
+                  "smith2020deep",
+                  "smith2020deepa"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-render-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000203",
+          "method": "bibliography.render",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "styleId": "apa"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000203",
+          "ok": true,
+          "data": {
+            "styleId": "apa",
+            "citations": [
+              {
+                "index": 0,
+                "keys": [
+                  "smith2020deep",
+                  "lee2019robot"
+                ],
+                "start": 14,
+                "end": 43,
+                "text": "(Smith, 2020; lee2019robot?)"
+              },
+              {
+                "index": 1,
+                "keys": [
+                  "x"
+                ],
+                "text": ""
+              }
+            ],
+            "entries": [
+              {
+                "key": "smith2020deep",
+                "text": "Smith, J. (2020). Deep learning for crops. Journal of Agri, 12, 1–10."
+              }
+            ],
+            "segments": [
+              {
+                "entry": 0,
+                "text": "Smith, J. (2020). Deep learning for crops. ",
+                "italic": false,
+                "bold": false,
+                "url": null
+              },
+              {
+                "entry": 0,
+                "text": "Journal of Agri",
+                "italic": true,
+                "bold": false,
+                "url": null
+              },
+              {
+                "entry": 0,
+                "text": "https://doi.org/10.1000/abc",
+                "italic": false,
+                "bold": false,
+                "url": "https://doi.org/10.1000/abc"
+              }
+            ],
+            "missing": [
+              "lee2019robot"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-add-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000206",
+          "method": "bibliography.add",
+          "params": {
+            "identifier": "10.1038/s41586-021-03819-2"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000206",
+          "ok": true,
+          "data": {
+            "status": "added",
+            "key": "jumper2021highly",
+            "reasonCode": null,
+            "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           }
         }
       ]
