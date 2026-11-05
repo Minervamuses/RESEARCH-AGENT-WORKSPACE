@@ -9,8 +9,8 @@
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
-| C4 | In progress | C4-S1–S3 見事件 | — | C4-S4 渲染與匯出模組 |
-| C5 | Not started | — | 依賴 C4 | — |
+| C4 | Complete | C4-S1–S4 見事件 | — | — |
+| C5 | Not started | — | — | C5-S1 |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
 | C8 | Not started | — | 依賴 C7 | — |
@@ -158,6 +158,18 @@
 
 - **判定**：觸發條件是 C4-S2 中 Pandoc 在核心類別有不一致；實際為 0，所以不安裝 citeproc-py，`app/pyproject.toml`、`app/poetry.lock` 未動（`git diff --quiet HEAD` 確認）。產品照 A8 只用 Pandoc。
 - **下一步**：C4-S4。
+
+### C4-S4 渲染與匯出模組（2026-11-05）
+
+- **介面**（`app/skills/citation/csl_render.py`）：`list_styles()`、`style_path(id)`、`find_pandoc()`（先找執行中 Python 旁的 Conda `bin/pandoc`，再找 PATH）、`render(text, library_path, style_id) -> Rendered`（`to_dict()` = `{styleId, citations[] {index, keys, start, end, text, segments}, bibliography[] {key, text, segments}, missing}`）、`export_markdown`、`export_docx(..., resource_dir=None)`、`export_bib`；`RenderError.code` ∈ `pandoc_unavailable`、`pandoc_failed`、`pandoc_timeout`、`style_unknown`、`library_*`。
+- **作法**：Pandoc 子程序、不經 shell、正文走 stdin、逾時 60 s。citeproc 一律 `--sandbox`（R4 實測：`--sandbox` 下仍能讀命令列指定的 `--csl` 與 `--bibliography`，遠端與本地圖片都不讀）。逐筆引用取自 JSON AST 的 Cite 節點，並以 C3-S1 解析器的群組（key 序列比對）對回原文 UTF-16 位置；參考文獻取自 `#refs` 的 `ref-<key>` 條目。書目檔不存在時不傳 `--bibliography`，全部 key 列為 missing。
+- **與擬定介面不同之處（執行者調整，理由）**：
+  1. 預覽字串改為結構化 `segments`（`{text, italic?, bold?, url?}`）加純文字 `text`，不輸出 Markdown：`SafeContent.tsx` 沒有跳脫語法，網址或標題中的 `_`、`*` 會被誤判成斜體；C7 直接用 segments 產生元素。
+  2. `.bib` 用 `-t bibtex` 而不是 `biblatex`：bibtex 格式（`year`、`journal`）BibTeX 與 biblatex 都能讀，biblatex 格式（`date`、`journaltitle`）在傳統 BibTeX 樣式下會缺欄位。
+  3. docx 匯出：citeproc 在 `--sandbox` 下產生 AST，遠端圖片改成連結（永不抓取），再以文件所在資料夾為 `--resource-path` 執行 docx writer，所以本地圖片會嵌入；沒給 `resource_dir` 時 writer 也用 `--sandbox`、不嵌入任何圖片。
+  4. 已排版 Markdown：`-t markdown-citations-smart` 並先拆掉 Div/Span 包裝（否則會留下 `:::`、`{.csl-…}` 或 HTML `<div>`）；Pandoc 會把 `[1]` 跳脫為 `\[1\]`（合法 Markdown）。
+- **檢查**：新 `tests/test_citation_csl_render.py` 13 項通過：APA 與 IEEE 的引用與參考文獻都不同、正文雜湊與書目檔位元組不變；IEEE 參考文獻 = 首次出現順序、APA 依作者排序；引用的 UTF-16 位置對回原文；segments 帶斜體與 DOI 連結；缺 key 回報 missing 不崩潰；書目檔不存在；docx 可用 `zipfile` 開啟、`word/document.xml` 含渲染後引用且無 `@key`；遠端圖片沒送進 writer 當 Image、docx 只嵌入本地圖；Markdown 匯出無 `[@`、無 div；`.bib` 可被 pybtex 解析且含 DOI；Pandoc 不存在 → `pandoc_unavailable`；未知樣式、書目 malformed。範例輸出在 `evidence/C4-S4/`（合成正文）。
+- **下一步**：C5-S1。
 
 ## 最終彙報
 

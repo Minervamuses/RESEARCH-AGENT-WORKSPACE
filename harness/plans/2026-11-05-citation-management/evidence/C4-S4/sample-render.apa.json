@@ -1,0 +1,110 @@
+{
+ "styleId": "apa",
+ "citations": [
+  {
+   "index": 0,
+   "keys": [
+    "zhou2021field"
+   ],
+   "start": 10,
+   "end": 24,
+   "text": "(Zhou Lab, 2021)",
+   "segments": [
+    {
+     "text": "(Zhou Lab, 2021)"
+    }
+   ]
+  },
+  {
+   "index": 1,
+   "keys": [
+    "smith2020deep",
+    "adams2019robot"
+   ],
+   "start": 33,
+   "end": 64,
+   "text": "(Adams & Chen, 2019, p. 3; Smith, 2020)",
+   "segments": [
+    {
+     "text": "(Adams & Chen, 2019, p. 3; Smith, 2020)"
+    }
+   ]
+  },
+  {
+   "index": 2,
+   "keys": [
+    "smith2020deep"
+   ],
+   "start": 80,
+   "end": 94,
+   "text": "Smith (2020)",
+   "segments": [
+    {
+     "text": "Smith (2020)"
+    }
+   ]
+  }
+ ],
+ "bibliography": [
+  {
+   "key": "adams2019robot",
+   "text": "Adams, M., & Chen, W. (2019). Robot harvesting. Proc. ICRA.",
+   "segments": [
+    {
+     "text": "Adams, M., & Chen, W. (2019). Robot harvesting. "
+    },
+    {
+     "text": "Proc. ICRA",
+     "italic": true
+    },
+    {
+     "text": "."
+    }
+   ]
+  },
+  {
+   "key": "smith2020deep",
+   "text": "Smith, J. (2020). Deep learning for crops. Journal of Agri, 12, 1–10. https://doi.org/10.1000/abc",
+   "segments": [
+    {
+     "text": "Smith, J. (2020). Deep learning for crops. "
+    },
+    {
+     "text": "Journal of Agri",
+     "italic": true
+    },
+    {
+     "text": ", "
+    },
+    {
+     "text": "12",
+     "italic": true
+    },
+    {
+     "text": ", 1–10. "
+    },
+    {
+     "text": "https://doi.org/10.1000/abc",
+     "url": "https://doi.org/10.1000/abc"
+    }
+   ]
+  },
+  {
+   "key": "zhou2021field",
+   "text": "Zhou Lab. (2021). Field notes. Zhou Lab.",
+   "segments": [
+    {
+     "text": "Zhou Lab. (2021). "
+    },
+    {
+     "text": "Field notes",
+     "italic": true
+    },
+    {
+     "text": ". Zhou Lab."
+    }
+   ]
+  }
+ ],
+ "missing": []
+}
