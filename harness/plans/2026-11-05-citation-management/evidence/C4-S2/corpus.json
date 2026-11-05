@@ -1,0 +1,943 @@
+{
+ "cases": [
+  {
+   "id": "authors-1",
+   "category": "names",
+   "items": [
+    {
+     "id": "a1",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "a1"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "authors-2",
+   "category": "names",
+   "items": [
+    {
+     "id": "a2",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      },
+      {
+       "family": "Lee",
+       "given": "Min"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "a2"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "authors-3",
+   "category": "names",
+   "items": [
+    {
+     "id": "a3",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      },
+      {
+       "family": "Lee",
+       "given": "Min"
+      },
+      {
+       "family": "Chen",
+       "given": "Wei"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "a3"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "authors-8",
+   "category": "names",
+   "items": [
+    {
+     "id": "a8",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      },
+      {
+       "family": "Lee",
+       "given": "Min"
+      },
+      {
+       "family": "Chen",
+       "given": "Wei"
+      },
+      {
+       "family": "Garcia",
+       "given": "Ana"
+      },
+      {
+       "family": "Kumar",
+       "given": "Ravi"
+      },
+      {
+       "family": "Müller",
+       "given": "Hans"
+      },
+      {
+       "family": "Okafor",
+       "given": "Chidi"
+      },
+      {
+       "family": "Tanaka",
+       "given": "Yuki"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "a8"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "authors-21",
+   "category": "names",
+   "items": [
+    {
+     "id": "a21",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      },
+      {
+       "family": "Lee",
+       "given": "Min"
+      },
+      {
+       "family": "Chen",
+       "given": "Wei"
+      },
+      {
+       "family": "Garcia",
+       "given": "Ana"
+      },
+      {
+       "family": "Kumar",
+       "given": "Ravi"
+      },
+      {
+       "family": "Müller",
+       "given": "Hans"
+      },
+      {
+       "family": "Okafor",
+       "given": "Chidi"
+      },
+      {
+       "family": "Tanaka",
+       "given": "Yuki"
+      },
+      {
+       "family": "Novak",
+       "given": "Petr"
+      },
+      {
+       "family": "Silva",
+       "given": "Rita"
+      },
+      {
+       "family": "Brown",
+       "given": "Tom"
+      },
+      {
+       "family": "Rossi",
+       "given": "Luca"
+      },
+      {
+       "family": "Kim",
+       "given": "Soo"
+      },
+      {
+       "family": "Dubois",
+       "given": "Marie"
+      },
+      {
+       "family": "Ivanov",
+       "given": "Oleg"
+      },
+      {
+       "family": "Nguyen",
+       "given": "Lan"
+      },
+      {
+       "family": "Ali",
+       "given": "Omar"
+      },
+      {
+       "family": "Jensen",
+       "given": "Lars"
+      },
+      {
+       "family": "Costa",
+       "given": "Joao"
+      },
+      {
+       "family": "Weber",
+       "given": "Anna"
+      },
+      {
+       "family": "Sato",
+       "given": "Ken"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "a21"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "same-author-year",
+   "category": "disambiguation",
+   "items": [
+    {
+     "id": "s1",
+     "type": "article-journal",
+     "title": "Alpha results",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    },
+    {
+     "id": "s2",
+     "type": "article-journal",
+     "title": "Beta results",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "s1"
+     }
+    ],
+    [
+     {
+      "id": "s2"
+     }
+    ],
+    [
+     {
+      "id": "s1"
+     },
+     {
+      "id": "s2"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "same-surname",
+   "category": "disambiguation",
+   "items": [
+    {
+     "id": "g1",
+     "type": "article-journal",
+     "title": "Alpha",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    },
+    {
+     "id": "g2",
+     "type": "article-journal",
+     "title": "Beta",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Adam"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2020
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "g1"
+     }
+    ],
+    [
+     {
+      "id": "g2"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "institution",
+   "category": "names",
+   "items": [
+    {
+     "id": "org",
+     "type": "report",
+     "title": "Food outlook 2021",
+     "author": [
+      {
+       "literal": "Food and Agriculture Organization"
+      }
+     ],
+     "issued": {
+      "date-parts": [
+       [
+        2021
+       ]
+      ]
+     },
+     "publisher": "FAO",
+     "publisher-place": "Rome"
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "org"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "particle",
+   "category": "names",
+   "items": [
+    {
+     "id": "vdb",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Berg",
+       "given": "Jan",
+       "non-dropping-particle": "van der"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2019
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "vdb"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "no-year",
+   "category": "other",
+   "items": [
+    {
+     "id": "ny",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110"
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "ny"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "locator",
+   "category": "locator",
+   "items": [
+    {
+     "id": "loc",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      },
+      {
+       "family": "Lee",
+       "given": "Min"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2018
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "loc",
+      "locator": "33",
+      "label": "page"
+     }
+    ],
+    [
+     {
+      "id": "loc",
+      "locator": "4",
+      "label": "chapter"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "suppress-author",
+   "category": "other",
+   "items": [
+    {
+     "id": "sa",
+     "type": "article-journal",
+     "title": "Deep learning for crop monitoring",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2017
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "sa",
+      "suppress-author": true
+     }
+    ]
+   ]
+  },
+  {
+   "id": "multi-cite",
+   "category": "ordering",
+   "items": [
+    {
+     "id": "m1",
+     "type": "article-journal",
+     "title": "First",
+     "author": [
+      {
+       "family": "Zhou",
+       "given": "Li"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2015
+       ]
+      ]
+     }
+    },
+    {
+     "id": "m2",
+     "type": "article-journal",
+     "title": "Second",
+     "author": [
+      {
+       "family": "Adams",
+       "given": "Bo"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2019
+       ]
+      ]
+     }
+    },
+    {
+     "id": "m3",
+     "type": "article-journal",
+     "title": "Third",
+     "author": [
+      {
+       "family": "Moore",
+       "given": "Cy"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2011
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "m1"
+     },
+     {
+      "id": "m2"
+     },
+     {
+      "id": "m3"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "numeric-order-range",
+   "category": "ordering",
+   "items": [
+    {
+     "id": "n1",
+     "type": "article-journal",
+     "title": "Paper 1",
+     "author": [
+      {
+       "family": "Lee",
+       "given": "Min"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2011
+       ]
+      ]
+     }
+    },
+    {
+     "id": "n2",
+     "type": "article-journal",
+     "title": "Paper 2",
+     "author": [
+      {
+       "family": "Chen",
+       "given": "Wei"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2012
+       ]
+      ]
+     }
+    },
+    {
+     "id": "n3",
+     "type": "article-journal",
+     "title": "Paper 3",
+     "author": [
+      {
+       "family": "Garcia",
+       "given": "Ana"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2013
+       ]
+      ]
+     }
+    },
+    {
+     "id": "n4",
+     "type": "article-journal",
+     "title": "Paper 4",
+     "author": [
+      {
+       "family": "Kumar",
+       "given": "Ravi"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2014
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "n3"
+     }
+    ],
+    [
+     {
+      "id": "n1"
+     }
+    ],
+    [
+     {
+      "id": "n1"
+     },
+     {
+      "id": "n2"
+     },
+     {
+      "id": "n3"
+     },
+     {
+      "id": "n4"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "title-case",
+   "category": "case",
+   "items": [
+    {
+     "id": "tc",
+     "type": "article-journal",
+     "title": "deep learning for the analysis of RGB images: a review of methods",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      }
+     ],
+     "container-title": "Computers and Electronics in Agriculture",
+     "volume": "12",
+     "issue": "3",
+     "page": "101-110",
+     "issued": {
+      "date-parts": [
+       [
+        2022
+       ]
+      ]
+     }
+    },
+    {
+     "id": "tb",
+     "type": "book",
+     "title": "the art of computer programming",
+     "author": [
+      {
+       "family": "Knuth",
+       "given": "Donald"
+      }
+     ],
+     "issued": {
+      "date-parts": [
+       [
+        1997
+       ]
+      ]
+     },
+     "publisher": "Addison-Wesley"
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "tc"
+     },
+     {
+      "id": "tb"
+     }
+    ]
+   ]
+  },
+  {
+   "id": "conference-doi-url",
+   "category": "other",
+   "items": [
+    {
+     "id": "conf",
+     "type": "paper-conference",
+     "title": "Robot harvesting in orchards",
+     "author": [
+      {
+       "family": "Smith",
+       "given": "Jane"
+      },
+      {
+       "family": "Lee",
+       "given": "Min"
+      }
+     ],
+     "issued": {
+      "date-parts": [
+       [
+        2023,
+        5
+       ]
+      ]
+     },
+     "container-title": "Proceedings of the IEEE International Conference on Robotics and Automation",
+     "page": "5-12",
+     "DOI": "10.1109/icra.2023.1",
+     "publisher": "IEEE"
+    },
+    {
+     "id": "web",
+     "type": "webpage",
+     "title": "FAOSTAT database",
+     "author": [
+      {
+       "literal": "FAO"
+      }
+     ],
+     "issued": {
+      "date-parts": [
+       [
+        2024
+       ]
+      ]
+     },
+     "URL": "https://www.fao.org/faostat/",
+     "accessed": {
+      "date-parts": [
+       [
+        2025,
+        1,
+        15
+       ]
+      ]
+     }
+    }
+   ],
+   "clusters": [
+    [
+     {
+      "id": "conf"
+     },
+     {
+      "id": "web"
+     }
+    ]
+   ]
+  }
+ ]
+}

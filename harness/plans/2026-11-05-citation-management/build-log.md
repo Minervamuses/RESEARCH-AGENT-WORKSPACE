@@ -9,7 +9,7 @@
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
-| C4 | In progress | C4-S1 見事件 | — | C4-S2 比較測試 |
+| C4 | In progress | C4-S1、C4-S2 見事件 | — | C4-S3（條件）|
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
@@ -145,6 +145,14 @@
 - **檔案**：`app/skills/citation/styles/{apa,modern-language-association,ieee,chicago-author-date}.csl`；清單 `styles.json`（`id`、`name`、`file`、`kind`、`origin`，以及來源 repository、commit、日期、授權）。`kind` 取自各檔的 `citation-format`：APA、Chicago 為 author-date，MLA 為 author，IEEE 為 numeric。
 - **檢查**：以 C1-S2 的三筆小檔，四個樣式各自 `pandoc --citeproc` 成功（exit 0），四份輸出的雜湊互不相同（`evidence/C4-S1/*.txt`）。`poetry build -f wheel -o <暫存目錄>` 產生的 wheel 含四個 `.csl` 與 `styles.json`（`evidence/C4-S1/wheel-contents.txt`）；wheel 建在暫存目錄後刪除，`app/dist/` 未動（該目錄本來就被 `.gitignore` 忽略）。
 - **下一步**：C4-S2。
+
+### C4-S2 Pandoc 與 citeproc-js 比較（2026-11-05）
+
+- **基準安裝**（只在 `$TMPDIR/cpjs`，不進 repo、不進 desktop 的 `package.json`）：npm `citeproc` 2.4.63（`--save-exact`；`package.json`、`package-lock.json` 複製到 evidence，node_modules 不提交）。沙箱內 `~/.npm` 唯讀（EROFS），以 `npm_config_cache=$TMPDIR/npm-cache` 解決（環境問題）。en-US locale 取自 `citation-style-language/locales` commit `8bef426f89f38c0789223c50e53ec2197bc50bb3`。
+- **語料**（`corpus.json`，16 案例）：1、2、3、8、21 位作者；同作者同年；同姓不同名；機構作者；`van der` 前綴；缺年份；頁碼與章節 locator；省略作者；一次多篇；數字制首次出現順序與多篇；標題大小寫；會議論文 DOI 與網頁 URL/accessed。
+- **腳本**：`citeproc_js.js`（`rebuildProcessorState` 取最終引用字串、`makeBibliography`）、`pandoc_run.py`（每個 cluster 一段，`--citeproc -t json` 取 Cite 節點與 `#refs`，再轉 plain）、`compare.py`（NFC 與空白正規化後逐字串比較、分類）。輸出 `out-citeproc-js.json`、`out-pandoc.json`、`comparison.json`、`summary.md`。
+- **結果**：64 組（4 樣式 × 16 案例）中 63 組完全一致；**Pandoc 在核心類別（作者清單/et al.、消歧、排序/編號、locator）的不一致數 = 0**。唯一差異：MLA 的 `[-@key]` 無頁碼時，Pandoc 輸出空字串、citeproc-js 輸出 `[NO_PRINTED_FORM]`（類別「其他」）。另記：此版 IEEE 樣式的多篇引用兩邊都是 `[1], [2], [3], [4]`（不合併成範圍），計劃寫的「[1]–[3]」與官方樣式不同，以樣式為準；APA 不會把小寫標題改成句首大寫（CSL 只能轉大寫），兩邊一致。
+- **下一步**：C4-S3 的觸發條件（核心類別不一致）未成立。
 
 ## 最終彙報
 

@@ -1,0 +1,8 @@
+{
+  "name": "citeproc-compare",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "citeproc": "2.4.63"
+  }
+}

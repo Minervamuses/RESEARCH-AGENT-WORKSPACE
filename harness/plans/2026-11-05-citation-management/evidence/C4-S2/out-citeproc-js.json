@@ -1,0 +1,582 @@
+{
+ "apa": {
+  "authors-1": {
+   "citations": [
+    "(Smith, 2020)"
+   ],
+   "bibliography": [
+    "Smith, J. (2020). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "authors-2": {
+   "citations": [
+    "(Smith & Lee, 2020)"
+   ],
+   "bibliography": [
+    "Smith, J., & Lee, M. (2020). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "authors-3": {
+   "citations": [
+    "(Smith et al., 2020)"
+   ],
+   "bibliography": [
+    "Smith, J., Lee, M., & Chen, W. (2020). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "authors-8": {
+   "citations": [
+    "(Smith et al., 2020)"
+   ],
+   "bibliography": [
+    "Smith, J., Lee, M., Chen, W., Garcia, A., Kumar, R., Müller, H., Okafor, C., & Tanaka, Y. (2020). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "authors-21": {
+   "citations": [
+    "(Smith et al., 2020)"
+   ],
+   "bibliography": [
+    "Smith, J., Lee, M., Chen, W., Garcia, A., Kumar, R., Müller, H., Okafor, C., Tanaka, Y., Novak, P., Silva, R., Brown, T., Rossi, L., Kim, S., Dubois, M., Ivanov, O., Nguyen, L., Ali, O., Jensen, L., Costa, J., … Sato, K. (2020). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "same-author-year": {
+   "citations": [
+    "(Smith, 2020a)",
+    "(Smith, 2020b)",
+    "(Smith, 2020a, 2020b)"
+   ],
+   "bibliography": [
+    "Smith, J. (2020a). Alpha results. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Smith, J. (2020b). Beta results. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "same-surname": {
+   "citations": [
+    "(J. Smith, 2020)",
+    "(A. Smith, 2020)"
+   ],
+   "bibliography": [
+    "Smith, A. (2020). Beta. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Smith, J. (2020). Alpha. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "institution": {
+   "citations": [
+    "(Food and Agriculture Organization, 2021)"
+   ],
+   "bibliography": [
+    "Food and Agriculture Organization. (2021). Food outlook 2021. FAO."
+   ]
+  },
+  "particle": {
+   "citations": [
+    "(van der Berg, 2019)"
+   ],
+   "bibliography": [
+    "van der Berg, J. (2019). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "no-year": {
+   "citations": [
+    "(Smith, n.d.)"
+   ],
+   "bibliography": [
+    "Smith, J. (n.d.). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "locator": {
+   "citations": [
+    "(Smith & Lee, 2018, p. 33)",
+    "(Smith & Lee, 2018, Chapter 4)"
+   ],
+   "bibliography": [
+    "Smith, J., & Lee, M. (2018). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "suppress-author": {
+   "citations": [
+    "(2017)"
+   ],
+   "bibliography": [
+    "Smith, J. (2017). Deep learning for crop monitoring. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "multi-cite": {
+   "citations": [
+    "(Adams, 2019; Moore, 2011; Zhou, 2015)"
+   ],
+   "bibliography": [
+    "Adams, B. (2019). Second. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Moore, C. (2011). Third. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Zhou, L. (2015). First. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "numeric-order-range": {
+   "citations": [
+    "(Garcia, 2013)",
+    "(Lee, 2011)",
+    "(Chen, 2012; Garcia, 2013; Kumar, 2014; Lee, 2011)"
+   ],
+   "bibliography": [
+    "Chen, W. (2012). Paper 2. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Garcia, A. (2013). Paper 3. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Kumar, R. (2014). Paper 4. Computers and Electronics in Agriculture, 12(3), 101–110.",
+    "Lee, M. (2011). Paper 1. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "title-case": {
+   "citations": [
+    "(Knuth, 1997; Smith, 2022)"
+   ],
+   "bibliography": [
+    "Knuth, D. (1997). the art of computer programming. Addison-Wesley.",
+    "Smith, J. (2022). deep learning for the analysis of RGB images: a review of methods. Computers and Electronics in Agriculture, 12(3), 101–110."
+   ]
+  },
+  "conference-doi-url": {
+   "citations": [
+    "(FAO, 2024; Smith & Lee, 2023)"
+   ],
+   "bibliography": [
+    "FAO. (2024). FAOSTAT database. https://www.fao.org/faostat/",
+    "Smith, J., & Lee, M. (2023). Robot harvesting in orchards. Proceedings of the IEEE International Conference on Robotics and Automation, 5–12. https://doi.org/10.1109/icra.2023.1"
+   ]
+  }
+ },
+ "modern-language-association": {
+  "authors-1": {
+   "citations": [
+    "(Smith)"
+   ],
+   "bibliography": [
+    "Smith, Jane. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "authors-2": {
+   "citations": [
+    "(Smith and Lee)"
+   ],
+   "bibliography": [
+    "Smith, Jane, and Min Lee. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "authors-3": {
+   "citations": [
+    "(Smith et al.)"
+   ],
+   "bibliography": [
+    "Smith, Jane, et al. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "authors-8": {
+   "citations": [
+    "(Smith et al.)"
+   ],
+   "bibliography": [
+    "Smith, Jane, et al. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "authors-21": {
+   "citations": [
+    "(Smith et al.)"
+   ],
+   "bibliography": [
+    "Smith, Jane, et al. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "same-author-year": {
+   "citations": [
+    "(Smith, “Alpha Results”)",
+    "(Smith, “Beta Results”)",
+    "(Smith, “Alpha Results”; Smith, “Beta Results”)"
+   ],
+   "bibliography": [
+    "Smith, Jane. “Alpha Results.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10.",
+    "———. “Beta Results.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "same-surname": {
+   "citations": [
+    "(J. Smith)",
+    "(A. Smith)"
+   ],
+   "bibliography": [
+    "Smith, Adam. “Beta.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10.",
+    "Smith, Jane. “Alpha.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2020, pp. 101–10."
+   ]
+  },
+  "institution": {
+   "citations": [
+    "(Food and Agriculture Organization)"
+   ],
+   "bibliography": [
+    "Food and Agriculture Organization. Food Outlook 2021. FAO, 2021."
+   ]
+  },
+  "particle": {
+   "citations": [
+    "(van der Berg)"
+   ],
+   "bibliography": [
+    "van der Berg, Jan. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2019, pp. 101–10."
+   ]
+  },
+  "no-year": {
+   "citations": [
+    "(Smith)"
+   ],
+   "bibliography": [
+    "Smith, Jane. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–10."
+   ]
+  },
+  "locator": {
+   "citations": [
+    "(Smith and Lee 33)",
+    "(Smith and Lee, ch. 4)"
+   ],
+   "bibliography": [
+    "Smith, Jane, and Min Lee. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2018, pp. 101–10."
+   ]
+  },
+  "suppress-author": {
+   "citations": [
+    "[NO_PRINTED_FORM]"
+   ],
+   "bibliography": [
+    "Smith, Jane. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2017, pp. 101–10."
+   ]
+  },
+  "multi-cite": {
+   "citations": [
+    "(Zhou; Adams; Moore)"
+   ],
+   "bibliography": [
+    "Adams, Bo. “Second.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2019, pp. 101–10.",
+    "Moore, Cy. “Third.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2011, pp. 101–10.",
+    "Zhou, Li. “First.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2015, pp. 101–10."
+   ]
+  },
+  "numeric-order-range": {
+   "citations": [
+    "(Garcia)",
+    "(Lee)",
+    "(Lee; Chen; Garcia; Kumar)"
+   ],
+   "bibliography": [
+    "Chen, Wei. “Paper 2.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2012, pp. 101–10.",
+    "Garcia, Ana. “Paper 3.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2013, pp. 101–10.",
+    "Kumar, Ravi. “Paper 4.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2014, pp. 101–10.",
+    "Lee, Min. “Paper 1.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2011, pp. 101–10."
+   ]
+  },
+  "title-case": {
+   "citations": [
+    "(Smith; Knuth)"
+   ],
+   "bibliography": [
+    "Knuth, Donald. The Art of Computer Programming. Addison-Wesley, 1997.",
+    "Smith, Jane. “Deep Learning for the Analysis of RGB Images: A Review of Methods.” Computers and Electronics in Agriculture, vol. 12, no. 3, 2022, pp. 101–10."
+   ]
+  },
+  "conference-doi-url": {
+   "citations": [
+    "(Smith and Lee; FAO)"
+   ],
+   "bibliography": [
+    "FAO. FAOSTAT Database. 2024, https://www.fao.org/faostat/.",
+    "Smith, Jane, and Min Lee. “Robot Harvesting in Orchards.” Proceedings of the IEEE International Conference on Robotics and Automation, 2023, pp. 5–12, https://doi.org/10.1109/icra.2023.1."
+   ]
+  }
+ },
+ "ieee": {
+  "authors-1": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "authors-2": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith and M. Lee, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "authors-3": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, M. Lee, and W. Chen, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "authors-8": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith et al., “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "authors-21": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith et al., “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "same-author-year": {
+   "citations": [
+    "[1]",
+    "[2]",
+    "[1], [2]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, “Alpha results,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020.",
+    "[2] J. Smith, “Beta results,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "same-surname": {
+   "citations": [
+    "[1]",
+    "[2]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, “Alpha,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020.",
+    "[2] A. Smith, “Beta,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2020."
+   ]
+  },
+  "institution": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] Food and Agriculture Organization, “Food outlook 2021,” FAO, Rome, 2021."
+   ]
+  },
+  "particle": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. van der Berg, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2019."
+   ]
+  },
+  "no-year": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110."
+   ]
+  },
+  "locator": {
+   "citations": [
+    "[1, p. 33]",
+    "[1, Ch. 4]"
+   ],
+   "bibliography": [
+    "[1] J. Smith and M. Lee, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2018."
+   ]
+  },
+  "suppress-author": {
+   "citations": [
+    "[1]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, “Deep learning for crop monitoring,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2017."
+   ]
+  },
+  "multi-cite": {
+   "citations": [
+    "[1], [2], [3]"
+   ],
+   "bibliography": [
+    "[1] L. Zhou, “First,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2015.",
+    "[2] B. Adams, “Second,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2019.",
+    "[3] C. Moore, “Third,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2011."
+   ]
+  },
+  "numeric-order-range": {
+   "citations": [
+    "[1]",
+    "[2]",
+    "[1], [2], [3], [4]"
+   ],
+   "bibliography": [
+    "[1] A. Garcia, “Paper 3,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2013.",
+    "[2] M. Lee, “Paper 1,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2011.",
+    "[3] W. Chen, “Paper 2,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2012.",
+    "[4] R. Kumar, “Paper 4,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2014."
+   ]
+  },
+  "title-case": {
+   "citations": [
+    "[1], [2]"
+   ],
+   "bibliography": [
+    "[1] J. Smith, “deep learning for the analysis of RGB images: a review of methods,” Computers and Electronics in Agriculture, vol. 12, no. 3, pp. 101–110, 2022.",
+    "[2] D. Knuth, the art of computer programming. Addison-Wesley, 1997."
+   ]
+  },
+  "conference-doi-url": {
+   "citations": [
+    "[1], [2]"
+   ],
+   "bibliography": [
+    "[1] J. Smith and M. Lee, “Robot harvesting in orchards,” in Proceedings of the IEEE International Conference on Robotics and Automation, IEEE, May 2023, pp. 5–12. doi: 10.1109/icra.2023.1.",
+    "[2] FAO, “FAOSTAT database.” Accessed: Jan. 15, 2025. [Online]. Available: https://www.fao.org/faostat/"
+   ]
+  }
+ },
+ "chicago-author-date": {
+  "authors-1": {
+   "citations": [
+    "(Smith 2020)"
+   ],
+   "bibliography": [
+    "Smith, Jane. 2020. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "authors-2": {
+   "citations": [
+    "(Smith and Lee 2020)"
+   ],
+   "bibliography": [
+    "Smith, Jane, and Min Lee. 2020. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "authors-3": {
+   "citations": [
+    "(Smith et al. 2020)"
+   ],
+   "bibliography": [
+    "Smith, Jane, Min Lee, and Wei Chen. 2020. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "authors-8": {
+   "citations": [
+    "(Smith et al. 2020)"
+   ],
+   "bibliography": [
+    "Smith, Jane, Min Lee, Wei Chen, et al. 2020. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "authors-21": {
+   "citations": [
+    "(Smith et al. 2020)"
+   ],
+   "bibliography": [
+    "Smith, Jane, Min Lee, Wei Chen, et al. 2020. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "same-author-year": {
+   "citations": [
+    "(Smith 2020a)",
+    "(Smith 2020b)",
+    "(Smith 2020a, 2020b)"
+   ],
+   "bibliography": [
+    "Smith, Jane. 2020a. “Alpha Results.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Smith, Jane. 2020b. “Beta Results.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "same-surname": {
+   "citations": [
+    "(J. Smith 2020)",
+    "(A. Smith 2020)"
+   ],
+   "bibliography": [
+    "Smith, Adam. 2020. “Beta.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Smith, Jane. 2020. “Alpha.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "institution": {
+   "citations": [
+    "(Food and Agriculture Organization 2021)"
+   ],
+   "bibliography": [
+    "Food and Agriculture Organization. 2021. Food Outlook 2021. FAO."
+   ]
+  },
+  "particle": {
+   "citations": [
+    "(van der Berg 2019)"
+   ],
+   "bibliography": [
+    "Berg, Jan van der. 2019. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "no-year": {
+   "citations": [
+    "(Smith, n.d.)"
+   ],
+   "bibliography": [
+    "Smith, Jane. n.d. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "locator": {
+   "citations": [
+    "(Smith and Lee 2018, 33)",
+    "(Smith and Lee 2018, chap. 4)"
+   ],
+   "bibliography": [
+    "Smith, Jane, and Min Lee. 2018. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "suppress-author": {
+   "citations": [
+    "(2017)"
+   ],
+   "bibliography": [
+    "Smith, Jane. 2017. “Deep Learning for Crop Monitoring.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "multi-cite": {
+   "citations": [
+    "(Zhou 2015; Adams 2019; Moore 2011)"
+   ],
+   "bibliography": [
+    "Adams, Bo. 2019. “Second.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Moore, Cy. 2011. “Third.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Zhou, Li. 2015. “First.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "numeric-order-range": {
+   "citations": [
+    "(Garcia 2013)",
+    "(Lee 2011)",
+    "(Lee 2011; Chen 2012; Garcia 2013; Kumar 2014)"
+   ],
+   "bibliography": [
+    "Chen, Wei. 2012. “Paper 2.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Garcia, Ana. 2013. “Paper 3.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Kumar, Ravi. 2014. “Paper 4.” Computers and Electronics in Agriculture 12 (3): 101–10.",
+    "Lee, Min. 2011. “Paper 1.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "title-case": {
+   "citations": [
+    "(Smith 2022; Knuth 1997)"
+   ],
+   "bibliography": [
+    "Knuth, Donald. 1997. The Art of Computer Programming. Addison-Wesley.",
+    "Smith, Jane. 2022. “Deep Learning for the Analysis of RGB Images: A Review of Methods.” Computers and Electronics in Agriculture 12 (3): 101–10."
+   ]
+  },
+  "conference-doi-url": {
+   "citations": [
+    "(Smith and Lee 2023; FAO 2024)"
+   ],
+   "bibliography": [
+    "FAO. 2024. “FAOSTAT Database.” https://www.fao.org/faostat/.",
+    "Smith, Jane, and Min Lee. 2023. “Robot Harvesting in Orchards.” Proceedings of the IEEE International Conference on Robotics and Automation, May, 5–12. https://doi.org/10.1109/icra.2023.1."
+   ]
+  }
+ }
+}
