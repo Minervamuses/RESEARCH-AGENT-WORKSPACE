@@ -1,0 +1,14 @@
+{
+ "source": {
+  "repository": "https://github.com/citation-style-language/styles",
+  "commit": "205bf7b617f9f8d48e4e0c2998b855eeae18fd65",
+  "downloaded": "2026-11-05",
+  "license": "CC BY-SA 3.0 (each file keeps its own <rights> and author header)"
+ },
+ "styles": [
+  {"id": "apa", "name": "APA 7th edition", "file": "apa.csl", "kind": "author-date", "origin": "csl-styles"},
+  {"id": "modern-language-association", "name": "MLA 9th edition", "file": "modern-language-association.csl", "kind": "author", "origin": "csl-styles"},
+  {"id": "ieee", "name": "IEEE", "file": "ieee.csl", "kind": "numeric", "origin": "csl-styles"},
+  {"id": "chicago-author-date", "name": "Chicago author-date (18th edition)", "file": "chicago-author-date.csl", "kind": "author-date", "origin": "csl-styles"}
+ ]
+}

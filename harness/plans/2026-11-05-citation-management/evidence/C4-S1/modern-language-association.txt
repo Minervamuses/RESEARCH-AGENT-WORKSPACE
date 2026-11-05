@@ -1,0 +1,10 @@
+Crops matter (Smith; Lee and Chen). See also FAO.
+
+References
+
+FAO. Food Outlook. FAO, 2021.
+
+Lee, Min, and Wei Chen. “Robot Harvesting.” Proc. ICRA, 2019.
+
+Smith, Jane. “Deep Learning for Crops.” Journal of Agri, vol. 12, 2020,
+pp. 1–10, https://doi.org/10.1000/abc.

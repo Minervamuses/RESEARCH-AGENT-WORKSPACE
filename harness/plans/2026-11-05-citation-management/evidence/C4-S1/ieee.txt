@@ -1,0 +1,10 @@
+Crops matter [1], [2]. See also [3].
+
+References
+
+[1] J. Smith, “Deep learning for crops,” Journal of Agri, vol. 12, pp.
+1–10, 2020, doi: 10.1000/abc.
+
+[2] M. Lee and W. Chen, “Robot harvesting,” in Proc. ICRA, 2019.
+
+[3] FAO, “Food outlook,” FAO, 2021.

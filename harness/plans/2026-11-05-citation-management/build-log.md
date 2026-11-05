@@ -9,7 +9,7 @@
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete | C3-S1–S3 見事件 | — | — |
-| C4 | Not started | — | — | C4-S1 |
+| C4 | In progress | C4-S1 見事件 | — | C4-S2 比較測試 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
@@ -138,6 +138,13 @@
 - **檢查**：新 `tests/test_desktop_citation_keys.py` 8 項通過：文件回合呼叫 `bibliography_lookup` 成功且沒有 `approval.required`；引入未知 key → failed、`unknownKeys`、沒有 `document.proposed`/`approval.required`、檔案不變；已知 key → 正常候選並存檔；原範圍已有的未知 key 保留不擋；書目壞掉時無 key 的修改照常、新增 key 的修改被擋；提示文字；不在 proposer 清單；citation 回合有效、CLI session 沒有此工具。既有 `test_desktop_document_service.py`、`test_desktop_documents.py`、`test_inline_skills.py`、`test_citation_skill_activation.py` 通過；完整 pytest（沙箱外）1619 passed，exit 0。
 - **交付**：工具描述見 `service.py` 的 `_bibliography_tool`。
 - **下一步**：C4-S1。
+
+### C4-S1 內建樣式就位（2026-11-05）
+
+- **來源**：CSL 官方樣式庫 `citation-style-language/styles`，commit `205bf7b617f9f8d48e4e0c2998b855eeae18fd65`（2026-11-04），以該 SHA 的 raw URL 下載，與當時 master 逐位元組相同；下載日 2026-11-05。四個檔案都是 independent style、`<rights>` 為 CC BY-SA 3.0，檔頭作者資訊原樣保留。
+- **檔案**：`app/skills/citation/styles/{apa,modern-language-association,ieee,chicago-author-date}.csl`；清單 `styles.json`（`id`、`name`、`file`、`kind`、`origin`，以及來源 repository、commit、日期、授權）。`kind` 取自各檔的 `citation-format`：APA、Chicago 為 author-date，MLA 為 author，IEEE 為 numeric。
+- **檢查**：以 C1-S2 的三筆小檔，四個樣式各自 `pandoc --citeproc` 成功（exit 0），四份輸出的雜湊互不相同（`evidence/C4-S1/*.txt`）。`poetry build -f wheel -o <暫存目錄>` 產生的 wheel 含四個 `.csl` 與 `styles.json`（`evidence/C4-S1/wheel-contents.txt`）；wheel 建在暫存目錄後刪除，`app/dist/` 未動（該目錄本來就被 `.gitignore` 忽略）。
+- **下一步**：C4-S2。
 
 ## 最終彙報
 
