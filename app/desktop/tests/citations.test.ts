@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  addErrorOutcome,
+  addOutcome,
   buildPanelModel,
+  citationFormatForPath,
+  citationInsertion,
+  completionCandidates,
+  completionPrefix,
   describeEntry,
+  insertIntoSnapshot,
+  removeConfirmation,
+  removeErrorMessage,
   selectUse,
   type BibliographyInspectDto,
 } from "../src/citations.ts";
@@ -94,4 +103,62 @@ test("stale or invalid positions are not selected", () => {
   assert.equal(selectUse({ editorRevision: 5, sourceText: TEXT + "x" }, TEXT, use), null);
   assert.equal(selectUse({ editorRevision: 5, sourceText: TEXT }, TEXT, { start: 3, end: 3, line: 1 }), null);
   assert.equal(selectUse({ editorRevision: 5, sourceText: TEXT }, TEXT, { start: 0, end: TEXT.length + 1, line: 1 }), null);
+});
+
+
+const clientError = (code: string, message = "backend message") => ({ uiError: { code, message } });
+
+test("removal asks for confirmation only while the entry is cited", () => {
+  assert.equal(removeConfirmation("a2019", 0), null);
+  const once = removeConfirmation("a2019", 1);
+  assert.match(once ?? "", /cited once in this document/);
+  assert.match(once ?? "", /Other documents were not checked/);
+  assert.match(removeConfirmation("b2020", 3) ?? "", /cited 3 times/);
+});
+
+test("a stale fingerprint asks for a refresh", () => {
+  assert.match(removeErrorMessage(clientError("BIBLIOGRAPHY_CONFLICT")), /changed since the last check/);
+  assert.equal(removeErrorMessage(clientError("BIBLIOGRAPHY_FAILED", "cannot write")), "cannot write");
+});
+
+test("add results map to added, existing, failed and denied", () => {
+  assert.deepEqual(addOutcome({ status: "added", key: "k2020x", reasonCode: null, libraryFingerprint: "a".repeat(64) }),
+    { kind: "added", key: "k2020x", message: "Verified and added as k2020x." });
+  assert.equal(addOutcome({ status: "existing", key: "k2020x", reasonCode: null, libraryFingerprint: null }).kind, "existing");
+  assert.deepEqual(addOutcome({ status: "failed", key: null, reasonCode: "exact_doi_not_found", libraryFingerprint: null }),
+    { kind: "failed", key: null, message: "Not added (exact_doi_not_found)." });
+  assert.equal(addErrorOutcome(clientError("APPROVAL_DENIED")).kind, "denied");
+  assert.deepEqual(addErrorOutcome(clientError("PROTOCOL_INVALID", "Enter a DOI or an arXiv ID.")),
+    { kind: "failed", key: null, message: "Enter a DOI or an arXiv ID." });
+});
+
+test("insertion text follows the document type", () => {
+  assert.equal(citationFormatForPath("/p/thesis.md"), "markdown");
+  assert.equal(citationFormatForPath("/p/thesis.TEX"), "latex");
+  assert.equal(citationFormatForPath("/p/notes.txt"), null);
+  assert.equal(citationInsertion("k2020x", "markdown"), "[@k2020x]");
+  assert.equal(citationInsertion("k2020x", "latex"), "\\cite{k2020x}");
+  const inserted = insertIntoSnapshot({ editorRevision: 2, sourceText: "😀 ab", rangeStartUtf16: 0, rangeEndUtf16: 2 }, 3, "[@k]");
+  assert.deepEqual(inserted, { editorRevision: 3, sourceText: "😀 [@k]ab" });
+});
+
+test("completion triggers after [@, ; @, \\cite{ and commas", () => {
+  assert.equal(completionPrefix("See [@", "markdown"), "");
+  assert.equal(completionPrefix("See [@ng20", "markdown"), "ng20");
+  assert.equal(completionPrefix("See [@a; @b", "markdown"), "b");
+  assert.equal(completionPrefix("See [-@ng", "markdown"), "ng");
+  assert.equal(completionPrefix("mail jane@doe", "markdown"), null);
+  assert.equal(completionPrefix("in-text @ng", "markdown"), null);
+  assert.equal(completionPrefix("\\cite{", "latex"), "");
+  assert.equal(completionPrefix("\\citep[see][p. 3]{a2019, b2", "latex"), "b2");
+  assert.equal(completionPrefix("\\cite{a2019} done", "latex"), null);
+  assert.equal(completionPrefix("[@k", "latex"), null);
+});
+
+test("completion candidates rank key prefixes before title matches", () => {
+  const entries = inspect().entries;
+  assert.deepEqual(completionCandidates(entries, "b").map((c) => c.key), ["b2020"]);
+  assert.deepEqual(completionCandidates(entries, "").map((c) => c.key), ["a2019", "b2020", "c2021"]);
+  assert.deepEqual(completionCandidates(entries, "alpha"), [{ key: "a2019", detail: "Adams 2019 · Alpha" }]);
+  assert.deepEqual(completionCandidates(entries, "zzz"), []);
 });

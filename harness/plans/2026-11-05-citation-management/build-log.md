@@ -12,7 +12,7 @@
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
-| C7 | In progress | C7-S1 見事件 | — | C7-S2 增刪與補全 |
+| C7 | In progress | C7-S1、C7-S2 見事件 | — | C7-S3 格式、預覽、匯出 |
 | C8 | Not started | — | 依賴 C7 | — |
 
 ## 事件
@@ -241,6 +241,16 @@
 - **檢查**：新 `tests/citations.test.ts` 6 項（排序、計數、問題分類、數字制編號、書目錯誤、描述字串、emoji 造成的 UTF-16 位移、過期或越界位置不選取）；`npm test` 295/295；`npm run build`（tsc + vite）成功。
 - **限制**：原生視窗的實際外觀與點擊未觀察（R6），列入 C8 手動檢查清單。
 - **下一步**：C7-S2。
+
+### C7-S2 增刪、插入與補全（2026-11-05）
+
+- **刪除**：每個書目條目有 Remove；仍被本文引用時先以 `window.confirm` 說明次數並註明「Other documents were not checked」，確認後帶 inspect 回傳的 `libraryFingerprint` 呼叫 `bibliography.remove`；`BIBLIOGRAPHY_CONFLICT` 時提示重新整理。
+- **新增**：輸入 DOI 或 arXiv ID → `bibliography.add`。這個請求在回合外執行，原本的事件監聽只接受進行中回合或文件操作的 `approval.required`，所以 `App.tsx` 以 `requestCitationAdd` 追蹤它的 requestId（`citationRequestRef`），讓 Ask 模式的 `citation.save` 批准沿用既有的批准對話框；請求結束時清掉殘留的待批准狀態。結果分為 added/existing（顯示 key 並提供「Insert at cursor」）、failed（顯示原因代碼）、denied（`APPROVAL_DENIED`，說明沒有寫入任何東西）。
+- **插入**：只改 Monaco 中的未儲存文字（新的本地 `editorRevision`），Markdown 插入 `[@key]`、LaTeX 插入 `\cite{key}`；位置取自編輯器回報的游標（`DocumentEditor` 新增 `onCursor`），沒有時用選取結尾或文末。
+- **補全**：`DocumentEditor` 新增 `citationEntries`，為目前 model 的語言註冊 Monaco completion provider（觸發字元 `@`、`{`、`,`；只回應自己的 model；隨編輯器一起 dispose），在 `[@`、`; @`、`[-@`、`\cite{` 與其中的逗號之後列出 key（key 前綴優先，其次 key 包含、標題/作者/年份包含），細節欄顯示作者年份標題。行文中的 `@` 與 email 不觸發。
+- **寫入停用**：回合進行中、文件操作中或有待批准時，Remove 與新增都停用。
+- **檢查**：`tests/citations.test.ts` 新增 6 項（共 12）：確認條件與文字、衝突訊息、新增的四種結果、依副檔名的插入文字與 UTF-16 插入、補全觸發條件、候選排序與內容；`npm test` 301/301；`npm run build` 成功。
+- **下一步**：C7-S3。
 
 ## 最終彙報
 

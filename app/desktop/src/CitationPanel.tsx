@@ -2,15 +2,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { JsonObject } from "./protocol";
 import type { DocumentSnapshot } from "./DocumentEditor";
 import {
+  addErrorOutcome,
+  addOutcome,
   buildPanelModel,
+  citationFormatForPath,
+  citationInsertion,
   describeEntry,
+  insertIntoSnapshot,
+  removeConfirmation,
+  removeErrorMessage,
   selectUse,
+  type AddOutcome,
+  type BibliographyAddDto,
   type BibliographyInspectDto,
   type CitedItem,
   type UseLocation,
 } from "./citations";
 
-export type BackendRequest = (method: "bibliography.inspect", params: JsonObject) => Promise<JsonObject>;
+export type BackendRequest = (
+  method: "bibliography.inspect" | "bibliography.remove",
+  params: JsonObject,
+) => Promise<JsonObject>;
 
 export interface CitationPanelProps {
   document: DocumentSnapshot;
@@ -21,6 +33,12 @@ export interface CitationPanelProps {
   onSelect: (snapshot: DocumentSnapshot) => void;
   /** Keys and titles for editor completion. */
   onEntries?: (entries: BibliographyInspectDto["entries"]) => void;
+  /** bibliography.add, tracked by App so an Ask-mode approval reaches the approval UI. */
+  requestAdd: (identifier: string) => Promise<JsonObject>;
+  /** Caret offset in the editor text, when known. */
+  cursorOffset: () => number | null;
+  /** Writes are disabled while a turn or document operation runs. */
+  writesDisabled: boolean;
 }
 
 function errorText(error: unknown): string {
@@ -39,7 +57,22 @@ function UseButtons({ item, onJump }: { item: { key: string; uses: UseLocation[]
   );
 }
 
-function CitedRow({ item, onJump }: { item: CitedItem; onJump: (use: UseLocation) => void }) {
+interface EntryActions {
+  onRemove: (key: string, citedCount: number) => void;
+  onInsert: (key: string) => void;
+  disabled: boolean;
+}
+
+function EntryButtons({ entryKey, citedCount, actions }: { entryKey: string; citedCount: number; actions: EntryActions }) {
+  return (
+    <span className="citation-actions">
+      <button type="button" className="link-button" onClick={() => actions.onInsert(entryKey)}>Insert</button>
+      <button type="button" className="link-button" disabled={actions.disabled} onClick={() => actions.onRemove(entryKey, citedCount)}>Remove</button>
+    </span>
+  );
+}
+
+function CitedRow({ item, onJump, actions }: { item: CitedItem; onJump: (use: UseLocation) => void; actions: EntryActions }) {
   return (
     <li className="citation-row">
       <details>
@@ -51,12 +84,15 @@ function CitedRow({ item, onJump }: { item: CitedItem; onJump: (use: UseLocation
           {item.entry !== null && <span className={`citation-badge ${item.entry.verification}`}>{item.entry.verification}</span>}
         </summary>
         <UseButtons item={item} onJump={onJump} />
+        {item.entry !== null && <EntryButtons entryKey={item.key} citedCount={item.count} actions={actions} />}
       </details>
     </li>
   );
 }
 
-export function CitationPanel({ document, refreshToken, request, contextPayload, onSelect, onEntries }: CitationPanelProps) {
+export function CitationPanel({
+  document, refreshToken, request, contextPayload, onSelect, onEntries, requestAdd, cursorOffset, writesDisabled,
+}: CitationPanelProps) {
   const [inspect, setInspect] = useState<BibliographyInspectDto | null>(null);
   const [inspectedText, setInspectedText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -94,6 +130,50 @@ export function CitationPanel({ document, refreshToken, request, contextPayload,
     onSelect(selected);
   }, [inspectedText, onSelect]);
 
+  const [identifier, setIdentifier] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<AddOutcome | null>(null);
+  const format = citationFormatForPath(document.path);
+
+  const insert = useCallback((key: string) => {
+    if (format === null) return;
+    const snapshot = documentRef.current;
+    const offset = cursorOffset() ?? snapshot.rangeEndUtf16 ?? snapshot.sourceText.length;
+    onSelect(insertIntoSnapshot(snapshot, offset, citationInsertion(key, format)));
+  }, [cursorOffset, format, onSelect]);
+
+  const remove = useCallback(async (key: string, citedCount: number) => {
+    const fingerprint = inspect?.libraryFingerprint;
+    if (fingerprint === null || fingerprint === undefined || writesDisabled) return;
+    const question = removeConfirmation(key, citedCount);
+    if (question !== null && !window.confirm(question)) return;
+    try {
+      await request("bibliography.remove", { key, libraryFingerprint: fingerprint });
+      setNotice(`Removed ${key} from the bibliography.`);
+      await refresh();
+    } catch (error) {
+      setNotice(removeErrorMessage(error));
+    }
+  }, [inspect?.libraryFingerprint, refresh, request, writesDisabled]);
+
+  const add = useCallback(async () => {
+    const value = identifier.trim();
+    if (value === "" || writesDisabled) return;
+    setAdding(true);
+    setAdded(null);
+    try {
+      const outcome = addOutcome(await requestAdd(value) as unknown as BibliographyAddDto);
+      setAdded(outcome);
+      if (outcome.kind !== "failed") setIdentifier("");
+      await refresh();
+    } catch (error) {
+      setAdded(addErrorOutcome(error));
+    } finally {
+      setAdding(false);
+    }
+  }, [identifier, refresh, requestAdd, writesDisabled]);
+
+  const actions: EntryActions = { onRemove: (key, count) => void remove(key, count), onInsert: insert, disabled: writesDisabled };
   const model = inspect === null ? null : buildPanelModel(inspect);
   return (
     <section className="citation-panel" aria-label="Citations">
@@ -112,7 +192,7 @@ export function CitationPanel({ document, refreshToken, request, contextPayload,
           <summary>Cited in this document ({model.cited.length})</summary>
           {model.cited.length === 0
             ? <p className="citation-empty">No citation keys in this document yet.</p>
-            : <ol className="citation-list">{model.cited.map((item) => <CitedRow key={item.key} item={item} onJump={jump} />)}</ol>}
+            : <ol className="citation-list">{model.cited.map((item) => <CitedRow key={item.key} item={item} onJump={jump} actions={actions} />)}</ol>}
         </details>
         {(model.missing.length > 0 || model.duplicates.length > 0) && <details open className="citation-section citation-problems">
           <summary>Problems ({model.missing.length + model.duplicates.length})</summary>
@@ -128,11 +208,26 @@ export function CitationPanel({ document, refreshToken, request, contextPayload,
             ))}
           </ul>
         </details>}
+        <form className="citation-add" onSubmit={(event) => { event.preventDefault(); void add(); }}>
+          <label>
+            Add by DOI or arXiv ID
+            <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} maxLength={2048}
+              placeholder="10.1038/… or 2401.01234" disabled={adding || writesDisabled} />
+          </label>
+          <button type="submit" disabled={adding || writesDisabled || identifier.trim() === ""}>{adding ? "Verifying…" : "Verify and add"}</button>
+        </form>
+        {added !== null && <p className={added.kind === "added" || added.kind === "existing" ? "citation-added" : "document-error"} role="status">
+          {added.message}
+          {added.key !== null && format !== null && <> <button type="button" className="link-button" onClick={() => insert(added.key!)}>Insert at cursor</button></>}
+        </p>}
         <details className="citation-section">
           <summary>Not cited in this document ({model.uncited.length})</summary>
           <ul className="citation-list">
             {model.uncited.map((entry) => (
-              <li key={entry.key} className="citation-row"><code>{entry.key}</code> <span className="citation-meta">{describeEntry(entry)}</span></li>
+              <li key={entry.key} className="citation-row">
+                <code>{entry.key}</code> <span className="citation-meta">{describeEntry(entry)}</span>
+                <EntryButtons entryKey={entry.key} citedCount={0} actions={actions} />
+              </li>
             ))}
           </ul>
         </details>

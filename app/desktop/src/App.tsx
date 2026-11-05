@@ -76,6 +76,7 @@ import type {
 import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
 import { AnnotationComment, DocumentEditor, type AnnotationControls, type DocumentSnapshot } from "./DocumentEditor.tsx";
 import { CitationPanel } from "./CitationPanel.tsx";
+import type { BibliographyEntryDto } from "./citations.ts";
 import {
   ApprovalDialog,
   BashPermissionControl,
@@ -1083,6 +1084,9 @@ export default function App() {
   }, []);
   // Bumped after open, save, and applied operations so the citation panel re-checks.
   const [citationRefresh, setCitationRefresh] = useState(0);
+  const [citationEntries, setCitationEntries] = useState<readonly BibliographyEntryDto[]>([]);
+  const editorCursorRef = useRef<number | null>(null);
+  const citationRequestRef = useRef<string | null>(null);
   const inFlight = useRef(false);
   const exclusiveOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const catalogLoading = useRef<WorkspaceOperationOwner | null>(null);
@@ -1254,6 +1258,23 @@ export default function App() {
     return pending;
   }, [captureOwner, ownsOperation, receiveDocumentResult]);
 
+  const requestCitationAdd = useCallback(async (identifier: string): Promise<JsonObject> => {
+    const tracked = backendClient.requestTracked("bibliography.add", { identifier });
+    citationRequestRef.current = tracked.requestId;
+    try {
+      return await tracked.result;
+    } finally {
+      if (citationRequestRef.current === tracked.requestId) citationRequestRef.current = null;
+      if (pendingApprovalRef.current?.parentRequestId === tracked.requestId) {
+        pendingApprovalRef.current = null;
+        approvalOwnerRef.current = null;
+        approvalResolvingRef.current = false;
+        setPendingApproval(null);
+        setApprovalResolving(false);
+      }
+    }
+  }, []);
+
   const openDocument = useCallback(async () => {
     if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
         conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
@@ -1397,6 +1418,25 @@ export default function App() {
             if (message.messageType !== "event" || !("requestId" in message)) return;
             const active = conversationRef.current.activeTurn;
             const documentRequest = documentRequestRef.current;
+            const citationRequest = citationRequestRef.current;
+            if (active === null && documentRequest === null && citationRequest === null) return;
+            if (citationRequest !== null && message.requestId === citationRequest) {
+              // bibliography.add runs outside a turn; its citation.save approval uses the shared approval UI.
+              if (message.event === "approval.required") {
+                const accepted = acceptApprovalEvent(generationRef.current, message.requestId, citationRequest,
+                  message.data as unknown as ApprovalRequiredDto, Date.now());
+                if (accepted !== null) {
+                  setPendingApproval((current) => {
+                    if (current !== null) return current;
+                    pendingApprovalRef.current = accepted;
+                    approvalOwnerRef.current = captureOwner("approval");
+                    frameOwnerRef.current = null;
+                    return accepted;
+                  });
+                }
+              }
+              return;
+            }
             if (active === null && documentRequest === null) return;
             const generation = generationRef.current;
             if (active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpochRef.current)) return;
@@ -2786,13 +2826,18 @@ export default function App() {
               onUndo={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })}
             />
             {documentNotice !== null && <p className="document-error" role="status">{documentNotice}</p>}
-            <DocumentEditor value={documentValue} onChange={updateDocument} annotationControls={annotationControls} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
+            <DocumentEditor value={documentValue} onChange={updateDocument} annotationControls={annotationControls} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy}
+              citationEntries={citationEntries} onCursor={(offset) => { editorCursorRef.current = offset; }} />
             {documentValue !== null && state.snapshot?.lifecycle === "ready" && <CitationPanel
               document={documentValue}
               refreshToken={citationRefresh}
               request={backendClient.request}
               contextPayload={documentContextPayload}
               onSelect={updateDocument}
+              onEntries={setCitationEntries}
+              requestAdd={requestCitationAdd}
+              cursorOffset={() => editorCursorRef.current}
+              writesDisabled={interaction.turnActive || documentBusy || pendingApproval !== null}
             />}
             {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
               <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
