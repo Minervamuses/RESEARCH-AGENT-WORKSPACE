@@ -8,8 +8,8 @@
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
-| C3 | In progress | C3-S1、C3-S2 見事件 | — | C3-S3 Agent 接線 |
-| C4 | Not started | — | — | C3 後進行 |
+| C3 | Complete | C3-S1–S3 見事件 | — | — |
+| C4 | Not started | — | — | C4-S1 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
 | C7 | Not started | — | 依賴 C6 | — |
@@ -126,6 +126,18 @@
 - **檢查**：新 `tests/test_citation_integrity.py` 6 項通過（缺 key 與位置、重複 DOI、首次出現順序、手寫為 unverified、有 bundle 為 verified、bundle 被改為 unverified、書目 malformed 回報錯誤不拋例外、書目不存在時全部 key 為缺漏、LaTeX）。
 - **論文副本**（`evidence/C3-S2/thesis-report-summary.json`，只有數量與 key）：69 條目、55 次使用、45 個被引用 key、缺漏 0、未被 proposal 引用 24（書目與 thesis 共用，屬預期）、重複 DOI 0、verified 0（repo 的 `cite/` 目前沒有 bundle）。
 - **下一步**：C3-S3。
+
+### C3-S3 Agent 接線：bibliography_lookup 與未知 key 防護（2026-11-05）
+
+- **改動**：
+  - `agent/desktop/service.py`：新增唯讀工具 `bibliography_lookup(query)`（`_desktop_bibliography_lookup`；回傳 `status`、`path`、`exists`、`total`、最多 20 筆 `entries`，每筆 key、authors、year、title、doi、type、verification），與 `document_edit` 一起放進 `extra_tools`。`document_edit` 準備候選前呼叫 `_unknown_new_citation_keys`：以 `citekeys` 解析 replacement 與被替換的原範圍（UTF-16 切片），只看「新出現」的 key；不在書目的 → `{"status": "failed", "issue": …, "unknownKeys": […]}`，不準備候選、不發 `document.proposed`；書目讀不到時只擋有新 key 的修改。文件回合提示加上一句：用 key（`[@key]`/`\cite{key}`）、以 `bibliography_lookup` 找 key、不自行打作者年份或編號、不捏造 key、缺來源時建議 `/citation`。
+  - `agent/session.py`（只做接線）：(1) `bibliography_lookup` 與 `document_edit` 一樣歸入 family `desktop_document`（所以 `service.py` 的批准判斷 `family != "desktop_document"` 不會要求批准）；(2) `tool_access_resolution` 在文件回合或 citation skill 啟用時把 `bibliography_lookup` 加入 effective tools（只在 session 的工具宇集有它時，即桌面）。
+  - `skills/citation/library.py`：`search_bibliography(items, query, limit)`（完全相同的 key 優先，否則每個查詢字都要出現在 key/標題/作者/年份/DOI 中）。
+  - `skills/citation/SKILL.md`：新增「Project bibliography (desktop projects)」一節。
+  - `agent/thinking/**` 未改，`bibliography_lookup` 不在 `FUSION_READ_ONLY_ALLOWLIST`（D6）。
+- **檢查**：新 `tests/test_desktop_citation_keys.py` 8 項通過：文件回合呼叫 `bibliography_lookup` 成功且沒有 `approval.required`；引入未知 key → failed、`unknownKeys`、沒有 `document.proposed`/`approval.required`、檔案不變；已知 key → 正常候選並存檔；原範圍已有的未知 key 保留不擋；書目壞掉時無 key 的修改照常、新增 key 的修改被擋；提示文字；不在 proposer 清單；citation 回合有效、CLI session 沒有此工具。既有 `test_desktop_document_service.py`、`test_desktop_documents.py`、`test_inline_skills.py`、`test_citation_skill_activation.py` 通過；完整 pytest（沙箱外）1619 passed，exit 0。
+- **交付**：工具描述見 `service.py` 的 `_bibliography_tool`。
+- **下一步**：C4-S1。
 
 ## 最終彙報
 

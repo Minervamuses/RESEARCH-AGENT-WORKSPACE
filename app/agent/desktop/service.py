@@ -92,9 +92,15 @@ from agent.skills.runtime import SkillSelectionError, resolve_skill_references
 from agent.turns.safety import content_text
 from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
+from skills.citation.citekeys import format_for_path as citation_format_for_path
+from skills.citation.citekeys import keys_in as citation_keys_in
+from skills.citation.integrity import bundle_checker, entry_summary
+from skills.citation.library import LibraryError, search_bibliography
+from skills.citation.library import load as load_bibliography
 from skills.citation.storage import resolve_output_dir
 
 logger = logging.getLogger(__name__)
+BIBLIOGRAPHY_LOOKUP_LIMIT = 20
 
 # Mapped failures whose message already names the cause and its fix; every
 # other exception-derived failure carries an incident reference to the log.
@@ -365,6 +371,17 @@ class DesktopService:
                 "calling this tool. The tool waits for the user's single-operation approval "
                 "and the actual version-checked save. Only status=saved proves a write. "
                 "Never use bash or another file tool to bypass this document operation."
+            ),
+        )
+
+        self._bibliography_tool = StructuredTool.from_function(
+            func=self._desktop_bibliography_lookup,
+            name="bibliography_lookup",
+            description=(
+                "Read-only search of the open project's bibliography (CSL-JSON). Give a key, "
+                "author, title words, year, or DOI; returns up to 20 entries with key, authors, "
+                "year, title, DOI, and verification status. Cite documents only with keys this "
+                "tool returns: [@key] in Markdown, \\cite{key} in LaTeX. It never writes."
             ),
         )
 
@@ -1406,7 +1423,7 @@ class DesktopService:
             parameter.kind is inspect.Parameter.VAR_KEYWORD
             for parameter in factory_parameters.values()
         ):
-            kwargs["extra_tools"] = [self._document_tool]
+            kwargs["extra_tools"] = [self._document_tool, self._bibliography_tool]
         if "operation_approval_handler" in factory_parameters or any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD
             for parameter in factory_parameters.values()
@@ -2155,6 +2172,74 @@ class DesktopService:
     ) -> dict[str, Any]:
         return await asyncio.to_thread(self._documents.save, params["documentContext"])
 
+    def _desktop_bibliography_lookup(self, query: str) -> str:
+        """Search the opened project's bibliography without writing anything."""
+        project = self._project
+        if project is None:
+            return json.dumps({"status": "failed", "issue": "No research project is open."})
+        try:
+            path = project_citation_settings(project["rootPath"])["bibliographyPath"]
+        except CatalogError as exc:
+            return json.dumps({"status": "failed", "issue": f"Project bibliography setting is invalid: {exc}"})
+        try:
+            library = load_bibliography(path)
+        except LibraryError as exc:
+            return json.dumps({"status": "failed", "code": exc.code, "issue": str(exc), "path": str(path)})
+        check = bundle_checker(resolve_output_dir(self.config))
+        matches = search_bibliography(library.items, query, limit=BIBLIOGRAPHY_LOOKUP_LIMIT)
+        return json.dumps({
+            "status": "ok",
+            "path": str(path),
+            "exists": library.exists,
+            "total": len(library.items),
+            "entries": [entry_summary(item, check(item)) for item in matches],
+        }, ensure_ascii=False)
+
+    def _unknown_new_citation_keys(self, context: dict[str, Any], replacement_text: str) -> dict[str, Any] | None:
+        """Refuse replacement text that introduces citation keys missing from the bibliography.
+
+        Keys already present in the replaced range are kept as they are.
+        Returns the failure payload, or None when the edit may proceed.
+        """
+        fmt = citation_format_for_path(context["path"])
+        if fmt is None:
+            return None
+        encoded = context["sourceText"].encode("utf-16-le")
+        original = encoded[context["rangeStartUtf16"] * 2:context["rangeEndUtf16"] * 2].decode("utf-16-le", errors="replace")
+        existing = set(citation_keys_in(original, fmt))
+        new_keys = list(dict.fromkeys(
+            key for key in citation_keys_in(replacement_text, fmt) if key not in existing
+        ))
+        if not new_keys:
+            return None
+        project = self._project
+        try:
+            if project is None:
+                raise LibraryError("library_malformed", "No research project is open.")
+            path = project_citation_settings(project["rootPath"])["bibliographyPath"]
+            known = set(load_bibliography(path).keys())
+        except (CatalogError, LibraryError) as exc:
+            return {
+                "status": "failed",
+                "issue": (
+                    "The replacement adds citation keys, but the project bibliography cannot be read "
+                    f"({exc}); no candidate was prepared."
+                ),
+                "unknownKeys": new_keys,
+            }
+        unknown = [key for key in new_keys if key not in known]
+        if not unknown:
+            return None
+        return {
+            "status": "failed",
+            "issue": (
+                "The replacement introduces citation keys that are not in the project bibliography "
+                f"({path}); no candidate was prepared. Use bibliography_lookup for existing keys, or "
+                "save the work with /citation first. Do not invent keys."
+            ),
+            "unknownKeys": unknown,
+        }
+
     async def _desktop_document_edit(
         self, replacement_text: str, tool_call_id: Annotated[str, InjectedToolCallId],
         reference_id: str | None = None,
@@ -2204,6 +2289,9 @@ class DesktopService:
                     self._advance_document_working_context(existing, checked)
                 return json.dumps(existing.result, ensure_ascii=False)
             return json.dumps({"status": "failed", "issue": "This turn already has a pending document candidate; do not replay it."})
+        refused = self._unknown_new_citation_keys(context, replacement_text)
+        if refused is not None:
+            return json.dumps(refused, ensure_ascii=False)
         candidate_value = await run_local_work(
             self._documents.prepare, context, replacement_text, turn_id=turn_id, call_id=call_id,
         )
@@ -2877,6 +2965,11 @@ class DesktopService:
                     "edit, call document_edit with replacement_text for only that range; never use "
                     "bash or another tool to edit this document. The tool reports the actual saved, "
                     "conflict, failed, or cancelled result; only saved confirms a successful save."
+                    " Citations in this document are keys from the project bibliography: [@key] or "
+                    "[@a; @b] in Markdown, \\cite{key} in LaTeX. Find keys with bibliography_lookup; "
+                    "never type author-year or numbered references yourself and never invent a key. "
+                    "document_edit refuses keys that are not in the bibliography; when a claim needs a "
+                    "source that is missing, say so and suggest saving it with /citation."
                 )
                 if len(turn_text.encode("utf-8")) > MAX_INPUT_BYTES:
                     raise DocumentError("The prompt plus document snapshot exceeds the existing 1 MiB turn limit; select a smaller document.")

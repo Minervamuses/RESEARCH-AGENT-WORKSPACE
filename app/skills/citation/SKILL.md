@@ -146,5 +146,21 @@ task; visible prior conversation still supplies metadata and authorization.
   Base your response on that result and preserve ambiguity/failure honestly;
   no finalizer will replace your prose with a deterministic save summary.
 
+## Project bibliography (desktop projects)
+
+- In a desktop research project, every saved or reused work is also merged
+  into the project's CSL-JSON bibliography, and the save result reports its
+  `key` (`bibliography.status` is `added`, `existing`, or `failed` with a
+  reason; a bibliography failure never changes the bundle outcome).
+- Text written into a project document cites by key only: `[@key]` or
+  `[@a; @b]` in Markdown, `\cite{key}` in LaTeX. Do not type author-year or
+  numbered references into the document yourself and never invent a key;
+  the chosen citation style is applied when the document is previewed or
+  exported. `[[cite:...]]` markers stay for chat replies only.
+- `bibliography_lookup` searches the existing entries (key, title, author,
+  year, DOI). `document_edit` refuses replacement text that adds a key the
+  bibliography does not contain; save the work first, or say which claims
+  still lack a source.
+
 Bundles are staged, fsynced, and atomically renamed. DOI identities keep their
 stable `src-*`; schema-v1 bundles are validated and reused without rewriting.

@@ -279,6 +279,31 @@ def merge(library: Library, item: dict) -> MergeResult:
     return MergeResult("added", key, new_item, updated)
 
 
+# --- searching ----------------------------------------------------------
+
+
+def _search_text(item: dict) -> str:
+    parts = [str(item.get("id", "")), str(item.get("title", "")), str(item.get("DOI", ""))]
+    parts.append(_year_token(item))
+    for role in ("author", "editor"):
+        for name in item.get(role) or []:
+            if isinstance(name, dict):
+                parts.extend(str(name.get(part, "")) for part in ("family", "given", "literal"))
+    return " ".join(parts).casefold()
+
+
+def search_bibliography(items: list[dict], query: str, *, limit: int = 20) -> list[dict]:
+    """Exact key first, then entries containing every query word."""
+    query = (query or "").strip()
+    exact = [item for item in items if item.get("id") == query]
+    if exact:
+        return exact[:limit]
+    words = query.casefold().split()
+    if not words:
+        return items[:limit]
+    return [item for item in items if all(word in _search_text(item) for word in words)][:limit]
+
+
 # --- writing ------------------------------------------------------------
 
 

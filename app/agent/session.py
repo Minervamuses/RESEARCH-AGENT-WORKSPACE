@@ -147,8 +147,9 @@ class ChatSession:
         self.active_skill_runtime: SkillRuntime | None = None
         self.extra_tools = list(extra_tools or [])
         self.mcp_families = dict(mcp_families or {})
-        if any(getattr(tool, "name", None) == "document_edit" for tool in self.extra_tools):
-            self.mcp_families["document_edit"] = "desktop_document"
+        for desktop_tool in ("document_edit", "bibliography_lookup"):
+            if any(getattr(tool, "name", None) == desktop_tool for tool in self.extra_tools):
+                self.mcp_families[desktop_tool] = "desktop_document"
         self.global_mcp_families = frozenset(
             global_mcp_families
             if global_mcp_families is not None
@@ -661,9 +662,19 @@ class ChatSession:
                 None, self._tool_universe_refs(), mcp_families=self.mcp_families,
                 global_mcp_families=self.global_mcp_families,
             )
-        if self._document_turn_active and "document_edit" in self._tool_universe_refs():
+        universe = self._tool_universe_refs()
+        forced = []
+        if self._document_turn_active and "document_edit" in universe:
+            forced.append("document_edit")
+        if (
+            (self._document_turn_active or self.citation_skill_active)
+            and "bibliography_lookup" in universe
+        ):
+            # Read-only project bibliography search for document and /citation turns.
+            forced.append("bibliography_lookup")
+        if forced:
             resolution = replace(resolution, effective_tools=tuple(dict.fromkeys([
-                *resolution.effective_tools, "document_edit",
+                *resolution.effective_tools, *forced,
             ])))
         return resolution
 
