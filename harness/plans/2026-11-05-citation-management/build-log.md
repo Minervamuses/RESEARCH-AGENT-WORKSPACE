@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
-| C3 | In progress | C3-S1 見事件 | — | C3-S2 完整性報告 |
+| C3 | In progress | C3-S1、C3-S2 見事件 | — | C3-S3 Agent 接線 |
 | C4 | Not started | — | — | C3 後進行 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
@@ -118,6 +118,14 @@
   - **已知限制**：同一個註腳被參照兩次時，Pandoc 會把註腳內容複製到每個參照處，所以 Pandoc 的使用次數較多（`footnote.md`：解析器 4、Pandoc 6）；key 集合與首次出現順序仍相同。
 - **檢查**：新 `tests/test_citation_citekeys.py` 42 項通過（各語法、email、code、註解、數學、全形標點與中文前後文、emoji 的 UTF-16 位移、LaTeX 家族）；其中 26 個 Markdown 例子的期望值另以 Pandoc 逐一驗證相同。
 - **下一步**：C3-S2。
+
+### C3-S2 完整性報告（2026-11-05）
+
+- **介面**（`app/skills/citation/integrity.py`）：`inspect(text, fmt, library_path, bundle_check=None) -> dict`、`bundle_checker(output_dir) -> (item -> bool)`、`entry_summary(item, verified)`。報告欄位（C6 直接序列化）：`format`；`bibliography {path, status: ok|missing|error, error {code, message}|null}`；`entries[] {key, authors, year, title, doi, type, verification: verified|unverified, citedCount, firstUse}`；`uses[] {key, start, end, line, group, known}`（書目讀不到時 `known` 為 null）；`order`（首次出現順序）；`missing[] {key, uses[] {start, end, line}}`；`uncited`；`duplicateDois[] {doi, keys}`。
+- **驗證狀態**：條目的 DOI 或 arXiv ID 在 citation 輸出目錄有通過 `storage.validate_identity_bundle` 的 bundle 才是 `verified`（先以目錄名的 identity hash 建索引，不逐條掃描）；手寫條目、被竄改的 bundle 都是 `unverified`。
+- **檢查**：新 `tests/test_citation_integrity.py` 6 項通過（缺 key 與位置、重複 DOI、首次出現順序、手寫為 unverified、有 bundle 為 verified、bundle 被改為 unverified、書目 malformed 回報錯誤不拋例外、書目不存在時全部 key 為缺漏、LaTeX）。
+- **論文副本**（`evidence/C3-S2/thesis-report-summary.json`，只有數量與 key）：69 條目、55 次使用、45 個被引用 key、缺漏 0、未被 proposal 引用 24（書目與 thesis 共用，屬預期）、重複 DOI 0、verified 0（repo 的 `cite/` 目前沒有 bundle）。
+- **下一步**：C3-S3。
 
 ## 最終彙報
 
