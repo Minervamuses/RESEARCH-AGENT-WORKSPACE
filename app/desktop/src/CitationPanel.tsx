@@ -8,19 +8,26 @@ import {
   citationFormatForPath,
   citationInsertion,
   describeEntry,
+  EXPORT_LABELS,
+  exportFormats,
   insertIntoSnapshot,
+  previewEntries,
   removeConfirmation,
   removeErrorMessage,
   selectUse,
+  styleChangeParams,
   type AddOutcome,
   type BibliographyAddDto,
   type BibliographyInspectDto,
+  type BibliographyRenderDto,
   type CitedItem,
+  type ExportFormat,
   type UseLocation,
 } from "./citations";
+import { CitationText } from "./CitationText.tsx";
 
 export type BackendRequest = (
-  method: "bibliography.inspect" | "bibliography.remove",
+  method: "bibliography.inspect" | "bibliography.remove" | "bibliography.set_style" | "bibliography.render" | "bibliography.export",
   params: JsonObject,
 ) => Promise<JsonObject>;
 
@@ -173,6 +180,56 @@ export function CitationPanel({
     }
   }, [identifier, refresh, requestAdd, writesDisabled]);
 
+  const [preview, setPreview] = useState<BibliographyRenderDto | null>(null);
+  const [working, setWorking] = useState<string | null>(null);
+  const [exported, setExported] = useState<string | null>(null);
+
+  const setStyle = useCallback(async (styleId: string) => {
+    const params = styleChangeParams(inspect, styleId, writesDisabled);
+    if (params === null) return;
+    setWorking("Saving style…");
+    try {
+      await request("bibliography.set_style", params);
+      setPreview(null);
+      await refresh();
+    } catch (error) {
+      setNotice(removeErrorMessage(error));
+    } finally {
+      setWorking(null);
+    }
+  }, [inspect, refresh, request, writesDisabled]);
+
+  const renderPreview = useCallback(async () => {
+    if (inspect === null) return;
+    setWorking("Formatting…");
+    try {
+      const data = await request("bibliography.render", {
+        documentContext: contextPayload(documentRef.current), styleId: inspect.styleId,
+      }) as unknown as BibliographyRenderDto;
+      setPreview(data);
+    } catch (error) {
+      setNotice(removeErrorMessage(error));
+    } finally {
+      setWorking(null);
+    }
+  }, [contextPayload, inspect, request]);
+
+  const runExport = useCallback(async (exportFormat: ExportFormat) => {
+    if (inspect === null || writesDisabled) return;
+    setWorking("Exporting…");
+    setExported(null);
+    try {
+      const data = await request("bibliography.export", {
+        documentContext: contextPayload(documentRef.current), format: exportFormat, styleId: inspect.styleId,
+      });
+      setExported(typeof data.path === "string" ? data.path : null);
+    } catch (error) {
+      setNotice(removeErrorMessage(error));
+    } finally {
+      setWorking(null);
+    }
+  }, [contextPayload, inspect, request, writesDisabled]);
+
   const actions: EntryActions = { onRemove: (key, count) => void remove(key, count), onInsert: insert, disabled: writesDisabled };
   const model = inspect === null ? null : buildPanelModel(inspect);
   return (
@@ -188,6 +245,32 @@ export function CitationPanel({
           {model.libraryStatus === "missing" && " — not created yet. Save a source with /citation or add one below."}
         </p>
         {model.libraryIssue !== null && <p className="document-error" role="alert">{model.libraryIssue}</p>}
+        <div className="citation-format-row">
+          <label>
+            Style
+            <select value={inspect!.styleId} disabled={writesDisabled || working !== null}
+              onChange={(event) => void setStyle(event.target.value)}>
+              {inspect!.styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+            </select>
+          </label>
+          {format === "markdown" && <button type="button" disabled={working !== null} onClick={() => void renderPreview()}>Preview</button>}
+          {exportFormats(format).map((exportFormat) => (
+            <button key={exportFormat} type="button" disabled={writesDisabled || working !== null}
+              onClick={() => void runExport(exportFormat)}>Export {EXPORT_LABELS[exportFormat]}</button>
+          ))}
+        </div>
+        {writesDisabled && <p className="citation-empty">Style changes, edits and exports wait until the current turn or document operation finishes.</p>}
+        {working !== null && <p role="status">{working}</p>}
+        {exported !== null && <p className="citation-added" role="status">Exported to <code>{exported}</code>. The source document is unchanged.</p>}
+        {preview !== null && <details open className="citation-section citation-preview">
+          <summary>Preview ({preview.styleId})</summary>
+          <ol className="citation-list">
+            {preview.citations.map((citation) => <li key={citation.index}><code>{citation.keys.join("; ")}</code> → {citation.text}</li>)}
+          </ol>
+          <div className="citation-references">
+            {previewEntries(preview).map((entry) => <p key={entry.key}><CitationText segments={entry.segments} /></p>)}
+          </div>
+        </details>}
         <details open className="citation-section">
           <summary>Cited in this document ({model.cited.length})</summary>
           {model.cited.length === 0

@@ -266,3 +266,61 @@ export function completionCandidates(
     .sort((left, right) => left.rank - right.rank || left.entry.key.localeCompare(right.entry.key));
   return scored.slice(0, limit).map(({ entry }) => ({ key: entry.key, detail: describeEntry(entry) }));
 }
+
+// --- styles, preview, export ---------------------------------------------------
+
+export type ExportFormat = "docx" | "markdown" | "bib";
+
+/** LaTeX formats its own references, so only the bibliography exports for .tex. */
+export function exportFormats(format: CitationFormat | null): ExportFormat[] {
+  return format === "markdown" ? ["docx", "markdown", "bib"] : ["bib"];
+}
+
+export const EXPORT_LABELS: Record<ExportFormat, string> = {
+  docx: "Word (.docx)",
+  markdown: "Formatted Markdown",
+  bib: "BibTeX (.bib)",
+};
+
+export interface RenderSegmentDto {
+  entry: number;
+  text: string;
+  italic: boolean;
+  bold: boolean;
+  url: string | null;
+}
+
+export interface BibliographyRenderDto {
+  styleId: string;
+  citations: { index: number; keys: string[]; start?: number; end?: number; text: string }[];
+  entries: { key: string; text: string }[];
+  segments: RenderSegmentDto[];
+  missing: string[];
+}
+
+export interface PreviewEntry {
+  key: string;
+  segments: RenderSegmentDto[];
+}
+
+/** Group the flat segment list back into one list per bibliography entry. */
+export function previewEntries(render: BibliographyRenderDto): PreviewEntry[] {
+  const grouped: PreviewEntry[] = render.entries.map((entry) => ({ key: entry.key, segments: [] }));
+  for (const segment of render.segments) {
+    const target = grouped[segment.entry];
+    if (target !== undefined) target.segments.push(segment);
+  }
+  return grouped.map((entry, index) => entry.segments.length > 0 ? entry
+    : { ...entry, segments: [{ entry: index, text: render.entries[index].text, italic: false, bold: false, url: null }] });
+}
+
+/** The bibliography.set_style params for a selection, or null when nothing should be sent. */
+export function styleChangeParams(
+  inspect: Pick<BibliographyInspectDto, "styleId" | "styles"> | null,
+  nextStyleId: string,
+  writesDisabled: boolean,
+): { styleId: string } | null {
+  if (inspect === null || writesDisabled || nextStyleId === inspect.styleId) return null;
+  if (!inspect.styles.some((style) => style.id === nextStyleId)) return null;
+  return { styleId: nextStyleId };
+}

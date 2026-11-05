@@ -12,8 +12,8 @@
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
-| C7 | In progress | C7-S1、C7-S2 見事件 | — | C7-S3 格式、預覽、匯出 |
-| C8 | Not started | — | 依賴 C7 | — |
+| C7 | Complete | C7-S1–S3 見事件 | — | — |
+| C8 | Not started | — | — | C8-S1 |
 
 ## 事件
 
@@ -251,6 +251,15 @@
 - **寫入停用**：回合進行中、文件操作中或有待批准時，Remove 與新增都停用。
 - **檢查**：`tests/citations.test.ts` 新增 6 項（共 12）：確認條件與文字、衝突訊息、新增的四種結果、依副檔名的插入文字與 UTF-16 插入、補全觸發條件、候選排序與內容；`npm test` 301/301；`npm run build` 成功。
 - **下一步**：C7-S3。
+
+### C7-S3 格式、預覽與匯出（2026-11-05）
+
+- **樣式**：面板的 Style 下拉選單列出 `inspect.styles`（含 `bime-appendix17`），選擇後經 `styleChangeParams`（只在閒置、樣式不同且在清單中時）呼叫 `bibliography.set_style`，然後重新 inspect；回合或文件操作進行中停用並顯示說明。
+- **預覽**（只有 Markdown）：`bibliography.render` 以目前編輯器文字（含未儲存）渲染，列出每筆引用（key → 渲染字串）與參考文獻。參考文獻以新的 `CitationText` 元件顯示 `segments`：斜體/粗體是 `<em>`/`<strong>` 元素，文字永遠是 React 文字節點（HTML 與 `*` 不會被解析），連結只在 `safeExternalUrl` 通過（http/https）時成為按鈕並以 `openSafeExternalUrl` 開啟 —— 與 `SafeContent` 同一套網址檢查。這是 C4-S4 改用 segments 的對應做法（計劃原寫「經 SafeContent 顯示」，SafeContent 沒有跳脫語法會把 `_` 誤判為斜體）。
+- **匯出**：Markdown 文件有 Word、Formatted Markdown、BibTeX 三個按鈕，LaTeX 文件只有 BibTeX；完成後顯示寫出的路徑並註明原文件未改變。
+- **檢查**：新 `tests/citation_preview.test.ts` 4 項（樣式請求的條件、`.tex` 只有 bib、segments 分組、SSR 渲染：`<em>`、HTML 被跳脫、只有 https 連結成為按鈕、`javascript:` 不成為按鈕）；`npm test` 305/305；`npm run build` 成功；`cargo test --locked`（沙箱外）40 passed。
+- **面板操作清單**（C8 手動檢查用）：開啟 .md/.tex → 面板出現；Refresh；展開條目 → Line 按鈕跳到並選取引用；Problems 顯示未知 key 與重複 DOI；Remove（被引用時確認對話框）；Verify and add（Ask 模式批准對話框；拒絕 → 未寫入）；Insert / Insert at cursor；在 `[@`、`\cite{` 後輸入看到補全；Style 選單（回合中停用）；Preview；Export Word/Markdown/BibTeX（.tex 只有 BibTeX）。
+- **下一步**：C8-S1。
 
 ## 最終彙報
 

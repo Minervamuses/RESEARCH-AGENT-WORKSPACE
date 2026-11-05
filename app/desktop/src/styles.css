@@ -1280,3 +1280,10 @@ h3 {
 .citation-empty { color: #6b7075; }
 .citation-problems li { margin-bottom: .2rem; }
 .link-button { border: 0; background: none; padding: 0; color: #1f5f99; text-decoration: underline; cursor: pointer; font: inherit; }
+.citation-format-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .3rem 0; }
+.citation-format-row select { margin-left: .3rem; max-width: 16rem; }
+.citation-add { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; margin: .4rem 0; }
+.citation-add input { display: block; min-width: 16rem; }
+.citation-added { color: #1f6b3a; overflow-wrap: anywhere; }
+.citation-actions { display: inline-flex; gap: .5rem; margin-left: .4rem; }
+.citation-references p { padding-left: 1.5rem; text-indent: -1.5rem; margin: .2rem 0; overflow-wrap: anywhere; }
