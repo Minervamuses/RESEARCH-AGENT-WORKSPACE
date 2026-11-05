@@ -9,7 +9,7 @@
 | `adapters/` | 將 framework-neutral RAG API 轉成 LangChain tools |
 | `cli/` | Interactive chat、slash command parsing 與 local command handling |
 | `conversations/` | Canonical JSON transcript authority、catalog-independent validation 與 lifecycle transitions |
-| `desktop/` | Python desktop protocol/service、catalog coordination 與 isolated fixture seams |
+| `desktop/` | Python desktop protocol/service、catalog coordination、`bibliography.*` adapters (logic in `skills/citation`) 與 isolated fixture seams |
 | `extensions/` | Drop-in discovery、validation、registry、apply 與 startup loading |
 | `llm/` | App-layer model construction 與 text normalization |
 | `skills/` | Skill metadata、runtime、tool broker 與 agent integration policy |

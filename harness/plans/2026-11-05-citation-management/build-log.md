@@ -13,7 +13,7 @@
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete | C7-S1–S3 見事件 | — | — |
-| C8 | In progress | C8-S1 見事件 | — | C8-S2 文件 |
+| C8 | In progress | C8-S1、C8-S2 見事件 | — | C8-S3 回歸與最終彙報 |
 
 ## 事件
 
@@ -268,6 +268,15 @@
 - **公開請求**（`requests.jsonl`，發出前寫入）：3 次存檔請求（預算 8）。網路經沙箱代理放行 doi.org、api.crossref.org、export.arxiv.org 等文獻主機；arXiv 的授權查詢走 export.arxiv.org（PLANS 主機清單未列，屬「公開文獻 API」）。一次成功，沒有重試。
 - **觀察**（`observations.json`、`transcript.jsonl`，長字串已截斷）：16 項檢查全部通過 —— 文件雜湊在所有步驟前後相同；手寫條目不變；第一個 DOI → `added jumper2021highly`；同 DOI → `existing` 同 key；arXiv → `added vaswani2017attention`；新增後沒有缺漏 key、新增的兩筆為 verified、手寫為 unverified；APA 與 IEEE 渲染不同（例：`(Jumper et al., 2021)` vs `[2]`，`(see Vaswani et al., 2017, p. 3)` vs `see [3, p. 3]`）；三個匯出檔存在，docx 含 `[1]`、Markdown 不含 `[@`；remove 後 `old1999notes` 消失，最終書目 = 手寫 FAO + 兩筆新條目；書目與 `citation.json` 都沒有 abstract；bundle 只寫在暫存的 cite 目錄，repo 的 `cite/` 未變。
 - **下一步**：C8-S2。
+
+### C8-S2 文件（2026-11-05）
+
+- **根目錄 `README.md`**：環境一節加上 Pandoc（既有 `app` 環境補裝 `conda install -n app -c conda-forge "pandoc>=3,<4"`）；新增「引用與參考文獻」一節（書目庫位置與 `bibliography` metadata、Agent 存檔併入與 key、正文寫法、`bibliography_lookup` 與未知 key 防護、Citations 面板各操作、Style/Preview/Export 與匯出檔名、`.tex` 範圍、附件十七限制）；「記錄了哪些資訊」表新增「專案書目庫」「引用匯出」兩列，並更新「已儲存的文獻」說明。
+- **`app/skills/citation/README.md`**：專案書目的資料流、三個新模組群組、內建樣式的來源 commit 與授權、附件十七比對結果連結、新不變條件。`SKILL.md` 的「Project bibliography」一節已於 C3-S3 加入。
+- **`app/agent/README.md`**：`desktop/` 一列註明 `bibliography.*` 轉接（邏輯在 `skills/citation`）。
+- 未修改 `AGENTS.md`、`for_agents/`。
+- **檢查**：四份文件的相對連結全部存在；五個樣式 ID、`bibliography_lookup`、`citationStyle`、`bibliography`、`references.json`、五個模組檔名、樣式來源 commit 都出現在文件中且與實作一致；`test_citation_skill_activation.py` 通過。
+- **下一步**：C8-S3。
 
 ## 最終彙報
 

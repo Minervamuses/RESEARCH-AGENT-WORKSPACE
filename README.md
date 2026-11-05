@@ -26,7 +26,13 @@ npm run build
 cd ../../..
 ```
 
-已存在 `app` 環境時直接啟用，不必重新建立。Conda 管理 Python、Poetry、Node 與 Rust；Poetry 在這個環境內管理 Python 套件，專案已停用 Poetry 自建虛擬環境。
+已存在 `app` 環境時直接啟用，不必重新建立。Conda 管理 Python、Poetry、Node、Rust 與 Pandoc；Poetry 在這個環境內管理 Python 套件，專案已停用 Poetry 自建虛擬環境。
+
+引用格式的預覽與匯出使用 Pandoc（`app/env/env-app.yml` 已列入）。在加入 Pandoc 之前建立的 `app` 環境，補裝一次即可：
+
+```bash
+conda install -n app -c conda-forge "pandoc>=3,<4"
+```
 
 網頁搜尋工具來自專案內附的 [Web Search MCP server](app/vendor/web-search-mcp/README.md)，agent 啟動時載入它的 `dist/index.js`。尚未 build 時 agent 仍會啟動，只是沒有網頁搜尋，log 會記錄缺少的路徑。
 
@@ -85,6 +91,16 @@ agent 可在同一回合依留言依序修改目前文件的多個段落，後�
 
 正常操作順序是：選取原文 → 留言並確認收合 → 整批送出 → 等待回合完成或確實停止 → 再手動編輯原文。標註後又手動改原文、或 agent 執行中同時手動改原文，屬於目前不支援的操作；介面不另提供鎖定、標記重定位或合併機制。
 
+## 引用與參考文獻
+
+每個研究專案有一份 CSL-JSON 書目庫，預設是專案根目錄的 `references.json`；可在 `RESEARCH.md` 的 metadata 加上 `"bibliography": "相對路徑.json"` 改到專案內其他位置。正文只寫引用 key，格式在預覽或匯出時才套用，切換格式不會改動正文任何文字。
+
+- **Agent 存檔**：在專案中用 `/citation` 儲存的文獻（驗證過的 DOI 或 arXiv ID），除了照舊寫入 bundle，也會併入書目庫並取得 key（例如 `jumper2021highly`）。已存在相同 DOI 或 arXiv ID 的條目會被重用，內容與 key 都不改；檔案原本的 JSON 排版保持不變。摘要不寫入。CLI 沒有專案，只寫 bundle。
+- **正文寫法**：Markdown 用 Pandoc 語法 `[@key]`、`[@a; @b]`、`[see @key, p. 3]`；LaTeX 用 `\cite{key}` 一族。Agent 修改文件時不能引入書目中沒有的 key；它可用唯讀工具 `bibliography_lookup` 查詢既有 key。
+- **引用面板**：開啟文件後，編輯器下方的 **Citations** 面板列出本文引用（依首次出現順序；數字制樣式顯示編號、次數、verified／unverified）、問題（書目中找不到的 key、重複 DOI、書目無法讀取）與未引用的條目。點 **Line** 會在編輯器選取那個引用。**Verify and add** 以 DOI 或 arXiv ID 驗證後加入書目（Ask 模式會先請你批准，與 `/citation` 的存檔相同）；**Insert** 在游標處插入 `[@key]` 或 `\cite{key}`（只改編輯器中的文字，仍需 Ctrl+S 保存）；**Remove** 從書目移除條目（本文仍引用時先確認，其他文件不檢查）。在 `[@`、`; @` 或 `\cite{` 之後輸入會出現 key 補全。
+- **格式與匯出**：**Style** 選單的選擇存在 `RESEARCH.md` 的 `citationStyle`。內建 APA 7、MLA 9、IEEE、Chicago author-date，以及依附件十七撰寫的 `bime-appendix17`。**Preview** 顯示目前文字的逐筆引用與參考文獻。**Export** 在文件旁寫出 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`（引用已排版）與 `<書目檔名>.bib`，原始文件不變。`.tex` 文件只提供檢查、面板與 `.bib` 匯出，格式由 LaTeX 自己的書目系統決定。
+- **附件十七的限制**：標準 CSL 無法表達中日文依姓氏筆畫排序、全中文引用群組內的全形「；」，`等人` 前會多一個空白；中日文條目需要 `language` 欄位（例如 `"zh-TW"`）才會套用中文格式。比對結果見 [計劃證據](harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md)。系所送審的 Word 檔仍由 bime_word 產生。
+
 ## 停止回合
 
 送出後 **Send** 變成 **Stop**。按下後顯示 **Stopping…**，等待模型呼叫、核准等待、工具及本回合可控制的本地工作真正收束，才恢復送出下一回合的操作。本地子程序會終止並回收；已進入的短同步操作會等返回，不會提前顯示停止完成。
@@ -111,7 +127,9 @@ Delete 會先確認範圍：**只刪這則對話紀錄，不刪研究專案或�
 | 桌面後端 stderr | 同一目錄的 `desktop-backend.stderr.log`，5 MiB 時輪替一次 | 後端程序的 stderr，以及每次啟動的 generation 標頭 | — |
 | 對話 | 桌面：專案的 `historyDirectory`（寫在專案的 `RESEARCH.md`，預設 `app/store/projects/<專案 ID>/conversations/`）。CLI：`<persist_dir>/conversations/`（預設 `app/store/conversations/`，可用 `KMS_STORE_DIR` 改） | 每回合的輸入、送出時的專案規則與引用、思考模式、回答全文、狀態與失敗原因、時間，以及工具活動（呼叫 ID、工具名稱、成功或失敗） | 工具參數與工具回傳的內容 |
 | MCP server log | `$XDG_CACHE_HOME/agent-mcp/<server>.stderr.log`，預設 `~/.cache/agent-mcp/`，5 MiB 時輪替並保留 3 份 | MCP server 的 stderr：每次載入一行標頭；web_search 每次搜尋解析到的結果數、`handleWebSearch` 的 limit 與 includeContent，以及錯誤訊息（可能含網址） | 查詢文字與頁面內容。server 的 stdout 只轉送 JSON-RPC，其餘印出的文字都被丟棄 |
-| 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存的來源 | 搜尋過但沒有儲存的候選 |
+| 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存（或在引用面板以 DOI／arXiv ID 加入）的來源 | 搜尋過但沒有儲存的候選 |
+| 專案書目庫 | 桌面專案的 `references.json`，或 `RESEARCH.md` metadata 的 `bibliography` 指定的檔案 | 已儲存文獻的 CSL-JSON 書目欄位（作者、年份、標題、期刊、卷期頁、DOI、URL 等）與 key；使用者手寫的條目原樣保留 | 摘要、參考文獻清單、授權、ORCID、機構等欄位 |
+| 引用匯出 | 文件旁的 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`、`<書目檔名>.bib`，只在按下 Export 時寫出 | 套用所選格式的正文與參考文獻 | — |
 
 模型每次收到的完整 prompt、中間回覆，以及工具回傳的全文，都只存在記憶體裡，回合結束後不保存。所以事後只能從下面的長度、次數與時間判斷工具結果有沒有交給模型，不能還原內容。
 
