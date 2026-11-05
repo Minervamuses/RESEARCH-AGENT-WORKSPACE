@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
-| C3 | Not started | — | — | C3-S1 |
+| C3 | In progress | C3-S1 見事件 | — | C3-S2 完整性報告 |
 | C4 | Not started | — | — | C3 後進行 |
 | C5 | Not started | — | 依賴 C4 | — |
 | C6 | Not started | — | 依賴 C3、C5 | — |
@@ -106,6 +106,18 @@
 - **檢查**：新 `tests/test_citation_project_library.py` 21 項通過：存一個 DOI → 書目只多尾端一筆、工具輸出含 key 與 `[@key]`/`\cite{key}`；再存 → 檔案逐位元組不變、同 key；手寫條目（大寫 DOI）被重用且不變；書目 malformed → bundle 仍 saved、書目回 `library_malformed`、檔案不變；CLI（無 library_path）→ artifact 無 `bibliography`、不產生 JSON 檔；policy 只在專案時傳 `library_path`；metadata：預設路徑、接受新鍵、10 種非法值與 symlink 逃逸皆 malformed、`initialize_project` 仍只寫兩鍵；桌面端到端（`/citation` 回合）→ 批准描述含書目路徑、`references.json` 建立且無 abstract。全部 `test_citation_*`、`test_desktop_*` 與完整 pytest（沙箱外）1563 passed，exit 0。
 - **交付**：書目結果欄位 `items[].bibliography = {status, path, key, reason_code}`；metadata 鍵 `bibliography`、`citationStyle`；`project_citation_settings`。
 - **下一步**：C3-S1。
+
+### C3-S1 正文引用 key 解析器（2026-11-05）
+
+- **介面**（`app/skills/citation/citekeys.py`）：`find_citations(text, fmt) -> list[CitationUse]`（`key`、`start`/`end` 為 UTF-16 offset、`line` 從 1 起、`group`；`to_dict()`），`keys_in`，`format_for_path`（`.md`/`.markdown` → markdown、`.tex` → latex），`LATEX_CITE_COMMANDS`。
+- **作法**：先以 Pandoc 實測邊界（`@` 前為字母/數字含中文時不是引用；行首 `(@x)` 是 example list；`/@user` 的裸 URL 是引用；`@{含空白}` 不是引用），再寫解析器。Markdown 遮蔽 YAML front matter、fenced 與縮排 code block、行內 code、HTML 註解、autolink、`$`/`$$` 數學；註腳內的引用依 Pandoc 排在註腳參照的位置，未被參照的註腳定義略過。LaTeX：`\cite` 家族（含星號、0–2 個 `[...]`、多 key、`\nocite{*}` 略過），略過 `%` 註解（`\%` 除外）與 verbatim/lstlisting/minted/comment 環境。
+- **交叉比對**（`evidence/C3-S1/crosscheck.py`、`crosscheck-result.jsonl`）：以 `pandoc -f markdown -t json` 的 Cite 節點 key 序列比較。
+  - 合成語料 `synthetic.md`（36 次使用）、`ex.md`：完全相同。
+  - 論文 `proposal.md`（`$TMPDIR` 複本，HEAD `59e9dc1`）：55 次使用、45 個不同 key，序列完全相同（規劃時的「約 46 個」實為 45）。
+  - 修正兩輪：第一輪修 `@{含空白}`、縮排 code block、行中 `(@x)`；第二輪修註腳順序。
+  - **已知限制**：同一個註腳被參照兩次時，Pandoc 會把註腳內容複製到每個參照處，所以 Pandoc 的使用次數較多（`footnote.md`：解析器 4、Pandoc 6）；key 集合與首次出現順序仍相同。
+- **檢查**：新 `tests/test_citation_citekeys.py` 42 項通過（各語法、email、code、註解、數學、全形標點與中文前後文、emoji 的 UTF-16 位移、LaTeX 家族）；其中 26 個 Markdown 例子的期望值另以 Pandoc 逐一驗證相同。
+- **下一步**：C3-S2。
 
 ## 最終彙報
 
