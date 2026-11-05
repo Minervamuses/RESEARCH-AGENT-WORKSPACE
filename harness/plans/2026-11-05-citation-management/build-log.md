@@ -1,12 +1,12 @@
 # 執行紀錄
 
-本文件是本計劃唯一的狀態來源。尚未執行任何實作。
+本文件是本計劃唯一的狀態來源。
 
 ## 目前狀態
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| C1 | Not started | — | — | C1-S1 唯讀核對與基線測試 |
+| C1 | In progress | C1-S1 基線見事件 | — | C1-S2 安裝 Pandoc |
 | C2 | Not started | — | 依賴 C1 | — |
 | C3 | Not started | — | 依賴 C2 | — |
 | C4 | Not started | — | 依賴 C1 | — |
@@ -53,6 +53,18 @@
   - 第 9、10、12 項：明文規定不找使用者；硬阻塞只剩兩種（分支不是 GUI、commit 失敗）。
   - PROMPTS 與 GOALS A10 同步修改；A10 註明 GUI 的批准是產品行為，與執行者無關。
 - **檢查**：結構檢查重跑。
+
+### C1-S1 唯讀核對與基線測試通過（2026-11-05）
+
+- **Git**：`/home/minervamuses/research-agent-workspace`，分支 GUI，HEAD `6538f69`；tracked 與 index 乾淨（`git diff --cached --name-only` 空）。`git status --short` 只列出宿主掛載的佔位項目（`.bash_profile`、`.bashrc`、`.claude/`、`.gitconfig`、`.gitmodules`、`.idea`、`.mcp.json`、`.profile`、`.ripgreprc`、`.vscode`、`.zprofile`、`.zshrc`），不 stage。計劃 14 個檔案都通過 `git ls-files --error-unmatch`。
+- **工具鏈**（`/home/minervamuses/miniconda3/envs/app/bin`）：Python 3.13.14、Poetry 2.4.1、node v24.18.0、npm 11.16.0、cargo/rustc 1.97.1。
+- **基線測試**：
+  - 完整 pytest（沙箱外，`TMPDIR`/`XDG_CACHE_HOME`/`AGENT_LOG_DIR` 導到 `/tmp/cm-base.*`）：1517 passed，2 warnings，52.6 s，exit 0。
+  - `npm test`（沙箱內）：260/260 pass，exit 0。
+  - `npm run build`（沙箱內）：exit 0（既有的 chunk > 500 kB 警告）。
+  - `cargo test --locked`（沙箱外）：40 passed，exit 0。
+- **既有失敗**：無。之後的回歸以此為準（全部通過）。
+- **下一步**：C1-S2。
 
 ## 最終彙報
 
