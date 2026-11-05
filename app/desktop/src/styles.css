@@ -1263,3 +1263,20 @@ h3 {
 .annotation-popup p { margin: .45rem 0 0; color: #5c7066; font-size: .7rem; }
 .annotation-batch { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .75rem; color: #466152; }
 .annotation-batch button { padding: .1rem .4rem; border: 1px solid #a9bdb4; border-radius: .35rem; color: #17533f; background: #f1f7f3; }
+.citation-panel { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow: auto; padding: .6rem .7rem; border-top: 1px solid #d4d6d8; background: #fbfbfa; font-size: .78rem; }
+.citation-panel-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.citation-panel-header h3 { font-size: .9rem; margin: 0; }
+.citation-library { overflow-wrap: anywhere; color: #4a4f55; }
+.citation-section > summary { cursor: pointer; font-weight: 600; margin: .35rem 0; }
+.citation-list { margin: 0; padding-left: 1.1rem; }
+.citation-row summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; cursor: pointer; }
+.citation-number { font-weight: 600; }
+.citation-meta { color: #4a4f55; overflow-wrap: anywhere; }
+.citation-count { color: #6b7075; }
+.citation-badge { padding: 0 .3rem; border-radius: .2rem; font-size: .68rem; border: 1px solid #c9cccf; }
+.citation-badge.verified { color: #1f6b3a; border-color: #8cc5a0; }
+.citation-badge.unverified { color: #7a5a12; border-color: #d9be7c; }
+.citation-uses { display: flex; flex-wrap: wrap; gap: .3rem; list-style: none; padding: 0; margin: .2rem 0 .4rem; }
+.citation-empty { color: #6b7075; }
+.citation-problems li { margin-bottom: .2rem; }
+.link-button { border: 0; background: none; padding: 0; color: #1f5f99; text-decoration: underline; cursor: pointer; font: inherit; }

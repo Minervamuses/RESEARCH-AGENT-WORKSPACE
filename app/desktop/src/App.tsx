@@ -75,6 +75,7 @@ import type {
 } from "./protocol.ts";
 import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
 import { AnnotationComment, DocumentEditor, type AnnotationControls, type DocumentSnapshot } from "./DocumentEditor.tsx";
+import { CitationPanel } from "./CitationPanel.tsx";
 import {
   ApprovalDialog,
   BashPermissionControl,
@@ -1080,6 +1081,8 @@ export default function App() {
     documentRef.current = value;
     setDocumentValue(value);
   }, []);
+  // Bumped after open, save, and applied operations so the citation panel re-checks.
+  const [citationRefresh, setCitationRefresh] = useState(0);
   const inFlight = useRef(false);
   const exclusiveOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const catalogLoading = useRef<WorkspaceOperationOwner | null>(null);
@@ -1177,6 +1180,7 @@ export default function App() {
       throw protocolMismatch("The backend returned a document result for a different source.");
     }
     if (result.status === "saved" && result.sourceText !== undefined && result.diskFingerprint !== undefined) {
+      setCitationRefresh((value) => value + 1);
       if (action?.callId !== undefined && action.sourceSnapshot !== undefined) {
         workingDocumentSourcesRef.current = advanceWorkingDocumentSources(workingDocumentSourcesRef.current, action.sourceSnapshot, result);
       }
@@ -1268,6 +1272,7 @@ export default function App() {
       if (opened.rootPath !== projectRef.current?.rootPath) throw protocolMismatch("The backend opened a document from a different project.");
       documentBaselineRef.current = { ...opened };
       updateDocument({ ...opened, editorRevision: opened.editorRevision ?? 0 });
+      setCitationRefresh((value) => value + 1);
       setDocumentConflict(null);
       setLastDocumentAction(null);
       setDocumentNotice(null);
@@ -2782,6 +2787,13 @@ export default function App() {
             />
             {documentNotice !== null && <p className="document-error" role="status">{documentNotice}</p>}
             <DocumentEditor value={documentValue} onChange={updateDocument} annotationControls={annotationControls} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy} />
+            {documentValue !== null && state.snapshot?.lifecycle === "ready" && <CitationPanel
+              document={documentValue}
+              refreshToken={citationRefresh}
+              request={backendClient.request}
+              contextPayload={documentContextPayload}
+              onSelect={updateDocument}
+            />}
             {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
               <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
               <p>Keeping the editor or cancelling leaves disk unchanged. Using the candidate replaces this file after checking its version again.</p>

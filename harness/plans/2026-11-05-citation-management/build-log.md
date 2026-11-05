@@ -12,7 +12,7 @@
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Complete | C5-S1–S3 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
-| C7 | Not started | — | — | C7-S1 |
+| C7 | In progress | C7-S1 見事件 | — | C7-S2 增刪與補全 |
 | C8 | Not started | — | 依賴 C7 | — |
 
 ## 事件
@@ -230,6 +230,17 @@
 - **檢查**：新 `tests/test_desktop_bibliography.py` 10 項（每個結果都過 `validate_result_data`）：未開專案 → `SESSION_NOT_READY`；inspect（書目不存在、含未儲存文字、malformed）；render（IEEE/APA 不同、UTF-16 位置、未知樣式、`.tex` 拒絕且 inspect 可用）；set_style（只改 metadata、規則文字與雜湊不變、新指紋、未知樣式、`BUSY_TURN` 不寫入）；set_style 後送出新回合成功（R5）；remove（指紋衝突、未知 key 不寫、成功只少一筆）；add（Ask 拒絕 → `APPROVAL_DENIED` 且書目與 bundle 都不存在；Ask 同意 → added；Bypass 直接執行 → existing；不存在的 DOI → failed；非識別碼 → `PROTOCOL_INVALID`）；export（docx/markdown/bib 路徑與內容、原文件雜湊不變、`.tex` 的 docx 拒絕而 bib 可用）；錯誤分型（書目壞掉、Pandoc 不在）；`update_project_metadata` 單元測試（縮排 JSON 保留鍵序與區塊外文字、不可改其他鍵、寫入前檔案被改 → 衝突且無暫存檔殘留）。`test_project_permissions.py`、`test_citation_project_library.py` 通過；完整 pytest（沙箱外）1678 passed（加上新單元測試前），exit 0。
 - **交付給 C7**：方法與欄位見 C6-S1；預設樣式 `apa`；錯誤碼 `BIBLIOGRAPHY_CONFLICT`、`BIBLIOGRAPHY_FAILED`。
 - **下一步**：C7-S1。
+
+### C7-S1 引用面板：檢視與跳轉（2026-11-05）
+
+- **改動**：
+  - `src/citations.ts`（純函式，無 React）：協定 DTO 型別、`buildPanelModel`（依 `order` 的首次出現順序；數字制樣式只替書目中存在的 key 依序編號；每個 key 的次數與位置；問題分為找不到的 key 與重複 DOI，書目錯誤轉成訊息）、`describeEntry`、`selectUse`（只有編輯器文字仍與檢查時相同才產生選取範圍；範圍以 UTF-16 為單位、越界拒絕）。
+  - `src/CitationPanel.tsx`：在文件開啟時顯示於編輯器下方；分區「Cited in this document」（編號、key、作者年份標題、次數、驗證狀態，展開列出行號按鈕）、「Problems」、「Not cited in this document」；書目不存在時顯示說明。所有書目字串都以 React 文字節點顯示（不經 HTML）。呼叫 `bibliography.inspect` 的時機：文件開啟、手動儲存成功、`document.apply` 存檔成功（`App.tsx` 的 `citationRefresh` 計數）與按下 Refresh；不在每次按鍵時呼叫。
+  - 跳轉：面板把帶 `rangeStartUtf16/rangeEndUtf16` 的快照（同一個 `editorRevision`）交給 `updateDocument`，`DocumentEditor` 既有的受控邏輯就會選取並捲到該範圍。
+  - 介面文字沿用 GUI 的英文；`styles.css` 新增面板樣式。
+- **檢查**：新 `tests/citations.test.ts` 6 項（排序、計數、問題分類、數字制編號、書目錯誤、描述字串、emoji 造成的 UTF-16 位移、過期或越界位置不選取）；`npm test` 295/295；`npm run build`（tsc + vite）成功。
+- **限制**：原生視窗的實際外觀與點擊未觀察（R6），列入 C8 手動檢查清單。
+- **下一步**：C7-S2。
 
 ## 最終彙報
 
