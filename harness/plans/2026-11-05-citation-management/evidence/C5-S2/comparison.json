@@ -6,7 +6,7 @@
   },
   "bibliography": {
    "total": 42,
-   "match": 37,
+   "match": 42,
    "csl_entries": 42
   }
  },
@@ -397,8 +397,8 @@
    "position": 1,
    "key": "asai2026openscholar",
    "oracle": "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D'Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W.-t. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
-   "csl": "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D'Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
-   "match": false
+   "csl": "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D'Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W.-t. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
+   "match": true
   },
   {
    "position": 2,
@@ -432,8 +432,8 @@
    "position": 6,
    "key": "grattafiori2024llama3",
    "oracle": "Grattafiori, A., A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten, A. Vaughan, et al. 2024. The Llama 3 Herd of Models. arXiv:2407.21783. Available at: https://doi.org/10.48550/arXiv.2407.21783.",
-   "csl": "Grattafiori, A., A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten, A. Vaughan, and et al. 2024. The Llama 3 Herd of Models. arXiv:2407.21783. Available at: https://doi.org/10.48550/arXiv.2407.21783.",
-   "match": false
+   "csl": "Grattafiori, A., A. Dubey, A. Jauhri, A. Pandey, A. Kadian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten, A. Vaughan, et al. 2024. The Llama 3 Herd of Models. arXiv:2407.21783. Available at: https://doi.org/10.48550/arXiv.2407.21783.",
+   "match": true
   },
   {
    "position": 7,
@@ -467,8 +467,8 @@
    "position": 11,
    "key": "karpukhin2020dpr",
    "oracle": "Karpukhin, V., B. Oguz, S. Min, P. Lewis, L. Wu, S. Edunov, D. Chen, and W.-t. Yih. 2020. Dense Passage Retrieval for Open-Domain Question Answering. In “Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)”, 6769-6781. B. Webber, T. Cohn, Y. He, and Y. Liu, eds. Stroudsburg, PA: Association for Computational Linguistics.",
-   "csl": "Karpukhin, V., B. Oguz, S. Min, P. Lewis, L. Wu, S. Edunov, D. Chen, and W. Yih. 2020. Dense Passage Retrieval for Open-Domain Question Answering. In “Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)”, 6769-6781. B. Webber, T. Cohn, Y. He, and Y. Liu, eds. Stroudsburg, PA: Association for Computational Linguistics.",
-   "match": false
+   "csl": "Karpukhin, V., B. Oguz, S. Min, P. Lewis, L. Wu, S. Edunov, D. Chen, and W.-t. Yih. 2020. Dense Passage Retrieval for Open-Domain Question Answering. In “Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)”, 6769-6781. B. Webber, T. Cohn, Y. He, and Y. Liu, eds. Stroudsburg, PA: Association for Computational Linguistics.",
+   "match": true
   },
   {
    "position": 12,
@@ -502,15 +502,15 @@
    "position": 16,
    "key": "lee2025critical",
    "oracle": "Lee, H.-P., A. Sarkar, L. Tankelevitch, I. Drosos, S. Rintel, R. Banks, and N. Wilson. 2025. The Impact of Generative AI on Critical Thinking: Self-Reported Reductions in Cognitive Effort and Confidence Effects From a Survey of Knowledge Workers. In “Proceedings of the 2025 CHI Conference on Human Factors in Computing Systems”, 1-22. New York, NY: ACM.",
-   "csl": "Lee, H.-P. (Hank)., A. Sarkar, L. Tankelevitch, I. Drosos, S. Rintel, R. Banks, and N. Wilson. 2025. The Impact of Generative AI on Critical Thinking: Self-Reported Reductions in Cognitive Effort and Confidence Effects From a Survey of Knowledge Workers. In “Proceedings of the 2025 CHI Conference on Human Factors in Computing Systems”, 1-22. New York, NY: ACM.",
-   "match": false
+   "csl": "Lee, H.-P., A. Sarkar, L. Tankelevitch, I. Drosos, S. Rintel, R. Banks, and N. Wilson. 2025. The Impact of Generative AI on Critical Thinking: Self-Reported Reductions in Cognitive Effort and Confidence Effects From a Survey of Knowledge Workers. In “Proceedings of the 2025 CHI Conference on Human Factors in Computing Systems”, 1-22. New York, NY: ACM.",
+   "match": true
   },
   {
    "position": 17,
    "key": "lewis2020rag",
    "oracle": "Lewis, P., E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis, W.-t. Yih, T. Rocktäschel, S. Riedel, and D. Kiela. 2020. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In “Advances in Neural Information Processing Systems 33 (NeurIPS 2020)”, 9459-9474. H. Larochelle, M. Ranzato, R. Hadsell, M. F. Balcan, and H. Lin, eds. Curran Associates, Inc.",
-   "csl": "Lewis, P., E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis, W. Yih, T. Rocktäschel, S. Riedel, and D. Kiela. 2020. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In “Advances in Neural Information Processing Systems 33 (NeurIPS 2020)”, 9459-9474. H. Larochelle, M. Ranzato, R. Hadsell, M. F. Balcan, and H. Lin, eds. Curran Associates, Inc.",
-   "match": false
+   "csl": "Lewis, P., E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis, W.-t. Yih, T. Rocktäschel, S. Riedel, and D. Kiela. 2020. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In “Advances in Neural Information Processing Systems 33 (NeurIPS 2020)”, 9459-9474. H. Larochelle, M. Ranzato, R. Hadsell, M. F. Balcan, and H. Lin, eds. Curran Associates, Inc.",
+   "match": true
   },
   {
    "position": 18,

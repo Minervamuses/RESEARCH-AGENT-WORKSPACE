@@ -179,6 +179,66 @@ def protect_apostrophes(items: list[dict], document_text: str) -> tuple[list[dic
     return out, placeholder
 
 
+_NAME_ROLES = ("author", "editor", "translator", "collection-editor", "container-author")
+_NICKNAME = re.compile(r"\s*\([^)]*\)")
+
+
+def _given_for_appendix17(given: str) -> str:
+    """bime_word's given-name rules: drop "(Nickname)"; initialize hyphenated
+    parts when one starts lower-case ("Wen-tau" -> "W.-t."), which CSL drops."""
+    tokens = []
+    for token in _NICKNAME.sub(" ", given).split():
+        parts = [part for part in token.split("-") if part]
+        if len(parts) > 1 and any(part[0].islower() for part in parts[1:]):
+            token = "-".join(part[0] + "." for part in parts)
+        tokens.append(token)
+    return " ".join(tokens)
+
+
+def normalize_given_names(items: list[dict]) -> list[dict]:
+    """Copy with Appendix 17 given-name rules applied to non-CJK names."""
+    out = []
+    for item in items:
+        copy = dict(item)
+        if cjk_language(item) is None:
+            for role in _NAME_ROLES:
+                names = item.get(role)
+                if not isinstance(names, list):
+                    continue
+                fixed = []
+                for name in names:
+                    if isinstance(name, dict) and isinstance(name.get("given"), str):
+                        name = dict(name)
+                        given = _given_for_appendix17(name["given"])
+                        if given:
+                            name["given"] = given
+                        else:
+                            name.pop("given")
+                    fixed.append(name)
+                copy[role] = fixed
+        out.append(copy)
+    return out
+
+
+# A source-truncated author list ends in a literal like "et al."; the
+# Appendix 17 style prints such lists without "and" and ends them with et al.
+_ET_AL_LITERALS = frozenset({"et al.", "et al", "others", "等", "等人"})
+TRUNCATION_FLAG = "references"  # the CSL variable bime-appendix17.csl tests
+
+
+def mark_truncated_author_lists(items: list[dict]) -> list[dict]:
+    out = []
+    for item in items:
+        copy = {key: value for key, value in item.items() if key != TRUNCATION_FLAG}
+        names = item.get("author")
+        if isinstance(names, list) and len(names) > 1 and isinstance(names[-1], dict) \
+                and str(names[-1].get("literal", "")).strip().casefold() in _ET_AL_LITERALS:
+            copy["author"] = names[:-1]
+            copy[TRUNCATION_FLAG] = "truncated-author-list"
+        out.append(copy)
+    return out
+
+
 def prepare_render_items(items: list[dict], steps: list[str], document_text: str) -> tuple[list[dict], dict[str, str]]:
     """Apply a style's ``preprocess`` steps (styles.json) to a copy of the items.
 
@@ -187,6 +247,10 @@ def prepare_render_items(items: list[dict], steps: list[str], document_text: str
     restore: dict[str, str] = {}
     if "cjk-language" in steps:
         items = language_branch_items(items)
+    if "given-names" in steps:
+        items = normalize_given_names(items)
+    if "truncated-authors" in steps:
+        items = mark_truncated_author_lists(items)
     if "straight-apostrophes" in steps:
         items, placeholder = protect_apostrophes(items, document_text)
         if placeholder is not None:

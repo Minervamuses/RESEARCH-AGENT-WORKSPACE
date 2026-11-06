@@ -243,3 +243,59 @@ def test_no_free_placeholder_leaves_text_unchanged():
     items = [{"id": "a", "title": "x'y"}]
     copy, placeholder = protect_apostrophes(items, "".join(_APOSTROPHE_PLACEHOLDERS))
     assert (copy, placeholder) == (items, None)
+
+
+def _names(*families, given="A."):
+    return [{"family": family, "given": given} for family in families]
+
+
+NAME_CASES = [
+    {"id": "yih2020", "type": "article-journal", "title": "One",
+     "author": [{"family": "Yih", "given": "Wen-tau"}, {"family": "Godard", "given": "Jean-Luc"},
+                {"family": "Lee", "given": "Hao-Ping (Hank)"}],
+     "issued": {"date-parts": [[2020]]}, "container-title": "J. X", "volume": "1", "page": "1-2"},
+    {"id": "trunc2024", "type": "article", "title": "Truncated in the source",
+     "author": _names(*[f"F{i}" for i in range(1, 11)]) + [{"literal": "et al."}],
+     "issued": {"date-parts": [[2024]]}, "number": "arXiv:2407.21783"},
+    {"id": "twelve2024", "type": "article", "title": "Twelve real authors",
+     "author": _names(*[f"G{i}" for i in range(1, 13)]), "issued": {"date-parts": [[2024]]}, "number": "arXiv:1"},
+    {"id": "pair2023", "type": "article", "title": "Two then et al",
+     "author": _names("Pa", "Pb") + [{"literal": "et al"}], "issued": {"date-parts": [[2023]]}, "number": "arXiv:2"},
+    {"id": "wang2020", "type": "article-journal", "language": "zh-TW", "title": "水稻研究",
+     "author": [{"family": "王", "given": "小明"}, {"family": "李", "given": "大華"}, {"literal": "等"}],
+     "issued": {"date-parts": [[2020]]}, "container-title": "農業工程學報", "volume": "1", "page": "1-2"},
+]
+
+
+def test_given_names_follow_bime_word_rules(tmp_path):
+    """User decision D11: Wen-tau -> W.-t. and no nickname, without editing the file."""
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(NAME_CASES, ensure_ascii=False), encoding="utf-8")
+    before = path.read_bytes()
+    out = render("[@yih2020]", path, "bime-appendix17")
+    assert out.bibliography[0]["text"] == "Yih, W.-t., J.-L. Godard, and H.-P. Lee. 2020. One. J. X 1: 1-2."
+    assert path.read_bytes() == before
+
+
+def test_truncated_author_lists_end_with_et_al(tmp_path):
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(NAME_CASES, ensure_ascii=False), encoding="utf-8")
+    out = render("[@trunc2024] [@twelve2024] [@pair2023] [@wang2020]", path, "bime-appendix17")
+    assert [c["text"] for c in out.citations] == [
+        "(F1 et al., 2024)", "(G1 et al., 2024)", "(Pa et al., 2023)", "(王 等人，2020)",
+    ]
+    entries = {e["key"]: e["text"] for e in out.bibliography}
+    first_ten = "F1, A., " + ", ".join(f"A. F{i}" for i in range(2, 11))
+    assert entries["trunc2024"] == f"{first_ten}, et al. 2024. Truncated in the source. arXiv:2407.21783."
+    assert entries["twelve2024"].startswith("G1, A., A. G2, ") and ", A. G11, and A. G12. 2024." in entries["twelve2024"]
+    assert entries["pair2023"] == "Pa, A., A. Pb, et al. 2023. Two then et al. arXiv:2."
+    assert entries["wang2020"] == "王小明、李大華等。2020。水稻研究。農業工程學報 1: 1-2。"
+    apa = render("[@trunc2024]", path, "apa")
+    assert "et al." in apa.bibliography[0]["text"]  # other styles read the file as before
+
+
+def test_preprocessing_never_leaks_the_flag_variable():
+    from skills.citation.csl_render import TRUNCATION_FLAG, mark_truncated_author_lists
+
+    items = [{"id": "a", "author": [{"family": "A"}], TRUNCATION_FLAG: "user data"}]
+    assert mark_truncated_author_lists(items) == [{"id": "a", "author": [{"family": "A"}]}]

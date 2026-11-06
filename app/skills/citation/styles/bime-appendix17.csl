@@ -31,16 +31,39 @@
        Standard CSL cannot test its value, so the renderer (csl_render,
        styles.json "preprocess") passes Pandoc a copy that keeps "language"
        only on Chinese/Japanese entries; the user's file is unchanged. -->
+  <!-- "references" marks an author list truncated in the source (the renderer
+       removes its trailing literal "et al." name and sets the flag): it is
+       printed without "and" and ends with et al. / 等, as bime_word does. -->
   <macro name="author-bib">
     <choose>
       <if variable="language">
-        <names variable="author">
-          <name delimiter="、"/>
-          <substitute>
-            <text variable="publisher"/>
-          </substitute>
-        </names>
+        <choose>
+          <if variable="references">
+            <group>
+              <names variable="author">
+                <name delimiter="、"/>
+              </names>
+              <text value="等"/>
+            </group>
+          </if>
+          <else>
+            <names variable="author">
+              <name delimiter="、"/>
+              <substitute>
+                <text variable="publisher"/>
+              </substitute>
+            </names>
+          </else>
+        </choose>
       </if>
+      <else-if variable="references">
+        <group delimiter=", ">
+          <names variable="author">
+            <name delimiter=", " initialize-with=". " name-as-sort-order="first" sort-separator=", "/>
+          </names>
+          <text term="et-al"/>
+        </group>
+      </else-if>
       <else>
         <names variable="author">
           <name and="text" delimiter=", " delimiter-precedes-last="always" initialize-with=". " name-as-sort-order="first" sort-separator=", "/>
@@ -54,14 +77,29 @@
   <macro name="author-short">
     <choose>
       <if variable="language">
-        <names variable="author">
-          <name form="short" delimiter="與" et-al-min="3" et-al-use-first="1"/>
-          <et-al term="and others"/>
-          <substitute>
-            <text variable="publisher"/>
-          </substitute>
-        </names>
+        <choose>
+          <if variable="references">
+            <names variable="author">
+              <name form="short" delimiter="與" et-al-min="2" et-al-use-first="1"/>
+              <et-al term="and others"/>
+            </names>
+          </if>
+          <else>
+            <names variable="author">
+              <name form="short" delimiter="與" et-al-min="3" et-al-use-first="1"/>
+              <et-al term="and others"/>
+              <substitute>
+                <text variable="publisher"/>
+              </substitute>
+            </names>
+          </else>
+        </choose>
       </if>
+      <else-if variable="references">
+        <names variable="author">
+          <name form="short" delimiter=", " et-al-min="2" et-al-use-first="1"/>
+        </names>
+      </else-if>
       <else>
         <names variable="author">
           <name form="short" and="text" delimiter=", " delimiter-precedes-last="contextual" et-al-min="3" et-al-use-first="1"/>

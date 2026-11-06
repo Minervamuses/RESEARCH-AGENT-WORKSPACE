@@ -42,7 +42,9 @@
    "origin": "custom",
    "preprocess": [
     "cjk-language",
-    "straight-apostrophes"
+    "straight-apostrophes",
+    "given-names",
+    "truncated-authors"
    ]
   }
  ]

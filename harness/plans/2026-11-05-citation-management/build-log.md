@@ -10,10 +10,10 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete（驗收修正後）| C3-S1–S3、C3-F1、C3-F2 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | In progress（使用者決定 D9–D11）| C5-S1–S3、C5-F1–F3 見事件 | — | C5-F4 |
+| C5 | Complete（D9–D11 後）| C5-S1–S3、C5-F1–F4 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
-| C8 | Complete（驗收修正後）| C8-S1–S3、C8-F1 見事件；最終彙報 | — | — |
+| C8 | In progress | C8-S1–S3、C8-F1 見事件；最終彙報 | — | C8-F2 |
 
 ## 事件
 
@@ -373,6 +373,28 @@
 
   原有測試中附件十七 SAS 範例的期望值改回原文的 `User's`，現在與附件十七原文完全相同。`test_citation_appendix17.py`、`test_citation_csl_render.py`、`test_desktop_bibliography.py` 共 44 passed。
 - **論文比對重跑**：參考文獻 **37/42**（原 32/42；gero2022sparks、jakesch2023cowriting、lala2023paperqa、lee2022coauthor、openai2023outage 現在一致），引用 46/46。剩下 asai2026openscholar、karpukhin2020dpr、lewis2020rag（`Wen-tau`）、grattafiori2024llama3（截斷清單）、lee2025critical（暱稱）。
+
+### C5-F4 以渲染副本消除另外 4 條差異（D11）（2026-11-06）
+
+- **作法的選擇**：使用者同意「修改書目資料」以消除這 4 條差異，但實作改為在渲染時的書目副本中套用 bime_word 的相同規則，不改寫 `references.json`，原因：
+  - 不會失去完整名字（例如 `Wen-tau` 不必永久改成 `W.-t.`）。
+  - 以後新增的條目也適用。
+  - 不必寫入計劃原本規定唯讀的論文資料夾。
+  - grattafiori2024llama3 若改成列出完整作者，Llama 3 論文有數百位作者，輸出會與 bime_word 的 `…, A. Vaughan, et al.` 不同。C5-F2 對這一條建議「列出完整作者」並不正確。
+
+  效果與使用者的目標相同（差異消除），列入最終彙報；若使用者仍要改資料，可另外進行。
+- **改動**：
+  - `styles.json` 的 `preprocess` 增加 `given-names` 與 `truncated-authors`。
+  - `csl_render.normalize_given_names`：只處理非中日文名字。去掉 `(暱稱)`；連字號名字中有小寫開頭的部分時預先縮寫（`Wen-tau` → `W.-t.`），`Jean-Luc` 這類交給 CSL 照常處理。
+  - `csl_render.mark_truncated_author_lists`：作者清單以 `et al.`、`et al`、`others`、`等`、`等人` 的 literal 名字結尾時，在副本中移除它並設定旗標變數 `references`。副本中先清掉所有條目原有的 `references`，所以使用者資料不會誤觸。
+  - `bime-appendix17.csl`：作者巨集與引用巨集在有旗標時，英文輸出不加 and、以 `et al.` 結尾；中文輸出為 `、` 分隔加 `等`；引用時二人以上就用 `et al.`／`等人`。
+- **檢查**：`test_citation_appendix17.py` 新增 3 項（共 31）：
+  - `Wen-tau`/`Jean-Luc`/`Hao-Ping (Hank)` → `Yih, W.-t., J.-L. Godard, and H.-P. Lee`，書目檔不變。
+  - 截斷清單：10 人 + literal → `…, A. F10, et al.`；2 人 + literal → `Pa, A., A. Pb, et al.` 與 `(Pa et al., 2023)`；12 位真實作者仍全列並有 `and`；中文 `王小明、李大華等` 與 `(王 等人，2020)`；APA 照舊讀原檔。
+  - 旗標變數不會從使用者資料外洩。
+
+  CSL 以 ElementTree 確認為合法 XML。`test_citation_appendix17.py`、`test_citation_csl_render.py`、`test_desktop_bibliography.py` 共 47 passed。
+- **論文比對重跑**：**引用 46/46、參考文獻 42/42**（`evidence/C5-S2/comparison.json`）。`compare.md`、`C5-F2/inexpressible.md` 補上後續說明；中日文規則判定不變（13 達成、1 部分、2 無法表達）。`README.md` 的附件十七說明同步更新。
 
 ## 最終彙報
 
