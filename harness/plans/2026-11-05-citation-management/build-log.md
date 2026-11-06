@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
-| C3 | Reopened（驗收）→ 修正中 | C3-S1–S3、C3-F1 見事件 | — | C3-F2 |
+| C3 | Complete（驗收修正後）| C3-S1–S3、C3-F1、C3-F2 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Reopened（驗收）| C5-S1–S3 見事件 | — | C5-F1、C5-F2 |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
@@ -304,6 +304,14 @@
 - **檢查**：`tests/test_citation_citekeys.py` 新增 20 個例子（共 61 項通過）；其中 44 個 Markdown 例子的期望值逐一以 Pandoc 驗證相同。交叉比對重跑（`evidence/C3-F1/crosscheck-result.jsonl`）：新的 `links.md`（8 次使用）完全相同；`synthetic.md`、`ex.md`、論文 `proposal.md`（HEAD `59e9dc1`，55 次、45 key）仍完全相同；`footnote.md` 仍是既知的註腳重複參照差異。全部 `test_citation_*.py` 520 passed。
 - **新記錄的已知限制**：段落中只有一張圖片時，Pandoc 會把 alt 文字同時放進 figure 標題與圖片 alt，所以 alt 中的引用在 Pandoc 中出現兩次（`evidence/C3-F1/image-figure.md`：解析器 2、Pandoc 3）；key 集合與首次出現順序相同。
 - **影響**：引用面板不再把連結中的 `@` 列為缺漏 key；`document_edit` 的防護不再拒絕加入這類連結的正常修改（C3-F2 的測試涵蓋）。
+
+### C3-F2 未知 key 防護改為檢查存檔後的完整文件（2026-11-06）
+
+- **原因**：C3-S3 只解析 Agent 提交的替換文字，與最後寫入的內容不同；局部選取（例如 `[@known]` 中只選 `known`、換成 `ghost`）可繞過。
+- **改動**：
+  - `agent/desktop/documents.py`：抽出 `_apply_replacement`（換行正規化 + 拼接），`prepare` 與新的 `candidate_text(snapshot, replacement)` 共用；`candidate_text` 回傳 `prepare` 會綁定的完整候選文字，但不登記候選。所以檢查的文字與存檔的 `candidateText` 逐字相同。
+  - `agent/desktop/service.py` `_unknown_new_citation_keys`：比較修改前（快照原文）與修改後（完整候選文字）每個 key 的出現次數；次數增加的 key 若不在書目中就拒絕（不準備候選、不發 `document.proposed`）。文件原本已有的使用（包括原本就有的未知 key）照舊保留；新增一次原本就未知的 key 也會被拒絕（以前只看選取範圍時會放過）。書目讀不到時，只拒絕會增加 key 使用次數的修改。範圍無效時交給 `prepare` 回報同樣的錯誤。
+- **檢查**：`tests/test_desktop_citation_keys.py` 新增 5 項（共 13）：審查者的情境（只選 `ng2021journal` 換成 `ghost` → failed、`unknownKeys == ["ghost"]`、沒有 `document.proposed`/`approval.required`、檔案不變）；只選 `[@`、替換文字本身不是完整引用但結果是 → 拒絕；局部改成另一個已知 key → saved；在別處再用一次既有的未知 key → 拒絕；加入 `[Profile](https://example.org/@ghost "about @ghost2")` → saved（C3-F1 的效果）。**突變確認**：把 `service.py` 暫時換回修正前版本，審查者情境的測試失敗（實際 `saved`），換回後通過。`test_desktop_document_service.py`、`test_desktop_documents.py` 一起 67 passed。
 
 ## 最終彙報
 

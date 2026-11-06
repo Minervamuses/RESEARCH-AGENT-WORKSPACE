@@ -118,6 +118,87 @@ def test_unknown_key_already_in_the_range_is_kept(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+async def _open_with_selection(service, path, text, selected, occurrence=0):
+    path.write_text(text, encoding="utf-8")
+    context = await service.dispatch("document.open", {"path": str(path)})
+    start = -1
+    for _ in range(occurrence + 1):
+        start = text.index(selected, start + 1)
+    return {**context, "rangeStartUtf16": start, "rangeEndUtf16": start + len(selected)}
+
+
+def test_partial_selection_inside_a_citation_cannot_introduce_an_unknown_key(tmp_path, monkeypatch):
+    """Acceptance P1: replacing only `ng2021journal` inside [@ng2021journal] with `ghost`."""
+    async def run():
+        service, model, path, _context = await _setup(tmp_path, monkeypatch)
+        _write_library(tmp_path)
+        text = "研究指出 [@ng2021journal]。🙂\n"
+        context = await _open_with_selection(service, path, text, "ng2021journal")
+        model.replacement = "ghost"
+        result, sink = await _turn(service, context)
+        assert result["text"] == "Document operation: failed."
+        assert _tool_message(model, "document_edit")["unknownKeys"] == ["ghost"]
+        assert not [e for e, _ in sink.events if e in {"document.proposed", "approval.required"}]
+        assert path.read_text(encoding="utf-8") == text
+    asyncio.run(run())
+
+
+def test_selection_that_completes_a_citation_is_checked_in_the_result(tmp_path, monkeypatch):
+    async def run():
+        service, model, path, _context = await _setup(tmp_path, monkeypatch)
+        _write_library(tmp_path)
+        text = "見 [@ng2021journal] 與尾段。\n"
+        # The replacement alone has no complete citation; the saved text would.
+        context = await _open_with_selection(service, path, text, "[@")
+        model.replacement = "[@ghost2020x; @"
+        result, _sink = await _turn(service, context)
+        assert result["text"] == "Document operation: failed."
+        assert _tool_message(model, "document_edit")["unknownKeys"] == ["ghost2020x"]
+        assert path.read_text(encoding="utf-8") == text
+    asyncio.run(run())
+
+
+def test_partial_edit_to_another_known_key_is_saved(tmp_path, monkeypatch):
+    async def run():
+        service, model, path, _context = await _setup(tmp_path, monkeypatch)
+        _write_library(tmp_path)
+        text = "研究指出 [@ng2021journal]。\n"
+        context = await _open_with_selection(service, path, text, "ng2021journal")
+        model.replacement = "lab2019site"
+        result, _sink = await _turn(service, context)
+        assert result["text"] == "Document operation: saved."
+        assert path.read_text(encoding="utf-8") == "研究指出 [@lab2019site]。\n"
+    asyncio.run(run())
+
+
+def test_another_use_of_an_existing_unknown_key_is_refused(tmp_path, monkeypatch):
+    async def run():
+        service, model, path, _context = await _setup(tmp_path, monkeypatch)
+        _write_library(tmp_path)
+        text = "舊文 [@legacy1999old]。\n\n新段落。\n"
+        context = await _open_with_selection(service, path, text, "新段落。")
+        model.replacement = "新段落 [@legacy1999old]。"
+        result, _sink = await _turn(service, context)
+        assert result["text"] == "Document operation: failed."
+        assert _tool_message(model, "document_edit")["unknownKeys"] == ["legacy1999old"]
+        assert path.read_text(encoding="utf-8") == text
+    asyncio.run(run())
+
+
+def test_link_with_at_sign_is_not_treated_as_a_citation(tmp_path, monkeypatch):
+    """Acceptance P2: [Profile](https://example.org/@ghost) is a link, not a citation."""
+    async def run():
+        service, model, path, _context = await _setup(tmp_path, monkeypatch)
+        _write_library(tmp_path)
+        text = "作者頁面。\n"
+        context = await _open_with_selection(service, path, text, "作者頁面。")
+        model.replacement = '作者頁面 [Profile](https://example.org/@ghost "about @ghost2")。'
+        result, _sink = await _turn(service, context)
+        assert result["text"] == "Document operation: saved."
+        assert "@ghost" in path.read_text(encoding="utf-8")
+    asyncio.run(run())
+
+
 def test_unreadable_bibliography_only_blocks_new_keys(tmp_path, monkeypatch):
     async def run():
         service, model, path, context = await _setup(tmp_path, monkeypatch)

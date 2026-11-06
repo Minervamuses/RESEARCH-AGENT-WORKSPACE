@@ -15,6 +15,7 @@ import platform
 import re
 import sys
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -2422,21 +2423,27 @@ class DesktopService:
         }, ensure_ascii=False)
 
     def _unknown_new_citation_keys(self, context: dict[str, Any], replacement_text: str) -> dict[str, Any] | None:
-        """Refuse replacement text that introduces citation keys missing from the bibliography.
+        """Refuse an edit whose resulting document adds uses of keys missing from the bibliography.
 
-        Keys already present in the replaced range are kept as they are.
+        The check runs on the full text the candidate would save (the
+        replacement spliced into the source exactly as ``prepare`` does), so a
+        partial selection such as ``known`` inside ``[@known]`` cannot turn a
+        known key into an unknown one. A key counts as added when it occurs
+        more often after the edit than before; existing uses, including
+        unknown keys the document already had, are left alone.
         Returns the failure payload, or None when the edit may proceed.
         """
         fmt = citation_format_for_path(context["path"])
         if fmt is None:
             return None
-        encoded = context["sourceText"].encode("utf-16-le")
-        original = encoded[context["rangeStartUtf16"] * 2:context["rangeEndUtf16"] * 2].decode("utf-16-le", errors="replace")
-        existing = set(citation_keys_in(original, fmt))
-        new_keys = list(dict.fromkeys(
-            key for key in citation_keys_in(replacement_text, fmt) if key not in existing
-        ))
-        if not new_keys:
+        try:
+            base, candidate = self._documents.candidate_text(context, replacement_text)
+        except DocumentError:
+            return None  # prepare() reports the same invalid range or text
+        before = Counter(citation_keys_in(base["sourceText"], fmt))
+        after = Counter(citation_keys_in(candidate, fmt))
+        added = [key for key in after if after[key] > before.get(key, 0)]
+        if not added:
             return None
         project = self._project
         try:
@@ -2448,18 +2455,18 @@ class DesktopService:
             return {
                 "status": "failed",
                 "issue": (
-                    "The replacement adds citation keys, but the project bibliography cannot be read "
+                    "The edit adds citation keys to the document, but the project bibliography cannot be read "
                     f"({exc}); no candidate was prepared."
                 ),
-                "unknownKeys": new_keys,
+                "unknownKeys": added,
             }
-        unknown = [key for key in new_keys if key not in known]
+        unknown = [key for key in added if key not in known]
         if not unknown:
             return None
         return {
             "status": "failed",
             "issue": (
-                "The replacement introduces citation keys that are not in the project bibliography "
+                "After this edit the document would cite keys that are not in the project bibliography "
                 f"({path}); no candidate was prepared. Use bibliography_lookup for existing keys, or "
                 "save the work with /citation first. Do not invent keys."
             ),

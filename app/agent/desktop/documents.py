@@ -207,6 +207,23 @@ class DocumentWorkspace:
             start, end = 0, utf16_length(validated["sourceText"])
         return {**validated, "rangeStartUtf16": start, "rangeEndUtf16": end}
 
+    @staticmethod
+    def _apply_replacement(base: dict[str, Any], replacement: str) -> tuple[str, str]:
+        """(newline-normalized replacement, full candidate text) for a resolved base."""
+        source = base["sourceText"]
+        left = utf16_to_index(source, base["rangeStartUtf16"])
+        right = utf16_to_index(source, base["rangeEndUtf16"])
+        newline = re.search(r"\r\n|\r|\n", source[left:right]) or re.search(r"\r\n|\r|\n", source)
+        if newline is not None:
+            replacement = re.sub(r"\r\n|\r|\n", lambda _: newline[0], replacement)
+        return replacement, source[:left] + replacement + source[right:]
+
+    def candidate_text(self, snapshot: dict[str, Any], replacement_text: str) -> tuple[dict[str, Any], str]:
+        """The resolved base and the exact full text ``prepare`` would bind, without registering it."""
+        base = self.resolve_range(snapshot)
+        _replacement, candidate = self._apply_replacement(base, _text(replacement_text, "replacementText"))
+        return base, candidate
+
     def prepare(
         self, snapshot: dict[str, Any], replacement_text: str, *, turn_id: str, call_id: str,
     ) -> dict[str, Any]:
@@ -217,12 +234,8 @@ class DocumentWorkspace:
             raise DocumentError("turnId and callId are required")
         key = (turn_id, call_id)
         with self._lock:
-            source = base["sourceText"]
             start, end = base["rangeStartUtf16"], base["rangeEndUtf16"]
-            left, right = utf16_to_index(source, start), utf16_to_index(source, end)
-            newline = re.search(r"\r\n|\r|\n", source[left:right]) or re.search(r"\r\n|\r|\n", source)
-            if newline is not None:
-                replacement = re.sub(r"\r\n|\r|\n", lambda _: newline[0], replacement)
+            replacement, candidate_text = self._apply_replacement(base, replacement)
             previous = self._candidates.get(key)
             if previous is not None:
                 if previous["documentContext"] != base or previous["replacementText"] != replacement:
@@ -230,7 +243,7 @@ class DocumentWorkspace:
                 return copy.deepcopy(previous)
             candidate = {
                 "turnId": turn_id, "callId": call_id, "documentContext": base,
-                "replacementText": replacement, "candidateText": source[:left] + replacement + source[right:],
+                "replacementText": replacement, "candidateText": candidate_text,
                 "path": base["path"], "rangeStartUtf16": start, "rangeEndUtf16": end,
             }
             _text(candidate["candidateText"], "candidateText")
