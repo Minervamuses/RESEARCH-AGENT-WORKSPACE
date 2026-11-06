@@ -13,7 +13,7 @@
 | C5 | Complete（驗收修正後）| C5-S1–S3、C5-F1、C5-F2 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
-| C8 | Reopened（驗收）| C8-S1–S3 見事件；最終彙報 | — | C8-F1 回歸與彙報更新 |
+| C8 | Complete（驗收修正後）| C8-S1–S3、C8-F1 見事件；最終彙報 | — | — |
 
 ## 事件
 
@@ -342,20 +342,41 @@
   - D 暱稱（1 條）：CSL 沒有字串刪除，`name-part` 只能改大小寫 → 樣式無法表達；把暱稱移出 given 即可。
   - 精確表述：「無法以**樣式**表達」。改資料可完全消除 4 條（karpukhin2020dpr、lewis2020rag、grattafiori2024llama3、lee2025critical）；asai2026openscholar 改資料後只剩撇號；A 類 6 條需 CSL 之外的處理。依規定都沒有自動執行。`evidence/C5-S2/compare.md` 已加註連到本論證。
 
+### C8-F1 驗收修正後的全套回歸與彙報更新（2026-11-06）
+
+- 完整 pytest（沙箱外，暫存目錄 `/tmp/cm-f1.*`）：**1715 passed**，2 warnings，56.6 s，exit 0（C8-S3 為 1679；新增的都是修正的回歸測試）。
+- `npm test`：**307/307**；`npm run build`：成功；`cargo test --locked`（沙箱外）：**40 passed**。
+- **沒有重跑 C8-S1 端到端**：修正沒有改到 `bibliography.add` 或匯出路徑。重跑會再用 3 次公開存檔請求，而 PLANS 規定已發出的請求不重發。四個修正的回歸測試都走真實的 `DesktopService`：P1 防護經過真實的文件回合與存檔流程，只有模型是假的。
+- 最終彙報已依驗收修正更新（下方「驗收修正」一節與相關列）。
+
 ## 最終彙報
 
-（2026-11-05，C8-S3 完成後撰寫。每項聲明都對應上方事件、`evidence/` 或測試。）
+（2026-11-05，C8-S3 完成後撰寫；2026-11-06 依驗收審查修正後更新。每項聲明都對應上方事件、`evidence/` 或測試。）
+
+### 驗收修正（2026-11-06）
+
+驗收審查找出 4 個實作缺口與 1 個論證不足，已全部處理，每項都有自己的 commit 與回歸測試；其中 4 項的測試已確認會在修正前的程式上失敗：
+
+| 問題 | 修正 | 步驟 |
+|---|---|---|
+| P1 局部選取可繞過未知 key 防護（`[@known]` 只選 `known` 換成 `ghost` → 存成 `[@ghost]`） | 改為檢查存檔後的完整文件：比較每個 key 修改前後的出現次數 | C3-F2 |
+| P1 GUI 的新增文獻批准被失效批准清理邏輯清掉 | 擁有者規則納入進行中的 `bibliography.add` 請求 | C7-F1 |
+| P2 連結目的地、標題中的 `@` 被當成引用 | 依 Pandoc 遮蔽連結目的地與標題、reference 目標、屬性區塊、HTML 標籤屬性 | C3-F1 |
+| P2 `"language": "en"` 的英文條目被套用中文格式 | 渲染時的暫存副本只在中日文條目保留 `language`，書目檔不改寫 | C5-F1 |
+| 「10 條差異無法以 CSL 表達」缺乏逐類論證 | 以最小樣式在兩個引擎上逐類實驗；結論修正為「無法以樣式表達」，其中 3 類可改資料 | C5-F2 |
+
+修正後：pytest 1715、npm 307、cargo 40，全部通過。
 
 ### 目標狀態
 
 | 目標 | 狀態 | 證據 |
 |---|---|---|
 | CG1 專案 CSL-JSON 書目庫與存檔併入 | 達成 | C2-S1–S3；`test_citation_csl.py`、`test_citation_library.py`、`test_citation_project_library.py`；C8-S1 真實後端：新增只在尾端、手寫條目不變、同 DOI → existing 同 key、無 abstract、CLI 無書目 |
-| CG2 正文 key 解析、檢查、Agent 接線 | 達成 | C3-S1（與 Pandoc 交叉比對：論文 proposal 55 次使用完全一致）、C3-S2、C3-S3（`bibliography_lookup` 免批准、未知 key 無候選）；`test_citation_citekeys.py`、`test_citation_integrity.py`、`test_desktop_citation_keys.py` |
-| CG3 GUI 引用面板 | 後端與前端測試達成；原生視窗未實際操作（R6） | C6、C7；`test_desktop_bibliography.py`、`tests/citations.test.ts`、`tests/citation_preview.test.ts`；手動檢查清單見下 |
+| CG2 正文 key 解析、檢查、Agent 接線 | 達成（驗收修正後） | C3-S1（與 Pandoc 交叉比對：論文 proposal 55 次使用完全一致）、C3-F1（連結與 HTML，44 個 Markdown 例子逐一與 Pandoc 相同）、C3-S2、C3-S3（`bibliography_lookup` 免批准）、C3-F2（未知 key 防護檢查存檔後的完整文件，局部選取不能繞過）；`test_citation_citekeys.py`、`test_citation_integrity.py`、`test_desktop_citation_keys.py` |
+| CG3 GUI 引用面板 | 後端與前端測試達成；原生視窗未實際操作（R6） | C6、C7、C7-F1（新增文獻的批准不再被清掉）；`test_desktop_bibliography.py`、`tests/citations.test.ts`、`tests/citation_preview.test.ts`；手動檢查清單見下 |
 | CG4 格式設定、預覽、正文不變 | 達成 | C4-S4、C6-S2（set_style 只改 metadata）、C8-S1（APA/IEEE/附件十七渲染不同，文件雜湊不變） |
 | CG5 docx/Markdown/bib 匯出 | 達成 | C4-S4、C6-S2、C8-S1（三個檔案存在、docx 含 `[1]`、Markdown 無 `[@`、原文件不變） |
-| CG6 附件十七 `.csl` 與基準比對 | 部分達成（依 D3 預期） | C5：引用 46/46、參考文獻 32/42、排序 42/42；其餘 10 條屬 4 類 CSL/處理器/資料無法表達者；中日文 14 條規則 11 達成、1 部分、2 無法表達 |
+| CG6 附件十七 `.csl` 與基準比對 | 部分達成（依 D3 預期） | C5：引用 46/46、參考文獻 32/42、排序 42/42；其餘 10 條屬 4 類，C5-F2 以實驗逐類證明都無法以樣式表達（3 類可改資料）；C5-F1 起依語言值選格式；中日文 16 條規則 13 達成、1 部分、2 無法表達 |
 | CG7 依賴與 manifest 一致 | 達成 | C1-S2：Pandoc 3.13 在 Conda `app`、`env-app.yml` 加 `pandoc>=3,<4`；`pyproject.toml`/`poetry.lock` 未變（citeproc-py 未觸發）；citeproc-js 只在 `$TMPDIR` |
 | CG8 不退化、文件、彙報 | 達成 | C8-S3 四套檢查全過；C8-S2 文件；聊天 `[[cite:…]]`、CLI 存檔、`document_edit`、extended thinking 的既有測試全部通過，`agent/thinking/**` 未改 |
 
@@ -365,14 +386,20 @@
 
 ### 附件十七剩餘差異
 
-- 參考文獻 10 條不一致：撇號 `'`→`’`（6，兩個處理器都會換）、`Wen-tau`→`W.`（3，兩個處理器相同）、書目中 `{"literal": "et al."}` 前多 `and`（1）、名字括號暱稱 `(Hank)`（1）。後三類可以改資料解決（例如 `given` 寫成 `W.-t.`、截斷清單補全作者、暱稱移到 `note`），本計劃依規定沒有改你的 `references.json`。
-- 中日文（合成條目）：三人以上輸出 `(田 等人，1989)` 多一個空白（與二人的 `與` 只能二選一正確，目前選二人正確）；**無法表達**：中日文依筆畫排序、全中文群組內的全形 `；`。中日文條目需要 `language` 欄位（你現有條目都沒有，因為全是英文）。
+- 參考文獻 10 條不一致，逐類實驗見 `evidence/C5-F2/inexpressible.md`；四類都**無法以樣式表達**（Pandoc 與 citeproc-js 結果一致）：
+  - 撇號 `'`→`’`（6 條）：樣式只輸出原始標題時已被替換，改資料也不行；只能在 CSL 之外處理。
+  - `Wen-tau`→`W.`（3 條）：所有縮寫選項都試過；資料寫成 `W.-t.` 時 Pandoc 正確。
+  - literal `"et al."` 前多 `and`（1 條）：兩種全域解法都會弄壞其他條目（會截斷論文中 6 筆 11 人以上的清單）；列出完整作者即可。
+  - 名字括號暱稱 `(Hank)`（1 條）：CSL 沒有字串刪除；暱稱移到 note 即可。
+  - 改資料可完全消除 4 條；asai2026openscholar 改資料後只剩撇號。依規定沒有改你的 `references.json`。
+- 中日文（合成條目）：三人以上輸出 `(田 等人，1989)` 多一個空白（與二人的 `與` 只能二選一正確，目前選二人正確）；**無法表達**：中日文依筆畫排序、全中文群組內的全形 `；`。C5-F1 起不再需要 `language` 欄位：明確的 `zh…`/`ja…` 或（沒有欄位時）標題與姓名中的漢字、假名決定格式，`en` 等其他語言維持英文格式。
 
 ### 需要你決定或確認的事
 
 1. **規劃假設 A1–A10**（見 GOALS）是否照現狀：A1 書目預設 `references.json`；A2 樣式存 `RESEARCH.md` 的 `citationStyle`；A3 key 規則（對你既有 69 筆有 23 筆與你手選的相同，既有 key 永不改）；A4 統計只看目前文件；A5 匯出命名；A6 `.tex` 只做檢查與 `.bib`；A7 內建樣式；A8 只用 Pandoc；A9 不新增正文佔位語法；A10 刪除/匯出不需批准、新增沿用 `citation.save` 批准。
 2. **未設定樣式時的預設**：我選了 `apa`（實作時新增的決定）。你的論文可能更適合預設 `bime-appendix17`；在面板選一次就會寫入 `RESEARCH.md`。
-3. **附件十七的取捨**：是否接受上列限制；是否修改書目資料以消除 3 類資料性差異；`等人`/`與` 的空白取捨。依 D3 不改走 `cite.py`（這是你的決策，只有你能改）。
+3. **附件十七的取捨**：是否接受上列限制；是否修改書目資料以消除 B、C、D 三類差異（4 條完全消除）；撇號要不要在 CSL 之外改成直撇號（排版選擇，附件十七沒有規定）；`等人`/`與` 的空白取捨。依 D3 不改走 `cite.py`（這是你的決策，只有你能改）。
+3a. **`language` 欄位**：C5-F1 後，存檔時 `language` 照原值保留（C5-S3 曾只保留中日文，已撤回），附件十七樣式在渲染時判斷語言；沒有 `language` 的條目依漢字、假名判斷，與 bime_word 規則相同。若你希望只認明確的 `language` 而不做字元判斷，請告知。
 4. **arXiv 條目寫法**：工具新建的 arXiv 條目改為 `number: "arXiv:<id>"`、不設 publisher（與你論文書目一致）；APA 因此不會印出 publisher「arXiv」。
 5. **E2E 作法的偏離**：此環境沒有 `OPENROUTER_API_KEY`，所以 C8-S1 沒有建立 session、改由驅動程式回應 Ask 批准（反而驗證了真實的批准路徑）；arXiv 驗證連到 export.arxiv.org（PLANS 主機清單未列，屬公開文獻 API，3/8 次存檔請求）。
 6. **Conda 連帶更新**：安裝 Pandoc 時 `--freeze-installed` 仍把 `openssl` 3.6.3→3.6.5、`ca-certificates` 更新（pandoc 相依）；SSL 與全套測試正常。
@@ -380,7 +407,7 @@
 
 ### 未做 live 驗證（R6、R7）與手動檢查清單
 
-- R6：原生 GUI 視窗沒有實際開啟操作；以後端 RPC、前端純函式與 SSR 測試、真實後端 NDJSON 端到端驗收。
+- R6：原生 GUI 視窗沒有實際開啟操作；以後端 RPC、前端純函式與 SSR 測試、真實後端 NDJSON 端到端驗收。C7-F1 的批准修正同樣只有純函式與接線測試，手動清單第 4 項（Ask 模式下 Verify and add）是唯一的實機確認。
 - R7：Agent 在文件回合實際插入 key 需要付費模型；以假模型測試（`test_desktop_citation_keys.py`）。
 
 手動檢查清單（在論文資料夾新增文獻會寫入你真正的 `references.json`；只想試用請先複製資料夾；舊環境先 `conda install -n app -c conda-forge "pandoc>=3,<4"`）：
@@ -388,9 +415,9 @@
 1. `python main.py`，開啟論文資料夾（或副本），開 `proposal.md`：Citations 面板列出 45 個本文引用（其中 3 個只在 TODO 註記內）與未引用的條目；沒有 bundle 的手寫條目顯示 unverified。
 2. 展開一個引用按 Line，編輯器選取該引用。
 3. Style 選 APA、IEEE、NTU BIME Appendix 17 各按一次 Preview，正文不變。
-4. 以 DOI 新增一篇已在書目中的論文：書目檔內容不變、面板顯示 existing，該條目變成 verified。
+4. 在 **Ask** 模式、沒有回合進行時，以 DOI 新增一篇已在書目中的論文：批准視窗出現並停留到你按下（C7-F1）；批准後書目檔內容不變、面板顯示 existing，該條目變成 verified；拒絕時不寫入任何東西。
 5. 在 `[@` 後輸入，看到 key 補全；按某條目的 Insert 插入 `[@key]`。
-6. 在文件回合中用 `/citation` 找新文獻並請 Agent 插入引用（會使用付費模型）：正文出現 `[@key]`、書目多一筆；請 Agent 插入不存在的 key 時被拒。
+6. 在文件回合中用 `/citation` 找新文獻並請 Agent 插入引用（會使用付費模型）：正文出現 `[@key]`、書目多一筆；請 Agent 插入不存在的 key 時被拒；只選取某個 `[@key]` 裡的 key 文字、請 Agent 改成不存在的 key 時也被拒（C3-F2）。
 7. Export Word，用 Word 開啟檢查引用與參考文獻；`.tex` 文件只有 BibTeX 匯出。
 
 ### 步驟與 commit 對照
@@ -420,6 +447,12 @@
 | C7-S3 | `cc2d34e` |
 | C8-S1 | `5297e3c` |
 | C8-S2 | `40af15a` |
-| C8-S3 | 本 commit（subject 含 `[C8-S3]`） |
+| C8-S3 | `2037ee2` |
+| C3-F1 | `c371c49` |
+| C3-F2 | `d55a0e1` |
+| C7-F1 | `22ae953` |
+| C5-F1 | `b16ee9a` |
+| C5-F2 | `121f28a` |
+| C8-F1 | 本 commit（subject 含 `[C8-F1]`） |
 
 沒有 push，沒有建立或切換 branch。
