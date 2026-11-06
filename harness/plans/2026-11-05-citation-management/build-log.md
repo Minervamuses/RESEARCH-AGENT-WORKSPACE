@@ -10,7 +10,7 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete（驗收修正後）| C3-S1–S3、C3-F1、C3-F2 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Reopened（驗收）| C5-S1–S3、C5-F1 見事件 | — | C5-F2 |
+| C5 | Complete（驗收修正後）| C5-S1–S3、C5-F1、C5-F2 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
 | C8 | Reopened（驗收）| C8-S1–S3 見事件；最終彙報 | — | C8-F1 回歸與彙報更新 |
@@ -330,6 +330,17 @@
   - CSL 檔註解與 `README.md` 的限制說明同步更新（不再需要 `language` 欄位）。
 - **檢查**：`test_citation_appendix17.py` 新增：審查者的情境與其他非中日文語言（無、`en`、`en-US`、`de`、`fr-FR`）→ `(Smith and Jones, 2020)` 與英文參考文獻、書目檔位元組不變；中文條目帶 `zh-TW`/`zh`/`chi` 或沒有 `language` → `(張與盧，1992)` 與中文參考文獻；沒有 `language` 時以假名判斷日文並排在中文之後、英文之前。`test_citation_csl_render.py` 新增 `cjk_language` 規則與「只有 languageBranch 樣式拿到副本、APA 仍讀原檔且看得到 `language: en`、原檔不變」。`test_citation_csl.py` 改為驗證 `language` 照原值保留。三檔 38 passed。**突變確認**：把 `csl_render.py` 換回修正前版本，`language: en` 的測試得到 `(Smith與Jones，2020)` 而失敗；換回後通過。
 - **證據重跑**：C5-S2 論文比對不變（引用 46/46、參考文獻 32/42）；`evidence/C5-S3/run_cjk.py` 新增兩列 ——「移除所有 `language` 後輸出完全相同」與「英文條目加上 `language: en` 後輸出完全相同」皆達成；語言分組一列不再標註「需 language 欄位」。中日文規則現為 16 條中 13 達成、1 部分達成、2 無法表達。
+
+### C5-F2 剩餘 10 條差異的逐類論證（2026-11-06）
+
+- **原因**：C5-S2 只把 10 條差異分類並寫「無法以 CSL 表達」，沒有逐類實驗。
+- **作法**（`evidence/C5-F2/`）：`probe_inexpressible.py` 為四類各寫只含相關機制的最小樣式，用 Pandoc 3.13 與 citeproc-js 2.4.63 各渲染一次（citeproc-js 以 C4-S2 的 lock 檔在 `$TMPDIR` 重新 `npm ci`；`cpjs_bib.js` 為 node 渲染器），再加上「改資料」的對照變體。結果存 `probe-results.json`，論證寫在 `inexpressible.md`。
+- **結論**（兩個引擎一致）：
+  - A 撇號（6 條）：樣式只輸出原始 `title`、沒有任何格式屬性時已變成 `’`，資料本身是 `’` 也一樣 → 樣式無法表達，改資料也不行；只能在 CSL 之外處理（渲染流程中保護或取代），屬排版選擇，列為使用者決定。
+  - B `Wen-tau`（3 條）：`initialize-with-hyphen` true/false、`initialize-with` 有無空白都得到 `W.`，`initialize="false"` 得到全名 → 樣式無法表達；資料寫成 `W.-t.` 時 Pandoc 輸出正確。
+  - C literal `et al.`（1 條）：不用 `and` 能修好這條但弄壞所有一般清單；`et-al-min=11/use-first=10` 能修好這條但會截斷論文中 6 筆 11 人以上的真實清單（違反作者全列）；CSL 條件不能檢查名字內容 → 樣式無法表達；列出完整作者即可。
+  - D 暱稱（1 條）：CSL 沒有字串刪除，`name-part` 只能改大小寫 → 樣式無法表達；把暱稱移出 given 即可。
+  - 精確表述：「無法以**樣式**表達」。改資料可完全消除 4 條（karpukhin2020dpr、lewis2020rag、grattafiori2024llama3、lee2025critical）；asai2026openscholar 改資料後只剩撇號；A 類 6 條需 CSL 之外的處理。依規定都沒有自動執行。`evidence/C5-S2/compare.md` 已加註連到本論證。
 
 ## 最終彙報
 
