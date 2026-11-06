@@ -32,6 +32,27 @@ from skills.citation.citekeys import find_citations, format_for_path, keys_in
     ("(@ex) at line start\n\nmid (@ex2) text", ["ex2"]),
     ("---\ntitle: \"@meta\"\n---\n\nBody @body", ["body"]),
     ("A[^1] then @after.\n\n[^1]: Note @fn.\n\n[^u]: Unused @unused.\n", ["fn", "after"]),
+    # Link destinations, titles, reference targets, attributes and HTML tags
+    # are never citations; link text and HTML element content are.
+    ("[Profile](https://example.org/@ghost)", []),
+    ('[Profile](https://example.org/@ghost "title @t1")', []),
+    ("[Profile](https://example.org/x 'title @t2')", []),
+    ("[Profile](<https://example.org/a b/@g3>)", []),
+    ("[x]( https://x.org/@g16 )", []),
+    ("[x](https://x.org/(p)/@g9) and @after", ["after"]),
+    ("[see @a](https://x.org/@g4)", ["a"]),
+    ("[@a](https://x.org/@g5)", ["a"]),
+    ('![alt](pic/@g7.png "cap @g8")', []),
+    ('[ref]: https://x.org/@g10 "t @g11"', []),
+    ("[@k]: https://x.org", ["k"]),
+    ('[x][r] and @real2\n\n[r]: https://x.org/@g19 "t @g21"\n', ["real2"]),
+    ('[x](https://x.org/@g17){.cls key="@g20"}', []),
+    ("[span @s1]{.cls}", ["s1"]),
+    ('<a href="https://x.org/@g12">@inhtml</a>', ["inhtml"]),
+    ('<span title="@g13">x</span>', []),
+    ("[unclosed](https://x.org/@g14", ["g14"]),
+    ("text](https://x.org/@g15)", ["g15"]),
+    ("See @a<b>c and <em>@d</em>.", ["a<b>c", "d"]),
 ])
 def test_markdown_keys_match_pandoc_rules(text, keys):
     assert keys_in(text, "markdown") == keys

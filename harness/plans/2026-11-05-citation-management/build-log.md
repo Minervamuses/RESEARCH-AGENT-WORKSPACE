@@ -8,12 +8,12 @@
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
-| C3 | Complete | C3-S1–S3 見事件 | — | — |
+| C3 | Reopened（驗收）→ 修正中 | C3-S1–S3、C3-F1 見事件 | — | C3-F2 |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Complete | C5-S1–S3 見事件 | — | — |
+| C5 | Reopened（驗收）| C5-S1–S3 見事件 | — | C5-F1、C5-F2 |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
-| C7 | Complete | C7-S1–S3 見事件 | — | — |
-| C8 | Complete | C8-S1–S3 見事件；最終彙報 | — | — |
+| C7 | Reopened（驗收）| C7-S1–S3 見事件 | — | C7-F1 |
+| C8 | Reopened（驗收）| C8-S1–S3 見事件；最終彙報 | — | C8-F1 回歸與彙報更新 |
 
 ## 事件
 
@@ -284,6 +284,26 @@
 - `npm test`：**305/305**，exit 0（基線 260）。`npm run build`：成功，exit 0（既有的 chunk 大小警告）。
 - `cargo test --locked`（沙箱外）：**40 passed**，exit 0（基線 40）。
 - Git：分支 GUI，`origin/GUI` 之後 34 個本地 commit（未 push）；沒有建立、切換、刪除 branch；工作區除宿主佔位項目外乾淨。論文資料夾只以 `git show` 讀取，HEAD 仍為 `59e9dc1`，其未提交與未追蹤檔案的時間都早於本次執行。
+
+## 驗收重開（2026-11-06）
+
+使用者的驗收審查判定未通過，找出四個實作缺口（審查原文的分級）：
+
+1. **P1** 未知 key 防護可被局部選取繞過：在 `[@known]` 中只選 `known`、替換為 `ghost`，檢查器只看替換文字，實際存檔後正文成為 `[@ghost]`（審查者以假模型經真實後端重現 `saved`）。→ C3-F2。
+2. **P1** GUI 的 `bibliography.add` 批准會被 App 既有的失效批准清理邏輯清掉（靜態確認；C8-S1 由驅動程式直接回覆批准，沒有經過 React 狀態）。→ C7-F1。
+3. **P2** 解析器把連結目的地、標題中的 `@` 當成引用（`[Profile](https://example.org/@ghost)`，Pandoc 不算）。→ C3-F1。
+4. **P2** 附件十七以「有 `language` 欄位」判斷中日文，既有英文條目帶 `"language": "en"` 會變成中文格式。→ C5-F1。
+5. 另外，「10 條書目不一致全部無法以 CSL 表達」需要逐類論證，不能只靠比較報告的分類。→ C5-F2。
+
+重開 C3、C5、C7、C8 的相關驗收；每個修正是一個步驟、各自 commit（ID `C?-F?`），最後 C8-F1 重跑全套回歸並更新最終彙報。
+
+### C3-F1 解析器不再把連結目的地、標題、屬性與 HTML 標籤屬性當成引用（2026-11-06）
+
+- **先實測 Pandoc**（19 種寫法）：連結/圖片的目的地與標題、reference definition 的目標、連結或 span 後的 `{...}` 屬性、HTML 標籤的屬性都不產生引用；連結文字（`[see @a](url)`、`[@a](url)`）、bracketed span 內容、HTML 元素內容會；沒有閉合的 `[x](url` 與沒有 `[` 的 `text](url)` 不是連結，其中的 `@` 是引用；`[@k]: url` 是引用不是 reference definition。
+- **改動**（`app/skills/citation/citekeys.py`）：`_mask_link_targets`（以既有的方括號配對找出 `](`，依 Pandoc 的規則解析目的地：`<...>` 或括號平衡、可選的 `"…"`/`'…'`/`(…)` 標題，解析失敗就不遮蔽；遮蔽 reference definition 冒號之後的目標與標題；遮蔽連結或 span 後的 `{...}`）；遮蔽 HTML 標籤（`<` 緊接在字母數字後時不算，因為那是 key 的一部分，例如 `@a<b>c`，Pandoc 同樣如此）。
+- **檢查**：`tests/test_citation_citekeys.py` 新增 20 個例子（共 61 項通過）；其中 44 個 Markdown 例子的期望值逐一以 Pandoc 驗證相同。交叉比對重跑（`evidence/C3-F1/crosscheck-result.jsonl`）：新的 `links.md`（8 次使用）完全相同；`synthetic.md`、`ex.md`、論文 `proposal.md`（HEAD `59e9dc1`，55 次、45 key）仍完全相同；`footnote.md` 仍是既知的註腳重複參照差異。全部 `test_citation_*.py` 520 passed。
+- **新記錄的已知限制**：段落中只有一張圖片時，Pandoc 會把 alt 文字同時放進 figure 標題與圖片 alt，所以 alt 中的引用在 Pandoc 中出現兩次（`evidence/C3-F1/image-figure.md`：解析器 2、Pandoc 3）；key 集合與首次出現順序相同。
+- **影響**：引用面板不再把連結中的 `@` 列為缺漏 key；`document_edit` 的防護不再拒絕加入這類連結的正常修改（C3-F2 的測試涵蓋）。
 
 ## 最終彙報
 

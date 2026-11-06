@@ -6,8 +6,9 @@ editor uses. Markdown follows what Pandoc itself parses (cross-checked with
 
 * ``@key`` is a citation unless the ``@`` follows a letter or digit (so
   ``jane@doe.com`` and ``見@a`` are not), is escaped (``\\@``), or sits in
-  code, an HTML comment, an autolink ``<...>``, inline math, or YAML front
-  matter;
+  code, an HTML comment or tag, an autolink ``<...>``, inline math, YAML front
+  matter, a link or image destination or title, a reference definition's
+  target, or a ``{...}`` attribute block after a link or span;
 * ``(@label)`` with ASCII parentheses is an example-list reference;
 * a key starts with a letter, digit or ``_``; it may contain the internal
   punctuation ``:.#$%&-+?<>~/`` only when a letter, digit or ``_`` follows,
@@ -166,7 +167,88 @@ def _mask_markdown(text: str) -> str:
         for match in re.finditer(pattern, masked, re.S):
             _blank(chars, match.start(), match.end())
         masked = "".join(chars)
-    return masked
+    # Raw HTML tags: attributes are never read (element content still is). A
+    # "<" glued to a word character is inside a citation key (``@a<b>c``).
+    for match in re.finditer(r"(?<!\w)</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>", masked):
+        _blank(chars, match.start(), match.end())
+    masked = "".join(chars)
+    _mask_link_targets(masked, chars)
+    return "".join(chars)
+
+
+_REFERENCE_DEFINITION = re.compile(
+    r"^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<[^<>\n]*>|\S+)"
+    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*$",
+    re.M,
+)
+
+
+def _link_destination_end(text: str, start: int) -> int | None:
+    """Index of the ``)`` closing an inline link destination opened at ``start``.
+
+    ``start`` points just after ``(``. Accepts ``<...>`` or a destination with
+    balanced parentheses, then an optional quoted or parenthesized title;
+    returns None when Pandoc would not read this as a link.
+    """
+    index = start
+    length = len(text)
+    while index < length and text[index] in " \t\n":
+        index += 1
+    if index < length and text[index] == "<":
+        close = text.find(">", index)
+        if close < 0 or "\n" in text[index:close]:
+            return None
+        index = close + 1
+    else:
+        depth = 0
+        while index < length and not text[index].isspace():
+            char = text[index]
+            if char == "\\" and index + 1 < length:
+                index += 2
+                continue
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            index += 1
+    while index < length and text[index] in " \t\n":
+        index += 1
+    if index < length and text[index] in "\"'(":
+        closer = ")" if text[index] == "(" else text[index]
+        close = text.find(closer, index + 1)
+        if close < 0:
+            return None
+        index = close + 1
+        while index < length and text[index] in " \t\n":
+            index += 1
+    if index < length and text[index] == ")":
+        return index
+    return None
+
+
+def _mask_link_targets(masked: str, chars: list[str]) -> None:
+    """Blank link/image destinations and titles, reference-definition targets,
+    and attribute blocks after links or bracketed spans.
+
+    Link text (``[see @a](url)``) stays visible: Pandoc reads citations there.
+    """
+    for match in _REFERENCE_DEFINITION.finditer(masked):
+        colon = masked.index("]:", match.start()) + 2
+        _blank(chars, colon, match.end())
+    for _open, close in _bracket_groups(masked):
+        after = close + 1
+        if after < len(masked) and masked[after] == "(":
+            end = _link_destination_end(masked, after + 1)
+            if end is None:
+                continue
+            _blank(chars, after, end + 1)
+            after = end + 1
+        if after < len(masked) and masked[after] == "{":
+            brace = masked.find("}", after)
+            if brace > after and "\n" not in masked[after:brace]:
+                _blank(chars, after, brace + 1)
 
 
 _LIST_MARKER = re.compile(r" {0,3}(?:[-*+]|\d{1,9}[.)]|\(@[\w-]*\))[ \t]")
