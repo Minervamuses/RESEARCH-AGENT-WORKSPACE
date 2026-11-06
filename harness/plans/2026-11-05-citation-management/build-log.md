@@ -13,7 +13,7 @@
 | C5 | Complete（D9–D11 後）| C5-S1–S3、C5-F1–F4 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
-| C8 | In progress | C8-S1–S3、C8-F1 見事件；最終彙報 | — | C8-F2 |
+| C8 | Complete（D9–D11 後）| C8-S1–S3、C8-F1、C8-F2 見事件；最終彙報 | — | — |
 
 ## 事件
 
@@ -396,6 +396,12 @@
   CSL 以 ElementTree 確認為合法 XML。`test_citation_appendix17.py`、`test_citation_csl_render.py`、`test_desktop_bibliography.py` 共 47 passed。
 - **論文比對重跑**：**引用 46/46、參考文獻 42/42**（`evidence/C5-S2/comparison.json`）。`compare.md`、`C5-F2/inexpressible.md` 補上後續說明；中日文規則判定不變（13 達成、1 部分、2 無法表達）。`README.md` 的附件十七說明同步更新。
 
+### C8-F2 使用者決定 D9–D11 後的全套回歸與彙報更新（2026-11-06）
+
+- 完整 pytest（沙箱外，`/tmp/cm-f2.*`）：**1722 passed**，exit 0。`npm test`：**307/307**；`npm run build`：成功。
+- `cargo test --locked`（沙箱外）：第一次 **39 passed、1 failed**（exit 101），立即重跑 40 passed，之後再連跑 8 次都是 40 passed（共 10 次中 1 次失敗）。自上次全綠以來，`app/desktop/src-tauri/` 與 `app/desktop/protocol/` 沒有任何改動（`git diff 2037ee2 HEAD` 為空），所以與本次修改無關，記為**間歇性失敗**。失敗測試的名稱沒有記下：第一次只保留了摘要行，之後 9 次都沒有重現。已知對時間敏感的 supervisor 測試（見 `for_agents/testing-strategy.md`）是可能的來源，但未證實。
+- 最終彙報依 D9–D11 更新。
+
 ## 最終彙報
 
 （2026-11-05，C8-S3 完成後撰寫；2026-11-06 依驗收審查修正後更新。每項聲明都對應上方事件、`evidence/` 或測試。）
@@ -412,7 +418,7 @@
 | P2 `"language": "en"` 的英文條目被套用中文格式 | 渲染時的暫存副本只在中日文條目保留 `language`，書目檔不改寫 | C5-F1 |
 | 「10 條差異無法以 CSL 表達」缺乏逐類論證 | 以最小樣式在兩個引擎上逐類實驗；結論修正為「無法以樣式表達」，其中 3 類可改資料 | C5-F2 |
 
-修正後：pytest 1715、npm 307、cargo 40，全部通過。
+修正後：pytest 1715、npm 307、cargo 40，全部通過。之後依使用者決定 D9–D11 做的 C5-F3、C5-F4：pytest 1722、npm 307、cargo 40（10 次中有 1 次間歇失敗，與修改無關，見 C8-F2）。
 
 ### 目標狀態
 
@@ -423,7 +429,7 @@
 | CG3 GUI 引用面板 | 後端與前端測試達成；原生視窗未實際操作（R6） | C6、C7、C7-F1（新增文獻的批准不再被清掉）；`test_desktop_bibliography.py`、`tests/citations.test.ts`、`tests/citation_preview.test.ts`；手動檢查清單見下 |
 | CG4 格式設定、預覽、正文不變 | 達成 | C4-S4、C6-S2（set_style 只改 metadata）、C8-S1（APA/IEEE/附件十七渲染不同，文件雜湊不變） |
 | CG5 docx/Markdown/bib 匯出 | 達成 | C4-S4、C6-S2、C8-S1（三個檔案存在、docx 含 `[1]`、Markdown 無 `[@`、原文件不變） |
-| CG6 附件十七 `.csl` 與基準比對 | 部分達成（依 D3 預期） | C5：引用 46/46、參考文獻 32/42、排序 42/42；其餘 10 條屬 4 類，C5-F2 以實驗逐類證明都無法以樣式表達（3 類可改資料）；C5-F1 起依語言值選格式；中日文 16 條規則 13 達成、1 部分、2 無法表達 |
+| CG6 附件十七 `.csl` 與基準比對 | 論文基準達成；中日文有 3 項限制 | C5、C5-F1–F4：**引用 46/46、參考文獻 42/42**。原本 10 條差異經 C5-F2 實驗證明無法只靠樣式消除，依 D10、D11 在渲染副本中套用 bime_word 的規則後全部一致。中日文 16 條規則：13 達成、1 部分（`等人` 前空白）、2 無法表達（筆畫排序、全形 `；`） |
 | CG7 依賴與 manifest 一致 | 達成 | C1-S2：Pandoc 3.13 在 Conda `app`、`env-app.yml` 加 `pandoc>=3,<4`；`pyproject.toml`/`poetry.lock` 未變（citeproc-py 未觸發）；citeproc-js 只在 `$TMPDIR` |
 | CG8 不退化、文件、彙報 | 達成 | C8-S3 四套檢查全過；C8-S2 文件；聊天 `[[cite:…]]`、CLI 存檔、`document_edit`、extended thinking 的既有測試全部通過，`agent/thinking/**` 未改 |
 
@@ -433,20 +439,19 @@
 
 ### 附件十七剩餘差異
 
-- 參考文獻 10 條不一致，逐類實驗見 `evidence/C5-F2/inexpressible.md`；四類都**無法以樣式表達**（Pandoc 與 citeproc-js 結果一致）：
+- **與 bime_word 的 `proposal.docx` 已無差異（46/46、42/42）。** 以下是原本 10 條差異的處理經過，逐類實驗見 `evidence/C5-F2/inexpressible.md`。四類都**無法只靠樣式表達**（Pandoc 與 citeproc-js 結果一致），依 D10、D11 改在渲染副本中處理（C5-F3、C5-F4）：
   - 撇號 `'`→`’`（6 條）：樣式只輸出原始標題時已被替換，改資料也不行；只能在 CSL 之外處理。
   - `Wen-tau`→`W.`（3 條）：所有縮寫選項都試過；資料寫成 `W.-t.` 時 Pandoc 正確。
   - literal `"et al."` 前多 `and`（1 條）：兩種全域解法都會弄壞其他條目（會截斷論文中 6 筆 11 人以上的清單）；列出完整作者即可。
   - 名字括號暱稱 `(Hank)`（1 條）：CSL 沒有字串刪除；暱稱移到 note 即可。
-  - 改資料可完全消除 4 條；asai2026openscholar 改資料後只剩撇號。依規定沒有改你的 `references.json`。
+  - D11 原本的說法是「改資料」，實作改在渲染副本中套用相同規則，`references.json` 沒有被改。理由：不失去完整名字、以後的條目也適用、不寫入論文資料夾；Llama 3 若列出完整作者會有數百人，反而與 bime_word 不同。
 - 中日文（合成條目）：三人以上輸出 `(田 等人，1989)` 多一個空白（與二人的 `與` 只能二選一正確，目前選二人正確）；**無法表達**：中日文依筆畫排序、全中文群組內的全形 `；`。C5-F1 起不再需要 `language` 欄位：明確的 `zh…`/`ja…` 或（沒有欄位時）標題與姓名中的漢字、假名決定格式，`en` 等其他語言維持英文格式。
 
 ### 需要你決定或確認的事
 
 1. **規劃假設 A1–A10**（見 GOALS）是否照現狀：A1 書目預設 `references.json`；A2 樣式存 `RESEARCH.md` 的 `citationStyle`；A3 key 規則（對你既有 69 筆有 23 筆與你手選的相同，既有 key 永不改）；A4 統計只看目前文件；A5 匯出命名；A6 `.tex` 只做檢查與 `.bib`；A7 內建樣式；A8 只用 Pandoc；A9 不新增正文佔位語法；A10 刪除/匯出不需批准、新增沿用 `citation.save` 批准。
 2. **未設定樣式時的預設**：我選了 `apa`（實作時新增的決定）。你的論文可能更適合預設 `bime-appendix17`；在面板選一次就會寫入 `RESEARCH.md`。
-3. **附件十七的取捨**：是否接受上列限制；是否修改書目資料以消除 B、C、D 三類差異（4 條完全消除）；撇號要不要在 CSL 之外改成直撇號（排版選擇，附件十七沒有規定）；`等人`/`與` 的空白取捨。依 D3 不改走 `cite.py`（這是你的決策，只有你能改）。
-3a. **`language` 欄位**：C5-F1 後，存檔時 `language` 照原值保留（C5-S3 曾只保留中日文，已撤回），附件十七樣式在渲染時判斷語言；沒有 `language` 的條目依漢字、假名判斷，與 bime_word 規則相同。若你希望只認明確的 `language` 而不做字元判斷，請告知。
+3. **附件十七**：撇號（D10）、4 條可修正的差異（D11）、沒有 `language` 時的字元判斷（D9）已依你的回覆完成。D11 的做法與原本的說法不同：不改寫你的 `references.json`，改在渲染時處理（理由見上）。若你仍想直接修改資料，可以另外進行。還剩的取捨：中日文 `等人`／`與` 的空白只能二選一。依 D3 不改走 `cite.py`。
 4. **arXiv 條目寫法**：工具新建的 arXiv 條目改為 `number: "arXiv:<id>"`、不設 publisher（與你論文書目一致）；APA 因此不會印出 publisher「arXiv」。
 5. **E2E 作法的偏離**：此環境沒有 `OPENROUTER_API_KEY`，所以 C8-S1 沒有建立 session、改由驅動程式回應 Ask 批准（反而驗證了真實的批准路徑）；arXiv 驗證連到 export.arxiv.org（PLANS 主機清單未列，屬公開文獻 API，3/8 次存檔請求）。
 6. **Conda 連帶更新**：安裝 Pandoc 時 `--freeze-installed` 仍把 `openssl` 3.6.3→3.6.5、`ca-certificates` 更新（pandoc 相依）；SSL 與全套測試正常。
@@ -466,6 +471,7 @@
 5. 在 `[@` 後輸入，看到 key 補全；按某條目的 Insert 插入 `[@key]`。
 6. 在文件回合中用 `/citation` 找新文獻並請 Agent 插入引用（會使用付費模型）：正文出現 `[@key]`、書目多一筆；請 Agent 插入不存在的 key 時被拒；只選取某個 `[@key]` 裡的 key 文字、請 Agent 改成不存在的 key 時也被拒（C3-F2）。
 7. Export Word，用 Word 開啟檢查引用與參考文獻；`.tex` 文件只有 BibTeX 匯出。
+8. 選 NTU BIME Appendix 17 匯出 `proposal.md` 的 Word，與 bime_word 產生的 `proposal.docx` 對照參考文獻：撇號是直撇號、Yih 縮寫為 `W.-t.`、Llama 3 為 `…, A. Vaughan, et al.`、Lee 沒有 `(Hank)`。
 
 ### 步驟與 commit 對照
 
@@ -500,6 +506,9 @@
 | C7-F1 | `22ae953` |
 | C5-F1 | `b16ee9a` |
 | C5-F2 | `121f28a` |
-| C8-F1 | 本 commit（subject 含 `[C8-F1]`） |
+| C8-F1 | `c9c5976` |
+| C5-F3（D10） | `595c75a` |
+| C5-F4（D11） | `1d22bea` |
+| C8-F2 | 本 commit（subject 含 `[C8-F2]`） |
 
 沒有 push，沒有建立或切換 branch。
