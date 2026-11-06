@@ -176,8 +176,10 @@ def _mask_markdown(text: str) -> str:
     return "".join(chars)
 
 
+# A footnote ("[^n]: ...") or a citation-shaped label ("[@k]: ...") is not a
+# reference definition in Pandoc; its text is still read for citations.
 _REFERENCE_DEFINITION = re.compile(
-    r"^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<[^<>\n]*>|\S+)"
+    r"^ {0,3}\[(?![\^@]|-@)[^\]\n]+\]:[ \t]*(?:<[^<>\n]*>|\S+)"
     r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*$",
     re.M,
 )

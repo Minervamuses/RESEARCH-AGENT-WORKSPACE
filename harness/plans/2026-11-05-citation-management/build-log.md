@@ -8,12 +8,12 @@
 |---|---|---|---|---|
 | C1 | Complete | C1-S1 基線見事件；`evidence/C1-S2/` | — | — |
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
-| C3 | Complete（驗收修正後）| C3-S1–S3、C3-F1、C3-F2 見事件 | — | — |
+| C3 | Complete（第二次驗收修正後）| C3-S1–S3、C3-F1–F3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Complete（D9–D11 後）| C5-S1–S3、C5-F1–F4 見事件 | — | — |
+| C5 | Reopened（第二次驗收）| C5-S1–S3、C5-F1–F4 見事件 | — | C5-F5 |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
-| C8 | Complete（D9–D11 後）| C8-S1–S3、C8-F1、C8-F2 見事件；最終彙報 | — | — |
+| C8 | Reopened（第二次驗收）| C8-S1–S3、C8-F1、C8-F2 見事件；最終彙報 | — | C8-F3 |
 
 ## 事件
 
@@ -401,6 +401,25 @@
 - 完整 pytest（沙箱外，`/tmp/cm-f2.*`）：**1722 passed**，exit 0。`npm test`：**307/307**；`npm run build`：成功。
 - `cargo test --locked`（沙箱外）：第一次 **39 passed、1 failed**（exit 101），立即重跑 40 passed，之後再連跑 8 次都是 40 passed（共 10 次中 1 次失敗）。自上次全綠以來，`app/desktop/src-tauri/` 與 `app/desktop/protocol/` 沒有任何改動（`git diff 2037ee2 HEAD` 為空），所以與本次修改無關，記為**間歇性失敗**。失敗測試的名稱沒有記下：第一次只保留了摘要行，之後 9 次都沒有重現。已知對時間敏感的 supervisor 測試（見 `for_agents/testing-strategy.md`）是可能的來源，但未證實。
 - 最終彙報依 D9–D11 更新。
+
+## 第二次驗收重開（2026-11-06，驗收版本 `4d89838`）
+
+審查判定仍未通過：
+
+1. **P1** 註腳中的引用被漏掉：`Claim[^n].` + `[^n]: [@ghost]` → `document_edit` saved、檢查 `missing: []`，但 Pandoc 預覽出現 `(ghost?)`。原因：C3-F1 的 reference definition 規則把註腳定義也當成連結定義遮蔽了。這是 C3-F1 造成的退化。→ C3-F3。
+2. **P2** 語言代碼寫法影響排序：`chi`/`jpn` 會讓日文排在中文前面。原因：渲染副本保留原始代碼，CSL 依代碼字串排序。→ C5-F5。
+3. Rust 測試 `child_crash_fails_pending_and_restart_is_user_driven` 失敗（預期 `BACKEND_CRASHED`，實得 `BACKEND_OUTPUT_CLOSED`），原因未確認，不能記為全綠。C8-F2 的「間歇性、名稱未記下」不足以結案。→ C8-F3 找出原因。
+
+### C3-F3 註腳與引用形 label 不是 reference definition（2026-11-06）
+
+- **實測 Pandoc**：註腳定義 `[^n]: …` 與引用形 label `[@k]: …`、`[-@k]: …` 都不是 reference definition，其中文字照常讀取引用。C3-F1 的規則把它們冒號後的內容遮蔽了。另外兩個同源漏判：`[^n]: https://x.org/@g1`（Pandoc 讀到 `g1`）、`[@k]: https://x.org/@g3`（Pandoc 讀到 `k`、`g3`）。一般 label（含 `foo@bar`）仍是 reference definition。
+- **改動**：`citekeys._REFERENCE_DEFINITION` 排除以 `^`、`@`、`-@` 開頭的 label。
+- **檢查**：
+  - `test_citation_citekeys.py` 新增 7 例（共 68 項）；52 個 Markdown 例子逐一與 Pandoc 相同。
+  - `test_desktop_citation_keys.py` 新增審查者的情境：經真實文件回合 → failed、`unknownKeys == ["ghost"]`、檔案不變；`bibliography.inspect` 的 `missing == ["ghost"]`。把 `citekeys.py` 換回 HEAD 版本時這個測試得到 saved。
+  - **新的差分測試** `test_citation_citekeys_differential.py`：固定 seed 產生 240 份文件，片段涵蓋 code、註解、數學、autolink、HTML、連結目的地/標題/屬性、reference definition、註腳（每個只參照一次）、example list、跳脫、email、大括號 key、標點，逐份與 Pandoc 比較 key 序列。修正後 240/240 相同；HEAD 版本有 71/240 不同。不產生兩種已記錄的計數差異（註腳被參照兩次、段落中只有一張圖片）。
+  - 語料交叉比對（`evidence/C3-F3/crosscheck-result.jsonl`）：新 `footnotes.md` 與既有 `synthetic.md`、`ex.md`、`links.md`、論文 `proposal.md` 全部相同。全部 `test_citation_*.py` 547 passed。
+- **反省**：兩次漏判都來自「挑選的例子沒有覆蓋規則之間的組合」；差分測試用生成的組合代替手挑例子。
 
 ## 最終彙報
 

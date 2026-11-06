@@ -53,6 +53,14 @@ from skills.citation.citekeys import find_citations, format_for_path, keys_in
     ("[unclosed](https://x.org/@g14", ["g14"]),
     ("text](https://x.org/@g15)", ["g15"]),
     ("See @a<b>c and <em>@d</em>.", ["a<b>c", "d"]),
+    # Footnotes and citation-shaped labels are not reference definitions.
+    ("Claim[^n].\n\n[^n]: [@ghost]\n", ["ghost"]),
+    ("Claim[^n].\n\n[^n]: https://x.org/@g1\n", ["g1"]),
+    ("Claim[^n].\n\n[^n]: [x](https://x.org/@g2)\n", []),
+    ("Claim[^n].\n\n[^n]: <https://x.org/@g6>\n", []),
+    ("[@k]: https://x.org/@g3\n", ["k", "g3"]),
+    ("[-@k]: https://x.org\n", ["k"]),
+    ("[foo@bar]: https://x.org/@g4\n\n[x][foo@bar]\n", []),
 ])
 def test_markdown_keys_match_pandoc_rules(text, keys):
     assert keys_in(text, "markdown") == keys

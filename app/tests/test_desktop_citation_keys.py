@@ -199,6 +199,24 @@ def test_link_with_at_sign_is_not_treated_as_a_citation(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_unknown_key_inside_a_footnote_is_refused(tmp_path, monkeypatch):
+    """Acceptance 2026-11-06: `[^n]: [@ghost]` is a footnote, not a link definition."""
+    async def run():
+        service, model, path, _context = await _setup(tmp_path, monkeypatch)
+        _write_library(tmp_path)
+        text = "Claim.\n"
+        context = await _open_with_selection(service, path, text, "Claim.")
+        model.replacement = "Claim[^n].\n\n[^n]: [@ghost]"
+        result, _sink = await _turn(service, context)
+        assert result["text"] == "Document operation: failed."
+        assert _tool_message(model, "document_edit")["unknownKeys"] == ["ghost"]
+        assert path.read_text(encoding="utf-8") == text
+        report = await service.dispatch("bibliography.inspect", {"documentContext": {
+            **context, "sourceText": "Claim[^n].\n\n[^n]: [@ghost]\n"}})
+        assert report["missing"] == ["ghost"]
+    asyncio.run(run())
+
+
 def test_unreadable_bibliography_only_blocks_new_keys(tmp_path, monkeypatch):
     async def run():
         service, model, path, context = await _setup(tmp_path, monkeypatch)
