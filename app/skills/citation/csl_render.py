@@ -143,20 +143,76 @@ def language_branch_items(items: list[dict]) -> list[dict]:
     return out
 
 
+# Characters Pandoc leaves alone and collates like ignorable punctuation (so
+# "D'Arcy" sorts as "DArcy", as bime_word does); the first one absent from the
+# bibliography and the document stands in for a straight apostrophe.
+_APOSTROPHE_PLACEHOLDERS = ("\u2035", "\u055a", "\u05f3", "\u02b9")
+_VERBATIM_FIELDS = frozenset({"id", "type", "language", "URL", "DOI", "ISBN", "ISSN", "PMID", "PMCID"})
+
+
+def _map_strings(value, convert):
+    if isinstance(value, str):
+        return convert(value)
+    if isinstance(value, list):
+        return [_map_strings(item, convert) for item in value]
+    if isinstance(value, dict):
+        return {key: _map_strings(item, convert) for key, item in value.items()}
+    return value
+
+
+def protect_apostrophes(items: list[dict], document_text: str) -> tuple[list[dict], str | None]:
+    """Hide straight apostrophes from Pandoc, which always prints them as ’.
+
+    Returns the copy and the placeholder to turn back into ``'`` after
+    rendering (None when no free placeholder exists; then nothing changes).
+    Identifier fields are left verbatim; typographic ’ in the data stays ’.
+    """
+    used = json.dumps(items, ensure_ascii=False) + document_text
+    placeholder = next((char for char in _APOSTROPHE_PLACEHOLDERS if char not in used), None)
+    if placeholder is None:
+        return items, None
+    out = [
+        {key: value if key in _VERBATIM_FIELDS else _map_strings(value, lambda text: text.replace("'", placeholder))
+         for key, value in item.items()}
+        for item in items
+    ]
+    return out, placeholder
+
+
+def prepare_render_items(items: list[dict], steps: list[str], document_text: str) -> tuple[list[dict], dict[str, str]]:
+    """Apply a style's ``preprocess`` steps (styles.json) to a copy of the items.
+
+    Returns the copy and the replacements to apply to Pandoc's output.
+    """
+    restore: dict[str, str] = {}
+    if "cjk-language" in steps:
+        items = language_branch_items(items)
+    if "straight-apostrophes" in steps:
+        items, placeholder = protect_apostrophes(items, document_text)
+        if placeholder is not None:
+            restore[placeholder] = "'"
+    return items, restore
+
+
 def _citeproc_ast(text: str, library_path: Path, style_id: str, *, timeout: float) -> dict:
     library = lib.load(Path(library_path))  # validates; raises LibraryError
     style = _style_entry(style_id)
     args = ["--sandbox", "-f", "markdown", "-t", "json", "--citeproc", "--csl", str(STYLES_DIR / style["file"])]
     if not library.exists:
         return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
-    if style.get("languageBranch") != "cjk":
+    steps = style.get("preprocess") or []
+    if not steps:
         args += ["--bibliography", str(library_path)]
         return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
+    items, restore = prepare_render_items(library.items, steps, text)
     with tempfile.TemporaryDirectory(prefix="citation-render-") as folder:
         copy = Path(folder) / "bibliography.json"
-        copy.write_text(json.dumps(language_branch_items(library.items), ensure_ascii=False), encoding="utf-8")
+        copy.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
         args += ["--bibliography", str(copy)]
-        return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
+        ast = json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
+    for placeholder, original in restore.items():
+        ast = _map_strings(ast, lambda value: value.replace(placeholder, original))
+    return ast
 
 
 def _library_or_error(library_path: Path) -> lib.Library:

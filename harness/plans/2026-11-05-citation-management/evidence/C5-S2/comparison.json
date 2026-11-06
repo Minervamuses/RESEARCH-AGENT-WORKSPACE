@@ -6,7 +6,7 @@
   },
   "bibliography": {
    "total": 42,
-   "match": 32,
+   "match": 37,
    "csl_entries": 42
   }
  },
@@ -397,7 +397,7 @@
    "position": 1,
    "key": "asai2026openscholar",
    "oracle": "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D'Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W.-t. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
-   "csl": "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D’Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
+   "csl": "Asai, A., J. He, R. Shao, W. Shi, A. Singh, J. C. Chang, K. Lo, L. Soldaini, S. Feldman, M. D'Arcy, D. Wadden, M. Latzke, J. Sparks, J. D. Hwang, V. Kishore, M. Tian, P. Ji, S. Liu, H. Tong, B. Wu, Y. Xiong, L. Zettlemoyer, G. Neubig, D. S. Weld, D. Downey, W. Yih, P. W. Koh, and H. Hajishirzi. 2026. Synthesizing scientific literature with retrieval-augmented language models. Nature 650(8103): 857-863.",
    "match": false
   },
   {
@@ -425,8 +425,8 @@
    "position": 5,
    "key": "gero2022sparks",
    "oracle": "Gero, K. I., V. Liu, and L. Chilton. 2022. Sparks: Inspiration for Science Writing using Language Models. In “Designing Interactive Systems Conference (DIS '22)”, 1002-1019. New York, NY: ACM.",
-   "csl": "Gero, K. I., V. Liu, and L. Chilton. 2022. Sparks: Inspiration for Science Writing using Language Models. In “Designing Interactive Systems Conference (DIS ’22)”, 1002-1019. New York, NY: ACM.",
-   "match": false
+   "csl": "Gero, K. I., V. Liu, and L. Chilton. 2022. Sparks: Inspiration for Science Writing using Language Models. In “Designing Interactive Systems Conference (DIS '22)”, 1002-1019. New York, NY: ACM.",
+   "match": true
   },
   {
    "position": 6,
@@ -446,8 +446,8 @@
    "position": 8,
    "key": "jakesch2023cowriting",
    "oracle": "Jakesch, M., A. Bhat, D. Buschek, L. Zalmanson, and M. Naaman. 2023. Co-Writing with Opinionated Language Models Affects Users' Views. In “Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems”, 1-15. New York, NY: ACM.",
-   "csl": "Jakesch, M., A. Bhat, D. Buschek, L. Zalmanson, and M. Naaman. 2023. Co-Writing with Opinionated Language Models Affects Users’ Views. In “Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems”, 1-15. New York, NY: ACM.",
-   "match": false
+   "csl": "Jakesch, M., A. Bhat, D. Buschek, L. Zalmanson, and M. Naaman. 2023. Co-Writing with Opinionated Language Models Affects Users' Views. In “Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems”, 1-15. New York, NY: ACM.",
+   "match": true
   },
   {
    "position": 9,
@@ -488,15 +488,15 @@
    "position": 14,
    "key": "lala2023paperqa",
    "oracle": "Lála, J., O. O'Donoghue, A. Shtedritski, S. Cox, S. G. Rodriques, and A. D. White. 2023. PaperQA: Retrieval-Augmented Generative Agent for Scientific Research. arXiv:2312.07559. Available at: https://doi.org/10.48550/arXiv.2312.07559.",
-   "csl": "Lála, J., O. O’Donoghue, A. Shtedritski, S. Cox, S. G. Rodriques, and A. D. White. 2023. PaperQA: Retrieval-Augmented Generative Agent for Scientific Research. arXiv:2312.07559. Available at: https://doi.org/10.48550/arXiv.2312.07559.",
-   "match": false
+   "csl": "Lála, J., O. O'Donoghue, A. Shtedritski, S. Cox, S. G. Rodriques, and A. D. White. 2023. PaperQA: Retrieval-Augmented Generative Agent for Scientific Research. arXiv:2312.07559. Available at: https://doi.org/10.48550/arXiv.2312.07559.",
+   "match": true
   },
   {
    "position": 15,
    "key": "lee2022coauthor",
    "oracle": "Lee, M., P. Liang, and Q. Yang. 2022. CoAuthor: Designing a Human-AI Collaborative Writing Dataset for Exploring Language Model Capabilities. In “CHI Conference on Human Factors in Computing Systems (CHI '22)”, 1-19. New York, NY: ACM.",
-   "csl": "Lee, M., P. Liang, and Q. Yang. 2022. CoAuthor: Designing a Human-AI Collaborative Writing Dataset for Exploring Language Model Capabilities. In “CHI Conference on Human Factors in Computing Systems (CHI ’22)”, 1-19. New York, NY: ACM.",
-   "match": false
+   "csl": "Lee, M., P. Liang, and Q. Yang. 2022. CoAuthor: Designing a Human-AI Collaborative Writing Dataset for Exploring Language Model Capabilities. In “CHI Conference on Human Factors in Computing Systems (CHI '22)”, 1-19. New York, NY: ACM.",
+   "match": true
   },
   {
    "position": 16,
@@ -586,8 +586,8 @@
    "position": 28,
    "key": "openai2023outage",
    "oracle": "OpenAI. 2023. March 20 ChatGPT outage: Here's what happened. OpenAI. Available at: https://web.archive.org/web/20231229185333/https://openai.com/blog/march-20-chatgpt-outage. Accessed 6 October 2026.",
-   "csl": "OpenAI. 2023. March 20 ChatGPT outage: Here’s what happened. OpenAI. Available at: https://web.archive.org/web/20231229185333/https://openai.com/blog/march-20-chatgpt-outage. Accessed 6 October 2026.",
-   "match": false
+   "csl": "OpenAI. 2023. March 20 ChatGPT outage: Here's what happened. OpenAI. Available at: https://web.archive.org/web/20231229185333/https://openai.com/blog/march-20-chatgpt-outage. Accessed 6 October 2026.",
+   "match": true
   },
   {
    "position": 29,

@@ -40,7 +40,10 @@
    "file": "bime-appendix17.csl",
    "kind": "author-date",
    "origin": "custom",
-   "languageBranch": "cjk"
+   "preprocess": [
+    "cjk-language",
+    "straight-apostrophes"
+   ]
   }
  ]
 }

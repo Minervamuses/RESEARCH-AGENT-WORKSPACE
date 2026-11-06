@@ -29,8 +29,8 @@
   <!-- Names -->
   <!-- Chinese/Japanese entries are recognised by having a "language" field.
        Standard CSL cannot test its value, so the renderer (csl_render,
-       styles.json "languageBranch": "cjk") passes Pandoc a copy that keeps
-       "language" only on Chinese/Japanese entries; the user's file is unchanged. -->
+       styles.json "preprocess") passes Pandoc a copy that keeps "language"
+       only on Chinese/Japanese entries; the user's file is unchanged. -->
   <macro name="author-bib">
     <choose>
       <if variable="language">

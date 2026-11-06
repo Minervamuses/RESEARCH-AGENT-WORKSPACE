@@ -89,7 +89,7 @@ def test_reference_entries_match_the_regulation_examples(rendered):
         "Available at: www.nsc.org. Accessed 17 December 2000."
     )
     assert entries["sas1990"] == (
-        "SAS. 1990. SAS User’s Guide: Statistics. Ver. 6a. Cary, N.C.: SAS Institute, Inc."
+        "SAS. 1990. SAS User's Guide: Statistics. Ver. 6a. Cary, N.C.: SAS Institute, Inc."
     )
     assert entries["campbell1991"] == (
         "Campbell, M. D. 1991. The lower limit of soil water potential for potato growth. "
@@ -179,3 +179,67 @@ def test_japanese_is_inferred_from_kana_and_ordered_after_chinese(tmp_path):
     out = render("[@yamada2000] [@smith2020] [@tian1989]", path, "bime-appendix17")
     assert [c["text"] for c in out.citations] == ["(山田，2000)", "(Smith and Jones, 2020)", "(田 等人，1989)"]
     assert [e["key"] for e in out.bibliography][-2:] == ["yamada2000", "smith2020"]
+
+
+APOSTROPHES = [
+    {"id": "obrien2020", "type": "article-journal", "title": "Users' views of O'Brien's tool",
+     "author": [{"family": "O'Brien", "given": "Pat"}, {"family": "D'Arcy", "given": "Mike"}],
+     "issued": {"date-parts": [[2020]]}, "container-title": "J. X", "volume": "1", "page": "1-2",
+     "URL": "https://example.org/it's"},
+    {"id": "obama2020", "type": "article-journal", "title": "Typographic data: Users’ guide",
+     "author": [{"family": "Obama", "given": "B."}], "issued": {"date-parts": [[2020]]},
+     "container-title": "J. X", "volume": "1", "page": "3-4"},
+    {"id": "obrist2020", "type": "article-journal", "title": "Third",
+     "author": [{"family": "Obrist", "given": "C."}], "issued": {"date-parts": [[2020]]},
+     "container-title": "J. X", "volume": "1", "page": "5-6"},
+]
+
+
+def _apostrophe_library(tmp_path):
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(APOSTROPHES, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_appendix17_keeps_straight_apostrophes_from_the_data(tmp_path):
+    """User decision (2026-11-06): straight apostrophes, as in bime_word's output."""
+    path = _apostrophe_library(tmp_path)
+    before = path.read_bytes()
+    out = render("[@obrien2020; @obama2020; @obrist2020]", path, "bime-appendix17")
+    assert [c["text"] for c in out.citations] == ["(O'Brien and D'Arcy, 2020; Obama, 2020; Obrist, 2020)"]
+    entries = {e["key"]: e["text"] for e in out.bibliography}
+    assert entries["obrien2020"] == (
+        "O'Brien, P., and M. D'Arcy. 2020. Users' views of O'Brien's tool. J. X 1: 1-2."
+    )
+    assert entries["obama2020"] == "Obama, B. 2020. Typographic data: Users’ guide. J. X 1: 3-4."
+    # Sorted as if the apostrophe were absent (bime_word folds punctuation away).
+    assert [e["key"] for e in out.bibliography] == ["obama2020", "obrien2020", "obrist2020"]
+    assert path.read_bytes() == before
+
+
+def test_apostrophes_in_urls_are_untouched_and_other_styles_unchanged(tmp_path):
+    from skills.citation.csl_render import protect_apostrophes
+
+    copy, placeholder = protect_apostrophes(APOSTROPHES, "")
+    assert placeholder is not None
+    assert copy[0]["URL"] == "https://example.org/it's"
+    assert "'" not in copy[0]["title"] and placeholder in copy[0]["title"]
+    assert copy[0]["id"] == "obrien2020"
+    apa = render("[@obrien2020]", _apostrophe_library(tmp_path), "apa")
+    assert "O’Brien" in apa.citations[0]["text"]
+
+
+def test_document_text_keeps_its_own_typography(tmp_path):
+    from skills.citation.csl_render import export_markdown
+
+    out = export_markdown("It's cited [@obrien2020].\n", _apostrophe_library(tmp_path), "bime-appendix17")
+    assert out.startswith("It’s cited (O'Brien and D'Arcy, 2020).")
+    assert "O'Brien, P., and M. D'Arcy. 2020. [Users' views of O'Brien's tool](https://example.org/it's)." in out
+
+
+def test_no_free_placeholder_leaves_text_unchanged():
+    from skills.citation.csl_render import _APOSTROPHE_PLACEHOLDERS, protect_apostrophes
+
+    items = [{"id": "a", "title": "x'y"}]
+    copy, placeholder = protect_apostrophes(items, "".join(_APOSTROPHE_PLACEHOLDERS))
+    assert (copy, placeholder) == (items, None)

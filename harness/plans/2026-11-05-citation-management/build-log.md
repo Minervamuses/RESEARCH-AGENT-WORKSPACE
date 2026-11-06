@@ -10,7 +10,7 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete（驗收修正後）| C3-S1–S3、C3-F1、C3-F2 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Complete（驗收修正後）| C5-S1–S3、C5-F1、C5-F2 見事件 | — | — |
+| C5 | In progress（使用者決定 D9–D11）| C5-S1–S3、C5-F1–F3 見事件 | — | C5-F4 |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
 | C8 | Complete（驗收修正後）| C8-S1–S3、C8-F1 見事件；最終彙報 | — | — |
@@ -348,6 +348,31 @@
 - `npm test`：**307/307**；`npm run build`：成功；`cargo test --locked`（沙箱外）：**40 passed**。
 - **沒有重跑 C8-S1 端到端**：修正沒有改到 `bibliography.add` 或匯出路徑。重跑會再用 3 次公開存檔請求，而 PLANS 規定已發出的請求不重發。四個修正的回歸測試都走真實的 `DesktopService`：P1 防護經過真實的文件回合與存檔流程，只有模型是假的。
 - 最終彙報已依驗收修正更新（下方「驗收修正」一節與相關列）。
+
+## 使用者決定（2026-11-06）
+
+使用者對最終彙報的三個待決事項回覆（記為 GOALS 的 D9–D11）：
+
+- **D9**：沒有 `language` 欄位時依漢字、假名自動判斷中日文 →「要」。C5-F1 的規則保留，不需改動。
+- **D10**：附件十七在 CSL 之外改成直撇號 →「好」。→ C5-F3。
+- **D11**：消除可由資料修正的 4 條差異 →「好」。→ C5-F4。
+
+### C5-F3 附件十七輸出直撇號（D10）（2026-11-06）
+
+- **實測**：Pandoc 會把資料中的 `'` 換成 `’`。HTML entity（`&#39;`、`&apos;`）會原樣輸出成字面文字，`<span class="nocase">'</span>` 仍被替換，所以都不能用。私用區字元能原樣保留，但排序會落在字母之後（`O'Brien` 排到 `Ońeil` 之後）。U+2035、U+055A、U+05F3、U+02B9 等字元也能原樣保留，而且排序時被當成可忽略的標點：`D'Arcy` 排在 `Darby` 之後、`O'Brien` 排在 `Obama` 與 `Obrist` 之間，正是 bime_word 去掉標點後比較的規則。原本的直撇號反而讓這些名字排在同字首的最前面。
+- **改動**：
+  - `styles.json` 的 `languageBranch` 改為通用的 `"preprocess": ["cjk-language", "straight-apostrophes"]`。
+  - `csl_render.prepare_render_items` 依步驟清單處理渲染副本。
+  - 新步驟 `protect_apostrophes`：從上述字元中選第一個沒有出現在書目與文件中的，用它取代文字欄位裡的 `'`；`id`、`type`、`language`、`URL`、`DOI` 等識別欄位原樣保留。Pandoc 輸出後把佔位字元換回 `'`。資料中原本的排版撇號 `’` 照樣保留。正文不受影響。其他樣式不變。
+- **檢查**：`test_citation_appendix17.py` 新增 4 項：
+  - 引用與參考文獻都是直撇號，例如 `(O'Brien and D'Arcy, 2020; …)`。
+  - 資料中的 `’` 保留，排序為 Obama、O'Brien、Obrist，書目檔不變。
+  - URL 中的 `'` 不動；APA 仍為 `O’Brien`。
+  - 匯出 Markdown 時，正文的 `It's` 仍由 Pandoc 排成 `It’s`，參考文獻是直撇號。
+  - 沒有可用的佔位字元時不做任何改變。
+
+  原有測試中附件十七 SAS 範例的期望值改回原文的 `User's`，現在與附件十七原文完全相同。`test_citation_appendix17.py`、`test_citation_csl_render.py`、`test_desktop_bibliography.py` 共 44 passed。
+- **論文比對重跑**：參考文獻 **37/42**（原 32/42；gero2022sparks、jakesch2023cowriting、lala2023paperqa、lee2022coauthor、openai2023outage 現在一致），引用 46/46。剩下 asai2026openscholar、karpukhin2020dpr、lewis2020rag（`Wen-tau`）、grattafiori2024llama3（截斷清單）、lee2025critical（暱稱）。
 
 ## 最終彙報
 
