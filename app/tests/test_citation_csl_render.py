@@ -168,3 +168,37 @@ def test_unknown_style_and_bad_library(library, tmp_path):
     with pytest.raises(RenderError) as excinfo:
         render(TEXT, bad, "apa")
     assert excinfo.value.code == "library_malformed"
+
+
+def test_cjk_language_rule():
+    from skills.citation.csl_render import cjk_language
+
+    assert cjk_language({"language": "en", "title": "水稻"}) is None  # explicit language wins
+    assert cjk_language({"language": "zh-Hant"}) == "zh"
+    assert cjk_language({"language": "jpn"}) == "ja"
+    assert cjk_language({"language": "zhx"}) is None
+    assert cjk_language({"title": "果実選別装置の研究"}) == "ja"
+    assert cjk_language({"author": [{"family": "王", "given": "小明"}], "title": "Rice"}) == "zh"
+    assert cjk_language({"title": "Rice drying"}) is None
+
+
+def test_only_language_branch_styles_get_a_normalized_copy(library, monkeypatch):
+    items = json.loads(library.read_text(encoding="utf-8"))
+    items[0]["language"] = "en"
+    library.write_text(json.dumps(items, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    before = library.read_bytes()
+    seen = []
+    real_run = csl_render._run
+
+    def spy(args, stdin, *, timeout):
+        if "--bibliography" in args:
+            path = args[args.index("--bibliography") + 1]
+            seen.append((path, json.loads(open(path, encoding="utf-8").read())))
+        return real_run(args, stdin, timeout=timeout)
+
+    monkeypatch.setattr(csl_render, "_run", spy)
+    render(TEXT, library, "apa")
+    render(TEXT, library, "bime-appendix17")
+    assert seen[0][0] == str(library) and seen[0][1][0]["language"] == "en"
+    assert seen[1][0] != str(library) and "language" not in seen[1][1][0]
+    assert library.read_bytes() == before

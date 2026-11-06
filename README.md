@@ -99,7 +99,7 @@ agent 可在同一回合依留言依序修改目前文件的多個段落，後�
 - **正文寫法**：Markdown 用 Pandoc 語法 `[@key]`、`[@a; @b]`、`[see @key, p. 3]`；LaTeX 用 `\cite{key}` 一族。Agent 修改文件時不能引入書目中沒有的 key；它可用唯讀工具 `bibliography_lookup` 查詢既有 key。
 - **引用面板**：開啟文件後，編輯器下方的 **Citations** 面板列出本文引用（依首次出現順序；數字制樣式顯示編號、次數、verified／unverified）、問題（書目中找不到的 key、重複 DOI、書目無法讀取）與未引用的條目。點 **Line** 會在編輯器選取那個引用。**Verify and add** 以 DOI 或 arXiv ID 驗證後加入書目（Ask 模式會先請你批准，與 `/citation` 的存檔相同）；**Insert** 在游標處插入 `[@key]` 或 `\cite{key}`（只改編輯器中的文字，仍需 Ctrl+S 保存）；**Remove** 從書目移除條目（本文仍引用時先確認，其他文件不檢查）。在 `[@`、`; @` 或 `\cite{` 之後輸入會出現 key 補全。
 - **格式與匯出**：**Style** 選單的選擇存在 `RESEARCH.md` 的 `citationStyle`。內建 APA 7、MLA 9、IEEE、Chicago author-date，以及依附件十七撰寫的 `bime-appendix17`。**Preview** 顯示目前文字的逐筆引用與參考文獻。**Export** 在文件旁寫出 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`（引用已排版）與 `<書目檔名>.bib`，原始文件不變。`.tex` 文件只提供檢查、面板與 `.bib` 匯出，格式由 LaTeX 自己的書目系統決定。
-- **附件十七的限制**：標準 CSL 無法表達中日文依姓氏筆畫排序、全中文引用群組內的全形「；」，`等人` 前會多一個空白；中日文條目需要 `language` 欄位（例如 `"zh-TW"`）才會套用中文格式。比對結果見 [計劃證據](harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md)。系所送審的 Word 檔仍由 bime_word 產生。
+- **附件十七的限制**：標準 CSL 無法表達中日文依姓氏筆畫排序、全中文引用群組內的全形「；」，`等人` 前會多一個空白。中文或日文條目依 `language` 欄位（`zh…`、`ja…`）判斷，沒有這個欄位時依標題與作者姓名中的漢字、假名判斷；`"language": "en"` 等其他語言維持英文格式。這個判斷只用在渲染時的暫存副本，書目檔不會被改寫。比對結果見 [計劃證據](harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md)。系所送審的 Word 檔仍由 bime_word 產生。
 
 ## 停止回合
 

@@ -137,3 +137,45 @@ def test_chinese_branch_with_language_field(tmp_path):
     order = [e["key"] for e in out.bibliography]
     # zh before ja before untagged English; stroke order is not expressible.
     assert order[-2:] == ["yamada2000", "anderson1998"]
+
+
+SMITH_JONES = {
+    "id": "smith2020", "type": "article-journal", "title": "Grain drying",
+    "author": [{"family": "Smith", "given": "A."}, {"family": "Jones", "given": "B."}],
+    "issued": {"date-parts": [[2020]]}, "container-title": "Trans. ASAE", "volume": "3", "page": "1-9",
+}
+
+
+@pytest.mark.parametrize("language", [None, "en", "en-US", "de", "fr-FR"])
+def test_non_cjk_language_keeps_the_english_format(tmp_path, language):
+    """Acceptance P2: "language": "en" must not switch to 與/，."""
+    item = dict(SMITH_JONES, **({"language": language} if language else {}))
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps([item], ensure_ascii=False), encoding="utf-8")
+    before = path.read_bytes()
+    out = render("[@smith2020]", path, "bime-appendix17")
+    assert [c["text"] for c in out.citations] == ["(Smith and Jones, 2020)"]
+    assert out.bibliography[0]["text"] == "Smith, A., and B. Jones. 2020. Grain drying. Trans. ASAE 3: 1-9."
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(("language", "expected"), [("zh-TW", "(張與盧，1992)"), ("zh", "(張與盧，1992)"),
+                                                    ("chi", "(張與盧，1992)"), (None, "(張與盧，1992)")])
+def test_chinese_entries_with_or_without_language(tmp_path, language, expected):
+    item = {k: v for k, v in CJK[1].items() if k != "language"}
+    if language:
+        item["language"] = language
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps([item], ensure_ascii=False), encoding="utf-8")
+    out = render("[@zhang1992]", path, "bime-appendix17")
+    assert [c["text"] for c in out.citations] == [expected]
+    assert out.bibliography[0]["text"] == "張福祥、盧福明。1992。芋頭收穫機之研究。農業機械學刊 1(1): 50-59。"
+
+
+def test_japanese_is_inferred_from_kana_and_ordered_after_chinese(tmp_path):
+    items = [{k: v for k, v in item.items() if k != "language"} for item in CJK] + [SMITH_JONES]
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    out = render("[@yamada2000] [@smith2020] [@tian1989]", path, "bime-appendix17")
+    assert [c["text"] for c in out.citations] == ["(山田，2000)", "(Smith and Jones, 2020)", "(田 等人，1989)"]
+    assert [e["key"] for e in out.bibliography][-2:] == ["yamada2000", "smith2020"]

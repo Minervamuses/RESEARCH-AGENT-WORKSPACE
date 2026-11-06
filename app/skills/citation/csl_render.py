@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,11 +57,7 @@ def list_styles() -> list[dict]:
 
 
 def style_path(style_id: str) -> Path:
-    manifest = json.loads(STYLES_MANIFEST.read_text(encoding="utf-8"))
-    for style in manifest["styles"]:
-        if style["id"] == style_id:
-            return STYLES_DIR / style["file"]
-    raise RenderError("style_unknown", f"unknown citation style: {style_id!r}")
+    return STYLES_DIR / _style_entry(style_id)["file"]
 
 
 # --- pandoc -------------------------------------------------------------------------
@@ -92,12 +89,74 @@ def _run(args: list[str], stdin: bytes, *, timeout: float) -> bytes:
     return completed.stdout
 
 
+_CJK_LANGUAGE = re.compile(r"(?:zh|chi|zho|ja|jpn)(?:$|[-_])", re.I)
+_KANA = re.compile(r"[\u3040-\u30ff]")
+_HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _style_entry(style_id: str) -> dict:
+    manifest = json.loads(STYLES_MANIFEST.read_text(encoding="utf-8"))
+    for style in manifest["styles"]:
+        if style["id"] == style_id:
+            return style
+    raise RenderError("style_unknown", f"unknown citation style: {style_id!r}")
+
+
+def cjk_language(item: dict) -> str | None:
+    """"zh"/"ja" when an entry is Chinese or Japanese, else None.
+
+    An explicit ``language`` decides (``en``, ``de`` … are not CJK); without
+    one, kana means Japanese and Han characters mean Chinese, looking at the
+    title and the names (the rule bime_word uses).
+    """
+    language = item.get("language")
+    if isinstance(language, str) and language.strip():
+        if not _CJK_LANGUAGE.match(language.strip()):
+            return None
+        return "ja" if language.strip().casefold().startswith(("ja", "jpn")) else "zh"
+    sample = str(item.get("title", ""))
+    for role in ("author", "editor"):
+        for name in item.get(role) or []:
+            if isinstance(name, dict):
+                sample += "".join(str(name.get(part, "")) for part in ("family", "given", "literal"))
+    if _KANA.search(sample):
+        return "ja"
+    return "zh" if _HAN.search(sample) else None
+
+
+def language_branch_items(items: list[dict]) -> list[dict]:
+    """Copy of ``items`` for a style that switches to its CJK branch on ``language``.
+
+    Standard CSL can only test whether ``language`` is present, not its
+    value, so the copy keeps ``language`` exactly on Chinese/Japanese entries
+    (inferred when missing) and drops it everywhere else. The user's file
+    is never changed.
+    """
+    out = []
+    for item in items:
+        copy = {key: value for key, value in item.items() if key != "language"}
+        language = cjk_language(item)
+        if language is not None:
+            original = item.get("language")
+            copy["language"] = original if isinstance(original, str) and original.strip() else language
+        out.append(copy)
+    return out
+
+
 def _citeproc_ast(text: str, library_path: Path, style_id: str, *, timeout: float) -> dict:
     library = lib.load(Path(library_path))  # validates; raises LibraryError
-    args = ["--sandbox", "-f", "markdown", "-t", "json", "--citeproc", "--csl", str(style_path(style_id))]
-    if library.exists:
+    style = _style_entry(style_id)
+    args = ["--sandbox", "-f", "markdown", "-t", "json", "--citeproc", "--csl", str(STYLES_DIR / style["file"])]
+    if not library.exists:
+        return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
+    if style.get("languageBranch") != "cjk":
         args += ["--bibliography", str(library_path)]
-    return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
+        return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
+    with tempfile.TemporaryDirectory(prefix="citation-render-") as folder:
+        copy = Path(folder) / "bibliography.json"
+        copy.write_text(json.dumps(language_branch_items(library.items), ensure_ascii=False), encoding="utf-8")
+        args += ["--bibliography", str(copy)]
+        return json.loads(_run(args, text.encode("utf-8"), timeout=timeout))
 
 
 def _library_or_error(library_path: Path) -> lib.Library:

@@ -168,8 +168,7 @@ def test_exact_doi_resolution_carries_csl_to_the_eligible_record():
     assert "abstract" not in resolution.decision.record.csl
 
 
-def test_language_is_kept_only_for_chinese_and_japanese():
-    assert "language" not in sanitize_csl({"type": "article-journal", "language": "en"})
-    assert "language" not in sanitize_csl({"type": "article-journal", "language": "en-US"})
+def test_language_is_kept_as_bibliographic_data():
+    # The Appendix 17 renderer decides what a language means; saved data keeps it.
+    assert sanitize_csl({"type": "article-journal", "language": "en"})["language"] == "en"
     assert sanitize_csl({"type": "article-journal", "language": "zh-TW"})["language"] == "zh-TW"
-    assert sanitize_csl({"type": "article-journal", "language": "ja"})["language"] == "ja"

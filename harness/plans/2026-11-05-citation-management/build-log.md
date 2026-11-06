@@ -10,7 +10,7 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete（驗收修正後）| C3-S1–S3、C3-F1、C3-F2 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Reopened（驗收）| C5-S1–S3 見事件 | — | C5-F1、C5-F2 |
+| C5 | Reopened（驗收）| C5-S1–S3、C5-F1 見事件 | — | C5-F2 |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
 | C8 | Reopened（驗收）| C8-S1–S3 見事件；最終彙報 | — | C8-F1 回歸與彙報更新 |
@@ -319,6 +319,17 @@
 - **改動**：`src/trust.tsx` 新增純函式 `approvalHasLiveOwner(parentRequestId, {turnRequestId, documentRequestId, citationRequestId})`；`App.tsx` 的清理 effect 改用它，並把 `citationRequestRef.current`（`bibliography.add` 進行中的 requestId）算作擁有者。其他清除待批准的位置已逐一檢查：後端重啟/崩潰/專案切換與回合結束屬正常清除；新增請求結束時自己的 `finally` 會清掉自己的批准。
 - **檢查**：`tests/trust.test.ts` 新增 2 項：擁有者規則（只有新增請求擁有時保留；請求結束後清除；三種擁有者都不符時清除）；App 接線的原始碼檢查（清理 effect 帶入 `citationRequestId: citationRequestRef.current`、舊的二擁有者條件不再出現、監聽器接受新增請求的 `approval.required`、請求設定擁有者 ref）。**突變確認**：把 `App.tsx` 暫時換回修正前版本，接線測試失敗；換回後通過。`npm test` 307/307，`npm run build` 成功。
 - **證據層級**：仍未在原生 GUI 視窗實際點擊（R6）；以純函式與接線測試確認，手動檢查清單第 4 項涵蓋。
+
+### C5-F1 附件十七依語言值而不是欄位有無選擇中日文格式（2026-11-06）
+
+- **原因**：`bime-appendix17.csl` 以 `<if variable="language">` 切換中日文分支，標準 CSL 無法比對欄位值；C5-S3 只在存檔時把非中日文的 `language` 刪掉，但使用者既有的手寫條目不經過存檔流程，所以 `"language": "en"` 的英文條目會得到 `(Smith與Jones，2020)`。
+- **改動**（書目檔不改寫，由渲染處理）：
+  - `styles.json` 為 `bime-appendix17` 標記 `"languageBranch": "cjk"`。
+  - `csl_render`：對這類樣式，把書目的暫存副本交給 Pandoc（`--sandbox` 仍只讀命令列指定的檔案）：`language` 只保留在中日文條目上 —— 明確的 `zh`/`chi`/`zho`/`ja`/`jpn`（含地區碼），或沒有 `language` 時依標題與姓名中的假名（→ 日文）、漢字（→ 中文）判斷（與 bime_word 的規則相同）；其他值（`en`、`de`、`fr-FR` …）在副本中移除。其他樣式照舊直接讀使用者的書目檔。新函式 `cjk_language`、`language_branch_items`。
+  - `csl.sanitize_csl` 恢復保留 `language`（C5-S3 的「只留 zh/ja」是繞道做法，現在由渲染判斷，存檔資料不再被裁切）。
+  - CSL 檔註解與 `README.md` 的限制說明同步更新（不再需要 `language` 欄位）。
+- **檢查**：`test_citation_appendix17.py` 新增：審查者的情境與其他非中日文語言（無、`en`、`en-US`、`de`、`fr-FR`）→ `(Smith and Jones, 2020)` 與英文參考文獻、書目檔位元組不變；中文條目帶 `zh-TW`/`zh`/`chi` 或沒有 `language` → `(張與盧，1992)` 與中文參考文獻；沒有 `language` 時以假名判斷日文並排在中文之後、英文之前。`test_citation_csl_render.py` 新增 `cjk_language` 規則與「只有 languageBranch 樣式拿到副本、APA 仍讀原檔且看得到 `language: en`、原檔不變」。`test_citation_csl.py` 改為驗證 `language` 照原值保留。三檔 38 passed。**突變確認**：把 `csl_render.py` 換回修正前版本，`language: en` 的測試得到 `(Smith與Jones，2020)` 而失敗；換回後通過。
+- **證據重跑**：C5-S2 論文比對不變（引用 46/46、參考文獻 32/42）；`evidence/C5-S3/run_cjk.py` 新增兩列 ——「移除所有 `language` 後輸出完全相同」與「英文條目加上 `language: en` 後輸出完全相同」皆達成；語言分組一列不再標註「需 language 欄位」。中日文規則現為 16 條中 13 達成、1 部分達成、2 無法表達。
 
 ## 最終彙報
 

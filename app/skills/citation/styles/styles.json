@@ -39,7 +39,8 @@
    "name": "NTU BIME Appendix 17 (author-year)",
    "file": "bime-appendix17.csl",
    "kind": "author-date",
-   "origin": "custom"
+   "origin": "custom",
+   "languageBranch": "cjk"
   }
  ]
 }
