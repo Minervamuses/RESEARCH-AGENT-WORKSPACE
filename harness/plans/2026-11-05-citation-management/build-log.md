@@ -10,7 +10,7 @@
 | C2 | Complete | C2-S1–S3 見事件 | — | — |
 | C3 | Complete（第二次驗收修正後）| C3-S1–S3、C3-F1–F3 見事件 | — | — |
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
-| C5 | Reopened（第二次驗收）| C5-S1–S3、C5-F1–F4 見事件 | — | C5-F5 |
+| C5 | Complete（第二次驗收修正後）| C5-S1–S3、C5-F1–F5 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
 | C8 | Reopened（第二次驗收）| C8-S1–S3、C8-F1、C8-F2 見事件；最終彙報 | — | C8-F3 |
@@ -420,6 +420,12 @@
   - **新的差分測試** `test_citation_citekeys_differential.py`：固定 seed 產生 240 份文件，片段涵蓋 code、註解、數學、autolink、HTML、連結目的地/標題/屬性、reference definition、註腳（每個只參照一次）、example list、跳脫、email、大括號 key、標點，逐份與 Pandoc 比較 key 序列。修正後 240/240 相同；HEAD 版本有 71/240 不同。不產生兩種已記錄的計數差異（註腳被參照兩次、段落中只有一張圖片）。
   - 語料交叉比對（`evidence/C3-F3/crosscheck-result.jsonl`）：新 `footnotes.md` 與既有 `synthetic.md`、`ex.md`、`links.md`、論文 `proposal.md` 全部相同。全部 `test_citation_*.py` 547 passed。
 - **反省**：兩次漏判都來自「挑選的例子沒有覆蓋規則之間的組合」；差分測試用生成的組合代替手挑例子。
+
+### C5-F5 渲染副本統一中日文語言代碼（2026-11-06）
+
+- **原因**：C5-F1 的副本保留原始代碼，而 `bime-appendix17.csl` 依 `language` 字串降冪排序。所以 `chi`/`jpn` 會讓日文排在中文前面。重現時另外發現同源問題：混用 `zh-TW`、`zh`、`chi` 時，中文條目被拆成數組，`chi` 的中文條目甚至排到日文之後（`['z1', 'z2', 'j1', 'z3']`）。
+- **改動**：`language_branch_items` 在副本中把中日文條目的 `language` 一律寫成 `cjk_language` 的標準值 `zh` 或 `ja`。CSL 不輸出這個欄位，只用它排序與切換分支；使用者的檔案不變。
+- **檢查**：`test_citation_appendix17.py` 新增 5 項。四種寫法（`zh`/`ja`、`chi`/`jpn`、`zho`/`ja-JP`、`zh-Hant`/無欄位推斷）的順序都是中文 → 日文 → 英文；混用中文代碼時排序與全部寫成 `zh` 完全相同、日文在最後。把 `csl_render.py` 換回 HEAD 版本時，`chi-jpn` 與混用兩項失敗。`test_citation_appendix17.py`、`test_citation_csl_render.py` 共 42 passed。論文比對仍為 46/46、42/42；中日文規則判定不變。
 
 ## 最終彙報
 

@@ -129,16 +129,17 @@ def language_branch_items(items: list[dict]) -> list[dict]:
 
     Standard CSL can only test whether ``language`` is present, not its
     value, so the copy keeps ``language`` exactly on Chinese/Japanese entries
-    (inferred when missing) and drops it everywhere else. The user's file
-    is never changed.
+    (inferred when missing) and drops it everywhere else. The value is the
+    canonical ``zh`` or ``ja``: the style sorts on it (descending: Chinese,
+    then Japanese), so ``chi``/``jpn`` or ``zh-TW`` next to ``zh`` must not
+    reorder or split the groups. The user's file is never changed.
     """
     out = []
     for item in items:
         copy = {key: value for key, value in item.items() if key != "language"}
         language = cjk_language(item)
         if language is not None:
-            original = item.get("language")
-            copy["language"] = original if isinstance(original, str) and original.strip() else language
+            copy["language"] = language
         out.append(copy)
     return out
 

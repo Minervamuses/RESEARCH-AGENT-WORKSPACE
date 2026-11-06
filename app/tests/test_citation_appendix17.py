@@ -299,3 +299,39 @@ def test_preprocessing_never_leaks_the_flag_variable():
 
     items = [{"id": "a", "author": [{"family": "A"}], TRUNCATION_FLAG: "user data"}]
     assert mark_truncated_author_lists(items) == [{"id": "a", "author": [{"family": "A"}]}]
+
+
+
+def _lang_item(key, family, language, title):
+    item = {"id": key, "type": "article-journal", "title": title, "author": [{"family": family, "given": "一"}],
+            "issued": {"date-parts": [[2000]]}, "container-title": "期刊", "volume": "1", "page": "1-2"}
+    if language:
+        item["language"] = language
+    return item
+
+
+@pytest.mark.parametrize(("zh", "ja"), [("zh", "ja"), ("chi", "jpn"), ("zho", "ja-JP"), ("zh-Hant", None)])
+def test_language_code_spelling_does_not_change_the_order(tmp_path, zh, ja):
+    """Acceptance 2026-11-06: chi/jpn put Japanese before Chinese."""
+    items = [_lang_item("j1", "山田", ja, "日本語の研究"), _lang_item("z1", "張", zh, "中文研究"),
+             dict(SMITH_JONES)]
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    out = render("[@j1] [@z1] [@smith2020]", path, "bime-appendix17")
+    assert [e["key"] for e in out.bibliography] == ["z1", "j1", "smith2020"]
+
+
+def test_mixed_chinese_codes_sort_as_one_group(tmp_path):
+    items = [_lang_item("zhTW", "張", "zh-TW", "甲"), _lang_item("zh", "李", "zh", "乙"),
+             _lang_item("chi", "王", "chi", "丙"), _lang_item("none", "田", None, "丁"),
+             _lang_item("ja", "山田", "ja-JP", "日本語の研究")]
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    out = render(" ".join(f"[@{item['id']}]" for item in items), path, "bime-appendix17")
+    order = [e["key"] for e in out.bibliography]
+    assert order[-1] == "ja"
+    # One Chinese group ordered by the collation of the surname, whatever the code.
+    plain = [dict(item, language="zh") if item["id"] != "ja" else item for item in items]
+    path.write_text(json.dumps(plain, ensure_ascii=False), encoding="utf-8")
+    same = render(" ".join(f"[@{item['id']}]" for item in items), path, "bime-appendix17")
+    assert order == [e["key"] for e in same.bibliography]
