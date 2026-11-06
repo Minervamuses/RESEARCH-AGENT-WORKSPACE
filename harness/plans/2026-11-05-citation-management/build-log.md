@@ -12,7 +12,7 @@
 | C4 | Complete | C4-S1–S4 見事件 | — | — |
 | C5 | Reopened（驗收）| C5-S1–S3 見事件 | — | C5-F1、C5-F2 |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
-| C7 | Reopened（驗收）| C7-S1–S3 見事件 | — | C7-F1 |
+| C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
 | C8 | Reopened（驗收）| C8-S1–S3 見事件；最終彙報 | — | C8-F1 回歸與彙報更新 |
 
 ## 事件
@@ -312,6 +312,13 @@
   - `agent/desktop/documents.py`：抽出 `_apply_replacement`（換行正規化 + 拼接），`prepare` 與新的 `candidate_text(snapshot, replacement)` 共用；`candidate_text` 回傳 `prepare` 會綁定的完整候選文字，但不登記候選。所以檢查的文字與存檔的 `candidateText` 逐字相同。
   - `agent/desktop/service.py` `_unknown_new_citation_keys`：比較修改前（快照原文）與修改後（完整候選文字）每個 key 的出現次數；次數增加的 key 若不在書目中就拒絕（不準備候選、不發 `document.proposed`）。文件原本已有的使用（包括原本就有的未知 key）照舊保留；新增一次原本就未知的 key 也會被拒絕（以前只看選取範圍時會放過）。書目讀不到時，只拒絕會增加 key 使用次數的修改。範圍無效時交給 `prepare` 回報同樣的錯誤。
 - **檢查**：`tests/test_desktop_citation_keys.py` 新增 5 項（共 13）：審查者的情境（只選 `ng2021journal` 換成 `ghost` → failed、`unknownKeys == ["ghost"]`、沒有 `document.proposed`/`approval.required`、檔案不變）；只選 `[@`、替換文字本身不是完整引用但結果是 → 拒絕；局部改成另一個已知 key → saved；在別處再用一次既有的未知 key → 拒絕；加入 `[Profile](https://example.org/@ghost "about @ghost2")` → saved（C3-F1 的效果）。**突變確認**：把 `service.py` 暫時換回修正前版本，審查者情境的測試失敗（實際 `saved`），換回後通過。`test_desktop_document_service.py`、`test_desktop_documents.py` 一起 67 passed。
+
+### C7-F1 GUI 不再把「新增文獻」的批准當成失效批准清掉（2026-11-06）
+
+- **原因**（靜態確認，與審查者一致）：`App.tsx` 有一個 effect 會清掉「既不屬於進行中回合、也不屬於文件操作」的待批准；C7-S2 新增的 `bibliography.add` 請求不在其中，所以閒置時按 Verify and add，剛設定的批准會立刻被這個 effect 清掉，後端只能等到逾時。C8-S1 由驅動程式直接回覆批准，沒有經過這段 React 狀態，所以沒有發現。
+- **改動**：`src/trust.tsx` 新增純函式 `approvalHasLiveOwner(parentRequestId, {turnRequestId, documentRequestId, citationRequestId})`；`App.tsx` 的清理 effect 改用它，並把 `citationRequestRef.current`（`bibliography.add` 進行中的 requestId）算作擁有者。其他清除待批准的位置已逐一檢查：後端重啟/崩潰/專案切換與回合結束屬正常清除；新增請求結束時自己的 `finally` 會清掉自己的批准。
+- **檢查**：`tests/trust.test.ts` 新增 2 項：擁有者規則（只有新增請求擁有時保留；請求結束後清除；三種擁有者都不符時清除）；App 接線的原始碼檢查（清理 effect 帶入 `citationRequestId: citationRequestRef.current`、舊的二擁有者條件不再出現、監聽器接受新增請求的 `approval.required`、請求設定擁有者 ref）。**突變確認**：把 `App.tsx` 暫時換回修正前版本，接線測試失敗；換回後通過。`npm test` 307/307，`npm run build` 成功。
+- **證據層級**：仍未在原生 GUI 視窗實際點擊（R6）；以純函式與接線測試確認，手動檢查清單第 4 項涵蓋。
 
 ## 最終彙報
 

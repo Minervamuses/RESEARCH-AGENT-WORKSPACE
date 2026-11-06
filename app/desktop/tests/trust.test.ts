@@ -10,7 +10,14 @@ import type {
   ExtensionPreviewDto,
 } from "../src/protocol.ts";
 
+interface ApprovalOwners {
+  turnRequestId: string | null;
+  documentRequestId: string | null;
+  citationRequestId: string | null;
+}
+
 interface TrustModule {
+  approvalHasLiveOwner: (parentRequestId: string, owners: ApprovalOwners) => boolean;
   ApprovalDialog: (props: {
     approval: ApprovalRequiredDto;
     resolving: boolean;
@@ -374,4 +381,30 @@ test("approval keeps Stop and its failure visible inside the modal", async () =>
   assert.match(failed, /role="alert">Stop failed; the turn remains active\./);
   assert.match(failed, /type="button">Stop<\/button>/);
   assert.equal((failed.match(/disabled=""/g) ?? []).length, 2);
+});
+
+
+test("a pending approval stays while its turn, document or bibliography.add request is in flight", async () => {
+  const { approvalHasLiveOwner } = await loadTrust();
+  const idle = { turnRequestId: null, documentRequestId: null, citationRequestId: null };
+  // Acceptance P1: an idle Verify-and-add approval must not be cleared as stale.
+  assert.equal(approvalHasLiveOwner("req-add", { ...idle, citationRequestId: "req-add" }), true);
+  assert.equal(approvalHasLiveOwner("req-turn", { ...idle, turnRequestId: "req-turn" }), true);
+  assert.equal(approvalHasLiveOwner("req-doc", { ...idle, documentRequestId: "req-doc" }), true);
+  assert.equal(approvalHasLiveOwner("req-add", idle), false, "finished add request no longer owns it");
+  assert.equal(approvalHasLiveOwner("req-old", {
+    turnRequestId: "req-turn", documentRequestId: "req-doc", citationRequestId: "req-add",
+  }), false);
+});
+
+test("App's stale-approval cleanup counts the bibliography.add request as an owner", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const cleanup = app.slice(app.indexOf("// Drop an approval only when no request that can raise one still owns it"));
+  assert.match(cleanup.slice(0, 600), /approvalHasLiveOwner\(pendingApproval\.parentRequestId, \{[\s\S]*citationRequestId: citationRequestRef\.current/);
+  assert.equal(app.includes("documentRequestRef.current?.requestId !== pendingApproval.parentRequestId"), false,
+    "the old two-owner check must not come back");
+  // The listener accepts the add request's approval.required and the request sets the owner ref.
+  assert.match(app, /citationRequestRef\.current = tracked\.requestId;/);
+  assert.match(app, /if \(citationRequest !== null && message\.requestId === citationRequest\)/);
 });

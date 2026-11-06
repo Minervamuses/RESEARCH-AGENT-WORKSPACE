@@ -239,6 +239,21 @@ export function acceptApprovalEvent(
   return { ...data, generation };
 }
 
+/** Requests that may own a pending approval: the active turn, a document operation,
+ * and an out-of-turn bibliography.add (its citation.save approval). */
+export interface ApprovalOwnerRequests {
+  turnRequestId: string | null;
+  documentRequestId: string | null;
+  citationRequestId: string | null;
+}
+
+/** True while the request that raised this approval is still in flight. */
+export function approvalHasLiveOwner(parentRequestId: string, owners: ApprovalOwnerRequests): boolean {
+  return parentRequestId === owners.turnRequestId
+    || parentRequestId === owners.documentRequestId
+    || parentRequestId === owners.citationRequestId;
+}
+
 interface ApprovalDialogProps {
   approval: PendingApproval | ApprovalRequiredDto;
   resolving: boolean;

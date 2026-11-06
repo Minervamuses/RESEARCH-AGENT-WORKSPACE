@@ -83,6 +83,7 @@ import {
   ThinkingControl,
   ExtensionPanel,
   acceptApprovalEvent,
+  approvalHasLiveOwner,
   beginExtensionApply,
   beginExtensionApplyRecovery,
   beginExtensionPreview,
@@ -2127,11 +2128,13 @@ export default function App() {
 
   useEffect(() => {
     if (pendingApproval === null) return;
-    const active = conversation.activeTurn;
-    if (
-      active?.requestId !== pendingApproval.parentRequestId &&
-      documentRequestRef.current?.requestId !== pendingApproval.parentRequestId
-    ) {
+    // Drop an approval only when no request that can raise one still owns it;
+    // bibliography.add raises citation.save outside any turn or document operation.
+    if (!approvalHasLiveOwner(pendingApproval.parentRequestId, {
+      turnRequestId: conversation.activeTurn?.requestId ?? null,
+      documentRequestId: documentRequestRef.current?.requestId ?? null,
+      citationRequestId: citationRequestRef.current,
+    })) {
       pendingApprovalRef.current = null;
       approvalResolvingRef.current = false;
       setPendingApproval(null);
