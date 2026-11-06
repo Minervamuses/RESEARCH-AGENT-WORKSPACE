@@ -427,6 +427,18 @@
 - **改動**：`language_branch_items` 在副本中把中日文條目的 `language` 一律寫成 `cjk_language` 的標準值 `zh` 或 `ja`。CSL 不輸出這個欄位，只用它排序與切換分支；使用者的檔案不變。
 - **檢查**：`test_citation_appendix17.py` 新增 5 項。四種寫法（`zh`/`ja`、`chi`/`jpn`、`zho`/`ja-JP`、`zh-Hant`/無欄位推斷）的順序都是中文 → 日文 → 英文；混用中文代碼時排序與全部寫成 `zh` 完全相同、日文在最後。把 `csl_render.py` 換回 HEAD 版本時，`chi-jpn` 與混用兩項失敗。`test_citation_appendix17.py`、`test_citation_csl_render.py` 共 42 passed。論文比對仍為 46/46、42/42；中日文規則判定不變。
 
+### C8-F3 Rust 測試失敗的根因：子程序崩潰被誤判為「輸出關閉」（2026-11-06）
+
+- **計劃修訂（範圍擴充）**：`app/desktop/src-tauri/src/backend.rs` 不在 PLANS 第 3 項的可改清單內。這個缺陷早於本計劃，但驗收要求 Rust 全綠，而失敗的根因在產品程式，所以擴充範圍修正，並在此記錄。
+- **根因**：子程序結束時，核心先關閉它的檔案描述子（讀取端因此看到 stdout EOF），之後行程才能被 `wait` 回收。`stdout_closed` 在 EOF 時只呼叫**一次**立即的 `try_wait()`；讀取端搶先時會回傳「仍在執行」，崩潰就被判為 `BACKEND_OUTPUT_CLOSED` 並強制終止，而不是 `BACKEND_CRASHED`。另一個 exit monitor 每 20 ms 才輪詢一次，來不及先處理。這是產品層的錯誤分類（使用者在 GUI 看到的錯誤種類會隨時序改變），不只是測試不穩。審查者遇到的失敗與我在 C8-F2 看到的那次 39/40 都是這個時序；之前記憶中「沙箱內會失敗」也是同一個原因。
+- **可重現的測試**：新 fixture 模式 `crash_after_output_close`（先關 stdout、等 100 ms、再 `os._exit(7)`），把核心的時間窗刻意拉大；新測試 `crash_seen_first_as_stdout_eof_is_still_reported_as_a_crash`。修正前 3/3 失敗，與審查者看到的一樣：`left: "BACKEND_OUTPUT_CLOSED"`、`right: "BACKEND_CRASHED"`。
+- **修正**：`stdout_closed` 在 EOF 後給子程序 500 ms 寬限期（`STDOUT_CLOSE_EXIT_GRACE`），每 10 ms 輪詢一次 `try_wait`，等待時不持有鎖；若 exit monitor 已先處理就直接返回。寬限期內被回收就判為崩潰；寬限期後仍在執行，才判為 `BACKEND_OUTPUT_CLOSED` 並終止（真正「關了 stdout 但還活著」的情況，既有測試 `stdout_pipe_close_fails_the_pending_request_without_a_deadline` 仍通過）。
+- **檢查**（沙箱外）：
+  - 一般情況：完整 `cargo test --locked` 連跑 15 次，15/15 全過（41 項，含新測試）。
+  - 負載下（2 倍 CPU 超額佔用：16 核心上 32 個忙迴圈）對照：舊的 `stdout_closed` 跑審查者的測試，**8/25 失敗**；修正後三個崩潰/輸出關閉測試 **25/25 全過**。
+  - 另外觀察到：同樣的人為超載下，`complete_large_transcript…` 與 `complete_large_turn…` 兩個大資料量測試偶爾得到 `Forced` 而非 `Graceful`。原因是測試設定的關閉時限只有 250/500 ms；在一般執行中都通過，與這個競態無關，所以沒有修改，只記錄。
+- **記憶修正**：「沙箱內 child_crash 測試會誤判」不是沙箱本身的問題，而是這個競態（沙箱、並行測試或負載讓時間窗變大）。
+
 ## 最終彙報
 
 （2026-11-05，C8-S3 完成後撰寫；2026-11-06 依驗收審查修正後更新。每項聲明都對應上方事件、`evidence/` 或測試。）

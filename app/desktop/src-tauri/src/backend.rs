@@ -1527,6 +1527,8 @@ fn handle_python_line(
     Ok(())
 }
 
+const STDOUT_CLOSE_EXIT_GRACE: Duration = Duration::from_millis(500);
+
 fn stdout_closed(core: &SupervisorCore, generation: u64) {
     let child = {
         let state = lock_state(core);
@@ -1541,12 +1543,28 @@ fn stdout_closed(core: &SupervisorCore, generation: u64) {
     let Some(child) = child else {
         return;
     };
-    let exited = {
-        let mut process = child
-            .child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        matches!(process.try_wait(), Ok(Some(_)))
+    // A dying process's stdout closes before the process can be reaped, so a
+    // crash is often seen here first. Give it a short grace period to become
+    // reapable before treating the EOF as a protocol failure of a live child.
+    let deadline = Instant::now() + STDOUT_CLOSE_EXIT_GRACE;
+    let exited = loop {
+        let reaped = {
+            let mut process = child
+                .child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            matches!(process.try_wait(), Ok(Some(_)))
+        };
+        if reaped || Instant::now() >= deadline {
+            break reaped;
+        }
+        {
+            let state = lock_state(core);
+            if state.snapshot.generation != generation || !state.snapshot.child_running {
+                return; // the exit monitor already handled it
+            }
+        }
+        thread::sleep(Duration::from_millis(10));
     };
     if exited {
         child_exited(core, generation);
@@ -1778,6 +1796,11 @@ for raw in sys.stdin:
         os.close(sys.stdout.fileno())
         time.sleep(5)
         continue
+    if MODE == 'crash_after_output_close':
+        # A crashing process closes stdout before it can be reaped; widen that window.
+        os.close(sys.stdout.fileno())
+        time.sleep(0.1)
+        os._exit(7)
     if MODE == 'wrong_id':
         send({{'protocolVersion':1,'messageType':'result','requestId':'123e4567-e89b-42d3-a456-426614174001','ok':True,'data':{{}}}})
         time.sleep(5)
@@ -2162,6 +2185,26 @@ for raw in sys.stdin:
                 "{mode}"
             );
         }
+    }
+
+    #[test]
+    fn crash_seen_first_as_stdout_eof_is_still_reported_as_a_crash() {
+        // The kernel closes a dying process's stdout before the process can be
+        // reaped, so the reader can see EOF while try_wait still says "running".
+        let (supervisor, script, _events) = supervisor("crash_after_output_close");
+        assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
+        let error = supervisor
+            .request(request(REQUEST_ID))
+            .expect_err("crash failure");
+        assert_eq!(error.code, "BACKEND_CRASHED");
+        assert_eq!(
+            error.message,
+            format!(
+                "The desktop backend process exited unexpectedly. Diagnostic logs are in {}.",
+                script.directory.join("logs").display()
+            )
+        );
+        assert_eq!(supervisor.snapshot().lifecycle, BackendLifecycle::Crashed);
     }
 
     #[test]
