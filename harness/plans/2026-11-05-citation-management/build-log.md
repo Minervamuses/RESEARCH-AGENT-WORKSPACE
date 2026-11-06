@@ -13,7 +13,7 @@
 | C5 | Complete（第二次驗收修正後）| C5-S1–S3、C5-F1–F5 見事件 | — | — |
 | C6 | Complete | C6-S1、C6-S2 見事件 | — | — |
 | C7 | Complete（驗收修正後）| C7-S1–S3、C7-F1 見事件 | — | — |
-| C8 | Reopened（第二次驗收）| C8-S1–S3、C8-F1、C8-F2 見事件；最終彙報 | — | C8-F3 |
+| C8 | Complete（第二次驗收修正後）| C8-S1–S3、C8-F1–F4 見事件；最終彙報 | — | — |
 
 ## 事件
 
@@ -439,6 +439,12 @@
   - 另外觀察到：同樣的人為超載下，`complete_large_transcript…` 與 `complete_large_turn…` 兩個大資料量測試偶爾得到 `Forced` 而非 `Graceful`。原因是測試設定的關閉時限只有 250/500 ms；在一般執行中都通過，與這個競態無關，所以沒有修改，只記錄。
 - **記憶修正**：「沙箱內 child_crash 測試會誤判」不是沙箱本身的問題，而是這個競態（沙箱、並行測試或負載讓時間窗變大）。
 
+### C8-F4 第二次驗收修正後的全套回歸與彙報更新（2026-11-06）
+
+- 完整 pytest（沙箱外，`/tmp/cm-f4.*`）：**1736 passed**，exit 0。`npm test`：**307/307**；`npm run build`：成功。`cargo test --locked`（沙箱外）連跑 5 次：**41 passed** ×5（C8-F3 另有 15 次一般執行與負載對照）。
+- 論文基準（C5-F5 重跑）：引用 46/46、參考文獻 42/42。
+- 最終彙報已更新：C8-F2 的「間歇性、原因不明」改為 C8-F3 找到的根因與修正。
+
 ## 最終彙報
 
 （2026-11-05，C8-S3 完成後撰寫；2026-11-06 依驗收審查修正後更新。每項聲明都對應上方事件、`evidence/` 或測試。）
@@ -455,20 +461,30 @@
 | P2 `"language": "en"` 的英文條目被套用中文格式 | 渲染時的暫存副本只在中日文條目保留 `language`，書目檔不改寫 | C5-F1 |
 | 「10 條差異無法以 CSL 表達」缺乏逐類論證 | 以最小樣式在兩個引擎上逐類實驗；結論修正為「無法以樣式表達」，其中 3 類可改資料 | C5-F2 |
 
-修正後：pytest 1715、npm 307、cargo 40，全部通過。之後依使用者決定 D9–D11 做的 C5-F3、C5-F4：pytest 1722、npm 307、cargo 40（10 次中有 1 次間歇失敗，與修改無關，見 C8-F2）。
+修正後：pytest 1715、npm 307、cargo 40，全部通過。之後依使用者決定 D9–D11 做 C5-F3、C5-F4。
+
+第二次驗收（版本 `4d89838`）又找出三項，已修正：
+
+| 問題 | 修正 | 步驟 |
+|---|---|---|
+| P1 註腳中的引用被漏掉（`[^n]: [@ghost]` 被當成連結定義），未知 key 能存入 | 註腳與引用形 label 不再算 reference definition；新增 240 份生成文件與 Pandoc 的差分測試 | C3-F3 |
+| P2 `chi`/`jpn` 讓日文排在中文前面；混用中文代碼會把中文拆成數組 | 渲染副本統一寫成 `zh`/`ja` | C5-F5 |
+| Rust `child_crash_fails_pending_and_restart_is_user_driven` 失敗 | 根因：崩潰時 stdout 先關、行程後回收，只查一次 `try_wait` 時會誤判為輸出關閉；改為 500 ms 寬限期。負載下舊邏輯 8/25 失敗、修正後 25/25 通過 | C8-F3（範圍擴充：`backend.rs`） |
+
+最後狀態：pytest 1736、npm 307、build 成功、cargo 41（連跑 5 次全過）；論文基準 46/46、42/42。
 
 ### 目標狀態
 
 | 目標 | 狀態 | 證據 |
 |---|---|---|
 | CG1 專案 CSL-JSON 書目庫與存檔併入 | 達成 | C2-S1–S3；`test_citation_csl.py`、`test_citation_library.py`、`test_citation_project_library.py`；C8-S1 真實後端：新增只在尾端、手寫條目不變、同 DOI → existing 同 key、無 abstract、CLI 無書目 |
-| CG2 正文 key 解析、檢查、Agent 接線 | 達成（驗收修正後） | C3-S1（與 Pandoc 交叉比對：論文 proposal 55 次使用完全一致）、C3-F1（連結與 HTML，44 個 Markdown 例子逐一與 Pandoc 相同）、C3-S2、C3-S3（`bibliography_lookup` 免批准）、C3-F2（未知 key 防護檢查存檔後的完整文件，局部選取不能繞過）；`test_citation_citekeys.py`、`test_citation_integrity.py`、`test_desktop_citation_keys.py` |
+| CG2 正文 key 解析、檢查、Agent 接線 | 達成（兩次驗收修正後；C3-F3 修正註腳退化並加入與 Pandoc 的差分測試） | C3-S1（與 Pandoc 交叉比對：論文 proposal 55 次使用完全一致）、C3-F1（連結與 HTML，44 個 Markdown 例子逐一與 Pandoc 相同）、C3-S2、C3-S3（`bibliography_lookup` 免批准）、C3-F2（未知 key 防護檢查存檔後的完整文件，局部選取不能繞過）；`test_citation_citekeys.py`、`test_citation_integrity.py`、`test_desktop_citation_keys.py` |
 | CG3 GUI 引用面板 | 後端與前端測試達成；原生視窗未實際操作（R6） | C6、C7、C7-F1（新增文獻的批准不再被清掉）；`test_desktop_bibliography.py`、`tests/citations.test.ts`、`tests/citation_preview.test.ts`；手動檢查清單見下 |
 | CG4 格式設定、預覽、正文不變 | 達成 | C4-S4、C6-S2（set_style 只改 metadata）、C8-S1（APA/IEEE/附件十七渲染不同，文件雜湊不變） |
 | CG5 docx/Markdown/bib 匯出 | 達成 | C4-S4、C6-S2、C8-S1（三個檔案存在、docx 含 `[1]`、Markdown 無 `[@`、原文件不變） |
 | CG6 附件十七 `.csl` 與基準比對 | 論文基準達成；中日文有 3 項限制 | C5、C5-F1–F4：**引用 46/46、參考文獻 42/42**。原本 10 條差異經 C5-F2 實驗證明無法只靠樣式消除，依 D10、D11 在渲染副本中套用 bime_word 的規則後全部一致。中日文 16 條規則：13 達成、1 部分（`等人` 前空白）、2 無法表達（筆畫排序、全形 `；`） |
 | CG7 依賴與 manifest 一致 | 達成 | C1-S2：Pandoc 3.13 在 Conda `app`、`env-app.yml` 加 `pandoc>=3,<4`；`pyproject.toml`/`poetry.lock` 未變（citeproc-py 未觸發）；citeproc-js 只在 `$TMPDIR` |
-| CG8 不退化、文件、彙報 | 達成 | C8-S3 四套檢查全過；C8-S2 文件；聊天 `[[cite:…]]`、CLI 存檔、`document_edit`、extended thinking 的既有測試全部通過，`agent/thinking/**` 未改 |
+| CG8 不退化、文件、彙報 | 達成（C8-F4：pytest 1736、npm 307、cargo 41；C8-F3 修正既有的 Rust 崩潰判斷競態） | C8-S3 四套檢查全過；C8-S2 文件；聊天 `[[cite:…]]`、CLI 存檔、`document_edit`、extended thinking 的既有測試全部通過，`agent/thinking/**` 未改 |
 
 ### C4 比較測試結論
 
@@ -546,6 +562,10 @@
 | C8-F1 | `c9c5976` |
 | C5-F3（D10） | `595c75a` |
 | C5-F4（D11） | `1d22bea` |
-| C8-F2 | 本 commit（subject 含 `[C8-F2]`） |
+| C8-F2 | `4d89838` |
+| C3-F3 | `626865f` |
+| C5-F5 | `9adf3a2` |
+| C8-F3 | `8c34c9a` |
+| C8-F4 | 本 commit（subject 含 `[C8-F4]`） |
 
 沒有 push，沒有建立或切換 branch。
