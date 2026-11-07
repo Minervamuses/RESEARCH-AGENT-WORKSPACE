@@ -1,0 +1,10 @@
+{
+  "response path is the new copy's proposal.bime.docx": true,
+  "three reports exist": true,
+  "reportPath is the copy's .audit.md": true,
+  "audit equals the report summary": true,
+  "summary equals the R3-S3 positive CLI audit": true,
+  "layoutVerified is false": true,
+  "source copy bytes unchanged": true,
+  "bibliography was the project's references.json": true
+}

@@ -1,0 +1,39 @@
+{
+  "work_dir": "/tmp/claude-1000/bime-e2e.xvcL",
+  "response": {
+    "format": "bime_docx",
+    "path": "/tmp/claude-1000/bime-e2e.xvcL/project/proposal.bime.docx",
+    "audit": {
+      "errors": 0,
+      "warnings": 0,
+      "manualChecks": 11,
+      "reportPath": "/tmp/claude-1000/bime-e2e.xvcL/project/proposal.bime.audit.md",
+      "layoutVerified": false
+    }
+  },
+  "report_summary": {
+    "error": 0,
+    "warning": 0,
+    "conflict": 0,
+    "unknown": 0,
+    "manual": 11
+  },
+  "library": {
+    "path": "/tmp/claude-1000/bime-e2e.xvcL/project/references.json",
+    "status": "ok",
+    "entries": 69
+  },
+  "missing_keys": [],
+  "docx_sha256": "2b9406a73cb95fa42880bf4851e9c54608cf4192e682306d6f080659bf95ae70",
+  "docx_bytes": 51180,
+  "checks": {
+    "response path is the new copy's proposal.bime.docx": true,
+    "three reports exist": true,
+    "reportPath is the copy's .audit.md": true,
+    "audit equals the report summary": true,
+    "summary equals the R3-S3 positive CLI audit": true,
+    "layoutVerified is false": true,
+    "source copy bytes unchanged": true,
+    "bibliography was the project's references.json": true
+  }
+}

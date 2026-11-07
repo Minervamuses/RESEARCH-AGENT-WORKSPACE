@@ -9,8 +9,8 @@
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
-| R4 | In progress | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/) | — | R4-S3 真實 proposal 端到端驗證 |
-| R5 | Not started | — | — | S1、S2 的前提都已滿足（R4-S2 完成） |
+| R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/) | — | — |
+| R5 | Not started | — | — | R5-S1 收合摘要列 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
@@ -196,3 +196,17 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - 測試（`citation_preview.test.ts`）：選項順序與標籤、BIME 說明；`exportSummary` 的一般／系上格式／單複數與 `hasErrors`；SSR：Markdown 只有一個收合的 `Export ▾` 按鈕（`aria-expanded="false"`、未渲染 menu）、停用時帶 `disabled`、LaTeX 渲染為空字串。協定的 bime_docx 請求與回應由 R4-S1 的共享夾具涵蓋（本次 node 執行中通過）。
 - 檢查（觀察）：`node --test … citations citation_preview protocol` → **228/228**（[node-focused.txt](evidence/R4-S2/node-focused.txt)）；`npm run build` → exit 0（[npm-build.txt](evidence/R4-S2/npm-build.txt)）。
 - 交由使用者 GUI 驗收：選單展開、Escape／點外部關閉、處理中停用、完成訊息的顯示。
+
+### R4-S3 以真實內容做端到端驗證（2026-11-07）
+
+- 前提：R3-S3 正負案例都達到成功標準（見 R3-S3）。
+- 輸入：只從 R3-S3 的 `positive/`（`/tmp/claude-1000/bime-trial.nWo3/positive/`，仍存在）複製 `proposal.md`、`references.json`、`bime-proposal-profile.json`，複製前以 [R3-S3/inputs.txt](evidence/R3-S3/inputs.txt) 的 SHA-256 核對；不複製已產生的 docx／報告，不使用 `negative/`。新的暫時桌面專案：`/tmp/claude-1000/bime-e2e.xvcL/project/`（runtime 目錄另外放在 `…/runtime/`，AGENT_LOG_DIR 與 XDG_* 導向 `$TMPDIR/bime-e2e-rt.*`）。
+- 程序（[run_e2e.py](evidence/R4-S3/run_e2e.py)，在 `app/` 以 `PYTHONPATH=. $P/bin/python` 執行，沙箱內）：`workspace.select` inspect／initialize → `document.open proposal.md` → `bibliography.inspect`（書目為專案的 `references.json`，69 筆，`missing` 為空）→ `DesktopService.dispatch("bibliography.export", {"documentContext": …, "format": "bime_docx"})`，回應再以 `validate_result_data` 驗證。約 2 秒，exit 0。
+- 結果（觀察，[result.json](evidence/R4-S3/result.json)）：
+  - 回應：`{"format": "bime_docx", "path": ".../project/proposal.bime.docx", "audit": {"errors": 0, "warnings": 0, "manualChecks": 11, "reportPath": ".../project/proposal.bime.audit.md", "layoutVerified": false}}`。
+  - 三份報告 `proposal.bime.audit.json`、`.audit.md`、`.bime.bime.json` 都在新副本目錄中（複製到 [evidence/R4-S3/](evidence/R4-S3/)）；docx 51,180 bytes，不提交，SHA-256 記在 result.json。
+  - 稽核摘要 `{"error": 0, "warning": 0, "conflict": 0, "unknown": 0, "manual": 11}`，與 R3-S3 正向 CLI 的 stdout 相同；`.audit.json` 除 `source`／`source_sha256` 與 `bibliography` 路徑外與 R3-S3 相同；`.audit.md` 只有檔案路徑與 docx SHA-256 兩行不同（docx 內含產生時間等，位元組不同屬預期）。
+  - 原稿副本 `proposal.md` 的位元組在匯出前後相同。
+  - 8 項檢查全部為 true（[stdout.txt](evidence/R4-S3/stdout.txt)）。
+- 論文 repo 的 `git status --short` 仍與 R1-S1 相同。
+- 結論：G5 的代理端自動驗收（真實 proposal 副本、正負案例）通過；GUI 中的路徑與摘要顯示依 D14 交由使用者確認。
