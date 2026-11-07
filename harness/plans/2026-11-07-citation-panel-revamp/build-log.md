@@ -6,9 +6,9 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| R1 | In progress | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt) | — | R1-S2 核對測試基線 |
-| R2 | Not started | — | — | 等 R1 |
-| R3 | Not started | — | — | 等 R1 |
+| R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
+| R2 | Not started | — | — | R2-S1 拆除 Insert |
+| R3 | Not started | — | — | R3-S1 加入依賴（R2 之後依正常順序） |
 | R4 | Not started | — | — | 等 R2、R3 |
 | R5 | Not started | — | — | R2-S1 後可先做 S2；S1 等 R4-S2 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
@@ -74,3 +74,19 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 7. 另記 `/home/minervamuses/論文/`（唯讀）的 HEAD `59e9dc1d5096f5f0b7767a4654ca4753ca88012f` 與 `git status --short`：` M CLAUDE.md`、` M proposal.docx`、` M references.json`、`?? 076aca99-…docx`、`?? RESEARCH.md`、`?? proposal.pdf`。R3-S3 與 R6-S2 以此比對。
 
 結論：所有項目符合，不需修改後續階段檔。
+
+### R1-S2 核對既有測試基線（2026-11-07）
+
+**沿用的歷史基線**（未在本次重跑）：
+
+- 來源：已刪除的 `harness/plans/2026-11-05-citation-management/build-log.md` 的 C8-F4 一節，以 `git show 05df764:harness/plans/2026-11-05-citation-management/build-log.md` 唯讀讀取（第 442–446 行）。
+- 當時結果（2026-11-06）：完整 pytest（沙箱外，TMPDIR 等導向 `/tmp/cm-f4.*`）**1736 passed**、exit 0；`npm test` **307/307**；`npm run build` 成功（既有 chunk 大小警告）；`cargo test --locked`（沙箱外）**41 passed**，連跑 5 次全過。
+- 程式版本：C8-F4 commit `5aea53c` 只改計劃檔，量測的程式碼即 `8c34c9a`。`git diff --stat 8c34c9a HEAD -- app` 只有 `app/skills/citation/README.md` 一行文件連結（665cabe），所以程式碼與目前 HEAD 相同。
+- 環境：同一個 Conda `app`（Python 3.13.14、pandoc 3.13）；當時同樣沒有 python-docx／lxml。
+- 可沿用範圍：作為 R2–R5 判斷回歸的比較對象，以及 R6 完整套件的對照數字。限制：這是歷史紀錄，不是本次觀察；R6 必須實際各跑一次，驗收標準是全部通過，不是固定數字。已知既有失敗：無（C8-F3 已修正 Rust 的崩潰判斷競態；記憶中提到兩個 `complete_large_*` 測試在人為 2 倍 CPU 超載下可能變成 Forced，一般執行未見）。
+
+**本次局部檢查（觀察，不冒充完整基線）**：
+
+- `python -m pytest -q -p no:cacheprovider tests/test_desktop_bibliography.py tests/test_citation_csl_render.py tests/test_desktop_protocol_contract.py`（`app`，沙箱內）：**229 passed**、1 個 langgraph 的 PendingDeprecationWarning，exit 0，約 4 秒。輸出：[evidence/R1-S2/pytest-focused.txt](evidence/R1-S2/pytest-focused.txt)。
+- `node --test --experimental-strip-types tests/citations.test.ts tests/citation_preview.test.ts tests/protocol.test.ts tests/documents.test.ts`（`app/desktop`，沙箱內）：**222/222 pass**，exit 0，約 4 秒。輸出：[evidence/R1-S2/node-focused.txt](evidence/R1-S2/node-focused.txt)。
+- R1 未跑完整 pytest、npm、cargo 套件（依 PLANS，留至 R6 各一次）。
