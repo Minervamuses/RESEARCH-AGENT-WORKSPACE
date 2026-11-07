@@ -1,0 +1,7 @@
+$ pytest -q -p no:cacheprovider tests/test_desktop_bibliography.py tests/test_desktop_protocol_contract.py
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+237 passed, 1 warning in 2.04s
+exit 0
+
+mutation: 'if False and split_front_matter(target)' -> 2 failed (test_bime_export_numbers_the_table_of_contents_in_roman_and_the_body_from_1, test_bime_export_reaudits_after_numbering_the_front_matter), 7 passed; restored -> 20 passed

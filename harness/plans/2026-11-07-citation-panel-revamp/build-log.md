@@ -9,7 +9,7 @@
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
-| R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/) | — | — |
+| R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/)；R4-F1（使用者驗收後修正）：[evidence/R4-F1/](evidence/R4-F1/) | — | — |
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
 
@@ -275,6 +275,45 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - **論文 repo**：HEAD `59e9dc1…`，`git status --short` 與 R1-S1 相同（` M CLAUDE.md`、` M proposal.docx`、` M references.json`、三個未追蹤檔）。
 - **GUI**：依 D14 由使用者本人驗收，清單見下方「最終彙報」；以上都是自動檢查與程式碼核對，沒有任何 GUI 實測。
 
+### 使用者驗收回報（2026-11-07 晚間）
+
+- 使用者已自行還原 `yao2023react`，在 GUI 匯出一次系上格式 Word，並請 Agent 在第 191 行插入一筆引用。
+- 代理唯讀核對後回報兩個問題：
+  - **匯出的頁碼**：GUI 匯出與論文 repo 已提交的 `proposal.docx` 不同。已提交版是 bime_word 輸出再經兩步人工後處理（論文 commit `7853b51`、`0a42403`）：換入計劃書封面，並把目錄獨立成小寫羅馬數字一節。本文經逐段比對，格式相同。
+  - **新引用顯示 unverified**：Agent 新增的 NeurIPS 條目 `vaswani2017attention` 顯示 unverified；同一篇再存一次還會多出一筆 `vaswani2017attentiona`（只在記憶體中重現，沒有寫入）。
+- 使用者決定：
+  - 封面維持 bime_word 產生的學位論文封面（「轉成論文才是正確的」）。
+  - 頁碼「這個要處理」→ R4-F1。
+  - 另在 side chat 發現 citation skill 的 NeurIPS「查證」其實只比對一筆寫死的資料，要求真的去查；若官方不支援，就移除支援 NeurIPS 的宣稱 → R7。
+- 代理的疏漏：R4-S3 只比對了稽核數字，沒有和使用者提交過的檔案比對，因此沒有發現頁碼差異。
+
+### R4-F1 系上格式匯出：目錄獨立一節、本文從 1 起算（2026-11-07）
+
+- **診斷**：bime_word 1.1.5 的 `fragment` 範圍會把封面之後全部從 1 編頁（`convert.py` 的 cover 分支）。目錄因此與本文同一節，稽核只列為人工項 PAGE_FORMAT「Front matter and body share a section」——這就是第 11 個人工項，先前提交的版本只有 10 個。附件十七 二.4 規定前頁用小寫羅馬數字、本文從 1 起算。
+- **修正**：只改 `app/agent/desktop/bime_export.py`，vendor 不動。
+  - **`split_front_matter`**：適用條件是 TOC 標題（`BIMETOCTitle`）與第一個 `Heading1` 在同一節。
+    - 在 `Heading1` 前插入一個空段落，帶有複製自本文節的 `sectPr`：`pgNumType lowerRoman start=1`，同樣的頁面設定與頁尾。這個段落位於 TOC 欄位之外，在 Word 更新欄位後仍會保留。
+    - 本文節設為 `decimal start=1`，並移除該 `Heading1` 的 `pageBreakBefore`。
+    - 其他 package part 逐位元組保留，以原子取代寫回並保留檔案權限。
+    - 沒有目錄或已經分節的文件不變。
+  - **重跑稽核**：分節後執行 `bime_word.py audit <docx> [--config profile] --scope fragment --report <stem>.bime.audit --fail-on none`，覆寫兩份稽核報告，面板數字改用這次的結果。
+  - **operation report**：`<stem>.bime.bime.json` 加一筆 `front_matter_section` 決定（含轉檔時的 SHA-256），`output_sha256` 改為最終檔。
+  - 失敗（讀不到 docx、稽核非 0 結束、輸出不是 JSON）一律回 `BIBLIOGRAPHY_FAILED` 並顯示訊息。
+- **測試**（`app/tests/test_desktop_bibliography.py`）：
+  - 真實轉檔含 `{{TOC}}`：節為 `[lowerRoman 1, decimal 1]`；章前是分節段落；稽核沒有 share-a-section；回應數字等於 `.audit.json`；`.audit.md` 與 operation report 的 SHA-256 等於最終檔。
+  - 真實轉檔不含目錄時只有一節，也沒有 `front_matter_section`。
+  - stand-in 子程序改寫出真正的最小 docx：檢查 convert→audit 兩次呼叫的參數、稽核失敗與非 JSON 的訊息。
+  - `split_front_matter` 單元測試：只改 `document.xml`、`pgNumType` 依 schema 排在 `cols` 之前、權限保留、第二次呼叫不變、壞檔回錯誤。
+  - 突變（停用分節）使兩項新測試失敗。
+  - focused：`test_desktop_bibliography.py` + `test_desktop_protocol_contract.py` 237 passed（[pytest-focused.txt](evidence/R4-F1/pytest-focused.txt)）。
+- **真實副本**（[real-copy.txt](evidence/R4-F1/real-copy.txt)）：從論文資料夾唯讀複製目前的 `proposal.md`、`references.json`、profile 到 `$TMPDIR/bimereal/`，以 `run_bime_convert` 匯出。
+  - 結果：節結構與已提交的 `proposal.docx` 相同（封面無頁碼 → 目錄 i… → 本文 1…）。
+  - 稽核 0／0／10，share-a-section 0 項。
+  - `.audit.md` 與 operation report 的 SHA-256 等於最終檔。
+  - 與已提交版的段落文字差異只有：封面（使用者決定保留論文封面）；Pandoc 版本造成的兩個樣式名稱（格式相同）；`proposal.md` 新增的 vaswani 引用。
+  - 論文資料夾沒有寫入。
+- **README**：根目錄 README 的 BIME 匯出段落說明分節與重跑稽核。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -293,9 +332,10 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R5-S1 | `79bfeda` |
 | R5-S2 | `a9689e1` |
 | R6-S1 | `d4ed203` |
-| R6-S2 | 本 commit（主旨含 `[R6-S2]`） |
+| R6-S2 | `38f7662` |
+| R4-F1 | 本 commit（主旨含 `[R4-F1]`） |
 
-沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。
+R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
 
 ## 最終彙報
 

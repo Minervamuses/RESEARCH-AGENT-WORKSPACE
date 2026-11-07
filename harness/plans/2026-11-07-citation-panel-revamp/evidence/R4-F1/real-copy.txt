@@ -1,0 +1,57 @@
+# R4-F1 real proposal copy (copied read-only from /home/minervamuses/論文 at 2026-11-07T20:58:47+08:00)
+## inputs
+f5bb5135c2a3d717368f48c3b7d2c54126b9be1ae6149de148ee662491be6162  proposal.md
+da5806dfe6893908708eb5c7fccd9917e665a9c58ba90cf371daa4c6b637a17a  references.json
+8a54bd725142626784400027227522aa607f4c40c2d8457c9f2bb3cad28ca2bf  bime-proposal-profile.json
+59e9dc1d5096f5f0b7767a4654ca4753ca88012f
+## sections of the GUI export written 20:08 (before the fix): /home/minervamuses/論文/proposal.bime.docx
+0 size 11906 16838 mar {'top': '1701', 'right': '1701', 'bottom': '1134', 'left': '1701', 'header': '850', 'footer': '567', 'gutter': '0'} pgNum None footers [] titlePg False
+1 size 11906 16838 mar {'top': '1701', 'right': '1701', 'bottom': '1134', 'left': '1701', 'header': '850', 'footer': '567', 'gutter': '0'} pgNum {'fmt': 'decimal', 'start': '1'} footers ['default'] titlePg False
+## sections of the committed proposal.docx (論文 HEAD, bime_word + manual post-processing)
+0 size 11906 16838 mar {'bottom': '1134', 'footer': '567', 'gutter': '0', 'header': '850', 'left': '1701', 'right': '1701', 'top': '1701'} pgNum None footers [] titlePg False
+1 size 11906 16838 mar {'bottom': '1134', 'footer': '567', 'gutter': '0', 'header': '850', 'left': '1701', 'right': '1701', 'top': '1701'} pgNum {'fmt': 'lowerRoman', 'start': '1'} footers ['default'] titlePg False
+2 size 11906 16838 mar {'bottom': '1134', 'footer': '567', 'gutter': '0', 'header': '850', 'left': '1701', 'right': '1701', 'top': '1701'} pgNum {'fmt': 'decimal', 'start': '1'} footers ['default'] titlePg False
+## sections after the fix (run_bime_convert on the copy)
+0 size 11906 16838 mar {'top': '1701', 'right': '1701', 'bottom': '1134', 'left': '1701', 'header': '850', 'footer': '567', 'gutter': '0'} pgNum None footers [] titlePg False
+1 size 11906 16838 mar {'top': '1701', 'right': '1701', 'bottom': '1134', 'left': '1701', 'header': '850', 'footer': '567', 'gutter': '0'} pgNum {'fmt': 'lowerRoman', 'start': '1'} footers ['default'] titlePg False
+2 size 11906 16838 mar {'top': '1701', 'right': '1701', 'bottom': '1134', 'left': '1701', 'header': '850', 'footer': '567', 'gutter': '0'} pgNum {'fmt': 'decimal', 'start': '1'} footers ['default'] titlePg False
+## audit after the fix
+範圍：`fragment`；結果：`machine_checks_passed_review_required`
+error: 0 | warning: 0 | conflict: 0 | unknown: 0 | manual: 10
+share-a-section findings: 0
+## audit of the 20:08 GUI export
+error: 0 | warning: 0 | conflict: 0 | unknown: 0 | manual: 11
+share-a-section findings: 1
+## final docx sha256 vs reports
+4db5eb5af69c39394914e85a5d34f3d33b4711f17df299e53f316ae4d7750c7e  /tmp/claude-1000/bimereal/proposal.bime.docx
+SHA-256：`4db5eb5af69c39394914e85a5d34f3d33b4711f17df299e53f316ae4d7750c7e`
+output_sha256 4db5eb5af69c39394914e85a5d34f3d33b4711f17df299e53f316ae4d7750c7e
+[{'type': 'front_matter_section', 'rule': 'PAGE_FORMAT', 'message': 'After conversion, the research agent gave the table of contents its own lowerRoman section and restarted the body at 1 (Appendix 17 二.4); output_sha256 is the final file.', 'converted_sha256': '2606143a32ad9fd4a9fafb910d8f383f0a86e820d06cf9f5fc3a1931c8fbf89f'}]
+## paragraph text diff: committed proposal.docx vs fixed export (bookmarks dropped)
+2c2
+< P[BIMECover] 碩士論文計劃書
+---
+> P[BIMECover] 碩士論文
+7d6
+< P[BIMECover] Proposal
+11a11
+> P[BIMECover] 
+46c46
+< P[BIMECover] SECT 
+---
+> P[] SECT 
+123c123
+< P[BodyText] 三項發現與研究問題二直接相關。第一，混合檢索加上重排 在三種語料上都是最好或並列最好的組合。第二，B
+---
+> P[FirstParagraph] 三項發現與研究問題二直接相關。第一，混合檢索加上重排 在三種語料上都是最好或並列最好的組合。第�
+129c129
+< P[FirstParagraph] 引用功能曾因一次實際使用中的失敗而重新設計。當時每一次搜尋都會把結果重新編號，保存時以編號指�
+---
+> P[FirstParagraph] 引用功能曾因一次實際使用中的失敗而重新設計。當時每一次搜尋都會把結果重新編號，保存時以編號指�
+137c137
+< P[BodyText] 累計百分比依範本說明第 2 點的 B 方式（工作量之比重）估計：工作項目 1 至 9 的權重依序為 6%、7%、14%、17%、
+---
+> P[FirstParagraph] 累計百分比依範本說明第 2 點的 B 方式（工作量之比重）估計：工作項目 1 至 9 的權重依序為 6%、7%、14%、
+175a176
+> P[Bibliography] Vaswani, A., N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. Kaiser, and I. Polosukhin. 2017. Attention Is All You Need. In “
+(cover text: user decided 2026-11-07 that the thesis cover 碩士論文/Master Thesis is correct; line 129/176 differ because proposal.md now cites vaswani2017attention)
