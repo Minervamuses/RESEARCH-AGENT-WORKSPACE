@@ -5,11 +5,9 @@ import {
   addOutcome,
   buildPanelModel,
   citationFormatForPath,
-  citationInsertion,
   completionCandidates,
   completionPrefix,
   describeEntry,
-  insertIntoSnapshot,
   removeConfirmation,
   removeErrorMessage,
   selectUse,
@@ -132,14 +130,10 @@ test("add results map to added, existing, failed and denied", () => {
     { kind: "failed", key: null, message: "Enter a DOI or an arXiv ID." });
 });
 
-test("insertion text follows the document type", () => {
+test("citation format follows the document type", () => {
   assert.equal(citationFormatForPath("/p/thesis.md"), "markdown");
   assert.equal(citationFormatForPath("/p/thesis.TEX"), "latex");
   assert.equal(citationFormatForPath("/p/notes.txt"), null);
-  assert.equal(citationInsertion("k2020x", "markdown"), "[@k2020x]");
-  assert.equal(citationInsertion("k2020x", "latex"), "\\cite{k2020x}");
-  const inserted = insertIntoSnapshot({ editorRevision: 2, sourceText: "😀 ab", rangeStartUtf16: 0, rangeEndUtf16: 2 }, 3, "[@k]");
-  assert.deepEqual(inserted, { editorRevision: 3, sourceText: "😀 [@k]ab" });
 });
 
 test("completion triggers after [@, ; @, \\cite{ and commas", () => {

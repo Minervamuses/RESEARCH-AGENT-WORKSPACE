@@ -1,0 +1,28 @@
+✔ panel lists cited keys in first-use order with counts and issues (1.68394ms)
+✔ numeric styles number only known references in first-use order (0.13714ms)
+✔ library errors become a problem message, not an exception (0.221962ms)
+✔ entries are described compactly (0.109599ms)
+✔ jumping selects the exact UTF-16 range after an emoji (0.156531ms)
+✔ stale or invalid positions are not selected (0.080699ms)
+✔ removal asks for confirmation only while the entry is cited (0.125656ms)
+✔ a stale fingerprint asks for a refresh (0.135194ms)
+✔ add results map to added, existing, failed and denied (0.137706ms)
+✔ citation format follows the document type (0.264608ms)
+✔ completion triggers after [@, ; @, \cite{ and commas (0.517936ms)
+✔ completion candidates rank key prefixes before title matches (4.1472ms)
+✔ a source selection targets the second duplicate without changing BOM, tabs or mixed newlines (329.980051ms)
+✔ source lines 40–45 use stored lines even when one source line is long (0.318125ms)
+✔ multiple Monaco edits resolve against one pre-edit source snapshot (0.104585ms)
+✔ manual Save preserves an empty or narrow selection and does not advance an unchanged revision (2584.790763ms)
+✔ Agent saved snapshots use the post-replacement selection and preserve edits made after send (0.332148ms)
+✔ a selection collapsed during approval omits optional range keys from every document payload (0.202439ms)
+✔ annotation Enter confirms locally while IME and Shift+Enter keep editing (11.80764ms)
+✔ saved document receipts advance two UTF-16 references without changing the submitted context (0.633361ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3274.11248

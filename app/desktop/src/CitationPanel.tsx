@@ -6,11 +6,9 @@ import {
   addOutcome,
   buildPanelModel,
   citationFormatForPath,
-  citationInsertion,
   describeEntry,
   EXPORT_LABELS,
   exportFormats,
-  insertIntoSnapshot,
   previewEntries,
   removeConfirmation,
   removeErrorMessage,
@@ -42,8 +40,6 @@ export interface CitationPanelProps {
   onEntries?: (entries: BibliographyInspectDto["entries"]) => void;
   /** bibliography.add, tracked by App so an Ask-mode approval reaches the approval UI. */
   requestAdd: (identifier: string) => Promise<JsonObject>;
-  /** Caret offset in the editor text, when known. */
-  cursorOffset: () => number | null;
   /** Writes are disabled while a turn or document operation runs. */
   writesDisabled: boolean;
 }
@@ -66,14 +62,12 @@ function UseButtons({ item, onJump }: { item: { key: string; uses: UseLocation[]
 
 interface EntryActions {
   onRemove: (key: string, citedCount: number) => void;
-  onInsert: (key: string) => void;
   disabled: boolean;
 }
 
 function EntryButtons({ entryKey, citedCount, actions }: { entryKey: string; citedCount: number; actions: EntryActions }) {
   return (
     <span className="citation-actions">
-      <button type="button" className="link-button" onClick={() => actions.onInsert(entryKey)}>Insert</button>
       <button type="button" className="link-button" disabled={actions.disabled} onClick={() => actions.onRemove(entryKey, citedCount)}>Remove</button>
     </span>
   );
@@ -98,7 +92,7 @@ function CitedRow({ item, onJump, actions }: { item: CitedItem; onJump: (use: Us
 }
 
 export function CitationPanel({
-  document, refreshToken, request, contextPayload, onSelect, onEntries, requestAdd, cursorOffset, writesDisabled,
+  document, refreshToken, request, contextPayload, onSelect, onEntries, requestAdd, writesDisabled,
 }: CitationPanelProps) {
   const [inspect, setInspect] = useState<BibliographyInspectDto | null>(null);
   const [inspectedText, setInspectedText] = useState("");
@@ -141,13 +135,6 @@ export function CitationPanel({
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<AddOutcome | null>(null);
   const format = citationFormatForPath(document.path);
-
-  const insert = useCallback((key: string) => {
-    if (format === null) return;
-    const snapshot = documentRef.current;
-    const offset = cursorOffset() ?? snapshot.rangeEndUtf16 ?? snapshot.sourceText.length;
-    onSelect(insertIntoSnapshot(snapshot, offset, citationInsertion(key, format)));
-  }, [cursorOffset, format, onSelect]);
 
   const remove = useCallback(async (key: string, citedCount: number) => {
     const fingerprint = inspect?.libraryFingerprint;
@@ -230,7 +217,7 @@ export function CitationPanel({
     }
   }, [contextPayload, inspect, request, writesDisabled]);
 
-  const actions: EntryActions = { onRemove: (key, count) => void remove(key, count), onInsert: insert, disabled: writesDisabled };
+  const actions: EntryActions = { onRemove: (key, count) => void remove(key, count), disabled: writesDisabled };
   const model = inspect === null ? null : buildPanelModel(inspect);
   return (
     <section className="citation-panel" aria-label="Citations">
@@ -301,7 +288,6 @@ export function CitationPanel({
         </form>
         {added !== null && <p className={added.kind === "added" || added.kind === "existing" ? "citation-added" : "document-error"} role="status">
           {added.message}
-          {added.key !== null && format !== null && <> <button type="button" className="link-button" onClick={() => insert(added.key!)}>Insert at cursor</button></>}
         </p>}
         <details className="citation-section">
           <summary>Not cited in this document ({model.uncited.length})</summary>

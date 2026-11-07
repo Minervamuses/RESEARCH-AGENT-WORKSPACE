@@ -70,8 +70,6 @@ interface DocumentEditorProps {
   saveDisabled?: boolean;
   /** Bibliography entries offered after `[@`, `; @`, `\cite{` or a comma inside it. */
   citationEntries?: readonly BibliographyEntryDto[];
-  /** UTF-16 offset of the caret in the source text. */
-  onCursor?: (offset: number) => void;
 }
 
 interface SourceChange {
@@ -133,11 +131,11 @@ function modelSource(source: string): string {
   return source.startsWith("\uFEFF") ? source.slice(1) : source;
 }
 
-export function DocumentEditor({ value, onChange, onSave, onAddReference, annotationControls, saveDisabled = false, citationEntries, onCursor }: DocumentEditorProps) {
+export function DocumentEditor({ value, onChange, onSave, onAddReference, annotationControls, saveDisabled = false, citationEntries }: DocumentEditorProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const snapshotRef = useRef<DocumentSnapshot | null>(value);
-  const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled, onCursor });
+  const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled });
   const citationEntriesRef = useRef(citationEntries);
   citationEntriesRef.current = citationEntries;
   const refreshReferenceActionRef = useRef<(() => void) | null>(null);
@@ -147,7 +145,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
   const incomingRef = useRef(false);
   const [selectionLabel, setSelectionLabel] = useState("Line 1, column 1");
   const [issue, setIssue] = useState<string | null>(null);
-  callbacksRef.current = { onChange, onSave, onAddReference, saveDisabled, onCursor };
+  callbacksRef.current = { onChange, onSave, onAddReference, saveDisabled };
   annotationControlsRef.current = annotationControls;
 
   useEffect(() => {
@@ -273,7 +271,6 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
           rangeEndUtf16: selection.isEmpty() ? undefined : end,
         };
         snapshotRef.current = updated;
-        callbacksRef.current.onCursor?.(documentOffsetAt(current.sourceText, selection.getPosition()));
         refreshReferenceAction();
         setSelectionLabel(selection.isEmpty()
           ? `Line ${selection.positionLineNumber}, column ${selection.positionColumn}`

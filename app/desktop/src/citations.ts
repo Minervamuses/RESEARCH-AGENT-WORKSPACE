@@ -146,7 +146,7 @@ export function selectUse<T extends SelectableSnapshot>(
   return { ...snapshot, rangeStartUtf16: use.start, rangeEndUtf16: use.end };
 }
 
-// --- remove, add, insert, complete -------------------------------------------
+// --- remove, add, complete -------------------------------------------
 
 /** Confirmation text before removing an entry, or null when no confirmation is needed. */
 export function removeConfirmation(key: string, citedCount: number): string | null {
@@ -209,21 +209,6 @@ export function citationFormatForPath(path: string): CitationFormat | null {
   if (/\.(md|markdown)$/i.test(path)) return "markdown";
   if (/\.tex$/i.test(path)) return "latex";
   return null;
-}
-
-export function citationInsertion(key: string, format: CitationFormat): string {
-  return format === "latex" ? `\\cite{${key}}` : `[@${key}]`;
-}
-
-/** Insert text into the unsaved editor text at a UTF-16 offset (a new local revision). */
-export function insertIntoSnapshot<T extends SelectableSnapshot>(snapshot: T, offset: number, text: string): T {
-  const at = Math.max(0, Math.min(snapshot.sourceText.length, Math.trunc(offset)));
-  const { rangeStartUtf16: _start, rangeEndUtf16: _end, ...rest } = snapshot;
-  return {
-    ...rest,
-    editorRevision: snapshot.editorRevision + 1,
-    sourceText: snapshot.sourceText.slice(0, at) + text + snapshot.sourceText.slice(at),
-  } as T;
 }
 
 const LATEX_CITE = /\\(?:cite|citep|citet|parencite|textcite|autocite|nocite|Cite|Citep|Citet|Parencite|Textcite|Autocite|citealp|citealt|citeauthor|citeyear|footcite|smartcite|supercite)\*?(?:\[[^\]]*\]){0,2}\{([^{}]*)$/;

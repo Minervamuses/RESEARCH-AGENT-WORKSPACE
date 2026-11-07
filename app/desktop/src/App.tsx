@@ -1086,7 +1086,6 @@ export default function App() {
   // Bumped after open, save, and applied operations so the citation panel re-checks.
   const [citationRefresh, setCitationRefresh] = useState(0);
   const [citationEntries, setCitationEntries] = useState<readonly BibliographyEntryDto[]>([]);
-  const editorCursorRef = useRef<number | null>(null);
   const citationRequestRef = useRef<string | null>(null);
   const inFlight = useRef(false);
   const exclusiveOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
@@ -2830,7 +2829,7 @@ export default function App() {
             />
             {documentNotice !== null && <p className="document-error" role="status">{documentNotice}</p>}
             <DocumentEditor value={documentValue} onChange={updateDocument} annotationControls={annotationControls} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy}
-              citationEntries={citationEntries} onCursor={(offset) => { editorCursorRef.current = offset; }} />
+              citationEntries={citationEntries} />
             {documentValue !== null && state.snapshot?.lifecycle === "ready" && <CitationPanel
               document={documentValue}
               refreshToken={citationRefresh}
@@ -2839,7 +2838,6 @@ export default function App() {
               onSelect={updateDocument}
               onEntries={setCitationEntries}
               requestAdd={requestCitationAdd}
-              cursorOffset={() => editorCursorRef.current}
               writesDisabled={interaction.turnActive || documentBusy || pendingApproval !== null}
             />}
             {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
