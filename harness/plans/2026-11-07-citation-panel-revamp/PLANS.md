@@ -12,7 +12,7 @@
 1. 協定修改會牽動 Python、TypeScript、Rust 三方的契約測試。
 2. bime_word 必須在桌面後端的子行程中跑起來。
 
-GUI 沒有自動化操作視窗的方法，所以 GUI 的行為以單元測試和建置驗收，最終彙報附上手動檢查清單。
+依使用者決策 D14，GUI 驗收由使用者本人於交付後操作。代理負責實作、必要自動檢查與程式碼核對，交付手動清單後即可完成代理工作，不等待使用者驗收；不把清單或單元測試描述成 GUI 已實測。這是明確分工，不以是否有 GUI 自動化工具決定。
 
 ## 基線（2026-11-07 撰寫時觀察，HEAD `5aea53c`，分支 `GUI`）
 
@@ -33,7 +33,7 @@ GUI 沒有自動化操作視窗的方法，所以 GUI 的行為以單元測試�
   - `removeConfirmation` 只在條目仍被引用時要求確認。
 - `desktop/src/App.tsx`：`editorCursorRef`（約第 1089 行）只用來把 `onCursor`（第 2833 行）傳給面板的 `cursorOffset`（第 2842 行）。
 - `desktop/src/DocumentEditor.tsx`：
-  - Monaco 的 `fontSize: 14` 寫死在第 183 行。
+  - Monaco 的 `fontSize: 14` 寫死在第 183 行，下一行固定 `lineHeight: 23`；R5 必須一併改為自動行高。
   - 第 295 行註冊 `[@`、`; @`、`\cite{` 的 key 補全，補全保留不改。
   - 選取變更時呼叫 `onCursor`（第 276 行）。
 - `desktop/src/styles.css`：
@@ -54,7 +54,8 @@ GUI 沒有自動化操作視窗的方法，所以 GUI 的行為以單元測試�
 - 協定定義：`desktop/protocol/v1/contract.json` 第 789、1201 行的 `format` enum 為 `["docx","markdown","bib"]`；`fixtures.json` 約第 2210、2252 行使用 `"bib"`。
 - 協定的使用者：
   - `agent/desktop/protocol.py`
-  - `desktop/src-tauri/src/protocol.rs`（所以修改契約後 cargo 測試為必要）
+  - `desktop/src/protocol.ts`：回應約第 995 行與參數約第 1169 行，各自寫死匯出格式 enum，修改 contract 不會自動更新這兩處。
+  - `desktop/src-tauri/src/protocol.rs`：參數約第 999 行、回應約第 2455 行，各自寫死格式 enum；約第 2454 行以 `validate_exact_data_keys` 限定匯出回應只有 format、path。新增 audit 時必須一起更新允許欄位與驗證，不能只改 contract。因此修改契約後 Rust 協定測試為必要。
   - `desktop/tests/protocol.test.ts`
   - `tests/test_desktop_protocol_contract.py`
 - 測試中的 bib：
@@ -89,20 +90,29 @@ GUI 沒有自動化操作視窗的方法，所以 GUI 的行為以單元測試�
 **測試基線**
 
 - 2026-11-06 的紀錄：pytest 1736、npm 307、cargo 41，都是通過的測試數。
-- 驗收標準是「全部通過」，不是固定的數字。R1 會重新量測。
+- 驗收標準是「全部通過」，不是固定的數字。R1 先核對既有紀錄的來源、版本與適用性，不重新跑完整套件；無可用紀錄時記為基線未知，僅做必要的局部檢查。完整套件留至 R6。
 
 ## 路線
 
 | 階段 | 後置條件 | 相依 | 涵蓋 | 細節 |
 |---|---|---|---|---|
-| R1 | 確認分支、工作樹與工具狀態，記錄三套測試的基線；計劃檔已提交 | 無 | G8 | [phase-1-preflight.md](build/phase-1-preflight.md) |
+| R1 | 確認分支、工作樹與工具狀態，記錄可沿用的測試基線及其限制；計劃檔已提交 | 無 | G8 | [phase-1-preflight.md](build/phase-1-preflight.md) |
 | R2 | Insert 全部拆除；Remove 只在未引用區且有確認；BibTeX 匯出從前端、協定到後端全部移除 | R1 | G1、G2、G3 | [phase-2-remove-controls.md](build/phase-2-remove-controls.md) |
-| R3 | `python-docx`、`lxml` 已加入 `app`；bime_word 1.1.5 已 vendor 並通過完整性檢查；從 app 環境能轉出 proposal 副本 | R1 | G5 | [phase-3-bime-vendor.md](build/phase-3-bime-vendor.md) |
-| R4 | 一個 `Export ▾` 選單提供 Word（一般）、Word（系上格式）、Markdown；後端能以 vendor 的 bime_word 寫出 `<檔名>.bime.docx` | R2、R3 | G4、G5 | [phase-4-export-menu.md](build/phase-4-export-menu.md) |
-| R5 | 面板預設收合成摘要列；編輯器 16px 並支援縮放與記憶；面板文字至少 0.9rem | R4 | G6、G7 | [phase-5-layout-font.md](build/phase-5-layout-font.md) |
-| R6 | README 已更新；三套完整測試通過；最終彙報附手動 GUI 檢查清單 | R5 | G8、G9 | [phase-6-readme-acceptance.md](build/phase-6-readme-acceptance.md) |
+| R3 | 依賴與 vendor 完整性、doctor 檢查通過；正負試轉已執行並記錄結果，未通過的真實案例移交 R4-S3，不能視為 G5 通過 | R1 | G5（環境與試轉證據；真實案例由 R4 驗收） | [phase-3-bime-vendor.md](build/phase-3-bime-vendor.md) |
+| R4 | 一個 Export 選單提供三種匯出；整合測試與真實 proposal 副本驗收通過；GUI 操作交付使用者確認 | R2、R3；R4-S3 另須 R3-S3 的正負案例通過 | G4、G5 | [phase-4-export-menu.md](build/phase-4-export-menu.md) |
+| R5 | 面板預設收合成摘要列；編輯器 16px 並支援縮放與記憶；面板文字至少 0.9rem | R1；S2 另需 R2-S1 完成，S1 另需 R4-S2 完成 | G6、G7 | [phase-5-layout-font.md](build/phase-5-layout-font.md) |
+| R6 | README 已更新；三套完整測試通過；最終彙報附手動 GUI 檢查清單 | R4、R5 全部完成 | G8、G9 | [phase-6-readme-acceptance.md](build/phase-6-readme-acceptance.md) |
 
-R2 和 R3 互不相依，但都會修改 repo，所以依序執行：先 R2，再 R3。R5 放在 R4 之後，因為摘要列需要包含 R4 的 `Export ▾`。
+正常順序仍是 R1→R2→R3→R4→R5→R6，依序修改 repo，不新增平行執行。遇到局部阻塞時，按實際步驟前提選下一個可執行項目，不讓階段編號阻止獨立工作。
+
+上表與 `plan-index.json` 記錄進入階段的共同前提；各步驟的額外前提以階段檔為準。R5 可以先完成獨立的 S2，但缺少 S1 時不能將整個 R5 標為 Complete。R6 同時依賴 R4、R5 完成，避免 R5 先做完就略過真實匯出驗收。
+
+| 可繼續的步驟 | 必須已具備的前提 | 不必等待的項目 |
+|---|---|---|
+| R4-S1／S2 整合 | R2 完成、R3 工具就緒與試轉結果已交接；S2 在 S1 通過後進行 | 真實 proposal 的 R4-S3 驗收 |
+| R5-S2 字體與縮放 | R2-S1 完成，Insert／游標管線已拆除；無須等待 R2-S2／S3 | R3 的試轉問題、R4 的匯出整合／真實案例 |
+| R5-S1 收合摘要列 | R2 完成且 R4-S2 的 Export 選單已完成 | R4-S3 的真實 proposal 驗收 |
+| R6 最終文件與驗收 | R4、R5 的必要工作全部完成 | GUI 本人驗收結果（D14） |
 
 ## 檢查指令
 
@@ -119,6 +129,14 @@ R2 和 R3 互不相依，但都會修改 repo，所以依序執行：先 R2，�
 
 用管線把輸出接到 `tail` 時，以 `${PIPESTATUS[0]}` 判斷結束碼。
 
+**檢查範圍與次數**：
+
+- R1 優先沿用仍適用的歷史證據，記錄來源與差異；R2–R5 只跑修改相關的 Python 模組、前端測試檔、Rust 協定測試及必要建置。
+- 前端局部指令：在 `app/desktop` 執行 `PATH=$P/bin:$PATH node --test --experimental-strip-types tests/citations.test.ts tests/citation_preview.test.ts tests/protocol.test.ts`，依本步修改只保留相關檔案；編輯器改動使用現有 `tests/documents.test.ts`，新增縮放測試時加入實際新增的測試檔。
+- Rust 局部指令：在 `app/desktop` 執行 `PATH=$P/bin:$PATH CONDA_PREFIX=$P CONDA_DEFAULT_ENV=app cargo test --locked --manifest-path src-tauri/Cargo.toml protocol::tests`，並確認有測試執行；完整 Rust 套件留至 R6。
+- 完整 pytest、`npm test`、完整 `cargo test --locked` 各最多一次，安排於 R6；預估任一命令超過十分鐘時先取得明確授權。開發中的局部檢查與建置只在相關修改後重跑，已通過且仍適用的證據沿用。
+- 完整套件失敗後不自動重跑；若修正後需要第二輪完整驗收，記錄原因、預估耗時與用量，待使用者明確授權。啟動提示中的一般授權不包含這類追加成本。
+
 ## 執行契約
 
 本文件只規定工作內容，本身不授權實作。只要求撰寫計劃時，交付審查過的計劃檔就結束。使用者明確以 [PROMPTS.md](PROMPTS.md) 的提示啟動本計劃後，執行者就在授權範圍內連續完成所有可執行的階段，包括一般的實作選擇、修正、檢查與計劃維護。這份授權在交接後仍然有效。宿主或工具的權限控制，以及使用者之後的變更，仍然優先。
@@ -128,7 +146,7 @@ R2 和 R3 互不相依，但都會修改 repo，所以依序執行：先 R2，�
 - 計劃列出的程式碼、測試、協定與文件修改，以及本地 commit。
 - 以 Poetry 把 `python-docx>=1.2.0,<2.0`、`lxml>=5.2,<7.0` 加入 `app/pyproject.toml` 與 `app/poetry.lock`，並安裝到 Conda `app`，包括為此需要的 PyPI 連線。
 - 讀取 `/home/minervamuses/論文/` 中的 bime_word zip 以及 `proposal.md`、`references.json`、`bime-proposal-profile.json`，複製到計劃 `evidence/` 或 `$TMPDIR` 後使用。
-- 依上表在沙箱外執行完整 pytest 與 cargo 測試。
+- 依上表執行相關局部檢查，並在 R6 各執行一次完整測試；仍須遵守耗時、重跑及宿主權限限制。
 
 **未授權的動作**：
 
@@ -139,7 +157,7 @@ R2 和 R3 互不相依，但都會修改 repo，所以依序執行：先 R2，�
 
 **每一步的流程**：
 
-1. 先讀 `AGENTS.md`、GOALS、本檔、build-log 與目前相依已滿足的階段檔，再核對實際狀態。
+1. 先讀 `AGENTS.md`、GOALS、本檔與 build-log，再依「可繼續的步驟」及階段檔的步驟前提核對實際狀態；有 Blocked 項目時仍檢查其他獨立步驟，不只沿階段編號尋找下一步。
 2. 保留與本計劃無關的既有工作：不 stage 根目錄那些未追蹤的檔案。
 3. 每個步驟做完必要檢查、更新 build-log 後，在本地 commit，成功之後才進入下一步。
    - commit 主旨格式為 `type(scope): summary [Rn-Sm]`，結尾加上宿主要求的 attribution。
@@ -151,24 +169,30 @@ R2 和 R3 互不相依，但都會修改 repo，所以依序執行：先 R2，�
 **問題處理**：
 
 - 先診斷，再做範圍內的最小修正；修正步驟加上新的步驟 ID，例如 `R4-F1`。
-- 首次嘗試失敗或到了階段邊界，都不是停下來的理由；可以先做不相依的工作。
+- 一次便宜的局部嘗試失敗時，先診斷原因；階段邊界本身不是停止條件。依 D15，局部阻塞只影響該問題與實際相依步驟，其他已滿足前提的工作繼續。
+- 同一問題兩次聚焦修正仍失敗時，停止修正該問題，將問題與依賴它的步驟標為 Blocked。在 build-log 記錄嘗試次數、證據、受影響步驟及恢復條件，再繼續不相依且前提已滿足的工作；不得換步驟 ID 或換階段重置同一問題的次數。
+- **「昂貴嘗試」只指付費 API 呼叫**；本專案中基本上只有 OpenRouter 的模型呼叫（D16）。本計劃不授權任何付費 API，所以某個步驟看起來需要呼叫時，視為需要追加授權：只隔離該動作，不嘗試呼叫。萬一仍發生一次付費呼叫，而且失敗或沒有實質改善，就停止整次執行並彙報，不自行再試。完整測試套件、`poetry add`、cargo 編譯這類本機或免費的操作不算昂貴嘗試，依兩次修正上限和十分鐘規則處理。沒有昂貴失敗時，只有剩餘工作都被阻塞或尚無必要授權、已無可執行的獨立步驟，才停止整次執行並彙報最小下一步。宿主限制與使用者明確停止指示仍優先。
+- 任何約超過十分鐘的命令或完整套件追加重跑，須有具體成本說明與明確授權；等待新增授權時先隔離該動作，仍可做不依賴它的已授權工作。「一次執行到底」不授權突破這些成本限制。
+- 既有測試失敗可以不阻止無關實作，但不因此降低「必要自動檢查全部通過」的完成標準。不要順便修復無關失敗；未解決時如實交付未完成項目，G8／R6 不標為 Complete，除非使用者明確變更驗收。
 - 證據顯示路線需要改變時，先修改受影響、尚未開始或進行中的階段，以及 `plan-index.json` 的涵蓋關係，再繼續。不得自行修改使用者的目標、範圍外項目或驗收。
-- 只有在缺少無法自行解決的前提，或遇到必須由使用者決定的事時，才停下受影響的工作，並寫明恢復需要什麼。其餘工作照常進行，需要使用者決定的事放進最終彙報。
+- 缺少無法自行解決的前提或需要新決定時，只封鎖受影響的工作並寫明恢復條件；局部問題達到兩次修正上限後，獨立工作仍須繼續。只有上述昂貴失敗／無可執行獨立步驟等整次停止條件才結束本次執行。
+- 例如 R3-S3 的試轉問題被封鎖：保留已完成的 R2、R3 環境檢查與試轉紀錄，封鎖 R4-S3 的真實驗收；環境就緒時 R4-S1／S2 仍可做，R5-S2 可先做，R4-S2 完成後也可做 R5-S1。未通過的真實案例仍阻止 G5／R4 與 R6 完成。
+- 階段內仍有可執行步驟時維持 In progress，逐項記錄 Blocked；剩餘步驟全被封鎖時才把該階段標為 Blocked。完成的步驟及其證據不因其他步驟受阻而撤銷。
 
 **完成的判斷**：
 
-- 只能依觀察到的驗收結果判斷完成；寫完程式碼、結構檢查通過或 commit，都不等於完成。
-- 略過或無法執行的必要檢查不算通過。
+- 代理交付完成須有實作、必要自動檢查及程式碼核對證據；寫完程式碼、結構檢查通過或 commit 本身不等於完成。GUI 實測依 D14 交由使用者，不是代理完成的前置條件。
+- 略過或無法執行的必要自動檢查不算通過。GUI 手動項目記為「交由使用者驗收，尚無結果」，不算代理阻塞，也不宣稱已通過。
 - 證據要標明是觀察到的、沿用的還是歷史紀錄。
 
-**中斷後續作**：先以步驟 ID 對照 build-log 與 `git log`，核對工作樹，再決定從哪裡繼續，不重複已完成的動作。重跑 `poetry add` 前，先檢查 `pyproject.toml` 是否已有這兩個依賴。
+**中斷後續作**：先以步驟 ID 對照 build-log 與 `git log`，核對工作樹、局部阻塞及實際步驟前提，再選擇可繼續的工作；同一問題的修正次數跨交接保留，只有記錄的恢復條件成立或使用者明確允許追加嘗試，才重開該問題。不重複已完成的動作。重跑 `poetry add` 前，先檢查 `pyproject.toml` 是否已有這兩個依賴。
 
-## 整體完成
+## 代理交付完成
 
-以下全部成立，本計劃才算完成：
+以下全部成立，代理即完成本計劃的交付；GUI 實測由使用者本人接手，不需等待其結果：
 
-- R1–R6 的必要驗收都有觀察到的證據。
-- G1–G9 各自的成功觀察都已記錄在 build-log。
+- R1–R6 的代理工作與必要自動檢查都有證據。R3 的環境就緒不能代替 R4-S3 的真實 proposal 驗收。
+- G1–G9 的自動檢查／程式碼證據已記錄在 build-log；GUI 手動項目另列負責人與尚未回報的結果。
 - 完整 pytest、npm test、npm run build、cargo test 都通過。
 - 每一步都有本地 commit，工作樹中沒有本計劃留下的未提交修改。
 - 最終彙報包含：手動 GUI 檢查清單、需要使用者決定的事項，以及「`for_agents/` 可能已過時」的提醒。

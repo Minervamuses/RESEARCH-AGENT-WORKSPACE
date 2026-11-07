@@ -17,7 +17,7 @@
     {"id": "R2", "file": "build/phase-2-remove-controls.md", "depends_on": ["R1"], "covers": ["G1", "G2", "G3"]},
     {"id": "R3", "file": "build/phase-3-bime-vendor.md", "depends_on": ["R1"], "covers": ["G5"]},
     {"id": "R4", "file": "build/phase-4-export-menu.md", "depends_on": ["R2", "R3"], "covers": ["G4", "G5"]},
-    {"id": "R5", "file": "build/phase-5-layout-font.md", "depends_on": ["R4"], "covers": ["G6", "G7"]},
-    {"id": "R6", "file": "build/phase-6-readme-acceptance.md", "depends_on": ["R5"], "covers": ["G8", "G9"]}
+    {"id": "R5", "file": "build/phase-5-layout-font.md", "depends_on": ["R1"], "covers": ["G6", "G7"]},
+    {"id": "R6", "file": "build/phase-6-readme-acceptance.md", "depends_on": ["R4", "R5"], "covers": ["G8", "G9"]}
   ]
 }
