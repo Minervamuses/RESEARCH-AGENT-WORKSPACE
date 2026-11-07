@@ -10,7 +10,7 @@
 | `rag/` | Ingest、chunking、Chroma/JSON store、retrieval 與 framework-neutral public API |
 | `skills/` | Repo 內建 skill bundles；`SKILL.md` 是模型執行指令 |
 | `tool/` | Skill/MCP drop-in roots、內部管理資源與尚未載入的 local-tool v1 預留區 |
-| `vendor/` | 內附的第三方元件；`web-search-mcp/` 是加上本專案修正的全域 Web Search MCP server（Node） |
+| `vendor/` | 內附的第三方元件；`web-search-mcp/` 是加上本專案修正的全域 Web Search MCP server（Node）；`bime-word/` 是原樣內附的 bime_word 1.1.5，桌面後端以子行程執行它做系上格式 Word 匯出，不打包進 wheel，也不是 agent 技能 |
 | `tests/` | 單一 pytest suite；`tests/rag/` 保留 RAG subsystem tests |
 | `env/` | Conda-owned runtime definition |
 

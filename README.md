@@ -36,6 +36,14 @@ conda install -n app -c conda-forge "pandoc>=3,<4"
 
 網頁搜尋工具來自專案內附的 [Web Search MCP server](app/vendor/web-search-mcp/README.md)，agent 啟動時載入它的 `dist/index.js`。尚未 build 時 agent 仍會啟動，只是沒有網頁搜尋，log 會記錄缺少的路徑。
 
+引用面板的「系上格式 Word」匯出使用專案內附的 [bime_word](app/vendor/bime-word/README.md) 1.1.5（依臺大生機系附件十七把 Markdown 轉成 Word）。它來自作者提供的 `bime_word-1.1.5.zip`（SHA-256 `66052fb91d5f9fbccff4b7eb98c3ea56779ec55192360e1772f8179e26303ab2`），原樣放在 `app/vendor/bime-word/`，不做修改，也不會被當成 agent 技能載入。它需要的 `python-docx` 與 `lxml` 已列在 `app/pyproject.toml`，`poetry install` 會安裝；Pandoc 沿用上面的 Conda 套件。檢查環境：
+
+```bash
+python app/vendor/bime-word/scripts/bime_word.py doctor
+```
+
+更新版本時，把新的 zip 解壓到空目錄並在其中執行 `sha256sum -c manifest.sha256`，通過後整個取代 `app/vendor/bime-word/`，再到該目錄執行一次 `sha256sum -c manifest.sha256`。
+
 模型使用啟動 shell 繼承的 `OPENROUTER_API_KEY`，例如：
 
 ```bash
@@ -64,7 +72,7 @@ python main.py
 
 1. 按 **Choose project folder…**，在 Windows 原生視窗選取 WSL 資料夾，例如 `\\wsl.localhost\Ubuntu-24.04\home\你的帳號\research`。
 2. 檢查畫面顯示的 Linux 專案路徑與 history directory。已有設定時按 **Open project**；首次設定時確認歷史位置，再按 **Initialize and open project**。專案的 `RESEARCH.md` 保存研究規則及對話歷史位置。
-3. 在文件區右上方選單選 **Open file**，選取目前專案內的 `.md`、`.markdown` 或 `.tex`。編輯後以 **Ctrl+S** 保存。Windows 選取路徑會對應到原本的 Linux 文件，開啟與保存使用同一份實體檔案。
+3. 在文件區右上方選單選 **Open file**，選取目前專案內的 `.md`、`.markdown` 或 `.tex`。編輯後以 **Ctrl+S** 保存。Windows 選取路徑會對應到原本的 Linux 文件，開啟與保存使用同一份實體檔案。編輯器字體預設 16px；游標在編輯器中時，**Ctrl+=** 放大、**Ctrl+-**（減號）縮小（每次 1px，範圍 10–28px），**Ctrl+0** 恢復 16px。縮放後的大小會記住，重開程式仍沿用。
 4. 從側欄手動選取既有對話，或按 **New conversation** 建立新對話。
 
 每次重新開啟程式都要手動選專案、文件與對話；既有歷史仍保留，但不自動回到上次位置。取消原生選檔視窗會保留目前文件與未送出的草稿。
@@ -97,9 +105,14 @@ agent 可在同一回合依留言依序修改目前文件的多個段落，後�
 
 - **Agent 存檔**：在專案中用 `/citation` 儲存的文獻（驗證過的 DOI 或 arXiv ID），除了照舊寫入 bundle，也會併入書目庫並取得 key（例如 `jumper2021highly`）。已存在相同 DOI 或 arXiv ID 的條目會被重用，內容與 key 都不改；檔案原本的 JSON 排版保持不變。摘要不寫入。CLI 沒有專案，只寫 bundle。
 - **正文寫法**：Markdown 用 Pandoc 語法 `[@key]`、`[@a; @b]`、`[see @key, p. 3]`；LaTeX 用 `\cite{key}` 一族。Agent 修改文件時不能引入書目中沒有的 key；它可用唯讀工具 `bibliography_lookup` 查詢既有 key。
-- **引用面板**：開啟文件後，編輯器下方的 **Citations** 面板列出本文引用（依首次出現順序；數字制樣式顯示編號、次數、verified／unverified）、問題（書目中找不到的 key、重複 DOI、書目無法讀取）與未引用的條目。點 **Line** 會在編輯器選取那個引用。**Verify and add** 以 DOI 或 arXiv ID 驗證後加入書目（Ask 模式會先請你批准，與 `/citation` 的存檔相同）；**Insert** 在游標處插入 `[@key]` 或 `\cite{key}`（只改編輯器中的文字，仍需 Ctrl+S 保存）；**Remove** 從書目移除條目（本文仍引用時先確認，其他文件不檢查）。在 `[@`、`; @` 或 `\cite{` 之後輸入會出現 key 補全。
-- **格式與匯出**：**Style** 選單的選擇存在 `RESEARCH.md` 的 `citationStyle`。內建 APA 7、MLA 9、IEEE、Chicago author-date，以及依附件十七撰寫的 `bime-appendix17`。**Preview** 顯示目前文字的逐筆引用與參考文獻。**Export** 在文件旁寫出 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`（引用已排版）與 `<書目檔名>.bib`，原始文件不變。`.tex` 文件只提供檢查、面板與 `.bib` 匯出，格式由 LaTeX 自己的書目系統決定。
-- **附件十七的細節**：渲染前會在書目的暫存副本套用與 bime_word 相同的規則：直撇號 `'` 不會被換成 `’`；`Wen-tau` 這類名字縮寫成 `W.-t.`；去掉名字中的 `(暱稱)`；資料中以 `{"literal": "et al."}` 結尾的作者清單輸出為 `…, A. Vaughan, et al.`。與 bime_word 產出的 `proposal.docx` 相比，引用與參考文獻全部一致。仍有的限制：標準 CSL 無法表達中日文依姓氏筆畫排序、全中文引用群組內的全形「；」，`等人` 前會多一個空白。中文或日文條目依 `language` 欄位（`zh…`、`ja…`）判斷，沒有這個欄位時依標題與作者姓名中的漢字、假名判斷；`"language": "en"` 等其他語言維持英文格式。這個判斷只用在渲染時的暫存副本，書目檔不會被改寫。比對紀錄保存在 git 歷史中：`git show 05df764:harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md`。系所送審的 Word 檔仍由 bime_word 產生。
+- **引用面板**：開啟文件後，編輯器下方的 **Citations** 面板預設收合成一列摘要：引用數與問題數（例如 `3 cited · 1 problem`）、**Style**、**Preview**（只限 Markdown）、**Export ▾**、**Refresh** 與 **Expand／Collapse**。有問題時摘要列標紅。開啟文件時已有問題、存檔或 Refresh 後問題從無到有，或按下 **Preview** 時，面板會自動展開；其他時候維持你的選擇，收合狀態不保存。通知、書目錯誤、處理進度與匯出結果在收合時也顯示在摘要列下方。展開後列出本文引用（依首次出現順序；數字制樣式顯示編號、次數、verified／unverified）、問題（書目中找不到的 key、重複 DOI、書目無法讀取）與未引用的條目。點 **Line** 會在編輯器選取那個引用。**Verify and add** 以 DOI 或 arXiv ID 驗證後加入書目（Ask 模式會先請你批准，與 `/citation` 的存檔相同）。**Remove** 只出現在 **Not cited in this document** 區，按下後一律先確認：它會從書目檔刪除那個 key，而書目檔由專案中的所有文件共用，其他文件不檢查。面板沒有插入引用的按鈕；在 `[@`、`; @` 或 `\cite{` 之後輸入會出現 key 補全。
+- **格式與匯出**：**Style** 選單的選擇存在 `RESEARCH.md` 的 `citationStyle`。內建 APA 7、MLA 9、IEEE、Chicago author-date，以及依附件十七撰寫的 `bime-appendix17`。**Preview** 顯示目前文字的逐筆引用與參考文獻。Markdown 文件的 **Export ▾** 有三個選項，檔案都寫在原始文件旁（同名檔案會被覆蓋），原始文件不變：
+  - **Word (.docx)**：`<檔名>.<樣式>.docx`，引用依 Style 排版。
+  - **Word – BIME Appendix 17 (bime_word)**：以內附的 bime_word 寫出 `<檔名>.bime.docx`，另有三份報告 `<檔名>.bime.audit.json`、`<檔名>.bime.audit.md`、`<檔名>.bime.bime.json`。它轉換的是已存檔的檔案，所以有未存檔的修改時會拒絕，請先按 Ctrl+S；引用格式固定為附件十七，不使用 Style。原始文件旁有 `bime-<檔名>-profile.json` 時會當作 bime_word 的設定檔（例如 `proposal.md` 對應 `bime-proposal-profile.json`）；書目一律使用專案書目庫；轉換範圍是 `fragment`。完成後面板顯示稽核的錯誤、警告與需人工確認的項目數，以及 `.audit.md` 的路徑；稽核有錯誤時仍會寫出檔案。bime_word 不驗證版面，請在 Word 中更新所有欄位並逐頁檢查。正文用了書目中沒有的 key、或設定檔有誤時，不會寫出檔案，面板顯示 bime_word 的錯誤訊息。
+  - **Markdown (.md)**：`<檔名>.<樣式>.md`，引用已排版。
+
+  `.tex` 文件沒有匯出，只提供檢查、面板與補全，格式由 LaTeX 自己的書目系統決定。
+- **附件十七的細節**：渲染前會在書目的暫存副本套用與 bime_word 相同的規則：直撇號 `'` 不會被換成 `’`；`Wen-tau` 這類名字縮寫成 `W.-t.`；去掉名字中的 `(暱稱)`；資料中以 `{"literal": "et al."}` 結尾的作者清單輸出為 `…, A. Vaughan, et al.`。與 bime_word 產出的 `proposal.docx` 相比，引用與參考文獻全部一致。仍有的限制：標準 CSL 無法表達中日文依姓氏筆畫排序、全中文引用群組內的全形「；」，`等人` 前會多一個空白。中文或日文條目依 `language` 欄位（`zh…`、`ja…`）判斷，沒有這個欄位時依標題與作者姓名中的漢字、假名判斷；`"language": "en"` 等其他語言維持英文格式。這個判斷只用在渲染時的暫存副本，書目檔不會被改寫。比對紀錄保存在 git 歷史中：`git show 05df764:harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md`。系所送審的 Word 檔仍由 bime_word 產生，可在 **Export ▾** 選 **Word – BIME Appendix 17 (bime_word)**。
 
 ## 停止回合
 
@@ -129,7 +142,7 @@ Delete 會先確認範圍：**只刪這則對話紀錄，不刪研究專案或�
 | MCP server log | `$XDG_CACHE_HOME/agent-mcp/<server>.stderr.log`，預設 `~/.cache/agent-mcp/`，5 MiB 時輪替並保留 3 份 | MCP server 的 stderr：每次載入一行標頭；web_search 每次搜尋解析到的結果數、`handleWebSearch` 的 limit 與 includeContent，以及錯誤訊息（可能含網址） | 查詢文字與頁面內容。server 的 stdout 只轉送 JSON-RPC，其餘印出的文字都被丟棄 |
 | 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存（或在引用面板以 DOI／arXiv ID 加入）的來源 | 搜尋過但沒有儲存的候選 |
 | 專案書目庫 | 桌面專案的 `references.json`，或 `RESEARCH.md` metadata 的 `bibliography` 指定的檔案 | 已儲存文獻的 CSL-JSON 書目欄位（作者、年份、標題、期刊、卷期頁、DOI、URL 等）與 key；使用者手寫的條目原樣保留 | 摘要、參考文獻清單、授權、ORCID、機構等欄位 |
-| 引用匯出 | 文件旁的 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`、`<書目檔名>.bib`，只在按下 Export 時寫出 | 套用所選格式的正文與參考文獻 | — |
+| 引用匯出 | 文件旁的 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`，以及系上格式的 `<檔名>.bime.docx` 與報告 `<檔名>.bime.audit.json`、`<檔名>.bime.audit.md`、`<檔名>.bime.bime.json`；只在從 Export 選單選擇時寫出 | 套用所選格式（或附件十七）的正文與參考文獻；bime_word 的稽核結果與轉換紀錄 | — |
 
 模型每次收到的完整 prompt、中間回覆，以及工具回傳的全文，都只存在記憶體裡，回合結束後不保存。所以事後只能從下面的長度、次數與時間判斷工具結果有沒有交給模型，不能還原內容。
 

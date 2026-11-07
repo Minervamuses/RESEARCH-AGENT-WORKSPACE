@@ -38,7 +38,7 @@ verified save (doi.org CSL-JSON, or the arXiv/venue authority record)
 document text ([@key] / \cite{key})
     → citekeys.find_citations (UTF-16 positions, Pandoc-compatible)
     → integrity.inspect (missing / uncited / duplicate DOIs / verified-by-bundle)
-    → csl_render.render | export_docx | export_markdown | export_bib (Pandoc citeproc)
+    → csl_render.render | export_docx | export_markdown (Pandoc citeproc)
 ```
 
 ## Module groups
@@ -52,7 +52,7 @@ document text ([@key] / \cite{key})
 | Output safety | `gate.py`, `render.py` | Marker validation、safe blocking 與 bibliography rendering |
 | Project bibliography | `csl.py`, `library.py` | Sanitized CSL-JSON；`references.json` load/layout detection/keys/merge/remove/fingerprint-checked atomic write |
 | Document citations | `citekeys.py`, `integrity.py` | Markdown (Pandoc) and LaTeX `\cite` key parsing; integrity report for one document |
-| Styles and export | `csl_render.py`, `styles/` | Pandoc rendering (preview = export), `.docx`/Markdown/BibTeX export, bundled CSL styles |
+| Styles and export | `csl_render.py`, `styles/` | Pandoc rendering (preview = export), `.docx`/Markdown export, bundled CSL styles. The desktop's BIME Appendix 17 Word export does not use it: it runs the vendored bime_word (`agent/desktop/bime_export.py`) |
 
 ### Bundled styles
 

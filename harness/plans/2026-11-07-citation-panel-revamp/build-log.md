@@ -11,7 +11,7 @@
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/) | — | — |
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
-| R6 | Not started | — | — | R6-S1 更新 README（R4、R5 已完成） |
+| R6 | In progress | R6-S1：[evidence/R6-S1/](evidence/R6-S1/) | — | R6-S2 完整套件與交接 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -232,3 +232,25 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - `styles.css`（面板文字 ≥ .9rem）：`.citation-panel` `.78rem` → `.95rem`（padding 微調）；`.citation-badge` `.68rem` → `.9rem`；`.citation-summary h3` `1rem`；`.citation-export-note` `.9rem`；新增 `.citation-panel select { font: inherit }`（全域的 `font: inherit` 只涵蓋 button、input、textarea，select 原本用瀏覽器預設字級）與 `.citation-panel .document-error { font-size: inherit }`（`.document-error` 全域為 `.75rem`，面板內的通知改為繼承 `.95rem`）。`.link-button`、按鈕、輸入框都是 `font: inherit`。摘要列按鈕與 select 改為 `min-height: 2rem`、較小的 padding，`flex-wrap: wrap` 讓窄視窗換行。grep 結果見 [static-checks.txt](evidence/R5-S2/static-checks.txt)：面板相關的 font-size 只有 .95rem、inherit、1rem、.9rem、.9rem。
 - 測試：新 `tests/editorZoom.test.ts`（5 項）：預設值與範圍、有效／無效的儲存值、storage 拋例外、步進／上下限／重設與「重開後讀到縮放後的大小」；另以原始碼核對 `lineHeight: 0` 恰好出現在 create 與 updateOptions 兩處、沒有固定行高或 `fontSize: 14`、三組快捷鍵都已註冊。實際畫面與 28px 多行文字是否重疊不在 Node 測試範圍，列入使用者的 GUI 清單。
 - 檢查（觀察）：`node --test … editorZoom documents citations citation_preview` → **35/35**（[node-focused.txt](evidence/R5-S2/node-focused.txt)）；`npm run build` → exit 0（[npm-build.txt](evidence/R5-S2/npm-build.txt)）。
+
+### R6-S1 更新 README（2026-11-07）
+
+- `/README.md`：
+  - 環境一節（原第 37 行 web-search-mcp 段落之後）新增 bime_word：來源 `bime_word-1.1.5.zip`、版本 1.1.5、完整 SHA-256、原樣放在 `app/vendor/bime-word/` 且不當成 agent 技能、依賴 python-docx 與 lxml（`pyproject.toml`）與 Pandoc、`doctor` 檢查指令，以及更新方式（新 zip 解壓到空目錄並 `sha256sum -c manifest.sha256`，整個取代後在 vendor 目錄再檢查一次）。
+  - 「開啟專案、文件與對話」第 3 點：編輯器 16px、Ctrl+= ／ Ctrl+-（減號）／ Ctrl+0、每次 1px、10–28px、縮放會記住；只在游標位於編輯器時生效。
+  - 「引用面板」：預設收合的摘要列與其內容、有問題時標紅、三種自動展開條件與「其他時候維持你的選擇、不保存」、收合時仍顯示的訊息；刪除 Insert；Remove 只在 Not cited 區、一律確認、書目檔共用且其他文件不檢查；面板沒有插入按鈕，保留 `[@` 補全說明。
+  - 「格式與匯出」：`Export ▾` 的三個選項與檔名（`<檔名>.<樣式>.docx`、`<檔名>.bime.docx` 加三份報告、`<檔名>.<樣式>.md`），同名覆蓋、原稿不變；系上格式要先存檔、不使用 Style、`bime-<檔名>-profile.json`、專案書目、`fragment`、稽核摘要與「有錯誤仍寫出」、不驗證版面需在 Word 更新欄位、缺 key／設定錯誤時顯示 bime_word 的訊息；`.tex` 沒有匯出。
+  - 「附件十七的細節」最後一句補上 Export 選單的對應選項。
+  - 輸出位置表的「引用匯出」列：刪除 `<書目檔名>.bib`，加入 `.bime.docx` 與三份報告。
+- `app/README.md`：`vendor/` 一列原本只寫 web-search-mcp，補上 `bime-word/`（子行程執行、不進 wheel、不是 agent 技能）。這列與本次改版直接相關且已過時。
+- `app/skills/citation/README.md`：第 41 行資料流刪除 `export_bib`；第 55 行刪除 BibTeX 匯出，並註明系上格式 Word 由 `agent/desktop/bime_export.py` 執行 vendor 的 bime_word、不經過 `csl_render`。
+- `grep -rn -i "insert\|bibtex\|\.bib\b\|export" README.md app/README.md app/skills/citation/README.md` 剩下的命中：README 第 50 行是 shell 的 `export OPENROUTER_API_KEY`；citation README 第 22、50 行是 bundle 的 canonical BibTeX（保留的功能）；其餘都是本次改寫的內容（[readme-checks.txt](evidence/R6-S1/readme-checks.txt)；該檔以 `cut -c1-220` 截斷長行，有一處中文字被切成亂碼，不影響判讀）。
+- **README 與程式行為逐條對照（程式碼核對）**：
+  - G1：README 寫「面板沒有插入引用的按鈕」與 `[@`／`; @`／`\cite{` 補全——對應 R2-S1 的移除（grep 無結果）與保留的 `completionPrefix`。
+  - G2：「Remove 只出現在 Not cited 區、一律先確認、其他文件不檢查」——對應 `UncitedRow`、`CitedRow` 只有 Line、`removeConfirmation` 的文字。
+  - G3：「`.tex` 文件沒有匯出」——對應 `exportFormats("latex") = []`，`ExportMenu` 空清單不渲染；README 不再提 BibTeX 匯出。
+  - G4：三個選項的名稱與順序、`<檔名>.<樣式>.docx|md`、同名覆蓋——對應 `EXPORT_LABELS`、`exportFormats`、`csl_render.export_target`、`write_bytes_atomic`。
+  - G5：`<檔名>.bime.docx` 與三份報告名稱、先存檔、不用 Style、profile 命名、專案書目、`fragment`、稽核摘要、錯誤仍寫出、失敗顯示 bime_word 訊息——對應 `bime_export.convert_command`／`run_bime_convert`、`service._bime_export`、`exportSummary`／`BIME_LAYOUT_REMINDER`，以及 R4-S3 實測的報告檔名。
+  - G6：預設收合、摘要列項目、標紅、自動展開三條件、不保存、收合時仍顯示的訊息——對應 `CitationPanel` 的摘要列、`problemCount`、`nextExpanded`、`document.path` 重設。
+  - G7：16px、Ctrl+= ／ Ctrl+- ／ Ctrl+0、1px、10–28px、記住大小、只在編輯器焦點時生效——對應 `editorZoom.ts` 與 `DocumentEditor` 的 Monaco action。README 未另寫面板字級（≥ .9rem 屬視覺調整）。
+- 檢查（觀察）：三份 README 的 20 個相對連結全部指向存在的檔案（含新的 `app/vendor/bime-word/README.md`）；`git diff --check` exit 0。
