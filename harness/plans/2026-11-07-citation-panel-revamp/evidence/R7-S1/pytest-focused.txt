@@ -1,0 +1,14 @@
+$ pytest -q -p no:cacheprovider tests/ -k "citation or skill"   (sandbox)
+ERROR tests/test_desktop_crash_recovery.py::test_kill_after_citation_rejection_never_persists_unsafe_completed_text
+ERROR tests/test_desktop_fixture.py::test_phase07_integrated_final_only_skill_tool_restore_journey
+ERROR tests/test_desktop_fixture.py::test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection
+802 passed, 958 deselected, 2 warnings, 3 errors in 12.86s
+The 3 errors are the known read-only /tmp phase02 fixture inside the sandbox (OSError: [Errno 30] Read-only file system: '/tmp/research-agent-desktop-phase02-…'); they run in R7-S3's full suite outside the sandbox.
+
+$ pytest -q -p no:cacheprovider tests/test_citation_authority.py
+21 passed, 1 warning in 0.45s
+
+mutations:
+- page-title cross-check disabled (normalize_title(page_title) != wanted -> False): test_neurips_lookup_abstains_unless_the_official_pages_agree FAILED (1 failed, 20 passed)
+- service venue rule reverted (venue=authority.venue): test_neurips_save_verifies_online_and_writes_the_project_entry FAILED (1 failed, 20 passed)
+- restored: 21 passed

@@ -1,0 +1,28 @@
+2017 'Attention Is All You Need': venue:neurips:2017:3f5ee243547dee91fbd053c1c4a845aa (2.1s)
+   title: Attention is All you Need | venue: Advances in Neural Information Processing Systems 30 | url: https://proceedings.neurips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html
+   authors: Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, Illia Polosukhin
+   csl author[0..1]: [{"family": "Vaswani", "given": "Ashish"}, {"family": "Shazeer", "given": "Noam"}] | bibtex key/type: inproceedings
+2020 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks': venue:neurips:2020:6b493230205f780e1bc26945df7481e5 (1.6s)
+   title: Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks | venue: Advances in Neural Information Processing Systems 33 | url: https://proceedings.neurips.cc/paper_files/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html
+   authors: Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, Sebastian Riedel, Douwe Kiela
+   csl author[0..1]: [{"family": "Lewis", "given": "Patrick"}, {"family": "Perez", "given": "Ethan"}] | bibtex key/type: inproceedings
+2023 'Toolformer: Language Models Can Teach Themselves to Use Tools': venue:neurips:2023:d842425e4bf79ba039352da0f658a906 (3.4s)
+   title: Toolformer: Language Models Can Teach Themselves to Use Tools | venue: Advances in Neural Information Processing Systems 36 | url: https://proceedings.neurips.cc/paper_files/paper/2023/hash/d842425e4bf79ba039352da0f658a906-Abstract-Conference.html
+   authors: Timo Schick, Jane Dwivedi-Yu, Roberto Dessi, Roberta Raileanu, Maria Lomeli, Eric Hambro, Luke Zettlemoyer, Nicola Cancedda, Thomas Scialom
+   csl author[0..1]: [{"family": "Schick", "given": "Timo"}, {"family": "Dwivedi-Yu", "given": "Jane"}] | bibtex key/type: inproceedings
+2024 'MicroAdam: Accurate Adaptive Optimization with Low Space Overhead and Provable Convergence': venue:neurips:2024:000f947dcaff8fbffcc3f53a1314f358 (4.0s)
+   title: MicroAdam: Accurate Adaptive Optimization with Low Space Overhead and Provable Convergence | venue: Advances in Neural Information Processing Systems 37 | url: https://proceedings.neurips.cc/paper_files/paper/2024/hash/000f947dcaff8fbffcc3f53a1314f358-Abstract-Conference.html
+   authors: Ionut-Vlad Modoranu, Mher Safaryan, Grigory Malinovsky, Eldar Kurtic, Thomas Robert, Peter Richtárik, Dan Alistarh
+   csl author[0..1]: [{"family": "Modoranu", "given": "Ionut-Vlad"}, {"family": "Safaryan", "given": "Mher"}] | bibtex key/type: inproceedings
+2018 'Attention Is All You Need': None (1.3s)
+2017 'A Paper That Does Not Exist At NeurIPS': None (0.0s)
+requests: 9
+   https://proceedings.neurips.cc/paper_files/paper/2017
+   https://proceedings.neurips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html
+   https://proceedings.neurips.cc/paper_files/paper/2020
+   https://proceedings.neurips.cc/paper_files/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html
+   https://proceedings.neurips.cc/paper_files/paper/2023
+   https://proceedings.neurips.cc/paper_files/paper/2023/hash/d842425e4bf79ba039352da0f658a906-Abstract-Conference.html
+   https://proceedings.neurips.cc/paper_files/paper/2024
+   https://proceedings.neurips.cc/paper_files/paper/2024/hash/000f947dcaff8fbffcc3f53a1314f358-Abstract-Conference.html
+   https://proceedings.neurips.cc/paper_files/paper/2018

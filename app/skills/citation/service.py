@@ -246,7 +246,11 @@ class CitationService:
                 title=authority.title,
                 authors=list(authority.authors),
                 year=authority.year,
-                venue=authority.venue,
+                # The NeurIPS adapter runs only for a venue naming NeurIPS and
+                # searches only the official proceedings, so the venue is already
+                # established; comparing "NeurIPS 2017" with "Advances in Neural
+                # Information Processing Systems 30" as text would reject it.
+                venue="" if authority.provider == "neurips" else authority.venue,
                 work_type=authority.work_type,
                 url=authority.url,
                 identifiers={authority.identity.kind: authority.identity.value},

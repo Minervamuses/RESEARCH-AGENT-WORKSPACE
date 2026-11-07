@@ -243,7 +243,10 @@ def csl_from_authority(record) -> dict:
     item: dict[str, Any] = {
         "type": "article" if record.provider == "arxiv" else "paper-conference",
         "title": record.title,
-        "author": [person_from_display_name(name) for name in record.authors],
+        "author": [
+            ({"family": family, "given": given} if given else {"family": family})
+            for family, given in record.names
+        ] if record.names else [person_from_display_name(name) for name in record.authors],
         "issued": {"date-parts": [[int(record.year)]]},
         "URL": record.url,
     }

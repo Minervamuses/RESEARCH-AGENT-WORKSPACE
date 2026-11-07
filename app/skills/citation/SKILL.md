@@ -110,7 +110,10 @@ task; visible prior conversation still supplies metadata and authorization.
   syntax inside `title` or another field; the workflow owns provider query
   construction. It then makes a descriptive best match, verifies it against
   authoritative metadata, and reports an uncertain match as ambiguous or not
-  found instead of saving it.
+  found instead of saving it. A NeurIPS (NIPS) proceedings paper without a
+  DOI is looked up on the official proceedings site by its exact title within
+  the conference year, so give that title, the conference year, and a venue
+  naming NeurIPS; a paper the site does not list is reported as not found.
 - Save when the visible conversation authorizes it; authorization and target
   choice may come from earlier turns. Do not require the user to repeat a
   version word in the current message. If a reference is genuinely ambiguous,

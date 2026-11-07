@@ -30,7 +30,7 @@ Search 與 save 是不同階段；discovery result 不會因被找到就自動�
 Desktop projects add a second output for the same save:
 
 ```text
-verified save (doi.org CSL-JSON, or the arXiv/venue authority record)
+verified save (doi.org CSL-JSON, or the authority record from the arXiv API or the official NeurIPS proceedings site)
     → csl.sanitize_csl (CSL 1.0.2 whitelist, no abstract, fixed type map)
     → library.merge into the project's references.json (reuse by DOI/arXiv ID, append otherwise)
     → item.bibliography {status, path, key, reason_code} in the save result

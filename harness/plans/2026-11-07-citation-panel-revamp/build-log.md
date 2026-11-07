@@ -12,6 +12,7 @@
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/)；R4-F1（使用者驗收後修正）：[evidence/R4-F1/](evidence/R4-F1/) | — | — |
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
+| R7（使用者驗收後追加） | In progress | R7-S1：[evidence/R7-S1/](evidence/R7-S1/) | — | R7-S2 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -314,6 +315,47 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - 論文資料夾沒有寫入。
 - **README**：根目錄 README 的 BIME 匯出段落說明分節與重跑稽核。
 
+### R7-S1 NeurIPS 改為真的查官方論文集（2026-11-07，使用者追加）
+
+- **範圍**：使用者要求 citation skill 遇到 NeurIPS 時必須真的去查；若官方不支援，就移除支援 NeurIPS 的宣稱。這超出原計劃範圍，由使用者直接授權。
+- **診斷**：`app/skills/citation/authority.py`（`c2f1bdd`，2026-07-13）的 `_NEURIPS` 是只有一筆的寫死表（2017《Attention Is All You Need》→ `venue:neurips:2017:7181`）。
+  - NeurIPS 路徑完全不連網，卻以 `authority_metadata_verified`、`authoritative:neurips` 存檔。
+  - 其他任何 NeurIPS 論文都找不到。
+  - 使用者 20:11 那次存檔（`cite/Attention_Is_All_You_Need--e0b4220861eb`）就是來自這張表。
+- **官方是否支援**（實測，沙箱內連 `proceedings.neurips.cc`）：
+  - 每年的論文列表 `/paper_files/paper/<year>`：2017 年 362 KB、2024 年 3.1 MB／4,493 篇，含 `-Abstract-Conference` 與 `-Abstract-Datasets_and_Benchmarks_Track`。
+  - 每篇的頁面有 Highwire `citation_*` meta tag：title、author（「Family, Given」，Unicode 正確）、journal_title、volume、publication_date。
+  - 另有 BibTeX 檔。
+  - 結論：官方支援查詢，所以實作真查詢，而不是移除宣稱。
+- **修正**：
+  - **`authority.py`**：移除寫死表，改為 `proceedings.neurips.cc` 的真查詢。
+    - 先抓該年列表：上限 16 MB，同一 session 快取；404 回空。
+    - 標準化後與要求標題完全相同的論文必須恰好一篇。
+    - 再抓該篇頁面：頁面標題、年份必須再次相符，作者與會議名不得為空，否則都不採用。
+    - identity 改為官方的論文 hash `venue:neurips:<year>:<hash>`；venue 為「Advances in Neural Information Processing Systems <volume>」，與使用者手寫條目及舊紀錄相同，因為 bime_word 不印獨立的 volume。
+    - 作者保留結構化的（family, given），CSL 與 BibTeX 不再以空白猜姓名。
+    - `names_neurips` 認得 NeurIPS、NIPS、Neural Information Processing Systems。
+    - arXiv 與 NeurIPS 共用 `_get`（重試、404、大小上限）。
+  - **`service.py`**：NeurIPS 的權威紀錄比對時不再做會議名稱的文字比對。轉接器只在 venue 指名 NeurIPS 時執行，且只查官方論文集，所以會議已經確定；「NeurIPS 2017」對「Advances in … 30」的文字比對會誤判不符。
+  - **`csl.py`**：`csl_from_authority` 有結構化姓名時使用之。
+  - **文件**：SKILL.md 告訴模型 NeurIPS 論文要給精確標題、會議年份、指名 NeurIPS 的 venue，官方未列出即回報 not found；`format_explain` 與 citation README 註明 NeurIPS 走官方論文集。
+- **測試**（`app/tests/test_citation_authority.py`）：
+  - 夾具 `app/tests/fixtures/neurips/`：2017 列表與該篇頁面，取自官方頁面的節錄，只去掉行尾空白。
+  - 真查詢的請求順序與欄位，列表只抓一次。
+  - **沒有內建答案**：離線時拋出 ProviderNetworkError；列表沒有該篇時回 None。
+  - **七種不一致時不採用**：標題未列、年份不存在、同名兩篇、頁面標題不同、頁面年份不同、沒有作者、頁面 404。
+  - 列表解析（HTML entity）與會議名稱判斷。
+  - service 端到端：venue「NeurIPS 2017」存檔成功，bundle 為 authority_metadata_verified，書目條目欄位正確。
+  - 既有的 earliest 測試改用官方站替身。
+  - 兩個突變（停用頁面標題核對、還原 venue 比對）各使一項測試失敗。
+  - 沙箱內 `-k "citation or skill"`：802 passed，另有 3 個已知的 `/tmp` phase02 夾具錯誤（[pytest-focused.txt](evidence/R7-S1/pytest-focused.txt)）。
+- **實際連線**（[live-lookup.txt](evidence/R7-S1/live-lookup.txt)，用 hub 的真實 httpx fetcher，共 9 個請求，只連 `proceedings.neurips.cc`）：
+  - 2017 Attention、2020 RAG、2023 Toolformer、2024 MicroAdam 都查到，hash 與使用者手寫條目的 URL 相同（`lewis2020rag`、`schick2023toolformer`）。
+  - 「Attention…」配 2018 年、不存在的標題都回 None。
+- **已知限制**：
+  - 只查主論文集網站；2021 年獨立的 Datasets and Benchmarks 網站（例如 `thakur2021beir`）查不到，會回報 not found。
+  - 頁面的 meta tag 不含頁碼、編者、出版者，所以新條目沒有這三項。官方 BibTeX 檔有這些欄位，需要時可另外補抓。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -333,7 +375,8 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R5-S2 | `a9689e1` |
 | R6-S1 | `d4ed203` |
 | R6-S2 | `38f7662` |
-| R4-F1 | 本 commit（主旨含 `[R4-F1]`） |
+| R4-F1 | `eb7f4a4` |
+| R7-S1 | 本 commit（主旨含 `[R7-S1]`） |
 
 R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
 

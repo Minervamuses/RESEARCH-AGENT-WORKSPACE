@@ -6,10 +6,16 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from skills.citation import service as service_module
-from skills.citation.authority import AuthorityRegistry, export_bibtex
+from skills.citation.authority import (
+    NEURIPS_BASE,
+    AuthorityRegistry,
+    export_bibtex,
+    names_neurips,
+    parse_neurips_index,
+)
 from skills.citation.hub import CitationProviderHub
 from skills.citation.providers.base import ProviderRecord
-from skills.citation.providers.net import FetchResponse, ProviderError
+from skills.citation.providers.net import FetchResponse, ProviderError, ProviderNetworkError, TransportFailure
 from skills.citation.resolution import (
     ResolutionDecision,
     WorkIdentifier,
@@ -89,13 +95,137 @@ def test_arxiv_transient_status_recovers_and_missing_record_abstains(
     assert len(no_citation_backoff) == 1
 
 
-def test_neurips_adapter_is_exact_allowlisted_metadata():
-    async def no_fetch(url, headers):
-        raise AssertionError("network not expected")
-    registry = AuthorityRegistry(fetcher=no_fetch)
-    record = asyncio.run(registry.resolve(WorkIntent("x", title="Attention Is All You Need", year=2017, venue="NeurIPS")))
-    assert record.identity.key == "venue:neurips:2017:7181"
-    assert export_bibtex(record).entry_type == "inproceedings"
+NEURIPS_FIXTURES = Path(__file__).parent / "fixtures" / "neurips"
+NEURIPS_2017 = f"{NEURIPS_BASE}/paper_files/paper/2017"
+ATTENTION_HASH = "3f5ee243547dee91fbd053c1c4a845aa"
+ATTENTION_PAGE = f"{NEURIPS_2017}/hash/{ATTENTION_HASH}-Abstract.html"
+
+
+def neurips_site(pages=None):
+    """Official proceedings stand-in: the trimmed 2017 list and paper page; 404 elsewhere.
+
+    ``pages`` overrides a URL's body; ``None`` makes that URL 404.
+    """
+    served = {
+        NEURIPS_2017: (NEURIPS_FIXTURES / "2017-index.html").read_bytes(),
+        ATTENTION_PAGE: (NEURIPS_FIXTURES / "2017-attention-abstract.html").read_bytes(),
+        **(pages or {}),
+    }
+    calls = []
+
+    async def fetch(url, headers):
+        calls.append(url)
+        if served.get(url) is not None:
+            return FetchResponse(200, body=served[url])
+        return FetchResponse(404)
+
+    return fetch, calls
+
+
+def neurips_intent(title="Attention Is All You Need", year=2017, venue="NeurIPS 2017", **extra):
+    return WorkIntent("x", title=title, year=year, venue=venue, **extra)
+
+
+def test_neurips_lookup_queries_the_official_list_and_paper_page():
+    fetch, calls = neurips_site()
+    registry = AuthorityRegistry(fetcher=fetch)
+
+    record = asyncio.run(registry.resolve(neurips_intent()))
+
+    assert calls == [NEURIPS_2017, ATTENTION_PAGE]
+    assert record.identity.key == f"venue:neurips:2017:{ATTENTION_HASH}"
+    assert record.title == "Attention is All you Need", "the proceedings' own title"
+    assert record.authors[0] == "Ashish Vaswani" and record.authors[6] == "Łukasz Kaiser"
+    assert record.names[5] == ("Gomez", "Aidan N.") and len(record.names) == 8
+    assert (record.year, record.venue) == (2017, "Advances in Neural Information Processing Systems 30")
+    assert (record.url, record.provider, record.work_type) == (ATTENTION_PAGE, "neurips", "inproceedings")
+    bibtex = export_bibtex(record)
+    assert bibtex.entry_type == "inproceedings" and bibtex.doi is None
+    assert bibtex.title == "Attention is All you Need" and bibtex.venue == record.venue
+
+    # The year's list is fetched once per session.
+    assert asyncio.run(registry.resolve(neurips_intent(title="A General Framework for Robust Interactive Learning"))) is None
+    assert calls[2:] == [f"{NEURIPS_2017}/hash/3f647cadf56541fb9513cb63ec370187-Abstract.html"]
+
+
+def test_neurips_lookup_has_no_built_in_answer():
+    """Even the one paper the old table knew must come from the official site."""
+
+    async def offline(_url, _headers):
+        raise TransportFailure("ConnectError", "connection refused", retryable=False)
+
+    with pytest.raises(ProviderNetworkError):
+        asyncio.run(AuthorityRegistry(fetcher=offline).resolve(neurips_intent()))
+    empty, calls = neurips_site({NEURIPS_2017: b"<html><ul></ul></html>"})
+    assert asyncio.run(AuthorityRegistry(fetcher=empty).resolve(neurips_intent())) is None
+    assert calls == [NEURIPS_2017]
+
+
+def test_neurips_lookup_abstains_unless_the_official_pages_agree():
+    page = (NEURIPS_FIXTURES / "2017-attention-abstract.html").read_text(encoding="utf-8")
+    index = (NEURIPS_FIXTURES / "2017-index.html").read_text(encoding="utf-8")
+    twice = index.replace("</ul>", index[index.index("<li"):index.index("</li>") + 5] + "</ul>")
+    cases = {
+        "title not listed that year": ({}, neurips_intent(title="Attention Is Not All You Need")),
+        "year not published": ({}, neurips_intent(year=2099)),
+        "two listed papers share the title": ({NEURIPS_2017: twice.encode()}, neurips_intent()),
+        "paper page has another title": (
+            {ATTENTION_PAGE: page.replace('citation_title" content="Attention is All you Need',
+                                          'citation_title" content="Something Else').encode()}, neurips_intent()),
+        "paper page has another year": (
+            {ATTENTION_PAGE: page.replace('content="2017"', 'content="2018"').encode()}, neurips_intent()),
+        "paper page lists no authors": (
+            {ATTENTION_PAGE: page.replace('name="citation_author"', 'name="x_author"').encode()}, neurips_intent()),
+        "paper page is gone": ({ATTENTION_PAGE: None}, neurips_intent()),
+    }
+    for label, (pages, intent) in cases.items():
+        fetch, _calls = neurips_site(pages)
+        assert asyncio.run(AuthorityRegistry(fetcher=fetch).resolve(intent)) is None, label
+
+
+def test_neurips_list_parsing_and_venue_names():
+    papers = parse_neurips_index((NEURIPS_FIXTURES / "2017-index.html").read_text(encoding="utf-8"), 2017)
+    assert [paper.title for paper in papers] == [
+        "Attention is All you Need",
+        "A General Framework for Robust Interactive Learning",
+        "Reconstruct & Crush Network",
+        'Decoupling "when to update" from "how to update"',
+    ]
+    assert papers[0].paper_hash == ATTENTION_HASH and papers[0].path.endswith("-Abstract.html")
+    assert parse_neurips_index((NEURIPS_FIXTURES / "2017-index.html").read_text(encoding="utf-8"), 2018) == []
+    for venue in ("NeurIPS", "NeurIPS 2017", "NIPS 2017", "Advances in Neural Information Processing Systems 30"):
+        assert names_neurips(venue), venue
+    for venue in (None, "", "Neural Networks", "SNIPS workshop", "example.com", "ICLR"):
+        assert not names_neurips(venue), venue
+
+
+def test_neurips_save_verifies_online_and_writes_the_project_entry(tmp_path):
+    fetch, calls = neurips_site()
+
+    class Resolver:
+        async def resolve(self, _intent):
+            return WorkResolution(ResolutionDecision("not_found", "no_provider_records"), ())
+
+    library = tmp_path / "references.json"
+    service = CitationService(
+        CitationProviderHub(env={}, fetcher=fetch), output_dir=tmp_path / "cite", library_path=library,
+    )
+    service.resolver = Resolver()
+    intent = neurips_intent(authors=("Ashish Vaswani",), version_kind="published")
+
+    item = asyncio.run(service.save((intent,))).items[0]
+
+    assert item.status == "saved" and item.reason_code == "saved_new"
+    assert item.receipt.canonical_identity.key == f"venue:neurips:2017:{ATTENTION_HASH}"
+    assert calls == [NEURIPS_2017, ATTENTION_PAGE]
+    sidecar = json.loads((Path(item.receipt.bundle_path) / "citation.json").read_text(encoding="utf-8"))
+    assert sidecar["source_ref"]["verification_level"] == "authority_metadata_verified"
+    assert sidecar["source_ref"]["provenance"] == "authoritative:neurips"
+    [entry] = json.loads(library.read_text(encoding="utf-8"))
+    assert entry["type"] == "paper-conference" and entry["URL"] == ATTENTION_PAGE
+    assert entry["container-title"] == "Advances in Neural Information Processing Systems 30"
+    assert entry["author"][6] == {"family": "Kaiser", "given": "Łukasz"}
+    assert entry["issued"] == {"date-parts": [[2017]]} and entry["title"] == "Attention is All you Need"
 
 
 def test_untrusted_or_unknown_venue_abstains():
@@ -122,14 +252,9 @@ def earliest_authority_case(tmp_path):
             doi=DOI_B, version_kind="preprint", identifiers={"arxiv": "1706.03762"},
         ),
     ]
-    calls = []
-
-    async def no_fetch(url, headers):
-        calls.append((url, headers.get("Accept", "")))
-        raise AssertionError(f"unexpected network request: {url}")
-
+    fetch, calls = neurips_site()
     service = CitationService(
-        CitationProviderHub(env={}, fetcher=no_fetch), output_dir=tmp_path / "cite",
+        CitationProviderHub(env={}, fetcher=fetch), output_dir=tmp_path / "cite",
     )
     return intent, records, service, calls
 
@@ -159,7 +284,7 @@ def test_earliest_authority_fallback_preserves_year_ambiguity_only(
 
     if status == "not_found":
         assert item.status == "saved"
-        assert item.receipt.canonical_identity.key == "venue:neurips:2017:7181"
+        assert item.receipt.canonical_identity.key == f"venue:neurips:2017:{ATTENTION_HASH}"
         assert service.registry.receipt_is_trusted(item.receipt)
         assert (Path(item.receipt.bundle_path) / "reference.bib").is_file()
     else:
@@ -171,7 +296,8 @@ def test_earliest_authority_fallback_preserves_year_ambiguity_only(
         ]
         assert service.registry.list() == []
         assert not service.output_dir.exists()
-    assert calls == []
+    # Only the official proceedings site is ever contacted (list once, then the page).
+    assert set(calls) <= {NEURIPS_2017, ATTENTION_PAGE} and calls.count(NEURIPS_2017) == 1
 
 
 @pytest.mark.parametrize("year,reason", [(2017, "earliest_year_tie"), (None, "earliest_year_missing")])
