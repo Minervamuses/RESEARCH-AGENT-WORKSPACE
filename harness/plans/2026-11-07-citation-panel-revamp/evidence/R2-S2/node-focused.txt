@@ -1,0 +1,25 @@
+✔ style changes send set_style only for a different known style while idle (1.429974ms)
+✔ LaTeX documents only export the bibliography (0.09456ms)
+✔ segments are grouped per bibliography entry (0.155271ms)
+✔ cited rows offer only Line jumps; uncited rows offer Remove (2232.382238ms)
+✔ preview text shows italics and safe links without interpreting markup (0.9185ms)
+✔ panel lists cited keys in first-use order with counts and issues (1.810605ms)
+✔ numeric styles number only known references in first-use order (0.132888ms)
+✔ library errors become a problem message, not an exception (0.189375ms)
+✔ entries are described compactly (0.127808ms)
+✔ jumping selects the exact UTF-16 range after an emoji (0.203206ms)
+✔ stale or invalid positions are not selected (0.092673ms)
+✔ removal always asks for confirmation naming the key, the file and the unchecked documents (0.115129ms)
+✔ a stale fingerprint asks for a refresh (0.10517ms)
+✔ add results map to added, existing, failed and denied (0.145067ms)
+✔ citation format follows the document type (0.254279ms)
+✔ completion triggers after [@, ; @, \cite{ and commas (0.503335ms)
+✔ completion candidates rank key prefixes before title matches (13.23301ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3561.787539

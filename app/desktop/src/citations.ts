@@ -148,12 +148,14 @@ export function selectUse<T extends SelectableSnapshot>(
 
 // --- remove, add, complete -------------------------------------------
 
-/** Confirmation text before removing an entry, or null when no confirmation is needed. */
-export function removeConfirmation(key: string, citedCount: number): string | null {
-  if (citedCount <= 0) return null;
-  const times = citedCount === 1 ? "once" : `${citedCount} times`;
-  return `“${key}” is cited ${times} in this document. Other documents were not checked. ` +
-    "Remove it from the project bibliography anyway? The citation keys in the text stay as they are.";
+/**
+ * Confirmation text shown before every removal. Only entries this document
+ * does not cite offer Remove, but the bibliography file is shared by every
+ * document in the project and the others are not checked.
+ */
+export function removeConfirmation(key: string, libraryPath: string): string {
+  return `Delete “${key}” from the bibliography file ${libraryPath}? ` +
+    "This document does not cite it, but other documents were not checked and may still cite it.";
 }
 
 /** The backend error code carried by a rejected request, if any. */

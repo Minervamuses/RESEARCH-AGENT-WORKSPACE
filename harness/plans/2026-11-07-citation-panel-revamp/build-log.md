@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
-| R2 | In progress | R2-S1：[evidence/R2-S1/](evidence/R2-S1/) | — | R2-S2 限縮 Remove |
+| R2 | In progress | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/) | — | R2-S3 移除 BibTeX 匯出 |
 | R3 | Not started | — | — | R3-S1 加入依賴（R2 之後依正常順序） |
 | R4 | Not started | — | — | 等 R2、R3 |
 | R5 | Not started | — | — | R2-S1 後可先做 S2；S1 等 R4-S2 |
@@ -100,3 +100,13 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - `node --test --experimental-strip-types tests/citations.test.ts tests/documents.test.ts` → 20/20 pass，含兩項補全測試（[evidence/R2-S1/node-focused.txt](evidence/R2-S1/node-focused.txt)）。
   - `npm run build`（`tsc --noEmit && vite build`）→ exit 0，只有既有的 chunk 大小警告（[evidence/R2-S1/npm-build.txt](evidence/R2-S1/npm-build.txt)）。
 - 此時 Remove 仍出現在本文引用列（R2-S2 處理）。
+
+### R2-S2 限縮 Remove（2026-11-07）
+
+- 修改：`CitationPanel.tsx` 刪除 `EntryActions`／`EntryButtons`；`CitedRow`（改為 export）只保留 Line 跳轉；新增 export 的 `UncitedRow`，每筆有 Remove，`writesDisabled` 時停用。`remove(key)` 一律先 `window.confirm(removeConfirmation(key, inspect.libraryPath))`，取消就在送出 `bibliography.remove` 之前 return（程式碼核對：`CitationPanel.tsx` 的 `remove` callback）。`citations.ts` 的 `removeConfirmation(key, libraryPath)` 一律回傳文字：「Delete “<key>” from the bibliography file <path>? This document does not cite it, but other documents were not checked and may still cite it.」
+- 檢查（觀察）：
+  - `citations.test.ts`：確認文字含 key、書目檔路徑與「other documents were not checked」。
+  - `citation_preview.test.ts` 新增 SSR 測試（沿用該檔的 Vite `ssrLoadModule`）：`CitedRow` 的 markup 只有一個 `Line 3` 按鈕，沒有 Remove／Insert；`UncitedRow` 有 Remove，disabled 時帶 `disabled=""`。
+  - **突變確認**：暫時在 `CitedRow` 加入 Remove 按鈕，新測試失敗（1 fail）；還原後通過，`CitationPanel.tsx` 與 commit 內容相同。
+  - `node --test --experimental-strip-types tests/citations.test.ts tests/citation_preview.test.ts` → 17/17 pass（[evidence/R2-S2/node-focused.txt](evidence/R2-S2/node-focused.txt)）；`npm run build` → exit 0（[evidence/R2-S2/npm-build.txt](evidence/R2-S2/npm-build.txt)）。
+- 取消後書目不變屬 GUI 行為，列入使用者手動清單；自動證據只有上述程式碼核對。

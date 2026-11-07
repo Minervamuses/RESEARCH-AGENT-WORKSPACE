@@ -59,6 +59,29 @@ test("segments are grouped per bibliography entry", () => {
   ]);
 });
 
+test("cited rows offer only Line jumps; uncited rows offer Remove", async () => {
+  type Row = (props: Record<string, unknown>) => unknown;
+  const { CitedRow, UncitedRow } = await load<{ CitedRow: Row; UncitedRow: Row }>("/src/CitationPanel.tsx");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const entry = {
+    key: "a2019", authors: ["Ann"], year: "2019", title: "T", doi: null, type: "article-journal",
+    verification: "verified" as const, citedCount: 1,
+  };
+  const cited = renderToStaticMarkup(createElement(CitedRow as never, {
+    item: { key: "a2019", number: null, entry, count: 1, uses: [{ start: 4, end: 12, line: 3 }] },
+    onJump: () => undefined,
+  }));
+  assert.match(cited, />Line 3<\/button>/);
+  assert.equal((cited.match(/<button/g) ?? []).length, 1, "only the Line jump");
+  assert.ok(!/Remove|Insert/.test(cited));
+  const uncited = renderToStaticMarkup(createElement(UncitedRow as never, { entry, onRemove: () => undefined, disabled: false }));
+  assert.match(uncited, /<button type="button" class="link-button">Remove<\/button>/);
+  assert.ok(!uncited.includes("Insert"));
+  const locked = renderToStaticMarkup(createElement(UncitedRow as never, { entry, onRemove: () => undefined, disabled: true }));
+  assert.match(locked, /<button type="button" class="link-button" disabled="">Remove<\/button>/);
+});
+
 test("preview text shows italics and safe links without interpreting markup", async () => {
   const { CitationText } = await load<{ CitationText: (props: { segments: RenderSegmentDto[] }) => unknown }>("/src/CitationText.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");

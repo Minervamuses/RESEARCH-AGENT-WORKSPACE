@@ -106,12 +106,11 @@ test("stale or invalid positions are not selected", () => {
 
 const clientError = (code: string, message = "backend message") => ({ uiError: { code, message } });
 
-test("removal asks for confirmation only while the entry is cited", () => {
-  assert.equal(removeConfirmation("a2019", 0), null);
-  const once = removeConfirmation("a2019", 1);
-  assert.match(once ?? "", /cited once in this document/);
-  assert.match(once ?? "", /Other documents were not checked/);
-  assert.match(removeConfirmation("b2020", 3) ?? "", /cited 3 times/);
+test("removal always asks for confirmation naming the key, the file and the unchecked documents", () => {
+  const question = removeConfirmation("a2019", "/p/references.json");
+  assert.match(question, /Delete “a2019” from the bibliography file \/p\/references\.json\?/);
+  assert.match(question, /other documents were not checked/);
+  assert.notEqual(removeConfirmation("b2020", "/p/references.json"), question);
 });
 
 test("a stale fingerprint asks for a refresh", () => {

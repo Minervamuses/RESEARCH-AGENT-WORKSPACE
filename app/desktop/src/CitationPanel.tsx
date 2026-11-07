@@ -16,6 +16,7 @@ import {
   styleChangeParams,
   type AddOutcome,
   type BibliographyAddDto,
+  type BibliographyEntryDto,
   type BibliographyInspectDto,
   type BibliographyRenderDto,
   type CitedItem,
@@ -60,20 +61,8 @@ function UseButtons({ item, onJump }: { item: { key: string; uses: UseLocation[]
   );
 }
 
-interface EntryActions {
-  onRemove: (key: string, citedCount: number) => void;
-  disabled: boolean;
-}
-
-function EntryButtons({ entryKey, citedCount, actions }: { entryKey: string; citedCount: number; actions: EntryActions }) {
-  return (
-    <span className="citation-actions">
-      <button type="button" className="link-button" disabled={actions.disabled} onClick={() => actions.onRemove(entryKey, citedCount)}>Remove</button>
-    </span>
-  );
-}
-
-function CitedRow({ item, onJump, actions }: { item: CitedItem; onJump: (use: UseLocation) => void; actions: EntryActions }) {
+/** A key cited in this document: details and Line jumps only, never a write action. */
+export function CitedRow({ item, onJump }: { item: CitedItem; onJump: (use: UseLocation) => void }) {
   return (
     <li className="citation-row">
       <details>
@@ -85,8 +74,23 @@ function CitedRow({ item, onJump, actions }: { item: CitedItem; onJump: (use: Us
           {item.entry !== null && <span className={`citation-badge ${item.entry.verification}`}>{item.entry.verification}</span>}
         </summary>
         <UseButtons item={item} onJump={onJump} />
-        {item.entry !== null && <EntryButtons entryKey={item.key} citedCount={item.count} actions={actions} />}
       </details>
+    </li>
+  );
+}
+
+/** An entry this document does not cite; Remove asks for confirmation first. */
+export function UncitedRow({ entry, onRemove, disabled }: {
+  entry: BibliographyEntryDto;
+  onRemove: (key: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <li className="citation-row">
+      <code>{entry.key}</code> <span className="citation-meta">{describeEntry(entry)}</span>
+      <span className="citation-actions">
+        <button type="button" className="link-button" disabled={disabled} onClick={() => onRemove(entry.key)}>Remove</button>
+      </span>
     </li>
   );
 }
@@ -136,11 +140,10 @@ export function CitationPanel({
   const [added, setAdded] = useState<AddOutcome | null>(null);
   const format = citationFormatForPath(document.path);
 
-  const remove = useCallback(async (key: string, citedCount: number) => {
+  const remove = useCallback(async (key: string) => {
     const fingerprint = inspect?.libraryFingerprint;
-    if (fingerprint === null || fingerprint === undefined || writesDisabled) return;
-    const question = removeConfirmation(key, citedCount);
-    if (question !== null && !window.confirm(question)) return;
+    if (inspect === null || fingerprint === null || fingerprint === undefined || writesDisabled) return;
+    if (!window.confirm(removeConfirmation(key, inspect.libraryPath))) return;
     try {
       await request("bibliography.remove", { key, libraryFingerprint: fingerprint });
       setNotice(`Removed ${key} from the bibliography.`);
@@ -148,7 +151,7 @@ export function CitationPanel({
     } catch (error) {
       setNotice(removeErrorMessage(error));
     }
-  }, [inspect?.libraryFingerprint, refresh, request, writesDisabled]);
+  }, [inspect, refresh, request, writesDisabled]);
 
   const add = useCallback(async () => {
     const value = identifier.trim();
@@ -217,7 +220,6 @@ export function CitationPanel({
     }
   }, [contextPayload, inspect, request, writesDisabled]);
 
-  const actions: EntryActions = { onRemove: (key, count) => void remove(key, count), disabled: writesDisabled };
   const model = inspect === null ? null : buildPanelModel(inspect);
   return (
     <section className="citation-panel" aria-label="Citations">
@@ -262,7 +264,7 @@ export function CitationPanel({
           <summary>Cited in this document ({model.cited.length})</summary>
           {model.cited.length === 0
             ? <p className="citation-empty">No citation keys in this document yet.</p>
-            : <ol className="citation-list">{model.cited.map((item) => <CitedRow key={item.key} item={item} onJump={jump} actions={actions} />)}</ol>}
+            : <ol className="citation-list">{model.cited.map((item) => <CitedRow key={item.key} item={item} onJump={jump} />)}</ol>}
         </details>
         {(model.missing.length > 0 || model.duplicates.length > 0) && <details open className="citation-section citation-problems">
           <summary>Problems ({model.missing.length + model.duplicates.length})</summary>
@@ -293,10 +295,7 @@ export function CitationPanel({
           <summary>Not cited in this document ({model.uncited.length})</summary>
           <ul className="citation-list">
             {model.uncited.map((entry) => (
-              <li key={entry.key} className="citation-row">
-                <code>{entry.key}</code> <span className="citation-meta">{describeEntry(entry)}</span>
-                <EntryButtons entryKey={entry.key} citedCount={0} actions={actions} />
-              </li>
+              <UncitedRow key={entry.key} entry={entry} disabled={writesDisabled} onRemove={(key) => void remove(key)} />
             ))}
           </ul>
         </details>
