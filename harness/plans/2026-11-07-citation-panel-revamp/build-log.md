@@ -13,6 +13,7 @@
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
 | R7（使用者驗收後追加） | Complete | R7-S1：[evidence/R7-S1/](evidence/R7-S1/)；R7-S2：[evidence/R7-S2/](evidence/R7-S2/)；R7-S3：[evidence/R7-S3/](evidence/R7-S3/) | — | GUI 由使用者驗收（D14） |
+| R8（D17：拿掉 verified 標籤） | In progress | R8-S1：計劃修訂 | — | R8-S2 刪除標籤與判斷 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -31,6 +32,7 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | G7 | R5-S2：`editorZoom` 5 項測試（含 storage 例外與重開讀回）；`lineHeight: 0` 在 create 與 updateOptions 兩處（`DocumentEditor.tsx:185`、`:328`）；Tauri 縮放熱鍵預設關閉；面板 font-size grep 全部 ≥ .9rem | 交由使用者（含 28px 多行不重疊），尚無結果 |
 | G8 | R6-S2 完整套件各一次全部通過：pytest **1756**、npm test **329**、npm run build、cargo **41**（歷史基線 1736／307／41） | 保留功能的 GUI 操作：交由使用者，尚無結果 |
 | G9 | R6-S1：README 與 G1–G7 逐條對照、20 個相對連結存在、`git diff --check` 通過 | 不適用：README 由代理核對 |
+| G10 | 待 R8-S2 | 交由使用者，尚無結果 |
 
 ## 紀錄
 
@@ -389,6 +391,21 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - **論文 repo**：HEAD `59e9dc1`，`git status --short` 與使用者回報時相同。R4-F1、R7 只從那裡唯讀複製，沒有寫入。
 - **GUI**：依 D14 由使用者驗收，見下方「驗收後修正的彙報」。以上都是自動檢查、程式碼核對與實際連線的腳本，沒有 GUI 實測。
 
+### R8-S1 計劃修訂：拿掉 verified 標籤（D17，2026-11-07）
+
+- **來源**：使用者驗收 R7 後問「真的需要保留那個verify機制嗎?」。
+  - 代理以 `bundle_checker` 唯讀檢查使用者的 `references.json`：70 筆、0 筆 verified，其中 52 筆有 DOI、10 筆有 arXiv、4 筆有 NeurIPS 官方網址。
+  - 代理的說明：標籤只表示「`cite/` 裡有 Agent 存檔的查證紀錄」，不表示條目正確；手寫條目永遠 unverified，`cite/` 是 git 不追蹤的產生資料，清掉後全部變回 unverified；`bibliography_lookup` 也把這個狀態交給模型。
+  - 代理建議只拿掉標籤，保留存檔前的權威查證與 `cite/` 紀錄。使用者：「我同意你的判斷，去改」。
+- **修訂**（[GOALS.md](GOALS.md)）：
+  - 新增 D17，D9 標為被 D17 取代；「已否決」清單刪去「隱藏 unverified 標籤」。
+  - G8 的保留清單刪去 verified／unverified 標籤；新增 G10。
+  - 範圍外改為「存檔前的驗證邏輯」，註明面板的 verified 判斷在 R8 刪除。
+- **R8 步驟**（與 R7 相同，只記在本檔，不新增 phase 檔）：
+  - R8-S2：刪除標籤、三方協定與共享夾具的 `verification` 欄位、`bibliography_lookup` 的狀態、`bundle_checker` 與相關測試；README 與工具說明同步。
+  - R8-S3：pytest、npm test、npm run build、cargo test 各跑一次（協定三方都改），交接。
+- **授權**：沿用原啟動提示的限制（每步 commit、不切 branch、不 push、不寫論文資料夾、不呼叫付費 API）。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -411,7 +428,8 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R4-F1 | `eb7f4a4` |
 | R7-S1 | `86497be` |
 | R7-S2 | `7d1017b` |
-| R7-S3 | 本 commit（主旨含 `[R7-S3]`） |
+| R7-S3 | `044a0e9` |
+| R8-S1 | 本 commit（主旨含 `[R8-S1]`） |
 
 R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
 

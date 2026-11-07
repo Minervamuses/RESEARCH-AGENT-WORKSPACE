@@ -22,14 +22,15 @@
 | G5 | 「Word（系上格式）」以專案內附的 bime_word 1.1.5 產生 `<檔名>.bime.docx` | 對 `proposal.md` 的副本匯出後得到 `proposal.bime.docx` 與 bime_word 的三份報告；GUI 顯示輸出路徑與稽核摘要；bime_word 回報稽核錯誤時仍顯示檔案路徑與錯誤數；設定或轉檔失敗時顯示 bime_word 的錯誤訊息 |
 | G6 | 面板預設收合成一條摘要列 | 開啟文件時只看到一列：引用數、問題數、Style、Preview、Export、Refresh 與展開鈕；有 Problems 時摘要列標紅並自動展開；按 Preview 時自動展開以顯示結果 |
 | G7 | 編輯器字體預設 16px，可用 Ctrl+= / Ctrl+− 縮放並記住設定；面板文字至少 0.9rem | 新開的編輯器字體為 16px；縮放後重開 GUI 仍是縮放後的大小；Ctrl+0 恢復 16px；行高隨字級調整，28px 的多行文字不重疊；面板內沒有小於 0.9rem 的文字 |
-| G8 | 決定保留的行為不受影響 | Preview、Style 選單、verified／unverified 標籤、Problems、Verify and add、Line 跳轉、key 補全，以及 Python、npm、cargo 全部測試都和改版前一樣通過 |
+| G8 | 決定保留的行為不受影響 | Preview、Style 選單、Problems、Verify and add、Line 跳轉、key 補全，以及 Python、npm、cargo 全部測試都和改版前一樣通過 |
 | G9 | README 反映改版後的面板 | `README.md` 的引用面板、格式與匯出、輸出位置表，以及 `app/skills/citation/README.md` 的匯出說明，都與實際行為一致；列出 bime_word 的來源與版本 |
+| G10 | 面板與 Agent 都不再看到 verified／unverified（D17） | 面板條目沒有標籤；`bibliography.inspect` 的 entries 與 `bibliography_lookup` 的回傳都沒有 `verification` 欄位，三方協定拒絕帶此欄位的回應；`bundle_checker` 已刪除；Agent 存檔前的權威來源查證與 `cite/` 的查證紀錄照舊 |
 
 **驗收分工（D14）**：上表保留完整的預期行為。代理負責實作、必要的自動檢查與程式碼核對，並交付 GUI 手動檢查清單；實際 GUI 操作由使用者本人於交付後驗收。代理不等待手動驗收，也不以 GUI 尚未操作阻塞交付；紀錄須區分自動證據與尚未回報的手動結果，不得宣稱 GUI 已實測。
 
 ## 決策紀錄
 
-D1–D13 沿用原計劃記錄的 2026-11-07 對話來源；D14 來自使用者的 GUI 驗收分工修訂；D15 是代理在核對中提出、使用者採用的局部阻塞規則；D16 是使用者對「昂貴嘗試」的定義。本計劃保留必要引文，執行時不需要讀原對話。
+D1–D13 沿用原計劃記錄的 2026-11-07 對話來源；D14 來自使用者的 GUI 驗收分工修訂；D15 是代理在核對中提出、使用者採用的局部阻塞規則；D16 是使用者對「昂貴嘗試」的定義；D17 是使用者驗收後同意代理的提議，取代 D9。本計劃保留必要引文，執行時不需要讀原對話。
 
 | ID | 決策 | 狀態 | 來源 | 後果 |
 |---|---|---|---|---|
@@ -41,7 +42,7 @@ D1–D13 沿用原計劃記錄的 2026-11-07 對話來源；D14 來自使用者�
 | D6 | 方案 2A：預設收合成摘要列，有 Problems 時自動展開 | 已確認 | 「2A」 | G6 |
 | D7 | 編輯器 16px，加上 Ctrl+= / Ctrl+− 縮放並記住設定；面板文字至少 0.9rem | 已確認 | 「我同意這個」 | G7 |
 | D8 | 保留 Preview | 已確認 | 「preview我覺得很好，應該保留」 | G8 |
-| D9 | 不隱藏 unverified 標籤 | 已確認 | 「不需要」 | G8 |
+| D9 | 不隱藏 unverified 標籤 | 被 D17 取代 | 「不需要」 | G8 |
 | D10 | 以 Poetry 把 `python-docx` 與 `lxml` 加入 `app`（依 AGENTS.md，新增依賴必須經過使用者同意，此處已取得） | 已確認 | 選擇「加進 app 環境（推薦）」 | G5、R3 |
 | D11 | 把 bime_word 1.1.5 vendor 到 `app/vendor/bime-word/`，作法比照 web-search-mcp | 已確認 | 選擇「vendor 1.1.5 進 repo（推薦）」 | G5、R3 |
 | D12 | 系上格式輸出檔名為 `<檔名>.bime.docx`，不覆蓋使用者追蹤的 `proposal.docx` | 已確認 | 選擇「proposal.bime.docx（推薦）」 | G5 |
@@ -49,8 +50,9 @@ D1–D13 沿用原計劃記錄的 2026-11-07 對話來源；D14 來自使用者�
 | D14 | GUI 驗收由使用者本人操作；代理完成實作、自動檢查並交付手動清單，不等待 GUI 驗收 | 已確認 | 本次審核回覆：「這個我不同意，GUI驗收留給我本人操作就好」 | G1–G8、R6、代理交付完成條件 |
 | D15 | 同一問題兩次聚焦修正失敗只封鎖該問題及相依步驟；獨立工作繼續。昂貴嘗試失敗／無改善，或已無可執行的獨立工作時，停止整次執行 | 本次修訂採用 | 使用者後續核對 B：「只停下那個問題和依賴它的步驟，標為 Blocked；不相依的階段繼續做」 | PLANS、PROMPTS、步驟相依與續作；取代本計劃先前兩次局部失敗即停止整次的規則 |
 | D16 | 「昂貴嘗試」只指付費 API 呼叫，本專案基本上只有 OpenRouter。完整測試、`poetry add`、編譯等本機或免費的操作都不算 | 已確認 | 使用者：「昂貴嘗試的定義就是付費API(基本上這邊應該只有openrouter的付費)」 | D15 的整次停止條件；本計劃本來就不授權付費 API，所以這個條件只在意外發生付費呼叫時才會觸發 |
+| D17 | 拿掉 verified／unverified：面板標籤、協定的 `verification` 欄位、`bibliography_lookup` 回傳的狀態與 `bundle_checker` 都刪除。Agent 存檔前向權威來源查證、`cite/` 的查證紀錄、NeurIPS 官方網址的去重保留 | 已確認（2026-11-07 驗收後） | 使用者問「真的需要保留那個verify機制嗎?」；代理說明標籤只表示「`cite/` 有 Agent 存檔的紀錄」，使用者的 70 筆書目 0 筆 verified（52 筆有 DOI），建議只拿掉標籤；使用者：「我同意你的判斷，去改」 | G8、G10、R8；取代 D9 |
 
-已否決、不得重新引入：方案 1B（Insert 與 Remove 全部刪除）、1C（只改名）、2B（拖曳分隔線）、2C（移到右側分頁）、3B（系統存檔視窗）、隱藏 unverified 標籤，以及讓 bime_word 改用額外指定的 Python 或使用者 skill 目錄中的版本。
+已否決、不得重新引入：方案 1B（Insert 與 Remove 全部刪除）、1C（只改名）、2B（拖曳分隔線）、2C（移到右側分頁）、3B（系統存檔視窗），以及讓 bime_word 改用額外指定的 Python 或使用者 skill 目錄中的版本。
 
 ## 可逆的規劃假設
 
@@ -72,7 +74,7 @@ D1–D13 沿用原計劃記錄的 2026-11-07 對話來源；D14 來自使用者�
 
 ## 範圍外
 
-- 驗證邏輯、verified 判斷、Style 清單與 Preview 的內容。
+- 存檔前的驗證邏輯、Style 清單與 Preview 的內容。面板的 verified 判斷依 D17 在 R8 刪除。
 - citation skill、agent 的 `/citation` 流程，以及 `Verify and add` 的驗證與合併語意（只移除成功後的 Insert at cursor）。
 - LaTeX 的引用檢查與補全（保留）。
 - 寫入 `/home/minervamuses/論文/` 的任何檔案，包括還原被誤刪的 `yao2023react`，那是使用者自己的資料。zip 只讀不寫。
