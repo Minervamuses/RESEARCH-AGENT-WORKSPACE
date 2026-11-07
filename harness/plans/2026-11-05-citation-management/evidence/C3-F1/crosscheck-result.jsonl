@@ -1,5 +1,0 @@
-{"file": "synthetic.md", "status": "MATCH", "parser_uses": 36, "pandoc_uses": 36, "distinct_keys": 35, "first_appearance_match": true, "only_parser": [], "only_pandoc": []}
-{"file": "footnote.md", "status": "DIFF", "parser_uses": 4, "pandoc_uses": 6, "distinct_keys": 4, "first_appearance_match": true, "only_parser": [], "only_pandoc": []}
-{"file": "ex.md", "status": "MATCH", "parser_uses": 1, "pandoc_uses": 1, "distinct_keys": 1, "first_appearance_match": true, "only_parser": [], "only_pandoc": []}
-{"file": "proposal.md", "status": "MATCH", "parser_uses": 55, "pandoc_uses": 55, "distinct_keys": 45, "first_appearance_match": true, "only_parser": [], "only_pandoc": []}
-{"file": "links.md", "status": "MATCH", "parser_uses": 8, "pandoc_uses": 8, "distinct_keys": 8, "first_appearance_match": true, "only_parser": [], "only_pandoc": []}

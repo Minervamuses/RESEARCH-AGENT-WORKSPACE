@@ -56,7 +56,7 @@ document text ([@key] / \cite{key})
 
 ### Bundled styles
 
-`styles/styles.json` lists the styles the desktop offers. `apa.csl`, `modern-language-association.csl`, `ieee.csl` and `chicago-author-date.csl` are copied unchanged from [citation-style-language/styles](https://github.com/citation-style-language/styles) at commit `205bf7b617f9f8d48e4e0c2998b855eeae18fd65` (downloaded 2026-11-05) and keep their CC BY-SA 3.0 `<rights>` and author headers. `bime-appendix17.csl` is written for 國立臺灣大學生物機電工程學系 Appendix 17 二.8 (CC BY-SA 3.0, structure modelled on Chicago author-date); its measured differences from bime_word and the rules standard CSL cannot express are in the [citation plan evidence](../../../harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md). Pandoc is the only rendering engine; it must be installed in the `app` Conda environment.
+`styles/styles.json` lists the styles the desktop offers. `apa.csl`, `modern-language-association.csl`, `ieee.csl` and `chicago-author-date.csl` are copied unchanged from [citation-style-language/styles](https://github.com/citation-style-language/styles) at commit `205bf7b617f9f8d48e4e0c2998b855eeae18fd65` (downloaded 2026-11-05) and keep their CC BY-SA 3.0 `<rights>` and author headers. `bime-appendix17.csl` is written for 國立臺灣大學生物機電工程學系 Appendix 17 二.8 (CC BY-SA 3.0, structure modelled on Chicago author-date); its measured differences from bime_word and the rules standard CSL cannot express are recorded in the citation plan evidence, which was removed from the tree on 2026-11-07; read it with `git show 05df764:harness/plans/2026-11-05-citation-management/evidence/C5-S2/compare.md`. Pandoc is the only rendering engine; it must be installed in the `app` Conda environment.
 
 ## State boundaries
 
