@@ -256,17 +256,66 @@ export function completionCandidates(
 
 // --- styles, preview, export ---------------------------------------------------
 
-export type ExportFormat = "docx" | "markdown";
+export type ExportFormat = "docx" | "bime_docx" | "markdown";
 
 /** Only Markdown documents export; LaTeX formats its own references, so .tex has no export. */
 export function exportFormats(format: CitationFormat | null): ExportFormat[] {
-  return format === "markdown" ? ["docx", "markdown"] : [];
+  return format === "markdown" ? ["docx", "bime_docx", "markdown"] : [];
 }
 
 export const EXPORT_LABELS: Record<ExportFormat, string> = {
   docx: "Word (.docx)",
-  markdown: "Formatted Markdown",
+  bime_docx: "Word – BIME Appendix 17 (bime_word)",
+  markdown: "Markdown (.md)",
 };
+
+/** One line under each Export menu option. */
+export const EXPORT_NOTES: Record<ExportFormat, string> = {
+  docx: "Citations in the selected Style.",
+  bime_docx: "Citation format fixed to Appendix 17; converts the saved file.",
+  markdown: "Citations in the selected Style.",
+};
+
+export interface BimeAuditDto {
+  errors: number;
+  warnings: number;
+  manualChecks: number;
+  reportPath: string;
+  layoutVerified: boolean;
+}
+
+export interface BibliographyExportDto {
+  format: ExportFormat;
+  path: string;
+  audit?: BimeAuditDto;
+}
+
+export interface ExportSummary {
+  path: string;
+  /** bime_word only: counts, report and the manual-review reminder. */
+  audit: string | null;
+  reportPath: string | null;
+  hasErrors: boolean;
+}
+
+export const BIME_LAYOUT_REMINDER =
+  "Open it in Word, update all fields, and review the layout by hand; bime_word does not verify the layout.";
+
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** What the panel says after an export (paths stay plain text). */
+export function exportSummary(result: BibliographyExportDto): ExportSummary {
+  if (result.audit === undefined) return { path: result.path, audit: null, reportPath: null, hasErrors: false };
+  const { errors, warnings, manualChecks, reportPath } = result.audit;
+  return {
+    path: result.path,
+    audit: `bime_word audit: ${counted(errors, "error")}, ${counted(warnings, "warning")}, ${counted(manualChecks, "manual check")}.`,
+    reportPath,
+    hasErrors: errors > 0,
+  };
+}
 
 export interface RenderSegmentDto {
   entry: number;

@@ -9,8 +9,8 @@
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
-| R4 | In progress | R4-S1：[evidence/R4-S1/](evidence/R4-S1/) | — | R4-S2 前端 Export 選單 |
-| R5 | Not started | — | — | S2 的前提（R2-S1）已滿足；S1 等 R4-S2 |
+| R4 | In progress | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/) | — | R4-S3 真實 proposal 端到端驗證 |
+| R5 | Not started | — | — | S1、S2 的前提都已滿足（R4-S2 完成） |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
@@ -186,4 +186,13 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - `node --test … protocol citations citation_preview` → **226/226**，含新增的 1 個 message 與 6 個 trace 夾具（[node-focused.txt](evidence/R4-S1/node-focused.txt)）。
   - `npm run build` → exit 0（[npm-build.txt](evidence/R4-S1/npm-build.txt)）。
   - Rust `protocol::tests`（沙箱外）→ **12 passed**，exit 0，約 7 秒（[cargo-protocol-tests.txt](evidence/R4-S1/cargo-protocol-tests.txt)）。
-- 子行程會在 `app/vendor/bime-word/scripts/bime/` 產生 `__pycache__`，已被根目錄與 vendor 的 `.gitignore` 忽略，不影響 manifest 檢查。
+- （R4-S2 更正：原句「子行程會產生 `__pycache__`」是推測。觀察結果：本機 shell 設有 `PYTHONDONTWRITEBYTECODE=1`，子行程繼承後沒有產生；在其他環境即使產生，也會被根目錄與 vendor 的 `.gitignore` 忽略，不影響 manifest 檢查。）
+
+### R4-S2 前端 Export 選單（2026-11-07）
+
+- `citations.ts`：`ExportFormat = "docx" | "bime_docx" | "markdown"`；`exportFormats("markdown")` 依序回傳 docx、bime_docx、markdown，LaTeX／`null` 為空。標籤（A9 英文）：`Word (.docx)`、`Word – BIME Appendix 17 (bime_word)`、`Markdown (.md)`；每個選項下方有一行說明，系上格式為「Citation format fixed to Appendix 17; converts the saved file.」（A5、A11）。新增 `BibliographyExportDto`、`BimeAuditDto` 與純函式 `exportSummary()`：一般匯出只有路徑；系上格式另有「bime_word audit: N errors, N warnings, N manual checks.」、報告路徑，以及 `BIME_LAYOUT_REMINDER`（「Open it in Word, update all fields, and review the layout by hand; bime_word does not verify the layout.」）；錯誤數大於 0 時 `hasErrors` 讓訊息改用錯誤樣式（A3：仍顯示路徑，不算失敗）。
+- `CitationPanel.tsx`：逐一產生的 Export 按鈕換成 export 的 `ExportMenu`：一個 `Export ▾`（`aria-haspopup="menu"`），清單為空時不渲染任何元素；打開時焦點移到第一個選項；選擇後關閉；Escape 或焦點離開（點選單外）時關閉——沿用 `trust.tsx` `ThinkingControl` 既有的 onBlur／Escape 作法；`writesDisabled` 或處理中（`working !== null`）時停用並關閉。`bime_docx` 請求不送 `styleId`。結果訊息中的路徑以 React 文字節點顯示（既有的安全顯示方式）。
+- `styles.css`：選項清單在摘要列的版面流中另起一行（`.citation-export { display: contents }`、`.citation-export-options { order: 1; flex-basis: 100% }`），不用絕對定位：面板是 `overflow: auto`，浮動選單會被裁切，R5 收合成一列後更明顯。說明文字 `.9rem`。
+- 測試（`citation_preview.test.ts`）：選項順序與標籤、BIME 說明；`exportSummary` 的一般／系上格式／單複數與 `hasErrors`；SSR：Markdown 只有一個收合的 `Export ▾` 按鈕（`aria-expanded="false"`、未渲染 menu）、停用時帶 `disabled`、LaTeX 渲染為空字串。協定的 bime_docx 請求與回應由 R4-S1 的共享夾具涵蓋（本次 node 執行中通過）。
+- 檢查（觀察）：`node --test … citations citation_preview protocol` → **228/228**（[node-focused.txt](evidence/R4-S2/node-focused.txt)）；`npm run build` → exit 0（[npm-build.txt](evidence/R4-S2/npm-build.txt)）。
+- 交由使用者 GUI 驗收：選單展開、Escape／點外部關閉、處理中停用、完成訊息的顯示。

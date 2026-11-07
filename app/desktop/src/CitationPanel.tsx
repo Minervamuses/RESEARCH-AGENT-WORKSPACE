@@ -7,8 +7,11 @@ import {
   buildPanelModel,
   citationFormatForPath,
   describeEntry,
+  BIME_LAYOUT_REMINDER,
   EXPORT_LABELS,
+  EXPORT_NOTES,
   exportFormats,
+  exportSummary,
   previewEntries,
   removeConfirmation,
   removeErrorMessage,
@@ -17,10 +20,12 @@ import {
   type AddOutcome,
   type BibliographyAddDto,
   type BibliographyEntryDto,
+  type BibliographyExportDto,
   type BibliographyInspectDto,
   type BibliographyRenderDto,
   type CitedItem,
   type ExportFormat,
+  type ExportSummary,
   type UseLocation,
 } from "./citations";
 import { CitationText } from "./CitationText.tsx";
@@ -58,6 +63,43 @@ function UseButtons({ item, onJump }: { item: { key: string; uses: UseLocation[]
         </li>
       ))}
     </ul>
+  );
+}
+
+/** One `Export ▾` button; its options open in the panel's flow so the panel never clips them. */
+export function ExportMenu({ formats, disabled, onExport }: {
+  formats: ExportFormat[];
+  disabled: boolean;
+  onExport: (format: ExportFormat) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (disabled) setOpen(false);
+    else if (open) menu.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [disabled, open]);
+  if (formats.length === 0) return null;
+  const close = () => { setOpen(false); trigger.current?.focus(); };
+  return (
+    <div className="citation-export" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }} onKeyDown={(event) => {
+      if (event.key === "Escape" && open) { event.preventDefault(); close(); }
+    }}>
+      <button ref={trigger} type="button" disabled={disabled} aria-haspopup="menu" aria-expanded={open}
+        onClick={() => setOpen(!open)}>Export ▾</button>
+      {open && <ul ref={menu} className="citation-export-options" role="menu" aria-label="Export">
+        {formats.map((format) => (
+          <li key={format} role="none">
+            <button type="button" role="menuitem" onClick={() => { close(); onExport(format); }}>
+              <span className="citation-export-label">{EXPORT_LABELS[format]}</span>
+              <span className="citation-export-note">{EXPORT_NOTES[format]}</span>
+            </button>
+          </li>
+        ))}
+      </ul>}
+    </div>
   );
 }
 
@@ -172,7 +214,7 @@ export function CitationPanel({
 
   const [preview, setPreview] = useState<BibliographyRenderDto | null>(null);
   const [working, setWorking] = useState<string | null>(null);
-  const [exported, setExported] = useState<string | null>(null);
+  const [exported, setExported] = useState<ExportSummary | null>(null);
 
   const setStyle = useCallback(async (styleId: string) => {
     const params = styleChangeParams(inspect, styleId, writesDisabled);
@@ -210,9 +252,10 @@ export function CitationPanel({
     setExported(null);
     try {
       const data = await request("bibliography.export", {
-        documentContext: contextPayload(documentRef.current), format: exportFormat, styleId: inspect.styleId,
-      });
-      setExported(typeof data.path === "string" ? data.path : null);
+        documentContext: contextPayload(documentRef.current), format: exportFormat,
+        ...(exportFormat === "bime_docx" ? {} : { styleId: inspect.styleId }),
+      }) as unknown as BibliographyExportDto;
+      setExported(exportSummary(data));
     } catch (error) {
       setNotice(removeErrorMessage(error));
     } finally {
@@ -243,14 +286,15 @@ export function CitationPanel({
             </select>
           </label>
           {format === "markdown" && <button type="button" disabled={working !== null} onClick={() => void renderPreview()}>Preview</button>}
-          {exportFormats(format).map((exportFormat) => (
-            <button key={exportFormat} type="button" disabled={writesDisabled || working !== null}
-              onClick={() => void runExport(exportFormat)}>Export {EXPORT_LABELS[exportFormat]}</button>
-          ))}
+          <ExportMenu formats={exportFormats(format)} disabled={writesDisabled || working !== null}
+            onExport={(exportFormat) => void runExport(exportFormat)} />
         </div>
         {writesDisabled && <p className="citation-empty">Style changes, edits and exports wait until the current turn or document operation finishes.</p>}
         {working !== null && <p role="status">{working}</p>}
-        {exported !== null && <p className="citation-added" role="status">Exported to <code>{exported}</code>. The source document is unchanged.</p>}
+        {exported !== null && <p className={exported.hasErrors ? "document-error" : "citation-added"} role="status">
+          Exported to <code>{exported.path}</code>. The source document is unchanged.
+          {exported.audit !== null && <> {exported.audit} Report: <code>{exported.reportPath}</code>. {BIME_LAYOUT_REMINDER}</>}
+        </p>}
         {preview !== null && <details open className="citation-section citation-preview">
           <summary>Preview ({preview.styleId})</summary>
           <ol className="citation-list">

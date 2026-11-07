@@ -1286,4 +1286,9 @@ h3 {
 .citation-add input { display: block; min-width: 16rem; }
 .citation-added { color: #1f6b3a; overflow-wrap: anywhere; }
 .citation-actions { display: inline-flex; gap: .5rem; margin-left: .4rem; }
+/* The options open in the row's flow (own line) so the scrolling panel never clips them. */
+.citation-export { display: contents; }
+.citation-export-options { order: 1; flex-basis: 100%; display: grid; gap: .15rem; margin: 0; padding: .25rem; list-style: none; background: #fff; border: 1px solid #d4d6d8; border-radius: .45rem; box-shadow: 0 .35rem 1rem #23272f22; }
+.citation-export-options button { display: grid; gap: .1rem; width: 100%; padding: .4rem .5rem; border: 0; text-align: left; }
+.citation-export-note { color: #4a4f55; font-size: .9rem; }
 .citation-references p { padding-left: 1.5rem; text-indent: -1.5rem; margin: .2rem 0; overflow-wrap: anywhere; }

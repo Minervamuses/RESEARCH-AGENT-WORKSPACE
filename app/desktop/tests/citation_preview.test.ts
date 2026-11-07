@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import {
+  BIME_LAYOUT_REMINDER,
+  EXPORT_LABELS,
+  EXPORT_NOTES,
   exportFormats,
+  exportSummary,
   previewEntries,
   styleChangeParams,
   type BibliographyRenderDto,
@@ -35,10 +39,51 @@ test("style changes send set_style only for a different known style while idle",
   assert.equal(styleChangeParams(null, "ieee", false), null);
 });
 
-test("only Markdown documents export, and never BibTeX", () => {
-  assert.deepEqual(exportFormats("markdown"), ["docx", "markdown"]);
+test("only Markdown documents export: Word, BIME Word, then Markdown, never BibTeX", () => {
+  assert.deepEqual(exportFormats("markdown"), ["docx", "bime_docx", "markdown"]);
   assert.deepEqual(exportFormats("latex"), []);
   assert.deepEqual(exportFormats(null), []);
+  assert.deepEqual(exportFormats("markdown").map((format) => EXPORT_LABELS[format]),
+    ["Word (.docx)", "Word – BIME Appendix 17 (bime_word)", "Markdown (.md)"]);
+  assert.match(EXPORT_NOTES.bime_docx, /fixed to Appendix 17/);
+});
+
+test("export results name the file; BIME results add the audit and the manual-review reminder", () => {
+  assert.deepEqual(exportSummary({ format: "docx", path: "/p/a.apa.docx" }),
+    { path: "/p/a.apa.docx", audit: null, reportPath: null, hasErrors: false });
+  const bime = exportSummary({ format: "bime_docx", path: "/p/a.bime.docx", audit: {
+    errors: 2, warnings: 1, manualChecks: 11, reportPath: "/p/a.bime.audit.md", layoutVerified: false,
+  } });
+  assert.deepEqual(bime, {
+    path: "/p/a.bime.docx", audit: "bime_word audit: 2 errors, 1 warning, 11 manual checks.",
+    reportPath: "/p/a.bime.audit.md", hasErrors: true,
+  });
+  const clean = exportSummary({ format: "bime_docx", path: "/p/a.bime.docx", audit: {
+    errors: 0, warnings: 0, manualChecks: 1, reportPath: "/p/a.bime.audit.md", layoutVerified: false,
+  } });
+  assert.equal(clean.audit, "bime_word audit: 0 errors, 0 warnings, 1 manual check.");
+  assert.equal(clean.hasErrors, false);
+  assert.match(BIME_LAYOUT_REMINDER, /update all fields, and review the layout by hand/);
+});
+
+test("Markdown documents get one closed Export button; others get none", async () => {
+  type Menu = (props: Record<string, unknown>) => unknown;
+  const { ExportMenu } = await load<{ ExportMenu: Menu }>("/src/CitationPanel.tsx");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const html = renderToStaticMarkup(createElement(ExportMenu as never, {
+    formats: exportFormats("markdown"), disabled: false, onExport: () => undefined,
+  }));
+  assert.equal((html.match(/<button/g) ?? []).length, 1);
+  assert.match(html, /aria-haspopup="menu" aria-expanded="false">Export ▾<\/button>/);
+  assert.ok(!html.includes("role=\"menu\""), "options render only after opening");
+  const busy = renderToStaticMarkup(createElement(ExportMenu as never, {
+    formats: exportFormats("markdown"), disabled: true, onExport: () => undefined,
+  }));
+  assert.match(busy, /<button type="button" disabled=""/);
+  assert.equal(renderToStaticMarkup(createElement(ExportMenu as never, {
+    formats: exportFormats("latex"), disabled: false, onExport: () => undefined,
+  })), "");
 });
 
 test("segments are grouped per bibliography entry", () => {
