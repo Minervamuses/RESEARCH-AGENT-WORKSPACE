@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
-| R3 | In progress | R3-S1：[evidence/R3-S1/](evidence/R3-S1/) | — | R3-S2 vendor bime_word |
+| R3 | In progress | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/) | — | R3-S3 隔離副本試轉 |
 | R4 | Not started | — | — | 等 R2、R3 |
 | R5 | Not started | — | — | S2 的前提（R2-S1）已滿足；S1 等 R4-S2 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
@@ -138,3 +138,16 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - `poetry check` → 「All set!」，exit 0。
   - `git status`：只修改 `app/pyproject.toml`（dependencies 新增兩行）與 `app/poetry.lock`（新增 lxml、python-docx 兩個 package 區塊；唯一刪除的行是 `content-hash`），沒有改到其他鎖定版本；未修改 `env-app.yml`。
   - 引用相關 pytest：`tests/test_citation*.py`（33 個模組）+ `test_desktop_bibliography.py` + `test_desktop_protocol_contract.py` → **772 passed**，exit 0，約 7 秒（[pytest-citation.txt](evidence/R3-S1/pytest-citation.txt)）。
+
+### R3-S2 vendor bime_word 1.1.5（2026-11-07）
+
+- 來源：`/home/minervamuses/論文/bime_word-1.1.5.zip`（唯讀），SHA-256 `66052fb91d5f9fbccff4b7eb98c3ea56779ec55192360e1772f8179e26303ab2`，與 PLANS 相同。解壓到新建的空目錄 `$TMPDIR/bime-vendor.CUbh/`，`sha256sum -c manifest.sha256` 全部 OK（39 筆），40 個檔案（含 manifest），沒有 `__pycache__`／`*.pyc`。
+- 以 `cp -a` 把 `bime-word/` 整個複製到 `app/vendor/bime-word/`（目標原本不存在）。
+- 檢查（觀察，[vendor-check.txt](evidence/R3-S2/vendor-check.txt)）：
+  - 在 `app/vendor/bime-word` 執行 `sha256sum -c manifest.sha256`：39 筆全部 OK，exit 0。
+  - `diff -r --exclude=__pycache__ <解壓目錄>/bime-word app/vendor/bime-word`：無差異，exit 0。
+  - CRLF：`grep -rlI $'\r'` 無結果，沒有 CRLF 檔；`.gitattributes` 的 `* text=auto eol=lf` 不會改動內容，manifest 不受影響。唯一的二進位檔 `references/source/bime-format-original.docx` 由 git 自動判定為 binary。
+  - `git add --dry-run app/vendor/bime-word`：40 個檔案全部列入。vendor 內的 `.gitignore` 只忽略 `__pycache__/`、`*.py[cod]`、`.pytest_cache/`、`.venv/`、`preview/`、`*.audit.json`、`*.audit.md`、`*.bime.json`，原始檔沒有符合這些規則的。
+  - `PYTHONDONTWRITEBYTECODE=1 $P/bin/python app/vendor/bime-word/scripts/bime_word.py doctor` → exit 0：python-docx 1.2.0、lxml 6.1.3、pandoc `/home/minervamuses/miniconda3/envs/app/bin/pandoc`（3.13）；`readiness.convert_and_insert: true`（[doctor.txt](evidence/R3-S2/doctor.txt)）。字型 DFKai-SB、MingLiU 以 DejaVu Sans 代替、Times New Roman 以 Liberation Serif 代替；`soffice` 不存在，所以 `png_preview: false`。依計劃只記錄，不安裝字型：只影響在 Word 中的顯示，不影響轉檔。
+  - 技能探索：`agent/skills/metadata.py:48` 只掃描 `resolve_skills_dir()`（預設 `app/skills`）下的 `*/SKILL.md`；`agent/` 中沒有任何地方遞迴搜尋 `SKILL.md` 或掃描 `vendor`。以專案的 `discover_skills()` 實際載入：`['_prompt-master', 'academic-paper-writing', 'citation', 'skill-installer']`，沒有 `bime-word`（[skill-discovery.txt](evidence/R3-S2/skill-discovery.txt)）。
+  - A10：`pyproject.toml` 的 `packages` 只有 agent、rag、skills，vendor 不進 wheel；`testpaths = ["tests"]`，vendor 內的測試不會被 app 的 pytest 收集。

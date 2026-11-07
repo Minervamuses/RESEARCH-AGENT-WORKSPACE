@@ -1,0 +1,612 @@
+{
+ "schema_version": 2,
+ "rules": [
+  {
+   "id": "STRUCTURE",
+   "source_section": "一",
+   "source_paragraph_1based": 6,
+   "quote": "一、論文按順序包含：封面(Cover)、標題頁(Title Page)、簽名頁(Signature Page)、誌謝(Acknowledgements)、摘要(Abstract)、目錄(Table of Contents)、前言(Introduction)、文獻探討(Literature Review)、材料與方法(Materials and Methods)、結果與討論(Results and Discussion)、結論(Conclusions)、參考文獻 (References)及附錄(Appendices)。摘要包括中文及英文兩種，均排列於前言之前。且中文摘要列於英文摘要之前。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "thesis",
+   "interpretation": "論文組成、順序；中文摘要在英文摘要之前",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "順序：封面、標題頁、口試委員會審定書、誌謝、中文摘要、英文摘要、目錄、圖目錄、表目錄、符號說明、各章、參考文獻、附錄。",
+    "resolved_by": "friend_template",
+    "basis": "一與系辦目錄範例；朋友範本前置頁順序與範例相同。"
+   }
+  },
+  {
+   "id": "SPECIAL_PAGES",
+   "source_section": "二.1",
+   "source_paragraph_1based": 9,
+   "quote": "1.封面、標題頁、簽名頁及目錄請參考範例。",
+   "strength": "example",
+   "checkability": "manual",
+   "scope": "thesis",
+   "interpretation": "封面、標題頁、簽名頁與目錄參考範例",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "封面、審定書依系辦範例的行序與字級產生；標題頁沒有任何來源給版面，預設與封面相同並列入人工確認。",
+    "resolved_by": "regulation",
+    "basis": "二.1「封面、標題頁、簽名頁及目錄請參考範例」。"
+   }
+  },
+  {
+   "id": "ABSTRACT_LENGTH",
+   "source_section": "二.2",
+   "source_paragraph_1based": 10,
+   "quote": "2.中英文摘要約500至1000字，以不超過三頁為限。內容應涵蓋研究之目的、方法、結果與結論，且內容須完整易於瞭解,切忌1、2、3…等條列式書寫法。中英文摘要之內容須一致。於末尾應註明中英文關鍵詞(Keywords)各3～5個。",
+   "strength": "ambiguous",
+   "checkability": "manual",
+   "scope": "abstract",
+   "interpretation": "約500–1000字、不超過三頁：計算方式未說明（見 decision）",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "中文摘要與英文摘要各自計算：中文以漢字數、英文以單詞數，各約 500–1000；超出只給 warning（原文為「約」）。三頁上限須渲染後判定。",
+    "resolved_by": "author_claude_md",
+    "basis": "CLAUDE.md：「Chinese then English abstract (500–1000 words each, …)」。"
+   }
+  },
+  {
+   "id": "ABSTRACT_CONTENT",
+   "source_section": "二.2",
+   "source_paragraph_1based": 10,
+   "quote": "2.中英文摘要約500至1000字，以不超過三頁為限。內容應涵蓋研究之目的、方法、結果與結論，且內容須完整易於瞭解,切忌1、2、3…等條列式書寫法。中英文摘要之內容須一致。於末尾應註明中英文關鍵詞(Keywords)各3～5個。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "abstract",
+   "interpretation": "目的、方法、結果、結論；中英內容一致",
+   "authority": "regulation"
+  },
+  {
+   "id": "ABSTRACT_LIST",
+   "source_section": "二.2",
+   "source_paragraph_1based": 10,
+   "quote": "2.中英文摘要約500至1000字，以不超過三頁為限。內容應涵蓋研究之目的、方法、結果與結論，且內容須完整易於瞭解,切忌1、2、3…等條列式書寫法。中英文摘要之內容須一致。於末尾應註明中英文關鍵詞(Keywords)各3～5個。",
+   "strength": "explicit",
+   "checkability": "heuristic",
+   "scope": "abstract",
+   "interpretation": "摘要不採條列",
+   "authority": "regulation"
+  },
+  {
+   "id": "KEYWORDS",
+   "source_section": "二.2",
+   "source_paragraph_1based": 10,
+   "quote": "2.中英文摘要約500至1000字，以不超過三頁為限。內容應涵蓋研究之目的、方法、結果與結論，且內容須完整易於瞭解,切忌1、2、3…等條列式書寫法。中英文摘要之內容須一致。於末尾應註明中英文關鍵詞(Keywords)各3～5個。",
+   "strength": "explicit",
+   "checkability": "deterministic",
+   "scope": "abstract",
+   "interpretation": "中英文各3–5個關鍵詞",
+   "authority": "regulation"
+  },
+  {
+   "id": "HEADING_NUMBER",
+   "source_section": "二.3",
+   "source_paragraph_1based": 11,
+   "quote": "3.文字敘述之編號：內文章節用1.1或1-1。圖表按章以圖1-1，表1-1等順序表示。表格及圖片均應有一獨立完整之內容；表格之標題應列在表格上方，圖片之標題則列在圖片下方。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "body",
+   "interpretation": "章節編號可用1.1或1-1",
+   "authority": "regulation"
+  },
+  {
+   "id": "CAPTION_NUMBER",
+   "source_section": "二.3",
+   "source_paragraph_1based": 11,
+   "quote": "3.文字敘述之編號：內文章節用1.1或1-1。圖表按章以圖1-1，表1-1等順序表示。表格及圖片均應有一獨立完整之內容；表格之標題應列在表格上方，圖片之標題則列在圖片下方。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "body",
+   "interpretation": "圖表按章分別編號",
+   "authority": "regulation"
+  },
+  {
+   "id": "CAPTION_POSITION",
+   "source_section": "二.3",
+   "source_paragraph_1based": 11,
+   "quote": "3.文字敘述之編號：內文章節用1.1或1-1。圖表按章以圖1-1，表1-1等順序表示。表格及圖片均應有一獨立完整之內容；表格之標題應列在表格上方，圖片之標題則列在圖片下方。",
+   "strength": "explicit",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "表標題在上，圖標題在下",
+   "authority": "regulation"
+  },
+  {
+   "id": "CAPTION_COMPLETE",
+   "source_section": "二.3",
+   "source_paragraph_1based": 11,
+   "quote": "3.文字敘述之編號：內文章節用1.1或1-1。圖表按章以圖1-1，表1-1等順序表示。表格及圖片均應有一獨立完整之內容；表格之標題應列在表格上方，圖片之標題則列在圖片下方。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "body",
+   "interpretation": "每個表格、圖片有獨立完整內容",
+   "authority": "regulation"
+  },
+  {
+   "id": "PAGE_FORMAT",
+   "source_section": "二.4",
+   "source_paragraph_1based": 12,
+   "quote": "4.頁碼之編排：正文前之頁碼以小寫羅馬字i, ii標示，誌謝為第i頁;正文則以阿拉伯字1, 2標示。頁碼須置於底部中間。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "thesis",
+   "interpretation": "正文前小寫羅馬字，正文阿拉伯字",
+   "authority": "regulation"
+  },
+  {
+   "id": "PAGE_ORIGIN",
+   "source_section": "二.4 vs 目錄範例",
+   "source_paragraph_1based": 12,
+   "quote": "4.頁碼之編排：正文前之頁碼以小寫羅馬字i, ii標示，誌謝為第i頁;正文則以阿拉伯字1, 2標示。頁碼須置於底部中間。",
+   "strength": "conflict",
+   "checkability": "manual",
+   "scope": "thesis",
+   "interpretation": "條文誌謝 i 與範例審定書 i、誌謝 ii 衝突（見 decision）",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "誌謝為第 i 頁；封面、標題頁、審定書不編頁碼。",
+    "resolved_by": "friend_template",
+    "basis": "條文二.4 與朋友範本一致；系辦目錄範例（審定書 i、誌謝 ii）與條文衝突，列為已知差異。"
+   }
+  },
+  {
+   "id": "PAGE_POSITION",
+   "source_section": "二.4 / 二.5",
+   "source_paragraph_1based": 12,
+   "quote": "4.頁碼之編排：正文前之頁碼以小寫羅馬字i, ii標示，誌謝為第i頁;正文則以阿拉伯字1, 2標示。頁碼須置於底部中間。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "body",
+   "interpretation": "頁碼在每頁底部中央",
+   "authority": "regulation"
+  },
+  {
+   "id": "MARGINS",
+   "source_section": "二.5",
+   "source_paragraph_1based": 13,
+   "quote": "5.排版邊界：本文留白上3公分、下2公分、左右各3公分，各頁正下方應置中註明頁碼。",
+   "strength": "explicit",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "上3cm、下2cm、左右各3cm；頁首頁尾不可撐大邊界",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "每一個分節（含前置頁）都用上 3、下 2、左右 3 cm，並檢查頁首頁尾高度沒有把本文邊界撐大。",
+    "resolved_by": "friend_template",
+    "basis": "朋友範本兩個分節皆為 pgMar 1701/1134/1701/1701；其頁尾距離 1.75 cm 加空段落會撐大下邊界，違反二.5，故不採用其頁尾距離。"
+   }
+  },
+  {
+   "id": "NUMERAL",
+   "source_section": "二.6(1)",
+   "source_paragraph_1based": 15,
+   "quote": "(1).文字敘述中之數字，除十位以下之數字外, 請用阿拉伯數字表示。",
+   "strength": "ambiguous",
+   "checkability": "manual",
+   "scope": "body",
+   "interpretation": "「十位以下」語意不明；採用大於十用阿拉伯數字（見 decision）",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "大於十的數字用阿拉伯數字；十以下可用中文數字；同文混用不強制統一。稽核以啟發式找出大於十的中文數字，只給 warning。",
+    "resolved_by": "author_claude_md",
+    "basis": "CLAUDE.md：「numbers above ten in Arabic numerals (Chinese numerals below ten are allowed, mixing is left as is)」。"
+   }
+  },
+  {
+   "id": "SI_UNITS",
+   "source_section": "二.6(2)",
+   "source_paragraph_1based": 16,
+   "quote": "(2).單位一律採用SI Units(國際單位)，其規定詳美國農業工程師學會出版之ASAE Standards。如需要採用其他單位如台制或英制者，須以SI制為主要單位，而再以括弧列明其他單位。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "body",
+   "interpretation": "SI主要；其他單位於括號；ASAE未附完整內容",
+   "authority": "regulation"
+  },
+  {
+   "id": "TERMINOLOGY",
+   "source_section": "二.6(3)",
+   "source_paragraph_1based": 17,
+   "quote": "(3).習見之符號、如：m；kg；ppm；pH等不必另用中文。專門名詞無適當譯名者，從原文。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "body",
+   "interpretation": "習見符號無須譯名；無適當譯名用原文",
+   "authority": "regulation"
+  },
+  {
+   "id": "PHOTO_ORIGIN",
+   "source_section": "二.7",
+   "source_paragraph_1based": 18,
+   "quote": "7.照片限用原始攝影而富有學術或說明價值者，圖片之內容如涉及大小，則應嵌入大小單位之標示。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "figures",
+   "interpretation": "原始攝影、學術或說明價值",
+   "authority": "regulation"
+  },
+  {
+   "id": "IMAGE_SCALE",
+   "source_section": "二.7",
+   "source_paragraph_1based": 18,
+   "quote": "7.照片限用原始攝影而富有學術或說明價值者，圖片之內容如涉及大小，則應嵌入大小單位之標示。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "figures",
+   "interpretation": "涉及大小時嵌入大小單位標示",
+   "authority": "regulation"
+  },
+  {
+   "id": "REF_CITED",
+   "source_section": "二.8(1)",
+   "source_paragraph_1based": 20,
+   "quote": "（1）以確經正文中引用者為限。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "references",
+   "interpretation": "列表僅收錄正文實際引用的文獻",
+   "authority": "regulation"
+  },
+  {
+   "id": "REF_ORDER",
+   "source_section": "二.8(2)",
+   "source_paragraph_1based": 21,
+   "quote": "（2）中日文者以姓氏筆畫多少為序，英（歐）文者以姓氏之字母先後排列。並按中文、日文、英（歐）文之次序排列。如同一人有數篇時，應按發表年次之先後排列。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "references",
+   "interpretation": "中、日、英歐；筆畫或字母；同作者按年",
+   "authority": "regulation"
+  },
+  {
+   "id": "JOURNAL_ABBREVIATION",
+   "source_section": "二.8(3)",
+   "source_paragraph_1based": 22,
+   "quote": "（3）英（歐）文雜誌名稱能縮寫者請用縮寫，縮寫方法以學術界通用為準。可參考International Standard ISO4-1984(E)。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "references",
+   "interpretation": "可縮寫者採學術通用縮寫；不可猜ISO4縮寫",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "只採用使用者在書目資料中提供並查證過的縮寫（container-title-short）；沒有就用全名並列入人工項。",
+    "resolved_by": "author_claude_md",
+    "basis": "二.8(3)；CLAUDE.md：「journal names ISO 4 abbreviated」。"
+   }
+  },
+  {
+   "id": "CITATION_FORM",
+   "source_section": "二.8(4)",
+   "source_paragraph_1based": 24,
+   "quote": "（4）正文中引用參考文獻時，以括號註明作者姓氏及發表年份，或作者之後以括號註明年份。例：(Smith, 1985)，Smith (1985)，(林與張，1960)， (Smith and Kline, 1968)，(Smith, 1985; Wang and Lin, 1992)。作者若超過三人（含三人），英（歐）文採用(Smith et al., 1990)，中文採用(陳等人，1989)。",
+   "strength": "explicit",
+   "checkability": "mixed",
+   "scope": "body",
+   "interpretation": "作者年份；兩人and/與；三人含以上et al./等人",
+   "authority": "regulation"
+  },
+  {
+   "id": "REF_TYPES",
+   "source_section": "二.8(5)–(13)",
+   "source_paragraph_1based": 25,
+   "quote": "（5）參考文獻若為期刊上之論文，可依下列次序書寫：",
+   "strength": "example",
+   "checkability": "manual",
+   "scope": "references",
+   "interpretation": "九種文獻類型分別核對；範例不等於所有欄位硬性必填",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "依二.8(5)–(13) 範例為格式樣板；arXiv 預印本保持原樣（標 arXiv 編號）；網頁以公司為出版者、不寫出版地；會議論文集有來源載明時才列編者與地點；作者自己的 repository 以軟體條目列出，正文以 commit 作為定位。期刊名不用斜體（三個期刊範例中兩個未用斜體）。",
+    "resolved_by": "author_claude_md",
+    "basis": "CLAUDE.md Reference list 一節的 Author decisions。"
+   }
+  },
+  {
+   "id": "FONT_ZH",
+   "source_section": "三.2",
+   "source_paragraph_1based": 64,
+   "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+   "strength": "principle",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "中文以12號楷書；細明體及標楷體為主",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "中文字型預設「標楷體」（系辦與朋友範本寫法相同）；細明體亦屬條文列舉。",
+    "resolved_by": "regulation",
+    "basis": "三.2 與朋友範本 docDefaults eastAsia=\"標楷體\"。"
+   }
+  },
+  {
+   "id": "FONT_EN",
+   "source_section": "三.2",
+   "source_paragraph_1based": 64,
+   "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+   "strength": "principle",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "英文12號Times New Roman",
+   "authority": "regulation"
+  },
+  {
+   "id": "FONT_SIZE",
+   "source_section": "三.2",
+   "source_paragraph_1based": 64,
+   "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+   "strength": "principle",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "正文12pt；不套用所有標題、封面",
+   "authority": "regulation"
+  },
+  {
+   "id": "LINE_SPACING",
+   "source_section": "三.2",
+   "source_paragraph_1based": 64,
+   "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+   "strength": "ambiguous",
+   "checkability": "mixed",
+   "scope": "body",
+   "interpretation": "中文 1.5、英文雙行；中英混排與適用範圍未說明（見 decision）",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "依全篇撰寫語言（三.1「論文以中文或英文撰寫」）統一行距：中文論文全篇 1.5 倍，英文論文全篇 2 倍；前置頁的散文（誌謝、摘要）同樣適用。1.5 倍採 Word「多行 1.5」並保留文件格線（每行 18 pt）。",
+    "resolved_by": "friend_template",
+    "basis": "朋友範本 Normal 樣式 line=360 auto 套用全篇，sectPr docGrid type=lines linePitch=360。"
+   }
+  },
+  {
+   "id": "TEXT_COLOR",
+   "source_section": "三.2",
+   "source_paragraph_1based": 64,
+   "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+   "strength": "explicit",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "正文字色黑色",
+   "authority": "regulation"
+  },
+  {
+   "id": "PUNCTUATION",
+   "source_section": "三.2",
+   "source_paragraph_1based": 64,
+   "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+   "strength": "explicit",
+   "checkability": "manual",
+   "scope": "body",
+   "interpretation": "文內要加標點",
+   "authority": "regulation"
+  },
+  {
+   "id": "PAGE_SIZE",
+   "source_section": "四.1",
+   "source_paragraph_1based": 67,
+   "quote": "1.論文尺寸以A4大小為原則。",
+   "strength": "principle",
+   "checkability": "deterministic",
+   "scope": "document",
+   "interpretation": "A4原則",
+   "authority": "regulation"
+  },
+  {
+   "id": "CHAPTER_NAMES",
+   "source_section": "一 / 目錄範例",
+   "source_paragraph_1based": 6,
+   "quote": "一、論文按順序包含：封面(Cover)、標題頁(Title Page)、簽名頁(Signature Page)、誌謝(Acknowledgements)、摘要(Abstract)、目錄(Table of Contents)、前言(Introduction)、文獻探討(Literature Review)、材料與方法(Materials and Methods)、結果與討論(Results and Discussion)、結論(Conclusions)、參考文獻 (References)及附錄(Appendices)。摘要包括中文及英文兩種，均排列於前言之前。且中文摘要列於英文摘要之前。",
+   "strength": "explicit",
+   "checkability": "heuristic",
+   "scope": "thesis",
+   "interpretation": "正文各章對應前言、文獻探討、材料與方法、結果與討論、結論；系辦範例本身用過其他章名，故不符只給 warning。",
+   "authority": "regulation",
+   "decision": {
+    "resolution": "稽核比對章名；其他章名（例如 DSR 的緒論）列為 warning。CLAUDE.md 已於 2026-09-30 改為依附件十七章名。",
+    "resolved_by": "regulation",
+    "basis": "使用者指定的權威順序：系辦 > 朋友 > CLAUDE.md。"
+   }
+  },
+  {
+   "id": "BACKMATTER_UNNUMBERED",
+   "source_section": "二.1 目錄範例",
+   "source_paragraph_1based": 152,
+   "quote": "第六章　結論…71 / 第七章　建議…75 / 參考文獻…77 / 附錄一…81 / 附錄二…85",
+   "strength": "example",
+   "checkability": "deterministic",
+   "scope": "thesis",
+   "interpretation": "參考文獻與附錄不編章號；多個附錄依範例寫附錄一、附錄二。",
+   "authority": "regulation"
+  },
+  {
+   "id": "TOC_CONTENT",
+   "source_section": "二.1 目錄範例",
+   "source_paragraph_1based": 152,
+   "quote": "目　　　　　錄 / 頁數 / 口試委員審定書 i / 誌謝 ii / 中文摘要 iii / 英文摘要 v / 圖目錄 vi / 表目錄 vii / 符號說明 viii / 第一章　前言 1 / 1.1 ○○○ 2",
+   "strength": "example",
+   "checkability": "mixed",
+   "scope": "thesis",
+   "interpretation": "目錄收錄前置頁、各章、節、參考文獻與附錄，不收錄「目錄」本身；右上標「頁數」。",
+   "authority": "regulation"
+  },
+  {
+   "id": "COVER_CONTENT",
+   "source_section": "二.1 / 四.4 封面範例",
+   "source_paragraph_1based": 111,
+   "quote": "國立臺灣大學生物資源暨農學院生物機電工程學系 / 碩士論文/博士論文 / Department of Biomechatronics Engineering / College of Bioresources and Agriculture / National Taiwan University / Master Thesis/Doctoral Dissertation / 論文題目 / 作者 / 指導教授：王大中 博士 / Advisor: Da-Chung Wang, Ph.D. / 中華民國109年7月 July 2020",
+   "strength": "example",
+   "checkability": "mixed",
+   "scope": "thesis",
+   "interpretation": "封面依範例行序；系名與學位 18 pt、英文系院 14 pt、National Taiwan University 與 Master Thesis 16 pt、題目、姓名、指導教授與日期 18 pt，置中、1.5 倍行距。",
+   "authority": "regulation"
+  },
+  {
+   "id": "SIGNATURE_CONTENT",
+   "source_section": "二.1 / 四.4 第一頁範例",
+   "source_paragraph_1based": 132,
+   "quote": "國立臺灣大學（碩）博士學位論文 / 口試委員會審定書 / 論文中文題目 論文英文題目 / 本論文係○○○君（○學號○）在國立臺灣大學○○學系、所完成之碩（博）士學位論文，於民國○○年○○月○○日承下列考試委員審查通過及口試及格，特此證明 / 口試委員： / （簽名）（指導教授） / 系主任、所長 （簽名）",
+   "strength": "example",
+   "checkability": "mixed",
+   "scope": "thesis",
+   "interpretation": "審定書依範例：24 pt 校名學位、26 pt 標題、20 pt 題目、16 pt 內文與簽名欄；不填造簽名或口試結果。",
+   "authority": "regulation"
+  },
+  {
+   "id": "WRITING_LANGUAGE",
+   "source_section": "三.1",
+   "source_paragraph_1based": 63,
+   "quote": "1.論文以中文或英文撰寫為原則，雙面印刷，但頁數為80頁以下得以單面印刷（彩色圖片亦可單面印刷）。",
+   "strength": "principle",
+   "checkability": "mixed",
+   "scope": "document",
+   "interpretation": "撰寫語言決定三.2 的行距（中文 1.5、英文雙行）。",
+   "authority": "regulation"
+  },
+  {
+   "id": "HOUSE_TYPOGRAPHY",
+   "source_section": "friend_template styles.xml",
+   "source_paragraph_1based": 0,
+   "quote": "heading 1: b, sz=36, jc=center, spacing before=240 after=120；heading 2/3: b, sz=28；Title（前置頁標題）: b, sz=36, jc=center；Normal: ind firstLineChars=200；footer: sz=20",
+   "strength": "house",
+   "checkability": "manual",
+   "scope": "document",
+   "interpretation": "系辦未規定的標題字級、首行縮排與頁碼字級，依朋友範本：章標題 18 pt 粗體置中、節標題 14 pt 粗體、前置頁標題 18 pt 粗體置中、正文首行縮排兩字、頁碼 10 pt。只用於產生，稽核不當成系辦規定。",
+   "authority": "friend_template"
+  },
+  {
+   "id": "HOUSE_CAPTION",
+   "source_section": "friend_template numbering.xml / styles.xml",
+   "source_paragraph_1based": 0,
+   "quote": "lvlText='圖%1-%4' / '表%1-%5'（isLgl、lvlRestart=1，無 suff＝定位字元）；圖內容／表內容樣式 jc=center，未加粗；圖片位置樣式 jc=center keepNext",
+   "strength": "house",
+   "checkability": "manual",
+   "scope": "figures",
+   "interpretation": "圖表標題寫成「圖1-1」（無空格）＋定位字元＋標題，置中、不加粗；圖片段落置中並與標題同頁。",
+   "authority": "friend_template"
+  },
+  {
+   "id": "HOUSE_FOOTER",
+   "source_section": "friend_template footer2.xml / sectPr",
+   "source_paragraph_1based": 0,
+   "quote": "PAGE 欄位、jc=center、footer 樣式 sz=20；sectPr pgMar header=851 footer=992",
+   "strength": "house",
+   "checkability": "deterministic",
+   "scope": "document",
+   "interpretation": "頁碼 10 pt 置中；頁首距離 1.5 cm 沿用朋友範本；頁尾距離改為 1.0 cm，且頁碼下不留空段落，避免撐大 2 cm 的下邊界（二.5 優先於朋友範本）。",
+   "authority": "friend_template"
+  },
+  {
+   "id": "AUTHOR_THESIS_PARTS",
+   "source_section": "CLAUDE.md Page format",
+   "source_paragraph_1based": 0,
+   "quote": "Thesis-only parts: signature page, acknowledgements, Chinese then English abstract (500–1000 words each, no lists, 3–5 keywords), lists of figures and tables, symbol list.",
+   "strength": "author",
+   "checkability": "mixed",
+   "scope": "thesis",
+   "interpretation": "完整論文應有圖目錄、表目錄與符號說明（系辦目錄範例與朋友範本也有）。",
+   "authority": "author_claude_md"
+  },
+  {
+   "id": "CITATION_KEYS",
+   "source_section": "CLAUDE.md In-text citation",
+   "source_paragraph_1based": 0,
+   "quote": "Write English names in narrative citations as `Name et al. [-@key]`, not with Chinese connectives.",
+   "strength": "author",
+   "checkability": "deterministic",
+   "scope": "body",
+   "interpretation": "Markdown 以 pandoc 引用鍵撰寫；轉檔時依書目資料產生二.8(4) 的作者年份格式；英文作者一律用 and／et al.，中文作者用與／等人。",
+   "authority": "author_claude_md"
+  }
+ ],
+ "excluded": [
+  "紙張材質、磅數",
+  "封皮顏色與上膜",
+  "實體裝訂與書背製作",
+  "單雙面印刷",
+  "複寫紙"
+ ],
+ "unregulated": [
+  "段前段後距離",
+  "正文左右對齊",
+  "公式編號",
+  "表格線條",
+  "自動目錄或自動交互參照"
+ ],
+ "authority_order": [
+  "regulation",
+  "friend_template",
+  "author_claude_md",
+  "implementation_default"
+ ],
+ "sources": {
+  "regulation": {
+   "filename": "references/source/bime-format-original.docx",
+   "title": "國立臺灣大學生物機電工程學研究所 博(碩)士班論文格式及撰寫要點",
+   "sha256": "89721138dda00df0c4d07ee826f128ad83fc5f2771d887a84cdbdf8777abfdc6",
+   "revision": "Not stated in supplied source; sample dates are not a revision date."
+  },
+  "friend_template": {
+   "filename": "論文格式.docx",
+   "sha256": "6ab7ee5aa6198e4698708904001db68ad9575124392c3a8606eac31540f0e880",
+   "bundled": false,
+   "note": "朋友手做的 Word 範本；未打包進 skill，採用的參數與 XML 證據記在 references/friend-template.md。"
+  },
+  "author_claude_md": {
+   "path": "論文/CLAUDE.md",
+   "git_commit": "38f76bf",
+   "read_date": "2026-09-30",
+   "bundled": false,
+   "note": "作者在論文 repo 記錄的附件十七決定；相關段落逐字摘錄在 references/author-decisions.md。",
+   "revised": {
+    "git_commit": "7317bbf",
+    "date": "2026-09-30",
+    "change": "chapter names follow Appendix 17"
+   }
+  }
+ },
+ "unregulated_note": "系辦未規定的項目：朋友範本有值即依朋友範本，其次依 CLAUDE.md，都沒有才是實作預設（見 references/authority.md）。",
+ "rejected": [
+  {
+   "source": "friend_template",
+   "item": "頁尾距離 1.75 cm 且頁碼下多一個空段落",
+   "reason": "頁尾頂端約 3 cm，Word 會把本文下邊界撐到約 3 cm，違反二.5。"
+  },
+  {
+   "source": "friend_template",
+   "item": "頁碼段落首行縮排 0.71 cm",
+   "reason": "頁碼偏右，違反二.4、二.5 的置中。"
+  },
+  {
+   "source": "friend_template",
+   "item": "參考文獻、附錄編為第六章、第七章",
+   "reason": "系辦目錄範例不編章號。"
+  },
+  {
+   "source": "friend_template",
+   "item": "目錄收錄「目錄」本身",
+   "reason": "系辦目錄範例沒有這一項。"
+  },
+  {
+   "source": "friend_template",
+   "item": "誌謝、摘要等段落直接格式 1.16 倍行距、段後 8 pt",
+   "reason": "與範本自身 Normal 的 1.5 倍不一致，三.2 行距優先。"
+  },
+  {
+   "source": "friend_template",
+   "item": "heading 4 使用主題色 0F4761",
+   "reason": "三.2 字體顏色為黑色。"
+  },
+  {
+   "source": "friend_template",
+   "item": "空白段落套用標題 3（會印出孤立的 3.1.3）",
+   "reason": "二.3 編號應對應實際節次。"
+  },
+  {
+   "source": "author_claude_md",
+   "item": "章名依 DSR（緒論、系統設計與實作……），不依附件十七",
+   "reason": "使用者指定系辦與朋友範本的權威高於 CLAUDE.md；兩者都用前言、文獻探討、材料與方法、結果與討論、結論。",
+   "status": "resolved: CLAUDE.md changed to the Appendix 17 chapter names on 2026-09-30 (commit 7317bbf)"
+  }
+ ]
+}

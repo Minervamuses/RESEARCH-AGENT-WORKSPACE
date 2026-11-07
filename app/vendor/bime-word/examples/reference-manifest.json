@@ -1,0 +1,13 @@
+{
+  "notice": "Synthetic test-only data. Never insert these entries into a real thesis.",
+  "entries": [
+    {
+      "id": "synthetic-adams-2020",
+      "language": "en",
+      "sort_key": "Adams",
+      "year": 2020,
+      "reference_text": "Adams, A. 2020. Synthetic test entry. Not a real publication.",
+      "citation_forms": ["(Adams, 2020)", "Adams (2020)"]
+    }
+  ]
+}

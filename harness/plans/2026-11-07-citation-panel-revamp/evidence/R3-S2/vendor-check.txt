@@ -1,0 +1,90 @@
+$ sha256sum zip
+66052fb91d5f9fbccff4b7eb98c3ea56779ec55192360e1772f8179e26303ab2  /home/minervamuses/論文/bime_word-1.1.5.zip
+$ (cd app/vendor/bime-word && sha256sum -c manifest.sha256)
+.gitignore: OK
+README.md: OK
+SKILL.md: OK
+agents/openai.yaml: OK
+assets/defaults.json: OK
+examples/chapter.md: OK
+examples/citations.md: OK
+examples/confirmed-profile.json: OK
+examples/insert.md: OK
+examples/reference-manifest.json: OK
+examples/reference-profile.json: OK
+examples/refs.json: OK
+examples/thesis-outline.md: OK
+references/ambiguities.md: OK
+references/author-decisions.md: OK
+references/authority.md: OK
+references/friend-template.md: OK
+references/rules-guide.md: OK
+references/rules.json: OK
+references/source-excerpts.md: OK
+references/source/bime-format-original.docx: OK
+references/technical-sources.md: OK
+references/workflows.md: OK
+requirements-test.txt: OK
+requirements.txt: OK
+scripts/bime/__init__.py: OK
+scripts/bime/audit.py: OK
+scripts/bime/cite.py: OK
+scripts/bime/cli.py: OK
+scripts/bime/common.py: OK
+scripts/bime/convert.py: OK
+scripts/bime/insert.py: OK
+scripts/bime/ooxml_order.py: OK
+scripts/bime_word.py: OK
+scripts/preview.py: OK
+scripts/validate_skill.py: OK
+tests/ACCEPTANCE.md: OK
+tests/test_authority.py: OK
+tests/test_bime_word.py: OK
+exit=0
+$ diff -r --exclude=__pycache__ <extract>/bime-word app/vendor/bime-word
+exit=0
+$ grep -rlI CR app/vendor/bime-word
+exit=1 (1 = no CRLF files)
+$ git add --dry-run app/vendor/bime-word
+add 'app/vendor/bime-word/.gitignore'
+add 'app/vendor/bime-word/README.md'
+add 'app/vendor/bime-word/SKILL.md'
+add 'app/vendor/bime-word/agents/openai.yaml'
+add 'app/vendor/bime-word/assets/defaults.json'
+add 'app/vendor/bime-word/examples/chapter.md'
+add 'app/vendor/bime-word/examples/citations.md'
+add 'app/vendor/bime-word/examples/confirmed-profile.json'
+add 'app/vendor/bime-word/examples/insert.md'
+add 'app/vendor/bime-word/examples/reference-manifest.json'
+add 'app/vendor/bime-word/examples/reference-profile.json'
+add 'app/vendor/bime-word/examples/refs.json'
+add 'app/vendor/bime-word/examples/thesis-outline.md'
+add 'app/vendor/bime-word/manifest.sha256'
+add 'app/vendor/bime-word/references/ambiguities.md'
+add 'app/vendor/bime-word/references/author-decisions.md'
+add 'app/vendor/bime-word/references/authority.md'
+add 'app/vendor/bime-word/references/friend-template.md'
+add 'app/vendor/bime-word/references/rules-guide.md'
+add 'app/vendor/bime-word/references/rules.json'
+add 'app/vendor/bime-word/references/source-excerpts.md'
+add 'app/vendor/bime-word/references/source/bime-format-original.docx'
+add 'app/vendor/bime-word/references/technical-sources.md'
+add 'app/vendor/bime-word/references/workflows.md'
+add 'app/vendor/bime-word/requirements-test.txt'
+add 'app/vendor/bime-word/requirements.txt'
+add 'app/vendor/bime-word/scripts/bime/__init__.py'
+add 'app/vendor/bime-word/scripts/bime/audit.py'
+add 'app/vendor/bime-word/scripts/bime/cite.py'
+add 'app/vendor/bime-word/scripts/bime/cli.py'
+add 'app/vendor/bime-word/scripts/bime/common.py'
+add 'app/vendor/bime-word/scripts/bime/convert.py'
+add 'app/vendor/bime-word/scripts/bime/insert.py'
+add 'app/vendor/bime-word/scripts/bime/ooxml_order.py'
+add 'app/vendor/bime-word/scripts/bime_word.py'
+add 'app/vendor/bime-word/scripts/preview.py'
+add 'app/vendor/bime-word/scripts/validate_skill.py'
+add 'app/vendor/bime-word/tests/ACCEPTANCE.md'
+add 'app/vendor/bime-word/tests/test_authority.py'
+add 'app/vendor/bime-word/tests/test_bime_word.py'
+$ count
+40

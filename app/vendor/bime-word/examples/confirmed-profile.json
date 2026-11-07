@@ -1,0 +1,8 @@
+{
+  "language": "zh",
+  "font_zh": "標楷體",
+  "heading_separator": ".",
+  "pagination_origin": "acknowledgements",
+  "pagination_confirmed": true,
+  "bibliography": "refs.json"
+}

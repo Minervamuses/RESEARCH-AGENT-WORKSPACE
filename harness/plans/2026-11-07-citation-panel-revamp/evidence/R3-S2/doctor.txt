@@ -1,0 +1,36 @@
+{
+  "python": "3.13.14",
+  "platform": "Linux-6.6.87.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "packages": {
+    "python-docx": "1.2.0",
+    "lxml": "6.1.3"
+  },
+  "executables": {
+    "pandoc": "/home/minervamuses/miniconda3/envs/app/bin/pandoc",
+    "soffice": null,
+    "libreoffice": null,
+    "pdftoppm": "/usr/bin/pdftoppm",
+    "fc-match": "/usr/bin/fc-match"
+  },
+  "fonts": {
+    "DFKai-SB": {
+      "resolved_family": "DejaVu Sans",
+      "note": "A substitute family is not proof that the requested font is installed."
+    },
+    "MingLiU": {
+      "resolved_family": "DejaVu Sans",
+      "note": "A substitute family is not proof that the requested font is installed."
+    },
+    "Times New Roman": {
+      "resolved_family": "Liberation Serif",
+      "note": "A substitute family is not proof that the requested font is installed."
+    }
+  },
+  "network_required_at_runtime": false,
+  "pandoc_version": "pandoc 3.13",
+  "readiness": {
+    "audit": true,
+    "convert_and_insert": true,
+    "png_preview": false
+  }
+}

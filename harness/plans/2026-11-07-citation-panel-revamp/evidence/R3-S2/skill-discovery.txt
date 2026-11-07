@@ -1,0 +1,6 @@
+/home/minervamuses/miniconda3/envs/app/lib/python3.13/site-packages/langgraph/cache/base/__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+skills_dir: /home/minervamuses/research-agent-workspace/app/skills
+names: ['_prompt-master', 'academic-paper-writing', 'citation', 'skill-installer']
+bime-word present: False
+any path under vendor: False

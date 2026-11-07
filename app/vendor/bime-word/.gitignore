@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+preview/
+*.audit.json
+*.audit.md
+*.bime.json

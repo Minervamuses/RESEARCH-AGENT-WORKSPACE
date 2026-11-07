@@ -1,0 +1,6 @@
+interface:
+  display_name: "bime_word"
+  short_description: "生機論文 Word 轉檔、局部新增與來源式格式檢查"
+  default_prompt: "Use $bime-word to convert, extend, or audit my Word document against the BIME Appendix 17 rules (regulation > friend template > CLAUDE.md). Preserve the original and report which source each finding rests on."
+policy:
+  allow_implicit_invocation: true
