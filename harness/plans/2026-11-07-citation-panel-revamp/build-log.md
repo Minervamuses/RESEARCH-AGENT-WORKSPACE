@@ -6,7 +6,7 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| R1 | Not started | — | — | R1-S1 唯讀核對 |
+| R1 | In progress | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt) | — | R1-S2 核對測試基線 |
 | R2 | Not started | — | — | 等 R1 |
 | R3 | Not started | — | — | 等 R1 |
 | R4 | Not started | — | — | 等 R2、R3 |
@@ -60,3 +60,17 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - 結果：本計劃本來就不授權付費 API，所以 D15 的整次停止條件，實際上只剩「沒有可執行的獨立步驟」這一項；完整測試、`poetry add`、編譯仍受兩次修正上限與十分鐘規則約束。
 - 補充 RA2 的出處：A–C 是代理在核對時提出的，使用者採用後自行修訂計劃。
 - 結構檢查與 `git diff --check` 的結果記錄在這次提交的訊息中。RA1–RA3 的計劃修訂一起本地提交；R1–R6 仍為 Not started。
+
+### R1-S1 唯讀前置核對（2026-11-07，觀察）
+
+證據：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)（指令輸出原文）。
+
+1. 分支：`git branch --show-current` → `GUI`；HEAD `83eb38ecb3e0187ecfea09997eba4eeab0c1a478`（RA3）。PLANS 的基線寫 `5aea53c`，之後只有計劃 commit（05df764、665cabe、83eb38e），沒有產品程式碼變更。
+2. 計劃檔：`git ls-files harness/plans/2026-11-07-citation-panel-revamp` 列出 11 檔（含 `build/` 的 6 個 phase 檔），工作樹沒有對應修改，不需補 commit。
+3. 與本計劃無關的未追蹤項目，只記錄、不動：`note/20261106/`（使用者的筆記）；根目錄的 `.bash_profile`、`.bashrc`、`.claude/`、`.gitconfig`、`.gitmodules`、`.idea`、`.mcp.json`、`.profile`、`.ripgreprc`、`.vscode`、`.zprofile`、`.zshrc` 是沙箱掛載的 `/dev/null` 字元裝置（`crw-rw-rw- 1,3`，nobody:nogroup），不是使用者檔案，一律不 stage。
+4. 程式位置（`grep -n`，行號相對 `app/`）：與 PLANS 基線一致。差異只有行號：`CitationPanel.tsx` Insert callback 第 145 行、成功訊息「Insert at cursor」第 304 行、Export 按鈕第 257 行；`citations.ts` 的 `citationInsertion`／`insertIntoSnapshot` 第 214／219 行、`ExportFormat` 第 272 行、`removeConfirmation` 第 152 行；`App.tsx` `editorCursorRef` 第 1089 行、`onCursor` 第 2833 行、`cursorOffset` 第 2842 行；`DocumentEditor.tsx` `fontSize: 14`／`lineHeight: 23` 第 183–184 行、`onCursor` 第 276 行、補全第 295 行；`styles.css` `.citation-panel` 第 1266 行（`.78rem`）、`.citation-badge` 第 1276 行（`.68rem`）；`desktop/src` 沒有 `localStorage`；`service.py` `_bibliography_export` 第 2372 行、bib 分支第 2389 行、`_markdown_snapshot` 的 `.bib instead` 第 2266 行；`csl_render.py` `EXPORT_SUFFIXES` 第 511 行、`export_bib` 第 529 行、Pandoc 搜尋第 68–71 行；`contract.json` 第 789／1201 行、`fixtures.json` 第 2210／2252 行、`protocol.ts` 第 995／1169 行、`protocol.rs` 第 999／2454–2455 行；`agent/skills/metadata.py:48` 為 `skills_dir.glob("*/SKILL.md")`；README 第 37、100、101、132 行，citation README 第 41、55 行。
+5. zip：`sha256sum` = `66052fb91d5f9fbccff4b7eb98c3ea56779ec55192360e1772f8179e26303ab2`，與 PLANS 相同。解壓到 `$TMPDIR/bimezip.UTdf/`，頂層 `bime-word/`、約 512K；`sha256sum -c manifest.sha256` 結束碼 0，39 行全部 OK；`scripts/bime/__init__.py:2` 為 `__version__ = '1.1.5'`；`requirements.txt` 與 PLANS 相同。
+6. Conda `app` 工具：Poetry 2.4.1、npm 11.16.0（node v24.18.0）、cargo 1.97.1、pandoc 3.13、Python 3.13.14 都可執行；`import docx`、`import lxml` 都是 `ModuleNotFoundError`，與基線相同（由 R3-S1 處理）。
+7. 另記 `/home/minervamuses/論文/`（唯讀）的 HEAD `59e9dc1d5096f5f0b7767a4654ca4753ca88012f` 與 `git status --short`：` M CLAUDE.md`、` M proposal.docx`、` M references.json`、`?? 076aca99-…docx`、`?? RESEARCH.md`、`?? proposal.pdf`。R3-S3 與 R6-S2 以此比對。
+
+結論：所有項目符合，不需修改後續階段檔。

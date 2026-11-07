@@ -1,0 +1,83 @@
+# R1-S1 preflight (observed 2026-11-07)
+## branch / HEAD
+GUI
+83eb38ecb3e0187ecfea09997eba4eeab0c1a478
+## git status --short (repo root)
+?? .bash_profile
+?? .bashrc
+?? .claude/
+?? .gitconfig
+?? .gitmodules
+?? .idea
+?? .mcp.json
+?? .profile
+?? .ripgreprc
+?? .vscode
+?? .zprofile
+?? .zshrc
+?? harness/plans/2026-11-07-citation-panel-revamp/evidence/
+?? note/20261106/
+## root untracked entries are sandbox /dev/null mounts:
+crw-rw-rw- 1 nobody nogroup 1, 3 Nov  7 14:10 .bashrc
+crw-rw-rw- 1 nobody nogroup 1, 3 Nov  7 14:10 .mcp.json
+## zip
+66052fb91d5f9fbccff4b7eb98c3ea56779ec55192360e1772f8179e26303ab2  /home/minervamuses/論文/bime_word-1.1.5.zip
+## manifest check in $TMPDIR extract
+.gitignore: OK
+README.md: OK
+SKILL.md: OK
+agents/openai.yaml: OK
+assets/defaults.json: OK
+examples/chapter.md: OK
+examples/citations.md: OK
+examples/confirmed-profile.json: OK
+examples/insert.md: OK
+examples/reference-manifest.json: OK
+examples/reference-profile.json: OK
+examples/refs.json: OK
+examples/thesis-outline.md: OK
+references/ambiguities.md: OK
+references/author-decisions.md: OK
+references/authority.md: OK
+references/friend-template.md: OK
+references/rules-guide.md: OK
+references/rules.json: OK
+references/source-excerpts.md: OK
+references/source/bime-format-original.docx: OK
+references/technical-sources.md: OK
+references/workflows.md: OK
+requirements-test.txt: OK
+requirements.txt: OK
+scripts/bime/__init__.py: OK
+scripts/bime/audit.py: OK
+scripts/bime/cite.py: OK
+scripts/bime/cli.py: OK
+scripts/bime/common.py: OK
+scripts/bime/convert.py: OK
+scripts/bime/insert.py: OK
+scripts/bime/ooxml_order.py: OK
+scripts/bime_word.py: OK
+scripts/preview.py: OK
+scripts/validate_skill.py: OK
+tests/ACCEPTANCE.md: OK
+tests/test_authority.py: OK
+tests/test_bime_word.py: OK
+## version
+2:__version__ = '1.1.5'
+## tools
+Poetry (version 2.4.1)
+11.16.0
+v24.18.0
+cargo 1.97.1 (c980f4866 2026-06-30)
+pandoc 3.13
+Python 3.13.14
+ModuleNotFoundError: No module named 'docx'
+ModuleNotFoundError: No module named 'lxml'
+## 論文 repo (read-only) HEAD and status
+59e9dc1d5096f5f0b7767a4654ca4753ca88012f
+ M CLAUDE.md
+ M proposal.docx
+ M references.json
+?? 076aca99-82f1-4ff3-aa28-dc63da26ec5e.docx
+?? RESEARCH.md
+?? proposal.pdf
