@@ -1,0 +1,45 @@
+3123,3166d3122
+<  },
+<  {
+<   "id": "yao2023react",
+<   "author": [
+<    {
+<     "family": "Yao",
+<     "given": "Shunyu"
+<    },
+<    {
+<     "family": "Zhao",
+<     "given": "Jeffrey"
+<    },
+<    {
+<     "family": "Yu",
+<     "given": "Dian"
+<    },
+<    {
+<     "family": "Du",
+<     "given": "Nan"
+<    },
+<    {
+<     "family": "Shafran",
+<     "given": "Izhak"
+<    },
+<    {
+<     "family": "Narasimhan",
+<     "given": "Karthik"
+<    },
+<    {
+<     "family": "Cao",
+<     "given": "Yuan"
+<    }
+<   ],
+<   "issued": {
+<    "date-parts": [
+<     [
+<      2023
+<     ]
+<    ]
+<   },
+<   "URL": "https://openreview.net/forum?id=WE_vluYUL-X",
+<   "type": "paper-conference",
+<   "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+<   "container-title": "The Eleventh International Conference on Learning Representations (ICLR 2023)"

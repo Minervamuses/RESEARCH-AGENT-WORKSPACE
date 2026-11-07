@@ -1,0 +1,3 @@
+bime-proposal-profile.json
+proposal.md
+references.json

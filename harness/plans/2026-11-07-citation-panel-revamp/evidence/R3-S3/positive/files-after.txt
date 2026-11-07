@@ -1,0 +1,7 @@
+bime-proposal-profile.json
+proposal.bime.audit.json
+proposal.bime.audit.md
+proposal.bime.bime.json
+proposal.bime.docx
+proposal.md
+references.json

@@ -1,0 +1,7 @@
+paragraph count: 175
+cover lines: ['國立臺灣大學生物資源暨農學院生物機電工程學系', '碩士論文', 'Department of Biomechatronics Engineering', 'College of Bioresources and Agriculture', 'National Taiwan University', 'Master Thesis', '學術寫作研究輔助AI代理系統之設計與評估', 'Design and Evaluation of an Agentic AI System for Academic Writing and Research Assistance', '江重勳', 'Chung-Hsun Chiang']
+'參考文獻'/'References' paragraph indexes: [44, 132] (first is the TOC entry, last is the heading)
+non-empty paragraphs after the last heading: 42
+first: Anthropic. 2024. Introducing Contextual Retrieval. Anthropic Engineering. Anthropic. Available at: https://www.anthropic
+last: Zhang, B., K. Lazuka, and M. Murag. 2025. Equipping agents for the real world with Agent Skills. Anthropic Engineering. 
+contains a Yao entry: True

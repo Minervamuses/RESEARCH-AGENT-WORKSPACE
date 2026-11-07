@@ -1,0 +1,518 @@
+{
+  "schema_version": 2,
+  "operation": "audit",
+  "source": "proposal.bime.docx",
+  "source_sha256": "a3b9a84458e2c80789c336c00d44de84b626cb6e1acad1546e19749aaec2bdcd",
+  "source_rule_sha256": "89721138dda00df0c4d07ee826f128ad83fc5f2771d887a84cdbdf8777abfdc6",
+  "authority_order": [
+    "regulation",
+    "friend_template",
+    "author_claude_md",
+    "implementation_default"
+  ],
+  "scope": "fragment",
+  "overall": "machine_checks_passed_review_required",
+  "summary": {
+    "error": 0,
+    "warning": 0,
+    "conflict": 0,
+    "unknown": 0,
+    "manual": 11
+  },
+  "layout_verified": false,
+  "policy": {
+    "language": "zh",
+    "font_zh": "標楷體",
+    "font_en": "Times New Roman",
+    "body_size_pt": 12,
+    "heading_separator": ".",
+    "auto_number_headings": true,
+    "heading_sizes_pt": [
+      18,
+      14,
+      14,
+      12,
+      12,
+      12
+    ],
+    "front_title_size_pt": 18,
+    "chapter_page_break": true,
+    "pagination_origin": "acknowledgements",
+    "pagination_confirmed": false,
+    "paragraph_after_pt": 0,
+    "first_line_indent_chars": 2,
+    "document_grid": true,
+    "header_distance_cm": 1.5,
+    "footer_distance_cm": 1.0,
+    "page_number_size_pt": 10,
+    "title_page": "same_as_cover",
+    "cover": true,
+    "shift_heading_level": -1,
+    "drop_todo": true,
+    "bibliography": "/tmp/claude-1000/bime-trial.nWo3/positive/references.json",
+    "role_overrides": {},
+    "section_roles": {},
+    "reference_manifest": null
+  },
+  "metrics": {
+    "paragraphs": 404,
+    "body_runs_checked": 385,
+    "automatic_color_runs": 0,
+    "abstracts": {},
+    "sections": [
+      {
+        "index": 1,
+        "regions": [
+          "cover"
+        ],
+        "body_range": [
+          1,
+          18
+        ],
+        "size_twips": {
+          "w": "11906",
+          "h": "16838"
+        }
+      },
+      {
+        "index": 2,
+        "regions": [
+          "body",
+          "references",
+          "toc"
+        ],
+        "body_range": [
+          19,
+          180
+        ],
+        "size_twips": {
+          "w": "11906",
+          "h": "16838"
+        }
+      }
+    ],
+    "language": {
+      "value": "zh",
+      "source": "profile"
+    }
+  },
+  "coverage": {
+    "STRUCTURE": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "SPECIAL_PAGES": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "ABSTRACT_LENGTH": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "ABSTRACT_CONTENT": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "ABSTRACT_LIST": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "KEYWORDS": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "HEADING_NUMBER": {
+      "tested": 19,
+      "status": "machine_checked_with_manual_review"
+    },
+    "CAPTION_NUMBER": {
+      "tested": 4,
+      "status": "machine_checked_with_manual_review"
+    },
+    "CAPTION_POSITION": {
+      "tested": 4,
+      "status": "machine_pass"
+    },
+    "CAPTION_COMPLETE": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "PAGE_FORMAT": {
+      "tested": 2,
+      "status": "machine_checked_with_manual_review"
+    },
+    "PAGE_ORIGIN": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "PAGE_POSITION": {
+      "tested": 1,
+      "status": "machine_checked_with_manual_review"
+    },
+    "MARGINS": {
+      "tested": 9,
+      "status": "machine_pass"
+    },
+    "NUMERAL": {
+      "tested": 59,
+      "status": "machine_checked_with_manual_review"
+    },
+    "SI_UNITS": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "TERMINOLOGY": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "PHOTO_ORIGIN": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "IMAGE_SCALE": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "REF_CITED": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "REF_ORDER": {
+      "tested": 42,
+      "status": "machine_checked_with_manual_review"
+    },
+    "JOURNAL_ABBREVIATION": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "CITATION_FORM": {
+      "tested": 295,
+      "status": "machine_checked_with_manual_review"
+    },
+    "REF_TYPES": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "FONT_ZH": {
+      "tested": 233,
+      "status": "machine_pass"
+    },
+    "FONT_EN": {
+      "tested": 112,
+      "status": "machine_pass"
+    },
+    "FONT_SIZE": {
+      "tested": 385,
+      "status": "machine_pass"
+    },
+    "LINE_SPACING": {
+      "tested": 59,
+      "status": "machine_checked_with_manual_review"
+    },
+    "TEXT_COLOR": {
+      "tested": 385,
+      "status": "machine_pass"
+    },
+    "PUNCTUATION": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "PAGE_SIZE": {
+      "tested": 2,
+      "status": "machine_pass"
+    },
+    "CHAPTER_NAMES": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "BACKMATTER_UNNUMBERED": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "TOC_CONTENT": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "COVER_CONTENT": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "SIGNATURE_CONTENT": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "WRITING_LANGUAGE": {
+      "tested": 0,
+      "status": "manual"
+    },
+    "HOUSE_TYPOGRAPHY": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "HOUSE_CAPTION": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "HOUSE_FOOTER": {
+      "tested": 0,
+      "status": "not_checked"
+    },
+    "AUTHOR_THESIS_PARTS": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    },
+    "CITATION_KEYS": {
+      "tested": 0,
+      "status": "not_applicable_to_selected_scope"
+    }
+  },
+  "findings": [
+    {
+      "rule_id": "LINE_SPACING",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Whole-document writing language is zh (profile); every prose paragraph, including acknowledgements and abstracts, is checked against 1.5 spacing (decision taken from the friend template).",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "三.2",
+        "paragraph_1based": 64,
+        "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+        "strength": "ambiguous"
+      },
+      "decision": {
+        "resolution": "依全篇撰寫語言（三.1「論文以中文或英文撰寫」）統一行距：中文論文全篇 1.5 倍，英文論文全篇 2 倍；前置頁的散文（誌謝、摘要）同樣適用。1.5 倍採 Word「多行 1.5」並保留文件格線（每行 18 pt）。",
+        "resolved_by": "friend_template",
+        "basis": "朋友範本 Normal 樣式 line=360 auto 套用全篇，sectPr docGrid type=lines linePitch=360。"
+      }
+    },
+    {
+      "rule_id": "PAGE_FORMAT",
+      "severity": "manual",
+      "location": "word/document.xml / section[2]",
+      "locations": [
+        "word/document.xml / section[2]"
+      ],
+      "count": 1,
+      "message": "Front matter and body share a section; inspect field switches and the exact numbering boundary.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.4",
+        "paragraph_1based": 12,
+        "quote": "4.頁碼之編排：正文前之頁碼以小寫羅馬字i, ii標示，誌謝為第i頁;正文則以阿拉伯字1, 2標示。頁碼須置於底部中間。",
+        "strength": "explicit"
+      }
+    },
+    {
+      "rule_id": "CAPTION_COMPLETE",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Judge whether each figure/table is independently understandable, including axes, units, and necessary explanation.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.3",
+        "paragraph_1based": 11,
+        "quote": "3.文字敘述之編號：內文章節用1.1或1-1。圖表按章以圖1-1，表1-1等順序表示。表格及圖片均應有一獨立完整之內容；表格之標題應列在表格上方，圖片之標題則列在圖片下方。",
+        "strength": "explicit"
+      }
+    },
+    {
+      "rule_id": "NUMERAL",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Heuristic only: numerals inside quotations, names, idioms and dates need reading in context.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.6(1)",
+        "paragraph_1based": 15,
+        "quote": "(1).文字敘述中之數字，除十位以下之數字外, 請用阿拉伯數字表示。",
+        "strength": "ambiguous"
+      },
+      "decision": {
+        "resolution": "大於十的數字用阿拉伯數字；十以下可用中文數字；同文混用不強制統一。稽核以啟發式找出大於十的中文數字，只給 warning。",
+        "resolved_by": "author_claude_md",
+        "basis": "CLAUDE.md：「numbers above ten in Arabic numerals (Chinese numerals below ten are allowed, mixing is left as is)」。"
+      }
+    },
+    {
+      "rule_id": "CITATION_FORM",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Review author-year syntax, and two versus three-or-more authors. Citation keys and author counts cannot be proven from typography alone.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.8(4)",
+        "paragraph_1based": 24,
+        "quote": "（4）正文中引用參考文獻時，以括號註明作者姓氏及發表年份，或作者之後以括號註明年份。例：(Smith, 1985)，Smith (1985)，(林與張，1960)， (Smith and Kline, 1968)，(Smith, 1985; Wang and Lin, 1992)。作者若超過三人（含三人），英（歐）文採用(Smith et al., 1990)，中文採用(陳等人，1989)。",
+        "strength": "explicit"
+      }
+    },
+    {
+      "rule_id": "REF_CITED",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "No verified reference manifest supplied. Exact two-way citation matching is not claimed.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.8(1)",
+        "paragraph_1based": 20,
+        "quote": "（1）以確經正文中引用者為限。",
+        "strength": "explicit"
+      }
+    },
+    {
+      "rule_id": "REF_TYPES",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Apply the nine source-specific reference examples; do not substitute APA/IEEE or infer missing bibliographic facts.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.8(5)–(13)",
+        "paragraph_1based": 25,
+        "quote": "（5）參考文獻若為期刊上之論文，可依下列次序書寫：",
+        "strength": "example"
+      },
+      "decision": {
+        "resolution": "依二.8(5)–(13) 範例為格式樣板；arXiv 預印本保持原樣（標 arXiv 編號）；網頁以公司為出版者、不寫出版地；會議論文集有來源載明時才列編者與地點；作者自己的 repository 以軟體條目列出，正文以 commit 作為定位。期刊名不用斜體（三個期刊範例中兩個未用斜體）。",
+        "resolved_by": "author_claude_md",
+        "basis": "CLAUDE.md Reference list 一節的 Author decisions。"
+      }
+    },
+    {
+      "rule_id": "JOURNAL_ABBREVIATION",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Check recognized journal abbreviations against supplied verified information; full ISO4/ASAE tables are not in this attachment.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.8(3)",
+        "paragraph_1based": 22,
+        "quote": "（3）英（歐）文雜誌名稱能縮寫者請用縮寫，縮寫方法以學術界通用為準。可參考International Standard ISO4-1984(E)。",
+        "strength": "explicit"
+      },
+      "decision": {
+        "resolution": "只採用使用者在書目資料中提供並查證過的縮寫（container-title-short）；沒有就用全名並列入人工項。",
+        "resolved_by": "author_claude_md",
+        "basis": "二.8(3)；CLAUDE.md：「journal names ISO 4 abbreviated」。"
+      }
+    },
+    {
+      "rule_id": "SI_UNITS",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Check SI primacy, optional parenthetical non-SI units, and dimensions semantically.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.6(2)",
+        "paragraph_1based": 16,
+        "quote": "(2).單位一律採用SI Units(國際單位)，其規定詳美國農業工程師學會出版之ASAE Standards。如需要採用其他單位如台制或英制者，須以SI制為主要單位，而再以括弧列明其他單位。",
+        "strength": "explicit"
+      }
+    },
+    {
+      "rule_id": "TERMINOLOGY",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Common symbols need no translation; judge terminology in context.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "二.6(3)",
+        "paragraph_1based": 17,
+        "quote": "(3).習見之符號、如：m；kg；ppm；pH等不必另用中文。專門名詞無適當譯名者，從原文。",
+        "strength": "explicit"
+      }
+    },
+    {
+      "rule_id": "PUNCTUATION",
+      "severity": "manual",
+      "location": "document",
+      "locations": [
+        "document"
+      ],
+      "count": 1,
+      "message": "Review punctuation in prose; tables, equations, and headings have different roles.",
+      "actual": null,
+      "expected": null,
+      "excerpt": null,
+      "source": {
+        "authority": "regulation",
+        "section": "三.2",
+        "paragraph_1based": 64,
+        "quote": "2.原則上中文以12號楷書（細明體及標楷體為主），英文以12號Times New Roman打字，中文撰寫以1.5間距，英文則以雙行間距，字體顏色為黑色，文內要加標點，全文不得塗汙刪節，不得使用複寫紙。",
+        "strength": "explicit"
+      }
+    }
+  ],
+  "limitations": [
+    "No full Word layout engine was run; XML indices are not page numbers.",
+    "Header/footer heights are estimated from font size and spacing, not measured.",
+    "Actual font installation/substitution and visual clipping require render-and-inspect.",
+    "Conditional table styles, complex scripts, shapes, and all possible fields are not exhaustively resolved.",
+    "Only regulation rules are institutional requirements; friend-template and CLAUDE.md decisions fill gaps and are labelled by authority."
+  ]
+}

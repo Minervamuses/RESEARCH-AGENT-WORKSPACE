@@ -1,0 +1,14 @@
+source: git -C /home/minervamuses/論文 show 59e9dc1d5096f5f0b7767a4654ca4753ca88012f:<file> (read-only)
+trial root (not committed): /tmp/claude-1000/bime-trial.nWo3
+ed3a0e84d1d7701c7772448e2e2835bc1075ffefaac9d42a31a5b6bc28cf0f89  positive/proposal.md
+af01074a7aa25fae53bf6970a3a86b07a34cd4a2bad8cb902f5fdabf7c94d6a5  positive/references.json
+8a54bd725142626784400027227522aa607f4c40c2d8457c9f2bb3cad28ca2bf  positive/bime-proposal-profile.json
+ed3a0e84d1d7701c7772448e2e2835bc1075ffefaac9d42a31a5b6bc28cf0f89  negative/proposal.md
+5f712973a13370ceb855fc5312c471ead9075f7e15d0569f91e351a4b5314085  negative/references.json
+8a54bd725142626784400027227522aa607f4c40c2d8457c9f2bb3cad28ca2bf  negative/bime-proposal-profile.json
+negative/references.json = positive minus the yao2023react item (json.loads -> filter -> json.dumps(indent=1, ensure_ascii=False) + newline; the positive file round-trips byte-identically under the same dump)
+$ diff positive/references.json negative/references.json | wc -l
+45
+output docx (not committed):
+a3b9a84458e2c80789c336c00d44de84b626cb6e1acad1546e19749aaec2bdcd  positive/proposal.bime.docx
+51179 bytes

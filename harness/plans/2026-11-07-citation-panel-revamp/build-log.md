@@ -8,8 +8,8 @@
 |---|---|---|---|---|
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
-| R3 | In progress | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/) | — | R3-S3 隔離副本試轉 |
-| R4 | Not started | — | — | 等 R2、R3 |
+| R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
+| R4 | Not started | — | — | R4-S1 後端與三方協定（R3-S3 正負案例已通過，R4-S3 前提成立） |
 | R5 | Not started | — | — | S2 的前提（R2-S1）已滿足；S1 等 R4-S2 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
 
@@ -151,3 +151,14 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - `PYTHONDONTWRITEBYTECODE=1 $P/bin/python app/vendor/bime-word/scripts/bime_word.py doctor` → exit 0：python-docx 1.2.0、lxml 6.1.3、pandoc `/home/minervamuses/miniconda3/envs/app/bin/pandoc`（3.13）；`readiness.convert_and_insert: true`（[doctor.txt](evidence/R3-S2/doctor.txt)）。字型 DFKai-SB、MingLiU 以 DejaVu Sans 代替、Times New Roman 以 Liberation Serif 代替；`soffice` 不存在，所以 `png_preview: false`。依計劃只記錄，不安裝字型：只影響在 Word 中的顯示，不影響轉檔。
   - 技能探索：`agent/skills/metadata.py:48` 只掃描 `resolve_skills_dir()`（預設 `app/skills`）下的 `*/SKILL.md`；`agent/` 中沒有任何地方遞迴搜尋 `SKILL.md` 或掃描 `vendor`。以專案的 `discover_skills()` 實際載入：`['_prompt-master', 'academic-paper-writing', 'citation', 'skill-installer']`，沒有 `bime-word`（[skill-discovery.txt](evidence/R3-S2/skill-discovery.txt)）。
   - A10：`pyproject.toml` 的 `packages` 只有 agent、rag、skills，vendor 不進 wheel；`testpaths = ["tests"]`，vendor 內的測試不會被 app 的 pytest 收集。
+
+### R3-S3 以隔離副本試轉（2026-11-07）
+
+- 論文 repo（唯讀）HEAD 固定為 `59e9dc1d5096f5f0b7767a4654ca4753ca88012f`。以 `git -C /home/minervamuses/論文 show 59e9dc1:<檔名>` 讀出 `proposal.md`、`references.json`、`bime-proposal-profile.json`，分別寫入新的暫存根目錄 `$TMPDIR/bime-trial.nWo3/positive/` 與 `negative/`（`/tmp/claude-1000/bime-trial.nWo3/`，不提交）。`proposal.md` 沒有任何圖片（`grep` 無 `![`／`<img`），不需複製圖片。
+- 輸入：正向的 `references.json` 是 HEAD 版本，69 筆，含 `yao2023react`（使用者工作樹目前只有 68 筆，本步不依賴它）。負向只刪除 `yao2023react` 這一筆：`json.loads` → 過濾 → `json.dumps(indent=1, ensure_ascii=False)` 加換行；正向檔以同樣方式 dump 後位元組相同，所以兩者差異只有該筆（`diff` 45 行，[negative/references-diff.txt](evidence/R3-S3/negative/references-diff.txt)）。其他兩個輸入相同。各檔 SHA-256 記在 [inputs.txt](evidence/R3-S3/inputs.txt)，R4-S3 可用來核對或從同一 commit 重建。
+- 指令：在 repo 根目錄設 `bime_vendor_script="$PWD/app/vendor/bime-word/scripts/bime_word.py"`，分別以 `positive/`、`negative/` 為工作目錄執行 `PYTHONDONTWRITEBYTECODE=1 PATH=$P/bin:$PATH $P/bin/python "$bime_vendor_script" convert proposal.md -o proposal.bime.docx --config bime-proposal-profile.json --bibliography references.json --scope fragment`。執行前兩處都沒有 `proposal.bime.docx`。
+- **正向結果（觀察）**：exit **0**，約 1 秒；stderr 空白。stdout JSON：`{"output": "proposal.bime.docx", "language": "zh", "audit": {"error": 0, "warning": 0, "conflict": 0, "unknown": 0, "manual": 11}, "reports": ["proposal.bime.audit.json", "proposal.bime.audit.md"], "operation_report": "proposal.bime.bime.json", "layout_verified": false}`。產生 `proposal.bime.docx` 與三份報告 `proposal.bime.audit.json`、`proposal.bime.audit.md`、`proposal.bime.bime.json`（報告與 stdout／stderr／exit 存於 [evidence/R3-S3/positive/](evidence/R3-S3/positive/)；docx 不提交，SHA-256 與大小記在 inputs.txt）。python-docx 讀取：175 段；封面含「國立臺灣大學生物資源暨農學院生物機電工程學系」「碩士論文」、中文題目「學術寫作研究輔助AI代理系統之設計與評估」與英文題目；最後一個「參考文獻」標題之後有 42 段參考文獻（第一筆 Anthropic 2024，最後一筆 Zhang 2025），含 Yao 的條目（[positive/docx-read.txt](evidence/R3-S3/positive/docx-read.txt)）。
+- **負向結果（觀察）**：exit **2**，stdout 空白，stderr：`bime_word: Citation keys not found in the bibliography (nothing is invented): yao2023react`；不是 `Output exists`，也沒有產生 docx 或報告（[evidence/R3-S3/negative/](evidence/R3-S3/negative/)）。
+- 兩個案例都達到成功標準，沒有 G5／R4-S3 的未解驗收項目。
+- 論文 repo：`git status --short` 與開始前、也與 R1-S1 記錄相同；HEAD 不變。
+- **交接給 R4**：vendor 腳本 `app/vendor/bime-word/scripts/bime_word.py`；stdout 欄位 `output`、`language`、`audit.{error,warning,conflict,unknown,manual}`、`reports`（audit.json、audit.md）、`operation_report`、`layout_verified`；報告路徑相對於 `-o` 的位置。R4-S3 從 `positive/` 只複製三個輸入（不含 docx 與報告）；暫存目錄若已消失，就以同一 commit 重建，並用 inputs.txt 的 SHA-256 核對。

@@ -1,0 +1,306 @@
+{
+  "operation": "convert",
+  "source": "proposal.md",
+  "source_sha256": "ed3a0e84d1d7701c7772448e2e2835bc1075ffefaac9d42a31a5b6bc28cf0f89",
+  "output": "proposal.bime.docx",
+  "output_sha256": "a3b9a84458e2c80789c336c00d44de84b626cb6e1acad1546e19749aaec2bdcd",
+  "scope": "fragment",
+  "language": "zh",
+  "references": {
+    "cited": [
+      "anthropic2024contextual",
+      "asai2026openscholar",
+      "bhattacharyya2023fabricated",
+      "boteva2016nfcorpus",
+      "chen2024m3",
+      "gero2022sparks",
+      "grattafiori2024llama3",
+      "hendricks2020crossref",
+      "jakesch2023cowriting",
+      "jarvelin2002cumulated",
+      "kapoor2024agents",
+      "karpukhin2020dpr",
+      "kleppmann2019localfirst",
+      "kuzi2020hybrid",
+      "lala2023paperqa",
+      "lee2022coauthor",
+      "lee2025critical",
+      "lewis2020rag",
+      "li2025agriculture",
+      "liang2024mapping",
+      "liu2024agentbench",
+      "liu2023verifiability",
+      "lu2024aiscientist",
+      "magesh2025legal",
+      "nagli2025deepseek",
+      "nature2023groundrules",
+      "nogueira2019rerank",
+      "hermesagent",
+      "openai2023outage",
+      "priem2022openalex",
+      "rajpurkar2016squad",
+      "robertson2009bm25",
+      "shao2024storm",
+      "skarlinski2024paperqa2",
+      "sumers2024coala",
+      "thakur2021beir",
+      "tkaczyk2024myth",
+      "wadden2020scifact",
+      "walters2023fabrication",
+      "wang2024autosurvey",
+      "yao2023react",
+      "anthropic2025skills"
+    ],
+    "missing_fields": {
+      "liu2024agentbench": [
+        "page"
+      ],
+      "sumers2024coala": [
+        "volume",
+        "page"
+      ],
+      "thakur2021beir": [
+        "page"
+      ],
+      "yao2023react": [
+        "page"
+      ]
+    },
+    "uncited": [
+      "agrawal2024references",
+      "anthropic2024mcp",
+      "cohen1960kappa",
+      "cormack2009rrf",
+      "doi2025handbook",
+      "dwivedi2023sowhat",
+      "gao2023alce",
+      "gao2023ragsurvey",
+      "gregor2013positioning",
+      "hevner2004design",
+      "hevner2007three",
+      "huang2025hallucination",
+      "ji2023hallucination",
+      "kasneci2023chatgpt",
+      "lee2024designspace",
+      "lund2023academic",
+      "mcnemar1947",
+      "mialon2024gaia",
+      "noy2023productivity",
+      "peffers2007dsrm",
+      "schick2023toolformer",
+      "thorp2023notauthor",
+      "venable2016feds",
+      "wang2024agentsurvey",
+      "wilkinson2016fair",
+      "wilson1927",
+      "xi2025agents"
+    ],
+    "stroke_keys_missing": []
+  },
+  "decisions": [
+    {
+      "type": "todo_dropped",
+      "message": "20 [TODO: …] placeholder(s) were left out of the Word file; the Markdown keeps them.",
+      "items": [
+        {
+          "line": 15,
+          "text": "[TODO: 附件十七（2026-09-29 取得）已對照過：封面資訊、圖表編號與標題、正文引用寫法、參考文獻欄位與期刊縮寫已套用；節次編號、頁碼、參考文獻的排序與格式、字型與行距改由 bime_word 轉檔產生（設定 `bime-pro"
+        },
+        {
+          "line": 97,
+          "text": "[TODO: 上述研究缺口只根據本文所回顧的文獻；日後須以系統性檢索（例如 Association for Computing Machinery（ACM）Digital Library、Association for Computatio"
+        },
+        {
+          "line": 128,
+          "text": "[TODO: 本地執行所用的模型與硬體規格，待作者決定。]"
+        },
+        {
+          "line": 134,
+          "text": "[TODO: 產生脈絡所用的模型，建議沿用第一階段曾使用的開源模型 Llama 3.3 70B Instruct，以符合可本地部署的方向；待作者確認。]"
+        },
+        {
+          "line": 134,
+          "text": "[TODO: 第一階段發現脈絡與原文的前後順序會影響結果（細節見 git tag proposal-long-2026-10-08 的「初步結果」），建議採用原文在前；待作者確認。]"
+        },
+        {
+          "line": 134,
+          "text": "[TODO: SciFact 與 NFCorpus 的每篇文件在第一階段是整篇作為一個文字區塊，脈絡化檢索「說明文字區塊在文件中的位置」的前提在這兩個語料上並不成立。建議脈絡化檢索只套用在學術論文集與生農語料，BEIR 語料只比較其餘 6 "
+        },
+        {
+          "line": 136,
+          "text": "[TODO: 建議擴充至 20 至 30 篇論文，問題先由大語言模型生成、再由作者逐題審核並標註標準答案段落，或以多個模型生成問題並報告結果的變異；論文數量與問題集的建置方式，待作者確認。]"
+        },
+        {
+          "line": 136,
+          "text": "[TODO: 生農領域的檢索語料待作者提供。]"
+        },
+        {
+          "line": 138,
+          "text": "[TODO: 建議命中率與 MRR 同時報告 k = 1、5、10；建議以逐題的配對比較檢定組合之間的差異，例如 McNemar 檢定 [@mcnemar1947]。作者 2026-10-08 決定兩者都不在計畫書中寫死，留待論文期間決定。"
+        },
+        {
+          "line": 138,
+          "text": "[TODO: 成本的量測方式建議記錄：建置時間、雲端服務費用（使用託管模型時）或圖形處理器（GPU）時間（使用本地模型時），並記錄硬體規格；待作者確認。]"
+        },
+        {
+          "line": 144,
+          "text": "[TODO: 測試案例的規模與類別，建議約 100 題、每類 10 至 12 題；待作者確認。]"
+        },
+        {
+          "line": 144,
+          "text": "[TODO: 建議由第二位標註者獨立標註一部分題目的標準答案，並以 Cohen's kappa 報告一致性 [@cohen1960kappa]。作者 2026-10-08 決定不在計畫書中寫死，留待論文期間決定。]"
+        },
+        {
+          "line": 146,
+          "text": "[TODO: 三組模型的具體選擇，建議：前沿閉源模型用研究系統目前預設的主要模型 Gemini 3.8 Flash或同廠商更高階的模型；約 70B 的開源模型用 Llama 3.3 70B Instruct；小模型用 Qwen3 14B或 "
+        },
+        {
+          "line": 146,
+          "text": "[TODO: Hermes Agent 的版本（本計畫書撰寫時最新為 2026-09-24 發布的 v0.21.5），建議在實驗開始時固定一個版本並記錄；系統比較使用哪一個模型（建議至少用約 70B 的開源模型，預算允許時三組都做）待作者確"
+        },
+        {
+          "line": 146,
+          "text": "[TODO: 建議部分題目重複執行，以估計同一模型多次執行之間的變異；重複次數待作者確認。]"
+        },
+        {
+          "line": 148,
+          "text": "[TODO: 建議以 Wilson 信賴區間報告各比例 [@wilson1927]，以 McNemar 檢定比較同一組題目在不同模型或不同系統之間的差異 [@mcnemar1947]，並逐一分析每一個錯誤。作者 2026-10-08 決定不"
+        },
+        {
+          "line": 152,
+          "text": "[TODO: 案例研究的對象（實驗室成員的稿子與程式碼庫，或筆者自己的論文稿），計畫書暫不指定（作者 2026-10-08 決定）；選定後再補上，並決定取得同意的方式。]"
+        },
+        {
+          "line": 218,
+          "text": "[TODO: 估計方式與各項權重是執行者提出的建議，待作者與指導教授確認後調整。]"
+        },
+        {
+          "line": 218,
+          "text": "[TODO: 定稿後，由作者把進度表填入系上的表單「論文研究進度表.doc」。]"
+        },
+        {
+          "line": 222,
+          "text": "[TODO: 參考文獻清單由 `references.json`（CSL-JSON）依附件十七二.8 的格式產生，只列正文引用的條目。沿用自英文初稿（`c45ffc9`）的條目已於 2026-09-24 查證；新增條目於 2026-09-2"
+        }
+      ]
+    },
+    {
+      "type": "headings",
+      "message": "The first # heading became the document title and ## headings are chapters (shift_heading_level = -1)."
+    },
+    {
+      "type": "writing_language",
+      "rule": "WRITING_LANGUAGE",
+      "message": "Document language zh (profile); line spacing 1.5 applies to the whole document.",
+      "language": "zh"
+    },
+    {
+      "type": "captions",
+      "rule": "HOUSE_CAPTION",
+      "message": "4 caption label(s) normalised to 圖1-1/表1-1 + tab (regulation 二.3, friend template); bold removed from captions."
+    },
+    {
+      "type": "reference_fields",
+      "rule": "REF_TYPES",
+      "message": "Entries rendered without fields their Appendix 17 example shows; nothing was filled in.",
+      "items": {
+        "liu2024agentbench": [
+          "page"
+        ],
+        "sumers2024coala": [
+          "volume",
+          "page"
+        ],
+        "thakur2021beir": [
+          "page"
+        ],
+        "yao2023react": [
+          "page"
+        ]
+      }
+    },
+    {
+      "type": "uncited_references",
+      "rule": "REF_CITED",
+      "message": "Bibliography items never cited were left out (二.8(1)).",
+      "keys": [
+        "agrawal2024references",
+        "anthropic2024mcp",
+        "cohen1960kappa",
+        "cormack2009rrf",
+        "doi2025handbook",
+        "dwivedi2023sowhat",
+        "gao2023alce",
+        "gao2023ragsurvey",
+        "gregor2013positioning",
+        "hevner2004design",
+        "hevner2007three",
+        "huang2025hallucination",
+        "ji2023hallucination",
+        "kasneci2023chatgpt",
+        "lee2024designspace",
+        "lund2023academic",
+        "mcnemar1947",
+        "mialon2024gaia",
+        "noy2023productivity",
+        "peffers2007dsrm",
+        "schick2023toolformer",
+        "thorp2023notauthor",
+        "venable2016feds",
+        "wang2024agentsurvey",
+        "wilkinson2016fair",
+        "wilson1927",
+        "xi2025agents"
+      ]
+    },
+    {
+      "type": "pandoc_warning",
+      "message": "[WARNING] Deprecated: --no-highlight. Use --syntax-highlighting=none instead."
+    },
+    {
+      "type": "field_update",
+      "message": "{{TOC}}: entries link to their headings already; update fields in Word to fill in page numbers."
+    },
+    {
+      "type": "special_pages",
+      "rule": "SPECIAL_PAGES",
+      "message": "The cover follows the regulation sample (封面範例) and is not numbered; the pages after it are numbered from 1."
+    }
+  ],
+  "policy": {
+    "language": "zh",
+    "font_zh": "標楷體",
+    "font_en": "Times New Roman",
+    "body_size_pt": 12,
+    "heading_separator": ".",
+    "auto_number_headings": true,
+    "heading_sizes_pt": [
+      18,
+      14,
+      14,
+      12,
+      12,
+      12
+    ],
+    "front_title_size_pt": 18,
+    "chapter_page_break": true,
+    "pagination_origin": "acknowledgements",
+    "pagination_confirmed": false,
+    "paragraph_after_pt": 0,
+    "first_line_indent_chars": 2,
+    "document_grid": true,
+    "header_distance_cm": 1.5,
+    "footer_distance_cm": 1.0,
+    "page_number_size_pt": 10,
+    "title_page": "same_as_cover",
+    "cover": true,
+    "shift_heading_level": -1,
+    "drop_todo": true,
+    "bibliography": "/tmp/claude-1000/bime-trial.nWo3/positive/references.json",
+    "role_overrides": {},
+    "section_roles": {},
+    "reference_manifest": null
+  },
+  "layout_verified": false,
+  "note": "OOXML formatting is applied. Render and inspect before certifying visual layout."
+}

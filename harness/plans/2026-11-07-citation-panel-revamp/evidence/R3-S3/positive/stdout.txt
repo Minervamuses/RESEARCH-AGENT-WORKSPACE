@@ -1,0 +1,17 @@
+{
+  "output": "proposal.bime.docx",
+  "language": "zh",
+  "audit": {
+    "error": 0,
+    "warning": 0,
+    "conflict": 0,
+    "unknown": 0,
+    "manual": 11
+  },
+  "reports": [
+    "proposal.bime.audit.json",
+    "proposal.bime.audit.md"
+  ],
+  "operation_report": "proposal.bime.bime.json",
+  "layout_verified": false
+}
