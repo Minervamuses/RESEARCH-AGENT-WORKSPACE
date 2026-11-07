@@ -18,7 +18,6 @@ export interface BibliographyEntryDto {
   title: string;
   doi: string | null;
   type: string;
-  verification: "verified" | "unverified";
   citedCount: number;
 }
 

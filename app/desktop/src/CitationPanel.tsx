@@ -116,7 +116,6 @@ export function CitedRow({ item, onJump }: { item: CitedItem; onJump: (use: UseL
           <code>{item.key}</code>
           <span className="citation-meta">{describeEntry(item.entry)}</span>
           <span className="citation-count">{item.count}×</span>
-          {item.entry !== null && <span className={`citation-badge ${item.entry.verification}`}>{item.entry.verification}</span>}
         </summary>
         <UseButtons item={item} onJump={onJump} />
       </details>

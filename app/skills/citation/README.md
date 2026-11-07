@@ -37,7 +37,7 @@ verified save (doi.org CSL-JSON, or the authority record from the arXiv API or t
 
 document text ([@key] / \cite{key})
     → citekeys.find_citations (UTF-16 positions, Pandoc-compatible)
-    → integrity.inspect (missing / uncited / duplicate DOIs / verified-by-bundle via DOI, arXiv ID or NeurIPS URL)
+    → integrity.inspect (missing / uncited / duplicate DOIs; no per-entry verification status)
     → csl_render.render | export_docx | export_markdown (Pandoc citeproc)
 ```
 

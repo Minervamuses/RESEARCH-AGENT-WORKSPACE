@@ -13,7 +13,7 @@
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
 | R7（使用者驗收後追加） | Complete | R7-S1：[evidence/R7-S1/](evidence/R7-S1/)；R7-S2：[evidence/R7-S2/](evidence/R7-S2/)；R7-S3：[evidence/R7-S3/](evidence/R7-S3/) | — | GUI 由使用者驗收（D14） |
-| R8（D17：拿掉 verified 標籤） | In progress | R8-S1：計劃修訂 | — | R8-S2 刪除標籤與判斷 |
+| R8（D17：拿掉 verified 標籤） | In progress | R8-S1：計劃修訂；R8-S2：[evidence/R8-S2/](evidence/R8-S2/) | — | R8-S3 完整套件 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -406,6 +406,22 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - R8-S3：pytest、npm test、npm run build、cargo test 各跑一次（協定三方都改），交接。
 - **授權**：沿用原啟動提示的限制（每步 commit、不切 branch、不 push、不寫論文資料夾、不呼叫付費 API）。
 
+### R8-S2 刪除 verified／unverified 標籤與判斷（2026-11-07）
+
+- **後端**：
+  - `integrity.py`：刪除 `bundle_checker` 與 `BundleCheck`；`entry_summary(item)` 與 `inspect(text, fmt, library_path)` 不再接收或輸出查證狀態；模組說明改為「條目沒有查證狀態，查證發生在 `/citation` 存檔時」。
+  - `service.py`：`bibliography.inspect` 的 entries 與 `bibliography_lookup` 的回傳都不再有 `verification`；工具說明刪去「verification status」。
+  - 保留：`storage` 的 bundle 驗證（存檔重用仍用它）、`library.item_neurips`（去重仍用它）、存檔前的權威查證。
+- **三方協定**：`contract.json`、`protocol.ts`、`protocol.rs` 的 entry 欄位刪去 `verification`（Rust 的 exact keys 同步）。共享夾具的 valid／invalid 範例刪去此欄位；`bibliography-inspect-rejects-extra-entry-field` 改以 `verification` 作為多出的欄位（原為 `abstract`），三方都必須拒絕帶此欄位的回應。
+- **前端**：`CitedRow` 不再渲染標籤，`.citation-badge` 樣式刪除，`BibliographyEntryDto` 刪去欄位。
+- **測試**：
+  - 刪除四個只測標籤的測試（有效 bundle 才 verified、改過的 bundle 不 verified、NeurIPS 官方網址 verified、舊寫死表 bundle 不 verified）。NeurIPS 查詢、存檔與去重的測試在 `test_citation_authority.py`、`test_citation_library.py`，保留不變。
+  - 新增斷言：inspect 的 entry 只有指定的 8 個欄位；`bibliography_lookup` 的 entry 沒有 `verification`；本文引用列不含 verified 與 `citation-badge`。
+  - focused 6 個模組 298 passed（[pytest-focused.txt](evidence/R8-S2/pytest-focused.txt)）；npm test 329 passed（[npm-test-focused.txt](evidence/R8-S2/npm-test-focused.txt)，刪 0 加 0，只改既有測試）。
+  - 四個突變各使測試失敗（[mutations.txt](evidence/R8-S2/mutations.txt)）：`entry_summary` 加回欄位（2 failed）、inspect 回應加回欄位（2 failed，協定拒絕）、`protocol.ts` 接受欄位（3 failed，含 extra-entry-field 夾具）、本文引用列加回標籤（1 failed）。Rust 端沒有做突變，靠 R8-S3 的 cargo 跑同一份共享夾具。
+- **文件**：根目錄 README 的引用面板說明刪去 verified／unverified 及其定義，改寫為「面板不標示條目是否查證過；查證發生在 `/citation` 存入新文獻時」；citation README 的流程圖同步。
+- 第一次跑突變時紀錄檔用了相對路徑，`cd desktop` 後 M3、M4 的結果沒寫進去；檔案已還原（grep 為 0），以絕對路徑重跑 M3、M4 並記錄。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -429,7 +445,8 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R7-S1 | `86497be` |
 | R7-S2 | `7d1017b` |
 | R7-S3 | `044a0e9` |
-| R8-S1 | 本 commit（主旨含 `[R8-S1]`） |
+| R8-S1 | `579f338` |
+| R8-S2 | 本 commit（主旨含 `[R8-S2]`） |
 
 R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
 

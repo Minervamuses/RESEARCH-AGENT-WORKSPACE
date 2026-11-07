@@ -1283,9 +1283,6 @@ h3 {
 .citation-number { font-weight: 600; }
 .citation-meta { color: #4a4f55; overflow-wrap: anywhere; }
 .citation-count { color: #6b7075; }
-.citation-badge { padding: 0 .3rem; border-radius: .2rem; font-size: .9rem; border: 1px solid #c9cccf; }
-.citation-badge.verified { color: #1f6b3a; border-color: #8cc5a0; }
-.citation-badge.unverified { color: #7a5a12; border-color: #d9be7c; }
 .citation-uses { display: flex; flex-wrap: wrap; gap: .3rem; list-style: none; padding: 0; margin: .2rem 0 .4rem; }
 .citation-empty { color: #6b7075; }
 .citation-problems li { margin-bottom: .2rem; }

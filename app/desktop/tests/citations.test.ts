@@ -35,9 +35,9 @@ function inspect(overrides: Partial<BibliographyInspectDto> = {}): BibliographyI
     ],
     documentFormat: "markdown",
     entries: [
-      { key: "a2019", authors: ["Adams"], year: "2019", title: "Alpha", doi: null, type: "article", verification: "unverified", citedCount: 1 },
-      { key: "b2020", authors: ["Brown", "Chen", "Diaz"], year: "2020", title: "Beta", doi: "10.1/x", type: "article-journal", verification: "verified", citedCount: 2 },
-      { key: "c2021", authors: [], year: null, title: "", doi: "10.1/x", type: "", verification: "unverified", citedCount: 0 },
+      { key: "a2019", authors: ["Adams"], year: "2019", title: "Alpha", doi: null, type: "article", citedCount: 1 },
+      { key: "b2020", authors: ["Brown", "Chen", "Diaz"], year: "2020", title: "Beta", doi: "10.1/x", type: "article-journal", citedCount: 2 },
+      { key: "c2021", authors: [], year: null, title: "", doi: "10.1/x", type: "", citedCount: 0 },
     ],
     uses: [
       { key: "b2020", start: at("b2020"), end: at("b2020") + 6, line: 1, group: 0, known: true },

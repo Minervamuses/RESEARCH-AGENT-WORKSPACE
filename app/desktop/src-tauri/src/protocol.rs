@@ -2368,14 +2368,13 @@ fn validate_bibliography_result(method: &str, data: &Map<String, Value>) -> Resu
             }
             for (index, entry) in expect_object_array(&data["entries"], "data.entries", 10_000)?.into_iter().enumerate() {
                 let field = format!("data.entries[{index}]");
-                validate_exact_data_keys(entry, &["key", "authors", "year", "title", "doi", "type", "verification", "citedCount"])?;
+                validate_exact_data_keys(entry, &["key", "authors", "year", "title", "doi", "type", "citedCount"])?;
                 expect_bounded_string(&entry["key"], &format!("{field}.key"), 512)?;
                 validate_string_array(&entry["authors"], &format!("{field}.authors"), 1_000, 1_024)?;
                 validate_nullable_string(entry, "year", 16)?;
                 expect_text(&entry["title"], &format!("{field}.title"), 8_192)?;
                 validate_nullable_string(entry, "doi", 1_024)?;
                 expect_text(&entry["type"], &format!("{field}.type"), 64)?;
-                validate_enum(&entry["verification"], &format!("{field}.verification"), &["verified", "unverified"])?;
                 expect_integer_range(&entry["citedCount"], &format!("{field}.citedCount"), 0, 1_000_000)?;
             }
             for (index, used) in expect_object_array(&data["uses"], "data.uses", 100_000)?.into_iter().enumerate() {

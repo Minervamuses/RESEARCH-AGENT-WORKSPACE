@@ -72,7 +72,7 @@ def test_lookup_runs_in_a_document_turn_without_approval(tmp_path, monkeypatch):
         assert payload["status"] == "ok"
         assert payload["total"] == 2
         assert [e["key"] for e in payload["entries"]] == ["ng2021journal"]
-        assert payload["entries"][0]["verification"] == "unverified"
+        assert "verification" not in payload["entries"][0]
         assert any("bibliography_lookup" in names for names in model.bound_names)
     asyncio.run(run())
 

@@ -110,8 +110,7 @@ test("cited rows offer only Line jumps; uncited rows offer Remove", async () => 
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const entry = {
-    key: "a2019", authors: ["Ann"], year: "2019", title: "T", doi: null, type: "article-journal",
-    verification: "verified" as const, citedCount: 1,
+    key: "a2019", authors: ["Ann"], year: "2019", title: "T", doi: null, type: "article-journal", citedCount: 1,
   };
   const cited = renderToStaticMarkup(createElement(CitedRow as never, {
     item: { key: "a2019", number: null, entry, count: 1, uses: [{ start: 4, end: 12, line: 3 }] },
@@ -120,6 +119,7 @@ test("cited rows offer only Line jumps; uncited rows offer Remove", async () => 
   assert.match(cited, />Line 3<\/button>/);
   assert.equal((cited.match(/<button/g) ?? []).length, 1, "only the Line jump");
   assert.ok(!/Remove|Insert/.test(cited));
+  assert.ok(!/verified|citation-badge/.test(cited), "no verified/unverified badge");
   const uncited = renderToStaticMarkup(createElement(UncitedRow as never, { entry, onRemove: () => undefined, disabled: false }));
   assert.match(uncited, /<button type="button" class="link-button">Remove<\/button>/);
   assert.ok(!uncited.includes("Insert"));

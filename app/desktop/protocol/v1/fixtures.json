@@ -1882,7 +1882,6 @@
               "title": "Deep learning for crops",
               "doi": "10.1000/abc",
               "type": "article-journal",
-              "verification": "verified",
               "citedCount": 1
             },
             {
@@ -1892,7 +1891,6 @@
               "title": "",
               "doi": null,
               "type": "",
-              "verification": "unverified",
               "citedCount": 0
             }
           ],
@@ -4276,7 +4274,6 @@
                 "title": "Deep learning for crops",
                 "doi": "10.1000/abc",
                 "type": "article-journal",
-                "verification": "verified",
                 "citedCount": 1
               },
               {
@@ -4286,7 +4283,6 @@
                 "title": "",
                 "doi": null,
                 "type": "",
-                "verification": "unverified",
                 "citedCount": 0
               }
             ],
@@ -4389,7 +4385,6 @@
                 "title": "Deep learning for crops",
                 "doi": "10.1000/abc",
                 "type": "article-journal",
-                "verification": "verified",
                 "citedCount": 1
               },
               {
@@ -4399,7 +4394,6 @@
                 "title": "",
                 "doi": null,
                 "type": "",
-                "verification": "unverified",
                 "citedCount": 0
               }
             ],
@@ -4502,9 +4496,8 @@
                 "title": "Deep learning for crops",
                 "doi": "10.1000/abc",
                 "type": "article-journal",
-                "verification": "verified",
                 "citedCount": 1,
-                "abstract": "x"
+                "verification": "verified"
               }
             ],
             "uses": [
@@ -4702,7 +4695,6 @@
                 "title": "Deep learning for crops",
                 "doi": "10.1000/abc",
                 "type": "article-journal",
-                "verification": "verified",
                 "citedCount": 1
               },
               {
@@ -4712,7 +4704,6 @@
                 "title": "",
                 "doi": null,
                 "type": "",
-                "verification": "unverified",
                 "citedCount": 0
               }
             ],

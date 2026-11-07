@@ -99,7 +99,7 @@ from skills.citation.citekeys import format_for_path as citation_format_for_path
 from skills.citation.citekeys import keys_in as citation_keys_in
 from skills.citation import csl_render
 from skills.citation import library as citation_library
-from skills.citation.integrity import bundle_checker, entry_summary
+from skills.citation.integrity import entry_summary
 from skills.citation.integrity import inspect as inspect_citations
 from skills.citation.library import LibraryError, search_bibliography
 from skills.citation.library import load as load_bibliography
@@ -387,8 +387,8 @@ class DesktopService:
             description=(
                 "Read-only search of the open project's bibliography (CSL-JSON). Give a key, "
                 "author, title words, year, or DOI; returns up to 20 entries with key, authors, "
-                "year, title, DOI, and verification status. Cite documents only with keys this "
-                "tool returns: [@key] in Markdown, \\cite{key} in LaTeX. It never writes."
+                "year, title, and DOI. Cite documents only with keys this tool returns: "
+                "[@key] in Markdown, \\cite{key} in LaTeX. It never writes."
             ),
         )
 
@@ -2224,8 +2224,7 @@ class DesktopService:
         snapshot = self._bibliography_snapshot(params, required=False)
         fmt = citation_format_for_path(snapshot["path"]) if snapshot is not None else None
         text = snapshot["sourceText"] if snapshot is not None else ""
-        check = bundle_checker(resolve_output_dir(self.config))
-        report = await run_local_work(inspect_citations, text, fmt or "markdown", library_path, check)
+        report = await run_local_work(inspect_citations, text, fmt or "markdown", library_path)
         fingerprint = await run_local_work(citation_library.fingerprint, library_path) if report["bibliography"]["status"] != "missing" else None
         error = report["bibliography"]["error"] or {}
         return {
@@ -2243,7 +2242,6 @@ class DesktopService:
                     "key": entry["key"], "authors": [name for name in entry["authors"] if name],
                     "year": str(entry["year"]) if entry["year"] is not None else None,
                     "title": entry["title"], "doi": entry["doi"], "type": entry["type"] or "",
-                    "verification": entry["verification"],
                     "citedCount": entry["citedCount"] if snapshot is not None else 0,
                 }
                 for entry in report["entries"]
@@ -2431,14 +2429,13 @@ class DesktopService:
             library = load_bibliography(path)
         except LibraryError as exc:
             return json.dumps({"status": "failed", "code": exc.code, "issue": str(exc), "path": str(path)})
-        check = bundle_checker(resolve_output_dir(self.config))
         matches = search_bibliography(library.items, query, limit=BIBLIOGRAPHY_LOOKUP_LIMIT)
         return json.dumps({
             "status": "ok",
             "path": str(path),
             "exists": library.exists,
             "total": len(library.items),
-            "entries": [entry_summary(item, check(item)) for item in matches],
+            "entries": [entry_summary(item) for item in matches],
         }, ensure_ascii=False)
 
     def _unknown_new_citation_keys(self, context: dict[str, Any], replacement_text: str) -> dict[str, Any] | None:

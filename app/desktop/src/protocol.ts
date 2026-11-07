@@ -929,7 +929,6 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
         title: { type: "string", required: true, maxBytes: 8192, allowEmpty: true },
         doi: { type: "nullableString", required: true, maxBytes: 1024 },
         type: { type: "string", required: true, maxBytes: 64, allowEmpty: true },
-        verification: { type: "string", required: true, enum: ["verified", "unverified"] },
         citedCount: { type: "integer", required: true, minimum: 0, maximum: 1_000_000 },
       },
     },

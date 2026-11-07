@@ -1,0 +1,14 @@
+== M1 entry_summary adds verification
+2 failed, 16 passed, 1 warning in 0.96s
+== M2 bibliography.inspect response adds verification
+2 failed, 235 passed, 1 warning in 2.04s
+== M3 protocol.ts accepts a verification field
+ℹ fail 3
+✖ failing tests:
+✖ language-neutral manifest matches TypeScript constants (18.619108ms)
+✖ bibliography-inspect-rejects-extra-entry-field (0.28306ms)
+== M4 cited row renders a badge
+ℹ pass 328
+ℹ fail 1
+✖ failing tests:
+✖ cited rows offer only Line jumps; uncited rows offer Remove (2.581668ms)

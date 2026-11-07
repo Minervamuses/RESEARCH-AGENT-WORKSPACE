@@ -1,0 +1,13 @@
+✔ Bypass extension preview keeps exact targets visible without a second binding-consent step (42.662362ms)
+✔ approval keeps Stop and its failure visible inside the modal (39.991547ms)
+✔ a pending approval stays while its turn, document or bibliography.add request is in flight (46.793233ms)
+✔ App's stale-approval cleanup counts the bibliography.add request as an owner (2.620438ms)
+ℹ tests 329
+ℹ suites 0
+ℹ pass 329
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6073.566882
+exit 0

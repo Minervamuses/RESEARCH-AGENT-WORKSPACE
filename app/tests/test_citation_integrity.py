@@ -1,13 +1,9 @@
-"""Integrity report: uses, order, missing/uncited keys, duplicates, verification."""
+"""Integrity report: uses, order, missing/uncited keys, duplicates."""
 
-import asyncio
 import json
 
-from skills.citation.hub import CitationProviderHub
-from skills.citation.integrity import bundle_checker, inspect
-from skills.citation.resolution import WorkIdentifier, WorkIntent
-from skills.citation.service import CitationService
-from tests.test_citation_doi_first_save import JOURNAL_DOI, Fetcher
+from skills.citation.integrity import inspect
+from tests.test_citation_doi_first_save import JOURNAL_DOI
 
 ITEMS = [
     {"id": "ng2021journal", "type": "article-journal", "title": "A Journal Article",
@@ -43,31 +39,9 @@ def test_report_lists_uses_order_missing_uncited_and_duplicates(tmp_path):
     assert entries["ng2021journal"]["firstUse"] == 1
     assert entries["hand2019note"]["authors"] == ["Plant Lab"]
     assert entries["never2000cited"]["firstUse"] is None
+    assert {key for entry in report["entries"] for key in entry} == {
+        "key", "authors", "year", "title", "doi", "type", "citedCount", "firstUse"}, "no verification status"
     assert [u["known"] for u in report["uses"]] == [True, True, False, True, False]
-
-
-def test_verification_comes_from_valid_bundles(tmp_path):
-    cite = tmp_path / "cite"
-    service = CitationService(CitationProviderHub(env={}, fetcher=Fetcher()), output_dir=cite)
-    asyncio.run(service.save((WorkIntent("x", identifiers=(WorkIdentifier("doi", JOURNAL_DOI),)),)))
-    report = inspect(TEXT, "markdown", _library(tmp_path), bundle_checker(cite))
-    status = {e["key"]: e["verification"] for e in report["entries"]}
-    assert status == {
-        "ng2021journal": "verified",
-        "hand2019note": "unverified",
-        "dup2021copy": "verified",
-        "never2000cited": "unverified",
-    }
-
-
-def test_tampered_bundle_is_not_verified(tmp_path):
-    cite = tmp_path / "cite"
-    service = CitationService(CitationProviderHub(env={}, fetcher=Fetcher()), output_dir=cite)
-    asyncio.run(service.save((WorkIntent("x", identifiers=(WorkIdentifier("doi", JOURNAL_DOI),)),)))
-    bib = next(cite.glob("*/reference.bib"))
-    bib.write_text(bib.read_text() + "% tampered\n")
-    report = inspect(TEXT, "markdown", _library(tmp_path), bundle_checker(cite))
-    assert {e["verification"] for e in report["entries"]} == {"unverified"}
 
 
 def test_malformed_bibliography_is_reported_not_raised(tmp_path):
@@ -91,61 +65,3 @@ def test_latex_report(tmp_path):
     report = inspect("\\cite{ng2021journal,nope}", "latex", _library(tmp_path))
     assert report["format"] == "latex"
     assert [m["key"] for m in report["missing"]] == ["nope"]
-
-
-def test_neurips_entry_is_verified_by_its_official_url(tmp_path):
-    from skills.citation.resolution import ResolutionDecision, WorkResolution
-    from tests.test_citation_authority import ATTENTION_HASH, neurips_intent, neurips_site
-
-    class Resolver:
-        async def resolve(self, _intent):
-            return WorkResolution(ResolutionDecision("not_found", "no_provider_records"), ())
-
-    cite = tmp_path / "cite"
-    fetch, _calls = neurips_site()
-    service = CitationService(CitationProviderHub(env={}, fetcher=fetch), output_dir=cite)
-    service.resolver = Resolver()
-    assert asyncio.run(service.save((neurips_intent(),))).items[0].status == "saved"
-    url = f"https://papers.nips.cc/paper_files/paper/2017/hash/{ATTENTION_HASH}-Abstract.html"
-    items = [
-        {"id": "vaswani2017attention", "type": "paper-conference", "title": "Attention Is All You Need", "URL": url},
-        {"id": "other2017paper", "type": "paper-conference", "title": "Other",
-         "URL": url.replace(ATTENTION_HASH, "3f647cadf56541fb9513cb63ec370187")},
-    ]
-    report = inspect("[@vaswani2017attention]", "markdown", _library(tmp_path, items), bundle_checker(cite))
-    assert {e["key"]: e["verification"] for e in report["entries"]} == {
-        "vaswani2017attention": "verified", "other2017paper": "unverified"}
-
-    bib = next(cite.glob("*/reference.bib"))
-    bib.write_text(bib.read_text() + "% tampered\n")
-    report = inspect("", "markdown", _library(tmp_path, items), bundle_checker(cite))
-    assert {e["verification"] for e in report["entries"]} == {"unverified"}
-
-
-def test_bundle_from_the_old_built_in_neurips_table_never_verifies(tmp_path):
-    """venue:neurips:2017:7181 came from a hard-coded row, not the official site."""
-    from skills.citation.authority import AuthorityRecord
-    from skills.citation.resolution import ResolutionDecision, WorkResolution
-    from skills.citation.types import CanonicalIdentity
-    from tests.test_citation_authority import neurips_intent
-
-    url = "https://papers.nips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html"
-
-    class Resolver:
-        async def resolve(self, _intent):
-            return WorkResolution(ResolutionDecision("not_found", "no_provider_records"), ())
-
-    class OldTable:
-        async def resolve(self, _intent):
-            return AuthorityRecord(
-                CanonicalIdentity("venue", "neurips:2017:7181"), "Attention Is All You Need",
-                ("Ashish Vaswani",), 2017, "Advances in Neural Information Processing Systems 30",
-                "inproceedings", url, "neurips",
-            )
-
-    cite = tmp_path / "cite"
-    service = CitationService(CitationProviderHub(env={}, fetcher=Fetcher()), output_dir=cite)
-    service.resolver, service.authorities = Resolver(), OldTable()
-    assert asyncio.run(service.save((neurips_intent(),))).items[0].status == "saved", "a valid bundle exists"
-    item = {"id": "vaswani2017attention", "type": "paper-conference", "URL": url}
-    assert bundle_checker(cite)(item) is False
