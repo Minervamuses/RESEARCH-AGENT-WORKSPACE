@@ -11,7 +11,7 @@
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/) | — | — |
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
-| R6 | In progress | R6-S1：[evidence/R6-S1/](evidence/R6-S1/) | — | R6-S2 完整套件與交接 |
+| R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -19,10 +19,17 @@
 
 R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使用者本人於交付後驗收；尚未回報不阻塞代理完成，也不得記為已實測。歷史測試、沿用證據與本次觀察分開標示。
 
-| 目標 | 代理自動檢查／程式碼證據 | 使用者手動驗收 |
+| 目標 | 代理自動檢查／程式碼證據（本次觀察，除非另註） | 使用者手動驗收 |
 |---|---|---|
-| G1–G8 | 尚未執行 | GUI 操作交由使用者，尚無結果 |
-| G9 | 尚未執行 | 不適用：README 由代理核對 |
+| G1 | R2-S1：移除 grep 無結果（R6-S2 再查一次，含 `onCursor`，exit 1）；補全的 `registerCompletionItemProvider`／`completionPrefix` 保留，補全測試通過 | 交由使用者，尚無結果 |
+| G2 | R2-S2：`CitedRow` 只有 Line、`UncitedRow` 有 Remove 的 SSR 測試（突變確認）；`removeConfirmation` 文字含 key、書目檔與「other documents were not checked」；取消在送出前 return（程式碼核對） | 交由使用者，尚無結果 |
+| G3 | R2-S3：三方協定／共享夾具拒絕 bib 請求與回應；dispatch bib 不寫檔；`export_bib` 不存在；`.tex` 無 Export（`exportFormats` 為空、`ExportMenu` 不渲染）；`.tex` 的 inspect 斷言不變；保留的 BibTeX 功能仍在（R6-S2 [final-static-checks.txt](evidence/R6-S2/final-static-checks.txt)） | 交由使用者，尚無結果 |
+| G4 | R4-S2：選項順序與標籤測試、單一 `Export ▾` 的 SSR 測試；docx／markdown 既有匯出測試（檔名、原稿不變）未修改並通過 | 交由使用者，尚無結果 |
+| G5 | R3-S3 正負 CLI 試轉；R4-S1 六項後端測試（真實轉檔、profile、未存檔、缺 key、結束碼 1、失敗訊息）與三方 audit 驗證；**R4-S3 真實 proposal 副本端到端通過**（8 項檢查）；R6-S2 確認 a171a62 之後後端、vendor、依賴與協定未改，證據沿用；vendor manifest 仍全部 OK | GUI 中的路徑與稽核摘要顯示：交由使用者，尚無結果 |
+| G6 | R5-S1：`nextExpanded` 10 種情況、摘要文字與問題數測試、初始渲染只有摘要列的 SSR 測試 | 交由使用者，尚無結果 |
+| G7 | R5-S2：`editorZoom` 5 項測試（含 storage 例外與重開讀回）；`lineHeight: 0` 在 create 與 updateOptions 兩處（`DocumentEditor.tsx:185`、`:328`）；Tauri 縮放熱鍵預設關閉；面板 font-size grep 全部 ≥ .9rem | 交由使用者（含 28px 多行不重疊），尚無結果 |
+| G8 | R6-S2 完整套件各一次全部通過：pytest **1756**、npm test **329**、npm run build、cargo **41**（歷史基線 1736／307／41） | 保留功能的 GUI 操作：交由使用者，尚無結果 |
+| G9 | R6-S1：README 與 G1–G7 逐條對照、20 個相對連結存在、`git diff --check` 通過 | 不適用：README 由代理核對 |
 
 ## 紀錄
 
@@ -254,3 +261,59 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - G6：預設收合、摘要列項目、標紅、自動展開三條件、不保存、收合時仍顯示的訊息——對應 `CitationPanel` 的摘要列、`problemCount`、`nextExpanded`、`document.path` 重設。
   - G7：16px、Ctrl+= ／ Ctrl+- ／ Ctrl+0、1px、10–28px、記住大小、只在編輯器焦點時生效——對應 `editorZoom.ts` 與 `DocumentEditor` 的 Monaco action。README 未另寫面板字級（≥ .9rem 屬視覺調整）。
 - 檢查（觀察）：三份 README 的 20 個相對連結全部指向存在的檔案（含新的 `app/vendor/bime-word/README.md`）；`git diff --check` exit 0。
+
+### R6-S2 代理最終驗收與交接（2026-11-07）
+
+- **完整套件（各一次，觀察）**：
+  - 完整 pytest（`app/`，沙箱外；TMPDIR／XDG_CACHE_HOME／AGENT_LOG_DIR 導向新的 `/tmp/r6s2-pytest.YaYr/` 子目錄）：**1756 passed**、2 warnings，exit 0，約 65 秒（[pytest-full.txt](evidence/R6-S2/pytest-full.txt)）。基線 1736；新增的 20 項都是本計劃的測試與夾具參數（R2-S3、R4-S1 的 Python 測試與 messages／traces 夾具）。兩個 warning：langgraph 的 PendingDeprecationWarning（R1 已見），以及 `tests/test_skill_runtime.py::test_installer_zip_rejects_unsafe_members_without_extracting` 故意建立重複成員 zip 的 `UserWarning: Duplicate name`——該檔本計劃未修改，與改版無關。
+  - `npm test`（`app/desktop`，沙箱內）：**329/329**，0 fail／skip，exit 0，約 7 秒（[npm-test.txt](evidence/R6-S2/npm-test.txt)）。基線 307；新增 `editorZoom.test.ts` 與面板、選單、協定夾具的測試。
+  - `npm run build`：exit 0，只有既有的 chunk 大小警告（[npm-build.txt](evidence/R6-S2/npm-build.txt)）。
+  - 完整 `cargo test --locked`（沙箱外）：**41 passed**，exit 0（編譯已快取，約 3 秒）（[cargo-test-full.txt](evidence/R6-S2/cargo-test-full.txt)）。與基線 41 相同；協定的新規則由 `protocol::tests` 內既有的共享夾具與 contract 樣本測試涵蓋。
+  - 沒有失敗，所以沒有重跑。
+- **G1／G3 限定範圍檢查**（[final-static-checks.txt](evidence/R6-S2/final-static-checks.txt)）：Insert／游標管線 grep exit 1；補全保留；`export_bib` exit 1；contract／protocol.ts／protocol.rs／citations.ts／csl_render.py／protocol.py／service.py 都沒有 `"bib"`；fixtures 只剩兩個拒絕案例；export enum 為 `["docx","bime_docx","markdown"]`；`authority.export_bibtex`、其呼叫、`storage.py` 的 `reference.bib`、pybtex 依賴都保留。未恢復全域「bib 零命中」搜尋。
+- **R4-S3 證據沿用**：`git diff --stat a171a62 HEAD -- app/agent app/skills app/vendor app/pyproject.toml app/poetry.lock app/desktop/protocol` 只有 `app/skills/citation/README.md`（文件），程式、vendor、依賴、協定與輸入都未改，不重跑真實案例。vendor 的 `sha256sum -c manifest.sha256` 仍全部 OK。
+- **論文 repo**：HEAD `59e9dc1…`，`git status --short` 與 R1-S1 相同（` M CLAUDE.md`、` M proposal.docx`、` M references.json`、三個未追蹤檔）。
+- **GUI**：依 D14 由使用者本人驗收，清單見下方「最終彙報」；以上都是自動檢查與程式碼核對，沒有任何 GUI 實測。
+
+## 步驟與 commit
+
+| 步驟 | commit |
+|---|---|
+| R1-S1 | `483fc46` |
+| R1-S2 | `804c212` |
+| R2-S1 | `3b366bd` |
+| R2-S2 | `de2f8a6` |
+| R2-S3 | `c7e645e` |
+| R3-S1 | `a91eab6` |
+| R3-S2 | `f3b18a4` |
+| R3-S3 | `3b94810` |
+| R4-S1 | `2442b1d` |
+| R4-S2 | `1d3f409`（含 R4-S1 build-log 一句更正） |
+| R4-S3 | `a171a62` |
+| R5-S1 | `79bfeda` |
+| R5-S2 | `a9689e1` |
+| R6-S1 | `d4ed203` |
+| R6-S2 | 本 commit（主旨含 `[R6-S2]`） |
+
+沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。
+
+## 最終彙報
+
+1. **完成的改變**（`483fc46`..R6-S2，全部在 GUI 分支本地，未 push）：拆除 Insert 與游標管線；Remove 只在未引用區且一律確認；BibTeX 匯出從前端、三方協定到後端移除；`Export ▾` 選單（Word、Word – BIME Appendix 17、Markdown）；以 Poetry 加入 python-docx 1.2.0、lxml 6.1.3；vendor bime_word 1.1.5；`bime_docx` 匯出（`<檔名>.bime.docx` 與三份報告、稽核摘要）；面板預設收合成摘要列；編輯器 16px 與可記住的縮放；面板文字 ≥ .9rem；README 更新。測試：pytest 1756（基線 1736）、npm 329（基線 307）、build 成功、cargo 41（基線 41），全部通過。
+2. **手動 GUI 檢查清單**（D14，由使用者本人操作；代理沒有實測，以下都尚無結果）：
+   - 開啟沒有 Problems 的 `proposal.md` 副本時面板收合；若開啟時已有 Problems，應自動展開並標紅。
+   - 展開後本文引用沒有 Insert，也沒有 Remove。
+   - 未引用區的 Remove 會先確認，取消後沒有任何變化。
+   - `Export ▾` 有三個選項；選擇後選單關閉；Escape 或點選單外會關閉；回合進行中停用。
+   - 開啟 `.tex` 文件時沒有 Export。
+   - 有未存檔的修改時，系上格式匯出會被拒絕並提示先 Ctrl+S。
+   - 匯出後 `proposal.bime.docx` 與三份報告出現在原稿旁，面板顯示路徑、稽核數字、`.audit.md` 路徑與「在 Word 更新欄位並人工覆核」的提醒。
+   - 輸入 `[@notakey` 並存檔後，摘要列變紅並自動展開。
+   - Ctrl+= ／ Ctrl+- ／ Ctrl+0 能縮放編輯器字體；重開 GUI 後保留縮放的大小；放大至 28px 時，多行中英文不重疊。
+   - 面板文字的大小可以接受；窄視窗時摘要列換行正常。
+   - 保留的功能都還正常：Style 選單、Preview（會自動展開）、verified／unverified 標籤、Line 跳轉、Verify and add、`[@` 補全。
+3. **需要使用者決定或注意的事**：
+   - `/home/minervamuses/論文/references.json` 中被誤刪的 `yao2023react` 仍未還原（本計劃不寫入論文資料夾）。還原指令：`git -C /home/minervamuses/論文 checkout -- references.json`。還原前，系上格式匯出會因為這個未知的 key 停止（R3-S3 負向案例即此情況）。
+   - 可逆假設 A1–A11 照計劃實作。執行中另做的可逆選擇：audit 欄位為 errors／warnings／manualChecks／reportPath／layoutVerified；「問題數」包含書目無法讀取；問題數 N→M（都大於 0）時不自動展開（A7 字面）；`Export ▾` 的選項在摘要列中另起一行而非浮動選單（避免被面板裁切）；未存檔時的錯誤代碼沿用 `PROTOCOL_INVALID`；bime_word 逾時 180 秒；契約中 `documentContext` 仍是選填，由後端要求。
+   - `for_agents/` 可能已過時（面板、協定、vendor、依賴都有變動），需要用 infrastructure skill 更新。
+   - 已知既有失敗：無。沙箱內跑 `test_desktop_document_service.py` 的 phase02 fixture 會因 `/tmp` 唯讀失敗（已知限制，沙箱外通過）。
