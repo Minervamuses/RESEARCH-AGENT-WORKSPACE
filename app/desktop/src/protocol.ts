@@ -189,6 +189,15 @@ export const DOCUMENT_CONTEXT_SCHEMA: FieldSchema = {
   rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
 };
 
+/** bime_word audit summary returned only by a bime_docx export. */
+export const BIME_AUDIT_SCHEMA: FieldSchema = {
+  errors: { type: "integer", required: true, minimum: 0, maximum: 1000000 },
+  warnings: { type: "integer", required: true, minimum: 0, maximum: 1000000 },
+  manualChecks: { type: "integer", required: true, minimum: 0, maximum: 1000000 },
+  reportPath: { type: "string", required: true, maxBytes: 8192 },
+  layoutVerified: { type: "boolean", required: true },
+};
+
 export const SUBMITTED_CONTEXT_SCHEMA: FieldSchema = {
   "projectId": {
     "type": "string",
@@ -992,8 +1001,9 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     libraryFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
   },
   "bibliography.export": {
-    format: { type: "string", required: true, enum: ["docx", "markdown"] },
+    format: { type: "string", required: true, enum: ["docx", "bime_docx", "markdown"] },
     path: { type: "string", required: true, maxBytes: 8192 },
+    audit: { type: "object", required: false, items: BIME_AUDIT_SCHEMA },
   },
 };
 
@@ -1166,7 +1176,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "bibliography.export": {
     documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-    format: { type: "string", required: true, enum: ["docx", "markdown"] },
+    format: { type: "string", required: true, enum: ["docx", "bime_docx", "markdown"] },
     styleId: { type: "string", required: false, maxBytes: 128 },
   },
 };
@@ -1943,6 +1953,9 @@ export function validateResultData(method: ProtocolMethod, data: JsonObject): vo
   if (method === "document.save" || method === "document.apply") {
     validateDocumentRange(data, "data");
     if (data.expectedSnapshot !== undefined) validateDocumentRange(data.expectedSnapshot as JsonObject, "data.expectedSnapshot", true);
+  }
+  if (method === "bibliography.export" && (data.format === "bime_docx") !== ("audit" in data)) {
+    invalid("bibliography.export returns audit exactly for bime_docx");
   }
   if (method === "session.turn" && data.documentOperations !== undefined) {
     (data.documentOperations as JsonObject[]).forEach((item) => validateDocumentRange(item, "data.documentOperations"));

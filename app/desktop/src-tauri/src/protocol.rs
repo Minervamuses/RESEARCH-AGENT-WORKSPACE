@@ -996,7 +996,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
             }
             validate_optional_string(params, "styleId", 128)?;
             if let Some(format) = params.get("format") {
-                validate_enum(format, "params.format", &["docx", "markdown"])?;
+                validate_enum(format, "params.format", &["docx", "bime_docx", "markdown"])?;
             }
         }
         "bibliography.set_style" => validate_optional_string(params, "styleId", 128)?,
@@ -2451,9 +2451,23 @@ fn validate_bibliography_result(method: &str, data: &Map<String, Value>) -> Resu
             validate_nullable_fingerprint(data, "libraryFingerprint")?;
         }
         "bibliography.export" => {
-            validate_exact_data_keys(data, &["format", "path"])?;
-            validate_enum(&data["format"], "data.format", &["docx", "markdown"])?;
+            validate_data_keys(data, &["format", "path", "audit"], &["format", "path"])?;
+            validate_enum(&data["format"], "data.format", &["docx", "bime_docx", "markdown"])?;
             expect_bounded_string(&data["path"], "data.path", 8_192)?;
+            if (data["format"] == "bime_docx") != data.contains_key("audit") {
+                return Err(ProtocolViolation::invalid("bibliography.export returns audit exactly for bime_docx"));
+            }
+            if let Some(audit) = data.get("audit") {
+                let audit = expect_object(audit, "data.audit")?;
+                validate_exact_data_keys(audit, &["errors", "warnings", "manualChecks", "reportPath", "layoutVerified"])?;
+                for field in ["errors", "warnings", "manualChecks"] {
+                    expect_integer_range(&audit[field], &format!("data.audit.{field}"), 0, 1_000_000)?;
+                }
+                expect_bounded_string(&audit["reportPath"], "data.audit.reportPath", 8_192)?;
+                if !audit["layoutVerified"].is_boolean() {
+                    return Err(ProtocolViolation::invalid("data.audit.layoutVerified must be a boolean"));
+                }
+            }
         }
         _ => {}
     }
@@ -3371,12 +3385,17 @@ mod tests {
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
             if method == "document.apply" { params.remove("undoOfCallId"); }
+            let export_audit = |field: &str| method == "bibliography.export" && field == "audit";
             if method == "session.turn" { params.insert("text".to_owned(), Value::String("@x".to_owned())); params["skillReferences"][0]["endUtf16"] = Value::from(2); }
             let schema = schema_value.as_object().expect("result data schema");
             let mut data = schema
                 .iter()
                 .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
                 .collect::<Map<_, _>>();
+            if method == "bibliography.export" {
+                // The sample carries audit, which only a bime_docx result may (and must) have.
+                data.insert("format".to_owned(), Value::String("bime_docx".to_owned()));
+            }
             if is_durable_turn_method(method) {
                 data.insert("accepted".to_owned(), Value::Bool(true));
                 data.insert("persisted".to_owned(), Value::Bool(true));
@@ -3439,7 +3458,7 @@ mod tests {
                         Value::Object(missing),
                     )
                     .is_ok(),
-                    rule["required"] == false && !matches!(field.as_str(), "rangeStartUtf16" | "rangeEndUtf16"),
+                    rule["required"] == false && !matches!(field.as_str(), "rangeStartUtf16" | "rangeEndUtf16") && !export_audit(field),
                     "{method}.{field} missing"
                 );
 

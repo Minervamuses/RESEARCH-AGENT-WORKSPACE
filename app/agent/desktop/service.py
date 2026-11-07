@@ -52,6 +52,7 @@ from agent.cli.slash_commands import (
     parse_slash_command,
 )
 from agent.diagnostics import attach_incident, incident_reference
+from agent.desktop import bime_export
 from agent.desktop.catalog import (
     CATALOG_MAX_SESSIONS,
     CatalogError,
@@ -2373,9 +2374,11 @@ class DesktopService:
         self._require_idle_for_bibliography_write()
         library_path, default_style, _configured = self._citation_settings()
         fmt = params.get("format")
-        if fmt not in csl_render.EXPORT_SUFFIXES:
+        if fmt != "bime_docx" and fmt not in csl_render.EXPORT_SUFFIXES:
             raise DesktopServiceError("PROTOCOL_INVALID", f"Unknown export format: {fmt}")
         snapshot = self._markdown_snapshot(params, required=True)
+        if fmt == "bime_docx":
+            return await self._bime_export(snapshot, Path(library_path))
         style_id = self._requested_style(params, default_style)
         document_path = Path(snapshot["path"])
         target = csl_render.export_target(fmt, document_path=document_path, style_id=style_id)
@@ -2394,6 +2397,26 @@ class DesktopService:
         except (csl_render.RenderError, LibraryError) as exc:
             raise self._bibliography_error(exc) from exc
         return {"format": fmt, "path": str(target)}
+
+    async def _bime_export(self, snapshot: dict[str, Any], library_path: Path) -> dict[str, Any]:
+        """BIME Appendix 17 Word via the vendored bime_word; it reads the saved file (A11)."""
+        document_path = Path(snapshot["path"])
+        try:
+            saved = self._documents.matches_disk(snapshot)
+        except DocumentError as exc:
+            raise DesktopServiceError("BIBLIOGRAPHY_FAILED", str(exc)) from exc
+        if not saved:
+            raise DesktopServiceError(
+                "PROTOCOL_INVALID",
+                "Save the document first (Ctrl+S): the BIME Word export converts the saved file.",
+            )
+        if bime_export.bime_target(document_path).resolve() == document_path.resolve():
+            raise DesktopServiceError("PROTOCOL_INVALID", "An export never replaces its source document.")
+        try:
+            result = await run_local_work(bime_export.run_bime_convert, document_path, library_path)
+        except bime_export.BimeExportError as exc:
+            raise DesktopServiceError("BIBLIOGRAPHY_FAILED", str(exc)) from exc
+        return {"format": "bime_docx", "path": result["path"], "audit": result["audit"]}
 
     def _desktop_bibliography_lookup(self, query: str) -> str:
         """Search the opened project's bibliography without writing anything."""

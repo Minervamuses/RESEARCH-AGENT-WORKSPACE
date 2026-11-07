@@ -3,11 +3,15 @@
 import asyncio
 import hashlib
 import json
+import subprocess
+import sys
 import uuid
 import zipfile
+from pathlib import Path
 
 import pytest
 
+from agent.desktop import bime_export
 from agent.desktop.catalog import inspect_project
 from agent.desktop.protocol import ProtocolError, validate_message, validate_result_data
 from agent.desktop.service import DesktopServiceError
@@ -267,6 +271,152 @@ def test_bibtex_export_is_rejected_without_writing(tmp_path):
         with pytest.raises(ProtocolError):
             validate_result_data("bibliography.export", {"format": "bib", "path": str(tmp_path / "references.bib")})
         validate_result_data("bibliography.export", {"format": "markdown", "path": str(tmp_path / "稿件.apa.md")})
+    asyncio.run(run())
+
+
+CITED = "Claim [@ng2021journal].\n"
+
+
+def _bime_params(context):
+    return {"documentContext": context, "format": "bime_docx"}
+
+
+@needs_pandoc
+def test_bime_export_writes_the_docx_and_reports_beside_the_saved_file(tmp_path):
+    async def run():
+        service, document, context = await _project(tmp_path, text=CITED)
+        _write_library(tmp_path)
+        source = _sha(document)
+        data = await _call(service, "bibliography.export", {**_bime_params(context), "styleId": "ieee"})
+        assert data["format"] == "bime_docx" and data["path"] == str(tmp_path / "稿件.bime.docx")
+        for suffix in (".bime.docx", ".bime.audit.json", ".bime.audit.md", ".bime.bime.json"):
+            assert (tmp_path / f"稿件{suffix}").is_file(), suffix
+        audit = data["audit"]
+        assert audit["reportPath"] == str(tmp_path / "稿件.bime.audit.md") and audit["layoutVerified"] is False
+        summary = json.loads((tmp_path / "稿件.bime.audit.json").read_text(encoding="utf-8"))["summary"]
+        assert (audit["errors"], audit["warnings"], audit["manualChecks"]) == (
+            summary["error"], summary["warning"], summary["manual"])
+        with zipfile.ZipFile(data["path"]) as archive:
+            assert "Ng" in archive.read("word/document.xml").decode("utf-8")
+        assert _sha(document) == source
+        assert not list(tmp_path.glob("稿件.ieee.*")), "bime_docx ignores the Style menu"
+        again = await _call(service, "bibliography.export", _bime_params(context))
+        assert again["path"] == data["path"], "a second export overwrites the first"
+    asyncio.run(run())
+
+
+@needs_pandoc
+def test_bime_export_stops_on_a_key_missing_from_the_bibliography(tmp_path):
+    async def run():
+        service, _document, context = await _project(tmp_path, text="Claim [@ghost1999].\n")
+        _write_library(tmp_path)
+        with pytest.raises(DesktopServiceError) as excinfo:
+            await service.dispatch("bibliography.export", _bime_params(context))
+        assert excinfo.value.code == "BIBLIOGRAPHY_FAILED" and "ghost1999" in str(excinfo.value)
+        assert not (tmp_path / "稿件.bime.docx").exists()
+    asyncio.run(run())
+
+
+def _fake_bime(monkeypatch, *, returncode=0, errors=0, stdout=None, stderr=b""):
+    """Stand in for the bime_word child process and record each call."""
+    calls = []
+
+    def fake_run(command, *, cwd, env, capture_output, timeout, check):
+        calls.append({"command": command, "cwd": cwd, "env": env, "timeout": timeout})
+        target = Path(command[command.index("-o") + 1])
+        payload = b""
+        if returncode in (0, 1):
+            target.write_bytes(b"docx")
+            payload = json.dumps({
+                "output": str(target), "language": "zh",
+                "audit": {"error": errors, "warning": 1, "conflict": 0, "unknown": 0, "manual": 3},
+                "reports": [str(target.with_suffix(".audit.json")), str(target.with_suffix(".audit.md"))],
+                "operation_report": str(target.with_suffix(".bime.json")), "layout_verified": False,
+            }).encode("utf-8")
+        return subprocess.CompletedProcess(command, returncode, payload if stdout is None else stdout, stderr)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls
+
+
+def test_bime_export_passes_the_profile_bibliography_and_overwrite(tmp_path, monkeypatch):
+    async def run():
+        service, document, context = await _project(tmp_path, text=CITED)
+        library = _write_library(tmp_path)
+        calls = _fake_bime(monkeypatch)
+        await _call(service, "bibliography.export", _bime_params(context))
+        (tmp_path / "bime-稿件-profile.json").write_text('{"language": "zh"}\n', encoding="utf-8")
+        await _call(service, "bibliography.export", _bime_params(context))
+        without, with_profile = (call["command"] for call in calls)
+        assert without[:2] == [sys.executable, str(bime_export.vendor_script())]
+        assert without[2:6] == ["convert", str(document), "-o", str(tmp_path / "稿件.bime.docx")]
+        assert "--config" not in without
+        assert with_profile[with_profile.index("--config") + 1] == str(tmp_path / "bime-稿件-profile.json")
+        for command in (without, with_profile):
+            assert command[command.index("--bibliography") + 1] == str(library)
+            assert command[command.index("--scope") + 1] == "fragment" and command[-1] == "--overwrite"
+        assert all(call["cwd"] == tmp_path and call["timeout"] == bime_export.BIME_TIMEOUT_SECONDS for call in calls)
+        assert calls[0]["env"]["PATH"].split(":")[0] == str(Path(sys.executable).parent)
+    asyncio.run(run())
+
+
+def test_bime_export_refuses_unsaved_text_and_latex(tmp_path, monkeypatch):
+    async def run():
+        service, _document, context = await _project(tmp_path, text=CITED)
+        _write_library(tmp_path)
+        calls = _fake_bime(monkeypatch)
+        edited = {**context, "editorRevision": 1, "sourceText": CITED + "Unsaved line.\n"}
+        with pytest.raises(DesktopServiceError) as excinfo:
+            await service.dispatch("bibliography.export", _bime_params(edited))
+        assert excinfo.value.code == "PROTOCOL_INVALID" and "Save the document first" in str(excinfo.value)
+        tex = tmp_path / "thesis.tex"
+        tex.write_text("\\cite{ng2021journal}\n", encoding="utf-8")
+        tex_context = await service.dispatch("document.open", {"path": str(tex)})
+        with pytest.raises(DesktopServiceError) as excinfo:
+            await service.dispatch("bibliography.export", _bime_params(tex_context))
+        assert excinfo.value.code == "PROTOCOL_INVALID"
+        assert calls == [] and not list(tmp_path.glob("*.bime.*"))
+    asyncio.run(run())
+
+
+def test_bime_export_with_audit_errors_still_returns_the_file(tmp_path, monkeypatch):
+    async def run():
+        service, _document, context = await _project(tmp_path, text=CITED)
+        _write_library(tmp_path)
+        _fake_bime(monkeypatch, returncode=1, errors=2)
+        data = await _call(service, "bibliography.export", _bime_params(context))
+        assert data["path"] == str(tmp_path / "稿件.bime.docx")
+        assert data["audit"] == {"errors": 2, "warnings": 1, "manualChecks": 3,
+                                 "reportPath": str(tmp_path / "稿件.bime.audit.md"), "layoutVerified": False}
+    asyncio.run(run())
+
+
+def test_bime_export_failures_show_the_bime_word_message(tmp_path, monkeypatch):
+    async def run():
+        service, _document, context = await _project(tmp_path, text=CITED)
+        _write_library(tmp_path)
+        cases = [
+            ({"returncode": 2, "stderr": b"bime_word: Unknown config keys: colour\n"}, "Unknown config keys: colour"),
+            ({"returncode": 1, "stdout": b"", "stderr": b"Missing Python dependency. No module named 'docx'"},
+             "unexpected output (exit code 1): Missing Python dependency"),
+            ({"returncode": 0, "stdout": b"not json"}, "unexpected output (exit code 0): not json"),
+        ]
+        for options, message in cases:
+            _fake_bime(monkeypatch, **options)
+            with pytest.raises(DesktopServiceError) as excinfo:
+                await service.dispatch("bibliography.export", _bime_params(context))
+            assert excinfo.value.code == "BIBLIOGRAPHY_FAILED" and message in str(excinfo.value), str(excinfo.value)
+
+        def slow(command, **_kwargs):
+            raise subprocess.TimeoutExpired(command, 180)
+        monkeypatch.setattr(subprocess, "run", slow)
+        with pytest.raises(DesktopServiceError) as excinfo:
+            await service.dispatch("bibliography.export", _bime_params(context))
+        assert "did not finish within 180 s" in str(excinfo.value)
+        monkeypatch.setattr(bime_export, "vendor_script", lambda: tmp_path / "missing" / "bime_word.py")
+        with pytest.raises(DesktopServiceError) as excinfo:
+            await service.dispatch("bibliography.export", _bime_params(context))
+        assert excinfo.value.code == "BIBLIOGRAPHY_FAILED" and "bundled bime_word is missing" in str(excinfo.value)
     asyncio.run(run())
 
 

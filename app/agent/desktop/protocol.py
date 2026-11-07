@@ -366,6 +366,8 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
         _validate_document_range(data, "data")
         if "expectedSnapshot" in data:
             _validate_document_range(data["expectedSnapshot"], "data.expectedSnapshot", source=True)
+    if method == "bibliography.export" and (data["format"] == "bime_docx") != ("audit" in data):
+        _invalid("bibliography.export returns audit exactly for bime_docx")
     if method == "session.turn":
         for operation in data.get("documentOperations", []):
             _validate_document_range(operation, "data.documentOperations")

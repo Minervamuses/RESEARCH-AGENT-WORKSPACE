@@ -1,0 +1,80 @@
+........................................................................ [ 26%]
+........................................................................ [ 53%]
+........................................................................ [ 80%]
+.......................................F.............                    [100%]
+=================================== FAILURES ===================================
+________ test_isolated_desktop_fixture_calls_real_document_coordinator _________
+
+    def test_isolated_desktop_fixture_calls_real_document_coordinator():
+        from agent.desktop.fixture_session import (
+            FIXTURE_ROOT_ENV, FIXTURE_ROOT_PREFIX, build_phase02_fixture_service,
+        )
+    
+        async def run(root):
+            service = build_phase02_fixture_service(original_cwd=root, environ={FIXTURE_ROOT_ENV: str(root)})
+            project_root = root / "projects" / "project-one"
+            project = await service.dispatch("workspace.select", {"rootPath": str(project_root)})
+            assert project["status"] == "opened"
+            await service.dispatch("session.create", {"loadMcp": False, "projectId": project["projectId"]})
+            path = project_root / "draft.md"
+            path.write_text("first\nsecond\n")
+            context = await service.dispatch("document.open", {"path": str(path)})
+            context.update(rangeStartUtf16=6, rangeEndUtf16=12)
+            sink = _Sink(service, context)
+            result = await service.dispatch("session.turn", {
+                "text": "[[fixture:document-replace]] changed", "turnId": uuid.uuid4().hex,
+                "retry": False, "documentContext": context,
+            }, event_sink=sink)
+            await asyncio.gather(*sink.tasks)
+            assert result["text"] == "Fixture document operation: saved."
+            assert path.read_text() == "first\nchanged\n"
+    
+>       with tempfile.TemporaryDirectory(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp") as directory:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_desktop_document_service.py:300: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+../../miniconda3/envs/app/lib/python3.13/tempfile.py:887: in __init__
+    self.name = mkdtemp(suffix, prefix, dir)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+suffix = '', prefix = 'research-agent-desktop-phase02-', dir = '/tmp'
+
+    def mkdtemp(suffix=None, prefix=None, dir=None):
+        """User-callable function to create and return a unique temporary
+        directory.  The return value is the pathname of the directory.
+    
+        Arguments are as for mkstemp, except that the 'text' argument is
+        not accepted.
+    
+        The directory is readable, writable, and searchable only by the
+        creating user.
+    
+        Caller is responsible for deleting the directory when done with it.
+        """
+    
+        prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
+    
+        names = _get_candidate_names()
+        if output_type is bytes:
+            names = map(_os.fsencode, names)
+    
+        for seq in range(TMP_MAX):
+            name = next(names)
+            file = _os.path.join(dir, prefix + name + suffix)
+            _sys.audit("tempfile.mkdtemp", file)
+            try:
+>               _os.mkdir(file, 0o700)
+E               OSError: [Errno 30] Read-only file system: '/tmp/research-agent-desktop-phase02-6xfsx2yv'
+
+../../miniconda3/envs/app/lib/python3.13/tempfile.py:381: OSError
+=============================== warnings summary ===============================
+../../miniconda3/envs/app/lib/python3.13/site-packages/langgraph/cache/base/__init__.py:8
+  /home/minervamuses/miniconda3/envs/app/lib/python3.13/site-packages/langgraph/cache/base/__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_desktop_document_service.py::test_isolated_desktop_fixture_calls_real_document_coordinator
+1 failed, 268 passed, 1 warning in 3.95s

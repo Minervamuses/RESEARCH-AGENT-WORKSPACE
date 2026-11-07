@@ -186,6 +186,13 @@ class DocumentWorkspace:
                 raise DocumentError("document range end precedes its start")
         return {**snapshot, "path": str(path)}
 
+    def matches_disk(self, snapshot: dict[str, Any]) -> bool:
+        """True when the editor text is exactly the bytes on disk (nothing unsaved)."""
+        with self._lock:
+            current = self.validate_snapshot(snapshot)
+            text, _fingerprint = self._disk(Path(current["path"]))
+            return text == current["sourceText"]
+
     def resolve_range(self, snapshot: dict[str, Any], prompt: str = "", *, require_available: bool = True) -> dict[str, Any]:
         """Use explicit selection, or one unambiguous line reference in this snapshot."""
         validated = self.validate_snapshot(snapshot, require_available=require_available)

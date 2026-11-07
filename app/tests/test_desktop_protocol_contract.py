@@ -574,5 +574,21 @@ def test_bash_permission_mode_protocol_contract() -> None:
 
 def test_bibliography_export_formats_exclude_bibtex() -> None:
     method = next(item for item in CONTRACT["methods"] if item["name"] == "bibliography.export")
-    assert method["params"]["format"]["enum"] == ["docx", "markdown"]
-    assert CONTRACT["resultDataSchemas"]["bibliography.export"]["format"]["enum"] == ["docx", "markdown"]
+    assert method["params"]["format"]["enum"] == ["docx", "bime_docx", "markdown"]
+    assert CONTRACT["resultDataSchemas"]["bibliography.export"]["format"]["enum"] == ["docx", "bime_docx", "markdown"]
+
+
+def test_bibliography_export_audit_belongs_only_to_bime_docx() -> None:
+    audit = {"errors": 1, "warnings": 0, "manualChecks": 11, "reportPath": "/p/a.bime.audit.md", "layoutVerified": False}
+    validate_result_data("bibliography.export", {"format": "bime_docx", "path": "/p/a.bime.docx", "audit": audit})
+    validate_result_data("bibliography.export", {"format": "docx", "path": "/p/a.apa.docx"})
+    validate_result_data("bibliography.export", {"format": "markdown", "path": "/p/a.apa.md"})
+    for data in (
+        {"format": "bime_docx", "path": "/p/a.bime.docx"},
+        {"format": "docx", "path": "/p/a.apa.docx", "audit": audit},
+        {"format": "bime_docx", "path": "/p/a.bime.docx", "audit": {**audit, "errors": 1_000_001}},
+        {"format": "bime_docx", "path": "/p/a.bime.docx", "audit": {k: v for k, v in audit.items() if k != "reportPath"}},
+        {"format": "bime_docx", "path": "/p/a.bime.docx", "audit": {**audit, "layoutVerified": 0}},
+    ):
+        with pytest.raises(ProtocolError):
+            validate_result_data("bibliography.export", data)

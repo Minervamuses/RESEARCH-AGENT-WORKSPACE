@@ -2219,6 +2219,26 @@
       }
     },
     {
+      "name": "bibliography-export-bime-docx-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000212",
+        "method": "bibliography.export",
+        "params": {
+          "documentContext": {
+            "rootPath": "/home/u/thesis",
+            "path": "/home/u/thesis/proposal.md",
+            "editorRevision": 3,
+            "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+            "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "format": "bime_docx"
+        }
+      }
+    },
+    {
       "name": "bibliography-export-rejects-bib-request",
       "valid": false,
       "errorCode": "PROTOCOL_INVALID",
@@ -4942,6 +4962,240 @@
           "data": {
             "format": "bib",
             "path": "/home/u/thesis/references.bib"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-bime-docx-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000213",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "bime_docx"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000213",
+          "ok": true,
+          "data": {
+            "format": "bime_docx",
+            "path": "/home/u/thesis/proposal.bime.docx",
+            "audit": {
+              "errors": 0,
+              "warnings": 2,
+              "manualChecks": 11,
+              "reportPath": "/home/u/thesis/proposal.bime.audit.md",
+              "layoutVerified": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-bime-docx-rejects-missing-audit",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000214",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "bime_docx"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000214",
+          "ok": true,
+          "data": {
+            "format": "bime_docx",
+            "path": "/home/u/thesis/proposal.bime.docx"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-docx-rejects-audit",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000215",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "docx",
+            "styleId": "apa"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000215",
+          "ok": true,
+          "data": {
+            "format": "docx",
+            "path": "/home/u/thesis/proposal.apa.docx",
+            "audit": {
+              "errors": 0,
+              "warnings": 2,
+              "manualChecks": 11,
+              "reportPath": "/home/u/thesis/proposal.bime.audit.md",
+              "layoutVerified": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-bime-docx-rejects-negative-count",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000216",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "bime_docx"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000216",
+          "ok": true,
+          "data": {
+            "format": "bime_docx",
+            "path": "/home/u/thesis/proposal.bime.docx",
+            "audit": {
+              "errors": -1,
+              "warnings": 2,
+              "manualChecks": 11,
+              "reportPath": "/home/u/thesis/proposal.bime.audit.md",
+              "layoutVerified": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-bime-docx-rejects-extra-audit-field",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000217",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "bime_docx"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000217",
+          "ok": true,
+          "data": {
+            "format": "bime_docx",
+            "path": "/home/u/thesis/proposal.bime.docx",
+            "audit": {
+              "errors": 0,
+              "warnings": 2,
+              "manualChecks": 11,
+              "reportPath": "/home/u/thesis/proposal.bime.audit.md",
+              "layoutVerified": false,
+              "stderr": "raw"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-bime-docx-rejects-string-layout",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000218",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "bime_docx"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000218",
+          "ok": true,
+          "data": {
+            "format": "bime_docx",
+            "path": "/home/u/thesis/proposal.bime.docx",
+            "audit": {
+              "errors": 0,
+              "warnings": 2,
+              "manualChecks": 11,
+              "reportPath": "/home/u/thesis/proposal.bime.audit.md",
+              "layoutVerified": "no"
+            }
           }
         }
       ]

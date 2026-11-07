@@ -9,7 +9,7 @@
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
-| R4 | Not started | — | — | R4-S1 後端與三方協定（R3-S3 正負案例已通過，R4-S3 前提成立） |
+| R4 | In progress | R4-S1：[evidence/R4-S1/](evidence/R4-S1/) | — | R4-S2 前端 Export 選單 |
 | R5 | Not started | — | — | S2 的前提（R2-S1）已滿足；S1 等 R4-S2 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
 
@@ -162,3 +162,28 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - 兩個案例都達到成功標準，沒有 G5／R4-S3 的未解驗收項目。
 - 論文 repo：`git status --short` 與開始前、也與 R1-S1 記錄相同；HEAD 不變。
 - **交接給 R4**：vendor 腳本 `app/vendor/bime-word/scripts/bime_word.py`；stdout 欄位 `output`、`language`、`audit.{error,warning,conflict,unknown,manual}`、`reports`（audit.json、audit.md）、`operation_report`、`layout_verified`；報告路徑相對於 `-o` 的位置。R4-S3 從 `positive/` 只複製三個輸入（不含 docx 與報告）；暫存目錄若已消失，就以同一 commit 重建，並用 inputs.txt 的 SHA-256 核對。
+
+### R4-S1 後端與三方協定：`bime_docx`（2026-11-07）
+
+- 協定（三方一致）：
+  - `contract.json`：`bibliography.export` 參數與回應的 `format` enum 為 `["docx","bime_docx","markdown"]`；回應新增可選的 `audit` 物件，子欄位 `errors`、`warnings`、`manualChecks`（integer 0–1,000,000）、`reportPath`（string ≤ 8192 bytes）、`layoutVerified`（boolean），全部必填，不允許額外欄位。
+  - 條件規則「`audit` 恰好只出現在 `bime_docx`」：契約語法無法表達，三方各自實作——`agent/desktop/protocol.py` `validate_result_data`、`desktop/src/protocol.ts` `validateResultData`、`protocol.rs` `validate_bibliography_result`（`validate_data_keys` 允許 format／path／audit、必填 format／path，再驗 audit 子欄位的型別與界限）。`protocol.ts` 新增 `BIME_AUDIT_SCHEMA`，`RESULT_DATA_SCHEMAS` 仍與 contract 完全相同（既有 deepEqual 測試）。
+  - Rust 由 contract 產生樣本的通用測試 `rust_result_data_rules_match_manifest`：樣本含 audit，所以此方法的樣本 format 改為 `bime_docx`；`audit` 缺少時依條件規則應被拒絕，加入與既有 `rangeStartUtf16`／`rangeEndUtf16` 相同形式的例外。
+  - 共享夾具：新增有效的 `bibliography-export-bime-docx-request` 與 `bibliography-export-bime-docx-trace`；無效 traces：`…-bime-docx-rejects-missing-audit`、`…-docx-rejects-audit`、`…-bime-docx-rejects-negative-count`、`…-bime-docx-rejects-extra-audit-field`、`…-bime-docx-rejects-string-layout`。R2-S3 的 docx／markdown 夾具不變。
+- 後端：
+  - 新模組 `agent/desktop/bime_export.py`：`vendor_script()`（`find_app_root()/vendor/bime-word/scripts/bime_word.py`）、`bime_target()`（`<stem>.bime.docx`）、`profile_for()`（`bime-<stem>-profile.json` 存在才用）、`convert_command()`、`run_bime_convert()`。子行程：`[sys.executable, <vendor script>, "convert", <原稿>, "-o", <stem>.bime.docx, (--config <profile>), "--bibliography", <專案書目>, "--scope", "fragment", "--overwrite"]`，工作目錄為原稿目錄，`PATH` 前面加上 `Path(sys.executable).parent`（Conda 的 Pandoc），**逾時 180 秒**（`BIME_TIMEOUT_SECONDS`）。結束碼依 A3：0／1 需解析出 stdout JSON（`audit.error/warning/manual`、`reports` 中的 `.audit.md`、`layout_verified`）並確認 docx 已寫出；1 仍回傳路徑與錯誤數。其他結束碼回傳 stderr（保留最後 1,000 字元）。補充：bime_word 缺少依賴時以 `SystemExit` 的訊息結束，結束碼也是 1、沒有 JSON，因此 0／1 都必須解析成功，否則回傳「unexpected output (exit code N)」與截斷的 stderr／stdout，不猜測結果。逾時、無法啟動、vendor 腳本不存在都有明確訊息。
+  - `service.py`：`bime_docx` 走 `_bime_export`，不讀 `styleId`（A5）；必須是 Markdown 文件（沿用 `_markdown_snapshot`，LaTeX 為 `PROTOCOL_INVALID`）；以新的 `DocumentWorkspace.matches_disk(snapshot)`（`documents.py`，讀取磁碟位元組並與編輯器文字比較）確認已存檔，否則 `PROTOCOL_INVALID`「Save the document first (Ctrl+S): the BIME Word export converts the saved file.」（A11）；輸出等於原稿時拒絕；子行程以 `run_local_work` 執行；bime_word 失敗為 `BIBLIOGRAPHY_FAILED`。
+- 新增 pytest（`tests/test_desktop_bibliography.py`，真實轉檔標 `needs_pandoc`）：
+  - ① `test_bime_export_writes_the_docx_and_reports_beside_the_saved_file`：最小 Markdown＋CSL-JSON 實際轉檔，產生 `.bime.docx` 與三份報告；回應的 audit 與 `.bime.audit.json` 的 summary 相同；docx 內含 Ng；原稿位元組不變；`styleId: "ieee"` 不產生 `.ieee.*`；第二次匯出覆蓋同一路徑（A4）。
+  - ② `test_bime_export_passes_the_profile_bibliography_and_overwrite`（替身子行程）：沒有 profile 時沒有 `--config`，有 `bime-稿件-profile.json` 時傳入；`--bibliography <書目>`、`--scope fragment`、`--overwrite`、工作目錄、逾時與 PATH 前綴都核對。
+  - ③／⑥ `test_bime_export_refuses_unsaved_text_and_latex`：未存檔的文字與 `.tex` 文件都拒絕，子行程未被呼叫，沒有任何 `*.bime.*`。
+  - ④ `test_bime_export_stops_on_a_key_missing_from_the_bibliography`：實際轉檔，結束碼 2 的錯誤訊息含 `ghost1999`，沒有 docx。
+  - ⑤ `test_bime_export_with_audit_errors_still_returns_the_file`：替身結束碼 1、errors 2，回傳路徑與完整 audit。
+  - 失敗訊息：結束碼 2 的 stderr（未知設定 key）、缺依賴（結束碼 1、無 JSON）、非 JSON（結束碼 0）、逾時、vendor 腳本不存在。
+  - ⑦ docx／markdown 的既有匯出測試未修改並通過。`test_desktop_protocol_contract.py` 新增 audit 條件規則的正反案例（含上界 1,000,001、缺 reportPath、非 boolean 的 layoutVerified）。
+- 檢查（觀察）：
+  - pytest `test_desktop_bibliography.py test_citation_csl_render.py test_desktop_protocol_contract.py test_desktop_document_service.py`：沙箱內 268 passed、1 failed——失敗的是 `test_isolated_desktop_fixture_calls_real_document_coordinator`，原因是沙箱的 `/tmp` 唯讀（`OSError: [Errno 30] … /tmp/research-agent-desktop-phase02-…`，已知的 fixture 限制，見 [pytest-focused-sandbox.txt](evidence/R4-S1/pytest-focused-sandbox.txt)）；因本步修改了 `documents.py`，在沙箱外以 TMPDIR／XDG_CACHE_HOME／AGENT_LOG_DIR 導向新的 `/tmp/r4s1.*` 重跑同一組：**269 passed**，exit 0（[pytest-focused.txt](evidence/R4-S1/pytest-focused.txt)）。
+  - `node --test … protocol citations citation_preview` → **226/226**，含新增的 1 個 message 與 6 個 trace 夾具（[node-focused.txt](evidence/R4-S1/node-focused.txt)）。
+  - `npm run build` → exit 0（[npm-build.txt](evidence/R4-S1/npm-build.txt)）。
+  - Rust `protocol::tests`（沙箱外）→ **12 passed**，exit 0，約 7 秒（[cargo-protocol-tests.txt](evidence/R4-S1/cargo-protocol-tests.txt)）。
+- 子行程會在 `app/vendor/bime-word/scripts/bime/` 產生 `__pycache__`，已被根目錄與 vendor 的 `.gitignore` 忽略，不影響 manifest 檢查。
