@@ -98,6 +98,41 @@ def test_arxiv_id_reuses_hand_written_entry(tmp_path):
     assert lib.add_item(path, doi_form).key == "vaswani2017attention"
 
 
+NEURIPS_HASH = "3f5ee243547dee91fbd053c1c4a845aa"
+
+
+def test_neurips_identity_comes_from_the_official_proceedings_url():
+    for url in (
+        f"https://papers.nips.cc/paper_files/paper/2017/hash/{NEURIPS_HASH}-Abstract.html",
+        f"https://proceedings.neurips.cc/paper_files/paper/2017/hash/{NEURIPS_HASH}-Abstract.html",
+        f"https://proceedings.neurips.cc/paper_files/paper/2017/file/{NEURIPS_HASH}-Paper.pdf",
+        f"http://PAPERS.NIPS.CC/paper/2017/hash/{NEURIPS_HASH.upper()}-Abstract.html",
+    ):
+        assert lib.item_neurips({"URL": url}) == f"neurips:2017:{NEURIPS_HASH}", url
+    for url in (
+        None, "", "https://example.org/paper_files/paper/2017/hash/" + NEURIPS_HASH + "-Abstract.html",
+        "https://datasets-benchmarks-proceedings.neurips.cc/paper_files/paper/2021/hash/"
+        "65b9eea6e1cc6bb9f0cd2a47751a186f-Abstract-round2.html",
+        "https://proceedings.neurips.cc/paper_files/paper/2017",
+        "https://papers.nips.cc/paper/7181-attention-is-all-you-need",
+    ):
+        assert lib.item_neurips({"URL": url}) is None, url
+
+
+def test_neurips_paper_reuses_the_entry_with_either_host(tmp_path):
+    hand = {"id": "vaswani2017attention", "type": "paper-conference", "title": "Attention Is All You Need",
+            "URL": f"https://papers.nips.cc/paper_files/paper/2017/hash/{NEURIPS_HASH}-Abstract.html"}
+    path = tmp_path / "references.json"
+    path.write_text(json.dumps([hand], ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    saved = {"type": "paper-conference", "title": "Attention is All you Need",
+             "URL": f"https://proceedings.neurips.cc/paper_files/paper/2017/hash/{NEURIPS_HASH}-Abstract.html"}
+    assert (lib.add_item(path, saved).status, lib.add_item(path, saved).key) == ("existing", "vaswani2017attention")
+    assert path.read_bytes() == before
+    other = {**saved, "URL": saved["URL"].replace(NEURIPS_HASH, "3f647cadf56541fb9513cb63ec370187")}
+    assert lib.add_item(path, other).status == "added"
+
+
 def test_key_collision_gets_letter_suffix(tmp_path):
     path = _write_user_file(tmp_path)
     first = lib.add_item(path, NEW)

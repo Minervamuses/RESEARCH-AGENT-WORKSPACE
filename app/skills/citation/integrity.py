@@ -4,7 +4,8 @@ The report covers only the text it is given (the editor's current text,
 unsaved edits included). It never raises for a bad bibliography: library
 errors are reported in ``bibliography.status``/``error``.
 
-An entry is ``verified`` when its DOI or arXiv ID has a valid citation bundle
+An entry is ``verified`` when its DOI, arXiv ID, or official NeurIPS
+proceedings URL (``venue:neurips:<year>:<hash>``) has a valid citation bundle
 in the citation output directory (the same validation ``storage`` applies
 before reusing a bundle); hand-written entries are ``unverified``.
 """
@@ -46,6 +47,9 @@ def bundle_checker(output_dir: Path | None) -> BundleCheck:
         arxiv = lib.item_arxiv(item)
         if arxiv:
             identities.append(CanonicalIdentity("arxiv", arxiv))
+        neurips = lib.item_neurips(item)
+        if neurips:
+            identities.append(CanonicalIdentity("venue", neurips))
         for identity in identities:
             for length in HASH_LENGTHS:
                 for candidate in by_suffix.get(identity_hash(identity, length=length), ()):

@@ -91,3 +91,61 @@ def test_latex_report(tmp_path):
     report = inspect("\\cite{ng2021journal,nope}", "latex", _library(tmp_path))
     assert report["format"] == "latex"
     assert [m["key"] for m in report["missing"]] == ["nope"]
+
+
+def test_neurips_entry_is_verified_by_its_official_url(tmp_path):
+    from skills.citation.resolution import ResolutionDecision, WorkResolution
+    from tests.test_citation_authority import ATTENTION_HASH, neurips_intent, neurips_site
+
+    class Resolver:
+        async def resolve(self, _intent):
+            return WorkResolution(ResolutionDecision("not_found", "no_provider_records"), ())
+
+    cite = tmp_path / "cite"
+    fetch, _calls = neurips_site()
+    service = CitationService(CitationProviderHub(env={}, fetcher=fetch), output_dir=cite)
+    service.resolver = Resolver()
+    assert asyncio.run(service.save((neurips_intent(),))).items[0].status == "saved"
+    url = f"https://papers.nips.cc/paper_files/paper/2017/hash/{ATTENTION_HASH}-Abstract.html"
+    items = [
+        {"id": "vaswani2017attention", "type": "paper-conference", "title": "Attention Is All You Need", "URL": url},
+        {"id": "other2017paper", "type": "paper-conference", "title": "Other",
+         "URL": url.replace(ATTENTION_HASH, "3f647cadf56541fb9513cb63ec370187")},
+    ]
+    report = inspect("[@vaswani2017attention]", "markdown", _library(tmp_path, items), bundle_checker(cite))
+    assert {e["key"]: e["verification"] for e in report["entries"]} == {
+        "vaswani2017attention": "verified", "other2017paper": "unverified"}
+
+    bib = next(cite.glob("*/reference.bib"))
+    bib.write_text(bib.read_text() + "% tampered\n")
+    report = inspect("", "markdown", _library(tmp_path, items), bundle_checker(cite))
+    assert {e["verification"] for e in report["entries"]} == {"unverified"}
+
+
+def test_bundle_from_the_old_built_in_neurips_table_never_verifies(tmp_path):
+    """venue:neurips:2017:7181 came from a hard-coded row, not the official site."""
+    from skills.citation.authority import AuthorityRecord
+    from skills.citation.resolution import ResolutionDecision, WorkResolution
+    from skills.citation.types import CanonicalIdentity
+    from tests.test_citation_authority import neurips_intent
+
+    url = "https://papers.nips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html"
+
+    class Resolver:
+        async def resolve(self, _intent):
+            return WorkResolution(ResolutionDecision("not_found", "no_provider_records"), ())
+
+    class OldTable:
+        async def resolve(self, _intent):
+            return AuthorityRecord(
+                CanonicalIdentity("venue", "neurips:2017:7181"), "Attention Is All You Need",
+                ("Ashish Vaswani",), 2017, "Advances in Neural Information Processing Systems 30",
+                "inproceedings", url, "neurips",
+            )
+
+    cite = tmp_path / "cite"
+    service = CitationService(CitationProviderHub(env={}, fetcher=Fetcher()), output_dir=cite)
+    service.resolver, service.authorities = Resolver(), OldTable()
+    assert asyncio.run(service.save((neurips_intent(),))).items[0].status == "saved", "a valid bundle exists"
+    item = {"id": "vaswani2017attention", "type": "paper-conference", "URL": url}
+    assert bundle_checker(cite)(item) is False

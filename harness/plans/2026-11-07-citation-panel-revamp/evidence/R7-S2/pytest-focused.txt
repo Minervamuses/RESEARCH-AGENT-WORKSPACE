@@ -1,0 +1,7 @@
+$ pytest -q -p no:cacheprovider tests/test_citation_integrity.py tests/test_citation_library.py tests/test_citation_project_library.py tests/test_citation_authority.py tests/test_desktop_bibliography.py
+92 passed, 1 warning in 2.51s
+
+mutations:
+- integrity without the venue identity: test_neurips_entry_is_verified_by_its_official_url FAILED (1 failed, 29 passed)
+- find_existing without the NeurIPS match: test_neurips_paper_reuses_the_entry_with_either_host FAILED (1 failed, 29 passed)
+- restored: 30 passed

@@ -12,7 +12,7 @@
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/)；R4-F1（使用者驗收後修正）：[evidence/R4-F1/](evidence/R4-F1/) | — | — |
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
-| R7（使用者驗收後追加） | In progress | R7-S1：[evidence/R7-S1/](evidence/R7-S1/) | — | R7-S2 |
+| R7（使用者驗收後追加） | In progress | R7-S1：[evidence/R7-S1/](evidence/R7-S1/)；R7-S2：[evidence/R7-S2/](evidence/R7-S2/) | — | R7-S3 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -356,6 +356,30 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - 只查主論文集網站；2021 年獨立的 Datasets and Benchmarks 網站（例如 `thakur2021beir`）查不到，會回報 not found。
   - 頁面的 meta tag 不含頁碼、編者、出版者，所以新條目沒有這三項。官方 BibTeX 檔有這些欄位，需要時可另外補抓。
 
+### R7-S2 NeurIPS 條目的 verified 與去重（2026-11-07）
+
+- **診斷**：
+  - **面板**：`integrity.bundle_checker` 只從書目條目的 DOI 與 arXiv ID 推出 identity；NeurIPS 論文沒有 DOI，所以就算 bundle 存在也顯示 unverified。
+  - **去重**：`library.find_existing` 也只比對 DOI 與 arXiv，所以同一篇 NeurIPS 論文再存一次會多出 `vaswani2017attentiona`（使用者回報時已在記憶體中重現）。
+- **修正**：
+  - **`library.item_neurips`**：從官方論文集網址推出 `neurips:<year>:<hash>`，與 R7-S1 的 identity 相同。
+    - 接受 `proceedings.neurips.cc` 與舊網域 `papers.nips.cc`，`/paper_files/paper/` 或舊式 `/paper/`，`hash` 或 `file`。
+    - 其他網域（含 2021 年獨立的 D&B 站）、列表頁、舊式數字網址都不算。
+  - **`find_existing`**：在 DOI、arXiv 之後再比對 NeurIPS identity。
+  - **`integrity.bundle_checker`**：把它當 `venue` identity 查 bundle。仍是先以目錄名的 hash 建索引，再用 `validate_identity_bundle` 驗證，不逐條掃描。
+  - **README**（根目錄與 citation README）：說明存檔重用與 verified 的定義。
+- **舊 bundle**：寫死表留下的 `venue:neurips:2017:7181` 無法從網址推出，永遠不會讓條目變成 verified。使用者 repo 的 `cite/Attention_Is_All_You_Need--e0b4220861eb` 因此不再有作用，可以刪除。它是產生的資料，代理沒有刪。
+- **測試**：
+  - `test_citation_library.py`：網址解析的正反例；兩個網域視為同一篇，重用既有條目、檔案逐位元組不變；不同 hash 會新增。
+  - `test_citation_integrity.py`：經 R7-S1 流程存出的 bundle 讓 `papers.nips.cc` 網址的條目 verified、其他 hash 不會；bundle 被改則 unverified；以舊寫死表 identity 存出的有效 bundle 不會讓條目 verified。
+  - 兩個突變（拿掉 integrity 的 venue identity、拿掉 find_existing 的 NeurIPS 比對）各使一項失敗。
+  - focused 5 個模組 92 passed（[pytest-focused.txt](evidence/R7-S2/pytest-focused.txt)）。
+- **實際連線重現使用者的存檔**（[live-resave.txt](evidence/R7-S2/live-resave.txt)）：
+  - 從論文資料夾唯讀複製 `references.json` 與 `proposal.md` 到 `$TMPDIR/neurips-e2e/`，用真實 hub（Crossref、DataCite、`proceedings.neurips.cc`），送出與 20:11 那次 Agent 完全相同的 WorkIntent（取自舊 bundle 的 `agent_intent`）。
+  - **存檔**：`saved_new`，identity `venue:neurips:2017:3f5ee243547dee91fbd053c1c4a845aa`，bundle 為 `authority_metadata_verified`、`authoritative:neurips`，網址指向官方論文集。
+  - **書目**：`existing` 重用 `vaswani2017attention`，`references.json` 位元組不變，沒有重複條目。
+  - **面板**：用 repo 現有的 `cite/`（只有舊 bundle）時 `vaswani2017attention` 為 unverified；用新 bundle 時為 verified。使用者其他三筆手寫的 NeurIPS 條目（`lewis2020rag`、`schick2023toolformer`、`wang2024autosurvey`）沒有 bundle，維持 unverified。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -376,7 +400,8 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R6-S1 | `d4ed203` |
 | R6-S2 | `38f7662` |
 | R4-F1 | `eb7f4a4` |
-| R7-S1 | 本 commit（主旨含 `[R7-S1]`） |
+| R7-S1 | `86497be` |
+| R7-S2 | 本 commit（主旨含 `[R7-S2]`） |
 
 R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
 

@@ -32,12 +32,12 @@ Desktop projects add a second output for the same save:
 ```text
 verified save (doi.org CSL-JSON, or the authority record from the arXiv API or the official NeurIPS proceedings site)
     → csl.sanitize_csl (CSL 1.0.2 whitelist, no abstract, fixed type map)
-    → library.merge into the project's references.json (reuse by DOI/arXiv ID, append otherwise)
+    → library.merge into the project's references.json (reuse by DOI, arXiv ID or NeurIPS proceedings paper hash, append otherwise)
     → item.bibliography {status, path, key, reason_code} in the save result
 
 document text ([@key] / \cite{key})
     → citekeys.find_citations (UTF-16 positions, Pandoc-compatible)
-    → integrity.inspect (missing / uncited / duplicate DOIs / verified-by-bundle)
+    → integrity.inspect (missing / uncited / duplicate DOIs / verified-by-bundle via DOI, arXiv ID or NeurIPS URL)
     → csl_render.render | export_docx | export_markdown (Pandoc citeproc)
 ```
 

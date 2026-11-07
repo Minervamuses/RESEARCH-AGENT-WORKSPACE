@@ -1,0 +1,8 @@
+/home/minervamuses/miniconda3/envs/app/lib/python3.13/site-packages/langgraph/cache/base/__init__.py:8: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+panel with the repo cite/ (old built-in-table bundle): {'lewis2020rag': 'unverified', 'schick2023toolformer': 'unverified', 'wang2024autosurvey': 'unverified', 'vaswani2017attention': 'unverified'}
+save: saved saved_new venue:neurips:2017:3f5ee243547dee91fbd053c1c4a845aa
+bibliography: "BibliographyLink(status='existing', path='/tmp/claude-1000/neurips-e2e/references.json', key='vaswani2017attention', reason_code=None)"
+references.json unchanged: True
+bundle: authority_metadata_verified authoritative:neurips https://proceedings.neurips.cc/paper_files/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html
+panel with the new bundle: {'lewis2020rag': 'unverified', 'schick2023toolformer': 'unverified', 'wang2024autosurvey': 'unverified', 'vaswani2017attention': 'verified'}

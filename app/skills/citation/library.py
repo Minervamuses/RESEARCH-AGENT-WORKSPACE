@@ -16,6 +16,7 @@ import json
 import os
 import re
 import unicodedata
+import urllib.parse
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -250,6 +251,32 @@ def item_arxiv(item: dict) -> str | None:
     return None
 
 
+# The official NeurIPS proceedings (and its former papers.nips.cc host) put the
+# year and the paper hash in every paper URL, e.g.
+# /paper_files/paper/2017/hash/<32 hex>-Abstract.html or …/file/<hash>-Paper.pdf.
+_NEURIPS_HOSTS = frozenset({"proceedings.neurips.cc", "papers.nips.cc"})
+_NEURIPS_PATH = re.compile(r"/paper(?:_files/paper)?/(\d{4})/(?:hash|file)/([0-9a-f]{32})-", re.I)
+
+
+def item_neurips(item: dict) -> str | None:
+    """``neurips:<year>:<hash>`` from an official NeurIPS proceedings URL.
+
+    The same value the citation workflow's NeurIPS lookup uses as the
+    ``venue`` identity, so an entry links to its saved bundle the way a DOI does.
+    """
+    url = item.get("URL")
+    if not isinstance(url, str):
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+    except ValueError:
+        return None
+    if (parsed.hostname or "").casefold() not in _NEURIPS_HOSTS:
+        return None
+    match = _NEURIPS_PATH.match(parsed.path)
+    return f"neurips:{match.group(1)}:{match.group(2).casefold()}" if match else None
+
+
 def find_existing(library: Library, item: dict) -> dict | None:
     doi = item_doi(item)
     if doi:
@@ -260,6 +287,11 @@ def find_existing(library: Library, item: dict) -> dict | None:
     if arxiv:
         for existing in library.items:
             if item_arxiv(existing) == arxiv:
+                return existing
+    neurips = item_neurips(item)
+    if neurips:
+        for existing in library.items:
+            if item_neurips(existing) == neurips:
                 return existing
     return None
 
