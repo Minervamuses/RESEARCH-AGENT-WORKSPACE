@@ -1,0 +1,4 @@
+read-only: /home/minervamuses/論文/proposal.md + references.json
+bibliography: ok | entries: 70 | cited keys: 46 | missing: [] | duplicate DOIs: 0
+entry fields: ['authors', 'citedCount', 'doi', 'firstUse', 'key', 'title', 'type', 'year']
+verification present: False

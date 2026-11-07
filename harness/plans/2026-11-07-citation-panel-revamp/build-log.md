@@ -13,7 +13,7 @@
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
 | R7（使用者驗收後追加） | Complete | R7-S1：[evidence/R7-S1/](evidence/R7-S1/)；R7-S2：[evidence/R7-S2/](evidence/R7-S2/)；R7-S3：[evidence/R7-S3/](evidence/R7-S3/) | — | GUI 由使用者驗收（D14） |
-| R8（D17：拿掉 verified 標籤） | In progress | R8-S1：計劃修訂；R8-S2：[evidence/R8-S2/](evidence/R8-S2/) | — | R8-S3 完整套件 |
+| R8（D17：拿掉 verified 標籤） | Complete | R8-S1：計劃修訂；R8-S2：[evidence/R8-S2/](evidence/R8-S2/)；R8-S3：[evidence/R8-S3/](evidence/R8-S3/) | — | GUI 由使用者驗收（D14） |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -32,7 +32,7 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | G7 | R5-S2：`editorZoom` 5 項測試（含 storage 例外與重開讀回）；`lineHeight: 0` 在 create 與 updateOptions 兩處（`DocumentEditor.tsx:185`、`:328`）；Tauri 縮放熱鍵預設關閉；面板 font-size grep 全部 ≥ .9rem | 交由使用者（含 28px 多行不重疊），尚無結果 |
 | G8 | R6-S2 完整套件各一次全部通過：pytest **1756**、npm test **329**、npm run build、cargo **41**（歷史基線 1736／307／41） | 保留功能的 GUI 操作：交由使用者，尚無結果 |
 | G9 | R6-S1：README 與 G1–G7 逐條對照、20 個相對連結存在、`git diff --check` 通過 | 不適用：README 由代理核對 |
-| G10 | 待 R8-S2 | 交由使用者，尚無結果 |
+| G10 | R8-S2：`bundle_checker` 已刪除、entry 欄位斷言、lookup 斷言、本文引用列無標籤的 SSR 斷言；三方協定以共享夾具拒絕 `verification`（Python、TS 經突變確認，Rust 經 cargo 跑同一夾具）；R8-S3 使用者真實書目唯讀 inspect：70 筆，欄位無 `verification` | 交由使用者，尚無結果 |
 
 ## 紀錄
 
@@ -422,6 +422,17 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - **文件**：根目錄 README 的引用面板說明刪去 verified／unverified 及其定義，改寫為「面板不標示條目是否查證過；查證發生在 `/citation` 存入新文獻時」；citation README 的流程圖同步。
 - 第一次跑突變時紀錄檔用了相對路徑，`cd desktop` 後 M3、M4 的結果沒寫進去；檔案已還原（grep 為 0），以絕對路徑重跑 M3、M4 並記錄。
 
+### R8-S3 完整套件與交接（2026-11-07）
+
+- 全部在 HEAD `ebe0a00` 各跑一次：
+  - **pytest**：沙箱外，TMPDIR、XDG_CACHE_HOME、AGENT_LOG_DIR 導向 `/tmp/r8s3-pytest.q3lt/`。**1763 passed**、2 warnings（與 R7-S3 相同），exit 0，約 63 秒（[pytest-full.txt](evidence/R8-S3/pytest-full.txt)）。比 R7-S3 的 1767 少 4，即 R8-S2 刪除的四個只測標籤的測試。
+  - **npm test**：329 passed（[npm-test.txt](evidence/R8-S3/npm-test.txt)）。
+  - **npm run build**（`tsc --noEmit && vite build`）：成功，只有既有的 chunk 大小提示（[npm-build.txt](evidence/R8-S3/npm-build.txt)）。
+  - **cargo test --locked**：沙箱外，41 passed（[cargo-test.txt](evidence/R8-S3/cargo-test.txt)）。
+- **真實書目**（[real-inspect.txt](evidence/R8-S3/real-inspect.txt)）：唯讀讀取論文資料夾的 `proposal.md` 與 `references.json` 執行 `inspect`。70 筆條目，本文引用 46 個 key，無缺漏、無重複 DOI；entry 欄位為 authors、citedCount、doi、firstUse、key、title、type、year，沒有 `verification`。
+- 論文資料夾只讀不寫。
+- GUI 依 D14 由使用者驗收，以上沒有 GUI 實測。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -446,9 +457,10 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R7-S2 | `7d1017b` |
 | R7-S3 | `044a0e9` |
 | R8-S1 | `579f338` |
-| R8-S2 | 本 commit（主旨含 `[R8-S2]`） |
+| R8-S2 | `ebe0a00` |
+| R8-S3 | 本 commit（主旨含 `[R8-S3]`） |
 
-R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
+R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1、R7 與 R8（見紀錄），同樣沒有付費 API 呼叫。
 
 ## 最終彙報
 
@@ -487,3 +499,18 @@ R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkp
    - 舊寫死表的 NeurIPS 存檔，其 Agent 回覆曾以 `[authority_metadata_verified]` 標示，實際上沒有連網查證。
    - 只查 NeurIPS 主論文集網站：2021 年獨立的 Datasets and Benchmarks 網站查不到（例如 `thakur2021beir`）。新條目沒有頁碼、編者、出版者，因為論文頁的 meta tag 沒有這些欄位；官方 BibTeX 有，需要時可另外補抓。
    - `for_agents/` 可能已過時：R6 後未更新，R4-F1 與 R7 又改了匯出與 citation 行為，需要用 infrastructure skill 更新。
+
+## 拿掉 verified 標籤的彙報（R8，D17）
+
+1. **完成的改變**（`579f338`..R8-S3，GUI 分支本地，未 push）：
+   - 面板不再顯示 verified／unverified。
+   - 三方協定、`bibliography_lookup` 與 `integrity.py` 都不再計算或攜帶查證狀態。
+   - 存檔前的權威查證、`cite/` 紀錄與 NeurIPS 去重不變。
+   - pytest 1763、npm 329、build、cargo 41 全部通過。
+2. **手動 GUI 檢查清單**（使用者本人操作，代理沒有實測）：
+   - 開啟 `proposal.md`，展開 Citations 面板。檢查：本文引用列只有編號（數字制樣式）、key、作者年份標題、次數與 Line，沒有 verified／unverified。
+   - 在 `/citation` 請 Agent 查書目中的某個 key（例如「找 Ng 2021 的 key」）。檢查：它照常找到條目並以 key 引用，回覆中不再提到 verified 或 unverified。
+3. **需要使用者知道的事**：
+   - repo 的 `cite/` 現在只供 `/citation` 存檔時重用查證紀錄，面板不再讀它。舊的 `cite/Attention_Is_All_You_Need--e0b4220861eb` 仍可刪除。
+   - R7 GUI 清單中「面板上 `vaswani2017attention` 變成 verified」與「新條目面板顯示 verified」兩項已不適用；同一清單的「不新增重複條目」與「網址指向 `proceedings.neurips.cc`」仍要檢查。
+   - `for_agents/` 可能已過時，需要用 infrastructure skill 更新。
