@@ -748,17 +748,40 @@ pub async fn backend_restart(app_handle: AppHandle) -> BackendSnapshot {
 }
 
 // The script is fixed; the selected location is JSON data on stdin, never code.
+//
+// powershell.exe is started by wslhost.exe, not by the WSLg window the user just clicked,
+// so Windows refuses it the foreground and silently ignores TopMost: the dialog used to
+// open behind the app. The script first takes the foreground for its invisible owner by
+// sharing the foreground window's input state, then opens the dialog from it. The owner
+// also has a titled taskbar button in case Windows still refuses.
 const WINDOWS_PICKER_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -Namespace ResearchAgent -Name Foreground -MemberDefinition @'
+[DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr process);
+[DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] static extern bool AttachThreadInput(uint thread, uint target, bool attach);
+[DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);
+[DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+public static bool Take(IntPtr window) {
+    uint self = GetCurrentThreadId();
+    IntPtr current = GetForegroundWindow();
+    uint target = current == IntPtr.Zero ? 0 : GetWindowThreadProcessId(current, IntPtr.Zero);
+    bool attached = target != 0 && target != self && AttachThreadInput(self, target, true);
+    try { BringWindowToTop(window); SetForegroundWindow(window); }
+    finally { if (attached) { AttachThreadInput(self, target, false); } }
+    return GetForegroundWindow() == window;
+}
+'@
 $data = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $owner = New-Object System.Windows.Forms.Form
-$owner.ShowInTaskbar = $false
+$owner.Text = if ($data.kind -eq 'project') { 'Research Agent: choose project folder' } else { 'Research Agent: open document' }
+$owner.ShowInTaskbar = $true
 $owner.Opacity = 0
-$owner.TopMost = $true
 if ($data.kind -eq 'project') {
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = 'Choose the WSL research project'
@@ -774,6 +797,7 @@ if ($data.kind -eq 'project') {
 }
 try {
     $owner.Show()
+    [void][ResearchAgent.Foreground]::Take($owner.Handle)
     if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
         $path = if ($data.kind -eq 'project') { $dialog.SelectedPath } else { $dialog.FileName }
         @{status='selected'; path=$path} | ConvertTo-Json -Compress
@@ -1703,6 +1727,18 @@ mod tests {
         );
         assert!(!is_wsl_unc(r"C:\research\draft.md"));
         assert!(!is_wsl_unc(r"\\server\research\draft.md"));
+    }
+
+    #[test]
+    fn picker_takes_the_foreground_before_opening_the_dialog() {
+        let script = WINDOWS_PICKER_SCRIPT;
+        let show = script.find("$owner.Show()").expect("owner is shown");
+        let take = script.find("[ResearchAgent.Foreground]::Take($owner.Handle)").expect("foreground is taken");
+        let dialog = script.find("$dialog.ShowDialog($owner)").expect("dialog is opened");
+        assert!(show < take && take < dialog, "take the foreground after showing the owner, before the dialog");
+        assert!(script.contains("AttachThreadInput(self, target, true)") && script.contains("AttachThreadInput(self, target, false)"));
+        assert!(script.contains("$owner.ShowInTaskbar = $true"), "a taskbar button remains if Windows refuses");
+        assert!(!script.contains("TopMost"), "Windows ignores TopMost for this background process");
     }
     use std::io::{Cursor, Seek};
     use std::sync::atomic::{AtomicU64, Ordering};
