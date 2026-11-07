@@ -1,0 +1,43 @@
+✔ style changes send set_style only for a different known style while idle (1.588109ms)
+✔ only Markdown documents export: Word, BIME Word, then Markdown, never BibTeX (0.173063ms)
+✔ export results name the file; BIME results add the audit and the manual-review reminder (0.178548ms)
+✔ Markdown documents get one closed Export button; others get none (3044.410096ms)
+✔ segments are grouped per bibliography entry (0.333063ms)
+✔ cited rows offer only Line jumps; uncited rows offer Remove (1.347538ms)
+✔ a newly rendered panel is only the collapsed summary bar (1.319712ms)
+✔ preview text shows italics and safe links without interpreting markup (0.807662ms)
+✔ panel lists cited keys in first-use order with counts and issues (1.828174ms)
+✔ numeric styles number only known references in first-use order (0.137765ms)
+✔ library errors become a problem message, not an exception (0.148954ms)
+✔ entries are described compactly (0.093855ms)
+✔ jumping selects the exact UTF-16 range after an emoji (0.27256ms)
+✔ stale or invalid positions are not selected (0.090507ms)
+✔ the summary bar counts cited keys and problems, including an unreadable bibliography (0.208889ms)
+✔ the panel opens collapsed and expands by itself only for new problems or Preview (0.124147ms)
+✔ removal always asks for confirmation naming the key, the file and the unchecked documents (0.151793ms)
+✔ a stale fingerprint asks for a refresh (0.163532ms)
+✔ add results map to added, existing, failed and denied (0.138212ms)
+✔ citation format follows the document type (0.18442ms)
+✔ completion triggers after [@, ; @, \cite{ and commas (0.462376ms)
+✔ completion candidates rank key prefixes before title matches (4.098423ms)
+✔ a source selection targets the second duplicate without changing BOM, tabs or mixed newlines (1624.559047ms)
+✔ source lines 40–45 use stored lines even when one source line is long (0.705785ms)
+✔ multiple Monaco edits resolve against one pre-edit source snapshot (0.107569ms)
+✔ manual Save preserves an empty or narrow selection and does not advance an unchanged revision (1929.172843ms)
+✔ Agent saved snapshots use the post-replacement selection and preserve edits made after send (0.343625ms)
+✔ a selection collapsed during approval omits optional range keys from every document payload (0.501277ms)
+✔ annotation Enter confirms locally while IME and Shift+Enter keep editing (12.937939ms)
+✔ saved document receipts advance two UTF-16 references without changing the submitted context (0.871367ms)
+✔ the editor starts at 16px within a 10–28px range (1.134941ms)
+✔ a remembered size is used only when it is a whole number in range (0.168118ms)
+✔ storage that throws falls back to 16px and never breaks the editor (0.205614ms)
+✔ zoom steps one pixel, stays within 10–28, and resets to 16; the size is remembered (2.194229ms)
+✔ Monaco derives the line height from the font size at start and after every zoom (4.036703ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3979.581776

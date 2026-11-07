@@ -1263,11 +1263,15 @@ h3 {
 .annotation-popup p { margin: .45rem 0 0; color: #5c7066; font-size: .7rem; }
 .annotation-batch { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .75rem; color: #466152; }
 .annotation-batch button { padding: .1rem .4rem; border: 1px solid #a9bdb4; border-radius: .35rem; color: #17533f; background: #f1f7f3; }
-.citation-panel { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow: auto; padding: .6rem .7rem; border-top: 1px solid #d4d6d8; background: #fbfbfa; font-size: .78rem; }
+/* Panel text is never below .9rem (G7). */
+.citation-panel { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow: auto; padding: .5rem .7rem; border-top: 1px solid #d4d6d8; background: #fbfbfa; font-size: .95rem; }
+.citation-panel select { font: inherit; }
+.citation-panel .document-error { font-size: inherit; }
 /* Summary bar: always one (wrapping) row; the body below renders only when expanded. */
 .citation-summary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .2rem .35rem; border: 1px solid transparent; border-radius: .35rem; }
 .citation-summary h3 { font-size: 1rem; margin: 0; }
-.citation-summary select { margin-left: .3rem; max-width: 16rem; }
+.citation-summary select { margin-left: .3rem; max-width: 16rem; min-height: 2rem; }
+.citation-summary button { min-height: 2rem; padding: .3rem .65rem; }
 .citation-counts { color: #4a4f55; }
 .citation-summary.has-problems { background: #fbeaea; border-color: #e3a5a5; }
 .citation-summary.has-problems .citation-counts { color: #9b1c1c; font-weight: 600; }
@@ -1279,7 +1283,7 @@ h3 {
 .citation-number { font-weight: 600; }
 .citation-meta { color: #4a4f55; overflow-wrap: anywhere; }
 .citation-count { color: #6b7075; }
-.citation-badge { padding: 0 .3rem; border-radius: .2rem; font-size: .68rem; border: 1px solid #c9cccf; }
+.citation-badge { padding: 0 .3rem; border-radius: .2rem; font-size: .9rem; border: 1px solid #c9cccf; }
 .citation-badge.verified { color: #1f6b3a; border-color: #8cc5a0; }
 .citation-badge.unverified { color: #7a5a12; border-color: #d9be7c; }
 .citation-uses { display: flex; flex-wrap: wrap; gap: .3rem; list-style: none; padding: 0; margin: .2rem 0 .4rem; }

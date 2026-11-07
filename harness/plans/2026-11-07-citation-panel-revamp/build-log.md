@@ -10,8 +10,8 @@
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/) | — | — |
-| R5 | In progress | R5-S1：[evidence/R5-S1/](evidence/R5-S1/) | — | R5-S2 字體與縮放 |
-| R6 | Not started | — | — | 等 R4、R5 全部完成 |
+| R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
+| R6 | Not started | — | — | R6-S1 更新 README（R4、R5 已完成） |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -223,3 +223,12 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 - 測試：`citations.test.ts` 新增計數／摘要文字（含書目錯誤）與 `nextExpanded` 的 10 種情況（開啟時有／無問題、新文件從展開重設為收合、0→N、N→N 使用者已收合、N→M、N→0、0→0、Preview）；`citation_preview.test.ts` 新增 SSR：初始渲染只有摘要列，切換鈕 `aria-expanded="false"`、文字「Expand ▾」，沒有 `citation-body` 與「Verify and add」。
 - 檢查（觀察）：`node --test … citations citation_preview` → **22/22**（[node-focused.txt](evidence/R5-S1/node-focused.txt)）；`npm run build` → exit 0（[npm-build.txt](evidence/R5-S1/npm-build.txt)）。
 - 交由使用者 GUI 驗收：開啟沒有問題的文件時收合、有問題時自動展開與標紅、輸入 `[@notakey` 存檔後標紅並展開、Preview 展開、手動切換。
+
+### R5-S2 字體與縮放（2026-11-07）
+
+- 新模組 `app/desktop/src/editorZoom.ts`（A6）：預設 16、範圍 10–28、每次 ±1；`readEditorFontSize()` 只接受 `localStorage` 中 1–2 位數、範圍內的整數字串，其餘（含 `"16.5"`、`" 20"`、`"1e1"`）回到 16；`getItem` 拋例外或沒有 storage 時回到 16；`writeEditorFontSize()` 的例外被吞掉（只是不記住）；`zoomedFontSize(current, "in"|"out"|"reset")`。鍵名 `research-agent.editorFontSize`。
+- `DocumentEditor.tsx`：`monaco.editor.create` 以 `readEditorFontSize()` 初始化 `fontSize`，原本的 `fontSize: 14`、`lineHeight: 23` 改為 `fontSize`、`lineHeight: 0`（第 183、185 行）；新增三個只在編輯器取得焦點時生效的 Monaco action：放大 `CtrlCmd+Equal`、`CtrlCmd+Shift+Equal`、`CtrlCmd+NumpadAdd`，縮小 `CtrlCmd+Minus`、`CtrlCmd+NumpadSubtract`，重設 `CtrlCmd+Digit0`、`CtrlCmd+Numpad0`；觸發時 `instance.updateOptions({ fontSize, lineHeight: 0 })`（第 328 行）並寫入 storage；編輯器釋放時一併 dispose。重開時再從 storage 讀取，所以初始化與縮放都使用自動行高。
+- Tauri：`tauri.conf.json` 沒有設定 `zoomHotkeysEnabled`；Cargo.lock 使用的 tauri-utils 2.9.3 預設 `zoom_hotkeys_enabled: false`（`config.rs:2342`），webview 不會自己處理 Ctrl+=／Ctrl+−，不會重複縮放。未改用其他按鍵。
+- `styles.css`（面板文字 ≥ .9rem）：`.citation-panel` `.78rem` → `.95rem`（padding 微調）；`.citation-badge` `.68rem` → `.9rem`；`.citation-summary h3` `1rem`；`.citation-export-note` `.9rem`；新增 `.citation-panel select { font: inherit }`（全域的 `font: inherit` 只涵蓋 button、input、textarea，select 原本用瀏覽器預設字級）與 `.citation-panel .document-error { font-size: inherit }`（`.document-error` 全域為 `.75rem`，面板內的通知改為繼承 `.95rem`）。`.link-button`、按鈕、輸入框都是 `font: inherit`。摘要列按鈕與 select 改為 `min-height: 2rem`、較小的 padding，`flex-wrap: wrap` 讓窄視窗換行。grep 結果見 [static-checks.txt](evidence/R5-S2/static-checks.txt)：面板相關的 font-size 只有 .95rem、inherit、1rem、.9rem、.9rem。
+- 測試：新 `tests/editorZoom.test.ts`（5 項）：預設值與範圍、有效／無效的儲存值、storage 拋例外、步進／上下限／重設與「重開後讀到縮放後的大小」；另以原始碼核對 `lineHeight: 0` 恰好出現在 create 與 updateOptions 兩處、沒有固定行高或 `fontSize: 14`、三組快捷鍵都已註冊。實際畫面與 28px 多行文字是否重疊不在 Node 測試範圍，列入使用者的 GUI 清單。
+- 檢查（觀察）：`node --test … editorZoom documents citations citation_preview` → **35/35**（[node-focused.txt](evidence/R5-S2/node-focused.txt)）；`npm run build` → exit 0（[npm-build.txt](evidence/R5-S2/npm-build.txt)）。

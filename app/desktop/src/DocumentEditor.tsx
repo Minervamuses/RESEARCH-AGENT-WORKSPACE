@@ -4,6 +4,7 @@ import type { editor, IPosition, IRange } from "monaco-editor/editor/editor.api"
 import type { DraftAnnotation } from "./conversations.ts";
 import type { Reference } from "./protocol.ts";
 import { citationFormatForPath, completionCandidates, completionPrefix, type BibliographyEntryDto } from "./citations.ts";
+import { readEditorFontSize, writeEditorFontSize, zoomedFontSize, type ZoomStep } from "./editorZoom.ts";
 
 export interface AnnotationControls {
   annotations: readonly DraftAnnotation[];
@@ -169,6 +170,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         modelSource(initial.sourceText),
         /\.(md|markdown)$/i.test(initial.path) ? "markdown" : "plaintext",
       );
+      let fontSize = readEditorFontSize();
       const instance = monaco.editor.create(surfaceRef.current, {
         model,
         automaticLayout: true,
@@ -178,8 +180,9 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         fontFamily: '"Cascadia Code", "Noto Sans Mono", monospace',
-        fontSize: 14,
-        lineHeight: 23,
+        fontSize,
+        // 0 lets Monaco derive the line height from the font size, so zoomed lines never overlap.
+        lineHeight: 0,
         padding: { top: 12, bottom: 12 },
         tabSize: 4,
       });
@@ -319,6 +322,28 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
           if (!callbacksRef.current.saveDisabled) callbacksRef.current.onSave();
         },
       });
+      // Editor-only zoom (A6): active while the editor has focus, remembered for the next start.
+      const zoom = (step: ZoomStep) => {
+        fontSize = zoomedFontSize(fontSize, step);
+        instance.updateOptions({ fontSize, lineHeight: 0 });
+        writeEditorFontSize(fontSize);
+      };
+      const { CtrlCmd, Shift } = monaco.KeyMod;
+      const { Equal, NumpadAdd, Minus, NumpadSubtract, Digit0, Numpad0 } = monaco.KeyCode;
+      const zoomActions = [
+        instance.addAction({
+          id: "workspace.editor.zoom-in", label: "Increase editor font size",
+          keybindings: [CtrlCmd | Equal, CtrlCmd | Shift | Equal, CtrlCmd | NumpadAdd], run: () => zoom("in"),
+        }),
+        instance.addAction({
+          id: "workspace.editor.zoom-out", label: "Decrease editor font size",
+          keybindings: [CtrlCmd | Minus, CtrlCmd | NumpadSubtract], run: () => zoom("out"),
+        }),
+        instance.addAction({
+          id: "workspace.editor.zoom-reset", label: "Reset editor font size",
+          keybindings: [CtrlCmd | Digit0, CtrlCmd | Numpad0], run: () => zoom("reset"),
+        }),
+      ];
       if (initial.rangeStartUtf16 !== undefined && initial.rangeEndUtf16 !== undefined) {
         const start = documentPositionAt(initial.sourceText, initial.rangeStartUtf16);
         const end = documentPositionAt(initial.sourceText, initial.rangeEndUtf16);
@@ -337,6 +362,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         selectionListener.dispose();
         completion?.dispose();
         saveAction.dispose();
+        for (const action of zoomActions) action.dispose();
         instance.dispose();
         model.dispose();
         if (editorRef.current === instance) editorRef.current = null;
