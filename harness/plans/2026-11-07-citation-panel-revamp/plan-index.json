@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "plan_id": "citation-panel-revamp",
+  "goals": [
+    {"id": "G1", "text": "Remove every Insert control from the citation panel"},
+    {"id": "G2", "text": "Remove only in the not-cited section, always confirmed"},
+    {"id": "G3", "text": "Remove BibTeX export from front end, protocol and back end"},
+    {"id": "G4", "text": "One Export menu: Word, Word (BIME), Markdown"},
+    {"id": "G5", "text": "BIME-format Word export via vendored bime_word 1.1.5"},
+    {"id": "G6", "text": "Panel collapsed to a summary bar by default"},
+    {"id": "G7", "text": "Editor 16px with remembered zoom; panel text at least 0.9rem"},
+    {"id": "G8", "text": "Kept behavior and all test suites still pass"},
+    {"id": "G9", "text": "README describes the revised panel"}
+  ],
+  "phases": [
+    {"id": "R1", "file": "build/phase-1-preflight.md", "depends_on": [], "covers": ["G8"]},
+    {"id": "R2", "file": "build/phase-2-remove-controls.md", "depends_on": ["R1"], "covers": ["G1", "G2", "G3"]},
+    {"id": "R3", "file": "build/phase-3-bime-vendor.md", "depends_on": ["R1"], "covers": ["G5"]},
+    {"id": "R4", "file": "build/phase-4-export-menu.md", "depends_on": ["R2", "R3"], "covers": ["G4", "G5"]},
+    {"id": "R5", "file": "build/phase-5-layout-font.md", "depends_on": ["R4"], "covers": ["G6", "G7"]},
+    {"id": "R6", "file": "build/phase-6-readme-acceptance.md", "depends_on": ["R5"], "covers": ["G8", "G9"]}
+  ]
+}
