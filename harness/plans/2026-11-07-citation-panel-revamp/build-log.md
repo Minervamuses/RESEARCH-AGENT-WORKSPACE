@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
-| R3 | Not started | — | — | R3-S1 加入依賴 |
+| R3 | In progress | R3-S1：[evidence/R3-S1/](evidence/R3-S1/) | — | R3-S2 vendor bime_word |
 | R4 | Not started | — | — | 等 R2、R3 |
 | R5 | Not started | — | — | S2 的前提（R2-S1）已滿足；S1 等 R4-S2 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
@@ -127,3 +127,14 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - `npm run build` → exit 0（[npm-build.txt](evidence/R2-S3/npm-build.txt)）。
   - Rust `cargo test --locked … protocol::tests`（沙箱外）→ **12 passed**、29 filtered out，exit 0，約 6 秒；含 `shared_message_fixtures`、`shared_ordering_and_correlation_traces` 與由 contract 產生樣本的 `rust_result_data_rules_match_manifest`（[cargo-protocol-tests.txt](evidence/R2-S3/cargo-protocol-tests.txt)）。
   - 限定範圍的 grep（[grep-checks.txt](evidence/R2-S3/grep-checks.txt)）：`grep -nw export_bib service.py csl_render.py` exit 1；contract／protocol.ts／protocol.rs／citations.ts／csl_render.py 沒有 `"bib"`；fixtures 只剩兩個拒絕案例。保留的 BibTeX 功能仍在：`authority.export_bibtex` 及 `skills/citation/service.py:307` 的呼叫、`storage.py` 的 `reference.bib`、`bibtex_canonical`、`pyproject.toml` 的 pybtex。
+
+### R3-S1 加入 python-docx 與 lxml（2026-11-07）
+
+- 執行前：`pyproject.toml` 沒有這兩個依賴；`pyproject.toml` sha256 `775901d5…`、`poetry.lock` `6207f1ab…`；Conda `app` 的 `pip list --format=freeze` 161 個套件（[pip-freeze-before.txt](evidence/R3-S1/pip-freeze-before.txt)）。
+- 指令（`app/`）：`PATH=$P/bin:$PATH CONDA_PREFIX=$P CONDA_DEFAULT_ENV=app $P/bin/poetry add "python-docx>=1.2.0,<2.0" "lxml>=5.2,<7.0"`。直接在沙箱外執行：安裝目標是 `$P/lib/python3.13/site-packages`，不在沙箱可寫範圍，沙箱內必然被擋（PLANS 允許此情況在沙箱外執行）。exit 0，約 3 秒：「2 installs, 0 updates, 0 removals」，安裝 lxml 6.1.3、python-docx 1.2.0（[poetry-add.txt](evidence/R3-S1/poetry-add.txt)）。
+- 檢查（觀察）：
+  - `$P/bin/python -c "import docx, lxml"` 成功：python-docx 1.2.0、lxml 6.1.3（[import-check.txt](evidence/R3-S1/import-check.txt)）。
+  - 環境差異只有新增 `lxml==6.1.3`、`python-docx==1.2.0`（[pip-freeze-diff.txt](evidence/R3-S1/pip-freeze-diff.txt)）；其他套件的版本沒有變化。
+  - `poetry check` → 「All set!」，exit 0。
+  - `git status`：只修改 `app/pyproject.toml`（dependencies 新增兩行）與 `app/poetry.lock`（新增 lxml、python-docx 兩個 package 區塊；唯一刪除的行是 `content-hash`），沒有改到其他鎖定版本；未修改 `env-app.yml`。
+  - 引用相關 pytest：`tests/test_citation*.py`（33 個模組）+ `test_desktop_bibliography.py` + `test_desktop_protocol_contract.py` → **772 passed**，exit 0，約 7 秒（[pytest-citation.txt](evidence/R3-S1/pytest-citation.txt)）。
