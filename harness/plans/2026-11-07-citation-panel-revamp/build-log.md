@@ -12,7 +12,7 @@
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/)；R4-F1（使用者驗收後修正）：[evidence/R4-F1/](evidence/R4-F1/) | — | — |
 | R5 | Complete | R5-S1：[evidence/R5-S1/](evidence/R5-S1/)；R5-S2：[evidence/R5-S2/](evidence/R5-S2/) | — | — |
 | R6 | Complete | R6-S1：[evidence/R6-S1/](evidence/R6-S1/)；R6-S2：[evidence/R6-S2/](evidence/R6-S2/) | — | GUI 由使用者驗收（D14） |
-| R7（使用者驗收後追加） | In progress | R7-S1：[evidence/R7-S1/](evidence/R7-S1/)；R7-S2：[evidence/R7-S2/](evidence/R7-S2/) | — | R7-S3 |
+| R7（使用者驗收後追加） | Complete | R7-S1：[evidence/R7-S1/](evidence/R7-S1/)；R7-S2：[evidence/R7-S2/](evidence/R7-S2/)；R7-S3：[evidence/R7-S3/](evidence/R7-S3/) | — | GUI 由使用者驗收（D14） |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
 
@@ -380,6 +380,15 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - **書目**：`existing` 重用 `vaswani2017attention`，`references.json` 位元組不變，沒有重複條目。
   - **面板**：用 repo 現有的 `cite/`（只有舊 bundle）時 `vaswani2017attention` 為 unverified；用新 bundle 時為 verified。使用者其他三筆手寫的 NeurIPS 條目（`lewis2020rag`、`schick2023toolformer`、`wang2024autosurvey`）沒有 bundle，維持 unverified。
 
+### R7-S3 完整測試與交接（2026-11-07）
+
+- **完整 pytest**：只跑一次，沙箱外執行，TMPDIR、XDG_CACHE_HOME 與 AGENT_LOG_DIR 導向 `/tmp/r7s3-pytest.9Nni/`。結果 **1767 passed**、2 warnings，exit 0，約 66 秒（[pytest-full.txt](evidence/R7-S3/pytest-full.txt)）。
+  - 與 R6-S2 的 1756 相比多 11 項：R4-F1 +3，R7-S1 +4（刪 1 加 5），R7-S2 +4。
+  - 兩個 warning 與 R6-S2 相同。
+- **npm／cargo 沒有重跑**：`git diff 38f7662 HEAD -- app/desktop app/vendor app/pyproject.toml app/poetry.lock` 沒有任何變動，前端、Rust、vendor 與依賴都未改，所以沿用 R6-S2 的 329／41。
+- **論文 repo**：HEAD `59e9dc1`，`git status --short` 與使用者回報時相同。R4-F1、R7 只從那裡唯讀複製，沒有寫入。
+- **GUI**：依 D14 由使用者驗收，見下方「驗收後修正的彙報」。以上都是自動檢查、程式碼核對與實際連線的腳本，沒有 GUI 實測。
+
 ## 步驟與 commit
 
 | 步驟 | commit |
@@ -401,7 +410,8 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
 | R6-S2 | `38f7662` |
 | R4-F1 | `eb7f4a4` |
 | R7-S1 | `86497be` |
-| R7-S2 | 本 commit（主旨含 `[R7-S2]`） |
+| R7-S2 | `7d1017b` |
+| R7-S3 | 本 commit（主旨含 `[R7-S3]`） |
 
 R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkpoint commit、沒有任何付費 API 呼叫。使用者驗收後新增 R4-F1 與 R7（見紀錄），同樣沒有付費 API 呼叫。
 
@@ -425,3 +435,20 @@ R6-S2 之前：沒有 Blocked 項目、沒有修正步驟（F）、沒有 checkp
    - 可逆假設 A1–A11 照計劃實作。執行中另做的可逆選擇：audit 欄位為 errors／warnings／manualChecks／reportPath／layoutVerified；「問題數」包含書目無法讀取；問題數 N→M（都大於 0）時不自動展開（A7 字面）；`Export ▾` 的選項在摘要列中另起一行而非浮動選單（避免被面板裁切）；未存檔時的錯誤代碼沿用 `PROTOCOL_INVALID`；bime_word 逾時 180 秒；契約中 `documentContext` 仍是選填，由後端要求。
    - `for_agents/` 可能已過時（面板、協定、vendor、依賴都有變動），需要用 infrastructure skill 更新。
    - 已知既有失敗：無。沙箱內跑 `test_desktop_document_service.py` 的 phase02 fixture 會因 `/tmp` 唯讀失敗（已知限制，沙箱外通過）。
+
+## 驗收後修正的彙報（R4-F1、R7）
+
+1. **完成的改變**（`eb7f4a4`..R7-S3，GUI 分支本地，未 push）：
+   - **系上格式匯出**：目錄獨立成小寫羅馬數字一節，本文從 1 起算，並對最終檔案重跑稽核。
+   - **NeurIPS 真查詢**：改為查詢官方論文集，取代只有一筆的寫死表。
+   - **NeurIPS 條目**：依官方網址判斷 verified，並據此去重。
+   - 完整 pytest 1767 passed；npm 與 cargo 沿用 R6-S2，因前端與 Rust 未改。
+2. **手動 GUI 檢查清單**（使用者本人操作，代理沒有實測）：
+   - 在 GUI 重新匯出系上格式 Word，用 Word 開啟並允許更新欄位。檢查：封面無頁碼，目錄頁碼為 i，第一章從 1 開始；面板顯示的人工確認項為 10。
+   - 在 `/citation` 讓 Agent 重存《Attention Is All You Need》（或任一 NeurIPS 論文）。檢查：書目沒有新增重複條目，面板上 `vaswani2017attention` 變成 verified。
+   - 在 `/citation` 存一篇書目裡沒有的 NeurIPS 論文。檢查：新條目的網址指向 `proceedings.neurips.cc`，面板顯示 verified。
+3. **需要使用者知道或決定的事**：
+   - repo 的 `cite/Attention_Is_All_You_Need--e0b4220861eb` 是寫死表留下的 bundle，不再有作用，可刪除（產生的資料，代理沒有刪）。
+   - 舊寫死表的 NeurIPS 存檔，其 Agent 回覆曾以 `[authority_metadata_verified]` 標示，實際上沒有連網查證。
+   - 只查 NeurIPS 主論文集網站：2021 年獨立的 Datasets and Benchmarks 網站查不到（例如 `thakur2021beir`）。新條目沒有頁碼、編者、出版者，因為論文頁的 meta tag 沒有這些欄位；官方 BibTeX 有，需要時可另外補抓。
+   - `for_agents/` 可能已過時：R6 後未更新，R4-F1 與 R7 又改了匯出與 citation 行為，需要用 infrastructure skill 更新。

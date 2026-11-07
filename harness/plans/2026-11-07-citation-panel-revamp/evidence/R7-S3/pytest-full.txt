@@ -1,0 +1,9 @@
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+tests/test_skill_runtime.py::test_installer_zip_rejects_unsafe_members_without_extracting[skill/SKILL.md-33188]
+  /home/minervamuses/miniconda3/envs/app/lib/python3.13/zipfile/__init__.py:1661: UserWarning: Duplicate name: 'skill/SKILL.md'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1767 passed, 2 warnings in 62.21s (0:01:02)
+exit 0, 66 s
