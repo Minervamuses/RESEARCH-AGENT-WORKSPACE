@@ -10,7 +10,7 @@
 | R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
 | R3 | Complete | R3-S1：[evidence/R3-S1/](evidence/R3-S1/)；R3-S2：[evidence/R3-S2/](evidence/R3-S2/)；R3-S3：[evidence/R3-S3/](evidence/R3-S3/) | — | — |
 | R4 | Complete | R4-S1：[evidence/R4-S1/](evidence/R4-S1/)；R4-S2：[evidence/R4-S2/](evidence/R4-S2/)；R4-S3：[evidence/R4-S3/](evidence/R4-S3/) | — | — |
-| R5 | Not started | — | — | R5-S1 收合摘要列 |
+| R5 | In progress | R5-S1：[evidence/R5-S1/](evidence/R5-S1/) | — | R5-S2 字體與縮放 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
@@ -210,3 +210,16 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - 8 項檢查全部為 true（[stdout.txt](evidence/R4-S3/stdout.txt)）。
 - 論文 repo 的 `git status --short` 仍與 R1-S1 相同。
 - 結論：G5 的代理端自動驗收（真實 proposal 副本、正負案例）通過；GUI 中的路徑與摘要顯示依 D14 交由使用者確認。
+
+### R5-S1 收合摘要列（2026-11-07）
+
+- 依 PLANS 的正常順序先做 S1（前提 R4-S2 已完成），S2 接著做。
+- `citations.ts` 新增純函式：`problemCount(model)`＝未知 key＋重複 DOI＋（書目無法讀取時 1），與 README 對「問題」的定義一致；`panelSummaryText(model)` → 「3 cited · 2 problems」（單數 problem）；`nextExpanded(expanded, event)`（A7）：`{kind: "checked", previousProblems, problems}` 中 `previousProblems === null` 表示開啟後的第一次檢查，此時有問題才展開、否則收合；0→N 展開；其他（N→N、N→M、N→0、0→0）保留目前狀態；`{kind: "preview"}` 一律展開。
+- `CitationPanel.tsx`：面板分為摘要列與內容區。摘要列（`<header class="citation-summary">`）依序為 `Citations`、計數、Style、Preview（只限 Markdown）、`Export ▾`、Refresh、展開／收合切換（`aria-expanded`、`aria-controls`）；問題數大於 0 時加上 `has-problems`（紅底、紅框、計數加粗變紅）。內容區（書目路徑、寫入停用說明、Preview、本文引用、Problems、Verify and add、未引用區）只在展開時渲染。`document.path` 改變時重設為收合、`problemsRef = null`；每次 inspect 成功後依 `nextExpanded` 更新；按 Preview 時展開。
+  - 規則 6：通知（`notice`）、書目錯誤（`libraryIssue`）、處理中狀態與匯出結果都放在摘要列下方，收合時也看得到；書目錯誤同時計入問題數，所以會標紅並自動展開。
+  - 展開後高度上限仍由 `.citation-panel { max-height: 40vh; overflow: auto }` 控制（未改）。
+  - 收合狀態不保存（A7）。
+- `styles.css`：新增 `.citation-summary`、`.citation-counts`、`.has-problems`、`.citation-toggle` 規則；刪除已無使用者的 `.citation-panel-header`、`.citation-format-row`。新規則的字級都 ≥ .9rem（全面字級調整在 R5-S2）。
+- 測試：`citations.test.ts` 新增計數／摘要文字（含書目錯誤）與 `nextExpanded` 的 10 種情況（開啟時有／無問題、新文件從展開重設為收合、0→N、N→N 使用者已收合、N→M、N→0、0→0、Preview）；`citation_preview.test.ts` 新增 SSR：初始渲染只有摘要列，切換鈕 `aria-expanded="false"`、文字「Expand ▾」，沒有 `citation-body` 與「Verify and add」。
+- 檢查（觀察）：`node --test … citations citation_preview` → **22/22**（[node-focused.txt](evidence/R5-S1/node-focused.txt)）；`npm run build` → exit 0（[npm-build.txt](evidence/R5-S1/npm-build.txt)）。
+- 交由使用者 GUI 驗收：開啟沒有問題的文件時收合、有問題時自動展開與標紅、輸入 `[@notakey` 存檔後標紅並展開、Preview 展開、手動切換。

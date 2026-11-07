@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { JsonObject } from "./protocol";
 import type { DocumentSnapshot } from "./DocumentEditor";
 import {
@@ -12,7 +12,10 @@ import {
   EXPORT_NOTES,
   exportFormats,
   exportSummary,
+  nextExpanded,
+  panelSummaryText,
   previewEntries,
+  problemCount,
   removeConfirmation,
   removeErrorMessage,
   selectUse,
@@ -147,6 +150,16 @@ export function CitationPanel({
   const documentRef = useRef(document);
   documentRef.current = document;
   const sequence = useRef(0);
+  const [expanded, setExpanded] = useState(false);
+  /** Problems found by the previous check of this document; null until its first check. */
+  const problemsRef = useRef<number | null>(null);
+  const bodyId = useId();
+
+  // Each opened document starts collapsed; its first check decides whether to expand (A7).
+  useEffect(() => {
+    setExpanded(false);
+    problemsRef.current = null;
+  }, [document.path]);
 
   const refresh = useCallback(async () => {
     const snapshot = documentRef.current;
@@ -159,6 +172,10 @@ export function CitationPanel({
       setInspectedText(snapshot.sourceText);
       setNotice(null);
       onEntries?.(data.entries);
+      const problems = problemCount(buildPanelModel(data));
+      const event = { kind: "checked", previousProblems: problemsRef.current, problems } as const;
+      problemsRef.current = problems;
+      setExpanded((current) => nextExpanded(current, event));
     } catch (error) {
       if (ticket === sequence.current) setNotice(errorText(error));
     } finally {
@@ -233,6 +250,7 @@ export function CitationPanel({
 
   const renderPreview = useCallback(async () => {
     if (inspect === null) return;
+    setExpanded((current) => nextExpanded(current, { kind: "preview" }));
     setWorking("Formatting…");
     try {
       const data = await request("bibliography.render", {
@@ -264,37 +282,39 @@ export function CitationPanel({
   }, [contextPayload, inspect, request, writesDisabled]);
 
   const model = inspect === null ? null : buildPanelModel(inspect);
+  const problems = model === null ? 0 : problemCount(model);
   return (
     <section className="citation-panel" aria-label="Citations">
-      <header className="citation-panel-header">
+      <header className={problems > 0 ? "citation-summary has-problems" : "citation-summary"}>
         <h3>Citations</h3>
+        {model !== null && <span className="citation-counts">{panelSummaryText(model)}</span>}
+        {inspect !== null && <label className="citation-style">
+          Style
+          <select value={inspect.styleId} disabled={writesDisabled || working !== null}
+            onChange={(event) => void setStyle(event.target.value)}>
+            {inspect.styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+          </select>
+        </label>}
+        {inspect !== null && format === "markdown" && <button type="button" disabled={working !== null} onClick={() => void renderPreview()}>Preview</button>}
+        {inspect !== null && <ExportMenu formats={exportFormats(format)} disabled={writesDisabled || working !== null}
+          onExport={(exportFormat) => void runExport(exportFormat)} />}
         <button type="button" onClick={() => void refresh()} disabled={loading}>{loading ? "Checking…" : "Refresh"}</button>
+        <button type="button" className="citation-toggle" aria-expanded={expanded} aria-controls={bodyId}
+          onClick={() => setExpanded(!expanded)}>{expanded ? "Collapse ▴" : "Expand ▾"}</button>
       </header>
       {notice !== null && <p className="document-error" role="status">{notice}</p>}
-      {model !== null && <>
+      {model !== null && model.libraryIssue !== null && <p className="document-error" role="alert">{model.libraryIssue}</p>}
+      {working !== null && <p role="status">{working}</p>}
+      {exported !== null && <p className={exported.hasErrors ? "document-error" : "citation-added"} role="status">
+        Exported to <code>{exported.path}</code>. The source document is unchanged.
+        {exported.audit !== null && <> {exported.audit} Report: <code>{exported.reportPath}</code>. {BIME_LAYOUT_REMINDER}</>}
+      </p>}
+      {expanded && model !== null && <div id={bodyId} className="citation-body">
         <p className="citation-library">
           Bibliography: <code>{model.libraryPath}</code>
           {model.libraryStatus === "missing" && " — not created yet. Save a source with /citation or add one below."}
         </p>
-        {model.libraryIssue !== null && <p className="document-error" role="alert">{model.libraryIssue}</p>}
-        <div className="citation-format-row">
-          <label>
-            Style
-            <select value={inspect!.styleId} disabled={writesDisabled || working !== null}
-              onChange={(event) => void setStyle(event.target.value)}>
-              {inspect!.styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
-            </select>
-          </label>
-          {format === "markdown" && <button type="button" disabled={working !== null} onClick={() => void renderPreview()}>Preview</button>}
-          <ExportMenu formats={exportFormats(format)} disabled={writesDisabled || working !== null}
-            onExport={(exportFormat) => void runExport(exportFormat)} />
-        </div>
         {writesDisabled && <p className="citation-empty">Style changes, edits and exports wait until the current turn or document operation finishes.</p>}
-        {working !== null && <p role="status">{working}</p>}
-        {exported !== null && <p className={exported.hasErrors ? "document-error" : "citation-added"} role="status">
-          Exported to <code>{exported.path}</code>. The source document is unchanged.
-          {exported.audit !== null && <> {exported.audit} Report: <code>{exported.reportPath}</code>. {BIME_LAYOUT_REMINDER}</>}
-        </p>}
         {preview !== null && <details open className="citation-section citation-preview">
           <summary>Preview ({preview.styleId})</summary>
           <ol className="citation-list">
@@ -343,7 +363,7 @@ export function CitationPanel({
             ))}
           </ul>
         </details>
-      </>}
+      </div>}
     </section>
   );
 }

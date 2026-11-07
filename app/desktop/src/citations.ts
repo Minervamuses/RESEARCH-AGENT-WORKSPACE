@@ -146,6 +146,36 @@ export function selectUse<T extends SelectableSnapshot>(
   return { ...snapshot, rangeStartUtf16: use.start, rangeEndUtf16: use.end };
 }
 
+// --- collapsed summary bar ---------------------------------------------------
+
+/** What the summary bar counts as a problem: unknown keys, duplicate DOIs, an unreadable bibliography. */
+export function problemCount(model: PanelModel): number {
+  return model.missing.length + model.duplicates.length + (model.libraryIssue === null ? 0 : 1);
+}
+
+/** "3 cited · 1 problem" */
+export function panelSummaryText(model: PanelModel): string {
+  const problems = problemCount(model);
+  return `${model.cited.length} cited · ${problems} ${problems === 1 ? "problem" : "problems"}`;
+}
+
+export type PanelEvent =
+  /** A finished check; previousProblems is null for the first check of an opened document. */
+  | { kind: "checked"; previousProblems: number | null; problems: number }
+  | { kind: "preview" };
+
+/**
+ * The panel opens collapsed (A7). It expands by itself only when the first
+ * check of an opened document finds problems, when problems appear after a
+ * check that had none, or for Preview; otherwise it keeps the user's choice.
+ */
+export function nextExpanded(expanded: boolean, event: PanelEvent): boolean {
+  if (event.kind === "preview") return true;
+  if (event.previousProblems === null) return event.problems > 0;
+  if (event.previousProblems === 0 && event.problems > 0) return true;
+  return expanded;
+}
+
 // --- remove, add, complete -------------------------------------------
 
 /**

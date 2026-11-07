@@ -1264,8 +1264,14 @@ h3 {
 .annotation-batch { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .75rem; color: #466152; }
 .annotation-batch button { padding: .1rem .4rem; border: 1px solid #a9bdb4; border-radius: .35rem; color: #17533f; background: #f1f7f3; }
 .citation-panel { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow: auto; padding: .6rem .7rem; border-top: 1px solid #d4d6d8; background: #fbfbfa; font-size: .78rem; }
-.citation-panel-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-.citation-panel-header h3 { font-size: .9rem; margin: 0; }
+/* Summary bar: always one (wrapping) row; the body below renders only when expanded. */
+.citation-summary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .2rem .35rem; border: 1px solid transparent; border-radius: .35rem; }
+.citation-summary h3 { font-size: 1rem; margin: 0; }
+.citation-summary select { margin-left: .3rem; max-width: 16rem; }
+.citation-counts { color: #4a4f55; }
+.citation-summary.has-problems { background: #fbeaea; border-color: #e3a5a5; }
+.citation-summary.has-problems .citation-counts { color: #9b1c1c; font-weight: 600; }
+.citation-toggle { margin-left: auto; }
 .citation-library { overflow-wrap: anywhere; color: #4a4f55; }
 .citation-section > summary { cursor: pointer; font-weight: 600; margin: .35rem 0; }
 .citation-list { margin: 0; padding-left: 1.1rem; }
@@ -1280,8 +1286,6 @@ h3 {
 .citation-empty { color: #6b7075; }
 .citation-problems li { margin-bottom: .2rem; }
 .link-button { border: 0; background: none; padding: 0; color: #1f5f99; text-decoration: underline; cursor: pointer; font: inherit; }
-.citation-format-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .3rem 0; }
-.citation-format-row select { margin-left: .3rem; max-width: 16rem; }
 .citation-add { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; margin: .4rem 0; }
 .citation-add input { display: block; min-width: 16rem; }
 .citation-added { color: #1f6b3a; overflow-wrap: anywhere; }

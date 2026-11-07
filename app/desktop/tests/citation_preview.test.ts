@@ -127,6 +127,20 @@ test("cited rows offer only Line jumps; uncited rows offer Remove", async () => 
   assert.match(locked, /<button type="button" class="link-button" disabled="">Remove<\/button>/);
 });
 
+test("a newly rendered panel is only the collapsed summary bar", async () => {
+  const { CitationPanel } = await load<{ CitationPanel: (props: Record<string, unknown>) => unknown }>("/src/CitationPanel.tsx");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const html = renderToStaticMarkup(createElement(CitationPanel as never, {
+    document: { rootPath: "/p", path: "/p/a.md", editorRevision: 0, sourceText: "", diskFingerprint: "0".repeat(64) },
+    refreshToken: 0, request: () => new Promise(() => undefined), contextPayload: () => ({}),
+    onSelect: () => undefined, requestAdd: () => new Promise(() => undefined), writesDisabled: false,
+  }));
+  assert.match(html, /<header class="citation-summary"><h3>Citations<\/h3>/);
+  assert.match(html, /class="citation-toggle" aria-expanded="false"[^>]*>Expand ▾<\/button>/);
+  assert.ok(!html.includes("citation-body") && !html.includes("Verify and add"), "the body renders only when expanded");
+});
+
 test("preview text shows italics and safe links without interpreting markup", async () => {
   const { CitationText } = await load<{ CitationText: (props: { segments: RenderSegmentDto[] }) => unknown }>("/src/CitationText.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");

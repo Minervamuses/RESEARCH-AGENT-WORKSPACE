@@ -8,6 +8,9 @@ import {
   completionCandidates,
   completionPrefix,
   describeEntry,
+  nextExpanded,
+  panelSummaryText,
+  problemCount,
   removeConfirmation,
   removeErrorMessage,
   selectUse,
@@ -103,6 +106,32 @@ test("stale or invalid positions are not selected", () => {
   assert.equal(selectUse({ editorRevision: 5, sourceText: TEXT }, TEXT, { start: 0, end: TEXT.length + 1, line: 1 }), null);
 });
 
+
+test("the summary bar counts cited keys and problems, including an unreadable bibliography", () => {
+  const model = buildPanelModel(inspect());
+  assert.equal(problemCount(model), 2, "one unknown key and one shared DOI");
+  assert.equal(panelSummaryText(model), "3 cited · 2 problems");
+  const clean = buildPanelModel(inspect({ order: ["a2019"], uses: [], missing: [], duplicateDois: [] }));
+  assert.equal(panelSummaryText(clean), "1 cited · 0 problems");
+  const broken = buildPanelModel(inspect({
+    libraryStatus: "error", libraryErrorCode: "json", libraryError: "bad", order: [], uses: [], missing: [], duplicateDois: [],
+  }));
+  assert.equal(panelSummaryText(broken), "0 cited · 1 problem");
+});
+
+test("the panel opens collapsed and expands by itself only for new problems or Preview", () => {
+  const checked = (previousProblems: number | null, problems: number) => ({ kind: "checked" as const, previousProblems, problems });
+  assert.equal(nextExpanded(false, checked(null, 0)), false, "opened without problems");
+  assert.equal(nextExpanded(true, checked(null, 0)), false, "a newly opened document starts collapsed");
+  assert.equal(nextExpanded(false, checked(null, 2)), true, "opened with problems");
+  assert.equal(nextExpanded(false, checked(0, 1)), true, "problems appeared after a refresh");
+  assert.equal(nextExpanded(false, checked(2, 2)), false, "the user collapsed it and the count did not change");
+  assert.equal(nextExpanded(false, checked(1, 3)), false, "more problems of an already-seen kind keep the user's choice");
+  assert.equal(nextExpanded(true, checked(2, 0)), true, "fixing problems does not collapse it");
+  assert.equal(nextExpanded(false, checked(0, 0)), false);
+  assert.equal(nextExpanded(false, { kind: "preview" }), true, "Preview shows its result");
+  assert.equal(nextExpanded(true, { kind: "preview" }), true);
+});
 
 const clientError = (code: string, message = "backend message") => ({ uiError: { code, message } });
 

@@ -1,0 +1,30 @@
+✔ style changes send set_style only for a different known style while idle (1.455729ms)
+✔ only Markdown documents export: Word, BIME Word, then Markdown, never BibTeX (0.145104ms)
+✔ export results name the file; BIME results add the audit and the manual-review reminder (0.138559ms)
+✔ Markdown documents get one closed Export button; others get none (2698.597525ms)
+✔ segments are grouped per bibliography entry (0.320649ms)
+✔ cited rows offer only Line jumps; uncited rows offer Remove (1.570425ms)
+✔ a newly rendered panel is only the collapsed summary bar (1.2087ms)
+✔ preview text shows italics and safe links without interpreting markup (0.709112ms)
+✔ panel lists cited keys in first-use order with counts and issues (1.941066ms)
+✔ numeric styles number only known references in first-use order (0.143101ms)
+✔ library errors become a problem message, not an exception (0.205489ms)
+✔ entries are described compactly (0.116828ms)
+✔ jumping selects the exact UTF-16 range after an emoji (0.215089ms)
+✔ stale or invalid positions are not selected (0.084458ms)
+✔ the summary bar counts cited keys and problems, including an unreadable bibliography (0.16363ms)
+✔ the panel opens collapsed and expands by itself only for new problems or Preview (0.110211ms)
+✔ removal always asks for confirmation naming the key, the file and the unchecked documents (0.168657ms)
+✔ a stale fingerprint asks for a refresh (0.223316ms)
+✔ add results map to added, existing, failed and denied (0.134297ms)
+✔ citation format follows the document type (0.17087ms)
+✔ completion triggers after [@, ; @, \cite{ and commas (0.424937ms)
+✔ completion candidates rank key prefixes before title matches (11.512201ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4002.845338
