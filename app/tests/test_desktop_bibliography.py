@@ -9,7 +9,7 @@ import zipfile
 import pytest
 
 from agent.desktop.catalog import inspect_project
-from agent.desktop.protocol import validate_result_data
+from agent.desktop.protocol import ProtocolError, validate_message, validate_result_data
 from agent.desktop.service import DesktopServiceError
 from skills.citation import csl_render
 from skills.citation.hub import CitationProviderHub
@@ -109,7 +109,8 @@ def test_render_markdown_and_refuse_latex(tmp_path):
         tex_context = await service.dispatch("document.open", {"path": str(tex)})
         with pytest.raises(DesktopServiceError) as excinfo:
             await service.dispatch("bibliography.render", {"documentContext": tex_context})
-        assert excinfo.value.code == "PROTOCOL_INVALID" and ".bib" in str(excinfo.value)
+        assert excinfo.value.code == "PROTOCOL_INVALID" and "Markdown documents" in str(excinfo.value)
+        assert ".bib" not in str(excinfo.value)
         tex_report = await _call(service, "bibliography.inspect", {"documentContext": tex_context})
         assert tex_report["documentFormat"] == "latex" and tex_report["order"] == ["ng2021journal"]
     asyncio.run(run())
@@ -233,18 +234,39 @@ def test_export_writes_beside_the_document_and_keeps_the_source(tmp_path):
         markdown = await _call(service, "bibliography.export", {"documentContext": context, "format": "markdown"})
         assert markdown["path"] == str(document.parent / "稿件.apa.md")
         assert "[@" not in (tmp_path / "稿件.apa.md").read_text(encoding="utf-8")
-        bib = await _call(service, "bibliography.export", {"format": "bib"})
-        assert bib["path"] == str(tmp_path / "references.bib")
-        assert "@article{ng2021journal" in (tmp_path / "references.bib").read_text(encoding="utf-8")
         assert _sha(document) == source
         tex = tmp_path / "thesis.tex"
         tex.write_text("\\cite{ng2021journal}\n", encoding="utf-8")
         tex_context = await service.dispatch("document.open", {"path": str(tex)})
-        with pytest.raises(DesktopServiceError) as excinfo:
-            await service.dispatch("bibliography.export", {"documentContext": tex_context, "format": "docx"})
-        assert excinfo.value.code == "PROTOCOL_INVALID"
-        tex_bib = await _call(service, "bibliography.export", {"documentContext": tex_context, "format": "bib"})
-        assert tex_bib["path"] == str(tmp_path / "references.bib")
+        for fmt in ("docx", "markdown"):
+            with pytest.raises(DesktopServiceError) as excinfo:
+                await service.dispatch("bibliography.export", {"documentContext": tex_context, "format": fmt})
+            assert excinfo.value.code == "PROTOCOL_INVALID"
+    asyncio.run(run())
+
+
+def test_bibtex_export_is_rejected_without_writing(tmp_path):
+    async def run():
+        service, _document, context = await _project(tmp_path)
+        _write_library(tmp_path)
+        tex = tmp_path / "thesis.tex"
+        tex.write_text("\\cite{ng2021journal}\n", encoding="utf-8")
+        tex_context = await service.dispatch("document.open", {"path": str(tex)})
+        before = sorted(path.name for path in tmp_path.iterdir())
+        for params in ({"format": "bib"}, {"documentContext": context, "format": "bib"},
+                       {"documentContext": tex_context, "format": "bib"}):
+            with pytest.raises(DesktopServiceError) as excinfo:
+                await service.dispatch("bibliography.export", params)
+            assert excinfo.value.code == "PROTOCOL_INVALID"
+        assert sorted(path.name for path in tmp_path.iterdir()) == before
+        assert not list(tmp_path.rglob("*.bib"))
+        with pytest.raises(ProtocolError) as raised:
+            validate_message({"protocolVersion": 1, "messageType": "request", "requestId": str(uuid.uuid4()),
+                              "method": "bibliography.export", "params": {"documentContext": context, "format": "bib"}})
+        assert raised.value.code == "PROTOCOL_INVALID"
+        with pytest.raises(ProtocolError):
+            validate_result_data("bibliography.export", {"format": "bib", "path": str(tmp_path / "references.bib")})
+        validate_result_data("bibliography.export", {"format": "markdown", "path": str(tmp_path / "稿件.apa.md")})
     asyncio.run(run())
 
 
@@ -253,7 +275,7 @@ def test_bibliography_failures_are_typed(tmp_path, monkeypatch):
         service, _document, context = await _project(tmp_path)
         (tmp_path / "references.json").write_text("{bad", encoding="utf-8")
         with pytest.raises(DesktopServiceError) as excinfo:
-            await service.dispatch("bibliography.export", {"format": "bib"})
+            await service.dispatch("bibliography.export", {"documentContext": context, "format": "markdown"})
         assert excinfo.value.code == "BIBLIOGRAPHY_FAILED"
         _write_library(tmp_path)
         monkeypatch.setattr(csl_render, "find_pandoc", lambda: None)

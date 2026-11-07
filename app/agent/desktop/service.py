@@ -2263,7 +2263,7 @@ class DesktopService:
             raise DesktopServiceError(
                 "PROTOCOL_INVALID",
                 "LaTeX documents keep their own bibliography style; preview and .docx/Markdown export "
-                "are available for Markdown documents. Export the bibliography as .bib instead.",
+                "are available for Markdown documents.",
             )
         return snapshot
 
@@ -2372,22 +2372,18 @@ class DesktopService:
     async def _bibliography_export(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
         self._require_idle_for_bibliography_write()
         library_path, default_style, _configured = self._citation_settings()
-        fmt = params["format"]
-        if fmt == "bib":
-            snapshot = self._bibliography_snapshot(params, required=False)
-            style_id = default_style
-        else:
-            snapshot = self._markdown_snapshot(params, required=True)
-            style_id = self._requested_style(params, default_style)
-        document_path = Path(snapshot["path"]) if snapshot is not None else None
-        target = csl_render.export_target(fmt, document_path=document_path, library_path=library_path, style_id=style_id)
-        if document_path is not None and target.resolve() == document_path.resolve():
+        fmt = params.get("format")
+        if fmt not in csl_render.EXPORT_SUFFIXES:
+            raise DesktopServiceError("PROTOCOL_INVALID", f"Unknown export format: {fmt}")
+        snapshot = self._markdown_snapshot(params, required=True)
+        style_id = self._requested_style(params, default_style)
+        document_path = Path(snapshot["path"])
+        target = csl_render.export_target(fmt, document_path=document_path, style_id=style_id)
+        if target.resolve() == document_path.resolve():
             raise DesktopServiceError("PROTOCOL_INVALID", "An export never replaces its source document.")
 
         def export() -> None:
-            if fmt == "bib":
-                data = csl_render.export_bib(library_path).encode("utf-8")
-            elif fmt == "markdown":
+            if fmt == "markdown":
                 data = csl_render.export_markdown(snapshot["sourceText"], library_path, style_id).encode("utf-8")
             else:
                 data = csl_render.export_docx(snapshot["sourceText"], library_path, style_id, resource_dir=document_path.parent)

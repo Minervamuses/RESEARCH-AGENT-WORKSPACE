@@ -570,3 +570,9 @@ def test_bash_permission_mode_protocol_contract() -> None:
     }
     for method in ("session.create", "session.select"):
         assert CONTRACT["resultDataSchemas"][method]["thinkingMode"]["enum"] == ["normal", "extended"]
+
+
+def test_bibliography_export_formats_exclude_bibtex() -> None:
+    method = next(item for item in CONTRACT["methods"] if item["name"] == "bibliography.export")
+    assert method["params"]["format"]["enum"] == ["docx", "markdown"]
+    assert CONTRACT["resultDataSchemas"]["bibliography.export"]["format"]["enum"] == ["docx", "markdown"]

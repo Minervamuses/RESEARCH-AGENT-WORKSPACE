@@ -1,0 +1,17 @@
+$ grep -nw export_bib app/agent/desktop/service.py app/skills/citation/csl_render.py
+exit=1
+$ grep -n "\"bib\"" contract.json fixtures(request params/result data) protocol.ts protocol.rs citations.ts csl_render.py
+exit=1
+$ grep -n "\"bib\"" fixtures.json (only rejection cases expected)
+2238:          "format": "bib"
+4943:            "format": "bib",
+$ kept BibTeX features
+120:def export_bibtex(record: AuthorityRecord):
+12:from skills.citation.authority import AuthorityRecord, AuthorityRegistry, export_bibtex
+307:                    canonical = export_bibtex(record)
+app/skills/citation/__init__.py:14:(``reference.bib`` + ``citation.json`` sidecar). Verification is strictly
+app/skills/citation/storage.py:5:    <output>/<utf8-byte-capped-title>--<identity-hash>/reference.bib
+app/skills/citation/storage.py:51:BIB_FILENAME = "reference.bib"
+app/skills/citation/service.py:11:from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
+app/skills/citation/authority.py:12:from skills.citation.bibtex_canonical import parse_canonical_bibtex
+16:    "pybtex (>=0.26.1,<0.27)",

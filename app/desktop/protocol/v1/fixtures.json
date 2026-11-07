@@ -2199,7 +2199,7 @@
       }
     },
     {
-      "name": "bibliography-export-bib-request",
+      "name": "bibliography-export-markdown-request",
       "valid": true,
       "message": {
         "protocolVersion": 1,
@@ -2207,6 +2207,34 @@
         "requestId": "00000000-0000-4000-8000-000000000208",
         "method": "bibliography.export",
         "params": {
+          "documentContext": {
+            "rootPath": "/home/u/thesis",
+            "path": "/home/u/thesis/proposal.md",
+            "editorRevision": 3,
+            "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+            "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "format": "markdown"
+        }
+      }
+    },
+    {
+      "name": "bibliography-export-rejects-bib-request",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000208",
+        "method": "bibliography.export",
+        "params": {
+          "documentContext": {
+            "rootPath": "/home/u/thesis",
+            "path": "/home/u/thesis/proposal.md",
+            "editorRevision": 3,
+            "sourceText": "Crops matter [@smith2020deep; @lee2019robot]. 🙂\n",
+            "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
           "format": "bib"
         }
       }
@@ -2249,7 +2277,7 @@
         "requestId": "00000000-0000-4000-8000-000000000207",
         "method": "bibliography.export",
         "params": {
-          "format": "bib",
+          "format": "docx",
           "outputPath": "/etc/passwd"
         }
       }
@@ -4814,6 +4842,106 @@
             "key": "jumper2021highly",
             "reasonCode": null,
             "libraryFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-docx-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000209",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "docx",
+            "styleId": "apa"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000209",
+          "ok": true,
+          "data": {
+            "format": "docx",
+            "path": "/home/u/thesis/proposal.apa.docx"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-markdown-trace",
+      "valid": true,
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000210",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "markdown",
+            "styleId": "apa"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000210",
+          "ok": true,
+          "data": {
+            "format": "markdown",
+            "path": "/home/u/thesis/proposal.apa.md"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bibliography-export-rejects-bib-result",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "messages": [
+        {
+          "protocolVersion": 1,
+          "messageType": "request",
+          "requestId": "00000000-0000-4000-8000-000000000211",
+          "method": "bibliography.export",
+          "params": {
+            "documentContext": {
+              "rootPath": "/home/u/thesis",
+              "path": "/home/u/thesis/proposal.md",
+              "editorRevision": 3,
+              "sourceText": "Crops matter [@smith2020deep]. 🙂\n",
+              "diskFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "format": "docx",
+            "styleId": "apa"
+          }
+        },
+        {
+          "protocolVersion": 1,
+          "messageType": "result",
+          "requestId": "00000000-0000-4000-8000-000000000211",
+          "ok": true,
+          "data": {
+            "format": "bib",
+            "path": "/home/u/thesis/references.bib"
           }
         }
       ]

@@ -8,10 +8,9 @@ import zipfile
 import zlib
 
 import pytest
-from pybtex.database import parse_string
 
 from skills.citation import csl_render
-from skills.citation.csl_render import RenderError, export_bib, export_docx, export_markdown, list_styles, render
+from skills.citation.csl_render import RenderError, export_docx, export_markdown, export_target, list_styles, render
 
 pytestmark = pytest.mark.skipif(csl_render.find_pandoc() is None, reason="Pandoc is not installed")
 
@@ -145,11 +144,14 @@ def test_markdown_export_has_no_citation_syntax(library):
     assert ":::" not in out and "{.csl" not in out and "<div" not in out
 
 
-def test_bib_export_parses_with_pybtex(library):
-    bib = export_bib(library)
-    data = parse_string(bib, "bibtex")
-    assert set(data.entries) == {"smith2020deep", "adams2019robot", "zhou2021field"}
-    assert data.entries["smith2020deep"].fields["doi"] == "10.1000/abc"
+def test_export_targets_sit_beside_the_document_and_exclude_bibtex(tmp_path):
+    document = tmp_path / "稿件.md"
+    assert export_target("docx", document_path=document, style_id="apa") == tmp_path / "稿件.apa.docx"
+    assert export_target("markdown", document_path=document, style_id="ieee") == tmp_path / "稿件.ieee.md"
+    assert set(csl_render.EXPORT_SUFFIXES) == {"docx", "markdown"}
+    assert not hasattr(csl_render, "export_bib")
+    with pytest.raises(KeyError):
+        export_target("bib", document_path=document, style_id="apa")
 
 
 def test_missing_pandoc_is_a_clear_error(library, monkeypatch):

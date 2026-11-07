@@ -786,7 +786,7 @@
       "libraryFingerprint": {"type": "nullableString", "required": true, "maxBytes": 64, "pattern": "^[0-9a-f]{64}$"}
     },
     "bibliography.export": {
-      "format": {"type": "string", "required": true, "enum": ["docx", "markdown", "bib"]},
+      "format": {"type": "string", "required": true, "enum": ["docx", "markdown"]},
       "path": {"type": "string", "required": true, "maxBytes": 8192}
     }
   },
@@ -1198,7 +1198,7 @@
           "rangeStartUtf16": {"type": "integer", "required": false, "minimum": 0, "maximum": 9007199254740991},
           "rangeEndUtf16": {"type": "integer", "required": false, "minimum": 0, "maximum": 9007199254740991}
         }},
-        "format": {"type": "string", "required": true, "enum": ["docx", "markdown", "bib"]},
+        "format": {"type": "string", "required": true, "enum": ["docx", "markdown"]},
         "styleId": {"type": "string", "required": false, "maxBytes": 128}
       }
     }

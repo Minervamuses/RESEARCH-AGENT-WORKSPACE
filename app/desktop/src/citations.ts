@@ -256,17 +256,16 @@ export function completionCandidates(
 
 // --- styles, preview, export ---------------------------------------------------
 
-export type ExportFormat = "docx" | "markdown" | "bib";
+export type ExportFormat = "docx" | "markdown";
 
-/** LaTeX formats its own references, so only the bibliography exports for .tex. */
+/** Only Markdown documents export; LaTeX formats its own references, so .tex has no export. */
 export function exportFormats(format: CitationFormat | null): ExportFormat[] {
-  return format === "markdown" ? ["docx", "markdown", "bib"] : ["bib"];
+  return format === "markdown" ? ["docx", "markdown"] : [];
 }
 
 export const EXPORT_LABELS: Record<ExportFormat, string> = {
   docx: "Word (.docx)",
   markdown: "Formatted Markdown",
-  bib: "BibTeX (.bib)",
 };
 
 export interface RenderSegmentDto {

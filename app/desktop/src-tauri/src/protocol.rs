@@ -996,7 +996,7 @@ fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), Prot
             }
             validate_optional_string(params, "styleId", 128)?;
             if let Some(format) = params.get("format") {
-                validate_enum(format, "params.format", &["docx", "markdown", "bib"])?;
+                validate_enum(format, "params.format", &["docx", "markdown"])?;
             }
         }
         "bibliography.set_style" => validate_optional_string(params, "styleId", 128)?,
@@ -2452,7 +2452,7 @@ fn validate_bibliography_result(method: &str, data: &Map<String, Value>) -> Resu
         }
         "bibliography.export" => {
             validate_exact_data_keys(data, &["format", "path"])?;
-            validate_enum(&data["format"], "data.format", &["docx", "markdown", "bib"])?;
+            validate_enum(&data["format"], "data.format", &["docx", "markdown"])?;
             expect_bounded_string(&data["path"], "data.path", 8_192)?;
         }
         _ => {}

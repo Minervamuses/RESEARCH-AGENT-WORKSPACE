@@ -1,0 +1,26 @@
+   Compiling research-agent-desktop v0.1.0 (/home/minervamuses/research-agent-workspace/app/desktop/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.11s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/research_agent_desktop_lib-aeade238a6567571)
+
+running 12 tests
+test protocol::tests::extension_apply_failure_requires_exact_correlated_lifecycle ... ok
+test protocol::tests::logical_turn_id_must_match_across_a_successful_trace ... ok
+test protocol::tests::extension_apply_turn_id_must_match_across_a_successful_trace ... ok
+test protocol::tests::manifest_matches_rust_constants ... ok
+test protocol::tests::rust_event_data_rules_match_manifest ... ok
+test protocol::tests::shared_process_event_origin_fixtures ... ok
+test protocol::tests::shared_message_fixtures ... ok
+test protocol::tests::rust_request_param_rules_match_manifest ... ok
+test protocol::tests::shared_ordering_and_correlation_traces ... ok
+test protocol::tests::shared_raw_lines_and_size_limit ... ok
+test protocol::tests::complete_answer_and_transcript_text_have_no_capacity_rejection ... ok
+test protocol::tests::rust_result_data_rules_match_manifest ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.59s
+
+     Running unittests src/main.rs (src-tauri/target/debug/deps/research_agent_desktop-0e9c18b937c0e7c9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -35,10 +35,10 @@ test("style changes send set_style only for a different known style while idle",
   assert.equal(styleChangeParams(null, "ieee", false), null);
 });
 
-test("LaTeX documents only export the bibliography", () => {
-  assert.deepEqual(exportFormats("markdown"), ["docx", "markdown", "bib"]);
-  assert.deepEqual(exportFormats("latex"), ["bib"]);
-  assert.deepEqual(exportFormats(null), ["bib"]);
+test("only Markdown documents export, and never BibTeX", () => {
+  assert.deepEqual(exportFormats("markdown"), ["docx", "markdown"]);
+  assert.deepEqual(exportFormats("latex"), []);
+  assert.deepEqual(exportFormats(null), []);
 });
 
 test("segments are grouped per bibliography entry", () => {

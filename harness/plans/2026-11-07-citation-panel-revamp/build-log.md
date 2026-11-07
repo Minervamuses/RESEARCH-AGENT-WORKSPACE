@@ -7,10 +7,10 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | R1 | Complete | R1-S1：[evidence/R1-S1/preflight.txt](evidence/R1-S1/preflight.txt)；R1-S2：[evidence/R1-S2/](evidence/R1-S2/) | — | — |
-| R2 | In progress | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/) | — | R2-S3 移除 BibTeX 匯出 |
-| R3 | Not started | — | — | R3-S1 加入依賴（R2 之後依正常順序） |
+| R2 | Complete | R2-S1：[evidence/R2-S1/](evidence/R2-S1/)；R2-S2：[evidence/R2-S2/](evidence/R2-S2/)；R2-S3：[evidence/R2-S3/](evidence/R2-S3/) | — | — |
+| R3 | Not started | — | — | R3-S1 加入依賴 |
 | R4 | Not started | — | — | 等 R2、R3 |
-| R5 | Not started | — | — | R2-S1 後可先做 S2；S1 等 R4-S2 |
+| R5 | Not started | — | — | S2 的前提（R2-S1）已滿足；S1 等 R4-S2 |
 | R6 | Not started | — | — | 等 R4、R5 全部完成 |
 
 局部阻塞依 D15 逐項記錄問題、嘗試次數、受影響步驟與恢復條件；完成證據保留。階段內仍有可執行步驟時為 In progress，所有剩餘步驟均被封鎖時才標為 Blocked。此處仍是唯一的狀態來源。
@@ -110,3 +110,20 @@ R6-S2 時逐項填寫每個目標的代理證據與連結。GUI 依 D14 由使�
   - **突變確認**：暫時在 `CitedRow` 加入 Remove 按鈕，新測試失敗（1 fail）；還原後通過，`CitationPanel.tsx` 與 commit 內容相同。
   - `node --test --experimental-strip-types tests/citations.test.ts tests/citation_preview.test.ts` → 17/17 pass（[evidence/R2-S2/node-focused.txt](evidence/R2-S2/node-focused.txt)）；`npm run build` → exit 0（[evidence/R2-S2/npm-build.txt](evidence/R2-S2/npm-build.txt)）。
 - 取消後書目不變屬 GUI 行為，列入使用者手動清單；自動證據只有上述程式碼核對。
+
+### R2-S3 移除 BibTeX 匯出（2026-11-07）
+
+- 三方協定：`contract.json` 的 `bibliography.export` 參數與 `resultDataSchemas` 的 `format` enum 改為 `["docx","markdown"]`；`protocol.ts` 參數／回應 schema、`protocol.rs` 參數（`validate_enum(format, "params.format", …)`）與回應（`validate_enum(&data["format"], …)`）同步。`agent/desktop/protocol.py` 直接從 contract 載入，不需另改。`documentContext` 在契約中仍是 `required: false`（未改 `requiredParams`，避免額外的三方變更）；後端對所有格式一律要求文件（`_markdown_snapshot(required=True)`，缺少時 `PROTOCOL_INVALID`「Open a document first.」）。
+- 共享夾具：原本有效的 `bibliography-export-bib-request` 改為無效的 `bibliography-export-rejects-bib-request`（帶 Markdown 文件的 bib 請求，`PROTOCOL_INVALID`）；新增有效的 `bibliography-export-markdown-request`；`bibliography-export-rejects-unknown-param` 的 format 改為 docx，讓拒絕原因只剩 `outputPath`。traces 新增 `bibliography-export-docx-trace`、`bibliography-export-markdown-trace`（有效）與 `bibliography-export-rejects-bib-result`（docx 請求配 `format: "bib"` 回應，無效）；Python、TypeScript、Rust 三方都讀同一份 messages／traces。
+- 後端：`service.py` `_bibliography_export` 刪除 bib 分支與「不需要文件」的路徑；格式不在 `csl_render.EXPORT_SUFFIXES` 時直接 `PROTOCOL_INVALID`（防禦：協定層之外的呼叫也不會寫檔）；`_markdown_snapshot` 的錯誤訊息刪除「Export the bibliography as .bib instead」。`csl_render.py` 刪除 `export_bib`、`EXPORT_SUFFIXES["bib"]` 與 `export_target` 的 bib 分支；`export_target` 不再需要 `library_path`，`document_path` 改為必填。
+- 前端：`ExportFormat = "docx" | "markdown"`；`exportFormats` 對 LaTeX 與 `null` 回傳 `[]`；面板以 `.map` 產生按鈕，所以清單為空時沒有任何 Export 元素（R4 換成選單時沿用「空清單不顯示」）。
+- 測試：
+  - `test_desktop_bibliography.py`：新增 `test_bibtex_export_is_rejected_without_writing`——三種帶 `format: "bib"` 的 dispatch（無文件、Markdown、`.tex`）都是 `PROTOCOL_INVALID`，目錄內容不變且沒有 `*.bib`；`validate_message` 拒絕 bib 請求、`validate_result_data` 拒絕 bib 回應並接受 markdown。既有匯出測試刪除 bib 部分，`.tex` 的 docx 與 markdown 匯出都被拒絕；`.tex` render 錯誤訊息改為檢查「Markdown documents」且不含 `.bib`；`.tex` 的 `bibliography.inspect`（`documentFormat == "latex"`、`order`）斷言不變並通過。損壞書目的錯誤型別測試改用 markdown 匯出。
+  - `test_citation_csl_render.py`：以 `test_export_targets_sit_beside_the_document_and_exclude_bibtex` 取代 pybtex 的 bib 匯出測試（`EXPORT_SUFFIXES` 只有 docx／markdown、沒有 `export_bib`、`export_target("bib")` 拋 KeyError）。
+  - `test_desktop_protocol_contract.py`：新增 enum 斷言。`citation_preview.test.ts`：`exportFormats` 的新期望。
+- 檢查（觀察）：
+  - `pytest tests/test_desktop_bibliography.py tests/test_citation_csl_render.py tests/test_desktop_protocol_contract.py` → **235 passed**，無 skip（Pandoc 存在）（[pytest-focused.txt](evidence/R2-S3/pytest-focused.txt)）。
+  - `node --test … citations citation_preview protocol` → **219/219**，含上述 3 個 message 與 3 個 trace 夾具（[node-focused.txt](evidence/R2-S3/node-focused.txt)）。
+  - `npm run build` → exit 0（[npm-build.txt](evidence/R2-S3/npm-build.txt)）。
+  - Rust `cargo test --locked … protocol::tests`（沙箱外）→ **12 passed**、29 filtered out，exit 0，約 6 秒；含 `shared_message_fixtures`、`shared_ordering_and_correlation_traces` 與由 contract 產生樣本的 `rust_result_data_rules_match_manifest`（[cargo-protocol-tests.txt](evidence/R2-S3/cargo-protocol-tests.txt)）。
+  - 限定範圍的 grep（[grep-checks.txt](evidence/R2-S3/grep-checks.txt)）：`grep -nw export_bib service.py csl_render.py` exit 1；contract／protocol.ts／protocol.rs／citations.ts／csl_render.py 沒有 `"bib"`；fixtures 只剩兩個拒絕案例。保留的 BibTeX 功能仍在：`authority.export_bibtex` 及 `skills/citation/service.py:307` 的呼叫、`storage.py` 的 `reference.bib`、`bibtex_canonical`、`pyproject.toml` 的 pybtex。

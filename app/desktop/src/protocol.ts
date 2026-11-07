@@ -992,7 +992,7 @@ export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> =
     libraryFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
   },
   "bibliography.export": {
-    format: { type: "string", required: true, enum: ["docx", "markdown", "bib"] },
+    format: { type: "string", required: true, enum: ["docx", "markdown"] },
     path: { type: "string", required: true, maxBytes: 8192 },
   },
 };
@@ -1166,7 +1166,7 @@ export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
   },
   "bibliography.export": {
     documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-    format: { type: "string", required: true, enum: ["docx", "markdown", "bib"] },
+    format: { type: "string", required: true, enum: ["docx", "markdown"] },
     styleId: { type: "string", required: false, maxBytes: 128 },
   },
 };
