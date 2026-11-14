@@ -7,14 +7,14 @@
 
 ## 任務規模
 
-主要是 Python 後端（`agent/session.py`、`agent/desktop/service.py`、`agent/observability.py`）與兩個新 skill 的文字內容，加上一支評估腳本。預期不改前端與協定；若執行中發現必須改，npm 與 cargo 檢查變成必要。
+主要是 Python 後端（`agent/session.py`、`agent/desktop/service.py`、`agent/observability.py`；K4 選出口 B 時包含 `agent/graph.py` 的模型輸入組裝）與兩個新 skill 的文字內容，加上一支評估腳本。預期不改前端與協定；若執行中發現必須改，npm 與 cargo 檢查變成必要。
 
 風險集中在兩處：
 
 1. **歷史組裝（K3）**：文件快照是以文字嵌在已保存的 `semantic_input` 裡，重播時要正確辨識並替換，又不能動到保存的內容、重試與凍結引用。
 2. **編輯結果縮減（K4）**：`document_edit` 存檔成功的結果目前帶整份 `sourceText`，多 skill 連續編輯的提示（`agent/skills/runtime.py`）明說依賴它。縮減前要先回答「下一次編輯需不需要全文」。
 
-詰問 skill 的真實效果不在本計劃驗證範圍（U2）。執行者只能宣稱「skill 與框架完成、假模型流程通過」。
+詰問 skill 的真實效果不在本計劃驗證範圍（U2）。執行者只能宣稱「skill 與框架完成、假模型流程通過」。依 S4，詰問方法保持開放：觀察還原是否忠實、質疑是否成立、回應是否對題；不把固定格式或預寫答案當成效果驗收。工具遮蔽、量測、歷史組裝與文體交付則按工程規格驗收。
 
 ## 基線（2026-11-14 撰寫時讀碼，HEAD `7489076`，分支 `GUI`）
 
@@ -74,13 +74,23 @@
 - 2026-11-07 `ab22475`：pytest 1763、npm 329、cargo 41 全部通過；2026-11-07 `7489076`：cargo 42。
 - 驗收標準是「全部通過」，不是固定數字。
 
+## 2026-11-15 審核補充
+
+HEAD `2e961a2` 相對於基線 `7489076` 只新增本計劃。相關程式讀碼確認：`latest_context` 重播 `semantic_input` 與 `assistant_output`，不帶存檔後的工具結果；因此最後提交快照不等於最後存檔內容。`agent/graph.py` 的 `_agent_requests` 從累積訊息組裝每次模型輸入；K4 出口 B 要在這個邊界縮減舊工具結果的模型可見副本，僅改當次工具回傳值不足。這些是讀碼結果，未執行產品測試。
+
+第二輪審核（同日）補充的讀碼事實：
+
+- `_agent_requests` 內每次模型呼叫（首次、空回覆重試、修復階段 `[*prompt_messages, _REPAIR_INSTRUCTION]`）都使用同一份 `prompt_messages`，在建立它時縮減即可涵蓋全部呼叫。
+- `documentContext` 沒有範圍時，範圍預設為整份文件（`agent/desktop/documents.py` 約第 66–67 行、`agent/desktop/service.py` 約第 2749–2750 行）。所以沒有圈選時，「範圍文字」等於全文；K2 的計數與 K4 的縮減規則都要處理這種情況。
+- `DesktopService` 預設載入 MCP（約第 341 行 `_load_mcp = True`，約第 1622 行由 `load_mcp` 參數設定）；K6 的假模型執行與測試必須關閉。
+
 ## 路線
 
 | 階段 | 後置條件 | 相依 | 涵蓋 | 細節 |
 |---|---|---|---|---|
 | K1 | 分支、HEAD、工作樹、工具與基線位置已核對；可沿用的測試基線已記錄；計劃檔已提交 | 無 | G9 | [phase-1-preflight.md](build/phase-1-preflight.md) |
 | K2 | turn trace 可分出文件佔比；15 個編輯回合的假模型量測已建立，修改前的數字存進 evidence | K1 | G6 | [phase-2-measure.md](build/phase-2-measure.md) |
-| K3 | 重播歷史時舊回合不帶文件全文、只保留最新一份；保存與重試行為不變 | K2 | G7 | [phase-3-history-assembly.md](build/phase-3-history-assembly.md) |
+| K3 | 歷史舊全文縮成佔位，只保留最後提交的編輯器快照；不承諾它是最新存檔版本；保存與重試行為不變 | K2 | G7 | [phase-3-history-assembly.md](build/phase-3-history-assembly.md) |
 | K4 | 已回答「下一次編輯需不需要全文」並依結論縮減編輯結果；連續編輯不壞；修改後量測已記錄 | K2；修改後量測需 K3 完成 | G8、G6 | [phase-4-edit-result.md](build/phase-4-edit-result.md) |
 | K5 | `grill` skill 寫好並被載入；詰問回合可讀文件但 `document_edit` 被遮蔽；`@grill` 一回合生效 | K1 | G1、G2 | [phase-5-grill-skill.md](build/phase-5-grill-skill.md) |
 | K6 | 詰問評估框架（案例格式、示範案例、預設不連網的腳本、報告）完成並以假模型跑通 | K5 | G3 | [phase-6-grill-eval.md](build/phase-6-grill-eval.md) |
@@ -105,7 +115,7 @@
 **檢查範圍與次數**
 
 - K2–K7 只跑與該步修改相關的測試模組，例如 `tests/test_desktop_document_service.py`、`tests/test_observability.py`、`tests/test_session_persistence.py`、`tests/test_inline_skills.py`、`tests/test_skills.py`、`tests/test_academic_skill_tools.py`、`tests/test_thinking_session.py`、`tests/test_desktop_fixture.py`，以及新增的測試檔。
-- 完整 pytest 只在 K8 跑一次。npm、cargo 只在本計劃實際改到 `app/desktop/` 或協定（`desktop/protocol/`、`agent/desktop/protocol.py`）時才在 K8 各跑一次；沒改到時記為「不適用」並附 `git diff --stat` 為證。
+- 完整 pytest 只在 K8 跑一次。npm、cargo 只在本計劃實際改到 `app/desktop/`（包含 `app/desktop/protocol/`）或 `app/agent/desktop/protocol.py` 時才在 K8 各跑一次；沒改到時記為「不適用」並附 `git diff --stat` 為證。
 - 預估任一命令超過十分鐘時先取得明確授權。完整套件失敗後不自動重跑；修正後需要第二輪完整驗收時，記錄原因與預估耗時，留給使用者授權。
 
 ## 執行契約
@@ -138,7 +148,7 @@
 
 **GUI 與真實模型**：GUI 驗收由使用者本人在交付後操作（U5）；詰問的真實模型測試由使用者自行跑（U2）。執行者交付手動清單與執行方法，不等待結果，也不宣稱 GUI 或真實詰問效果已驗證。
 
-**中斷續作**：依 build-log、`git log` 中的步驟 ID 與實際工作樹對帳後再繼續；已 commit 的步驟不重做。工作樹有未提交的本計劃修改時，先看 `git diff`：屬於下一個步驟且看得懂的，接著完成；看不懂或已損壞的，只用 `git restore` 還原該步驟涉及的明確路徑後重做該步。不還原與本計劃無關的檔案。
+**中斷續作**：依 build-log、`git log` 中的步驟 ID 與實際工作樹對帳後再繼續；已 commit 的步驟不重做。工作樹有未提交修改時，先看 `git diff`，以具體變更確認歸屬；確認屬於本計劃且看得懂的，接著完成。看不懂、疑似損壞或無法區分使用者／其他工作修改時，保留原狀，將受影響步驟記為 Blocked，繼續獨立工作並在最終彙報列明。不得因路徑屬於本計劃就整檔 `git restore`；保護範圍包含同一檔案中的無關修改。
 
 ## 完成條件
 

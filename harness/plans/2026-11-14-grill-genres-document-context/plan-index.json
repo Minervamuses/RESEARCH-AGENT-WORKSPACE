@@ -2,13 +2,13 @@
   "schema_version": 1,
   "plan_id": "grill-genres-document-context",
   "goals": [
-    {"id": "G1", "text": "@grill skill: reconstruct, try to refute, raise; recheck responses; pass condition"},
+    {"id": "G1", "text": "@grill first research iteration: faithful reconstruction, scoped challenges, rechecking and qualified pass"},
     {"id": "G2", "text": "Grill turns can read the document but cannot edit it"},
-    {"id": "G3", "text": "Grill evaluation framework, offline by default, user runs live tests"},
+    {"id": "G3", "text": "Grill evaluation framework with human judgments and response applicability; offline by default, user runs live tests"},
     {"id": "G4", "text": "One genre skill with formats and extensions for seven genres"},
     {"id": "G5", "text": "Per-turn reply rules in SYSTEM_PROMPT"},
     {"id": "G6", "text": "Measure document share of model input; 15-turn fake-model measurement"},
-    {"id": "G7", "text": "History replay keeps only the latest document snapshot in full"},
+    {"id": "G7", "text": "History replay retains the last submitted editor snapshot, not guaranteed latest saved content; tool results assessed separately"},
     {"id": "G8", "text": "Same-turn edit results no longer accumulate full text"},
     {"id": "G9", "text": "Docs updated, full suites pass, final report delivered"}
   ],
