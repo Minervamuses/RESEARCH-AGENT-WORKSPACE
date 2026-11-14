@@ -7,7 +7,7 @@
 
 ## 任務規模
 
-主要是 Python 後端（`agent/session.py`、`agent/desktop/service.py`、`agent/observability.py`；K4 選出口 B 時包含 `agent/graph.py` 的模型輸入組裝）與兩個新 skill 的文字內容，加上一支評估腳本。預期不改前端與協定；若執行中發現必須改，npm 與 cargo 檢查變成必要。
+主要是 Python 後端（`agent/session.py`、`agent/desktop/service.py`、`agent/observability.py`；K4 兩個出口均包含 `agent/graph.py` 的模型輸入組裝）與兩個新 skill 的文字內容，加上一支評估腳本。預期不改前端與協定；若執行中發現必須改，npm 與 cargo 檢查變成必要。
 
 風險集中在兩處：
 
