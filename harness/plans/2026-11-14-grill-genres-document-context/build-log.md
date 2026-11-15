@@ -9,8 +9,8 @@
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
-| K4 | In progress | K4-S1、K4-S2 | — | K4-S3 修改後量測 |
-| K5 | Not started | — | — | 等 K1 |
+| K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
+| K5 | Not started | — | — | K5-S1 |
 | K6 | Not started | — | — | 等 K5 |
 | K7 | Not started | — | — | 等 K1 |
 | K8 | Not started | — | — | 等 K3–K7 |
@@ -198,3 +198,12 @@
 - 檢查（`app/`，沙箱外，三個環境變數指向 `$TMPDIR/k4s2*`）：
   - `tests/test_document_edit_compaction.py tests/test_document_context_budget.py tests/test_desktop_document_service.py tests/test_inline_skills.py tests/test_skill_runtime.py tests/test_desktop_fixture.py tests/test_desktop_citation_keys.py tests/test_graph_skill_loader.py tests/test_desktop_crash_recovery.py` → 139 passed，19.43 s。
   - 所有建 graph 的測試模組（`grep -l "build_graph\|_agent_requests" tests/*.py`，19 個檔）→ 419 passed，24.47 s。
+
+### K4-S3 修改後量測與三組對照（2026-11-15）
+
+- 指令（`app/`，沙箱內）：`DOCUMENT_BUDGET_REPORT=<計劃>/evidence/K4-S3/after.json $P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_context_budget.py::test_fifteen_document_turns_are_measured` → 1 passed；對照表由一次性腳本（`$TMPDIR/cmp.py`，未入庫）產生於 `evidence/K4-S3/summary.md`。
+- 對照（before → after-history → after）：
+  - 第 15 回合最後一次呼叫：全文副本 13 → 2 → 2；文件字元 100,965 → 15,638 → 15,638；prompt 字元 126,199 → 39,587 → 39,587；占比 80.0% → 39.5% → 39.5%。剩下 2 份＝當前提交快照 1＋最新編輯結果 1，符合 G7／G8 分開計數的目標。
+  - 第 5 回合（同回合連續兩次編輯）最後一次呼叫：副本 7 → 3 → 2；工具結果字元 15,471 → 15,471 → 8,376（最新一份全文 7,731＋較早一次的範圍文字）；prompt 69,614 → 38,875 → 31,890。
+  - 第 10 回合：第一次呼叫副本 11 → 1 → 1，prompt 108,228 → 29,724 → 29,724。
+- 限制：只有單次編輯的回合 K4 不改數字（只有一份結果，本來就是最新）。數字是字元數，不是 token。
