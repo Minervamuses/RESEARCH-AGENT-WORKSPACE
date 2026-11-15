@@ -11,7 +11,7 @@
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
 | K5 | Complete | K5-S1–S3 | — | — |
-| K6 | Not started | — | — | K6-S1 |
+| K6 | In progress | K6-S1 | — | K6-S2 腳本與報告 |
 | K7 | Not started | — | — | 等 K1 |
 | K8 | Not started | — | — | 等 K3–K7 |
 
@@ -242,3 +242,11 @@
 - 新測試 `app/tests/test_grill_skill.py::test_grill_typed_in_a_passage_comment_activates_for_the_whole_turn`：以前端的組合格式送出，留言內含 `@grill`、主請求沒有。實際結果：**會啟用**——SKILL.md 進入系統訊息、`document_edit` 不在綁定工具、凍結引用說明是唯讀版、沒有候選也沒有寫檔；`skillReferences` 送空陣列時後端仍從文字找到並啟用。測試保留作回歸保護。
 - 要列入最終彙報的觀察：留言中的 `@grill` 作用於**整個回合**（主請求與所有引用都變唯讀），不是只針對那一則留言的段落。若同一回合其他留言要求改寫，該回合不會改；需要分開送出。前端行為只讀碼確認，本步沒有跑 npm；本計劃不改前端或協定。
 - 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_skill.py` → 4 passed。
+
+### K6-S1 案例格式、驗證與示範案例（2026-11-15）
+
+- 新增 `app/scripts/grill_eval.py`（本步只有格式驗證：`validate_case`、`validate_cases`、`load_cases`、`CaseFormatError`）。案例檔為 `{"note": …, "cases": [...]}`；每個案例欄位 `id`、`kind`（`flawed`／`clean`）、`source`（`synthetic`／`real`）、`document`、`selection`（須在 `document` 中逐字且只出現一次）、`known_issues`（`id`、`quote`（須逐字在 `document`）、`note`；`flawed` 至少一條、`clean` 為空）、`author_turns`（`targets`、`type`、`expected`、`text`；`type` → `expected` 固定對應 `rephrase→maintain`、`supply_step→request_write_in`、`valid_rebuttal→withdraw`）。多餘或缺少欄位都拒絕，訊息帶案例 id。`expected` 只是條件式預期，是否適用由人判斷（報告不自動套用）。
+- 選擇：腳本放 `app/scripts/`（新目錄，不在 wheel 套件內），測試以 `importlib` 從路徑載入；不新增依賴。
+- 新增 `app/tests/fixtures/grill/cases.example.json`：3 個 `flawed`（平均提升推到所有學生、把攜帶手機當事實、以 R² 支持因果）與 2 個 `clean`（有限定的結果、定義在前文），全部 `synthetic`，由執行者撰寫、未取自使用者資料；`note` 寫明示範用、不能代表真實論文結果、標註不是完整真值、三類只是例子不構成分類表。作者回應涵蓋三種 type。
+- 新測試 `app/tests/test_grill_eval.py`（12 個）：示範案例通過；`selection` 不在文件、`kind` 與 `known_issues` 矛盾（兩個方向）、未知 `type`、`expected` 與 `type` 不符、引用不在文件、未知 `kind`／`source`、多餘欄位、缺欄位、重複 id、`selection` 出現兩次都被拒絕並給出清楚訊息。
+- 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_eval.py` → 12 passed。
