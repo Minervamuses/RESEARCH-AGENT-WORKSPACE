@@ -99,6 +99,25 @@ agent 可在同一回合依留言依序修改目前文件的多個段落，後�
 
 正常操作順序是：選取原文 → 留言並確認收合 → 整批送出 → 等待回合完成或確實停止 → 再手動編輯原文。標註後又手動改原文、或 agent 執行中同時手動改原文，屬於目前不支援的操作；介面不另提供鎖定、標記重定位或合併機制。
 
+## 詰問與文體 skill
+
+**@grill：檢查一段論證。** 圈選一段後輸入 `@grill`（可加一句說明），agent 會先寫出 **還原**：這段要讀者相信什麼、各句的角色與支持關係。接著在你實際主張的範圍內試著推翻，只在找到具體問題或影響判斷的資料缺口時提出 **發現**，每條附逐字引用、理由和要你回應的事；最後給出 **判斷**。回應質疑時再打一次 `@grill`，skill 只在打了 `@grill` 的那一回合生效。
+
+- 詰問回合只讀不改：模型看得到整份文件，但 `document_edit` 不可用，不會出現編輯核准，缺的內容只在回覆中以 `[TODO: …]`、`[CITE: …]`、`[FIGURE: …]` 建議。改寫是通過後另外一步。
+- 段落留言裡的 `@grill` 作用於整個回合：主請求與所有引用都變唯讀。要改寫的請求請另外送出。
+- 「通過」只表示在目前材料與檢查範圍內沒找到具體問題，不保證正確。這套方法是第一版，**還沒有用真實模型和真實段落驗證效果**。評估方法與 `scripts/grill_eval.py` 的用法見 [app/skills/grill/README.md](app/skills/grill/README.md)；`--live` 會呼叫 OpenRouter 並產生費用。
+
+**@writing-genres：文體格式。** 輸入 `@writing-genres` 並說明要寫的文體（論文、教材、筆記、計劃書、Abstract、Poster、投影片），agent 會依該文體的結構寫成原稿，並用 bash 寫檔（Ask 下要核准）。預設寫成編輯器能開的 `.md`；Word 由 Citations 面板的 **Export** 轉出，投影片可用 Pandoc 轉成 `.pptx`。轉出的檔案不能在編輯器圈選修改。不加 `@writing-genres` 時，每回合仍有簡短的寫作規則：先辨識文體、缺內容用上述佔位符、產出非 `.md`／`.markdown`／`.tex` 的檔案前先告知、詰問與改寫分開。
+
+## 文件在對話 context 中怎麼帶
+
+模型自動看到最近 10 個已完成回合。帶文件的回合在對話檔中照樣保存完整快照，但重播給模型時會縮減：
+
+- 本回合帶文件時，較早回合的文件快照與段落引用全文都換成佔位。佔位保留路徑、版本（`editorRevision`）、指紋、選取範圍與行號，以及較短的選取文字。
+- 本回合沒帶文件時（例如關閉文件後），只保留最近一次**提交時**的文件快照全文，並標明它是提交時的內容。若那一回合之後 agent 又存檔改了文件，模型看到的仍是改之前的版本，不會自動讀取最新存檔。
+- 同一回合連續編輯時，只有最新一次存檔結果帶全文，較早的結果只留改動的範圍。
+- 舊版本仍在對話封存中。要比較或還原時可以請 agent 從封存取回；Normal 模式下它會用 bash 搜尋（需要核准），Extended 模式做不到。沒有進入任何回合快照的中間存檔版本不在封存中。
+
 ## 引用與參考文獻
 
 每個研究專案有一份 CSL-JSON 書目庫，預設是專案根目錄的 `references.json`；可在 `RESEARCH.md` 的 metadata 加上 `"bibliography": "相對路徑.json"` 改到專案內其他位置。正文只寫引用 key，格式在預覽或匯出時才套用，切換格式不會改動正文任何文字。
@@ -152,6 +171,7 @@ Delete 會先確認範圍：**只刪這則對話紀錄，不刪研究專案或�
 
 - `turn_start`；`turn_end`：`state`、`duration_ms`、`model_calls`、`tool_calls`、`unfinished`。
 - `model_start`／`model_end`：`model_seq`、`at_ms`（距離嘗試開始的毫秒數）、`duration_ms`、`status`（ok、error、unfinished）、`tool_calls`、`input_tokens`、`output_tokens`（供應商回報的值）。
+  - `model_end` 另記文件佔比，只有字元數：`prompt_chars`（全部訊息字元數）、`document_chars_current`（本回合快照與段落引用全文）、`document_chars_history`（歷史回合仍帶的快照全文）、`document_chars_tool_results`（`document_edit` 結果中的全文或範圍文字）、`document_full_copies`（全文份數）、`document_parse_issue`（無法辨識的文件區塊，正常為 `None`），以及 `document_tokens_estimate`：`input_tokens` 乘以文件字元占比的**估計值**，不是供應商回報的數字。
 - `tool_start`／`tool_end`：
   - `tool`、`tool_call_id`、`model_seq`（由哪一次模型呼叫發出）；
   - `query_hash`（工具有 `query` 參數時）：查詢的 SHA-256 前 16 碼，只能比對兩次查詢是否相同，無法還原查詢；

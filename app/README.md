@@ -11,6 +11,7 @@
 | `skills/` | Repo 內建 skill bundles；`SKILL.md` 是模型執行指令 |
 | `tool/` | Skill/MCP drop-in roots、內部管理資源與尚未載入的 local-tool v1 預留區 |
 | `vendor/` | 內附的第三方元件；`web-search-mcp/` 是加上本專案修正的全域 Web Search MCP server（Node）；`bime-word/` 是原樣內附的 bime_word 1.1.5，桌面後端以子行程執行它做系上格式 Word 匯出，不打包進 wheel，也不是 agent 技能 |
+| `scripts/` | 不打包的開發與評估腳本；`grill_eval.py` 以 `@grill` 跑評估案例，預設拒絕呼叫付費模型（見 `skills/grill/README.md`） |
 | `tests/` | 單一 pytest suite；`tests/rag/` 保留 RAG subsystem tests |
 | `env/` | Conda-owned runtime definition |
 
@@ -41,6 +42,7 @@ Built-in skill 的 domain code 與 agent runtime 是不同邊界。例如 `skill
 - [Extended thinking](agent/thinking/README.md)
 - [Tool definitions and enforcement](agent/tools/README.md)
 - [Citation subsystem](skills/citation/README.md)
+- [@grill 使用與評估](skills/grill/README.md)
 - [RAG package](rag/README.md) 與 [RAG API](rag/docs/API.md)
 
 舊的 Skills 指南與 extension README 已在 2026-10-15 的整理中移除，內容可能已過時；需要時可用 `git show d497bd9^:app/SKILLS_GUIDE.md`、`git show be9c46e^:app/agent/extensions/README.md` 取回。

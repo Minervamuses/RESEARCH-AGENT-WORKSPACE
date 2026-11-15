@@ -67,6 +67,8 @@ ChatSession.turn_outcome()  [session-wide async lock]
 - Canonical JSON是唯一支援的transcript source。Desktop選取catalog session時若對應JSON不存在，會回報conversation unavailable，並保留目前已選取的session。
 - 舊Plan logs與conversation Chroma不會被讀取、匯入、改寫或刪除；catalog與isolated fixture都沒有batch migration入口。
 - 模型context固定只取canonical JSON中最新10個completed、eligible conversational turns。
+- 重播進模型時，`document_context.replay_history_inputs` 縮減歷史中的文件全文：當前回合帶快照時，舊快照與凍結引用都換成佔位；不帶時只保留最後提交的快照（標明可能早於之後的存檔）。`graph._agent_requests` 另以 `compact_edit_results` 讓同回合只有最新一次 saved `document_edit` 結果帶全文。兩者都只改模型輸入副本，canonical JSON、graph state 與前端收據不變。
+- 啟用 `READ_ONLY_DOCUMENT_SKILLS`（目前是 `grill`）的回合，`tool_access_resolution` 會移除 `document_edit`；文件快照照常送進模型。
 
 ## Tests and related docs
 

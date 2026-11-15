@@ -13,7 +13,7 @@
 | K5 | Complete | K5-S1–S3 | — | — |
 | K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
 | K7 | Complete | K7-S1–S3 | — | — |
-| K8 | Not started | — | — | K8-S1 |
+| K8 | In progress | K8-S1 | — | K8-S2 完整驗收 |
 
 ## 撰寫紀錄
 
@@ -304,3 +304,11 @@
 
 - `app/skills/academic-paper-writing/SKILL.md:93`：`[insert citation]`、`[report sample size]`、`[state limitation]` 改為 `[CITE: source for this claim]`、`[TODO: report sample size]`、`[TODO: state limitation]`，並補一句 `[FIGURE: …]` 用於缺的圖表（A4）。同一行其餘文字與檔案其他內容不動。
 - 檢查（`app/`）：`grep -rn "insert citation" skills` → 無結果（結束碼 1）。沙箱外跑所有提及 `academic-paper-writing` 的測試模組（`tests/test_citation_e2e.py tests/test_desktop_fixture.py tests/test_writing_genres.py tests/test_grill_skill.py tests/test_academic_skill_tools.py tests/test_citation_slash_command.py tests/test_thinking.py tests/test_citation_skill_activation.py tests/test_extension_baseline.py tests/test_inline_skills.py tests/test_skill_adherence.py`）→ 171 passed，7.32 s。
+
+### K8-S1 文件（2026-11-15）
+
+- `README.md`（repo 根目錄）：新增「詰問與文體 skill」一節（`@grill` 的還原／發現／判斷、只讀不改、留言中的 `@grill` 作用於整個回合、通過的範圍、真實效果未驗證、評估見 `app/skills/grill/README.md` 與 `--live` 費用；`@writing-genres` 的用途、預設 `.md`、Export／Pandoc 轉出檔不能圈選修改、每回合寫作規則），以及「文件在對話 context 中怎麼帶」一節（歷史快照縮成佔位、只保留最後提交的快照且不保證是最新存檔、同回合只有最新存檔結果帶全文、封存取回需 Normal 模式與 bash 核准、中間存檔版本不在封存）。turn_trace 欄位說明補上 `model_end` 的文件佔比欄位，標明 `document_tokens_estimate` 是估計值。
+- `app/agent/README.md`「Persistence boundary」補兩點：`replay_history_inputs`／`compact_edit_results` 只改模型輸入副本；`READ_ONLY_DOCUMENT_SKILLS` 回合移除 `document_edit`。
+- `app/README.md`：目錄表加 `scripts/`（`grill_eval.py`，預設拒絕付費模型），文件地圖加 `skills/grill/README.md`。
+- `for_agents/`（由 `$infrastructure` 管理）只修兩處與新行為矛盾的描述，未全面更新：`dangerous-assumptions.md` ASM-030 的「Latest-ten context replays earlier snapshots… no cross-turn deduplication」改為保存不變、模型輸入已縮減；`data-flow.md` Skill 流程第 3 步補「含 `grill` 的回合移除 `document_edit`」。其餘內容（例如基線 commit、測試數）可能已過時，建議使用者之後以 `$infrastructure` 重新整理。
+- 檢查：`grep -rn "每回合帶整份\|replays earlier snapshots\|cross-turn deduplication" README.md app/README.md app/agent/README.md for_agents/ app/skills/*/README.md` → 無結果；連結的 `app/skills/grill/README.md`、`app/skills/citation/README.md` 都存在。

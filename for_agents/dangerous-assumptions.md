@@ -267,8 +267,8 @@ Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection. RAG premise
 - Failure if false:
   - The stored context keeps a full `sourceText` for the editor snapshot and each document reference, so total size is roughly document size × (references + 1). A 100 KB document allows about 9 comments, a 300 KB one about 2.
   - A conflict result carries about three copies, so documents of about 700 KB or more exceed the 2 MiB line and fail as `PROTOCOL_INVALID`.
-  - Latest-ten context replays earlier snapshots. `sourceTextSameAs` deduplicates only within one prompt.
-- Detection or mitigation: a friendly size error before sending. There is no cross-turn deduplication.
+  - Stored turns keep every snapshot; the model-visible replay trims them (`document_context.replay_history_inputs`: placeholders, at most one last submitted snapshot) and keeps only the latest saved `document_edit` result whole (`compact_edit_results`). The stored JSON size is unchanged.
+- Detection or mitigation: a friendly size error before sending. Model input no longer accumulates history snapshots; stored size still does.
 - Evidence: `app/agent/conversations/models.py::MAX_INPUT_BYTES`; `desktop/protocol.py`; `service.py::_model_reference_projection`; commit `2bfdb22`.
 - Status: Active
 - Confidence: Mechanism Confirmed; thresholds are arithmetic, not measured.

@@ -135,7 +135,7 @@ Freshness: revalidated 2026-10-23 at `3f9176a` by static inspection of source an
 - Steps:
   1. Selection — the slash Skill comes first, then inline references. References must be exact catalog names with checked boundaries, and client-supplied references must equal the parsed list. A `skill-installer` entry makes the turn an installer turn.
   2. Loading — each Skill is hash-checked, its manifest validated and its required tools resolved. The Desktop validates before acceptance; in the CLI, a load failure after acceptance fails the turn.
-  3. Composite — names and instructions are joined, effective tools unioned and `members` recorded. Document turns force `document_edit` into the tools. Citation in the set forces Normal and a fresh registry.
+  3. Composite — names and instructions are joined, effective tools unioned and `members` recorded. Document turns force `document_edit` into the tools, except turns that include a `READ_ONLY_DOCUMENT_SKILLS` Skill (`grill`), which remove it. Citation in the set forces Normal and a fresh registry.
   4. Cleanup — the runtime is cleared, the Citation registry torn down and the previous thinking mode restored.
 - State or ownership transitions: no Skill selection survives the turn. Canonical metadata records the effective mode.
 - Error / retry / rollback behavior: the Desktop rejects stale or removed references before acceptance. An exact completed replay returns before any loading. Retrying a failed or interrupted turn needs a currently valid runtime. A rejected runtime never grants tools.
