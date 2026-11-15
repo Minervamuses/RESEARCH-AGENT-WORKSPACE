@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
-| K3 | In progress | K3-S1、K3-S2 | — | K3-S3 修改後量測 |
+| K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Not started | — | — | K4-S1（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
@@ -145,3 +145,9 @@
   - 沙箱外（`TMPDIR`／`XDG_CACHE_HOME`／`AGENT_LOG_DIR` 指向 `$TMPDIR/k3s2`）：`tests/test_document_context_budget.py tests/test_document_history_replay.py tests/test_document_measure.py tests/test_desktop_document_service.py tests/test_observability.py tests/test_session_persistence.py tests/test_inline_skills.py tests/test_skills.py tests/test_academic_skill_tools.py tests/test_thinking_session.py tests/test_desktop_fixture.py` → 149 passed，10.69 s。
   - 另跑會用到歷史組裝的模組（grep `_base_prompt_history|_visible_context_text|_prompt_history|latest_context`）：`tests/test_turn_finalizer.py tests/test_conversation_repository.py tests/test_desktop_service.py tests/test_chat_cli.py tests/test_desktop_conversations.py tests/test_history_retirement.py` → 218 passed，9.83 s。
 - 沒有修改任何既有測試。
+
+### K3-S3 修改後量測（2026-11-15）
+
+- 指令（`app/`，沙箱內）：`DOCUMENT_BUDGET_REPORT=<計劃>/evidence/K3-S3/after-history.json $P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_context_budget.py::test_fifteen_document_turns_are_measured` → 1 passed。對照表 `evidence/K3-S3/summary.md`。
+- 第 15 回合：第一次呼叫全文副本 12→1、history 字元 85,327→0、prompt 字元 117,773→31,159、文件占比 79.1%→25.1%；最後一次呼叫 13→2（1 份當前快照＋1 份 `document_edit` 結果）、126,199→39,587、80.0%→39.5%。current 與 tool_results 不變；第 5 回合最後一次呼叫仍有兩份工具結果全文（15,471 字元），由 K4 處理。
+- 限制：第 1 回合 prompt 字元前後差 4–6，來自 pytest 暫存路徑長度不同（出現在系統提示），與修改無關。佔位本身的字元計入 prompt 但不計入文件字元。
