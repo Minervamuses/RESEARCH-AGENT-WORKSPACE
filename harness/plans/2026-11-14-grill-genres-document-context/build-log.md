@@ -1,6 +1,6 @@
 # 執行紀錄
 
-本檔是本計劃唯一的狀態來源。2026-11-15 依使用者啟動提示開始執行。
+本檔是本計劃唯一的狀態來源。2026-11-15 依使用者啟動提示開始執行，同日 K1–K8 全部完成；最終彙報在 `evidence/K8-S3/final-report.md`。
 
 ## 目前狀態
 
@@ -13,7 +13,7 @@
 | K5 | Complete | K5-S1–S3 | — | — |
 | K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
 | K7 | Complete | K7-S1–S3 | — | — |
-| K8 | In progress | K8-S1、K8-S2；`evidence/K8-S2/` | — | K8-S3 最終彙報 |
+| K8 | Complete | K8-S1–S3；`evidence/K8-S2/`、`evidence/K8-S3/final-report.md` | — | 使用者：GUI 清單與真實詰問測試 |
 
 ## 撰寫紀錄
 
@@ -317,3 +317,8 @@
 
 - 完整 pytest（`app/`，沙箱外；`TMPDIR`、`XDG_CACHE_HOME`、`AGENT_LOG_DIR` 指向新建的 `/tmp/k8s2/{tmp,cache,logs}`）：`$P/bin/python -m pytest -q -p no:cacheprovider` → **1808 passed，2 warnings，62.58 s**（含收集約 65 s），結束碼 0。輸出尾段存於 `evidence/K8-S2/pytest-tail.txt`。兩個警告是既有的 LangChain `allowed_objects` 棄用警告與 zip 重複名稱警告（extension 測試的刻意輸入）。與歷史基線 1763 相比多 45 個，皆為本計劃新增的測試。只跑一次，未重跑。
 - npm、cargo：**不適用**。`git diff --stat 10187aa..HEAD -- app/desktop app/agent/desktop/protocol.py` 輸出為空（0 行），本計劃沒有改動前端（含 `app/desktop/protocol/`）或後端協定。
+
+### K8-S3 最終彙報（2026-11-15）
+
+- 寫入 `evidence/K8-S3/final-report.md`：G1–G9 狀態與證據指向（無 Blocked）、三組量測對照（假模型字元數，token 估計在假模型下不適用）、K4 出口 B 與理由、A1–A8 與執行中選擇待確認、留言中 `@grill` 的實際行為、使用者自跑真實詰問測試的方法與費用提醒（明寫執行者未用真實模型測試）、手動 GUI 清單、commit 對照表與未 push／未動 branch 的確認。
+- 計劃完成條件：K1–K8 皆 Complete；G1–G9 都有證據（G1 與 G3 的研究效果未驗證，屬範圍外，見 GOALS U2）；K8 完整 pytest 通過、npm／cargo 不適用；最終彙報已交付。
