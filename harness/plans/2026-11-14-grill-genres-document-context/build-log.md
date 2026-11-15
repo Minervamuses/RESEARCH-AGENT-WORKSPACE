@@ -7,9 +7,9 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
-| K2 | In progress | K2-S1 事件 | — | K2-S2 15 回合量測 |
-| K3 | Not started | — | — | 等 K2 |
-| K4 | Not started | — | — | 等 K2（K4-S3 另需 K3） |
+| K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
+| K3 | Not started | — | — | K3-S1 checkpoint 與轉換函式 |
+| K4 | Not started | — | — | K4-S1（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
 | K7 | Not started | — | — | 等 K1 |
@@ -103,3 +103,11 @@
 - 檢查（`app/`）：
   - 沙箱內 `$P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_measure.py tests/test_observability.py` → 27 passed。
   - 沙箱外（`TMPDIR`／`XDG_CACHE_HOME`／`AGENT_LOG_DIR` 指向 `$TMPDIR/k2s1`）`tests/test_document_measure.py tests/test_observability.py tests/test_desktop_document_service.py tests/test_desktop_fixture.py tests/test_inline_skills.py` → 86 passed，8.10 s。
+
+### K2-S2 15 回合假模型量測（2026-11-15）
+
+- 新增 `app/tests/test_document_context_budget.py`：沿用 `tests/test_desktop_document_service.py` 的 `_setup`／`_Sink`（直接匯入，未改其行為），以腳本化的假模型覆寫 `model.ainvoke`，跑同一 session 的 15 個帶文件回合。文件 21,774 bytes（12 節，中文＋emoji）。回合配置：11 個編輯回合（第 1、3、4、5、7、8、10、11、13、14、15）、第 5 回合同回合連續兩次 `document_edit`、第 7 回合以整份文件為範圍（無圈選）編輯、第 2、6、12 回合只分析、第 9 回合以 `submittedContext` 帶第一版（舊版本）的凍結文件引用並分析。每回合斷言：狀態 completed、存檔次數符合、磁碟內容與自行計算的預期逐字相同、每次模型呼叫 `document_full_copies ≥ 1`、無 `document_parse_issue`；第 9 回合 current 字元大於文件長度（舊版全文另計）。不斷言 K3／K4 會改變的數字。
+- `run_budget_scenario` 與 `summarize` 供 K3-S3、K4-S3 以同一測試產生 after 數字；設 `DOCUMENT_BUDGET_REPORT` 時寫出 JSON（含 summary）。
+- 指令（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_context_budget.py` → 1 passed（1.58 s）；`DOCUMENT_BUDGET_REPORT=<計劃>/evidence/K2-S2/before.json …` → 1 passed，產出 `evidence/K2-S2/before.json`，人讀摘要 `evidence/K2-S2/summary.md`。
+- 修改前數字（第 15 回合）：第一次呼叫 12 份全文、文件 93,140／117,773 字元（79.1%）；最後一次呼叫 13 份、100,965／126,199（80.0%）。讀碼預估「最多 11 份」與實測差異：歷史窗口中第 9 回合多一份舊版凍結引用全文，最後一次呼叫多一份 `document_edit` 結果全文；扣掉這兩項為 11 份，與預估一致。
+- 未呼叫任何真實模型。
