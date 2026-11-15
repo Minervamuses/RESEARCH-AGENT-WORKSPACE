@@ -11,7 +11,7 @@
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
 | K5 | Complete | K5-S1–S3 | — | — |
-| K6 | In progress | K6-S1 | — | K6-S2 腳本與報告 |
+| K6 | In progress | K6-S1、K6-S2 | — | K6-S3 使用說明與示範報告 |
 | K7 | Not started | — | — | 等 K1 |
 | K8 | Not started | — | — | 等 K3–K7 |
 
@@ -250,3 +250,17 @@
 - 新增 `app/tests/fixtures/grill/cases.example.json`：3 個 `flawed`（平均提升推到所有學生、把攜帶手機當事實、以 R² 支持因果）與 2 個 `clean`（有限定的結果、定義在前文），全部 `synthetic`，由執行者撰寫、未取自使用者資料；`note` 寫明示範用、不能代表真實論文結果、標註不是完整真值、三類只是例子不構成分類表。作者回應涵蓋三種 type。
 - 新測試 `app/tests/test_grill_eval.py`（12 個）：示範案例通過；`selection` 不在文件、`kind` 與 `known_issues` 矛盾（兩個方向）、未知 `type`、`expected` 與 `type` 不符、引用不在文件、未知 `kind`／`source`、多餘欄位、缺欄位、重複 id、`selection` 出現兩次都被拒絕並給出清楚訊息。
 - 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_eval.py` → 12 passed。
+
+### K6-S2 腳本與報告（2026-11-15，未呼叫任何真實模型）
+
+- `app/scripts/grill_eval.py` 新增：
+  - `run_case`：每個案例在 `--out/work/<id>/project/` 建暫存專案與 `case.md`（不碰案例原檔），`AgentConfig` 的 persist／citation／extension 目錄都在 `work/<id>/` 下；以 `DesktopService` 走與編輯器相同的路徑（`workspace.select`→`session.create {"loadMcp": …}`→`document.open`→`documentContext` 範圍＝`selection` 的 UTF-16 範圍→`session.turn` 帶 `@grill` 與 `skillReferences`）。第一輪 `@grill 請檢查選取的段落。`，之後依序送出 `@grill <作者回應>`，上限 `--max-rounds`。所有核准請求一律拒絕（不執行有副作用的 bash）。離線模式以注入的模型替換 `agent.graph.get_chat_model`、RAG 工具換成空清單；`model=None`（只有 `--live`）才用真實模型。記錄 `runtime.diagnostics` 的 `mcpEnabled`。
+  - `mechanical_record`：有無 `## 還原`、`## 發現`、`（無）`、每條 `### F<n>｜問題／資料不足` 的 `原文：「…」` 是否逐字在選取段／文件、`判斷：` 行、`## 回應檢查` 各行。不做語意判斷、不產生分數或通過／失敗標籤。
+  - `blank_observations`／`validate_observations`：人工欄位（還原忠實度、每條質疑是否成立、已知問題是否找到、標註之外的有效問題、硬挑、每輪作者回應「待填／適用／此輪不適用」＋理由、適用時的後續處理）。預設全部待填；「此輪不適用」須附理由，且不得填後續處理評價。
+  - 報告：每案例 `reports/<id>.json` 與 `.md`（模型回覆全文、呼叫的工具、機械記錄、條件式預期標明「僅在回應對題時適用」、人工觀察表），加 `summary.md`／`summary.json`；開頭說明機械記錄的限制、沒有品質分數、標註不是完整真值。
+  - CLI：`--cases`、`--out`、`--max-rounds`（預設 4）、互斥的 `--dry-run`／`--live`、`--mcp`（只在 `--live` 有效，預設不載入 MCP）。兩個模式都沒給時拒絕並結束碼 2；`--live` 開跑前印出案例數、最多 @grill 回合數（每案例 1＋作者回應數，以 `--max-rounds` 為上限）、費用提醒與 MCP 是否啟用。`--dry-run` 用內建 `DryRunModel`（固定且標明「離線替身」的格式化回覆，不讀已知問題、不判斷）。
+- 新測試（`app/tests/test_grill_eval.py`，以 fixture 把 `agent.graph.get_chat_model`、`agent.llm.openrouter.get_chat_model`、`agent.session.get_chat_model_for_role` 換成「一被呼叫就失敗」的記錄器）：
+  - 沒有模式旗標 → 結束碼 2、訊息說明拒絕、沒有建立模型、未建立輸出目錄；`--dry-run --mcp` → 2。
+  - 以注入的腳本化模型跑全部 5 個示範案例：MCP 未啟用；flawed 案例第 1 輪有還原段，F1 逐字引用被標為在選取段、F2 非逐字引用被標為不在文件；第 2 輪回應檢查被記下；作者回應依序帶 `@grill` 送出、輪數 3/3；全程無 `document_edit`、文件未變、案例原檔位元組不變；clean 案例第 1 輪「通過」被記錄；資料不足的回覆只記為判斷行，報告 JSON 中沒有 score／failure／semantic／pass／correct 等字樣；人工欄位預設待填、適用性為「待填」；Markdown 有人工觀察表與條件式預期說明。
+  - 示範填表：可記「此輪不適用」（附理由）與標註之外的有效問題並通過驗證、在 Markdown 中呈現；缺理由、不適用卻評價後續處理、不允許的值、缺說明的未標註問題都被拒絕。
+- 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_eval.py` → 15 passed（0.74 s）。
