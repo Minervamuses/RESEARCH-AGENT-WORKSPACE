@@ -12,7 +12,7 @@
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
 | K5 | Complete | K5-S1–S3 | — | — |
 | K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
-| K7 | Not started | — | — | K7-S1 |
+| K7 | In progress | K7-S1 | — | K7-S2 SYSTEM_PROMPT 回覆規則 |
 | K8 | Not started | — | — | 等 K3–K7 |
 
 ## 撰寫紀錄
@@ -272,3 +272,23 @@
 - 證據：`evidence/K6-S3/dry-run/`（`summary.md`、`summary.json`、`reports/*.md|json`，暫存專案 `work/` 未複製）；`evidence/K6-S3/filled-example.{json,md}`：以 `flawed-inference-gap` 的報告示範填寫人工欄位，兩輪作者回應記「此輪不適用」並附理由、記一條標註之外的有效問題，通過 `validate_observations`；README 中的檢查指令對它執行，結束碼 0。
 - **聲明：以上是假模型（離線替身）輸出與執行者的示範填表，只證明流程與欄位可用，並非真實研究結果；詰問效果未驗證。** 執行者未以 `--live` 執行、未呼叫 OpenRouter。
 - 檢查：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_skill.py tests/test_grill_eval.py tests/test_skills.py` → 28 passed。
+
+### K7-S1 `writing-genres` skill（2026-11-15）
+
+- 新增 `app/skills/writing-genres/SKILL.md`（英文說明，與其他 skill 一致）。七種文體合起來約 170 行，沒有拆 `references/`、不加 manifest（不需要額外工具，沿用 normal 模式的 bash）。
+- 讀碼與環境事實（寫進 skill 的依據）：編輯器只開 `.md`／`.markdown`／`.tex`（`agent/desktop/documents.py:17`），上限 1 MiB；Citation 面板 Export 只對 Markdown 提供 `Word (.docx)`、`Word – BIME Appendix 17 (bime_word)`、`Markdown (.md)`（`desktop/src/citations.ts:288–299`），`.tex` 沒有 Export；Conda `app` 有 Pandoc 3.13，本機沒有 `pdflatex`／`xelatex`／`lualatex`／`latexmk`；bime_word 轉檔只略過 `[TODO: …]`（K1-S1）。
+- 人工核對表（七種文體 × 五點；「共通 n」指「Rules for every genre」第 n 條）：
+
+| 文體 | 1 目的、讀者、結構、篇幅 | 2 預設格式、副檔名、轉出 | 3 寫檔方式 | 4 引用與佔位符 | 5 分工 |
+|---|---|---|---|---|---|
+| 論文 | 「### 論文」Reader／Structure／Length | `.md`（論文每章一檔），必要時 `.tex`；Export Word／BIME | 共通 3 | 共通 4、5 | 共通 7（@academic-paper-writing、@grill） |
+| 教材 | 「### 教材」 | `.md`；Export Word 或 Pandoc HTML | 共通 3 | 共通 4、5 | 共通 7 |
+| 筆記 | 「### 筆記」（來源 key、引述與自己想法分開） | `.md`，通常不轉出 | 共通 3 | 共通 4、5 | 共通 7 |
+| 計劃書 | 「### 計劃書」 | `.md`（`.tex` 只用於提供的 LaTeX 表單）；Export Word | 共通 3 | 共通 4、5 | 共通 7 |
+| Abstract | 「### Abstract」（150–300 英文字或 300–500 中文字為常見值，以 venue 為準） | 單獨 `abstract.md` | 共通 3 | 共通 4、5（預設不引用） | 共通 7 |
+| Poster | 「### Poster」（約 300–800 字） | `.md` 內容稿（每區塊一個 `##`），有 TeX 時改 `.tex`＋`tikzposter`；PDF 不能在編輯器改 | 共通 3 | 共通 4、5（`[FIGURE: …]`） | 共通 7 |
+| 投影片 | 「### 投影片」（約一分鐘一張） | Pandoc 投影片格式 `.md` → `pandoc … -o slides.pptx` 或 reveal.js HTML；轉出檔不能在編輯器改 | 共通 3 | 共通 4、5 | 共通 7 |
+
+- 共通規則另含：先辨識文體與讀者（不清楚時先問一句）、只有開啟中的檔案能圈選修改、bash 一次寫一個檔並用 `set -o noclobber` 避免覆寫、告知路徑、不安裝軟體。`paper-writting` 未搬入（U4）。
+- 待使用者確認的預設（A5，列入最終彙報）：論文／教材／筆記／計劃書／Abstract 用 `.md`；Poster 用 `.md` 內容稿（本機無 TeX）；投影片用 Pandoc 投影片 `.md` 轉 `.pptx`。
+- 新測試 `app/tests/test_writing_genres.py::test_writing_genres_is_in_the_catalog_and_covers_seven_genres`：預設目錄載入、`@writing-genres` 解析、context 中七個文體段落依序存在且各有 `Default file:` 與 `.md`、共通規則關鍵字存在。沙箱內 `$P/bin/python -m pytest -q -p no:cacheprovider tests/test_writing_genres.py` → 1 passed。
