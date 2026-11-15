@@ -12,7 +12,7 @@
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
 | K5 | Complete | K5-S1–S3 | — | — |
 | K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
-| K7 | In progress | K7-S1 | — | K7-S2 SYSTEM_PROMPT 回覆規則 |
+| K7 | In progress | K7-S1、K7-S2 | — | K7-S3 佔位符對齊 |
 | K8 | Not started | — | — | 等 K3–K7 |
 
 ## 撰寫紀錄
@@ -292,3 +292,10 @@
 - 共通規則另含：先辨識文體與讀者（不清楚時先問一句）、只有開啟中的檔案能圈選修改、bash 一次寫一個檔並用 `set -o noclobber` 避免覆寫、告知路徑、不安裝軟體。`paper-writting` 未搬入（U4）。
 - 待使用者確認的預設（A5，列入最終彙報）：論文／教材／筆記／計劃書／Abstract 用 `.md`；Poster 用 `.md` 內容稿（本機無 TeX）；投影片用 Pandoc 投影片 `.md` 轉 `.pptx`。
 - 新測試 `app/tests/test_writing_genres.py::test_writing_genres_is_in_the_catalog_and_covers_seven_genres`：預設目錄載入、`@writing-genres` 解析、context 中七個文體段落依序存在且各有 `Default file:` 與 `.md`、共通規則關鍵字存在。沙箱內 `$P/bin/python -m pytest -q -p no:cacheprovider tests/test_writing_genres.py` → 1 passed。
+
+### K7-S2 `SYSTEM_PROMPT` 回覆規則（2026-11-15）
+
+- `app/agent/session.py` 的 `SYSTEM_PROMPT` 在「Language policy」之前加「Writing rules (every turn):」四條（A6）：先辨識文體並依慣例寫、需要細節時建議 `@writing-genres`；不捏造，缺口用 `[TODO: …]`／`[CITE: …]`／`[FIGURE: …]`；編輯器只能開啟並圈選修改 `.md`／`.markdown`／`.tex`，產出其他副檔名前先告知；`@grill` 檢查與改寫是分開的兩步。語言政策與 skill 說明不變；不寫進任何 RESEARCH.md（U3）。
+- 同時把 K5-S2 加的 `READ_ONLY_DOCUMENT_SKILLS` 移到說明 `SYSTEM_PROMPT` 的註解之前（原本插在註解與 `SYSTEM_PROMPT` 之間），註解補上 writing rules；值不變。
+- 新測試（`app/tests/test_writing_genres.py`）：`SYSTEM_PROMPT` 含這一節且在語言政策之前、語言政策仍在；CLI 預設 `ChatSession` 連續兩回合，每次模型呼叫的第一則系統訊息都含規則；桌面服務開專案後連續兩回合，系統提示都含規則且位置在「### RESEARCH.md rules」之前。
+- 檢查（`app/`，沙箱外，環境變數指向 `$TMPDIR/k7s2`）：`tests/test_writing_genres.py tests/test_tool_inventory.py tests/test_desktop_service.py tests/test_chat_cli.py tests/test_session_persistence.py tests/test_thinking_session.py tests/test_skills.py tests/test_desktop_fixture.py` → 191 passed，8.83 s。既有提及 `SYSTEM_PROMPT` 的測試（`tests/test_tool_inventory.py`）通過。
