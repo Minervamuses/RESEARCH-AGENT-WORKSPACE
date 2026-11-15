@@ -1,0 +1,134 @@
+{
+  "case": {
+    "id": "clean-definition-from-context",
+    "kind": "clean",
+    "source": "synthetic",
+    "selection": "新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。這只描述上線前後的變化，不代表介面是唯一原因，同期也有行銷活動。",
+    "known_issues": []
+  },
+  "author_turns": [
+    {
+      "targets": "若模型要求定義「回訪」，作者回應定義已在前文",
+      "type": "valid_rebuttal",
+      "expected": "withdraw",
+      "text": "「回訪」的定義在文件開頭的名詞定義：首次造訪後 30 天內再次登入。"
+    }
+  ],
+  "mode": "offline",
+  "mcp_enabled": false,
+  "rounds_planned": 2,
+  "rounds_run": 2,
+  "error": null,
+  "rounds": [
+    {
+      "round": 1,
+      "author_input": "@grill 請檢查選取的段落。",
+      "author_turn": null,
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。」開始。\n\n## 發現\n### F1｜資料不足\n- 原文：「新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": []
+      }
+    },
+    {
+      "round": 2,
+      "author_input": "@grill 「回訪」的定義在文件開頭的名詞定義：首次造訪後 30 天內再次登入。",
+      "author_turn": {
+        "targets": "若模型要求定義「回訪」，作者回應定義已在前文",
+        "type": "valid_rebuttal",
+        "expected": "withdraw",
+        "text": "「回訪」的定義在文件開頭的名詞定義：首次造訪後 30 天內再次登入。"
+      },
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。」開始。\n\n## 回應檢查\n- F1：未對題 → 維持：離線替身不判斷作者回應。\n\n## 發現\n### F1｜資料不足\n- 原文：「新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "新版介面上線後的三個月內，回訪比例由 41% 增加到 47%。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": [
+          "F1：未對題 → 維持：離線替身不判斷作者回應。"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "first_pass_round": null,
+    "verdicts": [
+      "資料不足",
+      "資料不足"
+    ],
+    "document_edit_called": false,
+    "document_unchanged": true
+  },
+  "observations": {
+    "reconstruction": [
+      {
+        "round": 1,
+        "faithful": null,
+        "notes": ""
+      },
+      {
+        "round": 2,
+        "faithful": null,
+        "notes": ""
+      }
+    ],
+    "challenges": [
+      {
+        "round": 1,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      },
+      {
+        "round": 2,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      }
+    ],
+    "known_issues": [],
+    "unlabeled_valid_issues": [],
+    "nitpicks": [],
+    "author_turns": [
+      {
+        "round": 2,
+        "applicability": "待填",
+        "reason": "",
+        "handling": null,
+        "notes": ""
+      }
+    ]
+  }
+}

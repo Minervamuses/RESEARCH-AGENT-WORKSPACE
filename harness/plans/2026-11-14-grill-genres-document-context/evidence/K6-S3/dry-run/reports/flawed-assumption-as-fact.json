@@ -1,0 +1,146 @@
+{
+  "case": {
+    "id": "flawed-assumption-as-fact",
+    "kind": "flawed",
+    "source": "synthetic",
+    "selection": "由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。",
+    "known_issues": [
+      {
+        "id": "K1",
+        "quote": "由於所有受訪者每天都攜帶手機",
+        "note": "把「每天都攜帶手機」當成已知事實，但文件沒有交代依據；它是假設，且即使成立，定位紀錄也可能因關機、訊號或取樣頻率而缺漏。"
+      }
+    ]
+  },
+  "author_turns": [
+    {
+      "targets": "質疑攜帶手機是假設而非事實",
+      "type": "valid_rebuttal",
+      "expected": "withdraw",
+      "text": "這個說法有根據：問卷第 12 題問過攜帶習慣，100% 受訪者回答每天攜帶，資料在附錄 B 表 3；定位缺漏的部分我們在第 4.2 節用訊號紀錄檢查過，缺漏率低於 1%。"
+    }
+  ],
+  "mode": "offline",
+  "mcp_enabled": false,
+  "rounds_planned": 2,
+  "rounds_run": 2,
+  "error": null,
+  "rounds": [
+    {
+      "round": 1,
+      "author_input": "@grill 請檢查選取的段落。",
+      "author_turn": null,
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。」開始。\n\n## 發現\n### F1｜資料不足\n- 原文：「由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": []
+      }
+    },
+    {
+      "round": 2,
+      "author_input": "@grill 這個說法有根據：問卷第 12 題問過攜帶習慣，100% 受訪者回答每天攜帶，資料在附錄 B 表 3；定位缺漏的部分我們在第 4.2 節用訊號紀錄檢查過，缺漏率低於 1%。",
+      "author_turn": {
+        "targets": "質疑攜帶手機是假設而非事實",
+        "type": "valid_rebuttal",
+        "expected": "withdraw",
+        "text": "這個說法有根據：問卷第 12 題問過攜帶習慣，100% 受訪者回答每天攜帶，資料在附錄 B 表 3；定位缺漏的部分我們在第 4.2 節用訊號紀錄檢查過，缺漏率低於 1%。"
+      },
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。」開始。\n\n## 回應檢查\n- F1：未對題 → 維持：離線替身不判斷作者回應。\n\n## 發現\n### F1｜資料不足\n- 原文：「由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "由於所有受訪者每天都攜帶手機，定位資料完整反映了他們的通勤路線，因此不需要另外校正缺漏。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": [
+          "F1：未對題 → 維持：離線替身不判斷作者回應。"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "first_pass_round": null,
+    "verdicts": [
+      "資料不足",
+      "資料不足"
+    ],
+    "document_edit_called": false,
+    "document_unchanged": true
+  },
+  "observations": {
+    "reconstruction": [
+      {
+        "round": 1,
+        "faithful": null,
+        "notes": ""
+      },
+      {
+        "round": 2,
+        "faithful": null,
+        "notes": ""
+      }
+    ],
+    "challenges": [
+      {
+        "round": 1,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      },
+      {
+        "round": 2,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      }
+    ],
+    "known_issues": [
+      {
+        "id": "K1",
+        "found": null,
+        "notes": ""
+      }
+    ],
+    "unlabeled_valid_issues": [],
+    "nitpicks": [],
+    "author_turns": [
+      {
+        "round": 2,
+        "applicability": "待填",
+        "reason": "",
+        "handling": null,
+        "notes": ""
+      }
+    ]
+  }
+}

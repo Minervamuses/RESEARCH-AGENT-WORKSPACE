@@ -1,0 +1,67 @@
+[
+  {
+    "id": "flawed-inference-gap",
+    "kind": "flawed",
+    "rounds_run": 3,
+    "verdicts": [
+      "資料不足",
+      "資料不足",
+      "資料不足"
+    ],
+    "first_pass_round": null,
+    "document_edit_called": false,
+    "document_unchanged": true,
+    "error": null
+  },
+  {
+    "id": "flawed-assumption-as-fact",
+    "kind": "flawed",
+    "rounds_run": 2,
+    "verdicts": [
+      "資料不足",
+      "資料不足"
+    ],
+    "first_pass_round": null,
+    "document_edit_called": false,
+    "document_unchanged": true,
+    "error": null
+  },
+  {
+    "id": "flawed-misapplied-concept",
+    "kind": "flawed",
+    "rounds_run": 2,
+    "verdicts": [
+      "資料不足",
+      "資料不足"
+    ],
+    "first_pass_round": null,
+    "document_edit_called": false,
+    "document_unchanged": true,
+    "error": null
+  },
+  {
+    "id": "clean-qualified-claim",
+    "kind": "clean",
+    "rounds_run": 1,
+    "verdicts": [
+      "資料不足"
+    ],
+    "first_pass_round": null,
+    "document_edit_called": false,
+    "document_unchanged": true,
+    "error": null
+  },
+  {
+    "id": "clean-definition-from-context",
+    "kind": "clean",
+    "rounds_run": 2,
+    "verdicts": [
+      "資料不足",
+      "資料不足"
+    ],
+    "first_pass_round": null,
+    "document_edit_called": false,
+    "document_unchanged": true,
+    "error": null
+  }
+]

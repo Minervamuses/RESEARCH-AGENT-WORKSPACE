@@ -11,8 +11,8 @@
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
 | K5 | Complete | K5-S1–S3 | — | — |
-| K6 | In progress | K6-S1、K6-S2 | — | K6-S3 使用說明與示範報告 |
-| K7 | Not started | — | — | 等 K1 |
+| K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
+| K7 | Not started | — | — | K7-S1 |
 | K8 | Not started | — | — | 等 K3–K7 |
 
 ## 撰寫紀錄
@@ -264,3 +264,11 @@
   - 以注入的腳本化模型跑全部 5 個示範案例：MCP 未啟用；flawed 案例第 1 輪有還原段，F1 逐字引用被標為在選取段、F2 非逐字引用被標為不在文件；第 2 輪回應檢查被記下；作者回應依序帶 `@grill` 送出、輪數 3/3；全程無 `document_edit`、文件未變、案例原檔位元組不變；clean 案例第 1 輪「通過」被記錄；資料不足的回覆只記為判斷行，報告 JSON 中沒有 score／failure／semantic／pass／correct 等字樣；人工欄位預設待填、適用性為「待填」；Markdown 有人工觀察表與條件式預期說明。
   - 示範填表：可記「此輪不適用」（附理由）與標註之外的有效問題並通過驗證、在 Markdown 中呈現；缺理由、不適用卻評價後續處理、不允許的值、缺說明的未標註問題都被拒絕。
 - 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_eval.py` → 15 passed（0.74 s）。
+
+### K6-S3 使用說明與示範報告（2026-11-15）
+
+- 新增 `app/skills/grill/README.md`（給人看；技能載入只讀 `SKILL.md`，與 `skills/citation/README.md` 相同慣例）：桌面使用方式、留言中 `@grill` 作用於整個回合、「通過」的範圍、案例格式表與 `type`→`expected` 的條件式意義、真實段落放 repo 外、`--dry-run`／`--live`／`--mcp`／`--max-rounds` 指令與費用提醒、報告怎麼讀、人工觀察重點（忠實、質疑成立、已知問題、未標註問題與硬挑、回應是否對題、回合數）、不適用時的處理、`validate_observations` 檢查指令。
+- 以 CLI 跑一次示範案例（`app/`，沙箱內，日誌與快取導向 `$TMPDIR`）：`AGENT_LOG_DIR=$TMPDIR/grill-logs XDG_CACHE_HOME=$TMPDIR/grill-cache $P/bin/python scripts/grill_eval.py --cases tests/fixtures/grill/cases.example.json --out $TMPDIR/grill-dry --dry-run` → 結束碼 0；印出「offline run with a stand-in model. 5 case(s), at most 10 turn(s). MCP disabled.」；5 個案例共 10 輪全部完成，MCP 未啟用、無 `document_edit`、文件未變。
+- 證據：`evidence/K6-S3/dry-run/`（`summary.md`、`summary.json`、`reports/*.md|json`，暫存專案 `work/` 未複製）；`evidence/K6-S3/filled-example.{json,md}`：以 `flawed-inference-gap` 的報告示範填寫人工欄位，兩輪作者回應記「此輪不適用」並附理由、記一條標註之外的有效問題，通過 `validate_observations`；README 中的檢查指令對它執行，結束碼 0。
+- **聲明：以上是假模型（離線替身）輸出與執行者的示範填表，只證明流程與欄位可用，並非真實研究結果；詰問效果未驗證。** 執行者未以 `--live` 執行、未呼叫 OpenRouter。
+- 檢查：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_skill.py tests/test_grill_eval.py tests/test_skills.py` → 28 passed。

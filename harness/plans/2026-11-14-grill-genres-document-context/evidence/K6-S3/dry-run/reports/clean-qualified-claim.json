@@ -1,0 +1,73 @@
+{
+  "case": {
+    "id": "clean-qualified-claim",
+    "kind": "clean",
+    "source": "synthetic",
+    "selection": "在這個樣本與作業條件下，提示卡與較高的平均回憶正確率有關；本研究未檢驗不同年齡層或其他記憶作業是否有相同結果。",
+    "known_issues": []
+  },
+  "author_turns": [],
+  "mode": "offline",
+  "mcp_enabled": false,
+  "rounds_planned": 1,
+  "rounds_run": 1,
+  "error": null,
+  "rounds": [
+    {
+      "round": 1,
+      "author_input": "@grill 請檢查選取的段落。",
+      "author_turn": null,
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「在這個樣本與作業條件下，提示卡與較高的平均回憶正確率有關；」開始。\n\n## 發現\n### F1｜資料不足\n- 原文：「在這個樣本與作業條件下，提示卡與較高的平均回憶正確率有關；」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "在這個樣本與作業條件下，提示卡與較高的平均回憶正確率有關；",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": []
+      }
+    }
+  ],
+  "summary": {
+    "first_pass_round": null,
+    "verdicts": [
+      "資料不足"
+    ],
+    "document_edit_called": false,
+    "document_unchanged": true
+  },
+  "observations": {
+    "reconstruction": [
+      {
+        "round": 1,
+        "faithful": null,
+        "notes": ""
+      }
+    ],
+    "challenges": [
+      {
+        "round": 1,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      }
+    ],
+    "known_issues": [],
+    "unlabeled_valid_issues": [],
+    "nitpicks": [],
+    "author_turns": []
+  }
+}

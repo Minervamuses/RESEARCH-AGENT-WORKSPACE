@@ -1,0 +1,211 @@
+{
+  "case": {
+    "id": "flawed-inference-gap",
+    "kind": "flawed",
+    "source": "synthetic",
+    "selection": "導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。因此，同儕互評能提升所有學生的寫作能力。",
+    "known_issues": [
+      {
+        "id": "K1",
+        "quote": "因此，同儕互評能提升所有學生的寫作能力。",
+        "note": "由兩班平均差推到「所有學生」都提升，中間缺少個體層次的證據；平均提升與每個人都提升是不同主張。"
+      }
+    ]
+  },
+  "author_turns": [
+    {
+      "targets": "質疑由平均提升推論到所有學生",
+      "type": "supply_step",
+      "expected": "request_write_in",
+      "text": "我們其實有逐一檢查，實驗班 32 人中有 30 人分數上升，只是沒寫進這段。"
+    },
+    {
+      "targets": "同一項質疑（作者改寫說法）",
+      "type": "rephrase",
+      "expected": "maintain",
+      "text": "我的意思是同儕互評對學生整體都有幫助，這就是所有學生的意思。"
+    }
+  ],
+  "mode": "offline",
+  "mcp_enabled": false,
+  "rounds_planned": 3,
+  "rounds_run": 3,
+  "error": null,
+  "rounds": [
+    {
+      "round": 1,
+      "author_input": "@grill 請檢查選取的段落。",
+      "author_turn": null,
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。」開始。\n\n## 發現\n### F1｜資料不足\n- 原文：「導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": []
+      }
+    },
+    {
+      "round": 2,
+      "author_input": "@grill 我們其實有逐一檢查，實驗班 32 人中有 30 人分數上升，只是沒寫進這段。",
+      "author_turn": {
+        "targets": "質疑由平均提升推論到所有學生",
+        "type": "supply_step",
+        "expected": "request_write_in",
+        "text": "我們其實有逐一檢查，實驗班 32 人中有 30 人分數上升，只是沒寫進這段。"
+      },
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。」開始。\n\n## 回應檢查\n- F1：未對題 → 維持：離線替身不判斷作者回應。\n\n## 發現\n### F1｜資料不足\n- 原文：「導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": [
+          "F1：未對題 → 維持：離線替身不判斷作者回應。"
+        ]
+      }
+    },
+    {
+      "round": 3,
+      "author_input": "@grill 我的意思是同儕互評對學生整體都有幫助，這就是所有學生的意思。",
+      "author_turn": {
+        "targets": "同一項質疑（作者改寫說法）",
+        "type": "rephrase",
+        "expected": "maintain",
+        "text": "我的意思是同儕互評對學生整體都有幫助，這就是所有學生的意思。"
+      },
+      "reply": "## 還原\n（離線替身固定回覆，不是模型輸出）選取段落以「導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。」開始。\n\n## 回應檢查\n- F1：未對題 → 維持：離線替身不判斷作者回應。\n\n## 發現\n### F1｜資料不足\n- 原文：「導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。」\n- 理由：離線替身不檢查內容，只示範格式。\n- 請回應：無。\n\n## 判斷\n判斷：資料不足\n離線替身不做研究判斷。",
+      "state": "completed",
+      "tools_called": [],
+      "tool_results": [],
+      "approvals_refused": 0,
+      "document_proposals": 0,
+      "mechanical": {
+        "has_reconstruction": true,
+        "has_findings_section": true,
+        "declares_no_findings": false,
+        "findings": [
+          {
+            "id": "F1",
+            "label": "資料不足",
+            "quote": "導入同儕互評後，實驗班的平均寫作成績提升 6 分，對照班提升 1 分。",
+            "quote_verbatim_in_selection": true,
+            "quote_verbatim_in_document": true
+          }
+        ],
+        "verdict": "資料不足",
+        "response_checks": [
+          "F1：未對題 → 維持：離線替身不判斷作者回應。"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "first_pass_round": null,
+    "verdicts": [
+      "資料不足",
+      "資料不足",
+      "資料不足"
+    ],
+    "document_edit_called": false,
+    "document_unchanged": true
+  },
+  "observations": {
+    "reconstruction": [
+      {
+        "round": 1,
+        "faithful": "否",
+        "notes": "示範填表：離線替身只重述首句，沒有寫出主張與支持關係"
+      },
+      {
+        "round": 2,
+        "faithful": "否",
+        "notes": "同上"
+      },
+      {
+        "round": 3,
+        "faithful": "否",
+        "notes": "同上"
+      }
+    ],
+    "challenges": [
+      {
+        "round": 1,
+        "finding": "F1",
+        "valid": "無法判斷",
+        "notes": "示範填表：替身的理由是固定文字，沒有可檢查的內容"
+      },
+      {
+        "round": 2,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      },
+      {
+        "round": 3,
+        "finding": "F1",
+        "valid": null,
+        "notes": ""
+      }
+    ],
+    "known_issues": [
+      {
+        "id": "K1",
+        "found": "未找到",
+        "notes": "示範填表：K1（平均推到所有學生）沒有被提出"
+      }
+    ],
+    "unlabeled_valid_issues": [
+      {
+        "quote": "兩班由同一位教師授課",
+        "note": "示範填表：教師對兩班的期待可能不同，文中未討論；不在案例標註中"
+      }
+    ],
+    "nitpicks": [],
+    "author_turns": [
+      {
+        "round": 2,
+        "applicability": "此輪不適用",
+        "reason": "示範填表：腳本回應針對「平均推到所有學生」，替身提出的 F1 是首句的資料不足，兩者對不上",
+        "handling": null,
+        "notes": "不按 request_write_in 評判"
+      },
+      {
+        "round": 3,
+        "applicability": "此輪不適用",
+        "reason": "示範填表：同上，前一輪已不適用，本輪延續此限制",
+        "handling": null,
+        "notes": ""
+      }
+    ]
+  },
+  "demo_note": "示範填表：假模型（離線替身）輸出加上執行者示範填寫的人工欄位，只證明流程與欄位可用，並非真實研究結果。"
+}
