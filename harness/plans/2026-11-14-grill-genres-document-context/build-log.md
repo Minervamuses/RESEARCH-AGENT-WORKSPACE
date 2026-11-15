@@ -9,7 +9,7 @@
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
-| K4 | Not started | — | — | K4-S1（K4-S3 另需 K3） |
+| K4 | In progress | K4-S1 | — | K4-S2 checkpoint 與實作 |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
 | K7 | Not started | — | — | 等 K1 |
@@ -151,3 +151,30 @@
 - 指令（`app/`，沙箱內）：`DOCUMENT_BUDGET_REPORT=<計劃>/evidence/K3-S3/after-history.json $P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_context_budget.py::test_fifteen_document_turns_are_measured` → 1 passed。對照表 `evidence/K3-S3/summary.md`。
 - 第 15 回合：第一次呼叫全文副本 12→1、history 字元 85,327→0、prompt 字元 117,773→31,159、文件占比 79.1%→25.1%；最後一次呼叫 13→2（1 份當前快照＋1 份 `document_edit` 結果）、126,199→39,587、80.0%→39.5%。current 與 tool_results 不變；第 5 回合最後一次呼叫仍有兩份工具結果全文（15,471 字元），由 K4 處理。
 - 限制：第 1 回合 prompt 字元前後差 4–6，來自 pytest 暫存路徑長度不同（出現在系統提示），與修改無關。佔位本身的字元計入 prompt 但不計入文件字元。
+
+### K4-S1 下一次編輯需不需要全文（2026-11-15，只讀碼，未改產品程式）
+
+讀了 `agent/desktop/service.py` `_run_desktop_document_edit`（`:2500`）、`_advance_document_working_context`（`:2572`）、`agent/desktop/documents.py` `_result`／`apply`、`agent/skills/runtime.py:66–67`、`agent/graph.py` `_agent_requests`（`:177`），以及 `test_same_turn_reference_edits_keep_prior_saved_text_and_utf16_ranges`、`tests/test_inline_skills.py::test_two_real_catalog_skills_see_both_instructions_and_saved_first_product`。
+
+**情境表**
+
+| 情境 | 下一次編輯的目標範圍 | 模型寫 `replacement_text` 需要的資訊 | 只有範圍文字夠不夠 |
+|---|---|---|---|
+| 同一當前文件連續兩次（無 `reference_id`） | 伺服器把 `_active_document_context` 換成存檔後的快照與範圍 `[start, saved_end)` | 該範圍更新後的文字（就是上一次的 replacement） | 夠 |
+| 沒有圈選（範圍＝整份文件）連續編輯 | 整份文件 | 整份更新後文字 | 範圍文字＝全文，仍會累積一份 |
+| 兩個凍結引用依序、範圍不重疊 | 第二個引用的範圍隨位移平移 | 第二個引用的引述文字（未變） | 夠 |
+| 兩個凍結引用依序、範圍重疊或相鄰 | `_advance_document_working_context` 合併成 `[min(left,start), max(saved_end, right+delta))` | 合併後範圍的整段目前文字；模型手上沒有這一段作為一個單位的最新文字 | **不夠**，要從存檔後全文切出 |
+| 多 skill「先 A 再 B」（`runtime.py` 提示） | 同一範圍或 B 需要看 A 的實際產物與上下文 | 提示明說依賴「saved source and updated selection」 | 同範圍時夠；B 要檢查範圍外上下文（例如引用鍵）時需要存檔後全文 |
+
+**受影響的測試斷言**（解析「交給模型的工具結果」者）
+
+- `tests/test_inline_skills.py:91–93`：`messages[-1]` 為**最新**一次結果，斷言 `result["sourceText"]` 含編輯後段落。
+- `tests/test_desktop_document_service.py:705–709`、`:747`：`receipt = json.loads(messages[-1].content)`（最新一次），斷言 `status == "saved"` 與兩次重播收據相同。
+- `tests/test_desktop_document_service.py:42–44` `_DocumentModel.invoke`：只讀 `status`。
+- `tests/test_desktop_citation_keys.py:51–56` `_tool_message`：只讀被拒絕結果的 `unknownKeys`／`issue`（非 saved，不受影響）。
+- `agent/desktop/fixture_session.py:1074、1093`：只讀 `status`。
+- 只解析前端結果（`document.apply` 回傳、`sink.results`、`candidate.result`、`DocumentWorkspace` 直接回傳）的：`tests/test_desktop_documents.py`、`tests/test_desktop_bibliography.py`、`tests/test_project_permissions.py`、`tests/test_desktop_fixture.py`、`test_desktop_document_service.py` 的 `follow_save`、`test_inline_skills.py:174`（`candidates[1].context`）——不受工具結果縮減影響。
+
+**結論：出口 B。** 理由：重疊或相鄰引用合併範圍、以及多 skill 後一步要看前一步產物的上下文時，模型需要範圍外或合併範圍的最新文字，只給範圍文字（出口 A）會讓這些情形的下一次編輯缺資料；出口 B 保留最新一次成功結果的全文即可涵蓋，而較早的同回合結果在模型輸入中縮減，副本數不再累積。`runtime.py` 的提示改為描述「最新一次」結果帶全文。上表斷言都只讀最新一次結果或非 saved 結果，在出口 B 下不必改寫（`tests/test_inline_skills.py:93` 保持原斷言）。
+
+**實作位置與不改原始訊息的方式**：`agent/graph.py` `_agent_requests` 建立 `prompt_messages` 時，以新函式產生訊息清單的副本：最新一則 `status == "saved"` 的 `document_edit` 工具訊息原樣保留，較早的 saved 結果以 `model_copy(update={"content": …})` 換成縮減版（無 `sourceText`；保留狀態、路徑、`editorRevision`、`diskFingerprint`、範圍、`callId`，加上 `documentLengthUtf16`；範圍未涵蓋整份文件時附 `rangeText`，涵蓋整份文件時不附文字），其他訊息物件原樣放入。graph 狀態中的 `messages`、`candidate.result`、`document.apply` 回傳與保存資料都不變。三種呼叫（首次、空回覆重試、修復）共用同一份 `prompt_messages`，一次涵蓋。非 saved 結果（`conflict`／`failed`／`cancelled`）不縮減。
