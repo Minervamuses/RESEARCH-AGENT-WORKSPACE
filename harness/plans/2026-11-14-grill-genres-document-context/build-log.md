@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
-| K3 | Not started | — | — | K3-S1 checkpoint 與轉換函式 |
+| K3 | In progress | K3-S1 checkpoint | — | K3-S1 轉換函式與單元測試 |
 | K4 | Not started | — | — | K4-S1（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
@@ -111,3 +111,13 @@
 - 指令（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_context_budget.py` → 1 passed（1.58 s）；`DOCUMENT_BUDGET_REPORT=<計劃>/evidence/K2-S2/before.json …` → 1 passed，產出 `evidence/K2-S2/before.json`，人讀摘要 `evidence/K2-S2/summary.md`。
 - 修改前數字（第 15 回合）：第一次呼叫 12 份全文、文件 93,140／117,773 字元（79.1%）；最後一次呼叫 13 份、100,965／126,199（80.0%）。讀碼預估「最多 11 份」與實測差異：歷史窗口中第 9 回合多一份舊版凍結引用全文，最後一次呼叫多一份 `document_edit` 結果全文；扣掉這兩項為 11 份，與預估一致。
 - 未呼叫任何真實模型。
+
+### K3-S1 checkpoint：動手前的選擇（2026-11-15，嘗試次數 0）
+
+- 共用常數與轉換函式放 `app/agent/document_context.py`（K2-S1 新增、只依賴標準庫），`agent/session.py` 匯入它，不匯入 desktop service。
+- 新增標頭：保留的歷史快照用 `HISTORY_SNAPSHOT_HEADER`（標明「最後提交的快照、不保證是最新存檔內容、不是目前編輯器」），加入 `EDITOR_SNAPSHOT_HEADERS` 讓 K2 量測照樣計入；被縮減的快照用佔位標頭 `OMITTED_SNAPSHOT_HEADER`；歷史中的凍結引用用 `HISTORY_REFERENCES_HEADER`。三者後面都接一個 JSON 值，與現有格式一致。
+- 說明文字的界線：快照或凍結引用 JSON 之後、到下一個可辨識標頭（或文字結尾）之前，全是 service 附加的說明（使用者文字一律在第一個區塊之前），重播時整段拿掉；保存的 `semantic_input` 不變。
+- 佔位內容：`turnNumber`、路徑、`editorRevision`、`diskFingerprint`、UTF-16 範圍、起訖行號、原文長度；選取文字在「長度 ≤ 2,000 字元且小於全文一半」時保留（可逆的選擇，日後可調），否則只記長度；附封存取回指引（回合編號、可用 `diskFingerprint` 或選取文字以固定字串 grep）。
+- 判斷「當前回合帶快照」：`ChatSession` 在 `turn_outcome` 記下本回合實際送出的 `semantic_input`（`_active_turn_input`，重試時就是保存的原文），以其中是否有可解析的 `SNAPSHOT_HEADER` 區塊判斷，不看 `_document_turn_active`。不在回合中時（無當前輸入）視為不帶快照。
+- 無法解析的歷史回合整段原樣保留。
+- `fixture_session.py:1051` 只把歷史文字截短拼成假回答用的字串，不送模型，不接轉換（K3-S2 記錄）；`recent_turns` 對外顯示不轉換。
