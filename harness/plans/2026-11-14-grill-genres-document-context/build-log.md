@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
-| K2 | Not started | — | — | K2-S1 文件佔比欄位 |
+| K2 | In progress | K2-S1 事件 | — | K2-S2 15 回合量測 |
 | K3 | Not started | — | — | 等 K2 |
 | K4 | Not started | — | — | 等 K2（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
@@ -89,3 +89,17 @@
   - 沙箱內 `$P/bin/python -m pytest -q -p no:cacheprovider tests/test_desktop_document_service.py tests/test_observability.py tests/test_session_persistence.py tests/test_inline_skills.py tests/test_skills.py tests/test_academic_skill_tools.py tests/test_thinking_session.py tests/test_desktop_fixture.py` → 1 failed、112 passed、18 errors：全部來自 `tests/test_desktop_fixture.py`，原因是 fixture 寫死 `tempfile.mkdtemp(dir="/tmp")`，沙箱 `/tmp` 唯讀（`OSError: [Errno 30] Read-only file system`）。屬已知環境限制，不是產品失敗。
   - 同一指令在沙箱外、`TMPDIR`／`XDG_CACHE_HOME`／`AGENT_LOG_DIR` 指向計劃 `evidence/K1-S2/` 下的暫存目錄（跑完即刪）→ **131 passed，1 warning（LangChain `allowed_objects` 棄用警告），9.05 s**，結束碼 0。
 - 已知既有失敗：無。限制：`test_desktop_fixture.py` 之後的局部檢查需在沙箱外跑；這不是完整基線，K8 仍要跑完整 pytest。
+
+### K2-S1 文件佔比欄位（2026-11-15）
+
+- 新增 `app/agent/document_context.py`：共用標頭常數 `SNAPSHOT_HEADER`、`FROZEN_REFERENCES_HEADER`、`EDITOR_SNAPSHOT_HEADERS`（K3 會加入歷史快照標頭）、`DOCUMENT_EDIT_TOOL`；`iter_document_blocks` 以 `json.JSONDecoder().raw_decode` 從標頭後取出 JSON，不依賴後面的說明文字；`edit_result_document_text` 計算 `document_edit` 結果的全文字元與副本。模組只依賴標準庫，`session.py`、`observability.py`、`service.py` 都可匯入。
+- `agent/desktop/service.py` 的快照標頭、凍結引用標頭與重試時的舊文件回合判斷改用這些常數（字串逐字不變）；`agent/desktop/fixture_session.py:778` 同樣改用 `SNAPSHOT_HEADER`。
+- `agent/observability.py`：新增 `measure_document_context(messages)` 與 `document_tokens_estimate`。最後一則 `HumanMessage` 算 current，較早的算 history，`name == "document_edit"` 的 `ToolMessage` 算 tool_results。字元數用 Python `len`（code point）。計數規則：
+  - 快照的 `sourceText`、凍結文件引用快照的 `sourceText` 各計一份；`sourceTextSameAs` 不計；聊天引用不計。
+  - 工具結果的 `sourceText`、`candidateText`、`currentDiskText`、`expectedSnapshot.sourceText` 各是一份全文（`conflict` 結果因此計 3 份）；K4 縮減形式約定為 `rangeText` 加 `documentLengthUtf16`，範圍為 `[0, documentLengthUtf16)` 時計一份全文，否則只計字元。K4 實作須使用這兩個欄位名稱。
+  - 標頭後 JSON 解析失敗時計 0，`document_parse_issue` 記 `snapshot_json`／`references_json`／`tool_result_json`（形狀錯誤另有 `*_shape`）；工具結果不是以 `{` 開頭（例如 `Tool error: …`）時不算解析問題。
+- `TurnTimingTrace.on_chat_model_start` 以第一批訊息計算，存在 run 紀錄中，`model_end`（ok 與 error）一併輸出 `prompt_chars`、`document_chars_current`、`document_chars_history`、`document_chars_tool_results`、`document_full_copies`、`document_parse_issue`；ok 時另有 `document_tokens_estimate`（`round(input_tokens × 文件字元 ÷ prompt_chars)`，名稱標明 estimate，A7）。計算失敗只記 `measure_failed`，不影響模型呼叫。LangChain 1.4.9 對 `BaseChatModel` 呼叫 `on_chat_model_start`（既有 `model_start` 事件已依賴它）。
+- 新測試 `app/tests/test_document_measure.py`（9 個）：當前快照＋另一版本凍結引用＋`sourceTextSameAs`＋聊天引用＋歷史快照；只有凍結引用；相同版本 `sourceTextSameAs`；工具結果（saved、conflict、整份文件 `rangeText`、部分 `rangeText`、非 document 工具）；無文件；格式壞掉；估計公式；turn trace 欄位等於獨立計算值且記錄不含文件文字；生產端常數與字面標頭一致。
+- 檢查（`app/`）：
+  - 沙箱內 `$P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_measure.py tests/test_observability.py` → 27 passed。
+  - 沙箱外（`TMPDIR`／`XDG_CACHE_HOME`／`AGENT_LOG_DIR` 指向 `$TMPDIR/k2s1`）`tests/test_document_measure.py tests/test_observability.py tests/test_desktop_document_service.py tests/test_desktop_fixture.py tests/test_inline_skills.py` → 86 passed，8.10 s。

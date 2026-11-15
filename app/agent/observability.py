@@ -21,6 +21,7 @@ queries, DOIs, and provider free text never reach the log record.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -31,8 +32,17 @@ from typing import Any
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from agent.document_context import (
+    DOCUMENT_EDIT_TOOL,
+    EDITOR_SNAPSHOT_HEADERS,
+    FROZEN_REFERENCES_HEADER,
+    edit_result_document_text,
+    iter_document_blocks,
+    reference_full_texts,
+    snapshot_full_text,
+)
 from agent.llm.text import normalize_content
 
 logger = logging.getLogger(__name__)
@@ -289,6 +299,94 @@ def _tool_output_chars(output: object) -> int:
     return len(normalize_content(content, drop_unknown_parts=False))
 
 
+def _message_text(message: object) -> str:
+    content = message.content if isinstance(message, BaseMessage) else message
+    return normalize_content(content, drop_unknown_parts=False)
+
+
+def _user_document_text(text: str, issues: list[str]) -> tuple[int, int]:
+    """(characters, full copies) of snapshot and frozen-reference text in one user message."""
+    chars = copies = 0
+    headers = (*EDITOR_SNAPSHOT_HEADERS, FROZEN_REFERENCES_HEADER)
+    for block in iter_document_blocks(text, headers):
+        is_references = block.header == FROZEN_REFERENCES_HEADER
+        if not block.parsed:
+            issues.append("references_json" if is_references else "snapshot_json")
+            continue
+        if is_references:
+            texts = reference_full_texts(block.value)
+            if texts is None:
+                issues.append("references_shape")
+                continue
+        else:
+            source = snapshot_full_text(block.value)
+            texts = [] if source is None else [source]
+            if source is None and not isinstance(block.value, dict):
+                issues.append("snapshot_shape")
+        chars += sum(len(item) for item in texts)
+        copies += len(texts)
+    return chars, copies
+
+
+def measure_document_context(messages: Iterable[object]) -> dict[str, object]:
+    """Count how much of one model call's messages is document text.
+
+    The last human message is the current turn; earlier human messages are
+    replayed history; ``document_edit`` tool messages are edit results. Only
+    full texts actually present are counted: a ``sourceTextSameAs`` pointer
+    adds nothing. ``prompt_chars`` is the total content length of every
+    message. Malformed blocks count as zero and are named in
+    ``document_parse_issue`` instead of raising. Only counts are returned.
+    """
+    items = list(messages)
+    texts = [_message_text(message) for message in items]
+    last_human = max(
+        (index for index, message in enumerate(items) if isinstance(message, HumanMessage)),
+        default=None,
+    )
+    issues: list[str] = []
+    current = history = tool_results = copies = 0
+    for index, (message, text) in enumerate(zip(items, texts)):
+        if isinstance(message, HumanMessage):
+            chars, count = _user_document_text(text, issues)
+            if index == last_human:
+                current += chars
+            else:
+                history += chars
+            copies += count
+        elif isinstance(message, ToolMessage) and message.name == DOCUMENT_EDIT_TOOL:
+            if not text.lstrip().startswith("{"):
+                continue
+            try:
+                result = json.loads(text)
+            except ValueError:
+                issues.append("tool_result_json")
+                continue
+            chars, count = edit_result_document_text(result)
+            tool_results += chars
+            copies += count
+    return {
+        "prompt_chars": sum(len(text) for text in texts),
+        "document_chars_current": current,
+        "document_chars_history": history,
+        "document_chars_tool_results": tool_results,
+        "document_full_copies": copies,
+        "document_parse_issue": ",".join(sorted(set(issues))) or None,
+    }
+
+
+def document_tokens_estimate(measure: dict[str, object], input_tokens: object) -> int | None:
+    """Estimated document share of ``input_tokens`` by character proportion (A7)."""
+    prompt_chars = measure.get("prompt_chars")
+    if type(input_tokens) is not int or not isinstance(prompt_chars, int) or prompt_chars <= 0:
+        return None
+    document_chars = sum(
+        int(measure.get(key) or 0)
+        for key in ("document_chars_current", "document_chars_history", "document_chars_tool_results")
+    )
+    return round(input_tokens * document_chars / prompt_chars)
+
+
 class TurnTimingTrace(BaseCallbackHandler):
     """Log the real start and end of every model and tool run in one attempt.
 
@@ -310,7 +408,7 @@ class TurnTimingTrace(BaseCallbackHandler):
         self._lock = threading.Lock()
         self._model_seq = 0
         self._tool_count = 0
-        self._model_runs: dict[UUID, tuple[int, float]] = {}
+        self._model_runs: dict[UUID, tuple[int, float, dict[str, object]]] = {}
         self._tool_runs: dict[UUID, tuple[dict[str, object], float]] = {}
         self._model_by_call: dict[str, int] = {}
         self._finished = False
@@ -328,7 +426,12 @@ class TurnTimingTrace(BaseCallbackHandler):
             if self._finished:
                 return
             self._model_seq += 1
-            self._model_runs[run_id] = (self._model_seq, self._clock())
+            batch = messages[0] if messages else []
+            try:
+                measure = measure_document_context(batch)
+            except Exception:  # noqa: BLE001 - diagnostics must never break a model call
+                measure = {"document_parse_issue": "measure_failed"}
+            self._model_runs[run_id] = (self._model_seq, self._clock(), measure)
             self._emit("model_start", {"model_seq": self._model_seq, "at_ms": self._ms()})
 
     def on_llm_end(self, response, *, run_id: UUID, **kwargs: Any) -> None:
@@ -336,7 +439,7 @@ class TurnTimingTrace(BaseCallbackHandler):
             run = self._model_runs.pop(run_id, None)
             if run is None or self._finished:
                 return
-            seq, started = run
+            seq, started, measure = run
             tool_calls = 0
             input_tokens = output_tokens = None
             for generations in getattr(response, "generations", None) or []:
@@ -353,6 +456,8 @@ class TurnTimingTrace(BaseCallbackHandler):
                 "model_seq": seq, "status": "ok", "at_ms": self._ms(),
                 "duration_ms": self._ms(started), "tool_calls": tool_calls,
                 "input_tokens": input_tokens, "output_tokens": output_tokens,
+                **measure,
+                "document_tokens_estimate": document_tokens_estimate(measure, input_tokens),
             })
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -360,10 +465,10 @@ class TurnTimingTrace(BaseCallbackHandler):
             run = self._model_runs.pop(run_id, None)
             if run is None or self._finished:
                 return
-            seq, started = run
+            seq, started, measure = run
             self._emit("model_end", {
                 "model_seq": seq, "status": "error", "error_type": type(error).__name__,
-                "at_ms": self._ms(), "duration_ms": self._ms(started),
+                "at_ms": self._ms(), "duration_ms": self._ms(started), **measure,
             })
 
     def on_tool_start(self, serialized, input_str, *, run_id: UUID, inputs=None, **kwargs: Any) -> None:
@@ -417,7 +522,7 @@ class TurnTimingTrace(BaseCallbackHandler):
                 return
             self._finished = True
             unfinished = 0
-            for seq, started in self._model_runs.values():
+            for seq, started, _measure in self._model_runs.values():
                 unfinished += 1
                 self._emit("model_end", {
                     "model_seq": seq, "status": "unfinished",
