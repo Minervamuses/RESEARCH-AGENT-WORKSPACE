@@ -6,8 +6,8 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| K1 | In progress | K1-S1 事件 | — | K1-S2 測試基線 |
-| K2 | Not started | — | — | 等 K1 |
+| K1 | Complete | K1-S1、K1-S2 事件 | — | — |
+| K2 | Not started | — | — | K2-S1 文件佔比欄位 |
 | K3 | Not started | — | — | 等 K2 |
 | K4 | Not started | — | — | 等 K2（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
@@ -81,3 +81,11 @@
 - 與基線的差異：vendored bime_word 在 `scripts/bime/convert.py:115` 處理 `[TODO: …]`（轉檔時略過），`scripts/bime/audit.py:508` 把 `[TODO|CITE|FIGURE` 開頭的參考文獻行排除；README 說明 `[CITE: …]`、`[FIGURE: …]` 轉檔時保留不變。A4「bime_word 認得三種」成立，但只有 TODO 會在轉檔時被略過；K7 文體 skill 寫法要說清楚這點。不影響其他階段。
 - `/home/minervamuses/miniconda3/envs/app/bin/python -c "import agent, skills, langchain_core"`（`app/`）成功；Python 3.13.14、langchain_core 1.4.9。
 - 結論：基線成立，不需修改階段檔。下一步 K1-S2。
+
+### K1-S2 可沿用的測試基線（2026-11-15）
+
+- 歷史來源：先前計劃紀錄（記憶 `research-agent-workspace-setup`，對應 `ab22475` 的 R8-S3 build-log）：2026-11-07 `ab22475` pytest 1763、npm 329、cargo 41 全部通過；`7489076` 只改 `app/desktop/src-tauri`（picker），cargo 42。`git diff --stat ab22475 HEAD -- app` 只含 `7489076` 的 Rust 修改，Python 與前端程式自 `ab22475` 以來未變，pytest 1763／npm 329 的歷史數字可作為參考；`7489076` 之後 app 無任何變更，cargo 42 同樣可參考。這些是歷史紀錄，本步沒有重跑完整套件。
+- 局部基線（修改前，`app/`）：
+  - 沙箱內 `$P/bin/python -m pytest -q -p no:cacheprovider tests/test_desktop_document_service.py tests/test_observability.py tests/test_session_persistence.py tests/test_inline_skills.py tests/test_skills.py tests/test_academic_skill_tools.py tests/test_thinking_session.py tests/test_desktop_fixture.py` → 1 failed、112 passed、18 errors：全部來自 `tests/test_desktop_fixture.py`，原因是 fixture 寫死 `tempfile.mkdtemp(dir="/tmp")`，沙箱 `/tmp` 唯讀（`OSError: [Errno 30] Read-only file system`）。屬已知環境限制，不是產品失敗。
+  - 同一指令在沙箱外、`TMPDIR`／`XDG_CACHE_HOME`／`AGENT_LOG_DIR` 指向計劃 `evidence/K1-S2/` 下的暫存目錄（跑完即刪）→ **131 passed，1 warning（LangChain `allowed_objects` 棄用警告），9.05 s**，結束碼 0。
+- 已知既有失敗：無。限制：`test_desktop_fixture.py` 之後的局部檢查需在沙箱外跑；這不是完整基線，K8 仍要跑完整 pytest。
