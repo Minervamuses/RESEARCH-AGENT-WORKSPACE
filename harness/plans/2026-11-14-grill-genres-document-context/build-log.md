@@ -12,8 +12,8 @@
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
 | K5 | Complete | K5-S1–S3 | — | — |
 | K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
-| K7 | In progress | K7-S1、K7-S2 | — | K7-S3 佔位符對齊 |
-| K8 | Not started | — | — | 等 K3–K7 |
+| K7 | Complete | K7-S1–S3 | — | — |
+| K8 | Not started | — | — | K8-S1 |
 
 ## 撰寫紀錄
 
@@ -299,3 +299,8 @@
 - 同時把 K5-S2 加的 `READ_ONLY_DOCUMENT_SKILLS` 移到說明 `SYSTEM_PROMPT` 的註解之前（原本插在註解與 `SYSTEM_PROMPT` 之間），註解補上 writing rules；值不變。
 - 新測試（`app/tests/test_writing_genres.py`）：`SYSTEM_PROMPT` 含這一節且在語言政策之前、語言政策仍在；CLI 預設 `ChatSession` 連續兩回合，每次模型呼叫的第一則系統訊息都含規則；桌面服務開專案後連續兩回合，系統提示都含規則且位置在「### RESEARCH.md rules」之前。
 - 檢查（`app/`，沙箱外，環境變數指向 `$TMPDIR/k7s2`）：`tests/test_writing_genres.py tests/test_tool_inventory.py tests/test_desktop_service.py tests/test_chat_cli.py tests/test_session_persistence.py tests/test_thinking_session.py tests/test_skills.py tests/test_desktop_fixture.py` → 191 passed，8.83 s。既有提及 `SYSTEM_PROMPT` 的測試（`tests/test_tool_inventory.py`）通過。
+
+### K7-S3 `academic-paper-writing` 佔位符對齊（2026-11-15）
+
+- `app/skills/academic-paper-writing/SKILL.md:93`：`[insert citation]`、`[report sample size]`、`[state limitation]` 改為 `[CITE: source for this claim]`、`[TODO: report sample size]`、`[TODO: state limitation]`，並補一句 `[FIGURE: …]` 用於缺的圖表（A4）。同一行其餘文字與檔案其他內容不動。
+- 檢查（`app/`）：`grep -rn "insert citation" skills` → 無結果（結束碼 1）。沙箱外跑所有提及 `academic-paper-writing` 的測試模組（`tests/test_citation_e2e.py tests/test_desktop_fixture.py tests/test_writing_genres.py tests/test_grill_skill.py tests/test_academic_skill_tools.py tests/test_citation_slash_command.py tests/test_thinking.py tests/test_citation_skill_activation.py tests/test_extension_baseline.py tests/test_inline_skills.py tests/test_skill_adherence.py`）→ 171 passed，7.32 s。

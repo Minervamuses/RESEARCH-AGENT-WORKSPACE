@@ -90,7 +90,7 @@ Return:
 
 ### Drafting mode
 
-Return the requested prose directly, but keep it bounded to the evidence the user supplied. If evidence is missing, use bracketed placeholders such as `[insert citation]`, `[report sample size]`, or `[state limitation]` instead of inventing content.
+Return the requested prose directly, but keep it bounded to the evidence the user supplied. If evidence is missing, use bracketed placeholders such as `[CITE: source for this claim]`, `[TODO: report sample size]`, or `[TODO: state limitation]` (and `[FIGURE: …]` for a missing figure or table) instead of inventing content.
 
 ### Revision mode
 
