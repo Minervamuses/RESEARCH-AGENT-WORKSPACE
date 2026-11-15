@@ -130,12 +130,19 @@ def render_tool_availability_block(
         if name not in set(effective)
     ]
 
+    # A family split between available and unavailable tools is listed by
+    # tool name; one family label in both lists would hide which tool is which.
+    families = mcp_families or {}
+    split = {families[name] for name in effective if name in families} & {
+        families[name] for name in unavailable if name in families
+    }
+    shown_families = {name: family for name, family in families.items() if family not in split}
     lines = [
         "[Tool availability]",
         f"active_skill: {active_skill or _NONE}",
-        f"available_tools: {_format_tool_names(effective, mcp_families)}",
-        f"skill_tools: {_format_tool_names(skill_tools, mcp_families)}",
-        f"unavailable_tools: {_format_tool_names(unavailable, mcp_families)}",
+        f"available_tools: {_format_tool_names(effective, shown_families)}",
+        f"skill_tools: {_format_tool_names(skill_tools, shown_families)}",
+        f"unavailable_tools: {_format_tool_names(unavailable, shown_families)}",
     ]
     if active_skill:
         lines.append(

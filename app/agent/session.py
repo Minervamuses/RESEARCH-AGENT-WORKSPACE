@@ -75,6 +75,9 @@ logger = logging.getLogger(__name__)
 # The base tool inventory, its selection policy, and the base workflow are
 # owned by agent.tools.inventory (single source of truth). Only the optional
 # MCP families, skill activation, and language policy live here.
+# Skills whose turns may read the editor document but never edit it.
+READ_ONLY_DOCUMENT_SKILLS = frozenset({"grill"})
+
 SYSTEM_PROMPT = f"""You are a research assistant with access to several tool families.
 
 {tool_inventory.render_base_tool_prompt()}
@@ -691,7 +694,18 @@ class ChatSession:
             resolution = replace(resolution, effective_tools=tuple(dict.fromkeys([
                 *resolution.effective_tools, *forced,
             ])))
+        if self.read_only_document_turn and "document_edit" in resolution.effective_tools:
+            # A grill check reads the document but must not change it.
+            resolution = replace(resolution, effective_tools=tuple(
+                name for name in resolution.effective_tools if name != "document_edit"
+            ))
         return resolution
+
+    @property
+    def read_only_document_turn(self) -> bool:
+        """Whether an active skill forbids editing the document this turn."""
+        runtime = self.active_skill_runtime
+        return runtime is not None and any(runtime.includes(name) for name in READ_ONLY_DOCUMENT_SKILLS)
 
     def _tool_availability_block(self) -> str:
         runtime = self.active_skill_runtime

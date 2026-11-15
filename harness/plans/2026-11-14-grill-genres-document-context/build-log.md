@@ -10,7 +10,7 @@
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
-| K5 | In progress | K5-S1 | — | K5-S2 遮蔽 document_edit |
+| K5 | In progress | K5-S1、K5-S2 | — | K5-S3 段落留言中的 @grill |
 | K6 | Not started | — | — | 等 K5 |
 | K7 | Not started | — | — | 等 K1 |
 | K8 | Not started | — | — | 等 K3–K7 |
@@ -224,3 +224,14 @@
 - 實際採用的固定格式（K6 機械記錄依此）：標題 `## 還原`、`## 發現`、`## 判斷`，第二輪起加 `## 回應檢查`；發現標題 `### F<n>｜問題` 或 `### F<n>｜資料不足`；引用行 `- 原文：「<逐字引用>」`，另有 `- 理由：`、`- 請回應：`；判斷行 `判斷：通過｜待回應｜資料不足`；無發現寫 `（無）`；回應檢查行 `- F1：<對題｜未對題> → <維持｜撤回｜請寫進文字｜已解決>：<理由>`。
 - 新測試 `app/tests/test_grill_skill.py::test_grill_skill_is_in_the_catalog_and_parses_as_an_inline_reference`：預設技能目錄載入 `grill`、`@grill` 解析為行內引用（email 中的不算）、`load_skill_runtime("grill")` 的 context 含上述固定標題與格式。
 - 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_skill.py tests/test_skills.py tests/test_inline_skills.py` → 28 passed。
+
+### K5-S2 詰問回合唯讀（2026-11-15，嘗試 1）
+
+- `app/agent/session.py`：具名常數 `READ_ONLY_DOCUMENT_SKILLS = frozenset({"grill"})`（A3）與 `read_only_document_turn` 屬性；`tool_access_resolution` 在加入強制工具（`document_edit`、`bibliography_lookup`）之後，若啟用的 skill 含 `grill` 就移除 `document_edit`。`_build_tool_availability_hint`、`_run_graph_turn` 的 `effective_tools` 與綁定都來自這個 resolution，一處涵蓋 PLANS 基線的三個使用點；`PolicyToolNode` 依同一份 `effective_tools` 拒絕呼叫。`_document_turn_active`、`bibliography_lookup`、強制 normal 與回合結束復原不變。
+- `app/agent/desktop/service.py`：快照與凍結引用後的說明抽成模組常數（`_EDITABLE_SNAPSHOT_INSTRUCTIONS`、`_EDITABLE_REFERENCE_INSTRUCTIONS` 與原字串逐字相同，已用 Python 比對確認；`_READ_ONLY_SNAPSHOT_INSTRUCTIONS`、`_READ_ONLY_REFERENCE_INSTRUCTIONS` 為詰問版）。本回合的行內引用或 slash 指令含 `READ_ONLY_DOCUMENT_SKILLS` 中的 skill 時用唯讀版；其餘文件回合不變。
+- **執行中發現並修正**：`render_tool_availability_block` 會把同一 MCP family 的工具收成一個標籤，而 `document_edit` 與 `bibliography_lookup` 同屬 `desktop_document`（`session.py:154–156`）；詰問回合中 `available_tools` 與 `unavailable_tools` 都只會出現 `MCP family: desktop_document`，模型看不出哪個被遮蔽，不符合 K5-S2 的驗收。修正（`app/agent/skills/runtime.py`）：同一 family 的工具分在可用與不可用兩邊時，該 family 改以工具名稱逐一列出；未分裂的 family 照舊顯示標籤。這是共用的渲染函式，沒有另做隱藏。
+- 新測試（`app/tests/test_grill_skill.py`，假模型，記錄每次呼叫實際綁定的工具）：
+  - `test_grill_document_turn_reads_the_snapshot_but_cannot_edit`：帶文件＋`@grill`，模型收到完整快照（解析 JSON 比對全文）、說明是唯讀版且不含「call document_edit with replacement_text」、SKILL.md 內容在系統訊息；綁定工具不含 `document_edit`；可用性提示 `available_tools` 有 `bibliography_lookup` 無 `document_edit`，`unavailable_tools` 有 `document_edit`，兩邊都沒有 family 標籤；假模型硬發 `document_edit` 被政策拒絕：沒有 `document.proposed`／`approval.required`、沒有候選、檔案位元組不變；回合後 skill、文件旗標、思考模式復原。同一 session 下一個不帶 `@grill` 的文件回合：`document_edit` 回到綁定與可用清單、說明恢復編輯版、沒有 grill 內容（一回合生效）、編輯照常存檔；兩回合工具集合只差 `document_edit`。
+  - `test_grill_with_another_skill_and_frozen_references_stays_read_only`：`@academic-paper-writing`＋`@grill`＋一個凍結文件引用（`submittedContext`），凍結引用說明是唯讀版、快照說明唯讀、仍遮蔽且未寫檔。
+- 測試除錯（測試本身的問題，非產品修正）：bibliography 斷言改為與下一個文件回合比較工具集合；`submittedContext` 的權限需與目前控制一致（改用 `ask`）；`bind_tools` 有快取，改用每次呼叫記錄實際綁定的包裝物件。
+- 檢查（`app/`，沙箱外，環境變數指向 `$TMPDIR/k5s2`）：`tests/test_grill_skill.py tests/test_desktop_document_service.py tests/test_tool_access_matrix.py tests/test_inline_skills.py tests/test_skill_runtime.py tests/test_skills.py tests/test_desktop_fixture.py tests/test_document_context_budget.py tests/test_document_edit_compaction.py tests/test_desktop_citation_keys.py tests/test_desktop_bibliography.py tests/test_project_permissions.py`，加上 grep `render_tool_availability_block|Tool availability|MCP family` 找到的模組 → 267 passed，10.37 s。既有測試未修改。
