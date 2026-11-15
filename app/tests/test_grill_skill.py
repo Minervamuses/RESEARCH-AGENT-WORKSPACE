@@ -214,3 +214,58 @@ def test_grill_with_another_skill_and_frozen_references_stays_read_only(tmp_path
         assert session.active_skill_runtime is None
 
     asyncio.run(run())
+
+
+def test_grill_typed_in_a_passage_comment_activates_for_the_whole_turn(tmp_path, monkeypatch):
+    """Observed behavior (K5-S3): the desktop composes comments into the turn text.
+
+    ``composeTurnText`` (desktop/src/conversations.ts) sends
+    "Main request:…\\n\\nRequests for frozen references:\\n\\nReference <id>:\\n<comment>"
+    as ``text`` and computes ``skillReferences`` over that whole text. The
+    backend re-parses every catalog mention in ``text``, so an ``@grill`` in a
+    comment selects the skill for the entire turn: every reference and the
+    main request become read-only. This test pins that behavior.
+    """
+    async def run():
+        service, model, path, context = await _grill_setup(tmp_path, monkeypatch)
+        session = service.session
+        original = path.read_bytes()
+        text = (
+            "Main request:\n請看這兩段\n\nRequests for frozen references:\n\n"
+            "Reference passage:\n@grill 這段推論成立嗎？"
+        )
+        references = resolve_skill_references(text, session.loaded_skills)
+        assert [reference["name"] for reference in references] == ["grill"]
+        project = service._project
+        submitted = {
+            "projectId": project["projectId"], "rootPath": project["rootPath"],
+            "permissionMode": "ask", "requestedThinkingMode": "normal", "skillReferences": references,
+            "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
+            "documentContext": context,
+            "references": [{"referenceId": "passage", "kind": "document", "text": PASSAGE,
+                            "document": {"snapshot": context, "startLine": 3, "endLine": 3}}],
+        }
+        model.try_edit = True
+        sink = _Sink(service, context)
+        await service.dispatch("session.turn", {
+            "text": text, "turnId": uuid.uuid4().hex, "retry": False, "submittedContext": submitted,
+        }, event_sink=sink)
+        await asyncio.gather(*sink.tasks)
+
+        first = model.calls[0]
+        assert any(isinstance(message, SystemMessage) and "# Grill" in message.content for message in first)
+        assert "document_edit" not in model.call_tools[0]
+        assert _current_prompt(first).endswith(_READ_ONLY_REFERENCE_INSTRUCTIONS)
+        assert service._document_candidates == {} and path.read_bytes() == original
+
+        # Even without the client's skillReferences, the backend finds the mention in text.
+        model.calls.clear()
+        model.call_tools.clear()
+        await service.dispatch("session.turn", {
+            "text": text, "turnId": uuid.uuid4().hex, "retry": False,
+            "submittedContext": {**submitted, "skillReferences": []},
+        }, event_sink=_Sink(service, context))
+        assert any(isinstance(message, SystemMessage) and "# Grill" in message.content for message in model.calls[0])
+        assert "document_edit" not in model.call_tools[0]
+
+    asyncio.run(run())

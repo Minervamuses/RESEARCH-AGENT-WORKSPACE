@@ -10,8 +10,8 @@
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
-| K5 | In progress | K5-S1、K5-S2 | — | K5-S3 段落留言中的 @grill |
-| K6 | Not started | — | — | 等 K5 |
+| K5 | Complete | K5-S1–S3 | — | — |
+| K6 | Not started | — | — | K6-S1 |
 | K7 | Not started | — | — | 等 K1 |
 | K8 | Not started | — | — | 等 K3–K7 |
 
@@ -235,3 +235,10 @@
   - `test_grill_with_another_skill_and_frozen_references_stays_read_only`：`@academic-paper-writing`＋`@grill`＋一個凍結文件引用（`submittedContext`），凍結引用說明是唯讀版、快照說明唯讀、仍遮蔽且未寫檔。
 - 測試除錯（測試本身的問題，非產品修正）：bibliography 斷言改為與下一個文件回合比較工具集合；`submittedContext` 的權限需與目前控制一致（改用 `ask`）；`bind_tools` 有快取，改用每次呼叫記錄實際綁定的包裝物件。
 - 檢查（`app/`，沙箱外，環境變數指向 `$TMPDIR/k5s2`）：`tests/test_grill_skill.py tests/test_desktop_document_service.py tests/test_tool_access_matrix.py tests/test_inline_skills.py tests/test_skill_runtime.py tests/test_skills.py tests/test_desktop_fixture.py tests/test_document_context_budget.py tests/test_document_edit_compaction.py tests/test_desktop_citation_keys.py tests/test_desktop_bibliography.py tests/test_project_permissions.py`，加上 grep `render_tool_availability_block|Tool availability|MCP family` 找到的模組 → 267 passed，10.37 s。既有測試未修改。
+
+### K5-S3 段落留言中的 `@grill`（2026-11-15）
+
+- 讀碼（前端，未改）：`app/desktop/src/App.tsx:2315` 送出的 `text` 是 `turnSubmissionText` → `composeTurnText`（`src/conversations.ts:742–757`），把留言組成「Main request:…／Requests for frozen references:／Reference <id>:\n<留言>」放進同一段 `text`；`skillReferences` 由 `inlineSkillReferences(draft, …)`（`App.tsx:2347`）對這整段文字計算，`inlineSkillToken` 只要求 `@` 前不是英數或 `_.@+-`，換行後的 `@grill` 會被收進。後端 `service.py` 與 `session.turn_outcome` 都以 `resolve_skill_references(text, …)` 重新解析整段文字中的所有目錄名稱。
+- 新測試 `app/tests/test_grill_skill.py::test_grill_typed_in_a_passage_comment_activates_for_the_whole_turn`：以前端的組合格式送出，留言內含 `@grill`、主請求沒有。實際結果：**會啟用**——SKILL.md 進入系統訊息、`document_edit` 不在綁定工具、凍結引用說明是唯讀版、沒有候選也沒有寫檔；`skillReferences` 送空陣列時後端仍從文字找到並啟用。測試保留作回歸保護。
+- 要列入最終彙報的觀察：留言中的 `@grill` 作用於**整個回合**（主請求與所有引用都變唯讀），不是只針對那一則留言的段落。若同一回合其他留言要求改寫，該回合不會改；需要分開送出。前端行為只讀碼確認，本步沒有跑 npm；本計劃不改前端或協定。
+- 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_skill.py` → 4 passed。
