@@ -13,7 +13,7 @@
 | K5 | Complete | K5-S1–S3 | — | — |
 | K6 | Complete | K6-S1–S3；`evidence/K6-S3/` | — | — |
 | K7 | Complete | K7-S1–S3 | — | — |
-| K8 | In progress | K8-S1 | — | K8-S2 完整驗收 |
+| K8 | In progress | K8-S1、K8-S2；`evidence/K8-S2/` | — | K8-S3 最終彙報 |
 
 ## 撰寫紀錄
 
@@ -312,3 +312,8 @@
 - `app/README.md`：目錄表加 `scripts/`（`grill_eval.py`，預設拒絕付費模型），文件地圖加 `skills/grill/README.md`。
 - `for_agents/`（由 `$infrastructure` 管理）只修兩處與新行為矛盾的描述，未全面更新：`dangerous-assumptions.md` ASM-030 的「Latest-ten context replays earlier snapshots… no cross-turn deduplication」改為保存不變、模型輸入已縮減；`data-flow.md` Skill 流程第 3 步補「含 `grill` 的回合移除 `document_edit`」。其餘內容（例如基線 commit、測試數）可能已過時，建議使用者之後以 `$infrastructure` 重新整理。
 - 檢查：`grep -rn "每回合帶整份\|replays earlier snapshots\|cross-turn deduplication" README.md app/README.md app/agent/README.md for_agents/ app/skills/*/README.md` → 無結果；連結的 `app/skills/grill/README.md`、`app/skills/citation/README.md` 都存在。
+
+### K8-S2 完整驗收（2026-11-15）
+
+- 完整 pytest（`app/`，沙箱外；`TMPDIR`、`XDG_CACHE_HOME`、`AGENT_LOG_DIR` 指向新建的 `/tmp/k8s2/{tmp,cache,logs}`）：`$P/bin/python -m pytest -q -p no:cacheprovider` → **1808 passed，2 warnings，62.58 s**（含收集約 65 s），結束碼 0。輸出尾段存於 `evidence/K8-S2/pytest-tail.txt`。兩個警告是既有的 LangChain `allowed_objects` 棄用警告與 zip 重複名稱警告（extension 測試的刻意輸入）。與歷史基線 1763 相比多 45 個，皆為本計劃新增的測試。只跑一次，未重跑。
+- npm、cargo：**不適用**。`git diff --stat 10187aa..HEAD -- app/desktop app/agent/desktop/protocol.py` 輸出為空（0 行），本計劃沒有改動前端（含 `app/desktop/protocol/`）或後端協定。
