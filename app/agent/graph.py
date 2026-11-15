@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent.config import AgentConfig
 from agent.diagnostics import attach_incident, incident_reference
+from agent.document_context import compact_edit_results
 
 from agent.llm.openrouter import get_chat_model
 from agent.observability import (
@@ -180,8 +181,10 @@ def build_graph(
         tool_names = _effective_names(state)
         graph_steps_remaining = int(state["remaining_steps"])
         force_final = graph_steps_remaining < 3
+        # Only the latest saved document_edit result keeps its full text in
+        # the model input; graph state keeps every result unchanged.
         prompt_messages = [
-            *messages,
+            *compact_edit_results(messages),
             *([_GRAPH_LIMIT_FINALIZATION_INSTRUCTION] if force_final else []),
         ]
         invoke_model = model if force_final else _model_for_state(state)

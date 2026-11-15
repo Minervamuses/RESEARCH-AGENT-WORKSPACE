@@ -9,7 +9,7 @@
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
-| K4 | In progress | K4-S1 | — | K4-S2 checkpoint 與實作 |
+| K4 | In progress | K4-S1、K4-S2 | — | K4-S3 修改後量測 |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
 | K7 | Not started | — | — | 等 K1 |
@@ -184,3 +184,17 @@
 - 出口 B（K4-S1）。縮減函式 `compact_edit_results(messages)` 放 `app/agent/document_context.py`（以鴨子型別判斷 `type == "tool"`、`name == "document_edit"`，用 `model_copy` 產生新訊息，不匯入 LangChain 以外的東西），由 `agent/graph.py` `_agent_requests` 在建立 `prompt_messages` 時呼叫。
 - 縮減格式：K2-S1 約定的 `rangeText` 與 `documentLengthUtf16`，另加 `fullTextOmitted` 說明；整份文件範圍不附 `rangeText`。
 - `agent/skills/runtime.py` 多 skill 提示改成「最新一次成功的 document_edit 結果含存檔後全文與更新後選取；同回合較早的結果已縮減」。
+
+### K4-S2 實作出口 B（2026-11-15，嘗試 1）
+
+- `app/agent/document_context.py`：新增 `compact_edit_result`（saved 結果去掉 `sourceText`，加 `documentLengthUtf16` 與 `fullTextOmitted`；範圍小於整份文件時附 `rangeText`；範圍無法切出時回傳 None、保留原樣）與 `compact_edit_results(messages)`（找出所有 saved 且帶全文的 `document_edit` 工具訊息，除最新一則外以 `model_copy` 換成縮減版；回傳新清單，原清單與原訊息物件不變；非 saved 結果原樣）。
+- `app/agent/graph.py` `_agent_requests`：`prompt_messages` 由 `compact_edit_results(messages)` 建立；首次、空回覆重試與修復階段共用它。graph 狀態的 `messages` 不變。
+- `app/agent/skills/runtime.py:66–68`：多 skill 提示改為「the latest successful document_edit tool result contains the saved source and updated selection … (earlier results in the same turn are shortened to their updated range)」。沒有測試斷言舊字句。
+- 新測試 `app/tests/test_document_edit_compaction.py`（5 個）：
+  - 單元：三個 saved＋一個 conflict＋非文件工具，只有最新 saved 保留全文、較早兩個有正確 `rangeText`／`editorRevision`／`path`／`callId`，conflict 診斷欄位原樣，原訊息 deepcopy 比對不變、未縮減的訊息是同一物件。整份文件範圍不留文字；非 saved、範圍越界、只有一則結果時原樣。
+  - 整合（真實 desktop service＋graph、假模型），參數 `partial`（圈選一段連續三次）、`whole`（無圈選，範圍為整份文件，三次）、`replay`（`e1`、`e1` 重播收據、`e2`）：磁碟內容逐位元組等於預期；每次存檔收據的 UTF-16 範圍 `(start, start+len(replacement))` 正確（含中文與 emoji）；前端收據與 `candidate.result` 仍有完整 `sourceText`；第 2–4 次模型呼叫的工具結果全文副本數都是 1（K2 計數規則），較早結果無 `sourceText`、`partial`／`replay` 有 `rangeText`、`whole` 沒有；使用者訊息的提交快照另計為 1 份；第 2 次呼叫記錄下的第一則工具訊息仍含 `sourceText`，證明沒有原地修改。
+- 既有測試未修改（K4-S1 已確認受影響斷言都讀最新一次或非 saved 結果）。
+- 第一次執行 3 個整合案例失敗：測試自己用了非 UUID 的 `turnId`（`ConversationValidationError`），改用 `uuid.uuid4().hex` 後全部通過；屬測試錯誤。
+- 檢查（`app/`，沙箱外，三個環境變數指向 `$TMPDIR/k4s2*`）：
+  - `tests/test_document_edit_compaction.py tests/test_document_context_budget.py tests/test_desktop_document_service.py tests/test_inline_skills.py tests/test_skill_runtime.py tests/test_desktop_fixture.py tests/test_desktop_citation_keys.py tests/test_graph_skill_loader.py tests/test_desktop_crash_recovery.py` → 139 passed，19.43 s。
+  - 所有建 graph 的測試模組（`grep -l "build_graph\|_agent_requests" tests/*.py`，19 個檔）→ 419 passed，24.47 s。

@@ -290,3 +290,77 @@ def replay_history_inputs(
         _replay_one(text, number, keep_snapshot=index == keep_index)
         for index, (number, text) in enumerate(turns)
     ]
+
+
+def _utf16_slice(text: str, start: int, end: int) -> str | None:
+    encoded = text.encode("utf-16-le")
+    if not 0 <= start <= end <= len(encoded) // 2:
+        return None
+    try:
+        return encoded[start * 2:end * 2].decode("utf-16-le")
+    except UnicodeDecodeError:
+        return None
+
+
+def compact_edit_result(result: dict) -> dict | None:
+    """Shortened form of an earlier saved document_edit result, or None to keep it.
+
+    The full ``sourceText`` is dropped. A range smaller than the document
+    keeps its updated text as ``rangeText``; a whole-document range keeps no
+    text because the latest saved result already carries that full text.
+    """
+    source = result.get("sourceText")
+    start, end = result.get("rangeStartUtf16"), result.get("rangeEndUtf16")
+    if result.get("status") != "saved" or not isinstance(source, str):
+        return None
+    if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
+        return None
+    length = len(source.encode("utf-16-le")) // 2
+    compact = {key: value for key, value in result.items() if key != "sourceText"}
+    compact["documentLengthUtf16"] = length
+    if not (start == 0 and end == length):
+        range_text = _utf16_slice(source, start, end)
+        if range_text is None:
+            return None
+        compact["rangeText"] = range_text
+    compact["fullTextOmitted"] = (
+        "An earlier saved result in this turn; the latest saved document_edit result "
+        "carries the current full text."
+    )
+    return compact
+
+
+def compact_edit_results(messages: list) -> list:
+    """A model-input copy where only the latest saved edit result keeps full text.
+
+    Earlier saved ``document_edit`` tool messages are replaced by new message
+    objects with ``compact_edit_result`` content; non-saved results and every
+    other message are passed through as the same objects. ``messages`` itself
+    and its message objects are never modified.
+    """
+    parsed: dict[int, dict] = {}
+    for index, message in enumerate(messages):
+        if getattr(message, "type", None) != "tool" or getattr(message, "name", None) != DOCUMENT_EDIT_TOOL:
+            continue
+        content = getattr(message, "content", None)
+        if not isinstance(content, str) or not content.lstrip().startswith("{"):
+            continue
+        try:
+            result = json.loads(content)
+        except ValueError:
+            continue
+        if isinstance(result, dict) and result.get("status") == "saved" and isinstance(result.get("sourceText"), str):
+            parsed[index] = result
+    if len(parsed) < 2:
+        return list(messages)
+    latest = max(parsed)
+    compacted = list(messages)
+    for index, result in parsed.items():
+        if index == latest:
+            continue
+        compact = compact_edit_result(result)
+        if compact is not None:
+            compacted[index] = messages[index].model_copy(
+                update={"content": json.dumps(compact, ensure_ascii=False)},
+            )
+    return compacted
