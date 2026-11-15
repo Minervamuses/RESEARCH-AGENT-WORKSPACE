@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
-| K3 | In progress | K3-S1 checkpoint | — | K3-S1 轉換函式與單元測試 |
+| K3 | In progress | K3-S1 | — | K3-S2 接上歷史組裝 |
 | K4 | Not started | — | — | K4-S1（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
@@ -121,3 +121,10 @@
 - 判斷「當前回合帶快照」：`ChatSession` 在 `turn_outcome` 記下本回合實際送出的 `semantic_input`（`_active_turn_input`，重試時就是保存的原文），以其中是否有可解析的 `SNAPSHOT_HEADER` 區塊判斷，不看 `_document_turn_active`。不在回合中時（無當前輸入）視為不帶快照。
 - 無法解析的歷史回合整段原樣保留。
 - `fixture_session.py:1051` 只把歷史文字截短拼成假回答用的字串，不送模型，不接轉換（K3-S2 記錄）；`recent_turns` 對外顯示不轉換。
+
+### K3-S1 轉換函式與單元測試（2026-11-15，嘗試 1）
+
+- `app/agent/document_context.py` 新增 `HISTORY_SNAPSHOT_HEADER`、`OMITTED_SNAPSHOT_HEADER`、`HISTORY_REFERENCES_HEADER`、`PLACEHOLDER_SELECTION_MAX_CHARS = 2000`、`has_current_snapshot(text)`、`replay_history_inputs(turns, *, current_has_snapshot)`；`EDITOR_SNAPSHOT_HEADERS` 加入歷史快照標頭，K2 量測會把保留的歷史快照算進 history。行為依 checkpoint 所記；輸入不被原地修改；任一區塊無法解析時整則原樣回傳；已是重播形式的區塊原樣保留。
+- 新測試 `app/tests/test_document_history_replay.py`（7 個）：當前有快照（全部變佔位、佔位欄位、窄選取保留文字、整份範圍只記長度、封存指引含回合編號）；當前無快照（只保留最後一個快照、標頭與 JSON 之後無舊說明、量測計為 1 份 history）；只有凍結引用視為無快照；歷史凍結引用保留段落文字與行號、移除全文與 `sourceTextSameAs`、聊天引用不變；編輯說明與詰問唯讀說明兩種變體結果相同；格式壞掉與形狀錯誤原樣保留；使用者文字逐字保留。
+- 第一次執行 1 個失敗：測試本身用原始字串比對 JSON 跳脫後的全文（`DOC_V1 in replayed`），同時發現其他幾個「不含全文」斷言因同樣原因恆真；改為比對 `json.dumps(…, ensure_ascii=False)` 形式並用解析後的區塊比對。這是測試錯誤，不是產品修正。
+- 指令（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_history_replay.py tests/test_document_measure.py` → 16 passed。
