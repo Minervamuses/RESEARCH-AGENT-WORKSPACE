@@ -128,3 +128,8 @@
 - 新測試 `app/tests/test_document_history_replay.py`（7 個）：當前有快照（全部變佔位、佔位欄位、窄選取保留文字、整份範圍只記長度、封存指引含回合編號）；當前無快照（只保留最後一個快照、標頭與 JSON 之後無舊說明、量測計為 1 份 history）；只有凍結引用視為無快照；歷史凍結引用保留段落文字與行號、移除全文與 `sourceTextSameAs`、聊天引用不變；編輯說明與詰問唯讀說明兩種變體結果相同；格式壞掉與形狀錯誤原樣保留；使用者文字逐字保留。
 - 第一次執行 1 個失敗：測試本身用原始字串比對 JSON 跳脫後的全文（`DOC_V1 in replayed`），同時發現其他幾個「不含全文」斷言因同樣原因恆真；改為比對 `json.dumps(…, ensure_ascii=False)` 形式並用解析後的區塊比對。這是測試錯誤，不是產品修正。
 - 指令（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_document_history_replay.py tests/test_document_measure.py` → 16 passed。
+
+### K3-S2 checkpoint：接線位置（2026-11-15，嘗試次數 0）
+
+- `ChatSession` 新增 `_active_turn_input`：在 `turn_outcome` 與 `_active_turn_id` 同時設定為本回合送出的 `user_input`（即保存的 `semantic_input`；重試時是原文），於同一個 `finally` 清除。`run_display_only_turn` 不呼叫模型，不設定。
+- 新增 `ChatSession._replayed_context()`：對 `latest_context` 的 `(turn_number, user_input)` 套用 `replay_history_inputs`，`current_has_snapshot = has_current_snapshot(self._active_turn_input)`；`_base_prompt_history`（normal，也供 `orchestrator.py:188` 的 proposer）與 `_visible_context_text`（extended 的改寫提示，`orchestrator.py:534`）都改用它。`recent_turns`、`fixture_session.py` 的 `recent_turns` 與 `:1051` 假回答拼字串不轉換（不送模型）。
