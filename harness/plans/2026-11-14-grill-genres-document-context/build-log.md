@@ -10,7 +10,7 @@
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
 | K3 | Complete | K3-S1–S3；`evidence/K3-S3/` | — | — |
 | K4 | Complete | K4-S1–S3；`evidence/K4-S3/` | — | — |
-| K5 | Not started | — | — | K5-S1 |
+| K5 | In progress | K5-S1 | — | K5-S2 遮蔽 document_edit |
 | K6 | Not started | — | — | 等 K5 |
 | K7 | Not started | — | — | 等 K1 |
 | K8 | Not started | — | — | 等 K3–K7 |
@@ -207,3 +207,20 @@
   - 第 5 回合（同回合連續兩次編輯）最後一次呼叫：副本 7 → 3 → 2；工具結果字元 15,471 → 15,471 → 8,376（最新一份全文 7,731＋較早一次的範圍文字）；prompt 69,614 → 38,875 → 31,890。
   - 第 10 回合：第一次呼叫副本 11 → 1 → 1，prompt 108,228 → 29,724 → 29,724。
 - 限制：只有單次編輯的回合 K4 不改數字（只有一份結果，本來就是最新）。數字是字元數，不是 token。
+
+### K5-S1 `grill` SKILL.md（2026-11-15）
+
+- 新增 `app/skills/grill/SKILL.md`（英文說明，與 `academic-paper-writing`、`citation` 一致；回覆用繁體中文固定標題）。不加 `manifest.yaml`：不需要額外工具，沿用 normal 模式工具（讀檔、知識庫、文獻庫、web），遮蔽由 K5-S2 以具名常數實作（A3）。
+- 原則對照（內容交付檢查，不是詰問品質驗證）：
+  1. 對象與材料 → 「Target and material」：選取範圍或引用／留言段落、可讀整份文件上下文、可查專案檔案／知識庫／文獻庫／web 並說明來源、本回合唯讀。
+  2. 還原（D4、A1）→ 「1. Reconstruct first」：主張、各句角色、支持關係；保留術語、限定、適用條件與強度；讀不懂先核對上下文、說明具體歧義，不直接判作者錯。
+  3. 試著推翻（D4）→ 「2. Try to refute, within the actual claim」：依環節角色找具體理由；反例須針對實際主張（含「平均有效」例子）；分清問題與資料不足；不先選錯誤類型；自己的反駁也要檢查。沒有寫成錯誤類型表（D1、D3）。
+  4. 提出（D4、A8、A4）→ 「3. Raise only what matters」：只提影響主張成立的具體問題或資料缺口；逐字引用、具體理由、要作者回應什麼；字面與風格不在範圍；佔位符 `[TODO: …]`、`[CITE: …]`、`[FIGURE: …]`；不捏造引用或資料。
+  5. 作者回應後（D5）→ 「4. After the author replies」：先判斷是否對題；補缺步→請寫進文字；換說法→維持；有理由的反駁→撤回；不因堅持放行，也不為維持原判拒絕有效反駁。
+  6. 通過與判斷範圍（D6）→ 「5. Passing and the limits of judgment」：第一輪可通過、不硬挑；通過＝在目前材料與檢查範圍內未找到具體問題，不是正確性保證；資料不足不當錯誤也不當通過；作者未公開的研究細節的邊界（原則 9）。
+  7. 不改文件（D8）→ 「Target and material」最後一點與佔位符段落。
+  8. 一回合（D7）→ 「One turn at a time」。
+  9. 開頭段落明說這是待研究的第一版方法，標題只供整理，不證明還原忠實或質疑成立（S4）。
+- 實際採用的固定格式（K6 機械記錄依此）：標題 `## 還原`、`## 發現`、`## 判斷`，第二輪起加 `## 回應檢查`；發現標題 `### F<n>｜問題` 或 `### F<n>｜資料不足`；引用行 `- 原文：「<逐字引用>」`，另有 `- 理由：`、`- 請回應：`；判斷行 `判斷：通過｜待回應｜資料不足`；無發現寫 `（無）`；回應檢查行 `- F1：<對題｜未對題> → <維持｜撤回｜請寫進文字｜已解決>：<理由>`。
+- 新測試 `app/tests/test_grill_skill.py::test_grill_skill_is_in_the_catalog_and_parses_as_an_inline_reference`：預設技能目錄載入 `grill`、`@grill` 解析為行內引用（email 中的不算）、`load_skill_runtime("grill")` 的 context 含上述固定標題與格式。
+- 檢查（`app/`，沙箱內）：`$P/bin/python -m pytest -q -p no:cacheprovider tests/test_grill_skill.py tests/test_skills.py tests/test_inline_skills.py` → 28 passed。
