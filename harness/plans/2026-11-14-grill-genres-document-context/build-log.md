@@ -178,3 +178,9 @@
 **結論：出口 B。** 理由：重疊或相鄰引用合併範圍、以及多 skill 後一步要看前一步產物的上下文時，模型需要範圍外或合併範圍的最新文字，只給範圍文字（出口 A）會讓這些情形的下一次編輯缺資料；出口 B 保留最新一次成功結果的全文即可涵蓋，而較早的同回合結果在模型輸入中縮減，副本數不再累積。`runtime.py` 的提示改為描述「最新一次」結果帶全文。上表斷言都只讀最新一次結果或非 saved 結果，在出口 B 下不必改寫（`tests/test_inline_skills.py:93` 保持原斷言）。
 
 **實作位置與不改原始訊息的方式**：`agent/graph.py` `_agent_requests` 建立 `prompt_messages` 時，以新函式產生訊息清單的副本：最新一則 `status == "saved"` 的 `document_edit` 工具訊息原樣保留，較早的 saved 結果以 `model_copy(update={"content": …})` 換成縮減版（無 `sourceText`；保留狀態、路徑、`editorRevision`、`diskFingerprint`、範圍、`callId`，加上 `documentLengthUtf16`；範圍未涵蓋整份文件時附 `rangeText`，涵蓋整份文件時不附文字），其他訊息物件原樣放入。graph 狀態中的 `messages`、`candidate.result`、`document.apply` 回傳與保存資料都不變。三種呼叫（首次、空回覆重試、修復）共用同一份 `prompt_messages`，一次涵蓋。非 saved 結果（`conflict`／`failed`／`cancelled`）不縮減。
+
+### K4-S2 checkpoint（2026-11-15，嘗試次數 0）
+
+- 出口 B（K4-S1）。縮減函式 `compact_edit_results(messages)` 放 `app/agent/document_context.py`（以鴨子型別判斷 `type == "tool"`、`name == "document_edit"`，用 `model_copy` 產生新訊息，不匯入 LangChain 以外的東西），由 `agent/graph.py` `_agent_requests` 在建立 `prompt_messages` 時呼叫。
+- 縮減格式：K2-S1 約定的 `rangeText` 與 `documentLengthUtf16`，另加 `fullTextOmitted` 說明；整份文件範圍不附 `rangeText`。
+- `agent/skills/runtime.py` 多 skill 提示改成「最新一次成功的 document_edit 結果含存檔後全文與更新後選取；同回合較早的結果已縮減」。
