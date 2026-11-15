@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | K1 | Complete | K1-S1、K1-S2 事件 | — | — |
 | K2 | Complete | K2-S1、K2-S2 事件；`evidence/K2-S2/` | — | — |
-| K3 | In progress | K3-S1 | — | K3-S2 接上歷史組裝 |
+| K3 | In progress | K3-S1、K3-S2 | — | K3-S3 修改後量測 |
 | K4 | Not started | — | — | K4-S1（K4-S3 另需 K3） |
 | K5 | Not started | — | — | 等 K1 |
 | K6 | Not started | — | — | 等 K5 |
@@ -133,3 +133,15 @@
 
 - `ChatSession` 新增 `_active_turn_input`：在 `turn_outcome` 與 `_active_turn_id` 同時設定為本回合送出的 `user_input`（即保存的 `semantic_input`；重試時是原文），於同一個 `finally` 清除。`run_display_only_turn` 不呼叫模型，不設定。
 - 新增 `ChatSession._replayed_context()`：對 `latest_context` 的 `(turn_number, user_input)` 套用 `replay_history_inputs`，`current_has_snapshot = has_current_snapshot(self._active_turn_input)`；`_base_prompt_history`（normal，也供 `orchestrator.py:188` 的 proposer）與 `_visible_context_text`（extended 的改寫提示，`orchestrator.py:534`）都改用它。`recent_turns`、`fixture_session.py` 的 `recent_turns` 與 `:1051` 假回答拼字串不轉換（不送模型）。
+
+### K3-S2 接上所有歷史組裝處（2026-11-15，嘗試 1）
+
+- `app/agent/session.py`：依 checkpoint 新增 `_active_turn_input`（`turn_outcome` 設定、`finally` 清除）與 `_replayed_context()`；`_base_prompt_history`、`_visible_context_text` 改用它。`orchestrator.py:188` 經 `_base_prompt_history` 一併涵蓋。
+- 測試（`app/tests/test_document_context_budget.py`）：
+  - 15 回合測試加斷言：每次模型呼叫只看使用者訊息時，`document_chars_history == 0`、全文副本數＝當前回合自己的份數（一般 1；第 9 回合當前快照＋舊版引用 2）；歷史檔中每回合 `semantic_input` 與該回合第一次模型呼叫的當前使用者訊息逐字相同（保存不變）。工具結果不在此斷言。
+  - 新增 `test_closed_document_keeps_only_the_last_submitted_snapshot`：回合 1 分析 A；回合 2 以 `submittedContext` 分析並在模型呼叫時失敗，重試送出的當前訊息與失敗時逐字相同，歷史回合 1 已是佔位；回合 3 把 A 整份改寫並存成 B；回合 4 文件關閉後普通提問：歷史回合 1、2 為佔位，回合 3 以 `HISTORY_SNAPSHOT_HEADER` 保留 A（不含 B 的全文，舊編輯說明已移除），K2 量測無 parse issue、history 字元＝A 長度、1 份；extended 用的 `_visible_context_text` 同樣是兩個佔位＋一個歷史快照，當前輸入帶快照時不保留歷史快照；歷史檔四回合皆 completed，前三回合 `semantic_input` 仍含完整 A 快照。
+- 檢查（`app/`）：
+  - 沙箱內 `tests/test_document_context_budget.py` → 2 passed；`tests/test_desktop_document_service.py` 在沙箱內有 1 個 `/tmp` 唯讀失敗（`test_isolated_desktop_fixture_calls_real_document_coordinator`，K1-S2 已知環境限制）。
+  - 沙箱外（`TMPDIR`／`XDG_CACHE_HOME`／`AGENT_LOG_DIR` 指向 `$TMPDIR/k3s2`）：`tests/test_document_context_budget.py tests/test_document_history_replay.py tests/test_document_measure.py tests/test_desktop_document_service.py tests/test_observability.py tests/test_session_persistence.py tests/test_inline_skills.py tests/test_skills.py tests/test_academic_skill_tools.py tests/test_thinking_session.py tests/test_desktop_fixture.py` → 149 passed，10.69 s。
+  - 另跑會用到歷史組裝的模組（grep `_base_prompt_history|_visible_context_text|_prompt_history|latest_context`）：`tests/test_turn_finalizer.py tests/test_conversation_repository.py tests/test_desktop_service.py tests/test_chat_cli.py tests/test_desktop_conversations.py tests/test_history_retirement.py` → 218 passed，9.83 s。
+- 沒有修改任何既有測試。

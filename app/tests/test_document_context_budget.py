@@ -91,6 +91,7 @@ async def run_budget_scenario(tmp_path: Path, monkeypatch) -> dict:
 
     model.ainvoke = scripted
     turns = []
+    prompts = []
     for number, (kind, section) in enumerate(TURN_PLAN, start=1):
         source = editor["sourceText"]
         if kind == "whole":
@@ -145,12 +146,25 @@ async def run_budget_scenario(tmp_path: Path, monkeypatch) -> dict:
                 end = start + utf16_length(replacement)
             expected_disk = text
         assert path.read_text(encoding="utf-8") == expected_disk == editor["sourceText"]
-        calls = [measure_document_context(messages) for messages in model.calls[first_call:]]
+        turn_calls = model.calls[first_call:]
+        calls = [measure_document_context(messages) for messages in turn_calls]
+        user_calls = [
+            measure_document_context([message for message in messages if isinstance(message, HumanMessage)])
+            for messages in turn_calls
+        ]
+        prompts.append(next(
+            message.content for message in reversed(turn_calls[0]) if isinstance(message, HumanMessage)
+        ))
         turns.append({
             "turn": number, "kind": kind, "state": result["state"], "saved_edits": len(saved),
             "document_utf16": utf16_length(editor["sourceText"]), "calls": calls,
+            "user_message_calls": user_calls,
         })
-    return {"document_bytes": len(_document().encode("utf-8")), "turns": turns}
+    saved = service._conversation_repository.load(service.session.session_id).document.turns
+    return {
+        "document_bytes": len(_document().encode("utf-8")), "turns": turns,
+        "_saved_inputs_match_prompts": [turn.semantic_input for turn in saved] == prompts,
+    }
 
 
 def summarize(report: dict) -> list[dict]:
@@ -192,8 +206,107 @@ def test_fifteen_document_turns_are_measured(tmp_path, monkeypatch):
     # The old frozen version is a second full text beside the current snapshot.
     assert reference_turn["calls"][0]["document_chars_current"] > reference_turn["document_utf16"]
 
+    # K3: every turn carries a current snapshot, so replayed history user
+    # messages hold no snapshot or frozen-reference full text; only the
+    # current turn's own texts remain. Tool results are K4's concern.
+    for turn in turns:
+        for call in turn["user_message_calls"]:
+            assert call["document_chars_history"] == 0
+            assert call["document_full_copies"] == (2 if turn["kind"] == "reference" else 1)
+    # Saved history is unchanged: each turn's semantic_input is exactly the full prompt it sent.
+    assert report.pop("_saved_inputs_match_prompts") is True
+
     destination = os.environ.get("DOCUMENT_BUDGET_REPORT")
     if destination:
         report["summary"] = summarize(report)
         Path(destination).parent.mkdir(parents=True, exist_ok=True)
         Path(destination).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def test_closed_document_keeps_only_the_last_submitted_snapshot(tmp_path, monkeypatch):
+    """A is submitted and saved as B, then the document closes: history keeps A, labelled."""
+    from agent.desktop.service import DesktopServiceError
+    from agent.document_context import (
+        HISTORY_SNAPSHOT_HEADER, OMITTED_SNAPSHOT_HEADER, SNAPSHOT_HEADER, iter_document_blocks,
+    )
+    import pytest
+
+    def blocks(text):
+        return list(iter_document_blocks(text, (SNAPSHOT_HEADER, HISTORY_SNAPSHOT_HEADER, OMITTED_SNAPSHOT_HEADER)))
+
+    async def run():
+        service, model, path, opened = await _setup(tmp_path, monkeypatch)
+        version_a = opened["sourceText"]
+        project = service._project
+
+        def submitted(context):
+            return {
+                "projectId": project["projectId"], "rootPath": project["rootPath"],
+                "permissionMode": "ask", "requestedThinkingMode": "normal", "skillReferences": [],
+                "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
+                "documentContext": context, "references": [],
+            }
+
+        # Turn 1: analysis of A.
+        await service.dispatch("session.turn", {
+            "text": "分析 A 版", "turnId": uuid.uuid4().hex, "retry": False, "documentContext": opened,
+        }, event_sink=_Sink(service, opened))
+        # Turn 2: a failed analysis, then its retry with the saved input.
+        retry_turn = uuid.uuid4().hex
+        model.fail_before_answer = True
+        with pytest.raises(DesktopServiceError):
+            await service.dispatch("session.turn", {
+                "text": "分析重試", "turnId": retry_turn, "retry": False, "submittedContext": submitted(opened),
+            })
+        failed_prompt = model.calls[-1][-1].content
+        await service.dispatch("session.turn", {
+            "text": "分析重試", "turnId": retry_turn, "retry": True, "submittedContext": submitted(opened),
+        })
+        retried = model.calls[-1]
+        assert retried[-1].content == failed_prompt  # The retry resends the saved input verbatim.
+        history = [message.content for message in retried[:-1] if isinstance(message, HumanMessage)]
+        assert len(history) == 1 and [block.header for block in blocks(history[0])] == [OMITTED_SNAPSHOT_HEADER]
+        assert measure_document_context(retried)["document_chars_history"] == 0
+        # Turn 3: edit A into B and save.
+        model.replacement = "B 版全文已存檔✅\n"
+        sink = _Sink(service, opened)
+        await service.dispatch("session.turn", {
+            "text": "改寫全文", "turnId": uuid.uuid4().hex, "retry": False, "documentContext": opened,
+        }, event_sink=sink)
+        await asyncio.gather(*sink.tasks)
+        assert sink.results[-1]["status"] == "saved"
+        version_b = path.read_text(encoding="utf-8")
+        assert version_b == "B 版全文已存檔✅\n" != version_a
+        # Turn 4: the document is closed; a plain question follows.
+        await service.dispatch("session.turn", {"text": "分析先前的討論", "turnId": uuid.uuid4().hex, "retry": False})
+        closed = model.calls[-1]
+        history = [message.content for message in closed[:-1] if isinstance(message, HumanMessage)]
+        assert len(history) == 3
+        assert [block.header for block in blocks(history[0])] == [OMITTED_SNAPSHOT_HEADER]
+        assert [block.header for block in blocks(history[1])] == [OMITTED_SNAPSHOT_HEADER]
+        [kept] = blocks(history[2])
+        assert kept.header == HISTORY_SNAPSHOT_HEADER and kept.value["sourceText"] == version_a
+        assert json.dumps(version_b, ensure_ascii=False) not in "".join(history)
+        assert "Use this exact editor snapshot" not in history[2]
+        measure = measure_document_context(closed)
+        assert measure["document_parse_issue"] is None
+        assert measure["document_chars_history"] == len(version_a) and measure["document_full_copies"] == 1
+        # Extended thinking's plain-text context follows the same replay.
+        visible = service.session._visible_context_text()
+        assert [block.header for block in blocks(visible)] == [
+            OMITTED_SNAPSHOT_HEADER, OMITTED_SNAPSHOT_HEADER, HISTORY_SNAPSHOT_HEADER,
+        ]
+        service.session._active_turn_input = history[2].replace(HISTORY_SNAPSHOT_HEADER, SNAPSHOT_HEADER)
+        try:
+            assert HISTORY_SNAPSHOT_HEADER not in service.session._visible_context_text()
+        finally:
+            service.session._active_turn_input = None
+        # The saved history still holds every full submitted snapshot.
+        saved = service._conversation_repository.load(service.session.session_id).document.turns
+        assert [turn.state for turn in saved] == ["completed"] * 4
+        for turn in saved[:3]:
+            [block] = blocks(turn.semantic_input)
+            assert block.header == SNAPSHOT_HEADER and block.value["sourceText"] == version_a
+        assert saved[3].semantic_input == "分析先前的討論"
+
+    asyncio.run(run())

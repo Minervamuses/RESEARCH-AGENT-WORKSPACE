@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
@@ -25,6 +25,7 @@ from agent.turns.safety import (
 from agent.config import AgentConfig
 from agent.ingest import current_local_work
 from agent.diagnostics import attach_incident, incident_reference
+from agent.document_context import has_current_snapshot, replay_history_inputs
 from agent.extensions.manager import ExtensionManager, SkillInstaller
 from agent.conversations import (
     MAX_IDENTIFIER_BYTES,
@@ -186,6 +187,8 @@ class ChatSession:
         self._recover_interrupted_turn()
         self._active_turn_snapshot: ConversationSnapshot | None = None
         self._active_turn_id: str | None = None
+        # The semantic input of the turn now running; decides history replay.
+        self._active_turn_input: str | None = None
         self._turn_trace: TurnTimingTrace | None = None
         self._turn_journal = TurnJournal()
         self._citation_policy = CitationSessionPolicy(
@@ -560,20 +563,32 @@ class ChatSession:
         """
         return self._citation_policy.service
 
-    def _base_prompt_history(self) -> list:
+    def _replayed_context(self) -> list[tuple[Any, str]]:
+        """Latest context turns with their model-visible user input.
+
+        Saved inputs stay untouched; only the replayed copy drops old document
+        full texts (see ``replay_history_inputs``).
+        """
         snapshot = self._conversation_snapshot
         context = (
             self.conversation_repository.latest_context(snapshot)
             if snapshot is not None
             else ()
         )
+        replayed = replay_history_inputs(
+            [(turn.turn_number, turn.user_input) for turn in context],
+            current_has_snapshot=has_current_snapshot(self._active_turn_input),
+        )
+        return list(zip(context, replayed))
+
+    def _base_prompt_history(self) -> list:
         messages = [
             self.system_prompt_message,
             self._build_conversation_archive_hint(),
         ]
-        for turn in context:
+        for turn, user_input in self._replayed_context():
             messages.extend([
-                HumanMessage(content=turn.user_input),
+                HumanMessage(content=user_input),
                 AIMessage(content=turn.assistant_output),
             ])
         return messages
@@ -1095,16 +1110,10 @@ class ChatSession:
 
     def _visible_context_text(self) -> str:
         lines: list[str] = []
-        snapshot = self._conversation_snapshot
-        context = (
-            self.conversation_repository.latest_context(snapshot)
-            if snapshot is not None
-            else ()
-        )
-        for turn in context:
+        for turn, user_input in self._replayed_context():
             lines.extend([
                 f"User turn {turn.turn_number}:",
-                turn.user_input,
+                user_input,
                 f"Assistant turn {turn.turn_number}:",
                 turn.assistant_output,
                 "",
@@ -1355,6 +1364,7 @@ class ChatSession:
                 )
             self._active_turn_snapshot = snapshot
             self._active_turn_id = logical_turn_id
+            self._active_turn_input = user_input
             self._turn_trace = TurnTimingTrace(logical_turn_id)
             trace_state = "failed"
             try:
@@ -1412,6 +1422,7 @@ class ChatSession:
                 self._turn_trace = None
                 self._active_turn_snapshot = None
                 self._active_turn_id = None
+                self._active_turn_input = None
 
     async def turn(
         self,
