@@ -92,6 +92,33 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 
 審查提出的「計劃目錄未提交」，是因為審查在 `8f4ca06` 之前讀取，不需要修正。
 
+### CA2 依 Codex 審核修訂計劃（2026-11-19）
+
+使用者轉來 Codex 的唯讀審核，共 5 點。撰寫者逐點對照程式碼確認都成立後修正。
+
+1. **C3 回聲比對會把成功報成失敗。**
+   - 讀碼確認：`document.apply` 與 `approval.resolve` 的 request 參數有 `turnId`，result schema 沒有。
+   - C3 改為「只比對 request 參數與 result schema 都有的 ID 欄位，清單從 contract 推導」，並列出撰寫時推導出的組合，加上正反兩面的測試。
+   - C8-S3 的 `api.ts` 改為引用同一規則。
+2. **C5 的刪除順序與文字。**
+   - 讀碼確認：`agent/desktop/service.py` 第 107 行 import `skills.citation.storage`。`tests/test_inline_skills.py` 經由 `agent.desktop.service` 間接 import 它，原本的順序會讓測試在收集階段就失敗。
+   - 調整順序：C5-S3 先在桌面端移除 import 與 4 處 `resolve_output_dir`，C5-S4 才刪模組，並以 `pytest --collect-only` 檢查。
+   - fixture 的 `citation_output_dir` 留到 C5-S4 才刪，避免測試寫進 repo 的 `cite/`。
+   - C5-S5 殘留的舊說法「書目庫失敗等於存檔失敗」改成與 P7 一致。
+   - 評估分界 commit 改指 C5-S4。
+3. **C6 空歷史目錄失去歸屬保護。**
+   - 讀碼確認：`_check_catalog_owner` 在沒有對話時也會拒絕他專案。
+   - GOALS 的 U3 後果加入這一點，並新增 P11：預設接受這個改變，否決時改寫擁有者標記檔。C6 也寫入兩種做法。
+4. **C7 的 Retry Stop 只改桌面端不夠。**
+   - 讀碼確認：`agent/ingest.py::LocalWorkScope.finish_stop` 把失敗的清理 task 存在 `_bash_cleanup`，之後每次呼叫都重拋同一個例外。
+   - 既有的 `test_failed_stop_cleanup_keeps_new_turn_blocked` 整個替換了 `finish_stop`，測不到這個問題。
+   - C7-S5 改為兩層都修，驗收要在底層清理動作注入失敗，並加上 `LocalWorkScope` 的單元測試。
+5. **C8 不能全面移除 Vite SSR。**
+   - 讀碼確認：`citation_preview`、`documents`、`conversations`、`trust` 這 4 個測試檔以 `renderToStaticMarkup` 渲染元件，例如 `trust.test.ts` 約 250 行的 `ApprovalDialog`。
+   - C8-S2 改為：只有純函式測試改成直接 import，元件渲染測試保留 SSR 載入。
+   - PLANS 原本寫「前端沒有 DOM 測試工具」，不夠精確，已改為「沒有互動式 DOM 測試，但有靜態渲染測試」。
+   - C9 的新元件沿用同一方式做靜態渲染測試。
+
 ## 事件
 
 （執行開始後在此依步驟 ID 追加事件：觀察到的改變、執行的指令與結果、證據位置、限制、下一步。）

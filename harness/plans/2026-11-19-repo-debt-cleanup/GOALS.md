@@ -39,7 +39,7 @@
 |---|---|---|---|
 | U1 | 協定驗證縮減：<br>• Rust 只驗框架。<br>• TS 直接讀 `contract.json`，只驗 request 參數與 id 回聲。<br>• Python 是唯一的 schema 驗證者。 | 使用者對稽核問題回覆「好」。問題原文：「協定驗證要不要縮減？目前一個訊息最多被驗 7 次。我建議 Rust 只驗框架，TS 直接讀 contract。如果論文要主張『三層驗證邊界』，就不能這樣縮。」驗證範圍依稽核 §4 #1 的建議「TS import contract，只驗 request 與 id 回聲」。 | • 論文不能宣稱 TS 或 Rust 是獨立的逐方法驗證層。<br>• event 是否連號只由 Python 保證並由 fixture 測試覆蓋，執行時不再交叉檢查。<br>• INV-011 過時。 |
 | U2 | 10 個 `knowledge.*` RPC 全部刪除。 | 先回覆「好」，再以選項確認「全部刪除」（2026-11-19）。 | 桌面的 RAG 仍走 composer 指令 `/init /ingest /sync /prune` 與 agent 的 `rag_*` 工具，兩者必須照常運作。 |
-| U3 | `desktop-projects.json` catalog 改成由對話目錄掃描推導。同時刪除 registration retry 與多專案殘留。 | 使用者回覆「好」。問題原文：「desktop-projects.json catalog 要不要改成直接掃描對話目錄？這樣可以一併刪掉註冊重試和多專案殘留。」 | 「catalog 指向不存在的對話時拒絕開啟專案」這個 fail-closed 行為消失：遺失的對話只是不出現在清單。稽核 §4 #4 把這列為前提。 |
+| U3 | `desktop-projects.json` catalog 改成由對話目錄掃描推導。同時刪除 registration retry 與多專案殘留。 | 使用者回覆「好」。問題原文：「desktop-projects.json catalog 要不要改成直接掃描對話目錄？這樣可以一併刪掉註冊重試和多專案殘留。」 | 消失兩個 fail-closed 行為：<br>1. 「catalog 指向不存在的對話時拒絕開啟專案」：遺失的對話只是不出現在清單。稽核 §4 #4 把這列為前提。<br>2. **空歷史目錄的專案歸屬**：現在 catalog 檔記著擁有者，即使還沒有任何對話，另一個專案也無法開啟或初始化同一個 `historyDirectory`（`catalog.py` 的 `_check_catalog_owner`）。改成只掃對話後，空目錄沒有任何歸屬證據。處理方式見 P11。 |
 | U4 | citation bundle 併入專案書目庫，書目庫成為唯一儲存。CLI 不再存檔。 | 「同意，但是要在note裡面紀錄這個決定，寫詳細點」。決策紀錄已在撰寫計劃時寫成 `note/20261119/citation_storage_unification_decision.md`。 | • 使用者決定的只有「合併」與「CLI 不再存檔」。<br>• 行為細節（決策紀錄 §4–§5）是計劃設計；其中會改變行為的部分列為 P7–P9。<br>• 撰寫時讀碼發現，稽核 S105「BibTeX 鏈只為產出 `reference.bib`」的說法漏了 CSL 與 BibTeX 的 DOI 交叉比對，詳見決策紀錄 §2.3 與 §6.1。 |
 | U5 | browser-preview 降級模式直接刪除，不改成假資料預覽。 | 選項「直接刪除」（2026-11-19）。 | 前端只支援在 Tauri 內執行；在一般瀏覽器開啟時顯示一般的後端無法連線錯誤。 |
 | U6 | 刪除對話 schema v1/v2 讀取器。 | 選項「刪除」（2026-11-19）。使用者已知道 `app/store` 以外的 `historyDirectory` 無法由我檢查。 | • 一個 v1/v2 檔案會成為 scan issue。<br>• 依現行的 INV-016 與 FAIL-026，scan issue 會讓**整個專案**無法開啟，不只是那一個對話。<br>• C2-S5 執行前要先唯讀確認 `app/store` 下沒有非 v3 檔案。 |
@@ -50,7 +50,7 @@
 
 ## 計劃提出、未經使用者逐項確認的做法
 
-下列 P1–P10 都可逆，且在 U10 的範圍內。使用者若不同意，可在啟動前修改本表，或在啟動提示中說明；沒有否決就照本表執行。最終彙報會逐項列出。
+下列 P1–P11 都可逆，且在 U10 的範圍內。使用者若不同意，可在啟動前修改本表，或在啟動提示中說明；沒有否決就照本表執行。最終彙報會逐項列出。
 
 | ID | 做法 | 理由 |
 |---|---|---|
@@ -64,6 +64,7 @@
 | P8 | 隨 BibTeX 移除的「doi.org CSL 與 BibTeX 的 DOI 交叉比對」不以其他方式補回。<br>也不新增「回應 DOI 必須等於要求 DOI」的檢查，因為現在沒有這個檢查，加上去會拒絕 alias DOI。 | 決策紀錄 §5.2、§6.1。identity 與書目內容本來都只取自 CSL。若論文需要這個交叉比對，就否決 P8，改用另一個來源比對。 |
 | P9 | 移除 `AgentConfig.citation_output_dir`、環境變數 `CITATION_OUTPUT_DIR`、diagnostics 的 `citationOutputPath`，以及 GUI 的「Citation output」顯示。 | 決策紀錄 §4.4：這些只用來指定或顯示 bundle 目錄。`.env` 若設了這個變數，之後不再有作用。 |
 | P10 | C9 把近似重複的顏色合併成同一個 CSS 變數。 | 稽核 S096。會造成肉眼幾乎看不出的顏色差異；每組合併都記入 evidence 與 GUI 清單。 |
+| P11 | 接受 U3 帶來的空歷史目錄歸屬變化，不另存擁有者標記。<br>• **新行為**：兩個專案的 `RESEARCH.md` 指向同一個空的 `historyDirectory` 時，兩者都能開啟或初始化。<br>• **之後的保護**：任一方寫入第一個對話後，另一方下次開啟會因歸屬不符被拒（INV-016 的 scan 檢查仍在）。<br>• **最壞情況**：兩方在目錄還空的時候都寫入對話，之後兩方都無法開啟，需要手動把對話檔分開。 | • 這種情況只會在手動把兩個專案的 `historyDirectory` 設成同一處時發生；預設路徑 `app/store/projects/<專案 ID>` 本來就互不相同。<br>• 保留保證的替代做法，是在 `initialize_project` 時寫一個只含 projectId 的擁有者標記檔，開啟時比對。這等於留下一個縮小版的 catalog，與 U3「刪掉 catalog」的方向相反，所以預設不採用。<br>• 若否決 P11，就改用這個替代做法：C6-S2 實作標記檔，並加上「空目錄被另一專案開啟時拒絕」的測試。 |
 
 ## 範圍
 
@@ -81,7 +82,7 @@
   - S121 中只因 U4 而失效的測試。
   - S123 中 bibliography handler 抽出成模組的部分。
 - 稽核 §5 的 7 個缺陷。
-- U1–U9 與 P1–P10。
+- U1–U9 與 P1–P11。
 
 ### 不納入（留待使用者決定，最終彙報列出）
 
@@ -103,7 +104,7 @@ S034（只搬家）、S035、S065、S068、S069、S095、S104、S107、S124。
 
 ## 必須保留的不變量
 
-除了 U1–U9、P1–P10 明列的改變，下列行為必須維持。驗收以既有測試與各階段列出的檢查為準。
+除了 U1–U9、P1–P11 明列的改變，下列行為必須維持。驗收以既有測試與各階段列出的檢查為準。
 
 - **Python 擁有 policy 與持久化寫入**（INV-015）。React 只經由協定到達 domain 操作；Rust 只管一個 Python child generation。
 - **安全邊界照舊**：

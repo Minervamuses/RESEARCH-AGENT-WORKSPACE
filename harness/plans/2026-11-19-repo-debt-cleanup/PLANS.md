@@ -20,7 +20,7 @@
 1. **C3 協定收斂**：同時改 TS、Rust、Python 三端，以及共用 fixtures。
 2. **C5 citation 單一儲存**：牽動驗證保證、模型看到的 `SKILL.md`，以及論文實驗的可比性。
 3. **C7 後端接縫**：`service.py` 4,643 行，忙碌判斷與 Stop 恢復的細節多。
-4. **C8、C9 拆解 `App()`**：`App()` 沒有任何整合測試，前端也沒有 DOM 測試工具，而且不得新增相依。執行者看不到畫面，只能靠 `tsc`、`vite build`、`npm test`、純邏輯測試與使用者的 GUI 清單。
+4. **C8、C9 拆解 `App()`**：`App()` 沒有任何整合測試。前端沒有互動式 DOM 測試工具，只能以 `react-dom/server` 做元件的靜態渲染測試，而且不得新增相依。執行者看不到畫面，只能靠 `tsc`、`vite build`、`npm test`（純邏輯測試加上靜態渲染測試）與使用者的 GUI 清單。
 
 ## 事實來源
 
@@ -73,7 +73,7 @@
 - Rust production 在 `backend.rs` 用到 `parse_protocol_value`、`parse_protocol_value_from_origin`、`validate_result_data`。
 - `backend.rs:1545-1546` 先 `emit_protocol` 再經 invoke 回傳，同一個 result 送了兩次。
 - `app/desktop/tsconfig.json` 已開 `resolveJsonModule`，`module: ESNext`，`moduleResolution: Bundler`，`include: ["src"]`。
-- `npm test` 是 `node --test --experimental-strip-types tests/*.test.ts`，Node `v24.18.0`。5 個測試檔用 Vite SSR 載入 `.tsx` 模組：`inline_skills`、`citation_preview`、`documents`、`conversations`、`trust`。
+- `npm test` 是 `node --test --experimental-strip-types tests/*.test.ts`，Node `v24.18.0`。5 個測試檔用 Vite SSR 載入 `.tsx` 模組：`inline_skills`、`citation_preview`、`documents`、`conversations`、`trust`。其中 4 個（`citation_preview`、`documents`、`conversations`、`trust`）以 `react-dom/server` 的 `renderToStaticMarkup` 對元件做靜態渲染測試。
 
 ### citation 與 catalog
 
@@ -297,7 +297,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 |---|---|
 | `App()` 沒有整合測試，拆解時的回歸自動檢查看不到 | • C8-S1 先寫行為盤點。<br>• 狀態邏輯盡量抽成可直接測的純函式。<br>• 每個 hook 或元件各自一個 commit。<br>• 交付 GUI 清單給使用者。 |
 | U1 之後 Python 驗證器的錯誤不再被 TS 或 Rust 攔下 | 這是 U1 接受的後果。Python 端的 contract 與 fixture 測試保持完整，每個方法至少一個合法例與一個非法例。 |
-| C5 拆掉 BibTeX 時驗證保證中斷 | C5-S1 先建立保證對照，C5-S2 先補檢查，再於 C5-S3 刪除。 |
+| C5 拆掉 BibTeX 時驗證保證中斷 | C5-S1 先建立保證對照，C5-S2 先補檢查，C5-S3 先移除桌面端的依賴，C5-S4 才刪除模組。 |
 | U6 讓 `app/store` 以外的舊對話無法讀取 | 使用者已接受。C2-S5 先確認 `app/store` 內沒有非 v3 檔案。 |
 | 行號漂移 | 一律以符號與 grep 重新定位。稽核行號只當線索。 |
 | 用量上限中斷 | 每步 commit。依 build-log 與 git log 續作。 |
