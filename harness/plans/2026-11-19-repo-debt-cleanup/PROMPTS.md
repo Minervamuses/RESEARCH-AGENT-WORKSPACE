@@ -14,7 +14,7 @@
 > 先讀適用的 AGENTS.md、[GOALS.md](GOALS.md)、[PLANS.md](PLANS.md)、[build-log.md](build-log.md)，再依 PLANS 的相依關係讀取下一個可執行的 build 階段檔；遇到局部阻塞時，先做其他前提已滿足的階段。開始工作前，先唯讀核對目前的 GUI 分支、HEAD 與工作樹，以步驟 ID 對照 build-log 與 git log 中已完成的步驟，並保留與本計劃無關的既有檔案。依 PLANS 的執行契約做事，並遵守以下要求：
 >
 > - **我送出這段提示，就代表授權整份計劃列明的工作。** 不要為已授權的工作重複請求確認。需要追加授權的工作，停止相應部分，並在最終彙報列明。
-> - **不呼叫任何付費 API。** 不得啟動會連 OpenRouter 的 CLI 或桌面 app；所有測試用假模型。免費的 Crossref、DataCite、doi.org 只可用於 C5-S7 的選擇性冒煙測試。
+> - **不呼叫任何付費 API。** 不得啟動會連 OpenRouter 的 CLI 或桌面 app；所有測試用假模型。免費的 Crossref、DataCite、doi.org 只可用於 C5-S6 的選擇性冒煙測試。
 > - **GUI 驗收留給我本人操作。** 你交付清單即可，不要停下來等我，也不要宣稱 GUI 已驗證。
 > - **隔離問題並繼續獨立工作。** 同一問題兩次聚焦修正失敗，只封鎖該問題與相依步驟，記錄為 Blocked，繼續其他已滿足前提的工作；剩餘工作全部被阻塞時才停止並彙報。不得把必要檢查的失敗改成通過。
 > - **每一步皆強制 commit。** 每個步驟完成檢查、更新 build-log 後都在本地 commit，成功後才進入下一步；執行中新增的修正步驟、計劃修訂，以及檢查失敗時保留證據的 checkpoint 也一樣。只 `git add` 明確路徑，計劃 build/ 下的檔案用 `git add -f`；不得以未提交的修改結束。
@@ -23,7 +23,7 @@
 > 這個請求授權：
 > - 計劃列明的程式、skill 文字、測試與文件修改，以及本地 commit；
 > - PLANS 所列的局部檢查與完整檢查（pytest、npm test、npm run build、cargo test --locked）；
-> - C5-S6 以 Poetry 移除 pybtex（只限這一項相依變更）。
+> - C5-S5 以 Poetry 移除 pybtex（只限這一項相依變更）。
 >
 > 不授權：
 > - 其他相依的新增、升級或移除；

@@ -130,7 +130,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 **不變的部分**：
 
 - process event（4 個）不變。
-- 錯誤碼依 P3 移除沒有 producer 的部分，結果記在 C4-S5 與 C6-S4。
+- 錯誤碼依 P3 移除沒有 producer 的部分，結果記在 C4-S5 與 C10-S0。
 - 斜線指令仍會用到的錯誤碼都**保留**，包括 `OLLAMA_UNREACHABLE`、`OLLAMA_MODEL_MISSING`、`BUSY_KNOWLEDGE_MUTATION`。
 - approval operation enum 中的 `knowledge.init_workspace`、`knowledge.ingest_file`、`knowledge.ingest_folder`、`knowledge.prune_apply` 是斜線指令的核准名稱，不是 RPC 方法，同樣**保留**（GOALS A3）。
 
@@ -147,7 +147,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 | C7 | `ChatSession` 有公開介面，忙碌判斷集中，Stop 可恢復，fixture 移到 tests，`service.py` 模組化 | C2、C4、C5、C6 | G5、G7 | [phase-07-backend-seams.md](build/phase-07-backend-seams.md) |
 | C8 | 前端純邏輯模組化並受型別檢查，`api.ts` 唯一呼叫後端，hooks 承接 `App()` 的 state，preview stub 移除，錯誤遮蔽修正 | C3、C4、C5、C6 | G6、G7 | [phase-08-frontend-logic.md](build/phase-08-frontend-logic.md) |
 | C9 | 元件拆出，dialog 與 menu 共用，CSS 變數化，釘住 layout 的測試改為行為斷言 | C8 | G6 | [phase-09-frontend-presentation.md](build/phase-09-frontend-presentation.md) |
-| C10 | 文件與現況一致，完整測試通過，最終彙報完成 | C2–C9 | G9 | [phase-10-delivery.md](build/phase-10-delivery.md) |
+| C10 | 跨階段詞彙已比對，文件與現況一致，完整測試通過，最終彙報完成 | C2–C9 | G9、G2 | [phase-10-delivery.md](build/phase-10-delivery.md) |
 
 **執行順序**：依表格順序。
 
@@ -173,7 +173,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 | C7 | • S020（P5）、S021、S022<br>• S031、S037<br>• S052、S043、與 S052 有關的 S066 部分<br>• S028 與 FAIL-022（P4，缺陷 #1）<br>• `service.py` 模組化，其中 S034 搬到 `errors.py`、S123 的 bibliography handler 抽出 |
 | C8 | • S083、S082、S093、S071 的 snapshot 型別統一<br>• S078（U5）、S089（P6，缺陷 #3）<br>• S097 的 hooks、S080、S079 |
 | C9 | S097 的元件、S081、S096（含 P10）、S086、S087、S088 |
-| C10 | 文件更新、完整驗證、最終彙報 |
+| C10 | 跨階段詞彙收尾（C10-S0：目標詞彙比對、P3 錯誤碼複查）、文件更新、完整驗證、最終彙報 |
 
 缺陷 #5（`turn_logs`）就是 S047，歸 C2。
 
@@ -203,7 +203,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 - **在沙箱外執行**，因為 supervisor 測試寫死 `/tmp`。
 - `target/` 已被 `app/desktop/.gitignore` 忽略。
 
-**相依（只用於 C5-S6）**
+**相依（只用於 C5-S5）**
 
 - 從 `app/`，在 Conda env `app` 內執行 `poetry remove pybtex`。
 - 可能需要連 `pypi.org` 與 `files.pythonhosted.org`。在沙箱內要宣告這兩個網域，或改在沙箱外執行。
@@ -297,7 +297,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 |---|---|
 | `App()` 沒有整合測試，拆解時的回歸自動檢查看不到 | • C8-S1 先寫行為盤點。<br>• 狀態邏輯盡量抽成可直接測的純函式。<br>• 每個 hook 或元件各自一個 commit。<br>• 交付 GUI 清單給使用者。 |
 | U1 之後 Python 驗證器的錯誤不再被 TS 或 Rust 攔下 | 這是 U1 接受的後果。Python 端的 contract 與 fixture 測試保持完整，每個方法至少一個合法例與一個非法例。 |
-| C5 拆掉 BibTeX 時驗證保證中斷 | C5-S1 先建立保證對照，C5-S2 先補檢查，C5-S3 先移除桌面端的依賴，C5-S4 才刪除模組。 |
+| C5 拆掉 BibTeX 時驗證保證中斷 | C5-S1 先建立保證對照，C5-S2 先補檢查，C5-S3 才在同一個 commit 內刪除模組並切換桌面端。 |
 | U6 讓 `app/store` 以外的舊對話無法讀取 | 使用者已接受。C2-S5 先確認 `app/store` 內沒有非 v3 檔案。 |
 | 行號漂移 | 一律以符號與 grep 重新定位。稽核行號只當線索。 |
 | 用量上限中斷 | 每步 commit。依 build-log 與 git log 續作。 |
