@@ -7,7 +7,7 @@
 > **給使用者的前提說明**（不是給執行者的指令）：
 > - 執行者不會停下來等你，但宿主對沙箱外指令的權限提示不受本計劃控制。完整 pytest、`cargo test`、`poetry remove` 都需要在沙箱外執行。希望啟動後離開、回來時已經跑完，請以不逐次詢問的權限模式啟動；否則執行會停在第一個需要沙箱外權限的指令（C1-S2）。
 > - 執行可能因為用量上限而中斷，再次送出同一段提示即可續作。
-> - GOALS 的 P1–P7 是計劃提出、你尚未逐項確認的做法。若要否決某一項，請在送出提示前修改 GOALS，或在提示末尾加一句，例如「P2 不做」。
+> - GOALS 的 P1–P10 是計劃提出、你尚未逐項確認的做法。若要否決某一項，請在送出提示前修改 GOALS，或在提示末尾加一句，例如「P2 不做」。
 
 > 執行 harness/plans/2026-11-19-repo-debt-cleanup/ 計劃，一次執行到底。
 >
@@ -28,7 +28,7 @@
 > 不授權：
 > - 其他相依的新增、升級或移除；
 > - 付費模型呼叫、push 或發佈；
-> - 修改 for_agents/、AGENTS.md、note/ 的既有內容、其他計劃、~/.claude/、我的論文資料夾、任何 RESEARCH.md、app/store/ 的資料或 cite/ 的殘留檔案。
+> - 修改 for_agents/、AGENTS.md、note/ 的既有內容（唯一的例外是依 GOALS 在本計劃決策紀錄末尾追加更正）、其他計劃、~/.claude/、我的論文資料夾、任何 RESEARCH.md、app/store/ 的資料或 cite/ 的殘留檔案。
 >
 > 需要保留的證據放在計劃目錄的 evidence/，不要只放在 /tmp。
 
@@ -43,7 +43,7 @@
 
 ## 審查
 
-> 唯讀審查此計劃。對照 GOALS 的 G1–G9、U1–U10、P1–P7、A1–A5，以及決策紀錄 note/20261119/citation_storage_unification_decision.md，檢查：
+> 唯讀審查此計劃。對照 GOALS 的 G1–G9、U1–U10、P1–P10、A1–A5，以及決策紀錄 note/20261119/citation_storage_unification_decision.md，檢查：
 > - 每個目標是否有階段與可觀察的驗收；
 > - S-ID 歸屬表是否與 GOALS 的範圍一致；
 > - 相依關係與第一步；

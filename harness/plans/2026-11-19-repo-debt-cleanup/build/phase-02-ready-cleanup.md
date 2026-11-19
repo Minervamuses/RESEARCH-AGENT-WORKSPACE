@@ -32,14 +32,15 @@
 | C2-S7 | **Rust 與啟動器。**<br>• S014：刪 `capabilities/main.json` 的 `core:app:allow-tauri-version`。<br>• S098：PowerShell 腳本只設定一次 `InputEncoding`。<br>• S101：`BackendSupervisor::new` 與 `for_test` 共用一個建構路徑。<br>• S102：`main.py` 刪掉對不存在的 `public/` 目錄的特判。 | `cargo test --locked`（沙箱外）通過，它會經由 tauri-build 驗證 capability；`npm run build` 通過；`python main.py --help` 或等價的語法檢查不出錯。若 `main.py` 沒有無副作用的檢查方式，改用 `python -m py_compile main.py`。 |
 | C2-S8 | **前端小項目與缺陷 #2。**<br>• S073：`conversationInteractionState` 的三個欄位都等於 `turnActive`，呼叫端直接用 `turnActive`。<br>• S074：刪只為測試存在的 `sessionCreateParams`。<br>• S075：四份 backend snapshot／lifecycle 處理合成一個 `applyBackendSnapshot()`。<br>• S076：刪死 CSS 規則。<br>• S092：`generation`、`projectEpoch` 改成必填。<br>• 缺陷 #2：為 `.error-text` 加上錯誤樣式，沿用 `styles.css` 既有的錯誤色，不新增顏色。 | `npm test`、`npm run build` 通過；`grep -n "error-text" src/styles.css` 有規則。加入 GUI 清單：Stop 失敗訊息與 source editor 問題訊息以錯誤色顯示；backend 重啟與 crash 後的畫面狀態與之前相同。 |
 | C2-S9 | **Repo 整潔。**<br>• S128（缺陷 #7）：先讀 `app/desktop/watch.out`，確認它只是 picker 調查留下的 watch 輸出，再刪除。它沒有被追蹤，刪了無法用 git 復原。evidence 只記「已刪除」與檔案大小，不記內容，因為內容含視窗標題。<br>• S129：刪 repo 根目錄被 ignore 的過期 `__pycache__/` 與空目錄 `harness/plans/.claude/.cc-writes`（含其上層空的 `.claude/`）。 | `git status` 顯示這些項目已不在；沒有任何被追蹤的檔案改變。內容若不符預期（例如 `watch.out` 不是 watch 輸出），就不刪，標為 Blocked 並回報。 |
-| C2-S10 | **階段收尾。** 完整 pytest（沙箱外）、`npm test`、`npm run build`。C2-S7 已跑過 cargo，之後沒有再改 Rust，所以本步不重跑。 | 全部通過，或只剩 C1 記錄的既有失敗。結果寫入 build-log。 |
+| C2-S10 | **桌面後端小項目。**<br>• S023：`_execute_desktop_extension_command` 只回傳結果，不再回傳呼叫端會丟掉的第二個值；呼叫端不再重算它。<br>• S024：只呼叫一次的 async 包裝 `_apply_controls` inline 到呼叫端。<br>• S026：`documents.py` 的 `undo` 對 `validate_snapshot` 只呼叫一次；`prepare` 建好 candidate 後不再重複檢查。刪除前先確認兩次檢查之間沒有狀態變化（例如重新讀檔）；有的話就保留，並在 evidence 註明理由。 | `tests/test_desktop_service.py`、`test_desktop_documents.py`、`test_desktop_document_service.py`（沙箱外）、`test_extension_*.py` 通過。 |
+| C2-S11 | **階段收尾。** 完整 pytest（沙箱外）、`npm test`、`npm run build`。C2-S7 已跑過 cargo，之後沒有再改 Rust，所以本步不重跑。 | 全部通過，或只剩 C1 記錄的既有失敗。結果寫入 build-log。 |
 
 每一步一個 commit。scope 依子系統，例如 `refactor(thinking): drop sync review helpers [C2-S1]`、`chore(repo): remove stale watch output [C2-S9]`。
 
 ## 驗收
 
 - 歸屬 C2 的每個 S-ID 在 build-log 都有結果：APPLIED，或 Blocked 附理由。
-- C2-S10 的完整測試在最後狀態上通過。
+- C2-S11 的完整測試在最後狀態上通過。
 - `evidence/C2-S5/store-versions.md` 存在。每一步的測試退役紀錄都附在該步的 evidence 或 build-log 事件中。
 
 ## 交給後續階段

@@ -127,7 +127,12 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 
 `request.started`、`turn.accepted`、`stage.changed`、`tool.started`、`tool.finished`、`tool.failed`、`document.proposed`、`approval.required`
 
-**不變的部分**：process event（4 個）不變；錯誤碼依 P3 移除沒有 producer 的部分，結果記在 C4-S6 與 C6-S4。
+**不變的部分**：
+
+- process event（4 個）不變。
+- 錯誤碼依 P3 移除沒有 producer 的部分，結果記在 C4-S5 與 C6-S4。
+- 斜線指令仍會用到的錯誤碼都**保留**，包括 `OLLAMA_UNREACHABLE`、`OLLAMA_MODEL_MISSING`、`BUSY_KNOWLEDGE_MUTATION`。
+- approval operation enum 中的 `knowledge.init_workspace`、`knowledge.ingest_file`、`knowledge.ingest_folder`、`knowledge.prune_apply` 是斜線指令的核准名稱，不是 RPC 方法，同樣**保留**（GOALS A3）。
 
 ## 路線
 
@@ -160,14 +165,14 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 
 | 階段 | S-ID 與其他項目 |
 |---|---|
-| C2 | • Agent 核心：S038、S039、S040、S041、S042、S044、S046（U6）、S047<br>• Skills 與測試：S061、S062、S063、S109、S122<br>• RAG：S114、S115、S117<br>• Rust 與啟動器：S014、S098、S101、S102<br>• 前端：S073、S074、S075、S076、S092，以及 `.error-text` 樣式（缺陷 #2）<br>• Repo：S128（缺陷 #7）、S129 |
+| C2 | • Agent 核心：S038、S039、S040、S041、S042、S044、S046（U6）、S047<br>• Skills 與測試：S061、S062、S063、S109、S122<br>• RAG：S114、S115、S117<br>• Rust 與啟動器：S014、S098、S101、S102<br>• 前端：S073、S074、S075、S076、S092，以及 `.error-text` 樣式（缺陷 #2）<br>• Repo：S128（缺陷 #7）、S129<br>• 桌面後端：S023、S024、S026 |
 | C3 | • S001、S002、S003（缺陷 #4）、S004、S005<br>• S011、S012、S090<br>• S071 的兩個死 DTO、S072、S085 |
-| C4 | • S006、S007（U2＋P1）、S008、S009、S010、S016（U8＋P2）、P3<br>• 只屬於 knowledge 的 S032、S036 部分 |
-| C5 | • S105（U4）、S106（隨 S105 消失）<br>• S108、S110、S118、S119、S120<br>• S029<br>• U9、只因 U4 而失效的 S121 測試<br>• `doi_org._encoded` 型別（缺陷 #6） |
+| C4 | • S006、S007（U2＋P1）、S008、S009、S010、S016（U8＋P2）、P3<br>• 只因移除功能而失效的 S036 測試 |
+| C5 | • S105（U4、P7、P8）、S106（隨 S105 消失）<br>• S108、S110、S118、S119、S120<br>• S029<br>• U9、P9、只因 U4 而失效的 S121 測試<br>• `doi_org._encoded` 型別（缺陷 #6） |
 | C6 | S018、S019、S027、S070、`session.retry_registration` 與 registration 欄位（U3） |
 | C7 | • S020（P5）、S021、S022<br>• S031、S037<br>• S052、S043、與 S052 有關的 S066 部分<br>• S028 與 FAIL-022（P4，缺陷 #1）<br>• `service.py` 模組化，其中 S034 搬到 `errors.py`、S123 的 bibliography handler 抽出 |
 | C8 | • S083、S082、S093、S071 的 snapshot 型別統一<br>• S078（U5）、S089（P6，缺陷 #3）<br>• S097 的 hooks、S080、S079 |
-| C9 | S097 的元件、S081、S096、S086、S087、S088 |
+| C9 | S097 的元件、S081、S096（含 P10）、S086、S087、S088 |
 | C10 | 文件更新、完整驗證、最終彙報 |
 
 缺陷 #5（`turn_logs`）就是 S047，歸 C2。
