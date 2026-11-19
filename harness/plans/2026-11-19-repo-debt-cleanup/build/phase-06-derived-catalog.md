@@ -9,7 +9,7 @@
 - **涵蓋**：G4、G2
 - **相依**：C3
 - **輸入**：
-  - [GOALS.md](../GOALS.md) 的 U3 與其後果、P11。
+  - [GOALS.md](../GOALS.md) 的 U3 與其後果、P11／U11。
   - [稽核原文](../context/repo-debt-audit-2026-11-19.md)的 S018、S019、S027、S070。
   - [PLANS.md](../PLANS.md)「基線」對 catalog 的描述。
 
@@ -30,7 +30,7 @@
    - 現在即使沒有任何對話，`_check_catalog_owner` 也會拒絕另一個專案開啟或初始化同一個 `historyDirectory`。
    - 依 P11，這個保證消失；目錄裡有對話之後的歸屬檢查照舊。
    - 只為空目錄歸屬存在的測試，依退役規則刪除。
-   - **若使用者否決 P11**：C6-S2 改為在 `initialize_project` 寫一個只含 projectId 的擁有者標記檔，`open_project_history` 比對它；並保留或改寫「空目錄被另一專案開啟時拒絕」的測試。標記檔的檔名與格式記入 build-log。
+   - 使用者已接受 P11（GOALS U11），不實作擁有者標記檔。
 
 ## 步驟
 

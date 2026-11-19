@@ -140,6 +140,28 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
    - 問題：C6 收尾要求剛好 26 個方法，也要更新 C4 的錯誤碼清單，C4 被阻塞時 C6 就無法驗收。
    - 修正：C4 與 C6 都只驗收自己負責移除的項目。完整清單比對與 P3 錯誤碼複查移到新的 C10-S0；C10 的涵蓋目標加上 G2，plan-index 同步更新。
 
+### CA4 使用者接受 P11，並依 Codex 第三輪審核修訂（2026-11-19）
+
+**使用者決定**：回覆「P11接受」，記為 GOALS U11。C6 不實作擁有者標記檔，原本的否決分支已刪除。
+
+**Codex 第三輪審核**（對 `fbf1e5f`）共 4 點，撰寫者讀碼確認都成立：
+
+1. **C7 可能永久卡在忙碌。**
+   - 讀碼確認：`fixtures.json` 的 `session-stop-before-prompt-acceptance` 中，受理前就 Stop 的合法結果是 `state=null`、`accepted=false`、`persisted=false`，沒有終止紀錄可等。
+   - 修正：C7-S5 的解鎖條件改為「清理成功」加上以下其一：已持久化為 terminal，或已確認未受理且未落盤。讀取失敗或仍是 pending 時維持封鎖。補上這兩種情況的測試。
+2. **C3 漏了失敗回應的 ID 比對。**
+   - 讀碼確認：`protocol.ts` 約 2314–2318 行對 `session.turn`、`extensions.apply` 的失敗回應比對 `error.details.turnId`。
+   - 修正：回聲比對規則保留這一項，並沿用現有的錯誤 ID 案例驗收。
+3. **C8 的替代測試少驗一層。**
+   - 讀碼確認：`approvalHasLiveOwner` 已有單元測試（`trust.test.ts` 約 387 行）。原本的原始碼測試還守著「發出 `bibliography.add` 時登記擁有者」與「listener 接受相符的 `approval.required`」。
+   - 修正：approval 擁有者追蹤抽成純狀態模組，測完整流程：發出 add、接受相符事件、進行中不清除、結束後清除、不相符不接受。
+4. **C5-S3 的搜尋會提早失敗。**
+   - 讀碼確認：`skills/citation/README.md` 第 50 行列出 `bibtex_canonical.py`。
+   - 修正：C5-S3 只搜 `.py` 程式碼，文件留給 C5-S4 檢查。
+   - 撰寫者另外補查發現兩件事，一併修正：
+     - `agent/extensions/startup.py` 的 `_installed_bundle_path` 會被子字串搜尋誤中，所以改用 `grep -w` 整字比對；
+     - `skills/citation/__init__.py` 的 docstring 提到 pybtex，所以改到 C5-S3 一起修改。
+
 ## 事件
 
 （執行開始後在此依步驟 ID 追加事件：觀察到的改變、執行的指令與結果、證據位置、限制、下一步。）
