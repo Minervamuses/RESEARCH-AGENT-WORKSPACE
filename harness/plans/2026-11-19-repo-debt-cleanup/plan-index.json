@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "plan_id": "repo-debt-cleanup-2026-11-19",
+  "goals": [
+    {"id": "G1", "text": "Protocol has one hand-written source: TS imports contract.json, Rust checks framing only, Python validates once"},
+    {"id": "G2", "text": "Wire vocabulary is limited to used methods, events, fields and error codes"},
+    {"id": "G3", "text": "Citations are stored only in the project bibliography; BibTeX chain and pybtex removed; guarantees kept"},
+    {"id": "G4", "text": "Desktop conversation list is derived from the history scan; catalog file and registration retry removed"},
+    {"id": "G5", "text": "Backend seams: public ChatSession API, one operation-state object, recoverable Stop, fixture in tests, service split"},
+    {"id": "G6", "text": "Frontend foundation: pure modules, api.ts, hooks, components, shared modal and menu, CSS tokens, behavioral tests"},
+    {"id": "G7", "text": "Audit defects fixed"},
+    {"id": "G8", "text": "READY cleanups applied and conversation readers limited to schema v3"},
+    {"id": "G9", "text": "Baseline, full verification, updated docs and final report"}
+  ],
+  "phases": [
+    {"id": "C1", "file": "build/phase-01-preflight.md", "depends_on": [], "covers": ["G9"]},
+    {"id": "C2", "file": "build/phase-02-ready-cleanup.md", "depends_on": ["C1"], "covers": ["G7", "G8"]},
+    {"id": "C3", "file": "build/phase-03-protocol-single-source.md", "depends_on": ["C1"], "covers": ["G1", "G7", "G8"]},
+    {"id": "C4", "file": "build/phase-04-wire-vocabulary.md", "depends_on": ["C3"], "covers": ["G2"]},
+    {"id": "C5", "file": "build/phase-05-citation-single-store.md", "depends_on": ["C3"], "covers": ["G3", "G7", "G8"]},
+    {"id": "C6", "file": "build/phase-06-derived-catalog.md", "depends_on": ["C3"], "covers": ["G4", "G2"]},
+    {"id": "C7", "file": "build/phase-07-backend-seams.md", "depends_on": ["C2", "C4", "C5", "C6"], "covers": ["G5", "G7"]},
+    {"id": "C8", "file": "build/phase-08-frontend-logic.md", "depends_on": ["C3", "C4", "C5", "C6"], "covers": ["G6", "G7"]},
+    {"id": "C9", "file": "build/phase-09-frontend-presentation.md", "depends_on": ["C8"], "covers": ["G6"]},
+    {"id": "C10", "file": "build/phase-10-delivery.md", "depends_on": ["C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"], "covers": ["G9"]}
+  ]
+}
