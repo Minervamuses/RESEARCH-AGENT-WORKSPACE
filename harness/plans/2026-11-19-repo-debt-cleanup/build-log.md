@@ -1,6 +1,8 @@
 # 執行紀錄
 
-本檔是本計劃唯一的狀態來源。目前只完成了撰寫；**C1–C10 都還沒有開始，也沒有執行過任何實作或產品測試。**
+本檔是本計劃唯一的狀態來源。目前只完成了撰寫與 2026-11-20 的修訂（CA5）；**C1–C10 都還沒有開始，也沒有執行過任何實作或產品測試。**
+
+「撰寫紀錄」中 CA0–CA4 提到的步驟編號是當時的編號；CA5 重新整理了 C2、C3、C7、C8 的步驟，現行編號以 `build/phase-*.md` 為準。
 
 ## 目前狀態
 
@@ -161,6 +163,39 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
    - 撰寫者另外補查發現兩件事，一併修正：
      - `agent/extensions/startup.py` 的 `_installed_bundle_path` 會被子字串搜尋誤中，所以改用 `grep -w` 整字比對；
      - `skills/citation/__init__.py` 的 docstring 提到 pybtex，所以改到 C5-S3 一起修改。
+
+### CA5 依產品邊界與人工審查重寫計劃（2026-11-20）
+
+**依據**
+
+- 使用者轉來的人工審查討論結論。結論是：計劃不需要重選架構，但先前的審查與分析沒有先確認產品要支援什麼，就設計如何處理所有情況；應以產品邊界為第一個判斷條件，修正幾個錯誤設計與驗收標準。
+- 使用者提交的三份文件 commit：`19a661d`（README）、`90d8d58`（AGENTS.md）、`3f87f09`（CLAUDE.md），寫下單人、本地、一次一個專案、一個對話、一個回合的產品邊界。
+- 撰寫者以選項詢問的一題：書目庫寫入失敗的文獻是否仍可在當次對話引用。使用者選「A：不可引用」。
+- 使用者授權大幅改寫：「不要追求最小改動，因為會導致不乾淨，需要的地方就大改」。
+
+**讀碼確認**（HEAD `3f87f09`；`git diff --stat 3b6cfd8..3f87f09 -- app` 為空，所以基線行號不變）
+
+- `skills/citation/service.py::_link_library`：同一批次較早一筆剛加入記憶體的作品，之後的同一作品被報成 `existing`；若整批寫入失敗，它仍是 `existing`。這是討論所說的「同批重複 DOI 誤報」。
+- `SourceRegistry.register` 對同一 identity 重複登記不拒絕；`session_policy.py` 依 `saved`／`reused`／其他計算存檔計數，新增狀態值必須同步改計數。
+- `project.list` 唯一的呼叫者是 `App.tsx::loadSelectedProjectHistory`；選取恢復的 effect 讀 `catalog.selectedSessionId` 與 `resumeSelectionRef`。
+- `_session_turn` 在回合開始時設定 `installer.bypass_approval`，文件回合設定 `session._document_turn_active` 與 thinking mode，`finally` 再逐一還原，連同 `DesktopService` 的 10 個回合欄位。`finally` 中較早的呼叫若拋錯，之後的還原不會執行。
+- 送往 WebView 的錯誤訊息都經過 `protocol.py::bounded_error_message`（含 `server.py` 兩處），它只截斷不遮蔽；`diagnostics.redact_text` 已用於 log。
+- contract 的 schema 只有 13 種欄位型別，`typescript` devDependency 是 6.0.3，所以可以用 compiler API 比對 DTO 與 contract。
+
+**修訂內容**
+
+1. **GOALS 重寫**：新增「產品邊界」一節與審查規則；新增 2026-11-20 的決策 U12–U19 與否決或延後項 R1–R6；P4、P6、P7、P10 退役（分別由 U14、U15、U13、R4 取代）；新增 P12（media query 整併延後、CSS 只依原順序分檔）與 P13（registry 衝突改報 `identity_conflict`）；G1、G3–G7、G9 的驗收改寫；新增假設 A6、A7；限制加入產品邊界，並把 `CLAUDE.md` 列為不修改。
+2. **C5 存檔語意（U13）**：取代原 P7。桌面「可引用 ⇔ 已在書目庫」，寫入失敗是 `storage_failed` 且不登記；同一批次重複作品依第一筆的結果；CLI 一律 `verified`；`CitationSaveMetrics` 新增 `verified_count`；`BibliographyLink` 只剩 `added`／`existing`。驗收測試改寫為 (a)–(j)。決策紀錄 §4 依此改寫，並新增 §10 修訂紀錄。
+3. **C3 加 DTO 一致性檢查（U16）**：新步驟 C3-S3，以 `typescript` compiler API 比對 `MethodResults`、`EventData` 與 contract；C8-S3 再擴充到 `MethodParams`。原 C3-S3～S5 改為 S4～S6。C1-S4 加探測 compiler API。
+4. **錯誤遮蔽改到 Python 出口（U15）**：從原 C8-S5 移到新的 C2-S11，遮蔽位置從 `_map_exception` 改為 `bounded_error_message`，測試必須走真實的動態訊息路徑。原 C2-S11 收尾改為 C2-S12。
+5. **C6**：加入刪除 `project.list`、保留選取恢復（U19）與掃描量測（R3，新步驟 C6-S4）；收尾改為 C6-S5。
+6. **C7 重排**：新步驟 C7-S5 每回合參數（U17），涵蓋 installer bypass、文件回合旗標、thinking 覆寫與 `DesktopService` 的 10 個回合欄位；忙碌判斷（C7-S6）與 Retry Stop（C7-S7）分開，忙碌判斷明訂不改規則、不建衝突表；Retry Stop 改用公開的 `reload_and_recover`；模組化與收尾改為 C7-S8、C7-S9。
+7. **C8 重寫（U18）**：取消固定的七個 hooks；新增拆解原則（可測性來自純邏輯、不引入全域 store、hook 之間不互傳 ref 或 setter、跨 domain 協調集中、必要檢查都有純函式測試）；S079、S080 合為 C8-S5；C8-S6 依 domain 拆解並逐一記錄 hook 的參數。
+8. **C9**：取消色彩 token 與近似色合併（R4）與 media query 整併（P12）；CSS 只切成依原順序排列的連續區段，以打包後的 CSS 前後比對驗收。
+9. **C10**：目標方法數改為 25；最終彙報加入產品邊界檢查與掃描量測；文件更新不碰 README 的產品限制一節。
+10. **PLANS、PROMPTS、plan-index**：同步更新基線、目標詞彙、路線、S-ID 歸屬、執行契約（新增「產品邊界檢查」）、風險表、啟動與審查提示。
+
+**沒有採用的建議**（理由見 GOALS R1–R6）：大型 WorkspaceStore／controller、階層式鎖與正規化的忙碌衝突表、恢復 fixture 預覽、立即加掃描快取、CSS 色彩收斂、S056、回合開始時檢查待核准項目。
 
 ## 事件
 

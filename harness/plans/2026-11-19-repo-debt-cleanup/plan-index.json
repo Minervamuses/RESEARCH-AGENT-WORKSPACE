@@ -4,31 +4,31 @@
   "goals": [
     {
       "id": "G1",
-      "text": "Protocol has one hand-written source: TS imports contract.json, Rust checks framing only, Python validates once"
+      "text": "Protocol has one hand-written source: TS imports contract.json, DTO drift fails npm test, Rust checks framing only, Python validates once"
     },
     {
       "id": "G2",
-      "text": "Wire vocabulary is limited to used methods, events, fields and error codes"
+      "text": "Wire vocabulary is limited to used methods (25), events, fields and error codes"
     },
     {
       "id": "G3",
-      "text": "Citations are stored only in the project bibliography; BibTeX chain and pybtex removed; guarantees kept"
+      "text": "Citations are stored only in the project bibliography with honest save outcomes (desktop citable iff persisted, CLI verified); BibTeX chain and pybtex removed; guarantees kept"
     },
     {
       "id": "G4",
-      "text": "Desktop conversation list is derived from the history scan; catalog file and registration retry removed"
+      "text": "Desktop conversation list is derived from the history scan; catalog file, project.list and registration retry removed; selection recovery kept; scan cost measured"
     },
     {
       "id": "G5",
-      "text": "Backend seams: public ChatSession API, one operation-state object, recoverable Stop, fixture in tests, service split"
+      "text": "Backend seams: public ChatSession API, per-turn options, consolidated busy checks without new rules, recoverable Stop, fixture in tests, service split"
     },
     {
       "id": "G6",
-      "text": "Frontend foundation: pure modules, api.ts, hooks, components, shared modal and menu, CSS tokens, behavioral tests"
+      "text": "Frontend foundation: tested pure logic, hooks only along clean domain boundaries, api.ts, components, shared modal and menu, order-preserving CSS split, behavioral tests"
     },
     {
       "id": "G7",
-      "text": "Audit defects fixed"
+      "text": "Audit defects fixed, including error redaction at the single Python exit"
     },
     {
       "id": "G8",
@@ -36,7 +36,7 @@
     },
     {
       "id": "G9",
-      "text": "Baseline, full verification, updated docs and final report"
+      "text": "Baseline, full verification, updated docs and final report with product-boundary review"
     }
   ],
   "phases": [
@@ -128,8 +128,7 @@
         "C6"
       ],
       "covers": [
-        "G6",
-        "G7"
+        "G6"
       ]
     },
     {

@@ -1,9 +1,10 @@
-# C2 — 零風險清理與小缺陷
+# C2 — 零風險清理、錯誤出口與小缺陷
 
 - **完成後的狀態**：下列項目已套用並通過對應檢查：
   - [PLANS.md](../PLANS.md#s-id-歸屬) 中歸屬 C2 的 READY 項目；
   - U6（刪除對話 schema v1/v2 讀取器）；
   - S047（`turn_logs`）；
+  - U15（錯誤訊息只在 Python 出口遮蔽一次）；
   - 缺陷 #2（`.error-text` 無樣式）與 #7（`watch.out`）。
 - **涵蓋**：G7、G8
 - **相依**：C1
@@ -29,21 +30,24 @@
 | C2-S4 | **RAG。**<br>• S114：`VectorRetriever` inline 到 `rag/api.py`，刪掉 `rag/retriever/`。若 `rag/__init__.py` 的 lazy `__getattr__` 對照表提到它，一併更新。`tests/rag/test_tools_contract.py:64` 依賴 lazy 行為，不可破壞。<br>• S115：刪 `rag/store/base.py` 的 `BaseStore`。<br>• S117：修正 `rag/llm/__init__.py` 與實際用法矛盾的註解。 | `tests/rag/` 全部通過；`import rag` 仍延遲載入向量後端。 |
 | C2-S5 | **U6：刪對話 schema v1/v2 讀取器（S046）。**<br>1. 先唯讀檢查 `app/store/projects/*/conversations/*.json` 與 `app/store/conversations/*.json`（若存在）的 `schemaVersion`，結果寫入 `evidence/C2-S5/store-versions.md`。發現任何非 v3 檔案時，本步標為 Blocked 並回報，不刪讀取器。<br>2. 刪除 `conversations/models.py` 與 `repository.py` 中 v1/v2 的讀取與升版分支，以及 `test_conversation_repository.py` 中對應的升版測試。<br>3. 讀到 v1/v2 時要明確拒絕：成為 scan issue，或回報 unsupported schema。不可靜默升版，也不可當成 v3 解析。若原本沒有這種負向測試，就在既有的 repository 測試模組加一個最小的。 | 存證顯示全為 v3；repository、desktop conversation 測試通過；v2 檔案被拒絕的測試通過。 |
 | C2-S6 | **S047（缺陷 #5）：`TurnJournal.turn_logs`。**<br>• 移除每回合累加、從不清除的 `turn_logs`，保留 production 唯一讀取的 `last_tool_calls`。<br>• `_record_turn` 若因此不再需要 async，就改成同步。<br>• `test_turn_finalizer` 與 `test_observability` 改讀它們真正要驗證的公開結果。 | 受影響測試通過；grep `turn_logs` 為 0；連續多回合後 journal 內沒有隨回合數成長的清單（以既有測試斷言，或在其中加一行斷言）。 |
-| C2-S7 | **Rust 與啟動器。**<br>• S014：刪 `capabilities/main.json` 的 `core:app:allow-tauri-version`。<br>• S098：PowerShell 腳本只設定一次 `InputEncoding`。<br>• S101：`BackendSupervisor::new` 與 `for_test` 共用一個建構路徑。<br>• S102：`main.py` 刪掉對不存在的 `public/` 目錄的特判。 | `cargo test --locked`（沙箱外）通過，它會經由 tauri-build 驗證 capability；`npm run build` 通過；`python main.py --help` 或等價的語法檢查不出錯。若 `main.py` 沒有無副作用的檢查方式，改用 `python -m py_compile main.py`。 |
-| C2-S8 | **前端小項目與缺陷 #2。**<br>• S073：`conversationInteractionState` 的三個欄位都等於 `turnActive`，呼叫端直接用 `turnActive`。<br>• S074：刪只為測試存在的 `sessionCreateParams`。<br>• S075：四份 backend snapshot／lifecycle 處理合成一個 `applyBackendSnapshot()`。<br>• S076：刪死 CSS 規則。<br>• S092：`generation`、`projectEpoch` 改成必填。<br>• 缺陷 #2：為 `.error-text` 加上錯誤樣式，沿用 `styles.css` 既有的錯誤色，不新增顏色。 | `npm test`、`npm run build` 通過；`grep -n "error-text" src/styles.css` 有規則。加入 GUI 清單：Stop 失敗訊息與 source editor 問題訊息以錯誤色顯示；backend 重啟與 crash 後的畫面狀態與之前相同。 |
+| C2-S7 | **Rust 與啟動器。**<br>• S014：刪 `capabilities/main.json` 的 `core:app:allow-tauri-version`。<br>• S098：PowerShell 腳本只設定一次 `InputEncoding`。<br>• S101：`BackendSupervisor::new` 與 `for_test` 共用一個建構路徑。<br>• S102：`main.py` 刪掉對不存在的 `public/` 目錄的特判。 | `cargo test --locked`（沙箱外）通過，它會經由 tauri-build 驗證 capability；`npm run build` 通過；`python -m py_compile main.py` 不出錯。 |
+| C2-S8 | **前端小項目與缺陷 #2。**<br>• S073：`conversationInteractionState` 的三個欄位都等於 `turnActive`，呼叫端直接用 `turnActive`。<br>• S074：刪只為測試存在的 `sessionCreateParams`。<br>• S075：四份 backend snapshot／lifecycle 處理合成一個 `applyBackendSnapshot()`。其中「舊狀態加 snapshot 得出新狀態」的判斷寫成純函式，放在 `.ts` 模組，並為「重啟後 generation 改變」與「crash」各寫一個測試；呼叫 React setter 的部分留在 `App.tsx`。<br>• S076：刪死 CSS 規則。<br>• S092：`generation`、`projectEpoch` 改成必填。<br>• 缺陷 #2：為 `.error-text` 加上錯誤樣式，沿用 `styles.css` 既有的錯誤色，不新增顏色。 | `npm test`、`npm run build` 通過；`grep -n "error-text" src/styles.css` 有規則。加入 GUI 清單：Stop 失敗訊息與 source editor 問題訊息以錯誤色顯示；backend 重啟與 crash 後的畫面狀態與之前相同。 |
 | C2-S9 | **Repo 整潔。**<br>• S128（缺陷 #7）：先讀 `app/desktop/watch.out`，確認它只是 picker 調查留下的 watch 輸出，再刪除。它沒有被追蹤，刪了無法用 git 復原。evidence 只記「已刪除」與檔案大小，不記內容，因為內容含視窗標題。<br>• S129：刪 repo 根目錄被 ignore 的過期 `__pycache__/` 與空目錄 `harness/plans/.claude/.cc-writes`（含其上層空的 `.claude/`）。 | `git status` 顯示這些項目已不在；沒有任何被追蹤的檔案改變。內容若不符預期（例如 `watch.out` 不是 watch 輸出），就不刪，標為 Blocked 並回報。 |
 | C2-S10 | **桌面後端小項目。**<br>• S023：`_execute_desktop_extension_command` 只回傳結果，不再回傳呼叫端會丟掉的第二個值；呼叫端不再重算它。<br>• S024：只呼叫一次的 async 包裝 `_apply_controls` inline 到呼叫端。<br>• S026：`documents.py` 的 `undo` 對 `validate_snapshot` 只呼叫一次；`prepare` 建好 candidate 後不再重複檢查。刪除前先確認兩次檢查之間沒有狀態變化（例如重新讀檔）；有的話就保留，並在 evidence 註明理由。 | `tests/test_desktop_service.py`、`test_desktop_documents.py`、`test_desktop_document_service.py`（沙箱外）、`test_extension_*.py` 通過。 |
-| C2-S11 | **階段收尾。** 完整 pytest（沙箱外）、`npm test`、`npm run build`。C2-S7 已跑過 cargo，之後沒有再改 Rust，所以本步不重跑。 | 全部通過，或只剩 C1 記錄的既有失敗。結果寫入 build-log。 |
+| C2-S11 | **U15：錯誤訊息只在 Python 出口遮蔽一次（S089，缺陷 #3）。單一 commit。**<br>1. 盤點 UI 會顯示的錯誤字串來源，寫入 `evidence/C2-S11/error-sources.md`：<br>　• Python：`protocol.py` 的錯誤 result、`server.py` 的兩處框架錯誤，以及會把 `str(exc)` 帶出去的例外（`DocumentError` 等、`_bibliography_error`）。<br>　• Rust：bridge 與 process 錯誤的訊息是否只有固定字串，或會轉送 child 的輸出。<br>　• TS：協定錯誤與 `normalizeUiError` 的輸入。<br>2. `bounded_error_message` 先呼叫 `agent/diagnostics.py::redact_text`，再截斷長度。遮蔽用 log 遮蔽的同一組樣式與同一份已知 secret 清單；若現有樣式不涵蓋 `Authorization`／`Bearer` 標頭值、`sk-…` 樣式的 key 或 URL 中的帳密，就擴充 `diagnostics.py` 的樣式。不另外建立第二組樣式。<br>3. 若第 1 點發現 Rust 會轉送未經 Python 的文字，就改成固定字串；不在 Rust 另做遮蔽。<br>4. 刪除 TS 的 `sensitiveMessagePattern` 與它整句隱藏的分支，以及只測這個行為的測試。 | • Python 測試走**真實的動態訊息路徑**，不可只測 `_map_exception`（它只回固定字串，測試會空轉通過）。例如一個 handler 拋出訊息含 `sk-or-v1-…` 樣式的 key、`Authorization: Bearer xyz` 或 `https://user:pass@host/` 的 `DocumentError`：送出的錯誤 result 只含遮蔽後的值，而且其餘文字照原樣保留。再加一個超長訊息：先遮蔽再截斷，截斷不會留下半段 secret。<br>• `server.py` 的框架錯誤也有一個同樣的測試。<br>• TS 測試：含 `token`、`secret` 等字的正當訊息（例如 `Prompt exceeds the context token limit`）原文顯示。<br>• `grep -rn "sensitiveMessagePattern" app/desktop` 為 0。<br>• desktop 與 protocol 的 pytest 模組、`npm test`、`npm run build` 通過。<br>• 加入 GUI 清單：一個會失敗的文件操作或書目匯出，錯誤訊息完整顯示。 |
+| C2-S12 | **階段收尾。** 完整 pytest（沙箱外）、`npm test`、`npm run build`。C2-S7 已跑過 cargo，之後沒有再改 Rust 時本步不重跑；C2-S11 若改了 Rust，就重跑 `cargo test --locked`（沙箱外）。 | 全部通過，或只剩 C1 記錄的既有失敗。結果寫入 build-log。 |
 
-每一步一個 commit。scope 依子系統，例如 `refactor(thinking): drop sync review helpers [C2-S1]`、`chore(repo): remove stale watch output [C2-S9]`。
+每一步一個 commit。scope 依子系統，例如 `refactor(thinking): drop sync review helpers [C2-S1]`、`fix(desktop): redact error messages at the protocol exit [C2-S11]`。
 
 ## 驗收
 
 - 歸屬 C2 的每個 S-ID 在 build-log 都有結果：APPLIED，或 Blocked 附理由。
-- C2-S11 的完整測試在最後狀態上通過。
-- `evidence/C2-S5/store-versions.md` 存在。每一步的測試退役紀錄都附在該步的 evidence 或 build-log 事件中。
+- C2-S12 的完整測試在最後狀態上通過。
+- `evidence/C2-S5/store-versions.md` 與 `evidence/C2-S11/error-sources.md` 存在。每一步的測試退役紀錄都附在該步的 evidence 或 build-log 事件中。
 
 ## 交給後續階段
 
 - `ChatSession` 已沒有 `restore`、`citation_service` 與 `activate_citation_skill` 等測試專用 API。C7 在這個較小的介面上建立公開 API。
 - 對話 repository 只讀 v3。
+- 錯誤遮蔽只有一處：`bounded_error_message`。C3 改寫 `backend.ts` 時不需要再處理遮蔽；C7 搬移 `_map_exception` 時也不改變遮蔽的位置。
+- backend snapshot 的狀態轉移已是可測的純函式，C8 直接沿用。
