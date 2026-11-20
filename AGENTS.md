@@ -4,6 +4,14 @@
 
 This is a student-owned, local-use research project, not a commercial or customer-facing production service. Prioritize correct research workflows, simplicity, reproducibility, short feedback loops, and debuggability. Do not add enterprise hardening, high-availability or multi-tenant design, broad compatibility layers, or generic abstractions unless the user explicitly requests them or a demonstrated problem requires them. Treat records in `issue/` and `note/` as context, not automatic implementation scope.
 
+## Desktop Product Boundary: One Active Research Workflow
+
+The desktop app is a **single-user, local academic-writing tool**, not a general multi-agent or multi-tenant product. Its supported workflow has **one opened project, one selected conversation, and one active research turn at a time**. Multiple projects and conversations may be stored and used **sequentially**, not concurrently. Running turns in different conversations/projects at once, opening two active projects, or using multiple app instances against the same working data are **unsupported user workflows**.
+
+Users finish the current turn (or complete Stop) before switching projects/conversations or submitting another task, and resolve an outstanding approval before starting a new turn. Stop, approval resolution, and in-turn document application are **steps within the same active workflow**, not separate parallel research jobs.
+
+**Architecture/review rule:** Do not add general cross-project concurrency support, hierarchical/RW lock frameworks, multi-session schedulers, or a global controller merely to handle unsupported parallel workflows. Do not classify a hypothetical two-project race as a product defect. Preserve only the minimal existing admission/correlation checks needed for the supported single-workflow lifecycle. Conversely, an error during legitimate sequential use (failed save, retry Stop, pending approval, crash/restart recovery, or a late completion belonging to an already ended operation) **is a real defect** and must be handled with the smallest targeted fix. This boundary overrides generic recommendations to enterprise-harden concurrency.
+
 Linux is the supported runtime. The working tree may be edited from Windows through WSL tooling, but commands and runtime behavior must target Linux. Preserve the repository's LF line-ending policy, and do not add native Windows runtime support unless explicitly requested.
 
 ## Project Structure & Module Organization
