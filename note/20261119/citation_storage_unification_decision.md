@@ -6,8 +6,9 @@
   - 合併成單一儲存；
   - CLI 失去單獨存檔的能力；
   - 移除 `pybtex` 相依。
-- **計劃提出的內容**：第 4、5 節的行為細節是撰寫計劃時提出的設計，使用者沒有逐項確認。其中會改變行為的部分，在計劃的 GOALS 列為 P7–P9，使用者可以在啟動前否決。
-- 狀態：**合併已決定，尚未實作**。實作排在計劃 `harness/plans/2026-11-19-repo-debt-cleanup/` 的 C5 階段。
+- **2026-11-20 使用者追加決定的內容**（計劃 GOALS 的 U13）：存檔的成功語意。桌面端「可引用 ⇔ 已寫入書目庫」，寫入失敗回報 `storage_failed` 且不可引用；CLI 回報新狀態 `verified`，不叫 `saved`。見 §4.0 與 §10。
+- **計劃提出的內容**：第 4、5 節其餘的行為細節是撰寫計劃時提出的設計，使用者沒有逐項確認。其中會改變行為的部分，在計劃的 GOALS 列為 P8、P9、P13，使用者可以在啟動前否決。
+- 狀態：**合併與存檔語意已決定，尚未實作**。實作排在計劃 `harness/plans/2026-11-19-repo-debt-cleanup/` 的 C5 階段。
 - 依據：2026-11-19 的 repo 債務稽核，項目 S105、S106。稽核全文在計劃目錄的 `context/repo-debt-audit-2026-11-19.md`。
 - 讀碼基準：branch `GUI`、HEAD `3b6cfd8`。以下行號都以這個 commit 為準。
 - 使用者原話：
@@ -76,40 +77,56 @@
 
 這一節是計劃 C5 的驗收依據。「計劃設計」是撰寫計劃時的預定做法：執行者可以調整實作細節，但要達到同樣的可觀察結果，並在 build-log 記錄差異。
 
-### 4.0 兩種模式共用的規則（計劃設計，GOALS P7）
+### 4.0 存檔的成功語意（使用者決定，GOALS U13；2026-11-20 改寫）
 
-- **可引用性只看驗證結果**：驗證成功的作品登記到這次 task 的 registry，可以用 `[[cite:…]]` 引用。這與現在相同，登記仍在 `_persist_item` 內完成，順序不變。
-- **持久化只看 `bibliography` 連結**：
-  - `added`：寫入書目庫；
-  - `existing`：書目庫已有這筆；
-  - `failed`：寫不進去，附 reason；
-  - `null`：沒有書目庫（CLI）。
-- **書目庫失敗不改變存檔結果**：這維持現行 INV-032 的規則。以前 bundle 是主要結果、書目庫是附加；合併後書目庫是唯一的持久化，但「狀態」與「是否寫入」仍分開回報。工具結果在連結是 `failed` 或 `null` 時，要明說「沒有寫到磁碟」，避免模型對使用者說「已存檔」。
-- **狀態值**：
-  - `saved`：這是新的一筆，也就是書目庫原本沒有（桌面），或這次 task 的 registry 原本沒有（CLI）。
-  - `reused`：同一 identity（DOI、arXiv ID 或 NeurIPS 官方網址）已經在書目庫（桌面）或這次 task 的 registry（CLI）。
-  - 桌面的 `saved`／`reused` 要在書目庫合併後才能確定，所以合併後要更新每筆的狀態。現在的程式已經在合併後用 `replace` 補上 `bibliography` 連結，狀態一併更新即可。
-  - 不新增狀態值，避免 `CitationSaveMetrics` 與 turn trace 的計數語意改變。
-  - 若合併後已沒有任何程式會產生 `storage_failed`，就從 `SaveItemStatus` 移除它。目前 registry 衝突也會產生 `storage_failed`（code `registry_conflict`），要先確認。
+原則：**狀態只描述實際發生的事**。合併前，bundle 寫入失敗回報 `storage_failed`，而且因為登記與 bundle 寫入在同一個 `try` 裡，該筆也不可引用。合併後書目庫是唯一的持久化，所以書目庫寫入失敗必須回到同樣的語意，不可再報 `saved`。
+
+**狀態值**
+
+| 狀態 | 意思 | 可引用 | 出現在 |
+|---|---|---|---|
+| `saved` | 新加入書目庫，而且寫入成功 | 是 | 桌面 |
+| `reused` | 書目庫原本就有同一 identity（DOI、arXiv ID 或 NeurIPS 官方網址），或同一批次較早一筆剛成功加入 | 是，用既有 key | 桌面 |
+| `storage_failed` | 書目庫合併被拒或寫入失敗；reason 是書目庫的錯誤碼 | **否** | 桌面 |
+| `verified` | 驗證成功，只在這次 task 可引用，沒有寫到磁碟 | 是，只限當次 task | CLI |
+| `identity_conflict`（reason `registry_conflict`） | 同一 source ID 已屬於另一個 identity（GOALS P13） | 否 | 兩者 |
+
+其餘失敗狀態（`provider_failed`、`verification_failed` 等）不變。
+
+**桌面的順序**
+
+1. 解析與驗證，不寫任何檔案。
+2. 驗證成功的每筆建立 `SourceRef` 與 `SaveReceipt`，**先不登記**；registry 衝突在這裡就判定（P13），該筆不進入書目庫。
+3. 其餘各筆以一次 `_link_library` 合併並寫入書目庫。
+4. 依每筆的實際結果決定狀態：新加入而且寫入成功是 `saved`；原本就有是 `reused`；合併被拒或寫入失敗是 `storage_failed`。只有 `saved`、`reused` 登記到 registry。
+5. **同一批次的重複作品**：第一筆決定結果；之後同一作品的各筆，在第一筆是 `saved` 時報 `reused` 並共用 key，在第一筆是 `storage_failed` 時同樣是 `storage_failed`。現行 `_link_library` 會把「同批次較早一筆剛加入記憶體」的作品報成 `existing`，即使之後整批寫入失敗；合併後不可再這樣回報。
+
+**CLI**：解析與驗證後，registry 檢查通過就登記，狀態一律是 `verified`，沒有 bibliography 連結。同一 task 存同一作品兩次，兩次都是 `verified`。
+
+**計數**：`CitationSaveMetrics` 新增 `verified_count`；`new_saved_count` 只算 `saved`；`reused_count` 只算 `reused`；其餘狀態都算 `failed_count`。
+
+**工具結果**：`storage_failed` 要明說沒有存檔、這次不可引用、原因與書目庫路徑，並建議重試；`verified` 要明說只在這次對話可引用、沒有寫到磁碟。這樣結構化的狀態本身就是誠實的，不必靠附加的提示詞去更正一個寫著 `saved` 的欄位。
 
 ### 4.1 桌面專案（有書目庫）
 
 - 存檔唯一的寫入是把 CSL 項目併入 `references.json`。不再建立 `cite/`，也不再寫 `reference.bib` 或 `citation.json`。
-- 書目庫的錯誤碼（`LibraryError.code`）照現在的方式出現在 `bibliography.reason_code`。bundle 的 `bundle_conflict`、`source_id_collision`、`write_failed` 消失。
-- 引用面板的「以 DOI／arXiv ID 加入」（`bibliography.add`）走同一條路，只是不再產生 bundle。它現在的回傳已經以 `link.key` 判斷成功與否（`service.py` 約 2420 行），行為不變。
+- 書目庫的錯誤碼（`LibraryError.code`）改為 `storage_failed` 項目本身的 reason code，不再放在 `bibliography` 連結上。bundle 的 `bundle_conflict`、`source_id_collision`、`write_failed` 消失。
+- 引用面板的「以 DOI／arXiv ID 加入」（`bibliography.add`）走同一條路，只是不再產生 bundle。它現在以 `link.key` 判斷成功（`service.py` 約 2420 行）；合併後成功仍回傳 key，`storage_failed` 則回報失敗並附 reason。
 - 存檔的核准對話框（operation `citation.save`）目前的 target 是 bundle 輸出目錄（`service.py:2408-2410`、`:2772-2784`），之後改成書目庫路徑。
 - 若桌面在沒有書目庫的狀態下仍可能觸發這個核准（`library_path` 為 `None`，現在的程式有處理這個分支），target 要寫明「不寫入磁碟」。C5 要先確認這個分支是否還會被走到；走不到就刪除。
 
 ### 4.2 CLI（沒有書目庫）
 
 - `/citation` 的 `search`、`sources`、`source`、`explain` 不變。
-- `save` 照常解析、驗證與登記，所以這次對話中可以引用並渲染參考文獻。
+- `save` 照常解析、驗證與登記，所以這次對話中可以引用並渲染參考文獻。狀態是 `verified`，不是 `saved`（§4.0）。
 - **不寫入任何檔案**，`bibliography` 一律是 `null`，工具結果要明說。
 - 以前在 CLI 存過的 bundle 不會被讀回。跨 session 的 `reused` 在 CLI 消失。
 
 ### 4.3 型別與資料格式
 
-- `SaveReceipt` 移除 `bundle_path`。持久化位置與 key 由既有的 `BibliographyLink`（status、path、key）表達。
+- `SaveReceipt` 移除 `bundle_path`。持久化位置與 key 由 `BibliographyLink`（status、path、key）表達；它只剩 `added`、`existing` 兩種狀態，`failed` 與 `reason_code` 移除，失敗改由項目的 `storage_failed` 表達。
+- `SaveItemStatus` 新增 `verified`。有 receipt ⇔ 狀態是 `saved`、`reused` 或 `verified`。
+- `CitationSaveMetrics` 新增 `verified_count`，turn trace 的紀錄多一個鍵。
 - 工具 artifact `citation_save_batch` 的 schema 版本從 2 升為 3（`SAVE_BATCH_SCHEMA_VERSION`）。這個 artifact 只在當次回合內被 `CitationSessionPolicy.save_metrics` 與 `observability` 讀取；C5 執行時要確認它沒有被寫進對話 JSON。若有寫入，先停下來記錄，不可讓舊回合無法讀取。
 - `types.py` 的 `PERSIST_SCHEMA_VERSION`、`BUNDLE_SCHEMA_V2`、`SUPPORTED_PERSIST_SCHEMA_VERSIONS`，以及只為 v1 bundle 存在的 `identity_verified` 判斷，隨 bundle 一起移除。是否還有其他用途，執行時以 grep 確認。
 
@@ -139,7 +156,7 @@
    - 計劃**不**新增「回應的 DOI 必須等於被要求的 DOI」的檢查。這個檢查現在不存在，加上去會拒絕合法的 alias DOI。
    - 隨 BibTeX 消失的「CSL 與 BibTeX 的 DOI 交叉比對」也不以其他方式補回（GOALS P8），理由與影響見 6.1。
 3. **權威記錄的最低欄位要求**：`export_bibtex` 與 `parse_canonical_bibtex` 會拒絕某些不完整的記錄（例如缺標題）。C5 要列出這些拒絕條件，逐條確認在 resolution、`csl_from_authority` 或書目庫合併中已有對應檢查；沒有的話，把該條件改成對 CSL 項目的檢查，不要直接丟掉。DOI 記錄的 BibTeX 欄位解析檢查也照同樣方式對照。
-4. **書目庫合併規則**（INV-032）：保留既有條目、key 與 JSON 排版；拒絕無法重現的排版；寫入前重新比對 fingerprint；只用 atomic replace；書目庫失敗不改變存檔狀態（見 4.0）。
+4. **書目庫合併規則**（INV-032）：保留既有條目、key 與 JSON 排版；拒絕無法重現的排版；寫入前重新比對 fingerprint；只用 atomic replace。INV-032 原本的「書目庫失敗不改變存檔狀態」由 §4.0 取代：桌面端書目庫失敗就是 `storage_failed`，不可引用。
 5. **同一 identity 不重複加入**：與現在 `library.merge` 的 `existing` 判斷相同。
 
 ---
@@ -160,7 +177,7 @@
 agent 的設計選擇同時是實驗條件。這次合併會改變：
 
 1. **驗證管線**：每筆 DOI 存檔少一個獨立 artifact 的檢查（BibTeX），也少一次 doi.org 請求。CSL 已在 resolution 階段取得並快取 24 小時，所以存檔階段不再發出額外請求。
-2. **失敗類別**：`bibtex_lookup_*`、`bibtex_doi_mismatch`、`authority_bibtex_invalid` 不會再出現。bundle 的 `storage_failed` code 消失。C5 若把 BibTeX 的欄位檢查搬到 CSL（見 5.3），被搬過去的檢查會產生自己的 reason code。
+2. **失敗類別與狀態**：`bibtex_lookup_*`、`bibtex_doi_mismatch`、`authority_bibtex_invalid` 不會再出現。`storage_failed` 的 reason 從 bundle 的錯誤碼改為書目庫的錯誤碼；registry 衝突改報 `identity_conflict`。CLI 的成功狀態從 `saved` 改為 `verified`，存檔計數多了 `verified_count`。C5 若把 BibTeX 的欄位檢查搬到 CSL（見 5.3），被搬過去的檢查會產生自己的 reason code。
 3. **provenance 字串**：`fresh-resolution+doi.org-csl+bibtex` 會改成不含 `bibtex` 的版本。
 4. **模型指令**：`SKILL.md` 與 `explain` 的文字改變，見 4.5。
 5. **存檔紀錄**：若論文的 citation 驗證評估曾把 `cite/` 的 sidecar 當成每次存檔的紀錄，合併後要改用診斷 log 或回合結果。
@@ -193,7 +210,8 @@ agent 的設計選擇同時是實驗條件。這次合併會改變：
 
 - **INV-010**：「bundle written」不再成立；驗證 artifact 不再包含 BibTeX。
 - **INV-029**：`cite/` 不再產生新內容。
-- **INV-032**：規則本身不變，但其中「bundle save outcomes」的說法要改為「存檔狀態」。
+- **INV-032**：合併規則不變；「書目庫失敗不改變存檔結果」改為「桌面端書目庫失敗即 `storage_failed`、不可引用」（§4.0）。
+- **ASM-014**（模型誇大存檔結果）：存檔狀態本身已誠實，風險描述要更新。
 - **`data-flow.md`** 的 citation 存檔流程。
 - **`module-responsibilities.md`** 的 citation 模組列表。
 
@@ -210,3 +228,19 @@ agent 的設計選擇同時是實驗條件。這次合併會改變：
 - 引用樣式、預覽與匯出（Word、bime_word）：不變。
 - 搜尋 provider（Crossref、DataCite、OpenAlex）與 resolution 規則：除了第 5 節第 2、3 點的檢查搬移，其餘不變。
 - 是否另外為論文評估保存逐筆存檔紀錄：留待使用者需要時再決定（見 6.2）。
+
+---
+
+## 10. 修訂紀錄
+
+### 2026-11-20：存檔成功語意（GOALS U13，取代 P7）
+
+- **改了什麼**：§4.0 整節改寫；§4.1、§4.2、§4.3、§5.4、§6.2、§8 中與存檔狀態有關的句子同步修改。
+- **原本的設計（P7）**：可引用性只看驗證結果；書目庫寫入失敗時，狀態仍是 `saved`，只有 `bibliography` 連結是 `failed`；CLI 也回報 `saved`；以「書目庫或 registry 原本有沒有這筆」決定 `saved`／`reused`；不新增狀態值，理由是不改變存檔計數的語意。
+- **為什麼不成立**：
+  - 合併前，`storage_failed` 代表「沒有寫入，而且不可引用」，因為 `registry.register` 與 bundle 寫入在同一個 `try` 裡（`skills/citation/service.py` 約 390–413 行）。INV-032 的「書目庫失敗不改變存檔結果」能成立，前提是 bundle 已經寫入。合併後書目庫是唯一的持久化，P7 等於把「沒有存到任何地方」報成 `saved`。
+  - CLI 什麼都沒寫，也報 `saved`。名稱保留了，但 `saved` 與 `new_saved_count` 指的事實已經變了。
+  - 桌面的 `document_edit` 本來就拒絕不在書目庫的 key，所以 P7 會造成「聊天裡可引用、插入文件時被拒」的分裂。
+  - 依「原本有沒有」決定狀態時，同一批次的重複作品會被報成兩筆 `saved`；而現行 `_link_library` 在整批寫入失敗時，仍把同批次較早加入的作品報成 `existing`。
+- **來源**：使用者 2026-11-20 轉來的人工審查討論（「一篇文獻寫入失敗，卻回報 `saved`；同批重複 DOI 也可能誤報｜必修」），以及當天以選項確認「A：不可引用」。另一個選項「B：狀態是 `storage_failed`，但當次對話仍可引用」沒有被採用。
+- **對論文評估的影響**：C5 本來就是評估的分界 commit（§6.2）。這次修訂讓分界兩側的差異多了狀態值 `verified`、計數 `verified_count`，以及 `storage_failed` 的 reason 來源改變。
