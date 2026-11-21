@@ -16,8 +16,8 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/` | — | C2-S12 |
-| C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
+| C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
+| C3 | Not started | — | — | C3-S1 |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -368,3 +368,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S11/error-sources.md`。
 - **限制**：GUI 錯誤顯示由使用者手動檢查（已列入清單項目）。
 - **下一步**：C2-S12 階段收尾（完整 pytest、`npm test`、`npm run build`；未改 Rust，不重跑 cargo）。
+
+### C2-S12 階段收尾與 C2 驗收（2026-11-21）
+
+- **觀察結果**：
+  - 完整 pytest（沙箱外，`app/`）：**1808 passed, 2 warnings in 56.91 s**，0 失敗。兩則 warning 與 C1-S2 基線相同。測試總數與基線相同屬巧合：C2 刪除與新增的測試相抵（退役紀錄見各步 evidence）。
+  - `npm test`：330 passed，0 failed；`npm run build`：通過。兩者在 C2-S11 最終程式狀態上執行（之後只改 build-log 與 evidence）。
+  - cargo：C2-S7 之後未改 Rust（C2-S11 盤點確認不需修改），依步驟規格不重跑；C2-S7 的結果為 42 passed。
+  - **C2 驗收**：C2 歸屬的每個 S-ID 都有結果（S038、S039、S040、S041、S042、S044、S046、S047、S061、S062、S063、S109、S122、S114、S115、S117、S014、S098、S101、S102、S073–S076、S092、`.error-text`、S089、S128、S129、S023、S024 APPLIED；S026 部分 APPLIED 附保留理由）。`evidence/C2-S5/store-versions.md` 與 `evidence/C2-S11/error-sources.md` 存在。
+- **執行指令**：`timeout 900 python -m pytest -q -p no:cacheprovider`（沙箱外）。
+- **證據**：build-log 本節。
+- **限制**：無。
+- **下一步**：C3-S1。
