@@ -12,6 +12,7 @@ import {
   initialBackendState,
   normalizeUiError,
   parseBridgeEvent,
+  planBackendSnapshotTransition,
   toBoundedDiagnostics,
   type BackendSnapshot,
   type InvokeCommand,
@@ -461,4 +462,81 @@ test("error and diagnostic normalization stays bounded and omits unsafe detail",
   assert.equal("mcpDiagnostics" in bounded, false);
   assert.equal("sysPrefix" in bounded, false);
   assert.equal("originalWorkingDirectory" in bounded, false);
+});
+
+test("snapshot transition on restart generation change captures resume state and resets stale catalog", () => {
+  const selected = { projectId: "project-1", sessionId: "123e4567e89b42d3a456426614174000" };
+  const transition = planBackendSnapshotTransition({
+    currentGeneration: 1,
+    catalogGeneration: 1,
+    hasProject: true,
+    selectedConversation: selected,
+    resumeSelection: null,
+    draft: "unsent draft",
+    resumeDraft: null,
+    snapshot: { ...readySnapshot, generation: 2, lifecycle: "ready" },
+    completedAction: "restart",
+  });
+
+  assert.deepEqual(transition, {
+    accepted: true,
+    nextGeneration: 2,
+    generationChanged: true,
+    invalidateOperations: true,
+    captureResumeState: true,
+    nextResumeSelection: selected,
+    nextResumeDraft: "unsent draft",
+    clearBindingGeneration: true,
+    clearTransientUi: true,
+    resetStaleCatalog: true,
+    extensionTransition: "interrupt-awaiting-load",
+    completedAction: "restart",
+  });
+
+  const stale = planBackendSnapshotTransition({
+    currentGeneration: 2,
+    catalogGeneration: 2,
+    hasProject: true,
+    selectedConversation: selected,
+    resumeSelection: null,
+    draft: "",
+    resumeDraft: null,
+    snapshot: { ...readySnapshot, generation: 1 },
+  });
+  assert.deepEqual(stale, { accepted: false });
+});
+
+test("snapshot transition on crash clears transient UI without dropping current generation catalog", () => {
+  const selected = { projectId: "project-1", sessionId: "123e4567e89b42d3a456426614174000" };
+  const transition = planBackendSnapshotTransition({
+    currentGeneration: 1,
+    catalogGeneration: 1,
+    hasProject: true,
+    selectedConversation: selected,
+    resumeSelection: null,
+    draft: "in-flight draft",
+    resumeDraft: null,
+    snapshot: {
+      ...readySnapshot,
+      generation: 1,
+      lifecycle: "crashed",
+      childRunning: false,
+      lastError: { code: "BACKEND_EXITED", message: "Backend exited.", retryable: true },
+    },
+  });
+
+  assert.deepEqual(transition, {
+    accepted: true,
+    nextGeneration: 1,
+    generationChanged: false,
+    invalidateOperations: false,
+    captureResumeState: false,
+    nextResumeSelection: null,
+    nextResumeDraft: null,
+    clearBindingGeneration: false,
+    clearTransientUi: true,
+    resetStaleCatalog: false,
+    extensionTransition: "interrupt",
+    completedAction: null,
+  });
 });

@@ -603,3 +603,81 @@ export function createBackendClient(options: {
     restart: () => lifecycleCommand("backend_restart"),
   };
 }
+
+export type SnapshotExtensionTransition =
+  | "none"
+  | "interrupt"
+  | "interrupt-restarting"
+  | "interrupt-awaiting-load"
+  | "awaiting-load";
+
+export interface BackendSnapshotTransitionInput {
+  currentGeneration: number;
+  catalogGeneration: number | null;
+  hasProject: boolean;
+  selectedConversation: { projectId: string; sessionId: string } | null;
+  resumeSelection: { projectId: string; sessionId: string } | null;
+  draft: string;
+  resumeDraft: string | null;
+  snapshot: BackendSnapshot;
+  completedAction?: "start" | "restart" | "shutdown";
+}
+
+export type BackendSnapshotTransition =
+  | { accepted: false }
+  | {
+      accepted: true;
+      nextGeneration: number;
+      generationChanged: boolean;
+      invalidateOperations: boolean;
+      captureResumeState: boolean;
+      nextResumeSelection: { projectId: string; sessionId: string } | null;
+      nextResumeDraft: string | null;
+      clearBindingGeneration: boolean;
+      clearTransientUi: boolean;
+      resetStaleCatalog: boolean;
+      extensionTransition: SnapshotExtensionTransition;
+      completedAction: "start" | "restart" | "shutdown" | null;
+    };
+
+export function planBackendSnapshotTransition(
+  input: BackendSnapshotTransitionInput,
+): BackendSnapshotTransition {
+  const { snapshot, currentGeneration } = input;
+  if (snapshot.generation < currentGeneration) {
+    return { accepted: false };
+  }
+  const generationChanged = snapshot.generation !== currentGeneration;
+  const captureResumeState = generationChanged && input.hasProject;
+  const clearTransientUi = generationChanged || snapshot.lifecycle !== "ready";
+  const resetStaleCatalog =
+    input.catalogGeneration !== null && input.catalogGeneration !== snapshot.generation;
+  let extensionTransition: SnapshotExtensionTransition = "none";
+  if (clearTransientUi) {
+    if (snapshot.lifecycle === "restarting") {
+      extensionTransition = "interrupt-restarting";
+    } else if (snapshot.lifecycle === "ready" && generationChanged) {
+      extensionTransition = "interrupt-awaiting-load";
+    } else {
+      extensionTransition = "interrupt";
+    }
+  } else if (input.completedAction === "restart" && snapshot.lifecycle === "ready") {
+    extensionTransition = "awaiting-load";
+  }
+  return {
+    accepted: true,
+    nextGeneration: snapshot.generation,
+    generationChanged,
+    invalidateOperations: generationChanged,
+    captureResumeState,
+    nextResumeSelection: captureResumeState
+      ? input.selectedConversation ?? input.resumeSelection
+      : input.resumeSelection,
+    nextResumeDraft: captureResumeState ? input.draft : input.resumeDraft,
+    clearBindingGeneration: captureResumeState,
+    clearTransientUi,
+    resetStaleCatalog,
+    extensionTransition,
+    completedAction: input.completedAction ?? null,
+  };
+}

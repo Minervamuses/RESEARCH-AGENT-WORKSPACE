@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/` | — | C2-S8 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/` | — | C2-S9 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -321,3 +321,17 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：build-log 本節。
 - **限制**：無。
 - **下一步**：C2-S8 前端小項目與 `.error-text` 樣式（S073–S076、S092、缺陷 #2）。
+
+### C2-S8 前端小項目與 `.error-text` 樣式修正（2026-11-21）
+
+- **觀察結果**：
+  - **S073（APPLIED）**：移除 `ConversationInteractionState` 中恆等於 `turnActive` 的 `createDisabled`、`selectDisabled`、`controlDisabled`，呼叫端直接使用 `interaction.turnActive`。
+  - **S074（APPLIED）**：移除只為測試匯出的 `sessionCreateParams`。
+  - **S075（APPLIED）**：將 `App.tsx` 四處後端 snapshot／lifecycle 同步邏輯抽成 `src/backend.ts::planBackendSnapshotTransition` 純函式與 `App.tsx` 單一 `applyBackendSnapshot`，並新增重啟 generation 改變與 crash 兩支測試。
+  - **S076（APPLIED）**：合併重複的 `.empty-state`，刪除死規則 `.file-open-dialog .document-error` 與重複的 `.writing-workspace .transcript`。
+  - **S092（APPLIED）**：`ConversationAction` 中實際必傳的 `generation` 與 `projectEpoch` 改為必填。
+  - **缺陷 #2（APPLIED）**：於 `src/styles.css` 為 `.error-text` 補上既有錯誤色 `#843c38`（hex 110、rgba 16 不變）。
+- **執行指令**：`grep -n "error-text" src/styles.css`、`npm test`（330 passed in 5.69 s）、`npm run build`（526 ms）。
+- **證據**：`evidence/C2-S8/retired-tests.md`。
+- **限制**：GUI 視覺呈現交由使用者手動檢查清單驗收。
+- **下一步**：C2-S9 Repo 整潔（S128 缺陷 #7、S129）。

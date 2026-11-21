@@ -147,60 +147,61 @@ export interface ConversationState {
   failure: ConversationFailure | null;
 }
 
-export type ConversationAction = (
+export type ConversationAction =
   | { type: "backend-generation-changed"; generation: number }
-  | { type: "project-opened"; generation: number; preserveDraft?: boolean }
-  | ({ type: "conversation-selected"; generation: number; preserveDraft?: boolean } & ConversationSelection)
-  | ({ type: "conversation-deleted"; generation: number } & ConversationSelection)
   | { type: "draft-changed"; draft: string }
-  | { type: "reference-added"; reference: Reference; generation?: number }
-  | { type: "reference-removed"; referenceId: string; generation?: number }
-  | { type: "annotation-changed"; referenceId: string; comment: string; generation: number }
-  | { type: "annotation-toggled"; referenceId: string; expanded: boolean; generation: number }
-  | { type: "new-turn-requested"; generation?: number }
-  | { type: "stop-requested"; generation: number }
-  | ({ type: "stop-succeeded"; generation: number; requestId: string; turnId: string } & ConversationSelection)
-  | ({ type: "stop-failed"; generation: number; requestId: string; turnId: string; message: string } & ConversationSelection)
-  | ({ type: "turn-started"; generation: number; requestId: string; turnId: string; text?: string; submittedContext?: SubmittedContext | null } & ConversationSelection)
-  | ({ type: "turn-accepted"; generation: number; requestId: string; turnId: string } & ConversationSelection)
-  | ({ type: "turn-acceptance-reconciled"; generation: number; turnId: string; state: TranscriptTurnDto["state"] } & ConversationSelection)
-  | ({
-      type: "activity-received";
-      generation: number;
-      requestId: string;
-      sessionId: string;
-      activity: ConversationActivity;
-    })
-  | ({
-      type: "turn-succeeded";
-      generation: number;
-      requestId: string;
-      projectId: string;
-      result: AuthoritativeTurnResult;
-    })
-  | ({
-      type: "turn-failed";
-      cancelled?: boolean;
-      generation: number;
-      requestId: string;
-      projectId: string;
-      sessionId: string;
-      message: string;
-      retryable: boolean;
-      turnLifecycle?: TurnLifecycleDetailsDto | null;
-    })
-  | ({
-      type: "retry-target-restored";
-      submittedContext?: SubmittedContext | null;
-      generation: number;
-      turnId: string;
-      userText: string;
-      state: "failed" | "interrupted";
-      message: string;
-      retryable: boolean;
-    } & ConversationSelection)
   | { type: "failure-cleared" }
-) & { projectEpoch?: number };
+  | ((
+      | { type: "project-opened"; generation: number; preserveDraft?: boolean }
+      | ({ type: "conversation-selected"; generation: number; preserveDraft?: boolean } & ConversationSelection)
+      | ({ type: "conversation-deleted"; generation: number } & ConversationSelection)
+      | { type: "reference-added"; reference: Reference; generation: number }
+      | { type: "reference-removed"; referenceId: string; generation: number }
+      | { type: "annotation-changed"; referenceId: string; comment: string; generation: number }
+      | { type: "annotation-toggled"; referenceId: string; expanded: boolean; generation: number }
+      | { type: "new-turn-requested"; generation: number }
+      | { type: "stop-requested"; generation: number }
+      | ({ type: "stop-succeeded"; generation: number; requestId: string; turnId: string } & ConversationSelection)
+      | ({ type: "stop-failed"; generation: number; requestId: string; turnId: string; message: string } & ConversationSelection)
+      | ({ type: "turn-started"; generation: number; requestId: string; turnId: string; text?: string; submittedContext?: SubmittedContext | null } & ConversationSelection)
+      | ({ type: "turn-accepted"; generation: number; requestId: string; turnId: string } & ConversationSelection)
+      | ({ type: "turn-acceptance-reconciled"; generation: number; turnId: string; state: TranscriptTurnDto["state"] } & ConversationSelection)
+      | ({
+          type: "activity-received";
+          generation: number;
+          requestId: string;
+          sessionId: string;
+          activity: ConversationActivity;
+        })
+      | ({
+          type: "turn-succeeded";
+          generation: number;
+          requestId: string;
+          projectId: string;
+          result: AuthoritativeTurnResult;
+        })
+      | ({
+          type: "turn-failed";
+          cancelled?: boolean;
+          generation: number;
+          requestId: string;
+          projectId: string;
+          sessionId: string;
+          message: string;
+          retryable: boolean;
+          turnLifecycle?: TurnLifecycleDetailsDto | null;
+        })
+      | ({
+          type: "retry-target-restored";
+          submittedContext?: SubmittedContext | null;
+          generation: number;
+          turnId: string;
+          userText: string;
+          state: "failed" | "interrupted";
+          message: string;
+          retryable: boolean;
+        } & ConversationSelection)
+    ) & { projectEpoch: number });
 
 export interface WorkspaceOperationOwner {
   generation: number;
@@ -222,9 +223,6 @@ export function ownsWorkspaceOperation(
 export interface ConversationInteractionState {
   turnActive: boolean;
   sendDisabled: boolean;
-  createDisabled: boolean;
-  selectDisabled: boolean;
-  controlDisabled: boolean;
 }
 
 export const initialConversationState: ConversationState = {
@@ -479,7 +477,7 @@ export function conversationReducer(
 ): ConversationState {
   if (action.type !== "backend-generation-changed" && action.type !== "project-opened" &&
       action.type !== "draft-changed" && action.type !== "failure-cleared" &&
-      (action.projectEpoch ?? 0) !== state.projectEpoch) return state;
+      action.projectEpoch !== state.projectEpoch) return state;
   if (action.type === "backend-generation-changed") {
     if (!isNonNegativeSafeInteger(action.generation) || action.generation <= state.backendGeneration) {
       return state;
@@ -514,7 +512,7 @@ export function conversationReducer(
     return { ...state, stopRequest: state.activeTurn === null ? null : { ...stop, status: "confirmed" } };
   }
   if (action.type === "project-opened") {
-    const projectEpoch = action.projectEpoch ?? state.projectEpoch + 1;
+    const projectEpoch = action.projectEpoch;
     if (action.generation !== state.backendGeneration || state.activeTurn !== null || state.stopRequest !== null || projectEpoch <= state.projectEpoch) return state;
     return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch,
       draft: action.preserveDraft ? state.draft : "",
@@ -551,7 +549,7 @@ export function conversationReducer(
     return { ...initialConversationState, backendGeneration: state.backendGeneration, projectEpoch: state.projectEpoch };
   }
   if ((action.type === "reference-added" || action.type === "reference-removed" || action.type === "annotation-changed" || action.type === "annotation-toggled" || action.type === "new-turn-requested") &&
-      action.generation !== undefined && action.generation !== state.backendGeneration) return state;
+      action.generation !== state.backendGeneration) return state;
   if (action.type === "reference-added") {
     if (state.activeTurn !== null || state.stopRequest !== null || state.selected === null || state.draftReferences.some((item) => item.referenceId === action.reference.referenceId)) return state;
     return { ...state, draftReferences: [...state.draftReferences, structuredClone(action.reference)],
@@ -793,8 +791,5 @@ export function conversationInteractionState(
   return {
     turnActive,
     sendDisabled: turnActive || state.selected === null || composeTurnText(state.draft, state.annotations).trim().length === 0,
-    createDisabled: turnActive,
-    selectDisabled: turnActive,
-    controlDisabled: turnActive,
   };
 }

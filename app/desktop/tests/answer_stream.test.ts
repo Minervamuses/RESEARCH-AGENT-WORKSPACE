@@ -52,6 +52,7 @@ function selectedState(draft = "question"): ConversationState {
   state = conversationReducer(state, {
     type: "conversation-selected",
     generation: 1,
+    projectEpoch: 0,
     projectId,
     sessionId,
   });
@@ -62,6 +63,7 @@ function activeState(draft = "question"): ConversationState {
   return conversationReducer(selectedState(draft), {
     type: "turn-started",
     generation: 1,
+    projectEpoch: 0,
     projectId,
     sessionId,
     requestId,
@@ -77,6 +79,7 @@ function succeed(
   return conversationReducer(state, {
     type: "turn-succeeded",
     generation: 1,
+    projectEpoch: 0,
     requestId: correlatedRequestId,
     projectId,
     result: {
@@ -166,12 +169,13 @@ test("post-finalized, nonzero-chunk, cross-session, and malformed results fail c
 
 test("failure preserves the recoverable draft and never creates an assistant preview", () => {
   let state = activeState("retry this");
-  assert.equal(conversationInteractionState(state).createDisabled, true);
+  assert.equal(conversationInteractionState(state).turnActive, true);
   assert.equal(state.latestAnswer, null);
 
   state = conversationReducer(state, {
     type: "turn-failed",
     generation: 1,
+    projectEpoch: 0,
     requestId,
     projectId,
     sessionId,
@@ -185,7 +189,7 @@ test("failure preserves the recoverable draft and never creates an assistant pre
   assert.equal(state.failure?.draftPreserved, true);
   assert.equal(state.failure?.retryable, true);
   assert.equal(state.failure?.turnId, turnId);
-  assert.equal(conversationInteractionState(state).createDisabled, false);
+  assert.equal(conversationInteractionState(state).turnActive, false);
   assert.equal(conversationInteractionState(state).sendDisabled, false);
 
   const edited = conversationReducer(state, {
@@ -219,6 +223,7 @@ test("failure lifecycle distinguishes not accepted from durable terminal records
     const failed = conversationReducer(activeState(name), {
       type: "turn-failed",
       generation: 1,
+      projectEpoch: 0,
       requestId,
       projectId,
       sessionId,
@@ -237,6 +242,7 @@ test("failure lifecycle distinguishes not accepted from durable terminal records
   assert.equal(conversationReducer(started, {
     type: "turn-failed",
     generation: 1,
+    projectEpoch: 0,
     requestId,
     projectId,
     sessionId,
@@ -258,6 +264,7 @@ test("first send is not a retry and an explicit transport retry keeps the logica
   const started = conversationReducer(selectedState("question"), {
     type: "turn-started",
     generation: 1,
+    projectEpoch: 0,
     projectId,
     sessionId,
     requestId,
@@ -266,6 +273,7 @@ test("first send is not a retry and an explicit transport retry keeps the logica
   const timedOut = conversationReducer(started, {
     type: "turn-failed",
     generation: 1,
+    projectEpoch: 0,
     requestId,
     projectId,
     sessionId,
@@ -282,6 +290,7 @@ test("completed-before-ack retry replays the same logical turn", () => {
   const deliveryFailed = conversationReducer(activeState("question"), {
     type: "turn-failed",
     generation: 1,
+    projectEpoch: 0,
     requestId,
     projectId,
     sessionId,
@@ -295,6 +304,7 @@ test("completed-before-ack retry replays the same logical turn", () => {
   const replayStarted = conversationReducer(deliveryFailed, {
     type: "turn-started",
     generation: 1,
+    projectEpoch: 0,
     projectId,
     sessionId,
     requestId: retryRequestId,
@@ -315,12 +325,14 @@ test("restart transcript can restore an interrupted same-ID retry target", () =>
   state = conversationReducer(state, {
     type: "conversation-selected",
     generation: 2,
+    projectEpoch: 0,
     projectId,
     sessionId,
   });
   state = conversationReducer(state, {
     type: "retry-target-restored",
     generation: 2,
+    projectEpoch: 0,
     projectId,
     sessionId,
     turnId,
@@ -564,6 +576,7 @@ test("activity is correlated, bounded, and the global turn lock blocks controls"
   const blockedSelection: ConversationAction = {
     type: "conversation-selected",
     generation: 1,
+    projectEpoch: 0,
     projectId,
     sessionId: otherSessionId,
   };
@@ -571,15 +584,13 @@ test("activity is correlated, bounded, and the global turn lock blocks controls"
   assert.deepEqual(conversationInteractionState(state), {
     turnActive: true,
     sendDisabled: true,
-    createDisabled: true,
-    selectDisabled: true,
-    controlDisabled: true,
   });
 
   for (let index = 0; index < MAX_ACTIVITY_ITEMS + 5; index += 1) {
     state = conversationReducer(state, {
       type: "activity-received",
       generation: 1,
+      projectEpoch: 0,
       requestId,
       sessionId,
       activity: { kind: "stage", label: `stage-${index}`, status: null },
@@ -591,6 +602,7 @@ test("activity is correlated, bounded, and the global turn lock blocks controls"
   const wrongRequest = conversationReducer(state, {
     type: "activity-received",
     generation: 1,
+    projectEpoch: 0,
     requestId: "223e4567-e89b-42d3-a456-426614174000",
     sessionId,
     activity: { kind: "tool", label: "ignored", status: "ok" },
@@ -600,17 +612,17 @@ test("activity is correlated, bounded, and the global turn lock blocks controls"
 
 
 test("Stop waits for both replies in either order and ignores duplicate clicks", () => {
-  const stop = { type: "stop-requested", generation: 1 } as const;
-  const stopped = { type: "stop-succeeded", generation: 1, projectId, sessionId, requestId, turnId } as const;
+  const stop = { type: "stop-requested", generation: 1, projectEpoch: 0 } as const;
+  const stopped = { type: "stop-succeeded", generation: 1, projectEpoch: 0, projectId, sessionId, requestId, turnId } as const;
   for (const first of ["turn", "stop"]) {
     let state = conversationReducer(activeState(), stop);
     assert.equal(conversationReducer(state, stop), state);
     state = first === "turn" ? succeed(state) : conversationReducer(state, stopped);
     assert.deepEqual(conversationInteractionState(state), {
-      turnActive: true, sendDisabled: true, createDisabled: true, selectDisabled: true, controlDisabled: true,
+      turnActive: true, sendDisabled: true,
     });
     assert.equal(conversationReducer(state, {
-      type: "turn-started", generation: 1, projectId, sessionId, requestId: retryRequestId, turnId: otherTurnId,
+      type: "turn-started", generation: 1, projectEpoch: 0, projectId, sessionId, requestId: retryRequestId, turnId: otherTurnId,
     }), state);
     state = first === "turn" ? conversationReducer(state, stopped) : succeed(state);
     assert.equal(state.activeTurn, null);
@@ -621,15 +633,15 @@ test("Stop waits for both replies in either order and ignores duplicate clicks",
 });
 
 test("Stop failure remains blocked after the turn ends and can retry only its own target", () => {
-  let state = conversationReducer(activeState(), { type: "stop-requested", generation: 1 });
+  let state = conversationReducer(activeState(), { type: "stop-requested", generation: 1, projectEpoch: 0 });
   state = conversationReducer(state, {
-    type: "stop-failed", generation: 1, projectId, sessionId, requestId, turnId, message: "Local work is still stopping.",
+    type: "stop-failed", generation: 1, projectEpoch: 0, projectId, sessionId, requestId, turnId, message: "Local work is still stopping.",
   });
   assert.equal(state.stopRequest?.error, "Local work is still stopping.");
   state = succeed(state);
   assert.equal(conversationInteractionState(state).turnActive, true);
-  state = conversationReducer(state, { type: "stop-requested", generation: 1 });
-  const action = { type: "stop-succeeded", generation: 1, projectId, sessionId, requestId, turnId } as const;
+  state = conversationReducer(state, { type: "stop-requested", generation: 1, projectEpoch: 0 });
+  const action = { type: "stop-succeeded", generation: 1, projectEpoch: 0, projectId, sessionId, requestId, turnId } as const;
   for (const stale of [
     { ...action, generation: 0 }, { ...action, projectEpoch: 1 },
     { ...action, requestId: retryRequestId }, { ...action, sessionId: otherSessionId }, { ...action, turnId: otherTurnId },
@@ -640,12 +652,12 @@ test("Stop failure remains blocked after the turn ends and can retry only its ow
 });
 
 test("deleting the selected idle conversation clears its draft and retry state only", () => {
-  const action = { type: "conversation-deleted", generation: 1, projectId, sessionId } as const;
+  const action = { type: "conversation-deleted", generation: 1, projectEpoch: 0, projectId, sessionId } as const;
   const running = activeState();
   assert.equal(conversationReducer(running, action), running);
-  const waiting = conversationReducer(running, { type: "stop-requested", generation: 1 });
+  const waiting = conversationReducer(running, { type: "stop-requested", generation: 1, projectEpoch: 0 });
   assert.equal(conversationReducer(succeed(waiting), action).selected?.sessionId, sessionId);
-  const failed = conversationReducer(running, { type: "turn-failed", generation: 1, projectId, sessionId, requestId,
+  const failed = conversationReducer(running, { type: "turn-failed", generation: 1, projectEpoch: 0, projectId, sessionId, requestId,
     message: "Try again", retryable: true });
   const ready = { ...failed, draftReferences: [{ referenceId: "reference", kind: "chat" as const, text: "source",
     chat: { projectId, sessionId, turnId, role: "assistant" as const, messageFingerprint: "a".repeat(64), startUtf16: 0, endUtf16: 6 } }],
@@ -656,15 +668,14 @@ test("deleting the selected idle conversation clears its draft and retry state o
   }
   const deleted = conversationReducer(ready, action);
   assert.deepEqual(deleted, { ...initialConversationState, backendGeneration: 1 });
-  assert.equal(conversationInteractionState(deleted).createDisabled, false);
-  assert.equal(conversationInteractionState(deleted).selectDisabled, false);
+  assert.equal(conversationInteractionState(deleted).turnActive, false);
 });
 
 test("explicit cancellation preserves saved history but starts the next prompt with a new ID", () => {
   for (const accepted of [false, true]) {
-    let state = conversationReducer(activeState("cancel this"), { type: "stop-requested", generation: 1 });
+    let state = conversationReducer(activeState("cancel this"), { type: "stop-requested", generation: 1, projectEpoch: 0 });
     state = conversationReducer(state, {
-      type: "turn-failed", generation: 1, projectId, sessionId, requestId, cancelled: true,
+      type: "turn-failed", generation: 1, projectEpoch: 0, projectId, sessionId, requestId, cancelled: true,
       message: "The turn was stopped.", retryable: false,
       turnLifecycle: { turnId, state: accepted ? "interrupted" : null, accepted, persisted: accepted },
     });
@@ -674,7 +685,7 @@ test("explicit cancellation preserves saved history but starts the next prompt w
     assert.equal(state.draft, accepted ? "" : "cancel this");
     assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false });
     state = conversationReducer(state, { type: "backend-generation-changed", generation: 2 });
-    state = conversationReducer(state, { type: "conversation-selected", generation: 2, projectId, sessionId, preserveDraft: true });
+    state = conversationReducer(state, { type: "conversation-selected", generation: 2, projectEpoch: 0, projectId, sessionId, preserveDraft: true });
     assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false }, "restart does not revive an explicitly cancelled ID");
   }
   const cancelled = { ...transcriptTurn(2, otherTurnId, "interrupted"), failureCode: "cancelled" as const };
@@ -686,14 +697,14 @@ test("only the current accepted event clears annotation drafts while the model r
   const reference = { referenceId: "reference", kind: "chat" as const, text: "source text",
     chat: { projectId, sessionId, turnId: otherTurnId, role: "assistant" as const,
       messageFingerprint: "a".repeat(64), startUtf16: 0, endUtf16: 11 } };
-  let draft = conversationReducer(selectedState(""), { type: "reference-added", generation: 1, reference });
-  draft = conversationReducer(draft, { type: "annotation-changed", generation: 1, referenceId: "reference", comment: "Explain this claim." });
+  let draft = conversationReducer(selectedState(""), { type: "reference-added", generation: 1, projectEpoch: 0, reference });
+  draft = conversationReducer(draft, { type: "annotation-changed", generation: 1, projectEpoch: 0, referenceId: "reference", comment: "Explain this claim." });
   const sentText = composeTurnText(draft.draft, draft.annotations);
   const context = { projectId, rootPath: "/tmp/project", permissionMode: "ask" as const, requestedThinkingMode: "normal" as const,
     skillReferences: [], projectRules: { text: "rules", fingerprint: "b".repeat(64) }, references: [reference] };
-  const started = conversationReducer(draft, { type: "turn-started", generation: 1, requestId, projectId, sessionId, turnId, text: sentText, submittedContext: context });
+  const started = conversationReducer(draft, { type: "turn-started", generation: 1, projectEpoch: 0, requestId, projectId, sessionId, turnId, text: sentText, submittedContext: context });
   assert.equal(started.annotations.length, 1, "request dispatch does not mean acceptance");
-  const rejected = conversationReducer(started, { type: "turn-failed", generation: 1, requestId, projectId, sessionId,
+  const rejected = conversationReducer(started, { type: "turn-failed", generation: 1, projectEpoch: 0, requestId, projectId, sessionId,
     message: "pending write rejected", retryable: true, turnLifecycle: { turnId, state: null, accepted: false, persisted: false } });
   assert.deepEqual(rejected.annotations, draft.annotations);
   assert.deepEqual(rejected.draftReferences, [reference]);
@@ -707,12 +718,12 @@ test("only the current accepted event clears annotation drafts while the model r
   assert.deepEqual(running.draftReferences, []);
   assert.deepEqual(running.annotations, []);
   assert.deepEqual(running.submittedContext, context, "saved source context is not cleared");
-  const failed = conversationReducer(running, { type: "turn-failed", generation: 1, requestId, projectId, sessionId,
+  const failed = conversationReducer(running, { type: "turn-failed", generation: 1, projectEpoch: 0, requestId, projectId, sessionId,
     message: "model failed", retryable: true, turnLifecycle: { turnId, state: "failed", accepted: true, persisted: true } });
   assert.equal(failed.failure?.draftPreserved, false);
   assert.equal(turnSubmissionText(failed), sentText);
   assert.deepEqual(nextTurnSubmission(failed, () => otherTurnId), { turnId, retry: true });
-  const retry = conversationReducer(failed, { type: "turn-started", generation: 1, requestId: retryRequestId, projectId, sessionId, turnId,
+  const retry = conversationReducer(failed, { type: "turn-started", generation: 1, projectEpoch: 0, requestId: retryRequestId, projectId, sessionId, turnId,
     text: turnSubmissionText(failed), submittedContext: failed.submittedContext });
   assert.deepEqual(retry.annotations, []);
   assert.deepEqual(retry.submittedContext, context);

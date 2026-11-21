@@ -25,6 +25,7 @@ import {
   initialBackendState,
   normalizeUiError,
   parseBridgeEvent,
+  planBackendSnapshotTransition,
   toBoundedDiagnostics,
 } from "./backend.ts";
 import {
@@ -166,10 +167,6 @@ export function sidebarRowsForProject(
     });
   }
   return rows;
-}
-
-export function sessionCreateParams(projectId: string): JsonObject {
-  return { projectId };
 }
 
 export function DeleteConversationDialog({ title, status, error, onConfirm, onCancel }: {
@@ -1054,7 +1051,12 @@ export default function App() {
   const conversationMenuRef = useRef<HTMLDivElement>(null);
   const conversationMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const [slashCatalogOwner, setSlashCatalogOwner] = useState<SlashCatalogOwner | null>(null);
-  const [catalogGeneration, setCatalogGeneration] = useState<number | null>(null);
+  const [catalogGeneration, setCatalogGenerationState] = useState<number | null>(null);
+  const catalogGenerationRef = useRef<number | null>(null);
+  const setCatalogGeneration = useCallback((value: number | null) => {
+    catalogGenerationRef.current = value;
+    setCatalogGenerationState(value);
+  }, []);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<SafeUiError | null>(null);
   const [transcript, setTranscript] = useState<TranscriptView | null>(null);
@@ -1354,6 +1356,77 @@ export default function App() {
     }
   }, [documentConflict, applyDocumentOperation, saveDocument, updateDocument]);
 
+  const applyBackendSnapshot = useCallback((
+    snapshot: BackendSnapshot,
+    completedAction?: "start" | "restart" | "shutdown",
+  ) => {
+    const transition = planBackendSnapshotTransition({
+      currentGeneration: generationRef.current,
+      catalogGeneration: catalogGenerationRef.current,
+      hasProject: projectRef.current !== null,
+      selectedConversation: conversationRef.current.selected,
+      resumeSelection: resumeSelectionRef.current,
+      draft: conversationRef.current.draft,
+      resumeDraft: resumeDraftRef.current,
+      snapshot,
+      completedAction,
+    });
+    if (!transition.accepted) return;
+    if (transition.invalidateOperations) invalidateOperations();
+    if (transition.captureResumeState) {
+      resumeSelectionRef.current = transition.nextResumeSelection;
+      resumeDraftRef.current = transition.nextResumeDraft;
+      if (transition.clearBindingGeneration) bindingGenerationRef.current = null;
+    }
+    if (transition.clearTransientUi) {
+      setSlashCatalogOwner(null);
+      setSelectionPreview(null);
+      pendingApprovalRef.current = null;
+      approvalResolvingRef.current = false;
+      setPendingApproval(null);
+      setApprovalResolving(false);
+    }
+    if (transition.resetStaleCatalog) {
+      workspaceOperation.current = null;
+      setWorkspaceBusy(null);
+      setWorkspaceIssue(null);
+      setCatalog(null);
+      setSessionLists({});
+      setTranscript(null);
+      setSelectionPreview(null);
+      setLiveTurns([]);
+      setPendingUserText(null);
+      setRegistrationIssue(null);
+      pendingApprovalRef.current = null;
+      approvalResolvingRef.current = false;
+      setPendingApproval(null);
+      setApprovalResolving(false);
+      setCatalogGeneration(null);
+    }
+    if (transition.extensionTransition === "awaiting-load") {
+      setExtensionFlow((current) => current === null ? null : markExtensionAwaitingLoad(current));
+    } else if (transition.extensionTransition !== "none") {
+      setExtensionFlow((current) => {
+        if (current === null) return null;
+        const recoverable = interruptExtensionFlow(current);
+        if (recoverable === null || recoverable.report === null) return recoverable;
+        if (transition.extensionTransition === "interrupt-restarting") {
+          return markExtensionRestarting(recoverable);
+        }
+        if (transition.extensionTransition === "interrupt-awaiting-load") {
+          return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
+        }
+        return recoverable;
+      });
+    }
+    generationRef.current = transition.nextGeneration;
+    applyConversation({ type: "backend-generation-changed", generation: transition.nextGeneration });
+    dispatch({ type: "snapshot", snapshot });
+    if (transition.completedAction !== null) {
+      dispatch({ type: "action-completed", action: transition.completedAction });
+    }
+  }, [applyConversation, invalidateOperations, setCatalogGeneration]);
+
   useEffect(() => {
     if (!isTauriRuntime()) {
       dispatch({ type: "browser-preview" });
@@ -1368,38 +1441,7 @@ export default function App() {
           try {
             const event = parseBridgeEvent(payload);
             if (event.type === "lifecycle") {
-              if (event.snapshot.generation < generationRef.current) return;
-              const generationChanged = generationRef.current !== event.snapshot.generation;
-              if (generationChanged) {
-                invalidateOperations();
-                resumeSelectionRef.current = conversationRef.current.selected ?? resumeSelectionRef.current;
-                resumeDraftRef.current = conversationRef.current.draft;
-                bindingGenerationRef.current = null;
-              }
-              if (generationChanged || event.snapshot.lifecycle !== "ready") {
-                setSlashCatalogOwner(null);
-                setSelectionPreview(null);
-                pendingApprovalRef.current = null;
-                approvalResolvingRef.current = false;
-                setPendingApproval(null);
-                setApprovalResolving(false);
-                setExtensionFlow((current) => {
-                  if (current === null) return null;
-                  const recoverable = interruptExtensionFlow(current);
-                  if (recoverable === null) return null;
-                  if (recoverable.report === null) return recoverable;
-                  if (event.snapshot.lifecycle === "restarting") {
-                    return markExtensionRestarting(recoverable);
-                  }
-                  if (event.snapshot.lifecycle === "ready" && generationChanged) {
-                    return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
-                  }
-                  return recoverable;
-                });
-              }
-              generationRef.current = event.snapshot.generation;
-              applyConversation({ type: "backend-generation-changed", generation: event.snapshot.generation });
-              dispatch({ type: "snapshot", snapshot: event.snapshot });
+              applyBackendSnapshot(event.snapshot);
               return;
             }
             dispatch({ type: "protocol-event", message: event.message });
@@ -1512,45 +1554,15 @@ export default function App() {
         const snapshot = await backendClient.initialize(() => {
           if (!disposed) dispatch({ type: "action-started", action: "start" });
         });
-        if (!disposed && snapshot.generation >= generationRef.current) {
-          const generationChanged = generationRef.current !== snapshot.generation;
-          if (generationChanged) invalidateOperations();
-          if (generationChanged && projectRef.current !== null) {
-            resumeSelectionRef.current = conversationRef.current.selected ?? resumeSelectionRef.current;
-            resumeDraftRef.current = conversationRef.current.draft;
-            bindingGenerationRef.current = null;
-          }
-          if (generationChanged || snapshot.lifecycle !== "ready") {
-            setSlashCatalogOwner(null);
-            pendingApprovalRef.current = null;
-            approvalResolvingRef.current = false;
-            setPendingApproval(null);
-            setApprovalResolving(false);
-            setExtensionFlow((current) => {
-              if (current === null) return null;
-              const recoverable = interruptExtensionFlow(current);
-              if (recoverable === null) return null;
-              if (recoverable.report === null) return recoverable;
-              if (snapshot.lifecycle === "restarting") {
-                return markExtensionRestarting(recoverable);
-              }
-              if (snapshot.lifecycle === "ready" && generationChanged) {
-                return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
-              }
-              return recoverable;
-            });
-          }
-          generationRef.current = snapshot.generation;
-          applyConversation({ type: "backend-generation-changed", generation: snapshot.generation });
-          dispatch({ type: "snapshot", snapshot });
-          dispatch({ type: "action-completed", action: "start" });
+        if (!disposed) {
+          applyBackendSnapshot(snapshot, "start");
         }
       } catch (error) {
         if (!disposed) dispatch({ type: "action-failed", error: workspaceError(error) });
       }
     })();
     return () => { disposed = true; removeListener?.(); };
-  }, [applyConversation, applyDocumentOperation, captureOwner, invalidateOperations, ownsOperation]);
+  }, [applyBackendSnapshot, applyConversation, applyDocumentOperation, captureOwner, invalidateOperations, ownsOperation]);
 
   const runExclusive = useCallback(async (action: BackendActionName, operation: (owner: WorkspaceOperationOwner) => Promise<void>) => {
     if (inFlight.current) return;
@@ -1586,15 +1598,9 @@ export default function App() {
       const snapshot = await operation();
       if (exclusiveOwnerRef.current?.token !== owner.token || owner.projectEpoch !== projectEpochRef.current ||
           snapshot.generation < generationRef.current) return;
-      generationRef.current = snapshot.generation;
-      applyConversation({ type: "backend-generation-changed", generation: snapshot.generation });
-      dispatch({ type: "snapshot", snapshot });
-      if (action === "restart" && snapshot.lifecycle === "ready") {
-        setExtensionFlow((current) => current === null ? null : markExtensionAwaitingLoad(current));
-      }
-      dispatch({ type: "action-completed", action });
+      applyBackendSnapshot(snapshot, action);
     });
-  }, [applyConversation, runExclusive]);
+  }, [applyBackendSnapshot, runExclusive]);
 
   const loadDiagnostics = useCallback((force: boolean) => {
     const generation = state.snapshot?.generation;
@@ -1811,31 +1817,6 @@ export default function App() {
       }
     })();
   }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, sessionLists]);
-
-  useEffect(() => {
-    const generation = state.snapshot?.generation;
-    if (generation === undefined) return;
-    generationRef.current = generation;
-    applyConversation({ type: "backend-generation-changed", generation });
-    if (catalogGeneration !== null && catalogGeneration !== generation) {
-      workspaceOperation.current = null;
-      setWorkspaceBusy(null);
-      setWorkspaceIssue(null);
-      setCatalog(null);
-      setSessionLists({});
-      setTranscript(null);
-      setSelectionPreview(null);
-      setLiveTurns([]);
-      setPendingUserText(null);
-      setRegistrationIssue(null);
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setPendingApproval(null);
-      setApprovalResolving(false);
-      setExtensionFlow((current) => current === null ? null : interruptExtensionFlow(current));
-      setCatalogGeneration(null);
-    }
-  }, [applyConversation, catalogGeneration, state.snapshot?.generation]);
 
   useEffect(() => {
     const generation = state.snapshot?.generation;
@@ -2256,7 +2237,7 @@ export default function App() {
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     void (async () => {
       try {
-        const data = await backendClient.request("session.create", sessionCreateParams(activeProjectId));
+        const data = await backendClient.request("session.create", { projectId: activeProjectId });
         const session = data as unknown as SessionCreatedDto;
         if (!isCurrent()) return;
         if (session.projectId !== undefined && session.projectId !== activeProjectId) {
@@ -2781,7 +2762,7 @@ export default function App() {
       <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
       <aside className="sidebar" aria-label="Research Agent workspace" inert={deleteDialog !== null}>
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">R</span><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>Research Agent</h1></div></div>
-        <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={createSession} disabled={!canCreateSession || interaction.createDisabled}><span aria-hidden="true">＋</span> New conversation</button>
+        <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={createSession} disabled={!canCreateSession || interaction.turnActive}><span aria-hidden="true">＋</span> New conversation</button>
         <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
           <h2 id="workspace-label">Project</h2>
           <button type="button" onClick={showProjectChooser} disabled={!idle || state.snapshot?.lifecycle !== "ready" || state.diagnostics === null}>{project === null ? "Open project" : "Switch project"}</button>
@@ -2802,9 +2783,9 @@ export default function App() {
                   setConversationMenu({ projectId: project.projectId, session,
                     left: Math.max(8, Math.min(event.clientX || bounds.left, window.innerWidth - 200)),
                     top: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - 110)) });
-                }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
+                }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
-              {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.selectDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
+              {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
             </div>;
           })}
         </section>
@@ -2913,7 +2894,7 @@ export default function App() {
               annotationControls={annotationControls}
               thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.bashPermissionMode}
               turnActive={interaction.turnActive} stopping={stopping} onStop={stopTurn}
-              controlsDisabled={interaction.controlDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null}
+              controlsDisabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}
               onThinkingChange={(mode) => void updateThinkingMode(mode)}
               onPermissionChange={(mode) => void updateBashPermissionMode(mode)}
               turnHint={conversation.activeTurn !== null && conversation.submittedContext?.documentContext !== undefined &&

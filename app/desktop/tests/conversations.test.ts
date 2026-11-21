@@ -107,7 +107,6 @@ interface AppHelpersModule {
     isComposing: boolean,
   ) => boolean;
   isPersistedTurnFailure: (failure: ConversationFailure | null) => boolean;
-  sessionCreateParams: (projectId: string) => Record<string, unknown>;
   RestoredTurn: (props: { turn: TranscriptTurnDto }) => unknown;
   ConversationTurns: (props: { turns: readonly VisibleConversationTurn[] }) => unknown;
 }
@@ -503,15 +502,6 @@ test("an unresolved retry renders one prompt without a stale failure card", asyn
   }
 });
 
-test("new conversations delegate the MCP default to the backend", async () => {
-  const { sessionCreateParams } = await loadAppHelpers();
-
-  const params = sessionCreateParams("local");
-
-  assert.deepEqual(params, { projectId: "local" });
-  assert.equal("loadMcp" in params, false);
-});
-
 test("restored turns keep tool details lazy between user and assistant", async () => {
   const { RestoredTurn } = await loadAppHelpers();
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -823,7 +813,7 @@ test("composer replaces disabled Send with Stop and disables only the pending st
 
 test("two document comments and an assistant comment retain their pairing when edited and removed", () => {
   let state = conversationReducer(initialConversationState, { type: "backend-generation-changed", generation: 1 });
-  state = conversationReducer(state, { type: "conversation-selected", generation: 1, projectId: "project", sessionId: "session" });
+  state = conversationReducer(state, { type: "conversation-selected", generation: 1, projectEpoch: 0, projectId: "project", sessionId: "session" });
   const source = "first paragraph\nsecond paragraph";
   const snapshot = { rootPath: "/tmp/project", path: "/tmp/project/draft.md", sourceText: source, editorRevision: 0, diskFingerprint: "a".repeat(64) };
   const first = { referenceId: "first", kind: "document" as const, text: "first paragraph",
@@ -834,17 +824,17 @@ test("two document comments and an assistant comment retain their pairing when e
     chat: { projectId: "project", sessionId: "session", turnId: "turn", role: "assistant" as const,
       messageFingerprint: "b".repeat(64), startUtf16: 0, endUtf16: 34 } };
   for (const reference of [first, second, reply]) {
-    state = conversationReducer(state, { type: "reference-added", generation: 1, reference });
+    state = conversationReducer(state, { type: "reference-added", generation: 1, projectEpoch: 0, reference });
   }
   assert.deepEqual(state.annotations.map((item) => [item.number, item.expanded]), [[1, false], [2, false], [3, true]]);
   assert.equal(conversationInteractionState(state).sendDisabled, true, "source selection alone is not a request");
   for (const [referenceId, comment] of [["first", "Rewrite this paragraph."], ["second", "Remove this."], ["reply", "Explain this."]]) {
-    state = conversationReducer(state, { type: "annotation-changed", generation: 1, referenceId, comment });
-    state = conversationReducer(state, { type: "annotation-toggled", generation: 1, referenceId, expanded: false });
+    state = conversationReducer(state, { type: "annotation-changed", generation: 1, projectEpoch: 0, referenceId, comment });
+    state = conversationReducer(state, { type: "annotation-toggled", generation: 1, projectEpoch: 0, referenceId, expanded: false });
   }
-  state = conversationReducer(state, { type: "annotation-toggled", generation: 1, referenceId: "reply", expanded: true });
-  state = conversationReducer(state, { type: "annotation-changed", generation: 1, referenceId: "reply", comment: "  Explain the evidence.  " });
-  state = conversationReducer(state, { type: "reference-removed", generation: 1, referenceId: "second" });
+  state = conversationReducer(state, { type: "annotation-toggled", generation: 1, projectEpoch: 0, referenceId: "reply", expanded: true });
+  state = conversationReducer(state, { type: "annotation-changed", generation: 1, projectEpoch: 0, referenceId: "reply", comment: "  Explain the evidence.  " });
+  state = conversationReducer(state, { type: "reference-removed", generation: 1, projectEpoch: 0, referenceId: "second" });
   assert.deepEqual(state.annotations.map((item) => [item.number, item.referenceId, item.expanded]), [[1, "first", false], [3, "reply", true]]);
   assert.deepEqual(state.draftReferences, [first, reply], "wire references contain source data only");
   assert.equal(conversationInteractionState(state).sendDisabled, false);
