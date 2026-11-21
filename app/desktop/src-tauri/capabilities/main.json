@@ -4,7 +4,6 @@
   "description": "Minimum capability for the Research Agent main window",
   "windows": ["main"],
   "permissions": [
-    "core:app:allow-tauri-version",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     {

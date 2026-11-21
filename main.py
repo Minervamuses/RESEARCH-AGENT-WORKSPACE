@@ -13,7 +13,7 @@ def _release_is_current(desktop_dir: Path, executable: Path) -> bool:
         desktop_dir / name
         for name in (
             "index.html", "package.json", "package-lock.json", "tsconfig.json",
-            "vite.config.ts", "src", "public", "src-tauri/Cargo.toml",
+            "vite.config.ts", "src", "src-tauri/Cargo.toml",
             "src-tauri/Cargo.lock", "src-tauri/build.rs",
             "src-tauri/tauri.conf.json", "src-tauri/src",
             "src-tauri/capabilities", "src-tauri/icons",
@@ -21,8 +21,6 @@ def _release_is_current(desktop_dir: Path, executable: Path) -> bool:
     ]
     for path in inputs:
         if not path.exists():
-            if path == desktop_dir / "public":
-                continue
             return False
         if path.stat().st_mtime_ns > built_at:
             return False

@@ -223,7 +223,11 @@ struct BackendSupervisor {
 }
 
 impl BackendSupervisor {
-    fn new(event_sink: EventSink) -> Self {
+    fn with_options(
+        event_sink: EventSink,
+        launch_override: Option<LaunchConfig>,
+        timeouts: SupervisorTimeouts,
+    ) -> Self {
         Self {
             core: Arc::new(SupervisorCore {
                 state: Mutex::new(SupervisorState::default()),
@@ -231,23 +235,18 @@ impl BackendSupervisor {
                 changed: Condvar::new(),
                 event_sink,
             }),
-            launch_override: None,
-            timeouts: SupervisorTimeouts::default(),
+            launch_override,
+            timeouts,
         }
+    }
+
+    fn new(event_sink: EventSink) -> Self {
+        Self::with_options(event_sink, None, SupervisorTimeouts::default())
     }
 
     #[cfg(test)]
     fn for_test(launch: LaunchConfig, event_sink: EventSink, timeouts: SupervisorTimeouts) -> Self {
-        Self {
-            core: Arc::new(SupervisorCore {
-                state: Mutex::new(SupervisorState::default()),
-                operation: Mutex::new(()),
-                changed: Condvar::new(),
-                event_sink,
-            }),
-            launch_override: Some(launch),
-            timeouts,
-        }
+        Self::with_options(event_sink, Some(launch), timeouts)
     }
 
     fn snapshot(&self) -> BackendSnapshot {
@@ -757,8 +756,7 @@ pub async fn backend_restart(app_handle: AppHandle) -> BackendSnapshot {
 const WINDOWS_PICKER_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-[Console]::InputEncoding = New-Object System.Text.UTF8Encoding
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
+[Console]::InputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -Namespace ResearchAgent -Name Foreground -MemberDefinition @'
 [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();

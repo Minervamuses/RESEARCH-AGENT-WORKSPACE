@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/` | — | C2-S7 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/` | — | C2-S8 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -309,3 +309,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：build-log 本節。
 - **限制**：無。
 - **下一步**：C2-S7 Rust 與啟動器清理（S014、S098、S101、S102）。
+
+### C2-S7 Rust 與啟動器清理（2026-11-21）
+
+- **觀察結果**：
+  - **S014（APPLIED）**：自 `app/desktop/src-tauri/capabilities/main.json` 移除未使用的 `core:app:allow-tauri-version`。
+  - **S098（APPLIED）**：`WINDOWS_PICKER_SCRIPT` 的 `InputEncoding`／`OutputEncoding` 合併為單一 `New-Object System.Text.UTF8Encoding` 指派（原檔為各建一次 `UTF8Encoding`）。
+  - **S101（APPLIED）**：`BackendSupervisor::new` 與 `for_test` 改共用 `BackendSupervisor::with_options`。
+  - **S102（APPLIED）**：`main.py` 移除不存在的 `public/` 目錄與對應特判。
+- **執行指令**：`python -m py_compile main.py`、`pytest tests/test_desktop_launcher.py`（12 passed）、`npm run build`（通過）、`cargo test --locked --manifest-path src-tauri/Cargo.toml`（42 passed in 0.90 s）。
+- **證據**：build-log 本節。
+- **限制**：無。
+- **下一步**：C2-S8 前端小項目與 `.error-text` 樣式（S073–S076、S092、缺陷 #2）。
