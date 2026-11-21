@@ -2143,7 +2143,7 @@ def test_unknown_degraded_unavailable_and_busy_coordinator_states(
     assert asyncio.run(malformed_service.dispatch("project.list", {})) == cold_projects
 
 
-def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversations(
+def test_select_a_b_a_preserves_permission_mode_in_memory_across_conversations(
     tmp_path: Path,
 ) -> None:
     service, _catalog, _factory, _repository = _seed_coordinator(tmp_path)
@@ -2152,25 +2152,24 @@ def test_select_a_b_a_preserves_bash_permission_mode_in_memory_across_conversati
         "session.select",
         {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
-    assert selected_a["bashPermissionMode"] == "ask"
+    assert selected_a["permissionMode"] == "ask"
 
     ack_bypass = asyncio.run(service.dispatch(
-        "session.set_bash_permission",
-        {"mode": "bypass"},
+        "session.set_permission", {"permissionMode": "bypass"},
     ))
-    assert ack_bypass["bashPermissionMode"] == "bypass"
+    assert ack_bypass["permissionMode"] == "bypass"
 
     selected_b = asyncio.run(service.dispatch(
         "session.select",
         {"projectId": _project_id(tmp_path), "sessionId": SESSION_B},
     ))
-    assert selected_b["bashPermissionMode"] == "ask"
+    assert selected_b["permissionMode"] == "ask"
 
     returned_a = asyncio.run(service.dispatch(
         "session.select",
         {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
     ))
-    assert returned_a["bashPermissionMode"] == "bypass"
+    assert returned_a["permissionMode"] == "bypass"
 
 
 @pytest.mark.parametrize("operation", ["select", "rename"])
@@ -2181,11 +2180,11 @@ def test_conversation_change_blocks_turn_during_read(tmp_path, monkeypatch, oper
         await service.dispatch(
             "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_B}
         )
-        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
         selected_a = await service.dispatch(
             "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
         )
-        assert selected_a["bashPermissionMode"] == "ask"
+        assert selected_a["permissionMode"] == "ask"
         original_session = service.session
         original_load = service._load_conversation
         read_started = asyncio.Event()
@@ -2220,14 +2219,14 @@ def test_conversation_change_blocks_turn_during_read(tmp_path, monkeypatch, oper
 
         assert selected_b["sessionId"] == SESSION_B
         if operation == "select":
-            assert selected_b["bashPermissionMode"] == "bypass"
+            assert selected_b["permissionMode"] == "bypass"
         else:
             assert selected_b["title"] == "Renamed B"
             assert service.session is original_session
         returned_a = await service.dispatch(
             "session.select", {"projectId": _project_id(tmp_path), "sessionId": SESSION_A}
         )
-        assert returned_a["bashPermissionMode"] == "ask"
+        assert returned_a["permissionMode"] == "ask"
 
     asyncio.run(run())
 

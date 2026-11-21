@@ -51,7 +51,7 @@ import type {
   ApprovalRequiredDto,
   ApprovalResolvedDto,
   DocumentResultDto,
-  BashPermissionMode,
+  PermissionMode,
   ExtensionApplyDto,
   ExtensionPreviewDto,
   JsonObject,
@@ -62,7 +62,7 @@ import type {
   SubmittedContext,
   RegistrationRetryDto,
   RuntimeDiagnosticsDto,
-  SessionBashPermissionSetDto,
+  SessionPermissionSetDto,
   SessionCreatedDto,
   SessionDeletedDto,
   SessionListDto,
@@ -80,7 +80,7 @@ import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyEntryDto } from "./citations.ts";
 import {
   ApprovalDialog,
-  BashPermissionControl,
+  PermissionControl,
   ThinkingControl,
   ExtensionPanel,
   acceptApprovalEvent,
@@ -99,7 +99,7 @@ import {
   observeExtensionRevision,
   receiveExtensionApply,
   receiveExtensionPreview,
-  reconcileBashPermissionAck,
+  reconcilePermissionAck,
   type ExtensionBindingDecision,
   type ExtensionFlow,
   type PendingApproval,
@@ -340,15 +340,15 @@ export function SlashCommandList({ commands, active, onSelect, inline = false }:
 }
 
 export function ComposerFooter({ thinkingMode, permissionMode, controlsDisabled, sendDisabled, turnActive = false, stopping = false, onStop, onThinkingChange, onPermissionChange }: {
-  thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode;
+  thinkingMode: "normal" | "extended"; permissionMode: PermissionMode;
   controlsDisabled: boolean; sendDisabled: boolean;
   turnActive?: boolean; stopping?: boolean; onStop?: () => void;
-  onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
+  onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: PermissionMode) => void;
 }) {
   return <div className="composer-footer">
     <div className="composer-controls" aria-label="Conversation settings">
       <ThinkingControl mode={thinkingMode} disabled={controlsDisabled} onChange={onThinkingChange} />
-      <BashPermissionControl mode={permissionMode} disabled={controlsDisabled} onChange={onPermissionChange} />
+      <PermissionControl mode={permissionMode} disabled={controlsDisabled} onChange={onPermissionChange} />
     </div>
     {turnActive
       ? <button className="primary-button" type="button" disabled={stopping} onClick={onStop}>{stopping ? "Stopping…" : "Stop"}</button>
@@ -360,8 +360,8 @@ function SlashComposer({ draft, references, annotationControls, onRemoveReferenc
   references: readonly Reference[]; onRemoveReference: (id: string) => void;
   annotationControls: AnnotationControls;
   turnActive: boolean; stopping: boolean; onStop: () => void;
-  thinkingMode: "normal" | "extended"; permissionMode: BashPermissionMode; controlsDisabled: boolean; turnHint?: string;
-  onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: BashPermissionMode) => void;
+  thinkingMode: "normal" | "extended"; permissionMode: PermissionMode; controlsDisabled: boolean; turnHint?: string;
+  onThinkingChange: (mode: "normal" | "extended") => void; onPermissionChange: (mode: PermissionMode) => void;
   draft: string; commands: SlashCommands; skills: readonly string[]; onSkillPicked: (name: string) => void; textareaRef: RefObject<HTMLTextAreaElement | null>;
   disabled: boolean; sendDisabled: boolean; onChange: (draft: string) => void; onSubmit: () => void;
 }) {
@@ -777,7 +777,7 @@ export function checkSubmissionSize(text: string, submittedContext: SubmittedCon
   }
 }
 
-export function retrySettingsMatch(context: SubmittedContext | null, permission: BashPermissionMode, thinking: "normal" | "extended"): boolean {
+export function retrySettingsMatch(context: SubmittedContext | null, permission: PermissionMode, thinking: "normal" | "extended"): boolean {
   return context === null || (context.permissionMode === permission && context.requestedThinkingMode === thinking);
 }
 
@@ -2283,7 +2283,7 @@ export default function App() {
         documentBusyRef.current || pendingApprovalRef.current !== null || bindingGenerationRef.current !== generationRef.current ||
         selectedProject.projectId !== selected.projectId) return;
     const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
-    if (submission.retry && !retrySettingsMatch(conversationRef.current.submittedContext, session.bashPermissionMode, session.thinkingMode)) {
+    if (submission.retry && !retrySettingsMatch(conversationRef.current.submittedContext, session.permissionMode, session.thinkingMode)) {
       setReferenceIssue("The saved turn uses different Permission or Thinking settings. Send a new turn with the current settings, or restore those settings explicitly before retrying.");
       return;
     }
@@ -2306,7 +2306,7 @@ export default function App() {
         }
         submittedContext = {
           projectId: selected.projectId, rootPath: selectedProject.rootPath,
-          permissionMode: session.bashPermissionMode, requestedThinkingMode: session.thinkingMode,
+          permissionMode: session.permissionMode, requestedThinkingMode: session.thinkingMode,
           skillReferences: inlineSkillReferences(draft, session.loadedSkills, selectedSkillNamesRef.current),
           projectRules: { text: inspected.rulesText, fingerprint: inspected.rulesFingerprint },
           ...(background === undefined ? {} : { documentContext: background }),
@@ -2506,7 +2506,7 @@ export default function App() {
   const applyExtensions = useCallback(() => {
     const flow = extensionFlow;
     if (flow === null) return;
-    const effectiveFlow = state.session?.bashPermissionMode === "bypass" && flow.preview !== null
+    const effectiveFlow = state.session?.permissionMode === "bypass" && flow.preview !== null
       ? { ...flow, decisions: Object.fromEntries(flow.preview.bindings.map((binding) => [binding.bindingHash, "approve" as const])) }
       : flow;
     const submitting = effectiveFlow.phase === "error" && effectiveFlow.applyRequest !== null
@@ -2627,8 +2627,8 @@ export default function App() {
     finally { finishWorkspaceOperation(operation); }
   }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, state.session]);
 
-  const updateBashPermissionMode = useCallback(async (
-    mode: BashPermissionMode,
+  const updatePermissionMode = useCallback(async (
+    mode: PermissionMode,
   ) => {
     const selected = conversationRef.current.selected;
     if (selected === null || conversationRef.current.activeTurn !== null) return;
@@ -2637,9 +2637,9 @@ export default function App() {
     const generation = operation.generation;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     try {
-      const data = (await backendClient.request("session.set_bash_permission", { mode })) as unknown as SessionBashPermissionSetDto;
+      const data = (await backendClient.request("session.set_permission", { permissionMode: mode })) as unknown as SessionPermissionSetDto;
       if (!isCurrent()) return;
-      const updatedMode = reconcileBashPermissionAck(
+      const updatedMode = reconcilePermissionAck(
         generation,
         generationRef.current,
         selected.sessionId,
@@ -2657,14 +2657,14 @@ export default function App() {
               turnCount: 0,
               graphRecursionLimit: 64,
               thinkingMode: "normal",
-              bashPermissionMode: updatedMode,
+              permissionMode: updatedMode,
               slashCommands: [],
               loadedSkills: [],
               mcpFamilies: [],
               startupDiagnostics: [],
               extensionRevision: 0,
             }
-          : { ...state.session, bashPermissionMode: updatedMode },
+          : { ...state.session, permissionMode: updatedMode },
       });
       focusComposer(operation);
     } catch (error) {
@@ -2733,7 +2733,7 @@ export default function App() {
         },
   ), [conversation.activeTurn, liveTurns, pendingUserText, selectionPreview, visibleTranscript]);
   const renderConversation = activeProjectId !== null && state.phase === "session-ready" && state.session !== null && conversation.selected?.projectId === activeProjectId;
-  const retryControlsMatch = retrySettingsMatch(conversation.submittedContext, state.session?.bashPermissionMode ?? "ask", state.session?.thinkingMode ?? "normal");
+  const retryControlsMatch = retrySettingsMatch(conversation.submittedContext, state.session?.permissionMode ?? "ask", state.session?.thinkingMode ?? "normal");
   const documentDirty = documentValue !== null && documentValue.sourceText !== documentBaselineRef.current?.sourceText;
   const activeSession = renderConversation ? state.session : null;
 
@@ -2822,7 +2822,7 @@ export default function App() {
             flow={extensionFlow}
             busy={workspaceBusy !== null || state.activeAction !== null || interaction.turnActive}
             canRestart={canRestart}
-            permissionMode={state.session?.bashPermissionMode ?? "ask"}
+            permissionMode={state.session?.permissionMode ?? "ask"}
             onPreview={previewExtensions}
             onDecision={decideBinding}
             onApply={applyExtensions}
@@ -2872,11 +2872,11 @@ export default function App() {
               draft={conversation.draft} textareaRef={composerRef}
               references={conversation.draftReferences}
               annotationControls={annotationControls}
-              thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.bashPermissionMode}
+              thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.permissionMode}
               turnActive={interaction.turnActive} stopping={stopping} onStop={stopTurn}
               controlsDisabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}
               onThinkingChange={(mode) => void updateThinkingMode(mode)}
-              onPermissionChange={(mode) => void updateBashPermissionMode(mode)}
+              onPermissionChange={(mode) => void updatePermissionMode(mode)}
               turnHint={conversation.activeTurn !== null && conversation.submittedContext?.documentContext !== undefined &&
                 conversation.submittedContext.requestedThinkingMode === "extended" ? "Normal for this document turn; Extended resumes afterward." : undefined}
               onRemoveReference={(referenceId) => applyConversation({ type: "reference-removed", generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch, referenceId })}

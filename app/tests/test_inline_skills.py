@@ -504,7 +504,7 @@ async def _submit_reference_turn(
     project = service._project
     submitted = {
         "projectId": project["projectId"], "rootPath": project["rootPath"],
-        "permissionMode": service.bash_permission_mode, "requestedThinkingMode": service.session.thinking_mode,
+        "permissionMode": service.permission_mode, "requestedThinkingMode": service.session.thinking_mode,
         "skillReferences": [],
         "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
         "documentContext": background, "references": [reference],

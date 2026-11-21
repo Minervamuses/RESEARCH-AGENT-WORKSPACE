@@ -8,7 +8,7 @@ import {
 
 import type {
   ApprovalRequiredDto,
-  BashPermissionMode,
+  PermissionMode,
   ExtensionApplyDto,
   ExtensionPreviewDto,
   JsonObject,
@@ -366,17 +366,17 @@ export function ApprovalDialog({
   );
 }
 
-export interface BashPermissionControlProps {
-  mode: BashPermissionMode;
+export interface PermissionControlProps {
+  mode: PermissionMode;
   disabled: boolean;
-  onChange: (mode: BashPermissionMode) => void;
+  onChange: (mode: PermissionMode) => void;
 }
 
-export function BashPermissionControl({
+export function PermissionControl({
   mode,
   disabled,
   onChange,
-}: BashPermissionControlProps) {
+}: PermissionControlProps) {
   return (
     <label className="bash-permission-control">
       Permission
@@ -385,7 +385,7 @@ export function BashPermissionControl({
         title={disabled ? "The current turn keeps its starting mode. Change the mode after it finishes." : "Applies to document edits, Bash, citation saves, indexing, MCP and extensions."}
         value={mode}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value as BashPermissionMode)}
+        onChange={(event) => onChange(event.target.value as PermissionMode)}
       >
         <option value="ask">Ask</option>
         <option value="bypass">Bypass</option>
@@ -438,23 +438,23 @@ export function ThinkingControl({ mode, disabled, onChange }: {
   </div>;
 }
 
-export function reconcileBashPermissionAck(
+export function reconcilePermissionAck(
   generation: number,
   activeGeneration: number,
   selectedSessionId: string,
-  ack: { sessionId: string; bashPermissionMode: BashPermissionMode },
-): BashPermissionMode | null {
+  ack: { sessionId: string; permissionMode: PermissionMode },
+): PermissionMode | null {
   if (generation !== activeGeneration) return null;
   if (ack.sessionId !== selectedSessionId) return null;
-  if (ack.bashPermissionMode !== "ask" && ack.bashPermissionMode !== "bypass") return null;
-  return ack.bashPermissionMode;
+  if (ack.permissionMode !== "ask" && ack.permissionMode !== "bypass") return null;
+  return ack.permissionMode;
 }
 
 interface ExtensionPanelProps {
   flow: ExtensionFlow;
   busy: boolean;
   canRestart: boolean;
-  permissionMode?: BashPermissionMode;
+  permissionMode?: PermissionMode;
   onPreview: () => void;
   onDecision: (
     bindingHash: string,

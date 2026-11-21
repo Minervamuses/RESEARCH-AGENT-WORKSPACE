@@ -73,11 +73,11 @@ def test_tool_operations_receive_frozen_single_operation_consent(tmp_path, tool,
         service = _service(tmp_path, session_factory=factory)
         await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("session.set_bash_permission", {"mode": mode})
+        await service.dispatch("session.set_permission", {"permissionMode": mode})
 
         async def assert_mode_is_frozen(_data):
             with pytest.raises(DesktopServiceError) as raised:
-                await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+                await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
             assert raised.value.code == "BUSY_TURN"
 
         sink = _ApprovalSink(service, approve=approved, before_resolve=assert_mode_is_frozen)
@@ -137,7 +137,7 @@ def test_slash_index_mutations_ask_or_bypass_without_real_index(tmp_path, kind, 
         service = _service(tmp_path, session_factory=_SessionFactory(), knowledge_operations=operations)
         await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("session.set_bash_permission", {"mode": mode})
+        await service.dispatch("session.set_permission", {"permissionMode": mode})
         command = {"init": "/init", "file": f"/ingest {document}", "folder": f"/ingest {source}", "prune": f"/prune {source}"}[kind]
         if kind == "prune" and mode == "ask":
             preview = await service.dispatch("session.turn", _turn_params(command))
@@ -184,7 +184,7 @@ def test_bypass_prune_rechecks_preview_instead_of_silently_accepting_stale_set(t
         service = _service(tmp_path, session_factory=_SessionFactory(), knowledge_operations=ops)
         await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
         with pytest.raises(DesktopServiceError) as raised:
             await service.dispatch("session.turn", _turn_params(f"/prune {source}"))
         assert raised.value.code == "PRUNE_PREVIEW_STALE" and called == []
@@ -200,7 +200,7 @@ def test_extension_apply_uses_explicit_apply_or_current_bypass_bindings(tmp_path
         service = _service(tmp_path, session_factory=_SessionFactory(), extension_manager=manager)
         await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("session.set_bash_permission", {"mode": mode})
+        await service.dispatch("session.set_permission", {"permissionMode": mode})
         preview = await service.dispatch("extensions.preview", {})
         await service.dispatch("extensions.apply", {
             "previewId": preview["previewId"], "approvedBindingHashes": approved_hashes,
@@ -215,7 +215,7 @@ def test_bypass_document_edit_still_reports_editor_and_disk_conflicts(tmp_path, 
 
     async def run():
         service, _model, path, context = await _setup(tmp_path, monkeypatch)
-        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
         path.write_text("outside edit\n", encoding="utf-8")
         sink = _Sink(service, {**context, "editorRevision": 1, "sourceText": "editor edit\n"})
         result = await service.dispatch("session.turn", {

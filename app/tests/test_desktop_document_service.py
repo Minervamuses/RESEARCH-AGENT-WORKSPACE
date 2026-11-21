@@ -253,7 +253,7 @@ def test_denied_operation_retains_candidate_and_undo_checks_later_edits(tmp_path
 def test_retry_after_save_does_not_write_candidate_twice(tmp_path, monkeypatch):
     async def run():
         service, model, path, context = await _setup(tmp_path, monkeypatch)
-        service._bash_permission_mode = "bypass"
+        service._permission_mode = "bypass"
         writes = []
         original_write = service._documents._write
         def counted_write(target, text):
@@ -429,7 +429,7 @@ def test_stop_pending_approval_rejects_late_approval_and_apply_after_next_turn(t
 def test_stop_waits_started_document_save_and_preserves_saved_effect(tmp_path, monkeypatch):
     async def run():
         service, model, path, context = await _setup(tmp_path, monkeypatch)
-        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
         entered, release = threading.Event(), threading.Event()
         original_apply = service._documents.apply
 
@@ -541,7 +541,7 @@ def test_reference_comments_reach_model_as_requests_with_source_and_permission_b
             "Reference doc-second:" + nl + "Rewrite this paragraph.",
             "Reference assistant-answer:" + nl + "Explain this answer without changing its source.",
         ])
-        await service.dispatch("session.set_bash_permission", {"mode": permission})
+        await service.dispatch("session.set_permission", {"permissionMode": permission})
         project = service._project
         submitted = {
             "projectId": project["projectId"], "rootPath": project["rootPath"],
@@ -578,7 +578,7 @@ def test_reference_comments_reach_model_as_requests_with_source_and_permission_b
 
         approvals = [data for event, data in sink.events if event == "approval.required"]
         assert len(approvals) == (1 if permission == "ask" else 0)
-        assert service.bash_permission_mode == permission
+        assert service.permission_mode == permission
         assert sink.results[0]["status"] == ("cancelled" if permission == "ask" else "saved")
         expected = source if permission == "ask" else source[:second_start] + model.replacement + nl
         assert path.read_text() == expected
@@ -677,7 +677,7 @@ def test_same_turn_reference_edits_keep_prior_saved_text_and_utf16_ranges(tmp_pa
             {"referenceId": "second", "kind": "document", "text": paragraph,
              "document": {"snapshot": second, "startLine": 3, "endLine": 3}},
         ]
-        await service.dispatch("session.set_bash_permission", {"mode": permission})
+        await service.dispatch("session.set_permission", {"permissionMode": permission})
         project = service._project
         submitted = {
             "projectId": project["projectId"], "rootPath": project["rootPath"],
@@ -752,7 +752,7 @@ def test_same_turn_reference_edits_keep_prior_saved_text_and_utf16_ranges(tmp_pa
         assert [(data["rangeStartUtf16"], data["rangeEndUtf16"]) for data in approvals] == (
             [(0, first_end), (shifted_start, shifted_end)] if permission == "ask" else []
         )
-        assert service.bash_permission_mode == permission
+        assert service.permission_mode == permission
         candidates = list(service._document_candidates.values())
         assert candidates[0].context == first
         assert candidates[1].context["sourceText"] == first_source

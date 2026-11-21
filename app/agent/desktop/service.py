@@ -307,7 +307,7 @@ class _PendingApproval:
 @dataclass(frozen=True)
 class _ConversationControlSnapshot:
     thinking_mode: str
-    bash_permission_mode: str = "ask"
+    permission_mode: str = "ask"
 
 
 @dataclass
@@ -392,7 +392,7 @@ class DesktopService:
         self._session_registered = False
         self._pending_registration: tuple[str, str] | None = None
         self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
-        self._bash_permission_mode: str = "ask"
+        self._permission_mode: str = "ask"
         self._load_mcp = True
         self._session_creating = False
         self._turn_active = False
@@ -447,8 +447,8 @@ class DesktopService:
         )
 
     @property
-    def bash_permission_mode(self) -> str:
-        return self._bash_permission_mode
+    def permission_mode(self) -> str:
+        return self._permission_mode
 
     async def dispatch(
         self,
@@ -475,7 +475,7 @@ class DesktopService:
             "document.save": self._document_save,
             "document.apply": self._document_apply,
             "session.set_thinking": self._session_set_thinking,
-            "session.set_bash_permission": self._session_set_bash_permission,
+            "session.set_permission": self._session_set_permission,
             "extensions.preview": self._extensions_preview,
             "extensions.apply": self._extensions_apply,
             "approval.resolve": self._approval_resolve,
@@ -992,8 +992,8 @@ class DesktopService:
         self._session_registered = True
         self._pending_registration = None
         target_snapshot = self._control_snapshots.get(session_id)
-        self._bash_permission_mode = (
-            target_snapshot.bash_permission_mode
+        self._permission_mode = (
+            target_snapshot.permission_mode
             if target_snapshot is not None
             else "ask"
         )
@@ -1567,7 +1567,7 @@ class DesktopService:
     def _capture_controls(self, session: ChatSession) -> _ConversationControlSnapshot:
         return _ConversationControlSnapshot(
             thinking_mode=str(session.thinking_mode),
-            bash_permission_mode=self._bash_permission_mode,
+            permission_mode=self._permission_mode,
         )
 
     def _store_control_snapshot(
@@ -1649,7 +1649,7 @@ class DesktopService:
         self._selected_project_id = project_id
         self._session_registered = False
         self._pending_registration = None
-        self._bash_permission_mode = "ask"
+        self._permission_mode = "ask"
         return {
             **self._session_snapshot(session),
             "projectId": project_id,
@@ -2641,7 +2641,7 @@ class DesktopService:
         scope = current_local_work()
         if scope is not None:
             scope.check_cancelled()
-        mode = permission_mode or self._active_turn_permission_mode or self._bash_permission_mode
+        mode = permission_mode or self._active_turn_permission_mode or self._permission_mode
         if mode == "bypass":
             return True, document_context
         sink = event_sink or self._turn_event_sink
@@ -2698,7 +2698,7 @@ class DesktopService:
         scope = current_local_work()
         if scope is not None:
             scope.check_cancelled()
-        mode = self._active_turn_permission_mode or self._bash_permission_mode
+        mode = self._active_turn_permission_mode or self._permission_mode
         if mode == "bypass":
             return True
         summary = json.dumps(parameters, ensure_ascii=False, sort_keys=True, default=str) if parameters is not None else None
@@ -2843,7 +2843,7 @@ class DesktopService:
                 approval_parent = self._active_parent_request_id if self._turn_active else getattr(event_sink, "request_id", None)
                 if not isinstance(approval_parent, str):
                     raise DocumentError("Document operation requires a correlated desktop request.")
-                mode = self._bash_permission_mode if undo_of else candidate.permission_mode
+                mode = self._permission_mode if undo_of else candidate.permission_mode
                 approved, context = await self._document_operation_approval(
                     event_sink=approval_sink, parent_request_id=approval_parent,
                     turn_id=turn_id, operation="document.undo" if undo_of else "document.apply",
@@ -2904,7 +2904,7 @@ class DesktopService:
         if context["projectId"] != project["projectId"] or context["rootPath"] != project["rootPath"]:
             raise DesktopServiceError("PROTOCOL_INVALID", "Submitted context belongs to another project.")
         if existing is None or existing.state != "completed":
-            if context["permissionMode"] != self._bash_permission_mode or context["requestedThinkingMode"] != session.thinking_mode:
+            if context["permissionMode"] != self._permission_mode or context["requestedThinkingMode"] != session.thinking_mode:
                 raise DesktopServiceError("PROTOCOL_INVALID", "Original Permission or Thinking differs from the current controls. Restore those controls explicitly or send a new turn with the same references.")
         if existing is None and context["projectRules"] != {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]}:
             raise DesktopServiceError("PROTOCOL_INVALID", "Project rules changed after submission was prepared. Inspect the project and submit again; your draft is retained.")
@@ -2946,7 +2946,7 @@ class DesktopService:
         previous_mode = session.thinking_mode
         installer = getattr(session, "_skill_installer", None)
         if installer is not None:
-            installer.bypass_approval = self._bash_permission_mode == "bypass"
+            installer.bypass_approval = self._permission_mode == "bypass"
         response = None
         failure = None
         try:
@@ -3024,7 +3024,7 @@ class DesktopService:
             parent_request_id if isinstance(parent_request_id, str) else None
         )
         self._active_turn_id = turn_id
-        self._active_turn_permission_mode = self._bash_permission_mode
+        self._active_turn_permission_mode = self._permission_mode
         with owner.scope.bind():
             submitted_context, original_turn = await self._submitted_turn_context(session, params)
             if submitted_context is not None:
@@ -3347,20 +3347,20 @@ class DesktopService:
         session.set_thinking_mode(params["mode"])
         return self._session_snapshot(session)
 
-    async def _session_set_bash_permission(
+    async def _session_set_permission(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
         session = self._require_idle_session()
-        mode = params.get("mode")
+        mode = params.get("permissionMode")
         if mode not in ("ask", "bypass"):
             raise DesktopServiceError(
                 "PROTOCOL_INVALID",
-                f"Unknown bash permission mode: {mode}",
+                f"Unknown permission mode: {mode}",
             )
-        self._bash_permission_mode = str(mode)
+        self._permission_mode = str(mode)
         return {
             "sessionId": session.session_id,
-            "bashPermissionMode": self._bash_permission_mode,
+            "permissionMode": self._permission_mode,
         }
 
     async def _runtime_shutdown(
@@ -3455,7 +3455,7 @@ class DesktopService:
         self._pending_registration = None
         self._control_snapshots.clear()
         self._clear_session_caches()
-        self._bash_permission_mode = "ask"
+        self._permission_mode = "ask"
         return {"status": "stopped"}
 
     def _clear_session_caches(self) -> None:
@@ -3532,7 +3532,7 @@ class DesktopService:
             "turnCount": int(status.get("turn_count", 0)),
             "graphRecursionLimit": int(session.config.graph_recursion_limit),
             "thinkingMode": session.thinking_mode,
-            "bashPermissionMode": self._bash_permission_mode,
+            "permissionMode": self._permission_mode,
             "slashCommands": [
                 {"name": command.name, "description": self._bounded_text(command.description, 1_024)}
                 for command in commands
@@ -3686,7 +3686,7 @@ class DesktopService:
         session = self._require_session()
         preview_id, approved_values = self._extension_apply_values(params)
         approved = set(approved_values)
-        permission_mode = self._bash_permission_mode
+        permission_mode = self._permission_mode
         display_input = self._extension_apply_display_input(params)
 
         async def apply_once() -> ApplyReport:

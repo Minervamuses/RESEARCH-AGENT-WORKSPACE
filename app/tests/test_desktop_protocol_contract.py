@@ -449,39 +449,39 @@ def test_deeply_nested_json_is_a_bounded_protocol_failure() -> None:
     assert raised.value.code == "PROTOCOL_INVALID"
 
 
-def test_bash_permission_mode_protocol_contract() -> None:
-    method = METHODS["session.set_bash_permission"]
-    assert method["requiredParams"] == ["mode"]
-    assert method["params"]["mode"] == {
+def test_permission_mode_protocol_contract() -> None:
+    method = METHODS["session.set_permission"]
+    assert method["requiredParams"] == ["permissionMode"]
+    assert method["params"]["permissionMode"] == {
         "type": "string",
         "required": True,
         "enum": ["ask", "bypass"],
     }
 
-    validate_result_data("session.set_bash_permission", {
+    validate_result_data("session.set_permission", {
         "sessionId": "0123456789abcdef0123456789abcdef",
-        "bashPermissionMode": "bypass",
+        "permissionMode": "bypass",
     })
 
     with pytest.raises(ProtocolError):
-        validate_result_data("session.set_bash_permission", {
+        validate_result_data("session.set_permission", {
             "sessionId": "0123456789abcdef0123456789abcdef",
-            "bashPermissionMode": "bypass",
+            "permissionMode": "bypass",
             "extraKey": "forbidden",
         })
 
     with pytest.raises(ProtocolError):
-        validate_result_data("session.set_bash_permission", {
+        validate_result_data("session.set_permission", {
             "sessionId": "0123456789abcdef0123456789abcdef",
-            "bashPermissionMode": "invalid",
+            "permissionMode": "invalid",
         })
 
-    assert CONTRACT["resultDataSchemas"]["session.create"]["bashPermissionMode"] == {
+    assert CONTRACT["resultDataSchemas"]["session.create"]["permissionMode"] == {
         "type": "string",
         "required": True,
         "enum": ["ask", "bypass"],
     }
-    assert CONTRACT["resultDataSchemas"]["session.select"]["bashPermissionMode"] == {
+    assert CONTRACT["resultDataSchemas"]["session.select"]["permissionMode"] == {
         "type": "string",
         "required": True,
         "enum": ["ask", "bypass"],

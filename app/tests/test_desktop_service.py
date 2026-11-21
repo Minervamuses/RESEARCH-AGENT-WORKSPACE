@@ -2697,7 +2697,7 @@ def test_conversation_replacement_or_shutdown_denies_pending_bash(
     asyncio.run(run())
 
 
-def test_desktop_bash_permission_mode_defaults_to_ask_and_rejects_busy_turn(
+def test_desktop_permission_mode_defaults_to_ask_and_rejects_busy_turn(
     tmp_path: Path,
 ) -> None:
     async def run() -> None:
@@ -2710,10 +2710,10 @@ def test_desktop_bash_permission_mode_defaults_to_ask_and_rejects_busy_turn(
         )
         await _open_test_project(service, tmp_path)
         created = await service.dispatch("session.create", {"loadMcp": False})
-        assert created["bashPermissionMode"] == "ask"
+        assert created["permissionMode"] == "ask"
 
         with pytest.raises(DesktopServiceError) as invalid_mode:
-            await service.dispatch("session.set_bash_permission", {"mode": "invalid"})
+            await service.dispatch("session.set_permission", {"permissionMode": "invalid"})
         assert invalid_mode.value.code == "PROTOCOL_INVALID"
 
         sink = _CorrelatedEventSink(
@@ -2725,7 +2725,7 @@ def test_desktop_bash_permission_mode_defaults_to_ask_and_rejects_busy_turn(
         await sink.approval_ready.wait()
 
         with pytest.raises(DesktopServiceError) as busy:
-            await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+            await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
         assert busy.value.code == "BUSY_TURN"
 
         event = next(
@@ -2742,7 +2742,7 @@ def test_desktop_bash_permission_mode_defaults_to_ask_and_rejects_busy_turn(
     asyncio.run(run())
 
 
-def test_desktop_bash_permission_mode_idle_setter_and_fake_runner_bypass(
+def test_desktop_permission_mode_idle_setter_and_fake_runner_bypass(
     tmp_path: Path,
 ) -> None:
     async def run() -> None:
@@ -2769,12 +2769,11 @@ def test_desktop_bash_permission_mode_idle_setter_and_fake_runner_bypass(
         session_id = created["sessionId"]
 
         ack = await service.dispatch(
-            "session.set_bash_permission",
-            {"mode": "bypass"},
+            "session.set_permission", {"permissionMode": "bypass"},
         )
         assert ack == {
             "sessionId": session_id,
-            "bashPermissionMode": "bypass",
+            "permissionMode": "bypass",
         }
 
         sink1 = _CorrelatedEventSink(
@@ -2807,7 +2806,7 @@ def test_desktop_bash_permission_mode_idle_setter_and_fake_runner_bypass(
     asyncio.run(run())
 
 
-def test_desktop_bash_permission_mode_switching_back_to_ask_restores_approval(
+def test_desktop_permission_mode_switching_back_to_ask_restores_approval(
     tmp_path: Path,
 ) -> None:
     async def run() -> None:
@@ -2833,7 +2832,7 @@ def test_desktop_bash_permission_mode_switching_back_to_ask_restores_approval(
         created = await service.dispatch("session.create", {"loadMcp": False})
         session_id = created["sessionId"]
 
-        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
         sink1 = _CorrelatedEventSink(
             "00000000-0000-4000-8000-000000000314"
         )
@@ -2845,12 +2844,11 @@ def test_desktop_bash_permission_mode_switching_back_to_ask_restores_approval(
         assert len(runner_calls) == 1
 
         ack_ask = await service.dispatch(
-            "session.set_bash_permission",
-            {"mode": "ask"},
+            "session.set_permission", {"permissionMode": "ask"},
         )
         assert ack_ask == {
             "sessionId": session_id,
-            "bashPermissionMode": "ask",
+            "permissionMode": "ask",
         }
 
         sink2 = _CorrelatedEventSink(
@@ -2878,7 +2876,7 @@ def test_desktop_bash_permission_mode_switching_back_to_ask_restores_approval(
     asyncio.run(run())
 
 
-def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_without_events(
+def test_desktop_permission_mode_bypass_executes_undisplayable_context_without_events(
     tmp_path: Path,
 ) -> None:
     async def run() -> None:
@@ -2902,7 +2900,7 @@ def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_with
         )
         await _open_test_project(service, tmp_path)
         await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("session.set_bash_permission", {"mode": "bypass"})
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
 
         sink = _CorrelatedEventSink(
             "00000000-0000-4000-8000-000000000316"

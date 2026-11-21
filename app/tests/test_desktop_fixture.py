@@ -760,7 +760,7 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
     assert stopped == {"status": "stopped"}
 
 
-def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
+def test_permission_mode_resets_to_ask_after_service_restart_and_select(
     fixture_root: Path,
 ) -> None:
     first = _service(fixture_root, open_project=True)
@@ -771,15 +771,14 @@ def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
             {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
         bypassed = await first.dispatch(
-            "session.set_bash_permission",
-            {"mode": "bypass"},
+            "session.set_permission", {"permissionMode": "bypass"},
         )
         shutdown = await first.dispatch("runtime.shutdown", {})
         return selected, bypassed, shutdown
 
     selected, bypassed, shutdown = asyncio.run(run_first_process())
-    assert selected["bashPermissionMode"] == "ask"
-    assert bypassed["bashPermissionMode"] == "bypass"
+    assert selected["permissionMode"] == "ask"
+    assert bypassed["permissionMode"] == "bypass"
     assert shutdown == {"status": "stopped"}
 
     restarted = _service(fixture_root, open_project=True)
@@ -793,7 +792,7 @@ def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
         return restored, stopped
 
     restored, stopped = asyncio.run(run_second_process())
-    assert restored["bashPermissionMode"] == "ask"
+    assert restored["permissionMode"] == "ask"
     assert stopped == {"status": "stopped"}
 
 

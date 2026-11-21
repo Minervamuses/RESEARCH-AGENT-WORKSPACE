@@ -164,14 +164,14 @@ export interface TurnCompletedDto {
   extensionAction?: "status" | "preview";
 }
 
-export type BashPermissionMode = "ask" | "bypass";
+export type PermissionMode = "ask" | "bypass";
 
 export interface SessionCreatedDto {
   sessionId: string;
   turnCount: number;
   graphRecursionLimit: number;
   thinkingMode: "normal" | "extended";
-  bashPermissionMode: BashPermissionMode;
+  permissionMode: PermissionMode;
   slashCommands: { name: string; description: string }[];
   loadedSkills: string[];
   mcpFamilies: string[];
@@ -470,9 +470,9 @@ export interface ApprovalResolvedDto {
   approved: boolean;
 }
 
-export interface SessionBashPermissionSetDto {
+export interface SessionPermissionSetDto {
   sessionId: string;
-  bashPermissionMode: BashPermissionMode;
+  permissionMode: PermissionMode;
 }
 
 /**
@@ -496,7 +496,7 @@ export interface MethodResults {
   "session.retry_registration": RegistrationRetryDto;
   "session.transcript": SessionTranscriptDto;
   "session.turn": TurnCompletedDto;
-  "session.set_bash_permission": SessionBashPermissionSetDto;
+  "session.set_permission": SessionPermissionSetDto;
   "session.stop": TurnStoppedDto;
   "extensions.preview": ExtensionPreviewDto;
   "extensions.apply": ExtensionApplyDto;

@@ -18,7 +18,7 @@
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
-| C4 | In progress | `evidence/C4-S1/`–`C4-S3/` | — | C4-S4 |
+| C4 | In progress | `evidence/C4-S1/`–`C4-S4/` | — | C4-S5 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
@@ -487,3 +487,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C4-S3/dead-vocabulary.md`。
 - **限制**：`for_agents/` 仍提到舊測試檔名，列入最終彙報。
 - **下一步**：C4-S4 權限命名（U8＋P2）。
+
+### C4-S4 權限命名（2026-11-22）
+
+- **觀察結果**：**S016（U8＋P2，APPLIED）**。方法改為 `session.set_permission`，參數 `mode` 與線上欄位 `bashPermissionMode` 改為 `permissionMode`；Python handler、`DesktopService._permission_mode`、記憶體內控制快照、TS 型別、`PermissionControl` 元件與相關函式、fixtures 與 desktop 測試名稱同步改名。持久化的 `permissionMode` 與 bash 工具內部命名不變。
+- **執行指令**：相關 pytest（599 passed，沙箱外）、`npm test`（224 pass）、`npm run build`（通過）、grep（0 筆）。
+- **證據**：`evidence/C4-S4/permission-naming.md`。
+- **限制**：無。
+- **下一步**：C4-S5 無用欄位與錯誤碼（S008＋P3）。

@@ -214,7 +214,7 @@ def test_add_uses_citation_save_approval_and_merges(tmp_path, monkeypatch):
         assert data == {"status": "added", "key": "lee2020biorxiv", "reasonCode": None, "libraryFingerprint": _sha(library)}
         assert list((tmp_path / "cite").glob("*/reference.bib"))
 
-        service._bash_permission_mode = "bypass"
+        service._permission_mode = "bypass"
         again = await _call(service, "bibliography.add", {"identifier": PREPRINT_DOI})
         assert (again["status"], again["key"]) == ("existing", "lee2020biorxiv")
         missing = await _call(service, "bibliography.add", {"identifier": "10.9999/does-not-exist"})

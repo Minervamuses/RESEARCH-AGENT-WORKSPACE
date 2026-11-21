@@ -230,7 +230,7 @@ test("catalog requires a verified current session owner after switch or restart"
   const owner = { ...selected, generation: 1 };
   const session: SessionCreatedDto = {
     ...selected, turnCount: 0, graphRecursionLimit: 64, thinkingMode: "normal",
-    bashPermissionMode: "ask", slashCommands: [{ name: "skill-a", description: "A" }],
+    permissionMode: "ask", slashCommands: [{ name: "skill-a", description: "A" }],
     loadedSkills: ["unverified-skill"], mcpFamilies: [], startupDiagnostics: [], extensionRevision: 1,
   };
   assert.equal(composerSlashCommands(session, selected, 1, owner, true), session.slashCommands);

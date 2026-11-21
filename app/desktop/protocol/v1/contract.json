@@ -416,7 +416,7 @@
       "turnCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
-      "bashPermissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]},
+      "permissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]},
       "slashCommands": {
         "type": "objectArray", "required": true, "maxItems": 512,
         "items": {
@@ -522,7 +522,7 @@
       "turnCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "graphRecursionLimit": {"type": "integer", "required": true, "minimum": 3, "maximum": 4294967295},
       "thinkingMode": {"type": "string", "required": true, "enum": ["normal", "extended"]},
-      "bashPermissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]},
+      "permissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]},
       "slashCommands": {
         "type": "objectArray", "required": true, "maxItems": 512,
         "items": {
@@ -642,9 +642,9 @@
       "approvalId": {"type": "string", "required": true, "maxBytes": 256},
       "approved": {"type": "boolean", "required": true}
     },
-    "session.set_bash_permission": {
+    "session.set_permission": {
       "sessionId": {"type": "string", "required": true, "maxBytes": 256},
-      "bashPermissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]}
+      "permissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]}
     },
     "bibliography.inspect": {
       "libraryPath": {"type": "string", "required": true, "maxBytes": 8192},
@@ -944,10 +944,10 @@
       "params": {"mode": {"type": "string", "required": true, "enum": ["normal", "extended"]}}
     },
     {
-      "name": "session.set_bash_permission",
+      "name": "session.set_permission",
       "operation": "mutation",
-      "requiredParams": ["mode"],
-      "params": {"mode": {"type": "string", "required": true, "enum": ["ask", "bypass"]}}
+      "requiredParams": ["permissionMode"],
+      "params": {"permissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]}}
     },
     {
       "name": "session.stop",
