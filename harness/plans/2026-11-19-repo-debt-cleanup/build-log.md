@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S10/` | — | C2-S11 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/` | — | C2-S12 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -356,3 +356,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S10/notes.md`。
 - **限制**：無。
 - **下一步**：C2-S11 錯誤訊息只在 Python 出口遮蔽一次（U15、S089、缺陷 #3）。
+
+### C2-S11 錯誤訊息只在 Python 出口遮蔽一次（2026-11-21）
+
+- **觀察結果**：
+  - **S089／U15／缺陷 #3（APPLIED）**：`bounded_error_message` 先呼叫 `agent/diagnostics.py::redact_text` 再依 4096 bytes 截斷；`redact_text` 擴充 `Authorization` 標頭、URL 帳密、`sk-`／`ghp_`／`github_pat_` 獨立金鑰樣式，並與診斷 log 共用同一份已知 secret 清單（`configured_secrets()`）。未建立第二組樣式。
+  - Rust 盤點：bridge／process 錯誤全為固定字串，child stderr 不轉送，未改 Rust。
+  - TS：刪除 `sensitiveMessagePattern` 與整句隱藏分支；原測試改為驗證含 `token`、`secret` 的正當訊息原文顯示。
+  - **續作事件**：前一個 session 卡在 `test_server_framework_errors_redact_credentials_at_protocol_exit` 40 分鐘以上。根因是測試在 `run()` 啟動 writer 之前直接送框架錯誤（測試缺陷）；第 1 次聚焦修正（先 `writer.start()`）成功。截斷邊界測試的輸入改為以空白分隔的獨立金鑰（`\b` 是刻意保護正常字詞），斷言未放寬。細節見 evidence 第 5 節。
+- **執行指令**：`pytest tests/test_desktop_*.py tests/test_diagnostics.py`（沙箱外，509 passed in 21.62 s）、`npm test`（330 passed）、`npm run build`（通過）、`grep -rn "sensitiveMessagePattern" app/desktop`（0 筆）。
+- **證據**：`evidence/C2-S11/error-sources.md`。
+- **限制**：GUI 錯誤顯示由使用者手動檢查（已列入清單項目）。
+- **下一步**：C2-S12 階段收尾（完整 pytest、`npm test`、`npm run build`；未改 Rust，不重跑 cargo）。

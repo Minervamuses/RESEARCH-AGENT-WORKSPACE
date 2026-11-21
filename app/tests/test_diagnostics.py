@@ -120,6 +120,23 @@ def test_unwritable_log_dir_falls_back_to_stderr(tmp_path, installed, capsys):
     assert "still visible" in err
 
 
+def test_redact_text_covers_standalone_keys_headers_and_url_credentials():
+    raw = (
+        "Failed calling https://alice:hunter2pass@api.example.org/v1 with "
+        "sk-or-v1-unconfiguredkey987654, Authorization: Basic dXNlcjpwYXNz, "
+        "and Authorization: raw-header-secret while checking context token limit."
+    )
+    redacted = diagnostics.redact_text(raw, secrets=())
+    assert "hunter2pass" not in redacted
+    assert "sk-or-v1-unconfiguredkey987654" not in redacted
+    assert "dXNlcjpwYXNz" not in redacted
+    assert "raw-header-secret" not in redacted
+    assert "https://[redacted]@api.example.org/v1" in redacted
+    assert "Authorization: Basic [redacted]" in redacted
+    assert "Authorization: [redacted]" in redacted
+    assert "while checking context token limit." in redacted
+
+
 def test_rotation_keeps_owner_only_files(tmp_path, installed, monkeypatch):
     monkeypatch.setattr(diagnostics, "MAX_LOG_BYTES", 200)
     path = diagnostics.install_diagnostic_log(

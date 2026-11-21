@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 from uuid import RFC_4122, UUID
 
+from agent.diagnostics import redact_text
 from agent.paths import find_app_root
 from agent.conversations import ConversationValidationError, validate_submitted_context
 
@@ -642,9 +643,11 @@ def failure_result(
 
 
 def bounded_error_message(message: str) -> str:
-    """Return a non-empty error message within the v1 UTF-8 byte limit."""
+    """Redact credentials, then return a non-empty message within the v1 byte limit."""
     maximum = int(CONTRACT["errorMessageMaxBytes"])
-    text = message or "Protocol error."
+    text = redact_text(message) if message else "Protocol error."
+    if not text:
+        text = "Protocol error."
     encoded = text.encode("utf-8")
     if len(encoded) <= maximum:
         return text

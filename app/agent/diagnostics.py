@@ -38,18 +38,39 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [pid %(process)d] %(message)s"
 
 _SECRET_NAME_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
 _MIN_SECRET_LENGTH = 8
-_SECRET_PATTERNS = (
-    re.compile(
-        r"(?i)\b((?:api[_-]?key|access[_-]?token|token|secret|password|key)=)"
-        r"[^&\s\"']+"
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"(?i)\b((?:api[_-]?key|access[_-]?token|token|secret|password|key)=)"
+            r"[^&\s\"']+"
+        ),
+        r"\1[redacted]",
     ),
-    re.compile(r"(?i)\b(bearer\s+)[a-z0-9._~+/=-]+"),
-    re.compile(r"(?i)\b(mailto[:=])[^\s&\"')]+"),
+    (
+        re.compile(r"(?i)\b(authorization\s*:\s*(?:(?:bearer|basic|token)\s+)?)[^\s,\"')]+"),
+        r"\1[redacted]",
+    ),
+    (
+        re.compile(r"(?i)\b(bearer\s+)(?!\[redacted\])[a-z0-9._~+/=-]+"),
+        r"\1[redacted]",
+    ),
+    (
+        re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@\"']+(?::[^\s@\"']*)?(@)"),
+        r"\1[redacted]\2",
+    ),
+    (
+        re.compile(
+            r"\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"
+        ),
+        "[redacted]",
+    ),
+    (re.compile(r"(?i)\b(mailto[:=])[^\s&\"')]+"), r"\1[redacted]"),
 )
 
 _INCIDENT_ATTR = "agent_incident_id"
 
 _installed: tuple[Path | None, list[logging.Handler]] | None = None
+_installed_secrets: tuple[str, ...] | None = None
 
 
 def diagnostic_log_dir(env: Mapping[str, str] | None = None) -> Path:
@@ -105,12 +126,20 @@ def current_log_path() -> Path | None:
     return _installed[0] if _installed is not None else None
 
 
-def redact_text(text: str, secrets: Iterable[str] = ()) -> str:
+def configured_secrets() -> tuple[str, ...]:
+    """Return known secret values from the installed log or current environment."""
+    if _installed_secrets is not None:
+        return _installed_secrets
+    return _env_secrets(os.environ)
+
+
+def redact_text(text: str, secrets: Iterable[str] | None = None) -> str:
     """Blank out known secret values and credential-shaped substrings."""
-    for secret in secrets:
+    active_secrets = configured_secrets() if secrets is None else secrets
+    for secret in active_secrets:
         text = text.replace(secret, "[redacted]")
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub(r"\1[redacted]", text)
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -158,11 +187,12 @@ def install_diagnostic_log(
     CLI showed them before. When the log file cannot be created, records
     fall back to stderr and None is returned.
     """
-    global _installed
+    global _installed, _installed_secrets
     if _installed is not None:
         return _installed[0]
     env = dict(os.environ) if env is None else dict(env)
     secrets = _env_secrets(env)
+    _installed_secrets = secrets
     handlers: list[logging.Handler] = []
     path: Path | None = None
     failure: OSError | None = None
@@ -206,8 +236,9 @@ def install_diagnostic_log(
 
 def uninstall_diagnostic_log() -> None:
     """Detach and close the installed handlers (used by tests)."""
-    global _installed
+    global _installed, _installed_secrets
     if _installed is None:
+        _installed_secrets = None
         return
     root = logging.getLogger()
     for handler in _installed[1]:
@@ -216,3 +247,4 @@ def uninstall_diagnostic_log() -> None:
     for name in APP_LOGGERS:
         logging.getLogger(name).setLevel(logging.NOTSET)
     _installed = None
+    _installed_secrets = None

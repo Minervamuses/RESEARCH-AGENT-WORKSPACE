@@ -861,3 +861,130 @@ def test_bootstrap_failure_is_recorded_in_the_diagnostic_log(
     assert "Desktop backend bootstrap failed" in text
     assert "RuntimeError: bootstrap exploded" in text
     assert '"code":"INTERNAL_ERROR"' in capsys.readouterr().out
+
+
+def test_dynamic_service_error_redacts_credentials_and_truncates_safely(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent import diagnostics
+    from agent.desktop.documents import DocumentError
+    from test_desktop_service import _open_test_project
+
+    diagnostics.install_diagnostic_log(
+        "desktop-backend",
+        echo_stderr=False,
+        env={
+            "AGENT_LOG_DIR": str(tmp_path / "logs"),
+            "CUSTOM_PROVIDER_SECRET": "env_secret_value_9999",
+        },
+    )
+    try:
+        service = DesktopService(
+            original_cwd=tmp_path,
+            environ={
+                "CONDA_DEFAULT_ENV": "app",
+                "CONDA_PREFIX": "/conda/envs/app",
+            },
+        )
+        asyncio.run(_open_test_project(service, tmp_path / "project"))
+
+        calls = 0
+
+        def fail_open(_path: str) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise DocumentError(
+                    "Document token sync failed for https://alice:urlpass123@host.example/doc.md "
+                    "using sk-or-v1-dynamicsecret123456, Authorization: Bearer hdr_tok_987654, "
+                    "and custom env_secret_value_9999"
+                )
+            # Place a standalone credential across the 4096-byte
+            # errorMessageMaxBytes boundary (the key starts at byte 4088).
+            raise DocumentError("x" * 4087 + " sk-or-v1-boundarysecret1234567890")
+
+        monkeypatch.setattr(service._documents, "open", fail_open)
+
+        req1 = "00000000-0000-4000-8000-000000000251"
+        req2 = "00000000-0000-4000-8000-000000000252"
+        shutdown_id = "00000000-0000-4000-8000-000000000253"
+
+        async def run() -> list[dict[str, Any]]:
+            output = io.StringIO()
+            server = DesktopServer(service, ProtocolWriter(output))
+            reader = _reader(
+                _request(req1, "document.open", {"path": "draft.md"}),
+                _request(req2, "document.open", {"path": "draft.md"}),
+                _request(shutdown_id, "runtime.shutdown", {}),
+            )
+            assert await server.run(reader) == 0
+            return _messages(output)
+
+        messages = asyncio.run(run())
+    finally:
+        diagnostics.uninstall_diagnostic_log()
+
+    res1 = next(m for m in messages if m.get("requestId") == req1 and m["messageType"] == "result")
+    msg1 = res1["error"]["message"]
+    assert res1["ok"] is False
+    assert res1["error"]["code"] == "PROTOCOL_INVALID"
+    for leaked in (
+        "urlpass123",
+        "sk-or-v1-dynamicsecret123456",
+        "hdr_tok_987654",
+        "env_secret_value_9999",
+    ):
+        assert leaked not in msg1
+    assert "Document token sync failed for https://[redacted]@host.example/doc.md" in msg1
+    assert "Authorization: Bearer [redacted]" in msg1
+
+    res2 = next(m for m in messages if m.get("requestId") == req2 and m["messageType"] == "result")
+    msg2 = res2["error"]["message"]
+    assert len(msg2.encode("utf-8")) <= 4096
+    assert "sk-or-" not in msg2
+    assert "boundarysecret" not in msg2
+
+
+def test_server_framework_errors_redact_credentials_at_protocol_exit() -> None:
+    class _CredentialFrameworkErrorService:
+        lifecycle = "ready"
+
+        async def dispatch(self, method, _params, *, event_sink=None):
+            assert method == "runtime.shutdown"
+            raise ProtocolError(
+                "SHUTDOWN_FAILED",
+                "Shutdown token check failed: Authorization: Bearer shut_tok_123456 "
+                "and sk-or-v1-shutdownsecret987654",
+                retryable=True,
+            )
+
+    async def run() -> tuple[int, list[dict[str, Any]]]:
+        output = io.StringIO()
+        writer = ProtocolWriter(output)
+        server = DesktopServer(_CredentialFrameworkErrorService(), writer)
+        # The writer consumer must run before a direct framework-error send;
+        # run() reuses this already-started task.
+        writer.start()
+        await server._protocol_failure(
+            ProtocolError(
+                "PROTOCOL_INVALID",
+                "Frame error at https://bob:framepass@host.example/rpc with sk-or-v1-framesecret123456",
+            ),
+            None,
+        )
+        exit_code = await server.run(_reader())
+        return exit_code, _messages(output)
+
+    exit_code, messages = asyncio.run(run())
+    assert exit_code == 1
+    proto_err = next(m for m in messages if m.get("event") == "backend.protocol_error")
+    assert "framepass" not in proto_err["data"]["message"]
+    assert "sk-or-v1-framesecret123456" not in proto_err["data"]["message"]
+    assert "Frame error at https://[redacted]@host.example/rpc with [redacted]" == proto_err["data"]["message"]
+
+    shutdown_err = messages[-1]
+    assert shutdown_err["event"] == "backend.shutting_down"
+    assert "shut_tok_123456" not in shutdown_err["data"]["message"]
+    assert "sk-or-v1-shutdownsecret987654" not in shutdown_err["data"]["message"]
+    assert "Shutdown token check failed: Authorization: Bearer [redacted] and [redacted]" == shutdown_err["data"]["message"]

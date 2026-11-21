@@ -128,7 +128,6 @@ const backendLifecycles: readonly BackendLifecycle[] = [
   "shutting_down",
 ];
 
-const sensitiveMessagePattern = /api[ _-]?key|authorization|bearer|secret|token|traceback/i;
 const safeCodePattern = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -250,9 +249,8 @@ export function normalizeUiError(
   }
 
   const safeCode = safeCodePattern.test(code) ? code : "BACKEND_UNAVAILABLE";
-  const boundedMessage = sensitiveMessagePattern.test(message)
-    ? "Sensitive backend details were withheld. Check the local backend logs."
-    : boundText(message, MAX_UI_ERROR_CHARS) || "The desktop backend could not complete this action.";
+  const boundedMessage =
+    boundText(message, MAX_UI_ERROR_CHARS) || "The desktop backend could not complete this action.";
   return { code: safeCode, message: boundedMessage, retryable, source };
 }
 

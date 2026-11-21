@@ -313,7 +313,8 @@ test("lifecycle commands validate start/restart snapshots and snapshot after shu
   });
 });
 
-test("backend client maps protocol business failures into safe UI errors", async () => {
+test("backend client maps protocol business failures into safe UI errors without hiding legitimate keywords", async () => {
+  const message = "Prompt exceeds the context token limit; secret rotation docs are in README.";
   const client = createBackendClient({
     idFactory: () => requestId,
     invoke: async <T>() => ({
@@ -323,7 +324,7 @@ test("backend client maps protocol business failures into safe UI errors", async
       ok: false,
       error: {
         code: "OPENROUTER_NOT_CONFIGURED",
-        message: "API token is missing from the local configuration.",
+        message,
         retryable: true,
         details: {},
       },
@@ -333,7 +334,7 @@ test("backend client maps protocol business failures into safe UI errors", async
     assert.ok(error instanceof BackendClientError);
     assert.equal(error.uiError.code, "OPENROUTER_NOT_CONFIGURED");
     assert.equal(error.uiError.source, "business");
-    assert.doesNotMatch(error.uiError.message, /token/i);
+    assert.equal(error.uiError.message, message);
     return true;
   });
 });
