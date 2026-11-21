@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/` | — | C2-S9 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`, `evidence/C2-S9/` | — | C2-S10 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -335,3 +335,13 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S8/retired-tests.md`。
 - **限制**：GUI 視覺呈現交由使用者手動檢查清單驗收。
 - **下一步**：C2-S9 Repo 整潔（S128 缺陷 #7、S129）。
+
+### C2-S9 Repo 整潔（2026-11-21）
+
+- **觀察結果**：
+  - **S128／缺陷 #7（APPLIED）**：唯讀確認 `app/desktop/watch.out`（`509 bytes`）僅為 picker 調查輸出後已刪除（不記錄內容）。
+  - **S129（APPLIED）**：刪除 repo 根目錄 `__pycache__/` 與空目錄 `harness/plans/.claude/.cc-writes` 及 `harness/plans/.claude/`。
+- **執行指令**：`rm -f app/desktop/watch.out`、`rm -rf __pycache__`、`rmdir harness/plans/.claude/.cc-writes harness/plans/.claude`、`git status --short`。
+- **證據**：`evidence/C2-S9/cleanup.md`。
+- **限制**：無。
+- **下一步**：C2-S10 桌面後端小項目（S023、S024、S026）。
