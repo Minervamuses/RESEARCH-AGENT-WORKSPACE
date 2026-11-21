@@ -34,7 +34,6 @@ interface TrustModule {
     activeRequestId: string | null,
     data: ApprovalRequiredDto,
     now?: number,
-    activeTurnId?: string,
   ) => unknown;
   approvedBindingHashes: (flow: unknown) => string[] | null;
   beginExtensionApply: (flow: unknown, turnId: string) => unknown;
@@ -227,10 +226,6 @@ test("approval events must correlate to the active request and remain unexpired"
   );
   assert.equal(
     acceptApprovalEvent(3, data.parentRequestId, data.parentRequestId, data, Date.parse(data.expiresAt)),
-    null,
-  );
-  assert.equal(
-    acceptApprovalEvent(3, data.parentRequestId, data.parentRequestId, data, now, "other-turn"),
     null,
   );
 });

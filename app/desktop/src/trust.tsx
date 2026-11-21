@@ -220,7 +220,6 @@ export function acceptApprovalEvent(
   activeRequestId: string | null,
   data: ApprovalRequiredDto,
   now = Date.now(),
-  activeTurnId?: string,
 ): PendingApproval | null {
   const createdAt = Date.parse(data.createdAt);
   const expiresAt = Date.parse(data.expiresAt);
@@ -228,7 +227,6 @@ export function acceptApprovalEvent(
     activeRequestId === null ||
     requestId !== activeRequestId ||
     data.parentRequestId !== requestId ||
-    (activeTurnId !== undefined && data.turnId !== activeTurnId) ||
     !Number.isFinite(createdAt) ||
     !Number.isFinite(expiresAt) ||
     createdAt > expiresAt ||

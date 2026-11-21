@@ -205,7 +205,7 @@ test("request builder creates a canonical protocol-v1 request and validates para
   assert.throws(() => buildProtocolRequest("runtime.diagnostics", {}, () => "not-a-uuid"));
 });
 
-test("backend client correlates results and applies method-specific success validation", async () => {
+test("backend client correlates results by request ID", async () => {
   const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
   const invoke: InvokeCommand = async <T>(command: string, args?: Record<string, unknown>) => {
     calls.push({ command, args });
@@ -230,18 +230,18 @@ test("backend client correlates results and applies method-specific success vali
     params: {},
   });
 
-  const invalidClient = createBackendClient({
+  const uncorrelatedClient = createBackendClient({
     idFactory: () => requestId,
     invoke: async <T>() => ({
       protocolVersion: 1,
       messageType: "result",
-      requestId,
+      requestId: "123e4567-e89b-42d3-a456-426614174999",
       ok: true,
-      data: {},
+      data: diagnostics,
     }) as T,
   });
   await assert.rejects(
-    invalidClient.request("runtime.diagnostics", {}),
+    uncorrelatedClient.request("runtime.diagnostics", {}),
     (error) => error instanceof BackendClientError && error.uiError.source === "protocol",
   );
 });
@@ -269,7 +269,7 @@ test("tracked request exposes its request ID before transport invocation", async
   assert.equal(invoked, true);
 });
 
-test("lifecycle commands validate start/restart snapshots and snapshot after shutdown", async () => {
+test("lifecycle commands return start/restart snapshots and snapshot after shutdown", async () => {
   const restartedSnapshot = { ...readySnapshot, generation: 2 };
   const shutdownSnapshot: BackendSnapshot = {
     ...stoppedSnapshot,
@@ -302,7 +302,7 @@ test("lifecycle commands validate start/restart snapshots and snapshot after shu
 
   const invalidShutdown = createBackendClient({
     invoke: async <T>(command: string) => {
-      if (command === "backend_shutdown") return { kind: "graceful", flushed: true } as T;
+      if (command === "backend_shutdown") return "graceful" as T;
       return shutdownSnapshot as T;
     },
   });
@@ -415,7 +415,7 @@ test("backend client preserves validated extension-apply lifecycle details", asy
   );
 });
 
-test("bridge events validate lifecycle payloads and process-event origins", () => {
+test("bridge events parse lifecycle payloads and protocol envelopes from a known origin", () => {
   assert.deepEqual(parseBridgeEvent({ type: "lifecycle", snapshot: readySnapshot }), {
     type: "lifecycle",
     snapshot: readySnapshot,
@@ -431,14 +431,116 @@ test("bridge events validate lifecycle payloads and process-event origins", () =
     parseBridgeEvent({ type: "protocol", origin: "python", message: ready }).type,
     "protocol",
   );
-  assert.throws(() => parseBridgeEvent({ type: "protocol", origin: "rust", message: ready }));
+  assert.throws(() => parseBridgeEvent({ type: "protocol", origin: "browser", message: ready }));
+  assert.throws(() => parseBridgeEvent({ type: "protocol", origin: "rust", message: { ...ready, event: "backend.unknown" } }));
+  assert.throws(() => parseBridgeEvent({ type: "lifecycle", snapshot: "ready" }));
+});
 
-  const crashed = { ...ready, event: "backend.crashed" };
-  assert.equal(
-    parseBridgeEvent({ type: "protocol", origin: "rust", message: crashed }).type,
-    "protocol",
+const echoTurnId = "123e4567e89b42d3a456426614174001";
+const otherTurnId = "123e4567e89b42d3a456426614174009";
+const echoSessionId = "28b222e0cc6543aa8d7bbdc423de99a7";
+
+function resultClient(result: Record<string, unknown>) {
+  return createBackendClient({
+    idFactory: () => requestId,
+    invoke: async <T>() => ({ protocolVersion: 1, messageType: "result", requestId, ...result }) as T,
+  });
+}
+
+function rejectsAsProtocol(error: unknown): boolean {
+  return error instanceof BackendClientError && error.uiError.source === "protocol";
+}
+
+const documentContext = {
+  rootPath: "/project",
+  path: "/project/draft.md",
+  editorRevision: 1,
+  sourceText: "text",
+  diskFingerprint: "a".repeat(64),
+};
+
+test("echo: document.apply and approval.resolve accept success results without turnId", async () => {
+  const applied = await resultClient({ ok: true, data: { path: "/project/draft.md", status: "saved" } })
+    .request("document.apply", { documentContext, turnId: echoTurnId, callId: "call-1" });
+  assert.equal(applied.status, "saved");
+  const resolved = await resultClient({ ok: true, data: { approvalId: "approval-1", approved: true } })
+    .request("approval.resolve", { approvalId: "approval-1", approved: true, turnId: echoTurnId });
+  assert.equal(resolved.approved, true);
+});
+
+test("echo: session.stop rejects another turn or session and accepts its own", async () => {
+  const params = { sessionId: echoSessionId, turnId: echoTurnId, parentRequestId: "123e4567-e89b-42d3-a456-426614174111" };
+  const stopped = { sessionId: echoSessionId, turnId: echoTurnId, state: null, accepted: false, persisted: false };
+  assert.equal((await resultClient({ ok: true, data: stopped }).request("session.stop", params)).turnId, echoTurnId);
+  await assert.rejects(
+    resultClient({ ok: true, data: { ...stopped, turnId: otherTurnId } }).request("session.stop", params),
+    rejectsAsProtocol,
   );
-  assert.throws(() => parseBridgeEvent({ type: "protocol", origin: "python", message: crashed }));
+  await assert.rejects(
+    resultClient({ ok: true, data: { ...stopped, sessionId: "38b222e0cc6543aa8d7bbdc423de99a7" } }).request("session.stop", params),
+    rejectsAsProtocol,
+  );
+});
+
+test("echo: session.select rejects a result for another session", async () => {
+  await assert.rejects(
+    resultClient({ ok: true, data: { projectId: "p1", sessionId: "38b222e0cc6543aa8d7bbdc423de99a7" } })
+      .request("session.select", { projectId: "p1", sessionId: echoSessionId }),
+    rejectsAsProtocol,
+  );
+  await assert.rejects(
+    resultClient({ ok: true, data: { projectId: "p2", sessionId: echoSessionId } })
+      .request("session.select", { projectId: "p1", sessionId: echoSessionId }),
+    rejectsAsProtocol,
+  );
+});
+
+test("echo: session.create compares projectId only when the request carried it", async () => {
+  const created = await resultClient({ ok: true, data: { sessionId: echoSessionId, projectId: "backend-filled" } })
+    .request("session.create", {});
+  assert.equal(created.projectId, "backend-filled");
+  await assert.rejects(
+    resultClient({ ok: true, data: { sessionId: echoSessionId, projectId: "p2" } })
+      .request("session.create", { projectId: "p1" }),
+    rejectsAsProtocol,
+  );
+  const same = await resultClient({ ok: true, data: { sessionId: echoSessionId, projectId: "p1" } })
+    .request("session.create", { projectId: "p1" });
+  assert.equal(same.projectId, "p1");
+});
+
+test("echo: session.turn success must carry the requested turnId", async () => {
+  const params = { text: "question", turnId: echoTurnId, retry: false };
+  await assert.rejects(
+    resultClient({ ok: true, data: { sessionId: echoSessionId, turnId: otherTurnId } }).request("session.turn", params),
+    rejectsAsProtocol,
+  );
+});
+
+test("echo: turn failures compare error.details.turnId and require lifecycle details", async () => {
+  const lifecycle = { state: "failed", accepted: true, persisted: true };
+  const cases = [
+    ["session.turn", { text: "question", turnId: echoTurnId, retry: false }],
+    ["extensions.apply", { previewId: "preview-1", approvedBindingHashes: [], turnId: echoTurnId, retry: false }],
+  ] as const;
+  for (const [method, params] of cases) {
+    const failure = (details: Record<string, unknown>) => ({
+      ok: false,
+      error: { code: "PROVIDER_REQUEST_FAILED", message: "The provider request failed.", retryable: true, details },
+    });
+    await assert.rejects(
+      resultClient(failure({ ...lifecycle, turnId: echoTurnId })).request(method, params),
+      (error) => error instanceof BackendClientError && error.uiError.source === "business" &&
+        error.uiError.turnLifecycle?.turnId === echoTurnId,
+      method,
+    );
+    await assert.rejects(
+      resultClient(failure({ ...lifecycle, turnId: otherTurnId })).request(method, params),
+      rejectsAsProtocol,
+      method,
+    );
+    await assert.rejects(resultClient(failure({})).request(method, params), rejectsAsProtocol, method);
+  }
 });
 
 test("error and diagnostic normalization stays bounded and omits unsafe detail", () => {

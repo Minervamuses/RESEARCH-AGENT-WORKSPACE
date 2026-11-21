@@ -9,7 +9,6 @@ import {
   initialConversationState,
   latestRetryableTranscriptTurn,
   mergeConversationTurns,
-  reconciledTurnCount,
   upsertLiveTurn,
   composeTurnText,
   turnSubmissionText,
@@ -435,7 +434,6 @@ test("failed and interrupted retries replace one restored card without inflating
     assert.equal(visible.length, 1, state);
     assert.equal(visible[0]?.source, "live", state);
     assert.equal(visible[0]?.turnId, turnId, state);
-    assert.equal(reconciledTurnCount(4, 4), 4, state);
   }
 });
 
@@ -497,14 +495,12 @@ test("completed duplicate replay upserts one final-only live card", () => {
   assert.equal(visible[0]?.source, "live");
   assert.equal(visible[0]?.turn.streamKind, "final_only");
   assert.equal(visible[0]?.turn.assistantText, "replayed saved answer");
-  assert.equal(reconciledTurnCount(4, 4), 4);
 });
 
 test("a new turn increases the canonical count", () => {
   const live = upsertLiveTurn([], liveTurn(sessionId, 5, otherTurnId));
 
   assert.equal(live[0]?.turnNumber, 5);
-  assert.equal(reconciledTurnCount(4, 5), 5);
 });
 
 test("logical turn identity includes the session and older retries keep canonical order", () => {

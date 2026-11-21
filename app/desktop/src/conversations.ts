@@ -150,7 +150,6 @@ export interface ConversationState {
 export type ConversationAction =
   | { type: "backend-generation-changed"; generation: number }
   | { type: "draft-changed"; draft: string }
-  | { type: "failure-cleared" }
   | ((
       | { type: "project-opened"; generation: number; preserveDraft?: boolean }
       | ({ type: "conversation-selected"; generation: number; preserveDraft?: boolean } & ConversationSelection)
@@ -346,13 +345,6 @@ export function mergeConversationTurns(
   return [...byLogicalTurn.values()].sort(compareCanonicalTurns);
 }
 
-export function reconciledTurnCount(
-  current: number,
-  returnedTurnNumber: number,
-): number {
-  return Math.max(current, returnedTurnNumber);
-}
-
 function validTurnLifecycle(
   value: TurnLifecycleDetailsDto,
   turnId: string,
@@ -476,7 +468,7 @@ export function conversationReducer(
   action: ConversationAction,
 ): ConversationState {
   if (action.type !== "backend-generation-changed" && action.type !== "project-opened" &&
-      action.type !== "draft-changed" && action.type !== "failure-cleared" &&
+      action.type !== "draft-changed" &&
       action.projectEpoch !== state.projectEpoch) return state;
   if (action.type === "backend-generation-changed") {
     if (!isNonNegativeSafeInteger(action.generation) || action.generation <= state.backendGeneration) {
@@ -710,9 +702,6 @@ export function conversationReducer(
         },
       },
     };
-  }
-  if (action.type === "failure-cleared") {
-    return { ...state, failure: null };
   }
   return state;
 }

@@ -39,7 +39,6 @@ import {
   turnSubmissionText,
   ownsWorkspaceOperation,
   type WorkspaceOperationOwner,
-  reconciledTurnCount,
   sameSelection,
   upsertLiveTurn,
   type ConversationAction,
@@ -918,7 +917,7 @@ export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, 
     <span className="document-name" title={path ?? undefined}>{path?.split("/").at(-1) ?? "No source file"}</span>
     {dirty && <span className="document-dirty" role="status" aria-label="Unsaved changes" title="Unsaved changes">●</span>}
     {busy && <span className="document-busy" role="status">Working…</span>}
-    <details className="document-menu" data-document-menu onKeyDown={(event) => {
+    <details className="document-menu" onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.currentTarget.open = false;
@@ -2398,7 +2397,7 @@ export default function App() {
           session: {
             ...state.session,
             registered: result.registrationStatus === "registered" ? true : state.session.registered,
-            turnCount: reconciledTurnCount(state.session.turnCount, answer.turnNumber),
+            turnCount: Math.max(state.session.turnCount, answer.turnNumber),
           },
         });
       }
@@ -2572,7 +2571,7 @@ export default function App() {
           type: "session-created",
           session: {
             ...state.session,
-            turnCount: reconciledTurnCount(state.session.turnCount, report.turnNumber),
+            turnCount: Math.max(state.session.turnCount, report.turnNumber),
           },
         });
       }

@@ -1,6 +1,6 @@
 import {
   PROTOCOL_VERSION,
-  ProtocolTraceValidator,
+  echoedIdFields,
   type JsonObject,
   type ProtocolMessage,
   type ProtocolMethod,
@@ -8,11 +8,10 @@ import {
   type RequestEnvelope,
   type RuntimeDiagnosticsDto,
   type SessionCreatedDto,
+  type SuccessEnvelope,
   type TurnLifecycleDetailsDto,
   parseProtocolMessage,
-  parseProtocolMessageFromOrigin,
   parseTurnLifecycleDetails,
-  validateResultData,
 } from "./protocol.ts";
 
 export const BACKEND_EVENT_NAME = "research-agent://backend-event";
@@ -118,16 +117,6 @@ export type BackendUiAction =
   | { type: "session-cleared"; sessionId: string }
   | { type: "action-failed"; error: SafeUiError };
 
-const backendLifecycles: readonly BackendLifecycle[] = [
-  "stopped",
-  "starting",
-  "ready",
-  "degraded",
-  "crashed",
-  "restarting",
-  "shutting_down",
-];
-
 const safeCodePattern = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -145,13 +134,6 @@ function requireExactKeys(
   }
 }
 
-function requireNonNegativeInteger(value: unknown, field: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new Error(`${field} must be a non-negative integer`);
-  }
-  return Number(value);
-}
-
 function boundText(value: string, limit: number): string {
   const normalized = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
   if (normalized.length <= limit) {
@@ -160,68 +142,19 @@ function boundText(value: string, limit: number): string {
   return `${normalized.slice(0, Math.max(0, limit - 1))}…`;
 }
 
-function parseBridgeError(value: unknown): BridgeError {
-  if (!isObject(value)) {
-    throw new Error("bridge error must be an object");
-  }
-  requireExactKeys(value, ["code", "message", "retryable"], "bridge error");
-  if (typeof value.code !== "string" || typeof value.message !== "string") {
-    throw new Error("bridge error code and message must be strings");
-  }
-  if (typeof value.retryable !== "boolean") {
-    throw new Error("bridge error retryable must be a boolean");
-  }
-  return { code: value.code, message: value.message, retryable: value.retryable };
-}
-
 function parseShutdownReport(value: unknown): ShutdownReport {
   if (!isObject(value)) {
     throw new Error("shutdown report must be an object");
   }
-  requireExactKeys(value, ["kind"], "shutdown report");
-  if (value.kind !== "graceful" && value.kind !== "forced" && value.kind !== "not_running") {
-    throw new Error("shutdown report kind is invalid");
-  }
-  return { kind: value.kind };
+  return value as unknown as ShutdownReport;
 }
 
+/** The Rust host serializes snapshots from one typed struct; only the shape is checked. */
 export function parseBackendSnapshot(value: unknown): BackendSnapshot {
   if (!isObject(value)) {
     throw new Error("backend snapshot must be an object");
   }
-  requireExactKeys(
-    value,
-    [
-      "lifecycle",
-      "generation",
-      "childRunning",
-      "pendingRequests",
-      "stderrLines",
-      "stderrBytes",
-      "lastError",
-      "lastShutdown",
-    ],
-    "backend snapshot",
-  );
-  if (
-    typeof value.lifecycle !== "string" ||
-    !backendLifecycles.includes(value.lifecycle as BackendLifecycle)
-  ) {
-    throw new Error("backend snapshot lifecycle is invalid");
-  }
-  if (typeof value.childRunning !== "boolean") {
-    throw new Error("backend snapshot childRunning must be a boolean");
-  }
-  return {
-    lifecycle: value.lifecycle as BackendLifecycle,
-    generation: requireNonNegativeInteger(value.generation, "generation"),
-    childRunning: value.childRunning,
-    pendingRequests: requireNonNegativeInteger(value.pendingRequests, "pendingRequests"),
-    stderrLines: requireNonNegativeInteger(value.stderrLines, "stderrLines"),
-    stderrBytes: requireNonNegativeInteger(value.stderrBytes, "stderrBytes"),
-    lastError: value.lastError === null ? null : parseBridgeError(value.lastError),
-    lastShutdown: value.lastShutdown === null ? null : parseShutdownReport(value.lastShutdown),
-  };
+  return value as unknown as BackendSnapshot;
 }
 
 export function normalizeUiError(
@@ -427,7 +360,7 @@ export function parseBridgeEvent(value: unknown): ParsedBridgeEvent {
     return {
       type: "protocol",
       origin: value.origin,
-      message: parseProtocolMessageFromOrigin(value.message, value.origin),
+      message: parseProtocolMessage(value.message),
     };
   }
   throw new Error("backend event type is invalid");
@@ -498,18 +431,40 @@ function asClientError(value: unknown, source: SafeUiError["source"]): BackendCl
   return new BackendClientError(normalizeUiError(value, source));
 }
 
+/** Methods whose failures carry the turn lifecycle in `error.details`. */
+function carriesTurnLifecycle(method: ProtocolMethod): boolean {
+  return method === "session.turn" || method === "extensions.apply";
+}
+
 function normalizeBusinessError(
   error: { code: string; message: string; retryable: boolean; details: JsonObject },
-  method: ProtocolMethod,
+  request: RequestEnvelope,
 ): SafeUiError {
   const normalized = normalizeUiError(error, "business");
-  if (method !== "session.turn" && method !== "extensions.apply") {
+  if (!carriesTurnLifecycle(request.method)) {
     return normalized;
   }
-  return {
-    ...normalized,
-    turnLifecycle: parseTurnLifecycleDetails(error.details),
-  };
+  const turnLifecycle = parseTurnLifecycleDetails(error.details);
+  if (turnLifecycle.turnId !== request.params.turnId) {
+    throw new Error("error.details.turnId must match params.turnId");
+  }
+  return { ...normalized, turnLifecycle };
+}
+
+/**
+ * A result must echo the logical identifiers its request carried. This keeps a
+ * late response from an ended operation from being applied to the current view.
+ */
+function verifyResultEcho(request: RequestEnvelope, result: SuccessEnvelope): void {
+  for (const field of echoedIdFields(request.method)) {
+    if (
+      field in request.params &&
+      field in result.data &&
+      result.data[field] !== request.params[field]
+    ) {
+      throw new Error(`data.${field} must match params.${field}`);
+    }
+  }
 }
 
 export function createBackendClient(options: {
@@ -546,11 +501,8 @@ export function createBackendClient(options: {
 
   function requestTracked(method: ProtocolMethod, params: JsonObject): TrackedBackendRequest {
     let request: RequestEnvelope;
-    let traceValidator: ProtocolTraceValidator;
     try {
       request = buildProtocolRequest(method, params, idFactory);
-      traceValidator = new ProtocolTraceValidator();
-      traceValidator.accept(request);
     } catch (error) {
       throw asClientError(error, "protocol");
     }
@@ -569,11 +521,10 @@ export function createBackendClient(options: {
           if (message.messageType !== "result" || message.requestId !== request.requestId) {
             throw new Error("Backend returned an uncorrelated response.");
           }
-          traceValidator.accept(message);
           if (!message.ok) {
-            throw new BackendClientError(normalizeBusinessError(message.error, method));
+            throw new BackendClientError(normalizeBusinessError(message.error, request));
           }
-          validateResultData(method, message.data);
+          verifyResultEcho(request, message);
           return message.data;
         } catch (error) {
           throw asClientError(error, "protocol");

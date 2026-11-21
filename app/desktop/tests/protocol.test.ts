@@ -5,29 +5,16 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  EVENT_DATA_SCHEMAS,
-  FORBIDDEN_DATA_KEY_FRAGMENTS,
-  FULL_TEXT_RESULT_METHODS,
   MAX_ERROR_MESSAGE_BYTES,
-  MAX_PROTOCOL_LINE_BYTES,
   MAX_REQUEST_ID_BYTES,
-  METHOD_PARAM_SCHEMAS,
-  METHOD_REQUIRED_PARAMS,
-  PROCESS_EVENT_ORIGINS,
   PROCESS_EVENTS,
   PROTOCOL_ERROR_CODES,
   PROTOCOL_METHODS,
   PROTOCOL_VERSION,
-  RESULT_DATA_SCHEMAS,
-  SUBMITTED_CONTEXT_SCHEMA,
   ProtocolContractError,
-  ProtocolTraceValidator,
   REQUEST_EVENTS,
-  parseProtocolLine,
+  echoedIdFields,
   parseProtocolMessage,
-  parseProtocolMessageFromOrigin,
-  validateProcessEventOrigin,
-  validateResultData,
 } from "../src/protocol.ts";
 
 interface ContractFieldRule {
@@ -51,18 +38,11 @@ interface ContractMethod {
 
 interface ContractDocument {
   protocolVersion: number;
-  maxLineBytes: number;
-  fullTextResultMethods: string[];
   requestIdMaxBytes: number;
   errorMessageMaxBytes: number;
   requestEvents: string[];
   processEvents: string[];
-  processEventOrigins: Record<string, string[]>;
-  forbiddenDataKeyFragments: string[];
-  eventDataSchemas: Record<string, Record<string, ContractFieldRule>>;
   resultDataSchemas: Record<string, Record<string, ContractFieldRule>>;
-  turnErrorDetailsSchema: Record<string, ContractFieldRule>;
-  submittedContextSchema: Record<string, ContractFieldRule>;
   methods: ContractMethod[];
   errorCodes: string[];
 }
@@ -74,33 +54,8 @@ interface MessageFixture {
   message: unknown;
 }
 
-interface RawLineFixture {
-  name: string;
-  valid: boolean;
-  errorCode?: string;
-  line: string;
-}
-
-interface TraceFixture {
-  name: string;
-  valid: boolean;
-  errorCode?: string;
-  messages: unknown[];
-}
-
-interface OriginFixture {
-  name: string;
-  event: keyof typeof PROCESS_EVENT_ORIGINS;
-  origin: "python" | "rust";
-  valid: boolean;
-  errorCode?: string;
-}
-
 interface FixtureDocument {
   messages: MessageFixture[];
-  rawLines: RawLineFixture[];
-  originCases: OriginFixture[];
-  traces: TraceFixture[];
 }
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -114,55 +69,28 @@ function matchesExpectedError(error: unknown, code: string | undefined): boolean
   return error instanceof ProtocolContractError && error.code === code;
 }
 
-test("language-neutral manifest matches TypeScript constants", async () => {
+const requestId = "123e4567-e89b-42d3-a456-426614174000";
+
+function isRequestFixture(fixture: MessageFixture): boolean {
+  const message = fixture.message;
+  return typeof message === "object" && message !== null &&
+    (message as Record<string, unknown>).messageType === "request";
+}
+
+test("protocol vocabulary constants are read from contract.json, not copied", async () => {
+  // Both sides come from the same file; this only guards against literals creeping back.
   const contract = await loadJson<ContractDocument>("contract.json");
-  const turnErrorDetailsSchema = (
-    await import("../src/protocol.ts") as unknown as {
-      TURN_ERROR_DETAILS_SCHEMA: Record<string, ContractFieldRule>;
-    }
-  ).TURN_ERROR_DETAILS_SCHEMA;
-  assert.deepEqual(contract.submittedContextSchema, SUBMITTED_CONTEXT_SCHEMA);
-  assert.equal(contract.protocolVersion, PROTOCOL_VERSION);
-  assert.equal(contract.maxLineBytes, MAX_PROTOCOL_LINE_BYTES);
-  assert.deepEqual(contract.fullTextResultMethods, [...FULL_TEXT_RESULT_METHODS]);
-  assert.equal(contract.requestIdMaxBytes, MAX_REQUEST_ID_BYTES);
-  assert.equal(contract.errorMessageMaxBytes, MAX_ERROR_MESSAGE_BYTES);
-  assert.deepEqual(contract.methods.map(({ name }) => name), [...PROTOCOL_METHODS]);
-  assert.deepEqual(contract.requestEvents, [...REQUEST_EVENTS]);
-  assert.deepEqual(contract.processEvents, [...PROCESS_EVENTS]);
-  assert.deepEqual(contract.processEventOrigins, PROCESS_EVENT_ORIGINS);
-  assert.deepEqual(contract.forbiddenDataKeyFragments, [...FORBIDDEN_DATA_KEY_FRAGMENTS]);
-  assert.deepEqual(contract.eventDataSchemas, EVENT_DATA_SCHEMAS);
-  assert.deepEqual(contract.resultDataSchemas, RESULT_DATA_SCHEMAS);
-  assert.deepEqual(turnErrorDetailsSchema, {
-    turnId: { type: "turnId", required: true },
-    state: {
-      type: "nullableString",
-      required: true,
-      enum: ["pending", "completed", "failed", "interrupted"],
-    },
-    accepted: { type: "boolean", required: true },
-    persisted: { type: "boolean", required: true },
-  });
-  assert.deepEqual(contract.turnErrorDetailsSchema, turnErrorDetailsSchema);
-  assert.deepEqual(contract.errorCodes, [...PROTOCOL_ERROR_CODES]);
+  assert.equal(PROTOCOL_VERSION, contract.protocolVersion);
+  assert.equal(MAX_REQUEST_ID_BYTES, contract.requestIdMaxBytes);
+  assert.equal(MAX_ERROR_MESSAGE_BYTES, contract.errorMessageMaxBytes);
+  assert.deepEqual([...PROTOCOL_METHODS], contract.methods.map(({ name }) => name));
+  assert.deepEqual([...REQUEST_EVENTS], contract.requestEvents);
+  assert.deepEqual([...PROCESS_EVENTS], contract.processEvents);
+  assert.deepEqual([...PROTOCOL_ERROR_CODES], contract.errorCodes);
+});
 
-  for (const method of contract.methods) {
-    assert.deepEqual(
-      method.requiredParams,
-      METHOD_REQUIRED_PARAMS[method.name as keyof typeof METHOD_REQUIRED_PARAMS],
-      method.name,
-    );
-    assert.deepEqual(
-      method.params,
-      METHOD_PARAM_SCHEMAS[method.name as keyof typeof METHOD_PARAM_SCHEMAS],
-      method.name,
-    );
-    if (method.operation === "destructive") {
-      assert.ok(method.requiredParams.includes("previewId"), method.name);
-    }
-  }
-
+test("contract method names are unique and expose no generic escape hatches", async () => {
+  const contract = await loadJson<ContractDocument>("contract.json");
   const methodNames = new Set(contract.methods.map(({ name }) => name));
   assert.equal(methodNames.size, contract.methods.length);
   for (const forbidden of [
@@ -173,161 +101,106 @@ test("language-neutral manifest matches TypeScript constants", async () => {
   ]) {
     assert.equal(methodNames.has(forbidden), false);
   }
-});
-
-test("Product Plan Mode is retired while extended thinking remains", async () => {
-  const contract = await loadJson<ContractDocument>("contract.json");
-  const methodNames = new Set(contract.methods.map(({ name }) => name));
-  assert.equal(methodNames.has("session.set_mode"), false);
-  assert.equal(PROTOCOL_METHODS.includes("session.set_mode" as never), false);
-  assert.equal("session.set_mode" in METHOD_PARAM_SCHEMAS, false);
-  assert.equal(methodNames.has("session.set_thinking"), true);
-
-  for (const method of ["session.create", "session.select"] as const) {
-    const schema = RESULT_DATA_SCHEMAS[method];
-    assert.equal("planMode" in schema, false);
-    assert.equal("planLogPath" in schema, false);
-    assert.deepEqual(schema.thinkingMode.enum, ["normal", "extended"]);
+  for (const method of contract.methods) {
+    if (method.operation === "destructive") {
+      assert.ok(method.requiredParams.includes("previewId"), method.name);
+    }
   }
-
-  const appSource = await readFile(resolve(currentDir, "../src/App.tsx"), "utf8");
-  assert.equal(appSource.includes("session.set_mode"), false);
-  assert.equal(appSource.includes("Response mode"), false);
-  assert.equal(appSource.includes("session.set_thinking"), true);
-  assert.equal(appSource.includes("<ThinkingControl"), true);
 });
 
-test("normal answers use only the final terminal result", () => {
-  assert.equal(REQUEST_EVENTS.includes("answer.chunk" as never), false);
-  assert.equal("answer.chunk" in EVENT_DATA_SCHEMAS, false);
-  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].streamKind, {
+test("echoed identifier fields are derived from params and result schemas", () => {
+  assert.deepEqual(echoedIdFields("session.create"), ["projectId"]);
+  assert.deepEqual(echoedIdFields("session.list"), ["projectId"]);
+  for (const method of ["session.select", "session.delete", "session.rename", "session.transcript"] as const) {
+    assert.deepEqual(echoedIdFields(method), ["projectId", "sessionId"], method);
+  }
+  assert.deepEqual(echoedIdFields("session.turn"), ["turnId"]);
+  assert.deepEqual(echoedIdFields("session.stop"), ["sessionId", "turnId"]);
+  assert.deepEqual(echoedIdFields("extensions.apply"), ["turnId"]);
+  // The request carries turnId, but the success result does not.
+  assert.deepEqual(echoedIdFields("document.apply"), []);
+  assert.deepEqual(echoedIdFields("approval.resolve"), []);
+});
+
+test("normal answers use only the final terminal result", async () => {
+  const contract = await loadJson<ContractDocument>("contract.json");
+  const turnResult = contract.resultDataSchemas["session.turn"];
+  assert.equal(contract.requestEvents.includes("answer.chunk"), false);
+  assert.deepEqual(turnResult.streamKind, {
     type: "string",
     required: false,
     enum: ["final_only"],
   });
-  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].chunkCount, {
+  assert.deepEqual(turnResult.chunkCount, {
     type: "integer",
     required: false,
     minimum: 0,
     maximum: 0,
   });
-  assert.equal("maxBytes" in RESULT_DATA_SCHEMAS["session.turn"].text, false);
+  assert.equal("maxBytes" in turnResult.text, false);
 });
 
-test("complete answer and transcript text have no protocol capacity rejection", () => {
+test("complete answer and transcript results have no client capacity rejection", () => {
   const answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + "界".repeat(750_000) + "\nEND";
-  assert.doesNotThrow(() => validateResultData("session.turn", {
-    sessionId: "session-a",
-    turnId: "123e4567e89b42d3a456426614174000",
-    turnNumber: 1,
-    state: "completed",
-    accepted: true,
-    persisted: true,
-    text: answer,
-    validationErrors: [],
-    toolSummaries: [],
-    responseKind: "answer",
-    streamKind: "final_only",
-    chunkCount: 0,
-  }));
-
-  assert.doesNotThrow(() => validateResultData("session.transcript", {
-    projectId: "p1",
-    sessionId: "28b222e0cc6543aa8d7bbdc423de99a7",
-    status: "ready",
-    issue: null,
-    items: [{
+  assert.doesNotThrow(() => parseProtocolMessage({
+    protocolVersion: 1,
+    messageType: "result",
+    requestId,
+    ok: true,
+    data: {
+      sessionId: "session-a",
       turnId: "123e4567e89b42d3a456426614174000",
       turnNumber: 1,
-      kind: "conversational",
       state: "completed",
-      timestamp: "2026-09-05T00:00:00Z",
-      userText: "u".repeat(40_000),
-      assistantText: answer,
-      failureCode: null,
-      failureMessage: null,
-      failureRetryable: null,
-      toolActivities: [],
-    }],
-    total: 1,
-    offset: 0,
-    limit: 20,
-    hasMore: false,
+      accepted: true,
+      persisted: true,
+      text: answer,
+      validationErrors: [],
+      toolSummaries: [],
+      responseKind: "answer",
+    },
   }));
 });
 
-test("session turn carries one canonical logical identity and durable lifecycle", () => {
-  assert.deepEqual(METHOD_REQUIRED_PARAMS["session.turn"], ["text", "turnId", "retry"]);
-  assert.deepEqual(METHOD_PARAM_SCHEMAS["session.turn"].turnId, {
-    type: "turnId",
-    required: true,
-  });
-  assert.deepEqual(METHOD_PARAM_SCHEMAS["session.turn"].retry, {
-    type: "boolean",
-    required: true,
-  });
-  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].turnNumber, {
-    type: "integer",
-    required: true,
-    minimum: 1,
-    maximum: 4_096,
-  });
-  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].state, {
-    type: "string",
-    required: true,
-    enum: ["completed"],
-  });
-  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].accepted, {
-    type: "boolean",
-    required: true,
-  });
-  assert.deepEqual(RESULT_DATA_SCHEMAS["session.turn"].persisted, {
-    type: "boolean",
-    required: true,
-  });
-});
-
-test("extension apply carries its own canonical durable turn lifecycle", () => {
-  assert.deepEqual(METHOD_REQUIRED_PARAMS["extensions.apply"], [
-    "previewId",
-    "approvedBindingHashes",
-    "turnId",
-    "retry",
-  ]);
-  assert.deepEqual(METHOD_PARAM_SCHEMAS["extensions.apply"].turnId, {
-    type: "turnId",
-    required: true,
-  });
-  assert.deepEqual(METHOD_PARAM_SCHEMAS["extensions.apply"].retry, {
-    type: "boolean",
-    required: true,
-  });
-  const result = RESULT_DATA_SCHEMAS["extensions.apply"];
-  assert.deepEqual(result.turnId, { type: "turnId", required: true });
-  assert.deepEqual(result.turnNumber, {
-    type: "integer",
-    required: true,
-    minimum: 1,
-    maximum: 4_096,
-  });
-  assert.deepEqual(result.state, {
-    type: "string",
-    required: true,
-    enum: ["completed"],
-  });
+test("session turn carries one canonical logical identity and durable lifecycle", async () => {
+  const contract = await loadJson<ContractDocument>("contract.json");
+  const turn = contract.methods.find(({ name }) => name === "session.turn")!;
+  assert.deepEqual(
+    Object.entries(turn.params).filter(([, rule]) => rule.required).map(([field]) => field),
+    ["text", "turnId", "retry"],
+  );
+  assert.deepEqual(turn.params.turnId, { type: "turnId", required: true });
+  assert.deepEqual(turn.params.retry, { type: "boolean", required: true });
+  const result = contract.resultDataSchemas["session.turn"];
+  assert.deepEqual(result.turnNumber, { type: "integer", required: true, minimum: 1, maximum: 4_096 });
+  assert.deepEqual(result.state, { type: "string", required: true, enum: ["completed"] });
   assert.deepEqual(result.accepted, { type: "boolean", required: true });
   assert.deepEqual(result.persisted, { type: "boolean", required: true });
 });
 
-test("session summaries and transcripts expose canonical lifecycle state", () => {
-  const summary = RESULT_DATA_SCHEMAS["session.list"]?.items.items;
-  assert.deepEqual(summary?.createdAt, {
-    type: "nullableString",
-    required: true,
-    maxBytes: 64,
-  });
+test("extension apply carries its own canonical durable turn lifecycle", async () => {
+  const contract = await loadJson<ContractDocument>("contract.json");
+  const apply = contract.methods.find(({ name }) => name === "extensions.apply")!;
+  assert.deepEqual(
+    Object.entries(apply.params).filter(([, rule]) => rule.required).map(([field]) => field),
+    ["previewId", "approvedBindingHashes", "turnId", "retry"],
+  );
+  assert.deepEqual(apply.params.turnId, { type: "turnId", required: true });
+  assert.deepEqual(apply.params.retry, { type: "boolean", required: true });
+  const result = contract.resultDataSchemas["extensions.apply"];
+  assert.deepEqual(result.turnId, { type: "turnId", required: true });
+  assert.deepEqual(result.turnNumber, { type: "integer", required: true, minimum: 1, maximum: 4_096 });
+  assert.deepEqual(result.state, { type: "string", required: true, enum: ["completed"] });
+  assert.deepEqual(result.accepted, { type: "boolean", required: true });
+  assert.deepEqual(result.persisted, { type: "boolean", required: true });
+});
 
-  const turn = RESULT_DATA_SCHEMAS["session.transcript"]?.items.items;
+test("session summaries and transcripts expose canonical lifecycle state", async () => {
+  const contract = await loadJson<ContractDocument>("contract.json");
+  const summary = contract.resultDataSchemas["session.list"]?.items.items;
+  assert.deepEqual(summary?.createdAt, { type: "nullableString", required: true, maxBytes: 64 });
+
+  const turn = contract.resultDataSchemas["session.transcript"]?.items.items;
   assert.deepEqual(Object.keys(turn ?? {}).sort(), [
     "turnId",
     "turnNumber",
@@ -343,21 +216,14 @@ test("session summaries and transcripts expose canonical lifecycle state", () =>
     "toolActivities",
   ].sort());
   assert.deepEqual(turn?.turnId, { type: "turnId", required: true });
-  assert.deepEqual(turn?.kind, {
-    type: "string",
-    required: true,
-    enum: ["conversational", "display-only"],
-  });
+  assert.deepEqual(turn?.kind, { type: "string", required: true, enum: ["conversational", "display-only"] });
   assert.deepEqual(turn?.state, {
     type: "string",
     required: true,
     enum: ["pending", "completed", "failed", "interrupted"],
   });
   assert.deepEqual(turn?.timestamp, { type: "utcTimestamp", required: true });
-  assert.deepEqual(turn?.assistantText, {
-    type: "nullableString",
-    required: true,
-  });
+  assert.deepEqual(turn?.assistantText, { type: "nullableString", required: true });
   assert.deepEqual(turn?.userText, { type: "string", required: true });
   assert.deepEqual(turn?.failureCode, {
     type: "nullableString",
@@ -365,57 +231,16 @@ test("session summaries and transcripts expose canonical lifecycle state", () =>
     maxBytes: 256,
     enum: ["execution_failed", "persistence_failed", "interrupted", "cancelled"],
   });
-  assert.deepEqual(turn?.failureMessage, {
-    type: "nullableString",
-    required: true,
-    maxBytes: 4_096,
-  });
+  assert.deepEqual(turn?.failureMessage, { type: "nullableString", required: true, maxBytes: 4_096 });
   assert.deepEqual(turn?.failureRetryable, { type: "nullableBoolean", required: true });
 });
 
-test("shared process-event origin fixtures", async (context) => {
+test("shared request fixtures are validated against the contract params", async (context) => {
   const fixtures = await loadJson<FixtureDocument>("fixtures.json");
-  for (const fixture of fixtures.originCases) {
-    await context.test(fixture.name, () => {
-      if (fixture.valid) {
-        assert.doesNotThrow(() => validateProcessEventOrigin(fixture.event, fixture.origin));
-        assert.doesNotThrow(() =>
-          parseProtocolMessageFromOrigin(
-            {
-              protocolVersion: 1,
-              messageType: "event",
-              event: fixture.event,
-              data: {},
-            },
-            fixture.origin,
-          ),
-        );
-      } else {
-        assert.throws(
-          () => validateProcessEventOrigin(fixture.event, fixture.origin),
-          (error) => matchesExpectedError(error, fixture.errorCode),
-        );
-        assert.throws(
-          () =>
-            parseProtocolMessageFromOrigin(
-              {
-                protocolVersion: 1,
-                messageType: "event",
-                event: fixture.event,
-                data: {},
-              },
-              fixture.origin,
-            ),
-          (error) => matchesExpectedError(error, fixture.errorCode),
-        );
-      }
-    });
-  }
-});
-
-test("shared message fixtures", async (context) => {
-  const fixtures = await loadJson<FixtureDocument>("fixtures.json");
-  for (const fixture of fixtures.messages) {
+  const requests = fixtures.messages.filter(isRequestFixture);
+  assert.ok(requests.some((fixture) => fixture.valid));
+  assert.ok(requests.some((fixture) => !fixture.valid));
+  for (const fixture of requests) {
     await context.test(fixture.name, () => {
       if (fixture.valid) {
         assert.doesNotThrow(() => parseProtocolMessage(fixture.message));
@@ -429,43 +254,64 @@ test("shared message fixtures", async (context) => {
   }
 });
 
-test("shared raw-line fixtures and line limit", async (context) => {
-  const fixtures = await loadJson<FixtureDocument>("fixtures.json");
-  for (const fixture of fixtures.rawLines) {
-    await context.test(fixture.name, () => {
-      if (fixture.valid) {
-        assert.doesNotThrow(() => parseProtocolLine(fixture.line));
-      } else {
-        assert.throws(
-          () => parseProtocolLine(fixture.line),
-          (error) => matchesExpectedError(error, fixture.errorCode),
-        );
-      }
-    });
-  }
-
-  const oversized = JSON.stringify({ padding: "x".repeat(MAX_PROTOCOL_LINE_BYTES) });
+test("a request missing a required param is rejected before it is sent", () => {
   assert.throws(
-    () => parseProtocolLine(oversized),
-    (error) => matchesExpectedError(error, "PROTOCOL_INVALID"),
+    () => parseProtocolMessage({
+      protocolVersion: 1,
+      messageType: "request",
+      requestId,
+      method: "session.rename",
+      params: { projectId: "p1", sessionId: "28b222e0cc6543aa8d7bbdc423de99a7" },
+    }),
+    (error) => matchesExpectedError(error, "PROTOCOL_INVALID") &&
+      /params\.title is required/.test((error as Error).message),
   );
 });
 
-test("shared ordering and correlation traces", async (context) => {
-  const fixtures = await loadJson<FixtureDocument>("fixtures.json");
-  for (const fixture of fixtures.traces) {
-    await context.test(fixture.name, () => {
-      const validator = new ProtocolTraceValidator();
-      const run = () => {
-        for (const value of fixture.messages) {
-          validator.accept(parseProtocolMessage(value));
-        }
-      };
-      if (fixture.valid) {
-        assert.doesNotThrow(run);
-      } else {
-        assert.throws(run, (error) => matchesExpectedError(error, fixture.errorCode));
-      }
-    });
+test("envelopes are parsed without validating result or event data", () => {
+  assert.doesNotThrow(() => parseProtocolMessage({
+    protocolVersion: 1,
+    messageType: "result",
+    requestId,
+    ok: true,
+    data: { anyField: "Python validated this result before sending it" },
+  }));
+  assert.doesNotThrow(() => parseProtocolMessage({
+    protocolVersion: 1,
+    messageType: "event",
+    requestId,
+    sequence: 1,
+    event: "stage.changed",
+    data: { stage: "thinking" },
+  }));
+
+  const invalidEnvelopes: Array<[string, unknown, string]> = [
+    ["unsupported version", { protocolVersion: 2, messageType: "result", requestId, ok: true, data: {} }, "PROTOCOL_VERSION_UNSUPPORTED"],
+    ["unknown message type", { protocolVersion: 1, messageType: "notification", requestId }, "PROTOCOL_INVALID"],
+    ["non-boolean ok", { protocolVersion: 1, messageType: "result", requestId, ok: "yes", data: {} }, "PROTOCOL_INVALID"],
+    ["success with error", { protocolVersion: 1, messageType: "result", requestId, ok: true, data: {}, error: {} }, "PROTOCOL_INVALID"],
+    ["failure with data", { protocolVersion: 1, messageType: "result", requestId, ok: false, data: {}, error: {} }, "PROTOCOL_INVALID"],
+    ["non-canonical request id", { protocolVersion: 1, messageType: "result", requestId: "not-a-uuid", ok: true, data: {} }, "PROTOCOL_INVALID"],
+    ["unknown error code", {
+      protocolVersion: 1,
+      messageType: "result",
+      requestId,
+      ok: false,
+      error: { code: "NOT_IN_CONTRACT", message: "x", retryable: false, details: {} },
+    }, "PROTOCOL_INVALID"],
+    ["oversized error message", {
+      protocolVersion: 1,
+      messageType: "result",
+      requestId,
+      ok: false,
+      error: { code: "INTERNAL_ERROR", message: "x".repeat(MAX_ERROR_MESSAGE_BYTES + 1), retryable: false, details: {} },
+    }, "PROTOCOL_INVALID"],
+    ["unknown request event", { protocolVersion: 1, messageType: "event", requestId, sequence: 1, event: "answer.chunk", data: {} }, "PROTOCOL_INVALID"],
+    ["non-positive sequence", { protocolVersion: 1, messageType: "event", requestId, sequence: 0, event: "stage.changed", data: {} }, "PROTOCOL_INVALID"],
+    ["unknown process event", { protocolVersion: 1, messageType: "event", event: "backend.unknown", data: {} }, "PROTOCOL_INVALID"],
+    ["process event with sequence", { protocolVersion: 1, messageType: "event", sequence: 1, event: "backend.ready", data: {} }, "PROTOCOL_INVALID"],
+  ];
+  for (const [name, value, code] of invalidEnvelopes) {
+    assert.throws(() => parseProtocolMessage(value), (error) => matchesExpectedError(error, code), name);
   }
 });

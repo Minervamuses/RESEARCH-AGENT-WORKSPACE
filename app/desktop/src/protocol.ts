@@ -1,119 +1,16 @@
-export const PROTOCOL_VERSION = 1 as const;
-export const MAX_PROTOCOL_LINE_BYTES = 2 * 1024 * 1024;
-export const MAX_REQUEST_ID_BYTES = 128;
-export const MAX_ERROR_MESSAGE_BYTES = 4096;
-export const FULL_TEXT_RESULT_METHODS = ["session.turn", "session.transcript"] as const;
+import contract from "../protocol/v1/contract.json" with { type: "json" };
 
-export const PROTOCOL_METHODS = [
-  "runtime.diagnostics",
-  "project.list",
-  "workspace.select",
-  "document.open",
-  "document.save",
-  "document.apply",
-  "session.create",
-  "session.list",
-  "session.select",
-  "session.delete",
-  "session.rename",
-  "session.retry_registration",
-  "session.transcript",
-  "session.status",
-  "session.turn",
-  "session.set_thinking",
-  "session.set_bash_permission",
-  "session.stop",
-  "session.shutdown",
-  "knowledge.overview",
-  "knowledge.search",
-  "knowledge.list_chunks",
-  "knowledge.get_context",
-  "knowledge.init_workspace",
-  "knowledge.ingest_file",
-  "knowledge.ingest_folder",
-  "knowledge.sync",
-  "knowledge.prune_preview",
-  "knowledge.prune_apply",
-  "extensions.status",
-  "extensions.preview",
-  "extensions.apply",
-  "approval.resolve",
-  "runtime.shutdown",
-  "bibliography.inspect",
-  "bibliography.render",
-  "bibliography.set_style",
-  "bibliography.remove",
-  "bibliography.add",
-  "bibliography.export",
-] as const;
-
-export const REQUEST_EVENTS = [
-  "request.started",
-  "turn.accepted",
-  "request.progress",
-  "stage.changed",
-  "tool.started",
-  "tool.finished",
-  "tool.failed",
-  "document.proposed",
-  "approval.required",
-  "knowledge.progress",
-  "shutdown.progress",
-  "collecting.started",
-  "collecting.completed",
-  "tagging.started",
-  "tagging.folder_completed",
-  "metadata.written",
-  "writing.started",
-  "writing.file_completed",
-  "ingest.completed",
-  "ingest.failed",
-] as const;
-
-export const PROCESS_EVENTS = [
-  "backend.ready",
-  "backend.crashed",
-  "backend.shutting_down",
-  "backend.protocol_error",
-] as const;
-
-export const PROTOCOL_ERROR_CODES = [
-  "PROTOCOL_INVALID",
-  "PROTOCOL_VERSION_UNSUPPORTED",
-  "RUNTIME_WRONG_CONDA_ENV",
-  "SESSION_NOT_READY",
-  "OPENROUTER_NOT_CONFIGURED",
-  "OLLAMA_UNREACHABLE",
-  "OLLAMA_MODEL_MISSING",
-  "GRAPH_LIMIT_REACHED",
-  "BUSY_TURN",
-  "TURN_CANCELLED",
-  "BUSY_KNOWLEDGE_MUTATION",
-  "BUSY_EXTENSION_OPERATION",
-  "INVALID_PATH",
-  "RAG_READ_FAILED",
-  "RAG_WRITE_FAILED",
-  "RAG_PARTIAL_WRITE_POSSIBLE",
-  "PRUNE_PREVIEW_STALE",
-  "EXTENSION_PREVIEW_FAILED",
-  "EXTENSION_APPLY_FAILED",
-  "APPROVAL_DENIED",
-  "PROVIDER_RATE_LIMITED",
-  "PROVIDER_REQUEST_FAILED",
-  "BIBLIOGRAPHY_CONFLICT",
-  "BIBLIOGRAPHY_FAILED",
-  "INTERNAL_ERROR",
-] as const;
+/**
+ * Protocol v1 client helpers.
+ *
+ * `contract.json` is the only hand-written protocol vocabulary and schema
+ * source. Python is the schema validator for every message it sends (U1);
+ * this module validates outgoing request params against the contract, parses
+ * envelopes, and leaves response correlation to the backend client.
+ */
 
 export type JsonObject = Record<string, unknown>;
-export type ProtocolMethod = (typeof PROTOCOL_METHODS)[number];
-export type RequestEvent = (typeof REQUEST_EVENTS)[number];
-export type ProcessEvent = (typeof PROCESS_EVENTS)[number];
-export type ProtocolErrorCode = (typeof PROTOCOL_ERROR_CODES)[number];
 export type ProtocolOrigin = "python" | "rust";
-
-const TOOL_EVENT_DATA_KEYS = ["name", "callId", "status", "candidateId"] as const;
-const TOOL_STATUSES = ["started", "ok", "failed", "denied"] as const;
 
 export interface FieldRule {
   type:
@@ -144,1053 +41,124 @@ export interface FieldRule {
 
 export type FieldSchema = Record<string, FieldRule>;
 
-export const TURN_ERROR_DETAILS_SCHEMA: FieldSchema = {
-  turnId: { type: "turnId", required: true },
-  state: {
-    type: "nullableString",
-    required: true,
-    enum: ["pending", "completed", "failed", "interrupted"],
-  },
-  accepted: { type: "boolean", required: true },
-  persisted: { type: "boolean", required: true },
-};
+interface ProtocolContract {
+  protocolVersion: number;
+  requestIdMaxBytes: number;
+  errorMessageMaxBytes: number;
+  requestEvents: string[];
+  processEvents: string[];
+  errorCodes: string[];
+  methods: { name: string; params: FieldSchema }[];
+  resultDataSchemas: Record<string, FieldSchema>;
+  submittedContextSchema: FieldSchema;
+  turnErrorDetailsSchema: FieldSchema;
+}
 
-export const PROCESS_EVENT_ORIGINS: Record<ProcessEvent, readonly ProtocolOrigin[]> = {
-  "backend.ready": ["python"],
-  "backend.crashed": ["rust"],
-  "backend.shutting_down": ["python", "rust"],
-  "backend.protocol_error": ["python", "rust"],
-};
+// The JSON module type widens field-rule `type` values to string.
+const CONTRACT = contract as unknown as ProtocolContract;
 
-export const FORBIDDEN_DATA_KEY_FRAGMENTS = [
-  "apikey",
-  "authorization",
-  "langchain",
-  "messages",
-  "rawpayload",
-  "rawprovider",
-  "responsemetadata",
-  "secret",
-  "token",
-  "toolargs",
-  "toolcalls",
-  "toolresult",
-  "traceback",
-  "turnlogs",
-] as const;
+export const PROTOCOL_VERSION: number = CONTRACT.protocolVersion;
+export const MAX_REQUEST_ID_BYTES: number = CONTRACT.requestIdMaxBytes;
+export const MAX_ERROR_MESSAGE_BYTES: number = CONTRACT.errorMessageMaxBytes;
+export const PROTOCOL_METHODS: readonly string[] = CONTRACT.methods.map(({ name }) => name);
+export const REQUEST_EVENTS: readonly string[] = CONTRACT.requestEvents;
+export const PROCESS_EVENTS: readonly string[] = CONTRACT.processEvents;
+export const PROTOCOL_ERROR_CODES: readonly string[] = CONTRACT.errorCodes;
 
-export const DOCUMENT_CONTEXT_SCHEMA: FieldSchema = {
-  rootPath: { type: "string", required: true, maxBytes: 8192 },
-  path: { type: "string", required: true, maxBytes: 8192 },
-  editorRevision: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
-  sourceText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
-  diskFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-};
+const METHOD_PARAMS: ReadonlyMap<string, FieldSchema> = new Map(
+  CONTRACT.methods.map(({ name, params }) => [name, params]),
+);
 
-/** bime_word audit summary returned only by a bime_docx export. */
-export const BIME_AUDIT_SCHEMA: FieldSchema = {
-  errors: { type: "integer", required: true, minimum: 0, maximum: 1000000 },
-  warnings: { type: "integer", required: true, minimum: 0, maximum: 1000000 },
-  manualChecks: { type: "integer", required: true, minimum: 0, maximum: 1000000 },
-  reportPath: { type: "string", required: true, maxBytes: 8192 },
-  layoutVerified: { type: "boolean", required: true },
-};
+/** Logical identifiers a result echoes from its request. */
+const ECHO_ID_FIELDS = ["projectId", "sessionId", "turnId"] as const;
 
-export const SUBMITTED_CONTEXT_SCHEMA: FieldSchema = {
-  "projectId": {
-    "type": "string",
-    "required": true,
-    "maxBytes": 64,
-    "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
-  },
-  "rootPath": {
-    "type": "string",
-    "required": true,
-    "maxBytes": 8192
-  },
-  "permissionMode": {
-    "type": "string",
-    "required": true,
-    "enum": [
-      "ask",
-      "bypass"
-    ]
-  },
-  "requestedThinkingMode": {
-    "type": "string",
-    "required": true,
-    "enum": [
-      "normal",
-      "extended"
-    ]
-  },
-  "skillReferences": {
-    "type": "objectArray",
-    "required": true,
-    "maxItems": 128,
-    "items": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 256
-      },
-      "startUtf16": {
-        "type": "integer",
-        "required": true,
-        "minimum": 0,
-        "maximum": 9007199254740991
-      },
-      "endUtf16": {
-        "type": "integer",
-        "required": true,
-        "minimum": 0,
-        "maximum": 9007199254740991
-      }
-    }
-  },
-  "projectRules": {
-    "type": "object",
-    "required": true,
-    "items": {
-      "text": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 1048576,
-        "allowEmpty": true
-      },
-      "fingerprint": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 64,
-        "pattern": "^[0-9a-f]{64}$"
-      }
-    }
-  },
-  "documentContext": {
-    "type": "object",
-    "required": false,
-    "items": {
-      "rootPath": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 8192
-      },
-      "path": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 8192
-      },
-      "editorRevision": {
-        "type": "integer",
-        "required": true,
-        "minimum": 0,
-        "maximum": 9007199254740991
-      },
-      "sourceText": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 1048576,
-        "allowEmpty": true
-      },
-      "diskFingerprint": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 64,
-        "pattern": "^[0-9a-f]{64}$"
-      },
-      "rangeStartUtf16": {
-        "type": "integer",
-        "required": false,
-        "minimum": 0,
-        "maximum": 9007199254740991
-      },
-      "rangeEndUtf16": {
-        "type": "integer",
-        "required": false,
-        "minimum": 0,
-        "maximum": 9007199254740991
-      }
-    }
-  },
-  "references": {
-    "type": "objectArray",
-    "required": true,
-    "items": {
-      "referenceId": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 256
-      },
-      "kind": {
-        "type": "string",
-        "required": true,
-        "enum": [
-          "document",
-          "chat"
-        ]
-      },
-      "text": {
-        "type": "string",
-        "required": true,
-        "maxBytes": 1048576,
-        "allowEmpty": false
-      },
-      "document": {
-        "type": "object",
-        "required": false,
-        "items": {
-          "snapshot": {
-            "type": "object",
-            "required": true,
-            "items": {
-              "rootPath": {
-                "type": "string",
-                "required": true,
-                "maxBytes": 8192
-              },
-              "path": {
-                "type": "string",
-                "required": true,
-                "maxBytes": 8192
-              },
-              "editorRevision": {
-                "type": "integer",
-                "required": true,
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              "sourceText": {
-                "type": "string",
-                "required": true,
-                "maxBytes": 1048576,
-                "allowEmpty": true
-              },
-              "diskFingerprint": {
-                "type": "string",
-                "required": true,
-                "maxBytes": 64,
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "rangeStartUtf16": {
-                "type": "integer",
-                "required": true,
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              "rangeEndUtf16": {
-                "type": "integer",
-                "required": true,
-                "minimum": 0,
-                "maximum": 9007199254740991
-              }
-            }
-          },
-          "startLine": {
-            "type": "integer",
-            "required": true,
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "endLine": {
-            "type": "integer",
-            "required": true,
-            "minimum": 1,
-            "maximum": 9007199254740991
-          }
-        }
-      },
-      "chat": {
-        "type": "object",
-        "required": false,
-        "items": {
-          "projectId": {
-            "type": "string",
-            "required": true,
-            "maxBytes": 64,
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
-          },
-          "sessionId": {
-            "type": "turnId",
-            "required": true
-          },
-          "turnId": {
-            "type": "turnId",
-            "required": true
-          },
-          "role": {
-            "type": "string",
-            "required": true,
-            "enum": [
-              "user",
-              "assistant"
-            ]
-          },
-          "messageFingerprint": {
-            "type": "string",
-            "required": true,
-            "maxBytes": 64,
-            "pattern": "^[0-9a-f]{64}$"
-          },
-          "startUtf16": {
-            "type": "integer",
-            "required": true,
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "endUtf16": {
-            "type": "integer",
-            "required": true,
-            "minimum": 0,
-            "maximum": 9007199254740991
-          }
-        }
-      }
-    }
-  }
-};
+/**
+ * Identifier fields both the method's params and its result schema declare,
+ * derived from the contract. Callers compare them only when the request
+ * actually carried the field and the result returned it.
+ */
+export function echoedIdFields(method: ProtocolMethod): readonly string[] {
+  const params = METHOD_PARAMS.get(method) ?? {};
+  const result = CONTRACT.resultDataSchemas[method] ?? {};
+  return ECHO_ID_FIELDS.filter((field) => field in params && field in result);
+}
 
-export const DOCUMENT_APPROVAL_DATA_SCHEMA: FieldSchema = {
-  approvalId: { type: "string", required: true, maxBytes: 256 },
-  parentRequestId: { type: "requestId", required: true },
-  turnId: { type: "string", required: true, maxBytes: 256 },
-  operation: { type: "string", required: true, enum: ["document.apply", "document.undo", "citation.save", "knowledge.init_workspace", "knowledge.ingest_file", "knowledge.ingest_folder", "knowledge.prune_apply", "mcp.call", "extension.install", "extensions.apply"] },
-  targetPath: { type: "string", required: true, maxBytes: 8192 },
-  rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  parametersSummary: { type: "string", required: false, maxBytes: 8192 },
-  description: { type: "string", required: true, maxBytes: 4096 },
-  createdAt: { type: "utcTimestamp", required: true },
-  expiresAt: { type: "utcTimestamp", required: true },
-};
+/** Method names; `tests/protocol_types.test.ts` keeps this equal to the contract. */
+export type ProtocolMethod =
+  | "runtime.diagnostics"
+  | "project.list"
+  | "workspace.select"
+  | "document.open"
+  | "document.save"
+  | "document.apply"
+  | "session.create"
+  | "session.list"
+  | "session.select"
+  | "session.delete"
+  | "session.rename"
+  | "session.retry_registration"
+  | "session.transcript"
+  | "session.status"
+  | "session.turn"
+  | "session.set_thinking"
+  | "session.set_bash_permission"
+  | "session.stop"
+  | "session.shutdown"
+  | "knowledge.overview"
+  | "knowledge.search"
+  | "knowledge.list_chunks"
+  | "knowledge.get_context"
+  | "knowledge.init_workspace"
+  | "knowledge.ingest_file"
+  | "knowledge.ingest_folder"
+  | "knowledge.sync"
+  | "knowledge.prune_preview"
+  | "knowledge.prune_apply"
+  | "extensions.status"
+  | "extensions.preview"
+  | "extensions.apply"
+  | "approval.resolve"
+  | "runtime.shutdown"
+  | "bibliography.inspect"
+  | "bibliography.render"
+  | "bibliography.set_style"
+  | "bibliography.remove"
+  | "bibliography.add"
+  | "bibliography.export";
 
-export const DOCUMENT_RESULT_SCHEMA: FieldSchema = {
-  path: { type: "string", required: true, maxBytes: 8192 },
-  status: { type: "string", required: true, enum: ["saved", "conflict", "failed", "cancelled"] },
-  sourceText: { type: "string", required: false, maxBytes: 1048576, allowEmpty: true },
-  diskFingerprint: { type: "string", required: false, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  rangeStartUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  rangeEndUtf16: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  candidateText: { type: "string", required: false, maxBytes: 1048576, allowEmpty: true },
-  currentDiskText: { type: "string", required: false, maxBytes: 1048576, allowEmpty: true },
-  issue: { type: "string", required: false, maxBytes: 4096 },
-  callId: { type: "string", required: false, maxBytes: 256 },
-  rootPath: { type: "string", required: false, maxBytes: 8192 },
-  editorRevision: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  savedFingerprint: { type: "string", required: false, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  expectedSnapshot: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-};
+/** Request event names; checked against the contract by `tests/protocol_types.test.ts`. */
+export type RequestEvent =
+  | "request.started"
+  | "turn.accepted"
+  | "request.progress"
+  | "stage.changed"
+  | "tool.started"
+  | "tool.finished"
+  | "tool.failed"
+  | "document.proposed"
+  | "approval.required"
+  | "knowledge.progress"
+  | "shutdown.progress"
+  | "collecting.started"
+  | "collecting.completed"
+  | "tagging.started"
+  | "tagging.folder_completed"
+  | "metadata.written"
+  | "writing.started"
+  | "writing.file_completed"
+  | "ingest.completed"
+  | "ingest.failed";
 
-export const EVENT_DATA_SCHEMAS: Partial<Record<RequestEvent, FieldSchema>> = {
-  "turn.accepted": {
-    sessionId: { type: "string", required: true, maxBytes: 256 },
-    turnId: { type: "turnId", required: true },
-  },
-  "document.proposed": {
-    turnId: { type: "turnId", required: true },
-    callId: { type: "string", required: true, maxBytes: 256 },
-    referenceId: { type: "string", required: false, maxBytes: 256, pattern: "^[\\s\\S]*\\S[\\s\\S]*$" },
-  },
-  "approval.required": {
-    approvalId: { type: "string", required: true, maxBytes: 256 },
-    parentRequestId: { type: "requestId", required: true },
-    turnId: { type: "string", required: true, maxBytes: 256 },
-    command: { type: "string", required: true, maxBytes: 65_536 },
-    description: { type: "string", required: true, maxBytes: 4_096 },
-    executionTimeoutSeconds: { type: "integer", required: true, minimum: 1, maximum: 3_600 },
-    createdAt: { type: "utcTimestamp", required: true },
-    expiresAt: { type: "utcTimestamp", required: true },
-  },
-  "collecting.started": {},
-  "collecting.completed": {
-    folders: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    files: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-  },
-  "tagging.started": {
-    total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-  },
-  "tagging.folder_completed": {
-    completed: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    folder: { type: "string", required: true, maxBytes: 8_192 },
-  },
-  "metadata.written": {
-    path: { type: "string", required: true, maxBytes: 8_192 },
-  },
-  "writing.started": {},
-  "writing.file_completed": {
-    filePath: { type: "string", required: true, maxBytes: 8_192 },
-    chunks: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    filesCompleted: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-  },
-  "ingest.completed": {
-    files: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    chunks: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-  },
-  "ingest.failed": {
-    stage: { type: "string", required: true, maxBytes: 256 },
-    partialWritePossible: { type: "boolean", required: true },
-  },
-};
+/** Process event names; checked against the contract by `tests/protocol_types.test.ts`. */
+export type ProcessEvent =
+  | "backend.ready"
+  | "backend.crashed"
+  | "backend.shutting_down"
+  | "backend.protocol_error";
 
-export const RESULT_DATA_SCHEMAS: Partial<Record<ProtocolMethod, FieldSchema>> = {
-  "workspace.select": {
-    rootPath: { type: "string", required: true, maxBytes: 8192 },
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    historyDirectory: { type: "string", required: true, maxBytes: 8192 },
-    rulesText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
-    rulesFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-    researchFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-    status: { type: "string", required: true, enum: ["ready", "needs_configuration", "needs_initialization", "opened"] },
-  },
-  "document.open": {
-    path: { type: "string", required: true, maxBytes: 8192 },
-    sourceText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
-    diskFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-    rootPath: { type: "string", required: false, maxBytes: 8192 },
-    editorRevision: { type: "integer", required: false, minimum: 0, maximum: 9007199254740991 },
-  },
-  "document.save": DOCUMENT_RESULT_SCHEMA,
-  "document.apply": DOCUMENT_RESULT_SCHEMA,
-  "runtime.diagnostics": {
-    backendState: {
-      type: "string",
-      required: true,
-      enum: ["starting", "ready", "shutting_down", "stopped", "crashed"],
-    },
-    platform: { type: "string", required: true, enum: ["linux"] },
-    appRoot: { type: "string", required: true, maxBytes: 8_192 },
-    workingDirectory: { type: "string", required: true, maxBytes: 8_192 },
-    originalWorkingDirectory: { type: "string", required: true, maxBytes: 8_192 },
-    pythonVersion: { type: "string", required: true, maxBytes: 256 },
-    sysPrefix: { type: "string", required: true, maxBytes: 8_192 },
-    condaEnvironment: { type: "nullableString", required: true, maxBytes: 256 },
-    condaPrefix: { type: "nullableString", required: true, maxBytes: 8_192 },
-    protocolVersion: { type: "integer", required: true, minimum: 1, maximum: 1 },
-    backendVersion: { type: "string", required: true, maxBytes: 256 },
-    openRouterConfigured: { type: "boolean", required: true },
-    openAlexConfigured: { type: "boolean", required: true },
-    storePath: { type: "string", required: true, maxBytes: 8_192 },
-    citationOutputPath: { type: "string", required: true, maxBytes: 8_192 },
-    ollamaReachable: { type: "nullableBoolean", required: true },
-    ollamaModelAvailable: { type: "nullableBoolean", required: true },
-    mcpEnabled: { type: "boolean", required: true },
-    mcpFamilies: {
-      type: "stringArray",
-      required: true,
-      maxItems: 512,
-      itemMaxBytes: 256,
-    },
-    mcpDiagnostics: {
-      type: "stringArray",
-      required: true,
-      maxItems: 512,
-      itemMaxBytes: 4_096,
-    },
-  },
-  "session.create": {
-    sessionId: { type: "string", required: true, maxBytes: 256 },
-    turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    graphRecursionLimit: {
-      type: "integer",
-      required: true,
-      minimum: 3,
-      maximum: 0xffff_ffff,
-    },
-    thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
-    bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
-    slashCommands: {
-      type: "objectArray", required: true, maxItems: 512,
-      items: {
-        name: { type: "string", required: true, maxBytes: 64 },
-        description: { type: "string", required: true, maxBytes: 1_024 },
-      },
-    },
-    loadedSkills: {
-      type: "stringArray",
-      required: true,
-      maxItems: 512,
-      itemMaxBytes: 256,
-    },
-    mcpFamilies: {
-      type: "stringArray",
-      required: true,
-      maxItems: 512,
-      itemMaxBytes: 256,
-    },
-    startupDiagnostics: {
-      type: "stringArray",
-      required: true,
-      maxItems: 512,
-      itemMaxBytes: 4_096,
-    },
-    extensionRevision: {
-      type: "integer",
-      required: true,
-      minimum: 0,
-      maximum: 0xffff_ffff,
-    },
-    projectId: { type: "string", required: false, maxBytes: 256 },
-    registered: { type: "boolean", required: false },
-  },
-  "session.turn": {
-    documentOperations: {
-      type: "objectArray",
-      required: false,
-      maxItems: 128,
-      items: {
-        callId: { type: "string", required: true, maxBytes: 256 },
-        path: { type: "string", required: true, maxBytes: 8192 },
-        candidateText: { type: "string", required: true, maxBytes: 1048576, allowEmpty: true },
-        rangeStartUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
-        rangeEndUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
-      },
-    },
-    sessionId: { type: "string", required: true, maxBytes: 256 },
-    turnId: { type: "turnId", required: true },
-    turnNumber: { type: "integer", required: true, minimum: 1, maximum: 4_096 },
-    state: { type: "string", required: true, enum: ["completed"] },
-    accepted: { type: "boolean", required: true },
-    persisted: { type: "boolean", required: true },
-    text: { type: "string", required: true },
-    validationErrors: {
-      type: "stringArray",
-      required: true,
-      maxItems: 128,
-      itemMaxBytes: 4_096,
-    },
-    toolSummaries: {
-      type: "objectArray",
-      required: true,
-      maxItems: 512,
-      items: {
-        name: { type: "string", required: true, maxBytes: 256 },
-        status: { type: "string", required: true, enum: ["ok", "failed", "denied"] },
-        callId: { type: "string", required: false, maxBytes: 256 },
-        candidateId: { type: "string", required: false, maxBytes: 256 },
-      },
-    },
-    responseKind: { type: "string", required: false, enum: ["answer", "command"] },
-    streamKind: { type: "string", required: false, enum: ["final_only"] },
-    chunkCount: { type: "integer", required: false, minimum: 0, maximum: 0 },
-    registrationStatus: {
-      type: "string",
-      required: false,
-      enum: ["registered", "pending", "not_required"],
-    },
-    registrationIssue: { type: "nullableString", required: false, maxBytes: 4_096 },
-    extensionAction: { type: "string", required: false, enum: ["status", "preview"] },
-  },
-  "session.stop": {
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    turnId: { type: "turnId", required: true },
-    state: { type: "nullableString", required: true, enum: ["completed", "failed", "interrupted"] },
-    accepted: { type: "boolean", required: true },
-    persisted: { type: "boolean", required: true },
-  },
-  "session.shutdown": {
-    status: { type: "string", required: true, enum: ["stopped", "no_session"] },
-  },
-  "runtime.shutdown": {
-    status: { type: "string", required: true, enum: ["stopped", "no_session"] },
-  },
-  "project.list": {
-    status: { type: "string", required: true, enum: ["ready", "unavailable"] },
-    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
-    projects: {
-      type: "objectArray",
-      required: true,
-      maxItems: 50,
-      items: {
-        projectId: { type: "string", required: true, maxBytes: 256 },
-        name: { type: "string", required: true, maxBytes: 256 },
-        sessionCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-      },
-    },
-    selectedProjectId: { type: "nullableString", required: true, maxBytes: 256 },
-    selectedSessionId: { type: "nullableString", required: true, maxBytes: 32 },
-  },
-  "session.list": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    status: { type: "string", required: true, enum: ["ready", "unavailable"] },
-    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
-    items: {
-      type: "objectArray",
-      required: true,
-      maxItems: 50,
-      items: {
-        sessionId: { type: "string", required: true, maxBytes: 32 },
-        title: { type: "string", required: true, maxBytes: 256 },
-        turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-        createdAt: { type: "nullableString", required: true, maxBytes: 64 },
-        updatedAt: { type: "nullableString", required: true, maxBytes: 64 },
-        status: { type: "string", required: true, enum: ["ready", "degraded", "unavailable"] },
-        issue: { type: "nullableString", required: true, maxBytes: 4_096 },
-      },
-    },
-    total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    offset: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    limit: { type: "integer", required: true, minimum: 1, maximum: 50 },
-    hasMore: { type: "boolean", required: true },
-  },
-  "session.select": {
-    sessionId: { type: "string", required: true, maxBytes: 256 },
-    turnCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    graphRecursionLimit: { type: "integer", required: true, minimum: 3, maximum: 0xffff_ffff },
-    thinkingMode: { type: "string", required: true, enum: ["normal", "extended"] },
-    bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
-    slashCommands: {
-      type: "objectArray", required: true, maxItems: 512,
-      items: {
-        name: { type: "string", required: true, maxBytes: 64 },
-        description: { type: "string", required: true, maxBytes: 1_024 },
-      },
-    },
-    loadedSkills: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
-    mcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
-    startupDiagnostics: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 4_096 },
-    extensionRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    registered: { type: "boolean", required: true },
-  },
-  "session.delete": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    status: { type: "string", required: true, enum: ["deleted"] },
-  },
-  "session.rename": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    title: { type: "string", required: true, maxBytes: 256 },
-  },
-  "session.retry_registration": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    status: { type: "string", required: true, enum: ["registered", "pending"] },
-    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
-  },
-  "session.transcript": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    status: { type: "string", required: true, enum: ["ready", "degraded", "unavailable"] },
-    issue: { type: "nullableString", required: true, maxBytes: 4_096 },
-    items: {
-      type: "objectArray",
-      required: true,
-      maxItems: 20,
-      items: {
-        turnId: { type: "turnId", required: true },
-        turnNumber: { type: "integer", required: true, minimum: 1, maximum: 0xffff_ffff },
-        kind: {
-          type: "string",
-          required: true,
-          enum: ["conversational", "display-only"],
-        },
-        state: {
-          type: "string",
-          required: true,
-          enum: ["pending", "completed", "failed", "interrupted"],
-        },
-        timestamp: { type: "utcTimestamp", required: true },
-        userText: { type: "string", required: true },
-        submittedContext: { type: "nullableSubmittedContext", required: false },
-        assistantText: { type: "nullableString", required: true },
-        failureCode: {
-          type: "nullableString",
-          required: true,
-          maxBytes: 256,
-          enum: ["execution_failed", "persistence_failed", "interrupted", "cancelled"],
-        },
-        failureMessage: { type: "nullableString", required: true, maxBytes: 4_096 },
-        failureRetryable: { type: "nullableBoolean", required: true },
-        toolActivities: {
-          type: "objectArray",
-          required: true,
-          maxItems: 128,
-          items: {
-            callId: { type: "nullableString", required: true, maxBytes: 256 },
-            name: { type: "string", required: true, maxBytes: 256 },
-            arguments: { type: "string", required: true, maxBytes: 32_768 },
-            result: { type: "string", required: true, maxBytes: 65_536 },
-            status: {
-              type: "string",
-              required: true,
-              enum: ["ok", "failed", "denied", "incomplete"],
-            },
-            promptEligible: { type: "boolean", required: true },
-          },
-        },
-      },
-    },
-    total: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    offset: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    limit: { type: "integer", required: true, minimum: 1, maximum: 20 },
-    hasMore: { type: "boolean", required: true },
-  },
-  "extensions.status": {
-    dropinRoot: { type: "string", required: true, maxBytes: 8_192 },
-    stateRoot: { type: "string", required: true, maxBytes: 8_192 },
-    desiredCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    appliedCount: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    appliedRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    runningRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    restartRequired: { type: "boolean", required: true },
-    managerAvailable: { type: "boolean", required: true },
-    managerError: { type: "nullableString", required: true, maxBytes: 4_096 },
-    diagnostics: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 4_096 },
-    runningMcpFamilies: { type: "stringArray", required: true, maxItems: 512, itemMaxBytes: 256 },
-  },
-  "extensions.preview": {
-    previewId: { type: "string", required: true, maxBytes: 256 },
-    summary: { type: "string", required: true, maxBytes: 4_096 },
-    proposedSkills: {
-      type: "stringArray",
-      required: true,
-      maxItems: 512,
-      itemMaxBytes: 256,
-    },
-    bindings: {
-      type: "objectArray",
-      required: true,
-      maxItems: 512,
-      items: {
-        name: { type: "string", required: true, maxBytes: 256 },
-        server: { type: "string", required: true, maxBytes: 256 },
-        bindingHash: { type: "string", required: true, maxBytes: 256 },
-        requiresApproval: { type: "boolean", required: true },
-        command: { type: "string", required: true, maxBytes: 8_192 },
-        arguments: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 4_096 },
-        workingDirectory: { type: "string", required: true, maxBytes: 8_192 },
-        environmentNames: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 256 },
-      },
-    },
-  },
-  "extensions.apply": {
-    sessionId: { type: "string", required: true, maxBytes: 256 },
-    turnId: { type: "turnId", required: true },
-    turnNumber: { type: "integer", required: true, minimum: 1, maximum: 4_096 },
-    state: { type: "string", required: true, enum: ["completed"] },
-    accepted: { type: "boolean", required: true },
-    persisted: { type: "boolean", required: true },
-    text: { type: "string", required: true, maxBytes: 65_536 },
-    displayInput: { type: "string", required: true, maxBytes: 256 },
-    previousRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    appliedRevision: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    restartRequired: { type: "boolean", required: true },
-    items: {
-      type: "objectArray",
-      required: true,
-      maxItems: 512,
-      items: {
-        key: { type: "string", required: true, maxBytes: 256 },
-        outcome: {
-          type: "string",
-          required: true,
-          enum: ["added", "updated", "removed", "unchanged", "blocked", "pending_approval"],
-        },
-        detail: { type: "string", required: true, maxBytes: 4_096 },
-      },
-    },
-    diagnostics: { type: "stringArray", required: true, maxItems: 128, itemMaxBytes: 4_096 },
-  },
-  "approval.resolve": {
-    approvalId: { type: "string", required: true, maxBytes: 256 },
-    approved: { type: "boolean", required: true },
-  },
-  "session.set_bash_permission": {
-    sessionId: { type: "string", required: true, maxBytes: 256 },
-    bashPermissionMode: { type: "string", required: true, enum: ["ask", "bypass"] },
-  },
-  "bibliography.inspect": {
-    libraryPath: { type: "string", required: true, maxBytes: 8192 },
-    libraryStatus: { type: "string", required: true, enum: ["ok", "missing", "error"] },
-    libraryFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-    libraryErrorCode: { type: "nullableString", required: true, maxBytes: 64 },
-    libraryError: { type: "nullableString", required: true, maxBytes: 4096 },
-    styleId: { type: "string", required: true, maxBytes: 128 },
-    styleConfigured: { type: "boolean", required: true },
-    styles: {
-      type: "objectArray", required: true, maxItems: 64,
-      items: {
-        id: { type: "string", required: true, maxBytes: 128 },
-        name: { type: "string", required: true, maxBytes: 256 },
-        kind: { type: "string", required: true, enum: ["author-date", "author", "numeric"] },
-        origin: { type: "string", required: true, enum: ["csl-styles", "custom"] },
-      },
-    },
-    documentFormat: { type: "nullableString", required: true, maxBytes: 16, enum: ["markdown", "latex"] },
-    entries: {
-      type: "objectArray", required: true, maxItems: 10_000,
-      items: {
-        key: { type: "string", required: true, maxBytes: 512 },
-        authors: { type: "stringArray", required: true, maxItems: 1000, itemMaxBytes: 1024 },
-        year: { type: "nullableString", required: true, maxBytes: 16 },
-        title: { type: "string", required: true, maxBytes: 8192, allowEmpty: true },
-        doi: { type: "nullableString", required: true, maxBytes: 1024 },
-        type: { type: "string", required: true, maxBytes: 64, allowEmpty: true },
-        citedCount: { type: "integer", required: true, minimum: 0, maximum: 1_000_000 },
-      },
-    },
-    uses: {
-      type: "objectArray", required: true, maxItems: 100_000,
-      items: {
-        key: { type: "string", required: true, maxBytes: 512 },
-        start: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
-        end: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
-        line: { type: "integer", required: true, minimum: 1, maximum: 9_007_199_254_740_991 },
-        group: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
-        known: { type: "nullableBoolean", required: true },
-      },
-    },
-    order: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
-    missing: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
-    uncited: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
-    duplicateDois: {
-      type: "objectArray", required: true, maxItems: 10_000,
-      items: {
-        doi: { type: "string", required: true, maxBytes: 1024 },
-        keys: { type: "stringArray", required: true, maxItems: 1000, itemMaxBytes: 512 },
-      },
-    },
-  },
-  "bibliography.render": {
-    styleId: { type: "string", required: true, maxBytes: 128 },
-    citations: {
-      type: "objectArray", required: true, maxItems: 100_000,
-      items: {
-        index: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
-        keys: { type: "stringArray", required: true, maxItems: 1000, itemMaxBytes: 512 },
-        start: { type: "integer", required: false, minimum: 0, maximum: 9_007_199_254_740_991 },
-        end: { type: "integer", required: false, minimum: 0, maximum: 9_007_199_254_740_991 },
-        text: { type: "string", required: true, maxBytes: 65_536, allowEmpty: true },
-      },
-    },
-    entries: {
-      type: "objectArray", required: true, maxItems: 10_000,
-      items: {
-        key: { type: "string", required: true, maxBytes: 512 },
-        text: { type: "string", required: true, maxBytes: 65_536, allowEmpty: true },
-      },
-    },
-    segments: {
-      type: "objectArray", required: true, maxItems: 1_000_000,
-      items: {
-        entry: { type: "integer", required: true, minimum: 0, maximum: 9_007_199_254_740_991 },
-        text: { type: "string", required: true, maxBytes: 65_536 },
-        italic: { type: "boolean", required: true },
-        bold: { type: "boolean", required: true },
-        url: { type: "nullableString", required: true, maxBytes: 8192 },
-      },
-    },
-    missing: { type: "stringArray", required: true, maxItems: 100_000, itemMaxBytes: 512 },
-  },
-  "bibliography.set_style": {
-    styleId: { type: "string", required: true, maxBytes: 128 },
-    researchFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  },
-  "bibliography.remove": {
-    key: { type: "string", required: true, maxBytes: 512 },
-    libraryFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  },
-  "bibliography.add": {
-    status: { type: "string", required: true, enum: ["added", "existing", "failed"] },
-    key: { type: "nullableString", required: true, maxBytes: 512 },
-    reasonCode: { type: "nullableString", required: true, maxBytes: 128 },
-    libraryFingerprint: { type: "nullableString", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  },
-  "bibliography.export": {
-    format: { type: "string", required: true, enum: ["docx", "bime_docx", "markdown"] },
-    path: { type: "string", required: true, maxBytes: 8192 },
-    audit: { type: "object", required: false, items: BIME_AUDIT_SCHEMA },
-  },
-};
-
-export const METHOD_PARAM_SCHEMAS: Record<ProtocolMethod, FieldSchema> = {
-  "workspace.select": {
-    rootPath: { type: "string", required: true, maxBytes: 8192 },
-    action: { type: "string", required: false, enum: ["inspect", "open", "initialize"] },
-    historyDirectory: { type: "string", required: false, maxBytes: 8192 },
-    expectedFingerprint: { type: "nullableString", required: false, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  },
-  "document.open": {
-    path: { type: "string", required: true, maxBytes: 8192 },
-  },
-  "document.save": {
-    documentContext: { type: "object", required: true, items: DOCUMENT_CONTEXT_SCHEMA },
-  },
-  "document.apply": {
-    documentContext: { type: "object", required: true, items: DOCUMENT_CONTEXT_SCHEMA },
-    turnId: { type: "turnId", required: true },
-    callId: { type: "string", required: false, maxBytes: 256 },
-    parentRequestId: { type: "requestId", required: false },
-    undoOfCallId: { type: "string", required: false, maxBytes: 256 },
-    resolution: { type: "string", required: false, enum: ["keep", "use", "cancel"] },
-    expectedSnapshot: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-  },
-  "runtime.diagnostics": {},
-  "project.list": {},
-  "session.create": {
-    loadMcp: { type: "boolean", required: false },
-    graphRecursionLimit: {
-      type: "integer",
-      required: false,
-      minimum: 3,
-      maximum: 0xffff_ffff,
-    },
-    projectId: { type: "string", required: false, maxBytes: 256 },
-  },
-  "session.list": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    offset: { type: "integer", required: false, minimum: 0, maximum: 0xffff_ffff },
-    limit: { type: "integer", required: false, minimum: 1, maximum: 50 },
-    reconcile: { type: "boolean", required: false },
-  },
-  "session.select": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-  },
-  "session.delete": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-  },
-  "session.rename": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    title: { type: "string", required: true, maxBytes: 256 },
-  },
-  "session.retry_registration": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-  },
-  "session.transcript": {
-    projectId: { type: "string", required: true, maxBytes: 256 },
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    offset: { type: "integer", required: false, minimum: 0, maximum: 0xffff_ffff },
-    limit: { type: "integer", required: false, minimum: 1, maximum: 20 },
-  },
-  "session.status": {},
-  "session.turn": {
-    submittedContext: { type: "submittedContext", required: false },
-    skillReferences: {
-      type: "objectArray",
-      required: false,
-      maxItems: 128,
-      items: {
-        name: { type: "string", required: true, maxBytes: 256 },
-        startUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
-        endUtf16: { type: "integer", required: true, minimum: 0, maximum: 9007199254740991 },
-      },
-    },
-    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-    text: { type: "string", required: true, maxBytes: 1_048_576 },
-    turnId: { type: "turnId", required: true },
-    retry: { type: "boolean", required: true },
-  },
-  "session.set_thinking": {
-    mode: { type: "string", required: true, enum: ["normal", "extended"] },
-  },
-  "session.set_bash_permission": {
-    mode: { type: "string", required: true, enum: ["ask", "bypass"] },
-  },
-  "session.stop": {
-    sessionId: { type: "string", required: true, maxBytes: 32 },
-    turnId: { type: "turnId", required: true },
-    parentRequestId: { type: "requestId", required: true },
-  },
-  "session.shutdown": {},
-  "knowledge.overview": {},
-  "knowledge.search": {
-    query: { type: "string", required: true, maxBytes: 16_384 },
-    k: { type: "integer", required: false, minimum: 1, maximum: 20 },
-    folderPrefix: { type: "string", required: false, maxBytes: 8_192 },
-    category: { type: "string", required: false, maxBytes: 256 },
-    fileType: { type: "string", required: false, maxBytes: 64 },
-    dateFrom: { type: "string", required: false, maxBytes: 10 },
-    dateTo: { type: "string", required: false, maxBytes: 10 },
-  },
-  "knowledge.list_chunks": {
-    folderPrefix: { type: "string", required: false, maxBytes: 8_192 },
-    pid: { type: "string", required: false, maxBytes: 1_024 },
-    category: { type: "string", required: false, maxBytes: 256 },
-    fileType: { type: "string", required: false, maxBytes: 64 },
-    dateFrom: { type: "string", required: false, maxBytes: 10 },
-    dateTo: { type: "string", required: false, maxBytes: 10 },
-    offset: { type: "integer", required: false, minimum: 0, maximum: 0xffff_ffff },
-    limit: { type: "integer", required: false, minimum: 1, maximum: 100 },
-  },
-  "knowledge.get_context": {
-    pid: { type: "string", required: true, maxBytes: 1_024 },
-    chunkId: { type: "integer", required: true, minimum: 0, maximum: 0xffff_ffff },
-    window: { type: "integer", required: false, minimum: 0, maximum: 3 },
-  },
-  "knowledge.init_workspace": {},
-  "knowledge.ingest_file": {
-    path: { type: "string", required: true, maxBytes: 8_192 },
-  },
-  "knowledge.ingest_folder": {
-    path: { type: "string", required: true, maxBytes: 8_192 },
-  },
-  "knowledge.sync": {
-    path: { type: "string", required: true, maxBytes: 8_192 },
-  },
-  "knowledge.prune_preview": {
-    path: { type: "string", required: true, maxBytes: 8_192 },
-  },
-  "knowledge.prune_apply": {
-    previewId: { type: "string", required: true, maxBytes: 256 },
-  },
-  "extensions.status": {},
-  "extensions.preview": {},
-  "extensions.apply": {
-    previewId: { type: "string", required: true, maxBytes: 256 },
-    approvedBindingHashes: { type: "stringArray", required: true, maxItems: 512 },
-    turnId: { type: "turnId", required: true },
-    retry: { type: "boolean", required: true },
-  },
-  "approval.resolve": {
-    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-    approvalId: { type: "string", required: true, maxBytes: 256 },
-    parentRequestId: { type: "requestId", required: false },
-    turnId: { type: "string", required: false, maxBytes: 256 },
-    approved: { type: "boolean", required: true },
-  },
-  "runtime.shutdown": {},
-  "bibliography.inspect": {
-    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-  },
-  "bibliography.render": {
-    documentContext: { type: "object", required: true, items: DOCUMENT_CONTEXT_SCHEMA },
-    styleId: { type: "string", required: false, maxBytes: 128 },
-  },
-  "bibliography.set_style": {
-    styleId: { type: "string", required: true, maxBytes: 128 },
-  },
-  "bibliography.remove": {
-    key: { type: "string", required: true, maxBytes: 512 },
-    libraryFingerprint: { type: "string", required: true, maxBytes: 64, pattern: "^[0-9a-f]{64}$" },
-  },
-  "bibliography.add": {
-    identifier: { type: "string", required: true, maxBytes: 2048 },
-  },
-  "bibliography.export": {
-    documentContext: { type: "object", required: false, items: DOCUMENT_CONTEXT_SCHEMA },
-    format: { type: "string", required: true, enum: ["docx", "bime_docx", "markdown"] },
-    styleId: { type: "string", required: false, maxBytes: 128 },
-  },
-};
-
-export const METHOD_REQUIRED_PARAMS = Object.fromEntries(
-  Object.entries(METHOD_PARAM_SCHEMAS).map(([method, schema]) => [
-    method,
-    Object.entries(schema)
-      .filter(([, rule]) => rule.required)
-      .map(([field]) => field),
-  ]),
-) as unknown as Record<ProtocolMethod, readonly string[]>;
 
 export interface ProtocolErrorDto {
-  code: ProtocolErrorCode;
+  code: string;
   message: string;
   retryable: boolean;
   details: JsonObject;
@@ -1473,31 +441,6 @@ export interface DocumentOperationDto {
   rangeEndUtf16: number;
 }
 
-export interface DocumentOpenDto {
-  path: string;
-  sourceText: string;
-  diskFingerprint: string;
-  rootPath?: string;
-  editorRevision?: number;
-}
-
-export interface DocumentResultDto {
-  path: string;
-  status: "saved" | "conflict" | "failed" | "cancelled";
-  sourceText?: string;
-  diskFingerprint?: string;
-  savedFingerprint?: string;
-  rootPath?: string;
-  editorRevision?: number;
-  expectedSnapshot?: DocumentContextDto;
-  rangeStartUtf16?: number;
-  rangeEndUtf16?: number;
-  candidateText?: string;
-  currentDiskText?: string;
-  issue?: string;
-  callId?: string;
-}
-
 export interface ApprovalRequiredDto {
   approvalId: string;
   parentRequestId: string;
@@ -1566,6 +509,7 @@ export interface FailureEnvelope extends EnvelopeBase {
 export type EventEnvelope = RequestEventEnvelope | ProcessEventEnvelope;
 export type ResultEnvelope = SuccessEnvelope | FailureEnvelope;
 export type ProtocolMessage = RequestEnvelope | EventEnvelope | ResultEnvelope;
+
 
 type ProtocolValidationCode = "PROTOCOL_INVALID" | "PROTOCOL_VERSION_UNSUPPORTED";
 
@@ -1778,7 +722,7 @@ function validateObjectSchema(value: JsonObject, schema: FieldSchema, field: str
 
 export function parseTurnLifecycleDetails(value: unknown): TurnLifecycleDetailsDto {
   const details = expectObject(value, "error.details");
-  validateObjectSchema(details, TURN_ERROR_DETAILS_SCHEMA, "error.details");
+  validateObjectSchema(details, CONTRACT.turnErrorDetailsSchema, "error.details");
   const parsed: TurnLifecycleDetailsDto = {
     turnId: details.turnId as string,
     state: details.state as TurnLifecycleDetailsDto["state"],
@@ -1793,27 +737,6 @@ export function parseTurnLifecycleDetails(value: unknown): TurnLifecycleDetailsD
     invalid("a durable turn error state must be accepted and persisted");
   }
   return parsed;
-}
-
-function normalizeDataKey(key: string): string {
-  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function validateSafeData(value: unknown, field: string): void {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => validateSafeData(item, `${field}[${index}]`));
-    return;
-  }
-  if (typeof value !== "object" || value === null) {
-    return;
-  }
-  for (const [key, item] of Object.entries(value)) {
-    const normalized = normalizeDataKey(key);
-    if (FORBIDDEN_DATA_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))) {
-      invalid(`${field} contains forbidden field: ${key}`);
-    }
-    validateSafeData(item, `${field}.${key}`);
-  }
 }
 
 function includesValue<const T extends readonly string[]>(values: T, value: string): value is T[number] {
@@ -1886,7 +809,7 @@ function validateContextDocument(snapshot: DocumentContextDto, root: string): vo
 
 export function validateSubmittedContext(value: unknown): asserts value is SubmittedContext {
   const context = expectObject(value, "submittedContext");
-  validateObjectSchema(context, SUBMITTED_CONTEXT_SCHEMA, "submittedContext");
+  validateObjectSchema(context, CONTRACT.submittedContextSchema, "submittedContext");
   if (encoder.encode(JSON.stringify(context)).byteLength > 1_048_576) invalid("submittedContext exceeds the 1 MiB input limit");
   const submitted = value as SubmittedContext;
   validateProjectPath(submitted.rootPath, "rootPath");
@@ -1927,7 +850,7 @@ function validateSubmissionSize(text: string, submittedContext: SubmittedContext
 }
 
 function validateParams(method: ProtocolMethod, params: JsonObject): void {
-  validateObjectSchema(params, METHOD_PARAM_SCHEMAS[method], "params");
+  validateObjectSchema(params, METHOD_PARAMS.get(method) ?? {}, "params");
   if (method === "session.turn") {
     validateSkillReferences(params);
     if (params.submittedContext !== undefined) {
@@ -1943,88 +866,6 @@ function validateParams(method: ProtocolMethod, params: JsonObject): void {
   }
 }
 
-export function validateResultData(method: ProtocolMethod, data: JsonObject): void {
-  validateSafeData(data, "data");
-  const schema = RESULT_DATA_SCHEMAS[method];
-  if (schema !== undefined) {
-    validateObjectSchema(data, schema, "data");
-  }
-  if (method === "document.save" || method === "document.apply") {
-    validateDocumentRange(data, "data");
-    if (data.expectedSnapshot !== undefined) validateDocumentRange(data.expectedSnapshot as JsonObject, "data.expectedSnapshot", true);
-  }
-  if (method === "bibliography.export" && (data.format === "bime_docx") !== ("audit" in data)) {
-    invalid("bibliography.export returns audit exactly for bime_docx");
-  }
-  if (method === "session.turn" && data.documentOperations !== undefined) {
-    (data.documentOperations as JsonObject[]).forEach((item) => validateDocumentRange(item, "data.documentOperations"));
-  }
-  if (
-    (method === "session.turn" || method === "extensions.apply") &&
-    (data.state !== "completed" || data.accepted !== true || data.persisted !== true)
-  ) {
-    invalid(`${method} success must be durably completed`);
-  }
-  if (method === "session.stop") {
-    const durable = data.state !== null;
-    if (data.accepted !== durable || data.persisted !== durable) {
-      invalid("session.stop lifecycle must match its durable state");
-    }
-  }
-  if (method === "session.transcript") {
-    (data.items as JsonObject[]).forEach((item) => {
-      const context = item.submittedContext as SubmittedContext | null | undefined;
-      if (context) {
-        if (context.projectId !== data.projectId) invalid("transcript submittedContext belongs to another project");
-        validateSkillReferences({ text: item.userText, skillReferences: context.skillReferences });
-        validateSubmissionSize(item.userText as string, context);
-      }
-      const failureValues = [
-        item.failureCode,
-        item.failureMessage,
-        item.failureRetryable,
-      ];
-      if (item.state === "completed") {
-        if (item.assistantText === null || failureValues.some((value) => value !== null)) {
-          invalid("completed transcript turn has invalid lifecycle fields");
-        }
-        return;
-      }
-      if (item.state === "pending") {
-        if (
-          item.assistantText !== null ||
-          failureValues.some((value) => value !== null) ||
-          (item.toolActivities as unknown[]).length > 0
-        ) {
-          invalid("pending transcript turn has invalid lifecycle fields");
-        }
-        return;
-      }
-      if (
-        item.assistantText !== null ||
-        failureValues.some((value) => value === null) ||
-        (item.toolActivities as unknown[]).length > 0
-      ) {
-        invalid(`${String(item.state)} transcript turn has invalid lifecycle fields`);
-      }
-      if (
-        item.state === "failed" &&
-        item.failureCode !== "execution_failed" &&
-        item.failureCode !== "persistence_failed"
-      ) {
-        invalid("failed transcript turn has an invalid failure code");
-      }
-      if (
-        item.state === "interrupted" &&
-        item.failureCode !== "interrupted" &&
-        item.failureCode !== "cancelled"
-      ) {
-        invalid("interrupted transcript turn has an invalid failure code");
-      }
-    });
-  }
-}
-
 function parseRequest(message: JsonObject): RequestEnvelope {
   expectExactKeys(
     message,
@@ -2033,7 +874,7 @@ function parseRequest(message: JsonObject): RequestEnvelope {
   );
   const requestId = expectRequestId(message.requestId);
   const method = expectString(message.method, "method");
-  if (!includesValue(PROTOCOL_METHODS, method)) {
+  if (!includesValue(PROTOCOL_METHODS as readonly ProtocolMethod[], method)) {
     invalid(`Unknown method: ${method}`);
   }
   const params = expectObject(message.params, "params");
@@ -2047,51 +888,15 @@ function parseRequest(message: JsonObject): RequestEnvelope {
   };
 }
 
-function validateToolEvent(event: RequestEvent, data: JsonObject): void {
-  if (!event.startsWith("tool.")) {
-    return;
-  }
-  for (const key of Object.keys(data)) {
-    if (!includesValue(TOOL_EVENT_DATA_KEYS, key)) {
-      invalid(`Unsafe tool event field: ${key}`);
-    }
-  }
-  expectString(data.name, "data.name");
-  const status = expectString(data.status, "data.status");
-  if (!includesValue(TOOL_STATUSES, status)) {
-    invalid(`Unknown tool status: ${status}`);
-  }
-  if (data.callId !== undefined) {
-    expectString(data.callId, "data.callId");
-  }
-  if (data.candidateId !== undefined) {
-    expectString(data.candidateId, "data.candidateId");
-  }
-}
-
-function validateEventData(event: RequestEvent, requestId: string, data: JsonObject): void {
-  validateToolEvent(event, data);
-  const schema = event === "approval.required" && "operation" in data
-    ? DOCUMENT_APPROVAL_DATA_SCHEMA : EVENT_DATA_SCHEMAS[event];
-  if (schema !== undefined) {
-    validateObjectSchema(data, schema, "data");
-  }
-  if (event === "approval.required" && "operation" in data) validateDocumentRange(data, "data");
-  if (event === "approval.required" && data.parentRequestId !== requestId) {
-    invalid("data.parentRequestId must match the event requestId");
-  }
-}
-
 function parseEvent(message: JsonObject): EventEnvelope {
   const event = expectString(message.event, "event");
   const data = expectObject(message.data, "data");
-  validateSafeData(data, "data");
   if (message.requestId === undefined) {
     expectExactKeys(message, ["protocolVersion", "messageType", "event", "data"], "event");
     if (message.sequence !== undefined) {
       invalid("Process events cannot carry a sequence");
     }
-    if (!includesValue(PROCESS_EVENTS, event)) {
+    if (!includesValue(PROCESS_EVENTS as readonly ProcessEvent[], event)) {
       invalid(`Unknown process event: ${event}`);
     }
     return {
@@ -2115,10 +920,9 @@ function parseEvent(message: JsonObject): EventEnvelope {
   ) {
     invalid("Request event sequence must be a positive integer");
   }
-  if (!includesValue(REQUEST_EVENTS, event)) {
+  if (!includesValue(REQUEST_EVENTS as readonly RequestEvent[], event)) {
     invalid(`Unknown request event: ${event}`);
   }
-  validateEventData(event, requestId, data);
   return {
     protocolVersion: PROTOCOL_VERSION,
     messageType: "event",
@@ -2133,7 +937,7 @@ function parseError(value: unknown): ProtocolErrorDto {
   const error = expectObject(value, "error");
   expectExactKeys(error, ["code", "message", "retryable", "details"], "error");
   const code = expectString(error.code, "error.code");
-  if (!includesValue(PROTOCOL_ERROR_CODES, code)) {
+  if (!PROTOCOL_ERROR_CODES.includes(code)) {
     invalid(`Unknown error code: ${code}`);
   }
   if (typeof error.retryable !== "boolean") {
@@ -2143,20 +947,11 @@ function parseError(value: unknown): ProtocolErrorDto {
   if (encoder.encode(message).byteLength > MAX_ERROR_MESSAGE_BYTES) {
     invalid("error.message is too large");
   }
-  const details = expectObject(error.details, "error.details");
-  validateSafeData(details, "error.details");
-  const hasTurnLifecycleField = Object.keys(TURN_ERROR_DETAILS_SCHEMA)
-    .some((key) => key in details);
-  if (hasTurnLifecycleField) {
-    parseTurnLifecycleDetails(details);
-  } else if (code === "INTERNAL_ERROR" && Object.keys(details).length > 0) {
-    invalid("INTERNAL_ERROR details must be empty");
-  }
   return {
     code,
     message,
     retryable: error.retryable,
-    details,
+    details: expectObject(error.details, "error.details"),
   };
 }
 
@@ -2168,19 +963,12 @@ function parseResult(message: JsonObject): ResultEnvelope {
       ["protocolVersion", "messageType", "requestId", "ok", "data"],
       "result",
     );
-    if (message.error !== undefined) {
-      invalid("Successful results cannot contain error");
-    }
     return {
       protocolVersion: PROTOCOL_VERSION,
       messageType: "result",
       requestId,
       ok: true,
-      data: (() => {
-        const data = expectObject(message.data, "data");
-        validateSafeData(data, "data");
-        return data;
-      })(),
+      data: expectObject(message.data, "data"),
     };
   }
   if (message.ok === false) {
@@ -2189,9 +977,6 @@ function parseResult(message: JsonObject): ResultEnvelope {
       ["protocolVersion", "messageType", "requestId", "ok", "error"],
       "result",
     );
-    if (message.data !== undefined) {
-      invalid("Failed results cannot contain data");
-    }
     return {
       protocolVersion: PROTOCOL_VERSION,
       messageType: "result",
@@ -2203,6 +988,7 @@ function parseResult(message: JsonObject): ResultEnvelope {
   return invalid("result.ok must be a boolean");
 }
 
+/** Parse one protocol envelope; request params are validated against the contract. */
 export function parseProtocolMessage(value: unknown): ProtocolMessage {
   const message = expectObject(value, "message");
   validateVersion(message);
@@ -2217,109 +1003,6 @@ export function parseProtocolMessage(value: unknown): ProtocolMessage {
     return parseResult(message);
   }
   return invalid(`Unknown messageType: ${messageType}`);
-}
-
-export function validateProcessEventOrigin(event: ProcessEvent, origin: ProtocolOrigin): void {
-  if (!PROCESS_EVENT_ORIGINS[event].includes(origin)) {
-    invalid(`${event} cannot originate from ${origin}`);
-  }
-}
-
-export function parseProtocolMessageFromOrigin(
-  value: unknown,
-  origin: ProtocolOrigin,
-): ProtocolMessage {
-  const message = parseProtocolMessage(value);
-  if (message.messageType === "event" && !("requestId" in message)) {
-    validateProcessEventOrigin(message.event, origin);
-  }
-  return message;
-}
-
-export function parseProtocolLine(line: string): ProtocolMessage {
-  if (encoder.encode(line).byteLength > MAX_PROTOCOL_LINE_BYTES) {
-    invalid("Protocol line exceeds the 2 MiB limit");
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return invalid("Protocol line is not valid JSON");
-  }
-  return parseProtocolMessage(value);
-}
-
-interface RequestTraceState {
-  nextSequence: number;
-  terminal: boolean;
-  method: ProtocolMethod;
-  turnId: string | null;
-  sessionId: string | null;
-}
-
-export class ProtocolTraceValidator {
-  private readonly requests = new Map<string, RequestTraceState>();
-
-  accept(message: ProtocolMessage): void {
-    if (message.messageType === "request") {
-      if (this.requests.has(message.requestId)) {
-        invalid(`Duplicate requestId: ${message.requestId}`);
-      }
-      this.requests.set(message.requestId, {
-        nextSequence: 1,
-        terminal: false,
-        method: message.method,
-        turnId:
-          message.method === "session.turn" || message.method === "extensions.apply" || message.method === "session.stop"
-            ? String(message.params.turnId)
-            : null,
-        sessionId: message.method === "session.stop" ? String(message.params.sessionId) : null,
-      });
-      return;
-    }
-    if (message.messageType === "event" && "requestId" in message) {
-      const state = this.requests.get(message.requestId);
-      if (state === undefined) {
-        invalid(`Event references unknown requestId: ${message.requestId}`);
-      }
-      if (state.terminal) {
-        invalid(`Event arrived after terminal result: ${message.requestId}`);
-      }
-      if (message.sequence !== state.nextSequence) {
-        invalid(`Expected sequence ${state.nextSequence}, received ${message.sequence}`);
-      }
-      if ((message.event === "document.proposed" || message.event === "turn.accepted") &&
-          (state.method !== "session.turn" || message.data.turnId !== state.turnId)) {
-        invalid(`${message.event} must match the active session.turn`);
-      }
-      state.nextSequence += 1;
-      return;
-    }
-    if (message.messageType === "result") {
-      const state = this.requests.get(message.requestId);
-      if (state === undefined) {
-        invalid(`Result references unknown requestId: ${message.requestId}`);
-      }
-      if (state.terminal) {
-        invalid(`Duplicate terminal result: ${message.requestId}`);
-      }
-      if (message.ok) {
-        validateResultData(state.method, message.data);
-        if (state.turnId !== null && message.data.turnId !== state.turnId) {
-          invalid("data.turnId must match params.turnId");
-        }
-        if (state.method === "session.stop" && message.data.sessionId !== state.sessionId) {
-          invalid("data.sessionId must match params.sessionId");
-        }
-      } else if (state.method === "session.turn" || state.method === "extensions.apply") {
-        const details = parseTurnLifecycleDetails(message.error.details);
-        if (details.turnId !== state.turnId) {
-          invalid("error.details.turnId must match params.turnId");
-        }
-      }
-      state.terminal = true;
-    }
-  }
 }
 
 export interface ProjectWorkspaceDto {

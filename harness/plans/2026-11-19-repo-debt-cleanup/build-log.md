@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
-| C3 | In progress | `evidence/C3-S1/` | — | C3-S2 |
+| C3 | In progress | `evidence/C3-S1/`–`C3-S2/` | — | C3-S3 |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -388,3 +388,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C3-S1/decision.md`。
 - **限制**：無。
 - **下一步**：C3-S2 TS 改讀 contract。
+
+### C3-S2 TS 改讀 contract（2026-11-22）
+
+- **觀察結果**：
+  - `protocol.ts` 以 C3-S1 的 JSON import 讀 contract：七個詞彙常數引用 `contract`；request 參數由解譯器讀 `methods[].params` 驗證，必填取自 `params[].required`。刪除所有手抄字面量與 `*_SCHEMA`、result／event data 驗證（含 `validateResultData` 與其重複呼叫，S004）、`ProtocolTraceValidator`、TS 端的禁止鍵掃描與 process event 來源表。2,333 → 1,016 行。
+  - `backend.ts` 只保留 envelope 解析與回聲比對：成功回應比對由 contract 推導的 `echoedIdFields`（request 與 result 都帶時才比），失敗回應對 `session.turn`／`extensions.apply` 比對 `error.details.turnId`。產品邊界紀錄見 evidence §4。
+  - **S072（APPLIED）**、**S071 兩個死 DTO（APPLIED）**、**S085（APPLIED）**、**S090（APPLIED）**，細節見 evidence §5。
+  - result 驗證失敗的 catch 盤點：只剩 `requestTracked` 的單一 catch（改為只接 envelope／回聲錯誤），未另造替代檢查。
+- **執行指令**：`npx tsc --noEmit`、`npm test`（216 pass, 0 fail）、`npm run build`（通過）。
+- **證據**：`evidence/C3-S2/ts-contract.md`（常數定義行、方法名字串 grep 用途、catch 盤點、測試退役紀錄）。
+- **限制**：`tests/` 尚未受 `tsc` 檢查（C8 處理）。Rust 端尚未縮減（C3-S4），兩端各自的測試皆通過。
+- **下一步**：C3-S3 DTO 一致性檢查（U16）。
