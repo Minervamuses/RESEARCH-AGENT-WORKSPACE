@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
-| C3 | In progress | `evidence/C3-S1/`–`C3-S4/` | — | C3-S5 |
+| C3 | In progress | `evidence/C3-S1/`–`C3-S5/` | — | C3-S6 |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -433,3 +433,14 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：build-log 本節。
 - **限制**：無。
 - **下一步**：繼續 C3-S5。
+
+### C3-S5 Python 與 fixtures（2026-11-22）
+
+- **觀察結果**：
+  - **S005（APPLIED）**：`_encode_message` 不再重驗；`success_result` 只做 `validate_request_id` 與 `validate_result_data` 一次。每則送出的訊息只驗一次（pre-persist 的 S025 不納入）。
+  - **S011 Python 部分（APPLIED）**：`TraceValidator` 仍是 trace fixtures 的 oracle，移到 `app/tests/protocol_trace_oracle.py`，production 0 引用。
+  - **S012（APPLIED）**：刪除寫死的 28 個 result schema 名稱、歷史測試 `test_phase04_…v1_additions`、與 fixtures 重複的 bash-permission request 驗證；約定寫入測試模組 docstring。為 5 個保留的方法補 8 個 request fixtures，使所有保留的方法都有合法與非法例；仍缺項的 12 個方法都會在 C4／C6 移除。
+- **執行指令**：`pytest tests/test_desktop_protocol_contract.py tests/test_desktop_server.py -q`（243 passed，連跑 15 次 0 失敗）、desktop 全部 pytest 模組（513 passed）、`npm test`（228 pass）、`python3 evidence/C3-S5/fixture_coverage.py app/desktop/protocol/v1`。
+- **證據**：`evidence/C3-S5/python-single-validation.md`、`fixture_coverage.py`、`fixture-coverage.txt`。
+- **限制**：無。
+- **下一步**：C3-S6 階段收尾與「新增一個方法」走查。

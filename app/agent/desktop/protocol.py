@@ -612,15 +612,16 @@ def success_result(
     method: str,
     data: dict[str, Any],
 ) -> dict[str, Any]:
+    """Build a success result; its data is validated once against the method schema."""
+    validate_request_id(request_id)
     validate_result_data(method, data)
-    message = {
+    return {
         "protocolVersion": PROTOCOL_VERSION,
         "messageType": "result",
         "requestId": request_id,
         "ok": True,
         "data": data,
     }
-    return validate_message(message)
 
 
 def failure_result(
@@ -655,7 +656,11 @@ def bounded_error_message(message: str) -> str:
 
 
 def encode_message(message: dict[str, Any]) -> str:
-    """Serialize a validated envelope to one newline-terminated JSON line."""
+    """Serialize an envelope from a validating builder to one JSON line.
+
+    The builders (`request_event`, `process_event`, `success_result`,
+    `failure_result`) validate each message once; encoding does not repeat it.
+    """
     return _encode_message(message, enforce_line_limit=True)
 
 
@@ -677,7 +682,6 @@ def _encode_message(
     *,
     enforce_line_limit: bool,
 ) -> str:
-    validate_message(message)
     try:
         encoded = json.dumps(
             message,
@@ -693,71 +697,3 @@ def _encode_message(
     if enforce_line_limit and len(encoded_bytes) > MAX_PROTOCOL_LINE_BYTES:
         _invalid("Protocol line exceeds the 2 MiB limit")
     return encoded + "\n"
-
-
-class TraceValidator:
-    """Validate request correlation, event order, and terminal results."""
-
-    def __init__(self) -> None:
-        self._requests: dict[str, dict[str, int | bool | str | None]] = {}
-
-    def accept(self, message: dict[str, Any]) -> None:
-        message_type = message["messageType"]
-        if message_type == "request":
-            request_id = message["requestId"]
-            if request_id in self._requests:
-                _invalid(f"Duplicate requestId: {request_id}")
-            self._requests[request_id] = {
-                "nextSequence": 1,
-                "terminal": False,
-                "method": message["method"],
-                "turnId": (
-                    message["params"]["turnId"]
-                    if message["method"] in _DURABLE_TURN_METHODS or message["method"] == "session.stop"
-                    else None
-                ),
-                "sessionId": message["params"].get("sessionId") if message["method"] == "session.stop" else None,
-            }
-            return
-        if message_type == "event" and "requestId" in message:
-            request_id = message["requestId"]
-            state = self._requests.get(request_id)
-            if state is None:
-                _invalid(f"Event references unknown requestId: {request_id}")
-            if state["terminal"]:
-                _invalid(f"Event arrived after terminal result: {request_id}")
-            if message["sequence"] != state["nextSequence"]:
-                _invalid(
-                    f"Expected sequence {state['nextSequence']}, "
-                    f"received {message['sequence']}"
-                )
-            if message["event"] in {"document.proposed", "turn.accepted"} and (
-                state["method"] != "session.turn"
-                or message["data"]["turnId"] != state["turnId"]
-            ):
-                _invalid(f"{message['event']} must match the active session.turn")
-            state["nextSequence"] = int(state["nextSequence"]) + 1
-            return
-        if message_type == "result":
-            request_id = message["requestId"]
-            state = self._requests.get(request_id)
-            if state is None:
-                _invalid(f"Result references unknown requestId: {request_id}")
-            if state["terminal"]:
-                _invalid(f"Duplicate terminal result: {request_id}")
-            if message["ok"]:
-                validate_result_data(str(state["method"]), message["data"])
-                expected_turn_id = state["turnId"]
-                if (
-                    expected_turn_id is not None
-                    and message["data"].get("turnId") != expected_turn_id
-                ):
-                    _invalid("data.turnId must match params.turnId")
-                if state["method"] == "session.stop" and message["data"]["sessionId"] != state["sessionId"]:
-                    _invalid("data.sessionId must match params.sessionId")
-            elif state["method"] in _DURABLE_TURN_METHODS:
-                details = message["error"]["details"]
-                _validate_turn_error_details(details)
-                if details["turnId"] != state["turnId"]:
-                    _invalid("error.details.turnId must match params.turnId")
-            state["terminal"] = True

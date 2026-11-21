@@ -2299,6 +2299,113 @@
           "outputPath": "/etc/passwd"
         }
       }
+    },
+    {
+      "name": "workspace-select-open-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000701",
+        "method": "workspace.select",
+        "params": {
+          "rootPath": "/home/user/thesis",
+          "action": "open"
+        }
+      }
+    },
+    {
+      "name": "workspace-select-rejects-unknown-action",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000702",
+        "method": "workspace.select",
+        "params": {
+          "rootPath": "/home/user/thesis",
+          "action": "delete"
+        }
+      }
+    },
+    {
+      "name": "runtime-shutdown-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000703",
+        "method": "runtime.shutdown",
+        "params": {}
+      }
+    },
+    {
+      "name": "runtime-shutdown-rejects-params",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000704",
+        "method": "runtime.shutdown",
+        "params": {
+          "force": true
+        }
+      }
+    },
+    {
+      "name": "document-open-request",
+      "valid": true,
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000705",
+        "method": "document.open",
+        "params": {
+          "path": "/home/user/thesis/draft.md"
+        }
+      }
+    },
+    {
+      "name": "document-open-rejects-missing-path",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000706",
+        "method": "document.open",
+        "params": {}
+      }
+    },
+    {
+      "name": "session-select-rejects-missing-session",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000708",
+        "method": "session.select",
+        "params": {
+          "projectId": "thesis"
+        }
+      }
+    },
+    {
+      "name": "session-set-thinking-rejects-unknown-mode",
+      "valid": false,
+      "errorCode": "PROTOCOL_INVALID",
+      "message": {
+        "protocolVersion": 1,
+        "messageType": "request",
+        "requestId": "00000000-0000-4000-8000-000000000710",
+        "method": "session.set_thinking",
+        "params": {
+          "mode": "deep"
+        }
+      }
     }
   ],
   "rawLines": [

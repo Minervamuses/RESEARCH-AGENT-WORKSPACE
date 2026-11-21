@@ -1,0 +1,54 @@
+runtime.diagnostics          valid=  2  invalid=  5
+project.list                 valid=  2  invalid=  0
+workspace.select             valid=  1  invalid=  1
+document.open                valid=  3  invalid=  1
+document.save                valid=  2  invalid=  8
+document.apply               valid=  3  invalid=  2
+session.create               valid=  2  invalid=  7
+session.list                 valid=  4  invalid=  2
+session.select               valid=  2  invalid=  1
+session.delete               valid=  1  invalid=  2
+session.rename               valid=  1  invalid=  2
+session.retry_registration   valid=  1  invalid=  0
+session.transcript           valid=  2  invalid=  1
+session.status               valid=  1  invalid=  2
+session.turn                 valid= 11  invalid= 18
+session.set_thinking         valid=  1  invalid=  1
+session.set_bash_permission  valid=  1  invalid=  1
+session.stop                 valid=  5  invalid=  6
+session.shutdown             valid=  0  invalid=  0
+knowledge.overview           valid=  0  invalid=  0
+knowledge.search             valid=  1  invalid=  1
+knowledge.list_chunks        valid=  0  invalid=  0
+knowledge.get_context        valid=  0  invalid=  0
+knowledge.init_workspace     valid=  0  invalid=  0
+knowledge.ingest_file        valid=  1  invalid=  0
+knowledge.ingest_folder      valid=  0  invalid=  0
+knowledge.sync               valid=  0  invalid=  0
+knowledge.prune_preview      valid=  0  invalid=  0
+knowledge.prune_apply        valid=  1  invalid=  1
+extensions.status            valid=  0  invalid=  0
+extensions.preview           valid=  1  invalid=  1
+extensions.apply             valid=  1  invalid=  1
+approval.resolve             valid=  2  invalid=  1
+runtime.shutdown             valid=  1  invalid=  1
+bibliography.inspect         valid=  3  invalid=  3
+bibliography.render          valid=  2  invalid=  2
+bibliography.set_style       valid=  1  invalid=  1
+bibliography.remove          valid=  1  invalid=  2
+bibliography.add             valid=  2  invalid=  1
+bibliography.export          valid=  6  invalid=  9
+
+methods: 40; lacking a valid or an invalid fixture: 12
+  MISSING project.list {'valid': 2, 'invalid': 0}
+  MISSING session.retry_registration {'valid': 1, 'invalid': 0}
+  MISSING session.shutdown {'valid': 0, 'invalid': 0}
+  MISSING knowledge.overview {'valid': 0, 'invalid': 0}
+  MISSING knowledge.list_chunks {'valid': 0, 'invalid': 0}
+  MISSING knowledge.get_context {'valid': 0, 'invalid': 0}
+  MISSING knowledge.init_workspace {'valid': 0, 'invalid': 0}
+  MISSING knowledge.ingest_file {'valid': 1, 'invalid': 0}
+  MISSING knowledge.ingest_folder {'valid': 0, 'invalid': 0}
+  MISSING knowledge.sync {'valid': 0, 'invalid': 0}
+  MISSING knowledge.prune_preview {'valid': 0, 'invalid': 0}
+  MISSING extensions.status {'valid': 0, 'invalid': 0}

@@ -1,4 +1,11 @@
-"""Python checks for the shared desktop protocol v1 contract and fixtures."""
+"""Python checks for the shared desktop protocol v1 contract and fixtures.
+
+Python is the only schema validator (U1), so these tests are where the contract
+is exercised. Fixture convention: every contract method keeps at least one
+valid and one invalid case in `protocol/v1/fixtures.json` (a request message or
+a trace containing its request). TS runs only the request cases; Rust runs only
+the process-event origin cases.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +13,13 @@ import json
 
 import pytest
 
+from protocol_trace_oracle import TraceValidator
+
 from agent.desktop.protocol import (
     CONTRACT,
     METHODS,
     PROTOCOL_DIR,
     ProtocolError,
-    TraceValidator,
     parse_line,
     validate_message,
     validate_process_event_origin,
@@ -34,36 +42,6 @@ def test_protocol_manifest_safety_invariants() -> None:
         set(origins) <= {"python", "rust"}
         for origins in CONTRACT["processEventOrigins"].values()
     )
-    assert set(CONTRACT["resultDataSchemas"]) == {
-        "runtime.diagnostics",
-        "workspace.select",
-        "document.open",
-        "document.save",
-        "document.apply",
-        "project.list",
-        "session.create",
-        "session.list",
-        "session.select",
-        "session.delete",
-        "session.rename",
-        "session.retry_registration",
-        "session.transcript",
-        "session.turn",
-        "session.stop",
-        "session.shutdown",
-        "runtime.shutdown",
-        "extensions.status",
-        "extensions.preview",
-        "extensions.apply",
-        "approval.resolve",
-        "session.set_bash_permission",
-        "bibliography.inspect",
-        "bibliography.render",
-        "bibliography.set_style",
-        "bibliography.remove",
-        "bibliography.add",
-        "bibliography.export",
-    }
     assert len(METHODS) == len(CONTRACT["methods"])
     assert not {
         "run_slash_command",
@@ -78,38 +56,6 @@ def test_protocol_manifest_safety_invariants() -> None:
         assert method["requiredParams"] == required_from_schema
         if method["operation"] == "destructive":
             assert "previewId" in method["requiredParams"]
-
-
-def test_phase04_approval_correlation_and_extension_action_are_v1_additions() -> None:
-    approval = METHODS["approval.resolve"]
-    assert approval["requiredParams"] == ["approvalId", "approved"]
-    assert approval["params"]["parentRequestId"] == {
-        "type": "requestId",
-        "required": False,
-    }
-    assert approval["params"]["turnId"] == {
-        "type": "string",
-        "required": False,
-        "maxBytes": 256,
-    }
-    assert CONTRACT["resultDataSchemas"]["session.turn"]["extensionAction"] == {
-        "type": "string",
-        "required": False,
-        "enum": ["status", "preview"],
-    }
-    binding = CONTRACT["resultDataSchemas"]["extensions.preview"]["bindings"][
-        "items"
-    ]
-    assert set(binding) == {
-        "name",
-        "server",
-        "bindingHash",
-        "requiresApproval",
-        "command",
-        "arguments",
-        "workingDirectory",
-        "environmentNames",
-    }
 
 
 def test_normal_answers_use_only_the_final_terminal_result() -> None:
@@ -521,24 +467,6 @@ def test_bash_permission_mode_protocol_contract() -> None:
         "required": True,
         "enum": ["ask", "bypass"],
     }
-
-    validate_message({
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000091",
-        "method": "session.set_bash_permission",
-        "params": {"mode": "bypass"},
-    })
-
-    with pytest.raises(ProtocolError) as invalid_mode:
-        validate_message({
-            "protocolVersion": 1,
-            "messageType": "request",
-            "requestId": "00000000-0000-4000-8000-000000000092",
-            "method": "session.set_bash_permission",
-            "params": {"mode": "invalid_mode"},
-        })
-    assert invalid_mode.value.code == "PROTOCOL_INVALID"
 
     validate_result_data("session.set_bash_permission", {
         "sessionId": "0123456789abcdef0123456789abcdef",
