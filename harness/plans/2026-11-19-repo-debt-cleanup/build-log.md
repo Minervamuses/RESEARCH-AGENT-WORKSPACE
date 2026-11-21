@@ -19,8 +19,8 @@
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
-| C5 | In progress | `evidence/C5-S1/`–`C5-S5/` | — | C5-S6 |
-| C6 | Not started | — | — | 等 C3 |
+| C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
+| C6 | Not started | — | — | C6-S1 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
@@ -564,3 +564,16 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C5-S5/dependency.md`。
 - **限制**：無。
 - **下一步**：C5-S6 測試整理與收尾。
+
+### C5-S6 測試整理、收尾與 C5 驗收（2026-11-22）
+
+- **觀察結果**：
+  - **S121（部分，APPLIED）**：只刪除因 U4／U13 失效的 citation 測試（清單在 C5-S3 evidence §6），其他重疊不處理。
+  - 完整檢查：pytest 1762 passed（沙箱外）、`npm test` 224 pass、`npm run build` 通過、`cargo test --locked` 35 passed（沙箱外）；repo `cite/` 未改變。
+  - **citation 評估分界 commit：`9068f87`（C5-S3）**。
+  - 選擇性冒煙測試（只連 doi.org）：存 `10.1038/s41586-021-03819-2` 到暫時書目庫，狀態 `saved`，書目庫多一筆 `jumper2021highly`。
+  - **C5 驗收**：§4 結果與 §5 保證都有對應證據；grep 為 0；四套通過；GUI 清單已列四項。
+- **執行指令**：見 `evidence/C5-S6/wrap-up.md`。
+- **證據**：`evidence/C5-S6/wrap-up.md`。
+- **限制**：`for_agents/` 的 INV-010、INV-029、INV-032 與 ASM-014 過時，由 C10 列入最終彙報。
+- **下一步**：C6-S1。
