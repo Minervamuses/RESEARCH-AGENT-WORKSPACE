@@ -18,8 +18,8 @@
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
-| C4 | In progress | `evidence/C4-S1/`–`C4-S5/` | — | C4-S6 |
-| C5 | Not started | — | — | 等 C3 |
+| C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
+| C5 | Not started | — | — | C5-S1 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
@@ -505,3 +505,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C4-S5/unused-fields.md`、`evidence/C4-S5/error-codes.md`。
 - **限制**：Rust 在 C4-S6 重跑。
 - **下一步**：C4-S6 階段收尾。
+
+### C4-S6 階段收尾與 C4 驗收（2026-11-22）
+
+- **觀察結果**：完整 pytest 1798 passed（沙箱外）、`npm test` 224 pass、`npm run build` 通過、`cargo test --locked` 35 passed（沙箱外）。contract：方法 27（25 個目標加上 C6 負責的 2 個）、request event 8、process event 4、錯誤碼 25；腳本比對 C4 移除清單全為 0。**C4 驗收**：grep 為 0、四套通過、GUI 清單已加入兩項。
+- **執行指令**：見 `evidence/C4-S6/vocabulary-count.md`。
+- **證據**：`evidence/C4-S6/vocabulary-count.md`。
+- **限制**：無。
+- **下一步**：C5-S1。
