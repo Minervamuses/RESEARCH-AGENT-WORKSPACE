@@ -13,7 +13,7 @@ def _release_is_current(desktop_dir: Path, executable: Path) -> bool:
         desktop_dir / name
         for name in (
             "index.html", "package.json", "package-lock.json", "tsconfig.json",
-            "vite.config.ts", "src", "src-tauri/Cargo.toml",
+            "vite.config.ts", "src", "protocol", "src-tauri/Cargo.toml",
             "src-tauri/Cargo.lock", "src-tauri/build.rs",
             "src-tauri/tauri.conf.json", "src-tauri/src",
             "src-tauri/capabilities", "src-tauri/icons",

@@ -17,7 +17,7 @@ def _launcher(monkeypatch, tmp_path):
     monkeypatch.delenv("CARGO_TARGET_DIR", raising=False)
     desktop = tmp_path / "app" / "desktop"
     desktop.mkdir(parents=True)
-    for name in ("src", "src-tauri/src", "src-tauri/capabilities", "src-tauri/icons"):
+    for name in ("src", "protocol", "src-tauri/src", "src-tauri/capabilities", "src-tauri/icons"):
         (desktop / name).mkdir(parents=True, exist_ok=True)
     for name in (
         "index.html", "package.json", "package-lock.json", "tsconfig.json", "vite.config.ts",
@@ -41,6 +41,21 @@ def test_current_release_launch_skips_build_and_live_reload(monkeypatch, tmp_pat
     assert len(calls) == 1
     assert calls[0][0] == [str(binary)]
     assert calls[0][1]["cwd"] == desktop
+
+
+def test_protocol_contract_edit_invalidates_release(monkeypatch, tmp_path):
+    """TS and Rust both compile the shared contract into the release."""
+    launcher, desktop = _launcher(monkeypatch, tmp_path)
+    contract = desktop / "protocol/v1/contract.json"
+    contract.parent.mkdir(parents=True)
+    contract.write_text("{}", encoding="utf-8")
+    binary = desktop / "research-agent-desktop"
+    binary.touch()
+    for path in desktop.rglob("*"):
+        os.utime(path, ns=(100, 100))
+    assert launcher._release_is_current(desktop, binary)
+    os.utime(contract, ns=(200, 200))
+    assert not launcher._release_is_current(desktop, binary)
 
 
 def test_source_edit_or_removal_invalidates_release(monkeypatch, tmp_path):

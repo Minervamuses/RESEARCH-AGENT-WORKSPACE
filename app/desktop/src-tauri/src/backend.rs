@@ -14,9 +14,8 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::protocol::{
-    parse_protocol_value, parse_protocol_value_from_origin, validate_result_data, ProtocolMessage,
-    ProtocolOrigin, RequestEnvelope, FULL_TEXT_RESULT_METHODS, MAX_PROTOCOL_LINE_BYTES,
-    PROTOCOL_VERSION,
+    framework, parse_protocol_value, parse_protocol_value_from_origin, ProtocolMessage,
+    ProtocolOrigin, RequestEnvelope,
 };
 
 pub const BACKEND_EVENT_NAME: &str = "research-agent://backend-event";
@@ -406,7 +405,7 @@ impl BackendSupervisor {
             ));
         };
         let mut line = serde_json::to_vec(&request).map_err(|_| BridgeError::protocol())?;
-        if line.len() > MAX_PROTOCOL_LINE_BYTES {
+        if line.len() > framework().max_line_bytes {
             return Err(BridgeError::protocol());
         }
         line.push(b'\n');
@@ -566,7 +565,7 @@ impl BackendSupervisor {
 
         let request_id = self.next_internal_request_id();
         let request = json!({
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": framework().protocol_version,
             "messageType": "request",
             "requestId": request_id,
             "method": "runtime.shutdown",
@@ -912,7 +911,7 @@ fn emit_rust_protocol_error(core: &SupervisorCore, event: &str, error: &BridgeEr
         core,
         ProtocolEventOrigin::Rust,
         json!({
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": framework().protocol_version,
             "messageType": "event",
             "event": event,
             "data": {
@@ -1339,7 +1338,7 @@ fn read_protocol_line<R: BufRead>(
 ) -> Result<Option<Vec<u8>>, ReadLineError> {
     let mut line = Vec::new();
     let read = reader
-        .take((MAX_PROTOCOL_LINE_BYTES + 2) as u64)
+        .take((framework().max_line_bytes + 2) as u64)
         .read_until(b'\n', &mut line)
         .map_err(|_| ReadLineError::Io)?;
     if read == 0 {
@@ -1347,7 +1346,7 @@ fn read_protocol_line<R: BufRead>(
     }
     let bounded_line_ended = line.last() == Some(&b'\n');
     let bounded_content_len = line.len().saturating_sub(usize::from(bounded_line_ended));
-    if bounded_content_len > MAX_PROTOCOL_LINE_BYTES {
+    if bounded_content_len > framework().max_line_bytes {
         if !allows_oversized_success_prefix(core, generation, &line) {
             return Err(ReadLineError::Oversized);
         }
@@ -1372,14 +1371,14 @@ fn allows_oversized_success_prefix(core: &SupervisorCore, generation: u64, prefi
         return false;
     }
     state.pending.iter().any(|(request_id, pending)| {
-        if !FULL_TEXT_RESULT_METHODS.contains(&pending.method.as_str()) {
+        if !framework().allows_full_text_result(&pending.method) {
             return false;
         }
         let request_id = serde_json::to_string(request_id)
             .expect("canonical request IDs always serialize as JSON strings");
         let expected = format!(
             r#"{{"protocolVersion":{},"messageType":"result","requestId":{},"ok":true,"data":{{"#,
-            PROTOCOL_VERSION, request_id
+            framework().protocol_version, request_id
         );
         prefix.starts_with(expected.as_bytes())
     })
@@ -1411,7 +1410,7 @@ fn handle_python_line(
             );
             bridge_protocol_violation(violation)
         })?;
-    if line.len() > MAX_PROTOCOL_LINE_BYTES {
+    if line.len() > framework().max_line_bytes {
         let full_text_result = match &parsed {
             ProtocolMessage::Result(result) if result.ok => {
                 let state = lock_state(core);
@@ -1419,9 +1418,7 @@ fn handle_python_line(
                     && state
                         .pending
                         .get(&result.request_id)
-                        .is_some_and(|pending| {
-                            FULL_TEXT_RESULT_METHODS.contains(&pending.method.as_str())
-                        })
+                        .is_some_and(|pending| framework().allows_full_text_result(&pending.method))
             }
             _ => false,
         };
@@ -1524,23 +1521,12 @@ fn handle_python_line(
                 }
                 let pending = state
                     .pending
-                    .get(&result.request_id)
-                    .ok_or_else(BridgeError::protocol)?;
-                if result.ok {
-                    validate_result_data(
-                        &pending.method,
-                        result.data.as_ref().ok_or_else(BridgeError::protocol)?,
-                    )
-                    .map_err(|_| BridgeError::protocol())?;
-                }
-                let pending = state
-                    .pending
                     .remove(&result.request_id)
                     .ok_or_else(BridgeError::protocol)?;
                 state.snapshot.pending_requests = state.pending.len();
                 pending.sender
             };
-            emit_protocol(core, ProtocolEventOrigin::Python, value.clone());
+            // A result reaches the WebView only as the invoke return value.
             let _ = sender.send(Ok(value));
             return Ok(());
         }
@@ -1835,6 +1821,14 @@ for raw in sys.stdin:
         os.close(sys.stdout.fileno())
         time.sleep(0.1)
         os._exit(7)
+    if MODE == 'oversized_success':
+        send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{'pythonVersion':'x' * (2 * 1024 * 1024 + 4096)}}}})
+        time.sleep(5)
+        continue
+    if MODE == 'forbidden_event':
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'stage.changed','data':{{'stage':'x','apiKey':'leak'}}}})
+        time.sleep(5)
+        continue
     if MODE == 'wrong_id':
         send({{'protocolVersion':1,'messageType':'result','requestId':'123e4567-e89b-42d3-a456-426614174001','ok':True,'data':{{}}}})
         time.sleep(5)
@@ -1909,7 +1903,7 @@ for raw in sys.stdin:
             "protocolVersion": 1,
             "messageType": "request",
             "requestId": id,
-            "method": "knowledge.overview",
+            "method": "runtime.diagnostics",
             "params": {}
         })
     }
@@ -1922,12 +1916,29 @@ for raw in sys.stdin:
             .request(request(REQUEST_ID))
             .expect("request result");
         assert_eq!(result["ok"], true);
+        assert_eq!(result["requestId"], REQUEST_ID);
+        assert_eq!(result["messageType"], "result");
         let captured = events.lock().expect("events");
-        assert!(captured.iter().any(|event| matches!(
-            event,
-            BackendEvent::Protocol { origin: ProtocolEventOrigin::Python, message }
-                if message["event"] == "request.started"
-        )));
+        let request_messages = captured
+            .iter()
+            .filter_map(|event| match event {
+                BackendEvent::Protocol { origin: ProtocolEventOrigin::Python, message }
+                    if message["requestId"] == REQUEST_ID =>
+                {
+                    Some(message)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(request_messages.len(), 1, "{request_messages:?}");
+        assert_eq!(request_messages[0]["event"], "request.started");
+        assert!(
+            !captured.iter().any(|event| matches!(
+                event,
+                BackendEvent::Protocol { message, .. } if message["messageType"] == "result"
+            )),
+            "the result must arrive only through the invoke return value"
+        );
         drop(captured);
         assert_eq!(
             supervisor.shutdown(),
@@ -2028,12 +2039,7 @@ for raw in sys.stdin:
             .collect::<Vec<_>>();
         assert_eq!(
             order,
-            [
-                "request.started",
-                "request.progress",
-                "request.progress",
-                "result",
-            ]
+            ["request.started", "request.progress", "request.progress"]
         );
         drop(captured);
         assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
@@ -2158,7 +2164,13 @@ for raw in sys.stdin:
 
     #[test]
     fn malformed_oversized_and_wrong_id_output_fail_the_pending_request() {
-        for mode in ["malformed", "oversized", "wrong_id"] {
+        for mode in [
+            "malformed",
+            "oversized",
+            "oversized_success",
+            "forbidden_event",
+            "wrong_id",
+        ] {
             let (supervisor, _script, _events) = supervisor(mode);
             assert_eq!(supervisor.start().lifecycle, BackendLifecycle::Ready);
             let error = supervisor.request(request(REQUEST_ID)).expect_err(mode);
@@ -2171,7 +2183,7 @@ for raw in sys.stdin:
     #[test]
     fn ordinary_no_newline_input_stops_after_the_bounded_prefix() {
         let supervisor = BackendSupervisor::new(Arc::new(|_| {}));
-        let input = vec![b'x'; MAX_PROTOCOL_LINE_BYTES + 16_384];
+        let input = vec![b'x'; framework().max_line_bytes + 16_384];
         let mut reader = BufReader::new(Cursor::new(input));
 
         assert!(matches!(
@@ -2180,7 +2192,7 @@ for raw in sys.stdin:
         ));
         assert_eq!(
             reader.stream_position().expect("reader position") as usize,
-            MAX_PROTOCOL_LINE_BYTES + 2
+            framework().max_line_bytes + 2
         );
     }
 

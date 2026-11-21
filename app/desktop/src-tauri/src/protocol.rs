@@ -1,142 +1,65 @@
+//! Protocol v1 framing for the Python child.
+//!
+//! Python is the only schema validator (U1). The host checks only what it needs
+//! to route messages safely: JSON envelopes, the line limit and its full-text
+//! result exemption, request IDs, request-event sequences, process-event
+//! origins, and the forbidden-key scan. Framework values come from the
+//! compiled-in `contract.json`, the single hand-written protocol source.
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::sync::OnceLock;
 
 use serde::de::Error as DeserializeError;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
-pub const PROTOCOL_VERSION: u64 = 1;
-pub const MAX_PROTOCOL_LINE_BYTES: usize = 2 * 1024 * 1024;
-pub const MAX_REQUEST_ID_BYTES: usize = 128;
-pub const MAX_ERROR_MESSAGE_BYTES: usize = 4096;
-pub const FULL_TEXT_RESULT_METHODS: &[&str] = &["session.turn", "session.transcript"];
+const CONTRACT_JSON: &str = include_str!("../../protocol/v1/contract.json");
 
-pub const PROTOCOL_METHODS: &[&str] = &[
-    "runtime.diagnostics",
-    "project.list",
-    "workspace.select",
-    "document.open",
-    "document.save",
-    "document.apply",
-    "session.create",
-    "session.list",
-    "session.select",
-    "session.delete",
-    "session.rename",
-    "session.retry_registration",
-    "session.transcript",
-    "session.status",
-    "session.turn",
-    "session.set_thinking",
-    "session.set_bash_permission",
-    "session.stop",
-    "session.shutdown",
-    "knowledge.overview",
-    "knowledge.search",
-    "knowledge.list_chunks",
-    "knowledge.get_context",
-    "knowledge.init_workspace",
-    "knowledge.ingest_file",
-    "knowledge.ingest_folder",
-    "knowledge.sync",
-    "knowledge.prune_preview",
-    "knowledge.prune_apply",
-    "extensions.status",
-    "extensions.preview",
-    "extensions.apply",
-    "approval.resolve",
-    "runtime.shutdown",
-    "bibliography.inspect",
-    "bibliography.render",
-    "bibliography.set_style",
-    "bibliography.remove",
-    "bibliography.add",
-    "bibliography.export",
-];
+/// The framework subset of the protocol contract.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Framework {
+    pub protocol_version: u64,
+    pub max_line_bytes: usize,
+    pub request_id_max_bytes: usize,
+    pub error_message_max_bytes: usize,
+    pub full_text_result_methods: Vec<String>,
+    pub process_events: Vec<String>,
+    pub process_event_origins: HashMap<String, Vec<String>>,
+    pub forbidden_data_key_fragments: Vec<String>,
+}
 
-pub const REQUEST_EVENTS: &[&str] = &[
-    "request.started",
-    "turn.accepted",
-    "request.progress",
-    "stage.changed",
-    "tool.started",
-    "tool.finished",
-    "tool.failed",
-    "document.proposed",
-    "approval.required",
-    "knowledge.progress",
-    "shutdown.progress",
-    "collecting.started",
-    "collecting.completed",
-    "tagging.started",
-    "tagging.folder_completed",
-    "metadata.written",
-    "writing.started",
-    "writing.file_completed",
-    "ingest.completed",
-    "ingest.failed",
-];
+impl Framework {
+    /// Whether a successful result of `method` may exceed the line limit.
+    pub fn allows_full_text_result(&self, method: &str) -> bool {
+        self.full_text_result_methods.iter().any(|name| name == method)
+    }
+}
 
-pub const PROCESS_EVENTS: &[&str] = &[
-    "backend.ready",
-    "backend.crashed",
-    "backend.shutting_down",
-    "backend.protocol_error",
-];
-
-pub const PROTOCOL_ERROR_CODES: &[&str] = &[
-    "PROTOCOL_INVALID",
-    "PROTOCOL_VERSION_UNSUPPORTED",
-    "RUNTIME_WRONG_CONDA_ENV",
-    "SESSION_NOT_READY",
-    "OPENROUTER_NOT_CONFIGURED",
-    "OLLAMA_UNREACHABLE",
-    "OLLAMA_MODEL_MISSING",
-    "GRAPH_LIMIT_REACHED",
-    "BUSY_TURN",
-    "TURN_CANCELLED",
-    "BUSY_KNOWLEDGE_MUTATION",
-    "BUSY_EXTENSION_OPERATION",
-    "INVALID_PATH",
-    "RAG_READ_FAILED",
-    "RAG_WRITE_FAILED",
-    "RAG_PARTIAL_WRITE_POSSIBLE",
-    "PRUNE_PREVIEW_STALE",
-    "EXTENSION_PREVIEW_FAILED",
-    "EXTENSION_APPLY_FAILED",
-    "APPROVAL_DENIED",
-    "PROVIDER_RATE_LIMITED",
-    "PROVIDER_REQUEST_FAILED",
-    "BIBLIOGRAPHY_CONFLICT",
-    "BIBLIOGRAPHY_FAILED",
-    "INTERNAL_ERROR",
-];
-
-const TOOL_EVENT_DATA_KEYS: &[&str] = &["name", "callId", "status", "candidateId"];
-const TOOL_STATUSES: &[&str] = &["started", "ok", "failed", "denied"];
-const TURN_ERROR_DETAIL_KEYS: &[&str] = &["turnId", "state", "accepted", "persisted"];
-const FORBIDDEN_DATA_KEY_FRAGMENTS: &[&str] = &[
-    "apikey",
-    "authorization",
-    "langchain",
-    "messages",
-    "rawpayload",
-    "rawprovider",
-    "responsemetadata",
-    "secret",
-    "token",
-    "toolargs",
-    "toolcalls",
-    "toolresult",
-    "traceback",
-    "turnlogs",
-];
+/// Framework values parsed once from the contract compiled into the binary.
+pub fn framework() -> &'static Framework {
+    static FRAMEWORK: OnceLock<Framework> = OnceLock::new();
+    FRAMEWORK.get_or_init(|| {
+        serde_json::from_str(CONTRACT_JSON)
+            .expect("the compiled-in protocol contract has the framework fields")
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolOrigin {
     Python,
     Rust,
+}
+
+impl ProtocolOrigin {
+    fn contract_name(self) -> &'static str {
+        match self {
+            Self::Python => "python",
+            Self::Rust => "rust",
+        }
+    }
 }
 
 fn json_integer(value: &Value) -> Option<i64> {
@@ -159,8 +82,9 @@ where
     D: Deserializer<'de>,
 {
     let value = Value::deserialize(deserializer)?;
-    if value.as_f64() == Some(PROTOCOL_VERSION as f64) {
-        Ok(PROTOCOL_VERSION)
+    let version = framework().protocol_version;
+    if value.as_f64() == Some(version as f64) {
+        Ok(version)
     } else {
         Err(D::Error::custom("invalid protocol version"))
     }
@@ -277,118 +201,6 @@ impl Display for ProtocolViolation {
 
 impl Error for ProtocolViolation {}
 
-fn required_params(method: &str) -> Option<&'static [&'static str]> {
-    match method {
-        "runtime.diagnostics" => Some(&[]),
-        "project.list" => Some(&[]),
-        "workspace.select" => Some(&["rootPath"]),
-        "document.open" => Some(&["path"]),
-        "document.save" => Some(&["documentContext"]),
-        "document.apply" => Some(&["documentContext", "turnId"]),
-        "session.create" => Some(&[]),
-        "session.list" => Some(&["projectId"]),
-        "session.select" | "session.delete" | "session.retry_registration" | "session.transcript" => {
-            Some(&["projectId", "sessionId"])
-        }
-        "session.rename" => Some(&["projectId", "sessionId", "title"]),
-        "session.status" => Some(&[]),
-        "session.turn" => Some(&["text", "turnId", "retry"]),
-        "session.set_thinking" => Some(&["mode"]),
-        "session.set_bash_permission" => Some(&["mode"]),
-        "session.stop" => Some(&["sessionId", "turnId", "parentRequestId"]),
-        "session.shutdown" => Some(&[]),
-        "knowledge.overview" => Some(&[]),
-        "knowledge.search" => Some(&["query"]),
-        "knowledge.list_chunks" => Some(&[]),
-        "knowledge.get_context" => Some(&["pid", "chunkId"]),
-        "knowledge.init_workspace" => Some(&[]),
-        "knowledge.ingest_file" => Some(&["path"]),
-        "knowledge.ingest_folder" => Some(&["path"]),
-        "knowledge.sync" => Some(&["path"]),
-        "knowledge.prune_preview" => Some(&["path"]),
-        "knowledge.prune_apply" => Some(&["previewId"]),
-        "extensions.status" => Some(&[]),
-        "extensions.preview" => Some(&[]),
-        "extensions.apply" => Some(&["previewId", "approvedBindingHashes", "turnId", "retry"]),
-        "approval.resolve" => Some(&["approvalId", "approved"]),
-        "runtime.shutdown" => Some(&[]),
-        "bibliography.inspect" => Some(&[]),
-        "bibliography.render" => Some(&["documentContext"]),
-        "bibliography.set_style" => Some(&["styleId"]),
-        "bibliography.remove" => Some(&["key", "libraryFingerprint"]),
-        "bibliography.add" => Some(&["identifier"]),
-        "bibliography.export" => Some(&["format"]),
-        _ => None,
-    }
-}
-
-fn allowed_params(method: &str) -> Option<&'static [&'static str]> {
-    match method {
-        "runtime.diagnostics"
-        | "project.list"
-        | "session.status"
-        | "session.shutdown"
-        | "knowledge.overview"
-        | "knowledge.init_workspace"
-        | "extensions.status"
-        | "extensions.preview"
-        | "runtime.shutdown" => Some(&[]),
-        "session.create" => Some(&["loadMcp", "graphRecursionLimit", "projectId"]),
-        "session.list" => Some(&["projectId", "offset", "limit", "reconcile"]),
-        "session.select" | "session.delete" | "session.retry_registration" => Some(&["projectId", "sessionId"]),
-        "session.rename" => Some(&["projectId", "sessionId", "title"]),
-        "session.transcript" => Some(&["projectId", "sessionId", "offset", "limit"]),
-        "session.stop" => Some(&["sessionId", "turnId", "parentRequestId"]),
-        "workspace.select" => Some(&["rootPath", "action", "historyDirectory", "expectedFingerprint"]),
-        "document.open" => Some(&["path"]),
-        "document.save" => Some(&["documentContext"]),
-        "document.apply" => Some(&["documentContext", "turnId", "callId", "parentRequestId", "undoOfCallId", "resolution", "expectedSnapshot"]),
-        "session.turn" => Some(&["text", "turnId", "retry", "documentContext", "skillReferences", "submittedContext"]),
-        "session.set_thinking" => Some(&["mode"]),
-        "session.set_bash_permission" => Some(&["mode"]),
-        "knowledge.search" => Some(&[
-            "query",
-            "k",
-            "folderPrefix",
-            "category",
-            "fileType",
-            "dateFrom",
-            "dateTo",
-        ]),
-        "knowledge.list_chunks" => Some(&[
-            "folderPrefix",
-            "pid",
-            "category",
-            "fileType",
-            "dateFrom",
-            "dateTo",
-            "offset",
-            "limit",
-        ]),
-        "knowledge.get_context" => Some(&["pid", "chunkId", "window"]),
-        "knowledge.ingest_file"
-        | "knowledge.ingest_folder"
-        | "knowledge.sync"
-        | "knowledge.prune_preview" => Some(&["path"]),
-        "knowledge.prune_apply" => Some(&["previewId"]),
-        "extensions.apply" => Some(&["previewId", "approvedBindingHashes", "turnId", "retry"]),
-        "approval.resolve" => Some(&[
-            "approvalId",
-            "parentRequestId",
-            "turnId",
-            "approved",
-            "documentContext",
-        ]),
-        "bibliography.inspect" => Some(&["documentContext"]),
-        "bibliography.render" => Some(&["documentContext", "styleId"]),
-        "bibliography.set_style" => Some(&["styleId"]),
-        "bibliography.remove" => Some(&["key", "libraryFingerprint"]),
-        "bibliography.add" => Some(&["identifier"]),
-        "bibliography.export" => Some(&["documentContext", "format", "styleId"]),
-        _ => None,
-    }
-}
-
 fn is_canonical_uuid(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 36
@@ -412,7 +224,7 @@ fn is_canonical_uuid(value: &str) -> bool {
 }
 
 fn validate_request_id(value: &str) -> Result<(), ProtocolViolation> {
-    if value.is_empty() || value.len() > MAX_REQUEST_ID_BYTES {
+    if value.is_empty() || value.len() > framework().request_id_max_bytes {
         return Err(ProtocolViolation::invalid("requestId has an invalid size"));
     }
     if !is_canonical_uuid(value) {
@@ -421,26 +233,6 @@ fn validate_request_id(value: &str) -> Result<(), ProtocolViolation> {
         ));
     }
     Ok(())
-}
-
-fn is_canonical_turn_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 32
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-        && bytes[12] == b'4'
-        && matches!(bytes[16], b'8' | b'9' | b'a' | b'b')
-}
-
-fn expect_turn_id<'a>(value: &'a Value, field: &str) -> Result<&'a str, ProtocolViolation> {
-    let turn_id = expect_non_empty_string(value, field)?;
-    if !is_canonical_turn_id(turn_id) {
-        return Err(ProtocolViolation::invalid(format!(
-            "{field} must be a canonical lowercase UUIDv4 hex value"
-        )));
-    }
-    Ok(turn_id)
 }
 
 fn expect_object<'a>(
@@ -462,588 +254,6 @@ fn expect_non_empty_string<'a>(
         .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be a non-empty string")))
 }
 
-fn expect_bounded_string<'a>(
-    value: &'a Value,
-    field: &str,
-    max_bytes: usize,
-) -> Result<&'a str, ProtocolViolation> {
-    let text = expect_non_empty_string(value, field)?;
-    if text.len() > max_bytes {
-        return Err(ProtocolViolation::invalid(format!("{field} is too large")));
-    }
-    Ok(text)
-}
-
-fn expect_integer_range(
-    value: &Value,
-    field: &str,
-    minimum: i64,
-    maximum: i64,
-) -> Result<i64, ProtocolViolation> {
-    let integer = json_integer(value)
-        .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be an integer")))?;
-    if integer < minimum || integer > maximum {
-        return Err(ProtocolViolation::invalid(format!(
-            "{field} must be between {minimum} and {maximum}"
-        )));
-    }
-    Ok(integer)
-}
-
-fn validate_optional_string(
-    params: &Map<String, Value>,
-    field: &str,
-    max_bytes: usize,
-) -> Result<(), ProtocolViolation> {
-    if let Some(value) = params.get(field) {
-        expect_bounded_string(value, &format!("params.{field}"), max_bytes)?;
-    }
-    Ok(())
-}
-
-fn validate_optional_integer(
-    params: &Map<String, Value>,
-    field: &str,
-    minimum: i64,
-    maximum: i64,
-) -> Result<(), ProtocolViolation> {
-    if let Some(value) = params.get(field) {
-        expect_integer_range(value, &format!("params.{field}"), minimum, maximum)?;
-    }
-    Ok(())
-}
-
-const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
-
-fn expect_document_text<'a>(value: &'a Value, field: &str) -> Result<&'a str, ProtocolViolation> {
-    let text = value.as_str().ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be a string")))?;
-    if text.len() > 1_048_576 {
-        return Err(ProtocolViolation::invalid(format!("{field} is too large")));
-    }
-    Ok(text)
-}
-
-fn validate_fingerprint(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
-    let text = expect_non_empty_string(value, field)?;
-    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')) {
-        return Err(ProtocolViolation::invalid(format!("{field} must be a SHA-256 fingerprint")));
-    }
-    Ok(())
-}
-
-fn validate_document_range(data: &Map<String, Value>, field: &str, source: Option<&str>) -> Result<(), ProtocolViolation> {
-    let (start, end) = (data.get("rangeStartUtf16"), data.get("rangeEndUtf16"));
-    match (start, end) {
-        (None, None) => Ok(()),
-        (Some(start), Some(end)) => {
-            let start = expect_integer_range(start, &format!("{field}.rangeStartUtf16"), 0, MAX_SAFE_INTEGER)?;
-            let end = expect_integer_range(end, &format!("{field}.rangeEndUtf16"), 0, MAX_SAFE_INTEGER)?;
-            if start > end {
-                return Err(ProtocolViolation::invalid(format!("{field} has a reversed UTF-16 range")));
-            }
-            if let Some(text) = source {
-                let mut position = 0_i64;
-                let mut start_valid = start == 0;
-                let mut end_valid = end == 0;
-                for character in text.chars() {
-                    position += character.len_utf16() as i64;
-                    start_valid |= position == start;
-                    end_valid |= position == end;
-                }
-                if !start_valid || !end_valid {
-                    return Err(ProtocolViolation::invalid(format!("{field} range exceeds source text or splits a surrogate pair")));
-                }
-            }
-            Ok(())
-        }
-        _ => Err(ProtocolViolation::invalid(format!("{field} requires both UTF-16 range endpoints"))),
-    }
-}
-
-fn validate_document_context(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
-    let data = expect_object(value, field)?;
-    validate_data_keys(data,
-        &["rootPath", "path", "editorRevision", "sourceText", "diskFingerprint", "rangeStartUtf16", "rangeEndUtf16"],
-        &["rootPath", "path", "editorRevision", "sourceText", "diskFingerprint"])?;
-    for name in ["rootPath", "path"] {
-        expect_bounded_string(&data[name], &format!("{field}.{name}"), 8_192)?;
-    }
-    expect_integer_range(&data["editorRevision"], &format!("{field}.editorRevision"), 0, MAX_SAFE_INTEGER)?;
-    let source = expect_document_text(&data["sourceText"], &format!("{field}.sourceText"))?;
-    validate_fingerprint(&data["diskFingerprint"], &format!("{field}.diskFingerprint"))?;
-    validate_document_range(data, field, Some(source))
-}
-
-fn validate_document_result(data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    validate_data_keys(data,
-        &["path", "status", "sourceText", "diskFingerprint", "rangeStartUtf16", "rangeEndUtf16", "candidateText", "currentDiskText", "issue", "callId", "rootPath", "editorRevision", "savedFingerprint", "expectedSnapshot"],
-        &["path", "status"])?;
-    expect_bounded_string(&data["path"], "data.path", 8_192)?;
-    validate_enum(&data["status"], "data.status", &["saved", "conflict", "failed", "cancelled"])?;
-    for name in ["sourceText", "candidateText", "currentDiskText"] {
-        if let Some(value) = data.get(name) { expect_document_text(value, &format!("data.{name}"))?; }
-    }
-    for name in ["diskFingerprint", "savedFingerprint"] {
-        if let Some(value) = data.get(name) { validate_fingerprint(value, &format!("data.{name}"))?; }
-    }
-    for (name, max_bytes) in [("rootPath", 8_192), ("issue", 4_096), ("callId", 256)] {
-        if let Some(value) = data.get(name) { expect_bounded_string(value, &format!("data.{name}"), max_bytes)?; }
-    }
-    if let Some(value) = data.get("editorRevision") { expect_integer_range(value, "data.editorRevision", 0, MAX_SAFE_INTEGER)?; }
-    if let Some(value) = data.get("expectedSnapshot") { validate_document_context(value, "data.expectedSnapshot")?; }
-    validate_document_range(data, "data", None)
-}
-
-fn validate_document_operations(value: &Value) -> Result<(), ProtocolViolation> {
-    let items = value.as_array().ok_or_else(|| ProtocolViolation::invalid("data.documentOperations must be an array"))?;
-    if items.len() > 128 { return Err(ProtocolViolation::invalid("data.documentOperations contains too many items")); }
-    for item in items {
-        let data = expect_object(item, "data.documentOperations[]")?;
-        validate_exact_data_keys(data, &["callId", "path", "candidateText", "rangeStartUtf16", "rangeEndUtf16"])?;
-        expect_bounded_string(&data["callId"], "data.documentOperations[].callId", 256)?;
-        expect_bounded_string(&data["path"], "data.documentOperations[].path", 8_192)?;
-        expect_document_text(&data["candidateText"], "data.documentOperations[].candidateText")?;
-        validate_document_range(data, "data.documentOperations[]", None)?;
-    }
-    Ok(())
-}
-
-fn validate_document_approval(request_id: &str, data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    validate_data_keys(data,
-        &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "rangeStartUtf16", "rangeEndUtf16", "description", "parametersSummary", "createdAt", "expiresAt"],
-        &["approvalId", "parentRequestId", "turnId", "operation", "targetPath", "description", "createdAt", "expiresAt"])?;
-    for (name, max_bytes) in [("approvalId", 256), ("turnId", 256), ("targetPath", 8_192), ("description", 4_096)] {
-        expect_bounded_string(&data[name], &format!("data.{name}"), max_bytes)?;
-    }
-    if let Some(value) = data.get("parametersSummary") { expect_bounded_string(value, "data.parametersSummary", 8_192)?; }
-    let parent = expect_non_empty_string(&data["parentRequestId"], "data.parentRequestId")?;
-    validate_request_id(parent)?;
-    if parent != request_id { return Err(ProtocolViolation::invalid("data.parentRequestId must match the event requestId")); }
-    validate_enum(&data["operation"], "data.operation", &["document.apply", "document.undo", "citation.save", "knowledge.init_workspace", "knowledge.ingest_file", "knowledge.ingest_folder", "knowledge.prune_apply", "mcp.call", "extension.install", "extensions.apply"])?;
-    for name in ["createdAt", "expiresAt"] {
-        let timestamp = expect_non_empty_string(&data[name], &format!("data.{name}"))?;
-        if !is_utc_timestamp(timestamp) { return Err(ProtocolViolation::invalid(format!("data.{name} must be a UTC ISO 8601 timestamp"))); }
-    }
-    validate_document_range(data, "data", None)
-}
-
-fn validate_skill_references(params: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    let Some(value) = params.get("skillReferences") else { return Ok(()); };
-    let items = value.as_array().ok_or_else(|| ProtocolViolation::invalid("params.skillReferences must be an array"))?;
-    if items.len() > 128 { return Err(ProtocolViolation::invalid("params.skillReferences contains too many items")); }
-    let text = expect_non_empty_string(&params["text"], "params.text")?;
-    let mut offsets = HashMap::new();
-    for item in items {
-        let item = expect_object(item, "params.skillReferences[]")?;
-        validate_exact_data_keys(item, &["name", "startUtf16", "endUtf16"])?;
-        expect_bounded_string(&item["name"], "params.skillReferences[].name", 256)?;
-        for field in ["startUtf16", "endUtf16"] {
-            let offset = expect_integer_range(&item[field], &format!("params.skillReferences[].{field}"), 0, MAX_SAFE_INTEGER)?;
-            offsets.insert(offset, None);
-        }
-    }
-    let mut position = 0_i64;
-    if let Some(value) = offsets.get_mut(&0) { *value = Some(0); }
-    for (index, character) in text.char_indices() {
-        position += character.len_utf16() as i64;
-        if let Some(value) = offsets.get_mut(&position) { *value = Some(index + character.len_utf8()); }
-    }
-    for item in items {
-        let first = json_integer(&item["startUtf16"]).expect("validated integer");
-        let last = json_integer(&item["endUtf16"]).expect("validated integer");
-        let start = offsets.get(&first).and_then(|value| *value);
-        let end = offsets.get(&last).and_then(|value| *value);
-        let (Some(start), Some(end)) = (start, end) else {
-            return Err(ProtocolViolation::invalid("params.skillReferences has an invalid UTF-16 range"));
-        };
-        if first > last || text.get(start..end) != Some(format!("@{}", item["name"].as_str().expect("validated name")).as_str()) {
-            return Err(ProtocolViolation::invalid("params.skillReferences does not match the original text"));
-        }
-        if let Some(previous) = text[..start].chars().next_back() {
-            if previous.is_ascii_alphanumeric() || "_.@+-".contains(previous) {
-                return Err(ProtocolViolation::invalid("params.skillReferences must begin at a Skill token boundary"));
-            }
-        }
-        let suffix = &text[end..];
-        if suffix.chars().next().is_some_and(|ch| ch.is_ascii_alphanumeric() || "_-".contains(ch))
-            || (suffix.starts_with('.') && suffix.chars().nth(1).is_some_and(|ch| ch.is_ascii_alphanumeric())) {
-            return Err(ProtocolViolation::invalid("params.skillReferences must end at a Skill token boundary"));
-        }
-    }
-    Ok(())
-}
-
-fn validate_project_path(value: &str, field: &str) -> Result<(), ProtocolViolation> {
-    if !value.starts_with('/') || value.chars().any(|ch| ch == '\\' || (ch as u32) < 32 || ch == '\u{7f}')
-        || (value != "/" && value.split('/').skip(1).any(|part| part.is_empty() || matches!(part, "." | ".."))) {
-        return Err(ProtocolViolation::invalid(format!("{field} must be an absolute normalized Linux path")));
-    }
-    Ok(())
-}
-
-fn validate_context_document(value: &Value, root: &str) -> Result<(), ProtocolViolation> {
-    validate_document_context(value, "submittedContext.document")?;
-    let path = value["path"].as_str().expect("validated path");
-    validate_project_path(path, "document.path")?;
-    let prefix = if root == "/" { "/".to_owned() } else { format!("{root}/") };
-    if value["rootPath"] != root || path == root || !path.starts_with(&prefix) {
-        return Err(ProtocolViolation::invalid("document snapshot belongs to another project root"));
-    }
-    Ok(())
-}
-
-fn utf16_byte_index(text: &str, offset: i64) -> Option<usize> {
-    let mut position = 0_i64;
-    if offset == 0 { return Some(0); }
-    for (index, ch) in text.char_indices() {
-        position += ch.len_utf16() as i64;
-        if position == offset { return Some(index + ch.len_utf8()); }
-    }
-    None
-}
-
-fn validate_submitted_context(value: &Value) -> Result<(), ProtocolViolation> {
-    let context = expect_object(value, "submittedContext")?;
-    validate_data_keys(context,
-        &["projectId", "rootPath", "permissionMode", "requestedThinkingMode", "skillReferences", "projectRules", "documentContext", "references"],
-        &["projectId", "rootPath", "permissionMode", "requestedThinkingMode", "skillReferences", "projectRules", "references"])?;
-    if serde_json::to_vec(value).map_err(|_| ProtocolViolation::invalid("invalid submittedContext JSON"))?.len() > 1_048_576 {
-        return Err(ProtocolViolation::invalid("submittedContext exceeds the 1 MiB input limit"));
-    }
-    let project = expect_bounded_string(&context["projectId"], "submittedContext.projectId", 64)?;
-    if !project.bytes().enumerate().all(|(index, ch)| ch.is_ascii_lowercase() || ch.is_ascii_digit()
-        || (index > 0 && matches!(ch, b'.' | b'_' | b'-'))) {
-        return Err(ProtocolViolation::invalid("submittedContext.projectId must be a canonical project ID"));
-    }
-    let root = expect_bounded_string(&context["rootPath"], "submittedContext.rootPath", 8192)?;
-    validate_project_path(root, "rootPath")?;
-    validate_enum(&context["permissionMode"], "permissionMode", &["ask", "bypass"])?;
-    validate_enum(&context["requestedThinkingMode"], "requestedThinkingMode", &["normal", "extended"])?;
-    let skills = context["skillReferences"].as_array().ok_or_else(|| ProtocolViolation::invalid("skillReferences must be an array"))?;
-    if skills.len() > 128 { return Err(ProtocolViolation::invalid("too many Skill references")); }
-    for value in skills {
-        let skill = expect_object(value, "skillReferences[]")?;
-        validate_exact_data_keys(skill, &["name", "startUtf16", "endUtf16"])?;
-        let name = expect_bounded_string(&skill["name"], "skill.name", 256)?;
-        let start = expect_integer_range(&skill["startUtf16"], "skill.startUtf16", 0, MAX_SAFE_INTEGER)?;
-        let end = expect_integer_range(&skill["endUtf16"], "skill.endUtf16", 0, MAX_SAFE_INTEGER)?;
-        if name.trim().is_empty() || end <= start { return Err(ProtocolViolation::invalid("invalid Skill reference")); }
-    }
-    let rules = expect_object(&context["projectRules"], "projectRules")?;
-    validate_exact_data_keys(rules, &["text", "fingerprint"])?;
-    expect_document_text(&rules["text"], "projectRules.text")?;
-    validate_fingerprint(&rules["fingerprint"], "projectRules.fingerprint")?;
-    if let Some(document) = context.get("documentContext") { validate_context_document(document, root)?; }
-    let references = context["references"].as_array().ok_or_else(|| ProtocolViolation::invalid("references must be an array"))?;
-    let mut seen = std::collections::HashSet::new();
-    for value in references {
-        let reference = expect_object(value, "reference")?;
-        validate_enum(reference.get("kind").unwrap_or(&Value::Null), "reference.kind", &["document", "chat"])?;
-        let kind = reference["kind"].as_str().expect("validated kind");
-        validate_exact_data_keys(reference, &["referenceId", "kind", "text", kind])?;
-        let id = expect_bounded_string(&reference["referenceId"], "referenceId", 256)?;
-        if id.trim().is_empty() || !seen.insert(id) { return Err(ProtocolViolation::invalid("referenceId must be nonblank and unique")); }
-        let frozen = expect_bounded_string(&reference["text"], "reference.text", 1_048_576)?;
-        if kind == "document" {
-            let document = expect_object(&reference["document"], "reference.document")?;
-            validate_exact_data_keys(document, &["snapshot", "startLine", "endLine"])?;
-            let snapshot = &document["snapshot"];
-            validate_context_document(snapshot, root)?;
-            let source = snapshot["sourceText"].as_str().expect("validated source");
-            let start = expect_integer_range(&snapshot["rangeStartUtf16"], "rangeStartUtf16", 0, MAX_SAFE_INTEGER)?;
-            let end = expect_integer_range(&snapshot["rangeEndUtf16"], "rangeEndUtf16", 0, MAX_SAFE_INTEGER)?;
-            let (Some(left), Some(right)) = (utf16_byte_index(source, start), utf16_byte_index(source, end)) else {
-                return Err(ProtocolViolation::invalid("invalid document reference range"));
-            };
-            if source.get(left..right) != Some(frozen) { return Err(ProtocolViolation::invalid("document reference text does not match frozen range")); }
-            let bytes = source.as_bytes();
-            let breaks: Vec<usize> = bytes.iter().enumerate().filter_map(|(index, byte)| {
-                if *byte == b'\r' { Some(index + if bytes.get(index + 1) == Some(&b'\n') { 2 } else { 1 }) }
-                else if *byte == b'\n' && (index == 0 || bytes[index - 1] != b'\r') { Some(index + 1) }
-                else { None }
-            }).collect();
-            let first = expect_integer_range(&document["startLine"], "startLine", 1, MAX_SAFE_INTEGER)?;
-            let last = expect_integer_range(&document["endLine"], "endLine", 1, MAX_SAFE_INTEGER)?;
-            if first != 1 + breaks.iter().filter(|offset| **offset <= left).count() as i64
-                || last != 1 + breaks.iter().filter(|offset| **offset < right).count() as i64 {
-                return Err(ProtocolViolation::invalid("document reference line numbers do not match frozen range"));
-            }
-        } else {
-            let chat = expect_object(&reference["chat"], "reference.chat")?;
-            validate_exact_data_keys(chat, &["projectId", "sessionId", "turnId", "role", "messageFingerprint", "startUtf16", "endUtf16"])?;
-            expect_bounded_string(&chat["projectId"], "chat.projectId", 64)?;
-            expect_turn_id(&chat["sessionId"], "chat.sessionId")?;
-            expect_turn_id(&chat["turnId"], "chat.turnId")?;
-            validate_enum(&chat["role"], "chat.role", &["user", "assistant"])?;
-            validate_fingerprint(&chat["messageFingerprint"], "chat.messageFingerprint")?;
-            let start = expect_integer_range(&chat["startUtf16"], "chat.startUtf16", 0, MAX_SAFE_INTEGER)?;
-            let end = expect_integer_range(&chat["endUtf16"], "chat.endUtf16", 0, MAX_SAFE_INTEGER)?;
-            if chat["projectId"] != project || end <= start || end - start != frozen.encode_utf16().count() as i64 {
-                return Err(ProtocolViolation::invalid("chat reference project or UTF-16 range is invalid"));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_submission_input(text: &Value, context: &Value) -> Result<(), ProtocolViolation> {
-    let params = serde_json::json!({"text": text, "skillReferences": context["skillReferences"]});
-    validate_skill_references(params.as_object().expect("object"))?;
-    let payload = serde_json::json!({"text": text, "submittedContext": context});
-    if serde_json::to_vec(&payload).map_err(|_| ProtocolViolation::invalid("invalid submission JSON"))?.len() > 1_048_576 {
-        return Err(ProtocolViolation::invalid("text and submittedContext exceed the 1 MiB input limit"));
-    }
-    Ok(())
-}
-
-fn validate_params(method: &str, params: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    let required = required_params(method)
-        .ok_or_else(|| ProtocolViolation::invalid(format!("Unknown method: {method}")))?;
-    let allowed = allowed_params(method)
-        .ok_or_else(|| ProtocolViolation::invalid(format!("Unknown method: {method}")))?;
-    for field in required {
-        if !params.contains_key(*field) {
-            return Err(ProtocolViolation::invalid(format!(
-                "params.{field} is required for {method}"
-            )));
-        }
-    }
-    for field in params.keys() {
-        if !allowed.contains(&field.as_str()) {
-            return Err(ProtocolViolation::invalid(format!(
-                "params contains unknown field: {field}"
-            )));
-        }
-    }
-
-    match method {
-        "workspace.select" => {
-            expect_bounded_string(&params["rootPath"], "params.rootPath", 8_192)?;
-            if let Some(value) = params.get("action") { validate_enum(value, "params.action", &["inspect", "open", "initialize"])?; }
-            validate_optional_string(params, "historyDirectory", 8_192)?;
-            if let Some(value) = params.get("expectedFingerprint") {
-                if !value.is_null() { validate_fingerprint(value, "params.expectedFingerprint")?; }
-            }
-        }
-        "document.open" => { expect_bounded_string(&params["path"], "params.path", 8_192)?; }
-        "document.save" | "document.apply" => {
-            validate_document_context(&params["documentContext"], "params.documentContext")?;
-            if method == "document.apply" {
-                expect_turn_id(&params["turnId"], "params.turnId")?;
-                if params.contains_key("callId") == params.contains_key("undoOfCallId") {
-                    return Err(ProtocolViolation::invalid("document.apply requires exactly one of callId or undoOfCallId"));
-                }
-                validate_optional_string(params, "callId", 256)?;
-                validate_optional_string(params, "undoOfCallId", 256)?;
-                if let Some(value) = params.get("parentRequestId") { validate_request_id(expect_non_empty_string(value, "params.parentRequestId")?)?; }
-                if let Some(value) = params.get("resolution") { validate_enum(value, "params.resolution", &["keep", "use", "cancel"])?; }
-                if let Some(value) = params.get("expectedSnapshot") { validate_document_context(value, "params.expectedSnapshot")?; }
-            }
-        }
-        "session.create" => {
-            if let Some(load_mcp) = params.get("loadMcp") {
-                if !load_mcp.is_boolean() {
-                    return Err(ProtocolViolation::invalid(
-                        "params.loadMcp must be a boolean",
-                    ));
-                }
-            }
-            validate_optional_integer(params, "graphRecursionLimit", 3, u32::MAX as i64)?;
-            validate_optional_string(params, "projectId", 256)?;
-        }
-        "session.list" => {
-            validate_optional_string(params, "projectId", 256)?;
-            validate_optional_integer(params, "offset", 0, u32::MAX as i64)?;
-            validate_optional_integer(params, "limit", 1, 50)?;
-            if let Some(reconcile) = params.get("reconcile") {
-                if !reconcile.is_boolean() {
-                    return Err(ProtocolViolation::invalid("params.reconcile must be a boolean"));
-                }
-            }
-        }
-        "session.select" | "session.delete" | "session.retry_registration" => {
-            validate_optional_string(params, "projectId", 256)?;
-            validate_optional_string(params, "sessionId", 32)?;
-        }
-        "session.rename" => {
-            validate_optional_string(params, "projectId", 256)?;
-            validate_optional_string(params, "sessionId", 32)?;
-            validate_optional_string(params, "title", 256)?;
-        }
-        "session.transcript" => {
-            validate_optional_string(params, "projectId", 256)?;
-            validate_optional_string(params, "sessionId", 32)?;
-            validate_optional_integer(params, "offset", 0, u32::MAX as i64)?;
-            validate_optional_integer(params, "limit", 1, 20)?;
-        }
-        "session.turn" => {
-            expect_bounded_string(&params["text"], "params.text", 1_048_576)?;
-            validate_skill_references(params)?;
-            if let Some(value) = params.get("submittedContext") {
-                validate_submitted_context(value)?;
-                validate_submission_input(&params["text"], value)?;
-            }
-            if let Some(value) = params.get("documentContext") { validate_document_context(value, "params.documentContext")?; }
-            expect_turn_id(&params["turnId"], "params.turnId")?;
-            if !params["retry"].is_boolean() {
-                return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
-            }
-        }
-        "session.stop" => {
-            expect_bounded_string(&params["sessionId"], "params.sessionId", 32)?;
-            expect_turn_id(&params["turnId"], "params.turnId")?;
-            validate_request_id(expect_non_empty_string(&params["parentRequestId"], "params.parentRequestId")?)?;
-        }
-        "session.set_thinking" => {
-            let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
-            if !["normal", "extended"].contains(&mode) {
-                return Err(ProtocolViolation::invalid(format!(
-                    "params.mode contains an unknown enum value: {mode}"
-                )));
-            }
-        }
-        "session.set_bash_permission" => {
-            let mode = expect_non_empty_string(&params["mode"], "params.mode")?;
-            if !["ask", "bypass"].contains(&mode) {
-                return Err(ProtocolViolation::invalid(format!(
-                    "params.mode contains an unknown enum value: {mode}"
-                )));
-            }
-        }
-        "knowledge.search" => {
-            validate_optional_string(params, "query", 16_384)?;
-            validate_optional_integer(params, "k", 1, 20)?;
-            for (field, max_bytes) in [
-                ("folderPrefix", 8_192),
-                ("category", 256),
-                ("fileType", 64),
-                ("dateFrom", 10),
-                ("dateTo", 10),
-            ] {
-                validate_optional_string(params, field, max_bytes)?;
-            }
-        }
-        "knowledge.list_chunks" => {
-            for (field, max_bytes) in [
-                ("folderPrefix", 8_192),
-                ("pid", 1_024),
-                ("category", 256),
-                ("fileType", 64),
-                ("dateFrom", 10),
-                ("dateTo", 10),
-            ] {
-                validate_optional_string(params, field, max_bytes)?;
-            }
-            validate_optional_integer(params, "offset", 0, u32::MAX as i64)?;
-            validate_optional_integer(params, "limit", 1, 100)?;
-        }
-        "knowledge.get_context" => {
-            validate_optional_string(params, "pid", 1_024)?;
-            validate_optional_integer(params, "chunkId", 0, u32::MAX as i64)?;
-            validate_optional_integer(params, "window", 0, 3)?;
-        }
-        "knowledge.ingest_file"
-        | "knowledge.ingest_folder"
-        | "knowledge.sync"
-        | "knowledge.prune_preview" => {
-            validate_optional_string(params, "path", 8_192)?;
-        }
-        "knowledge.prune_apply" => {
-            validate_optional_string(params, "previewId", 256)?;
-        }
-        "extensions.apply" => {
-            validate_optional_string(params, "previewId", 256)?;
-            let hashes = params["approvedBindingHashes"].as_array().ok_or_else(|| {
-                ProtocolViolation::invalid("params.approvedBindingHashes must be an array")
-            })?;
-            if hashes.len() > 512 {
-                return Err(ProtocolViolation::invalid(
-                    "params.approvedBindingHashes contains too many items",
-                ));
-            }
-            for hash in hashes {
-                expect_non_empty_string(hash, "params.approvedBindingHashes[]")?;
-            }
-            expect_turn_id(&params["turnId"], "params.turnId")?;
-            if !params["retry"].is_boolean() {
-                return Err(ProtocolViolation::invalid("params.retry must be a boolean"));
-            }
-        }
-        "approval.resolve" => {
-            validate_optional_string(params, "approvalId", 256)?;
-            if let Some(value) = params.get("documentContext") { validate_document_context(value, "params.documentContext")?; }
-            if let Some(parent_request_id) = params.get("parentRequestId") {
-                let parent_request_id = expect_non_empty_string(
-                    parent_request_id,
-                    "params.parentRequestId",
-                )?;
-                if !is_canonical_uuid(parent_request_id) {
-                    return Err(ProtocolViolation::invalid(
-                        "params.parentRequestId must be a canonical UUID",
-                    ));
-                }
-            }
-            validate_optional_string(params, "turnId", 256)?;
-            if !params["approved"].is_boolean() {
-                return Err(ProtocolViolation::invalid(
-                    "params.approved must be a boolean",
-                ));
-            }
-        }
-        "bibliography.inspect" | "bibliography.render" | "bibliography.export" => {
-            if let Some(context) = params.get("documentContext") {
-                validate_document_context(context, "params.documentContext")?;
-            }
-            validate_optional_string(params, "styleId", 128)?;
-            if let Some(format) = params.get("format") {
-                validate_enum(format, "params.format", &["docx", "bime_docx", "markdown"])?;
-            }
-        }
-        "bibliography.set_style" => validate_optional_string(params, "styleId", 128)?,
-        "bibliography.remove" => {
-            validate_optional_string(params, "key", 512)?;
-            validate_fingerprint(&params["libraryFingerprint"], "params.libraryFingerprint")?;
-        }
-        "bibliography.add" => validate_optional_string(params, "identifier", 2_048)?,
-        _ => {}
-    }
-    Ok(())
-}
-
-fn validate_tool_event(event: &str, data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    if !event.starts_with("tool.") {
-        return Ok(());
-    }
-    for key in data.keys() {
-        if !TOOL_EVENT_DATA_KEYS.contains(&key.as_str()) {
-            return Err(ProtocolViolation::invalid(format!(
-                "Unsafe tool event field: {key}"
-            )));
-        }
-    }
-    expect_non_empty_string(
-        data.get("name")
-            .ok_or_else(|| ProtocolViolation::invalid("data.name is required"))?,
-        "data.name",
-    )?;
-    let status = expect_non_empty_string(
-        data.get("status")
-            .ok_or_else(|| ProtocolViolation::invalid("data.status is required"))?,
-        "data.status",
-    )?;
-    if !TOOL_STATUSES.contains(&status) {
-        return Err(ProtocolViolation::invalid(format!(
-            "Unknown tool status: {status}"
-        )));
-    }
-    for optional in ["callId", "candidateId"] {
-        if let Some(value) = data.get(optional) {
-            expect_non_empty_string(value, &format!("data.{optional}"))?;
-        }
-    }
-    Ok(())
-}
-
 fn normalized_data_key(key: &str) -> String {
     key.chars()
         .flat_map(char::to_lowercase)
@@ -1051,6 +261,7 @@ fn normalized_data_key(key: &str) -> String {
         .collect()
 }
 
+/// Reject any object key that names provider internals or credentials.
 fn validate_safe_data(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
     match value {
         Value::Array(items) => {
@@ -1058,1414 +269,19 @@ fn validate_safe_data(value: &Value, field: &str) -> Result<(), ProtocolViolatio
                 validate_safe_data(item, &format!("{field}[{index}]"))?;
             }
         }
-        Value::Object(object) => validate_safe_object(object, field)?,
-        _ => {}
-    }
-    Ok(())
-}
-
-fn validate_safe_object(object: &Map<String, Value>, field: &str) -> Result<(), ProtocolViolation> {
-    for (key, item) in object {
-        let normalized = normalized_data_key(key);
-        if FORBIDDEN_DATA_KEY_FRAGMENTS
-            .iter()
-            .any(|fragment| normalized.contains(fragment))
-        {
-            return Err(ProtocolViolation::invalid(format!(
-                "{field} contains forbidden field: {key}"
-            )));
-        }
-        validate_safe_data(item, &format!("{field}.{key}"))?;
-    }
-    Ok(())
-}
-
-fn validate_turn_error_details(details: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    validate_exact_data_keys(details, TURN_ERROR_DETAIL_KEYS)?;
-    expect_turn_id(&details["turnId"], "error.details.turnId")?;
-    if !details["state"].is_null() {
-        validate_enum(
-            &details["state"],
-            "error.details.state",
-            &["pending", "completed", "failed", "interrupted"],
-        )?;
-    }
-    for field in ["accepted", "persisted"] {
-        if !details[field].is_boolean() {
-            return Err(ProtocolViolation::invalid(format!(
-                "error.details.{field} must be a boolean"
-            )));
-        }
-    }
-    let accepted = details["accepted"].as_bool().expect("validated boolean");
-    let persisted = details["persisted"].as_bool().expect("validated boolean");
-    if details["state"].is_null() {
-        if accepted || persisted {
-            return Err(ProtocolViolation::invalid(
-                "a null turn error state must not be accepted or persisted",
-            ));
-        }
-    } else if !accepted || !persisted {
-        return Err(ProtocolViolation::invalid(
-            "a durable turn error state must be accepted and persisted",
-        ));
-    }
-    Ok(())
-}
-
-fn is_durable_turn_method(method: &str) -> bool {
-    matches!(method, "session.turn" | "extensions.apply")
-}
-
-fn validate_completed_turn_fields(
-    data: &Map<String, Value>,
-    method: &str,
-    text_max_bytes: Option<usize>,
-) -> Result<(), ProtocolViolation> {
-    expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-    expect_turn_id(&data["turnId"], "data.turnId")?;
-    expect_integer_range(&data["turnNumber"], "data.turnNumber", 1, 4_096)?;
-    validate_enum(&data["state"], "data.state", &["completed"])?;
-    if let Some(max_bytes) = text_max_bytes {
-        expect_bounded_string(&data["text"], "data.text", max_bytes)?;
-    } else {
-        expect_non_empty_string(&data["text"], "data.text")?;
-    }
-    for field in ["accepted", "persisted"] {
-        if !data[field].is_boolean() {
-            return Err(ProtocolViolation::invalid(format!(
-                "data.{field} must be a boolean"
-            )));
-        }
-    }
-    if data["accepted"] != Value::Bool(true) || data["persisted"] != Value::Bool(true) {
-        return Err(ProtocolViolation::invalid(format!(
-            "{method} success must be durably completed"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_data_keys(
-    data: &Map<String, Value>,
-    allowed: &[&str],
-    required: &[&str],
-) -> Result<(), ProtocolViolation> {
-    for key in data.keys() {
-        if !allowed.contains(&key.as_str()) {
-            return Err(ProtocolViolation::invalid(format!(
-                "data contains unknown field: {key}"
-            )));
-        }
-    }
-    for field in required {
-        if !data.contains_key(*field) {
-            return Err(ProtocolViolation::invalid(format!(
-                "data.{field} is required"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn validate_exact_data_keys(
-    data: &Map<String, Value>,
-    allowed: &[&str],
-) -> Result<(), ProtocolViolation> {
-    validate_data_keys(data, allowed, allowed)
-}
-
-fn is_utc_timestamp(value: &str) -> bool {
-    let Some(prefix) = value.strip_suffix('Z') else {
-        return false;
-    };
-    let (seconds, fraction) = match prefix.split_once('.') {
-        Some((seconds, fraction)) => (seconds, Some(fraction)),
-        None => (prefix, None),
-    };
-    if seconds.len() != 19 {
-        return false;
-    }
-    for (index, byte) in seconds.bytes().enumerate() {
-        let expected_separator = match index {
-            4 | 7 => Some(b'-'),
-            10 => Some(b'T'),
-            13 | 16 => Some(b':'),
-            _ => None,
-        };
-        if let Some(separator) = expected_separator {
-            if byte != separator {
-                return false;
-            }
-        } else if !byte.is_ascii_digit() {
-            return false;
-        }
-    }
-    let valid_fraction = fraction.is_none_or(|digits| {
-        !digits.is_empty() && digits.len() <= 6 && digits.bytes().all(|byte| byte.is_ascii_digit())
-    });
-    if !valid_fraction {
-        return false;
-    }
-    let number = |start: usize, end: usize| seconds[start..end].parse::<u32>().ok();
-    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
-        number(0, 4),
-        number(5, 7),
-        number(8, 10),
-        number(11, 13),
-        number(14, 16),
-        number(17, 19),
-    ) else {
-        return false;
-    };
-    if year == 0 || !(1..=12).contains(&month) || hour > 23 || minute > 59 || second > 59 {
-        return false;
-    }
-    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_in_month = [
-        31,
-        if leap_year { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    day >= 1 && day <= days_in_month[month as usize - 1]
-}
-
-fn validate_event_data(
-    event: &str,
-    request_id: &str,
-    data: &Map<String, Value>,
-) -> Result<(), ProtocolViolation> {
-    validate_safe_object(data, "data")?;
-    validate_tool_event(event, data)?;
-    if event == "approval.required" && data.contains_key("operation") {
-        return validate_document_approval(request_id, data);
-    }
-    match event {
-        "turn.accepted" => {
-            validate_exact_data_keys(data, &["sessionId", "turnId"])?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-            expect_turn_id(&data["turnId"], "data.turnId")?;
-        }
-        "document.proposed" => {
-            validate_data_keys(data, &["turnId", "callId", "referenceId"], &["turnId", "callId"])?;
-            expect_turn_id(&data["turnId"], "data.turnId")?;
-            expect_bounded_string(&data["callId"], "data.callId", 256)?;
-            if let Some(reference) = data.get("referenceId") {
-                if expect_bounded_string(reference, "data.referenceId", 256)?.trim().is_empty() {
-                    return Err(ProtocolViolation::invalid("data.referenceId must be nonblank"));
-                }
-            }
-        }
-        "approval.required" => {
-            const KEYS: &[&str] = &[
-                "approvalId",
-                "parentRequestId",
-                "turnId",
-                "command",
-                "description",
-                "executionTimeoutSeconds",
-                "createdAt",
-                "expiresAt",
-            ];
-            validate_exact_data_keys(data, KEYS)?;
-            for (field, max_bytes) in [
-                ("approvalId", 256),
-                ("turnId", 256),
-                ("command", 65_536),
-                ("description", 4_096),
-            ] {
-                expect_bounded_string(&data[field], &format!("data.{field}"), max_bytes)?;
-            }
-            let parent_request_id =
-                expect_non_empty_string(&data["parentRequestId"], "data.parentRequestId")?;
-            validate_request_id(parent_request_id)?;
-            if parent_request_id != request_id {
-                return Err(ProtocolViolation::invalid(
-                    "data.parentRequestId must match the event requestId",
-                ));
-            }
-            expect_integer_range(
-                &data["executionTimeoutSeconds"],
-                "data.executionTimeoutSeconds",
-                1,
-                3_600,
-            )?;
-            for field in ["createdAt", "expiresAt"] {
-                let timestamp = expect_non_empty_string(&data[field], &format!("data.{field}"))?;
-                if !is_utc_timestamp(timestamp) {
+        Value::Object(object) => {
+            for (key, item) in object {
+                let normalized = normalized_data_key(key);
+                if framework()
+                    .forbidden_data_key_fragments
+                    .iter()
+                    .any(|fragment| normalized.contains(fragment.as_str()))
+                {
                     return Err(ProtocolViolation::invalid(format!(
-                        "data.{field} must be a UTC ISO 8601 timestamp"
+                        "{field} contains forbidden field: {key}"
                     )));
                 }
-            }
-        }
-        "collecting.started" | "writing.started" => validate_exact_data_keys(data, &[])?,
-        "collecting.completed" => {
-            validate_exact_data_keys(data, &["folders", "files"])?;
-            for field in ["folders", "files"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-        }
-        "tagging.started" => {
-            validate_exact_data_keys(data, &["total"])?;
-            expect_integer_range(&data["total"], "data.total", 0, u32::MAX as i64)?;
-        }
-        "tagging.folder_completed" => {
-            validate_exact_data_keys(data, &["completed", "total", "folder"])?;
-            for field in ["completed", "total"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-            expect_bounded_string(&data["folder"], "data.folder", 8_192)?;
-        }
-        "metadata.written" => {
-            validate_exact_data_keys(data, &["path"])?;
-            expect_bounded_string(&data["path"], "data.path", 8_192)?;
-        }
-        "writing.file_completed" => {
-            validate_exact_data_keys(data, &["filePath", "chunks", "filesCompleted"])?;
-            expect_bounded_string(&data["filePath"], "data.filePath", 8_192)?;
-            for field in ["chunks", "filesCompleted"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-        }
-        "ingest.completed" => {
-            validate_exact_data_keys(data, &["files", "chunks"])?;
-            for field in ["files", "chunks"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-        }
-        "ingest.failed" => {
-            validate_exact_data_keys(data, &["stage", "partialWritePossible"])?;
-            expect_bounded_string(&data["stage"], "data.stage", 256)?;
-            if !data["partialWritePossible"].is_boolean() {
-                return Err(ProtocolViolation::invalid(
-                    "data.partialWritePossible must be a boolean",
-                ));
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn validate_nullable_string(
-    data: &Map<String, Value>,
-    field: &str,
-    max_bytes: usize,
-) -> Result<(), ProtocolViolation> {
-    if !data[field].is_null() {
-        expect_bounded_string(&data[field], &format!("data.{field}"), max_bytes)?;
-    }
-    Ok(())
-}
-
-fn validate_nullable_boolean(
-    data: &Map<String, Value>,
-    field: &str,
-) -> Result<(), ProtocolViolation> {
-    if !data[field].is_null() && !data[field].is_boolean() {
-        return Err(ProtocolViolation::invalid(format!(
-            "data.{field} must be a boolean or null"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_string_array(
-    value: &Value,
-    field: &str,
-    max_items: usize,
-    item_max_bytes: usize,
-) -> Result<(), ProtocolViolation> {
-    let items = value
-        .as_array()
-        .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be an array")))?;
-    if items.len() > max_items {
-        return Err(ProtocolViolation::invalid(format!(
-            "{field} contains too many items"
-        )));
-    }
-    for (index, item) in items.iter().enumerate() {
-        expect_bounded_string(item, &format!("{field}[{index}]"), item_max_bytes)?;
-    }
-    Ok(())
-}
-
-fn validate_enum(value: &Value, field: &str, allowed: &[&str]) -> Result<(), ProtocolViolation> {
-    let text = expect_non_empty_string(value, field)?;
-    if !allowed.contains(&text) {
-        return Err(ProtocolViolation::invalid(format!(
-            "{field} contains an unknown enum value"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_session_snapshot(
-    data: &Map<String, Value>,
-    require_registration: bool,
-) -> Result<(), ProtocolViolation> {
-    const BASE_KEYS: &[&str] = &[
-        "sessionId",
-        "turnCount",
-        "graphRecursionLimit",
-        "thinkingMode",
-        "bashPermissionMode",
-        "slashCommands",
-        "loadedSkills",
-        "mcpFamilies",
-        "startupDiagnostics",
-        "extensionRevision",
-    ];
-    const ALL_KEYS: &[&str] = &[
-        "sessionId",
-        "turnCount",
-        "graphRecursionLimit",
-        "thinkingMode",
-        "bashPermissionMode",
-        "slashCommands",
-        "loadedSkills",
-        "mcpFamilies",
-        "startupDiagnostics",
-        "extensionRevision",
-        "projectId",
-        "registered",
-    ];
-    let required = if require_registration {
-        ALL_KEYS
-    } else {
-        BASE_KEYS
-    };
-    validate_data_keys(data, ALL_KEYS, required)?;
-    expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-    expect_integer_range(&data["turnCount"], "data.turnCount", 0, u32::MAX as i64)?;
-    expect_integer_range(
-        &data["graphRecursionLimit"],
-        "data.graphRecursionLimit",
-        3,
-        u32::MAX as i64,
-    )?;
-    validate_enum(
-        &data["thinkingMode"],
-        "data.thinkingMode",
-        &["normal", "extended"],
-    )?;
-    validate_enum(
-        &data["bashPermissionMode"],
-        "data.bashPermissionMode",
-        &["ask", "bypass"],
-    )?;
-    let commands = data["slashCommands"].as_array().ok_or_else(|| {
-        ProtocolViolation::invalid("data.slashCommands must be an array")
-    })?;
-    if commands.len() > 512 {
-        return Err(ProtocolViolation::invalid("data.slashCommands has too many items"));
-    }
-    for command in commands {
-        let command = expect_object(command, "data.slashCommands item")?;
-        validate_data_keys(command, &["name", "description"], &["name", "description"])?;
-        expect_bounded_string(&command["name"], "slashCommands.name", 64)?;
-        expect_bounded_string(&command["description"], "slashCommands.description", 1_024)?;
-    }
-    validate_string_array(&data["loadedSkills"], "data.loadedSkills", 512, 256)?;
-    validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
-    validate_string_array(
-        &data["startupDiagnostics"],
-        "data.startupDiagnostics",
-        512,
-        4_096,
-    )?;
-    expect_integer_range(
-        &data["extensionRevision"],
-        "data.extensionRevision",
-        0,
-        u32::MAX as i64,
-    )?;
-    if let Some(project_id) = data.get("projectId") {
-        expect_bounded_string(project_id, "data.projectId", 256)?;
-    }
-    if let Some(registered) = data.get("registered") {
-        if !registered.is_boolean() {
-            return Err(ProtocolViolation::invalid(
-                "data.registered must be a boolean",
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn validate_result_data(method: &str, value: &Value) -> Result<(), ProtocolViolation> {
-    let data = expect_object(value, "data")?;
-    validate_safe_object(data, "data")?;
-    match method {
-        "workspace.select" => {
-            validate_exact_data_keys(data, &["rootPath", "projectId", "historyDirectory", "rulesText", "rulesFingerprint", "researchFingerprint", "status"])?;
-            expect_bounded_string(&data["rootPath"], "data.rootPath", 8_192)?;
-            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
-            expect_bounded_string(&data["historyDirectory"], "data.historyDirectory", 8_192)?;
-            expect_document_text(&data["rulesText"], "data.rulesText")?;
-            validate_fingerprint(&data["rulesFingerprint"], "data.rulesFingerprint")?;
-            if !data["researchFingerprint"].is_null() { validate_fingerprint(&data["researchFingerprint"], "data.researchFingerprint")?; }
-            validate_enum(&data["status"], "data.status", &["ready", "needs_configuration", "needs_initialization", "opened"])?;
-        }
-        "document.open" => {
-            validate_data_keys(data, &["path", "sourceText", "diskFingerprint", "rootPath", "editorRevision"],
-                &["path", "sourceText", "diskFingerprint"])?;
-            if let Some(value) = data.get("rootPath") { expect_bounded_string(value, "data.rootPath", 8_192)?; }
-            if let Some(value) = data.get("editorRevision") { expect_integer_range(value, "data.editorRevision", 0, MAX_SAFE_INTEGER)?; }
-            expect_bounded_string(&data["path"], "data.path", 8_192)?;
-            expect_document_text(&data["sourceText"], "data.sourceText")?;
-            validate_fingerprint(&data["diskFingerprint"], "data.diskFingerprint")?;
-        }
-        "document.save" | "document.apply" => validate_document_result(data)?,
-        "runtime.diagnostics" => {
-            const KEYS: &[&str] = &[
-                "backendState",
-                "platform",
-                "appRoot",
-                "workingDirectory",
-                "originalWorkingDirectory",
-                "pythonVersion",
-                "sysPrefix",
-                "condaEnvironment",
-                "condaPrefix",
-                "protocolVersion",
-                "backendVersion",
-                "openRouterConfigured",
-                "openAlexConfigured",
-                "storePath",
-                "citationOutputPath",
-                "ollamaReachable",
-                "ollamaModelAvailable",
-                "mcpEnabled",
-                "mcpFamilies",
-                "mcpDiagnostics",
-            ];
-            validate_exact_data_keys(data, KEYS)?;
-            let backend_state =
-                expect_non_empty_string(&data["backendState"], "data.backendState")?;
-            if !["starting", "ready", "shutting_down", "stopped", "crashed"]
-                .contains(&backend_state)
-            {
-                return Err(ProtocolViolation::invalid(
-                    "data.backendState contains an unknown enum value",
-                ));
-            }
-            if data["platform"] != "linux" {
-                return Err(ProtocolViolation::invalid(
-                    "data.platform contains an unknown enum value",
-                ));
-            }
-            for (field, max_bytes) in [
-                ("appRoot", 8_192),
-                ("workingDirectory", 8_192),
-                ("originalWorkingDirectory", 8_192),
-                ("pythonVersion", 256),
-                ("sysPrefix", 8_192),
-                ("backendVersion", 256),
-                ("storePath", 8_192),
-                ("citationOutputPath", 8_192),
-            ] {
-                expect_bounded_string(&data[field], &format!("data.{field}"), max_bytes)?;
-            }
-            validate_nullable_string(data, "condaEnvironment", 256)?;
-            validate_nullable_string(data, "condaPrefix", 8_192)?;
-            expect_integer_range(&data["protocolVersion"], "data.protocolVersion", 1, 1)?;
-            for field in ["openRouterConfigured", "openAlexConfigured", "mcpEnabled"] {
-                if !data[field].is_boolean() {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "data.{field} must be a boolean"
-                    )));
-                }
-            }
-            validate_nullable_boolean(data, "ollamaReachable")?;
-            validate_nullable_boolean(data, "ollamaModelAvailable")?;
-            validate_string_array(&data["mcpFamilies"], "data.mcpFamilies", 512, 256)?;
-            validate_string_array(&data["mcpDiagnostics"], "data.mcpDiagnostics", 512, 4_096)?;
-        }
-        "session.create" => validate_session_snapshot(data, false)?,
-        "session.select" => validate_session_snapshot(data, true)?,
-        "session.delete" => {
-            validate_exact_data_keys(data, &["projectId", "sessionId", "status"])?;
-            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
-            validate_enum(&data["status"], "data.status", &["deleted"])?;
-        }
-        "session.rename" => {
-            validate_data_keys(data, &["projectId", "sessionId", "title"], &["projectId", "sessionId", "title"])?;
-            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
-            expect_bounded_string(&data["title"], "data.title", 256)?;
-        }
-        "session.turn" => {
-            validate_data_keys(
-                data,
-                &[
-                    "sessionId",
-                    "turnId",
-                    "turnNumber",
-                    "state",
-                    "accepted",
-                    "persisted",
-                    "text",
-                    "validationErrors",
-                    "toolSummaries",
-                    "responseKind",
-                    "streamKind",
-                    "chunkCount",
-                    "registrationStatus",
-                    "registrationIssue",
-                    "extensionAction",
-                    "documentOperations",
-                ],
-                &[
-                    "sessionId",
-                    "turnId",
-                    "turnNumber",
-                    "state",
-                    "accepted",
-                    "persisted",
-                    "text",
-                    "validationErrors",
-                    "toolSummaries",
-                ],
-            )?;
-            validate_completed_turn_fields(data, "session.turn", None)?;
-            if let Some(value) = data.get("documentOperations") { validate_document_operations(value)?; }
-            validate_string_array(
-                &data["validationErrors"],
-                "data.validationErrors",
-                128,
-                4_096,
-            )?;
-            let summaries = data["toolSummaries"]
-                .as_array()
-                .ok_or_else(|| ProtocolViolation::invalid("data.toolSummaries must be an array"))?;
-            if summaries.len() > 512 {
-                return Err(ProtocolViolation::invalid(
-                    "data.toolSummaries contains too many items",
-                ));
-            }
-            for (index, summary) in summaries.iter().enumerate() {
-                let summary = expect_object(summary, &format!("data.toolSummaries[{index}]"))?;
-                validate_data_keys(
-                    summary,
-                    &["name", "status", "callId", "candidateId"],
-                    &["name", "status"],
-                )?;
-                expect_bounded_string(
-                    &summary["name"],
-                    &format!("data.toolSummaries[{index}].name"),
-                    256,
-                )?;
-                let status = expect_non_empty_string(
-                    &summary["status"],
-                    &format!("data.toolSummaries[{index}].status"),
-                )?;
-                if !["ok", "failed", "denied"].contains(&status) {
-                    return Err(ProtocolViolation::invalid(
-                        "data.toolSummaries status contains an unknown enum value",
-                    ));
-                }
-                for optional in ["callId", "candidateId"] {
-                    if let Some(value) = summary.get(optional) {
-                        expect_bounded_string(
-                            value,
-                            &format!("data.toolSummaries[{index}].{optional}"),
-                            256,
-                        )?;
-                    }
-                }
-            }
-            if let Some(value) = data.get("responseKind") {
-                validate_enum(value, "data.responseKind", &["answer", "command"])?;
-            }
-            if let Some(value) = data.get("streamKind") {
-                validate_enum(value, "data.streamKind", &["final_only"])?;
-            }
-            if let Some(value) = data.get("chunkCount") {
-                expect_integer_range(value, "data.chunkCount", 0, 0)?;
-            }
-            if let Some(value) = data.get("registrationStatus") {
-                validate_enum(
-                    value,
-                    "data.registrationStatus",
-                    &["registered", "pending", "not_required"],
-                )?;
-            }
-            if let Some(value) = data.get("registrationIssue") {
-                if !value.is_null() {
-                    expect_bounded_string(value, "data.registrationIssue", 4_096)?;
-                }
-            }
-            if let Some(value) = data.get("extensionAction") {
-                validate_enum(value, "data.extensionAction", &["status", "preview"])?;
-            }
-        }
-        "session.stop" => {
-            validate_exact_data_keys(data, &["sessionId", "turnId", "state", "accepted", "persisted"])?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
-            expect_turn_id(&data["turnId"], "data.turnId")?;
-            if !data["state"].is_null() {
-                validate_enum(&data["state"], "data.state", &["completed", "failed", "interrupted"])?;
-            }
-            let durable = !data["state"].is_null();
-            if data["accepted"] != Value::Bool(durable) || data["persisted"] != Value::Bool(durable) {
-                return Err(ProtocolViolation::invalid("session.stop lifecycle must match its durable state"));
-            }
-        }
-        "session.shutdown" | "runtime.shutdown" => {
-            validate_exact_data_keys(data, &["status"])?;
-            validate_enum(&data["status"], "data.status", &["stopped", "no_session"])?;
-        }
-        "project.list" => {
-            validate_exact_data_keys(
-                data,
-                &[
-                    "status",
-                    "issue",
-                    "projects",
-                    "selectedProjectId",
-                    "selectedSessionId",
-                ],
-            )?;
-            validate_enum(&data["status"], "data.status", &["ready", "unavailable"])?;
-            validate_nullable_string(data, "issue", 4_096)?;
-            validate_nullable_string(data, "selectedProjectId", 256)?;
-            validate_nullable_string(data, "selectedSessionId", 32)?;
-            let projects = data["projects"]
-                .as_array()
-                .ok_or_else(|| ProtocolViolation::invalid("data.projects must be an array"))?;
-            if projects.len() > 50 {
-                return Err(ProtocolViolation::invalid(
-                    "data.projects contains too many items",
-                ));
-            }
-            for (index, project) in projects.iter().enumerate() {
-                let project = expect_object(project, &format!("data.projects[{index}]"))?;
-                validate_exact_data_keys(project, &["projectId", "name", "sessionCount"])?;
-                expect_bounded_string(
-                    &project["projectId"],
-                    &format!("data.projects[{index}].projectId"),
-                    256,
-                )?;
-                expect_bounded_string(
-                    &project["name"],
-                    &format!("data.projects[{index}].name"),
-                    256,
-                )?;
-                expect_integer_range(
-                    &project["sessionCount"],
-                    &format!("data.projects[{index}].sessionCount"),
-                    0,
-                    u32::MAX as i64,
-                )?;
-            }
-        }
-        "session.list" => {
-            validate_exact_data_keys(
-                data,
-                &[
-                    "projectId",
-                    "status",
-                    "issue",
-                    "items",
-                    "total",
-                    "offset",
-                    "limit",
-                    "hasMore",
-                ],
-            )?;
-            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
-            validate_enum(&data["status"], "data.status", &["ready", "unavailable"])?;
-            validate_nullable_string(data, "issue", 4_096)?;
-            let items = data["items"]
-                .as_array()
-                .ok_or_else(|| ProtocolViolation::invalid("data.items must be an array"))?;
-            if items.len() > 50 {
-                return Err(ProtocolViolation::invalid(
-                    "data.items contains too many items",
-                ));
-            }
-            for (index, item) in items.iter().enumerate() {
-                let item = expect_object(item, &format!("data.items[{index}]"))?;
-                validate_exact_data_keys(
-                    item,
-                    &[
-                        "sessionId",
-                        "title",
-                        "turnCount",
-                        "createdAt",
-                        "updatedAt",
-                        "status",
-                        "issue",
-                    ],
-                )?;
-                expect_bounded_string(
-                    &item["sessionId"],
-                    &format!("data.items[{index}].sessionId"),
-                    32,
-                )?;
-                expect_bounded_string(&item["title"], &format!("data.items[{index}].title"), 256)?;
-                expect_integer_range(
-                    &item["turnCount"],
-                    &format!("data.items[{index}].turnCount"),
-                    0,
-                    u32::MAX as i64,
-                )?;
-                for field in ["createdAt", "updatedAt"] {
-                    if !item[field].is_null() {
-                        expect_bounded_string(
-                            &item[field],
-                            &format!("data.items[{index}].{field}"),
-                            64,
-                        )?;
-                    }
-                }
-                validate_enum(
-                    &item["status"],
-                    &format!("data.items[{index}].status"),
-                    &["ready", "degraded", "unavailable"],
-                )?;
-                if !item["issue"].is_null() {
-                    expect_bounded_string(
-                        &item["issue"],
-                        &format!("data.items[{index}].issue"),
-                        4_096,
-                    )?;
-                }
-            }
-            for field in ["total", "offset"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-            expect_integer_range(&data["limit"], "data.limit", 1, 50)?;
-            if !data["hasMore"].is_boolean() {
-                return Err(ProtocolViolation::invalid("data.hasMore must be a boolean"));
-            }
-        }
-        "session.retry_registration" => {
-            validate_exact_data_keys(data, &["projectId", "sessionId", "status", "issue"])?;
-            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
-            validate_enum(&data["status"], "data.status", &["registered", "pending"])?;
-            validate_nullable_string(data, "issue", 4_096)?;
-        }
-        "session.transcript" => {
-            validate_exact_data_keys(
-                data,
-                &[
-                    "projectId",
-                    "sessionId",
-                    "status",
-                    "issue",
-                    "items",
-                    "total",
-                    "offset",
-                    "limit",
-                    "hasMore",
-                ],
-            )?;
-            expect_bounded_string(&data["projectId"], "data.projectId", 256)?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 32)?;
-            validate_enum(
-                &data["status"],
-                "data.status",
-                &["ready", "degraded", "unavailable"],
-            )?;
-            validate_nullable_string(data, "issue", 4_096)?;
-            let items = data["items"]
-                .as_array()
-                .ok_or_else(|| ProtocolViolation::invalid("data.items must be an array"))?;
-            if items.len() > 20 {
-                return Err(ProtocolViolation::invalid(
-                    "data.items contains too many items",
-                ));
-            }
-            for (index, item) in items.iter().enumerate() {
-                let item = expect_object(item, &format!("data.items[{index}]"))?;
-                validate_data_keys(
-                    item,
-                    &["turnId", "turnNumber", "kind", "state", "timestamp", "userText", "assistantText",
-                      "failureCode", "failureMessage", "failureRetryable", "toolActivities", "submittedContext"],
-                    &[
-                        "turnId",
-                        "turnNumber",
-                        "kind",
-                        "state",
-                        "timestamp",
-                        "userText",
-                        "assistantText",
-                        "failureCode",
-                        "failureMessage",
-                        "failureRetryable",
-                        "toolActivities",
-                    ],
-                )?;
-                if let Some(context) = item.get("submittedContext").filter(|value| !value.is_null()) {
-                    validate_submitted_context(context)?;
-                    if context["projectId"] != data["projectId"] {
-                        return Err(ProtocolViolation::invalid("transcript submittedContext belongs to another project"));
-                    }
-                    validate_submission_input(&item["userText"], context)?;
-                }
-                expect_turn_id(&item["turnId"], &format!("data.items[{index}].turnId"))?;
-                expect_integer_range(
-                    &item["turnNumber"],
-                    &format!("data.items[{index}].turnNumber"),
-                    1,
-                    u32::MAX as i64,
-                )?;
-                validate_enum(
-                    &item["kind"],
-                    &format!("data.items[{index}].kind"),
-                    &["conversational", "display-only"],
-                )?;
-                validate_enum(
-                    &item["state"],
-                    &format!("data.items[{index}].state"),
-                    &["pending", "completed", "failed", "interrupted"],
-                )?;
-                let timestamp = expect_bounded_string(
-                    &item["timestamp"],
-                    &format!("data.items[{index}].timestamp"),
-                    64,
-                )?;
-                if !is_utc_timestamp(timestamp) {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "data.items[{index}].timestamp must be a UTC ISO 8601 timestamp"
-                    )));
-                }
-                expect_non_empty_string(
-                    &item["userText"],
-                    &format!("data.items[{index}].userText"),
-                )?;
-                if !item["assistantText"].is_null() {
-                    expect_non_empty_string(
-                        &item["assistantText"],
-                        &format!("data.items[{index}].assistantText"),
-                    )?;
-                }
-                if !item["failureMessage"].is_null() {
-                    expect_bounded_string(
-                        &item["failureMessage"],
-                        &format!("data.items[{index}].failureMessage"),
-                        4_096,
-                    )?;
-                }
-                if !item["failureCode"].is_null() {
-                    validate_enum(
-                        &item["failureCode"],
-                        &format!("data.items[{index}].failureCode"),
-                        &[
-                            "execution_failed",
-                            "persistence_failed",
-                            "interrupted",
-                            "cancelled",
-                        ],
-                    )?;
-                }
-                if !item["failureRetryable"].is_null() && !item["failureRetryable"].is_boolean() {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "data.items[{index}].failureRetryable must be a boolean or null"
-                    )));
-                }
-                let activities = item["toolActivities"].as_array().ok_or_else(|| {
-                    ProtocolViolation::invalid(format!(
-                        "data.items[{index}].toolActivities must be an array"
-                    ))
-                })?;
-                if activities.len() > 128 {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "data.items[{index}].toolActivities contains too many items"
-                    )));
-                }
-                for (activity_index, activity) in activities.iter().enumerate() {
-                    let field = format!(
-                        "data.items[{index}].toolActivities[{activity_index}]"
-                    );
-                    let activity = expect_object(activity, &field)?;
-                    validate_exact_data_keys(
-                        activity,
-                        &[
-                            "callId",
-                            "name",
-                            "arguments",
-                            "result",
-                            "status",
-                            "promptEligible",
-                        ],
-                    )?;
-                    if !activity["callId"].is_null() {
-                        expect_bounded_string(
-                            &activity["callId"],
-                            &format!("{field}.callId"),
-                            256,
-                        )?;
-                    }
-                    for (name, max_bytes) in [
-                        ("name", 256),
-                        ("arguments", 32_768),
-                        ("result", 65_536),
-                    ] {
-                        expect_bounded_string(
-                            &activity[name],
-                            &format!("{field}.{name}"),
-                            max_bytes,
-                        )?;
-                    }
-                    validate_enum(
-                        &activity["status"],
-                        &format!("{field}.status"),
-                        &["ok", "failed", "denied", "incomplete"],
-                    )?;
-                    if !activity["promptEligible"].is_boolean() {
-                        return Err(ProtocolViolation::invalid(format!(
-                            "{field}.promptEligible must be a boolean"
-                        )));
-                    }
-                }
-
-                let state = item["state"].as_str().expect("validated state");
-                let assistant_is_null = item["assistantText"].is_null();
-                let failures = [
-                    &item["failureCode"],
-                    &item["failureMessage"],
-                    &item["failureRetryable"],
-                ];
-                match state {
-                    "completed" => {
-                        if assistant_is_null || failures.iter().any(|value| !value.is_null()) {
-                            return Err(ProtocolViolation::invalid(
-                                "completed transcript turn has invalid lifecycle fields",
-                            ));
-                        }
-                    }
-                    "pending" => {
-                        if !assistant_is_null
-                            || failures.iter().any(|value| !value.is_null())
-                            || !activities.is_empty()
-                        {
-                            return Err(ProtocolViolation::invalid(
-                                "pending transcript turn has invalid lifecycle fields",
-                            ));
-                        }
-                    }
-                    "failed" | "interrupted" => {
-                        if !assistant_is_null
-                            || failures.iter().any(|value| value.is_null())
-                            || !activities.is_empty()
-                        {
-                            return Err(ProtocolViolation::invalid(format!(
-                                "{state} transcript turn has invalid lifecycle fields"
-                            )));
-                        }
-                        let failure_code = item["failureCode"]
-                            .as_str()
-                            .expect("validated failure code");
-                        let valid_code = if state == "failed" {
-                            matches!(failure_code, "execution_failed" | "persistence_failed")
-                        } else {
-                            matches!(failure_code, "interrupted" | "cancelled")
-                        };
-                        if !valid_code {
-                            return Err(ProtocolViolation::invalid(format!(
-                                "{state} transcript turn has an invalid failure code"
-                            )));
-                        }
-                    }
-                    _ => unreachable!("validated transcript state"),
-                }
-            }
-            for field in ["total", "offset"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-            expect_integer_range(&data["limit"], "data.limit", 1, 20)?;
-            if !data["hasMore"].is_boolean() {
-                return Err(ProtocolViolation::invalid("data.hasMore must be a boolean"));
-            }
-        }
-        "extensions.status" => {
-            const KEYS: &[&str] = &[
-                "dropinRoot",
-                "stateRoot",
-                "desiredCount",
-                "appliedCount",
-                "appliedRevision",
-                "runningRevision",
-                "restartRequired",
-                "managerAvailable",
-                "managerError",
-                "diagnostics",
-                "runningMcpFamilies",
-            ];
-            validate_exact_data_keys(data, KEYS)?;
-            expect_bounded_string(&data["dropinRoot"], "data.dropinRoot", 8_192)?;
-            expect_bounded_string(&data["stateRoot"], "data.stateRoot", 8_192)?;
-            for field in [
-                "desiredCount",
-                "appliedCount",
-                "appliedRevision",
-                "runningRevision",
-            ] {
-                expect_integer_range(
-                    &data[field],
-                    &format!("data.{field}"),
-                    0,
-                    u32::MAX as i64,
-                )?;
-            }
-            for field in ["restartRequired", "managerAvailable"] {
-                if !data[field].is_boolean() {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "data.{field} must be a boolean"
-                    )));
-                }
-            }
-            validate_nullable_string(data, "managerError", 4_096)?;
-            validate_string_array(&data["diagnostics"], "data.diagnostics", 128, 4_096)?;
-            validate_string_array(
-                &data["runningMcpFamilies"],
-                "data.runningMcpFamilies",
-                512,
-                256,
-            )?;
-        }
-        "extensions.preview" => {
-            validate_exact_data_keys(
-                data,
-                &["previewId", "summary", "proposedSkills", "bindings"],
-            )?;
-            expect_bounded_string(&data["previewId"], "data.previewId", 256)?;
-            expect_bounded_string(&data["summary"], "data.summary", 4_096)?;
-            validate_string_array(&data["proposedSkills"], "data.proposedSkills", 512, 256)?;
-            let bindings = data["bindings"]
-                .as_array()
-                .ok_or_else(|| ProtocolViolation::invalid("data.bindings must be an array"))?;
-            if bindings.len() > 512 {
-                return Err(ProtocolViolation::invalid(
-                    "data.bindings contains too many items",
-                ));
-            }
-            for (index, binding) in bindings.iter().enumerate() {
-                let binding = expect_object(binding, &format!("data.bindings[{index}]"))?;
-                validate_exact_data_keys(
-                    binding,
-                    &[
-                        "name",
-                        "server",
-                        "bindingHash",
-                        "requiresApproval",
-                        "command",
-                        "arguments",
-                        "workingDirectory",
-                        "environmentNames",
-                    ],
-                )?;
-                for field in ["name", "server", "bindingHash"] {
-                    expect_bounded_string(
-                        &binding[field],
-                        &format!("data.bindings[{index}].{field}"),
-                        256,
-                    )?;
-                }
-                if !binding["requiresApproval"].is_boolean() {
-                    return Err(ProtocolViolation::invalid(
-                        "data.bindings requiresApproval must be a boolean",
-                    ));
-                }
-                expect_bounded_string(
-                    &binding["command"],
-                    &format!("data.bindings[{index}].command"),
-                    8_192,
-                )?;
-                expect_bounded_string(
-                    &binding["workingDirectory"],
-                    &format!("data.bindings[{index}].workingDirectory"),
-                    8_192,
-                )?;
-                validate_string_array(
-                    &binding["arguments"],
-                    &format!("data.bindings[{index}].arguments"),
-                    128,
-                    4_096,
-                )?;
-                validate_string_array(
-                    &binding["environmentNames"],
-                    &format!("data.bindings[{index}].environmentNames"),
-                    128,
-                    256,
-                )?;
-            }
-        }
-        "extensions.apply" => {
-            validate_exact_data_keys(
-                data,
-                &[
-                    "sessionId",
-                    "turnId",
-                    "turnNumber",
-                    "state",
-                    "accepted",
-                    "persisted",
-                    "displayInput",
-                    "text",
-                    "previousRevision",
-                    "appliedRevision",
-                    "restartRequired",
-                    "items",
-                    "diagnostics",
-                ],
-            )?;
-            validate_completed_turn_fields(data, "extensions.apply", Some(65_536))?;
-            expect_bounded_string(&data["displayInput"], "data.displayInput", 256)?;
-            for field in ["previousRevision", "appliedRevision"] {
-                expect_integer_range(&data[field], &format!("data.{field}"), 0, u32::MAX as i64)?;
-            }
-            if !data["restartRequired"].is_boolean() {
-                return Err(ProtocolViolation::invalid(
-                    "data.restartRequired must be a boolean",
-                ));
-            }
-            let items = data["items"]
-                .as_array()
-                .ok_or_else(|| ProtocolViolation::invalid("data.items must be an array"))?;
-            if items.len() > 512 {
-                return Err(ProtocolViolation::invalid(
-                    "data.items contains too many items",
-                ));
-            }
-            for (index, item) in items.iter().enumerate() {
-                let item = expect_object(item, &format!("data.items[{index}]"))?;
-                validate_exact_data_keys(item, &["key", "outcome", "detail"])?;
-                expect_bounded_string(
-                    &item["key"],
-                    &format!("data.items[{index}].key"),
-                    256,
-                )?;
-                validate_enum(
-                    &item["outcome"],
-                    &format!("data.items[{index}].outcome"),
-                    &[
-                        "added",
-                        "updated",
-                        "removed",
-                        "unchanged",
-                        "blocked",
-                        "pending_approval",
-                    ],
-                )?;
-                expect_bounded_string(
-                    &item["detail"],
-                    &format!("data.items[{index}].detail"),
-                    4_096,
-                )?;
-            }
-            validate_string_array(&data["diagnostics"], "data.diagnostics", 128, 4_096)?;
-        }
-        "approval.resolve" => {
-            validate_exact_data_keys(data, &["approvalId", "approved"])?;
-            expect_bounded_string(&data["approvalId"], "data.approvalId", 256)?;
-            if !data["approved"].is_boolean() {
-                return Err(ProtocolViolation::invalid(
-                    "data.approved must be a boolean",
-                ));
-            }
-        }
-        "session.set_bash_permission" => {
-            validate_exact_data_keys(data, &["sessionId", "bashPermissionMode"])?;
-            expect_bounded_string(&data["sessionId"], "data.sessionId", 256)?;
-            validate_enum(
-                &data["bashPermissionMode"],
-                "data.bashPermissionMode",
-                &["ask", "bypass"],
-            )?;
-        }
-        "bibliography.inspect"
-        | "bibliography.render"
-        | "bibliography.set_style"
-        | "bibliography.remove"
-        | "bibliography.add"
-        | "bibliography.export" => validate_bibliography_result(method, data)?,
-        _ => {}
-    }
-    Ok(())
-}
-
-fn expect_text(value: &Value, field: &str, max_bytes: usize) -> Result<(), ProtocolViolation> {
-    let text = value
-        .as_str()
-        .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be a string")))?;
-    if text.len() > max_bytes {
-        return Err(ProtocolViolation::invalid(format!("{field} is too large")));
-    }
-    Ok(())
-}
-
-fn expect_object_array<'a>(
-    value: &'a Value,
-    field: &str,
-    max_items: usize,
-) -> Result<Vec<&'a Map<String, Value>>, ProtocolViolation> {
-    let items = value
-        .as_array()
-        .ok_or_else(|| ProtocolViolation::invalid(format!("{field} must be an array")))?;
-    if items.len() > max_items {
-        return Err(ProtocolViolation::invalid(format!("{field} contains too many items")));
-    }
-    items
-        .iter()
-        .enumerate()
-        .map(|(index, item)| expect_object(item, &format!("{field}[{index}]")))
-        .collect()
-}
-
-fn validate_nullable_fingerprint(data: &Map<String, Value>, field: &str) -> Result<(), ProtocolViolation> {
-    if !data[field].is_null() {
-        validate_fingerprint(&data[field], &format!("data.{field}"))?;
-    }
-    Ok(())
-}
-
-/// Result shapes for the bibliography.* methods (contract.json resultDataSchemas).
-fn validate_bibliography_result(method: &str, data: &Map<String, Value>) -> Result<(), ProtocolViolation> {
-    const KEY_ITEMS: usize = 100_000;
-    match method {
-        "bibliography.inspect" => {
-            validate_exact_data_keys(data, &[
-                "libraryPath", "libraryStatus", "libraryFingerprint", "libraryErrorCode", "libraryError",
-                "styleId", "styleConfigured", "styles", "documentFormat", "entries", "uses", "order",
-                "missing", "uncited", "duplicateDois",
-            ])?;
-            expect_bounded_string(&data["libraryPath"], "data.libraryPath", 8_192)?;
-            validate_enum(&data["libraryStatus"], "data.libraryStatus", &["ok", "missing", "error"])?;
-            validate_nullable_fingerprint(data, "libraryFingerprint")?;
-            validate_nullable_string(data, "libraryErrorCode", 64)?;
-            validate_nullable_string(data, "libraryError", 4_096)?;
-            expect_bounded_string(&data["styleId"], "data.styleId", 128)?;
-            if !data["styleConfigured"].is_boolean() {
-                return Err(ProtocolViolation::invalid("data.styleConfigured must be a boolean"));
-            }
-            for (index, style) in expect_object_array(&data["styles"], "data.styles", 64)?.into_iter().enumerate() {
-                let field = format!("data.styles[{index}]");
-                validate_exact_data_keys(style, &["id", "name", "kind", "origin"])?;
-                expect_bounded_string(&style["id"], &format!("{field}.id"), 128)?;
-                expect_bounded_string(&style["name"], &format!("{field}.name"), 256)?;
-                validate_enum(&style["kind"], &format!("{field}.kind"), &["author-date", "author", "numeric"])?;
-                validate_enum(&style["origin"], &format!("{field}.origin"), &["csl-styles", "custom"])?;
-            }
-            if !data["documentFormat"].is_null() {
-                expect_bounded_string(&data["documentFormat"], "data.documentFormat", 16)?;
-                validate_enum(&data["documentFormat"], "data.documentFormat", &["markdown", "latex"])?;
-            }
-            for (index, entry) in expect_object_array(&data["entries"], "data.entries", 10_000)?.into_iter().enumerate() {
-                let field = format!("data.entries[{index}]");
-                validate_exact_data_keys(entry, &["key", "authors", "year", "title", "doi", "type", "citedCount"])?;
-                expect_bounded_string(&entry["key"], &format!("{field}.key"), 512)?;
-                validate_string_array(&entry["authors"], &format!("{field}.authors"), 1_000, 1_024)?;
-                validate_nullable_string(entry, "year", 16)?;
-                expect_text(&entry["title"], &format!("{field}.title"), 8_192)?;
-                validate_nullable_string(entry, "doi", 1_024)?;
-                expect_text(&entry["type"], &format!("{field}.type"), 64)?;
-                expect_integer_range(&entry["citedCount"], &format!("{field}.citedCount"), 0, 1_000_000)?;
-            }
-            for (index, used) in expect_object_array(&data["uses"], "data.uses", 100_000)?.into_iter().enumerate() {
-                let field = format!("data.uses[{index}]");
-                validate_exact_data_keys(used, &["key", "start", "end", "line", "group", "known"])?;
-                expect_bounded_string(&used["key"], &format!("{field}.key"), 512)?;
-                for name in ["start", "end", "group"] {
-                    expect_integer_range(&used[name], &format!("{field}.{name}"), 0, MAX_SAFE_INTEGER)?;
-                }
-                expect_integer_range(&used["line"], &format!("{field}.line"), 1, MAX_SAFE_INTEGER)?;
-                validate_nullable_boolean(used, "known")?;
-            }
-            for name in ["order", "missing", "uncited"] {
-                validate_string_array(&data[name], &format!("data.{name}"), KEY_ITEMS, 512)?;
-            }
-            for (index, group) in expect_object_array(&data["duplicateDois"], "data.duplicateDois", 10_000)?.into_iter().enumerate() {
-                let field = format!("data.duplicateDois[{index}]");
-                validate_exact_data_keys(group, &["doi", "keys"])?;
-                expect_bounded_string(&group["doi"], &format!("{field}.doi"), 1_024)?;
-                validate_string_array(&group["keys"], &format!("{field}.keys"), 1_000, 512)?;
-            }
-        }
-        "bibliography.render" => {
-            validate_exact_data_keys(data, &["styleId", "citations", "entries", "segments", "missing"])?;
-            expect_bounded_string(&data["styleId"], "data.styleId", 128)?;
-            for (index, citation) in expect_object_array(&data["citations"], "data.citations", 100_000)?.into_iter().enumerate() {
-                let field = format!("data.citations[{index}]");
-                validate_data_keys(citation, &["index", "keys", "start", "end", "text"], &["index", "keys", "text"])?;
-                expect_integer_range(&citation["index"], &format!("{field}.index"), 0, MAX_SAFE_INTEGER)?;
-                validate_string_array(&citation["keys"], &format!("{field}.keys"), 1_000, 512)?;
-                for name in ["start", "end"] {
-                    if let Some(value) = citation.get(name) {
-                        expect_integer_range(value, &format!("{field}.{name}"), 0, MAX_SAFE_INTEGER)?;
-                    }
-                }
-                expect_text(&citation["text"], &format!("{field}.text"), 65_536)?;
-            }
-            for (index, entry) in expect_object_array(&data["entries"], "data.entries", 10_000)?.into_iter().enumerate() {
-                let field = format!("data.entries[{index}]");
-                validate_exact_data_keys(entry, &["key", "text"])?;
-                expect_bounded_string(&entry["key"], &format!("{field}.key"), 512)?;
-                expect_text(&entry["text"], &format!("{field}.text"), 65_536)?;
-            }
-            for (index, segment) in expect_object_array(&data["segments"], "data.segments", 1_000_000)?.into_iter().enumerate() {
-                let field = format!("data.segments[{index}]");
-                validate_exact_data_keys(segment, &["entry", "text", "italic", "bold", "url"])?;
-                expect_integer_range(&segment["entry"], &format!("{field}.entry"), 0, MAX_SAFE_INTEGER)?;
-                expect_bounded_string(&segment["text"], &format!("{field}.text"), 65_536)?;
-                for name in ["italic", "bold"] {
-                    if !segment[name].is_boolean() {
-                        return Err(ProtocolViolation::invalid(format!("{field}.{name} must be a boolean")));
-                    }
-                }
-                validate_nullable_string(segment, "url", 8_192)?;
-            }
-            validate_string_array(&data["missing"], "data.missing", KEY_ITEMS, 512)?;
-        }
-        "bibliography.set_style" => {
-            validate_exact_data_keys(data, &["styleId", "researchFingerprint"])?;
-            expect_bounded_string(&data["styleId"], "data.styleId", 128)?;
-            validate_fingerprint(&data["researchFingerprint"], "data.researchFingerprint")?;
-        }
-        "bibliography.remove" => {
-            validate_exact_data_keys(data, &["key", "libraryFingerprint"])?;
-            expect_bounded_string(&data["key"], "data.key", 512)?;
-            validate_fingerprint(&data["libraryFingerprint"], "data.libraryFingerprint")?;
-        }
-        "bibliography.add" => {
-            validate_exact_data_keys(data, &["status", "key", "reasonCode", "libraryFingerprint"])?;
-            validate_enum(&data["status"], "data.status", &["added", "existing", "failed"])?;
-            validate_nullable_string(data, "key", 512)?;
-            validate_nullable_string(data, "reasonCode", 128)?;
-            validate_nullable_fingerprint(data, "libraryFingerprint")?;
-        }
-        "bibliography.export" => {
-            validate_data_keys(data, &["format", "path", "audit"], &["format", "path"])?;
-            validate_enum(&data["format"], "data.format", &["docx", "bime_docx", "markdown"])?;
-            expect_bounded_string(&data["path"], "data.path", 8_192)?;
-            if (data["format"] == "bime_docx") != data.contains_key("audit") {
-                return Err(ProtocolViolation::invalid("bibliography.export returns audit exactly for bime_docx"));
-            }
-            if let Some(audit) = data.get("audit") {
-                let audit = expect_object(audit, "data.audit")?;
-                validate_exact_data_keys(audit, &["errors", "warnings", "manualChecks", "reportPath", "layoutVerified"])?;
-                for field in ["errors", "warnings", "manualChecks"] {
-                    expect_integer_range(&audit[field], &format!("data.audit.{field}"), 0, 1_000_000)?;
-                }
-                expect_bounded_string(&audit["reportPath"], "data.audit.reportPath", 8_192)?;
-                if !audit["layoutVerified"].is_boolean() {
-                    return Err(ProtocolViolation::invalid("data.audit.layoutVerified must be a boolean"));
-                }
+                validate_safe_data(item, &format!("{field}.{key}"))?;
             }
         }
         _ => {}
@@ -2477,12 +293,10 @@ pub fn validate_process_event_origin(
     event: &str,
     origin: ProtocolOrigin,
 ) -> Result<(), ProtocolViolation> {
-    let allowed = match event {
-        "backend.ready" => origin == ProtocolOrigin::Python,
-        "backend.crashed" => origin == ProtocolOrigin::Rust,
-        "backend.shutting_down" | "backend.protocol_error" => true,
-        _ => false,
-    };
+    let allowed = framework()
+        .process_event_origins
+        .get(event)
+        .is_some_and(|origins| origins.iter().any(|name| name == origin.contract_name()));
     if !allowed {
         return Err(ProtocolViolation::invalid(format!(
             "{event} cannot originate from {origin:?}"
@@ -2491,37 +305,11 @@ pub fn validate_process_event_origin(
     Ok(())
 }
 
-pub fn parse_protocol_line(line: &str) -> Result<ProtocolMessage, ProtocolViolation> {
-    if line.len() > MAX_PROTOCOL_LINE_BYTES {
-        return Err(ProtocolViolation::invalid(
-            "Protocol line exceeds the 2 MiB limit",
-        ));
-    }
-    let value: Value = serde_json::from_str(line)
-        .map_err(|_| ProtocolViolation::invalid("Protocol line is not valid JSON"))?;
-    parse_protocol_value(value)
-}
-
-pub fn parse_protocol_line_from_origin(
-    line: &str,
-    origin: ProtocolOrigin,
-) -> Result<ProtocolMessage, ProtocolViolation> {
-    let message = parse_protocol_line(line)?;
-    validate_message_origin(message, origin)
-}
-
 pub fn parse_protocol_value_from_origin(
     value: Value,
     origin: ProtocolOrigin,
 ) -> Result<ProtocolMessage, ProtocolViolation> {
     let message = parse_protocol_value(value)?;
-    validate_message_origin(message, origin)
-}
-
-fn validate_message_origin(
-    message: ProtocolMessage,
-    origin: ProtocolOrigin,
-) -> Result<ProtocolMessage, ProtocolViolation> {
     if let ProtocolMessage::Event(event) = &message {
         if event.request_id.is_none() {
             validate_process_event_origin(&event.event, origin)?;
@@ -2540,7 +328,7 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
             "protocolVersion must be a number",
         ));
     }
-    if version.as_f64() != Some(PROTOCOL_VERSION as f64) {
+    if version.as_f64() != Some(framework().protocol_version as f64) {
         return Err(ProtocolViolation::unsupported(version));
     }
     let message_type = expect_non_empty_string(
@@ -2556,8 +344,12 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
             let request: RequestEnvelope = serde_json::from_value(value)
                 .map_err(|error| ProtocolViolation::invalid(error.to_string()))?;
             validate_request_id(&request.request_id)?;
-            let params = expect_object(&request.params, "params")?;
-            validate_params(&request.method, params)?;
+            if request.method.is_empty() {
+                return Err(ProtocolViolation::invalid(
+                    "method must be a non-empty string",
+                ));
+            }
+            expect_object(&request.params, "params")?;
             Ok(ProtocolMessage::Request(request))
         }
         "event" => {
@@ -2575,7 +367,10 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
             }
             let event: EventEnvelope = serde_json::from_value(value)
                 .map_err(|error| ProtocolViolation::invalid(error.to_string()))?;
-            let data = expect_object(&event.data, "data")?;
+            if event.event.is_empty() {
+                return Err(ProtocolViolation::invalid("event must be a non-empty string"));
+            }
+            expect_object(&event.data, "data")?;
             if has_request_id {
                 let request_id = event.request_id.as_ref().ok_or_else(|| {
                     ProtocolViolation::invalid("requestId must be a non-empty string")
@@ -2589,22 +384,13 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
                         "Request event sequence must fit in a positive u32",
                     ));
                 }
-                if !REQUEST_EVENTS.contains(&event.event.as_str()) {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Unknown request event: {}",
-                        event.event
-                    )));
-                }
-                validate_event_data(&event.event, request_id, data)?;
-            } else {
-                if !PROCESS_EVENTS.contains(&event.event.as_str()) {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Unknown process event: {}",
-                        event.event
-                    )));
-                }
-                validate_safe_data(&event.data, "data")?;
+            } else if !framework().process_events.contains(&event.event) {
+                return Err(ProtocolViolation::invalid(format!(
+                    "Unknown process event: {}",
+                    event.event
+                )));
             }
+            validate_safe_data(&event.data, "data")?;
             Ok(ProtocolMessage::Event(event))
         }
         "result" => {
@@ -2627,57 +413,25 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
             let result: ResultEnvelope = serde_json::from_value(value)
                 .map_err(|error| ProtocolViolation::invalid(error.to_string()))?;
             validate_request_id(&result.request_id)?;
-            if result.ok {
-                if result.error.is_some() {
-                    return Err(ProtocolViolation::invalid(
-                        "Successful results cannot contain error",
-                    ));
-                }
-                let data = result
-                    .data
-                    .as_ref()
-                    .ok_or_else(|| ProtocolViolation::invalid("data is required"))?;
-                expect_object(
-                    result
-                        .data
-                        .as_ref()
-                        .ok_or_else(|| ProtocolViolation::invalid("data is required"))?,
-                    "data",
-                )?;
+            if let Some(data) = result.data.as_ref() {
+                expect_object(data, "data")?;
                 validate_safe_data(data, "data")?;
-            } else {
-                if result.data.is_some() {
+            }
+            if let Some(error) = result.error.as_ref() {
+                if error.code.is_empty() {
                     return Err(ProtocolViolation::invalid(
-                        "Failed results cannot contain data",
+                        "error.code must be a non-empty string",
                     ));
                 }
-                let error = result
-                    .error
-                    .as_ref()
-                    .ok_or_else(|| ProtocolViolation::invalid("error is required"))?;
-                if !PROTOCOL_ERROR_CODES.contains(&error.code.as_str()) {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Unknown error code: {}",
-                        error.code
-                    )));
-                }
-                if error.message.is_empty() || error.message.len() > MAX_ERROR_MESSAGE_BYTES {
+                if error.message.is_empty()
+                    || error.message.len() > framework().error_message_max_bytes
+                {
                     return Err(ProtocolViolation::invalid(
                         "error.message has an invalid size",
                     ));
                 }
-                let details = expect_object(&error.details, "error.details")?;
+                expect_object(&error.details, "error.details")?;
                 validate_safe_data(&error.details, "error.details")?;
-                if TURN_ERROR_DETAIL_KEYS
-                    .iter()
-                    .any(|key| details.contains_key(*key))
-                {
-                    validate_turn_error_details(details)?;
-                } else if error.code == "INTERNAL_ERROR" && !details.is_empty() {
-                    return Err(ProtocolViolation::invalid(
-                        "INTERNAL_ERROR details must be empty",
-                    ));
-                }
             }
             Ok(ProtocolMessage::Result(result))
         }
@@ -2687,840 +441,43 @@ pub fn parse_protocol_value(value: Value) -> Result<ProtocolMessage, ProtocolVio
     }
 }
 
-#[derive(Debug, Default)]
-pub struct ProtocolTraceValidator {
-    requests: HashMap<String, RequestTraceState>,
-}
-
-#[derive(Debug)]
-struct RequestTraceState {
-    next_sequence: u64,
-    terminal: bool,
-    method: String,
-    turn_id: Option<String>,
-    session_id: Option<String>,
-}
-
-impl ProtocolTraceValidator {
-    pub fn accept(&mut self, message: &ProtocolMessage) -> Result<(), ProtocolViolation> {
-        match message {
-            ProtocolMessage::Request(request) => {
-                if self.requests.contains_key(&request.request_id) {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Duplicate requestId: {}",
-                        request.request_id
-                    )));
-                }
-                let turn_id = if is_durable_turn_method(&request.method) || request.method == "session.stop" {
-                    request
-                        .params
-                        .get("turnId")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                } else {
-                    None
-                };
-                self.requests.insert(
-                    request.request_id.clone(),
-                    RequestTraceState {
-                        next_sequence: 1,
-                        terminal: false,
-                        method: request.method.clone(),
-                        turn_id,
-                        session_id: if request.method == "session.stop" {
-                            request.params.get("sessionId").and_then(Value::as_str).map(str::to_owned)
-                        } else { None },
-                    },
-                );
-            }
-            ProtocolMessage::Event(event) => {
-                let Some(request_id) = &event.request_id else {
-                    return Ok(());
-                };
-                let state = self.requests.get_mut(request_id).ok_or_else(|| {
-                    ProtocolViolation::invalid(format!(
-                        "Event references unknown requestId: {request_id}"
-                    ))
-                })?;
-                if state.terminal {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Event arrived after terminal result: {request_id}"
-                    )));
-                }
-                let sequence = event.sequence.expect("validated request event sequence");
-                if sequence != state.next_sequence {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Expected sequence {}, received {sequence}",
-                        state.next_sequence
-                    )));
-                }
-                if matches!(event.event.as_str(), "document.proposed" | "turn.accepted") && (state.method != "session.turn"
-                    || event.data.get("turnId").and_then(Value::as_str) != state.turn_id.as_deref()) {
-                    return Err(ProtocolViolation::invalid(format!("{} must match the active session.turn", event.event)));
-                }
-                state.next_sequence += 1;
-            }
-            ProtocolMessage::Result(result) => {
-                let state = self.requests.get_mut(&result.request_id).ok_or_else(|| {
-                    ProtocolViolation::invalid(format!(
-                        "Result references unknown requestId: {}",
-                        result.request_id
-                    ))
-                })?;
-                if state.terminal {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "Duplicate terminal result: {}",
-                        result.request_id
-                    )));
-                }
-                if result.ok {
-                    validate_result_data(
-                        &state.method,
-                        result.data.as_ref().expect("validated success result data"),
-                    )?;
-                    if let Some(expected_turn_id) = state.turn_id.as_deref() {
-                        let actual_turn_id = result
-                            .data
-                            .as_ref()
-                            .and_then(|data| data.get("turnId"))
-                            .and_then(Value::as_str);
-                        if actual_turn_id != Some(expected_turn_id) {
-                            return Err(ProtocolViolation::invalid(
-                                "data.turnId must match params.turnId",
-                            ));
-                        }
-                    }
-                    if state.method == "session.stop" && result.data.as_ref()
-                        .and_then(|data| data.get("sessionId")).and_then(Value::as_str) != state.session_id.as_deref() {
-                        return Err(ProtocolViolation::invalid("data.sessionId must match params.sessionId"));
-                    }
-                } else if is_durable_turn_method(&state.method) {
-                    let details = result
-                        .error
-                        .as_ref()
-                        .and_then(|error| error.details.as_object())
-                        .ok_or_else(|| {
-                            ProtocolViolation::invalid(format!(
-                                "{} failure requires lifecycle details",
-                                state.method
-                            ))
-                        })?;
-                    validate_turn_error_details(details)?;
-                    let actual_turn_id = details.get("turnId").and_then(Value::as_str);
-                    if actual_turn_id != state.turn_id.as_deref() {
-                        return Err(ProtocolViolation::invalid(
-                            "error.details.turnId must match params.turnId",
-                        ));
-                    }
-                }
-                state.terminal = true;
-            }
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    const CONTRACT: &str = include_str!("../../protocol/v1/contract.json");
     const FIXTURES: &str = include_str!("../../protocol/v1/fixtures.json");
+    const REQUEST_ID: &str = "123e4567-e89b-42d3-a456-426614174000";
 
-    fn expected_error(case: &Map<String, Value>) -> &str {
-        case["errorCode"]
-            .as_str()
-            .expect("invalid fixture errorCode")
-    }
-
-    fn sample_field_value(rule: &Value, request_id: &str) -> Value {
-        match rule["type"].as_str().expect("field type") {
-            "string" if rule["pattern"].is_string() => Value::String("0".repeat(64)),
-            "string" => rule["enum"]
-                .as_array()
-                .and_then(|values| values.first())
-                .cloned()
-                .unwrap_or_else(|| Value::String("x".to_owned())),
-            "boolean" => Value::Bool(false),
-            "nullableString" | "nullableBoolean" | "nullableSubmittedContext" => Value::Null,
-            "submittedContext" => serde_json::json!({
-                "projectId": "p1", "rootPath": "/tmp/project",
-                "permissionMode": "ask", "requestedThinkingMode": "normal",
-                "skillReferences": [], "references": [],
-                "projectRules": {"text": "", "fingerprint": "0".repeat(64)},
-            }),
-            "integer" => Value::from(rule["minimum"].as_i64().unwrap_or(0)),
-            "stringArray" => Value::Array(Vec::new()),
-            "object" => Value::Object(rule["items"].as_object().expect("object schema").iter()
-                .map(|(field, item_rule)| (field.clone(), sample_field_value(item_rule, request_id))).collect()),
-            "objectArray" => {
-                let item = rule["items"]
-                    .as_object()
-                    .expect("object array item schema")
-                    .iter()
-                    .map(|(field, item_rule)| {
-                        (field.clone(), sample_field_value(item_rule, request_id))
-                    })
-                    .collect::<Map<_, _>>();
-                Value::Array(vec![Value::Object(item)])
-            }
-            "requestId" => Value::String(request_id.to_owned()),
-            "turnId" => Value::String("123e4567e89b42d3a456426614174000".to_owned()),
-            "utcTimestamp" => Value::String("2026-08-24T01:02:03Z".to_owned()),
-            other => panic!("unknown field type: {other}"),
-        }
-    }
-
-    fn invalid_boundary_values(rule: &Value) -> Vec<Value> {
-        let mut invalid_values = vec![match rule["type"].as_str().expect("field type") {
-            "string" | "nullableString" | "requestId" | "turnId" | "utcTimestamp" => {
-                Value::Bool(true)
-            }
-            "boolean" | "nullableBoolean" | "integer" => Value::String("wrong".to_owned()),
-            "stringArray" | "objectArray" | "object" | "submittedContext" | "nullableSubmittedContext" => Value::Bool(true),
-            other => panic!("unknown field type: {other}"),
-        }];
-        if let Some(minimum) = rule["minimum"].as_i64() {
-            invalid_values.push(Value::from(minimum - 1));
-        }
-        if let Some(maximum) = rule["maximum"].as_i64() {
-            invalid_values.push(Value::from(maximum + 1));
-        }
-        if let Some(max_bytes) = rule["maxBytes"].as_u64() {
-            invalid_values.push(Value::String("x".repeat(max_bytes as usize + 1)));
-        }
-        if let Some(max_items) = rule["maxItems"].as_u64() {
-            invalid_values.push(Value::Array(vec![
-                Value::String("x".to_owned());
-                max_items as usize + 1
-            ]));
-        }
-        if let Some(item_max_bytes) = rule["itemMaxBytes"].as_u64() {
-            invalid_values.push(Value::Array(vec![Value::String(
-                "x".repeat(item_max_bytes as usize + 1),
-            )]));
-        }
-        if rule["enum"].is_array() {
-            invalid_values.push(Value::String("unknown-enum".to_owned()));
-        }
-        if rule["type"] == "utcTimestamp" {
-            invalid_values.push(Value::String("2026-08-24 01:02:03".to_owned()));
-        }
-        if rule["type"] == "requestId" {
-            invalid_values.push(Value::String("not-a-uuid".to_owned()));
-        }
-        if rule["type"] == "turnId" {
-            invalid_values.extend([
-                Value::String("123e4567-e89b-42d3-a456-426614174000".to_owned()),
-                Value::String("123e4567e89b32d3a456426614174000".to_owned()),
-                Value::String("123e4567e89b42d3c456426614174000".to_owned()),
-                Value::String("123E4567E89B42D3A456426614174000".to_owned()),
-            ]);
-        }
-        invalid_values
-    }
-
-    fn assert_field_boundaries_rejected(base: &Value, container: &str, field: &str, rule: &Value) {
-        for invalid_value in invalid_boundary_values(rule) {
-            let mut message = base.clone();
-            message[container][field] = invalid_value;
-            assert!(
-                parse_protocol_value(message).is_err(),
-                "{container}.{field} boundary must be rejected"
-            );
-        }
-    }
-
-    fn validate_result_trace(
-        method: &str,
-        params: Value,
-        data: Value,
-    ) -> Result<(), ProtocolViolation> {
-        const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000052";
-        let request = parse_protocol_value(serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "messageType": "request",
-            "requestId": REQUEST_ID,
-            "method": method,
-            "params": params,
-        }))?;
-        let result = parse_protocol_value(serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "messageType": "result",
-            "requestId": REQUEST_ID,
-            "ok": true,
-            "data": data,
-        }))?;
-        let mut tracker = ProtocolTraceValidator::default();
-        tracker.accept(&request)?;
-        tracker.accept(&result)
+    fn violation_code(value: Value) -> &'static str {
+        parse_protocol_value(value)
+            .expect_err("message must be rejected")
+            .code()
     }
 
     #[test]
-    fn manifest_matches_rust_constants() {
-        let contract: Value = serde_json::from_str(CONTRACT).expect("contract JSON");
-        assert_eq!(contract["protocolVersion"].as_u64(), Some(PROTOCOL_VERSION));
+    fn framework_values_come_from_the_compiled_contract() {
+        let contract: Value = serde_json::from_str(CONTRACT_JSON).expect("contract JSON");
+        let framework = framework();
+        assert_eq!(json!(framework.protocol_version), contract["protocolVersion"]);
+        assert_eq!(json!(framework.max_line_bytes), contract["maxLineBytes"]);
+        assert_eq!(json!(framework.request_id_max_bytes), contract["requestIdMaxBytes"]);
         assert_eq!(
-            contract["maxLineBytes"].as_u64(),
-            Some(MAX_PROTOCOL_LINE_BYTES as u64)
+            json!(framework.error_message_max_bytes),
+            contract["errorMessageMaxBytes"]
         );
         assert_eq!(
-            contract["requestIdMaxBytes"].as_u64(),
-            Some(MAX_REQUEST_ID_BYTES as u64)
+            json!(framework.full_text_result_methods),
+            contract["fullTextResultMethods"]
         );
+        assert_eq!(json!(framework.process_events), contract["processEvents"]);
         assert_eq!(
-            contract["errorMessageMaxBytes"].as_u64(),
-            Some(MAX_ERROR_MESSAGE_BYTES as u64)
+            json!(framework.forbidden_data_key_fragments),
+            contract["forbiddenDataKeyFragments"]
         );
-        let full_text_methods = contract["fullTextResultMethods"]
-            .as_array()
-            .expect("full text result methods")
-            .iter()
-            .map(|method| method.as_str().expect("full text result method"))
-            .collect::<Vec<_>>();
-        assert_eq!(full_text_methods, FULL_TEXT_RESULT_METHODS);
-
-        let methods = contract["methods"]
-            .as_array()
-            .expect("methods")
-            .iter()
-            .map(|method| method["name"].as_str().expect("method name"))
-            .collect::<Vec<_>>();
-        assert_eq!(methods, PROTOCOL_METHODS);
-        let request_events = contract["requestEvents"]
-            .as_array()
-            .expect("request events")
-            .iter()
-            .map(|event| event.as_str().expect("request event"))
-            .collect::<Vec<_>>();
-        assert_eq!(request_events, REQUEST_EVENTS);
-        let process_events = contract["processEvents"]
-            .as_array()
-            .expect("process events")
-            .iter()
-            .map(|event| event.as_str().expect("process event"))
-            .collect::<Vec<_>>();
-        assert_eq!(process_events, PROCESS_EVENTS);
-        for event in PROCESS_EVENTS {
-            let declared_origins = contract["processEventOrigins"][event]
-                .as_array()
-                .expect("process event origins");
-            for (name, origin) in [
-                ("python", ProtocolOrigin::Python),
-                ("rust", ProtocolOrigin::Rust),
-            ] {
-                assert_eq!(
-                    validate_process_event_origin(event, origin).is_ok(),
-                    declared_origins.iter().any(|value| value == name),
-                    "{event} from {name}"
-                );
-            }
-        }
-        let forbidden_data_keys = contract["forbiddenDataKeyFragments"]
-            .as_array()
-            .expect("forbidden data keys")
-            .iter()
-            .map(|key| key.as_str().expect("forbidden data key"))
-            .collect::<Vec<_>>();
-        assert_eq!(forbidden_data_keys, FORBIDDEN_DATA_KEY_FRAGMENTS);
-        let error_codes = contract["errorCodes"]
-            .as_array()
-            .expect("error codes")
-            .iter()
-            .map(|code| code.as_str().expect("error code"))
-            .collect::<Vec<_>>();
-        assert_eq!(error_codes, PROTOCOL_ERROR_CODES);
-
-        for method in contract["methods"].as_array().expect("methods") {
-            let name = method["name"].as_str().expect("method name");
-            let required = method["requiredParams"]
-                .as_array()
-                .expect("required params")
-                .iter()
-                .map(|field| field.as_str().expect("required field"))
-                .collect::<Vec<_>>();
-            assert_eq!(
-                required,
-                required_params(name).expect("known method"),
-                "{name}"
-            );
-            let mut declared_allowed = method["params"]
-                .as_object()
-                .expect("params schema")
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            let mut rust_allowed = allowed_params(name).expect("known method").to_vec();
-            declared_allowed.sort_unstable();
-            rust_allowed.sort_unstable();
-            assert_eq!(declared_allowed, rust_allowed, "{name}");
-            if method["operation"] == "destructive" {
-                assert!(required.contains(&"previewId"), "{name}");
-            }
-        }
-        for forbidden in [
-            "run_slash_command",
-            "run_shell",
-            "read_arbitrary_file",
-            "set_any_config_field",
-        ] {
-            assert!(!PROTOCOL_METHODS.contains(&forbidden));
-        }
-    }
-
-    #[test]
-    fn logical_turn_id_must_match_across_a_successful_trace() {
-        let error = validate_result_trace(
-            "session.turn",
-            serde_json::json!({
-                "text": "prompt",
-                "turnId": "123e4567e89b42d3a456426614174000",
-                "retry": false,
-            }),
-            serde_json::json!({
-                "sessionId": "session-a",
-                "turnId": "223e4567e89b42d3a456426614174000",
-                "turnNumber": 1,
-                "state": "completed",
-                "accepted": true,
-                "persisted": true,
-                "text": "answer",
-                "validationErrors": [],
-                "toolSummaries": [],
-                "responseKind": "answer",
-                "streamKind": "final_only",
-                "chunkCount": 0,
-            }),
-        )
-        .expect_err("mismatched logical turn IDs must be rejected");
-
-        assert_eq!(error.code(), "PROTOCOL_INVALID");
-    }
-
-    #[test]
-    fn complete_answer_and_transcript_text_have_no_capacity_rejection() {
-        let answer = format!(
-            "BEGIN 中文🙂\\n\\\"quoted\\\"\\\\path\\n{}\\nEND",
-            "界".repeat(750_000)
-        );
-        validate_result_trace(
-            "session.turn",
-            serde_json::json!({
-                "text": "prompt",
-                "turnId": "123e4567e89b42d3a456426614174000",
-                "retry": false,
-            }),
-            serde_json::json!({
-                "sessionId": "session-a",
-                "turnId": "123e4567e89b42d3a456426614174000",
-                "turnNumber": 1,
-                "state": "completed",
-                "accepted": true,
-                "persisted": true,
-                "text": answer.clone(),
-                "validationErrors": [],
-                "toolSummaries": [],
-                "responseKind": "answer",
-                "streamKind": "final_only",
-                "chunkCount": 0,
-            }),
-        )
-        .expect("large complete answer must validate");
-
-        validate_result_trace(
-            "session.transcript",
-            serde_json::json!({
-                "projectId": "p1",
-                "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
-                "offset": 0,
-                "limit": 20,
-            }),
-            serde_json::json!({
-                "projectId": "p1",
-                "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7",
-                "status": "ready",
-                "issue": null,
-                "items": [{
-                    "turnId": "123e4567e89b42d3a456426614174000",
-                    "turnNumber": 1,
-                    "kind": "conversational",
-                    "state": "completed",
-                    "timestamp": "2026-09-05T00:00:00Z",
-                    "userText": "u".repeat(40_000),
-                    "assistantText": answer,
-                    "failureCode": null,
-                    "failureMessage": null,
-                    "failureRetryable": null,
-                    "toolActivities": [],
-                }],
-                "total": 1,
-                "offset": 0,
-                "limit": 20,
-                "hasMore": false,
-            }),
-        )
-        .expect("large transcript text must validate");
-    }
-
-    #[test]
-    fn extension_apply_turn_id_must_match_across_a_successful_trace() {
-        let error = validate_result_trace(
-            "extensions.apply",
-            serde_json::json!({
-                "previewId": "extension-preview-opaque-1",
-                "approvedBindingHashes": ["sha256:binding-1"],
-                "turnId": "123e4567e89b42d3a456426614174000",
-                "retry": false,
-            }),
-            serde_json::json!({
-                "sessionId": "session-a",
-                "turnId": "223e4567e89b42d3a456426614174000",
-                "turnNumber": 1,
-                "state": "completed",
-                "accepted": true,
-                "persisted": true,
-                "displayInput": "Apply approved extension changes [123456789abc]",
-                "text": "Applied extension changes.",
-                "previousRevision": 0,
-                "appliedRevision": 1,
-                "restartRequired": true,
-                "items": [],
-                "diagnostics": [],
-            }),
-        )
-        .expect_err("mismatched extension apply turn IDs must be rejected");
-
-        assert_eq!(error.code(), "PROTOCOL_INVALID");
-    }
-
-    #[test]
-    fn extension_apply_failure_requires_exact_correlated_lifecycle() {
-        const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000060";
-        const TURN_ID: &str = "123e4567e89b42d3a456426614174000";
-
-        let request = parse_protocol_value(serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "messageType": "request",
-            "requestId": REQUEST_ID,
-            "method": "extensions.apply",
-            "params": {
-                "previewId": "extension-preview-opaque-1",
-                "approvedBindingHashes": ["sha256:binding-1"],
-                "turnId": TURN_ID,
-                "retry": false,
-            },
-        }))
-        .expect("valid extension apply request");
-
-        let missing_lifecycle = parse_protocol_value(serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "messageType": "result",
-            "requestId": REQUEST_ID,
-            "ok": false,
-            "error": {
-                "code": "EXTENSION_APPLY_FAILED",
-                "message": "apply failed",
-                "retryable": true,
-                "details": {},
-            },
-        }))
-        .expect("a standalone result cannot infer its request method");
-        let mut tracker = ProtocolTraceValidator::default();
-        tracker.accept(&request).expect("track request");
-        let error = tracker
-            .accept(&missing_lifecycle)
-            .expect_err("extension apply failure must include lifecycle details");
-        assert_eq!(error.code(), "PROTOCOL_INVALID");
-
-        let mismatched_lifecycle = parse_protocol_value(serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "messageType": "result",
-            "requestId": REQUEST_ID,
-            "ok": false,
-            "error": {
-                "code": "EXTENSION_APPLY_FAILED",
-                "message": "apply failed",
-                "retryable": true,
-                "details": {
-                    "turnId": "223e4567e89b42d3a456426614174000",
-                    "state": "failed",
-                    "accepted": true,
-                    "persisted": true,
-                },
-            },
-        }))
-        .expect("valid standalone lifecycle details");
-        let mut tracker = ProtocolTraceValidator::default();
-        tracker.accept(&request).expect("track request");
-        let error = tracker
-            .accept(&mismatched_lifecycle)
-            .expect_err("extension apply failure turn ID must match request");
-        assert_eq!(error.code(), "PROTOCOL_INVALID");
-    }
-
-    #[test]
-    fn rust_request_param_rules_match_manifest() {
-        const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000050";
-        let contract: Value = serde_json::from_str(CONTRACT).expect("contract JSON");
-        for method in contract["methods"].as_array().expect("methods") {
-            let method_name = method["name"].as_str().expect("method name");
-            let schema = method["params"].as_object().expect("params schema");
-            let mut params = schema
-                .iter()
-                .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
-                .collect::<Map<_, _>>();
-            if method_name == "document.apply" { params.remove("undoOfCallId"); }
-            if method_name == "session.turn" { params.insert("text".to_owned(), Value::String("@x".to_owned())); params["skillReferences"][0]["endUtf16"] = Value::from(2); }
-            let message = serde_json::json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "messageType": "request",
-                "requestId": REQUEST_ID,
-                "method": method_name,
-                "params": params,
-            });
-            assert!(
-                parse_protocol_value(message.clone()).is_ok(),
-                "{method_name} full schema"
-            );
-
-            let mut extra = message.clone();
-            extra["params"]["unexpected"] = Value::Bool(true);
-            assert!(
-                parse_protocol_value(extra).is_err(),
-                "{method_name} extra param"
-            );
-
-            for (field, rule) in schema {
-                let mut null_value = message.clone();
-                null_value["params"][field] = Value::Null;
-                assert_eq!(
-                    parse_protocol_value(null_value).is_ok(),
-                    rule["type"] == "nullableString",
-                    "{method_name}.{field} null must follow its schema"
-                );
-                if rule["required"] == true {
-                    let mut missing = message.clone();
-                    missing["params"]
-                        .as_object_mut()
-                        .expect("params")
-                        .remove(field);
-                    assert!(
-                        parse_protocol_value(missing).is_err(),
-                        "{method_name}.{field} missing"
-                    );
-                }
-                assert_field_boundaries_rejected(&message, "params", field, rule);
-            }
-        }
-    }
-
-    #[test]
-    fn rust_event_data_rules_match_manifest() {
-        const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000051";
-        let contract: Value = serde_json::from_str(CONTRACT).expect("contract JSON");
-        for (event, schema_value) in contract["eventDataSchemas"]
-            .as_object()
-            .expect("event data schemas")
-        {
-            let schema = schema_value.as_object().expect("event data schema");
-            let data = schema
-                .iter()
-                .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
-                .collect::<Map<_, _>>();
-            let message = serde_json::json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "messageType": "event",
-                "requestId": REQUEST_ID,
-                "sequence": 1,
-                "event": event,
-                "data": data,
-            });
-            assert!(
-                parse_protocol_value(message.clone()).is_ok(),
-                "{event} full schema"
-            );
-
-            let mut extra = message.clone();
-            extra["data"]["unexpected"] = Value::Bool(true);
-            assert!(parse_protocol_value(extra).is_err(), "{event} extra data");
-
-            for (field, rule) in schema {
-                let mut null_value = message.clone();
-                null_value["data"][field] = Value::Null;
-                assert!(
-                    parse_protocol_value(null_value).is_err(),
-                    "{event}.{field} null"
-                );
-                let mut missing = message.clone();
-                missing["data"].as_object_mut().expect("data").remove(field);
-                assert_eq!(
-                    parse_protocol_value(missing).is_err(),
-                    rule["required"] == Value::Bool(true),
-                    "{event}.{field} missing"
-                );
-                assert_field_boundaries_rejected(&message, "data", field, rule);
-            }
-        }
-    }
-
-    #[test]
-    fn rust_result_data_rules_match_manifest() {
-        const REQUEST_ID: &str = "00000000-0000-4000-8000-000000000052";
-        let contract: Value = serde_json::from_str(CONTRACT).expect("contract JSON");
-        for (method, schema_value) in contract["resultDataSchemas"]
-            .as_object()
-            .expect("result data schemas")
-        {
-            let method_contract = contract["methods"]
-                .as_array()
-                .expect("methods")
-                .iter()
-                .find(|item| item["name"] == *method)
-                .expect("result method contract");
-            let mut params = method_contract["params"]
-                .as_object()
-                .expect("params schema")
-                .iter()
-                .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
-                .collect::<Map<_, _>>();
-            if method == "document.apply" { params.remove("undoOfCallId"); }
-            let export_audit = |field: &str| method == "bibliography.export" && field == "audit";
-            if method == "session.turn" { params.insert("text".to_owned(), Value::String("@x".to_owned())); params["skillReferences"][0]["endUtf16"] = Value::from(2); }
-            let schema = schema_value.as_object().expect("result data schema");
-            let mut data = schema
-                .iter()
-                .map(|(field, rule)| (field.clone(), sample_field_value(rule, REQUEST_ID)))
-                .collect::<Map<_, _>>();
-            if method == "bibliography.export" {
-                // The sample carries audit, which only a bime_docx result may (and must) have.
-                data.insert("format".to_owned(), Value::String("bime_docx".to_owned()));
-            }
-            if is_durable_turn_method(method) {
-                data.insert("accepted".to_owned(), Value::Bool(true));
-                data.insert("persisted".to_owned(), Value::Bool(true));
-            }
-            if method == "session.transcript" {
-                let item = data["items"][0]
-                    .as_object_mut()
-                    .expect("transcript sample item");
-                item.insert("state".to_owned(), Value::String("completed".to_owned()));
-                item.insert(
-                    "assistantText".to_owned(),
-                    Value::String("answer".to_owned()),
-                );
-                for field in ["failureCode", "failureMessage", "failureRetryable"] {
-                    item.insert(field.to_owned(), Value::Null);
-                }
-            }
-            assert!(
-                validate_result_trace(
-                    method,
-                    Value::Object(params.clone()),
-                    Value::Object(data.clone()),
-                )
-                .is_ok(),
-                "{method} full result schema"
-            );
-
-            let mut extra = data.clone();
-            extra.insert("unexpected".to_owned(), Value::Bool(true));
-            assert!(
-                validate_result_trace(method, Value::Object(params.clone()), Value::Object(extra),)
-                    .is_err(),
-                "{method} extra result data"
-            );
-
-            for (field, rule) in schema {
-                let nullable = matches!(
-                    rule["type"].as_str(),
-                    Some("nullableString" | "nullableBoolean")
-                );
-                let mut null_value = data.clone();
-                null_value.insert(field.clone(), Value::Null);
-                assert_eq!(
-                    validate_result_trace(
-                        method,
-                        Value::Object(params.clone()),
-                        Value::Object(null_value),
-                    )
-                    .is_ok(),
-                    nullable,
-                    "{method}.{field} null"
-                );
-
-                let mut missing = data.clone();
-                missing.remove(field);
-                assert_eq!(
-                    validate_result_trace(
-                        method,
-                        Value::Object(params.clone()),
-                        Value::Object(missing),
-                    )
-                    .is_ok(),
-                    rule["required"] == false && !matches!(field.as_str(), "rangeStartUtf16" | "rangeEndUtf16") && !export_audit(field),
-                    "{method}.{field} missing"
-                );
-
-                for invalid_value in invalid_boundary_values(rule) {
-                    let mut invalid_data = data.clone();
-                    invalid_data.insert(field.clone(), invalid_value);
-                    assert!(
-                        validate_result_trace(
-                            method,
-                            Value::Object(params.clone()),
-                            Value::Object(invalid_data),
-                        )
-                        .is_err(),
-                        "{method}.{field} boundary"
-                    );
-                }
-
-                if rule["type"] == "objectArray" {
-                    let item_schema = rule["items"].as_object().expect("item schema");
-                    let mut extra_item = data.clone();
-                    extra_item[field][0]["unexpected"] = Value::Bool(true);
-                    assert!(
-                        validate_result_trace(
-                            method,
-                            Value::Object(params.clone()),
-                            Value::Object(extra_item),
-                        )
-                        .is_err(),
-                        "{method}.{field} extra item field"
-                    );
-                    for (item_field, item_rule) in item_schema {
-                        let mut missing_item = data.clone();
-                        missing_item[field][0]
-                            .as_object_mut()
-                            .expect("item")
-                            .remove(item_field);
-                        assert_eq!(
-                            validate_result_trace(
-                                method,
-                                Value::Object(params.clone()),
-                                Value::Object(missing_item),
-                            )
-                            .is_ok(),
-                            item_rule["required"] == false,
-                            "{method}.{field}.{item_field} missing"
-                        );
-                        for invalid_value in invalid_boundary_values(item_rule) {
-                            let mut invalid_item = data.clone();
-                            invalid_item[field][0][item_field] = invalid_value;
-                            assert!(
-                                validate_result_trace(
-                                    method,
-                                    Value::Object(params.clone()),
-                                    Value::Object(invalid_item),
-                                )
-                                .is_err(),
-                                "{method}.{field}.{item_field} boundary"
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        assert!(framework.allows_full_text_result("session.turn"));
+        assert!(framework.allows_full_text_result("session.transcript"));
+        assert!(!framework.allows_full_text_result("runtime.diagnostics"));
     }
 
     #[test]
@@ -3533,106 +490,127 @@ mod tests {
                 "rust" => ProtocolOrigin::Rust,
                 other => panic!("unknown fixture origin: {other}"),
             };
-            let result = validate_process_event_origin(
-                case["event"].as_str().expect("process event"),
+            let parsed = parse_protocol_value_from_origin(
+                json!({
+                    "protocolVersion": framework().protocol_version,
+                    "messageType": "event",
+                    "event": case["event"],
+                    "data": {},
+                }),
                 origin,
             );
-            let line = serde_json::json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "messageType": "event",
-                "event": case["event"],
-                "data": {},
-            })
-            .to_string();
-            let parsed_from_origin = parse_protocol_line_from_origin(&line, origin);
             if case["valid"].as_bool() == Some(true) {
-                assert!(result.is_ok(), "{}: {result:?}", case["name"]);
-                assert!(
-                    parsed_from_origin.is_ok(),
-                    "{}: {parsed_from_origin:?}",
+                assert!(parsed.is_ok(), "{}: {parsed:?}", case["name"]);
+            } else {
+                assert_eq!(
+                    parsed.expect_err("invalid origin").code(),
+                    case["errorCode"].as_str().expect("fixture errorCode"),
+                    "{}",
                     case["name"]
                 );
-            } else {
-                assert_eq!(
-                    result.expect_err("invalid origin").code(),
-                    expected_error(case)
-                );
-                assert_eq!(
-                    parsed_from_origin.expect_err("invalid origin line").code(),
-                    expected_error(case)
-                );
             }
         }
     }
 
     #[test]
-    fn shared_message_fixtures() {
-        let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures JSON");
-        for case in fixtures["messages"].as_array().expect("messages") {
-            let case = case.as_object().expect("message case");
-            let result = parse_protocol_value(case["message"].clone());
-            if case["valid"].as_bool() == Some(true) {
-                assert!(result.is_ok(), "{}: {result:?}", case["name"]);
-            } else {
-                assert_eq!(
-                    result.expect_err("invalid message").code(),
-                    expected_error(case)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn shared_raw_lines_and_size_limit() {
-        let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures JSON");
-        for case in fixtures["rawLines"].as_array().expect("raw lines") {
-            let case = case.as_object().expect("raw line case");
-            let result = parse_protocol_line(case["line"].as_str().expect("line"));
-            if case["valid"].as_bool() == Some(true) {
-                assert!(result.is_ok(), "{}: {result:?}", case["name"]);
-            } else {
-                assert_eq!(
-                    result.expect_err("invalid line").code(),
-                    expected_error(case)
-                );
-            }
-        }
-
-        let oversized = format!(
-            "{{\"padding\":\"{}\"}}",
-            "x".repeat(MAX_PROTOCOL_LINE_BYTES)
+    fn requests_are_framed_without_per_method_param_rules() {
+        let parsed = parse_protocol_value(json!({
+            "protocolVersion": 1,
+            "messageType": "request",
+            "requestId": REQUEST_ID,
+            "method": "session.turn",
+            "params": {},
+        }))
+        .expect("Python owns per-method param validation");
+        assert!(matches!(parsed, ProtocolMessage::Request(_)));
+        assert_eq!(
+            violation_code(json!({
+                "protocolVersion": 1,
+                "messageType": "request",
+                "requestId": "not-a-uuid",
+                "method": "session.turn",
+                "params": {},
+            })),
+            "PROTOCOL_INVALID"
         );
         assert_eq!(
-            parse_protocol_line(&oversized)
-                .expect_err("oversized line")
-                .code(),
+            violation_code(json!({
+                "protocolVersion": 1,
+                "messageType": "request",
+                "requestId": REQUEST_ID,
+                "method": "session.turn",
+                "params": [],
+            })),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({
+                "protocolVersion": 1,
+                "messageType": "request",
+                "requestId": REQUEST_ID,
+                "method": "session.turn",
+                "params": {},
+                "extra": true,
+            })),
             "PROTOCOL_INVALID"
         );
     }
 
     #[test]
-    fn shared_ordering_and_correlation_traces() {
-        let fixtures: Value = serde_json::from_str(FIXTURES).expect("fixtures JSON");
-        for case in fixtures["traces"].as_array().expect("traces") {
-            let case = case.as_object().expect("trace case");
-            let mut tracker = ProtocolTraceValidator::default();
-            let result = case["messages"]
-                .as_array()
-                .expect("trace messages")
-                .iter()
-                .try_for_each(|value| {
-                    let message = parse_protocol_value(value.clone())?;
-                    tracker.accept(&message)
-                });
-            if case["valid"].as_bool() == Some(true) {
-                assert!(result.is_ok(), "{}: {result:?}", case["name"]);
-            } else {
-                assert_eq!(
-                    result.expect_err("invalid trace").code(),
-                    expected_error(case)
-                );
-            }
-        }
+    fn envelope_shape_version_and_sequence_are_checked() {
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 2, "messageType": "event", "event": "backend.ready", "data": {}})),
+            "PROTOCOL_VERSION_UNSUPPORTED"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "notification"})),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "event", "requestId": REQUEST_ID, "sequence": 0, "event": "stage.changed", "data": {}})),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "event", "requestId": REQUEST_ID, "event": "stage.changed", "data": {}})),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "event", "event": "backend.unknown", "data": {}})),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "result", "requestId": REQUEST_ID, "ok": true, "data": {}, "error": {"code": "INTERNAL_ERROR", "message": "x", "retryable": false, "details": {}}})),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "result", "requestId": REQUEST_ID, "ok": false, "data": {}})),
+            "PROTOCOL_INVALID"
+        );
+        assert_eq!(
+            violation_code(json!({"protocolVersion": 1, "messageType": "result", "requestId": REQUEST_ID, "ok": false, "error": {"code": "INTERNAL_ERROR", "message": "x".repeat(4097), "retryable": false, "details": {}}})),
+            "PROTOCOL_INVALID"
+        );
+        // Result data is routed without per-method schema checks.
+        assert!(parse_protocol_value(json!({
+            "protocolVersion": 1,
+            "messageType": "result",
+            "requestId": REQUEST_ID,
+            "ok": true,
+            "data": {"anyField": "Python validated this result"},
+        }))
+        .is_ok());
     }
 
+    #[test]
+    fn forbidden_keys_are_rejected_in_events_results_and_error_details() {
+        let cases = [
+            json!({"protocolVersion": 1, "messageType": "event", "requestId": REQUEST_ID, "sequence": 1, "event": "stage.changed", "data": {"nested": [{"apiKey": "x"}]}}),
+            json!({"protocolVersion": 1, "messageType": "event", "event": "backend.protocol_error", "data": {"traceback": "x"}}),
+            json!({"protocolVersion": 1, "messageType": "result", "requestId": REQUEST_ID, "ok": true, "data": {"toolCalls": []}}),
+            json!({"protocolVersion": 1, "messageType": "result", "requestId": REQUEST_ID, "ok": false, "error": {"code": "INTERNAL_ERROR", "message": "x", "retryable": false, "details": {"rawProviderPayload": {}}}}),
+        ];
+        for case in cases {
+            assert_eq!(violation_code(case.clone()), "PROTOCOL_INVALID", "{case}");
+        }
+    }
 }

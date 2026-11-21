@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
-| C3 | In progress | `evidence/C3-S1/`–`C3-S3/` | — | C3-S4 |
+| C3 | In progress | `evidence/C3-S1/`–`C3-S4/` | — | C3-S5 |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -412,3 +412,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C3-S3/dto-check.md`（含演練輸出與耗時：真實比對 166–246 ms）。
 - **限制**：`MethodParams` 依計劃在 C8-S3 加入。
 - **下一步**：C3-S4 Rust 只驗框架、result 只送一次。
+
+### C3-S4 Rust 只驗框架，result 只送一次（2026-11-22）
+
+- **觀察結果**：
+  - **S002（APPLIED）**：`protocol.rs` 只剩框架檢查（3,638 → 616 行）；**框架常數取法：優先方案 `include_str!` contract，以 serde 解析進 `OnceLock<Framework>`**，`main.py` 的 release 重建輸入加入 `app/desktop/protocol/`（含 launcher 測試）。
+  - **S003／缺陷 #4（APPLIED）**：`backend.rs` 刪除 result 的 `emit_protocol` 第二次送出與 `validate_result_data`；result 只經 invoke 回傳。
+  - **S011 Rust 部分（APPLIED）**：刪除 `ProtocolTraceValidator`、`RequestTraceState`、`PROTOCOL_METHODS`、`parse_protocol_line(_from_origin)`。
+  - 範例 request 改為 `runtime.diagnostics`。新增 `oversized_success`、`forbidden_event` 模式與單次送出斷言。
+- **執行指令**：`cargo test --locked`（沙箱外，35 passed）、`npm test`（220 pass）、`pytest tests/test_desktop_launcher.py`（13 passed）、grep 四個符號（0 筆）。
+- **證據**：`evidence/C3-S4/rust-framing.md`（保留／移除對照、檢查對應測試、退役紀錄）。
+- **限制**：無。
+- **下一步**：C3-S5 Python 與 fixtures。
