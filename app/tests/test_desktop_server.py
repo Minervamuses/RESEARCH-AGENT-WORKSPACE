@@ -889,12 +889,10 @@ def test_dynamic_service_error_redacts_credentials_and_truncates_safely(
         )
         asyncio.run(_open_test_project(service, tmp_path / "project"))
 
-        calls = 0
-
-        def fail_open(_path: str) -> dict[str, Any]:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
+        # The two requests run as concurrent tasks, so the message is chosen by
+        # path rather than by call order.
+        def fail_open(path: str) -> dict[str, Any]:
+            if path.endswith("draft.md"):
                 raise DocumentError(
                     "Document token sync failed for https://alice:urlpass123@host.example/doc.md "
                     "using sk-or-v1-dynamicsecret123456, Authorization: Bearer hdr_tok_987654, "
@@ -915,7 +913,7 @@ def test_dynamic_service_error_redacts_credentials_and_truncates_safely(
             server = DesktopServer(service, ProtocolWriter(output))
             reader = _reader(
                 _request(req1, "document.open", {"path": "draft.md"}),
-                _request(req2, "document.open", {"path": "draft.md"}),
+                _request(req2, "document.open", {"path": "boundary.md"}),
                 _request(shutdown_id, "runtime.shutdown", {}),
             )
             assert await server.run(reader) == 0

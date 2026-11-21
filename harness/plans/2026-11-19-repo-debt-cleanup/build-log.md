@@ -424,3 +424,12 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C3-S4/rust-framing.md`（保留／移除對照、檢查對應測試、退役紀錄）。
 - **限制**：無。
 - **下一步**：C3-S5 Python 與 fixtures。
+
+### C2-S11a 修正 C2-S11 遮蔽測試的執行順序依賴（2026-11-22，C3-S5 執行中發現）
+
+- **觀察結果**：C3-S5 跑 `pytest tests/test_desktop_protocol_contract.py tests/test_desktop_server.py` 時，`test_dynamic_service_error_redacts_credentials_and_truncates_safely` 5 次中失敗 1 次。根因：兩個 `document.open` request 是並行的 task，`service.py` 以 `asyncio.to_thread(self._documents.open, ...)` 執行，替身 `fail_open` 卻依呼叫次數決定錯誤訊息，第二個 request 先到時兩則訊息對調。這是測試缺陷，不是產品缺陷。
+- **修正**（此問題第 1 次聚焦修正）：替身改依路徑決定訊息（`draft.md` 為一般訊息、`boundary.md` 為跨截斷邊界的訊息），斷言不變。
+- **執行指令**：同一組兩個模組連跑 15 次：0 次失敗。
+- **證據**：build-log 本節。
+- **限制**：無。
+- **下一步**：繼續 C3-S5。
