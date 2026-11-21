@@ -701,3 +701,18 @@ def test_async_graph_cancels_native_model_wait_and_can_run_again(monkeypatch, tm
         assert result["messages"][-1].content == "Next turn works."
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("value", [1, 2, True, 3.5])
+def test_agent_config_rejects_graph_limits_that_cannot_finalize(value):
+    with pytest.raises(ValueError, match="greater than or equal to 3"):
+        AgentConfig(graph_recursion_limit=value)
+
+
+def test_agent_config_accepts_minimum_graph_limit():
+    assert AgentConfig(graph_recursion_limit=3).graph_recursion_limit == 3
+
+
+def test_agent_config_runs_base_rag_validation():
+    with pytest.raises(ValueError, match="chunk_size must be a positive integer"):
+        AgentConfig(chunk_size=0)

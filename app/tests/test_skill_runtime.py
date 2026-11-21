@@ -113,7 +113,7 @@ capabilities:
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
 
-    with pytest.raises(ValueError, match="no longer supported"):
+    with pytest.raises(ValueError, match=r"(?s)capabilities.*Extra inputs are not permitted"):
         load_skill_runtime("paper", config=cfg, all_tools=[_read_file])
 
 
@@ -129,7 +129,7 @@ tool_policy:
     )
     cfg = AgentConfig(persist_dir=str(tmp_path), skills_dir=str(skills_dir))
 
-    with pytest.raises(ValueError, match="no longer supported"):
+    with pytest.raises(ValueError, match=r"(?s)tool_policy.*Extra inputs are not permitted"):
         load_skill_runtime("paper", config=cfg, all_tools=[_read_file, _bash])
 
 

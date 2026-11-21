@@ -725,9 +725,7 @@ class ChatSession:
             citation_active=self.citation_skill_active,
         )
 
-    def _finalize_answer(
-        self, answer: str, *, user_input: str
-    ) -> tuple[str, list[str]]:
+    def _finalize_answer(self, answer: str) -> tuple[str, list[str]]:
         """Apply the mode's citation policy, then render when applicable.
 
         Citation skill active: markers are checked against the registry's
@@ -740,7 +738,6 @@ class ChatSession:
         """
         return self._citation_policy.finalize_answer(
             answer,
-            user_input=user_input,
             citation_active=self.citation_skill_active,
         )
 
@@ -808,7 +805,7 @@ class ChatSession:
                 installer_result = self._installer_result_text()
             else:
                 answer = self._installer_result_text()
-        final_text, errors = self._finalize_answer(str(answer), user_input=user_input)
+        final_text, errors = self._finalize_answer(str(answer))
         if installer_result is not None:
             final_text = (
                 "[Host installation result]\n" + installer_result

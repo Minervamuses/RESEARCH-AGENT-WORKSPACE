@@ -8,12 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
-_LEGACY_FIELDS = ("capabilities", "tool_policy")
-_LEGACY_FIELDS_ERROR = (
-    "Legacy manifest fields `capabilities` and `tool_policy` are no longer "
-    "supported. Use the `tools` section."
-)
-
 
 class SkillToolSelector(BaseModel):
     """One required/optional block of skill tool requests."""
@@ -69,9 +63,6 @@ def validate_skill_manifest(
     source: str | Path = "manifest.yaml",
 ) -> dict[str, Any]:
     """Validate a manifest mapping and return a normalized plain dict."""
-    legacy = [field for field in _LEGACY_FIELDS if field in data]
-    if legacy:
-        raise ValueError(f"invalid skill manifest: {source}: {_LEGACY_FIELDS_ERROR}")
     try:
         manifest = SkillManifest.model_validate(data)
     except ValidationError as exc:

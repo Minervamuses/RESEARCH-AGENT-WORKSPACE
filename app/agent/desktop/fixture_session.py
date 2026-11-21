@@ -1110,7 +1110,6 @@ class FixtureSession:
                     self.config
                 ).finalize_answer(
                     _FIXTURE_UNSAFE_CITATION_DRAFT,
-                    user_input=text,
                     citation_active=True,
                 )
                 if not violations:

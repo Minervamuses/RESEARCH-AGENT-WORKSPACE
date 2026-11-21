@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`, `evidence/C2-S2/` | — | C2-S3 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/` | — | C2-S4 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -268,3 +268,16 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S2/retired-tests.md`。
 - **限制**：無。
 - **下一步**：C2-S3 Skills 與測試整理（S061–S063、S109、S122）。
+
+### C2-S3 Skills、Gate 與測試模組整理（2026-11-21）
+
+- **觀察結果**：
+  - **S061（APPLIED）**：刪除 `agent/skills/manifest_schema.py` 的 `_LEGACY_FIELDS` 友善錯誤，`extra="forbid"` 繼續拒絕舊欄位，`test_skill_runtime.py` 同步更新訊息斷言。
+  - **S062（APPLIED）**：`test_skill_scan_ignores_only_regular_zip_sources` 移入 `test_extension_registry.py`，刪除 `tests/test_extension_baseline.py`。
+  - **S063（APPLIED）**：`test_smoke.py` 的 3 支 `AgentConfig` 驗證測試移入 `test_graph_skill_loader.py`，移除無實質檢查的 `test_imports`，保留 `test_graph_builds_without_error`。
+  - **S109（APPLIED）**：刪除 `skills/citation/gate.py` 的無作用參數 `user_input` 與呼叫端傳值。
+  - **S122（APPLIED）**：`tests/test_ingest.py` 移至 `tests/rag/test_ingest.py`。
+- **執行指令**：8 個受影響測試模組 `pytest`（134 passed in 9.96 s）。
+- **證據**：`evidence/C2-S3/retired-tests.md`。
+- **限制**：無。
+- **下一步**：C2-S4 RAG 清理（S114、S115、S117）。

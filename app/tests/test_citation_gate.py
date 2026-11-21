@@ -14,12 +14,11 @@ def _codes(violations: list[GateViolation]) -> set[str]:
     return {violation.code for violation in violations}
 
 
-def _check(text, *, user_input="", verified=VERIFIED, active=True):
+def _check(text, *, verified=VERIFIED, active=True):
     return check_citations(
         text,
         verified_source_ids=verified,
         citation_active=active,
-        user_input=user_input,
     )
 
 
@@ -69,19 +68,17 @@ def test_code_fences_and_inline_code_are_not_scanned_for_markers():
 
 
 def test_user_quote_block_does_not_exempt_renderer_markers():
-    user_input = "Why did it emit [[cite:ghost]]?"
     text = (
         "You wrote:\n"
         "> Why did it emit [[cite:ghost]]?\n"
         "That marker would otherwise be invalid."
     )
-    assert _codes(_check(text, user_input=user_input)) == {"dangling_cite"}
+    assert _codes(_check(text)) == {"dangling_cite"}
 
 
-def test_quote_not_from_user_input_is_still_scanned():
+def test_quote_is_still_scanned():
     codes = _codes(_check(
         "> Unsupported [[cite:ghost]].\nThat is wrong.",
-        user_input="unrelated question",
     ))
     assert codes == {"dangling_cite"}
 

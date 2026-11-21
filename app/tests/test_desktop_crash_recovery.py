@@ -513,7 +513,6 @@ def test_kill_after_citation_rejection_never_persists_unsafe_completed_text(
         )
     ).finalize_answer(
         unsafe_draft,
-        user_input=text,
         citation_active=True,
     )
     assert violations

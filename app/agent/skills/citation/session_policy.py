@@ -170,7 +170,6 @@ class CitationSessionPolicy:
         self,
         answer: str,
         *,
-        user_input: str,
         citation_active: bool,
     ) -> tuple[str, list[str]]:
         """Apply citation validation and render verified markers."""
@@ -184,7 +183,6 @@ class CitationSessionPolicy:
             answer,
             verified_source_ids=verified_ids,
             citation_active=citation_active,
-            user_input=user_input,
         )
         if violations:
             errors = [

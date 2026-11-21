@@ -39,14 +39,13 @@ def _mask_pattern(text: str, pattern: re.Pattern) -> str:
     return out
 
 
-def mask_unscanned_regions(text: str, *, user_input: str = "") -> str:
+def mask_unscanned_regions(text: str) -> str:
     """Blank out code fences and inline code.
 
     Offsets are preserved (masked regions become spaces) so violation
     details can still reference the original text. Block quotes remain
     scannable because the renderer also transforms markers inside them.
     """
-    del user_input  # Kept for the stable gate call signature.
     masked = _mask_pattern(text, _FENCE_RE)
     masked = _mask_pattern(masked, _INLINE_CODE_RE)
     return masked
@@ -57,7 +56,6 @@ def check_citations(
     *,
     verified_source_ids: frozenset[str] | set[str],
     citation_active: bool,
-    user_input: str = "",
 ) -> list[GateViolation]:
     """Return every blocking violation in ``text`` (empty list = pass).
 
@@ -65,7 +63,7 @@ def check_citations(
     ``verified_source_ids``; inactive forbids every marker form.
     """
     violations: list[GateViolation] = []
-    scannable = mask_unscanned_regions(text or "", user_input=user_input)
+    scannable = mask_unscanned_regions(text or "")
 
     # Active: known forms only, every ID must resolve. Inactive: marker
     # syntax is unavailable because there is no registry-backed renderer.
