@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
-| C3 | Not started | — | — | C3-S1 |
+| C3 | In progress | `evidence/C3-S1/` | — | C3-S2 |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -380,3 +380,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：build-log 本節。
 - **限制**：無。
 - **下一步**：C3-S1。
+
+### C3-S1 決定 TS 讀取 contract 的寫法（2026-11-21）
+
+- **觀察結果**：寫法 (a) `import contract from "../protocol/v1/contract.json" with { type: "json" };` 同時通過 `tsc --noEmit`、`vite build` 與 `node --test --experimental-strip-types`（完整 `npm test` 330 pass）；寫法 (b)（無 import attribute）在 Node 失敗（`ERR_IMPORT_ATTRIBUTE_MISSING`）。**採用 (a)**，不產生 TS 副本。暫時改動已還原、未提交。
+- **執行指令**：見 `evidence/C3-S1/decision.md`。
+- **證據**：`evidence/C3-S1/decision.md`。
+- **限制**：無。
+- **下一步**：C3-S2 TS 改讀 contract。
