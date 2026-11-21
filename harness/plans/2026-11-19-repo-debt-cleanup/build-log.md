@@ -17,7 +17,7 @@
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
-| C3 | In progress | `evidence/C3-S1/`–`C3-S2/` | — | C3-S3 |
+| C3 | In progress | `evidence/C3-S1/`–`C3-S3/` | — | C3-S4 |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -400,3 +400,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C3-S2/ts-contract.md`（常數定義行、方法名字串 grep 用途、catch 盤點、測試退役紀錄）。
 - **限制**：`tests/` 尚未受 `tsc` 檢查（C8 處理）。Rust 端尚未縮減（C3-S4），兩端各自的測試皆通過。
 - **下一步**：C3-S3 DTO 一致性檢查（U16）。
+
+### C3-S3 DTO 一致性檢查（U16）（2026-11-22）
+
+- **觀察結果**：
+  - 新增 `tests/protocol_types.test.ts`：以 `typescript` compiler API 比對 `MethodResults`（26 列）與 `EventData`（3 列）的 DTO 和 contract schema，並檢查 `ProtocolMethod`、`RequestEvent`、`ProcessEvent` 聯集等於 contract。比對函式有 3 個 in-memory 單元測試，涵蓋步驟規格要求的六種偏差與 union 合併。
+  - 首次比對未發現 DTO 與 contract 不一致；依 contract 補上 `MethodResults` 需要的 7 個 DTO。`App.tsx` 重複的 `DocumentResult` 改用 `DocumentResultDto`（S071 剩餘的 `App.tsx` 部分）。C3-S2 依 S071 刪除的 `DocumentOpenDto`／`DocumentResultDto` 在本步作為 result DTO 重新加入，理由見 evidence §2。
+  - 例外清單 11 項，全是 C4 會移除的詞彙（P1 兩個 RPC、U7 九個 event），每項附理由；**C4 必須把清單清空**。
+  - 負向演練：contract 欄位改名、DTO 必填改選填，`npm test` 都失敗並指出 `MethodResults["session.rename"]` 與欄位；兩者已還原。
+- **執行指令**：`node --test --experimental-strip-types tests/protocol_types.test.ts`、`npm test`（220 pass, 0 fail）、`npm run build`（通過）。
+- **證據**：`evidence/C3-S3/dto-check.md`（含演練輸出與耗時：真實比對 166–246 ms）。
+- **限制**：`MethodParams` 依計劃在 C8-S3 加入。
+- **下一步**：C3-S4 Rust 只驗框架、result 只送一次。

@@ -50,6 +50,7 @@ import {
 import type {
   ApprovalRequiredDto,
   ApprovalResolvedDto,
+  DocumentResultDto,
   BashPermissionMode,
   ExtensionApplyDto,
   ExtensionPreviewDto,
@@ -936,17 +937,6 @@ export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, 
   </header>;
 }
 
-interface DocumentResult extends Partial<DocumentSnapshot> {
-  path: string;
-  status: "saved" | "conflict" | "failed" | "cancelled";
-  callId?: string;
-  savedFingerprint?: string;
-  candidateText?: string;
-  currentDiskText?: string;
-  issue?: string;
-  expectedSnapshot?: DocumentSnapshot;
-}
-
 export function documentContextPayload(value: DocumentSnapshot): JsonObject {
   const { rangeStartUtf16, rangeEndUtf16, ...context } = value;
   return {
@@ -995,7 +985,7 @@ export function documentOperationContext(current: DocumentSnapshot, source?: Doc
 }
 
 export function advanceWorkingDocumentSources(
-  working: WorkingDocumentSources | null, before: DocumentSnapshot, result: DocumentResult,
+  working: WorkingDocumentSources | null, before: DocumentSnapshot, result: DocumentResultDto,
 ): WorkingDocumentSources | null {
   if (working === null || result.status !== "saved" || result.path !== before.path ||
       result.rootPath !== before.rootPath || result.sourceText === undefined || result.editorRevision === undefined ||
@@ -1072,7 +1062,7 @@ export default function App() {
   const [documentBusy, setDocumentBusy] = useState(false);
   const documentBusyRef = useRef(false);
   const [documentNotice, setDocumentNotice] = useState<string | null>(null);
-  const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResult; base: DocumentSnapshot } | null>(null);
+  const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResultDto; base: DocumentSnapshot } | null>(null);
   const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
   const documentRequestRef = useRef<{ requestId: string; turnId: string; context: DocumentSnapshot } | null>(null);
   const documentApplyPromiseRef = useRef<Promise<void> | null>(null);
@@ -1178,7 +1168,7 @@ export default function App() {
     if (conversationMenu !== null) conversationMenuRef.current?.focus();
   }, [conversationMenu]);
 
-  const receiveDocumentResult = useCallback((result: DocumentResult, captured: DocumentSnapshot, action: DocumentAction | null) => {
+  const receiveDocumentResult = useCallback((result: DocumentResultDto, captured: DocumentSnapshot, action: DocumentAction | null) => {
     const current = documentRef.current;
     if (current === null || current.path !== captured.path || current.rootPath !== captured.rootPath) return;
     if (result.path !== captured.path || (result.rootPath !== undefined && result.rootPath !== captured.rootPath)) {
@@ -1234,7 +1224,7 @@ export default function App() {
           ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
         } as unknown as JsonObject);
         documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId, context: captured };
-        const result = await tracked.result as unknown as DocumentResult;
+        const result = await tracked.result as unknown as DocumentResultDto;
         if (ownsOperation(owner, documentOperationRef.current)) receiveDocumentResult(result, captured, action);
       } catch (error) {
         if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
@@ -1319,7 +1309,7 @@ export default function App() {
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
-      const result = await backendClient.request("document.save", { documentContext: documentContextPayload(captured) }) as unknown as DocumentResult;
+      const result = await backendClient.request("document.save", { documentContext: documentContextPayload(captured) }) as unknown as DocumentResultDto;
       if (!ownsOperation(owner, documentOperationRef.current)) return false;
       receiveDocumentResult(result, captured, null);
       return result.status === "saved" && documentRef.current?.sourceText === documentBaselineRef.current?.sourceText;

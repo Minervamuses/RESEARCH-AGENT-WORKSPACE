@@ -1,4 +1,10 @@
 import contract from "../protocol/v1/contract.json" with { type: "json" };
+import type {
+  BibliographyAddDto,
+  BibliographyExportDto,
+  BibliographyInspectDto,
+  BibliographyRenderDto,
+} from "./citations.ts";
 
 /**
  * Protocol v1 client helpers.
@@ -441,6 +447,57 @@ export interface DocumentOperationDto {
   rangeEndUtf16: number;
 }
 
+export interface DocumentOpenDto {
+  path: string;
+  sourceText: string;
+  diskFingerprint: string;
+  rootPath?: string;
+  editorRevision?: number;
+}
+
+/** Result of `document.save` and `document.apply`. */
+export interface DocumentResultDto {
+  path: string;
+  status: "saved" | "conflict" | "failed" | "cancelled";
+  sourceText?: string;
+  diskFingerprint?: string;
+  savedFingerprint?: string;
+  rootPath?: string;
+  editorRevision?: number;
+  expectedSnapshot?: DocumentContextDto;
+  rangeStartUtf16?: number;
+  rangeEndUtf16?: number;
+  candidateText?: string;
+  currentDiskText?: string;
+  issue?: string;
+  callId?: string;
+}
+
+export interface RuntimeShutdownDto {
+  status: "stopped" | "no_session";
+}
+
+export interface BibliographySetStyleDto {
+  styleId: string;
+  researchFingerprint: string;
+}
+
+export interface BibliographyRemoveDto {
+  key: string;
+  libraryFingerprint: string;
+}
+
+export interface TurnAcceptedDto {
+  sessionId: string;
+  turnId: string;
+}
+
+export interface DocumentProposedDto {
+  turnId: string;
+  callId: string;
+  referenceId?: string;
+}
+
 export interface ApprovalRequiredDto {
   approvalId: string;
   parentRequestId: string;
@@ -465,6 +522,47 @@ export interface ApprovalResolvedDto {
 export interface SessionBashPermissionSetDto {
   sessionId: string;
   bashPermissionMode: BashPermissionMode;
+}
+
+/**
+ * Result DTO for every method with a contract `resultDataSchemas` entry. The
+ * DTOs are hand-written types; `tests/protocol_types.test.ts` fails when one
+ * drifts from its schema.
+ */
+export interface MethodResults {
+  "runtime.diagnostics": RuntimeDiagnosticsDto;
+  "runtime.shutdown": RuntimeShutdownDto;
+  "project.list": ProjectListDto;
+  "workspace.select": ProjectWorkspaceDto;
+  "document.open": DocumentOpenDto;
+  "document.save": DocumentResultDto;
+  "document.apply": DocumentResultDto;
+  "session.create": SessionCreatedDto;
+  "session.list": SessionListDto;
+  "session.select": SessionSelectedDto;
+  "session.delete": SessionDeletedDto;
+  "session.rename": SessionRenamedDto;
+  "session.retry_registration": RegistrationRetryDto;
+  "session.transcript": SessionTranscriptDto;
+  "session.turn": TurnCompletedDto;
+  "session.set_bash_permission": SessionBashPermissionSetDto;
+  "session.stop": TurnStoppedDto;
+  "extensions.preview": ExtensionPreviewDto;
+  "extensions.apply": ExtensionApplyDto;
+  "approval.resolve": ApprovalResolvedDto;
+  "bibliography.inspect": BibliographyInspectDto;
+  "bibliography.render": BibliographyRenderDto;
+  "bibliography.set_style": BibliographySetStyleDto;
+  "bibliography.remove": BibliographyRemoveDto;
+  "bibliography.add": BibliographyAddDto;
+  "bibliography.export": BibliographyExportDto;
+}
+
+/** Data DTO for every request event with a contract `eventDataSchemas` entry. */
+export interface EventData {
+  "turn.accepted": TurnAcceptedDto;
+  "document.proposed": DocumentProposedDto;
+  "approval.required": ApprovalRequiredDto;
 }
 
 interface EnvelopeBase {
