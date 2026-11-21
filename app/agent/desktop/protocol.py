@@ -340,9 +340,8 @@ def _validate_event_data(
         status = _expect_string(data.get("status"), "data.status")
         if status not in CONTRACT["toolStatuses"]:
             _invalid(f"Unknown tool status: {status}")
-        for optional in ("callId", "candidateId"):
-            if optional in data:
-                _expect_string(data[optional], f"data.{optional}")
+        if "callId" in data:
+            _expect_string(data["callId"], "data.callId")
 
     schema = (CONTRACT["documentApprovalDataSchema"] if event == "approval.required" and "operation" in data
               else CONTRACT["eventDataSchemas"].get(event))
@@ -369,9 +368,6 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
             _validate_document_range(data["expectedSnapshot"], "data.expectedSnapshot", source=True)
     if method == "bibliography.export" and (data["format"] == "bime_docx") != ("audit" in data):
         _invalid("bibliography.export returns audit exactly for bime_docx")
-    if method == "session.turn":
-        for operation in data.get("documentOperations", []):
-            _validate_document_range(operation, "data.documentOperations")
     if method in _DURABLE_TURN_METHODS and (
         data.get("state") != "completed"
         or data.get("accepted") is not True

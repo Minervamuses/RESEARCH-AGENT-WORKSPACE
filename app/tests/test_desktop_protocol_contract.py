@@ -49,13 +49,6 @@ def test_protocol_manifest_safety_invariants() -> None:
         "read_arbitrary_file",
         "set_any_config_field",
     } & set(METHODS)
-    for method in CONTRACT["methods"]:
-        required_from_schema = [
-            name for name, rule in method["params"].items() if rule["required"]
-        ]
-        assert method["requiredParams"] == required_from_schema
-        if method["operation"] == "destructive":
-            assert "previewId" in method["requiredParams"]
 
 
 def test_normal_answers_use_only_the_final_terminal_result() -> None:
@@ -72,9 +65,13 @@ def test_normal_answers_use_only_the_final_terminal_result() -> None:
     assert "maxBytes" not in transcript_turn["assistantText"]
 
 
+def _required_params(method: str) -> list[str]:
+    return [name for name, rule in METHODS[method]["params"].items() if rule["required"]]
+
+
 def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
     method = METHODS["session.turn"]
-    assert method["requiredParams"] == ["text", "turnId", "retry"]
+    assert _required_params("session.turn") == ["text", "turnId", "retry"]
     assert method["params"]["turnId"] == {
         "type": "turnId",
         "required": True,
@@ -101,7 +98,7 @@ def test_session_turn_carries_canonical_lifecycle_identity_end_to_end() -> None:
 
 def test_extension_apply_is_a_durable_display_only_turn() -> None:
     method = METHODS["extensions.apply"]
-    assert method["requiredParams"] == [
+    assert _required_params("extensions.apply") == [
         "previewId",
         "approvedBindingHashes",
         "turnId",
@@ -451,7 +448,7 @@ def test_deeply_nested_json_is_a_bounded_protocol_failure() -> None:
 
 def test_permission_mode_protocol_contract() -> None:
     method = METHODS["session.set_permission"]
-    assert method["requiredParams"] == ["permissionMode"]
+    assert _required_params("session.set_permission") == ["permissionMode"]
     assert method["params"]["permissionMode"] == {
         "type": "string",
         "required": True,

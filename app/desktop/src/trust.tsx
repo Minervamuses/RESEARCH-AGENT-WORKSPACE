@@ -327,7 +327,7 @@ export function ApprovalDialog({
               "citation.save": "Save citation batch", "knowledge.init_workspace": "Initialize index",
               "knowledge.ingest_file": "Import file", "knowledge.ingest_folder": "Import folder",
               "knowledge.prune_apply": "Prune index", "mcp.call": "Call MCP tool",
-              "extension.install": "Install or update extension", "extensions.apply": "Apply extension changes",
+              "extension.install": "Install or update extension",
             }[approval.operation]}</dd></div>
             <div><dt>Target</dt><dd><code>{approval.targetPath}</code></dd></div>
             {approval.parametersSummary !== undefined && <div><dt>Parameters</dt><dd><pre>{approval.parametersSummary}</pre></dd></div>}

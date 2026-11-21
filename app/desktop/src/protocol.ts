@@ -144,11 +144,9 @@ export interface ToolSummaryDto {
   name: string;
   status: "ok" | "failed" | "denied";
   callId?: string;
-  candidateId?: string;
 }
 
 export interface TurnCompletedDto {
-  documentOperations?: DocumentOperationDto[];
   sessionId: string;
   turnId: string;
   turnNumber: number;
@@ -390,14 +388,6 @@ export interface SubmittedContext {
   references: Reference[];
 }
 
-export interface DocumentOperationDto {
-  callId: string;
-  path: string;
-  candidateText: string;
-  rangeStartUtf16: number;
-  rangeEndUtf16: number;
-}
-
 export interface DocumentOpenDto {
   path: string;
   sourceText: string;
@@ -454,7 +444,7 @@ export interface ApprovalRequiredDto {
   parentRequestId: string;
   turnId: string;
   command?: string;
-  operation?: "document.apply" | "document.undo" | "citation.save" | "knowledge.init_workspace" | "knowledge.ingest_file" | "knowledge.ingest_folder" | "knowledge.prune_apply" | "mcp.call" | "extension.install" | "extensions.apply";
+  operation?: "document.apply" | "document.undo" | "citation.save" | "knowledge.init_workspace" | "knowledge.ingest_file" | "knowledge.ingest_folder" | "knowledge.prune_apply" | "mcp.call" | "extension.install";
   targetPath?: string;
   rangeStartUtf16?: number;
   rangeEndUtf16?: number;

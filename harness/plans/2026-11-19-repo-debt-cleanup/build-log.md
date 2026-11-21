@@ -18,7 +18,7 @@
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
-| C4 | In progress | `evidence/C4-S1/`–`C4-S4/` | — | C4-S5 |
+| C4 | In progress | `evidence/C4-S1/`–`C4-S5/` | — | C4-S6 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
@@ -495,3 +495,13 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C4-S4/permission-naming.md`。
 - **限制**：無。
 - **下一步**：C4-S5 無用欄位與錯誤碼（S008＋P3）。
+
+### C4-S5 無用欄位與錯誤碼（2026-11-22）
+
+- **觀察結果**：
+  - **S008（APPLIED）**：刪除 `messageTypes`、頂層 `documentContextSchema`、`session.turn.documentOperations`（含 Python 驗證與 TS `DocumentOperationDto`）、所有方法的 `requiredParams` 與 `operation`、approval enum 的 `extensions.apply`（含 TS 聯集與 `trust.tsx` 標籤）、`candidateId`（tool event 與 `toolSummaries`）。刪除前確認 Python 與 TS 都讀 `params[].required`。
+  - **P3**：25 個錯誤碼都有 producer，本步不移除；清單與 producer 位置見 `evidence/C4-S5/error-codes.md`，C10-S0 複查。
+- **執行指令**：相關 pytest（548 passed，沙箱外）、`npx tsc --noEmit`、`npm test`（224 pass）、`npm run build`（通過）。
+- **證據**：`evidence/C4-S5/unused-fields.md`、`evidence/C4-S5/error-codes.md`。
+- **限制**：Rust 在 C4-S6 重跑。
+- **下一步**：C4-S6 階段收尾。

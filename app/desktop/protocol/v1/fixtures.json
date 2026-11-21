@@ -35,8 +35,7 @@
         "data": {
           "name": "rag_search",
           "callId": "call-1",
-          "status": "ok",
-          "candidateId": "candidate-1"
+          "status": "ok"
         }
       }
     },

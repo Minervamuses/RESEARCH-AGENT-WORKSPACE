@@ -31,8 +31,6 @@ interface ContractFieldRule {
 
 interface ContractMethod {
   name: string;
-  operation: string;
-  requiredParams: string[];
   params: Record<string, ContractFieldRule>;
 }
 
@@ -100,11 +98,6 @@ test("contract method names are unique and expose no generic escape hatches", as
     "set_any_config_field",
   ]) {
     assert.equal(methodNames.has(forbidden), false);
-  }
-  for (const method of contract.methods) {
-    if (method.operation === "destructive") {
-      assert.ok(method.requiredParams.includes("previewId"), method.name);
-    }
   }
 });
 

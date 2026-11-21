@@ -4,7 +4,6 @@
   "fullTextResultMethods": ["session.turn", "session.transcript"],
   "requestIdMaxBytes": 128,
   "errorMessageMaxBytes": 4096,
-  "messageTypes": ["request", "event", "result"],
   "requestEvents": [
     "request.started",
     "turn.accepted",
@@ -43,7 +42,7 @@
     "traceback",
     "turnlogs"
   ],
-  "toolEventDataKeys": ["name", "callId", "status", "candidateId"],
+  "toolEventDataKeys": ["name", "callId", "status"],
   "toolStatuses": ["started", "ok", "failed", "denied"],
   "eventDataSchemas": {
     "turn.accepted": {
@@ -432,18 +431,6 @@
       "registered": {"type": "boolean", "required": false}
     },
     "session.turn": {
-      "documentOperations": {
-        "type": "objectArray",
-        "required": false,
-        "maxItems": 128,
-        "items": {
-          "callId": {"type": "string", "required": true, "maxBytes": 256},
-          "path": {"type": "string", "required": true, "maxBytes": 8192},
-          "candidateText": {"type": "string", "required": true, "maxBytes": 1048576, "allowEmpty": true},
-          "rangeStartUtf16": {"type": "integer", "required": true, "minimum": 0, "maximum": 9007199254740991},
-          "rangeEndUtf16": {"type": "integer", "required": true, "minimum": 0, "maximum": 9007199254740991}
-        }
-      },
       "sessionId": {"type": "string", "required": true, "maxBytes": 256},
       "turnId": {"type": "turnId", "required": true},
       "turnNumber": {"type": "integer", "required": true, "minimum": 1, "maximum": 4096},
@@ -459,8 +446,7 @@
         "items": {
           "name": {"type": "string", "required": true, "maxBytes": 256},
           "status": {"type": "string", "required": true, "enum": ["ok", "failed", "denied"]},
-          "callId": {"type": "string", "required": false, "maxBytes": 256},
-          "candidateId": {"type": "string", "required": false, "maxBytes": 256}
+          "callId": {"type": "string", "required": false, "maxBytes": 256}
         }
       },
       "responseKind": {"type": "string", "required": false, "enum": ["answer", "command"]},
@@ -741,12 +727,10 @@
     "persisted": {"type": "boolean", "required": true}
   },
   "methods": [
-    {"name": "runtime.diagnostics", "operation": "read", "requiredParams": [], "params": {}},
-    {"name": "project.list", "operation": "read", "requiredParams": [], "params": {}},
+    {"name": "runtime.diagnostics", "params": {}},
+    {"name": "project.list", "params": {}},
     {
       "name": "workspace.select",
-      "operation": "lifecycle",
-      "requiredParams": ["rootPath"],
       "params": {
         "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
         "action": {"type": "string", "required": false, "enum": ["inspect", "open", "initialize"]},
@@ -756,16 +740,12 @@
     },
     {
       "name": "document.open",
-      "operation": "read",
-      "requiredParams": ["path"],
       "params": {
         "path": {"type": "string", "required": true, "maxBytes": 8192}
       }
     },
     {
       "name": "document.save",
-      "operation": "mutation",
-      "requiredParams": ["documentContext"],
       "params": {
         "documentContext": {
           "type": "object",
@@ -784,8 +764,6 @@
     },
     {
       "name": "document.apply",
-      "operation": "mutation",
-      "requiredParams": ["documentContext", "turnId"],
       "params": {
         "documentContext": {
           "type": "object",
@@ -822,8 +800,6 @@
     },
     {
       "name": "session.create",
-      "operation": "lifecycle",
-      "requiredParams": [],
       "params": {
         "loadMcp": {"type": "boolean", "required": false},
         "graphRecursionLimit": {"type": "integer", "required": false, "minimum": 3, "maximum": 4294967295},
@@ -832,8 +808,6 @@
     },
     {
       "name": "session.list",
-      "operation": "read",
-      "requiredParams": ["projectId"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "offset": {"type": "integer", "required": false, "minimum": 0, "maximum": 4294967295},
@@ -843,8 +817,6 @@
     },
     {
       "name": "session.select",
-      "operation": "lifecycle",
-      "requiredParams": ["projectId", "sessionId"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "sessionId": {"type": "string", "required": true, "maxBytes": 32}
@@ -852,8 +824,6 @@
     },
     {
       "name": "session.delete",
-      "operation": "mutation",
-      "requiredParams": ["projectId", "sessionId"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "sessionId": {"type": "string", "required": true, "maxBytes": 32}
@@ -861,8 +831,6 @@
     },
     {
       "name": "session.rename",
-      "operation": "mutation",
-      "requiredParams": ["projectId", "sessionId", "title"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "sessionId": {"type": "string", "required": true, "maxBytes": 32},
@@ -871,8 +839,6 @@
     },
     {
       "name": "session.retry_registration",
-      "operation": "mutation",
-      "requiredParams": ["projectId", "sessionId"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "sessionId": {"type": "string", "required": true, "maxBytes": 32}
@@ -880,8 +846,6 @@
     },
     {
       "name": "session.transcript",
-      "operation": "read",
-      "requiredParams": ["projectId", "sessionId"],
       "params": {
         "projectId": {"type": "string", "required": true, "maxBytes": 256},
         "sessionId": {"type": "string", "required": true, "maxBytes": 32},
@@ -891,8 +855,6 @@
     },
     {
       "name": "session.turn",
-      "operation": "mutation",
-      "requiredParams": ["text", "turnId", "retry"],
       "params": {
         "submittedContext": {"type": "submittedContext", "required": false},
         "skillReferences": {
@@ -939,31 +901,23 @@
     },
     {
       "name": "session.set_thinking",
-      "operation": "mutation",
-      "requiredParams": ["mode"],
       "params": {"mode": {"type": "string", "required": true, "enum": ["normal", "extended"]}}
     },
     {
       "name": "session.set_permission",
-      "operation": "mutation",
-      "requiredParams": ["permissionMode"],
       "params": {"permissionMode": {"type": "string", "required": true, "enum": ["ask", "bypass"]}}
     },
     {
       "name": "session.stop",
-      "operation": "lifecycle",
-      "requiredParams": ["sessionId", "turnId", "parentRequestId"],
       "params": {
         "sessionId": {"type": "string", "required": true, "maxBytes": 32},
         "turnId": {"type": "turnId", "required": true},
         "parentRequestId": {"type": "requestId", "required": true}
       }
     },
-    {"name": "extensions.preview", "operation": "paid-preview", "requiredParams": [], "params": {}},
+    {"name": "extensions.preview", "params": {}},
     {
       "name": "extensions.apply",
-      "operation": "destructive",
-      "requiredParams": ["previewId", "approvedBindingHashes", "turnId", "retry"],
       "params": {
         "previewId": {"type": "string", "required": true, "maxBytes": 256},
         "approvedBindingHashes": {"type": "stringArray", "required": true, "maxItems": 512},
@@ -973,8 +927,6 @@
     },
     {
       "name": "approval.resolve",
-      "operation": "control",
-      "requiredParams": ["approvalId", "approved"],
       "params": {
         "approvalId": {"type": "string", "required": true, "maxBytes": 256},
         "parentRequestId": {"type": "requestId", "required": false},
@@ -995,11 +947,9 @@
         }
       }
     },
-    {"name": "runtime.shutdown", "operation": "lifecycle", "requiredParams": [], "params": {}},
+    {"name": "runtime.shutdown", "params": {}},
     {
       "name": "bibliography.inspect",
-      "operation": "read",
-      "requiredParams": [],
       "params": {
         "documentContext": {"type": "object", "required": false, "items": {
           "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
@@ -1014,8 +964,6 @@
     },
     {
       "name": "bibliography.render",
-      "operation": "read",
-      "requiredParams": ["documentContext"],
       "params": {
         "documentContext": {"type": "object", "required": true, "items": {
           "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
@@ -1031,16 +979,12 @@
     },
     {
       "name": "bibliography.set_style",
-      "operation": "mutation",
-      "requiredParams": ["styleId"],
       "params": {
         "styleId": {"type": "string", "required": true, "maxBytes": 128}
       }
     },
     {
       "name": "bibliography.remove",
-      "operation": "mutation",
-      "requiredParams": ["key", "libraryFingerprint"],
       "params": {
         "key": {"type": "string", "required": true, "maxBytes": 512},
         "libraryFingerprint": {"type": "string", "required": true, "maxBytes": 64, "pattern": "^[0-9a-f]{64}$"}
@@ -1048,16 +992,12 @@
     },
     {
       "name": "bibliography.add",
-      "operation": "mutation",
-      "requiredParams": ["identifier"],
       "params": {
         "identifier": {"type": "string", "required": true, "maxBytes": 2048}
       }
     },
     {
       "name": "bibliography.export",
-      "operation": "mutation",
-      "requiredParams": ["format"],
       "params": {
         "documentContext": {"type": "object", "required": false, "items": {
           "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
@@ -1100,20 +1040,11 @@
     "BIBLIOGRAPHY_FAILED",
     "INTERNAL_ERROR"
   ],
-  "documentContextSchema": {
-    "rootPath": {"type": "string", "required": true, "maxBytes": 8192},
-    "path": {"type": "string", "required": true, "maxBytes": 8192},
-    "editorRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 9007199254740991},
-    "sourceText": {"type": "string", "required": true, "maxBytes": 1048576, "allowEmpty": true},
-    "diskFingerprint": {"type": "string", "required": true, "maxBytes": 64, "pattern": "^[0-9a-f]{64}$"},
-    "rangeStartUtf16": {"type": "integer", "required": false, "minimum": 0, "maximum": 9007199254740991},
-    "rangeEndUtf16": {"type": "integer", "required": false, "minimum": 0, "maximum": 9007199254740991}
-  },
   "documentApprovalDataSchema": {
     "approvalId": {"type": "string", "required": true, "maxBytes": 256},
     "parentRequestId": {"type": "requestId", "required": true},
     "turnId": {"type": "string", "required": true, "maxBytes": 256},
-    "operation": {"type": "string", "required": true, "enum": ["document.apply", "document.undo", "citation.save", "knowledge.init_workspace", "knowledge.ingest_file", "knowledge.ingest_folder", "knowledge.prune_apply", "mcp.call", "extension.install", "extensions.apply"]},
+    "operation": {"type": "string", "required": true, "enum": ["document.apply", "document.undo", "citation.save", "knowledge.init_workspace", "knowledge.ingest_file", "knowledge.ingest_folder", "knowledge.prune_apply", "mcp.call", "extension.install"]},
     "targetPath": {"type": "string", "required": true, "maxBytes": 8192},
     "rangeStartUtf16": {"type": "integer", "required": false, "minimum": 0, "maximum": 9007199254740991},
     "rangeEndUtf16": {"type": "integer", "required": false, "minimum": 0, "maximum": 9007199254740991},
