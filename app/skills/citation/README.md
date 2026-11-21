@@ -19,21 +19,21 @@ search intent
 
 save intent
     → authority verification
-    → canonical identity + BibTeX
-    → atomic bundle storage
-    → session source registry + trusted receipt
+    → canonical identity
+    → desktop: merge into the project bibliography (one write per batch); CLI: nothing written
+    → session source registry + trusted receipt (desktop: only for works in the bibliography)
     → [[cite:source-id]] gate and bibliography render
 ```
 
 Search 與 save 是不同階段；discovery result 不會因被找到就自動成為可引用的 saved source。
 
-Desktop projects add a second output for the same save:
+In a desktop project the bibliography is the only store for a save:
 
 ```text
 verified save (doi.org CSL-JSON, or the authority record from the arXiv API or the official NeurIPS proceedings site)
     → csl.sanitize_csl (CSL 1.0.2 whitelist, no abstract, fixed type map)
     → library.merge into the project's references.json (reuse by DOI, arXiv ID or NeurIPS proceedings paper hash, append otherwise)
-    → item.bibliography {status, path, key, reason_code} in the save result
+    → item status saved / reused (with bibliography {status, path, key}) or storage_failed (reason = library error code)
 
 document text ([@key] / \cite{key})
     → citekeys.find_citations (UTF-16 positions, Pandoc-compatible)
@@ -47,8 +47,8 @@ document text ([@key] / \cite{key})
 |---|---|---|
 | Entry/orchestration | `tool.py`, `service.py`, `hub.py` | Workflow tool、service operations 與 process-wide provider hub |
 | Discovery | `resolution.py`, `providers/` | Provider query plans、normalization、ranking 與 fallback |
-| Identity | `authority.py`, `doi.py`, `normalize.py`, `bibtex_canonical.py`, `types.py` | Canonical identity、verified metadata 與 artifacts |
-| Persistence | `storage.py`, `registry.py` | Atomic bundles、session source refs 與 trusted receipts |
+| Identity | `authority.py`, `doi.py`, `normalize.py`, `types.py` | Canonical identity、verified metadata 與 artifacts |
+| Session sources | `registry.py` | Session source refs 與 trusted receipts |
 | Output safety | `gate.py`, `render.py` | Marker validation、safe blocking 與 bibliography rendering |
 | Project bibliography | `csl.py`, `library.py` | Sanitized CSL-JSON；`references.json` load/layout detection/keys/merge/remove/fingerprint-checked atomic write |
 | Document citations | `citekeys.py`, `integrity.py` | Markdown (Pandoc) and LaTeX `\cite` key parsing; integrity report for one document |
@@ -62,11 +62,11 @@ document text ([@key] / \cite{key})
 
 - Provider hub 可在 process 內共用，discovery call 不擁有 session state。
 - `CitationService` 與 source registry 是 session-scoped，由 `CitationSessionPolicy` 唯一擁有。
-- Saved citation bundle 是 disk-persistent local artifact，不因 skill deactivation 被刪除。
+- 唯一的持久化是桌面專案的書目庫；CLI 的存檔不寫任何檔案，`verified` 的來源只在當次 task 可引用。
 - `[[cite:...]]` 與 `[[citation-needed]]` 的特殊語意只在 citation skill active 時開放。
 - Extended thinking 不與 citation skill 同時啟用，避免平行 candidate 共享 registry。
 - The project bibliography file belongs to the user: existing entries, keys and JSON layout are never changed; a file whose layout cannot be reproduced is read but never rewritten; every write re-checks the file fingerprint first.
-- Bibliography failures never change a bundle's saved/reused outcome.
+- A bibliography failure is the item's `storage_failed` status: nothing was saved and the work is not citable. A work already in the bibliography before the batch stays `reused` even when a new work in the same batch fails to write.
 
 ## Correctness invariants
 

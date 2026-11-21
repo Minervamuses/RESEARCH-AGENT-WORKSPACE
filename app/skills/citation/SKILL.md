@@ -1,6 +1,6 @@
 ---
 name: citation
-description: Conversational citation selection, verified bundle saving, and [[cite:...]] rendering.
+description: Conversational citation selection, verified saving to the project bibliography, and [[cite:...]] rendering.
 ---
 
 # Citation Skill
@@ -8,7 +8,7 @@ description: Conversational citation selection, verified bundle saving, and [[ci
 Use `citation_workflow` to discover and save persistent citation identities.
 Its actions are `search`, `save`, `sources`, `source`, and `explain`. You own
 the conversational decision about which work/version the user requested and
-whether they authorized a write; the tool owns metadata retrieval, BibTeX,
+whether they authorized a write; the tool owns metadata retrieval,
 storage, and the factual save outcome.
 
 For paper discovery and citation work, use only citation_workflow and its existing Crossref, DataCite, and optional OpenAlex providers, preserving the workflow's existing authoritative identifier resolution and save behavior. Do not use Web Search or browse other websites to find papers, fill missing metadata or abstracts, or repair failed, incomplete, or ambiguous provider results. When the workflow cannot provide a reliable result, honestly report the returned failure, uncertainty, or missing information and present any usable results with their limitations; follow the existing bounded retry rules instead of searching the web. This instruction applies even when Web Search tools remain available.
@@ -64,8 +64,8 @@ task; visible prior conversation still supplies metadata and authorization.
   unaddressed confounders.
 - This workflow stops at abstracts. Do not download/read full text or start
   a separate evidence-verification pipeline. Abstracts exist only in this
-  turn's discovery results; saving still verifies bibliographic identity
-  and BibTeX, without upgrading the result to claim verification.
+  turn's discovery results; saving still verifies bibliographic identity,
+  without upgrading the result to claim verification.
 - If some providers fail, present the remaining results and the incomplete
   search scope. A provider failure or missing abstract is not a zero-hit
   result and is not evidence that relevant literature does not exist.
@@ -95,7 +95,7 @@ task; visible prior conversation still supplies metadata and authorization.
 - DOI first. When the selected record, or the conversation, shows a DOI or
   arXiv identifier, the WorkIntent is `requested_label` plus that one
   identifier in `identifiers`, and nothing else. Copy it from the record the
-  user chose. The workflow fetches authoritative doi.org metadata and BibTeX
+  user chose. The workflow fetches authoritative doi.org metadata
   for it without searching again, so re-typing title, authors, year, venue,
   or type adds nothing but chances for error.
 - Each version (preprint, published article, repository copy) has its own
@@ -142,19 +142,24 @@ task; visible prior conversation still supplies metadata and authorization.
   bibliography are allowed, but do not present invented bibliographic facts.
 - `sources` lists this task's sources and `source` accepts only a stable
   `source_id`. `explain` gives the public verification/storage contract.
-- A later task must save or reuse a bundle through the tool to obtain a
-  receipt trusted by its own registry. Historical markers or receipts alone
-  do not make a source citable in the new task. Cleanup keeps saved bundles.
+- A later task must save the work through the tool again to obtain a receipt
+  trusted by its own registry. Historical markers or receipts alone do not
+  make a source citable in the new task.
 - Each save's tool content contains the actual per-item status and any receipt.
   Base your response on that result and preserve ambiguity/failure honestly;
   no finalizer will replace your prose with a deterministic save summary.
 
 ## Project bibliography (desktop projects)
 
-- In a desktop research project, every saved or reused work is also merged
-  into the project's CSL-JSON bibliography, and the save result reports its
-  `key` (`bibliography.status` is `added`, `existing`, or `failed` with a
-  reason; a bibliography failure never changes the bundle outcome).
+- In a desktop research project, a save merges the verified work into the
+  project's CSL-JSON bibliography, the only citation store. `saved` (newly
+  added) and `reused` (already there) works are in the bibliography, report
+  their `key`, and are citable. `storage_failed` means the bibliography could
+  not be updated: nothing was saved and the work is not citable; tell the user
+  and offer to retry the save.
+- Without a project bibliography (the CLI), a successful save is `verified`:
+  citable in this conversation only and not written to disk. Do not describe
+  it as saved.
 - Text written into a project document cites by key only: `[@key]` or
   `[@a; @b]` in Markdown, `\cite{key}` in LaTeX. Do not type author-year or
   numbered references into the document yourself and never invent a key;
@@ -165,5 +170,5 @@ task; visible prior conversation still supplies metadata and authorization.
   bibliography does not contain; save the work first, or say which claims
   still lack a source.
 
-Bundles are staged, fsynced, and atomically renamed. DOI identities keep their
-stable `src-*`; schema-v1 bundles are validated and reused without rewriting.
+Bibliography writes re-check the file fingerprint and replace the file
+atomically. Each canonical identity keeps a stable `src-*` source ID.

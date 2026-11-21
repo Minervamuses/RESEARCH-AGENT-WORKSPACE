@@ -19,7 +19,7 @@
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
-| C5 | In progress | `evidence/C5-S1/`–`C5-S3/` | — | C5-S4 |
+| C5 | In progress | `evidence/C5-S1/`–`C5-S4/` | — | C5-S5 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
@@ -548,3 +548,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C5-S3/single-store.md`（語意表、(a)–(k) 對照、退役紀錄、產品邊界）。
 - **限制**：模型指令（`SKILL.md`、README）在 C5-S4 更新；`pybtex` 相依在 C5-S5 移除；cargo 在 C5-S6 重跑。
 - **下一步**：C5-S4 模型看到的文字。
+
+### C5-S4 模型看到的文字（2026-11-22）
+
+- **觀察結果**：**模型指令已改變（實驗條件）**。`SKILL.md` 的 description、BibTeX 的三處提及、後續 task 重新存檔的規則與「Project bibliography」一節改寫為新的存檔狀態（`saved`／`reused` 可引用、`storage_failed` 未存檔且不可引用並可重試、CLI 的 `verified` 只在本次對話可引用且不可說成已存檔）；skill `README.md` 的流程圖、模組表（刪 `bibtex_canonical.py`、`storage.py`）與狀態邊界同步。只剩「bundled CSL styles」的用語，與 citation bundle 無關。
+- **執行指令**：skill 相關測試 125 passed；grep 見 evidence。
+- **證據**：`evidence/C5-S4/skill-text.md`（含完整 diff）。
+- **限制**：無。
+- **下一步**：C5-S5 以 Poetry 移除 `pybtex`（U9）。
