@@ -7,8 +7,6 @@ import type {
 
 export const MAX_ACTIVITY_ITEMS = 32;
 
-export type AnswerStreamKind = "final_only";
-
 export interface ConversationSelection {
   projectId: string;
   sessionId: string;
@@ -37,8 +35,6 @@ export interface AuthoritativeTurnResult {
   persisted: boolean;
   text: string;
   responseKind?: "answer" | "command";
-  streamKind?: AnswerStreamKind;
-  chunkCount?: number;
 }
 
 export interface FinalConversationAnswer extends ConversationSelection {
@@ -47,7 +43,6 @@ export interface FinalConversationAnswer extends ConversationSelection {
   turnNumber: number;
   text: string;
   responseKind: "answer" | "command";
-  streamKind: AnswerStreamKind;
 }
 
 export interface LiveTurn {
@@ -58,7 +53,6 @@ export interface LiveTurn {
   userText: string;
   assistantText: string;
   responseKind: "answer" | "command";
-  streamKind: AnswerStreamKind;
 }
 
 export interface RestoredConversationTurn {
@@ -432,14 +426,11 @@ function finalizeTurn(
     typeof result.text !== "string" ||
     (result.responseKind !== undefined &&
       result.responseKind !== "answer" &&
-      result.responseKind !== "command") ||
-    (result.streamKind !== undefined && result.streamKind !== "final_only") ||
-    (result.chunkCount !== undefined && result.chunkCount !== 0)
+      result.responseKind !== "command")
   ) {
     return state;
   }
 
-  const streamKind = result.streamKind ?? "final_only";
   return {
     ...state,
     draft: "",
@@ -457,7 +448,6 @@ function finalizeTurn(
       turnNumber: result.turnNumber,
       text: result.text,
       responseKind,
-      streamKind,
     },
     failure: null,
   };

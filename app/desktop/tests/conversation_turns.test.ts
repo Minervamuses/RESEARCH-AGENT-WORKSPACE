@@ -90,14 +90,12 @@ function succeed(
       accepted: true,
       persisted: true,
       responseKind: "answer",
-      streamKind: "final_only",
-      chunkCount: 0,
       ...overrides,
     },
   });
 }
 
-test("one final-only result creates one complete authoritative answer", () => {
+test("one terminal result creates one complete authoritative answer", () => {
   const started = activeState();
   assert.equal(started.latestAnswer, null);
   assert.equal(started.activeTurn?.turnId, turnId);
@@ -113,7 +111,6 @@ test("one final-only result creates one complete authoritative answer", () => {
     turnNumber: 1,
     text: "complete answer",
     responseKind: "answer",
-    streamKind: "final_only",
   });
 
   assert.equal(succeed(state, { text: "duplicate" }), state);
@@ -125,7 +122,7 @@ test("a result for a different logical turn is rejected", () => {
   assert.equal(succeed(started, { turnId: otherTurnId }), started);
 });
 
-test("a local slash command is one durable final-only display result", () => {
+test("a local slash command is one durable display result", () => {
   const state = succeed(activeState("/sync /tmp/research"), {
     text: "Diff against /tmp/research:\n  (none)",
     responseKind: "command",
@@ -139,15 +136,12 @@ test("a local slash command is one durable final-only display result", () => {
     turnNumber: 1,
     text: "Diff against /tmp/research:\n  (none)",
     responseKind: "command",
-    streamKind: "final_only",
   });
 });
 
-test("post-finalized, nonzero-chunk, cross-session, and malformed results fail closed", () => {
+test("cross-session and malformed results fail closed", () => {
   const started = activeState();
   const invalidResults = [
-    { streamKind: "post_finalized" } as unknown as Partial<AuthoritativeTurnResult>,
-    { chunkCount: 1 },
     { sessionId: otherSessionId },
     { turnId: "" },
     { turnNumber: undefined } as unknown as Partial<AuthoritativeTurnResult>,
@@ -420,7 +414,6 @@ function liveTurn(
     userText: `question ${number}`,
     assistantText: text,
     responseKind: "answer",
-    streamKind: "final_only",
   };
 }
 
@@ -481,7 +474,7 @@ test("a pending new turn remains appended after restored turns", () => {
   assert.equal(visible[1]?.source === "pending" && visible[1].retrying, false);
 });
 
-test("completed duplicate replay upserts one final-only live card", () => {
+test("completed duplicate replay upserts one live card", () => {
   let live: LiveTurn[] = [];
   live = upsertLiveTurn(live, liveTurn(sessionId, 4, turnId, "saved answer"));
   live = upsertLiveTurn(live, liveTurn(sessionId, 4, turnId, "replayed saved answer"));
@@ -493,7 +486,6 @@ test("completed duplicate replay upserts one final-only live card", () => {
   assert.equal(live.length, 1);
   assert.equal(visible.length, 1);
   assert.equal(visible[0]?.source, "live");
-  assert.equal(visible[0]?.turn.streamKind, "final_only");
   assert.equal(visible[0]?.turn.assistantText, "replayed saved answer");
 });
 

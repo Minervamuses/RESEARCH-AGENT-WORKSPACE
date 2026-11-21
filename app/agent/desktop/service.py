@@ -830,8 +830,6 @@ class DesktopService:
             "citationOutputPath": str(
                 resolve_output_dir(self.config, self.environ).expanduser().resolve()
             ),
-            "ollamaReachable": None,
-            "ollamaModelAvailable": None,
             "mcpEnabled": self._load_mcp,
             "mcpFamilies": mcp_families,
             "mcpDiagnostics": mcp_diagnostics,
@@ -1685,8 +1683,6 @@ class DesktopService:
             "validationErrors": validation_errors,
             "toolSummaries": tool_summaries,
             "responseKind": "answer",
-            "streamKind": "final_only",
-            "chunkCount": 0,
             "registrationStatus": "pending",
             "registrationIssue": "\u0000" * 4_096,
         }
@@ -3204,8 +3200,6 @@ class DesktopService:
                         "validationErrors": [],
                         "toolSummaries": [],
                         "responseKind": "command",
-                        "streamKind": "final_only",
-                        "chunkCount": 0,
                         "registrationStatus": registration_status,
                         "registrationIssue": registration_issue,
                     }
@@ -3305,9 +3299,7 @@ class DesktopService:
                 "validationErrors": validation_errors,
                 "toolSummaries": tool_summaries,
                 "responseKind": "answer",
-                "streamKind": "final_only",
-                "chunkCount": 0,
-                "registrationStatus": registration_status,
+                        "registrationStatus": registration_status,
                 "registrationIssue": registration_issue,
             }
 

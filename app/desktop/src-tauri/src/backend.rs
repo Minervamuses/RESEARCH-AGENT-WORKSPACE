@@ -1805,7 +1805,7 @@ for raw in sys.stdin:
         elif MODE == 'oversized_malformed':
             output = '{{"protocolVersion":1,' + ('x' * (2 * 1024 * 1024 + 4096))
         elif MODE == 'oversized_event':
-            output = json.dumps({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.progress','data':{{'stage':'x' * (2 * 1024 * 1024 + 4096)}}}}, separators=(',', ':'))
+            output = json.dumps({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'stage.changed','data':{{'stage':'x' * (2 * 1024 * 1024 + 4096)}}}}, separators=(',', ':'))
         else:
             output = json.dumps({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':False,'error':{{'code':'FAIL','message':'x' * (2 * 1024 * 1024 + 4096),'retryable':False,'details':{{}}}}}}, separators=(',', ':'))
         sys.stdout.write(output)
@@ -1836,7 +1836,7 @@ for raw in sys.stdin:
     if MODE == 'large_turn' and method == 'session.turn':
         send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
         answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + ('界' * 750000) + '\nEND'
-        send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{'sessionId':'28b222e0cc6543aa8d7bbdc423de99a7','turnId':request['params']['turnId'],'turnNumber':1,'state':'completed','accepted':True,'persisted':True,'text':answer,'validationErrors':[],'toolSummaries':[],'responseKind':'answer','streamKind':'final_only','chunkCount':0}}}})
+        send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{'sessionId':'28b222e0cc6543aa8d7bbdc423de99a7','turnId':request['params']['turnId'],'turnNumber':1,'state':'completed','accepted':True,'persisted':True,'text':answer,'validationErrors':[],'toolSummaries':[],'responseKind':'answer'}}}})
         continue
     if MODE == 'large_transcript' and method == 'session.transcript':
         send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
@@ -1856,9 +1856,9 @@ for raw in sys.stdin:
     if MODE == 'long_request' and method != 'runtime.shutdown':
         send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':1,'event':'request.started','data':{{'stage':method}}}})
         time.sleep(0.05)
-        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':2,'event':'request.progress','data':{{'stage':'before-old-deadline'}}}})
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':2,'event':'stage.changed','data':{{'stage':'before-old-deadline'}}}})
         time.sleep(0.08)
-        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':3,'event':'request.progress','data':{{'stage':'after-old-deadline'}}}})
+        send({{'protocolVersion':1,'messageType':'event','requestId':request_id,'sequence':3,'event':'stage.changed','data':{{'stage':'after-old-deadline'}}}})
         time.sleep(0.05)
         send({{'protocolVersion':1,'messageType':'result','requestId':request_id,'ok':True,'data':{{}}}})
         continue
@@ -1972,8 +1972,6 @@ for raw in sys.stdin:
             "界".repeat(750_000)
         );
         assert_eq!(result["data"]["text"].as_str(), Some(expected.as_str()));
-        assert_eq!(result["data"]["streamKind"], "final_only");
-        assert_eq!(result["data"]["chunkCount"], 0);
         assert_eq!(supervisor.snapshot().lifecycle, BackendLifecycle::Ready);
         assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);
     }
@@ -2039,7 +2037,7 @@ for raw in sys.stdin:
             .collect::<Vec<_>>();
         assert_eq!(
             order,
-            ["request.started", "request.progress", "request.progress"]
+            ["request.started", "stage.changed", "stage.changed"]
         );
         drop(captured);
         assert_eq!(supervisor.shutdown().kind, ShutdownKind::Graceful);

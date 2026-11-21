@@ -8,24 +8,12 @@
   "requestEvents": [
     "request.started",
     "turn.accepted",
-    "request.progress",
     "stage.changed",
     "tool.started",
     "tool.finished",
     "tool.failed",
     "document.proposed",
-    "approval.required",
-    "knowledge.progress",
-    "shutdown.progress",
-    "collecting.started",
-    "collecting.completed",
-    "tagging.started",
-    "tagging.folder_completed",
-    "metadata.written",
-    "writing.started",
-    "writing.file_completed",
-    "ingest.completed",
-    "ingest.failed"
+    "approval.required"
   ],
   "processEvents": [
     "backend.ready",
@@ -76,36 +64,6 @@
       "executionTimeoutSeconds": {"type": "integer", "required": true, "minimum": 1, "maximum": 3600},
       "createdAt": {"type": "utcTimestamp", "required": true},
       "expiresAt": {"type": "utcTimestamp", "required": true}
-    },
-    "collecting.started": {},
-    "collecting.completed": {
-      "folders": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "files": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
-    },
-    "tagging.started": {
-      "total": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
-    },
-    "tagging.folder_completed": {
-      "completed": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "total": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "folder": {"type": "string", "required": true, "maxBytes": 8192}
-    },
-    "metadata.written": {
-      "path": {"type": "string", "required": true, "maxBytes": 8192}
-    },
-    "writing.started": {},
-    "writing.file_completed": {
-      "filePath": {"type": "string", "required": true, "maxBytes": 8192},
-      "chunks": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "filesCompleted": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
-    },
-    "ingest.completed": {
-      "files": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "chunks": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295}
-    },
-    "ingest.failed": {
-      "stage": {"type": "string", "required": true, "maxBytes": 256},
-      "partialWritePossible": {"type": "boolean", "required": true}
     }
   },
   "submittedContextSchema": {
@@ -449,8 +407,6 @@
       "openAlexConfigured": {"type": "boolean", "required": true},
       "storePath": {"type": "string", "required": true, "maxBytes": 8192},
       "citationOutputPath": {"type": "string", "required": true, "maxBytes": 8192},
-      "ollamaReachable": {"type": "nullableBoolean", "required": true},
-      "ollamaModelAvailable": {"type": "nullableBoolean", "required": true},
       "mcpEnabled": {"type": "boolean", "required": true},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096}
@@ -508,8 +464,6 @@
         }
       },
       "responseKind": {"type": "string", "required": false, "enum": ["answer", "command"]},
-      "streamKind": {"type": "string", "required": false, "enum": ["final_only"]},
-      "chunkCount": {"type": "integer", "required": false, "minimum": 0, "maximum": 0},
       "registrationStatus": {"type": "string", "required": false, "enum": ["registered", "pending", "not_required"]},
       "registrationIssue": {"type": "nullableString", "required": false, "maxBytes": 4096},
       "extensionAction": {"type": "string", "required": false, "enum": ["status", "preview"]}

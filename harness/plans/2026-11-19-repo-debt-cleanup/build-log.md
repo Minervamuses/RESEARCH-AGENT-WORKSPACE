@@ -18,7 +18,7 @@
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
-| C4 | In progress | `evidence/C4-S1/`–`C4-S2/` | — | C4-S3 |
+| C4 | In progress | `evidence/C4-S1/`–`C4-S3/` | — | C4-S4 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
@@ -475,3 +475,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C4-S2/rpc-registrations.md`。
 - **限制**：無。
 - **下一步**：C4-S3 死 event、streaming 殘留與 Ollama 欄位（U7）。
+
+### C4-S3 死 event、streaming 殘留與 Ollama 欄位（2026-11-22）
+
+- **觀察結果**：
+  - **S006（U7，APPLIED）**：contract 的 request event 20 → 8；fixtures 刪 2 個 `ingest-progress-*`，另 5 個以 `request.progress` 為泛用 event 的 fixture 改用 `stage.changed`。
+  - **S009（U7，APPLIED）**：`streamKind`、`chunkCount` 從 Python、contract、TS（含 `AnswerStreamKind` 與拒絕條件）與 fixtures 端到端刪除；`test_desktop_answer_stream.py` → `test_desktop_turn_results.py`、`answer_stream.test.ts` → `conversation_turns.test.ts`，保留有價值的 terminal result 斷言。
+  - **S010（U7，APPLIED）**：`ollamaReachable`、`ollamaModelAvailable` 與 GUI 兩列（含 `availabilityLabel`）刪除。
+  - `DTO_EXCEPTIONS` 已清空。Rust 測試的假 backend 同步改用現行詞彙。
+- **執行指令**：pytest desktop／protocol 相關模組（552 passed，沙箱外）、`npm test`（224 pass）、`npm run build`（通過）、`cargo test --locked`（35 passed，沙箱外）、grep 四個欄位名（0 筆）。
+- **證據**：`evidence/C4-S3/dead-vocabulary.md`。
+- **限制**：`for_agents/` 仍提到舊測試檔名，列入最終彙報。
+- **下一步**：C4-S4 權限命名（U8＋P2）。

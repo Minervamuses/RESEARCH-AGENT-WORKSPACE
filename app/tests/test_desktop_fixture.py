@@ -207,14 +207,13 @@ def test_fixture_status_reports_canonical_conversation_root(
     status = asyncio.run(run())
     expected_root = ConversationRepository(_history_root(service)).display_root()
     assert status["responseKind"] == "command"
-    assert status["streamKind"] == "final_only"
     assert (
         f"conversation_root: {json.dumps(expected_root, ensure_ascii=False)}"
         in status["text"]
     )
 
 
-def test_real_service_round_trip_registration_restore_and_final_only_answer(
+def test_real_service_round_trip_registration_restore_and_complete_answer(
     fixture_root: Path,
 ) -> None:
     service = _service(fixture_root, open_project=True)
@@ -242,8 +241,6 @@ def test_real_service_round_trip_registration_restore_and_final_only_answer(
         assert result["accepted"] is True
         assert result["persisted"] is True
         assert result["registrationStatus"] == "registered"
-        assert result["streamKind"] == "final_only"
-        assert result["chunkCount"] == 0
         assert all(event != "answer.chunk" for event, _data in events)
         assert result["text"] not in repr(events)
 
@@ -332,8 +329,6 @@ def test_fixture_long_answer_survives_switch_and_backend_restart(
     )
     assert len(expected.encode("utf-8")) > 2 * 1024 * 1024
     assert result["text"] == expected
-    assert result["streamKind"] == "final_only"
-    assert result["chunkCount"] == 0
     assert all(event != "answer.chunk" for event, _data in events)
     assert expected not in repr(events)
     assert switched["status"] == "ready"
@@ -420,8 +415,6 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
     assert retry["turnId"] == replay["turnId"] == turn_id
     assert retry["turnNumber"] == replay["turnNumber"] == 2
     assert retry["text"] == replay["text"]
-    assert retry["streamKind"] == replay["streamKind"] == "final_only"
-    assert retry["chunkCount"] == replay["chunkCount"] == 0
     matching = [item for item in transcript["items"] if item["turnId"] == turn_id]
     assert len(matching) == 1
     assert matching[0]["state"] == "completed"
@@ -966,7 +959,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
     assert restarted_provider.calls == 0
 
 
-def test_phase07_integrated_final_only_skill_tool_restore_journey(
+def test_phase07_integrated_skill_tool_restore_journey(
     phase07_fixture_root: Path,
 ) -> None:
     root = phase07_fixture_root
@@ -1033,8 +1026,6 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         "fixture.after-old-deadline",
         "fixture.finalized",
     ]
-    assert delayed["streamKind"] == "final_only"
-    assert delayed["chunkCount"] == 0
     assert all(event != "answer.chunk" for event, _data in delayed_events)
     assert delayed["text"] not in repr(delayed_events)
     assert applied["restartRequired"] is True
@@ -1133,18 +1124,13 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         skill.name for skill in discover_skills(second.config)
     } | {"fixture-writer"}
     assert "activeSkill" not in loaded and "taskMode" not in loaded
-    assert skill["streamKind"] == "final_only" and skill["chunkCount"] == 0
     assert skill["text"].startswith("Fixture skill fixture-writer")
     assert all(event != "answer.chunk" for event, _data in skill_events)
     assert skill["text"] not in repr(skill_events)
-    assert ordinary["streamKind"] == "final_only"
     assert "Fixture skill" not in ordinary["text"]
     assert skill_failure.code == "PROVIDER_REQUEST_FAILED"
     assert all(event != "answer.chunk" for event, _data in failed_events)
-    assert retry["streamKind"] == "final_only"
     assert "Fixture skill" not in retry["text"]
-    assert tool_answer["streamKind"] == "final_only"
-    assert tool_answer["chunkCount"] == 0
     assert all(event != "answer.chunk" for event, _data in tool_events)
     assert tool_answer["text"] not in repr(tool_events)
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
@@ -1231,8 +1217,6 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
         "Fixture knowledge search completed."
     )
     assert tool_invocations == [FIXTURE_RAG_QUESTION]
-    assert continued["streamKind"] == "final_only"
-    assert continued["chunkCount"] == 0
     assert all(event != "answer.chunk" for event, _data in continued_events)
     assert continued["text"] not in repr(continued_events)
     assert seed_selected["turnCount"] == 1

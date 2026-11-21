@@ -614,7 +614,6 @@ def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
     assert "staged source changed; preserving user changes and backup" in response["text"]
     assert f"backup_path: {backup}" in response["text"]
     assert response["state"] == "completed"
-    assert response["streamKind"] == "final_only" and response["chunkCount"] == 0
     assert runs == [] and graph.states == [] and model.calls == calls_before
     assert factory.calls == [] and all(not model.calls for model in models.values())
     assert before == {

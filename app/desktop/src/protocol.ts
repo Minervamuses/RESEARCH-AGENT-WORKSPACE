@@ -102,22 +102,10 @@ export type ProtocolMethod = keyof MethodResults | MethodWithoutResultDto;
 /** Request events without a data DTO in `EventData`. */
 export type RequestEventWithoutDataDto =
   | "request.started"
-  | "request.progress"
   | "stage.changed"
   | "tool.started"
   | "tool.finished"
-  | "tool.failed"
-  | "knowledge.progress"
-  | "shutdown.progress"
-  | "collecting.started"
-  | "collecting.completed"
-  | "tagging.started"
-  | "tagging.folder_completed"
-  | "metadata.written"
-  | "writing.started"
-  | "writing.file_completed"
-  | "ingest.completed"
-  | "ingest.failed";
+  | "tool.failed";
 
 /** Every contract request event; checked against the contract by `tests/protocol_types.test.ts`. */
 export type RequestEvent = keyof EventData | RequestEventWithoutDataDto;
@@ -171,8 +159,6 @@ export interface TurnCompletedDto {
   validationErrors: string[];
   toolSummaries: ToolSummaryDto[];
   responseKind?: "answer" | "command";
-  streamKind?: "final_only";
-  chunkCount?: number;
   registrationStatus?: "registered" | "pending" | "not_required";
   registrationIssue?: string | null;
   extensionAction?: "status" | "preview";
@@ -306,8 +292,6 @@ export interface RuntimeDiagnosticsDto {
   openAlexConfigured: boolean;
   storePath: string;
   citationOutputPath: string;
-  ollamaReachable: boolean | null;
-  ollamaModelAvailable: boolean | null;
   mcpEnabled: boolean;
   mcpFamilies: string[];
   mcpDiagnostics: string[];

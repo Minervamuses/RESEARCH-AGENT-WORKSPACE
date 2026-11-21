@@ -62,17 +62,8 @@ def test_normal_answers_use_only_the_final_terminal_result() -> None:
     assert "answer.chunk" not in CONTRACT["requestEvents"]
     assert "answer.chunk" not in CONTRACT["eventDataSchemas"]
     turn = CONTRACT["resultDataSchemas"]["session.turn"]
-    assert turn["streamKind"] == {
-        "type": "string",
-        "required": False,
-        "enum": ["final_only"],
-    }
-    assert turn["chunkCount"] == {
-        "type": "integer",
-        "required": False,
-        "minimum": 0,
-        "maximum": 0,
-    }
+    # The retired streaming markers stay out of the wire result.
+    assert "streamKind" not in turn and "chunkCount" not in turn
     assert "maxBytes" not in turn["text"]
     transcript_turn = CONTRACT["resultDataSchemas"]["session.transcript"][
         "items"

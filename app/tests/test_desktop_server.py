@@ -548,8 +548,6 @@ class _LargeAnswerService:
                 "text": self.answer,
                 "validationErrors": [],
                 "toolSummaries": [],
-                "streamKind": "final_only",
-                "chunkCount": 0,
             }
         if method == "session.transcript":
             return {
@@ -581,7 +579,7 @@ class _LargeAnswerService:
         raise AssertionError(method)
 
 
-def test_large_complete_answer_is_written_as_one_final_only_result() -> None:
+def test_large_complete_answer_is_written_as_one_result() -> None:
     request_id = "00000000-0000-4000-8000-000000000218"
     answer = "完整 Unicode 回答🙂\n" + "界" * 750_000
 
@@ -610,8 +608,6 @@ def test_large_complete_answer_is_written_as_one_final_only_result() -> None:
     )
     assert result["ok"] is True
     assert result["data"]["text"] == answer
-    assert result["data"]["streamKind"] == "final_only"
-    assert result["data"]["chunkCount"] == 0
 
 
 def test_large_transcript_answer_is_written_whole() -> None:

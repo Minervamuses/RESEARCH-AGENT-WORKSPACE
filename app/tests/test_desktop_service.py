@@ -483,7 +483,8 @@ def test_diagnostics_stays_available_without_provider_keys(tmp_path: Path) -> No
     assert diagnostics["backendState"] == "ready"
     assert diagnostics["openRouterConfigured"] is False
     assert diagnostics["openAlexConfigured"] is False
-    assert diagnostics["ollamaReachable"] is None
+    assert "ollamaReachable" not in diagnostics
+    assert "ollamaModelAvailable" not in diagnostics
     assert diagnostics["originalWorkingDirectory"] == str(tmp_path)
     success_result(
         "00000000-0000-4000-8000-000000000101",
@@ -650,8 +651,6 @@ def test_composer_keeps_normal_text_and_runs_status_without_model(
     )
     assert session.turn_inputs == [raw_text]
     assert status["responseKind"] == "command"
-    assert status["streamKind"] == "final_only"
-    assert status["chunkCount"] == 0
     assert "Session status:" in status["text"]
 
 
@@ -1049,7 +1048,6 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     params = _turn_params(raw)
     result = asyncio.run(_dispatch_approved(service, "session.turn", params))
     assert result["responseKind"] == "answer"
-    assert result["streamKind"] == "final_only" and result["chunkCount"] == 0
     assert "已保存並引用來源 [1]。" in result["text"]
     assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
     assert session.thinking_mode == "extended"
@@ -1093,7 +1091,6 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
         assert duplicate["text"] == result["text"]
         assert duplicate["turnNumber"] == result["turnNumber"]
         assert duplicate["state"] == "completed"
-        assert duplicate["streamKind"] == "final_only" and duplicate["chunkCount"] == 0
         success_result("00000000-0000-4000-8000-000000000102", "session.turn", duplicate)
     assert loads == []
     assert (len(model.invocations), len(fetcher.calls), len(services), len(save_calls)) == counts
@@ -1494,7 +1491,6 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
     assert factory.created is not None
     assert factory.created.turn_inputs == []
     assert all(result["responseKind"] == "command" for result in results)
-    assert all(result["streamKind"] == "final_only" for result in results)
     assert all(result["registrationStatus"] == "registered" for result in results)
     assert "initialized: 2 files, 5 chunks" in results[0]["text"]
     assert "ingested paper-pid (3 chunks)" in results[1]["text"]

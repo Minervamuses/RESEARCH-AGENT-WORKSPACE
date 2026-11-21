@@ -122,22 +122,10 @@ test("echoed identifier fields are derived from params and result schemas", () =
   assert.deepEqual(echoedIdFields("approval.resolve"), []);
 });
 
-test("normal answers use only the final terminal result", async () => {
+test("normal answers use only the terminal result", async () => {
   const contract = await loadJson<ContractDocument>("contract.json");
-  const turnResult = contract.resultDataSchemas["session.turn"];
   assert.equal(contract.requestEvents.includes("answer.chunk"), false);
-  assert.deepEqual(turnResult.streamKind, {
-    type: "string",
-    required: false,
-    enum: ["final_only"],
-  });
-  assert.deepEqual(turnResult.chunkCount, {
-    type: "integer",
-    required: false,
-    minimum: 0,
-    maximum: 0,
-  });
-  assert.equal("maxBytes" in turnResult.text, false);
+  assert.equal("maxBytes" in contract.resultDataSchemas["session.turn"].text, false);
 });
 
 test("complete answer and transcript results have no client capacity rejection", () => {

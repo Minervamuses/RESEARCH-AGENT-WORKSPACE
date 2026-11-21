@@ -1,4 +1,4 @@
-"""Focused tests for authoritative final-only desktop answers."""
+"""Focused tests for authoritative desktop turn results delivered by the terminal result."""
 
 from __future__ import annotations
 
@@ -102,8 +102,6 @@ def test_answer_is_delivered_only_by_the_final_terminal_result(tmp_path: Path) -
 
         assert events == []
         assert result["text"] == "final answer"
-        assert result["streamKind"] == "final_only"
-        assert result["chunkCount"] == 0
 
     asyncio.run(run())
 
@@ -124,11 +122,9 @@ def test_unicode_answer_is_returned_whole_without_answer_events(tmp_path: Path) 
 
     assert events == []
     assert result["text"] == text
-    assert result["streamKind"] == "final_only"
-    assert result["chunkCount"] == 0
 
 
-def test_answer_past_the_old_single_item_limit_is_returned_whole_and_final_only(
+def test_answer_past_the_old_single_item_limit_is_returned_whole(
     tmp_path: Path,
 ) -> None:
     text = '中文🙂\n"quoted"\\path\n' + "x" * 2_100_000
@@ -145,8 +141,6 @@ def test_answer_past_the_old_single_item_limit_is_returned_whole_and_final_only(
     )
 
     assert result["text"] == text
-    assert result["streamKind"] == "final_only"
-    assert result["chunkCount"] == 0
     assert events == []
 
 
@@ -197,12 +191,10 @@ def test_complete_success_preserves_escaped_text_and_bounded_metadata(
 
     assert result["text"] == text
     assert result["validationErrors"] == validation_errors
-    assert result["streamKind"] == "final_only"
-    assert result["chunkCount"] == 0
     assert events == []
 
 
-def test_final_only_answer_does_not_call_the_event_sink(
+def test_answer_does_not_call_the_event_sink(
     tmp_path: Path,
 ) -> None:
     session = _AnswerSession("authoritative")
@@ -223,8 +215,6 @@ def test_final_only_answer_does_not_call_the_event_sink(
     )
 
     assert result["text"] == "authoritative"
-    assert result["streamKind"] == "final_only"
-    assert result["chunkCount"] == 0
     assert calls == 0
 
 

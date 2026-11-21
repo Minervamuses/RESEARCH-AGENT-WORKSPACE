@@ -101,8 +101,6 @@ const diagnostics: RuntimeDiagnosticsDto = {
   openAlexConfigured: true,
   storePath: "/workspace/app/store",
   citationOutputPath: "/workspace/cite",
-  ollamaReachable: null,
-  ollamaModelAvailable: null,
   mcpEnabled: false,
   mcpFamilies: [],
   mcpDiagnostics: [],

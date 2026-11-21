@@ -2289,7 +2289,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     events = []
     result = asyncio.run(_dispatch_citation_approved(service, params, events))
     assert [event for event, _data in events].count("approval.required") == 1
-    assert result["responseKind"] == "answer" and result["streamKind"] == "final_only"
+    assert result["responseKind"] == "answer"
     assert "已保存並引用來源 [1]。" in result["text"]
     assert [event for event, _data in events].count("tool.started") == 2
     assert [event for event, _data in events].count("tool.finished") == 2

@@ -214,7 +214,7 @@
         "protocolVersion": 1,
         "messageType": "event",
         "requestId": "00000000-0000-4000-8000-000000000007",
-        "event": "request.progress",
+        "event": "stage.changed",
         "data": {
           "stage": "agent"
         }
@@ -455,7 +455,6 @@
           "sessionId": "0123456789abcdef0123456789abcdef",
           "turnId": "turn-1",
           "chunkIndex": 0,
-          "streamKind": "final_only",
           "text": "retired event"
         }
       }
@@ -816,40 +815,6 @@
           "rawArgs": {
             "shell": true
           }
-        }
-      }
-    },
-    {
-      "name": "ingest-progress-safe-dto",
-      "valid": true,
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "event",
-        "requestId": "00000000-0000-4000-8000-00000000003b",
-        "sequence": 1,
-        "event": "writing.file_completed",
-        "data": {
-          "filePath": "docs/研究 paper.md",
-          "chunks": 3,
-          "filesCompleted": 1
-        }
-      }
-    },
-    {
-      "name": "ingest-progress-rejects-source-text",
-      "valid": false,
-      "errorCode": "PROTOCOL_INVALID",
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "event",
-        "requestId": "00000000-0000-4000-8000-00000000003c",
-        "sequence": 1,
-        "event": "writing.file_completed",
-        "data": {
-          "filePath": "docs/paper.md",
-          "chunks": 3,
-          "filesCompleted": 1,
-          "sourceText": "must remain in Python"
         }
       }
     },
@@ -2379,7 +2344,7 @@
     {
       "name": "numeric-equivalent-sequence",
       "valid": true,
-      "line": "{\"protocolVersion\":1,\"messageType\":\"event\",\"requestId\":\"00000000-0000-4000-8000-00000000003e\",\"sequence\":1.0,\"event\":\"request.progress\",\"data\":{\"stage\":\"agent\"}}"
+      "line": "{\"protocolVersion\":1,\"messageType\":\"event\",\"requestId\":\"00000000-0000-4000-8000-00000000003e\",\"sequence\":1.0,\"event\":\"stage.changed\",\"data\":{\"stage\":\"agent\"}}"
     }
   ],
   "originCases": [
@@ -2501,7 +2466,7 @@
           "messageType": "event",
           "requestId": "00000000-0000-4000-8000-000000000012",
           "sequence": 2,
-          "event": "request.progress",
+          "event": "stage.changed",
           "data": {
             "stage": "agent"
           }
@@ -2534,7 +2499,7 @@
           "messageType": "event",
           "requestId": "00000000-0000-4000-8000-000000000013",
           "sequence": 1,
-          "event": "request.progress",
+          "event": "stage.changed",
           "data": {
             "stage": "late"
           }
@@ -2551,7 +2516,7 @@
           "messageType": "event",
           "requestId": "00000000-0000-4000-8000-000000000014",
           "sequence": 1,
-          "event": "request.progress",
+          "event": "stage.changed",
           "data": {
             "stage": "unknown"
           }
@@ -2793,8 +2758,6 @@
             "validationErrors": [],
             "toolSummaries": [],
             "responseKind": "answer",
-            "streamKind": "final_only",
-            "chunkCount": 0,
             "registrationStatus": "registered",
             "registrationIssue": null
           }
@@ -2958,8 +2921,6 @@
             "openAlexConfigured": false,
             "storePath": "/workspace/app/store",
             "citationOutputPath": "/workspace/cite",
-            "ollamaReachable": null,
-            "ollamaModelAvailable": null,
             "mcpEnabled": false,
             "mcpFamilies": [],
             "mcpDiagnostics": []
@@ -3000,8 +2961,6 @@
             "openAlexConfigured": false,
             "storePath": "/workspace/app/store",
             "citationOutputPath": "/workspace/cite",
-            "ollamaReachable": null,
-            "ollamaModelAvailable": null,
             "mcpEnabled": false,
             "mcpFamilies": [],
             "mcpDiagnostics": [],

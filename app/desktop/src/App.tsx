@@ -472,11 +472,6 @@ function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-function availabilityLabel(value: boolean | null): string {
-  if (value === null) return "Not checked";
-  return value ? "Available" : "Unavailable";
-}
-
 function configuredLabel(value: boolean): string {
   return value ? "Configured" : "Not configured";
 }
@@ -492,8 +487,6 @@ function RuntimeDetails({ diagnostics }: { diagnostics: BoundedRuntimeDiagnostic
         <div><dt>Conda environment</dt><dd>{diagnostics.condaEnvironment ?? "Not detected"}</dd></div>
         <div><dt>OpenRouter</dt><dd>{configuredLabel(diagnostics.openRouterConfigured)}</dd></div>
         <div><dt>OpenAlex</dt><dd>{configuredLabel(diagnostics.openAlexConfigured)}</dd></div>
-        <div><dt>Ollama</dt><dd>{availabilityLabel(diagnostics.ollamaReachable)}</dd></div>
-        <div><dt>Ollama model</dt><dd>{availabilityLabel(diagnostics.ollamaModelAvailable)}</dd></div>
         <div><dt>MCP</dt><dd>{diagnostics.mcpEnabled ? "Enabled" : "Disabled"}</dd></div>
         <div className="wide-detail"><dt>MCP families</dt><dd>{diagnostics.mcpFamilies.length > 0 ? diagnostics.mcpFamilies.join(", ") : "None"}</dd></div>
         <div className="wide-detail"><dt>App root</dt><dd>{diagnostics.appRoot}</dd></div>
@@ -2371,7 +2364,6 @@ export default function App() {
         submittedContext,
         assistantText: answer.text,
         responseKind: answer.responseKind,
-        streamKind: answer.streamKind,
       }));
       setPendingUserText(null);
       pendingApprovalRef.current = null;
@@ -2553,7 +2545,6 @@ export default function App() {
           userText: report.displayInput,
           assistantText: report.text,
           responseKind: "command",
-          streamKind: "final_only",
         }));
       }
       if (state.session !== null && !alreadyVisible) {

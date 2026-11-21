@@ -67,8 +67,6 @@ export interface BoundedRuntimeDiagnostics {
   citationOutputPath: string;
   openRouterConfigured: boolean;
   openAlexConfigured: boolean;
-  ollamaReachable: boolean | null;
-  ollamaModelAvailable: boolean | null;
   mcpEnabled: boolean;
   mcpFamilies: string[];
 }
@@ -385,8 +383,6 @@ export function toBoundedDiagnostics(value: RuntimeDiagnosticsDto): BoundedRunti
     citationOutputPath: boundedPath(value.citationOutputPath),
     openRouterConfigured: value.openRouterConfigured,
     openAlexConfigured: value.openAlexConfigured,
-    ollamaReachable: value.ollamaReachable,
-    ollamaModelAvailable: value.ollamaModelAvailable,
     mcpEnabled: value.mcpEnabled,
     mcpFamilies: value.mcpFamilies
       .slice(0, MAX_UI_MCP_FAMILIES)

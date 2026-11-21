@@ -34,20 +34,10 @@ const contract = JSON.parse(
 ) as ContractDocument;
 
 /**
- * Contract entries without a DTO, each with its reason. They belong to
- * vocabulary C4 removes from the contract (U7, P1); C4 empties this list.
+ * Contract entries without a DTO, each with its reason. Expected to stay empty;
+ * C4 removed the vocabulary that used to be listed here.
  */
-const DTO_EXCEPTIONS: Readonly<Record<string, string>> = {
-  "event:collecting.started": "Never emitted; removed from the contract by C4 (U7).",
-  "event:collecting.completed": "Never emitted; removed from the contract by C4 (U7).",
-  "event:tagging.started": "Never emitted; removed from the contract by C4 (U7).",
-  "event:tagging.folder_completed": "Never emitted; removed from the contract by C4 (U7).",
-  "event:metadata.written": "Never emitted; removed from the contract by C4 (U7).",
-  "event:writing.started": "Never emitted; removed from the contract by C4 (U7).",
-  "event:writing.file_completed": "Never emitted; removed from the contract by C4 (U7).",
-  "event:ingest.completed": "Never emitted; removed from the contract by C4 (U7).",
-  "event:ingest.failed": "Never emitted; removed from the contract by C4 (U7).",
-};
+const DTO_EXCEPTIONS: Readonly<Record<string, string>> = {};
 
 /** Methods without a result schema; they must stay out of `MethodResults`. */
 const METHODS_WITHOUT_RESULT_SCHEMA = [
