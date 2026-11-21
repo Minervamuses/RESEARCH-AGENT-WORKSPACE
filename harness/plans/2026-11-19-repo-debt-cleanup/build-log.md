@@ -15,7 +15,7 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| C1 | Not started | — | — | C1-S1 唯讀核對 |
+| C1 | In progress | `evidence/C1-S1/relocation.md` | — | C1-S2 建立基線 |
 | C2 | Not started | — | — | 等 C1 |
 | C3 | Not started | — | — | 等 C1 |
 | C4 | Not started | — | — | 等 C3 |
@@ -209,4 +209,10 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 
 ## 事件
 
-（執行開始後在此依步驟 ID 追加事件：觀察到的改變、執行的指令與結果、證據位置、限制、下一步。）
+### C1-S1 唯讀核對起點（2026-11-21）
+
+- **觀察結果**：分支確認為 `GUI`，HEAD 為 `651cdd3`。`3b6cfd8..HEAD` 僅包含 `[CA0]`–`[CA6]` 與使用者文件 commit（`19a661d`、`90d8d58`、`3f87f09`），`git diff --stat 3b6cfd8..HEAD -- app` 為空，S-ID 無行號漂移。工作樹僅有 `for_agents/` 9 個未提交修改及 `NOTES-grill-skill-and-document-context.md`、`app/desktop/watch.out`、`note/20261106/`，均保留不動。
+- **執行指令**：`git rev-parse --abbrev-ref HEAD`、`git log --oneline 3b6cfd8..HEAD`、`git diff --stat 3b6cfd8..HEAD -- app`、`git status --short`。
+- **證據**：`evidence/C1-S1/relocation.md`。
+- **限制**：無。
+- **下一步**：C1-S2 建立四套測試與建置基線。
