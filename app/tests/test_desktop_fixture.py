@@ -720,7 +720,7 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
             "session.turn",
             _turn_params("extended before restart", turn_id=extended_turn_id),
         )
-        shutdown = await first.dispatch("session.shutdown", {})
+        shutdown = await first.dispatch("runtime.shutdown", {})
         return selected, normal, extended, extended_turn, shutdown
 
     selected, normal, extended, extended_turn, shutdown = asyncio.run(
@@ -748,7 +748,7 @@ def test_thinking_mode_resets_to_normal_after_service_restart_and_select(
                 "limit": 20,
             },
         )
-        stopped = await restarted.dispatch("session.shutdown", {})
+        stopped = await restarted.dispatch("runtime.shutdown", {})
         return restored, transcript, stopped
 
     restored, transcript, stopped = asyncio.run(run_second_process())
@@ -781,7 +781,7 @@ def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
             "session.set_bash_permission",
             {"mode": "bypass"},
         )
-        shutdown = await first.dispatch("session.shutdown", {})
+        shutdown = await first.dispatch("runtime.shutdown", {})
         return selected, bypassed, shutdown
 
     selected, bypassed, shutdown = asyncio.run(run_first_process())
@@ -796,7 +796,7 @@ def test_bash_permission_mode_resets_to_ask_after_service_restart_and_select(
             "session.select",
             {"projectId": _project_id(fixture_root), "sessionId": SESSION_A},
         )
-        stopped = await restarted.dispatch("session.shutdown", {})
+        stopped = await restarted.dispatch("runtime.shutdown", {})
         return restored, stopped
 
     restored, stopped = asyncio.run(run_second_process())
@@ -845,9 +845,9 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
             "session.turn",
             _turn_params("/extension-management"),
         )
-        direct_status = await service.dispatch("extensions.status", {})
+        direct_status = await service._extensions_status()
         preview = await service.dispatch("extensions.preview", {})
-        status_after_preview = await service.dispatch("extensions.status", {})
+        status_after_preview = await service._extensions_status()
         binding = preview["bindings"][0]
         apply_turn_id = "00000000000040008000000000000549"
         apply_params = {
@@ -860,7 +860,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
             "extensions.apply",
             apply_params,
         )
-        post_apply = await service.dispatch("extensions.status", {})
+        post_apply = await service._extensions_status()
         replayed = await service.dispatch("extensions.apply", apply_params)
         return (
             created,
@@ -933,7 +933,7 @@ def test_fixture_extension_preview_apply_and_restart_load_are_isolated(
                 "limit": 20,
             },
         )
-        status = await restarted.dispatch("extensions.status", {})
+        status = await restarted._extensions_status()
         return loaded, skill_turn, ordinary_turn, transcript, status
 
     loaded, skill_turn, ordinary_turn, transcript, status = asyncio.run(
@@ -1014,7 +1014,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
                 "retry": False,
             },
         )
-        shutdown = await first.dispatch("session.shutdown", {})
+        shutdown = await first.dispatch("runtime.shutdown", {})
         return created, diagnostics, events, delayed, applied, shutdown
 
     created, diagnostics, delayed_events, delayed, applied, shutdown = asyncio.run(
@@ -1097,7 +1097,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
                 "limit": 20,
             },
         )
-        shutdown = await second.dispatch("session.shutdown", {})
+        shutdown = await second.dispatch("runtime.shutdown", {})
         return (
             loaded,
             diagnostics,
@@ -1193,7 +1193,7 @@ def test_phase07_integrated_final_only_skill_tool_restore_journey(
             "session.transcript",
             {"projectId": _project_id(root), "sessionId": SESSION_B, "limit": 20},
         )
-        shutdown = await third.dispatch("session.shutdown", {})
+        shutdown = await third.dispatch("runtime.shutdown", {})
         return (
             diagnostics,
             restored,

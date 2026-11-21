@@ -521,9 +521,6 @@
       "accepted": {"type": "boolean", "required": true},
       "persisted": {"type": "boolean", "required": true}
     },
-    "session.shutdown": {
-      "status": {"type": "string", "required": true, "enum": ["stopped", "no_session"]}
-    },
     "runtime.shutdown": {
       "status": {"type": "string", "required": true, "enum": ["stopped", "no_session"]}
     },
@@ -642,19 +639,6 @@
       "offset": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
       "limit": {"type": "integer", "required": true, "minimum": 1, "maximum": 20},
       "hasMore": {"type": "boolean", "required": true}
-    },
-    "extensions.status": {
-      "dropinRoot": {"type": "string", "required": true, "maxBytes": 8192},
-      "stateRoot": {"type": "string", "required": true, "maxBytes": 8192},
-      "desiredCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "appliedCount": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "appliedRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "runningRevision": {"type": "integer", "required": true, "minimum": 0, "maximum": 4294967295},
-      "restartRequired": {"type": "boolean", "required": true},
-      "managerAvailable": {"type": "boolean", "required": true},
-      "managerError": {"type": "nullableString", "required": true, "maxBytes": 4096},
-      "diagnostics": {"type": "stringArray", "required": true, "maxItems": 128, "itemMaxBytes": 4096},
-      "runningMcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256}
     },
     "extensions.preview": {
       "previewId": {"type": "string", "required": true, "maxBytes": 256},
@@ -951,7 +935,6 @@
         "limit": {"type": "integer", "required": false, "minimum": 1, "maximum": 20}
       }
     },
-    {"name": "session.status", "operation": "read", "requiredParams": [], "params": {}},
     {
       "name": "session.turn",
       "operation": "mutation",
@@ -1022,8 +1005,6 @@
         "parentRequestId": {"type": "requestId", "required": true}
       }
     },
-    {"name": "session.shutdown", "operation": "lifecycle", "requiredParams": [], "params": {}},
-    {"name": "extensions.status", "operation": "read", "requiredParams": [], "params": {}},
     {"name": "extensions.preview", "operation": "paid-preview", "requiredParams": [], "params": {}},
     {
       "name": "extensions.apply",

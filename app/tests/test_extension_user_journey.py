@@ -477,7 +477,7 @@ def test_conversational_zip_acceptance(entry, tmp_path, monkeypatch, capsys):
             await service.dispatch("session.create", {"loadMcp": False})
             assert "pdf" in {skill.name for skill in service.session.loaded_skills}
             await turn("/pdf Read forms.md only, do not execute scripts")
-            await service.dispatch("session.shutdown", {})
+            await service.dispatch("runtime.shutdown", {})
 
     asyncio.run(scenario())
     registry = load_registry(Path(config.extension_state_dir))

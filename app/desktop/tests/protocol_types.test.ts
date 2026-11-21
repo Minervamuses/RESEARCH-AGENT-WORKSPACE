@@ -38,8 +38,6 @@ const contract = JSON.parse(
  * vocabulary C4 removes from the contract (U7, P1); C4 empties this list.
  */
 const DTO_EXCEPTIONS: Readonly<Record<string, string>> = {
-  "method:session.shutdown": "RPC without callers; removed from the contract by C4 (P1).",
-  "method:extensions.status": "RPC without callers; removed from the contract by C4 (P1).",
   "event:collecting.started": "Never emitted; removed from the contract by C4 (U7).",
   "event:collecting.completed": "Never emitted; removed from the contract by C4 (U7).",
   "event:tagging.started": "Never emitted; removed from the contract by C4 (U7).",
@@ -53,7 +51,6 @@ const DTO_EXCEPTIONS: Readonly<Record<string, string>> = {
 
 /** Methods without a result schema; they must stay out of `MethodResults`. */
 const METHODS_WITHOUT_RESULT_SCHEMA = [
-  "session.status",
   "session.set_thinking",
 ];
 

@@ -94,10 +94,7 @@ export function echoedIdFields(method: ProtocolMethod): readonly string[] {
  * keeps `ProtocolMethod` equal to the contract method list.
  */
 export type MethodWithoutResultDto =
-  | "session.status"
-  | "session.set_thinking"
-  | "session.shutdown"
-  | "extensions.status";
+  | "session.set_thinking";
 
 /** Every contract method: those with a result DTO plus those without one. */
 export type ProtocolMethod = keyof MethodResults | MethodWithoutResultDto;

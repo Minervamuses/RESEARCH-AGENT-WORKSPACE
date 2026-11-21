@@ -356,14 +356,13 @@ def test_transcript_schema_accepts_each_durable_lifecycle_state(
 
 
 def test_shutdown_contract_has_truthful_status_without_legacy_flush_fields() -> None:
-    for method in ("session.shutdown", "runtime.shutdown"):
-        assert CONTRACT["resultDataSchemas"][method] == {
-            "status": {
-                "type": "string",
-                "required": True,
-                "enum": ["stopped", "no_session"],
-            }
+    assert CONTRACT["resultDataSchemas"]["runtime.shutdown"] == {
+        "status": {
+            "type": "string",
+            "required": True,
+            "enum": ["stopped", "no_session"],
         }
+    }
 
 
 def test_transcript_tool_activity_schema_is_bounded_and_parser_derived() -> None:

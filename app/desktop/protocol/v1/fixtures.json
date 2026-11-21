@@ -2431,8 +2431,10 @@
           "protocolVersion": 1,
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000010",
-          "method": "session.status",
-          "params": {}
+          "method": "session.set_thinking",
+          "params": {
+            "mode": "normal"
+          }
         },
         {
           "protocolVersion": 1,
@@ -2462,15 +2464,19 @@
           "protocolVersion": 1,
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000011",
-          "method": "session.status",
-          "params": {}
+          "method": "session.set_thinking",
+          "params": {
+            "mode": "normal"
+          }
         },
         {
           "protocolVersion": 1,
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000011",
-          "method": "session.status",
-          "params": {}
+          "method": "session.set_thinking",
+          "params": {
+            "mode": "normal"
+          }
         }
       ]
     },
@@ -2511,8 +2517,10 @@
           "protocolVersion": 1,
           "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000013",
-          "method": "session.status",
-          "params": {}
+          "method": "session.set_thinking",
+          "params": {
+            "mode": "normal"
+          }
         },
         {
           "protocolVersion": 1,

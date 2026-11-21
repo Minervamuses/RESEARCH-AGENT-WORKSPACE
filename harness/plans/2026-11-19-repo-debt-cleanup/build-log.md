@@ -18,7 +18,7 @@
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
-| C4 | In progress | `evidence/C4-S1/` | — | C4-S2 |
+| C4 | In progress | `evidence/C4-S1/`–`C4-S2/` | — | C4-S3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
@@ -467,3 +467,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C4-S1/knowledge-rpc.md`（刪除前 grep、保留清單、退役紀錄）。
 - **限制**：無。
 - **下一步**：C4-S2 移除 `session.status`、`session.shutdown`、`extensions.status` 的 RPC 註冊（P1）。
+
+### C4-S2 移除 `session.status`、`session.shutdown`、`extensions.status` 的 RPC 註冊（2026-11-22）
+
+- **觀察結果**：**S007（P1 部分，APPLIED）**。刪除 3 個 dispatch 項目與 contract 方法（含兩個 result schema）；`_session_status` 與 `_session_shutdown` 沒有其他呼叫者而刪除，`_extensions_status` 仍供 `/extension-management status` 使用而保留（簽名簡化），`_shutdown_session` 保留。`dispatch` 中只為這兩個方法存在的例外條件同步簡化。TS 例外清單只剩 9 個 event（C4-S3 清除）。沒有刪除測試：以 `session.shutdown` 結束行程的改用 `runtime.shutdown`，需要繼續使用 service 的改呼叫 `_shutdown_session()`，server 測試的泛用方法改為 `session.set_thinking`／`runtime.diagnostics`，3 個 trace fixture 同步。
+- **執行指令**：desktop 與 extension 相關 pytest（628 passed，沙箱外）、`npm test`（224 pass）、`npm run build`（通過）、grep 三個方法名（0 筆）。
+- **證據**：`evidence/C4-S2/rpc-registrations.md`。
+- **限制**：無。
+- **下一步**：C4-S3 死 event、streaming 殘留與 Ollama 欄位（U7）。

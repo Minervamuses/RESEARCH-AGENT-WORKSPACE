@@ -556,7 +556,8 @@ def test_catalog_follows_materialized_session_and_same_session_select(tmp_path):
     assert len(factory.sessions) == 1
     assert asyncio.run(select(SESSION_B)) == "reviewer"
     assert asyncio.run(select(SESSION_A)) == "new-writer"
-    asyncio.run(service.dispatch("session.shutdown", {}))
+    # Drop the cached session the way project switches and deletes do.
+    asyncio.run(service._shutdown_session())
     desired[SESSION_A] = "restarted-writer"
     assert asyncio.run(select(SESSION_A)) == "restarted-writer"
 
@@ -1197,9 +1198,7 @@ def test_session_select_defaults_mcp_on_initially_and_after_shutdown(tmp_path):
         )
         assert factory.load_mcp_calls == [False]
 
-        assert await service.dispatch("session.shutdown", {}) == {
-            "status": "stopped",
-        }
+        assert await service._shutdown_session() == {"status": "stopped"}
         selected = await service.dispatch(
             "session.select",
             {"projectId": _project_id(tmp_path), "sessionId": SESSION_A},
@@ -1837,7 +1836,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
                 "retry": False,
             },
         )
-        shutdown = await first.dispatch("session.shutdown", {})
+        shutdown = await first.dispatch("runtime.shutdown", {})
         return created, answer, shutdown
 
     created, first_answer, first_shutdown = asyncio.run(run_first_process())
@@ -2402,7 +2401,6 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
                 assert session.citation_skill_active and session._citation_policy.loaded_service is services[0]
                 for method, values in (
                     ("session.select", selected),
-                    ("session.shutdown", {}),
                     ("runtime.shutdown", {}),
                 ):
                     with pytest.raises(DesktopServiceError) as busy:

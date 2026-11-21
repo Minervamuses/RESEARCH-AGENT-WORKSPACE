@@ -468,7 +468,6 @@ class DesktopService:
             "session.delete": self._session_delete,
             "session.retry_registration": self._session_retry_registration,
             "session.transcript": self._session_transcript,
-            "session.status": self._session_status,
             "session.turn": self._session_turn,
             "session.stop": self._session_stop,
             "workspace.select": self._workspace_select,
@@ -477,8 +476,6 @@ class DesktopService:
             "document.apply": self._document_apply,
             "session.set_thinking": self._session_set_thinking,
             "session.set_bash_permission": self._session_set_bash_permission,
-            "session.shutdown": self._session_shutdown,
-            "extensions.status": self._extensions_status,
             "extensions.preview": self._extensions_preview,
             "extensions.apply": self._extensions_apply,
             "approval.resolve": self._approval_resolve,
@@ -506,22 +503,19 @@ class DesktopService:
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "The desktop backend is shutting down or stopped."
             )
-        if self._session_closing and method not in {
-            "runtime.diagnostics",
-            "session.status",
-        }:
+        if self._session_closing and method != "runtime.diagnostics":
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "The desktop session is shutting down."
             )
         project_operation = (
             method.startswith(("document.", "bibliography."))
-            or (method.startswith("session.") and method not in {"session.status", "session.shutdown"})
+            or method.startswith("session.")
         )
         project_operation_admitted = False
         project_read = method in {"session.list", "session.transcript"}
         try:
             if self._workspace_opening and method not in {
-                "runtime.diagnostics", "session.status", "project.list",
+                "runtime.diagnostics", "project.list",
             }:
                 raise DesktopServiceError(
                     "SESSION_NOT_READY", "Wait for the project open operation to finish.", retryable=True,
@@ -1664,13 +1658,6 @@ class DesktopService:
             "registered": False,
         }
 
-    async def _session_status(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        if self.session is None:
-            return {"ready": False, "lifecycle": self.lifecycle}
-        return {"ready": True, **self._session_snapshot(self.session)}
-
     def _validation_error_dtos(self, errors: list[Any]) -> list[str]:
         return [
             self._bounded_text(str(item), 4_096)
@@ -2075,7 +2062,7 @@ class DesktopService:
     ) -> SlashCommandResult:
         action = self._desktop_extension_action(parsed)
         if action == "status":
-            status = await self._extensions_status({}, None)
+            status = await self._extensions_status()
             diagnostics = len(status["diagnostics"])
             running = ", ".join(status["runningMcpFamilies"]) or "none"
             message = "\n".join([
@@ -3384,11 +3371,6 @@ class DesktopService:
             "bashPermissionMode": self._bash_permission_mode,
         }
 
-    async def _session_shutdown(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        return await self._shutdown_session()
-
     async def _runtime_shutdown(
         self, _params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -3641,9 +3623,8 @@ class DesktopService:
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    async def _extensions_status(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
+    async def _extensions_status(self) -> dict[str, Any]:
+        """Extension Management status for the `/extension-management status` command."""
         session = self.session
         status = await run_local_work(
             self._extension_manager.status,

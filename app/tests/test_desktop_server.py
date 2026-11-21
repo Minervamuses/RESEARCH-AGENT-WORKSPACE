@@ -140,7 +140,7 @@ class _ConcurrentService:
                 "validationErrors": [],
                 "toolSummaries": [],
             }
-        if method == "session.status":
+        if method == "session.set_thinking":
             assert self.turn_started.is_set()
             self.release_turn.set()
             return {"ready": True}
@@ -165,8 +165,8 @@ def test_reader_accepts_status_while_turn_is_active_and_lines_never_interleave()
             ),
             _request(
                 "00000000-0000-4000-8000-000000000204",
-                "session.status",
-                {},
+                "session.set_thinking",
+                {"mode": "normal"},
             ),
             _request(
                 "00000000-0000-4000-8000-000000000205",
@@ -444,8 +444,8 @@ def test_duplicate_request_id_reports_process_error_without_second_result(
         service = DesktopService(original_cwd=tmp_path)
         server = DesktopServer(service, ProtocolWriter(output))
         reader = _reader(
-            _request(request_id, "session.status", {}),
-            _request(request_id, "session.status", {}),
+            _request(request_id, "runtime.diagnostics", {}),
+            _request(request_id, "runtime.diagnostics", {}),
             _request(
                 "00000000-0000-4000-8000-000000000207",
                 "runtime.shutdown",
@@ -754,7 +754,7 @@ class _LateProgressService:
         self.late_task: asyncio.Task[None] | None = None
 
     async def dispatch(self, method, _params, *, event_sink=None):
-        if method == "session.status":
+        if method == "session.set_thinking":
             assert event_sink is not None
 
             async def emit_late_progress() -> None:
@@ -780,7 +780,7 @@ def test_late_progress_cannot_follow_terminal_result() -> None:
         service = _LateProgressService()
         server = DesktopServer(service, ProtocolWriter(output))
         assert await server.run(
-            _reader(_request(request_id, "session.status", {}))
+            _reader(_request(request_id, "session.set_thinking", {"mode": "normal"}))
         ) == 0
         assert service.late_task is not None
         await service.late_task

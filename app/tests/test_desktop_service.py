@@ -1929,7 +1929,7 @@ def test_cancelled_dynamic_turn_clears_busy_and_allows_shutdown(
             ("cancellable prompt", "research")
         ]
         session.block_turn = False
-        assert await service.dispatch("session.shutdown", {}) == {
+        assert await service.dispatch("runtime.shutdown", {}) == {
             "status": "stopped",
         }
 
@@ -2006,7 +2006,7 @@ def test_session_shutdown_clears_active_session(
         session.clear_skill_installer = clear_skill_installer
 
         result = await asyncio.wait_for(
-            service.dispatch("session.shutdown", {}),
+            service.dispatch("runtime.shutdown", {}),
             timeout=1,
         )
 
@@ -2925,7 +2925,7 @@ def test_desktop_bash_permission_mode_bypass_executes_undisplayable_context_with
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("method", ["session.create", "session.shutdown"])
+@pytest.mark.parametrize("method", ["session.create", "runtime.shutdown"])
 def test_installer_cleanup_conflict_is_visible_before_session_replacement(tmp_path, monkeypatch, method):
     factory, _sessions = _canonical_session_factory(monkeypatch)
     service = _service(tmp_path, session_factory=factory)
