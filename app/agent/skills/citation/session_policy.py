@@ -69,10 +69,6 @@ class CitationSessionPolicy:
         """Return the loaded service without constructing it."""
         return self._service
 
-    def set_loaded_service(self, service: CitationService | None) -> None:
-        """Replace the loaded service, primarily for controlled injection."""
-        self._service = service
-
     @property
     def registry(self):
         """Return the live source registry without constructing a service."""

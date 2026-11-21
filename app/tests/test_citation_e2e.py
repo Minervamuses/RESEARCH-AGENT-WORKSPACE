@@ -308,13 +308,6 @@ def _make_session(monkeypatch, tmp_path, model) -> ChatSession:
     return ChatSession(config)
 
 
-def _seed_fixture_service(session, tmp_path, fetcher=None):
-    hub = CitationProviderHub(env={}, fetcher=fetcher or RoutingFetcher())
-    service = CitationService(hub, output_dir=tmp_path / "cite")
-    session._citation_service = service
-    return service
-
-
 def _fixture_services(monkeypatch, tmp_path, fetcher=None):
     """Keep lazy per-task service construction real with offline I/O boundaries."""
     hub = CitationProviderHub(env={}, fetcher=fetcher or RoutingFetcher())
@@ -423,12 +416,15 @@ def test_save_reporting_reaches_model_history_and_cli(
         {"all_success": 0, "retry": 3}.get(scenario, 1),
         transient=scenario == "retry",
     )
-    service = _seed_fixture_service(session, tmp_path, fetcher=fetcher)
     services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
     prior_files = {}
     if scenario == "all_success":
+        seed_service = CitationService(
+            CitationProviderHub(env={}, fetcher=fetcher),
+            output_dir=tmp_path / "cite",
+        )
         intent = CitationWorkflowInput.model_validate({"action": "save", "works": works[:1]})
-        prepared = asyncio.run(service.save(tuple(work.to_domain() for work in intent.works)))
+        prepared = asyncio.run(seed_service.save(tuple(work.to_domain() for work in intent.works)))
         assert prepared.items[0].status == "saved"
         prior_files = {
             path: (path.read_bytes(), path.stat().st_mtime_ns)
@@ -475,7 +471,7 @@ def test_save_reporting_reaches_model_history_and_cli(
     assert len(services) == 1
     service = services[0]
     assert session.active_skill_runtime is None
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session._build_sources_hint() is None
     assert "citation_workflow" not in session.tool_access_resolution().effective_tools
 
@@ -550,11 +546,12 @@ def test_search_selection_save_bundle_journey_reads_tool_messages(
     model = _SearchSaveModel()
     session = _make_session(monkeypatch, tmp_path, model)
     session.activate_citation_skill()
-    service = _seed_fixture_service(session, tmp_path)
+    services = _fixture_services(monkeypatch, tmp_path)
 
     answer = asyncio.run(
         session.turn("搜尋 Paper A，選擇 2021 年正式記錄，保存並引用")
     )
+    service = services[0]
 
     assert model.search_message is not None
     assert model.save_message is not None
@@ -603,7 +600,7 @@ def test_citation_workflow_denial_is_consumed_by_model(
     assert denial.status == "error"
     assert model.denial_message is denial
     assert outcome.text == f"citation unavailable: {denial.content}"
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session.active_skill_runtime is None
 
 
@@ -628,7 +625,7 @@ def test_search_selection_journey_stops_when_search_is_empty(
     assert service.registry.list() == []
     assert list((tmp_path / "cite").glob("*/reference.bib")) == []
     assert len(fetcher.calls) == 2
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session.active_skill_runtime is None
     assert session.thinking_mode == "extended"
 
@@ -649,13 +646,14 @@ def test_search_selection_journey_rejects_malformed_save_receipt(
     model = _RejectingReceiptModel()
     session = _make_session(monkeypatch, tmp_path, model)
     session.activate_citation_skill()
-    service = _seed_fixture_service(session, tmp_path)
+    services = _fixture_services(monkeypatch, tmp_path)
 
-    async def malformed_save(_intents):
+    async def malformed_save(_self, _intents):
         return _MalformedSaveOutcome()
 
-    service.save = malformed_save
+    monkeypatch.setattr(CitationService, "save", malformed_save)
     answer = asyncio.run(session.turn("搜尋 Paper A 並保存"))
+    service = services[0]
 
     assert model.save_message is not None
     assert model.save_message.status == "success"
@@ -687,7 +685,7 @@ def test_one_shot_cli_cites_then_runs_ordinary_turn(monkeypatch, tmp_path, capsy
         value = next(inputs)
         if value == "ordinary question":
             assert session.active_skill_runtime is None
-            assert session._citation_service is None
+            assert session._citation_policy.loaded_service is None
         return value
 
     monkeypatch.setattr(chat.ChatSession, "create", create)
@@ -738,7 +736,7 @@ def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
     def check_completion(*args, **kwargs):
         assert session.citation_skill_active
         assert session.thinking_mode == "normal"
-        assert session._citation_service is services[0]
+        assert session._citation_policy.loaded_service is services[0]
         assert services[0].registry.trusted_receipt(model.receipt.source_id) == model.receipt
         if terminal == "persistence":
             raise ConversationUnavailableError("fixture final write failed")
@@ -768,7 +766,7 @@ def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
         assert turn.assistant_output is None
     assert session.thinking_mode == "extended"
     assert session.active_skill_runtime is None
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session._build_sources_hint() is None
     assert "citation_workflow" not in session.tool_access_resolution().effective_tools
     assert Path(model.receipt.bundle_path, "reference.bib").is_file()
@@ -804,14 +802,14 @@ def test_later_citation_requires_new_receipt_and_reuses_saved_bundle(monkeypatch
 
     def cite_old(messages):
         assert any(isinstance(m, AIMessage) and m.content == first for m in messages)
-        assert session.citation_service.registry.list() == []
+        assert session._citation_policy.service.registry.list() == []
         return AIMessage(content=f"Old marker {receipt.cite_marker}")
 
     monkeypatch.setattr(model, "invoke", cite_old)
     rejected = asyncio.run(session.turn_outcome("引用先前選擇", skill_name="citation"))
     assert rejected.validation_errors and "已被封鎖" in rejected.text
     assert "Sources:" not in rejected.text
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     monkeypatch.setattr(model, "invoke", invoke)
     assert asyncio.run(session.turn("重用先前選擇並保存引用", skill_name="citation")) == first
     assert len(services) == 3
@@ -822,7 +820,7 @@ def test_later_citation_requires_new_receipt_and_reuses_saved_bundle(monkeypatch
 
 
 def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, tmp_path):
-    from skills.citation import service as citation_service
+    from skills.citation import service as citation_service_mod
 
     model = _SearchSaveModel()
     session = _make_session(monkeypatch, tmp_path, model)
@@ -831,7 +829,7 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
     entered = threading.Event()
     release = threading.Event()
     finished = threading.Event()
-    write = citation_service.write_identity_bundle
+    write = citation_service_mod.write_identity_bundle
 
     def delayed_write(*args, **kwargs):
         entered.set()
@@ -841,7 +839,7 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
         finally:
             finished.set()
 
-    monkeypatch.setattr(citation_service, "write_identity_bundle", delayed_write)
+    monkeypatch.setattr(citation_service_mod, "write_identity_bundle", delayed_write)
 
     async def scenario():
         task = asyncio.create_task(session.turn("搜尋 Paper A，保存並引用", skill_name="citation"))
@@ -851,28 +849,28 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-            assert session._citation_service is None
+            assert session._citation_policy.loaded_service is None
             assert session.active_skill_runtime is None
             assert session.thinking_mode == "extended"
             assert session.conversation_repository.load(session.session_id).document.turns[-1].state == "interrupted"
 
             def next_task(messages):
-                assert session.citation_service is not old
+                assert session._citation_policy.service is not old
                 release.set()
                 assert finished.wait(5)
                 assert old.registry.list() == []
-                assert session.citation_service.registry.list() == []
+                assert session._citation_policy.service.registry.list() == []
                 return AIMessage(content="晚到的磁碟寫入沒有本次可信 receipt。")
 
             monkeypatch.setattr(model, "invoke", next_task)
             answer = await session.turn("檢查來源", skill_name="citation")
             assert "沒有本次可信 receipt" in answer
-            assert session._citation_service is None
+            assert session._citation_policy.loaded_service is None
             assert session.thinking_mode == "extended"
             assert list((tmp_path / "cite").glob("*/reference.bib"))
 
             def ordinary(messages):
-                assert session._citation_service is None
+                assert session._citation_policy.loaded_service is None
                 assert "citation_workflow" not in session.tool_access_resolution().effective_tools
                 assert not any("[Citable sources]" in m.content for m in messages if isinstance(m, SystemMessage))
                 return AIMessage(content="ordinary answer")

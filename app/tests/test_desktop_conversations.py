@@ -831,7 +831,7 @@ def test_session_restore_uses_only_canonical_history_and_writes_through(
     )
     monkeypatch.setattr("agent.startup.load_session_startup", fake_startup)
 
-    session = asyncio.run(ChatSession.restore(
+    session = asyncio.run(ChatSession.create(
         config,
         session_id=SESSION_A,
         conversation_repository=repository,
@@ -2296,7 +2296,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     assert [event for event, _data in events].count("tool.finished") == 2
     assert [item["name"] for item in result["toolSummaries"]] == ["citation_workflow", "citation_workflow"]
     assert session_a.thinking_mode == "extended"
-    assert session_a.active_skill_runtime is None and session_a._citation_service is None
+    assert session_a.active_skill_runtime is None and session_a._citation_policy.loaded_service is None
     _assert_result("session.turn", result, 280)
     counts = (len(model.invocations), len(fetcher.calls), len(services))
 
@@ -2313,11 +2313,11 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
 
     asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
     session_b = service.session
-    assert session_b is not session_a and session_b._citation_service is None
+    assert session_b is not session_a and session_b._citation_policy.loaded_service is None
     returned = asyncio.run(service.dispatch("session.select", selected))
     assert returned["thinkingMode"] == "extended"
     assert service.session is not session_a
-    assert service.session.active_skill_runtime is None and service.session._citation_service is None
+    assert service.session.active_skill_runtime is None and service.session._citation_policy.loaded_service is None
     again = asyncio.run(service.dispatch("session.transcript", {**selected, "offset": 0, "limit": 20}))
     assert again == transcript
     assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
@@ -2331,8 +2331,8 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     assert restored == transcript
     assert asyncio.run(restarted.dispatch("session.turn", params))["text"] == result["text"]
     assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
-    assert restarted.session.active_skill_runtime is None and restarted.session._citation_service is None
-    assert all(session._citation_service is None for session in sessions)
+    assert restarted.session.active_skill_runtime is None and restarted.session._citation_policy.loaded_service is None
+    assert all(session._citation_policy.loaded_service is None for session in sessions)
     assert Path(model.receipt.bundle_path, "reference.bib").is_file()
 
     ordinary = asyncio.run(restarted.dispatch("session.turn", _turn_params("ordinary question")))
@@ -2355,7 +2355,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     assert interrupted["items"][-1]["state"] == "interrupted"
     assert interrupted["items"][-1]["assistantText"] is None
     assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
-    assert recovered.session._citation_service is None
+    assert recovered.session._citation_policy.loaded_service is None
 
 
 @pytest.mark.parametrize("terminal", ["provider", "cancel"])
@@ -2399,7 +2399,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
             task = asyncio.create_task(_dispatch_citation_approved(service, params))
             try:
                 await asyncio.wait_for(entered.wait(), timeout=3)
-                assert session.citation_skill_active and session._citation_service is services[0]
+                assert session.citation_skill_active and session._citation_policy.loaded_service is services[0]
                 for method, values in (
                     ("session.select", selected),
                     ("session.shutdown", {}),
@@ -2408,7 +2408,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
                     with pytest.raises(DesktopServiceError) as busy:
                         await service.dispatch(method, values)
                     assert busy.value.code == "BUSY_TURN"
-                    assert session._citation_service is services[0]
+                    assert session._citation_policy.loaded_service is services[0]
                 task.cancel()
                 with pytest.raises(DesktopServiceError) as cancelled:
                     await task
@@ -2426,7 +2426,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         expected_state = "failed" if terminal == "provider" else "interrupted"
         assert session.conversation_repository.load(session.session_id).document.turns[-1].state == expected_state
         assert session.thinking_mode == "extended"
-        assert session.active_skill_runtime is None and session._citation_service is None
+        assert session.active_skill_runtime is None and session._citation_policy.loaded_service is None
         assert service._turn_active is False
         assert Path(model.receipt.bundle_path, "reference.bib").is_file()
         monkeypatch.setattr(model, "invoke", original_invoke)
@@ -2447,7 +2447,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         assert retried["turnNumber"] == 1
         assert len(services) == 2 and services[0] is not services[1]
         assert _save_content(model.save_message).items[0].status == "reused"
-        assert restarted.session._citation_service is None and restarted._turn_active is False
+        assert restarted.session._citation_policy.loaded_service is None and restarted._turn_active is False
         assert Path(model.receipt.bundle_path, "reference.bib").is_file()
 
     asyncio.run(scenario())

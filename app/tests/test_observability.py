@@ -609,7 +609,7 @@ def test_turn_trace_reaches_the_persistent_diagnostic_log(monkeypatch, tmp_path)
 
 
 def test_turn_trace_links_citation_actions_queries_and_counts(monkeypatch, tmp_path, caplog):
-    from test_citation_e2e import _seed_fixture_service
+    from test_citation_e2e import _fixture_services
     from tests.citation_fixtures import DOI_A
 
     tools = []
@@ -620,7 +620,7 @@ def test_turn_trace_links_citation_actions_queries_and_counts(monkeypatch, tmp_p
         AIMessage(content="候選與限制已說明。"),
     ], tools)
     session.activate_citation_skill()
-    _seed_fixture_service(session, tmp_path)
+    _fixture_services(monkeypatch, tmp_path)
     turn_id = uuid.uuid4().hex
     with caplog.at_level(logging.INFO, logger="agent.observability"):
         assert asyncio.run(session.turn_outcome("找 Paper A", turn_id=turn_id)).state == "completed"

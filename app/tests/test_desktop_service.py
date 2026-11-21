@@ -1051,7 +1051,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     assert result["responseKind"] == "answer"
     assert result["streamKind"] == "final_only" and result["chunkCount"] == 0
     assert "已保存並引用來源 [1]。" in result["text"]
-    assert session._citation_service is None and session.active_skill_runtime is None
+    assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
     assert session.thinking_mode == "extended"
     assert service._session_snapshot(session)["thinkingMode"] == "extended"
     turn = session.conversation_repository.load(session.session_id).document.turns[-1]
@@ -3086,7 +3086,7 @@ def test_completed_citation_replay_keeps_canonical_identity(monkeypatch, tmp_pat
         asyncio.run(service.dispatch("session.turn", params))
     assert graph.states == []
     assert path.read_bytes() == before + (b"\n" if mismatch == "fingerprint" else b"")
-    assert session._citation_service is None and session.active_skill_runtime is None
+    assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
 
 
 @pytest.mark.parametrize("terminal", ["failed", "interrupted"])
@@ -3132,7 +3132,7 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
             asyncio.run(service.dispatch("session.turn", {**params, "retry": retry}))
         assert caught.value.code == "PROTOCOL_INVALID"
     assert graph.states == [] and path.read_bytes() == before
-    assert session._citation_service is None and session.active_skill_runtime is None
+    assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
 
 
 async def _open_test_project(service, root: Path, *, history_directory: str | None = None):

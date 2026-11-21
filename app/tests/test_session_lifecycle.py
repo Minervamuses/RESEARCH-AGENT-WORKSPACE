@@ -301,7 +301,7 @@ def test_restore_marks_leftover_pending_interrupted_without_running_a_graph(
         lambda _config, extra_tools=None, **kwargs: graph,
     )
 
-    asyncio.run(ChatSession.restore(
+    asyncio.run(ChatSession.create(
         AgentConfig(persist_dir=str(tmp_path)),
         session_id=session_id,
         conversation_repository=repository,

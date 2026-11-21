@@ -1,5 +1,6 @@
 """Tests for extended thinking workflow helpers."""
 
+import asyncio
 import json
 
 import pytest
@@ -12,14 +13,14 @@ from agent.thinking import (
     ReviewReport,
     Rewrite,
     ThinkingOutputError,
+    aparse_reviser_output,
     append_tool_trace,
-    parse_reviser_output,
+    areview_draft,
+    arewrite_prompt,
     parse_structured_output,
     render_review_stop_message,
     render_route_message,
-    review_draft,
     rewrite_messages,
-    rewrite_prompt,
     route_review_report,
     summarize_tool_trace,
     trim_head,
@@ -33,6 +34,10 @@ class _QueuedModel:
         self.calls: list[list] = []
 
     def invoke(self, messages):
+        self.calls.append(messages)
+        return AIMessage(content=self.outputs.pop(0))
+
+    async def ainvoke(self, messages):
         self.calls.append(messages)
         return AIMessage(content=self.outputs.pop(0))
 
@@ -130,16 +135,16 @@ def test_trim_head_preserves_skill_header():
     )
 
 
-def test_rewrite_prompt_returns_rewritten_prompt_and_includes_context():
+def test_arewrite_prompt_returns_rewritten_prompt_and_includes_context():
     model = _QueuedModel(["Rewrite this as a precise task."])
 
-    result = rewrite_prompt(
+    result = asyncio.run(arewrite_prompt(
         model,
         skill_text="prompt-master skill",
         user_input="raw request",
         visible_context="recent context",
         skill_context="active skill context",
-    )
+    ))
 
     assert isinstance(result, Rewrite)
     assert result.prompt == "Rewrite this as a precise task."
@@ -152,7 +157,7 @@ def test_rewrite_prompt_returns_rewritten_prompt_and_includes_context():
     assert "你不得新增" in prompt_text
 
 
-def test_rewrite_prompt_includes_runtime_tool_availability():
+def test_arewrite_prompt_includes_runtime_tool_availability():
     model = _QueuedModel(["Rewrite this as a precise task."])
     tool_block = (
         "[Tool availability]\n"
@@ -161,12 +166,12 @@ def test_rewrite_prompt_includes_runtime_tool_availability():
         "unavailable_tools: shell_runner"
     )
 
-    rewrite_prompt(
+    asyncio.run(arewrite_prompt(
         model,
         skill_text="prompt-master skill",
         user_input="raw request",
         tool_availability=tool_block,
-    )
+    ))
 
     prompt_text = "\n".join(message.content for message in model.calls[0])
     assert tool_block in prompt_text
@@ -209,23 +214,23 @@ def test_review_messages_fallback_renders_base_tool_availability():
         assert name in prompt_text
 
 
-def test_rewrite_prompt_detects_clarify_sentinel():
+def test_arewrite_prompt_detects_clarify_sentinel():
     model = _QueuedModel(["<<CLARIFY>>\n- Which journal?"])
 
-    result = rewrite_prompt(model, skill_text="skill", user_input="revise")
+    result = asyncio.run(arewrite_prompt(model, skill_text="skill", user_input="revise"))
 
     assert isinstance(result, Clarify)
     assert result.text == "- Which journal?"
 
 
-def test_review_draft_invokes_model_with_evidence_and_rebuttal():
+def test_areview_draft_invokes_model_with_evidence_and_rebuttal():
     model = _QueuedModel([_report_json("pass")])
     tool_block = (
         "[Tool availability]\n"
         "available_tools: alpha_search"
     )
 
-    report = review_draft(
+    report = asyncio.run(areview_draft(
         model,
         raw_user_input="raw",
         rewritten_prompt="rewritten",
@@ -234,7 +239,7 @@ def test_review_draft_invokes_model_with_evidence_and_rebuttal():
         evidence_trace_summary="[Writer] tool trace",
         previous_rebuttal="reasonable objection",
         tool_availability=tool_block,
-    )
+    ))
 
     assert report.decision == "pass"
     prompt_text = model.calls[0][-1].content
@@ -248,7 +253,7 @@ def test_review_draft_invokes_model_with_evidence_and_rebuttal():
 def test_review_prompt_includes_general_routing_and_fabrication_contract():
     model = _QueuedModel([_report_json("pass")])
 
-    review_draft(
+    asyncio.run(areview_draft(
         model,
         raw_user_input="請查專案筆記後回答",
         rewritten_prompt="Use the indexed project notes.",
@@ -259,7 +264,7 @@ def test_review_prompt_includes_general_routing_and_fabrication_contract():
             "available_tools: rag_search\n"
             "unavailable_tools: (none)"
         ),
-    )
+    ))
 
     prompt_text = model.calls[0][-1].content
     assert "Finding routing contract" in prompt_text
@@ -283,7 +288,7 @@ def test_document_retrieval_gap_routes_to_revise_not_ask_user():
         _report_json("revise", [finding.model_dump()], "Use document retrieval first.")
     ])
 
-    report = review_draft(
+    report = asyncio.run(areview_draft(
         model,
         raw_user_input="一月上半的研究進度是什麼？請自行查專案筆記。",
         rewritten_prompt="Answer from the indexed project notes.",
@@ -294,7 +299,7 @@ def test_document_retrieval_gap_routes_to_revise_not_ask_user():
             "available_tools: rag_search\n"
             "unavailable_tools: (none)"
         ),
-    )
+    ))
 
     assert report.decision == "revise"
     assert report.findings[0].severity == "major"
@@ -450,49 +455,49 @@ def test_append_tool_trace_keeps_recent_evidence_under_cap():
     assert "[Reviser round 1]" in combined
 
 
-def test_parse_reviser_output_splits_draft_and_rebuttal():
-    parsed = parse_reviser_output(
+def test_aparse_reviser_output_splits_draft_and_rebuttal():
+    parsed = asyncio.run(aparse_reviser_output(
         "DRAFT:\nClean answer\n\nREBUTTAL:\nI disagree with finding 1."
-    )
+    ))
 
     assert parsed.draft == "Clean answer"
     assert parsed.rebuttal == "I disagree with finding 1."
 
 
-def test_parse_reviser_output_accepts_draft_only_marker():
-    parsed = parse_reviser_output("DRAFT: Clean answer")
+def test_aparse_reviser_output_accepts_draft_only_marker():
+    parsed = asyncio.run(aparse_reviser_output("DRAFT: Clean answer"))
 
     assert parsed.draft == "Clean answer"
     assert parsed.rebuttal == ""
 
 
-def test_parse_reviser_output_repairs_missing_markers_once():
+def test_aparse_reviser_output_repairs_missing_markers_once():
     repair = _QueuedModel(["DRAFT:\nClean answer\n\nREBUTTAL:\n(none)"])
 
-    parsed = parse_reviser_output("Clean answer\nInternal note", repair_model=repair)
+    parsed = asyncio.run(aparse_reviser_output("Clean answer\nInternal note", repair_model=repair))
 
     assert parsed.draft == "Clean answer"
     assert parsed.rebuttal == "(none)"
     assert len(repair.calls) == 1
 
 
-def test_parse_reviser_output_heuristically_strips_internal_tail():
+def test_aparse_reviser_output_heuristically_strips_internal_tail():
     repair = _QueuedModel(["still unmarked"])
 
-    parsed = parse_reviser_output(
+    parsed = asyncio.run(aparse_reviser_output(
         "Clean answer paragraph with enough content to keep.\n\nREBUTTAL:\n(none)",
         repair_model=repair,
-    )
+    ))
 
     assert parsed.draft == "Clean answer paragraph with enough content to keep."
     assert "(none)" in parsed.rebuttal
     assert parsed.format_warning == ""
 
 
-def test_parse_reviser_output_final_fallback_warns_when_unsafe_to_strip():
+def test_aparse_reviser_output_final_fallback_warns_when_unsafe_to_strip():
     repair = _QueuedModel(["still unmarked"])
 
-    parsed = parse_reviser_output("Clean answer without markers", repair_model=repair)
+    parsed = asyncio.run(aparse_reviser_output("Clean answer without markers", repair_model=repair))
 
     assert parsed.draft == "Clean answer without markers"
     assert parsed.format_warning == REVISER_FORMAT_WARNING
@@ -507,7 +512,7 @@ from agent.thinking import (  # noqa: E402
     FusionCandidate,
     FusionCandidateTrace,
     FusionTurnMetadata,
-    aggregate_candidates,
+    aaggregate_candidates,
     aggregate_messages,
     build_fusion_evidence_summary,
     parse_aggregate_result,
@@ -615,14 +620,14 @@ def test_aggregate_messages_do_not_describe_call_as_tool_evidence():
     assert "must not invent a tool" in system_text
 
 
-def test_aggregate_candidates_invokes_model_and_parses():
+def test_aaggregate_candidates_invokes_model_and_parses():
     model = _QueuedModel([_aggregate_json(draft="merged draft", selected=["candidate-1"])])
-    result = aggregate_candidates(
+    result = asyncio.run(aaggregate_candidates(
         model,
         raw_user_input="raw",
         rewritten_prompt="rewritten",
         successful_candidates=[_candidate("candidate-1", "model-a", "answer")],
-    )
+    ))
 
     assert result.draft == "merged draft"
     assert result.selected_candidate_ids == ["candidate-1"]

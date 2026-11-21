@@ -76,8 +76,7 @@ async def _noop_fetcher(url, headers):
 
 
 def _seed_verified_source(session, tmp_path, source_id="src-known"):
-    hub = CitationProviderHub(env={}, fetcher=_noop_fetcher)
-    service = CitationService(hub, output_dir=tmp_path / "cite")
+    service = session._citation_policy.service
     ref = SourceRef(
         source_id=source_id,
         doi="10.1234/known",
@@ -103,7 +102,6 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         version_kind="published",
     )
     service.registry.register(ref, receipt=receipt)
-    session._citation_service = service
     return service
 
 
@@ -114,7 +112,7 @@ def _save_tool_message(
     status="success",
     call_id="save-1",
 ):
-    receipt = session.citation_service.registry.trusted_receipt(source_id)
+    receipt = session._citation_policy.service.registry.trusted_receipt(source_id)
     assert receipt is not None
     artifact = SaveBatchOutcome(
         f"batch-{call_id}",
@@ -586,7 +584,7 @@ def test_user_doi_in_input_is_never_auto_registered(make_session):
         session.turn_outcome("請看 https://doi.org/10.1234/user-paper")
     )
     assert outcome.text == "plain answer"
-    assert session._citation_service is None  # noqa: SLF001
+    assert session._citation_policy.loaded_service is None  # noqa: SLF001
 
     session.graph = make_astream_graph(
         answer="Your paper [[user-cite:usr-anything]] is interesting."
@@ -633,7 +631,7 @@ def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path
     assert session._build_sources_hint() is not None
     session.deactivate_citation_skill()
     assert session._build_sources_hint() is None
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
 
 
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):

@@ -7,8 +7,8 @@ re-exports the former flat module's names so importers are unchanged.
 from agent.llm.text import invoke_text_messages as invoke_text
 from agent.thinking.parsers import (
     REVISER_FORMAT_WARNING,
+    aparse_reviser_output,
     parse_aggregate_result,
-    parse_reviser_output,
     parse_structured_output,
 )
 from agent.thinking.prompts import (
@@ -18,11 +18,11 @@ from agent.thinking.prompts import (
 )
 from agent.thinking.review import (
     MAX_REVIEW_ATTEMPTS,
-    aggregate_candidates,
+    aaggregate_candidates,
+    areview_draft,
+    arewrite_prompt,
     render_review_stop_message,
     render_route_message,
-    review_draft,
-    rewrite_prompt,
     route_review_report,
 )
 from agent.thinking.schemas import (
@@ -72,20 +72,20 @@ __all__ = [
     "Rewrite",
     "RewriteResult",
     "ThinkingOutputError",
-    "aggregate_candidates",
+    "aaggregate_candidates",
     "aggregate_messages",
+    "aparse_reviser_output",
     "append_tool_trace",
+    "areview_draft",
+    "arewrite_prompt",
     "build_fusion_evidence_summary",
     "invoke_text",
     "parse_aggregate_result",
-    "parse_reviser_output",
     "parse_structured_output",
     "render_review_stop_message",
     "render_route_message",
-    "review_draft",
     "review_messages",
     "rewrite_messages",
-    "rewrite_prompt",
     "route_review_report",
     "summarize_tool_trace",
     "trim_head",

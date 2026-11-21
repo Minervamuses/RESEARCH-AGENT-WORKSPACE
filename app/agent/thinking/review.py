@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Sequence
 
-from agent.llm.text import ainvoke_text_messages, invoke_text_messages as invoke_text
+from agent.llm.text import ainvoke_text_messages
 from agent.thinking.parsers import parse_aggregate_result, parse_structured_output
 from agent.thinking.prompts import (
     _CLARIFY_SENTINEL,
@@ -154,92 +154,11 @@ def _prepend_warning(answer: str, warning: str) -> str:
     return f"{warning}\n\n{answer}"
 
 
-def rewrite_prompt(
-    model,
-    *,
-    skill_text: str,
-    user_input: str,
-    visible_context: str = "",
-    skill_context: str = "",
-    tool_availability: str = "",
-) -> RewriteResult:
-    """Run prompt-master rewrite and parse clarify vs rewritten prompt."""
-    text = invoke_text(
-        model,
-        rewrite_messages(
-            skill_text=skill_text,
-            user_input=user_input,
-            visible_context=visible_context,
-            skill_context=skill_context,
-            tool_availability=tool_availability,
-        ),
-    )
-    return _parse_rewrite(text)
-
-
 def _parse_rewrite(text: str) -> RewriteResult:
     stripped = text.lstrip()
     if stripped.startswith(_CLARIFY_SENTINEL):
         return Clarify(text=stripped[len(_CLARIFY_SENTINEL):].strip())
     return Rewrite(prompt=text.strip())
-
-
-def review_draft(
-    model,
-    *,
-    raw_user_input: str,
-    rewritten_prompt: str,
-    draft: str,
-    skill_context: str = "",
-    evidence_trace_summary: str = "",
-    previous_rebuttal: str = "",
-    tool_availability: str = "",
-) -> ReviewReport:
-    """Run the reviewer LLM step and parse a ReviewReport."""
-    text = invoke_text(
-        model,
-        review_messages(
-            raw_user_input=raw_user_input,
-            rewritten_prompt=rewritten_prompt,
-            draft=draft,
-            skill_context=skill_context,
-            evidence_trace_summary=evidence_trace_summary,
-            previous_rebuttal=previous_rebuttal,
-            tool_availability=tool_availability,
-        ),
-    )
-    return parse_structured_output(ReviewReport, text)
-
-
-def aggregate_candidates(
-    model,
-    *,
-    raw_user_input: str,
-    rewritten_prompt: str,
-    successful_candidates: Sequence[FusionCandidate],
-    skill_context: str = "",
-    tool_availability: str = "",
-) -> FusionAggregateResult:
-    """Run the aggregator LLM over successful candidates and parse the result.
-
-    Only successful candidates may be passed; failed, timed-out, or empty
-    candidates belong in fusion metadata and reviewer evidence, never in the
-    aggregator's candidate input.
-    """
-    text = invoke_text(
-        model,
-        aggregate_messages(
-            raw_user_input=raw_user_input,
-            rewritten_prompt=rewritten_prompt,
-            successful_candidates=successful_candidates,
-            skill_context=skill_context,
-            tool_availability=tool_availability,
-        ),
-    )
-    return parse_aggregate_result(
-        text,
-        successful_candidate_ids=[c.candidate_id for c in successful_candidates],
-    )
 
 
 async def arewrite_prompt(
@@ -274,7 +193,7 @@ async def areview_draft(
     previous_rebuttal: str = "",
     tool_availability: str = "",
 ) -> ReviewReport:
-    """Await the reviewer using the synchronous helper's output contract."""
+    """Await the reviewer LLM step and parse a ReviewReport."""
     text = await ainvoke_text_messages(
         model,
         review_messages(

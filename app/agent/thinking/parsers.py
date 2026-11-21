@@ -10,7 +10,7 @@ from typing import Sequence, TypeVar
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
-from agent.llm.text import ainvoke_text_messages, invoke_text_messages as invoke_text
+from agent.llm.text import ainvoke_text_messages
 from agent.thinking.schemas import (
     FusionAggregateResult,
     RevisedDraft,
@@ -105,28 +105,6 @@ def parse_aggregate_result(
         removed_or_uncertain_points=list(parsed.removed_or_uncertain_points),
         aggregator_error="",
     )
-
-
-def parse_reviser_output(text: str, *, repair_model=None) -> RevisedDraft:
-    """Parse DRAFT/REBUTTAL output with repair and conservative fallbacks."""
-    parsed = _parse_marked_reviser_output(text)
-    if parsed is not None:
-        return parsed
-
-    if repair_model is not None:
-        try:
-            repaired = invoke_text(
-                repair_model,
-                _reviser_repair_messages(text),
-            )
-            parsed = _parse_marked_reviser_output(repaired)
-            if parsed is not None:
-                return parsed
-            logger.warning("reviser output marker repair failed")
-        except Exception as exc:  # pragma: no cover - logging-only safety path
-            logger.warning("reviser output marker repair raised: %s", exc)
-
-    return _reviser_fallback(text)
 
 
 async def aparse_reviser_output(text: str, *, repair_model=None) -> RevisedDraft:

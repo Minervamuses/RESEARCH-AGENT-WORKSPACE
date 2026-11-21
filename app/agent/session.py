@@ -186,13 +186,6 @@ class ChatSession:
         self._conversation_snapshot = self.conversation_repository.load_optional(
             self.session_id
         )
-        if (
-            self._conversation_snapshot is not None
-            and self._conversation_snapshot.document.project_id != self.project_id
-        ):
-            raise ConversationConflictError(
-                "conversation belongs to a different project"
-            )
         self._recover_interrupted_turn()
         self._active_turn_snapshot: ConversationSnapshot | None = None
         self._active_turn_id: str | None = None
@@ -553,24 +546,6 @@ class ChatSession:
         if self._conversation_snapshot is None:
             return 0
         return len(self._conversation_snapshot.document.turns)
-
-    @property
-    def _citation_service(self):
-        """Return the loaded citation service without constructing it."""
-        return self._citation_policy.loaded_service
-
-    @_citation_service.setter
-    def _citation_service(self, service) -> None:
-        self._citation_policy.set_loaded_service(service)
-
-    @property
-    def citation_service(self):
-        """Session-scoped CitationService over the process provider hub.
-
-        Built lazily on first use. Its mutating methods are reachable only
-        through the skill-only citation_workflow tool.
-        """
-        return self._citation_policy.service
 
     def _replayed_context(self) -> list[tuple[Any, str]]:
         """Latest context turns with their model-visible user input.
@@ -1527,29 +1502,4 @@ class ChatSession:
             bash_command_runner=bash_command_runner,
             operation_approval_handler=operation_approval_handler,
             citation_bibliography_path=citation_bibliography_path,
-        )
-
-    @classmethod
-    async def restore(
-        cls,
-        config: AgentConfig,
-        *,
-        session_id: str,
-        system_prompt: str = SYSTEM_PROMPT,
-        conversation_repository: ConversationRepository | None = None,
-        project_id: str | None = None,
-        load_mcp: bool = True,
-        progress_cb=None,
-    ) -> "ChatSession":
-        """Restore one canonical conversation and interrupt a leftover pending turn."""
-        if not is_canonical_uuid4_hex(session_id):
-            raise ValueError("session_id must be canonical UUIDv4 hex")
-        return await cls.create(
-            config,
-            system_prompt=system_prompt,
-            conversation_repository=conversation_repository,
-            project_id=project_id,
-            load_mcp=load_mcp,
-            progress_cb=progress_cb,
-            session_id=session_id,
         )

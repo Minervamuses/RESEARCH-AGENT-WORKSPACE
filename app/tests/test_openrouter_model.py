@@ -11,7 +11,7 @@ from openrouter.errors import OpenRouterError
 from agent.config import AgentConfig
 from agent.llm import openrouter
 from agent.llm.openrouter import get_chat_model, get_openrouter_chat_model
-from agent.llm.text import invoke_text
+from agent.llm.text import invoke_text_messages
 
 
 def test_default_main_model_is_pinned(tmp_path):
@@ -122,7 +122,7 @@ def test_real_chat_openrouter_accepts_model_overrides(monkeypatch, tmp_path):
     assert model.temperature == 0.0
 
 
-def test_invoke_text_invokes_chat_model_with_human_message():
+def test_invoke_text_messages_invokes_chat_model_with_human_message():
     seen_messages = []
 
     class FakeResponse:
@@ -133,7 +133,7 @@ def test_invoke_text_invokes_chat_model_with_human_message():
             seen_messages.extend(messages)
             return FakeResponse()
 
-    result = invoke_text(FakeModel(), "hi")
+    result = invoke_text_messages(FakeModel(), [HumanMessage(content="hi")])
 
     assert result == "hello"
     assert seen_messages[0].content == "hi"

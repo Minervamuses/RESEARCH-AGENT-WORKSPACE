@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | Not started | — | — | C2-S1 |
+| C2 | In progress | `evidence/C2-S1/` | — | C2-S2 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -247,3 +247,16 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C1-S4/probes.md`。
 - **限制**：`tsc` 與 `vite build` 對 `with { type: "json" }` 的相容性依計劃在 C3-S1 實測。
 - **下一步**：進入 C2（C2-S1）。
+
+### C2-S1 移除 Agent 核心測試專用 API（2026-11-21）
+
+- **觀察結果**：
+  - **S038（APPLIED）**：刪除 `agent/thinking/review.py` 的同步 `rewrite_prompt`、`review_draft`、`aggregate_candidates` 與 `parsers.py` 的同步 `parse_reviser_output` 及 `thinking/__init__.py` re-export，`test_thinking.py` 改測 async 版。
+  - **S039（APPLIED）**：刪除 `agent.llm.text.invoke_text` 與 `agent/llm/__init__.py` re-export（保留 `thinking` 的 `invoke_text_messages` 別名）；`test_openrouter_model.py` 改測 `invoke_text_messages`，`test_text_normalization.py` 改直接測 `normalize_content(..., drop_unknown_parts=True)`。
+  - **S041（APPLIED）**：刪除 `ChatSession.citation_service`、`_citation_service` 屬性／setter 與 `CitationSessionPolicy.set_loaded_service`，相關測試改用 `_fixture_services` 與 `_citation_policy`。
+  - **S042（APPLIED）**：刪除 `ChatSession.restore`，3 處測試改用 `ChatSession.create(..., session_id=...)`。
+  - **S044（APPLIED）**：刪除 `ChatSession.__init__` 中與緊接其後 `_recover_interrupted_turn -> _validate_snapshot_project` 重複的 inline 專案歸屬檢查。
+- **執行指令**：13 個受影響 pytest 模組（359 passed in 13.43 s）與 `.py` 符號 grep（0 筆殘留）。
+- **證據**：`evidence/C2-S1/retired-tests.md`。
+- **限制**：無。
+- **下一步**：C2-S2 移除 `activate_citation_skill` 與 `deactivate_citation_skill`（S040）。

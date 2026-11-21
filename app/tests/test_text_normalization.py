@@ -1,18 +1,14 @@
 """Table tests pinning the two divergent content-normalization behaviors.
 
-Written before consolidating agent/llm/text.py and agent/thinking.py's copies
-(pin-then-swap): these must pass byte-for-byte against the pre-swap code and
-survive the swap unchanged. The two entry points intentionally diverge:
-
-- text.invoke_text (prompt str in): drops unknown dict parts (also consulting
-  a "content" key) and strips the final result.
+- normalize_content(..., drop_unknown_parts=True): drops unknown dict parts
+  (also consulting a "content" key).
 - thinking.invoke_text (messages in): keeps unknown dict parts as their repr
   (e.g. tool_use parts) and does NOT strip list-joined content.
 """
 
 import pytest
 
-from agent.llm.text import invoke_text as text_invoke_text
+from agent.llm.text import normalize_content
 from agent.thinking import invoke_text as thinking_invoke_text
 
 
@@ -55,13 +51,8 @@ TOOL_USE_PART = {"type": "tool_use", "id": "call-1", "name": "rag_search"}
         ([], ""),
     ],
 )
-def test_text_invoke_text_drops_unknown_parts_and_strips(content, expected):
-    model = _FixedModel(content)
-
-    assert text_invoke_text(model, "prompt") == expected
-    # prompt-str form wraps the prompt in a single human message
-    assert len(model.seen[0]) == 1
-    assert model.seen[0][0].content == "prompt"
+def test_normalize_content_drops_unknown_parts_and_strips(content, expected):
+    assert normalize_content(content, drop_unknown_parts=True).strip() == expected
 
 
 @pytest.mark.parametrize(

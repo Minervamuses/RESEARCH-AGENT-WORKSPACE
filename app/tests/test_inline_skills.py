@@ -174,7 +174,7 @@ def test_two_real_catalog_skills_see_both_instructions_and_saved_first_product(t
         assert "潤飾後的段落😀" in candidates[1].context["sourceText"]
         assert service.session.active_skill_runtime is None
         assert service.session.thinking_mode == "extended"
-        assert service.session._citation_service is None
+        assert service.session._citation_policy.loaded_service is None
         combined = "\n".join(str(message.content) for message in model.calls[0])
         assert "# Citation Skill" in combined and "[Multiple selected skills]" in combined
         assert "academic-paper-writing" in combined and text in combined
@@ -217,13 +217,13 @@ def test_multiple_skills_cleanup_after_failure_and_cancel(tmp_path, monkeypatch,
         assert session.active_skill_runtime.includes("citation")
         assert session.active_skill_runtime.includes("academic-paper-writing")
         assert session.thinking_mode == "normal"
-        session._citation_service = object()
+        _ = session._citation_policy.service
         raise failure
     monkeypatch.setattr(session, "_run_turn", fail)
     with pytest.raises(type(failure)):
         asyncio.run(session.turn("使用 @academic-paper-writing 和 @citation"))
     assert session.active_skill_runtime is None
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session.thinking_mode == "extended"
     async def next_turn(_text):
         assert session.active_skill_runtime is None
@@ -411,7 +411,7 @@ def test_selected_unsaved_claim_reaches_topic_search_abstract_and_final_citation
             assert "摘要不足以證明普遍效果" in result["text"]
             assert "[1]" in result["text"] and DOI_A in result["text"]
         assert service.session.active_skill_runtime is None
-        assert service.session._citation_service is None
+        assert service.session._citation_policy.loaded_service is None
         assert service.session.thinking_mode == "extended"
 
     original_disk_text = "舊稿：詞袋相似度與文件分類。\n"
@@ -556,7 +556,7 @@ def test_desktop_citation_command_survives_reference_comment_composition(
         saved = service._conversation_repository.load(service.session.session_id).document.turns[-1]
         assert saved.display_input == text and saved.submitted_context == submitted
         assert service.session.active_skill_runtime is None
-        assert service.session._citation_service is None
+        assert service.session._citation_policy.loaded_service is None
         assert service.session.thinking_mode == "extended"
         assert path.read_text(encoding="utf-8") == "研究背景\n舊稿。\n"
         # The same turn is traceable in the diagnostic log without its text.

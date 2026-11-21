@@ -268,7 +268,7 @@ def test_reload_interrupts_leftover_pending_without_replay(monkeypatch, tmp_path
         lambda _config, extra_tools=None, **kwargs: graph,
     )
 
-    restored = asyncio.run(ChatSession.restore(
+    restored = asyncio.run(ChatSession.create(
         AgentConfig(persist_dir=str(tmp_path)),
         session_id=session_id,
         conversation_repository=repository,

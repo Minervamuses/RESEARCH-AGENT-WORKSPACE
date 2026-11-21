@@ -120,33 +120,33 @@ def test_extended_thinking_refused_while_citation_active(make_session):
 def test_deactivation_tears_down_workflow_and_registry(make_session, tmp_path):
     session = make_session()
     session.activate_citation_skill()
-    service = session.citation_service  # lazily built
+    service = session._citation_policy.service  # lazily built
     from skills.citation.types import SourceRef
 
     service.registry.register(SourceRef(
         source_id="src-x", doi="10.1234/x", title="X",
         verification_level="identity_verified",
     ))
-    assert session._citation_service is not None
+    assert session._citation_policy.loaded_service is not None
 
     session.deactivate_citation_skill()
     assert session.active_skill_runtime is None
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     # A later activation starts from a fresh registry.
     session.activate_citation_skill()
-    assert session.citation_service.registry.list() == []
+    assert session._citation_policy.service.registry.list() == []
 
 
 def test_switching_to_another_skill_tears_down_citation_state(make_session):
     session = make_session()
     session.activate_citation_skill()
-    _ = session.citation_service
+    _ = session._citation_policy.service
     answer = asyncio.run(session.turn(
         "draft this paper",
         skill_name="academic-paper-writing",
     ))
     assert answer == "ok"
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session.active_skill_runtime is None
     assert session.citation_skill_active is False
 
@@ -154,12 +154,12 @@ def test_switching_to_another_skill_tears_down_citation_state(make_session):
 def test_failed_activation_keeps_previous_skill_and_state(make_session, monkeypatch):
     session = make_session()
     session.activate_citation_skill()
-    marker = session.citation_service
+    marker = session._citation_policy.service
 
     with pytest.raises(KeyError):
         asyncio.run(session.turn("draft", skill_name="no-such-skill"))
     assert session.citation_skill_active is True
-    assert session._citation_service is marker
+    assert session._citation_policy.loaded_service is marker
 
 
 def test_failed_generic_slash_resolution_preserves_citation_state(
@@ -176,7 +176,7 @@ def test_failed_generic_slash_resolution_preserves_citation_state(
 
     session = make_session()
     session.activate_citation_skill()
-    marker = session.citation_service
+    marker = session._citation_policy.service
     session.loaded_skills.append(SkillMetadata(
         name="help",
         description="Must not replace static help.",
@@ -189,11 +189,11 @@ def test_failed_generic_slash_resolution_preserves_citation_state(
         with pytest.raises(SlashCommandError):
             asyncio.run(execute_slash_command(parse_slash_command(raw), context))
         assert session.citation_skill_active is True
-        assert session._citation_service is marker
+        assert session._citation_policy.loaded_service is marker
 
     assert any("/help" in item and "collision" in item for item in registry.diagnostics)
     assert session.citation_skill_active is True
-    assert session._citation_service is marker
+    assert session._citation_policy.loaded_service is marker
 
 
 def test_non_citation_skills_unaffected_by_teardown_logic(make_session):
@@ -223,7 +223,7 @@ def test_citation_turn_scope_restores_mode_and_records_actual_normal(make_sessio
     assert observed[0].thinking_mode == "normal"
     assert session.thinking_mode == "extended"
     assert session.active_skill_runtime is None
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session._build_sources_hint() is None
     assert "citation_workflow" not in session.tool_access_resolution().effective_tools
 
@@ -231,16 +231,16 @@ def test_citation_turn_scope_restores_mode_and_records_actual_normal(make_sessio
 def test_citation_turn_replaces_legacy_service_under_lock(make_session):
     session = make_session()
     session.activate_citation_skill()
-    legacy = session.citation_service
+    legacy = session._citation_policy.service
 
     def inspect(_state):
         assert session._turn_execution_lock.locked()
         assert session.citation_skill_active
-        assert session._citation_service is None
+        assert session._citation_policy.loaded_service is None
 
     session.graph = make_astream_graph(on_state=inspect)
     assert asyncio.run(session.turn("find Paper A", skill_name="CITATION")) == "ok"
-    assert session._citation_service is None
+    assert session._citation_policy.loaded_service is None
     assert session.active_skill_runtime is None
     assert legacy.registry.list() == []
 
@@ -279,7 +279,7 @@ def test_tampered_one_shot_slash_preserves_citation_before_graph(tmp_path, monke
 
     session, installed, graph = _applied_session(tmp_path, monkeypatch, "writer")
     previous = session.activate_citation_skill()
-    service = session.citation_service
+    service = session._citation_policy.service
     thinking = session.thinking_mode
     tools = session.tool_access_resolution()
     marker = "PRIVATE_ONE_SHOT_TEST_CONTENT"
@@ -296,7 +296,7 @@ def test_tampered_one_shot_slash_preserves_citation_before_graph(tmp_path, monke
     assert str(caught.value) == "applied bundle changed; restart or re-apply required"
     assert graph.states == []
     assert session.active_skill_runtime is previous
-    assert session._citation_service is service
+    assert session._citation_policy.loaded_service is service
     assert session.thinking_mode == thinking
     assert session.tool_access_resolution() == tools
     assert marker not in session._active_skill_context_block()
@@ -319,7 +319,7 @@ def test_tampered_applied_citation_activation_preserves_state(tmp_path, monkeypa
     else:
         session.set_thinking_mode("extended")
     previous = session.active_skill_runtime
-    service = session.citation_service
+    service = session._citation_policy.service
     thinking = session.thinking_mode
     tools = session.tool_access_resolution()
     marker = "PRIVATE_CITATION_TEST_CONTENT"
@@ -336,7 +336,7 @@ def test_tampered_applied_citation_activation_preserves_state(tmp_path, monkeypa
     assert "applied bundle changed; restart or re-apply required" in str(caught.value)
     assert graph.states == []
     assert session.active_skill_runtime is previous
-    assert session._citation_service is service
+    assert session._citation_policy.loaded_service is service
     assert session.thinking_mode == thinking
     assert session.tool_access_resolution() == tools
     assert marker not in caplog.text
