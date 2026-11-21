@@ -86,7 +86,7 @@
 | 狀態 | 意思 | 可引用 | 出現在 |
 |---|---|---|---|
 | `saved` | 新加入書目庫，而且寫入成功 | 是 | 桌面 |
-| `reused` | 書目庫原本就有同一 identity（DOI、arXiv ID 或 NeurIPS 官方網址），或同一批次較早一筆剛成功加入 | 是，用既有 key | 桌面 |
+| `reused` | 本批寫入前磁碟書目庫已有同一 identity，或本批較早一筆已確實寫入成功 | 是，用既有 key；原本就有的作品不受其他新作品寫入失敗影響 | 桌面 |
 | `storage_failed` | 書目庫合併被拒或寫入失敗；reason 是書目庫的錯誤碼 | **否** | 桌面 |
 | `verified` | 驗證成功，只在這次 task 可引用，沒有寫到磁碟 | 是，只限當次 task | CLI |
 | `identity_conflict`（reason `registry_conflict`） | 同一 source ID 已屬於另一個 identity（GOALS P13） | 否 | 兩者 |
@@ -98,7 +98,7 @@
 1. 解析與驗證，不寫任何檔案。
 2. 驗證成功的每筆建立 `SourceRef` 與 `SaveReceipt`，**先不登記**；registry 衝突在這裡就判定（P13），該筆不進入書目庫。
 3. 其餘各筆以一次 `_link_library` 合併並寫入書目庫。
-4. 依每筆的實際結果決定狀態：新加入而且寫入成功是 `saved`；原本就有是 `reused`；合併被拒或寫入失敗是 `storage_failed`。只有 `saved`、`reused` 登記到 registry。
+4. 依每筆的實際結果決定狀態：新加入且成功落盤是 `saved`；本批前磁碟書目庫已存在是 `reused`；本批需寫入的新作品合併被拒或未成功落盤是 `storage_failed`。只有 `saved`、`reused` 登記到 registry。
 5. **同一批次的重複作品**：第一筆決定結果；之後同一作品的各筆，在第一筆是 `saved` 時報 `reused` 並共用 key，在第一筆是 `storage_failed` 時同樣是 `storage_failed`。現行 `_link_library` 會把「同批次較早一筆剛加入記憶體」的作品報成 `existing`，即使之後整批寫入失敗；合併後不可再這樣回報。
 
 **CLI**：解析與驗證後，registry 檢查通過就登記，狀態一律是 `verified`，沒有 bibliography 連結。同一 task 存同一作品兩次，兩次都是 `verified`。
@@ -106,6 +106,8 @@
 **計數**：`CitationSaveMetrics` 新增 `verified_count`；`new_saved_count` 只算 `saved`；`reused_count` 只算 `reused`；其餘狀態都算 `failed_count`。
 
 **工具結果**：`storage_failed` 要明說沒有存檔、這次不可引用、原因與書目庫路徑，並建議重試；`verified` 要明說只在這次對話可引用、沒有寫到磁碟。這樣結構化的狀態本身就是誠實的，不必靠附加的提示詞去更正一個寫著 `saved` 的欄位。
+
+**U20：既有與新作品混合批次（2026-11-21）**。例如 A 在本批開始前已存在書目庫，B 是本批新作品。若 B 寫入失敗，A 仍是 `reused`、原 key、可引用，B 是 `storage_failed`、不可引用。必須區分「批次前已持久化」和「本批較早加入記憶體但最終沒有落盤」；後者寫入失敗不能被稱為 `reused`。本例計數為 `reused_count=1`、`new_saved_count=0`、`failed_count=1`。
 
 ### 4.1 桌面專案（有書目庫）
 

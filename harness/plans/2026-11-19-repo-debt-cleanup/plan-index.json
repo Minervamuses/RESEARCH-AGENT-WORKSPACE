@@ -12,7 +12,7 @@
     },
     {
       "id": "G3",
-      "text": "Citations are stored only in the project bibliography with honest save outcomes (desktop citable iff persisted, CLI verified); BibTeX chain and pybtex removed; guarantees kept"
+      "text": "Citations are stored only in the project bibliography with honest save outcomes (desktop citable iff persisted, CLI verified); BibTeX chain and pybtex removed; guarantees kept; mixed-batch existing entries survive new-item write failure (U20)"
     },
     {
       "id": "G4",
@@ -20,11 +20,11 @@
     },
     {
       "id": "G5",
-      "text": "Backend seams: public ChatSession API, per-turn options, consolidated busy checks without new rules, recoverable Stop, fixture in tests, service split"
+      "text": "Backend seams: public ChatSession API, per-turn options, shared busy checks without forced state ownership (U21), recoverable Stop, fixture in tests, service split"
     },
     {
       "id": "G6",
-      "text": "Frontend foundation: tested pure logic, hooks only along clean domain boundaries, api.ts, components, shared modal and menu, order-preserving CSS split, behavioral tests"
+      "text": "Frontend foundation: tested pure logic, hooks only along clean domain boundaries, api.ts, components, shared modal and menu, order-preserving CSS split, behavioral tests; share UI presentation primitives without forced semantic merging (U22)"
     },
     {
       "id": "G7",

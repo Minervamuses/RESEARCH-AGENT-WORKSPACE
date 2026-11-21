@@ -14,13 +14,13 @@
 - C2 的錯誤出口遮蔽；
 - C3 的 DTO 一致性檢查；
 - C5 的存檔語意與搬移的驗證檢查；
-- C7 的每回合選項、忙碌判斷的集中處與 `ChatSession` 公開介面；
+- C7 的每回合選項、重複忙碌判斷的少量共用 helper（U21）與 `ChatSession` 公開介面；
 - C8、C9 抽出的純邏輯模組、hooks、元件與 `api.ts`。
 
 風險集中在四處：
 
 1. **C3 協定收斂**：同時改 TS、Rust、Python 三端與共用 fixtures。拿掉 TS 的逐欄位驗證後，型別漂移改由 U16 的檢查守住。
-2. **C5 citation**：存檔語意改變（U13），牽動驗證保證、模型看到的 `SKILL.md`、存檔計數，以及論文實驗的可比性。
+2. **C5 citation**：存檔語意改變（U13、U20），牽動驗證保證、模型看到的 `SKILL.md`、存檔計數，以及論文實驗的可比性。
 3. **C7 後端接縫**：`service.py` 4,643 行；每回合選項、忙碌判斷與 Stop 恢復都碰到回合生命週期。
 4. **C8、C9 拆解 `App()`**：`App()` 沒有整合測試；前端沒有互動式 DOM 測試工具，只能以 `react-dom/server` 做靜態渲染測試，而且不得新增相依。執行者看不到畫面，只能靠 `tsc`、`vite build`、`npm test` 與使用者的 GUI 清單。所以可測性要來自**純邏輯模組**，而不是 hooks（U18）。
 
@@ -151,9 +151,9 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 | C4 | 線上詞彙縮到目標，權限命名統一 | C3 | G2 | [phase-04-wire-vocabulary.md](build/phase-04-wire-vocabulary.md) |
 | C5 | citation 只存在書目庫，存檔結果誠實（U13），BibTeX 鏈與 `pybtex` 移除，驗證保證保留 | C3 | G3、G7、G8 | [phase-05-citation-single-store.md](build/phase-05-citation-single-store.md) |
 | C6 | 對話清單由掃描推導，`project.list` 與 registration 移除，選取恢復保留，掃描成本已量測 | C3 | G4、G2 | [phase-06-derived-catalog.md](build/phase-06-derived-catalog.md) |
-| C7 | fixture 移到 tests，`ChatSession` 有公開介面，每回合選項取代共用狀態，忙碌判斷集中，Stop 可恢復，`service.py` 模組化 | C2、C4、C5、C6 | G5、G7 | [phase-07-backend-seams.md](build/phase-07-backend-seams.md) |
+| C7 | fixture 移到 tests，`ChatSession` 有公開介面，每回合選項取代共用狀態，重複忙碌判斷以最少抽象共用（U21），Stop 可恢復，`service.py` 模組化 | C2、C4、C5、C6 | G5、G7 | [phase-07-backend-seams.md](build/phase-07-backend-seams.md) |
 | C8 | 前端純邏輯模組化並受型別檢查，`api.ts` 唯一呼叫後端，preview stub 移除，`App()` 依 domain 拆解 | C3、C4、C5、C6 | G6 | [phase-08-frontend-logic.md](build/phase-08-frontend-logic.md) |
-| C9 | 元件拆出，dialog 與 menu 共用，CSS 依區塊分檔，釘住 layout 的測試改為行為斷言 | C8 | G6 | [phase-09-frontend-presentation.md](build/phase-09-frontend-presentation.md) |
+| C9 | 元件拆出，dialog／menu／transcript 共用相同語意的部分（U22），CSS 依區塊分檔，釘住 layout 的測試改為行為斷言 | C8 | G6 | [phase-09-frontend-presentation.md](build/phase-09-frontend-presentation.md) |
 | C10 | 跨階段詞彙已比對，文件與現況一致，完整測試通過，最終彙報完成 | C2–C9 | G9、G2 | [phase-10-delivery.md](build/phase-10-delivery.md) |
 
 **執行順序**：依表格順序。
@@ -259,7 +259,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
   - 繼續其他前提已滿足的工作；
   - 剩下的工作全部被阻塞時，才停止並彙報。
 - 不可為了通過而削弱斷言、守衛、快照或測試設定。測試數量下降是預期的，但每個被刪的測試都要符合下面的退役規則。
-- 新證據改變路線時，先修訂受影響的未開始或進行中階段，以及 `plan-index.json`，再繼續；修訂本身也要 commit。不可在沒有授權的情況下改變 G1–G9、U1–U19、R1–R6、限制或必要驗收。
+- 新證據改變路線時，先修訂受影響的未開始或進行中階段，以及 `plan-index.json`，再繼續；修訂本身也要 commit。不可在沒有授權的情況下改變 G1–G9、U1–U22、R1–R6、限制或必要驗收。
 - 遇到需要使用者決定的事，在不違反決策的安全前提下繼續其他工作，並把該事項寫進最終彙報，不停下來等。
 
 ### 測試退役規則
@@ -298,7 +298,7 @@ C4、C5、C6 完成後，contract 應剛好有下列內容（G2）。
 | U1 之後 Python 驗證器的錯誤不再被 TS 或 Rust 攔下 | 這是 U1 接受的後果。Python 端的 contract 與 fixture 測試保持完整，每個方法至少一個合法例與一個非法例。TS DTO 的漂移由 U16 的檢查守住。 |
 | C5 拆掉 BibTeX 時驗證保證中斷 | C5-S1 先建立保證對照，C5-S2 先補檢查，C5-S3 才在同一個 commit 內刪除模組、改存檔語意並切換桌面端。 |
 | C5 的存檔語意改變影響論文評估 | C5-S6 記錄評估分界 commit；決策紀錄 §6.2 與 §10 列出改變的欄位與計數。 |
-| C7 的每回合選項或 Stop 修正改變回合生命週期 | 先寫回歸測試（中途失敗的回合、清理失敗後重試），再改程式；每一步讓 desktop 測試全部通過才 commit。 |
+| C7 的每回合選項或 Stop 修正改變回合生命週期 | 先寫回歸測試（中途失敗的回合、清理失敗後重試），再改程式；每一步讓 desktop 測試全部通過才 commit。C7-S6 不強制把所有 Busy flag 搬到新物件（U21）。 |
 | 為不支援的同時操作加機制，或反過來以產品邊界為由放過真缺陷 | 「產品邊界檢查」：每個新機制都要寫出支援的觸發情境；R1–R6 不得重新引入。 |
 | U6 讓 `app/store` 以外的舊對話無法讀取 | 使用者已接受。C2-S5 先確認 `app/store` 內沒有非 v3 檔案。 |
 | 行號漂移 | 一律以符號與 grep 重新定位。稽核行號只當線索。 |

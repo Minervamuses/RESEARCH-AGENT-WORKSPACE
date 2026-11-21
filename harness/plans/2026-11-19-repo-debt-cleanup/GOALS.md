@@ -39,10 +39,10 @@
 |---|---|---|---|
 | G1 | 協定只有一份手寫來源，而且 TS 型別跟得上它。<br>• `contract.json` 是唯一手寫的方法、事件、錯誤碼與 schema 清單。<br>• TS 在建置與測試時直接讀它。<br>• Rust 只檢查框架。<br>• 只有 Python 做 schema 驗證。<br>• 每個 result 只送到 WebView 一次。 | • `protocol.ts` 與 `protocol.rs` 沒有手抄的方法、事件、錯誤碼清單，也沒有逐方法 schema 分支。<br>• 舊的 parity 測試不存在。<br>• 改動 contract 的欄位而不改 TS DTO 時，`npm test` 失敗（U16）。<br>• 「新增一個方法要改哪裡」的走查：只剩 contract、Python handler 與 dispatch、TS DTO 與呼叫端，以及 fixtures。<br>• 三語言測試通過。 | U1、U16；S001–S005、S011、S012、S090 |
 | G2 | 線上詞彙只剩有人用的部分。 | • contract 剛好是 [PLANS.md](PLANS.md#目標詞彙) 列出的 25 個方法與 8 個 request event。<br>• 沒有 `streamKind`、`chunkCount`、`ollamaReachable`、`ollamaModelAvailable`、`citationOutputPath`、`registrationStatus`、`registrationIssue`、`bashPermissionMode`。<br>• 沒有 producer 的錯誤碼與欄位已移除。 | U2、U3、U4、U7、U8、U19、P1–P3、P9；S006–S010、S016 |
-| G3 | citation 只有一套儲存（專案書目庫），而且存檔結果誠實。<br>• 桌面：只有書目庫裡確實有這筆時才回報 `saved`／`reused`，也才可引用。<br>• CLI：不寫檔，驗證成功回報 `verified`，只在當次 task 可引用。<br>• BibTeX 鏈與 `pybtex` 移除。<br>• 除了 P8 明列的交叉比對，驗證保證不弱化。 | • 桌面存檔只改寫書目庫，不產生 `cite/`。<br>• 書目庫寫入失敗時，該筆是 `storage_failed`，不可引用，工具結果明說沒有存檔。<br>• 同一批次重複的作品，不會被報成兩筆 `saved`；寫入失敗時，重複的那筆也不會被報成 `reused`。<br>• CLI 存檔不寫任何檔案，狀態是 `verified`。<br>• 存檔計數分開 `new_saved`、`reused`、`verified`、`failed`。<br>• BibTeX 原本負責的欄位檢查都有對應的程式位置與測試。<br>• `pyproject.toml` 與 `poetry.lock` 沒有 `pybtex`、`latexcodec`。<br>• 細節依決策紀錄 §4–§5。 | U4、U9、U13、P8、P9、P13；S105、S106 |
+| G3 | citation 只有一套儲存（專案書目庫），而且存檔結果誠實。<br>• 桌面：只有書目庫裡確實有這筆時才回報 `saved`／`reused`，也才可引用。<br>• CLI：不寫檔，驗證成功回報 `verified`，只在當次 task 可引用。<br>• BibTeX 鏈與 `pybtex` 移除。<br>• 除了 P8 明列的交叉比對，驗證保證不弱化。 | • 桌面存檔只改寫書目庫，不產生 `cite/`。<br>• 書目庫寫入失敗時，該筆是 `storage_failed`，不可引用，工具結果明說沒有存檔。<br>• 同一批次重複的作品，不會被報成兩筆 `saved`；同批新增而寫入失敗時，重複的那筆也不會被報成 `reused`。<br>• 本批開始前已在磁碟書目庫的 A，不受同批新文獻 B 寫入失敗影響，仍為 `reused`、保留原 key 和引用資格（U20）。<br>• CLI 存檔不寫任何檔案，狀態是 `verified`。<br>• 存檔計數分開 `new_saved`、`reused`、`verified`、`failed`。<br>• BibTeX 原本負責的欄位檢查都有對應的程式位置與測試。<br>• `pyproject.toml` 與 `poetry.lock` 沒有 `pybtex`、`latexcodec`。<br>• 細節依決策紀錄 §4–§5。 | U4、U9、U13、P8、P9、P13；S105、S106 |
 | G4 | 桌面的對話清單由對話目錄掃描推導。 | • 程式不讀寫 `desktop-projects.json`。<br>• 沒有 `project.list`、`session.retry_registration` 與 registration 狀態。<br>• 既有對話照常列出，新對話在第一次送出後出現。<br>• 後端重啟後，原本選取的對話照常恢復（U19）。<br>• 專案擁有權與歷史健康檢查照舊 fail closed（INV-016）。<br>• 掃描成本已量測並交給使用者決定是否需要快取（R3）。 | U3、U19；S018、S019、S027、S070 |
-| G5 | 後端有清楚的接縫，回合之間不互相汙染。 | • `agent/desktop` 與 `agent/thinking` 不再存取 `ChatSession` 的私有屬性。<br>• 權限、文件回合、thinking 覆寫與 installer bypass 以每回合參數傳入；`DesktopService` 的回合狀態放在每回合紀錄。一個中途失敗的回合，不會讓設定殘留到下一回合（U17）。<br>• 8 處忙碌判斷集中到一處，錯誤碼與訊息不變，沒有新增拒絕條件。<br>• Retry Stop 會重試清理，成功後恢復可用（FAIL-022，U14）。<br>• `fixture_session.py` 位於 `tests/`，`server.py` 沒有 fixture 開關。<br>• `service.py` 只剩 dispatch、生命週期與接線。 | U14、U17；S020、S028、S031、S037、S052 |
-| G6 | 前端有可重設計的地基，而且不是把相依關係換個地方放。 | • `App.tsx` 不再是單一巨型元件：domain 邏輯在 `.ts` 純模組，以 `node:test` 測試。<br>• 只有 domain 邊界清楚的 state 與 effect 才抽成 hook；hook 之間不互傳 ref 或 setter；跨 domain 的協調集中在一處（U18）。<br>• 只有 `api.ts` 呼叫後端。<br>• 測試受 `tsc` 檢查。<br>• dialog 與 menu 各只有一份實作。<br>• 後端重啟、Stop、核准與過期回應的既有檢查，都有純函式測試。<br>• CSS 依區塊分檔、維持原本的層疊順序，顏色值不變。<br>• browser-preview 降級模式不存在。<br>• 釘住 layout 的測試改成行為斷言。 | U5、U18；S078–S083、S086–S088、S093、S096（部分）、S097 |
+| G5 | 後端有清楚的接縫，回合之間不互相汙染。 | • `agent/desktop` 與 `agent/thinking` 不再存取 `ChatSession` 的私有屬性。<br>• 權限、文件回合、thinking 覆寫與 installer bypass 以每回合參數傳入；`DesktopService` 的回合狀態放在每回合紀錄。一個中途失敗的回合，不會讓設定殘留到下一回合（U17）。<br>• 8 處忙碌判斷以少量共用查詢消除真正重複的條件；錯誤碼與訊息不變、沒有新增拒絕條件，也不強制轉移所有 flag、計數及 lock 的所有權（U21）。<br>• Retry Stop 會重試清理，成功後恢復可用（FAIL-022，U14）。<br>• `fixture_session.py` 位於 `tests/`，`server.py` 沒有 fixture 開關。<br>• `service.py` 只剩 dispatch、生命週期與接線。 | U14、U17；S020、S028、S031、S037、S052 |
+| G6 | 前端有可重設計的地基，而且不是把相依關係換個地方放。 | • `App.tsx` 不再是單一巨型元件：domain 邏輯在 `.ts` 純模組，以 `node:test` 測試。<br>• 只有 domain 邊界清楚的 state 與 effect 才抽成 hook；hook 之間不互傳 ref 或 setter；跨 domain 的協調集中在一處（U18）。<br>• 只有 `api.ts` 呼叫後端。<br>• 測試受 `tsc` 檢查。<br>• dialog／menu 共用相同的互動原語，不強迫不同語意使用單一元件（U22）。<br>• restored／live／pending transcript 共用相容的呈現元件，不強制合成大型 variant 元件（U22）。<br>• 後端重啟、Stop、核准與過期回應的既有檢查，都有純函式測試。<br>• CSS 依區塊分檔、維持原本的層疊順序，顏色值不變。<br>• browser-preview 降級模式不存在。<br>• 釘住 layout 的測試改成行為斷言。 | U5、U18；S078–S083、S086–S088、S093、S096（部分）、S097 |
 | G7 | 稽核 §5 的缺陷已修正。 | • FAIL-022 由 G5 修正。<br>• `.error-text` 有錯誤樣式。<br>• 所有錯誤訊息只在 Python 的錯誤出口遮蔽一次：憑證格式的值被遮蔽，其餘原文顯示；TS 不再依關鍵字整句隱藏（U15）。<br>• Rust 每個 result 只傳一次。<br>• `TurnJournal.turn_logs` 不再無限累加。<br>• `doi_org._encoded` 的型別標註正確。<br>• `app/desktop/watch.out` 已刪除。 | U15；稽核 §5；S003、S047、S089、S128 |
 | G8 | 稽核標為 READY 的清理全部完成或附理由回報；對話 schema 只剩 v3。 | • 每個 READY 項目在最終彙報的狀態是 APPLIED 或附理由。<br>• 讀到 v1/v2 對話檔時明確拒絕，不靜默升版。 | U6；S003–S005、S008、S014、S021–S024、S026、S029、S031、S038–S044、S046、S061–S063、S071–S076、S085、S092、S098、S101、S102、S108–S110、S114、S115、S117–S120、S122、S128、S129 |
 | G9 | 可交付、可驗證。 | • 起點有基線。<br>• 完成時 pytest、`npm test`、`npm run build`、`cargo test --locked` 全部通過。<br>• 文件與現況一致。<br>• 最終彙報列出：每個 S-ID 的結果、量測前後數字、使用者可見的行為改變、產品邊界檢查、掃描量測、過時的 `for_agents/` 條目、GUI 手動檢查清單與未處理的決策。 | 使用者執行慣例 |
@@ -79,6 +79,14 @@
 | U17 | 每回合的設定改用簡單的每回合參數，不再「先改共用狀態、回合結束再還原」。 | 討論 §二：「C7 每回合設定｜即使循序使用，前一回合的權限或文件設定也可能意外殘留到下一回合｜採用簡單的每回合參數」。 | • `ChatSession` 接收每回合選項，在自己內部管理生命週期。<br>• `DesktopService` 的回合欄位移進每回合紀錄。<br>• 不新增其他抽象。 |
 | U18 | 前端照原計劃拆解 `App.tsx`，但**不硬性要求拆成七個 hooks**：保留 React 原有的狀態管理，抽出可以獨立測試的純邏輯，不引入全域 store。處理後端重啟、Stop、核准與過期回應的必要檢查要保留；「專案 A 和 B 同時操作」不是驗收目標。 | 討論 §二「C8 前端，我也改變了建議」。 | • 2026-11-19 曾建議的純 TS store／controller 不採用（R1）。<br>• 要避免的是：拆完之後只是把一個檔案裡的相依關係，變成七個 hooks 互傳狀態。 |
 | U19 | 刪除 `project.list`，但保留現有的對話選取恢復功能。 | 討論 §三：「`project.list` 則值得刪除……不過要保留現有的對話選取恢復功能」。 | G2 的方法數從 26 改為 25。前端改用已知的專案 ID 與 `session.list`。 |
+
+### 2026-11-21（使用者同意審核後的補充修訂）
+
+| ID | 決策 | 來源 | 後果 |
+|---|---|---|---|
+| U20 | C5 區分「本批開始前已在書目庫」與「本批僅在記憶體中合併但未成功寫入」。既有 A、新文獻 B 同批，B 寫入失敗時 A 仍 `reused` 可引用，B `storage_failed` 不可引用。 | 使用者同意 11/21 C5 審核修訂。 | C5 增加混合批次部分失敗的 key、gate、計數回歸測試；更新 citation 決策紀錄。 |
+| U21 | C7 集中的是重複 Busy 判斷，不是強制建立新的狀態擁有者；先用少量 helper／共用查詢，只有實際減少耦合才搬移 flag、計數或 lock。 | 使用者同意 11/21 C7 審核修訂。 | C7-S6／S9 不再要求 `operation_state.py` 持有全部狀態；不改既有拒絕規則。 |
+| U22 | C9 Transcript 以相容的呈現元件共用為目標；restored、live、pending 不同的資料流程／生命週期可保留各自入口。Modal／Menu 也只抽相同的互動原語。 | 使用者同意 11/21 C9 審核修訂。 | C9-S1／S2／S5 不以單一元件數量或固定 variant 為驗收。 |
 
 ## 已否決或延後（2026-11-20）
 
@@ -126,7 +134,7 @@
   - S121 中只因 U4 而失效的測試。
   - S123 中 bibliography handler 抽出成模組的部分。
 - 稽核 §5 的 7 個缺陷。
-- U1–U19，以及 P1–P3、P5、P8、P9、P12、P13。
+- U1–U22，以及 P1–P3、P5、P8、P9、P12、P13。
 
 ### 不納入（留待使用者決定，最終彙報列出）
 
@@ -150,7 +158,7 @@ S034（只搬家）、S035、S065、S068、S069、S095、S104、S107、S124。
 
 ## 必須保留的不變量
 
-除了 U1–U19 與上方 P 項明列的改變，下列行為必須維持。驗收以既有測試與各階段列出的檢查為準。
+除了 U1–U22 與上方 P 項明列的改變，下列行為必須維持。驗收以既有測試與各階段列出的檢查為準。
 
 - **Python 擁有 policy 與持久化寫入**（INV-015）。React 只經由協定到達 domain 操作；Rust 只管一個 Python child generation。
 - **安全邊界照舊**：
