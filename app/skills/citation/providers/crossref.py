@@ -33,6 +33,7 @@ from skills.citation.providers.net import (
     ProviderError,
     TTLCache,
     fetch_with_retries,
+    user_agent,
 )
 from skills.citation.types import PublishedDateFilter
 
@@ -41,11 +42,6 @@ SEARCH_URL = "https://api.crossref.org/works"
 
 # Async transport: (url, headers) -> FetchResponse. Injected by the hub.
 Fetcher = Callable[[str, dict[str, str]], Awaitable[FetchResponse]]
-
-
-def _user_agent(mailto: str | None) -> str:
-    base = "research-agent-citation/1.0"
-    return f"{base} (mailto:{mailto})" if mailto else base
 
 
 def _first_author_family_name(name: str) -> str:
@@ -330,7 +326,7 @@ class CrossrefClient:
         url = f"{SEARCH_URL}?{params}"
         headers = {
             "Accept": "application/json",
-            "User-Agent": _user_agent(self._mailto),
+            "User-Agent": user_agent(self._mailto),
         }
 
         async def _fetch() -> FetchResponse:

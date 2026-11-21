@@ -1,4 +1,4 @@
-"""doi.org content-negotiation contracts: CSL, BibTeX, RA, caching, 404."""
+"""doi.org content-negotiation contracts: CSL, caching, 404."""
 
 import asyncio
 import json
@@ -7,7 +7,6 @@ import pytest
 
 from skills.citation.providers.doi_org import (
     CSL_ACCEPT,
-    BIBTEX_ACCEPT,
     DoiNotFound,
     DoiOrgClient,
     parse_csl,
@@ -81,15 +80,6 @@ def test_structured_lookup_is_cached_24h_by_canonical_doi():
     assert len(calls) == 1
 
 
-def test_fetch_bibtex_returns_raw_text_with_bibtex_accept():
-    client, calls = _client([
-        FetchResponse(status=200, body=b"@article{x, title={T}, year={2021}}")
-    ])
-    text = asyncio.run(client.fetch_bibtex("10.1038/s41586-021-03819-2"))
-    assert text.startswith("@article")
-    assert calls[0][1]["Accept"] == BIBTEX_ACCEPT
-
-
 def test_missing_doi_raises_doi_not_found():
     client, _ = _client([FetchResponse(status=404)])
     with pytest.raises(DoiNotFound):
@@ -118,23 +108,6 @@ def test_non_doi_input_is_rejected_before_any_network_call():
     with pytest.raises(ProviderError):
         asyncio.run(client.fetch_structured("not-a-doi"))
     assert calls == []
-
-
-def test_registration_agency_lookup():
-    client, calls = _client([
-        FetchResponse(
-            status=200,
-            body=json.dumps([{"DOI": "10.1038/x", "RA": "Crossref"}]).encode(),
-        )
-    ])
-    agency = asyncio.run(client.fetch_registration_agency("10.1038/x"))
-    assert agency == "Crossref"
-    assert calls[0][0] == "https://doi.org/ra/10.1038/x"
-
-
-def test_registration_agency_tolerates_garbage():
-    client, _ = _client([FetchResponse(status=200, body=b"[]")])
-    assert asyncio.run(client.fetch_registration_agency("10.1038/x")) == ""
 
 
 def test_parse_csl_missing_fields_are_empty_never_guessed():

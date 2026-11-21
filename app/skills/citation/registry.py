@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from skills.citation.types import SaveReceipt, SourceRef, source_identity
+from skills.citation.types import SaveReceipt, SourceRef
 
 PROMPT_REGISTRY_LIMIT = 20
 
@@ -17,7 +17,7 @@ class SourceRegistry:
     def _validate_receipt(ref: SourceRef, receipt: SaveReceipt) -> None:
         if (
             receipt.source_id != ref.source_id
-            or receipt.canonical_identity != source_identity(ref)
+            or receipt.canonical_identity != ref.canonical_identity
             or receipt.doi != ref.doi
             or receipt.title != ref.title
             or receipt.year != ref.year
@@ -26,14 +26,19 @@ class SourceRegistry:
         ):
             raise ValueError("save receipt does not match source")
 
+    def conflicts(self, ref: SourceRef) -> bool:
+        """Whether ``ref``'s source ID already belongs to another identity."""
+        existing = self._sources.get(ref.source_id)
+        return existing is not None and existing.canonical_identity != ref.canonical_identity
+
     def register(
         self, ref: SourceRef, *, receipt: SaveReceipt | None = None
     ) -> SourceRef:
         if receipt is not None:
             self._validate_receipt(ref, receipt)
-        existing = self._sources.get(ref.source_id)
-        if existing is not None and source_identity(existing) != source_identity(ref):
+        if self.conflicts(ref):
             raise ValueError(f"source_id {ref.source_id!r} belongs to another identity")
+        existing = self._sources.get(ref.source_id)
         self._sources[ref.source_id] = ref
         if receipt is None:
             self._save_receipts.pop(ref.source_id, None)
@@ -49,9 +54,6 @@ class SourceRegistry:
 
     def get(self, source_id: str) -> SourceRef | None:
         return self._sources.get(source_id)
-
-    def trusted_receipt(self, source_id: str) -> SaveReceipt | None:
-        return self._save_receipts.get(source_id)
 
     def receipt_is_trusted(self, receipt: SaveReceipt) -> bool:
         ref = self._sources.get(receipt.source_id)

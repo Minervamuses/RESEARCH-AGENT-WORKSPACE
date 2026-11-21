@@ -315,7 +315,7 @@ async def run_case(
     document_path = project / "case.md"
     document_path.write_text(case["document"], encoding="utf-8")
     config = AgentConfig(
-        persist_dir=str(work / "store"), citation_output_dir=str(work / "cite"),
+        persist_dir=str(work / "store"),
         extension_dropin_dir=str(work / "dropin"), extension_state_dir=str(work / "state"),
     )
     stack = contextlib.ExitStack()

@@ -405,7 +405,6 @@
       "openRouterConfigured": {"type": "boolean", "required": true},
       "openAlexConfigured": {"type": "boolean", "required": true},
       "storePath": {"type": "string", "required": true, "maxBytes": 8192},
-      "citationOutputPath": {"type": "string", "required": true, "maxBytes": 8192},
       "mcpEnabled": {"type": "boolean", "required": true},
       "mcpFamilies": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 256},
       "mcpDiagnostics": {"type": "stringArray", "required": true, "maxItems": 512, "itemMaxBytes": 4096}

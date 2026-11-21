@@ -65,7 +65,6 @@ async def _service(tmp_path: Path, session: _AnswerSession) -> DesktopService:
         },
         config=AgentConfig(
             persist_dir=str(tmp_path / "store"),
-            citation_output_dir=str(tmp_path / "cite"),
             extension_dropin_dir=str(tmp_path / "dropin"),
             extension_state_dir=str(tmp_path / "extensions"),
         ),

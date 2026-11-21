@@ -400,8 +400,8 @@ def test_selected_unsaved_claim_reaches_topic_search_abstract_and_final_citation
         from urllib.parse import parse_qs, urlsplit
         search_url = next(url for url, _headers in fetcher.calls if "api.crossref.org" in url)
         assert parse_qs(urlsplit(search_url).query)["query.bibliographic"] == [topic_query]
-        bundle = next((tmp_path / "cite").glob("*/citation.json"))
-        assert "abstract" not in json.loads(bundle.read_text())
+        [entry] = json.loads((tmp_path.resolve() / "references.json").read_text(encoding="utf-8"))
+        assert entry["DOI"] == DOI_A and "abstract" not in entry
         if forged_marker:
             assert "dangling_cite" in result["text"]
             assert "摘要報告小型評估" not in result["text"]

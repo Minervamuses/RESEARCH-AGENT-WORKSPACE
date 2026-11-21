@@ -206,13 +206,15 @@ def test_add_uses_citation_save_approval_and_merges(tmp_path, monkeypatch):
         assert excinfo.value.code == "APPROVAL_DENIED"
         approval = next(data for event, data in deny.events if event == "approval.required")
         assert approval["operation"] == "citation.save" and str(library) in approval["description"]
+        # The approval names the only place the save writes: the project bibliography.
+        assert approval["targetPath"] == str(library)
         assert not library.exists() and not (tmp_path / "cite").exists()
 
         allow = _DenySink(service, True)
         data = await _call(service, "bibliography.add", {"identifier": f"https://doi.org/{PREPRINT_DOI}"}, allow)
         await asyncio.gather(*allow.tasks)
         assert data == {"status": "added", "key": "lee2020biorxiv", "reasonCode": None, "libraryFingerprint": _sha(library)}
-        assert list((tmp_path / "cite").glob("*/reference.bib"))
+        assert not (tmp_path / "cite").exists()
 
         service._permission_mode = "bypass"
         again = await _call(service, "bibliography.add", {"identifier": PREPRINT_DOI})
@@ -222,6 +224,27 @@ def test_add_uses_citation_save_approval_and_merges(tmp_path, monkeypatch):
         with pytest.raises(DesktopServiceError) as excinfo:
             await service.dispatch("bibliography.add", {"identifier": "not an id"})
         assert excinfo.value.code == "PROTOCOL_INVALID"
+    asyncio.run(run())
+
+
+def test_add_reports_a_bibliography_write_failure_with_its_reason(tmp_path, monkeypatch):
+    from skills.citation import service as citation_service
+    from skills.citation.library import LIBRARY_WRITE_FAILED, LibraryError
+
+    hub = CitationProviderHub(env={}, fetcher=Fetcher())
+    monkeypatch.setattr("skills.citation.hub.get_provider_hub", lambda: hub)
+
+    def fail_write(_library):
+        raise LibraryError(LIBRARY_WRITE_FAILED, "read-only project folder")
+
+    monkeypatch.setattr(citation_service, "write_library_atomic", fail_write)
+
+    async def run():
+        service, _document, _context = await _project(tmp_path)
+        service._permission_mode = "bypass"
+        data = await _call(service, "bibliography.add", {"identifier": PREPRINT_DOI})
+        assert data == {"status": "failed", "key": None, "reasonCode": LIBRARY_WRITE_FAILED, "libraryFingerprint": None}
+        assert not (tmp_path / "references.json").exists()
     asyncio.run(run())
 
 

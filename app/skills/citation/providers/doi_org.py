@@ -2,7 +2,7 @@
 
 This is the *verification* provider: the save path re-fetches the
 structured CSL JSON record for the selected DOI here (never trusting the
-discovery provider's copy), then fetches BibTeX for the same canonical DOI.
+discovery provider's copy).
 A plain DOI-shaped search query also resolves through this singleton
 without starting any LLM or web search.
 
@@ -31,10 +31,8 @@ from skills.citation.providers.net import (
 
 PROVIDER_NAME = "doi.org"
 NEGOTIATE_URL = "https://doi.org/{doi}"
-RA_URL = "https://doi.org/ra/{doi}"
 
 CSL_ACCEPT = "application/vnd.citationstyles.csl+json"
-BIBTEX_ACCEPT = "application/x-bibtex"
 
 Fetcher = Callable[[str, dict[str, str]], Awaitable[FetchResponse]]
 
@@ -107,7 +105,7 @@ def parse_csl(doi: str, payload: dict) -> StructuredRecord:
 
 
 class DoiOrgClient:
-    """Content-negotiation lookups against doi.org (CSL JSON / BibTeX / RA)."""
+    """Content-negotiation lookups of CSL JSON records against doi.org."""
 
     name = PROVIDER_NAME
 
@@ -122,7 +120,7 @@ class DoiOrgClient:
         self._cache = cache
         self._limiter = limiter
 
-    def _encoded(self, doi: str) -> str:
+    def _encoded(self, doi: str) -> tuple[str, str]:
         canonical = canonicalize_doi(doi)
         if canonical is None:
             raise ProviderError(PROVIDER_NAME, f"not a DOI: {doi!r}")
@@ -163,35 +161,3 @@ class DoiOrgClient:
         record = parse_csl(canonical, payload)
         self._cache.put(cache_key, record, DOI_TTL_SECONDS)
         return record
-
-    async def fetch_bibtex(self, doi: str) -> str:
-        """Fetch raw BibTeX text for ``doi`` (24 h cache). Validation is the
-        caller's job (citation.bibtex_canonical)."""
-        canonical, encoded = self._encoded(doi)
-        cache_key = (PROVIDER_NAME, "bibtex", canonical)
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        response = await self._get(NEGOTIATE_URL.format(doi=encoded), BIBTEX_ACCEPT)
-        text = response.text
-        self._cache.put(cache_key, text, DOI_TTL_SECONDS)
-        return text
-
-    async def fetch_registration_agency(self, doi: str) -> str:
-        """Return the RA name for ``doi`` ('' when the RA API is unhelpful)."""
-        canonical, encoded = self._encoded(doi)
-        cache_key = (PROVIDER_NAME, "ra", canonical)
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        response = await self._get(RA_URL.format(doi=encoded), "application/json")
-        try:
-            payload = json.loads(response.text)
-            agency = str((payload[0] or {}).get("RA", "") or "")
-        except (json.JSONDecodeError, IndexError, KeyError, TypeError):
-            agency = ""
-        if agency:
-            self._cache.put(cache_key, agency, DOI_TTL_SECONDS)
-        return agency

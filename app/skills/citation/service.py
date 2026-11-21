@@ -5,18 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from skills.citation.bibtex_canonical import BibtexValidationError, inject_doi, parse_canonical_bibtex
-from skills.citation.authority import AuthorityRecord, AuthorityRegistry, export_bibtex
+from skills.citation.authority import AuthorityRecord, AuthorityRegistry
 from skills.citation.csl import csl_from_authority, minimal_csl
 from skills.citation.library import LibraryError
 from skills.citation.library import load as load_library
 from skills.citation.library import merge as merge_library
 from skills.citation.library import write_atomic as write_library_atomic
 from skills.citation.registry import PROMPT_REGISTRY_LIMIT, SourceRegistry
-from skills.citation.doi import canonicalize_doi, doi_equal
+from skills.citation.doi import canonicalize_doi
 from skills.citation.providers.base import ProviderRecord
 from skills.citation.providers.net import (
     TRANSIENT_FAILURE_KINDS,
@@ -30,7 +29,6 @@ from skills.citation.resolution import (
     evaluate_record,
     infer_version_kind,
 )
-from skills.citation.storage import StorageError, resolve_output_dir, source_id_for, write_identity_bundle
 from skills.citation.types import (
     BibliographyLink,
     CanonicalIdentity,
@@ -40,18 +38,29 @@ from skills.citation.types import (
     SaveItemOutcome,
     SaveReceipt,
     SourceRef,
+    source_id_for,
 )
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _VerifiedWork:
+    """A verified work that is not yet registered or written anywhere."""
+
+    label: str
+    ref: SourceRef
+    receipt: SaveReceipt
+    csl: dict
+
+
 class CitationService:
-    def __init__(self, hub, *, config=None, output_dir=None, library_path=None):
+    def __init__(self, hub, *, library_path=None):
         self.hub = hub
         self.registry = SourceRegistry()
-        self.output_dir = Path(output_dir) if output_dir is not None else resolve_output_dir(config)
-        # Project CSL-JSON bibliography (desktop projects only). None keeps the
-        # bundle-only behavior the CLI has always had.
+        # The project CSL-JSON bibliography is the only citation store
+        # (desktop projects). Without one (the CLI) a save verifies works for
+        # the current task only and writes nothing.
         self.library_path = Path(library_path) if library_path is not None else None
         self.resolver = WorkResolver(
             crossref=hub.crossref,
@@ -59,7 +68,7 @@ class CitationService:
             openalex=hub.openalex,
             doi_org=hub.doi_org,
         )
-        self.authorities = AuthorityRegistry(fetcher=hub._fetch)
+        self.authorities = AuthorityRegistry(fetcher=hub.fetch)
         # Search providers that already exhausted their retries on a transient
         # failure. A service lives for one Citation task (the session rebuilds
         # it per turn), so later queries in that task skip them instead of
@@ -137,11 +146,16 @@ class CitationService:
         return ordered[:rows], states
 
     async def save(self, intents: tuple[WorkIntent, ...]) -> SaveBatchOutcome:
-        """Resolve, verify, and persist each intent with per-item isolation.
+        """Resolve, verify, and record each intent with per-item isolation.
 
-        An unexpected exception in one item becomes that item's
-        ``internal_error`` outcome (logged with batch ID, index, stage, and
-        traceback) instead of discarding every other item's result.
+        Desktop (a project bibliography): a work is citable only once it is in
+        the bibliography. ``saved`` was added by this batch's write,
+        ``reused`` was there before the batch (or shares the key of an
+        earlier item that was written), and ``storage_failed`` was not
+        written and is not citable. CLI (no bibliography): every verified
+        work is ``verified``, citable in this task only, and nothing is
+        written. An unexpected exception in one item becomes that item's
+        ``internal_error`` outcome instead of discarding the other items.
         """
         batch_id = uuid.uuid4().hex
         resolutions = await asyncio.gather(
@@ -149,33 +163,62 @@ class CitationService:
             return_exceptions=True,
         )
         outcomes: list[SaveItemOutcome | None] = []
-        eligible: list[tuple[int, WorkIntent, object, str]] = []
+        verified: dict[int, _VerifiedWork] = {}
         for index, (intent, resolution) in enumerate(zip(intents, resolutions, strict=True)):
             try:
                 if isinstance(resolution, BaseException):
                     raise resolution
                 planned = await self._plan_item(index, intent, resolution)
             except Exception as exc:
-                planned = self._internal_failure(batch_id, index, intent, "resolution", exc)
+                planned = self._internal_failure(batch_id, index, intent.requested_label, "resolution", exc)
             if isinstance(planned, SaveItemOutcome):
                 outcomes.append(planned)
                 continue
-            record, resolution_reason = planned
-            eligible.append((index, intent, record, resolution_reason))
+            record, _resolution_reason = planned
+            try:
+                work = self._verified_work(intent, record)
+            except Exception as exc:
+                outcomes.append(self._internal_failure(batch_id, index, intent.requested_label, "verification", exc))
+                continue
+            if self.registry.conflicts(work.ref):
+                # Checked before the bibliography write so a rejected work is
+                # never written without being citable.
+                logger.warning(
+                    "citation save batch %s item %d: source ID %s belongs to another identity",
+                    batch_id, index, work.ref.source_id,
+                )
+                outcomes.append(SaveItemOutcome(index, work.label, "identity_conflict", "registry_conflict"))
+                continue
+            verified[index] = work
             outcomes.append(None)
 
-        # All resolution/provider verification completes before the first write.
-        csl_items: dict[int, dict] = {}
-        for index, intent, record, resolution_reason in eligible:
-            outcomes[index] = await self._persist_item(
-                batch_id, index, intent, record, resolution_reason
-            )
-            if outcomes[index].status in {"saved", "reused"}:
-                csl_items[index] = self._csl_item(record, outcomes[index].receipt)
-        if self.library_path is not None and csl_items:
-            links = await asyncio.to_thread(self._link_library, csl_items)
+        # All resolution and verification completes before the one write.
+        if self.library_path is None:
+            for index, work in verified.items():
+                outcomes[index] = self._registered(batch_id, index, work, "verified", "verified_not_persisted")
+        elif verified:
+            try:
+                links = await asyncio.to_thread(
+                    self._link_library, {index: work.csl for index, work in verified.items()}
+                )
+            except Exception as exc:
+                # One write serves every verified item, so an unexpected
+                # failure leaves all of them unsaved; earlier items keep theirs.
+                links = {}
+                for index, work in verified.items():
+                    outcomes[index] = self._internal_failure(batch_id, index, work.label, "storage", exc)
             for index, link in links.items():
-                outcomes[index] = replace(outcomes[index], bibliography=link)
+                work = verified[index]
+                if isinstance(link, BibliographyLink):
+                    saved = link.status == "added"
+                    outcomes[index] = self._registered(
+                        batch_id, index, work,
+                        "saved" if saved else "reused",
+                        "saved_new" if saved else "reused_existing",
+                        link,
+                    )
+                else:
+                    outcomes[index] = SaveItemOutcome(index, work.label, "storage_failed", link)
         for item in outcomes:
             logger.info(
                 "citation save batch %s item %d: %s/%s",
@@ -295,128 +338,59 @@ class CitationService:
             alternatives=alternatives,
         )
 
-    async def _persist_item(
+    def _verified_work(self, intent: WorkIntent, record) -> _VerifiedWork:
+        """Build the source, receipt, and CSL item for one eligible record."""
+        if isinstance(record, AuthorityRecord):
+            identity = record.identity
+            sid = source_id_for(identity)
+            ref = SourceRef(
+                sid, None, record.title, authors=list(record.authors), year=record.year,
+                venue=record.venue, work_type=record.work_type, url=record.url,
+                verification_level="authority_metadata_verified",
+                provenance=f"authoritative:{record.provider}",
+                canonical_identity=identity,
+            )
+            version_kind = "preprint" if record.provider == "arxiv" else "published"
+        else:
+            identity = CanonicalIdentity("doi", record.doi)
+            sid = source_id_for(identity)
+            ref = SourceRef(
+                sid, identity.value, record.title,
+                authors=list(record.authors),
+                year=record.year,
+                venue=record.venue,
+                work_type=record.work_type,
+                url=record.url or f"https://doi.org/{identity.value}",
+                verification_level="doi_identity_verified",
+                provenance="fresh-resolution+doi.org-csl",
+                canonical_identity=identity,
+            )
+            version_kind = infer_version_kind(record)
+        receipt = SaveReceipt(
+            sid, identity, ref.doi, ref.title, ref.year,
+            ref.work_type, ref.verification_level, f"[[cite:{sid}]]", version_kind,
+        )
+        return _VerifiedWork(intent.requested_label, ref, receipt, self._csl_item(record, receipt))
+
+    def _registered(
         self,
         batch_id: str,
         index: int,
-        intent: WorkIntent,
-        record,
-        resolution_reason: str,
+        work: _VerifiedWork,
+        status: str,
+        reason_code: str,
+        link: BibliographyLink | None = None,
     ) -> SaveItemOutcome:
-        """Fetch/validate BibTeX, then write the bundle and register it."""
-        stage = "verification"
+        """Register a verified work as citable and report it."""
         try:
-            if isinstance(record, AuthorityRecord):
-                try:
-                    canonical = export_bibtex(record)
-                except BibtexValidationError as exc:
-                    return SaveItemOutcome(
-                        index,
-                        intent.requested_label,
-                        "verification_failed",
-                        getattr(exc, "code", "authority_bibtex_invalid"),
-                    )
-                identity = record.identity
-                sid = source_id_for(identity)
-                ref = SourceRef(
-                    sid, None, record.title, authors=list(record.authors), year=record.year,
-                    venue=record.venue, work_type=record.work_type, url=record.url,
-                    verification_level="authority_metadata_verified",
-                    provenance=f"authoritative:{record.provider}", schema_version=2,
-                    canonical_identity=identity,
-                )
-                provider_record_ids = [identity.key]
-                version_kind = "preprint" if record.provider == "arxiv" else "published"
-            else:
-                try:
-                    raw = await self.hub.doi_org.fetch_bibtex(record.doi)
-                    canonical = parse_canonical_bibtex(raw)
-                    if canonical.doi is None:
-                        canonical = inject_doi(canonical, record.doi)
-                    elif not doi_equal(canonical.doi, record.doi):
-                        raise BibtexValidationError("bibtex_doi_mismatch", "DOI mismatch")
-                except ProviderError as exc:
-                    kind = failure_kind(exc)
-                    logger.warning(
-                        "citation BibTeX lookup via doi.org failed: %s",
-                        describe_failure(exc),
-                    )
-                    if kind in TRANSIENT_FAILURE_KINDS:
-                        return SaveItemOutcome(
-                            index, intent.requested_label,
-                            "provider_failed", f"bibtex_lookup_{kind}",
-                        )
-                    return SaveItemOutcome(
-                        index, intent.requested_label,
-                        "verification_failed", "bibtex_lookup_failed",
-                    )
-                except BibtexValidationError as exc:
-                    logger.warning("citation BibTeX validation failed: %s", exc.code)
-                    return SaveItemOutcome(
-                        index, intent.requested_label, "verification_failed", exc.code,
-                    )
-                identity = CanonicalIdentity("doi", record.doi)
-                sid = source_id_for(identity)
-                ref = SourceRef(
-                    sid, identity.value, record.title or canonical.title,
-                    authors=list(record.authors) or list(canonical.authors),
-                    year=record.year if record.year is not None else canonical.year,
-                    venue=record.venue or canonical.venue,
-                    work_type=record.work_type,
-                    url=record.url or f"https://doi.org/{identity.value}",
-                    verification_level="doi_identity_verified",
-                    provenance="fresh-resolution+doi.org-csl+bibtex",
-                    schema_version=2,
-                    canonical_identity=identity,
-                )
-                provider_record_ids = [record.provider_id]
-                version_kind = infer_version_kind(record)
-            sidecar = {
-                "source_ref": ref.to_persisted_dict(),
-                "creation_evidence": {
-                    "batch_id": batch_id,
-                    "request_index": index,
-                    "agent_intent": self._intent_evidence(intent),
-                },
-                "resolution": {
-                    "record_source": record.provider,
-                    "provider_record_ids": provider_record_ids,
-                    "version_kind": version_kind,
-                    "decision_reason_codes": [resolution_reason],
-                },
-            }
-            stage = "storage"
-            try:
-                bundle = await asyncio.to_thread(
-                    write_identity_bundle,
-                    self.output_dir,
-                    identity=identity,
-                    title=ref.title,
-                    bibtex_text=canonical.text,
-                    sidecar=sidecar,
-                )
-                receipt = SaveReceipt(
-                    sid, identity, ref.doi, ref.title, ref.year,
-                    ref.work_type, str(bundle.bundle_dir), ref.verification_level,
-                    f"[[cite:{sid}]]", version_kind,
-                )
-                self.registry.register(ref, receipt=receipt)
-            except (StorageError, ValueError) as exc:
-                code = getattr(exc, "code", "registry_conflict")
-                logger.warning(
-                    "citation bundle storage failed for batch %s item %d: %s (%s)",
-                    batch_id,
-                    index,
-                    code,
-                    exc,
-                )
-                return SaveItemOutcome(index, intent.requested_label, "storage_failed", code)
-            return SaveItemOutcome(
-                index, intent.requested_label, "reused" if bundle.reused else "saved",
-                "reused_existing" if bundle.reused else "saved_new", receipt,
+            self.registry.register(work.ref, receipt=work.receipt)
+        except ValueError as exc:
+            logger.warning(
+                "citation save batch %s item %d: registry rejected the source: %s",
+                batch_id, index, exc,
             )
-        except Exception as exc:
-            return self._internal_failure(batch_id, index, intent, stage, exc)
+            return SaveItemOutcome(index, work.label, "identity_conflict", "registry_conflict")
+        return SaveItemOutcome(index, work.label, status, reason_code, work.receipt, bibliography=link)
 
     @staticmethod
     def _csl_item(record, receipt: SaveReceipt) -> dict:
@@ -437,50 +411,57 @@ class CitationService:
         item.pop("abstract", None)
         return item
 
-    def _link_library(self, csl_items: dict[int, dict]) -> dict[int, BibliographyLink]:
-        """Merge saved works into the project bibliography in one write.
+    def _link_library(self, csl_items: dict[int, dict]) -> dict[int, BibliographyLink | str]:
+        """Merge verified works into the project bibliography in one write.
 
-        A bibliography failure never changes the bundle outcome; it is
-        reported on the item's ``bibliography`` link instead.
+        Returns each item's link, or the library error code when the item is
+        not in the bibliography after this call. A work that was on disk
+        before the batch keeps its link even when the write of other, new
+        works fails; a work added by this batch (and any duplicate of it in
+        the same batch) is linked only if the write succeeded.
         """
         path = str(self.library_path)
         try:
             library = load_library(self.library_path)
         except LibraryError as exc:
             logger.warning("citation bibliography load failed: %s (%s)", exc.code, exc)
-            return {index: BibliographyLink("failed", path, reason_code=exc.code) for index in csl_items}
-        results = {}
+            return {index: exc.code for index in csl_items}
+        merges = {}
+        added_keys: set[str] = set()
         for index, item in csl_items.items():
             try:
                 merged = merge_library(library, item)
             except LibraryError as exc:
-                results[index] = (None, exc.code)
+                merges[index] = exc.code
                 continue
             library = merged.library
-            results[index] = (merged, None)
-        added = [index for index, (merged, _code) in results.items() if merged and merged.status == "added"]
+            if merged.status == "added":
+                added_keys.add(merged.key)
+            merges[index] = merged
         write_error = None
-        if added:
+        if added_keys:
             try:
                 write_library_atomic(library)
             except LibraryError as exc:
                 logger.warning("citation bibliography write failed: %s (%s)", exc.code, exc)
                 write_error = exc.code
-        links = {}
-        for index, (merged, code) in results.items():
-            if merged is None:
-                links[index] = BibliographyLink("failed", path, reason_code=code)
-            elif merged.status == "added" and write_error is not None:
-                links[index] = BibliographyLink("failed", path, reason_code=write_error)
+        links: dict[int, BibliographyLink | str] = {}
+        for index, merged in merges.items():
+            if isinstance(merged, str):
+                links[index] = merged
+            elif merged.key not in added_keys:
+                links[index] = BibliographyLink("existing", path, merged.key)
+            elif write_error is not None:
+                links[index] = write_error
             else:
-                links[index] = BibliographyLink(merged.status, path, key=merged.key)
+                links[index] = BibliographyLink(merged.status, path, merged.key)
         return links
 
     @staticmethod
     def _internal_failure(
         batch_id: str,
         index: int,
-        intent: WorkIntent,
+        label: str,
         stage: str,
         exc: Exception,
     ) -> SaveItemOutcome:
@@ -493,26 +474,7 @@ class CitationService:
             type(exc).__name__,
             exc_info=exc,
         )
-        return SaveItemOutcome(
-            index, intent.requested_label, "internal_error", f"{stage}_internal_error",
-        )
-
-    @staticmethod
-    def _intent_evidence(intent: WorkIntent) -> dict:
-        """Record the agent selection used for this save without claiming proof."""
-        return {
-            "title": intent.title,
-            "authors": list(intent.authors),
-            "year": intent.year,
-            "venue": intent.venue,
-            "work_type": intent.work_type,
-            "work_kind": intent.work_kind,
-            "version_kind": intent.version_kind,
-            "identifiers": [
-                {"kind": identifier.kind, "value": identifier.value}
-                for identifier in intent.identifiers
-            ],
-        }
+        return SaveItemOutcome(index, label, "internal_error", f"{stage}_internal_error")
 
     def list_sources(self, page: int = 1):
         sources = self.registry.list()

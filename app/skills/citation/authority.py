@@ -1,4 +1,4 @@
-"""Authoritative no-DOI adapters (arXiv API, NeurIPS proceedings) and BibTeX export.
+"""Authoritative no-DOI adapters (arXiv API, NeurIPS proceedings).
 
 Both adapters query the official source for every lookup:
 
@@ -22,9 +22,6 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
-from pybtex.database import BibliographyData, Entry, Person
-
-from skills.citation.bibtex_canonical import parse_canonical_bibtex
 from skills.citation.normalize import normalize_title
 from skills.citation.providers.net import (
     AsyncRateLimiter,
@@ -239,27 +236,3 @@ class AuthorityRegistry:
             CanonicalIdentity("arxiv", arxiv_id), title, authors, year,
             "arXiv", "preprint", f"https://arxiv.org/abs/{arxiv_id}", "arxiv",
         )
-
-
-def export_bibtex(record: AuthorityRecord):
-    fields = {
-        "title": record.title, "year": str(record.year), "url": record.url,
-    }
-    if record.provider == "neurips":
-        fields["booktitle"] = record.venue
-    else:
-        fields["eprint"] = record.identity.value
-        fields["archiveprefix"] = "arXiv"
-    family = record.names[0][0] if record.names else record.authors[0].split()[-1]
-    key = re.sub(r"[^a-z0-9]+", "", family.casefold()) + str(record.year)
-    persons = (
-        [Person(f"{family}, {given}" if given else family) for family, given in record.names]
-        if record.names else [Person(author) for author in record.authors]
-    )
-    entry = Entry(
-        "inproceedings" if record.provider == "neurips" else "misc",
-        fields=fields,
-        persons={"author": persons},
-    )
-    text = BibliographyData({key: entry}).to_string("bibtex")
-    return parse_canonical_bibtex(text)

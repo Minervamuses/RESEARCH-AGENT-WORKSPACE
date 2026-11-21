@@ -12,6 +12,7 @@ from skills.citation.registry import SourceRegistry
 from skills.citation.resolution import WorkIdentifier, WorkIntent
 from skills.citation.service import CitationService
 from skills.citation.types import (
+    BibliographyLink,
     CanonicalIdentity,
     SaveAlternative,
     SaveBatchOutcome,
@@ -22,6 +23,10 @@ from skills.citation.types import (
 )
 
 
+def link(status="added"):
+    return BibliographyLink(status, "/project/references.json", "work2020")
+
+
 def receipt():
     return SaveReceipt(
         source_id="src-abc",
@@ -30,7 +35,6 @@ def receipt():
         title="A Work",
         year=2020,
         work_type="journal-article",
-        bundle_path="/tmp/cite/a",
         verification_level="doi_identity_verified",
         cite_marker="[[cite:src-abc]]",
         version_kind="published",
@@ -42,11 +46,14 @@ def test_save_batch_round_trip_is_exact_and_ordered():
         "b1",
         (
             SaveItemOutcome(1, "second", "not_found", "no_provider_records", alternatives=(SaveAlternative("A Work", year=2020, venue="Venue", version_kind="preprint", doi="10.48550/arxiv.2001.00001", arxiv="2001.00001"),)),
-            SaveItemOutcome(0, "first", "saved", "saved_new", receipt()),
+            SaveItemOutcome(0, "first", "saved", "saved_new", receipt(), bibliography=link()),
+            SaveItemOutcome(2, "third", "verified", "verified_not_persisted", receipt()),
+            SaveItemOutcome(3, "fourth", "storage_failed", "library_write_failed"),
         ),
     )
     restored = SaveBatchOutcome.from_artifact(batch.to_artifact())
     assert restored == batch
+    assert batch.to_artifact()["schema_version"] == 3
     assert restored.items[0].alternatives[0].version_kind == "preprint"
     assert restored.items[0].alternatives[0].doi == "10.48550/arxiv.2001.00001"
     assert restored.items[0].alternatives[0].arxiv == "2001.00001"
@@ -99,7 +106,7 @@ def test_save_batch_rejects_unknown_result_version_kind(target):
     batch = SaveBatchOutcome(
         "b",
         (
-            SaveItemOutcome(0, "saved", "saved", "saved_new", receipt()),
+            SaveItemOutcome(0, "saved", "saved", "saved_new", receipt(), bibliography=link()),
             SaveItemOutcome(
                 1,
                 "missing",
@@ -131,20 +138,48 @@ def test_save_batch_requires_items_and_unique_request_indices():
         )
 
 
+def _doi_ref(source_id, doi, title):
+    return SourceRef(
+        source_id, doi, title,
+        verification_level="doi_identity_verified",
+        canonical_identity=CanonicalIdentity("doi", doi),
+    )
+
+
 def test_registry_collision_preserves_original_source():
     registry = SourceRegistry()
-    first = SourceRef("src-same", "10.1234/one", "One")
+    first = _doi_ref("src-same", "10.1234/one", "One")
     registry.register(first)
+    other = _doi_ref("src-same", "10.1234/two", "Two")
+    assert registry.conflicts(other)
+    assert not registry.conflicts(_doi_ref("src-same", "10.1234/one", "One again"))
     with pytest.raises(ValueError):
-        registry.register(SourceRef("src-same", "10.1234/two", "Two"))
+        registry.register(other)
     assert registry.get("src-same") is first
+
+
+def test_save_item_status_receipt_and_bibliography_invariants():
+    # saved/reused live in the bibliography; verified is task-only; failures carry neither.
+    SaveItemOutcome(0, "x", "reused", "reused_existing", receipt(), bibliography=link("existing"))
+    SaveItemOutcome(0, "x", "verified", "verified_not_persisted", receipt())
+    for status, item_receipt, item_link in (
+        ("saved", receipt(), None),
+        ("verified", receipt(), link()),
+        ("verified", None, None),
+        ("storage_failed", receipt(), None),
+        ("storage_failed", None, link()),
+    ):
+        with pytest.raises(ValueError):
+            SaveItemOutcome(0, "x", status, "reason", item_receipt, bibliography=item_link)
+    with pytest.raises(ValueError):
+        BibliographyLink("failed", "/project/references.json", "key")
 
 
 def test_registry_binds_and_revalidates_trusted_save_receipt():
     registry = SourceRegistry()
     ref = SourceRef(
         "src-abc", "10.1234/work", "A Work", year=2020,
-        work_type="journal-article", schema_version=2,
+        work_type="journal-article",
         verification_level="doi_identity_verified",
         canonical_identity=CanonicalIdentity("doi", "10.1234/work"),
     )
@@ -152,7 +187,6 @@ def test_registry_binds_and_revalidates_trusted_save_receipt():
 
     registry.register(ref, receipt=trusted)
 
-    assert registry.trusted_receipt(ref.source_id) == trusted
     assert registry.receipt_is_trusted(trusted)
 
     ref.title = "Mutated title"
@@ -163,7 +197,7 @@ def test_registry_rejects_mismatched_receipt_and_clears_stale_trust():
     registry = SourceRegistry()
     ref = SourceRef(
         "src-abc", "10.1234/work", "A Work", year=2020,
-        work_type="journal-article", schema_version=2,
+        work_type="journal-article",
         verification_level="doi_identity_verified",
         canonical_identity=CanonicalIdentity("doi", "10.1234/work"),
     )
@@ -175,7 +209,7 @@ def test_registry_rejects_mismatched_receipt_and_clears_stale_trust():
 
     registry.register(ref, receipt=receipt())
     registry.register(ref)
-    assert registry.trusted_receipt(ref.source_id) is None
+    assert not registry.receipt_is_trusted(receipt())
 
 
 # --- Verification guarantees that do not depend on the BibTeX chain -------
@@ -224,7 +258,6 @@ async def _verification_fetcher(url, headers):
 def _desktop_service(tmp_path):
     return CitationService(
         CitationProviderHub(env={}, fetcher=_verification_fetcher),
-        output_dir=tmp_path / "cite",
         library_path=tmp_path / "references.json",
     )
 

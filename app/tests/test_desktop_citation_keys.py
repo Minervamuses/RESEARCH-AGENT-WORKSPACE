@@ -266,7 +266,7 @@ def test_lookup_is_effective_in_citation_turns_only_when_offered(monkeypatch, tm
     monkeypatch.setattr("agent.session.build_graph", lambda _cfg, extra_tools=None, **kwargs: make_astream_graph())
     lookup = StructuredTool.from_function(func=lambda query: "[]", name="bibliography_lookup",
                                           description="lookup")
-    config = AgentConfig(persist_dir=str(tmp_path / "store"), citation_output_dir=str(tmp_path / "cite"))
+    config = AgentConfig(persist_dir=str(tmp_path / "store"))
     session = ChatSession(config, extra_tools=[lookup])
     assert session.mcp_families["bibliography_lookup"] == "desktop_document"
     assert "bibliography_lookup" not in session.tool_access_resolution().effective_tools

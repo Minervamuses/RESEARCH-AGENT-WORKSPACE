@@ -9,7 +9,6 @@ from skills.citation import service as service_module
 from skills.citation.authority import (
     NEURIPS_BASE,
     AuthorityRegistry,
-    export_bibtex,
     names_neurips,
     parse_neurips_index,
 )
@@ -23,7 +22,6 @@ from skills.citation.resolution import (
     WorkResolution,
 )
 from skills.citation.service import CitationService
-from skills.citation.storage import StorageError
 from skills.citation.tool import TOOL_NAME, create_citation_workflow_tool
 from skills.citation.types import SaveBatchOutcome
 from tests.citation_fixtures import DOI_A, DOI_B, RoutingFetcher
@@ -34,15 +32,14 @@ ATOM = b'''<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org
 MISMATCHED_ATOM = ATOM.replace(b"2001.00001v1", b"2001.99999v1")
 
 
-def test_official_arxiv_record_and_deterministic_bibtex():
+def test_official_arxiv_record_carries_the_verified_fields():
     async def fetch(url, headers):
         assert url.startswith("https://export.arxiv.org/api/query?")
         return FetchResponse(200, body=ATOM)
     registry = AuthorityRegistry(fetcher=fetch)
     record = asyncio.run(registry.resolve(WorkIntent("x", identifiers=(WorkIdentifier("arxiv", "2001.00001"),))))
     assert record.identity.key == "arxiv:2001.00001"
-    canonical = export_bibtex(record)
-    assert canonical.title == "A Preprint" and canonical.doi is None
+    assert (record.title, record.authors, record.year) == ("A Preprint", ("Ada Author",), 2020)
 
 
 def test_arxiv_authority_rejects_a_mismatched_returned_identifier():
@@ -139,9 +136,6 @@ def test_neurips_lookup_queries_the_official_list_and_paper_page():
     assert record.names[5] == ("Gomez", "Aidan N.") and len(record.names) == 8
     assert (record.year, record.venue) == (2017, "Advances in Neural Information Processing Systems 30")
     assert (record.url, record.provider, record.work_type) == (ATTENTION_PAGE, "neurips", "inproceedings")
-    bibtex = export_bibtex(record)
-    assert bibtex.entry_type == "inproceedings" and bibtex.doi is None
-    assert bibtex.title == "Attention is All you Need" and bibtex.venue == record.venue
 
     # The year's list is fetched once per session.
     assert asyncio.run(registry.resolve(neurips_intent(title="A General Framework for Robust Interactive Learning"))) is None
@@ -208,7 +202,7 @@ def test_neurips_save_verifies_online_and_writes_the_project_entry(tmp_path):
 
     library = tmp_path / "references.json"
     service = CitationService(
-        CitationProviderHub(env={}, fetcher=fetch), output_dir=tmp_path / "cite", library_path=library,
+        CitationProviderHub(env={}, fetcher=fetch), library_path=library,
     )
     service.resolver = Resolver()
     intent = neurips_intent(authors=("Ashish Vaswani",), version_kind="published")
@@ -218,9 +212,11 @@ def test_neurips_save_verifies_online_and_writes_the_project_entry(tmp_path):
     assert item.status == "saved" and item.reason_code == "saved_new"
     assert item.receipt.canonical_identity.key == f"venue:neurips:2017:{ATTENTION_HASH}"
     assert calls == [NEURIPS_2017, ATTENTION_PAGE]
-    sidecar = json.loads((Path(item.receipt.bundle_path) / "citation.json").read_text(encoding="utf-8"))
-    assert sidecar["source_ref"]["verification_level"] == "authority_metadata_verified"
-    assert sidecar["source_ref"]["provenance"] == "authoritative:neurips"
+    ref = service.registry.get(item.receipt.source_id)
+    assert ref.verification_level == "authority_metadata_verified"
+    assert ref.provenance == "authoritative:neurips"
+    assert item.bibliography.status == "added"
+    assert item.bibliography.key == json.loads(library.read_text(encoding="utf-8"))[0]["id"]
     [entry] = json.loads(library.read_text(encoding="utf-8"))
     assert entry["type"] == "paper-conference" and entry["URL"] == ATTENTION_PAGE
     assert entry["container-title"] == "Advances in Neural Information Processing Systems 30"
@@ -253,9 +249,7 @@ def earliest_authority_case(tmp_path):
         ),
     ]
     fetch, calls = neurips_site()
-    service = CitationService(
-        CitationProviderHub(env={}, fetcher=fetch), output_dir=tmp_path / "cite",
-    )
+    service = CitationService(CitationProviderHub(env={}, fetcher=fetch))
     return intent, records, service, calls
 
 
@@ -265,7 +259,7 @@ def earliest_authority_case(tmp_path):
     (2017, "not_found", "no_provider_records"),
 ])
 def test_earliest_authority_fallback_preserves_year_ambiguity_only(
-    earliest_authority_case, year, status, reason,
+    earliest_authority_case, tmp_path, year, status, reason,
 ):
     intent, records, service, calls = earliest_authority_case
     for record in records:
@@ -283,10 +277,10 @@ def test_earliest_authority_fallback_preserves_year_ambiguity_only(
     item = asyncio.run(service.save((intent,))).items[0]
 
     if status == "not_found":
-        assert item.status == "saved"
+        # No project bibliography: verified for this task only.
+        assert item.status == "verified"
         assert item.receipt.canonical_identity.key == f"venue:neurips:2017:{ATTENTION_HASH}"
         assert service.registry.receipt_is_trusted(item.receipt)
-        assert (Path(item.receipt.bundle_path) / "reference.bib").is_file()
     else:
         assert item.status == "ambiguous"
         assert item.reason_code == reason
@@ -295,14 +289,14 @@ def test_earliest_authority_fallback_preserves_year_ambiguity_only(
             (DOI_A, year), (DOI_B, year),
         ]
         assert service.registry.list() == []
-        assert not service.output_dir.exists()
+    assert list(tmp_path.iterdir()) == []
     # Only the official proceedings site is ever contacted (list once, then the page).
     assert set(calls) <= {NEURIPS_2017, ATTENTION_PAGE} and calls.count(NEURIPS_2017) == 1
 
 
 @pytest.mark.parametrize("year,reason", [(2017, "earliest_year_tie"), (None, "earliest_year_missing")])
 def test_earliest_real_resolver_service_tool_returns_ambiguity_without_saving(
-    earliest_authority_case, monkeypatch, year, reason,
+    earliest_authority_case, monkeypatch, tmp_path, year, reason,
 ):
     intent, records, service, calls = earliest_authority_case
     for record in records:
@@ -336,7 +330,7 @@ def test_earliest_real_resolver_service_tool_returns_ambiguity_without_saving(
     assert len(crossref.calls) == len(datacite.calls) == 1
     assert calls == []
     assert service.registry.list() == []
-    assert not service.output_dir.exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_exact_arxiv_selection_uses_authoritative_metadata_when_saving(tmp_path: Path):
@@ -352,7 +346,7 @@ def test_exact_arxiv_selection_uses_authoritative_metadata_when_saving(tmp_path:
         return FetchResponse(200, body=ATOM)
 
     hub = CitationProviderHub(env={}, fetcher=fetch)
-    service = CitationService(hub, output_dir=tmp_path / "cite")
+    service = CitationService(hub)
     service.resolver = Resolver()
     intent = WorkIntent(
         "wrong title",
@@ -363,12 +357,12 @@ def test_exact_arxiv_selection_uses_authoritative_metadata_when_saving(tmp_path:
     outcome = asyncio.run(service.save((intent,)))
 
     item = outcome.items[0]
-    assert item.status == "saved"
+    assert item.status == "verified"
     assert item.receipt is not None
     assert item.receipt.title == "A Preprint"
     assert item.receipt.canonical_identity.key == "arxiv:2001.00001"
     assert item.receipt.version_kind == "preprint"
-    assert (Path(item.receipt.bundle_path) / "reference.bib").is_file()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_missing_exact_arxiv_authority_is_not_found(tmp_path: Path):
@@ -382,10 +376,7 @@ def test_missing_exact_arxiv_authority_is_not_found(tmp_path: Path):
     async def fetch(_url, _headers):
         return FetchResponse(200, body=MISMATCHED_ATOM)
 
-    service = CitationService(
-        CitationProviderHub(env={}, fetcher=fetch),
-        output_dir=tmp_path / "cite",
-    )
+    service = CitationService(CitationProviderHub(env={}, fetcher=fetch))
     service.resolver = Resolver()
 
     outcome = asyncio.run(service.save((WorkIntent(
@@ -394,7 +385,7 @@ def test_missing_exact_arxiv_authority_is_not_found(tmp_path: Path):
 
     assert outcome.items[0].status == "not_found"
     assert outcome.items[0].reason_code == "exact_arxiv_not_found"
-    assert not (tmp_path / "cite").exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_authority_provider_error_becomes_a_truthful_per_item_failure(tmp_path: Path):
@@ -414,7 +405,6 @@ def test_authority_provider_error_becomes_a_truthful_per_item_failure(tmp_path: 
 
     service = CitationService(
         CitationProviderHub(env={}, fetcher=no_fetch),
-        output_dir=tmp_path / "cite",
     )
     service.resolver = Resolver()
     service.authorities = FailingAuthority()
@@ -425,7 +415,7 @@ def test_authority_provider_error_becomes_a_truthful_per_item_failure(tmp_path: 
 
     assert outcome.items[0].status == "provider_failed"
     assert outcome.items[0].reason_code == "authority_lookup_failed"
-    assert not (tmp_path / "cite").exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_failed_exact_doi_never_falls_back_to_a_different_authority_identity(
@@ -447,7 +437,6 @@ def test_failed_exact_doi_never_falls_back_to_a_different_authority_identity(
 
     service = CitationService(
         CitationProviderHub(env={}, fetcher=no_fetch),
-        output_dir=tmp_path / "cite",
     )
     service.resolver = Resolver()
     service.authorities = AuthorityMustNotRun()
@@ -463,12 +452,10 @@ def test_failed_exact_doi_never_falls_back_to_a_different_authority_identity(
 
     assert outcome.items[0].status == "not_found"
     assert outcome.items[0].reason_code == "exact_doi_not_found"
-    assert not (tmp_path / "cite").exists()
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_mixed_doi_and_authority_save_preserves_metadata_and_reuses_bundles(
-    tmp_path: Path,
-):
+def _mixed_fetcher():
     routing = RoutingFetcher()
 
     async def fetch(url, headers):
@@ -476,8 +463,15 @@ def test_mixed_doi_and_authority_save_preserves_metadata_and_reuses_bundles(
             return FetchResponse(200, body=ATOM)
         return await routing(url, headers)
 
+    return fetch
+
+
+def test_mixed_doi_and_authority_save_preserves_metadata_and_reuses_entries(
+    tmp_path: Path,
+):
+    library = tmp_path / "references.json"
     service = CitationService(
-        CitationProviderHub(env={}, fetcher=fetch), output_dir=tmp_path / "cite",
+        CitationProviderHub(env={}, fetcher=_mixed_fetcher()), library_path=library,
     )
     intents = (
         WorkIntent("paper", identifiers=(WorkIdentifier("doi", DOI_A),)),
@@ -493,10 +487,9 @@ def test_mixed_doi_and_authority_save_preserves_metadata_and_reuses_bundles(
     ]
     assert first.items[1].reason_code == "exact_doi_not_found"
     assert first.items[1].receipt is None
-    artifacts = {}
-    for index, title, doi, version, provider, record_id, reason in (
-        (0, "Paper A", DOI_A, "published", "doi.org", f"doi.org:{DOI_A}", "exact_identifier"),
-        (2, "A Preprint", None, "preprint", "arxiv", "arxiv:2001.00001", "authoritative_exact_record"),
+    for index, title, doi, version, provenance in (
+        (0, "Paper A", DOI_A, "published", "fresh-resolution+doi.org-csl"),
+        (2, "A Preprint", None, "preprint", "authoritative:arxiv"),
     ):
         item = first.items[index]
         receipt = item.receipt
@@ -504,24 +497,10 @@ def test_mixed_doi_and_authority_save_preserves_metadata_and_reuses_bundles(
         assert (receipt.title, receipt.doi, receipt.version_kind) == (title, doi, version)
         assert receipt.cite_marker == f"[[cite:{receipt.source_id}]]"
         assert service.registry.receipt_is_trusted(receipt)
-        ref = service.registry.get(receipt.source_id)
-        bundle = Path(receipt.bundle_path)
-        sidecar = json.loads((bundle / "citation.json").read_text())
-        assert sidecar["source_ref"] == ref.to_persisted_dict()
-        assert sidecar["creation_evidence"]["batch_id"] == first.batch_id
-        assert sidecar["creation_evidence"]["request_index"] == index
-        assert sidecar["creation_evidence"]["agent_intent"]["identifiers"] == [
-            {"kind": intents[index].identifiers[0].kind, "value": intents[index].identifiers[0].value},
-        ]
-        assert sidecar["resolution"] == {
-            "record_source": provider,
-            "provider_record_ids": [record_id],
-            "version_kind": version,
-            "decision_reason_codes": [reason],
-        }
-        for name in ("reference.bib", "citation.json"):
-            path = bundle / name
-            artifacts[path] = path.read_bytes()
+        assert service.registry.get(receipt.source_id).provenance == provenance
+        assert item.bibliography.status == "added"
+    written = library.read_bytes()
+    assert len(json.loads(written)) == 2
 
     second = asyncio.run(service.save(intents))
 
@@ -529,39 +508,31 @@ def test_mixed_doi_and_authority_save_preserves_metadata_and_reuses_bundles(
     for index in (0, 2):
         assert second.items[index].reason_code == "reused_existing"
         assert second.items[index].receipt == first.items[index].receipt
+        assert second.items[index].bibliography.key == first.items[index].bibliography.key
         assert service.registry.receipt_is_trusted(second.items[index].receipt)
-    assert all(path.read_bytes() == content for path, content in artifacts.items())
+    assert library.read_bytes() == written
 
 
 def test_mixed_save_keeps_storage_and_registry_failures_per_item(
     monkeypatch, tmp_path: Path,
 ):
-    routing = RoutingFetcher()
-
-    async def fetch(url, headers):
-        if url.startswith("https://export.arxiv.org/api/query?"):
-            return FetchResponse(200, body=ATOM)
-        return await routing(url, headers)
-
+    library = tmp_path / "references.json"
     service = CitationService(
-        CitationProviderHub(env={}, fetcher=fetch), output_dir=tmp_path / "cite",
+        CitationProviderHub(env={}, fetcher=_mixed_fetcher()), library_path=library,
     )
-    write_bundle = service_module.write_identity_bundle
-    register = service.registry.register
+    merge = service_module.merge_library
+    conflicts = service.registry.conflicts
 
-    def fail_authority_write(output_dir, **kwargs):
-        if kwargs["identity"].kind == "arxiv":
-            raise StorageError("write_failed", "test write failure")
-        return write_bundle(output_dir, **kwargs)
+    def reject_authority_merge(current, item):
+        if item.get("URL", "").startswith("https://arxiv.org/"):
+            raise service_module.LibraryError("library_conflict", "test merge rejection")
+        return merge(current, item)
 
-    def fail_first_doi_registration(ref, *, receipt):
-        assert (Path(receipt.bundle_path) / "reference.bib").is_file()
-        if ref.doi == DOI_A:
-            raise ValueError("test registry conflict")
-        return register(ref, receipt=receipt)
+    def first_doi_conflicts(ref):
+        return ref.doi == DOI_A or conflicts(ref)
 
-    monkeypatch.setattr(service_module, "write_identity_bundle", fail_authority_write)
-    monkeypatch.setattr(service.registry, "register", fail_first_doi_registration)
+    monkeypatch.setattr(service_module, "merge_library", reject_authority_merge)
+    monkeypatch.setattr(service.registry, "conflicts", first_doi_conflicts)
     intents = (
         WorkIntent("preprint", identifiers=(WorkIdentifier("arxiv", "2001.00001"),)),
         WorkIntent("first paper", identifiers=(WorkIdentifier("doi", DOI_A),)),
@@ -571,8 +542,8 @@ def test_mixed_save_keeps_storage_and_registry_failures_per_item(
     batch = asyncio.run(service.save(intents))
 
     assert [(item.request_index, item.status, item.reason_code) for item in batch.items] == [
-        (0, "storage_failed", "write_failed"),
-        (1, "storage_failed", "registry_conflict"),
+        (0, "storage_failed", "library_conflict"),
+        (1, "identity_conflict", "registry_conflict"),
         (2, "saved", "saved_new"),
     ]
     assert batch.items[0].receipt is None
@@ -581,8 +552,5 @@ def test_mixed_save_keeps_storage_and_registry_failures_per_item(
     assert receipt.doi == DOI_B
     assert service.registry.receipt_is_trusted(receipt)
     assert [ref.doi for ref in service.registry.list()] == [DOI_B]
-    bibs = list(service.output_dir.glob("*/reference.bib"))
-    assert len(bibs) == 2
-    assert {DOI_A, DOI_B} == {
-        doi for path in bibs for doi in (DOI_A, DOI_B) if doi in path.read_text()
-    }
+    # The registry conflict was settled before the write, so only DOI_B reached the bibliography.
+    assert [entry.get("DOI") for entry in json.loads(library.read_text(encoding="utf-8"))] == [DOI_B]

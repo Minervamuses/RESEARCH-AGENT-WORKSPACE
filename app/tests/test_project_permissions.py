@@ -97,7 +97,9 @@ def test_tool_operations_receive_frozen_single_operation_consent(tmp_path, tool,
                 assert parameters["source"] == "/tmp/selected.zip"
                 assert parameters["installationRoot"] == str(tmp_path / "state")
             if tool == "citation_workflow":
-                assert event["targetPath"].endswith("/cite")
+                # This fixture session has no project bibliography, so the save writes nothing.
+                assert event["targetPath"] == "(not written to disk)"
+                assert "nothing is written to disk" in event["description"]
     asyncio.run(run())
 
 

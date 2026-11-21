@@ -52,9 +52,18 @@ def _intent(label: str, doi: str) -> WorkIntent:
 
 
 def _service(tmp_path: Path, fetcher) -> CitationService:
+    """A desktop-mode service: verified works go to the project bibliography."""
     return CitationService(
-        CitationProviderHub(env={}, fetcher=fetcher), output_dir=tmp_path / "cite",
+        CitationProviderHub(env={}, fetcher=fetcher),
+        library_path=tmp_path / "references.json",
     )
+
+
+def _library_dois(tmp_path: Path) -> list[str]:
+    path = tmp_path / "references.json"
+    if not path.exists():
+        return []
+    return sorted(entry.get("DOI") for entry in json.loads(path.read_text(encoding="utf-8")))
 
 
 def _statuses(outcome):
@@ -88,12 +97,16 @@ def test_unexpected_resolution_exception_isolated_to_its_item(tmp_path, caplog):
     assert record.exc_info is not None and record.exc_info[0] is KeyError
 
 
-def test_unexpected_verification_exception_isolated_to_its_item(tmp_path):
-    def fault(url, headers):
-        if url == f"https://doi.org/{DOI_B}" and "x-bibtex" in headers["Accept"]:
-            raise AttributeError("unexpected transport object")
+def test_unexpected_verification_exception_isolated_to_its_item(tmp_path, monkeypatch):
+    service = _service(tmp_path, _ThreePaperFetcher())
+    real_csl_item = service._csl_item
 
-    service = _service(tmp_path, _ThreePaperFetcher(fault))
+    def csl_item(record, receipt):
+        if receipt.doi == DOI_B:
+            raise AttributeError("unexpected record object")
+        return real_csl_item(record, receipt)
+
+    monkeypatch.setattr(service, "_csl_item", csl_item)
 
     outcome = asyncio.run(service.save((
         _intent("A", DOI_A), _intent("B", DOI_B), _intent("C", DOI_C),
@@ -104,30 +117,31 @@ def test_unexpected_verification_exception_isolated_to_its_item(tmp_path):
         ("internal_error", "verification_internal_error"),
         ("saved", "saved_new"),
     ]
-    assert len(list((tmp_path / "cite").glob("*/reference.bib"))) == 2
+    assert _library_dois(tmp_path) == sorted([DOI_A, DOI_C])
 
 
-def test_unexpected_storage_exception_isolated_to_its_item(tmp_path, monkeypatch):
-    real_write = service_module.write_identity_bundle
+def test_unexpected_storage_exception_fails_only_the_items_in_that_write(tmp_path, monkeypatch, caplog):
+    def write(_library):
+        raise PermissionError("read-only project folder")
 
-    def write(output_dir, *, identity, **kwargs):
-        if identity.value == DOI_A:
-            raise PermissionError("read-only bundle directory")
-        return real_write(output_dir, identity=identity, **kwargs)
-
-    monkeypatch.setattr(service_module, "write_identity_bundle", write)
+    monkeypatch.setattr(service_module, "write_library_atomic", write)
     service = _service(tmp_path, _ThreePaperFetcher())
 
-    outcome = asyncio.run(service.save((
-        _intent("A", DOI_A), _intent("B", DOI_B), _intent("C", DOI_C),
-    )))
+    with caplog.at_level(logging.ERROR, logger="skills.citation.service"):
+        outcome = asyncio.run(service.save((
+            _intent("A", DOI_A), _intent("missing", "10.1234/missing"), _intent("C", DOI_C),
+        )))
 
+    # The one bibliography write serves A and C; the unresolved item keeps its own result.
     assert _statuses(outcome) == [
         ("internal_error", "storage_internal_error"),
-        ("saved", "saved_new"),
-        ("saved", "saved_new"),
+        ("not_found", "exact_doi_not_found"),
+        ("internal_error", "storage_internal_error"),
     ]
-    assert {source.doi for source in service.registry.list()} == {DOI_B, DOI_C}
+    assert service.registry.list() == []
+    assert _library_dois(tmp_path) == []
+    record = next(r for r in caplog.records if "during storage" in r.getMessage())
+    assert record.exc_info is not None and record.exc_info[0] is PermissionError
 
 
 def test_all_items_failing_unexpectedly_still_return_a_batch(tmp_path):
@@ -141,7 +155,7 @@ def test_all_items_failing_unexpectedly_still_return_a_batch(tmp_path):
 
     assert [item.status for item in outcome.items] == ["internal_error"] * 2
     assert [item.request_index for item in outcome.items] == [0, 1]
-    assert not (tmp_path / "cite").exists()
+    assert not (tmp_path / "references.json").exists()
 
 
 def test_cancellation_is_not_converted_into_an_item_failure(tmp_path):
@@ -226,7 +240,7 @@ def test_non_object_csl_payload_is_a_provider_error(tmp_path):
     else:  # pragma: no cover - assertion helper
         raise AssertionError("expected ProviderError")
 
-    outcome = asyncio.run(CitationService(hub, output_dir=tmp_path / "cite").save(
+    outcome = asyncio.run(CitationService(hub).save(
         (_intent("A", DOI_A),)
     ))
     assert _statuses(outcome) == [("verification_failed", "doi_refetch_failed")]
@@ -274,30 +288,6 @@ def test_exact_doi_lookup_failures_are_classified(
     assert _statuses(outcome) == [("saved", "saved_new"), expected]
 
 
-@pytest.mark.parametrize(
-    ("outcomes", "expected"),
-    [
-        ([_refused() for _ in range(3)], ("provider_failed", "bibtex_lookup_network_error")),
-        (
-            [asyncio.TimeoutError("slow"), asyncio.TimeoutError("slow")],
-            ("provider_failed", "bibtex_lookup_timeout"),
-        ),
-        ([FetchResponse(404)], ("verification_failed", "bibtex_lookup_failed")),
-        (
-            [FetchResponse(200, body=b"not bibtex")],
-            ("verification_failed", "not_exactly_one_entry"),
-        ),
-    ],
-)
-def test_bibtex_failures_are_classified(tmp_path, no_citation_backoff, outcomes, expected):
-    fetcher = _FaultyDoiFetcher(DOI_A, "x-bibtex", outcomes)
-    service = _service(tmp_path, fetcher)
-
-    outcome = asyncio.run(service.save((_intent("A", DOI_A), _intent("C", DOI_C))))
-
-    assert _statuses(outcome) == [expected, ("saved", "saved_new")]
-
-
 def test_transient_authority_failure_is_classified(tmp_path):
     service = _service(tmp_path, _ThreePaperFetcher())
 
@@ -326,7 +316,7 @@ def test_search_states_name_the_failing_provider_and_cause(tmp_path, no_citation
     async def scenario():
         hub = _hub_with_transport(handler)
         try:
-            service = CitationService(hub, output_dir=tmp_path / "cite")
+            service = CitationService(hub)
             return await service.search("paper")
         finally:
             await hub.aclose()
@@ -356,25 +346,21 @@ def test_search_tool_does_not_present_total_failure_as_no_results(tmp_path):
     assert "No bibliographic records found" not in content
 
 
-def test_storage_failure_cause_is_logged(tmp_path, monkeypatch, caplog):
-    from skills.citation.storage import StorageError
+def test_bibliography_write_failure_cause_is_logged(tmp_path, monkeypatch, caplog):
+    def write(_library):
+        raise service_module.LibraryError("library_write_failed", "disk full")
 
-    def write(*_args, **_kwargs):
-        raise StorageError("write_failed", "source-slot lock timeout")
-
-    monkeypatch.setattr(service_module, "write_identity_bundle", write)
+    monkeypatch.setattr(service_module, "write_library_atomic", write)
     service = _service(tmp_path, _ThreePaperFetcher())
 
     with caplog.at_level(logging.WARNING, logger="skills.citation.service"):
         outcome = asyncio.run(service.save((_intent("A", DOI_A),)))
 
-    assert _statuses(outcome) == [("storage_failed", "write_failed")]
+    assert _statuses(outcome) == [("storage_failed", "library_write_failed")]
     message = next(
-        r.getMessage() for r in caplog.records if "storage failed" in r.getMessage()
+        r.getMessage() for r in caplog.records if "bibliography write failed" in r.getMessage()
     )
-    assert outcome.batch_id in message
-    assert "write_failed (source-slot lock timeout)" in message
-
+    assert "library_write_failed (disk full)" in message
 
 
 @pytest.mark.parametrize("abstract_rank,metadata_rank", [(0, 1), (1, 0)])

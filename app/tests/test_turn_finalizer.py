@@ -17,6 +17,7 @@ from agent.turns.safety import find_content_tool_protocol_artifact
 from skills.citation.hub import CitationProviderHub
 from skills.citation.service import CitationService
 from skills.citation.types import (
+    BibliographyLink,
     CanonicalIdentity,
     SaveBatchOutcome,
     SaveItemOutcome,
@@ -71,23 +72,24 @@ def _seed_verified_source(session, tmp_path, source_id="src-known"):
         venue="Journal",
         work_type="journal-article",
         verification_level="doi_identity_verified",
-        schema_version=2,
         canonical_identity=CanonicalIdentity("doi", "10.1234/known"),
     )
-    receipt = SaveReceipt(
+    service.registry.register(ref, receipt=_receipt_for(ref))
+    return service
+
+
+def _receipt_for(ref):
+    return SaveReceipt(
         source_id=ref.source_id,
         canonical_identity=ref.canonical_identity,
         doi=ref.doi,
         title=ref.title,
         year=ref.year,
         work_type=ref.work_type,
-        bundle_path=str(tmp_path / "cite" / source_id),
         verification_level=ref.verification_level,
         cite_marker=f"[[cite:{ref.source_id}]]",
         version_kind="published",
     )
-    service.registry.register(ref, receipt=receipt)
-    return service
 
 
 def _save_tool_message(
@@ -97,13 +99,15 @@ def _save_tool_message(
     status="success",
     call_id="save-1",
 ):
-    receipt = session._citation_policy.service.registry.trusted_receipt(source_id)
-    assert receipt is not None
+    ref = session._citation_policy.service.registry.get(source_id)
+    assert ref is not None
+    receipt = _receipt_for(ref)
+    link = BibliographyLink("added", "/project/references.json", "lovelace2021known")
     artifact = SaveBatchOutcome(
         f"batch-{call_id}",
         (
             SaveItemOutcome(1, "missing", "not_found", "no_provider_records"),
-            SaveItemOutcome(0, "wanted", "saved", "saved_new", receipt),
+            SaveItemOutcome(0, "wanted", "saved", "saved_new", receipt, bibliography=link),
         ),
     ).to_artifact()
     return ToolMessage(
@@ -137,7 +141,7 @@ def _save_failure_tool_message(*failures, content="save failed", call_id="save-f
 
 
 def _assert_save_metrics(
-    caplog, *, batches=0, saved=0, reused=0, failed=0,
+    caplog, *, batches=0, saved=0, reused=0, verified=0, failed=0,
 ):
     lines = [
         record.getMessage()
@@ -145,12 +149,12 @@ def _assert_save_metrics(
         if record.name == "agent.observability"
         and record.getMessage().startswith("citation_save_finalized")
     ]
-    if batches == 0 and saved == 0 and reused == 0 and failed == 0:
+    if batches == 0 and saved == 0 and reused == 0 and verified == 0 and failed == 0:
         assert lines == []
         return
     assert lines[-1] == (
         f"citation_save_finalized citation_save_batch_count={batches} "
-        f"new_saved_count={saved} reused_count={reused} failed_count={failed}"
+        f"new_saved_count={saved} reused_count={reused} verified_count={verified} failed_count={failed}"
     )
 
 
@@ -292,7 +296,7 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
     ]
     assert lines == [
         "citation_save_finalized citation_save_batch_count=1 "
-        "new_saved_count=1 reused_count=0 failed_count=1"
+        "new_saved_count=1 reused_count=0 verified_count=0 failed_count=1"
     ]
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert "10.1234/known" not in log_text
@@ -325,7 +329,6 @@ def test_multiple_save_artifacts_aggregate_without_invariant_failure(
 
 
 @pytest.mark.parametrize(("field", "forged_value"), [
-    ("bundle_path", "/forged"),
     ("title", "Forged title"),
     ("year", 1900),
     ("work_type", "forged-type"),
@@ -424,7 +427,7 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
     ]
     assert lines == [
         "citation_save_finalized citation_save_batch_count=0 "
-        "new_saved_count=0 reused_count=0 failed_count=0"
+        "new_saved_count=0 reused_count=0 verified_count=0 failed_count=0"
     ]
 
 

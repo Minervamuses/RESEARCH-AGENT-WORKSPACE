@@ -9,6 +9,15 @@ import pytest
 from skills.citation import library as lib
 from skills.citation.library import LibraryError
 
+
+def _add(path, item):
+    """Load, merge, and write only when something was added (the save path's steps)."""
+    result = lib.merge(lib.load(path), item)
+    if result.status == "added":
+        lib.write_atomic(result.library)
+    return result
+
+
 USER_ITEMS = [
     {
         "id": "agrawal2024references",
@@ -58,7 +67,7 @@ def test_adding_one_entry_only_appends_at_the_tail(tmp_path):
     path = _write_user_file(tmp_path)
     before = path.read_text(encoding="utf-8")
 
-    result = lib.add_item(path, NEW)
+    result = _add(path, NEW)
 
     after = path.read_text(encoding="utf-8")
     assert result.status == "added"
@@ -80,7 +89,7 @@ def test_adding_one_entry_only_appends_at_the_tail(tmp_path):
 def test_same_doi_with_different_case_reuses_entry_and_does_not_write(tmp_path):
     path = _write_user_file(tmp_path)
     before = path.read_bytes()
-    result = lib.add_item(path, {**NEW, "DOI": "10.18653/v1/2024.findings-eacl.62"})
+    result = _add(path, {**NEW, "DOI": "10.18653/v1/2024.findings-eacl.62"})
     assert result.status == "existing"
     assert result.key == "agrawal2024references"
     assert path.read_bytes() == before
@@ -91,11 +100,11 @@ def test_arxiv_id_reuses_hand_written_entry(tmp_path):
     before = path.read_bytes()
     item = {"type": "article", "title": "Attention", "number": "1706.03762",
             "publisher": "arXiv", "URL": "https://arxiv.org/abs/1706.03762"}
-    result = lib.add_item(path, item)
+    result = _add(path, item)
     assert (result.status, result.key) == ("existing", "vaswani2017attention")
     assert path.read_bytes() == before
     doi_form = {"type": "article", "DOI": "10.48550/arXiv.1706.03762"}
-    assert lib.add_item(path, doi_form).key == "vaswani2017attention"
+    assert _add(path, doi_form).key == "vaswani2017attention"
 
 
 NEURIPS_HASH = "3f5ee243547dee91fbd053c1c4a845aa"
@@ -127,17 +136,17 @@ def test_neurips_paper_reuses_the_entry_with_either_host(tmp_path):
     before = path.read_bytes()
     saved = {"type": "paper-conference", "title": "Attention is All you Need",
              "URL": f"https://proceedings.neurips.cc/paper_files/paper/2017/hash/{NEURIPS_HASH}-Abstract.html"}
-    assert (lib.add_item(path, saved).status, lib.add_item(path, saved).key) == ("existing", "vaswani2017attention")
+    assert (_add(path, saved).status, _add(path, saved).key) == ("existing", "vaswani2017attention")
     assert path.read_bytes() == before
     other = {**saved, "URL": saved["URL"].replace(NEURIPS_HASH, "3f647cadf56541fb9513cb63ec370187")}
-    assert lib.add_item(path, other).status == "added"
+    assert _add(path, other).status == "added"
 
 
 def test_key_collision_gets_letter_suffix(tmp_path):
     path = _write_user_file(tmp_path)
-    first = lib.add_item(path, NEW)
-    second = lib.add_item(path, {**NEW, "DOI": "10.1000/other"})
-    third = lib.add_item(path, {**NEW, "DOI": "10.1000/third"})
+    first = _add(path, NEW)
+    second = _add(path, {**NEW, "DOI": "10.1000/other"})
+    third = _add(path, {**NEW, "DOI": "10.1000/third"})
     assert [first.key, second.key, third.key] == [
         "smith2020structure", "smith2020structurea", "smith2020structureb",
     ]
@@ -160,7 +169,7 @@ def test_unknown_layout_is_not_written(tmp_path):
     path.write_text(json.dumps(USER_ITEMS, indent=3), encoding="utf-8")
     before = path.read_bytes()
     with pytest.raises(LibraryError) as excinfo:
-        lib.add_item(path, NEW)
+        _add(path, NEW)
     assert excinfo.value.code == lib.LIBRARY_FORMAT_UNSUPPORTED
     assert path.read_bytes() == before
 
@@ -168,7 +177,7 @@ def test_unknown_layout_is_not_written(tmp_path):
 @pytest.mark.parametrize("indent", [2, 4, "\t"])
 def test_other_known_layouts_are_preserved(tmp_path, indent):
     path = _write_user_file(tmp_path, indent=indent)
-    lib.add_item(path, NEW)
+    _add(path, NEW)
     data = json.loads(path.read_text(encoding="utf-8"))
     assert path.read_text(encoding="utf-8") == json.dumps(data, ensure_ascii=False, indent=indent) + "\n"
 
@@ -180,7 +189,7 @@ def test_malformed_files_are_rejected_and_not_written(tmp_path, payload):
     path = tmp_path / "references.json"
     path.write_text(payload, encoding="utf-8")
     with pytest.raises(LibraryError) as excinfo:
-        lib.add_item(path, NEW)
+        _add(path, NEW)
     assert excinfo.value.code == lib.LIBRARY_MALFORMED
     assert path.read_text(encoding="utf-8") == payload
 
@@ -200,7 +209,7 @@ def test_change_on_disk_before_write_is_a_conflict(tmp_path):
 
 def test_missing_file_is_created_with_new_file_layout(tmp_path):
     path = tmp_path / "references.json"
-    result = lib.add_item(path, NEW)
+    result = _add(path, NEW)
     assert result.status == "added"
     text = path.read_text(encoding="utf-8")
     assert text == json.dumps([{"id": "smith2020structure", **NEW}], ensure_ascii=False, indent=1) + "\n"
@@ -210,7 +219,7 @@ def test_missing_file_is_created_with_new_file_layout(tmp_path):
 def test_write_preserves_file_mode(tmp_path):
     path = _write_user_file(tmp_path)
     os.chmod(path, 0o640)
-    lib.add_item(path, NEW)
+    _add(path, NEW)
     assert (path.stat().st_mode & 0o777) == 0o640
 
 
@@ -234,5 +243,5 @@ def test_unknown_layout_is_readable_and_reuse_needs_no_write(tmp_path):
     before = path.read_bytes()
     library = lib.load(path)
     assert library.layout is None and len(library.items) == 3
-    assert lib.add_item(path, {"DOI": "10.18653/v1/2024.findings-eacl.62"}).status == "existing"
+    assert _add(path, {"DOI": "10.18653/v1/2024.findings-eacl.62"}).status == "existing"
     assert path.read_bytes() == before

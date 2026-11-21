@@ -12,6 +12,9 @@ import html
 import re
 import unicodedata
 
+# An arXiv identifier without version: new style (2001.00001) or old style (hep-th/9901001).
+ARXIV_ID = r"(?:\d{4}\.\d{4,5}|[a-z-]+/\d{7})"
+
 # LaTeX accent commands -> combining characters (applied to the next letter).
 _LATEX_ACCENTS = {
     "`": "̀",  # grave

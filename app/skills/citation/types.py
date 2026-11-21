@@ -2,28 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
 from typing import Literal
 
-PERSIST_SCHEMA_VERSION = 1
-BUNDLE_SCHEMA_V2 = 2
-SUPPORTED_PERSIST_SCHEMA_VERSIONS = frozenset({1, 2})
-SAVE_BATCH_SCHEMA_VERSION = 2
+SAVE_BATCH_SCHEMA_VERSION = 3
 SAVE_BATCH_KIND = "citation_save_batch"
 SAVE_RESULT_VERSION_KINDS = frozenset({
     "published", "preprint", "repository", "repost", "unknown",
 })
 CANONICAL_IDENTITY_KINDS = frozenset({"doi", "arxiv", "url", "venue"})
 VERIFICATION_LEVELS = frozenset({
-    "identity_verified",
     "doi_identity_verified",
     "authority_metadata_verified",
 })
 
-VerificationLevel = Literal["identity_verified", "doi_identity_verified", "authority_metadata_verified"]
+VerificationLevel = Literal["doi_identity_verified", "authority_metadata_verified"]
 ProviderStatus = Literal["ok", "empty", "error", "rate_limited", "timeout", "disabled"]
 
 
@@ -51,6 +47,11 @@ class CanonicalIdentity:
         return {"kind": self.kind, "value": self.value}
 
 
+def source_id_for(identity: CanonicalIdentity) -> str:
+    """Stable session source ID for one canonical identity."""
+    return f"src-{hashlib.sha256(identity.key.encode('utf-8')).hexdigest()[:12]}"
+
+
 @dataclass(frozen=True)
 class ProviderState:
     provider: str
@@ -60,10 +61,6 @@ class ProviderState:
     def to_dict(self):
         return {"provider": self.provider, "status": self.status, "detail": self.detail}
 
-    @classmethod
-    def from_dict(cls, data):
-        return cls(str(data.get("provider", "")), data.get("status", "error"), str(data.get("detail", "")))
-
 
 @dataclass(frozen=True)
 class PublishedDateFilter:
@@ -71,17 +68,6 @@ class PublishedDateFilter:
     date_to: str | None = None
     year_from: int | None = None
     year_to: int | None = None
-
-    @classmethod
-    def within_years(cls, years: int, *, today: date | None = None):
-        if years < 1:
-            raise ValueError("published_within_years must be >= 1")
-        today = today or datetime.now(timezone.utc).date()
-        try:
-            start = today.replace(year=today.year - years)
-        except ValueError:
-            start = today.replace(year=today.year - years, day=today.day - 1)
-        return cls(start.isoformat(), today.isoformat(), start.year, today.year)
 
     @classmethod
     def from_year_range(cls, year_from, year_to):
@@ -109,45 +95,25 @@ class SourceRef:
     venue: str = ""
     work_type: str = ""
     url: str | None = None
-    verification_level: VerificationLevel = "identity_verified"
+    verification_level: VerificationLevel = "doi_identity_verified"
     provenance: str = ""
-    schema_version: int = 1
     canonical_identity: CanonicalIdentity | None = None
-
-    def to_persisted_dict(self):
-        """Serialize portable source metadata, excluding runtime-only state."""
-        return {
-            "schema_version": self.schema_version, "source_id": self.source_id,
-            "doi": self.doi, "title": self.title, "authors": list(self.authors),
-            "year": self.year, "venue": self.venue, "work_type": self.work_type,
-            "url": self.url, "verification_level": self.verification_level,
-            "provenance": self.provenance,
-            "canonical_identity": self.canonical_identity.to_dict() if self.canonical_identity else None,
-        }
-
-
-def source_identity(ref: SourceRef):
-    from skills.citation.doi import canonicalize_doi
-    if ref.canonical_identity:
-        return ref.canonical_identity
-    doi = canonicalize_doi(ref.doi)
-    return CanonicalIdentity("doi", doi) if ref.schema_version == 1 and doi else None
 
 
 def is_citable_source(ref: SourceRef):
+    """A verified source: a DOI identity with its DOI, or a non-DOI authority record."""
     from skills.citation.doi import canonicalize_doi
-    identity = source_identity(ref)
+    identity = ref.canonical_identity
     if identity is None:
         return False
-    doi = canonicalize_doi(ref.doi)
-    if ref.verification_level == "identity_verified":
-        return ref.schema_version == 1 and identity.kind == "doi" and doi == identity.value
     if ref.verification_level == "doi_identity_verified":
-        return ref.schema_version == 2 and identity.kind == "doi" and doi == identity.value
-    return ref.verification_level == "authority_metadata_verified" and ref.schema_version == 2 and identity.kind != "doi" and ref.doi is None
+        return identity.kind == "doi" and canonicalize_doi(ref.doi) == identity.value
+    return ref.verification_level == "authority_metadata_verified" and identity.kind != "doi" and ref.doi is None
 
 
-SaveItemStatus = Literal["saved", "reused", "insufficient_intent", "ambiguous", "not_found", "identity_conflict", "unsupported_identifier", "unsupported_no_doi", "provider_failed", "verification_failed", "storage_failed", "internal_error"]
+# ``saved``/``reused``: in the project bibliography (desktop). ``verified``:
+# citable for this task only, nothing written (no project bibliography).
+SaveItemStatus = Literal["saved", "reused", "verified", "insufficient_intent", "ambiguous", "not_found", "identity_conflict", "unsupported_identifier", "unsupported_no_doi", "provider_failed", "verification_failed", "storage_failed", "internal_error"]
 
 
 def _strict_fields(value, fields, label):
@@ -163,7 +129,6 @@ class SaveReceipt:
     title: str
     year: int | None
     work_type: str
-    bundle_path: str
     verification_level: VerificationLevel
     cite_marker: str
     version_kind: str = "unknown"
@@ -174,7 +139,6 @@ class SaveReceipt:
             self.source_id,
             self.title,
             self.work_type,
-            self.bundle_path,
             self.verification_level,
             self.cite_marker,
             self.version_kind,
@@ -198,23 +162,23 @@ class SaveReceipt:
             raise ValueError("invalid save receipt version kind")
 
     def to_artifact(self):
-        return {"source_id": self.source_id, "canonical_identity": self.canonical_identity.to_dict(), "doi": self.doi, "title": self.title, "year": self.year, "work_type": self.work_type, "bundle_path": self.bundle_path, "verification_level": self.verification_level, "cite_marker": self.cite_marker, "version_kind": self.version_kind}
+        return {"source_id": self.source_id, "canonical_identity": self.canonical_identity.to_dict(), "doi": self.doi, "title": self.title, "year": self.year, "work_type": self.work_type, "verification_level": self.verification_level, "cite_marker": self.cite_marker, "version_kind": self.version_kind}
 
     @classmethod
     def from_artifact(cls, value):
-        fields = {"source_id", "canonical_identity", "doi", "title", "year", "work_type", "bundle_path", "verification_level", "cite_marker", "version_kind"}
+        fields = {"source_id", "canonical_identity", "doi", "title", "year", "work_type", "verification_level", "cite_marker", "version_kind"}
         _strict_fields(value, fields, "save receipt")
         raw = value["canonical_identity"]
         _strict_fields(raw, {"kind", "value"}, "canonical identity")
         if not all(isinstance(raw[key], str) for key in ("kind", "value")):
             raise ValueError("invalid canonical identity")
-        if not all(isinstance(value[k], str) for k in ("source_id", "title", "work_type", "bundle_path", "verification_level", "cite_marker", "version_kind")):
+        if not all(isinstance(value[k], str) for k in ("source_id", "title", "work_type", "verification_level", "cite_marker", "version_kind")):
             raise ValueError("invalid save receipt text")
         if value["doi"] is not None and not isinstance(value["doi"], str):
             raise ValueError("invalid DOI")
         if value["year"] is not None and (not isinstance(value["year"], int) or isinstance(value["year"], bool)):
             raise ValueError("invalid year")
-        return cls(value["source_id"], CanonicalIdentity(raw["kind"], raw["value"]), value["doi"], value["title"], value["year"], value["work_type"], value["bundle_path"], value["verification_level"], value["cite_marker"], value["version_kind"])
+        return cls(value["source_id"], CanonicalIdentity(raw["kind"], raw["value"]), value["doi"], value["title"], value["year"], value["work_type"], value["verification_level"], value["cite_marker"], value["version_kind"])
 
 
 @dataclass(frozen=True)
@@ -266,37 +230,30 @@ class SaveAlternative:
         return cls(value["title"], tuple(value["authors"]), value["year"], value["venue"], value["version_kind"], value["doi"], value["arxiv"])
 
 
-BIBLIOGRAPHY_LINK_STATUSES = frozenset({"added", "existing", "failed"})
+BIBLIOGRAPHY_LINK_STATUSES = frozenset({"added", "existing"})
 
 
 @dataclass(frozen=True)
 class BibliographyLink:
-    """What happened to one saved work in the project bibliography."""
+    """Where one saved work lives in the project bibliography."""
 
-    status: Literal["added", "existing", "failed"]
+    status: Literal["added", "existing"]
     path: str
-    key: str | None = None
-    reason_code: str | None = None
+    key: str
 
     def __post_init__(self):
         if self.status not in BIBLIOGRAPHY_LINK_STATUSES or not isinstance(self.path, str) or not self.path:
             raise ValueError("invalid bibliography link")
-        if (self.status == "failed") != (self.key is None):
-            raise ValueError("bibliography link key/status mismatch")
-        if self.key is not None and not isinstance(self.key, str):
+        if not isinstance(self.key, str) or not self.key:
             raise ValueError("invalid bibliography key")
-        if (self.status == "failed") != (self.reason_code is not None):
-            raise ValueError("bibliography link reason/status mismatch")
-        if self.reason_code is not None and not re.fullmatch(r"[a-z0-9_]+", self.reason_code):
-            raise ValueError("invalid bibliography reason code")
 
     def to_artifact(self):
-        return {"status": self.status, "path": self.path, "key": self.key, "reason_code": self.reason_code}
+        return {"status": self.status, "path": self.path, "key": self.key}
 
     @classmethod
     def from_artifact(cls, value):
-        _strict_fields(value, {"status", "path", "key", "reason_code"}, "bibliography link")
-        return cls(value["status"], value["path"], value["key"], value["reason_code"])
+        _strict_fields(value, {"status", "path", "key"}, "bibliography link")
+        return cls(value["status"], value["path"], value["key"])
 
 
 @dataclass(frozen=True)
@@ -321,22 +278,18 @@ class SaveItemOutcome:
             raise ValueError("invalid save item")
         if self.status not in SaveItemStatus.__args__:
             raise ValueError("invalid save item status")
-        if (self.status in {"saved", "reused"}) != (self.receipt is not None):
+        if (self.status in {"saved", "reused", "verified"}) != (self.receipt is not None):
             raise ValueError("save receipt/status mismatch")
-        if self.bibliography is not None and self.receipt is None:
-            raise ValueError("bibliography link requires a saved receipt")
+        if (self.status in {"saved", "reused"}) != (self.bibliography is not None):
+            raise ValueError("bibliography link/status mismatch")
 
     def to_artifact(self):
-        artifact = {"request_index": self.request_index, "requested_label": self.requested_label, "status": self.status, "reason_code": self.reason_code, "receipt": self.receipt.to_artifact() if self.receipt else None, "alternatives": [x.to_artifact() for x in self.alternatives]}
-        if self.bibliography is not None:
-            # Only desktop project saves carry this key; CLI artifacts are unchanged.
-            artifact["bibliography"] = self.bibliography.to_artifact()
-        return artifact
+        return {"request_index": self.request_index, "requested_label": self.requested_label, "status": self.status, "reason_code": self.reason_code, "receipt": self.receipt.to_artifact() if self.receipt else None, "alternatives": [x.to_artifact() for x in self.alternatives], "bibliography": self.bibliography.to_artifact() if self.bibliography else None}
 
     @classmethod
     def from_artifact(cls, value):
-        base = {"request_index", "requested_label", "status", "reason_code", "receipt", "alternatives"}
-        _strict_fields(value, base | {"bibliography"} if isinstance(value, Mapping) and "bibliography" in value else base, "save item")
+        fields = {"request_index", "requested_label", "status", "reason_code", "receipt", "alternatives", "bibliography"}
+        _strict_fields(value, fields, "save item")
         if (
             type(value["request_index"]) is not int
             or not isinstance(value["requested_label"], str)
@@ -347,7 +300,7 @@ class SaveItemOutcome:
         ):
             raise ValueError("invalid save item status")
         receipt = SaveReceipt.from_artifact(value["receipt"]) if value["receipt"] is not None else None
-        bibliography = BibliographyLink.from_artifact(value["bibliography"]) if value.get("bibliography") is not None else None
+        bibliography = BibliographyLink.from_artifact(value["bibliography"]) if value["bibliography"] is not None else None
         return cls(value["request_index"], value["requested_label"], value["status"], value["reason_code"], receipt, tuple(SaveAlternative.from_artifact(x) for x in value["alternatives"]), bibliography)
 
 

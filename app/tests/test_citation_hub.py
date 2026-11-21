@@ -117,7 +117,7 @@ def test_httpx_timeout_keeps_provider_timeout_route():
     async def scenario():
         hub = _hub_with_transport(handler)
         try:
-            await hub.doi_org.fetch_bibtex("10.1234/x")
+            await hub.doi_org.fetch_structured("10.1234/x")
         finally:
             await hub.aclose()
 
@@ -149,7 +149,7 @@ def test_search_survives_one_provider_connection_failure(tmp_path):
     async def scenario():
         hub = _hub_with_transport(handler)
         try:
-            service = CitationService(hub, output_dir=tmp_path / "cite")
+            service = CitationService(hub)
             return await service.search("dataset a")
         finally:
             await hub.aclose()
@@ -209,13 +209,13 @@ def test_a_provider_that_exhausted_retries_is_skipped_for_the_rest_of_the_task(
     async def scenario():
         hub = _failing_provider_hub(calls, datacite=datacite)
         try:
-            service = CitationService(hub, output_dir=tmp_path / "cite")
+            service = CitationService(hub)
             first = await service.search("first topic")
             first_waits = list(no_citation_backoff)
             tool = create_citation_workflow_tool(service_getter=lambda: service)
             second_text = await tool.ainvoke({"action": "search", "query": "second topic"})
             second_waits = no_citation_backoff[len(first_waits):]
-            next_task = await CitationService(hub, output_dir=tmp_path / "cite").search("third topic")
+            next_task = await CitationService(hub).search("third topic")
             return first, first_waits, second_text, second_waits, next_task
         finally:
             await hub.aclose()
@@ -245,7 +245,7 @@ def test_deterministic_errors_and_successes_do_not_skip_the_provider(tmp_path, d
     async def scenario():
         hub = _failing_provider_hub(calls, datacite=None if datacite == "ok" else datacite)
         try:
-            service = CitationService(hub, output_dir=tmp_path / "cite")
+            service = CitationService(hub)
             return [await service.search(query) for query in ("first topic", "second topic")]
         finally:
             await hub.aclose()
@@ -267,7 +267,7 @@ def test_all_providers_failing_then_skipped_is_reported_as_failed_not_zero_hits(
     async def scenario():
         hub = _failing_provider_hub(calls, crossref="timeout", datacite="timeout")
         try:
-            service = CitationService(hub, output_dir=tmp_path / "cite")
+            service = CitationService(hub)
             tool = create_citation_workflow_tool(service_getter=lambda: service)
             first = await tool.ainvoke({"action": "search", "query": "first topic"})
             second = await tool.ainvoke({"action": "search", "query": "second topic"})
@@ -301,7 +301,7 @@ def test_cancelled_search_records_no_provider_failure(tmp_path):
 
         hub = _hub_with_transport(handler)
         try:
-            service = CitationService(hub, output_dir=tmp_path / "cite")
+            service = CitationService(hub)
             task = asyncio.create_task(service.search("topic"))
             await asyncio.wait_for(entered.wait(), 5)
             task.cancel()

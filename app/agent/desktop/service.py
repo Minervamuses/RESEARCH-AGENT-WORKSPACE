@@ -102,7 +102,6 @@ from skills.citation.integrity import entry_summary
 from skills.citation.integrity import inspect as inspect_citations
 from skills.citation.library import LibraryError, search_bibliography
 from skills.citation.library import load as load_bibliography
-from skills.citation.storage import resolve_output_dir
 
 logger = logging.getLogger(__name__)
 BIBLIOGRAPHY_LOOKUP_LIMIT = 20
@@ -827,9 +826,6 @@ class DesktopService:
                 self.environ.get("OPENALEX_API_KEY", "").strip()
             ),
             "storePath": str(Path(self.config.persist_dir).expanduser().resolve()),
-            "citationOutputPath": str(
-                resolve_output_dir(self.config, self.environ).expanduser().resolve()
-            ),
             "mcpEnabled": self._load_mcp,
             "mcpFamilies": mcp_families,
             "mcpDiagnostics": mcp_diagnostics,
@@ -1286,7 +1282,8 @@ class DesktopService:
         """The opened project's CSL-JSON bibliography, or None when unusable.
 
         A malformed ``bibliography`` metadata value leaves citation saves
-        bundle-only (logged) instead of failing the Citation task.
+        verified for the current task only (logged, nothing written) instead
+        of failing the Citation task.
         """
         project = self._project
         if project is None or project.get("projectId") != project_id:
@@ -2249,7 +2246,8 @@ class DesktopService:
         fmt = citation_format_for_path(snapshot["path"]) if snapshot is not None else None
         text = snapshot["sourceText"] if snapshot is not None else ""
         report = await run_local_work(inspect_citations, text, fmt or "markdown", library_path)
-        fingerprint = await run_local_work(citation_library.fingerprint, library_path) if report["bibliography"]["status"] != "missing" else None
+        # The fingerprint of the copy inspect just read (None when missing or unreadable).
+        fingerprint = report["bibliography"]["fingerprint"]
         error = report["bibliography"]["error"] or {}
         return {
             "libraryPath": str(library_path),
@@ -2372,24 +2370,22 @@ class DesktopService:
             identifier = WorkIdentifier("doi", doi) if doi else WorkIdentifier("arxiv", normalize_arxiv(raw))
         except ValueError as exc:
             raise DesktopServiceError("PROTOCOL_INVALID", "Enter a DOI or an arXiv ID.") from exc
-        output_dir = Path(resolve_output_dir(self.config)).expanduser().resolve()
         await self._require_operation_approval(
-            "citation.save", str(output_dir),
+            "citation.save", str(library_path),
             f"Verify {identifier.kind.upper() if identifier.kind == 'doi' else 'arXiv'} {identifier.value} "
-            f"and save it; the verified work is also added to the project bibliography {library_path}.",
+            f"and add it to the project bibliography {library_path}.",
             parameters={"identifier": identifier.value, "bibliography": str(library_path)},
             event_sink=event_sink,
         )
-        service = CitationService(get_provider_hub(), config=self.config, library_path=library_path)
+        service = CitationService(get_provider_hub(), library_path=library_path)
         outcome = await service.save((WorkIntent(identifier.value[:200], identifiers=(identifier,)),))
         item = outcome.items[0]
-        link = item.bibliography
+        # The save wrote (or did not write) the bibliography itself; report the result's fingerprint.
         fingerprint = await run_local_work(citation_library.fingerprint, library_path)
-        if item.status not in {"saved", "reused"}:
+        if item.bibliography is None:
+            # storage_failed carries the bibliography's error code; other statuses their own reason.
             return {"status": "failed", "key": None, "reasonCode": item.reason_code, "libraryFingerprint": fingerprint}
-        if link is None or link.key is None:
-            reason = link.reason_code if link is not None else "library_unavailable"
-            return {"status": "failed", "key": None, "reasonCode": reason, "libraryFingerprint": fingerprint}
+        link = item.bibliography
         return {"status": link.status, "key": link.key, "reasonCode": None, "libraryFingerprint": fingerprint}
 
     async def _bibliography_export(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
@@ -2736,20 +2732,26 @@ class DesktopService:
         if citation_save:
             policy = getattr(self.session, "_citation_policy", None)
             loaded_service = getattr(policy, "loaded_service", None)
-            output_dir = getattr(loaded_service, "output_dir", None)
-            if output_dir is None:
-                output_dir = resolve_output_dir(self.config)
             if loaded_service is not None:
                 library_path = getattr(loaded_service, "library_path", None)
             else:
                 resolve_library = getattr(policy, "bibliography_path", None)
                 library_path = resolve_library() if callable(resolve_library) else None
-            description = "Save this batch of citation candidates after source verification."
             if library_path is not None:
-                description += f" Verified works are also added to the project bibliography {library_path}."
+                target = str(Path(library_path).expanduser().resolve())
+                description = (
+                    "Verify this batch of citation candidates and add the verified works "
+                    f"to the project bibliography {target}."
+                )
+            else:
+                # A malformed bibliography setting leaves the project without one.
+                target = "(not written to disk)"
+                description = (
+                    "Verify this batch of citation candidates for this conversation only; "
+                    "the project has no usable bibliography, so nothing is written to disk."
+                )
             return await self._operation_approval(
-                "citation.save", str(Path(output_dir).expanduser().resolve()),
-                description, parameters=args.get("works"),
+                "citation.save", target, description, parameters=args.get("works"),
             )
         if skill_install:
             context = getattr(self.session, "_installer_context", {})
@@ -3981,7 +3983,6 @@ class DesktopService:
         roots = {
             Path(self.config.persist_dir).expanduser().resolve(),
             skills_root,
-            resolve_output_dir(self.config, self.environ).expanduser().resolve(),
             extension_paths.dropin_root.resolve(),
             extension_paths.state_root.resolve(),
         }

@@ -2331,7 +2331,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
     assert (len(model.invocations), len(fetcher.calls), len(services)) == counts
     assert restarted.session.active_skill_runtime is None and restarted.session._citation_policy.loaded_service is None
     assert all(session._citation_policy.loaded_service is None for session in sessions)
-    assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+    assert model.receipt.doi in (tmp_path.resolve() / "references.json").read_text(encoding="utf-8")
 
     ordinary = asyncio.run(restarted.dispatch("session.turn", _turn_params("ordinary question")))
     assert ordinary["text"] == "ordinary answer"
@@ -2425,7 +2425,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         assert session.thinking_mode == "extended"
         assert session.active_skill_runtime is None and session._citation_policy.loaded_service is None
         assert service._turn_active is False
-        assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+        assert model.receipt.doi in (tmp_path.resolve() / "references.json").read_text(encoding="utf-8")
         monkeypatch.setattr(model, "invoke", original_invoke)
         counts = (len(model.invocations), len(fetcher.calls), len(services))
         restarted = _service(tmp_path, session_factory=service._session_factory)
@@ -2445,7 +2445,7 @@ def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tm
         assert len(services) == 2 and services[0] is not services[1]
         assert _save_content(model.save_message).items[0].status == "reused"
         assert restarted.session._citation_policy.loaded_service is None and restarted._turn_active is False
-        assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+        assert model.receipt.doi in (tmp_path.resolve() / "references.json").read_text(encoding="utf-8")
 
     asyncio.run(scenario())
 

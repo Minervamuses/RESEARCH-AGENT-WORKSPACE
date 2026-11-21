@@ -22,6 +22,7 @@ from skills.citation.providers.doi_org import DoiOrgClient
 from skills.citation.providers.net import (
     AsyncRateLimiter,
     FetchResponse,
+    ProviderError,
     TransportFailure,
     TTLCache,
 )
@@ -81,7 +82,7 @@ class CitationProviderHub:
         self.doi_org_limiter = AsyncRateLimiter(max_concurrency=4, min_interval=0.0)
 
         self.crossref = CrossrefClient(
-            fetcher=self._fetch,
+            fetcher=self.fetch,
             cache=self.cache,
             limiter=self.crossref_limiter,
             mailto=crossref_mailto,
@@ -95,7 +96,7 @@ class CitationProviderHub:
         api_key = env.get("OPENALEX_API_KEY", "").strip()
         self.openalex = (
             OpenAlexClient(
-                fetcher=self._fetch,
+                fetcher=self.fetch,
                 cache=self.cache,
                 limiter=self.openalex_limiter,
                 api_key=api_key,
@@ -104,12 +105,13 @@ class CitationProviderHub:
             else None
         )
         self.doi_org = DoiOrgClient(
-            fetcher=self._fetch,
+            fetcher=self.fetch,
             cache=self.cache,
             limiter=self.doi_org_limiter,
         )
 
-    async def _fetch(self, url: str, headers: dict[str, str]) -> FetchResponse:
+    async def fetch(self, url: str, headers: dict[str, str]) -> FetchResponse:
+        """Fetch one URL through the injected test fetcher or the shared HTTP client."""
         if self._injected_fetcher is not None:
             return await self._injected_fetcher(url, headers)
         return await self._httpx_fetch(url, headers)
@@ -118,7 +120,6 @@ class CitationProviderHub:
         if self._injected_fetcher is not None:
             response = await self._injected_fetcher(url, headers)
             if len(response.body) > MAX_RESPONSE_BYTES:
-                from skills.citation.providers.net import ProviderError
                 raise ProviderError("datacite", "response payload exceeds limit")
             return response
         return await self._httpx_fetch_bounded(url, headers, MAX_RESPONSE_BYTES)
@@ -159,14 +160,12 @@ class CitationProviderHub:
             async with client.stream("GET", url, headers=headers) as response:
                 raw_length = response.headers.get("content-length", "")
                 if raw_length.isdigit() and int(raw_length) > max_bytes:
-                    from skills.citation.providers.net import ProviderError
                     raise ProviderError("datacite", "response payload exceeds limit")
                 chunks: list[bytes] = []
                 total = 0
                 async for chunk in response.aiter_bytes():
                     total += len(chunk)
                     if total > max_bytes:
-                        from skills.citation.providers.net import ProviderError
                         raise ProviderError("datacite", "response payload exceeds limit")
                     chunks.append(chunk)
                 return FetchResponse(

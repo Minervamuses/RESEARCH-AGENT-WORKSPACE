@@ -58,6 +58,7 @@ class CitationSaveMetrics:
     batch_count: int = 0
     new_saved_count: int = 0
     reused_count: int = 0
+    verified_count: int = 0
     failed_count: int = 0
 
     def __post_init__(self) -> None:
@@ -65,6 +66,7 @@ class CitationSaveMetrics:
             self.batch_count,
             self.new_saved_count,
             self.reused_count,
+            self.verified_count,
             self.failed_count,
         )
         if any(type(value) is not int or value < 0 for value in counts):
@@ -77,6 +79,7 @@ class CitationSaveMetrics:
             "citation_save_batch_count": self.batch_count,
             "new_saved_count": self.new_saved_count,
             "reused_count": self.reused_count,
+            "verified_count": self.verified_count,
             "failed_count": self.failed_count,
         }
 
@@ -289,6 +292,7 @@ def _tool_result_counts(output: object) -> dict[str, object]:
             "save_items": len(statuses),
             "save_saved": statuses.count("saved"),
             "save_reused": statuses.count("reused"),
+            "save_verified": statuses.count("verified"),
         }
     return {}
 

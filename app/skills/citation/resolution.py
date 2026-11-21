@@ -17,7 +17,7 @@ from difflib import SequenceMatcher
 from typing import Callable, Literal, Sequence
 
 from skills.citation.doi import canonicalize_doi
-from skills.citation.normalize import normalize_title
+from skills.citation.normalize import ARXIV_ID, normalize_title
 from skills.citation.providers.base import BibliographicQuery, ProviderRecord
 from skills.citation.providers.doi_org import DoiNotFound
 from skills.citation.providers.net import (
@@ -71,7 +71,7 @@ def _clean(value: str, *, limit: int, field_name: str) -> str:
 def normalize_arxiv(value: str) -> str:
     text = value.strip().removeprefix("arXiv:").removeprefix("arxiv:")
     text = re.sub(r"v\d+$", "", text, flags=re.IGNORECASE)
-    if not re.fullmatch(r"(?:\d{4}\.\d{4,5}|[a-z-]+/\d{7})", text, re.I):
+    if not re.fullmatch(ARXIV_ID, text, re.I):
         raise ValueError("invalid arXiv identifier")
     return text.casefold()
 

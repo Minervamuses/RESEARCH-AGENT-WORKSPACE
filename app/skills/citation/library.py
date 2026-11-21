@@ -23,13 +23,13 @@ from pathlib import Path
 
 from agent.paths import fsync_directory
 from skills.citation.doi import canonicalize_doi
+from skills.citation.normalize import ARXIV_ID
 
 LIBRARY_MALFORMED = "library_malformed"
 LIBRARY_FORMAT_UNSUPPORTED = "library_format_unsupported"
 LIBRARY_CONFLICT = "library_conflict"
 LIBRARY_WRITE_FAILED = "library_write_failed"
 
-DEFAULT_LIBRARY_FILENAME = "references.json"
 LAYOUTS: tuple[int | str, ...] = (1, 2, 4, "\t")
 NEW_FILE_LAYOUT: int | str = 1
 NEW_FILE_MODE = 0o644
@@ -218,7 +218,7 @@ def generate_key(item: dict, existing: set[str] | list[str]) -> str:
 
 # --- identity matching --------------------------------------------------
 
-_ARXIV_ID = r"(\d{4}\.\d{4,5}|[a-z-]+/\d{7})(?:v\d+)?"
+_ARXIV_ID = rf"({ARXIV_ID})(?:v\d+)?"
 
 
 def item_doi(item: dict) -> str | None:
@@ -409,15 +409,6 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = NEW_FILE_MODE) ->
     except OSError as exc:
         _unlink(temp)
         raise LibraryError(LIBRARY_WRITE_FAILED, f"cannot write {path}: {exc}") from exc
-
-
-def add_item(path: Path, item: dict) -> MergeResult:
-    """Load, merge, and (only when something was added) write ``path``."""
-    library = load(path)
-    result = merge(library, item)
-    if result.status == "added":
-        write_atomic(result.library)
-    return result
 
 
 def _unlink(path: Path) -> None:

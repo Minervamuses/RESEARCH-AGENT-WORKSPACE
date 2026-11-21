@@ -289,7 +289,6 @@ export interface RuntimeDiagnosticsDto {
   openRouterConfigured: boolean;
   openAlexConfigured: boolean;
   storePath: string;
-  citationOutputPath: string;
   mcpEnabled: boolean;
   mcpFamilies: string[];
   mcpDiagnostics: string[];

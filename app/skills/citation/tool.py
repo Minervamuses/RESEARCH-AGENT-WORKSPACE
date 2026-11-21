@@ -26,7 +26,7 @@ TOOL_DESCRIPTION = (
     "save(works=[WorkIntent...]) verifies and stores each "
     "selected work. When the selected record shows a DOI or arXiv identifier, "
     "pass requested_label plus that identifier; the workflow fetches "
-    "authoritative doi.org metadata and BibTeX itself, so do not re-type title, "
+    "authoritative doi.org metadata itself, so do not re-type title, "
     "authors, year, venue, or work_type. Only when no identifier exists, give "
     "the known title, authors, year, venue, work_type, work_kind, and "
     "version_kind as separate fields for a descriptive best match. Never invent "
@@ -291,46 +291,56 @@ def _format_source(ref: SourceRef) -> str:
     ])
 
 
-def _format_bibliography_links(outcome) -> str:
-    """Tell the agent which project bibliography keys the saved works have."""
-    links = [
-        (item, item.bibliography)
-        for item in getattr(outcome, "items", ())
-        if getattr(item, "bibliography", None) is not None
-    ]
-    if not links:
-        return ""
-    lines = ["", f"Project bibliography: {links[0][1].path}"]
-    for item, link in links:
-        if link.key is not None:
-            lines.append(f"- {item.requested_label}: key {link.key} ({link.status})")
-        else:
-            lines.append(
-                f"- {item.requested_label}: not added to the bibliography ({link.reason_code}); "
-                "the bundle result above is unchanged"
-            )
-    if any(link.key is not None for _item, link in links):
+def _format_save_notes(outcome) -> str:
+    """Say in words what each saved, failed, or task-only result means."""
+    lines: list[str] = []
+    items = getattr(outcome, "items", ())
+    linked = [item for item in items if getattr(item, "bibliography", None) is not None]
+    if linked:
+        lines.append(f"Project bibliography: {linked[0].bibliography.path}")
+        lines += [
+            f"- {item.requested_label}: key {item.bibliography.key} ({item.status})"
+            for item in linked
+        ]
         lines.append(
             "Cite these works in project documents by key: [@key] in Markdown, "
             "\\cite{key} in LaTeX. In this chat reply keep using [[cite:...]] markers."
         )
-    return "\n".join(lines)
+    for item in items:
+        if item.status == "storage_failed":
+            lines.append(
+                f"- {item.requested_label}: NOT saved and not citable in this task "
+                f"({item.reason_code}): the project bibliography could not be updated. "
+                "Tell the user nothing was saved; the save can be retried."
+            )
+        elif item.status == "verified":
+            lines.append(
+                f"- {item.requested_label}: verified and citable in this conversation only; "
+                "nothing was written to disk (no project bibliography)."
+            )
+    return "\n" + "\n".join(lines) if lines else ""
 
 
-def format_explain(output_dir) -> str:
+def format_explain(library_path) -> str:
+    storage = (
+        "Verified works are added to the project bibliography "
+        f"{library_path}; a work is citable only once it is there."
+        if library_path is not None
+        else "This session has no project bibliography: save verifies works for "
+        "this conversation only and writes nothing to disk."
+    )
     return (
         "search is stateless and returns numbered record blocks with full "
         "metadata plus stable DOI/arXiv identifiers, without cX/mX IDs. "
         "save accepts 1–10 WorkIntent objects. A DOI goes straight to doi.org "
-        "verification (CSL JSON and BibTeX) without another search; only a "
+        "verification (CSL JSON) without another search; only a "
         "work without any identifier is resolved through provider-specific "
         "Crossref, DataCite, and optional OpenAlex queries, and a NeurIPS "
         "proceedings paper through the official proceedings site. Authoritative "
-        "metadata and BibTeX are verified before persistence, and save returns "
+        "metadata is verified before anything is recorded, and save returns "
         "the actual result for every requested item. The agent owns "
-        "conversational target and authorization decisions; bundles are "
-        "written atomically under "
-        + str(output_dir)
+        "conversational target and authorization decisions. "
+        + storage
     )
 
 
@@ -342,8 +352,8 @@ def create_citation_workflow_tool(
         raise ValueError("service_getter is required")
     # asyncio primitives are loop-bound once contended. Keep one serializer
     # per loop so a tool reused by tests or library callers across
-    # ``asyncio.run`` invocations remains valid; storage has its own
-    # cross-process identity lock for the actual filesystem mutation.
+    # ``asyncio.run`` invocations remains valid; the bibliography write
+    # itself is guarded by its fingerprint check.
     save_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
     # Records already shown per service; a service lives for one Citation task.
     shown_records: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
@@ -419,7 +429,7 @@ def create_citation_workflow_tool(
             return (
                 "Actual citation save result:\n"
                 + json.dumps(artifact, ensure_ascii=False, sort_keys=True)
-                + _format_bibliography_links(outcome),
+                + _format_save_notes(outcome),
                 artifact,
             )
         if action == "sources":
@@ -435,7 +445,7 @@ def create_citation_workflow_tool(
         if action == "explain":
             if any(value is not None for value in (query, works, source_id, page, year_from, year_to)):
                 return _error("explain accepts no additional fields"), None
-            return format_explain(service.output_dir), None
+            return format_explain(service.library_path), None
         return _error("unknown action"), None
 
     _run.__name__ = TOOL_NAME

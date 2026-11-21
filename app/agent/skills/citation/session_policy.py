@@ -14,7 +14,6 @@ from skills.citation.render import render_citations
 from skills.citation.tool import create_citation_workflow_tool
 from skills.citation.types import SaveBatchOutcome, is_citable_source
 
-from agent.config import AgentConfig
 from agent.observability import CitationSaveMetrics
 
 if TYPE_CHECKING:
@@ -28,11 +27,9 @@ class CitationSessionPolicy:
 
     def __init__(
         self,
-        config: AgentConfig,
         *,
         bibliography_path: Callable[[], Path | None] | None = None,
     ) -> None:
-        self._config = config
         # Desktop projects pass a callable that returns the project's CSL-JSON
         # bibliography; it is read when each service is built so metadata
         # edits apply to the next Citation task. The CLI passes nothing.
@@ -49,12 +46,9 @@ class CitationSessionPolicy:
             from skills.citation.hub import get_provider_hub
             from skills.citation.service import CitationService
 
-            library_path = self.bibliography_path()
-            extra = {"library_path": library_path} if library_path is not None else {}
             self._service = CitationService(
                 get_provider_hub(),
-                config=self._config,
-                **extra,
+                library_path=self.bibliography_path(),
             )
         return self._service
 
@@ -120,6 +114,7 @@ class CitationSessionPolicy:
         batch_count = 0
         saved_count = 0
         reused_count = 0
+        verified_count = 0
         failed_count = 0
         for message in new_messages:
             if (
@@ -157,12 +152,15 @@ class CitationSessionPolicy:
                     saved_count += 1
                 elif item.status == "reused":
                     reused_count += 1
+                elif item.status == "verified":
+                    verified_count += 1
                 else:
                     failed_count += 1
         return CitationSaveMetrics(
             batch_count=batch_count,
             new_saved_count=saved_count,
             reused_count=reused_count,
+            verified_count=verified_count,
             failed_count=failed_count,
         )
 
@@ -201,4 +199,4 @@ class CitationSessionPolicy:
         if not citation_active:
             return answer, []
         resolve = registry.get if registry is not None else (lambda _sid: None)
-        return render_citations(answer, resolve=resolve).text, []
+        return render_citations(answer, resolve=resolve), []

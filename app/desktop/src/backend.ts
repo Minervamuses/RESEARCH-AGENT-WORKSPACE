@@ -64,7 +64,6 @@ export interface BoundedRuntimeDiagnostics {
   appRoot: string;
   workingDirectory: string;
   storePath: string;
-  citationOutputPath: string;
   openRouterConfigured: boolean;
   openAlexConfigured: boolean;
   mcpEnabled: boolean;
@@ -380,7 +379,6 @@ export function toBoundedDiagnostics(value: RuntimeDiagnosticsDto): BoundedRunti
     appRoot: boundedPath(value.appRoot),
     workingDirectory: boundedPath(value.workingDirectory),
     storePath: boundedPath(value.storePath),
-    citationOutputPath: boundedPath(value.citationOutputPath),
     openRouterConfigured: value.openRouterConfigured,
     openAlexConfigured: value.openAlexConfigured,
     mcpEnabled: value.mcpEnabled,

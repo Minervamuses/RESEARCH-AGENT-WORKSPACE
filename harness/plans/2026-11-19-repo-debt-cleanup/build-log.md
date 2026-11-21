@@ -19,7 +19,7 @@
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
-| C5 | In progress | `evidence/C5-S1/`–`C5-S2/` | — | C5-S3 |
+| C5 | In progress | `evidence/C5-S1/`–`C5-S3/` | — | C5-S4 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
@@ -534,3 +534,17 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C5-S2/tests.md`。
 - **限制**：本步未改變驗證結果，評估分界 commit 依計劃記為 C5-S3。
 - **下一步**：C5-S3。
+
+### C5-S3 移除 bundle 與 BibTeX 鏈、改存檔語意、桌面端同步切換（2026-11-22）
+
+- **觀察結果**：
+  - **S105（U4、U13、U20、P8、P13，APPLIED）、S106（隨 S105 消失）**：書目庫成為唯一儲存；桌面只有在書目庫中時才 `saved`／`reused` 並可引用，寫入失敗為 `storage_failed`、不可引用；同批重複與 U20 混合批次依規則判讀；CLI 一律 `verified`、不寫檔；P13 衝突在寫入前判定為 `identity_conflict`。`SAVE_BATCH_SCHEMA_VERSION = 3`，計數新增 `verified_count`。
+  - **P9（APPLIED）**：`citation_output_dir`、`CITATION_OUTPUT_DIR`、`citationOutputPath` 與 GUI 兩處顯示移除；核准 target 改為書目庫路徑（無書目庫時為 `(not written to disk)`）；`_protected_roots` 不含輸出目錄。
+  - **S029、S108、S110、S118、S119、S120、缺陷 #6（APPLIED）**：細節見 evidence §2–§3；S029 中跨 handler 的路徑解析與 add 寫入後的 fingerprint 讀取附理由保留。
+  - 刪除 `storage.py`、`bibtex_canonical.py`、BibTeX 相關函式、legacy bundle fixture 與兩個 bundle／BibTeX 測試模組；新增存檔語意測試 (a)–(k)。
+  - 執行中發現並修正：工具結果在沒有書目庫連結時，說明文字未換行就接在 JSON 後（測試抓到）；書目庫寫入的非預期例外原本會讓整個存檔崩潰，改為參與寫入的各筆 `internal_error`。
+  - **citation 評估分界 commit：本步（C5-S3）**。C5-S2 未改變驗證結果。
+- **執行指令**：`pytest --collect-only -q`（1762，0 錯誤）、完整 pytest（沙箱外，1762 passed）、`npm test`（224 pass）、`npm run build`（通過）、整字 grep（全部 0）、`cite/` 前後清單比對（相同）。
+- **證據**：`evidence/C5-S3/single-store.md`（語意表、(a)–(k) 對照、退役紀錄、產品邊界）。
+- **限制**：模型指令（`SKILL.md`、README）在 C5-S4 更新；`pybtex` 相依在 C5-S5 移除；cargo 在 C5-S6 重跑。
+- **下一步**：C5-S4 模型看到的文字。

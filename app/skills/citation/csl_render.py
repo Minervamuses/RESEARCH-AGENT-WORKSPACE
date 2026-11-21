@@ -14,6 +14,7 @@ Nothing here ever writes the source document.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -47,17 +48,19 @@ class RenderError(RuntimeError):
 # --- styles -------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
+def _manifest_styles() -> tuple[dict, ...]:
+    """The bundled ``styles.json`` entries, parsed once per process."""
+    manifest = json.loads(STYLES_MANIFEST.read_text(encoding="utf-8"))
+    return tuple(manifest["styles"])
+
+
 def list_styles() -> list[dict]:
     """Bundled styles: id, name, kind (author-date | author | numeric), origin."""
-    manifest = json.loads(STYLES_MANIFEST.read_text(encoding="utf-8"))
     return [
         {key: style[key] for key in ("id", "name", "kind", "origin")}
-        for style in manifest["styles"]
+        for style in _manifest_styles()
     ]
-
-
-def style_path(style_id: str) -> Path:
-    return STYLES_DIR / _style_entry(style_id)["file"]
 
 
 # --- pandoc -------------------------------------------------------------------------
@@ -95,8 +98,7 @@ _HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
 def _style_entry(style_id: str) -> dict:
-    manifest = json.loads(STYLES_MANIFEST.read_text(encoding="utf-8"))
-    for style in manifest["styles"]:
+    for style in _manifest_styles():
         if style["id"] == style_id:
             return style
     raise RenderError("style_unknown", f"unknown citation style: {style_id!r}")
@@ -259,8 +261,9 @@ def prepare_render_items(items: list[dict], steps: list[str], document_text: str
     return items, restore
 
 
-def _citeproc_ast(text: str, library_path: Path, style_id: str, *, timeout: float) -> dict:
-    library = lib.load(Path(library_path))  # validates; raises LibraryError
+def _citeproc_ast(text: str, library: lib.Library, style_id: str, *, timeout: float) -> dict:
+    """Pandoc citeproc AST for ``text`` against an already loaded bibliography."""
+    library_path = library.path
     style = _style_entry(style_id)
     args = ["--sandbox", "-f", "markdown", "-t", "json", "--citeproc", "--csl", str(STYLES_DIR / style["file"])]
     if not library.exists:
@@ -398,10 +401,7 @@ class Rendered:
 def render(text: str, library_path: Path, style_id: str, *, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Rendered:
     """Render every citation of a Markdown document and its bibliography."""
     library = _library_or_error(library_path)
-    try:
-        ast = _citeproc_ast(text, Path(library_path), style_id, timeout=timeout)
-    except lib.LibraryError as exc:
-        raise RenderError(exc.code, str(exc)) from exc
+    ast = _citeproc_ast(text, library, style_id, timeout=timeout)
     cites: list = []
     _collect_cites(ast["blocks"], cites)
     groups = _source_groups(text)
@@ -447,8 +447,8 @@ def _source_groups(text: str) -> list[tuple[list[str], int, int]]:
 
 def export_markdown(text: str, library_path: Path, style_id: str, *, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
     """Markdown with citations replaced by text and the bibliography appended."""
-    _library_or_error(library_path)
-    ast = _unwrap(_citeproc_ast(text, Path(library_path), style_id, timeout=timeout))
+    library = _library_or_error(library_path)
+    ast = _unwrap(_citeproc_ast(text, library, style_id, timeout=timeout))
     out = _run(
         ["--sandbox", "-f", "json", "-t", MARKDOWN_EXPORT_FORMAT, "--wrap=preserve"],
         json.dumps(ast).encode("utf-8"), timeout=timeout,
@@ -498,8 +498,8 @@ def export_docx(
     embedded only when ``resource_dir`` (the document's folder) is given;
     otherwise the writer also runs sandboxed and leaves them out.
     """
-    _library_or_error(library_path)
-    ast = _unlink_remote_images(_citeproc_ast(text, Path(library_path), style_id, timeout=timeout))
+    library = _library_or_error(library_path)
+    ast = _unlink_remote_images(_citeproc_ast(text, library, style_id, timeout=timeout))
     args = ["-f", "json", "-t", "docx", "-o", "-"]
     if resource_dir is None:
         args.insert(0, "--sandbox")

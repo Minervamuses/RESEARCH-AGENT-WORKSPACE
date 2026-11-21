@@ -108,6 +108,12 @@ TRANSIENT_FAILURE_KINDS = frozenset({
 })
 
 
+def user_agent(mailto: str | None) -> str:
+    """User-Agent for the public bibliographic APIs (polite pool when a mailto is set)."""
+    base = "research-agent-citation/1.0"
+    return f"{base} (mailto:{mailto})" if mailto else base
+
+
 def failure_kind(exc: ProviderError) -> str:
     """Return a stable, free-text-free category for a provider failure.
 

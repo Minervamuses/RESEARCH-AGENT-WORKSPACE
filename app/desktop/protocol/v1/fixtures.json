@@ -2919,7 +2919,6 @@
             "openRouterConfigured": false,
             "openAlexConfigured": false,
             "storePath": "/workspace/app/store",
-            "citationOutputPath": "/workspace/cite",
             "mcpEnabled": false,
             "mcpFamilies": [],
             "mcpDiagnostics": []
@@ -2959,7 +2958,6 @@
             "openRouterConfigured": false,
             "openAlexConfigured": false,
             "storePath": "/workspace/app/store",
-            "citationOutputPath": "/workspace/cite",
             "mcpEnabled": false,
             "mcpFamilies": [],
             "mcpDiagnostics": [],

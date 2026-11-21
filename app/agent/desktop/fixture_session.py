@@ -542,7 +542,6 @@ def seed_fixture_root(root: Path) -> AgentConfig:
         persist_dir=str(persist_dir),
         extension_dropin_dir=str(root / "extensions" / "desired"),
         extension_state_dir=str(root / "extensions" / "state"),
-        citation_output_dir=str(root / "citations"),
     )
     _seed_fixture_extensions(root)
     for project_name in ("project-one", "project-two"):
@@ -1106,9 +1105,7 @@ class FixtureSession:
                 )
                 answer = "Fixture crash tool completed."
             elif text == _FIXTURE_CRASH_CITATION:
-                answer, violations = CitationSessionPolicy(
-                    self.config
-                ).finalize_answer(
+                answer, violations = CitationSessionPolicy().finalize_answer(
                     _FIXTURE_UNSAFE_CITATION_DRAFT,
                     citation_active=True,
                 )

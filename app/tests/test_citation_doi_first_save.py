@@ -71,17 +71,12 @@ class Fetcher:
         doi = url.removeprefix("https://doi.org/")
         if doi in CSL and "csl+json" in accept:
             return FetchResponse(200, body=json.dumps(CSL[doi]).encode())
-        if doi in CSL and "x-bibtex" in accept:
-            title = CSL[doi]["title"]
-            return FetchResponse(200, body=(
-                f"@misc{{k, title={{{title}}}, year={{2020}}, doi={{{doi}}}}}"
-            ).encode())
         raise AssertionError(f"unexpected url: {url}")
 
 
 def _service(tmp_path, fetcher):
     return CitationService(
-        CitationProviderHub(env={}, fetcher=fetcher), output_dir=tmp_path / "cite",
+        CitationProviderHub(env={}, fetcher=fetcher),
     )
 
 
@@ -100,17 +95,14 @@ def test_doi_only_save_keeps_the_search_records_version(tmp_path, doi, version):
     )))
 
     receipt = outcome.items[0].receipt
-    assert outcome.items[0].status == "saved"
+    # No project bibliography: verified for this task only.
+    assert outcome.items[0].status == "verified"
     assert receipt.doi == searched.doi
     assert receipt.title == searched.title
     assert receipt.year == searched.year
     assert receipt.version_kind == version
     if searched.version_kind != "unknown":
         assert receipt.version_kind == searched.version_kind
-    sidecar = json.loads(
-        (tmp_path / "cite").joinpath(receipt.bundle_path, "citation.json").read_text()
-    )
-    assert sidecar["resolution"]["version_kind"] == version
 
 
 def test_two_turn_selection_saves_the_chosen_record_by_doi_only(monkeypatch, tmp_path):
@@ -181,10 +173,11 @@ def test_two_turn_selection_saves_the_chosen_record_by_doi_only(monkeypatch, tmp
     answer = asyncio.run(session.turn("保存第 2 篇", skill_name="citation"))
 
     save_calls = fetcher.calls[calls_before_save:]
-    assert answer == "已保存：saved"
+    assert answer == "已保存：verified"
+    # Saving verifies against the doi.org CSL record only (one request).
     assert all(url.startswith("https://doi.org/") for url, _accept in save_calls)
-    assert sorted(accept for _url, accept in save_calls) == [
-        "application/vnd.citationstyles.csl+json", "application/x-bibtex",
+    assert [accept for _url, accept in save_calls] == [
+        "application/vnd.citationstyles.csl+json",
     ]
     work = model.save_args["works"][0]
     assert set(work) == {"requested_label", "identifiers"}

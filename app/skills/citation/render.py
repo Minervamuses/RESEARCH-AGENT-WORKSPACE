@@ -14,29 +14,20 @@ field is simply omitted, never guessed.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from typing import Callable
 
 from skills.citation.gate import (
     CITATION_NEEDED,
     CITE_MARKER_RE,
     MARKER_RE,
+    mask_unscanned_regions,
 )
 from skills.citation.types import SourceRef
 
 _MAX_BIB_AUTHORS = 6
-_FENCE_OR_CODE_RE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.DOTALL)
 
 
-@dataclass
-class RenderedTurn:
-    """Final text plus the sources actually cited, in numbering order."""
-
-    text: str
-    cited_sources: list[SourceRef] = field(default_factory=list)
-
-
-def format_bibliography_entry(ref: SourceRef) -> str:
+def _bibliography_entry(ref: SourceRef) -> str:
     """Neutral entry: authors<=6+et al., year, title, venue, DOI, level."""
     parts: list[str] = []
     if ref.authors:
@@ -63,13 +54,14 @@ def render_citations(
     text: str,
     *,
     resolve: Callable[[str], SourceRef | None],
-) -> RenderedTurn:
+) -> str:
     """Replace markers with per-response numbering and append a bibliography."""
     text = text or ""
-    code_spans = [m.span() for m in _FENCE_OR_CODE_RE.finditer(text)]
+    # The same code regions the gate leaves unscanned (masked to spaces).
+    scanned = mask_unscanned_regions(text)
 
     def _in_code(position: int) -> bool:
-        return any(start <= position < end for start, end in code_spans)
+        return scanned[position] != text[position]
 
     cited_order: list[SourceRef] = []
     cited_numbers: dict[str, int] = {}
@@ -98,10 +90,7 @@ def render_citations(
     if cited_order:
         lines = ["", "Sources:"]
         for i, ref in enumerate(cited_order, start=1):
-            lines.append(f"[{i}] {format_bibliography_entry(ref)}")
+            lines.append(f"[{i}] {_bibliography_entry(ref)}")
         rendered = rendered.rstrip() + "\n" + "\n".join(lines) + "\n"
 
-    return RenderedTurn(
-        text=rendered,
-        cited_sources=cited_order,
-    )
+    return rendered

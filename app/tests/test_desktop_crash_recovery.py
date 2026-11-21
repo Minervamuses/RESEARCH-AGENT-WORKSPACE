@@ -26,7 +26,6 @@ from typing import Any, Callable
 
 import pytest
 
-from agent.config import AgentConfig
 from agent.conversations import ConversationRepository
 from agent.desktop.catalog import inspect_project
 from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX, SESSION_A
@@ -506,12 +505,7 @@ def test_kill_after_citation_rejection_never_persists_unsafe_completed_text(
         "Fixture citation draft "
         f"[[cite:{UNSAFE_CITATION_TOKEN}]]"
     )
-    expected_safe, violations = CitationSessionPolicy(
-        AgentConfig(
-            persist_dir=str(crash_root / "store"),
-            citation_output_dir=str(crash_root / "citations"),
-        )
-    ).finalize_answer(
+    expected_safe, violations = CitationSessionPolicy().finalize_answer(
         unsafe_draft,
         citation_active=True,
     )

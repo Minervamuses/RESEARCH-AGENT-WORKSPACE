@@ -1386,7 +1386,8 @@ def test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection(
         assert "Skill: academic-paper-writing; skill_root:" in result["text"]
         assert "Skill: citation; skill_root:" in result["text"]
         assert path.read_text() == "Old disk/RAG claim.\n"
-        assert not Path(service.config.citation_output_dir).exists()
+        # Abstract-only discovery saved nothing to the project bibliography.
+        assert not (Path(service._project["rootPath"]) / "references.json").exists()
         assert service.session.active_skill_runtime is None
 
     asyncio.run(run())

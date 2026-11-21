@@ -16,6 +16,7 @@ from skills.citation.tool import (
     create_citation_workflow_tool,
 )
 from skills.citation.types import (
+    BibliographyLink,
     CanonicalIdentity,
     SaveAlternative,
     SaveBatchOutcome,
@@ -26,7 +27,7 @@ from skills.citation.types import (
 
 
 class FakeService:
-    output_dir = Path("/tmp/cite")
+    library_path = None
 
     def __init__(self):
         self.save_calls = 0
@@ -198,8 +199,11 @@ def test_save_needs_no_current_turn_context_and_returns_actual_outcome_content()
 def test_real_tool_call_returns_content_json_identical_to_message_artifact(status):
     receipt = SaveReceipt(
         "src-example", CanonicalIdentity("doi", "10.1234/example"),
-        "10.1234/example", "範例作品", 2020, "journal-article", "/tmp/cite/example",
+        "10.1234/example", "範例作品", 2020, "journal-article",
         "doi_identity_verified", "[[cite:src-example]]", "published",
+    ) if status in {"saved", "reused", "verified"} else None
+    link = BibliographyLink(
+        "added" if status == "saved" else "existing", "/project/references.json", "example2020",
     ) if status in {"saved", "reused"} else None
     outcome = SaveBatchOutcome("batch-all-fields", (
         SaveItemOutcome(1, "第二項", status, f"reason_{status}", receipt, (
@@ -208,7 +212,7 @@ def test_real_tool_call_returns_content_json_identical_to_message_artifact(statu
                 "10.1234/alternative", "1901.00001",
             ),
             SaveAlternative("缺值候選"),
-        )),
+        ), link),
         SaveItemOutcome(0, "第一項", "not_found", "no_provider_records"),
     ))
 
@@ -239,7 +243,10 @@ def test_real_tool_call_returns_content_json_identical_to_message_artifact(statu
     ]
     prefix = "Actual citation save result:\n"
     assert str(message.content).startswith(prefix)
-    content_artifact = json.loads(str(message.content).removeprefix(prefix))
+    # The JSON is followed only by plain-language notes on their own lines.
+    content_artifact, end = json.JSONDecoder().raw_decode(str(message.content).removeprefix(prefix))
+    notes = str(message.content).removeprefix(prefix)[end:]
+    assert notes == "" or notes.startswith("\n")
     assert content_artifact == message.artifact == outcome.to_artifact()
     assert SaveBatchOutcome.from_artifact(content_artifact) == outcome
     assert [item["request_index"] for item in content_artifact["items"]] == [1, 0]
@@ -478,8 +485,8 @@ def _year_pool_service(tmp_path):
         _ranked("datacite", 3, None),
         _ranked("datacite", 4, 2021, doi="10.1234/shared", abstract="Shared abstract from DataCite."),
     ])
-    hub = SimpleNamespace(crossref=crossref, datacite=datacite, openalex=None, doi_org=None, _fetch=None)
-    return CitationService(hub, output_dir=tmp_path / "cite"), crossref, datacite
+    hub = SimpleNamespace(crossref=crossref, datacite=datacite, openalex=None, doi_org=None, fetch=None)
+    return CitationService(hub), crossref, datacite
 
 
 def test_year_filter_runs_before_truncation_so_eligible_candidates_fill_in(tmp_path):

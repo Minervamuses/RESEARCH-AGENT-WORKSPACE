@@ -59,9 +59,6 @@ class AgentConfig(RAGConfig):
     extension_max_file_bytes: int = 8 * 1024 * 1024  # Maximum bytes per file.
     extension_max_bundle_bytes: int = 64 * 1024 * 1024  # Maximum bytes per bundle.
 
-    # Citation output
-    citation_output_dir: str | None = None  # Citation-bundle root override.
-
     # Skill context
     skill_max_pinned_reference_chars: int = 65_536  # Characters per pinned reference.
     skill_max_total_skill_context_chars: int = 200_000  # Total active-skill context chars.

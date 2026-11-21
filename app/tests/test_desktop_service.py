@@ -395,7 +395,6 @@ def _service(tmp_path: Path, **kwargs) -> DesktopService:
         "config",
         AgentConfig(
             persist_dir=str(tmp_path / "store"),
-            citation_output_dir=str(tmp_path / "cite"),
             extension_dropin_dir=str(tmp_path / "dropin"),
             extension_state_dir=str(tmp_path / "state"),
         ),
@@ -852,7 +851,6 @@ def test_composer_terminal_prune_restarts_without_replay_and_retries_same_id_onl
     source.mkdir()
     config = AgentConfig(
         persist_dir=str(tmp_path / "store"),
-        citation_output_dir=str(tmp_path / "cite"),
         extension_dropin_dir=str(tmp_path / "dropin"),
         extension_state_dir=str(tmp_path / "state"),
     )

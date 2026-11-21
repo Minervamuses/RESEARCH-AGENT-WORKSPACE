@@ -194,7 +194,7 @@ class ChatSession:
         self._turn_trace: TurnTimingTrace | None = None
         self._turn_journal = TurnJournal()
         self._citation_policy = CitationSessionPolicy(
-            config, bibliography_path=citation_bibliography_path,
+            bibliography_path=citation_bibliography_path,
         )
         self.citation_workflow_tool = self._citation_policy.workflow_tool
         self.extension_manager = ExtensionManager(config)

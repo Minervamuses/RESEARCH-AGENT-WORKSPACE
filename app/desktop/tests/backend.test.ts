@@ -100,7 +100,6 @@ const diagnostics: RuntimeDiagnosticsDto = {
   openRouterConfigured: false,
   openAlexConfigured: true,
   storePath: "/workspace/app/store",
-  citationOutputPath: "/workspace/cite",
   mcpEnabled: false,
   mcpFamilies: [],
   mcpDiagnostics: [],

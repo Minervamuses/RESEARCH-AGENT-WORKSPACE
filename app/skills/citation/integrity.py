@@ -51,11 +51,12 @@ def inspect(
 ) -> dict:
     """Build the integrity report for ``text``."""
     uses = find_citations(text, fmt)
-    bibliography = {"path": str(library_path), "status": "ok", "error": None}
+    bibliography = {"path": str(library_path), "status": "ok", "error": None, "fingerprint": None}
     items: list[dict] = []
     try:
         loaded = lib.load(library_path)
         items = loaded.items
+        bibliography["fingerprint"] = loaded.fingerprint
         if not loaded.exists:
             bibliography["status"] = "missing"
     except lib.LibraryError as exc:

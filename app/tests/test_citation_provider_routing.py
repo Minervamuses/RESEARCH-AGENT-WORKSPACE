@@ -127,7 +127,7 @@ def test_save_routes_structured_identity_through_three_distinct_query_plans(
         },
         fetcher=fetcher,
     )
-    service = CitationService(hub, output_dir=tmp_path / "cite")
+    service = CitationService(hub)
     intent = WorkIntent(
         "Paper A",
         title="Paper A",
@@ -139,7 +139,7 @@ def test_save_routes_structured_identity_through_three_distinct_query_plans(
 
     outcome = asyncio.run(service.save((intent,)))
 
-    assert outcome.items[0].status == "saved"
+    assert outcome.items[0].status == "verified"
     assert outcome.items[0].receipt.canonical_identity.value == DOI
     provider_urls = {
         host: [url for url, _accept in fetcher.calls if host in url]

@@ -25,6 +25,7 @@ from skills.citation.providers.net import (
     ProviderError,
     TTLCache,
     fetch_with_retries,
+    user_agent,
 )
 from skills.citation.types import PublishedDateFilter
 
@@ -53,11 +54,6 @@ _RESULT_FIELDS = ",".join(
 )
 
 Fetcher = Callable[[str, dict[str, str]], Awaitable[FetchResponse]]
-
-
-def _user_agent(mailto: str | None) -> str:
-    base = "research-agent-citation/1.0"
-    return f"{base} (mailto:{mailto})" if mailto else base
 
 
 def _entries(value: object) -> list[dict]:
@@ -382,7 +378,7 @@ class DataCiteClient:
         url = f"{SEARCH_URL}?{urllib.parse.urlencode(params)}"
         headers = {
             "Accept": "application/vnd.api+json",
-            "User-Agent": _user_agent(self._mailto),
+            "User-Agent": user_agent(self._mailto),
         }
 
         async def _fetch() -> FetchResponse:

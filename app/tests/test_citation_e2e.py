@@ -151,7 +151,7 @@ class _SearchSaveModel:
             if len(batch.items) != 1:
                 raise AssertionError("expected one production save outcome")
             item = batch.items[0]
-            if item.status not in {"saved", "reused"} or item.receipt is None:
+            if item.status not in {"saved", "reused", "verified"} or item.receipt is None:
                 raise AssertionError("production save did not return a usable receipt")
             self.receipt = item.receipt
             return AIMessage(
@@ -287,12 +287,12 @@ class _MalformedSaveOutcome:
                     "title": "Paper A",
                     "year": 2021,
                     "work_type": "journal-article",
-                    "bundle_path": "/not/a/trusted/bundle",
                     "verification_level": "doi_identity_verified",
                     "cite_marker": "[[cite:src-malformed]]",
                     "version_kind": "published",
                 },
                 "alternatives": [],
+                "bibliography": None,
             }],
         }
 
@@ -313,9 +313,9 @@ def _fixture_services(monkeypatch, tmp_path, fetcher=None):
     hub = CitationProviderHub(env={}, fetcher=fetcher or RoutingFetcher())
     services = []
 
-    def create(provider_hub, *, config, library_path=None):
+    def create(provider_hub, *, library_path=None):
         assert provider_hub is hub
-        service = CitationService(hub, output_dir=tmp_path / "cite", library_path=library_path)
+        service = CitationService(hub, library_path=library_path)
         services.append(service)
         return service
 
@@ -363,9 +363,9 @@ class _SaveReportingModel:
                 work = calls[0]["args"]["works"][item.request_index]
                 assert item.requested_label == work["requested_label"]
                 doi = next(value["value"] for value in work["identifiers"] if value["kind"] == "doi")
-                if item.status in {"saved", "reused"}:
+                if item.status in {"saved", "reused", "verified"}:
                     assert item.receipt is not None and item.receipt.doi == doi
-                    result = "新保存" if item.status == "saved" else "重用"
+                    result = {"saved": "新保存", "reused": "重用", "verified": "已驗證"}[item.status]
                 else:
                     result = "失敗"
                     retry_works.append(work)
@@ -378,25 +378,27 @@ class _SaveReportingModel:
 
 
 class _SaveResultFetcher(RoutingFetcher):
-    """Fail B's first BibTeX requests with a wrong DOI or uncached HTTP error."""
+    """Fail B's first doi.org CSL requests with a refusal or an uncached HTTP error."""
 
     def __init__(self, failures, *, transient=False):
         super().__init__()
         self.failures = failures
         self.transient = transient
-        self.bibtex_b_calls = 0
+        self.csl_b_calls = 0
 
     async def __call__(self, url, headers):
-        if url == f"https://doi.org/{DOI_B}" and "x-bibtex" in headers.get("Accept", ""):
-            self.bibtex_b_calls += 1
-            if self.bibtex_b_calls <= self.failures:
+        if url == f"https://doi.org/{DOI_B}" and "csl+json" in headers.get("Accept", ""):
+            self.csl_b_calls += 1
+            if self.csl_b_calls <= self.failures:
                 self.calls.append((url, headers["Accept"]))
-                if self.transient:
-                    return FetchResponse(503)
-                return FetchResponse(200, body=(
-                    f"@article{{b, title={{Paper B}}, year={{2020}}, doi={{{DOI_A}}}}}"
-                ).encode())
+                return FetchResponse(503 if self.transient else 403)
         return await super().__call__(url, headers)
+
+
+def _citation_files(root):
+    """Citation storage files anywhere under ``root`` (none in the CLI)."""
+    names = {"references.json", "reference.bib", "citation.json"}
+    return [path for path in root.rglob("*") if path.name in names]
 
 
 @pytest.mark.parametrize("scenario", ["all_success", "all_failure", "mixed", "retry"])
@@ -417,19 +419,6 @@ def test_save_reporting_reaches_model_history_and_cli(
         transient=scenario == "retry",
     )
     services = _fixture_services(monkeypatch, tmp_path, fetcher=fetcher)
-    prior_files = {}
-    if scenario == "all_success":
-        seed_service = CitationService(
-            CitationProviderHub(env={}, fetcher=fetcher),
-            output_dir=tmp_path / "cite",
-        )
-        intent = CitationWorkflowInput.model_validate({"action": "save", "works": works[:1]})
-        prepared = asyncio.run(seed_service.save(tuple(work.to_domain() for work in intent.works)))
-        assert prepared.items[0].status == "saved"
-        prior_files = {
-            path: (path.read_bytes(), path.stat().st_mtime_ns)
-            for path in Path(prepared.items[0].receipt.bundle_path).iterdir()
-        }
 
     turn_answers = []
     if scenario == "mixed":
@@ -490,56 +479,48 @@ def test_save_reporting_reaches_model_history_and_cli(
     assert len({batch.batch_id for batch in batches}) == len(batches)
     for message, batch in zip(results, batches, strict=True):
         assert batch.to_artifact() == message.artifact
+    # The CLI has no project bibliography: verified works are citable in this task only.
     expected = {
-        "all_success": [["reused", "saved"]],
+        "all_success": [["verified", "verified"]],
         "all_failure": [["verification_failed"]],
-        "mixed": [["saved", "verification_failed"]],
-        "retry": [["provider_failed"], ["saved"]],
+        "mixed": [["verified", "verification_failed"]],
+        "retry": [["provider_failed"], ["verified"]],
     }[scenario]
     assert [[item.status for item in batch.items] for batch in batches] == expected
     for batch in batches:
         for item in batch.items:
             if item.receipt is None:
                 assert item.reason_code == (
-                    "bibtex_lookup_server_error"
+                    "doi_refetch_server_error"
                     if scenario == "retry"
-                    else "bibtex_doi_mismatch"
+                    else "doi_refetch_failed"
                 )
                 assert f"：失敗（{item.reason_code}）。" in answer
             else:
                 receipt = item.receipt
-                assert service.registry.trusted_receipt(receipt.source_id) == receipt
-                bundle = Path(receipt.bundle_path)
-                assert receipt.doi in (bundle / "reference.bib").read_text(encoding="utf-8")
-                sidecar = json.loads((bundle / "citation.json").read_text(encoding="utf-8"))
-                assert sidecar["source_ref"]["doi"] == receipt.doi
-                if item.status == "saved":
-                    assert sidecar["creation_evidence"]["batch_id"] == batch.batch_id
-                    assert sidecar["creation_evidence"]["request_index"] == item.request_index
-                result = "重用" if item.status == "reused" else "新保存"
-                assert f"{item.requested_label} ({receipt.doi})：{result}（{item.reason_code}）。" in answer
+                assert service.registry.receipt_is_trusted(receipt)
+                assert item.bibliography is None
+                assert f"{item.requested_label} ({receipt.doi})：已驗證（{item.reason_code}）。" in answer
 
     expected_dois = {
         "all_success": {DOI_A, DOI_B}, "all_failure": set(),
         "mixed": {DOI_A}, "retry": {DOI_B},
     }[scenario]
     assert {source.doi for source in service.registry.list()} == expected_dois
-    assert len(list(service.output_dir.glob("*/reference.bib"))) == len(expected_dois)
-    for path, original in prior_files.items():
-        assert (path.read_bytes(), path.stat().st_mtime_ns) == original
+    assert _citation_files(tmp_path) == []
     if scenario == "all_failure":
-        assert "新保存" not in answer and "重用" not in answer
+        assert "已驗證" not in answer and "新保存" not in answer and "重用" not in answer
     if scenario == "retry":
-        assert fetcher.bibtex_b_calls == 4
+        assert fetcher.csl_b_calls == 4
         assert len(no_citation_backoff) == 2
         calls = [call for message in model.invocations[-1] if isinstance(message, AIMessage)
                  for call in message.tool_calls]
         assert calls[0]["args"]["works"] == calls[1]["args"]["works"] == works[1:]
         assert [batch.items[0].request_index for batch in batches] == [0, 0]
-        assert answer.index("失敗") < answer.index("新保存")
+        assert answer.index("失敗") < answer.index("已驗證")
 
 
-def test_search_selection_save_bundle_journey_reads_tool_messages(
+def test_search_selection_save_journey_reads_tool_messages(
     monkeypatch,
     tmp_path,
 ):
@@ -563,17 +544,10 @@ def test_search_selection_save_bundle_journey_reads_tool_messages(
     assert "Sources:" in answer
     assert "Paper A" in answer
     assert f"DOI: {DOI_A}" in answer
-    assert model.receipt.bundle_path not in answer
 
-    bundles = list((tmp_path / "cite").glob("*/reference.bib"))
-    assert len(bundles) == 1
-    assert DOI_A in bundles[0].read_text(encoding="utf-8")
-    sidecar = json.loads(
-        (bundles[0].parent / "citation.json").read_text(encoding="utf-8")
-    )
-    assert sidecar["source_ref"]["doi"] == DOI_A
-    assert "bundle_path" not in sidecar["source_ref"]
-    assert service.registry.trusted_receipt(model.receipt.source_id) == model.receipt
+    assert _save_content(model.save_message).items[0].status == "verified"
+    assert service.registry.receipt_is_trusted(model.receipt)
+    assert _citation_files(tmp_path) == []
     assert session.recent_turns[-1].assistant_output == answer
 
 
@@ -622,7 +596,7 @@ def test_search_selection_journey_stops_when_search_is_empty(
         "citation_workflow"
     ]
     assert service.registry.list() == []
-    assert list((tmp_path / "cite").glob("*/reference.bib")) == []
+    assert _citation_files(tmp_path) == []
     assert len(fetcher.calls) == 2
     assert session._citation_policy.loaded_service is None
     assert session.active_skill_runtime is None
@@ -662,7 +636,7 @@ def test_search_selection_journey_rejects_malformed_save_receipt(
         "citation_workflow",
     ]
     assert service.registry.list() == []
-    assert list((tmp_path / "cite").glob("*/reference.bib")) == []
+    assert _citation_files(tmp_path) == []
 
 
 def test_one_shot_cli_cites_then_runs_ordinary_turn(monkeypatch, tmp_path, capsys):
@@ -701,14 +675,14 @@ def test_one_shot_cli_cites_then_runs_ordinary_turn(monkeypatch, tmp_path, capsy
     assert len(model.invocations) == 4
     assert model.invocations[0][-1].content == prompt
     assert len(services) == 1
-    assert services[0].registry.trusted_receipt(model.receipt.source_id) == model.receipt
-    assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+    assert services[0].registry.receipt_is_trusted(model.receipt)
+    assert _citation_files(tmp_path) == []
     assert "citation_workflow" not in model.invoked_tool_names[-1]
     assert not any("[Citable sources]" in m.content for m in model.invocations[-1] if isinstance(m, SystemMessage))
 
 
 @pytest.mark.parametrize("terminal", ["success", "gate", "provider", "persistence"])
-def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
+def test_citation_terminal_cleanup_restores_thinking(
     monkeypatch, tmp_path, terminal,
 ):
     class Model(_SearchSaveModel):
@@ -735,7 +709,7 @@ def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
         assert session.citation_skill_active
         assert session.thinking_mode == "normal"
         assert session._citation_policy.loaded_service is services[0]
-        assert services[0].registry.trusted_receipt(model.receipt.source_id) == model.receipt
+        assert services[0].registry.receipt_is_trusted(model.receipt)
         if terminal == "persistence":
             raise ConversationUnavailableError("fixture final write failed")
         return complete(*args, **kwargs)
@@ -767,7 +741,7 @@ def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
     assert session._citation_policy.loaded_service is None
     assert session._build_sources_hint() is None
     assert "citation_workflow" not in session.tool_access_resolution().effective_tools
-    assert Path(model.receipt.bundle_path, "reference.bib").is_file()
+    assert _citation_files(tmp_path) == []
 
     if terminal == "success":
         count = len(model.invocations)
@@ -788,14 +762,12 @@ def test_citation_terminal_cleanup_preserves_bundle_and_restores_thinking(
     assert not any("[Citable sources]" in m.content for m in model.invocations[-1] if isinstance(m, SystemMessage))
 
 
-def test_later_citation_requires_new_receipt_and_reuses_saved_bundle(monkeypatch, tmp_path):
+def test_later_citation_requires_a_new_save_in_the_next_task(monkeypatch, tmp_path):
     model = _SearchSaveModel()
     session = _make_session(monkeypatch, tmp_path, model)
     services = _fixture_services(monkeypatch, tmp_path)
     first = asyncio.run(session.turn("搜尋 Paper A，保存並引用", skill_name="citation"))
     receipt = model.receipt
-    bundle = Path(receipt.bundle_path)
-    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bundle.iterdir()}
     invoke = model.invoke
 
     def cite_old(messages):
@@ -812,9 +784,11 @@ def test_later_citation_requires_new_receipt_and_reuses_saved_bundle(monkeypatch
     assert asyncio.run(session.turn("重用先前選擇並保存引用", skill_name="citation")) == first
     assert len(services) == 3
     assert len({id(service) for service in services}) == 3
-    assert _save_content(model.save_message).items[0].status == "reused"
-    assert services[-1].registry.trusted_receipt(receipt.source_id) == model.receipt
-    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bundle.iterdir()} == before
+    # The CLI keeps nothing between tasks: the new task verifies the same work again.
+    assert _save_content(model.save_message).items[0].status == "verified"
+    assert model.receipt == receipt
+    assert services[-1].registry.receipt_is_trusted(model.receipt)
+    assert _citation_files(tmp_path) == []
 
 
 def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, tmp_path):
@@ -824,10 +798,13 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
     session = _make_session(monkeypatch, tmp_path, model)
     services = _fixture_services(monkeypatch, tmp_path)
     session.thinking_mode = "extended"
+    # A project bibliography, so the save has a real write that can arrive late.
+    library = tmp_path / "references.json"
+    session._citation_policy._bibliography_path = lambda: library
     entered = threading.Event()
     release = threading.Event()
     finished = threading.Event()
-    write = citation_service_mod.write_identity_bundle
+    write = citation_service_mod.write_library_atomic
 
     def delayed_write(*args, **kwargs):
         entered.set()
@@ -837,7 +814,7 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
         finally:
             finished.set()
 
-    monkeypatch.setattr(citation_service_mod, "write_identity_bundle", delayed_write)
+    monkeypatch.setattr(citation_service_mod, "write_library_atomic", delayed_write)
 
     async def scenario():
         task = asyncio.create_task(session.turn("搜尋 Paper A，保存並引用", skill_name="citation"))
@@ -865,7 +842,7 @@ def test_cancelled_save_late_writer_cannot_populate_next_citation(monkeypatch, t
             assert "沒有本次可信 receipt" in answer
             assert session._citation_policy.loaded_service is None
             assert session.thinking_mode == "extended"
-            assert list((tmp_path / "cite").glob("*/reference.bib"))
+            assert library.exists()
 
             def ordinary(messages):
                 assert session._citation_policy.loaded_service is None

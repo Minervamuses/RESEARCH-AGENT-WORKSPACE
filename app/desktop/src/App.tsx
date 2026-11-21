@@ -493,7 +493,6 @@ function RuntimeDetails({ diagnostics }: { diagnostics: BoundedRuntimeDiagnostic
         <div className="wide-detail"><dt>Working directory</dt><dd>{diagnostics.workingDirectory}</dd></div>
         <div className="wide-detail"><dt>Conda prefix</dt><dd>{diagnostics.condaPrefix ?? "Not detected"}</dd></div>
         <div className="wide-detail"><dt>Research store</dt><dd>{diagnostics.storePath}</dd></div>
-        <div className="wide-detail"><dt>Citation output</dt><dd>{diagnostics.citationOutputPath}</dd></div>
       </dl>
     </details>
   );
@@ -2889,7 +2888,7 @@ export default function App() {
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
               onSubmit={sendTurn}
             />
-            <details className="session-meta"><summary>Session details · {activeSession.turnCount} turns</summary><p>Session {activeSession.sessionId} · {selectedRegistered ? "cataloged" : "transient"} · Citation output {state.diagnostics?.citationOutputPath ?? "unavailable"}</p></details>
+            <details className="session-meta"><summary>Session details · {activeSession.turnCount} turns</summary><p>Session {activeSession.sessionId} · {selectedRegistered ? "cataloged" : "transient"}</p></details>
           </section>}
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}
         </div>
