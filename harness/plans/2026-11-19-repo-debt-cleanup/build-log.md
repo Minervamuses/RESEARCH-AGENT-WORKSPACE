@@ -19,7 +19,7 @@
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
-| C5 | In progress | `evidence/C5-S1/`–`C5-S4/` | — | C5-S5 |
+| C5 | In progress | `evidence/C5-S1/`–`C5-S5/` | — | C5-S6 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
@@ -556,3 +556,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C5-S4/skill-text.md`（含完整 diff）。
 - **限制**：無。
 - **下一步**：C5-S5 以 Poetry 移除 `pybtex`（U9）。
+
+### C5-S5 以 Poetry 移除 `pybtex`（2026-11-22）
+
+- **觀察結果**：**U9（APPLIED）**。dry-run 確認只移除 `pybtex 0.26.1` 與 `latexcodec 3.0.1`（0 installs、0 updates）；`poetry remove pybtex` 後 `pyproject.toml`、`poetry.lock` 不再提及兩者，`poetry check` 通過，citation 模組可匯入。lock 的 diff 只有兩個套件區塊與 `content-hash`。
+- **執行指令**：見 `evidence/C5-S5/dependency.md`（沙箱外，Conda env `app`）。
+- **證據**：`evidence/C5-S5/dependency.md`。
+- **限制**：無。
+- **下一步**：C5-S6 測試整理與收尾。
