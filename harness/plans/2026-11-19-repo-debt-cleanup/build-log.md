@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`, `evidence/C2-S9/` | — | C2-S10 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S10/` | — | C2-S11 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -345,3 +345,14 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S9/cleanup.md`。
 - **限制**：無。
 - **下一步**：C2-S10 桌面後端小項目（S023、S024、S026）。
+
+### C2-S10 桌面後端小項目（2026-11-21）
+
+- **觀察結果**：
+  - **S023（APPLIED）**：`_execute_desktop_extension_command` 改只回傳 `SlashCommandResult`，動作解析集中至 `_desktop_extension_action`。
+  - **S024（APPLIED）**：刪除單次呼叫的 `_apply_controls`，inline 至 `_session_select`。
+  - **S026（部分 APPLIED，附保留理由）**：刪除 `documents.py::undo` 重複的第二次 `validate_snapshot`；`prepare` 的 `_text(candidate["candidateText"], "candidateText")` 因負責攔截「合法 `sourceText` 加合法 `replacementText` 合併後超過 `MAX_TEXT_BYTES`」的新字串上限，非重複驗證，依規則保留並記錄。
+- **執行指令**：`pytest tests/test_desktop_service.py tests/test_desktop_documents.py tests/test_desktop_document_service.py tests/test_extension_*.py`（234 passed in 11.60 s）。
+- **證據**：`evidence/C2-S10/notes.md`。
+- **限制**：無。
+- **下一步**：C2-S11 錯誤訊息只在 Python 出口遮蔽一次（U15、S089、缺陷 #3）。

@@ -987,10 +987,9 @@ class DesktopService:
                 project_id=project["projectId"],
                 session_id=session_id,
             )
-            await self._apply_controls(
-                target,
-                self._control_snapshots.get(session_id),
-            )
+            control_snapshot = self._control_snapshots.get(session_id)
+            if control_snapshot is not None:
+                target.set_thinking_mode(control_snapshot.thinking_mode)
             if self.lifecycle != "ready":
                 raise DesktopServiceError(
                     "SESSION_NOT_READY",
@@ -1592,15 +1591,6 @@ class DesktopService:
             bash_permission_mode=self._bash_permission_mode,
         )
 
-    async def _apply_controls(
-        self,
-        session: ChatSession,
-        snapshot: _ConversationControlSnapshot | None,
-    ) -> None:
-        if snapshot is None:
-            return
-        session.set_thinking_mode(snapshot.thinking_mode)
-
     def _store_control_snapshot(
         self,
         session_id: str,
@@ -2080,12 +2070,24 @@ class DesktopService:
             lines.append("    (none)")
         return "\n".join(lines)
 
+    @staticmethod
+    def _desktop_extension_action(parsed: ParsedSlashCommand) -> str:
+        args = tuple(arg.casefold() for arg in parsed.args)
+        if args == ("status",):
+            return "status"
+        if args in {(), ("--dry-run",)}:
+            return "preview"
+        raise DesktopServiceError(
+            "PROTOCOL_INVALID",
+            "usage: /extension-management [--dry-run|status]",
+        )
+
     async def _execute_desktop_extension_command(
         self,
         parsed: ParsedSlashCommand,
-    ) -> tuple[SlashCommandResult, str]:
-        args = tuple(arg.casefold() for arg in parsed.args)
-        if args == ("status",):
+    ) -> SlashCommandResult:
+        action = self._desktop_extension_action(parsed)
+        if action == "status":
             status = await self._extensions_status({}, None)
             diagnostics = len(status["diagnostics"])
             running = ", ".join(status["runningMcpFamilies"]) or "none"
@@ -2103,17 +2105,12 @@ class DesktopService:
                 f"running MCP: {running}",
                 f"diagnostics: {diagnostics}",
             ])
-            return SlashCommandResult(message=message), "status"
-        if args in {(), ("--dry-run",)}:
-            return SlashCommandResult(message=(
-                "Extension preview is ready to request. Preview may contact "
-                "the configured model provider, but it writes no changes. "
-                "Review the exact preview before applying."
-            )), "preview"
-        raise DesktopServiceError(
-            "PROTOCOL_INVALID",
-            "usage: /extension-management [--dry-run|status]",
-        )
+            return SlashCommandResult(message=message)
+        return SlashCommandResult(message=(
+            "Extension preview is ready to request. Preview may contact "
+            "the configured model provider, but it writes no changes. "
+            "Review the exact preview before applying."
+        ))
 
     def _register_saved_session(
         self,
@@ -3147,17 +3144,6 @@ class DesktopService:
                     turn_text = result.followup_input
                     turn_skill_name = result.skill_name
                 else:
-                    extension_action: str | None = (
-                        (
-                            "status"
-                            if tuple(arg.casefold() for arg in parsed.args)
-                            == ("status",)
-                            else "preview"
-                        )
-                        if command.name == _DESKTOP_EXTENSION_COMMAND
-                        else None
-                    )
-
                     async def execute_local_command() -> object:
                         if command.name in _DESKTOP_KNOWLEDGE_COMMANDS:
                             return await self._execute_desktop_knowledge_command(
@@ -3165,10 +3151,7 @@ class DesktopService:
                                 parsed,
                             )
                         if command.name == _DESKTOP_EXTENSION_COMMAND:
-                            result, _action = (
-                                await self._execute_desktop_extension_command(parsed)
-                            )
-                            return result
+                            return await self._execute_desktop_extension_command(parsed)
                         return await execute_slash_command(
                             parsed,
                             SlashCommandContext(
@@ -3252,8 +3235,8 @@ class DesktopService:
                         "registrationStatus": registration_status,
                         "registrationIssue": registration_issue,
                     }
-                    if extension_action is not None:
-                        response["extensionAction"] = extension_action
+                    if command.name == _DESKTOP_EXTENSION_COMMAND:
+                        response["extensionAction"] = self._desktop_extension_action(parsed)
                     return response
 
             read_only_turn = any(

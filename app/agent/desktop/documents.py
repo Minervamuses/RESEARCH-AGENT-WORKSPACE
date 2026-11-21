@@ -389,7 +389,6 @@ class DocumentWorkspace:
             if len(matches) != 1:
                 raise DocumentError("Undo requires one successful operation in this editing session")
             original = matches[0]
-            current = self.validate_snapshot(current_snapshot)
             saved = original["result"]
             if current["path"] != saved["path"]:
                 raise DocumentError("Undo belongs to another document")
