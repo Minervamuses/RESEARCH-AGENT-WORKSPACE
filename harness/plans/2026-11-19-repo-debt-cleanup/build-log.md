@@ -19,7 +19,7 @@
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
-| C5 | Not started | — | — | C5-S1 |
+| C5 | In progress | `evidence/C5-S1/` | — | C5-S2 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
@@ -513,3 +513,16 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C4-S6/vocabulary-count.md`。
 - **限制**：無。
 - **下一步**：C5-S1。
+
+### C5-S1 保證對照與使用者盤點（2026-11-22）
+
+- **觀察結果**：
+  - **A1 成立**：存檔 artifact、receipt 與計數只存在記憶體與 log，對話 JSON 只保存固定字串的 tool activity summary；`app/store` 沒有相關資料。
+  - **§5.3**：實測 `export_bibtex`／`parse_canonical_bibtex`：不拒絕缺標題或缺年份，缺作者是 `IndexError`（internal error），其餘拒絕都是 BibTeX 語法或 payload 格式的限制。權威記錄的最低欄位由 adapter 負責。**沒有「無人負責」的欄位要求**，C5-S2 只加測試 (b)、(c)。決策紀錄「例如缺標題」與程式不符，C5-S2 在決策紀錄末尾追加更正。
+  - 桌面在 `library_path` 為 `None` 時仍可能觸發 `citation.save` 核准（`RESEARCH.md` 的 `bibliography` metadata 格式錯誤），C5-S3 保留分支並在 target 寫明不寫入磁碟。
+  - `source_id_for` 在 `storage.py`，刪除前必須以相同公式搬家。
+  - 狀態值與計數的使用者清單見 evidence §6。
+- **執行指令**：見 evidence（唯讀 grep 與 BibTeX 函式實測）。
+- **證據**：`evidence/C5-S1/guarantee-map.md`。
+- **限制**：無。
+- **下一步**：C5-S2。
