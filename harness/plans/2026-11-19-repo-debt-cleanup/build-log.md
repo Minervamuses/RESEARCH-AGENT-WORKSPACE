@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/` | — | C2-S4 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/` | — | C2-S5 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -281,3 +281,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S3/retired-tests.md`。
 - **限制**：無。
 - **下一步**：C2-S4 RAG 清理（S114、S115、S117）。
+
+### C2-S4 RAG 清理（2026-11-21）
+
+- **觀察結果**：
+  - **S114（APPLIED）**：將 `VectorRetriever` inline 到 `rag/api.py::search`，更新 `rag/__init__.py` 的 lazy `__getattr__` 與 `__all__`，並刪除 `rag/retriever/`。
+  - **S115（APPLIED）**：刪除無人依賴的 `rag/store/base.py::BaseStore` 與 store 子類別繼承及 `rag/store/__init__.py` re-export。
+  - **S117（APPLIED）**：修正 `rag/llm/__init__.py` 與 `agent/llm/openrouter.py` 共用設定匯入現況矛盾的模組註解。
+  - 未刪除任何測試。
+- **執行指令**：`pytest tests/rag/`（38 passed in 4.36 s）與 `import rag` 延遲載入檢查（通過）。
+- **證據**：build-log 本節與 `tests/rag/test_tools_contract.py::test_public_import_defers_vector_backends`。
+- **限制**：無。
+- **下一步**：C2-S5 刪除對話 schema v1/v2 讀取器（U6、S046）。

@@ -8,10 +8,8 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from rag.store.base import BaseStore
 
-
-class JSONStore(BaseStore):
+class JSONStore:
     """File-based raw chunk store and backup.
 
     Every read/write entry point revalidates the in-memory copy against an

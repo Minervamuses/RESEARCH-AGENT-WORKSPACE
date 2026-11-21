@@ -4,10 +4,9 @@ from langchain_core.documents import Document
 
 from rag.config import RAGConfig
 from rag.embedder.ollama import OllamaEmbedder
-from rag.store.base import BaseStore
 
 
-class ChromaStore(BaseStore):
+class ChromaStore:
     """Vector store backed by ChromaDB."""
 
     def __init__(

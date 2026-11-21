@@ -34,14 +34,12 @@ def __getattr__(name: str):
         }
         return exports[name]
 
-    if name in {"ChromaStore", "VectorRetriever", "get_chroma_store"}:
-        from rag.retriever.vector import VectorRetriever
+    if name in {"ChromaStore", "get_chroma_store"}:
         from rag.store.cache import get_chroma_store
         from rag.store.chroma_store import ChromaStore
 
         exports = {
             "ChromaStore": ChromaStore,
-            "VectorRetriever": VectorRetriever,
             "get_chroma_store": get_chroma_store,
         }
         return exports[name]
@@ -58,7 +56,6 @@ __all__ = [
     "Inventory",
     "RAGConfig",
     "TOOL_SCHEMAS",
-    "VectorRetriever",
     "dispatch",
     "explore",
     "get_chroma_store",

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from rag.config import RAGConfig, KNOWLEDGE_COLLECTION
 from rag.filters import build_where, date_to_int
-from rag.retriever.vector import VectorRetriever
 from rag.store.cache import get_chroma_store, get_json_store
 from rag.types import ContextChunk, ContextWindow, FolderSummary, Hit, Inventory
 from rag.utils.paths import extract_date
@@ -90,9 +89,9 @@ def search(
         date_from=date_from,
         date_to=date_to,
     )
-    retriever = VectorRetriever(get_chroma_store(KNOWLEDGE_COLLECTION, cfg))
     retrieval_k = k * 3 if folder_prefix else k
-    docs = retriever.retrieve(query, k=retrieval_k, where=where)
+    chroma_store = get_chroma_store(KNOWLEDGE_COLLECTION, cfg)
+    docs = chroma_store.as_retriever(retrieval_k, where=where).invoke(query)
     hits = [_doc_to_hit(doc) for doc in docs]
     if folder_prefix is not None:
         prefix = folder_prefix.rstrip("/")

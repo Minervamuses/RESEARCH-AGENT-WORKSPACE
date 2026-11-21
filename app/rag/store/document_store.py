@@ -2,13 +2,12 @@
 
 from langchain_core.documents import Document
 
-from rag.store.base import BaseStore
 from rag.store.chroma_store import ChromaStore
 from rag.store.json_store import JSONStore
 from rag.types import check_cancelled
 
 
-class DocumentStore(BaseStore):
+class DocumentStore:
     """Combines ChromaStore and JSONStore for dual persistence."""
 
     def __init__(self, chroma: ChromaStore, json_store: JSONStore):
