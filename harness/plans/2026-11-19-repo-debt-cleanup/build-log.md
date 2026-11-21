@@ -15,7 +15,7 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| C1 | In progress | `evidence/C1-S1/relocation.md` | — | C1-S2 建立基線 |
+| C1 | In progress | `evidence/C1-S1/`, `evidence/C1-S2/` | — | C1-S3 量測 |
 | C2 | Not started | — | — | 等 C1 |
 | C3 | Not started | — | — | 等 C1 |
 | C4 | Not started | — | — | 等 C3 |
@@ -216,3 +216,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C1-S1/relocation.md`。
 - **限制**：無。
 - **下一步**：C1-S2 建立四套測試與建置基線。
+
+### C1-S2 建立基線（2026-11-21）
+
+- **觀察結果**：四套基線檢查全部通過，無既有失敗：
+  - Python `pytest`：1,808 passed, 0 failed, 0 skipped（64.58 s）
+  - 前端 `npm test`：329 passed, 0 failed, 0 skipped（11.25 s）
+  - 前端 `npm run build`：`tsc --noEmit && vite build` 通過，739 modules（873 ms）
+  - Rust `cargo test --locked`（於啟用的 Conda `app` 環境內）：42 passed, 0 failed, 0 ignored（0.69 s 執行，49.89 s 編譯）
+- **執行指令**：見 `evidence/C1-S2/baseline.md`。
+- **證據**：`evidence/C1-S2/baseline.md`。
+- **限制**：`cargo test` 的 supervisor 測試檢查 `CONDA_PREFIX`，後續執行皆須先 `conda activate app`。
+- **下一步**：C1-S3 量測熱點檔案與協定指標。
