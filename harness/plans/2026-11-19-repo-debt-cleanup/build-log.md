@@ -19,7 +19,7 @@
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
-| C5 | In progress | `evidence/C5-S1/` | — | C5-S2 |
+| C5 | In progress | `evidence/C5-S1/`–`C5-S2/` | — | C5-S3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
@@ -526,3 +526,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C5-S1/guarantee-map.md`。
 - **限制**：無。
 - **下一步**：C5-S2。
+
+### C5-S2 先補保證，再刪 BibTeX（2026-11-22）
+
+- **觀察結果**：C5-S1 沒有找到「無人負責」的欄位要求，本步只加測試 (b)、(c)（`test_citation_save_outcomes.py`：正常 DOI 與 arXiv 存檔成功、alias DOI 以 doi.org 回應的主要 DOI 為 identity），兩者在 BibTeX 仍存在時通過。**決策紀錄更正**：在 `note/20261119/citation_storage_unification_decision.md` 末尾追加「執行時更正（2026-11-22、C5-S2）」，說明 §5 第 3 點的「例如缺標題」與程式不符，最低欄位要求由權威 adapter 負責。
+- **執行指令**：`pytest tests/test_citation_save_outcomes.py`（16 passed）、`pytest tests/test_citation_*.py`（557 passed）。
+- **證據**：`evidence/C5-S2/tests.md`。
+- **限制**：本步未改變驗證結果，評估分界 commit 依計劃記為 C5-S3。
+- **下一步**：C5-S3。

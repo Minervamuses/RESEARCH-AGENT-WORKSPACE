@@ -1,8 +1,16 @@
+import asyncio
+import json as _json
 from dataclasses import replace
 
 import pytest
 
+from skills.citation.gate import check_citations
+from skills.citation.hub import CitationProviderHub
+from skills.citation.library import load as _load_library
+from skills.citation.providers.net import FetchResponse
 from skills.citation.registry import SourceRegistry
+from skills.citation.resolution import WorkIdentifier, WorkIntent
+from skills.citation.service import CitationService
 from skills.citation.types import (
     CanonicalIdentity,
     SaveAlternative,
@@ -10,6 +18,7 @@ from skills.citation.types import (
     SaveItemOutcome,
     SaveReceipt,
     SourceRef,
+    is_citable_source,
 )
 
 
@@ -167,3 +176,100 @@ def test_registry_rejects_mismatched_receipt_and_clears_stale_trust():
     registry.register(ref, receipt=receipt())
     registry.register(ref)
     assert registry.trusted_receipt(ref.source_id) is None
+
+
+# --- Verification guarantees that do not depend on the BibTeX chain -------
+#
+# These saves run in desktop mode (a project bibliography), whose success
+# status is ``saved`` before and after the BibTeX chain is removed.
+
+_REQUESTED_ALIAS_DOI = "10.5555/alias-of-primary"
+_PRIMARY_DOI = "10.5555/primary-work"
+_NORMAL_DOI = "10.5555/normal-work"
+_ARXIV_ATOM = (
+    b'<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+    b"<id>http://arxiv.org/abs/2001.00001v1</id><title>A Preprint</title>"
+    b"<published>2020-01-02T00:00:00Z</published>"
+    b"<author><name>Ada Author</name></author></entry></feed>"
+)
+
+
+def _csl(doi, title):
+    return {
+        "DOI": doi, "title": title, "author": [{"given": "Kim", "family": "Ng"}],
+        "issued": {"date-parts": [[2021]]}, "type": "journal-article",
+        "container-title": "Journal",
+    }
+
+
+async def _verification_fetcher(url, headers):
+    accept = headers.get("Accept", "")
+    if url.startswith("https://export.arxiv.org/api/query?"):
+        return FetchResponse(200, body=_ARXIV_ATOM)
+    doi = url.removeprefix("https://doi.org/")
+    # doi.org answers an alias DOI with the primary work's metadata.
+    canonical = _PRIMARY_DOI if doi == _REQUESTED_ALIAS_DOI else doi
+    if canonical not in {_PRIMARY_DOI, _NORMAL_DOI}:
+        raise AssertionError(f"unexpected url: {url}")
+    title = "Primary Work" if canonical == _PRIMARY_DOI else "Normal Work"
+    if "csl+json" in accept:
+        return FetchResponse(200, body=_json.dumps(_csl(canonical, title)).encode())
+    if "x-bibtex" in accept:
+        return FetchResponse(200, body=(
+            f"@article{{k, title={{{title}}}, author={{Ng, Kim}}, year={{2021}}, doi={{{canonical}}}}}"
+        ).encode())
+    raise AssertionError(f"unexpected accept header: {accept}")
+
+
+def _desktop_service(tmp_path):
+    return CitationService(
+        CitationProviderHub(env={}, fetcher=_verification_fetcher),
+        output_dir=tmp_path / "cite",
+        library_path=tmp_path / "references.json",
+    )
+
+
+def _assert_citable(service, receipt):
+    ref = service.registry.get(receipt.source_id)
+    assert ref is not None and is_citable_source(ref)
+    assert check_citations(
+        receipt.cite_marker,
+        verified_source_ids={receipt.source_id},
+        citation_active=True,
+    ) == []
+
+
+def test_normal_doi_and_arxiv_saves_succeed(tmp_path):
+    service = _desktop_service(tmp_path)
+    outcome = asyncio.run(service.save((
+        WorkIntent("doi pick", identifiers=(WorkIdentifier("doi", _NORMAL_DOI),)),
+        WorkIntent("arxiv pick", identifiers=(WorkIdentifier("arxiv", "2001.00001"),)),
+    )))
+
+    doi_item, arxiv_item = outcome.items
+    assert (doi_item.status, doi_item.reason_code) == ("saved", "saved_new")
+    assert doi_item.receipt.canonical_identity.key == _NORMAL_DOI
+    assert doi_item.receipt.title == "Normal Work"
+    assert (arxiv_item.status, arxiv_item.reason_code) == ("saved", "saved_new")
+    assert arxiv_item.receipt.canonical_identity.key == "arxiv:2001.00001"
+    assert arxiv_item.receipt.title == "A Preprint"
+    for item in outcome.items:
+        _assert_citable(service, item.receipt)
+    entries = {entry.get("DOI") or entry.get("title"): entry for entry in _load_library(tmp_path / "references.json").items}
+    assert set(entries) == {_NORMAL_DOI, "A Preprint"}
+
+
+def test_alias_doi_saves_the_doi_org_primary_identity(tmp_path):
+    service = _desktop_service(tmp_path)
+    outcome = asyncio.run(service.save((
+        WorkIntent("alias pick", identifiers=(WorkIdentifier("doi", _REQUESTED_ALIAS_DOI),)),
+    )))
+
+    item = outcome.items[0]
+    assert item.status == "saved"
+    # The identity is the DOI doi.org returns, not the requested alias.
+    assert item.receipt.doi == _PRIMARY_DOI
+    assert item.receipt.canonical_identity.key == _PRIMARY_DOI
+    _assert_citable(service, item.receipt)
+    [entry] = _load_library(tmp_path / "references.json").items
+    assert entry["DOI"] == _PRIMARY_DOI
