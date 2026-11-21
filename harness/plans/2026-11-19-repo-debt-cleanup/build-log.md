@@ -20,7 +20,7 @@
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
-| C6 | Not started | — | — | C6-S1 |
+| C6 | In progress | `evidence/C6-S1/` | — | C6-S2 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
@@ -577,3 +577,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C5-S6/wrap-up.md`。
 - **限制**：`for_agents/` 的 INV-010、INV-029、INV-032 與 ASM-014 過時，由 C10 列入最終彙報。
 - **下一步**：C6-S1。
+
+### C6-S1 registration、catalog 與 `project.list` 的觸點盤點（2026-11-22）
+
+- **觀察結果**：盤點後端、catalog 模組、contract、TS、`App.tsx`、fixture 與測試的觸點（evidence 表）。**GOALS A7 的結論**：支援的流程中前端選取變成 null 時後端都沒有 session，`selectedSessionId` 一律為 null，選取恢復只依賴 `resumeSelectionRef`，不需要把它移到 `session.list`。`registered` 欄位只服務 registration 與 `cataloged`／`transient` 文字，一併移除；sidebar 的「Not saved yet」暫存列與 catalog 無關，保留。模組改名為 `project.py`，例外類別改為 `Project*Error`。`_session_registered` 原本還決定切換時是否保存控制快照，改由「已有存檔 prompt」的單一旗標承擔。
+- **執行指令**：唯讀 grep 與讀碼。
+- **證據**：`evidence/C6-S1/surface.md`。
+- **限制**：無。
+- **下一步**：C6-S2 後端。
