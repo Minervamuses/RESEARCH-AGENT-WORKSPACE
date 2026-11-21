@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/` | — | C2-S5 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/` | — | C2-S6 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -293,3 +293,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：build-log 本節與 `tests/rag/test_tools_contract.py::test_public_import_defers_vector_backends`。
 - **限制**：無。
 - **下一步**：C2-S5 刪除對話 schema v1/v2 讀取器（U6、S046）。
+
+### C2-S5 刪除對話 schema v1/v2 讀取器（2026-11-21）
+
+- **觀察結果**：**S046（APPLIED，U6）**。唯讀核對 `app/store` 下 4/4 個對話檔均為 `schemaVersion = 3`。已刪除 `agent/conversations/models.py` 與 `repository.py` 對 v1/v2 的讀取與升版分支，讀取非 v3 檔案明確拋出 `unsupported_version` 並成為 scan issue；`test_conversation_repository.py` 已改為驗證 v3 rename 隔離與 v1/v2 拒絕不升版。
+- **執行指令**：`pytest tests/test_conversation_repository.py tests/test_desktop_conversations.py tests/test_session_persistence.py tests/test_conversation_archive_access.py`（90 passed in 4.69 s）。
+- **證據**：`evidence/C2-S5/store-versions.md`。
+- **限制**：`app/store` 以外的使用者專案 `historyDirectory` 依 GOALS 限制無法由執行者檢查。
+- **下一步**：C2-S6 移除 `TurnJournal.turn_logs`（S047，缺陷 #5）。

@@ -42,6 +42,7 @@ _DOCUMENT_KEYS = frozenset({
     "createdAt",
     "updatedAt",
     "turns",
+    "customTitle",
 })
 _TURN_KEYS = frozenset({
     "turnId",
@@ -57,6 +58,7 @@ _TURN_KEYS = frozenset({
     "assistantOutput",
     "toolActivities",
     "failure",
+    "submittedContext",
 })
 _TOOL_ACTIVITY_KEYS = frozenset({"callId", "name", "status", "summary"})
 _FAILURE_KEYS = frozenset({"code", "message", "retryable"})
@@ -145,9 +147,8 @@ def _failure_from_json(value: object) -> FailureInfo | None:
     )
 
 
-def _turn_from_json(value: object, schema_version: int) -> ConversationTurn:
-    keys = _TURN_KEYS | {"submittedContext"} if schema_version >= 2 else _TURN_KEYS
-    raw = _expect_exact_object(value, keys)
+def _turn_from_json(value: object) -> ConversationTurn:
+    raw = _expect_exact_object(value, _TURN_KEYS)
     activities = raw["toolActivities"]
     if type(activities) is not list:
         raise ValueError("toolActivities must be a JSON array")
@@ -165,7 +166,7 @@ def _turn_from_json(value: object, schema_version: int) -> ConversationTurn:
         assistant_output=raw["assistantOutput"],
         tool_activities=tuple(_activity_from_json(item) for item in activities),
         failure=_failure_from_json(raw["failure"]),
-        submitted_context=raw.get("submittedContext"),
+        submitted_context=raw["submittedContext"],
     )
 
 
@@ -192,7 +193,7 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
         "schemaVersion" in raw_value
         and (
             type(raw_value["schemaVersion"]) is not int
-            or raw_value["schemaVersion"] not in (1, 2, SCHEMA_VERSION)
+            or raw_value["schemaVersion"] != SCHEMA_VERSION
         )
     ):
         raise _ClassifiedMalformedError(
@@ -201,8 +202,7 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
         )
 
     try:
-        keys = _DOCUMENT_KEYS | {"customTitle"} if raw_value.get("schemaVersion") == 3 else _DOCUMENT_KEYS
-        raw = _expect_exact_object(raw_value, keys)
+        raw = _expect_exact_object(raw_value, _DOCUMENT_KEYS)
         conversation_id = validate_conversation_id(raw["conversationId"])
         if conversation_id != expected_id:
             raise _ClassifiedMalformedError(
@@ -218,8 +218,8 @@ def _document_from_json(data: bytes, expected_id: str) -> ConversationDocument:
             project_id=raw["projectId"],
             created_at=raw["createdAt"],
             updated_at=raw["updatedAt"],
-            turns=tuple(_turn_from_json(item, raw["schemaVersion"]) for item in turns),
-            custom_title=raw.get("customTitle"),
+            turns=tuple(_turn_from_json(item) for item in turns),
+            custom_title=raw["customTitle"],
         )
         return validate_document(document)
     except _ClassifiedMalformedError:
@@ -250,9 +250,9 @@ def _failure_to_json(failure: FailureInfo | None) -> dict[str, Any] | None:
     }
 
 
-def _turn_to_json(turn: ConversationTurn, schema_version: int) -> dict[str, Any]:
+def _turn_to_json(turn: ConversationTurn) -> dict[str, Any]:
     return {
-        **({"submittedContext": validate_submitted_context(turn.submitted_context)} if schema_version >= 2 else {}),
+        "submittedContext": validate_submitted_context(turn.submitted_context),
         "turnId": turn.turn_id,
         "turnNumber": turn.turn_number,
         "kind": turn.kind,
@@ -273,13 +273,13 @@ def _turn_to_json(turn: ConversationTurn, schema_version: int) -> dict[str, Any]
 
 def _document_to_json(document: ConversationDocument) -> dict[str, Any]:
     return {
-        **({"customTitle": document.custom_title} if document.schema_version >= 3 else {}),
+        "customTitle": document.custom_title,
         "schemaVersion": document.schema_version,
         "conversationId": document.conversation_id,
         "projectId": document.project_id,
         "createdAt": document.created_at,
         "updatedAt": document.updated_at,
-        "turns": [_turn_to_json(turn, document.schema_version) for turn in document.turns],
+        "turns": [_turn_to_json(turn) for turn in document.turns],
     }
 
 
@@ -425,7 +425,6 @@ class ConversationRepository:
         document: ConversationDocument,
     ) -> ConversationSnapshot:
         """Atomically publish one complete validated document without clobbering."""
-        document = replace(document, schema_version=SCHEMA_VERSION)
         payload = _encode_document(document)
         self._ensure_root(create=True)
         target = self.path_for(document.conversation_id)
@@ -487,7 +486,6 @@ class ConversationRepository:
         document: ConversationDocument,
     ) -> ConversationSnapshot:
         """Replace a snapshot only if its durable content is still unchanged."""
-        document = replace(document, schema_version=SCHEMA_VERSION)
         self._validate_snapshot_document_pair(snapshot, document)
         self._validate_document_update(snapshot.document, document)
         payload = _encode_document(document)
@@ -520,7 +518,6 @@ class ConversationRepository:
             raise ConversationValidationError("customTitle must be a string")
         document = replace(
             snapshot.document,
-            schema_version=SCHEMA_VERSION,
             custom_title=title.strip(),
             updated_at=updated_at,
         )

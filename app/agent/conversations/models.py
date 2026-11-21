@@ -433,11 +433,9 @@ class ConversationDocument:
     custom_title: str | None = None
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version not in (1, 2, SCHEMA_VERSION):
-            _invalid(f"schemaVersion must equal 1, 2, or {SCHEMA_VERSION}")
+        if type(self.schema_version) is not int or self.schema_version != SCHEMA_VERSION:
+            _invalid(f"schemaVersion must equal {SCHEMA_VERSION}")
         _validate_optional_text(self.custom_title, "customTitle", MAX_TITLE_BYTES, nonblank=True)
-        if self.schema_version < 3 and self.custom_title is not None:
-            _invalid("customTitle requires schemaVersion 3")
         validate_conversation_id(self.conversation_id)
         validate_project_id(self.project_id)
         _created_at, created_value = _timestamp_value(
@@ -638,8 +636,6 @@ def validate_document(document: ConversationDocument) -> ConversationDocument:
     for index, turn in enumerate(document.turns):
         validate_turn(turn)
         if turn.submitted_context is not None:
-            if document.schema_version == 1:
-                _invalid("schemaVersion 1 cannot contain submittedContext")
             if turn.submitted_context["projectId"] != document.project_id:
                 _invalid("submittedContext belongs to another conversation project")
         if turn.turn_number != index + 1:

@@ -449,11 +449,27 @@ def test_title_uses_first_valid_conversational_prompt_and_stays_stable(tmp_path)
     assert repository.path_for(CONVERSATION_ID).read_bytes() == before
 
 
-@pytest.mark.parametrize("schema_version", [1, 2])
-def test_rename_upgrades_only_target_preserving_legacy_turns_and_context(tmp_path, schema_version):
+def test_rename_updates_only_target_preserving_turns_and_context(tmp_path):
+    context = {
+        "projectId": "local", "rootPath": "/research", "permissionMode": "ask",
+        "requestedThinkingMode": "normal", "skillReferences": [], "references": [],
+        "projectRules": {"text": "saved rules", "fingerprint": hashlib.sha256(b"saved rules").hexdigest()},
+    }
     repository = ConversationRepository(tmp_path)
-    repository.complete_turn(
-        _create(repository),
+    created = repository.create(
+        conversation_id=CONVERSATION_ID,
+        project_id="local",
+        turn_id=_uuid4_hex(1),
+        kind="conversational",
+        display_input="display prompt",
+        semantic_input="semantic prompt",
+        context_eligible=True,
+        thinking_mode="normal",
+        submitted_at=_timestamp(1),
+        submitted_context=context,
+    )
+    loaded = repository.complete_turn(
+        created,
         turn_id=_uuid4_hex(1),
         assistant_output="original answer",
         finished_at=_timestamp(2),
@@ -461,27 +477,10 @@ def test_rename_upgrades_only_target_preserving_legacy_turns_and_context(tmp_pat
     other_id = _uuid4_hex(90)
     _create(repository, conversation_id=other_id)
     other_bytes = repository.path_for(other_id).read_bytes()
-    target = repository.path_for(CONVERSATION_ID)
-    legacy = json.loads(target.read_text("utf-8"))
-    legacy["schemaVersion"] = schema_version
-    del legacy["customTitle"]
-    context = {
-        "projectId": "local", "rootPath": "/research", "permissionMode": "ask",
-        "requestedThinkingMode": "normal", "skillReferences": [], "references": [],
-        "projectRules": {"text": "saved rules", "fingerprint": hashlib.sha256(b"saved rules").hexdigest()},
-    }
-    if schema_version == 1:
-        del legacy["turns"][0]["submittedContext"]
-    else:
-        legacy["turns"][0]["submittedContext"] = context
-    target.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
-    legacy_bytes = target.read_bytes()
 
-    loaded = repository.load(CONVERSATION_ID)
     assert loaded.document.custom_title is None
     assert repository.summary(loaded).title == "display prompt"
-    assert loaded.document.turns[0].submitted_context == (context if schema_version == 2 else None)
-    assert target.read_bytes() == legacy_bytes
+    assert loaded.document.turns[0].submitted_context == context
 
     renamed = repository.rename(loaded, "  自訂研究名稱  ", updated_at=_timestamp(3))
     reopened = ConversationRepository(tmp_path).load(CONVERSATION_ID)
@@ -489,13 +488,38 @@ def test_rename_upgrades_only_target_preserving_legacy_turns_and_context(tmp_pat
     assert reopened.document.schema_version == 3
     assert reopened.document.turns == loaded.document.turns
     assert repository.summary(reopened).title == "自訂研究名稱"
-    saved = json.loads(target.read_text("utf-8"))
-    assert saved["customTitle"] == "自訂研究名稱"
-    if schema_version == 2:
-        assert saved["turns"] == legacy["turns"]
     later = _append_completed(repository, reopened, 2)
     assert later.document.custom_title == "自訂研究名稱"
     assert repository.path_for(other_id).read_bytes() == other_bytes
+
+
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_legacy_schema_versions_are_rejected_without_upgrade(tmp_path, schema_version):
+    repository = ConversationRepository(tmp_path)
+    repository.complete_turn(
+        _create(repository),
+        turn_id=_uuid4_hex(1),
+        assistant_output="original answer",
+        finished_at=_timestamp(2),
+    )
+    target = repository.path_for(CONVERSATION_ID)
+    legacy = json.loads(target.read_text("utf-8"))
+    legacy["schemaVersion"] = schema_version
+    del legacy["customTitle"]
+    if schema_version == 1:
+        del legacy["turns"][0]["submittedContext"]
+    target.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+    legacy_bytes = target.read_bytes()
+
+    with pytest.raises(ConversationMalformedError, match="unsupported schema version"):
+        repository.load(CONVERSATION_ID)
+
+    scan = repository.scan()
+    assert scan.summaries == ()
+    assert len(scan.issues) == 1
+    assert scan.issues[0].conversation_id == CONVERSATION_ID
+    assert scan.issues[0].code == "unsupported_version"
+    assert target.read_bytes() == legacy_bytes
 
 
 @pytest.mark.parametrize("title", [" \n ", "界" * 86])
