@@ -96,16 +96,6 @@ export function echoedIdFields(method: ProtocolMethod): readonly string[] {
 export type MethodWithoutResultDto =
   | "session.status"
   | "session.set_thinking"
-  | "knowledge.overview"
-  | "knowledge.search"
-  | "knowledge.list_chunks"
-  | "knowledge.get_context"
-  | "knowledge.init_workspace"
-  | "knowledge.ingest_file"
-  | "knowledge.ingest_folder"
-  | "knowledge.sync"
-  | "knowledge.prune_preview"
-  | "knowledge.prune_apply"
   | "session.shutdown"
   | "extensions.status";
 

@@ -74,35 +74,10 @@
         "protocolVersion": 1,
         "messageType": "request",
         "requestId": "00000000-0000-4000-8000-000000000004",
-        "method": "knowledge.ingest_file",
+        "method": "document.open",
         "params": {
           "path": "/tmp/研究 資料/paper 01.pdf"
         }
-      }
-    },
-    {
-      "name": "prune-apply-with-server-preview",
-      "valid": true,
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000020",
-        "method": "knowledge.prune_apply",
-        "params": {
-          "previewId": "prune-preview-opaque-1"
-        }
-      }
-    },
-    {
-      "name": "prune-apply-missing-preview",
-      "valid": false,
-      "errorCode": "PROTOCOL_INVALID",
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000021",
-        "method": "knowledge.prune_apply",
-        "params": {}
       }
     },
     {
@@ -734,37 +709,6 @@
           "details": {
             "partialWritePossible": true
           }
-        }
-      }
-    },
-    {
-      "name": "knowledge-search-bounded-filters",
-      "valid": true,
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000034",
-        "method": "knowledge.search",
-        "params": {
-          "query": "研究代理",
-          "k": 20,
-          "folderPrefix": "docs/研究",
-          "dateFrom": "2026-01-01"
-        }
-      }
-    },
-    {
-      "name": "knowledge-search-k-out-of-range",
-      "valid": false,
-      "errorCode": "PROTOCOL_INVALID",
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000035",
-        "method": "knowledge.search",
-        "params": {
-          "query": "研究代理",
-          "k": 21
         }
       }
     },

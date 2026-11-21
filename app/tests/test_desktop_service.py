@@ -1563,6 +1563,7 @@ def test_composer_knowledge_paths_fail_closed_before_injected_operations(
         f"/sync {protected}",
         f"/sync {linked}",
         "/sync /",
+        f"/ingest {linked / document.name}",
         f"/prune {document}",
         f"/prune {source} --yes extra",
     ]
@@ -2038,51 +2039,19 @@ def test_runtime_shutdown_is_idempotent(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_knowledge_pagination_drops_raw_metadata(monkeypatch, tmp_path: Path) -> None:
-    import agent.desktop.service as service_module
-
-    hits = [
-        Hit(
-            pid="研究-1",
-            chunk_id=index,
-            text=f"內容 {index}",
-            file_path="docs/研究.md",
-            tags=["研究"],
-            metadata={"rawProviderPayload": "must remain in Python"},
-        )
-        for index in range(3)
-    ]
-    monkeypatch.setattr(service_module, "list_chunks", lambda **_kwargs: hits)
-    service = _service(tmp_path)
-
-    result = asyncio.run(
-        service.dispatch("knowledge.list_chunks", {"offset": 1, "limit": 1})
+def _composer_ingest_service(tmp_path: Path, ingest_file) -> DesktopService:
+    operations = SimpleNamespace(ingest_file=ingest_file)
+    service = _service(
+        tmp_path,
+        session_factory=_SessionFactory(),
+        knowledge_operations=operations,
     )
-
-    assert result["total"] == 3
-    assert result["hasMore"] is True
-    assert result["items"][0]["chunkId"] == 1
-    assert "metadata" not in result["items"][0]
-    assert "rawProviderPayload" not in repr(result)
+    asyncio.run(_open_test_project(service, tmp_path))
+    asyncio.run(service.dispatch("session.create", {"loadMcp": False}))
+    return service
 
 
-@pytest.mark.parametrize("raw", ["relative/path", r"C:\\Users\\research", ""])
-def test_desktop_path_guard_rejects_non_linux_paths(
-    tmp_path: Path, raw: str
-) -> None:
-    service = _service(tmp_path)
-
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(service.dispatch("knowledge.ingest_file", {"path": raw}))
-
-    assert raised.value.code == "INVALID_PATH"
-
-
-def test_single_file_ingest_rejects_unsupported_and_extension_state(
-    monkeypatch, tmp_path: Path
-) -> None:
-    import agent.desktop.service as service_module
-
+def test_composer_ingest_rejects_unsupported_and_extension_state(tmp_path: Path) -> None:
     called = False
 
     async def fake_ingest(_target, _config):
@@ -2090,96 +2059,48 @@ def test_single_file_ingest_rejects_unsupported_and_extension_state(
         called = True
         return "pid", 1
 
-    monkeypatch.setattr(service_module, "ingest_file", fake_ingest)
     unsupported = tmp_path / ".env"
     unsupported.write_text("PRIVATE=value", encoding="utf-8")
     dropin = tmp_path / "dropin"
     dropin.mkdir()
     private_extension = dropin / "private.md"
     private_extension.write_text("private extension instructions", encoding="utf-8")
-    service = _service(tmp_path)
+    service = _composer_ingest_service(tmp_path, fake_ingest)
 
     for target in (unsupported, private_extension):
         with pytest.raises(DesktopServiceError) as raised:
-            asyncio.run(
-                service.dispatch("knowledge.ingest_file", {"path": str(target)})
-            )
+            asyncio.run(service.dispatch("session.turn", _turn_params(f"/ingest {target}")))
         assert raised.value.code == "INVALID_PATH"
     assert called is False
 
 
-def test_desktop_path_guard_rejects_symlinked_parent(tmp_path: Path) -> None:
-    real = tmp_path / "real"
-    real.mkdir()
-    target = real / "research.md"
-    target.write_text("research", encoding="utf-8")
-    linked = tmp_path / "linked"
-    linked.symlink_to(real, target_is_directory=True)
-    service = _service(tmp_path)
-
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(
-            service.dispatch(
-                "knowledge.ingest_file", {"path": str(linked / target.name)}
-            )
-        )
-
-    assert raised.value.code == "INVALID_PATH"
-
-
-def test_single_file_ingest_rejects_zero_chunks_and_maps_ollama_failures(
-    monkeypatch, tmp_path: Path
-) -> None:
-    import agent.desktop.service as service_module
-
+def test_composer_ingest_rejects_zero_chunks_and_maps_ollama_failures(tmp_path: Path) -> None:
     target = tmp_path / "research.md"
     target.write_text("research content", encoding="utf-8")
-    service = _service(tmp_path)
+    behavior = {"result": ("research", 0), "error": None}
 
-    async def no_chunks(_target, _config):
-        return "research", 0
+    async def fake_ingest(_target, _config):
+        if behavior["error"] is not None:
+            raise behavior["error"]
+        return behavior["result"]
 
-    monkeypatch.setattr(service_module, "ingest_file", no_chunks)
+    service = _composer_ingest_service(tmp_path, fake_ingest)
+    command = _turn_params(f"/ingest {target}")
+
     with pytest.raises(DesktopServiceError) as empty:
-        asyncio.run(
-            _dispatch_approved(service, "knowledge.ingest_file", {"path": str(target)})
-        )
+        asyncio.run(_dispatch_approved(service, "session.turn", command))
     assert empty.value.code == "RAG_WRITE_FAILED"
 
-    async def missing_model(_target, _config):
-        raise RuntimeError("embedding model not found; pull it first")
-
-    monkeypatch.setattr(service_module, "ingest_file", missing_model)
+    behavior["error"] = RuntimeError("embedding model not found; pull it first")
     with pytest.raises(DesktopServiceError) as ollama:
-        asyncio.run(
-            _dispatch_approved(service, "knowledge.ingest_file", {"path": str(target)})
-        )
+        asyncio.run(_dispatch_approved(service, "session.turn", _turn_params(f"/ingest {target}")))
     assert ollama.value.code == "OLLAMA_MODEL_MISSING"
-    assert ollama.value.details == {"partialWritePossible": True}
+    assert ollama.value.retryable is True
 
-    async def provider_response_error(_target, _config):
-        raise RuntimeError("ollama.ResponseError: prompt too long (status code: 400)")
-
-    monkeypatch.setattr(service_module, "ingest_file", provider_response_error)
+    behavior["error"] = RuntimeError("ollama.ResponseError: prompt too long (status code: 400)")
     with pytest.raises(DesktopServiceError) as response_error:
-        asyncio.run(
-            _dispatch_approved(service, "knowledge.ingest_file", {"path": str(target)})
-        )
+        asyncio.run(_dispatch_approved(service, "session.turn", _turn_params(f"/ingest {target}")))
     assert response_error.value.code == "RAG_WRITE_FAILED"
-
-
-def test_folder_ingest_waits_for_structured_progress_step(tmp_path: Path) -> None:
-    folder = tmp_path / "documents"
-    folder.mkdir()
-    service = _service(tmp_path)
-
-    with pytest.raises(DesktopServiceError) as raised:
-        asyncio.run(
-            service.dispatch("knowledge.ingest_folder", {"path": str(folder)})
-        )
-
-    assert raised.value.code == "RAG_WRITE_FAILED"
-    assert "structured progress" in str(raised.value)
 
 
 def test_extension_preview_is_opaque_and_apply_returns_safe_durable_result(

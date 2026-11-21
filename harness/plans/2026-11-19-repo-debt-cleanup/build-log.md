@@ -18,7 +18,7 @@
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
-| C4 | Not started | — | — | C4-S1 |
+| C4 | In progress | `evidence/C4-S1/` | — | C4-S2 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
@@ -456,3 +456,14 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C3-S6/add-method-walkthrough.md`。
 - **限制**：`tests/protocol_types.test.ts` 的 `DTO_EXCEPTIONS` 與 `MethodWithoutResultDto` 中的 `session.shutdown`、`extensions.status`，以及 9 個未發出的 event，留給 C4 清除。
 - **下一步**：C4-S1。
+
+### C4-S1 刪 10 個 `knowledge.*` RPC（2026-11-22）
+
+- **觀察結果**：
+  - **S007（U2 部分，APPLIED）**：刪除 dispatch 的 10 個項目、10 個 handler、`_hit_dto`、RPC 專用的 `_prune_previews` 與其 `clear()`，以及因此無人使用的 `rag` 查詢 import 與 `math`。A3 列出的斜線指令共用符號全部保留（evidence §2）。contract 方法 40 → 30，approval enum 保留 4 個 `knowledge.*`。
+  - 測試：刪除 3 個只測 RPC 的測試與 `test_project_permissions.py` 的 RPC 核准測試（S036）；把 extension 狀態檔、0 chunk 與 Ollama 錯誤對照的兩個測試改寫到 `/ingest`，symlink 父目錄併入 composer fail-closed 測試，並在 composer 核准測試加上 `parentRequestId` 關聯斷言。fixture `unicode-path-with-spaces` 改用 `document.open`。
+  - 觀察：composer `/ingest` 的錯誤 details 依 contract 只有 turn lifecycle，看不到 `partialWritePossible`（既有行為，列入最終彙報）。
+- **執行指令**：相關 pytest 模組（621 passed，沙箱外）、`npm test`（224 pass）、`npm run build`（通過）。
+- **證據**：`evidence/C4-S1/knowledge-rpc.md`（刪除前 grep、保留清單、退役紀錄）。
+- **限制**：無。
+- **下一步**：C4-S2 移除 `session.status`、`session.shutdown`、`extensions.status` 的 RPC 註冊（P1）。

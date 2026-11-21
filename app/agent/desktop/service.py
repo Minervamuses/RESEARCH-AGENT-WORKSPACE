@@ -9,7 +9,6 @@ import importlib.metadata
 import inspect
 import json
 import logging
-import math
 import os
 import platform
 import re
@@ -94,7 +93,6 @@ from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX, READ_ONLY_
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.skills.runtime import SkillSelectionError, resolve_skill_references
 from agent.turns.safety import content_text
-from rag import explore, get_context, list_chunks, search
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.citekeys import format_for_path as citation_format_for_path
 from skills.citation.citekeys import keys_in as citation_keys_in
@@ -411,7 +409,6 @@ class DesktopService:
         self._tool_names: dict[str, str] = {}
         self._tool_summaries: dict[str, dict[str, str]] = {}
         self._extension_previews: dict[str, ExtensionPreview] = {}
-        self._prune_previews: dict[str, _PrunePreview] = {}
         self._composer_prune_preview: tuple[str, _PrunePreview] | None = None
         self._documents = DocumentWorkspace()
         self._document_candidates: dict[str, _DocumentCandidate] = {}
@@ -481,16 +478,6 @@ class DesktopService:
             "session.set_thinking": self._session_set_thinking,
             "session.set_bash_permission": self._session_set_bash_permission,
             "session.shutdown": self._session_shutdown,
-            "knowledge.overview": self._knowledge_overview,
-            "knowledge.search": self._knowledge_search,
-            "knowledge.list_chunks": self._knowledge_list_chunks,
-            "knowledge.get_context": self._knowledge_get_context,
-            "knowledge.init_workspace": self._knowledge_init_workspace,
-            "knowledge.ingest_file": self._knowledge_ingest_file,
-            "knowledge.ingest_folder": self._knowledge_ingest_folder,
-            "knowledge.sync": self._knowledge_sync,
-            "knowledge.prune_preview": self._knowledge_prune_preview,
-            "knowledge.prune_apply": self._knowledge_prune_apply,
             "extensions.status": self._extensions_status,
             "extensions.preview": self._extensions_preview,
             "extensions.apply": self._extensions_apply,
@@ -3500,7 +3487,6 @@ class DesktopService:
     def _clear_session_caches(self) -> None:
         self._complete_pending_approval(False)
         self._extension_previews.clear()
-        self._prune_previews.clear()
         self._composer_prune_preview = None
 
     def _require_session(self) -> ChatSession:
@@ -3644,215 +3630,6 @@ class DesktopService:
         if isinstance(payload, dict) and payload.get("approved") is False:
             return "denied"
         return "ok"
-
-    async def _knowledge_overview(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        inventory = await asyncio.to_thread(explore, config=self.config)
-        meta_path = Path(self.config.folder_meta_path())
-        return {
-            "storePath": str(Path(self.config.persist_dir).expanduser().resolve()),
-            "folderMetadataPresent": meta_path.is_file(),
-            "categories": [
-                {"name": name, "count": count}
-                for name, count in sorted(inventory.categories.items())
-            ],
-            "tags": list(inventory.tags),
-            "dateRange": list(inventory.date_range) if inventory.date_range else None,
-            "folders": [
-                {
-                    "folder": item.folder,
-                    "category": item.category,
-                    "tags": list(item.tags),
-                    "summary": item.summary,
-                }
-                for item in inventory.folders
-            ],
-        }
-
-    async def _knowledge_search(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        if self._knowledge_active:
-            raise DesktopServiceError(
-                "BUSY_KNOWLEDGE_MUTATION",
-                "A knowledge mutation is active.",
-                retryable=True,
-            )
-        hits = await asyncio.to_thread(
-            search,
-            params["query"],
-            k=params.get("k", 5),
-            folder_prefix=params.get("folderPrefix"),
-            category=params.get("category"),
-            file_type=params.get("fileType"),
-            date_from=params.get("dateFrom"),
-            date_to=params.get("dateTo"),
-            config=self.config,
-        )
-        return {"items": [self._hit_dto(hit) for hit in hits]}
-
-    async def _knowledge_list_chunks(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        hits = await asyncio.to_thread(
-            list_chunks,
-            folder_prefix=params.get("folderPrefix"),
-            pid=params.get("pid"),
-            category=params.get("category"),
-            file_type=params.get("fileType"),
-            date_from=params.get("dateFrom"),
-            date_to=params.get("dateTo"),
-            config=self.config,
-        )
-        offset = params.get("offset", 0)
-        limit = params.get("limit", 50)
-        page = hits[offset : offset + limit]
-        return {
-            "items": [self._hit_dto(hit) for hit in page],
-            "total": len(hits),
-            "offset": offset,
-            "limit": limit,
-            "hasMore": offset + len(page) < len(hits),
-        }
-
-    async def _knowledge_get_context(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        window = await asyncio.to_thread(
-            get_context,
-            params["pid"],
-            params["chunkId"],
-            window=params.get("window", 1),
-            config=self.config,
-        )
-        if window is None:
-            return {
-                "found": False,
-                "pid": params["pid"],
-                "targetChunkId": params["chunkId"],
-                "chunks": [],
-                "totalChunksInDoc": 0,
-            }
-        return {
-            "found": True,
-            "pid": window.pid,
-            "targetChunkId": window.target_chunk_id,
-            "chunks": [
-                {
-                    "chunkId": chunk.chunk_id,
-                    "text": chunk.text,
-                    "isTarget": chunk.is_target,
-                }
-                for chunk in window.chunks
-            ],
-            "totalChunksInDoc": window.total_chunks_in_doc,
-        }
-
-    async def _knowledge_init_workspace(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        raise DesktopServiceError(
-            "RAG_WRITE_FAILED",
-            "Workspace ingest requires structured progress and is not enabled yet.",
-        )
-
-    async def _knowledge_ingest_file(
-        self, params: dict[str, Any], event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        target = self._validated_path(params["path"], kind="file")
-        if (
-            target.suffix.lower() not in TEXT_EXTENSIONS
-            and target.name not in _EXTENSIONLESS_INGEST_FILES
-        ):
-            raise DesktopServiceError(
-                "INVALID_PATH", "The selected file type is not supported for ingest."
-            )
-        async with self._knowledge_operation():
-            await self._require_operation_approval(
-                "knowledge.ingest_file", str(target), "Import this file into the local knowledge index.",
-                parameters={"storePath": str(Path(self.config.persist_dir).expanduser().resolve())}, event_sink=event_sink,
-            )
-            pid, chunks = await ingest_file(target, self.config)
-        if chunks <= 0:
-            raise DesktopServiceError(
-                "RAG_WRITE_FAILED",
-                "The selected file contains no indexable UTF-8 text.",
-            )
-        return {"path": str(target), "pid": pid, "chunks": chunks}
-
-    async def _knowledge_ingest_folder(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        self._validated_path(params["path"], kind="directory")
-        raise DesktopServiceError(
-            "RAG_WRITE_FAILED",
-            "Folder ingest requires structured progress and is not enabled yet.",
-        )
-
-    async def _knowledge_sync(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        target = self._validated_path(params["path"], kind="directory")
-        async with self._knowledge_operation():
-            diff = await diff_folder(target, self.config)
-        return {
-            "root": str(target),
-            "missingFromStore": list(diff["missing_from_store"]),
-            "missingFromDisk": list(diff["missing_from_disk"]),
-            "comparison": "path_presence_only",
-        }
-
-    async def _knowledge_prune_preview(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        target = self._validated_path(
-            params["path"], kind="directory", destructive_root=True
-        )
-        async with self._knowledge_operation():
-            diff = await diff_folder(target, self.config)
-        orphans = tuple(sorted(diff["missing_from_disk"]))
-        digest = self._prune_digest(target, orphans)
-        preview_id = uuid.uuid4().hex
-        self._bounded_cache_insert(
-            self._prune_previews,
-            preview_id,
-            _PrunePreview(target, orphans, digest),
-        )
-        return {
-            "previewId": preview_id,
-            "root": str(target),
-            "orphans": list(orphans),
-            "count": len(orphans),
-            "hash": digest,
-        }
-
-    async def _knowledge_prune_apply(
-        self, params: dict[str, Any], event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        preview = self._prune_previews.get(params["previewId"])
-        if preview is None:
-            raise DesktopServiceError(
-                "PRUNE_PREVIEW_STALE", "The prune preview is unknown or already used."
-            )
-        async with self._knowledge_operation():
-            await self._require_operation_approval(
-                "knowledge.prune_apply", str(preview.root), "Prune these missing paths from the local knowledge index.",
-                parameters={"orphans": list(preview.orphans), "storePath": str(Path(self.config.persist_dir).expanduser().resolve())}, event_sink=event_sink,
-            )
-            latest = await diff_folder(preview.root, self.config)
-            latest_orphans = tuple(sorted(latest["missing_from_disk"]))
-            if self._prune_digest(preview.root, latest_orphans) != preview.digest:
-                self._prune_previews.pop(params["previewId"], None)
-                raise DesktopServiceError(
-                    "PRUNE_PREVIEW_STALE",
-                    "The prune preview changed; preview again before applying.",
-                )
-            try:
-                removed = await prune_folder(preview.root, self.config)
-            finally:
-                self._prune_previews.pop(params["previewId"], None)
-        return {"root": str(preview.root), "deleted": list(removed)}
 
     @staticmethod
     def _prune_digest(root: Path, orphans: tuple[str, ...]) -> str:
@@ -4236,24 +4013,6 @@ class DesktopService:
             extension_paths.state_root.resolve(),
         }
         return tuple(sorted(roots, key=str))
-
-    @staticmethod
-    def _hit_dto(hit: Any) -> dict[str, Any]:
-        score = hit.score
-        if not isinstance(score, (int, float)) or not math.isfinite(score):
-            score = None
-        return {
-            "pid": hit.pid,
-            "chunkId": hit.chunk_id,
-            "text": hit.text,
-            "filePath": hit.file_path,
-            "category": hit.category,
-            "fileType": hit.file_type,
-            "folder": hit.folder,
-            "date": hit.date,
-            "tags": list(hit.tags),
-            "score": score,
-        }
 
     @staticmethod
     def _extension_status_dto(status: ExtensionStatus) -> dict[str, Any]:

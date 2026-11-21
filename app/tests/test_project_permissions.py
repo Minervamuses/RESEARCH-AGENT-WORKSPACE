@@ -160,54 +160,7 @@ def test_slash_index_mutations_ask_or_bypass_without_real_index(tmp_path, kind, 
             event = sink.approvals[0]
             assert event["targetPath"] == str(document if kind == "file" else source)
             assert "storePath" in json.loads(event["parametersSummary"])
-    asyncio.run(run())
-
-
-@pytest.mark.parametrize("mode,approved,effects", [("ask", True, 1), ("ask", False, 0), ("bypass", False, 1)])
-@pytest.mark.parametrize("kind", ["ingest", "prune"])
-def test_direct_index_rpc_mutators_have_correlated_approval(tmp_path, monkeypatch, mode, approved, effects, kind):
-    async def run():
-        source = tmp_path / "source"
-        source.mkdir()
-        document = source / "paper.md"
-        document.write_text("source", encoding="utf-8")
-        writes = []
-
-        async def ingest(_target, _config):
-            writes.append("ingest")
-            return "paper", 1
-
-        async def diff(_target, _config):
-            return {"missing_from_store": [], "missing_from_disk": ["removed.md"]}
-
-        async def prune(_target, _config):
-            writes.append("prune")
-            return ["removed"]
-
-        monkeypatch.setattr("agent.desktop.service.ingest_file", ingest)
-        monkeypatch.setattr("agent.desktop.service.diff_folder", diff)
-        monkeypatch.setattr("agent.desktop.service.prune_folder", prune)
-        service = _service(tmp_path, session_factory=_SessionFactory())
-        await _open_test_project(service, tmp_path / "research")
-        await service.dispatch("session.create", {"loadMcp": False})
-        await service.dispatch("session.set_bash_permission", {"mode": mode})
-        if kind == "ingest":
-            method, params = "knowledge.ingest_file", {"path": str(document)}
-        else:
-            preview = await service.dispatch("knowledge.prune_preview", {"path": str(source)})
-            method, params = "knowledge.prune_apply", {"previewId": preview["previewId"]}
-        sink = _ApprovalSink(service, approve=approved)
-        if mode == "ask" and not approved:
-            with pytest.raises(DesktopServiceError) as raised:
-                await service.dispatch(method, params, event_sink=sink)
-            assert raised.value.code == "APPROVAL_DENIED"
-        else:
-            await service.dispatch(method, params, event_sink=sink)
-        await asyncio.gather(*sink.tasks)
-        assert len(writes) == effects
-        assert len(sink.approvals) == (mode == "ask")
-        if sink.approvals:
-            assert sink.approvals[0]["parentRequestId"] == sink.request_id
+            assert event["parentRequestId"] == sink.request_id
     asyncio.run(run())
 
 
