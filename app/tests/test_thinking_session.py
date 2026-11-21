@@ -129,10 +129,6 @@ def _default_models(**overrides):
     return models
 
 
-def _fusion(session):
-    return session.turn_logs[-1]["fusion"]
-
-
 def _state_for(factory, model_id):
     return next(call["state"] for call in factory.calls if call["model_id"] == model_id)
 
@@ -187,11 +183,11 @@ def test_three_of_three_success_runs_full_panel(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2", "p3"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "fused"
+    assert outcome.text == "fused"
     assert len(models["aggregator"].calls) == 1
-    assert _fusion(session)["reliability_tier"] == "full_panel"
+    assert outcome.fusion["reliability_tier"] == "full_panel"
 
 
 def test_two_of_three_success_runs_partial_panel(monkeypatch, tmp_path):
@@ -206,11 +202,11 @@ def test_two_of_three_success_runs_partial_panel(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2", "p3"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "fused"
+    assert outcome.text == "fused"
     assert len(models["aggregator"].calls) == 1
-    fusion = _fusion(session)
+    fusion = outcome.fusion
     assert fusion["reliability_tier"] == "partial_panel"
     assert fusion["candidate_statuses"] == {
         "candidate-1": "success", "candidate-2": "empty", "candidate-3": "success",
@@ -227,12 +223,12 @@ def test_one_success_skips_aggregator_but_still_reviews(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2", "p3"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "only answer"
+    assert outcome.text == "only answer"
     assert len(models["aggregator"].calls) == 0
     assert len(models["reviewer"].calls) == 1
-    assert _fusion(session)["reliability_tier"] == "single_candidate"
+    assert outcome.fusion["reliability_tier"] == "single_candidate"
 
 
 def test_zero_success_runs_base_fallback_into_reviewer(monkeypatch, tmp_path):
@@ -246,12 +242,12 @@ def test_zero_success_runs_base_fallback_into_reviewer(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2", "p3"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "base fallback draft"
+    assert outcome.text == "base fallback draft"
     assert len(models["aggregator"].calls) == 0
     assert len(models["reviewer"].calls) == 1
-    fusion = _fusion(session)
+    fusion = outcome.fusion
     assert fusion["reliability_tier"] == "fallback"
     assert fusion["aggregator_error"] == "no_successful_candidates_base_fallback"
     assert any(c["model_id"] == "session-writer" for c in factory.calls)
@@ -265,11 +261,11 @@ def test_aggregator_invalid_json_falls_back_then_reviews(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "a1"
+    assert outcome.text == "a1"
     assert len(models["reviewer"].calls) == 1
-    fusion = _fusion(session)
+    fusion = outcome.fusion
     assert fusion["reliability_tier"] == "fallback"
     assert "aggregator_failure" in fusion["aggregator_error"]
 
@@ -284,11 +280,11 @@ def test_aggregator_schema_invalid_falls_back_then_reviews(monkeypatch, tmp_path
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "a1"
+    assert outcome.text == "a1"
     assert len(models["reviewer"].calls) == 1
-    assert _fusion(session)["reliability_tier"] == "fallback"
+    assert outcome.fusion["reliability_tier"] == "fallback"
 
 
 def test_quorum_not_met_falls_back_then_reviews(monkeypatch, tmp_path):
@@ -302,12 +298,12 @@ def test_quorum_not_met_falls_back_then_reviews(monkeypatch, tmp_path):
         cfg=_cfg(tmp_path, proposer_models=["p1", "p2", "p3"], thinking_fusion_quorum=3),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert answer == "a1"
+    assert outcome.text == "a1"
     assert len(models["aggregator"].calls) == 0
     assert len(models["reviewer"].calls) == 1
-    fusion = _fusion(session)
+    fusion = outcome.fusion
     assert fusion["reliability_tier"] == "fallback"
     assert fusion["aggregator_error"] == "quorum_not_met"
 
@@ -323,11 +319,11 @@ def test_no_draft_returns_extended_error(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1", "p2"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert "Extended mode 無法安全完成" in answer
+    assert "Extended mode 無法安全完成" in outcome.text
     assert len(models["reviewer"].calls) == 0
-    assert _fusion(session)["reliability_tier"] == "fallback"
+    assert outcome.fusion["reliability_tier"] == "fallback"
 
 
 def test_reviewer_revise_path_still_works(monkeypatch, tmp_path):
@@ -361,11 +357,11 @@ def test_extended_clarification_skips_candidate_panel(monkeypatch, tmp_path):
         models=models, cfg=_cfg(tmp_path, proposer_models=["p1"]),
     )
 
-    answer = asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    assert "Which journal?" in answer
+    assert "Which journal?" in outcome.text
     assert factory.calls == []
-    assert session.turn_logs[-1]["fusion"] is None
+    assert outcome.fusion is None
 
 
 # --- Interface / invariant tests ------------------------------------------
@@ -389,19 +385,20 @@ def _two_tool_candidate_session(monkeypatch, tmp_path):
 def test_turn_holds_flat_calls_metadata_and_segmented_traces(monkeypatch, tmp_path):
     session, _factory, _models = _two_tool_candidate_session(monkeypatch, tmp_path)
 
-    asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
 
-    tool_calls = session.turn_logs[-1]["tool_calls"]
+    tool_calls = session.last_tool_calls
+    assert outcome.tool_calls == tool_calls
     candidate_calls = [c for c in tool_calls if c.get("candidate_id")]
     assert {c["candidate_id"] for c in candidate_calls} == {"candidate-1", "candidate-2"}
     # aggregator LLM call is never a tool call; only the two candidate calls exist.
     assert len(tool_calls) == 2
     assert all(c["name"] == "rag_search" for c in tool_calls)
 
-    fusion = session.turn_logs[-1]["fusion"]
+    fusion = outcome.fusion
     assert fusion["candidate_statuses"] == {"candidate-1": "success", "candidate-2": "success"}
     assert fusion["model_ids"] == {"candidate-1": "p1", "candidate-2": "p2"}
-    trace_events = session.turn_logs[-1]["trace_events"]
+    trace_events = outcome.trace_events
     assert any(ev.get("type") == "fusion" for ev in trace_events)
     candidate_events = [ev for ev in trace_events if ev.get("candidate_id")]
     assert {ev["candidate_id"] for ev in candidate_events} == {"candidate-1", "candidate-2"}
@@ -436,10 +433,10 @@ def test_extended_thinking_keeps_canonical_tool_summaries_and_candidate_scoped_t
 ):
     session, _factory, _models = _two_tool_candidate_session(monkeypatch, tmp_path)
 
-    asyncio.run(session.turn("question"))
+    outcome = asyncio.run(session.turn_outcome("question"))
     snapshot = session.conversation_repository.load(session.session_id)
     turn = snapshot.document.turns[-1]
-    trace_events = session.turn_logs[-1]["trace_events"]
+    trace_events = outcome.trace_events
     candidate_events = {
         event["candidate_id"]: event
         for event in trace_events

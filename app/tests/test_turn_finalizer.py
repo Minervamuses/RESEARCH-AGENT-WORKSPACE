@@ -137,32 +137,33 @@ def _save_failure_tool_message(*failures, content="save failed", call_id="save-f
 
 
 def _assert_save_metrics(
-    session, *, batches=0, saved=0, reused=0, failed=0,
+    caplog, *, batches=0, saved=0, reused=0, failed=0,
 ):
-    metrics = session.turn_logs[-1]
-    assert {
-        "citation_save_batch_count": metrics["citation_save_batch_count"],
-        "new_saved_count": metrics["new_saved_count"],
-        "reused_count": metrics["reused_count"],
-        "failed_count": metrics["failed_count"],
-    } == {
-        "citation_save_batch_count": batches,
-        "new_saved_count": saved,
-        "reused_count": reused,
-        "failed_count": failed,
-    }
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "agent.observability"
+        and record.getMessage().startswith("citation_save_finalized")
+    ]
+    if batches == 0 and saved == 0 and reused == 0 and failed == 0:
+        assert lines == []
+        return
+    assert lines[-1] == (
+        f"citation_save_finalized citation_save_batch_count={batches} "
+        f"new_saved_count={saved} reused_count={reused} failed_count={failed}"
+    )
 
 
-def test_clean_turn_returns_outcome_and_records(make_session):
+def test_clean_turn_returns_outcome_and_records(make_session, caplog):
     session = make_session(answer="plain answer")
-    outcome = asyncio.run(session.turn_outcome("hello"))
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        outcome = asyncio.run(session.turn_outcome("hello"))
     assert isinstance(outcome, TurnOutcome)
     assert outcome.text == "plain answer"
     assert outcome.validation_errors == []
     assert session.recent_turns[-1].assistant_output == "plain answer"
-    assert session.turn_logs[-1]["validation_errors"] == []
-    assert session.turn_logs[-1]["recovery"] is None
-    _assert_save_metrics(session)
+    assert outcome.recovery_reason is None
+    _assert_save_metrics(caplog)
 
 
 def test_status_reports_configured_graph_recursion_limit(make_session):
@@ -177,7 +178,7 @@ def test_blank_turn_uses_deterministic_fallback_and_records_it(make_session, dra
     outcome = asyncio.run(session.turn_outcome("請整理結果"))
     assert "未能產生可顯示" in outcome.text
     assert session.recent_turns[-1].assistant_output == outcome.text
-    assert session.turn_logs[-1]["recovery"] == "finalizer:empty_final_answer"
+    assert outcome.recovery_reason == "finalizer:empty_final_answer"
 
 
 @pytest.mark.parametrize("draft", [
@@ -192,7 +193,7 @@ def test_tool_protocol_artifact_never_reaches_history(make_session, draft):
     outcome = asyncio.run(session.turn_outcome("繼續"))
     assert "citation_workflow" not in outcome.text
     assert draft not in session.recent_turns[-1].assistant_output
-    assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
+    assert outcome.recovery_reason.startswith("finalizer:")
 
 
 @pytest.mark.parametrize("draft", [
@@ -204,7 +205,7 @@ def test_plain_tool_prose_is_not_a_protocol_artifact(make_session, draft):
     session = make_session(answer=draft)
     outcome = asyncio.run(session.turn_outcome("explain"))
     assert outcome.text == draft
-    assert session.turn_logs[-1]["recovery"] is None
+    assert outcome.recovery_reason is None
 
 
 def test_structured_tool_content_is_detected_before_flattening():
@@ -282,7 +283,7 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
 
     assert outcome.text == "Model-selected response."
     assert session.recent_turns[-1].assistant_output == "Model-selected response."
-    _assert_save_metrics(session, batches=1, saved=1, failed=1)
+    _assert_save_metrics(caplog, batches=1, saved=1, failed=1)
     lines = [
         record.getMessage()
         for record in caplog.records
@@ -299,7 +300,7 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
 
 
 def test_multiple_save_artifacts_aggregate_without_invariant_failure(
-    make_session, tmp_path,
+    make_session, tmp_path, caplog,
 ):
     session = make_session()
 
@@ -314,11 +315,12 @@ def test_multiple_save_artifacts_aggregate_without_invariant_failure(
         ]
 
     session.graph = _citation_turn_graph(updates)
-    outcome = asyncio.run(session.turn_outcome("save both", skill_name="citation"))
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        outcome = asyncio.run(session.turn_outcome("save both", skill_name="citation"))
 
     assert outcome.text == "Two save calls completed."
     _assert_save_metrics(
-        session, batches=2, saved=1, reused=1, failed=2,
+        caplog, batches=2, saved=1, reused=1, failed=2,
     )
 
 
@@ -329,7 +331,7 @@ def test_multiple_save_artifacts_aggregate_without_invariant_failure(
     ("work_type", "forged-type"),
 ])
 def test_registry_mismatch_affects_telemetry_but_not_model_prose(
-    make_session, tmp_path, field, forged_value,
+    make_session, tmp_path, caplog, field, forged_value,
 ):
     session = make_session()
 
@@ -343,10 +345,11 @@ def test_registry_mismatch_affects_telemetry_but_not_model_prose(
         ]
 
     session.graph = _citation_turn_graph(updates)
-    outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "The model owns this prose."
-    _assert_save_metrics(session, batches=1, failed=2)
+    _assert_save_metrics(caplog, batches=1, failed=2)
 
 
 def test_forged_receipt_identifier_never_reaches_logs(
@@ -374,7 +377,7 @@ def test_forged_receipt_identifier_never_reaches_logs(
     assert secret not in "\n".join(record.getMessage() for record in caplog.records)
 
 
-def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
+def test_error_tool_message_does_not_count_artifact(make_session, tmp_path, caplog):
     session = make_session()
 
     def updates():
@@ -385,9 +388,10 @@ def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
         ]
 
     session.graph = _citation_turn_graph(updates)
-    outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
     assert outcome.text == "工具呼叫失敗。"
-    _assert_save_metrics(session)
+    _assert_save_metrics(caplog)
 
 
 def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
@@ -424,7 +428,7 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
     ]
 
 
-def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_path):
+def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_path, caplog):
     session = make_session()
 
     def updates():
@@ -439,14 +443,15 @@ def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_p
         ]
 
     session.graph = _citation_turn_graph(updates)
-    outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "Reused the existing bundle."
-    _assert_save_metrics(session, batches=1, reused=1, failed=1)
+    _assert_save_metrics(caplog, batches=1, reused=1, failed=1)
 
 
 def test_all_save_failures_do_not_deterministically_replace_model_draft(
-    make_session, tmp_path,
+    make_session, tmp_path, caplog,
 ):
     session = make_session()
 
@@ -461,10 +466,11 @@ def test_all_save_failures_do_not_deterministically_replace_model_draft(
         ]
 
     session.graph = _citation_turn_graph(updates)
-    outcome = asyncio.run(session.turn_outcome("全部存下來", skill_name="citation"))
+    with caplog.at_level(logging.INFO, logger="agent.observability"):
+        outcome = asyncio.run(session.turn_outcome("全部存下來", skill_name="citation"))
 
     assert outcome.text == "This is the model's final wording."
-    _assert_save_metrics(session, batches=1, failed=2)
+    _assert_save_metrics(caplog, batches=1, failed=2)
 
 
 @pytest.mark.parametrize("draft", ["", 'citation_workflow(action="sources")'])
@@ -484,7 +490,7 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     outcome = asyncio.run(session.turn_outcome("確認", skill_name="citation"))
     assert "工具結果已取得" in outcome.text
     assert "src-known" not in outcome.text
-    assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
+    assert outcome.recovery_reason.startswith("finalizer:")
 
 
 def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
@@ -525,7 +531,7 @@ def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
     assert summaries == [
         ("citation_workflow", "ok", "Tool execution completed."),
     ]
-    assert session.turn_logs[-1]["trace_events"] == [{"type": "tool", **tool_call}]
+    assert outcome.trace_events == [{"type": "tool", **tool_call}]
     assert "src-known" not in canonical_text
 
 
@@ -561,6 +567,8 @@ def test_canonical_answer_survives_later_turn_without_secondary_store(
         ("citation_workflow", "ok"),
     ]
     assert not hasattr(first, "sources")
+    assert set(vars(session._turn_journal)) == {"last_tool_calls"}
+    assert session.last_tool_calls == []
 
 
 def test_user_doi_in_input_is_never_auto_registered(make_session):
@@ -653,5 +661,5 @@ def test_extended_mode_early_error_goes_through_finalizer(make_session):
     session.thinking_mode = "extended"
     outcome = asyncio.run(session.turn_outcome("question"))
     assert isinstance(outcome, TurnOutcome)
-    assert session.turn_logs[-1]["validation_errors"] == []
+    assert outcome.validation_errors == []
     assert session.recent_turns[-1].assistant_output == outcome.text

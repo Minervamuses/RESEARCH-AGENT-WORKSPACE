@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/` | — | C2-S6 |
+| C2 | In progress | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/` | — | C2-S7 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -301,3 +301,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S5/store-versions.md`。
 - **限制**：`app/store` 以外的使用者專案 `historyDirectory` 依 GOALS 限制無法由執行者檢查。
 - **下一步**：C2-S6 移除 `TurnJournal.turn_logs`（S047，缺陷 #5）。
+
+### C2-S6 移除無限累加的 `TurnJournal.turn_logs`（2026-11-21）
+
+- **觀察結果**：**S047／缺陷 #5（APPLIED）**。已移除 `TurnJournal.turn_logs` 與 `ChatSession.turn_logs`，`TurnJournal` 只保留覆寫更新的 `last_tool_calls`，`ChatSession._record_turn` 改為同步方法；單回合診斷結果隨當次回傳的 `TurnOutcome`（`trace_events`、`recovery_reason`、`fusion`）與 `agent.observability` 的 `citation_save_finalized` 日誌觀察。`test_turn_finalizer.py` 與 `test_thinking_session.py` 已改讀 `TurnOutcome` 與 `caplog`，並於連續兩回合測試中斷言 `set(vars(session._turn_journal)) == {"last_tool_calls"}`。未刪除任何測試。
+- **執行指令**：`grep -rn --exclude-dir=__pycache__ "turn_logs" app/`（0 筆）及 `pytest tests/test_turn_finalizer.py tests/test_thinking_session.py tests/test_observability.py tests/test_session_lifecycle.py`（89 passed in 2.92 s）。
+- **證據**：build-log 本節。
+- **限制**：無。
+- **下一步**：C2-S7 Rust 與啟動器清理（S014、S098、S101、S102）。

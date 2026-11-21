@@ -534,10 +534,6 @@ class ChatSession:
         ]
 
     @property
-    def turn_logs(self) -> list[dict]:
-        return self._turn_journal.turn_logs
-
-    @property
     def last_tool_calls(self) -> list[dict]:
         return self._turn_journal.last_tool_calls
 
@@ -831,22 +827,14 @@ class ChatSession:
         self._active_turn_snapshot = completed
         completed_turn = self._turn_from_snapshot(completed, turn_id)
         assert completed_turn is not None
-        await self._record_turn(
-            user_input=user_input,
-            answer=final_text,
-            new_messages=new_messages,
-            tool_calls=tool_calls,
-            trace_events=trace_events,
-            fusion=fusion,
-            candidate_traces=candidate_traces,
-            validation_errors=errors,
-            recovery_reason=recovery_reason,
-            citation_save_metrics=save_metrics,
-        )
+        self._record_turn(tool_calls=tool_calls)
         return TurnOutcome(
             text=final_text,
             validation_errors=errors,
             tool_calls=tool_calls,
+            trace_events=list(trace_events),
+            recovery_reason=recovery_reason,
+            fusion=fusion,
             turn_id=turn_id,
             turn_number=completed_turn.turn_number,
             state="completed",
@@ -1150,30 +1138,13 @@ class ChatSession:
             candidate_id=None,
         )
 
-    async def _record_turn(
+    def _record_turn(
         self,
         *,
-        user_input: str,
-        answer: str,
-        new_messages: list,
         tool_calls: list[dict],
-        trace_events: list[dict],
-        fusion: dict | None = None,
-        candidate_traces: list[FusionCandidateTrace] | None = None,
-        validation_errors: list[str] | None = None,
-        recovery_reason: str | None = None,
-        citation_save_metrics: CitationSaveMetrics,
     ) -> None:
         """Record non-authoritative diagnostics after durable completion."""
-        self._turn_journal.observe_turn(
-            user_input=user_input,
-            tool_calls=tool_calls,
-            trace_events=trace_events,
-            fusion=fusion,
-            validation_errors=validation_errors,
-            recovery_reason=recovery_reason,
-            citation_save_metrics=citation_save_metrics,
-        )
+        self._turn_journal.observe_turn(tool_calls=tool_calls)
 
     async def _run_normal_turn(self, user_input: str) -> TurnOutcome:
         result = await self._run_graph_turn(user_input)
