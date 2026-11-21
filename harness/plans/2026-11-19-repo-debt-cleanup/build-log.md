@@ -15,7 +15,7 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| C1 | In progress | `evidence/C1-S1/`, `evidence/C1-S2/` | — | C1-S3 量測 |
+| C1 | In progress | `evidence/C1-S1/`–`C1-S3/` | — | C1-S4 探測 |
 | C2 | Not started | — | — | 等 C1 |
 | C3 | Not started | — | — | 等 C1 |
 | C4 | Not started | — | — | 等 C3 |
@@ -228,3 +228,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C1-S2/baseline.md`。
 - **限制**：`cargo test` 的 supervisor 測試檢查 `CONDA_PREFIX`，後續執行皆須先 `conda activate app`。
 - **下一步**：C1-S3 量測熱點檔案與協定指標。
+
+### C1-S3 量測基線指標（2026-11-21）
+
+- **觀察結果**：已記錄 15 個熱點檔案行數、協定詞彙（40 methods、20 requestEvents、4 processEvents、25 errorCodes；fixtures 127 messages、60 traces）、`App()` 函式本體 hook 數（`useState` 35、`useRef` 35、`useEffect` 14、`useCallback` 42）、`styles.css` 色數（110 hex、16 rgba），以及 `service.py` 私有成員存取次數（`session._` 4 次、`self.session._` 0 次、`getattr/hasattr/setattr` 反射存取 6 次）。
+- **執行指令**：見 `evidence/C1-S3/metrics-before.md`。
+- **證據**：`evidence/C1-S3/metrics-before.md`。
+- **限制**：無。
+- **下一步**：C1-S4 探測 Node JSON import 與 TypeScript compiler API。
