@@ -15,9 +15,9 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| C1 | In progress | `evidence/C1-S1/`–`C1-S3/` | — | C1-S4 探測 |
-| C2 | Not started | — | — | 等 C1 |
-| C3 | Not started | — | — | 等 C1 |
+| C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
+| C2 | Not started | — | — | C2-S1 |
+| C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
@@ -236,3 +236,14 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C1-S3/metrics-before.md`。
 - **限制**：無。
 - **下一步**：C1-S4 探測 Node JSON import 與 TypeScript compiler API。
+
+### C1-S4 拋棄式探測與 C1 驗收完成（2026-11-21）
+
+- **觀察結果**：
+  1. **JSON import（GOALS A2）**：`import contract from ".../contract.json" with { type: "json" };` 在 `node --experimental-strip-types`（Node `v24.18.0`）直接通過，印出 `contract.methods.length = 40`，無錯誤訊息。
+  2. **TypeScript compiler API（GOALS A6）**：在 `node --test --experimental-strip-types` 中 `import ts from "typescript"`（TypeScript `6.0.3`）建立 `Program` 並透過 `TypeChecker` 解析 `SessionListDto` 成功，完整列出 8 個必填屬性（`projectId`、`status`、`issue`、`items`、`total`、`offset`、`limit`、`hasMore`），耗時 `322.96 ms`，不需啟用備案。
+  3. **C1 階段驗收**：`evidence/C1-S1`～`C1-S4` 均已建立且為實際執行結果，repo 產品程式碼未改動。
+- **執行指令**：見 `evidence/C1-S4/probes.md`。
+- **證據**：`evidence/C1-S4/probes.md`。
+- **限制**：`tsc` 與 `vite build` 對 `with { type: "json" }` 的相容性依計劃在 C3-S1 實測。
+- **下一步**：進入 C2（C2-S1）。
