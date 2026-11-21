@@ -89,27 +89,13 @@ export function echoedIdFields(method: ProtocolMethod): readonly string[] {
   return ECHO_ID_FIELDS.filter((field) => field in params && field in result);
 }
 
-/** Method names; `tests/protocol_types.test.ts` keeps this equal to the contract. */
-export type ProtocolMethod =
-  | "runtime.diagnostics"
-  | "project.list"
-  | "workspace.select"
-  | "document.open"
-  | "document.save"
-  | "document.apply"
-  | "session.create"
-  | "session.list"
-  | "session.select"
-  | "session.delete"
-  | "session.rename"
-  | "session.retry_registration"
-  | "session.transcript"
+/**
+ * Methods without a result DTO in `MethodResults`. `tests/protocol_types.test.ts`
+ * keeps `ProtocolMethod` equal to the contract method list.
+ */
+export type MethodWithoutResultDto =
   | "session.status"
-  | "session.turn"
   | "session.set_thinking"
-  | "session.set_bash_permission"
-  | "session.stop"
-  | "session.shutdown"
   | "knowledge.overview"
   | "knowledge.search"
   | "knowledge.list_chunks"
@@ -120,29 +106,20 @@ export type ProtocolMethod =
   | "knowledge.sync"
   | "knowledge.prune_preview"
   | "knowledge.prune_apply"
-  | "extensions.status"
-  | "extensions.preview"
-  | "extensions.apply"
-  | "approval.resolve"
-  | "runtime.shutdown"
-  | "bibliography.inspect"
-  | "bibliography.render"
-  | "bibliography.set_style"
-  | "bibliography.remove"
-  | "bibliography.add"
-  | "bibliography.export";
+  | "session.shutdown"
+  | "extensions.status";
 
-/** Request event names; checked against the contract by `tests/protocol_types.test.ts`. */
-export type RequestEvent =
+/** Every contract method: those with a result DTO plus those without one. */
+export type ProtocolMethod = keyof MethodResults | MethodWithoutResultDto;
+
+/** Request events without a data DTO in `EventData`. */
+export type RequestEventWithoutDataDto =
   | "request.started"
-  | "turn.accepted"
   | "request.progress"
   | "stage.changed"
   | "tool.started"
   | "tool.finished"
   | "tool.failed"
-  | "document.proposed"
-  | "approval.required"
   | "knowledge.progress"
   | "shutdown.progress"
   | "collecting.started"
@@ -154,6 +131,9 @@ export type RequestEvent =
   | "writing.file_completed"
   | "ingest.completed"
   | "ingest.failed";
+
+/** Every contract request event; checked against the contract by `tests/protocol_types.test.ts`. */
+export type RequestEvent = keyof EventData | RequestEventWithoutDataDto;
 
 /** Process event names; checked against the contract by `tests/protocol_types.test.ts`. */
 export type ProcessEvent =

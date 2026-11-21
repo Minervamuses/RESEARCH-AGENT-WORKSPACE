@@ -17,8 +17,8 @@
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
 | C2 | Complete | `evidence/C2-S1/`–`C2-S3/`, `evidence/C2-S5/`, `evidence/C2-S8/`–`C2-S11/`；C2-S12 見事件 | — | — |
-| C3 | In progress | `evidence/C3-S1/`–`C3-S5/` | — | C3-S6 |
-| C4 | Not started | — | — | 等 C3 |
+| C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
+| C4 | Not started | — | — | C4-S1 |
 | C5 | Not started | — | — | 等 C3 |
 | C6 | Not started | — | — | 等 C3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
@@ -444,3 +444,15 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C3-S5/python-single-validation.md`、`fixture_coverage.py`、`fixture-coverage.txt`。
 - **限制**：無。
 - **下一步**：C3-S6 階段收尾與「新增一個方法」走查。
+
+### C3-S6 階段收尾、「新增一個方法」走查與 C3 驗收（2026-11-22）
+
+- **觀察結果**：
+  - 完整檢查（最後狀態）：pytest 1816 passed（沙箱外）、`npm test` 228 pass、`npm run build` 通過、`cargo test --locked` 35 passed（沙箱外）。
+  - 走查 `session.rename`：第一次走查發現 `ProtocolMethod` 型別聯集是額外的手改處，改為 `keyof MethodResults | MethodWithoutResultDto`（`RequestEvent` 同理）。修正後必須手改的只剩 contract、Python handler 與 dispatch、TS DTO 與 `MethodResults` 的一列、呼叫端。
+  - 行數：`protocol.ts` 2,333 → 1,094；`protocol.rs` 3,638 → 616；`protocol.py` 760 → 699；`fixtures.json` 5,194 → 5,301（補 fixtures）。
+  - **C3 驗收**：責任表「移除」欄都已移除、「保留」欄有測試（C3-S2、S4、S5 evidence）；DTO 一致性檢查存在且負向演練會失敗（C3-S3）；四套檢查通過；走查符合 G1。
+- **執行指令**：見 `evidence/C3-S6/add-method-walkthrough.md`。
+- **證據**：`evidence/C3-S6/add-method-walkthrough.md`。
+- **限制**：`tests/protocol_types.test.ts` 的 `DTO_EXCEPTIONS` 與 `MethodWithoutResultDto` 中的 `session.shutdown`、`extensions.status`，以及 9 個未發出的 event，留給 C4 清除。
+- **下一步**：C4-S1。
