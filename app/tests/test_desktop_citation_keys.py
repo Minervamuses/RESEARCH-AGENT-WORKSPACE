@@ -254,22 +254,34 @@ def test_lookup_is_not_offered_to_extended_thinking_proposers():
 
 
 def test_lookup_is_effective_in_citation_turns_only_when_offered(monkeypatch, tmp_path):
+    import asyncio
     from langchain_core.tools import StructuredTool
 
+    from conftest import make_astream_graph
     from agent.config import AgentConfig
     from agent.session import ChatSession
 
     monkeypatch.setattr("agent.tools.inventory.create_rag_tools", lambda _config: [])
     monkeypatch.setattr("agent.session.find_app_root", lambda: tmp_path)
-    monkeypatch.setattr("agent.session.build_graph", lambda _cfg, extra_tools=None, **kwargs: object())
+    monkeypatch.setattr("agent.session.build_graph", lambda _cfg, extra_tools=None, **kwargs: make_astream_graph())
     lookup = StructuredTool.from_function(func=lambda query: "[]", name="bibliography_lookup",
                                           description="lookup")
     config = AgentConfig(persist_dir=str(tmp_path / "store"), citation_output_dir=str(tmp_path / "cite"))
     session = ChatSession(config, extra_tools=[lookup])
     assert session.mcp_families["bibliography_lookup"] == "desktop_document"
     assert "bibliography_lookup" not in session.tool_access_resolution().effective_tools
-    session.activate_citation_skill()
-    assert "bibliography_lookup" in session.tool_access_resolution().effective_tools
+    desktop_effective: list[tuple[str, ...]] = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: desktop_effective.append(session.tool_access_resolution().effective_tools),
+    )
+    asyncio.run(session.turn("find papers", skill_name="citation"))
+    assert "bibliography_lookup" in desktop_effective[0]
+    assert "bibliography_lookup" not in session.tool_access_resolution().effective_tools
+
     cli = ChatSession(config)
-    cli.activate_citation_skill()
-    assert "bibliography_lookup" not in cli.tool_access_resolution().effective_tools
+    cli_effective: list[tuple[str, ...]] = []
+    cli.graph = make_astream_graph(
+        on_state=lambda _s: cli_effective.append(cli.tool_access_resolution().effective_tools),
+    )
+    asyncio.run(cli.turn("find papers", skill_name="citation"))
+    assert "bibliography_lookup" not in cli_effective[0]

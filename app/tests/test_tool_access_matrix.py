@@ -11,6 +11,7 @@ and verifies that prompt rendering, graph binding, the fusion proposer
 intersection, and PolicyToolNode all agree with the shared resolution.
 """
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,9 +117,13 @@ def _make_session(monkeypatch, tmp_path) -> ChatSession:
 
 def test_prompt_matches_effective_tools(monkeypatch, tmp_path):
     session = _make_session(monkeypatch, tmp_path)
-    session.activate_citation_skill()
+    blocks: list[str] = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: blocks.append(session._tool_availability_block()),
+    )
+    asyncio.run(session.turn("find", skill_name="citation"))
 
-    block = session._tool_availability_block()
+    block = blocks[0]
     available_line = next(
         line for line in block.splitlines() if line.startswith("available_tools:")
     )
@@ -151,10 +156,16 @@ def test_prompt_does_not_claim_web_search_when_mcp_missing(monkeypatch, tmp_path
 
 def test_fusion_matches_effective_tools(monkeypatch, tmp_path):
     session = _make_session(monkeypatch, tmp_path)
-    session.activate_citation_skill()
+    captured: list[tuple[dict, set[str]]] = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: captured.append((
+            session._fusion._proposer_read_only_state(),
+            set(session.tool_access_resolution().effective_tools),
+        )),
+    )
+    asyncio.run(session.turn("find", skill_name="citation"))
 
-    state = session._fusion._proposer_read_only_state()
-    effective = set(session.tool_access_resolution().effective_tools)
+    state, effective = captured[0]
 
     assert state["effective_tools"] == [
         name for name in FUSION_READ_ONLY_ALLOWLIST if name in effective

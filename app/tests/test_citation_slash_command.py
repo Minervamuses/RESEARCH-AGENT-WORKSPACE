@@ -20,25 +20,12 @@ class StubRuntime:
 
 
 class StubSession:
-    """Session stand-in tracking skill activation calls."""
+    """Session stand-in verifying /citation only returns turn intent."""
 
-    def __init__(self, active=None, fail_activation=False):
+    def __init__(self, active=None):
         self.active_skill_runtime = StubRuntime(active) if active else None
-        self.fail_activation = fail_activation
         self.calls: list[str] = []
         self.thinking_mode = "extended"
-
-    def activate_citation_skill(self):
-        self.calls.append("activate:citation")
-        if self.fail_activation:
-            raise ValueError("boom")
-        self.active_skill_runtime = StubRuntime("citation")
-        self.thinking_mode = "normal"
-        return self.active_skill_runtime
-
-    def deactivate_citation_skill(self):
-        self.calls.append("deactivate")
-        self.active_skill_runtime = None
 
 
 def _run(session, raw):

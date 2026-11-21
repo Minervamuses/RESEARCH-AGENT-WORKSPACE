@@ -545,11 +545,10 @@ def test_search_selection_save_bundle_journey_reads_tool_messages(
 ):
     model = _SearchSaveModel()
     session = _make_session(monkeypatch, tmp_path, model)
-    session.activate_citation_skill()
     services = _fixture_services(monkeypatch, tmp_path)
 
     answer = asyncio.run(
-        session.turn("搜尋 Paper A，選擇 2021 年正式記錄，保存並引用")
+        session.turn("搜尋 Paper A，選擇 2021 年正式記錄，保存並引用", skill_name="citation")
     )
     service = services[0]
 
@@ -645,14 +644,13 @@ def test_search_selection_journey_rejects_malformed_save_receipt(
 ):
     model = _RejectingReceiptModel()
     session = _make_session(monkeypatch, tmp_path, model)
-    session.activate_citation_skill()
     services = _fixture_services(monkeypatch, tmp_path)
 
     async def malformed_save(_self, _intents):
         return _MalformedSaveOutcome()
 
     monkeypatch.setattr(CitationService, "save", malformed_save)
-    answer = asyncio.run(session.turn("搜尋 Paper A 並保存"))
+    answer = asyncio.run(session.turn("搜尋 Paper A 並保存", skill_name="citation"))
     service = services[0]
 
     assert model.save_message is not None

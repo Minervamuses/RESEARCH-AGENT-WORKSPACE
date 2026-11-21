@@ -16,7 +16,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | C1 | Complete | `evidence/C1-S1/`–`C1-S4/` | — | C2-S1 |
-| C2 | In progress | `evidence/C2-S1/` | — | C2-S2 |
+| C2 | In progress | `evidence/C2-S1/`, `evidence/C2-S2/` | — | C2-S3 |
 | C3 | Not started | — | — | 等 C2（依 PLANS 順序） |
 | C4 | Not started | — | — | 等 C3 |
 | C5 | Not started | — | — | 等 C3 |
@@ -260,3 +260,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C2-S1/retired-tests.md`。
 - **限制**：無。
 - **下一步**：C2-S2 移除 `activate_citation_skill` 與 `deactivate_citation_skill`（S040）。
+
+### C2-S2 移除 `activate_citation_skill` 與 `deactivate_citation_skill`（2026-11-21）
+
+- **觀察結果**：**S040（APPLIED）**。已從 `agent/session.py` 刪除只供測試跨回合常駐的 `activate_citation_skill` 與 `deactivate_citation_skill`；7 個測試檔共 40 處引用全部改走單回合 `skill_name="citation"`／`/citation` 正式路徑，未另建等價啟動 helper。
+- **執行指令**：`grep -rn --exclude-dir=__pycache__ "activate_citation_skill\|deactivate_citation_skill" app/`（0 筆）及 7 個測試模組 `pytest`（126 passed in 4.10 s）。
+- **證據**：`evidence/C2-S2/retired-tests.md`。
+- **限制**：無。
+- **下一步**：C2-S3 Skills 與測試整理（S061–S063、S109、S122）。

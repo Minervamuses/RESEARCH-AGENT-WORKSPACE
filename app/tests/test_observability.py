@@ -619,11 +619,10 @@ def test_turn_trace_links_citation_actions_queries_and_counts(monkeypatch, tmp_p
                ("citation_workflow", {"action": "search", "query": "another private topic", "year_from": 2021}, "search-3")),
         AIMessage(content="候選與限制已說明。"),
     ], tools)
-    session.activate_citation_skill()
     _fixture_services(monkeypatch, tmp_path)
     turn_id = uuid.uuid4().hex
     with caplog.at_level(logging.INFO, logger="agent.observability"):
-        assert asyncio.run(session.turn_outcome("找 Paper A", turn_id=turn_id)).state == "completed"
+        assert asyncio.run(session.turn_outcome("找 Paper A", skill_name="citation", turn_id=turn_id)).state == "completed"
 
     records = _trace_records(caplog, turn_id)
     ends = {record["tool_call_id"]: record for record in records if record["event"] == "tool_end"}

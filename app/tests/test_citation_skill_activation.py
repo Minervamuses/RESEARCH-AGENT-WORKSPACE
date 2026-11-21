@@ -57,7 +57,13 @@ def test_citation_skill_text_is_free_of_protocol_artifacts():
 
 def test_citation_runtime_keeps_the_web_search_boundary_once(make_session):
     # AF39: deleting the boundary paragraph from SKILL.md must fail a test.
-    runtime = make_session().activate_citation_skill()
+    session = make_session()
+    captured = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: captured.append(session.active_skill_runtime),
+    )
+    asyncio.run(session.turn("find papers", skill_name="citation"))
+    runtime = captured[0]
     for sentence in (
         "Do not use Web Search or browse other websites to find papers",
         "honestly report the returned failure, uncertainty, or missing information",
@@ -69,8 +75,15 @@ def test_citation_runtime_keeps_the_web_search_boundary_once(make_session):
 def test_activation_adds_only_the_workflow_tool(make_session):
     session = make_session()
     normal_effective = session.tool_access_resolution().effective_tools
-
-    runtime = session.activate_citation_skill()
+    captured = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: captured.append((
+            session.active_skill_runtime,
+            session._tool_availability_block(),
+        )),
+    )
+    asyncio.run(session.turn("find papers", skill_name="citation"))
+    runtime, availability = captured[0]
 
     assert runtime.name == "citation"
     assert runtime.tool_access.skill_tools == ("citation_workflow",)
@@ -78,7 +91,6 @@ def test_activation_adds_only_the_workflow_tool(make_session):
         *normal_effective,
         "citation_workflow",
     )
-    availability = session._tool_availability_block()
     assert "citation_workflow" in availability
     # Global base tools stay available while the citation skill is active.
     assert "read_file" in availability
@@ -88,9 +100,16 @@ def test_activation_adds_only_the_workflow_tool(make_session):
 def test_activation_forces_normal_thinking(make_session):
     session = make_session()
     session.thinking_mode = "extended"
-    session.activate_citation_skill()
-    assert session.thinking_mode == "normal"
-    assert session.citation_skill_active is True
+    observed = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: observed.append((
+            session.thinking_mode,
+            session.citation_skill_active,
+        )),
+    )
+    asyncio.run(session.turn("find papers", skill_name="citation"))
+    assert observed == [("normal", True)]
+    assert session.thinking_mode == "extended"
 
 
 def test_extended_thinking_refused_while_citation_active(make_session):
@@ -103,44 +122,64 @@ def test_extended_thinking_refused_while_citation_active(make_session):
     )
 
     session = make_session()
-    session.activate_citation_skill()
-    with pytest.raises(ValueError, match="extended thinking is unavailable"):
-        session.set_thinking_mode("extended")
-
     context = SlashCommandContext(
         session=session, registry=build_default_registry()
     )
-    with pytest.raises(SlashCommandError, match="citation"):
-        asyncio.run(execute_slash_command(
-            parse_slash_command("/thinking extended"), context
-        ))
-    assert session.thinking_mode == "normal"
+    checked = []
+
+    class _CheckDuringTurnGraph:
+        async def astream(self, _state, config=None, stream_mode="updates"):
+            with pytest.raises(ValueError, match="extended thinking is unavailable"):
+                session.set_thinking_mode("extended")
+            with pytest.raises(SlashCommandError, match="citation"):
+                await execute_slash_command(
+                    parse_slash_command("/thinking extended"), context
+                )
+            checked.append(session.thinking_mode)
+            for update in make_astream_graph().updates:
+                yield update
+
+    session.graph = _CheckDuringTurnGraph()
+    asyncio.run(session.turn("find papers", skill_name="citation"))
+    assert checked == ["normal"]
 
 
 def test_deactivation_tears_down_workflow_and_registry(make_session, tmp_path):
-    session = make_session()
-    session.activate_citation_skill()
-    service = session._citation_policy.service  # lazily built
     from skills.citation.types import SourceRef
 
-    service.registry.register(SourceRef(
-        source_id="src-x", doi="10.1234/x", title="X",
-        verification_level="identity_verified",
-    ))
-    assert session._citation_policy.loaded_service is not None
+    session = make_session()
 
-    session.deactivate_citation_skill()
+    def populate(_state):
+        service = session._citation_policy.service  # lazily built
+        service.registry.register(SourceRef(
+            source_id="src-x", doi="10.1234/x", title="X",
+            verification_level="identity_verified",
+        ))
+        assert session._citation_policy.loaded_service is not None
+
+    session.graph = make_astream_graph(on_state=populate)
+    asyncio.run(session.turn("find papers", skill_name="citation"))
     assert session.active_skill_runtime is None
     assert session._citation_policy.loaded_service is None
-    # A later activation starts from a fresh registry.
-    session.activate_citation_skill()
-    assert session._citation_policy.service.registry.list() == []
+
+    # A later /citation turn starts from a fresh registry.
+    later_entries = []
+    session.graph = make_astream_graph(
+        on_state=lambda _s: later_entries.append(
+            session._citation_policy.service.registry.list()
+        ),
+    )
+    asyncio.run(session.turn("find again", skill_name="citation"))
+    assert later_entries == [[]]
 
 
 def test_switching_to_another_skill_tears_down_citation_state(make_session):
     session = make_session()
-    session.activate_citation_skill()
-    _ = session._citation_policy.service
+    session.graph = make_astream_graph(
+        on_state=lambda _s: session._citation_policy.service,
+    )
+    asyncio.run(session.turn("find papers", skill_name="citation"))
+    session.graph = make_astream_graph()
     answer = asyncio.run(session.turn(
         "draft this paper",
         skill_name="academic-paper-writing",
@@ -153,13 +192,13 @@ def test_switching_to_another_skill_tears_down_citation_state(make_session):
 
 def test_failed_activation_keeps_previous_skill_and_state(make_session, monkeypatch):
     session = make_session()
-    session.activate_citation_skill()
-    marker = session._citation_policy.service
+    session.thinking_mode = "extended"
 
     with pytest.raises(KeyError):
         asyncio.run(session.turn("draft", skill_name="no-such-skill"))
-    assert session.citation_skill_active is True
-    assert session._citation_policy.loaded_service is marker
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
+    assert session._citation_policy.loaded_service is None
 
 
 def test_failed_generic_slash_resolution_preserves_citation_state(
@@ -175,8 +214,7 @@ def test_failed_generic_slash_resolution_preserves_citation_state(
     )
 
     session = make_session()
-    session.activate_citation_skill()
-    marker = session._citation_policy.service
+    session.thinking_mode = "extended"
     session.loaded_skills.append(SkillMetadata(
         name="help",
         description="Must not replace static help.",
@@ -188,12 +226,12 @@ def test_failed_generic_slash_resolution_preserves_citation_state(
     for raw in ("/academic-paper-writing", "/missing prompt"):
         with pytest.raises(SlashCommandError):
             asyncio.run(execute_slash_command(parse_slash_command(raw), context))
-        assert session.citation_skill_active is True
-        assert session._citation_policy.loaded_service is marker
+        assert session.thinking_mode == "extended"
+        assert session.active_skill_runtime is None
 
     assert any("/help" in item and "collision" in item for item in registry.diagnostics)
-    assert session.citation_skill_active is True
-    assert session._citation_policy.loaded_service is marker
+    assert session.thinking_mode == "extended"
+    assert session.active_skill_runtime is None
 
 
 def test_non_citation_skills_unaffected_by_teardown_logic(make_session):
@@ -230,7 +268,6 @@ def test_citation_turn_scope_restores_mode_and_records_actual_normal(make_sessio
 
 def test_citation_turn_replaces_legacy_service_under_lock(make_session):
     session = make_session()
-    session.activate_citation_skill()
     legacy = session._citation_policy.service
 
     def inspect(_state):
@@ -278,8 +315,9 @@ def test_tampered_one_shot_slash_preserves_citation_before_graph(tmp_path, monke
     )
 
     session, installed, graph = _applied_session(tmp_path, monkeypatch, "writer")
-    previous = session.activate_citation_skill()
-    service = session._citation_policy.service
+    session.set_thinking_mode("extended")
+    previous = session.active_skill_runtime
+    service = session._citation_policy.loaded_service
     thinking = session.thinking_mode
     tools = session.tool_access_resolution()
     marker = "PRIVATE_ONE_SHOT_TEST_CONTENT"
@@ -306,32 +344,25 @@ def test_tampered_one_shot_slash_preserves_citation_before_graph(tmp_path, monke
     assert marker not in conversation_path.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("entry", ["direct", "slash"])
-def test_tampered_applied_citation_activation_preserves_state(tmp_path, monkeypatch, caplog, entry):
+def test_tampered_applied_citation_activation_preserves_state(tmp_path, monkeypatch, caplog):
     from agent.cli.slash_commands import (
-        SlashCommandContext, SlashCommandError, build_default_registry,
+        SlashCommandContext, build_default_registry,
         execute_slash_command, parse_slash_command,
     )
 
     session, installed, graph = _applied_session(tmp_path, monkeypatch, "citation")
-    if entry == "direct":
-        session.activate_citation_skill()
-    else:
-        session.set_thinking_mode("extended")
+    session.set_thinking_mode("extended")
     previous = session.active_skill_runtime
-    service = session._citation_policy.service
+    service = session._citation_policy.loaded_service
     thinking = session.thinking_mode
     tools = session.tool_access_resolution()
     marker = "PRIVATE_CITATION_TEST_CONTENT"
     (installed / "manifest.yaml").write_text(f"tools: [{marker}\n", encoding="utf-8")
 
     with pytest.raises(ValueError) as caught:
-        if entry == "direct":
-            session.activate_citation_skill()
-        else:
-            context = SlashCommandContext(session=session, registry=build_default_registry(session))
-            result = asyncio.run(execute_slash_command(parse_slash_command("/citation find Paper A"), context))
-            asyncio.run(session.turn(result.followup_input, skill_name=result.skill_name))
+        context = SlashCommandContext(session=session, registry=build_default_registry(session))
+        result = asyncio.run(execute_slash_command(parse_slash_command("/citation find Paper A"), context))
+        asyncio.run(session.turn(result.followup_input, skill_name=result.skill_name))
 
     assert "applied bundle changed; restart or re-apply required" in str(caught.value)
     assert graph.states == []

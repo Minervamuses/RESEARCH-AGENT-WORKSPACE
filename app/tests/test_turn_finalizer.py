@@ -8,7 +8,7 @@ import uuid
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from conftest import make_astream_graph
+from conftest import AstreamGraph, make_astream_graph
 
 from agent.config import AgentConfig
 from agent.session import ChatSession
@@ -45,30 +45,15 @@ def make_session(monkeypatch, tmp_path):
     return _make
 
 
-async def _finalize_pending(session, *, user_input: str, **kwargs):
-    """Exercise the finalizer only after its canonical pending precondition."""
-    turn_id = uuid.uuid4().hex
-    snapshot, turn, duplicate = await session._begin_turn(
-        semantic_input=user_input,
-        display_input=user_input,
-        turn_id=turn_id,
-        retry=False,
-    )
-    assert duplicate is False
-    assert turn.state == "pending"
-    persisted = session.conversation_repository.load(session.session_id)
-    assert persisted.document.turns[-1].state == "pending"
-    session._conversation_snapshot = persisted
-    session._active_turn_snapshot = persisted
-    session._active_turn_id = turn_id
-    try:
-        return await session.finalize_and_record(
-            user_input=user_input,
-            **kwargs,
-        )
-    finally:
-        session._active_turn_snapshot = None
-        session._active_turn_id = None
+def _citation_turn_graph(build_updates):
+    """Build a scripted graph whose updates are created during the active turn."""
+    graph = AstreamGraph([])
+
+    def on_state(_state):
+        graph.updates[:] = build_updates()
+
+    graph.on_state = on_state
+    return graph
 
 
 async def _noop_fetcher(url, headers):
@@ -242,12 +227,12 @@ def test_turn_and_outcome_return_finalized_text(make_session):
 
 
 def test_cited_answer_is_rendered_with_bibliography(make_session, tmp_path):
-    session = make_session(
-        answer="Transformers work [[cite:src-known]]. Really [[cite:src-known]]."
+    session = make_session()
+    session.graph = make_astream_graph(
+        answer="Transformers work [[cite:src-known]]. Really [[cite:src-known]].",
+        on_state=lambda _s: _seed_verified_source(session, tmp_path),
     )
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(session.turn_outcome("tell me"))
+    outcome = asyncio.run(session.turn_outcome("tell me", skill_name="citation"))
     assert "Transformers work [1]. Really [1]." in outcome.text
     assert "Sources:" in outcome.text
     assert "[doi_identity_verified]" in outcome.text
@@ -265,10 +250,13 @@ def test_raw_citation_styles_are_not_blocked_or_rewritten(
     )
     session = make_session(answer=draft)
     if active:
-        session.activate_citation_skill()
-        _seed_verified_source(session, tmp_path)
-
-    outcome = asyncio.run(session.turn_outcome("tell me"))
+        session.graph = make_astream_graph(
+            answer=draft,
+            on_state=lambda _s: _seed_verified_source(session, tmp_path),
+        )
+        outcome = asyncio.run(session.turn_outcome("tell me", skill_name="citation"))
+    else:
+        outcome = asyncio.run(session.turn_outcome("tell me"))
 
     assert outcome.text == draft
     assert outcome.validation_errors == []
@@ -279,18 +267,18 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
     make_session, tmp_path, caplog,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
+
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        return [
+            {"tools": {"messages": [_save_tool_message(session)]}},
+            {"agent": {"messages": [AIMessage(content="Model-selected response.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
 
     with caplog.at_level(logging.INFO, logger="agent.observability"):
-        outcome = asyncio.run(_finalize_pending(
-            session,
-            user_input="save",
-            answer="Model-selected response.",
-            new_messages=[_save_tool_message(session)],
-            tool_calls=[],
-            trace_events=[],
-        ))
+        outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "Model-selected response."
     assert session.recent_turns[-1].assistant_output == "Model-selected response."
@@ -299,33 +287,34 @@ def test_save_artifact_does_not_override_model_prose_and_records_metrics(
         record.getMessage()
         for record in caplog.records
         if record.name == "agent.observability"
+        and record.getMessage().startswith("citation_save_finalized")
     ]
     assert lines == [
         "citation_save_finalized citation_save_batch_count=1 "
         "new_saved_count=1 reused_count=0 failed_count=1"
     ]
-    assert "10.1234/known" not in lines[0]
-    assert "Known Paper" not in lines[0]
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "10.1234/known" not in log_text
+    assert "Known Paper" not in log_text
 
 
 def test_multiple_save_artifacts_aggregate_without_invariant_failure(
     make_session, tmp_path,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    second = _save_tool_message(session, call_id="save-2")
-    second.artifact["items"][1]["status"] = "reused"
-    second.artifact["items"][1]["reason_code"] = "reused_existing"
 
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="save both",
-        answer="Two save calls completed.",
-        new_messages=[_save_tool_message(session), second],
-        tool_calls=[],
-        trace_events=[],
-    ))
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        second = _save_tool_message(session, call_id="save-2")
+        second.artifact["items"][1]["status"] = "reused"
+        second.artifact["items"][1]["reason_code"] = "reused_existing"
+        return [
+            {"tools": {"messages": [_save_tool_message(session), second]}},
+            {"agent": {"messages": [AIMessage(content="Two save calls completed.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("save both", skill_name="citation"))
 
     assert outcome.text == "Two save calls completed."
     _assert_save_metrics(
@@ -343,19 +332,18 @@ def test_registry_mismatch_affects_telemetry_but_not_model_prose(
     make_session, tmp_path, field, forged_value,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    message = _save_tool_message(session)
-    message.artifact["items"][1]["receipt"][field] = forged_value
 
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="save",
-        answer="The model owns this prose.",
-        new_messages=[message],
-        tool_calls=[],
-        trace_events=[],
-    ))
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        message = _save_tool_message(session)
+        message.artifact["items"][1]["receipt"][field] = forged_value
+        return [
+            {"tools": {"messages": [message]}},
+            {"agent": {"messages": [AIMessage(content="The model owns this prose.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "The model owns this prose."
     _assert_save_metrics(session, batches=1, failed=2)
@@ -365,23 +353,22 @@ def test_forged_receipt_identifier_never_reaches_logs(
     make_session, tmp_path, caplog,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    message = _save_tool_message(session)
     secret = "10.9999/private-provider-text"
-    receipt = message.artifact["items"][1]["receipt"]
-    receipt["source_id"] = secret
-    receipt["cite_marker"] = f"[[cite:{secret}]]"
 
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        message = _save_tool_message(session)
+        receipt = message.artifact["items"][1]["receipt"]
+        receipt["source_id"] = secret
+        receipt["cite_marker"] = f"[[cite:{secret}]]"
+        return [
+            {"tools": {"messages": [message]}},
+            {"agent": {"messages": [AIMessage(content="No receipt details here.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
     with caplog.at_level(logging.WARNING):
-        outcome = asyncio.run(_finalize_pending(
-            session,
-            user_input="save",
-            answer="No receipt details here.",
-            new_messages=[message],
-            tool_calls=[],
-            trace_events=[],
-        ))
+        outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "No receipt details here."
     assert secret not in "\n".join(record.getMessage() for record in caplog.records)
@@ -389,23 +376,22 @@ def test_forged_receipt_identifier_never_reaches_logs(
 
 def test_error_tool_message_does_not_count_artifact(make_session, tmp_path):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="save",
-        answer="工具呼叫失敗。",
-        new_messages=[_save_tool_message(session, status="error")],
-        tool_calls=[],
-        trace_events=[],
-    ))
+
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        return [
+            {"tools": {"messages": [_save_tool_message(session, status="error")]}},
+            {"agent": {"messages": [AIMessage(content="工具呼叫失敗。")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
     assert outcome.text == "工具呼叫失敗。"
     _assert_save_metrics(session)
 
 
 def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
     session = make_session()
-    session.activate_citation_skill()
     save_call = AIMessage(content="", tool_calls=[{
         "name": "citation_workflow",
         "args": {"action": "save", "works": []},
@@ -417,16 +403,14 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
         name="citation_workflow",
         status="success",
     )
+    session.graph = AstreamGraph([
+        {"agent": {"messages": [save_call]}},
+        {"tools": {"messages": [result]}},
+        {"agent": {"messages": [AIMessage(content="保存未完成。")]}},
+    ])
 
     with caplog.at_level(logging.WARNING, logger="agent.observability"):
-        outcome = asyncio.run(_finalize_pending(
-            session,
-            user_input="save",
-            answer="保存未完成。",
-            new_messages=[save_call, result],
-            tool_calls=[],
-            trace_events=[],
-        ))
+        outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "保存未完成。"
     lines = [
@@ -442,21 +426,20 @@ def test_answered_save_without_artifact_logs_none_status(make_session, caplog):
 
 def test_reused_save_is_counted_separately_without_rewriting(make_session, tmp_path):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    message = _save_tool_message(session)
-    saved_item = message.artifact["items"][1]
-    saved_item["status"] = "reused"
-    saved_item["reason_code"] = "reused_existing"
 
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="save",
-        answer="Reused the existing bundle.",
-        new_messages=[message],
-        tool_calls=[],
-        trace_events=[],
-    ))
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        message = _save_tool_message(session)
+        saved_item = message.artifact["items"][1]
+        saved_item["status"] = "reused"
+        saved_item["reason_code"] = "reused_existing"
+        return [
+            {"tools": {"messages": [message]}},
+            {"agent": {"messages": [AIMessage(content="Reused the existing bundle.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("save", skill_name="citation"))
 
     assert outcome.text == "Reused the existing bundle."
     _assert_save_metrics(session, batches=1, reused=1, failed=1)
@@ -466,19 +449,19 @@ def test_all_save_failures_do_not_deterministically_replace_model_draft(
     make_session, tmp_path,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="全部存下來",
-        answer="This is the model's final wording.",
-        new_messages=[_save_failure_tool_message(
-            (0, "VAE", "verification_failed", "bibtex_lookup_failed"),
-            (1, "missing", "not_found", "no_provider_records"),
-        )],
-        tool_calls=[],
-        trace_events=[],
-    ))
+
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        return [
+            {"tools": {"messages": [_save_failure_tool_message(
+                (0, "VAE", "verification_failed", "bibtex_lookup_failed"),
+                (1, "missing", "not_found", "no_provider_records"),
+            )]}},
+            {"agent": {"messages": [AIMessage(content="This is the model's final wording.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("全部存下來", skill_name="citation"))
 
     assert outcome.text == "This is the model's final wording."
     _assert_save_metrics(session, batches=1, failed=2)
@@ -489,16 +472,16 @@ def test_generic_final_response_recovery_is_not_replaced_by_save_receipt(
     make_session, tmp_path, draft,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="確認",
-        answer=draft,
-        new_messages=[_save_tool_message(session)],
-        tool_calls=[],
-        trace_events=[],
-    ))
+
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        return [
+            {"tools": {"messages": [_save_tool_message(session)]}},
+            {"agent": {"messages": [AIMessage(content=draft)]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("確認", skill_name="citation"))
     assert "工具結果已取得" in outcome.text
     assert "src-known" not in outcome.text
     assert session.turn_logs[-1]["recovery"].startswith("finalizer:")
@@ -509,8 +492,6 @@ def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
     tmp_path,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
     draft = "Saved according to the tool."
     tool_call = {
         "name": "citation_workflow",
@@ -518,14 +499,16 @@ def test_citation_finalizer_records_canonical_answer_without_receipt_leak(
         "id": "save-1",
     }
 
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="儲存",
-        answer=draft,
-        new_messages=[_save_tool_message(session)],
-        tool_calls=[tool_call],
-        trace_events=[{"type": "tool", **tool_call}],
-    ))
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        return [
+            {"agent": {"messages": [AIMessage(content="", tool_calls=[tool_call])]}},
+            {"tools": {"messages": [_save_tool_message(session)]}},
+            {"agent": {"messages": [AIMessage(content=draft)]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("儲存", skill_name="citation"))
     snapshot = session.conversation_repository.load(session.session_id)
     turn = snapshot.document.turns[-1]
     canonical_text = session.conversation_repository.path_for(
@@ -551,21 +534,23 @@ def test_canonical_answer_survives_later_turn_without_secondary_store(
     tmp_path,
 ):
     session = make_session()
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
     tool_call = {
         "name": "citation_workflow",
         "args": {"action": "save"},
         "id": "save-1",
     }
-    outcome = asyncio.run(_finalize_pending(
-        session,
-        user_input="儲存",
-        answer="Saved according to the tool.",
-        new_messages=[_save_tool_message(session)],
-        tool_calls=[tool_call],
-        trace_events=[{"type": "tool", **tool_call}],
-    ))
+
+    def updates():
+        _seed_verified_source(session, tmp_path)
+        return [
+            {"agent": {"messages": [AIMessage(content="", tool_calls=[tool_call])]}},
+            {"tools": {"messages": [_save_tool_message(session)]}},
+            {"agent": {"messages": [AIMessage(content="Saved according to the tool.")]}},
+        ]
+
+    session.graph = _citation_turn_graph(updates)
+    outcome = asyncio.run(session.turn_outcome("儲存", skill_name="citation"))
+    session.graph = make_astream_graph()
     asyncio.run(session.turn("下一步"))
     snapshot = session.conversation_repository.load(session.session_id)
     first, second = snapshot.document.turns
@@ -596,10 +581,12 @@ def test_user_doi_in_input_is_never_auto_registered(make_session):
 
 
 def test_dangling_cite_marker_blocks_in_citation_mode(make_session, tmp_path):
-    session = make_session(answer="Bogus [[cite:src-ghost]].")
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    outcome = asyncio.run(session.turn_outcome("q"))
+    session = make_session()
+    session.graph = make_astream_graph(
+        answer="Bogus [[cite:src-ghost]].",
+        on_state=lambda _s: _seed_verified_source(session, tmp_path),
+    )
+    outcome = asyncio.run(session.turn_outcome("q", skill_name="citation"))
     assert any("dangling_cite" in error for error in outcome.validation_errors)
 
 
@@ -625,11 +612,16 @@ def test_plain_web_link_passes_and_renderer_skips_outside_citation_mode(
 
 
 def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path):
-    session = make_session(answer="plain")
-    session.activate_citation_skill()
-    _seed_verified_source(session, tmp_path)
-    assert session._build_sources_hint() is not None
-    session.deactivate_citation_skill()
+    session = make_session()
+    hints = []
+
+    def populate(_state):
+        _seed_verified_source(session, tmp_path)
+        hints.append(session._build_sources_hint())
+
+    session.graph = make_astream_graph(answer="plain", on_state=populate)
+    asyncio.run(session.turn_outcome("find", skill_name="citation"))
+    assert hints[0] is not None
     assert session._build_sources_hint() is None
     assert session._citation_policy.loaded_service is None
 
@@ -637,14 +629,22 @@ def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):
     session = make_session()
     assert session._build_sources_hint() is None
-    session.activate_citation_skill()
-    assert session._build_sources_hint() is None
-    _seed_verified_source(session, tmp_path)
-    hint = session._build_sources_hint()
+    captured = []
+
+    def inspect(_state):
+        before = session._build_sources_hint()
+        _seed_verified_source(session, tmp_path)
+        after = session._build_sources_hint()
+        history = session._prompt_history()
+        captured.append((before, after, history))
+
+    session.graph = make_astream_graph(on_state=inspect)
+    asyncio.run(session.turn_outcome("q", skill_name="citation"))
+    before, hint, history = captured[0]
+    assert before is None
     assert hint is not None
     assert "[[cite:src-known]]" in hint.content
     assert "never write raw" not in hint.content
-    history = session._prompt_history()
     assert any("[[cite:src-known]]" in str(message.content) for message in history)
 
 

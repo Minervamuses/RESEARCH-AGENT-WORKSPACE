@@ -897,25 +897,6 @@ class ChatSession:
             catalog=self.loaded_skills,
         )
 
-    def activate_citation_skill(self) -> SkillRuntime:
-        """Keep Citation active across turns and force normal thinking.
-
-        Supported entry points run Citation for one task through
-        ``/citation`` or ``@citation``; nothing in production calls this.
-        """
-        runtime = self._load_skill_runtime(CITATION_SKILL_NAME)
-        self.clear_skill_installer()
-        self.active_skill_runtime = runtime
-        self.thinking_mode = "normal"
-        return runtime
-
-    def deactivate_citation_skill(self) -> None:
-        """Deactivate Citation without touching an unrelated transient Skill."""
-        if not self.citation_skill_active:
-            return
-        self.active_skill_runtime = None
-        self._teardown_citation_session_state()
-
     @staticmethod
     def _requests_skill_installer(text: str) -> bool:
         return bool(re.match(
