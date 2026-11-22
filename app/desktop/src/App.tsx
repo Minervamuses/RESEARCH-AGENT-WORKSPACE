@@ -28,6 +28,9 @@ import {
 } from "./backend.ts";
 import {
   conversationInteractionState,
+  lifecycleResultIsStale,
+  stopScreenState,
+  turnEventIsStale,
   conversationToRestore,
   composeTurnText,
   conversationReducer,
@@ -60,7 +63,7 @@ import { AnnotationComment, DocumentEditor, type AnnotationControls } from "./Do
 import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ApprovalDialog, PermissionControl, ThinkingControl, ExtensionPanel } from "./trust.tsx";
-import { reconcilePermissionAck } from "./lib/approval.ts";
+import { approvalExpiry, reconcilePermissionAck } from "./lib/approval.ts";
 import {
   approvalToResolve,
   beginApprovalResolve,
@@ -985,7 +988,7 @@ export default function App() {
             }
             if (active === null && documentRequest === null) return;
             const generation = generationRef.current;
-            if (active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpochRef.current)) return;
+            if (turnEventIsStale(active, generation, projectEpochRef.current)) return;
             if (documentRequest !== null && (documentOperationRef.current === null || !ownsOperation(documentOperationRef.current, documentOperationRef.current))) return;
             if (message.event === "turn.accepted" && active !== null && turnOwnerRef.current !== null &&
                 ownsOperation(turnOwnerRef.current, turnOwnerRef.current) && typeof message.data.sessionId === "string" && typeof message.data.turnId === "string") {
@@ -1085,8 +1088,11 @@ export default function App() {
     const operation = action === "start" ? api.start : action === "restart" ? api.restart : api.shutdown;
     void runExclusive(action, async (owner) => {
       const snapshot = await operation();
-      if (exclusiveOwnerRef.current?.token !== owner.token || owner.projectEpoch !== projectEpochRef.current ||
-          snapshot.generation < generationRef.current) return;
+      if (lifecycleResultIsStale({
+        ownerToken: owner.token, currentOwnerToken: exclusiveOwnerRef.current?.token,
+        ownerProjectEpoch: owner.projectEpoch, projectEpoch: projectEpochRef.current,
+        snapshotGeneration: snapshot.generation, generation: generationRef.current,
+      })) return;
       applyBackendSnapshot(snapshot, action);
     });
   }, [applyBackendSnapshot, runExclusive]);
@@ -1543,12 +1549,12 @@ export default function App() {
 
   useEffect(() => {
     if (pendingApproval === null) return;
-    const remaining = Date.parse(pendingApproval.expiresAt) - Date.now();
-    if (remaining <= 0) {
+    const expiry = approvalExpiry(pendingApproval.expiresAt, Date.now());
+    if (expiry.kind === "expired") {
       resolvePendingApproval(false, pendingApproval.approvalId);
       return;
     }
-    const timeout = window.setTimeout(() => resolvePendingApproval(false, pendingApproval.approvalId), remaining);
+    const timeout = window.setTimeout(() => resolvePendingApproval(false, pendingApproval.approvalId), expiry.delayMs);
     return () => window.clearTimeout(timeout);
   }, [pendingApproval, resolvePendingApproval]);
 
@@ -2127,9 +2133,12 @@ export default function App() {
       generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch }),
   }), [applyConversation, conversation.annotations, conversation.draftReferences, conversation.backendGeneration, conversation.projectEpoch, idle, chooserOpen]);
   const canStart = idle && (state.snapshot === null || state.snapshot.lifecycle === "stopped");
-  const stopRecovery = conversation.stopRequest?.status === "failed" && conversation.activeTurn === null &&
-    state.activeAction === null && workspaceBusy === null && !documentBusy && pendingApproval === null;
-  const stopping = conversation.stopRequest !== null && conversation.stopRequest.status !== "failed";
+  const stopScreen = stopScreenState(
+    conversation,
+    state.activeAction === null && workspaceBusy === null && !documentBusy && pendingApproval === null,
+    pendingUserText,
+  );
+  const { stopRecovery, stopping } = stopScreen;
   const canRestart = (idle || stopRecovery) && (state.phase === "crashed" || state.phase === "degraded" || state.snapshot?.childRunning === true);
   const canShutdown = idle && state.snapshot?.childRunning === true;
   const canCreateSession = idle && workspaceBusy === null && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && activeProjectId !== null;
@@ -2264,11 +2273,11 @@ export default function App() {
             onRestart={restartForExtensions}
           />}
           {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : conversation.failure?.cancelled ? "Turn stopped" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && (conversation.failure.draftPreserved || conversation.submittedTurn?.turnId === conversation.failure.turnId) && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved turn</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
-          {conversation.stopRequest?.status === "failed" && <section className="notice notice-error" role="alert">
+          {stopScreen.showStopFailure && conversation.stopRequest !== null && <section className="notice notice-error" role="alert">
             <div><h3>The turn could not finish stopping</h3><p>{conversation.stopRequest.error}</p>
-              {conversation.activeTurn === null && pendingUserText !== null && <details><summary>Your message</summary><SafeContent content={pendingUserText} /></details>}
+              {stopScreen.showPendingMessage && pendingUserText !== null && <details><summary>Your message</summary><SafeContent content={pendingUserText} /></details>}
               <div className="action-row"><button type="button" onClick={stopTurn}>Retry Stop</button>
-                {conversation.activeTurn === null && <button type="button" disabled={!canRestart} onClick={() => runLifecycle("restart")}>Restart backend</button>}
+                {stopScreen.showRestartInPanel && <button type="button" disabled={!canRestart} onClick={() => runLifecycle("restart")}>Restart backend</button>}
               </div>
             </div>
           </section>}

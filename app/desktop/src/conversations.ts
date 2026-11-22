@@ -229,6 +229,60 @@ export function ownsWorkspaceOperation(
     owner.projectEpoch === projectEpoch && owner.projectEpoch === current.projectEpoch;
 }
 
+/**
+ * A turn event whose turn was bound to an older backend generation or project epoch is dropped
+ * (the backend restarted or the project was reopened since it was sent). No active turn: nothing to drop.
+ */
+export function turnEventIsStale(
+  active: { backendGeneration: number; projectEpoch: number } | null,
+  generation: number,
+  projectEpoch: number,
+): boolean {
+  return active !== null && (active.backendGeneration !== generation || active.projectEpoch !== projectEpoch);
+}
+
+/**
+ * A late start/restart/shutdown result is ignored when its exclusive owner was replaced or invalidated,
+ * the project was reopened, or the snapshot is older than the generation already applied.
+ */
+export function lifecycleResultIsStale(input: {
+  ownerToken: symbol;
+  currentOwnerToken: symbol | undefined;
+  ownerProjectEpoch: number;
+  projectEpoch: number;
+  snapshotGeneration: number;
+  generation: number;
+}): boolean {
+  return input.currentOwnerToken !== input.ownerToken ||
+    input.ownerProjectEpoch !== input.projectEpoch ||
+    input.snapshotGeneration < input.generation;
+}
+
+export interface StopScreenState {
+  /** The Stop button shows "Stopping…". */
+  stopping: boolean;
+  /** Backend Restart is offered even though a failed Stop keeps the turn locked. */
+  stopRecovery: boolean;
+  /** "The turn could not finish stopping" with Retry Stop. */
+  showStopFailure: boolean;
+  /** Inside that panel: the unsent message and Restart backend, only once the turn itself ended. */
+  showPendingMessage: boolean;
+  showRestartInPanel: boolean;
+}
+
+/** `quiet` is true when no lifecycle action, workspace operation, document operation or approval is in progress. */
+export function stopScreenState(state: ConversationState, quiet: boolean, pendingUserText: string | null): StopScreenState {
+  const failed = state.stopRequest?.status === "failed";
+  const turnEnded = state.activeTurn === null;
+  return {
+    stopping: state.stopRequest !== null && state.stopRequest.status !== "failed",
+    stopRecovery: failed && turnEnded && quiet,
+    showStopFailure: failed,
+    showPendingMessage: failed && turnEnded && pendingUserText !== null,
+    showRestartInPanel: failed && turnEnded,
+  };
+}
+
 export interface ConversationInteractionState {
   turnActive: boolean;
   sendDisabled: boolean;

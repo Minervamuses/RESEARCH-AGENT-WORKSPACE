@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
-import { acceptApprovalEvent, approvalHasLiveOwner, reconcilePermissionAck } from "../src/lib/approval.ts";
+import { acceptApprovalEvent, approvalExpiry, approvalHasLiveOwner, reconcilePermissionAck } from "../src/lib/approval.ts";
 import * as extensionFlow from "../src/lib/extensionFlow.ts";
 
 import type {
@@ -370,4 +370,13 @@ test("a pending approval stays while its turn, document or bibliography.add requ
   assert.equal(approvalHasLiveOwner("req-old", {
     turnRequestId: "req-turn", documentRequestId: "req-doc", citationRequestId: "req-add",
   }), false);
+});
+
+test("approval timeout: an expired approval is denied at once, a live one waits for its remaining time", () => {
+  const expiresAt = "2026-01-01T00:01:00.000Z";
+  const deadline = Date.parse(expiresAt);
+  assert.deepEqual(approvalExpiry(expiresAt, deadline - 45_000), { kind: "wait", delayMs: 45_000 });
+  assert.deepEqual(approvalExpiry(expiresAt, deadline - 1), { kind: "wait", delayMs: 1 });
+  assert.deepEqual(approvalExpiry(expiresAt, deadline), { kind: "expired" });
+  assert.deepEqual(approvalExpiry(expiresAt, deadline + 5_000), { kind: "expired" });
 });

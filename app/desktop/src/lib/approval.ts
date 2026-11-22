@@ -42,6 +42,14 @@ export function approvalHasLiveOwner(parentRequestId: string, owners: ApprovalOw
     || parentRequestId === owners.citationRequestId;
 }
 
+export type ApprovalExpiry = { kind: "expired" } | { kind: "wait"; delayMs: number };
+
+/** Whether a pending approval is already past its deadline (deny now) or how long to wait before denying. */
+export function approvalExpiry(expiresAt: string, now: number): ApprovalExpiry {
+  const remaining = Date.parse(expiresAt) - now;
+  return remaining <= 0 ? { kind: "expired" } : { kind: "wait", delayMs: remaining };
+}
+
 export function reconcilePermissionAck(
   generation: number,
   activeGeneration: number,

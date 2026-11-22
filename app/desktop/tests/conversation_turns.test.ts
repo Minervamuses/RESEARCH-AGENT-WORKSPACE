@@ -8,6 +8,11 @@ import {
   conversationReducer,
   initialConversationState,
   latestRetryableTranscriptTurn,
+  lifecycleResultIsStale,
+  ownsWorkspaceOperation,
+  stopScreenState,
+  turnEventIsStale,
+  type WorkspaceOperationOwner,
   mergeConversationTurns,
   upsertLiveTurn,
   composeTurnText,
@@ -741,4 +746,58 @@ test("an uncertain send reconciles its durable turn ID after reconnect without r
   state = conversationReducer(state, { type: "draft-changed", draft: "new question" });
   assert.deepEqual(nextTurnSubmission(state, () => otherTurnId), { turnId: otherTurnId, retry: false });
   assert.equal(turnSubmissionText(state), "new question");
+});
+
+test("Stop screen: Stopping, Retry Stop panel and Restart offer follow the stop request and turn state", () => {
+  const quiet = true;
+  assert.deepEqual(stopScreenState(activeState(), quiet, "question"), {
+    stopping: false, stopRecovery: false, showStopFailure: false, showPendingMessage: false, showRestartInPanel: false,
+  });
+  let state = conversationReducer(activeState(), { type: "stop-requested", generation: 1, projectEpoch: 0 });
+  assert.equal(stopScreenState(state, quiet, null).stopping, true);
+  state = conversationReducer(state, {
+    type: "stop-failed", generation: 1, projectEpoch: 0, projectId, sessionId, requestId, turnId, message: "Still stopping.",
+  });
+  // Failed while the turn still runs: Retry Stop shows, but no message preview and no Restart yet.
+  const running = stopScreenState(state, quiet, "question");
+  assert.deepEqual(running, { stopping: false, stopRecovery: false, showStopFailure: true, showPendingMessage: false, showRestartInPanel: false });
+  // The turn ended afterwards: the unsent message and Restart appear; Restart is allowed only when nothing else is busy.
+  const ended = succeed(state);
+  assert.deepEqual(stopScreenState(ended, quiet, "question"), { stopping: false, stopRecovery: true, showStopFailure: true, showPendingMessage: true, showRestartInPanel: true });
+  assert.equal(stopScreenState(ended, false, "question").stopRecovery, false);
+  assert.equal(stopScreenState(ended, quiet, null).showPendingMessage, false);
+  // Retrying Stop returns to "Stopping…" and hides the failure panel.
+  const retrying = conversationReducer(ended, { type: "stop-requested", generation: 1, projectEpoch: 0 });
+  assert.equal(stopScreenState(retrying, quiet, "question").stopping, true);
+  assert.equal(stopScreenState(retrying, quiet, "question").showStopFailure, false);
+});
+
+const owner = (generation: number, projectEpoch: number, token = Symbol("op")): WorkspaceOperationOwner => ({ generation, projectEpoch, token });
+
+test("late results: an operation owner only applies while its token, generation and project epoch are still current", () => {
+  const op = owner(2, 5);
+  assert.equal(ownsWorkspaceOperation(op, op, 2, 5), true);
+  assert.equal(ownsWorkspaceOperation(op, null, 2, 5), false, "finished or invalidated operation");
+  assert.equal(ownsWorkspaceOperation(op, owner(2, 5), 2, 5), false, "superseded by another operation");
+  assert.equal(ownsWorkspaceOperation(op, op, 3, 5), false, "backend restarted");
+  assert.equal(ownsWorkspaceOperation(op, op, 2, 6), false, "project reopened");
+  const moved = { ...op, generation: 3 };
+  assert.equal(ownsWorkspaceOperation(op, moved, 2, 5), false, "current owner recorded for another generation");
+  assert.equal(ownsWorkspaceOperation(moved, moved, 3, 5), true, "self-comparison checks only the live generation and epoch");
+});
+
+test("stale generation: turn events and lifecycle results from before a restart or reopen are dropped", () => {
+  assert.equal(turnEventIsStale(null, 2, 5), false);
+  assert.equal(turnEventIsStale({ backendGeneration: 2, projectEpoch: 5 }, 2, 5), false);
+  assert.equal(turnEventIsStale({ backendGeneration: 1, projectEpoch: 5 }, 2, 5), true);
+  assert.equal(turnEventIsStale({ backendGeneration: 2, projectEpoch: 4 }, 2, 5), true);
+
+  const token = Symbol("restart");
+  const base = { ownerToken: token, currentOwnerToken: token, ownerProjectEpoch: 5, projectEpoch: 5, snapshotGeneration: 3, generation: 3 };
+  assert.equal(lifecycleResultIsStale(base), false);
+  assert.equal(lifecycleResultIsStale({ ...base, snapshotGeneration: 4 }), false);
+  assert.equal(lifecycleResultIsStale({ ...base, snapshotGeneration: 2 }), true);
+  assert.equal(lifecycleResultIsStale({ ...base, currentOwnerToken: undefined }), true);
+  assert.equal(lifecycleResultIsStale({ ...base, currentOwnerToken: Symbol("other") }), true);
+  assert.equal(lifecycleResultIsStale({ ...base, projectEpoch: 6 }), true);
 });
