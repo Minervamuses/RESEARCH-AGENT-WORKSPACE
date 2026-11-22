@@ -143,6 +143,50 @@ test("backend interruption preserves only an uncertain apply for explicit delive
   assert.equal(extensionFlow.interruptExtensionFlow(terminal), null);
 });
 
+test("extension planning: Bypass approves every binding, recovery retries the saved request, late results need the same flow", () => {
+  const applyTurnId = "123e4567e89b42d3a456426614174005";
+  const previewed = extensionFlow.receiveExtensionPreview(extensionFlow.createExtensionFlow("turn-5"), preview);
+  assert.equal(extensionFlow.planExtensionApply(previewed, "ask", () => applyTurnId), null);
+  const bypass = extensionFlow.planExtensionApply(previewed, "bypass", () => applyTurnId)!;
+  assert.deepEqual(bypass.request.approvedBindingHashes, ["a".repeat(64), "b".repeat(64)]);
+  assert.equal(bypass.submitting.phase, "applying");
+
+  const interrupted = extensionFlow.interruptExtensionFlow(bypass.submitting)!;
+  const recovery = extensionFlow.planExtensionApply(interrupted, "ask", () => "unused")!;
+  assert.equal(recovery.request.turnId, applyTurnId);
+  assert.equal(recovery.request.retry, true);
+
+  assert.equal(extensionFlow.canPreviewExtensions(null), false);
+  assert.equal(extensionFlow.canPreviewExtensions(previewed), false);
+  assert.equal(extensionFlow.canPreviewExtensions(extensionFlow.createExtensionFlow("t")), true);
+
+  const report = { turnId: applyTurnId, appliedRevision: 1, restartRequired: true } as unknown as ExtensionApplyDto;
+  assert.equal(extensionFlow.settleExtensionApply(bypass.submitting, "other", applyTurnId, report, 1), bypass.submitting);
+  assert.equal(extensionFlow.settleExtensionApply(bypass.submitting, "turn-5", "other-request", report, 1), bypass.submitting);
+  const settled = extensionFlow.settleExtensionApply(bypass.submitting, "turn-5", applyTurnId, report, 1)!;
+  assert.equal(settled.phase, "loaded");
+  assert.equal(extensionFlow.updateExtensionFlowFor(previewed, "other", () => { throw new Error("must not run"); }), previewed);
+  assert.equal(extensionFlow.canRestartForExtensions(extensionFlow.receiveExtensionApply(bypass.submitting, report)), true);
+});
+
+test("backend snapshot transitions interrupt, restart and await-load the extension flow", () => {
+  const applying = extensionFlow.planExtensionApply(
+    extensionFlow.receiveExtensionPreview(extensionFlow.createExtensionFlow("turn-6"), preview),
+    "bypass", () => "123e4567e89b42d3a456426614174006",
+  )!.submitting;
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(null, "interrupt"), null);
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(applying, "none"), applying);
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(extensionFlow.createExtensionFlow("t"), "interrupt"), null);
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(applying, "interrupt")!.phase, "error");
+  const report = { turnId: "123e4567e89b42d3a456426614174006", appliedRevision: 2, restartRequired: true } as unknown as ExtensionApplyDto;
+  const applied = extensionFlow.receiveExtensionApply(applying, report);
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(applied, "interrupt")!.phase, "applied");
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(applied, "interrupt-restarting")!.phase, "restarting");
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(applied, "interrupt-awaiting-load")!.phase, "awaiting-load");
+  const restarting = extensionFlow.markExtensionRestarting(applied);
+  assert.equal(extensionFlow.applyExtensionSnapshotTransition(restarting, "awaiting-load")!.phase, "awaiting-load");
+});
+
 test("approval events must correlate to the active request and remain unexpired", () => {
   const data: ApprovalRequiredDto = {
     approvalId: "approval-1",

@@ -74,23 +74,18 @@ import {
   type ApprovalOwnerState,
 } from "./lib/approvalOwner.ts";
 import { applyReducerOnce } from "./lib/reducerOnce.ts";
+import { useExtensions } from "./hooks/useExtensions.ts";
 import {
-  beginExtensionApply,
-  beginExtensionApplyRecovery,
   beginExtensionPreview,
-  createExtensionFlow,
+  canPreviewExtensions,
+  canRestartForExtensions,
   decideExtensionBinding,
-  extensionApplyRequest,
   failExtensionApply,
   failExtensionFlow,
-  interruptExtensionFlow,
-  markExtensionAwaitingLoad,
-  markExtensionRestarting,
-  observeExtensionRevision,
-  receiveExtensionApply,
+  planExtensionApply,
   receiveExtensionPreview,
+  settleExtensionApply,
   type ExtensionBindingDecision,
-  type ExtensionFlow,
 } from "./lib/extensionFlow.ts";
 import {
   checkSubmissionSize,
@@ -616,7 +611,17 @@ export default function App() {
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [historyIssue, setHistoryIssue] = useState<string | null>(null);
-  const [extensionFlow, setExtensionFlow] = useState<ExtensionFlow | null>(null);
+  const {
+    flow: extensionFlow,
+    reset: resetExtensions,
+    start: startExtensions,
+    interrupt: interruptExtensions,
+    markRestarting: markExtensionsRestarting,
+    applyTransition: applyExtensionTransition,
+    observeRevision: observeExtensionsRevision,
+    update: updateExtensions,
+    updateFor: updateExtensionsFor,
+  } = useExtensions();
   const [approval, setApproval] = useState(() => initialApprovalOwnerState<WorkspaceOperationOwner>());
   const [documentValue, setDocumentValue] = useState<DocumentSnapshot | null>(null);
   const documentRef = useRef<DocumentSnapshot | null>(null);
@@ -947,22 +952,7 @@ export default function App() {
       commitApproval(clearApproval(approvalRef.current));
       setHistoryGeneration(null);
     }
-    if (transition.extensionTransition === "awaiting-load") {
-      setExtensionFlow((current) => current === null ? null : markExtensionAwaitingLoad(current));
-    } else if (transition.extensionTransition !== "none") {
-      setExtensionFlow((current) => {
-        if (current === null) return null;
-        const recoverable = interruptExtensionFlow(current);
-        if (recoverable === null || recoverable.report === null) return recoverable;
-        if (transition.extensionTransition === "interrupt-restarting") {
-          return markExtensionRestarting(recoverable);
-        }
-        if (transition.extensionTransition === "interrupt-awaiting-load") {
-          return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
-        }
-        return recoverable;
-      });
-    }
+    applyExtensionTransition(transition.extensionTransition);
     generationRef.current = transition.nextGeneration;
     applyConversation({ type: "backend-generation-changed", generation: transition.nextGeneration });
     dispatch({ type: "snapshot", snapshot });
@@ -992,7 +982,7 @@ export default function App() {
               (message.event === "backend.crashed" || message.event === "backend.shutting_down")
             ) {
               commitApproval(clearApproval(approvalRef.current));
-              setExtensionFlow((current) => current === null ? null : interruptExtensionFlow(current));
+              interruptExtensions();
             }
             if (message.messageType !== "event" || !("requestId" in message)) return;
             const active = conversationRef.current.activeTurn;
@@ -1103,7 +1093,7 @@ export default function App() {
       resumeSelectionRef.current = conversationRef.current.selected;
       resumeDraftRef.current = conversationRef.current.draft;
       bindingGenerationRef.current = null;
-      setExtensionFlow((current) => current === null ? null : markExtensionRestarting(current));
+      markExtensionsRestarting();
     }
     const operation = action === "start" ? api.start : action === "restart" ? api.restart : api.shutdown;
     void runExclusive(action, async (owner) => {
@@ -1248,7 +1238,7 @@ export default function App() {
       setLiveTurns([]);
       setPendingUserText(null);
       setHistoryIssue(null);
-      setExtensionFlow(null);
+      resetExtensions();
       commitApproval(clearApproval(approvalRef.current));
       updateDocument(null);
       documentBaselineRef.current = null;
@@ -1516,7 +1506,7 @@ export default function App() {
         setLiveTurns([]);
         setPendingUserText(null);
         setHistoryIssue(null);
-        setExtensionFlow(null);
+        resetExtensions();
         setChatSelection(null);
         setReferenceIssue(null);
         submittedDocumentRef.current = null;
@@ -1610,7 +1600,7 @@ export default function App() {
         onSelected: (selected) => {
           setSlashCatalogOwner({ generation, projectId, sessionId: selected.sessionId });
           dispatch({ type: "session-created", session: selected });
-          setExtensionFlow((current) => observeExtensionRevision(current, selected.extensionRevision));
+          observeExtensionsRevision(selected.extensionRevision);
           applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, preserveDraft: restoringSelection, projectId, sessionId: session.sessionId });
           selectionApplied = true;
           setChatSelection(null);
@@ -1698,7 +1688,7 @@ export default function App() {
         if (!isCurrent()) return;
         setSlashCatalogOwner({ generation, projectId: activeProjectId, sessionId: session.sessionId });
         dispatch({ type: "session-created", session });
-        setExtensionFlow((current) => observeExtensionRevision(current, session.extensionRevision));
+        observeExtensionsRevision(session.extensionRevision);
         applyConversation({ type: "conversation-selected", generation, projectEpoch: operation.projectEpoch, preserveDraft: resumeDraftRef.current !== null, projectId: activeProjectId, sessionId: session.sessionId });
         if (resumeDraftRef.current !== null) {
           applyConversation({ type: "draft-changed", draft: resumeDraftRef.current });
@@ -1838,7 +1828,7 @@ export default function App() {
       setPendingUserText(null);
       commitApproval(clearApproval(approvalRef.current));
       if (result.extensionAction === "preview") {
-        setExtensionFlow(createExtensionFlow(result.turnId));
+        startExtensions(result.turnId);
       }
       if (state.session !== null) {
         dispatch({
@@ -1940,43 +1930,38 @@ export default function App() {
 
   const previewExtensions = useCallback(() => {
     const flow = extensionFlow;
-    if (flow === null || (flow.phase !== "ready" && flow.phase !== "error")) return;
+    if (!canPreviewExtensions(flow)) return;
     const operation = beginWorkspaceOperation("Previewing extensions");
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
-    setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? beginExtensionPreview(current) : current);
+    updateExtensionsFor(flow.triggerTurnId, beginExtensionPreview);
     void api.extensionsPreview().then((preview) => {
       if (!isCurrent()) return;
-      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? receiveExtensionPreview(current, preview) : current);
+      updateExtensionsFor(flow.triggerTurnId, (current) => receiveExtensionPreview(current, preview));
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
       const safe = workspaceError(error);
-      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? failExtensionFlow(current, safe.message) : current);
+      updateExtensionsFor(flow.triggerTurnId, (current) => failExtensionFlow(current, safe.message));
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [ownsOperation, beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation]);
+  }, [ownsOperation, beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, updateExtensionsFor]);
 
   const decideBinding = useCallback((
     bindingHash: string,
     decision: Exclude<ExtensionBindingDecision, null>,
   ) => {
-    setExtensionFlow((current) => current === null ? null : decideExtensionBinding(current, bindingHash, decision));
-  }, []);
+    updateExtensions((current) => current === null ? null : decideExtensionBinding(current, bindingHash, decision));
+  }, [updateExtensions]);
 
   const applyExtensions = useCallback(() => {
     const flow = extensionFlow;
     if (flow === null) return;
-    const effectiveFlow = state.session?.permissionMode === "bypass" && flow.preview !== null
-      ? { ...flow, decisions: Object.fromEntries(flow.preview.bindings.map((binding) => [binding.bindingHash, "approve" as const])) }
-      : flow;
-    const submitting = effectiveFlow.phase === "error" && effectiveFlow.applyRequest !== null
-      ? beginExtensionApplyRecovery(effectiveFlow)
-      : beginExtensionApply(effectiveFlow, newLogicalTurnId());
-    const request = extensionApplyRequest(submitting);
-    if (request === null) return;
+    const plan = planExtensionApply(flow, state.session?.permissionMode, newLogicalTurnId);
+    if (plan === null) return;
+    const { submitting, request } = plan;
     const operation = beginWorkspaceOperation("Applying extensions");
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
-    setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? submitting : current);
+    updateExtensionsFor(flow.triggerTurnId, () => submitting);
     void api.extensionsApply(request).then((report) => {
       if (!isCurrent()) return;
       if (report.sessionId !== state.session?.sessionId) {
@@ -1988,13 +1973,13 @@ export default function App() {
         liveTurns.some((turn) =>
           turn.sessionId === report.sessionId && turn.turnId === report.turnId
         );
-      setExtensionFlow((current) => {
-        if (current?.triggerTurnId !== flow.triggerTurnId || current.applyRequest?.turnId !== request.turnId) return current;
-        return observeExtensionRevision(
-          receiveExtensionApply(current, report),
-          state.session?.extensionRevision ?? -1,
-        );
-      });
+      updateExtensions((current) => settleExtensionApply(
+        current,
+        flow.triggerTurnId,
+        request.turnId,
+        report,
+        state.session?.extensionRevision ?? -1,
+      ));
       if (!alreadyVisible) {
         setLiveTurns((turns) => upsertLiveTurn(turns, {
           sessionId: report.sessionId,
@@ -2018,14 +2003,13 @@ export default function App() {
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
       const safe = workspaceError(error);
-      setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId
-        ? failExtensionApply(current, safe.message, safe.turnLifecycle)
-        : current);
+      updateExtensionsFor(flow.triggerTurnId, (current) =>
+        failExtensionApply(current, safe.message, safe.turnLifecycle));
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [ownsOperation, scheduleOwnedFrame, beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, liveTurns, state.session, transcript]);
+  }, [ownsOperation, scheduleOwnedFrame, beginWorkspaceOperation, extensionFlow, finishWorkspaceOperation, liveTurns, state.session, transcript, updateExtensions, updateExtensionsFor]);
 
   const restartForExtensions = useCallback(() => {
-    if (extensionFlow?.phase !== "applied" || extensionFlow.report?.restartRequired !== true) return;
+    if (!canRestartForExtensions(extensionFlow)) return;
     runLifecycle("restart");
   }, [extensionFlow, runLifecycle]);
 

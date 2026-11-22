@@ -1,7 +1,9 @@
+import type { SnapshotExtensionTransition } from "../backend.ts";
 import type {
   ExtensionApplyDto,
   ExtensionPreviewDto,
   JsonObject,
+  PermissionMode,
   TurnLifecycleDetailsDto,
 } from "../protocol.ts";
 
@@ -199,4 +201,70 @@ export function interruptExtensionFlow(flow: ExtensionFlow): ExtensionFlow | nul
     phase: "error",
     error: "The backend stopped before the saved extension result was delivered.",
   };
+}
+
+/** Applies the backend snapshot's extension transition to the flow (null stays null). */
+export function applyExtensionSnapshotTransition(
+  flow: ExtensionFlow | null,
+  transition: SnapshotExtensionTransition,
+): ExtensionFlow | null {
+  if (flow === null || transition === "none") return flow;
+  if (transition === "awaiting-load") return markExtensionAwaitingLoad(flow);
+  const recoverable = interruptExtensionFlow(flow);
+  if (recoverable === null || recoverable.report === null) return recoverable;
+  if (transition === "interrupt-restarting") return markExtensionRestarting(recoverable);
+  if (transition === "interrupt-awaiting-load") {
+    return markExtensionAwaitingLoad(markExtensionRestarting(recoverable));
+  }
+  return recoverable;
+}
+
+/** A late result may only change the flow it was started for. */
+export function updateExtensionFlowFor(
+  flow: ExtensionFlow | null,
+  triggerTurnId: string,
+  update: (flow: ExtensionFlow) => ExtensionFlow,
+): ExtensionFlow | null {
+  return flow?.triggerTurnId === triggerTurnId ? update(flow) : flow;
+}
+
+export function canPreviewExtensions(flow: ExtensionFlow | null): flow is ExtensionFlow {
+  return flow !== null && (flow.phase === "ready" || flow.phase === "error");
+}
+
+export function canRestartForExtensions(flow: ExtensionFlow | null): boolean {
+  return flow?.phase === "applied" && flow.report?.restartRequired === true;
+}
+
+/** Builds the submitting flow and exact apply request; Bypass approves every previewed binding. */
+export function planExtensionApply(
+  flow: ExtensionFlow,
+  permissionMode: PermissionMode | undefined,
+  newTurnId: () => string,
+): { submitting: ExtensionFlow; request: ExtensionApplyRequest } | null {
+  const effective = permissionMode === "bypass" && flow.preview !== null
+    ? {
+      ...flow,
+      decisions: Object.fromEntries(
+        flow.preview.bindings.map((binding) => [binding.bindingHash, "approve" as const]),
+      ),
+    }
+    : flow;
+  const submitting = effective.phase === "error" && effective.applyRequest !== null
+    ? beginExtensionApplyRecovery(effective)
+    : beginExtensionApply(effective, newTurnId());
+  const request = extensionApplyRequest(submitting);
+  return request === null ? null : { submitting, request };
+}
+
+/** Records a delivered apply report only for the flow and request that sent it. */
+export function settleExtensionApply(
+  flow: ExtensionFlow | null,
+  triggerTurnId: string,
+  requestTurnId: string,
+  report: ExtensionApplyDto,
+  observedRevision: number,
+): ExtensionFlow | null {
+  if (flow?.triggerTurnId !== triggerTurnId || flow.applyRequest?.turnId !== requestTurnId) return flow;
+  return observeExtensionRevision(receiveExtensionApply(flow, report), observedRevision);
 }
