@@ -1,9 +1,10 @@
 """Extended-thinking orchestration (proposer panel + aggregate + review loop).
 
 FusionOrchestrator is a ChatSession collaborator holding a back-reference to
-the facade: shared turn plumbing (_execute_graph, _run_graph_turn,
-_record_turn, prompt/context helpers) stays on the session, while everything
-fusion-specific lives here. The graph builder
+the facade: shared turn plumbing (execute_graph, run_graph_turn,
+finalize_and_record, prompt/context helpers) stays on the session, while
+everything fusion-specific lives here. ``TurnHost`` lists exactly the session
+members the orchestrator uses; all of them are public. The graph builder
 and thinking-model getters are injected at construction so monkeypatches of
 the corresponding agent.session module attributes keep working.
 """
@@ -15,7 +16,7 @@ import dataclasses
 from pathlib import Path
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
 from langchain_core.messages import SystemMessage
 
@@ -55,9 +56,52 @@ from agent.tools.access import ToolAccessResolution
 from agent.tools import inventory as tool_inventory
 
 if TYPE_CHECKING:
-    from agent.session import ChatSession
+    from agent.config import AgentConfig
+    from agent.conversations import ConversationRepository
+    from agent.skills.runtime import SkillRuntime
+    from agent.turns.results import TurnOutcome
 
 logger = logging.getLogger(__name__)
+
+
+class TurnHost(Protocol):
+    """The ChatSession surface the fusion orchestrator relies on."""
+
+    config: AgentConfig
+    conversation_repository: ConversationRepository
+    active_skill_runtime: SkillRuntime | None
+    extra_tools: list
+    operation_approval_handler: Callable[[str, dict], Awaitable[bool]] | None
+
+    def tool_access_resolution(self) -> ToolAccessResolution: ...
+
+    def tool_availability_block(self) -> str: ...
+
+    def base_prompt_history(self) -> list: ...
+
+    def visible_context_text(self) -> str: ...
+
+    def prompt_master_skill_text(self) -> str: ...
+
+    async def execute_graph(
+        self,
+        *,
+        graph: Any,
+        user_input: str,
+        prompt_history: list,
+        skill_state: dict,
+        extra_system_messages: list[SystemMessage] | None = None,
+        candidate_id: str | None = None,
+    ) -> GraphTurnResult: ...
+
+    async def run_graph_turn(
+        self,
+        user_input: str,
+        *,
+        extra_system_messages: list[SystemMessage] | None = None,
+    ) -> GraphTurnResult: ...
+
+    async def finalize_and_record(self, **kwargs: Any) -> TurnOutcome: ...
 
 # Read-only tool allowlist for fusion proposers. Only these local base tools
 # may be bound; bash, extra tools, and MCP tools are excluded regardless of
@@ -91,7 +135,7 @@ class FusionOrchestrator:
 
     def __init__(
         self,
-        session: "ChatSession",
+        session: TurnHost,
         *,
         graph_builder,
         role_model_getter,
@@ -162,7 +206,7 @@ class FusionOrchestrator:
 
     def _reviewer_tool_availability_block(self) -> str:
         """Reviewer / reviser use the session availability."""
-        return self._session._tool_availability_block()
+        return self._session.tool_availability_block()
 
     def _proposer_read_only_state(self) -> dict:
         """Full read-only skill state injected directly into a proposer graph.
@@ -185,7 +229,7 @@ class FusionOrchestrator:
         """Prompt history for a read-only proposer: session context + active skill
         context (if any) + the proposer-specific availability block."""
         session = self._session
-        base = session._base_prompt_history()
+        base = session.base_prompt_history()
         hints: list[SystemMessage] = []
         if session.active_skill_runtime is not None:
             hints.append(
@@ -206,9 +250,9 @@ class FusionOrchestrator:
         repository = self._session.conversation_repository
         if repository.root.resolve() != (Path(self._session.config.persist_dir).expanduser() / "conversations").resolve():
             approval_options["conversation_root"] = str(repository.root.resolve())
-        if self._session._operation_approval_handler is not None:
+        if self._session.operation_approval_handler is not None:
             approval_options["operation_approval_handler"] = (
-                self._session._operation_approval_handler
+                self._session.operation_approval_handler
             )
         graph = self._graph_builder(
             cloned,
@@ -241,7 +285,7 @@ class FusionOrchestrator:
         start = time.monotonic()
         try:
             result = await asyncio.wait_for(
-                self._session._execute_graph(
+                self._session.execute_graph(
                     graph=graph,
                     user_input=rewritten_prompt,
                     prompt_history=prompt_history,
@@ -404,7 +448,7 @@ class FusionOrchestrator:
         if not successful:
             base = None
             try:
-                base = await self._session._run_graph_turn(
+                base = await self._session.run_graph_turn(
                     rewritten_prompt, extra_system_messages=rewrite_hints
                 )
             except Exception as exc:  # noqa: BLE001 - base fallback must stay best-effort
@@ -510,7 +554,7 @@ class FusionOrchestrator:
             rewrite_model = self._get_thinking_role_model("rewrite")
             reviewer_model = self._get_thinking_role_model("reviewer")
             repair_model = self._get_thinking_role_model("repair")
-            prompt_master_skill = session._prompt_master_skill_text()
+            prompt_master_skill = session.prompt_master_skill_text()
             proposer_models = resolve_fusion_proposer_models(config)
             aggregator_model = resolve_fusion_aggregator_model(config)
         except (ExtendedModeNotConfigured, RuntimeError, OSError) as exc:
@@ -522,7 +566,8 @@ class FusionOrchestrator:
                 trace_events=[],
             )
 
-        skill_context = session._active_skill_context_block()
+        runtime = session.active_skill_runtime
+        skill_context = runtime.context_block() if runtime is not None else ""
         proposer_availability = self._proposer_tool_availability_block()
         reviewer_availability = self._reviewer_tool_availability_block()
         try:
@@ -531,7 +576,7 @@ class FusionOrchestrator:
                 skill_text=prompt_master_skill,
                 user_input=user_input,
                 visible_context=trim_tail(
-                    session._visible_context_text(),
+                    session.visible_context_text(),
                     config.thinking_rewrite_visible_chars,
                 ),
                 skill_context=trim_head(
@@ -668,7 +713,7 @@ class FusionOrchestrator:
                 )
                 break
 
-            reviser_result = await session._run_graph_turn(
+            reviser_result = await session.run_graph_turn(
                 rewritten_prompt,
                 extra_system_messages=self._reviser_hints(
                     raw_user_input=user_input,

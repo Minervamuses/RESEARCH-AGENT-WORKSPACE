@@ -81,7 +81,7 @@ def test_extended_archive_hint_does_not_claim_bash_is_available(
     session, _repository, _graph_kwargs = _session(monkeypatch, tmp_path)
     session.set_thinking_mode("extended")
 
-    hint = str(session._base_prompt_history()[1].content)
+    hint = str(session.base_prompt_history()[1].content)
 
     assert "do not receive the approval-gated bash tool" in hint
     assert "normal thinking mode" in hint

@@ -79,7 +79,7 @@ def test_activation_adds_only_the_workflow_tool(make_session):
     session.graph = make_astream_graph(
         on_state=lambda _s: captured.append((
             session.active_skill_runtime,
-            session._tool_availability_block(),
+            session.tool_availability_block(),
         )),
     )
     asyncio.run(session.turn("find papers", skill_name="citation"))
@@ -337,7 +337,7 @@ def test_tampered_one_shot_slash_preserves_citation_before_graph(tmp_path, monke
     assert session._citation_policy.loaded_service is service
     assert session.thinking_mode == thinking
     assert session.tool_access_resolution() == tools
-    assert marker not in session._active_skill_context_block()
+    assert previous is None or marker not in previous.context_block()
     assert marker not in caplog.text
     assert marker not in "".join(traceback.format_exception(caught.value))
     conversation_path = session.conversation_repository.path_for(session.session_id)

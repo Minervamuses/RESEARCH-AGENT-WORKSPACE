@@ -292,13 +292,13 @@ def test_closed_document_keeps_only_the_last_submitted_snapshot(tmp_path, monkey
         assert measure["document_parse_issue"] is None
         assert measure["document_chars_history"] == len(version_a) and measure["document_full_copies"] == 1
         # Extended thinking's plain-text context follows the same replay.
-        visible = service.session._visible_context_text()
+        visible = service.session.visible_context_text()
         assert [block.header for block in blocks(visible)] == [
             OMITTED_SNAPSHOT_HEADER, OMITTED_SNAPSHOT_HEADER, HISTORY_SNAPSHOT_HEADER,
         ]
         service.session._active_turn_input = history[2].replace(HISTORY_SNAPSHOT_HEADER, SNAPSHOT_HEADER)
         try:
-            assert HISTORY_SNAPSHOT_HEADER not in service.session._visible_context_text()
+            assert HISTORY_SNAPSHOT_HEADER not in service.session.visible_context_text()
         finally:
             service.session._active_turn_input = None
         # The saved history still holds every full submitted snapshot.

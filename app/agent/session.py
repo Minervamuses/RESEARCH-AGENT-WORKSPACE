@@ -224,7 +224,7 @@ class ChatSession:
             bash_tool_options["bash_approval_handler"] = bash_approval_handler
         if bash_command_runner is not None:
             bash_tool_options["bash_command_runner"] = bash_command_runner
-        self._operation_approval_handler = operation_approval_handler
+        self.operation_approval_handler = operation_approval_handler
         if operation_approval_handler is not None:
             bash_tool_options["operation_approval_handler"] = operation_approval_handler
         self.graph = build_graph(
@@ -561,7 +561,7 @@ class ChatSession:
         )
         return list(zip(context, replayed))
 
-    def _base_prompt_history(self) -> list:
+    def base_prompt_history(self) -> list:
         messages = [
             self.system_prompt_message,
             self._build_conversation_archive_hint(),
@@ -614,7 +614,7 @@ class ChatSession:
         ))
 
     def _prompt_history(self) -> list:
-        base = self._base_prompt_history()
+        base = self.base_prompt_history()
         hints = [
             hint
             for hint in (
@@ -637,11 +637,6 @@ class ChatSession:
                 self._installer_context, ensure_ascii=False, default=str
             )
         return SystemMessage(content=content)
-
-    def _active_skill_context_block(self) -> str:
-        if self.active_skill_runtime is None:
-            return ""
-        return self.active_skill_runtime.context_block()
 
     def tool_access_resolution(self) -> ToolAccessResolution:
         """The shared tool access resolution for the current mode.
@@ -684,7 +679,7 @@ class ChatSession:
         runtime = self.active_skill_runtime
         return runtime is not None and any(runtime.includes(name) for name in READ_ONLY_DOCUMENT_SKILLS)
 
-    def _tool_availability_block(self) -> str:
+    def tool_availability_block(self) -> str:
         runtime = self.active_skill_runtime
         return render_tool_availability_block(
             resolution=self.tool_access_resolution(),
@@ -696,7 +691,7 @@ class ChatSession:
     def _build_tool_availability_hint(self) -> SystemMessage | None:
         if self.active_skill_runtime is None and not self._document_turn_active:
             return None
-        return SystemMessage(content=self._tool_availability_block())
+        return SystemMessage(content=self.tool_availability_block())
 
     def _build_sources_hint(self) -> SystemMessage | None:
         """Inject the visible/recently-activated sources (at most 20).
@@ -1069,7 +1064,7 @@ class ChatSession:
             self.skill_install_tool.name,
         ]
 
-    def _visible_context_text(self) -> str:
+    def visible_context_text(self) -> str:
         lines: list[str] = []
         for turn, user_input in self._replayed_context():
             lines.extend([
@@ -1081,7 +1076,7 @@ class ChatSession:
             ])
         return "\n".join(lines).strip()
 
-    def _prompt_master_skill_text(self) -> str:
+    def prompt_master_skill_text(self) -> str:
         if self._prompt_master_skill_text_cache is None:
             path = find_app_root() / "skills" / "_prompt-master" / "SKILL.md"
             self._prompt_master_skill_text_cache = path.read_text(
@@ -1090,7 +1085,7 @@ class ChatSession:
             )
         return self._prompt_master_skill_text_cache
 
-    async def _execute_graph(
+    async def execute_graph(
         self,
         *,
         graph,
@@ -1119,7 +1114,7 @@ class ChatSession:
             callbacks=[self._turn_trace] if self._turn_trace is not None else None,
         )
 
-    async def _run_graph_turn(
+    async def run_graph_turn(
         self,
         user_input: str,
         *,
@@ -1129,7 +1124,7 @@ class ChatSession:
         skill_state = skill_runtime_to_agent_state(self.active_skill_runtime)
         if self.active_skill_runtime is not None or self._document_turn_active:
             skill_state["effective_tools"] = list(self.tool_access_resolution().effective_tools)
-        return await self._execute_graph(
+        return await self.execute_graph(
             graph=self.graph,
             user_input=user_input,
             prompt_history=self._prompt_history(),
@@ -1147,7 +1142,7 @@ class ChatSession:
         self._turn_journal.observe_turn(tool_calls=tool_calls)
 
     async def _run_normal_turn(self, user_input: str) -> TurnOutcome:
-        result = await self._run_graph_turn(user_input)
+        result = await self.run_graph_turn(user_input)
         return await self.finalize_and_record(
             user_input=user_input,
             answer=result.answer,

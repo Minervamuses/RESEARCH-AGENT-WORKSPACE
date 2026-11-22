@@ -119,7 +119,7 @@ def test_prompt_matches_effective_tools(monkeypatch, tmp_path):
     session = _make_session(monkeypatch, tmp_path)
     blocks: list[str] = []
     session.graph = make_astream_graph(
-        on_state=lambda _s: blocks.append(session._tool_availability_block()),
+        on_state=lambda _s: blocks.append(session.tool_availability_block()),
     )
     asyncio.run(session.turn("find", skill_name="citation"))
 
@@ -148,7 +148,7 @@ def test_prompt_does_not_claim_web_search_when_mcp_missing(monkeypatch, tmp_path
     )
     session = ChatSession(_cfg(tmp_path))
 
-    block = session._tool_availability_block()
+    block = session.tool_availability_block()
 
     assert "web_search" not in block
     assert "full-web-search" not in block

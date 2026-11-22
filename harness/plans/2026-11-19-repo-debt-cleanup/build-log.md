@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S2/` | — | C7-S3 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S3/` | — | C7-S4 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -633,3 +633,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S2/fakes.md`。
 - **限制**：無。
 - **下一步**：C7-S3 thinking orchestrator 的私有存取。
+
+### C7-S3 orchestrator 的私有存取（S052、S043，2026-11-22）
+
+- **觀察結果**：A5 盤點成立（evidence 表）。orchestrator 用到的 7 個 `ChatSession` 私有成員改為公開名稱，新增 `TurnHost` Protocol；`_active_skill_context_block` inline 到唯一呼叫者後刪除。
+- **執行指令**：沙箱外完整 pytest；grep。
+- **證據**：`evidence/C7-S3/private-access.md`。
+- **限制**：無。
+- **下一步**：C7-S4 desktop 端的私有存取。
