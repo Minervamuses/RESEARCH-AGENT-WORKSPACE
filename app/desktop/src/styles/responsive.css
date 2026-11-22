@@ -1,0 +1,110 @@
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .sidebar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    padding: 0.7rem;
+    border-right: 0;
+    border-bottom: 1px solid #dedfdd;
+  }
+
+  .brand-lockup {
+    padding-bottom: 0.3rem;
+  }
+
+  .new-session-button {
+    width: auto;
+    margin: 0;
+  }
+
+  .project-browser {
+    grid-column: 1 / -1;
+    max-height: 12rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid #d7d8d6;
+  }
+
+  .sidebar-spacer {
+    display: none;
+  }
+
+  .backend-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(11rem, auto);
+    grid-column: 1 / -1;
+    gap: 0.5rem;
+    padding-top: 0.7rem;
+  }
+
+  .sidebar-status {
+    margin: 0;
+  }
+
+  .main-workspace {
+    min-height: 0;
+    height: auto;
+  }
+
+  .conversation-workspace-body {
+    height: auto;
+    min-height: 70vh;
+  }
+
+  .extension-card {
+    max-height: 70vh;
+  }
+}
+
+@media (max-width: 520px) {
+  .sidebar,
+  .backend-controls,
+  .workspace-header,
+  .notice,
+  .setup-card {
+    grid-template-columns: 1fr;
+  }
+
+  .new-session-button {
+    width: 100%;
+  }
+
+  .workspace-header {
+    display: grid;
+  }
+
+  .header-status {
+    max-width: 100%;
+    justify-self: start;
+  }
+
+  .notice-icon,
+  .success-mark {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .runtime-details dl {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-details .wide-detail {
+    grid-column: auto;
+  }
+
+  .message {
+    max-width: 100%;
+  }
+
+  .composer-footer { gap: .35rem; }
+
+  .extension-summary,
+  .approval-actions {
+    grid-template-columns: 1fr;
+  }
+}

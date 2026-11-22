@@ -15,7 +15,7 @@ export function DeleteConversationDialog({ title, status, error, onConfirm, onCa
     <h2 id="delete-conversation-title">Delete conversation?</h2>
     <p>Delete the conversation record “{title}”? The project and its output files will remain.</p>
     <p>If this conversation is running, it will be stopped before deletion.</p>
-    {error !== null && <p className="extension-error" role="alert">{error}</p>}
+    {error !== null && <p className="dialog-error" role="alert">{error}</p>}
     {busy && <p role="status">{status === "stopping" ? "Stopping and finishing the current turn…" : "Deleting conversation…"}</p>}
     <div className="action-row">
       <button type="button" disabled={busy} onClick={onConfirm}>{error === null ? "Delete conversation" : "Retry deletion"}</button>
@@ -44,8 +44,8 @@ export function RenameConversationDialog({ title, issue, titleTooLong, busy, sav
       onFocus={(event) => event.currentTarget.select()}
       onKeyDown={(event) => { if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }}
       onChange={(event) => onTitleChange(event.target.value)} /></label>
-    {titleTooLong && <p className="extension-error" role="alert">Enter a shorter name.</p>}
-    {issue !== null && <p className="extension-error" role="alert">{issue}</p>}
+    {titleTooLong && <p className="dialog-error" role="alert">Enter a shorter name.</p>}
+    {issue !== null && <p className="dialog-error" role="alert">{issue}</p>}
     <div className="action-row">
       <button type="submit" className="primary-button" disabled={!canSave || title.trim() === "" || titleTooLong}>
         {saving ? "Saving…" : "Save name"}

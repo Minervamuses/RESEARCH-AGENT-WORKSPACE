@@ -1,0 +1,90 @@
+.project-browser {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.project-group {
+  margin-bottom: 0.9rem;
+}
+
+.project-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.project-heading strong {
+  min-width: 0;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-heading small,
+.sidebar-note {
+  color: #777d7a;
+  font-size: 0.68rem;
+}
+
+.sidebar-note {
+  margin: 0.35rem 0.45rem 0.7rem;
+}
+
+.session-list {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.load-more-sessions {
+  width: 100%;
+  margin-top: 0.35rem;
+  font-size: 0.68rem;
+}
+
+.session-link {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+
+.session-link[aria-current="page"] {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: #d6d9d6;
+}
+
+.session-link:disabled { pointer-events: none; }
+.conversation-menu-backdrop { position: fixed; inset: 0; z-index: 900; }
+.document-menu-actions.conversation-menu { position: fixed; right: auto; min-width: 12rem; }
+
+.session-link span {
+  font-size: 0.76rem;
+  font-weight: 680;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-link:hover span,
+.session-link:focus-visible span,
+.project-heading strong:hover,
+.project-heading strong:focus-visible {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.session-link small {
+  color: #737b78;
+  font-size: 0.64rem;
+}

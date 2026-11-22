@@ -1,0 +1,101 @@
+/* Source and conversation share a workspace; tool waits never disable editing. */
+.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); height: 100%; min-height: 0; flex: 1; }
+.document-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #d4d6d8; background: #fff; }
+.document-header { display: flex; align-items: center; gap: .45rem; flex: 0 0 auto; min-width: 0; padding: .35rem .7rem; border-bottom: 1px solid #dedfdd; }
+.document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
+.document-dirty { color: #9b6a25; font-size: .65rem; }
+.document-busy { color: #66716d; font-size: .7rem; }
+.document-menu { position: relative; margin-left: auto; }
+.document-menu > summary { padding: .3rem .55rem; border-radius: .35rem; cursor: pointer; list-style: none; }
+.document-menu > summary::-webkit-details-marker { display: none; }
+.document-menu-actions { position: absolute; top: 100%; right: 0; z-index: 60; display: grid; min-width: 13rem; padding: .3rem; background: #fff; border: 1px solid #d4d6d8; border-radius: .45rem; box-shadow: 0 .35rem 1rem #23272f22; }
+.document-menu-actions button { text-align: left; border: 0; min-height: 2rem; font-size: .75rem; }
+.document-menu-actions kbd { float: right; margin-left: 1rem; color: #66716d; font: inherit; }
+.document-error { flex: 0 0 auto; max-height: 16vh; overflow: auto; padding: .45rem .7rem; margin: 0; color: #7b4540; background: #fff7f5; font-size: .75rem; }
+.file-open-dialog label { display: grid; gap: .3rem; margin: 1rem 0; }
+.file-open-dialog input { width: 100%; padding: .5rem; }
+.document-editor { display: flex; flex-direction: column; flex: 1; min-height: 6rem; min-width: 0; }
+.document-editor-surface { flex: 1; min-height: 0; }
+.document-editor-status { padding: .35rem .7rem; color: #66716d; font-size: .68rem; border-top: 1px solid #dedfdd; }
+.document-conflict { flex: 0 1 auto; min-height: 0; padding: .7rem; max-height: 45vh; overflow: auto; border-top: 2px solid #b38539; background: #fffaf0; }
+.document-conflict h3 { font-size: .95rem; }
+.document-conflict p, .document-conflict button, .conflict-versions { font-size: .72rem; }
+.conflict-versions pre { max-height: 9rem; overflow: auto; white-space: pre-wrap; padding: .5rem; background: #fff; border: 1px solid #dedfdd; }
+.writing-workspace > .workspace-body { min-width: 0; padding: .8rem; }
+.writing-workspace > .workspace-body:not(.conversation-workspace-body) { overflow: auto; }
+@media (max-width: 1050px) {
+  .writing-workspace { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  .document-pane { min-height: 55vh; border-right: 0; border-bottom: 1px solid #d4d6d8; }
+  .writing-workspace > .workspace-body { min-height: 70vh; }
+}
+@media (max-width: 760px) {
+  .writing-workspace { height: auto; overflow: visible; }
+  .writing-workspace > .conversation-workspace-body { height: 75vh; }
+}
+
+.document-editor-empty { padding: 1.5rem .9rem; color: #66716d; font-size: .8rem; }
+.document-approval-backdrop { pointer-events: none; background: transparent; justify-content: flex-end; align-items: flex-start; padding: 5rem 1.5rem 1rem; }
+.document-approval-backdrop .modal-dialog { pointer-events: auto; width: min(30rem, 90vw); box-shadow: 0 1rem 3rem #23272f33; }
+
+/* Frozen context stays separate from selectable message text. */
+.reference-cards { display: grid; gap: 0.45rem; min-width: 0; margin: 0.5rem 0; max-height: 18rem; overflow: auto; }
+.reference-card { min-width: 0; padding: 0.55rem 0.7rem; border: 1px solid #ccd9d3; border-radius: 0.55rem; background: #f4f8f5; }
+.reference-card summary { cursor: pointer; display: grid; gap: 0.2rem; overflow-wrap: anywhere; }
+.reference-card summary strong { font-size: 0.76rem; }
+.reference-card summary span { color: #57635d; font-size: 0.78rem; }
+.reference-card pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 15rem; overflow: auto; margin: 0.6rem 0; }
+.reference-version { font-size: 0.7rem; color: #57635d; overflow-wrap: anywhere; }
+.reference-card button { margin-top: 0.3rem; }
+.reference-issue, .reference-retry-settings { margin: 0.35rem 0; padding: 0.5rem 0.7rem; color: #714b29; background: #fff8ec; border-radius: 0.4rem; font-size: 0.8rem; }
+.reference-retry-settings p { margin: 0 0 0.35rem; }
+.chat-reference-action, .document-reference-action { z-index: 50; padding: 0.45rem 0.65rem; color: #fff; background: #236c55; border: 1px solid #17533f; border-radius: 0.4rem; box-shadow: 0 0.25rem 0.7rem #20382d33; cursor: pointer; font: inherit; font-size: 0.78rem; }
+.chat-reference-action:hover, .document-reference-action:hover { background: #17533f; }
+.reference-message-body { position: relative; }
+.chat-annotation-anchor { position: absolute; z-index: 20; }
+.document-annotation-widget { z-index: 30; }
+.annotation-comment { position: relative; font: 13px/1.45 "Segoe UI", sans-serif; }
+.annotation-number { width: 1.65rem; height: 1.65rem; padding: 0; border: 1px solid #17533f; border-radius: 50%; background: #236c55; color: #fff; font-weight: 700; cursor: pointer; box-shadow: 0 2px 5px #20382d33; }
+.annotation-number[aria-expanded="true"] { background: #174c3b; }
+.annotation-popup { position: absolute; top: 1.9rem; left: 0; z-index: 60; box-sizing: border-box; width: 260px; padding: .65rem; border: 1px solid #a9bdb4; border-radius: .55rem; color: #20382d; background: #fff; box-shadow: 0 .35rem 1rem #20382d33; white-space: normal; }
+.document-annotation-widget .annotation-popup { position: relative; top: auto; margin-top: .25rem; }
+.annotation-popup label { display: grid; gap: .3rem; font-weight: 600; }
+.annotation-popup textarea { box-sizing: border-box; width: 100%; min-height: 4.5rem; padding: .4rem; resize: vertical; font: inherit; line-height: 1.5; color: #20382d; background: #fff; border: 1px solid #a9bdb4; border-radius: .3rem; }
+.annotation-actions { display: flex; gap: .4rem; margin-top: .45rem; }
+.annotation-actions button { padding: .25rem .55rem; font: inherit; cursor: pointer; }
+.annotation-popup p { margin: .45rem 0 0; color: #5c7066; font-size: .7rem; }
+.annotation-batch { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: .75rem; color: #466152; }
+.annotation-batch button { padding: .1rem .4rem; border: 1px solid #a9bdb4; border-radius: .35rem; color: #17533f; background: #f1f7f3; }
+/* Panel text is never below .9rem (G7). */
+.citation-panel { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow: auto; padding: .5rem .7rem; border-top: 1px solid #d4d6d8; background: #fbfbfa; font-size: .95rem; }
+.citation-panel select { font: inherit; }
+.citation-panel .document-error { font-size: inherit; }
+/* Summary bar: always one (wrapping) row; the body below renders only when expanded. */
+.citation-summary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .2rem .35rem; border: 1px solid transparent; border-radius: .35rem; }
+.citation-summary h3 { font-size: 1rem; margin: 0; }
+.citation-summary select { margin-left: .3rem; max-width: 16rem; min-height: 2rem; }
+.citation-summary button { min-height: 2rem; padding: .3rem .65rem; }
+.citation-counts { color: #4a4f55; }
+.citation-summary.has-problems { background: #fbeaea; border-color: #e3a5a5; }
+.citation-summary.has-problems .citation-counts { color: #9b1c1c; font-weight: 600; }
+.citation-toggle { margin-left: auto; }
+.citation-library { overflow-wrap: anywhere; color: #4a4f55; }
+.citation-section > summary { cursor: pointer; font-weight: 600; margin: .35rem 0; }
+.citation-list { margin: 0; padding-left: 1.1rem; }
+.citation-row summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; cursor: pointer; }
+.citation-number { font-weight: 600; }
+.citation-meta { color: #4a4f55; overflow-wrap: anywhere; }
+.citation-count { color: #6b7075; }
+.citation-uses { display: flex; flex-wrap: wrap; gap: .3rem; list-style: none; padding: 0; margin: .2rem 0 .4rem; }
+.citation-empty { color: #6b7075; }
+.citation-problems li { margin-bottom: .2rem; }
+.link-button { border: 0; background: none; padding: 0; color: #1f5f99; text-decoration: underline; cursor: pointer; font: inherit; }
+.citation-add { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; margin: .4rem 0; }
+.citation-add input { display: block; min-width: 16rem; }
+.citation-added { color: #1f6b3a; overflow-wrap: anywhere; }
+.citation-actions { display: inline-flex; gap: .5rem; margin-left: .4rem; }
+/* The options open in the row's flow (own line) so the scrolling panel never clips them. */
+.citation-export { display: contents; }
+.citation-export-options { order: 1; flex-basis: 100%; display: grid; gap: .15rem; margin: 0; padding: .25rem; list-style: none; background: #fff; border: 1px solid #d4d6d8; border-radius: .45rem; box-shadow: 0 .35rem 1rem #23272f22; }
+.citation-export-options button { display: grid; gap: .1rem; width: 100%; padding: .4rem .5rem; border: 0; text-align: left; }
+.citation-export-note { color: #4a4f55; font-size: .9rem; }
+.citation-references p { padding-left: 1.5rem; text-indent: -1.5rem; margin: .2rem 0; overflow-wrap: anywhere; }

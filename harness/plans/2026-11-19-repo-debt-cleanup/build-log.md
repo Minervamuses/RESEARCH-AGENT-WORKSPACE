@@ -762,3 +762,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **限制**：GUI 未驗證；沒有刪除測試，測試只改 SSR 載入目標。
 - **下一步**：C9-S3 CSS 分檔與 class 改名。
 
+
+### C9-S3 CSS 分檔與 class 改名（S096，P12，2026-11-22）
+
+- **觀察結果**：先以 `normalize-css.sh` 存 `css-before.txt`（1,061 行）。`styles.css`（1,294 行）切成 7 個連續區段：`styles.css`（1–288，含第一個 `:root`）加 `src/styles/` 的 `workspace`、`sidebar`、`conversation`、`dialogs`、`responsive`、`document`，由 `main.tsx` 緊接在 `styles.css` 之後依序 import。`extension-error` 在擴充面板仍是真的擴充錯誤，所以保留；對話與選專案的 4 處借用改為 `dialog-error`，並在同一規則的選擇器清單加 `.dialog-error`。打包後 CSS 前後只差這一個選擇器；`#hex` 與 `rgb()/rgba()` 集合相同。
+- **執行指令**：`npm test`（256 pass，`styles.test.ts` 未改）、`npm run build`（通過）。
+- **證據**：`evidence/C9-S3/css-split.md`、`normalize-css.sh`、`css-before.txt`、`css-after.txt`、`colors-*.txt`、`rgb-*.txt`。
+- **限制**：GUI 未驗證；元件規則仍分散在幾個區段（P12，預期）。
+- **下一步**：C9-S4。

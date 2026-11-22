@@ -56,7 +56,7 @@ export function ProjectChooser({
         {documentDirty && dirtyChoice === "save" ? "Save and " : ""}{candidate.status === "ready" ? "Open project" : "Initialize and open project"}
       </button></div>
     </div>}
-    {issue !== null && <p className="extension-error" role="alert">{issue}</p>}
+    {issue !== null && <p className="dialog-error" role="alert">{issue}</p>}
     {busy && <p role="status">{busyLabel}…</p>}
     <button type="button" disabled={busy} onClick={onCancel}>Cancel</button>
   </ModalDialog>;
