@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S8/` | — | C7-S9 |
+| C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -681,3 +681,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S8/modules.md`、搬移工具 `split_service.py`、`fixup_imports.py`。
 - **限制**：無。
 - **下一步**：C7-S9 階段收尾。
+
+### C7-S9 階段收尾與 C7 驗收（2026-11-22）
+
+- **觀察結果**：完整 pytest 1827 passed（沙箱外）。殘留 grep：fixture 開關、`inspect.signature`、兩種私有存取（除一個非 `ChatSession` 的命中）、`bypass_approval`／`_document_turn_active`、10 個回合欄位舊名都是 0；忙碌條件只剩共用查詢定義。phase-07 七項完成狀態都有證據。
+- **執行指令**：見 `evidence/C7-S9/residual-grep.md`。
+- **證據**：`evidence/C7-S9/residual-grep.md`。
+- **限制**：`for_agents/` 對 `service.py` 結構、fixture 位置與 Retry Stop（FAIL-022）的描述過時，交給 C10。
+- **下一步**：C8 前端邏輯（相依 C3–C6 已完成）。
