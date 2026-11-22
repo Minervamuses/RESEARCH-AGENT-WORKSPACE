@@ -23,7 +23,7 @@
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
-| C9 | In progress | `evidence/C9-S1/`–`C9-S2/` | — | C9-S3 |
+| C9 | Complete | `evidence/C9-S1/`–`C9-S5/` | — | — |
 | C10 | Not started | — | — | 等 C2–C9 |
 
 ## 撰寫紀錄
@@ -778,3 +778,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C9-S4/tests.md`（含每個改或刪測試的退役紀錄）。
 - **限制**：`styles.test.ts` 讀 CSS，屬 S084，保留。合併後的測試跨 parser 與 renderer，失敗時需看斷言訊息定位。
 - **下一步**：C9-S5。
+
+### C9-S5 階段收尾與 C9 驗收（2026-11-22）
+
+- **觀察結果**：`npm test` 253 pass、`npm run build` 通過。樣式 7 檔合計 1,289 行（`styles.css` 288）；`App.tsx` 1,932 行；15 個元件檔。共用互動原語仍在使用；live、pending、restored 三種 Transcript 靜態渲染測試都在。phase-09 四項完成狀態都有證據。
+- **執行指令**：`npm test`、`npm run build`、`wc -l`、`grep`。
+- **證據**：`evidence/C9-S5/wrap-up.md`（含驗收表與 GUI 清單指標）。
+- **限制**：GUI 未驗證，焦點、Tab、外觀與編輯器縮放留給使用者。
+- **下一步**：C10 交付。
