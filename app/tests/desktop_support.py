@@ -39,6 +39,7 @@ class _FakeSession:
         self.turn_inputs: list[str] = []
         self.skill_turn_inputs: list[tuple[str, str | None]] = []
         self.turn_calls: list[dict[str, object]] = []
+        self.turn_options: list[object] = []
         self._turn_number = 0
         self._prompt_persisted_callback = None
 
@@ -63,9 +64,11 @@ class _FakeSession:
         turn_id: str | None = None,
         skill_name: str | None = None,
         retry: bool = False,
+        options=None,
     ) -> TurnOutcome:
         assert turn_id is not None
         assert uuid.UUID(hex=turn_id).hex == turn_id
+        self.turn_options.append(options)
         self.turn_inputs.append(text)
         self.skill_turn_inputs.append((text, skill_name))
         self.turn_calls.append({

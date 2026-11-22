@@ -88,7 +88,7 @@ from agent.ingest import (
     prune_folder,
 )
 from agent.paths import find_app_root
-from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX, READ_ONLY_DOCUMENT_SKILLS, SYSTEM_PROMPT
+from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX, READ_ONLY_DOCUMENT_SKILLS, SYSTEM_PROMPT, TurnOptions
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.skills.runtime import SkillSelectionError, resolve_skill_references
 from agent.turns.safety import content_text
@@ -321,12 +321,27 @@ class _DocumentCandidate:
 
 @dataclass
 class _TurnWork:
+    """One session turn: its identity, Stop bookkeeping and every per-turn value.
+
+    The service reads the per-turn values only through ``_running_turn``, which
+    is None once the turn finishes, so nothing carries into the next turn.
+    """
+
     session_id: str
     turn_id: str
     parent_request_id: str | None
     task: asyncio.Task
     scope: LocalWorkScope
     done: asyncio.Future[None]
+    event_sink: EventSink | None = None
+    loop: asyncio.AbstractEventLoop | None = None
+    permission_mode: str = "ask"
+    document_context: dict[str, Any] | None = None
+    references: list[dict[str, Any]] = field(default_factory=list)
+    editor_path: str | None = None
+    tool_names: dict[str, str] = field(default_factory=dict)
+    tool_summaries: dict[str, dict[str, str]] = field(default_factory=dict)
+    finished: bool = False
     document_tasks: set[asyncio.Task] = field(default_factory=set)
     stopping: bool = False
     result: dict[str, Any] | None = None
@@ -393,21 +408,11 @@ class DesktopService:
         self._session_closing = False
         self._knowledge_active = False
         self._extension_active = False
-        self._turn_event_sink: EventSink | None = None
-        self._turn_loop: asyncio.AbstractEventLoop | None = None
-        self._active_parent_request_id: str | None = None
-        self._active_turn_id: str | None = None
         self._pending_approval: _PendingApproval | None = None
-        self._tool_names: dict[str, str] = {}
-        self._tool_summaries: dict[str, dict[str, str]] = {}
         self._extension_previews: dict[str, ExtensionPreview] = {}
         self._composer_prune_preview: tuple[str, _PrunePreview] | None = None
         self._documents = DocumentWorkspace()
         self._document_candidates: dict[str, _DocumentCandidate] = {}
-        self._active_document_context: dict[str, Any] | None = None
-        self._active_references: list[dict[str, Any]] = []
-        self._active_editor_path: str | None = None
-        self._active_turn_permission_mode: str | None = None
         self._operation_approval_lock = asyncio.Lock()
         self._document_apply_lock = asyncio.Lock()
         self._document_tool_lock = asyncio.Lock()
@@ -1313,9 +1318,15 @@ class DesktopService:
         )
         return session
 
-    def _on_prompt_persisted(self, session: ChatSession) -> None:
+    @property
+    def _running_turn(self) -> _TurnWork | None:
+        """The turn now running, or None (also after it finished while a failed Stop keeps the service busy)."""
         owner = self._turn_work
-        sink = self._turn_event_sink
+        return owner if owner is not None and not owner.finished else None
+
+    def _on_prompt_persisted(self, session: ChatSession) -> None:
+        owner = self._running_turn
+        sink = owner.event_sink if owner is not None else None
         if (
             owner is not None and not owner.done.done()
             and owner.session_id == session.session_id and sink is not None
@@ -1509,7 +1520,7 @@ class DesktopService:
             session_id=session_id,
             text=text,
             validation_errors=self._validation_error_dtos(errors),
-            tool_summaries=list(self._tool_summaries.values())[:512],
+            tool_summaries=self._running_turn_summaries(),
         )
 
     async def _execute_desktop_knowledge_command(
@@ -1702,7 +1713,8 @@ class DesktopService:
             lines.append("Re-run the same command with --yes to apply.")
             result = self._knowledge_result("\n".join(lines))
             self._composer_prune_preview = (session.session_id, preview)
-            if self._active_turn_permission_mode != "bypass":
+            turn = self._running_turn
+            if turn is None or turn.permission_mode != "bypass":
                 return result
 
         stored = self._composer_prune_preview
@@ -1938,10 +1950,6 @@ class DesktopService:
             self._project_epoch += 1
             self._document_candidates.clear()
             self._approval_document_snapshots.clear()
-            self._active_document_context = None
-            self._active_turn_permission_mode = None
-            self._tool_names.clear()
-            self._tool_summaries.clear()
             return {**project, "status": "opened"}
         finally:
             self._workspace_opening = False
@@ -2274,23 +2282,26 @@ class DesktopService:
         scope = current_local_work()
         if scope is not None:
             scope.check_cancelled()
-        context = self._active_document_context
-        document_references = [item for item in self._active_references if item["kind"] == "document"]
+        turn = self._running_turn
+        if turn is None:
+            return json.dumps({"status": "failed", "issue": "No active desktop document snapshot is available."})
+        context = turn.document_context
+        document_references = [item for item in turn.references if item["kind"] == "document"]
         reference = None
         if reference_id is not None:
-            reference = next((item for item in self._active_references if item["referenceId"] == reference_id), None)
+            reference = next((item for item in turn.references if item["referenceId"] == reference_id), None)
             if reference is None or reference["kind"] != "document":
                 return json.dumps({"status": "failed", "issue": "reference_id must identify a document reference; chat references are read-only."})
         elif len(document_references) > 1:
             return json.dumps({"status": "failed", "issue": "Supply the reference_id identified by the user's request for this edit. Handle separately requested references in order; ask for clarification only if the target is unclear."})
         if reference is not None:
             context = reference["document"]["snapshot"]
-            if context["path"] != self._active_editor_path:
+            if context["path"] != turn.editor_path:
                 return json.dumps({"status": "failed", "issue": "Open this reference's document in the editor and submit a new turn before editing it."})
-        turn_id = self._active_turn_id
-        parent_request_id = self._active_parent_request_id
-        sink = self._turn_event_sink
-        if not self._turn_active or context is None or turn_id is None or parent_request_id is None or sink is None:
+        turn_id = turn.turn_id
+        parent_request_id = turn.parent_request_id
+        sink = turn.event_sink
+        if not self._turn_active or context is None or parent_request_id is None or sink is None:
             return json.dumps({"status": "failed", "issue": "No active desktop document snapshot is available."})
         # The model call's identity is stable for an explicit retry, while two
         # distinct operations within one turn must remain separate candidates.
@@ -2318,7 +2329,7 @@ class DesktopService:
         candidate = _DocumentCandidate(
             value=candidate_value, context=context, turn_id=turn_id,
             parent_request_id=parent_request_id,
-            permission_mode=self._active_turn_permission_mode or "ask", future=future,
+            permission_mode=turn.permission_mode, future=future,
         )
         self._document_candidates[call_id] = candidate
         try:
@@ -2342,9 +2353,10 @@ class DesktopService:
     def _advance_document_working_context(
         self, candidate: _DocumentCandidate, result: dict[str, Any],
     ) -> None:
+        turn = self._running_turn
         if (
             result.get("status") != "saved" or not self._turn_active
-            or candidate.turn_id != self._active_turn_id
+            or turn is None or candidate.turn_id != turn.turn_id
         ):
             return
         snapshot_keys = ("rootPath", "path", "editorRevision", "sourceText", "diskFingerprint")
@@ -2352,14 +2364,14 @@ class DesktopService:
             key: result[key]
             for key in (*snapshot_keys, "rangeStartUtf16", "rangeEndUtf16")
         }
-        active = self._active_document_context
+        active = turn.document_context
         if active is not None and all(active[key] == candidate.context[key] for key in snapshot_keys):
-            self._active_document_context = saved
+            turn.document_context = saved
         start = candidate.value["rangeStartUtf16"]
         end = candidate.value["rangeEndUtf16"]
         saved_end = result["rangeEndUtf16"]
         delta = saved_end - end
-        for reference in self._active_references:
+        for reference in turn.references:
             if reference["kind"] != "document":
                 continue
             before = reference["document"]["snapshot"]
@@ -2387,19 +2399,21 @@ class DesktopService:
         scope = current_local_work()
         if scope is not None:
             scope.check_cancelled()
-        mode = permission_mode or self._active_turn_permission_mode or self._permission_mode
+        turn = self._running_turn
+        mode = permission_mode or (turn.permission_mode if turn is not None else self._permission_mode)
         if mode == "bypass":
             return True, document_context
-        sink = event_sink or self._turn_event_sink
-        active_owner = self._active_turn_id if self._turn_active else None
-        parent = parent_request_id or self._active_parent_request_id or getattr(sink, "request_id", None)
-        operation_turn = turn_id or self._active_turn_id or uuid.uuid4().hex
+        sink = event_sink or (turn.event_sink if turn is not None else None)
+        active_owner = turn.turn_id if self._turn_active and turn is not None else None
+        parent = parent_request_id or (turn.parent_request_id if turn is not None else None) or getattr(sink, "request_id", None)
+        operation_turn = turn_id or (turn.turn_id if turn is not None else None) or uuid.uuid4().hex
         if sink is None or not isinstance(parent, str):
             return False, document_context
         async with self._operation_approval_lock:
             if scope is not None:
                 scope.check_cancelled()
-            if active_owner is not None and (not self._turn_active or self._active_turn_id != active_owner):
+            current = self._running_turn
+            if active_owner is not None and (not self._turn_active or current is None or current.turn_id != active_owner):
                 return False, document_context
             if self._pending_approval is not None:
                 return False, document_context
@@ -2444,7 +2458,8 @@ class DesktopService:
         scope = current_local_work()
         if scope is not None:
             scope.check_cancelled()
-        mode = self._active_turn_permission_mode or self._permission_mode
+        turn = self._running_turn
+        mode = turn.permission_mode if turn is not None else self._permission_mode
         if mode == "bypass":
             return True
         summary = json.dumps(parameters, ensure_ascii=False, sort_keys=True, default=str) if parameters is not None else None
@@ -2477,7 +2492,8 @@ class DesktopService:
         mcp_call = family is not None and family != "desktop_document"
         if not (citation_save or skill_install or mcp_call):
             return True
-        if not self._turn_active or self._active_turn_id is None or self._active_parent_request_id is None:
+        turn = self._running_turn
+        if not self._turn_active or turn is None or turn.parent_request_id is None:
             return False
         if citation_save:
             policy = self.session.citation_policy
@@ -2568,8 +2584,10 @@ class DesktopService:
                 raise DocumentError("Unknown document operation; do not replay after restart.")
             if params.get("parentRequestId") is not None and params["parentRequestId"] != candidate.parent_request_id:
                 raise DocumentError("Document operation belongs to another turn request.")
+            running = self._running_turn
             if self._turn_active and (
-                turn_id != self._active_turn_id or candidate.parent_request_id != self._active_parent_request_id
+                running is None or turn_id != running.turn_id
+                or candidate.parent_request_id != running.parent_request_id
             ):
                 raise DocumentError("Document operation does not match the active turn.")
             if context["path"] != candidate.context["path"]:
@@ -2588,8 +2606,12 @@ class DesktopService:
             else:
                 # In a turn, approval shares session.turn's live event stream. A later
                 # conflict choice or Undo uses its own document.apply request stream.
-                approval_sink = self._turn_event_sink if self._turn_active else event_sink
-                approval_parent = self._active_parent_request_id if self._turn_active else getattr(event_sink, "request_id", None)
+                running = self._running_turn
+                approval_sink = (running.event_sink if running is not None else None) if self._turn_active else event_sink
+                approval_parent = (
+                    (running.parent_request_id if running is not None else None)
+                    if self._turn_active else getattr(event_sink, "request_id", None)
+                )
                 if not isinstance(approval_parent, str):
                     raise DocumentError("Document operation requires a correlated desktop request.")
                 mode = self._permission_mode if undo_of else candidate.permission_mode
@@ -2685,16 +2707,15 @@ class DesktopService:
             )
         self._turn_active = True
         task = asyncio.current_task()
+        parent_request_id = getattr(event_sink, "request_id", None)
         owner = _TurnWork(
             session.session_id, params["turnId"],
-            getattr(event_sink, "request_id", None), task,
+            parent_request_id if isinstance(parent_request_id, str) else None, task,
             LocalWorkScope(), asyncio.get_running_loop().create_future(),
+            event_sink=event_sink, loop=asyncio.get_running_loop(),
+            permission_mode=self._permission_mode,
         )
         self._turn_work = owner
-        previous_mode = session.thinking_mode
-        installer = getattr(session, "_skill_installer", None)
-        if installer is not None:
-            installer.bypass_approval = self._permission_mode == "bypass"
         response = None
         failure = None
         try:
@@ -2735,21 +2756,8 @@ class DesktopService:
                     details=lifecycle,
                 )
             self._complete_pending_approval(False)
-            if installer is not None:
-                installer.bypass_approval = False
-            if self._active_document_context is not None:
-                session._document_turn_active = False
-                session.set_thinking_mode(previous_mode)
-            self._active_document_context = None
-            self._active_references = []
-            self._active_editor_path = None
-            self._active_turn_permission_mode = None
-            self._active_parent_request_id = None
-            self._active_turn_id = None
-            self._turn_loop = None
-            self._turn_event_sink = None
-            self._tool_names = {}
-            self._tool_summaries = {}
+            # Discard the whole per-turn record; the next turn starts a new one.
+            owner.finished = True
             self._turn_active = owner.error is not None
 
             if not owner.done.done():
@@ -2762,24 +2770,14 @@ class DesktopService:
         self, params: dict[str, Any], event_sink: EventSink | None, session: ChatSession,
         owner: _TurnWork,
     ) -> dict[str, Any]:
-        self._turn_event_sink = event_sink
-        self._tool_names = {}
-        self._tool_summaries = {}
-        turn_id = params["turnId"]
-        parent_request_id = getattr(event_sink, "request_id", None)
-        self._turn_loop = asyncio.get_running_loop()
-        self._active_parent_request_id = (
-            parent_request_id if isinstance(parent_request_id, str) else None
-        )
-        self._active_turn_id = turn_id
-        self._active_turn_permission_mode = self._permission_mode
+        turn_id = owner.turn_id
         with owner.scope.bind():
             submitted_context, original_turn = await self._submitted_turn_context(session, params)
             if submitted_context is not None:
                 params = {**params, "skillReferences": submitted_context["skillReferences"]}
                 if "documentContext" in submitted_context:
                     params["documentContext"] = submitted_context["documentContext"]
-                self._active_references = copy.deepcopy(submitted_context["references"])
+                owner.references = copy.deepcopy(submitted_context["references"])
             context_options = {"submitted_context": submitted_context} if submitted_context is not None else {}
             original_text = params["text"]
             try:
@@ -2957,8 +2955,8 @@ class DesktopService:
                 document_context = self._documents.resolve_range(
                     params["documentContext"], original_text, require_available=submitted_context is None,
                 )
-                self._active_document_context = document_context
-                self._active_editor_path = document_context["path"]
+                owner.document_context = document_context
+                owner.editor_path = document_context["path"]
                 turn_text += (
                     f"\n\n{SNAPSHOT_HEADER}\n"
                     + json.dumps(document_context, ensure_ascii=False, sort_keys=True)
@@ -2966,13 +2964,11 @@ class DesktopService:
                 )
                 if len(turn_text.encode("utf-8")) > MAX_INPUT_BYTES:
                     raise DocumentError("The prompt plus document snapshot exceeds the existing 1 MiB turn limit; select a smaller document.")
-                session.set_thinking_mode("normal")
-                session._document_turn_active = True
-            if self._active_references:
+            if owner.references:
                 turn_text += (
                     f"\n\n{FROZEN_REFERENCES_HEADER}\n"
                     + json.dumps(
-                        _model_reference_projection(self._active_references, self._active_document_context),
+                        _model_reference_projection(owner.references, owner.document_context),
                         ensure_ascii=False, sort_keys=True,
                     )
                     + (_READ_ONLY_REFERENCE_INSTRUCTIONS if read_only_turn else _EDITABLE_REFERENCE_INSTRUCTIONS)
@@ -2985,6 +2981,13 @@ class DesktopService:
                 raise DocumentError("The prompt and frozen sources exceed the existing 1 MiB turn limit; remove references or use a smaller source. Your draft is retained.")
             skill_options = {"skill_references": params["skillReferences"]} if "skillReferences" in params else {}
             skill_options.update(context_options)
+            document_turn = owner.document_context is not None
+            # A document turn runs in normal thinking without changing the user's selection.
+            skill_options["options"] = TurnOptions(
+                document_turn=document_turn,
+                thinking_mode="normal" if document_turn else None,
+                permission_mode=owner.permission_mode,
+            )
             if turn_skill_name is None:
                 outcome = await session.turn_outcome(
                     turn_text,
@@ -3020,7 +3023,7 @@ class DesktopService:
             validation_errors = self._validation_error_dtos(
                 outcome.validation_errors
             )
-            tool_summaries = list(self._tool_summaries.values())[:512]
+            tool_summaries = self._running_turn_summaries()
             self._validate_turn_result_shape(
                 session_id=session.session_id,
                 text=outcome.text,
@@ -3283,9 +3286,14 @@ class DesktopService:
             "extensionRevision": int(session.running_extension_revision),
         }
 
+    def _running_turn_summaries(self) -> list[dict[str, str]]:
+        turn = self._running_turn
+        return list(turn.tool_summaries.values())[:512] if turn is not None else []
+
     def _on_session_progress(self, node_name: str, new_messages: list[Any]) -> None:
-        sink = self._turn_event_sink
-        if sink is None:
+        turn = self._running_turn
+        sink = turn.event_sink if turn is not None else None
+        if turn is None or sink is None:
             return
         sink("stage.changed", {"stage": str(node_name)})
         for message in new_messages:
@@ -3298,7 +3306,7 @@ class DesktopService:
                     name = self._bounded_text(name, 256)
                     call_id = self._bounded_text(call_id, 256) if call_id else ""
                     if call_id:
-                        self._tool_names[call_id] = name
+                        turn.tool_names[call_id] = name
                     data: dict[str, Any] = {"name": name, "status": "started"}
                     if call_id:
                         data["callId"] = call_id
@@ -3307,7 +3315,7 @@ class DesktopService:
             if not isinstance(message, ToolMessage):
                 continue
             call_id = str(message.tool_call_id or "").strip()
-            name = str(message.name or self._tool_names.get(call_id, "")).strip()
+            name = str(message.name or turn.tool_names.get(call_id, "")).strip()
             if not name:
                 continue
             name = self._bounded_text(name, 256)
@@ -3316,7 +3324,7 @@ class DesktopService:
             summary: dict[str, str] = {"name": name, "status": status}
             if call_id:
                 summary["callId"] = call_id
-            self._tool_summaries[call_id or f"{name}:{len(self._tool_summaries)}"] = summary
+            turn.tool_summaries[call_id or f"{name}:{len(turn.tool_summaries)}"] = summary
             sink(
                 "tool.failed" if status in {"failed", "denied"} else "tool.finished",
                 dict(summary),
@@ -3519,17 +3527,17 @@ class DesktopService:
         description: str,
         execution_timeout_seconds: int,
     ) -> bool:
-        loop = self._turn_loop
+        turn = self._running_turn
+        loop = turn.loop if turn is not None else None
         if loop is None or loop.is_closed():
             return False
         if (
             not self._turn_active
-            or self._turn_event_sink is None
-            or self._active_parent_request_id is None
-            or self._active_turn_id is None
+            or turn.event_sink is None
+            or turn.parent_request_id is None
         ):
             return False
-        if self._active_turn_permission_mode == "bypass":
+        if turn.permission_mode == "bypass":
             return True
         scope = current_local_work()
         if scope is not None:
@@ -3544,14 +3552,15 @@ class DesktopService:
             ),
             loop,
         )
-        owner_turn = self._active_turn_id
+        owner_turn = turn.turn_id
         while True:
             try:
                 return bool(staged.result(timeout=1.0))
             except TimeoutError:
                 # Another operation can own the single approval UI. Its wait
                 # must not consume this operation's own approval deadline.
-                if not self._turn_active or self._active_turn_id != owner_turn or loop.is_closed():
+                current = self._running_turn
+                if not self._turn_active or current is None or current.turn_id != owner_turn or loop.is_closed():
                     staged.cancel()
                     return False
             except Exception:
@@ -3561,14 +3570,15 @@ class DesktopService:
     async def _stage_bash_approval(
         self, command: str, description: str, execution_timeout_seconds: int,
     ) -> bool:
-        if (not self._turn_active or self._turn_event_sink is None
-                or self._active_parent_request_id is None or self._active_turn_id is None
+        turn = self._running_turn
+        if (not self._turn_active or turn is None or turn.event_sink is None
+                or turn.parent_request_id is None
                 or not self._approval_context_is_safe(command, description)):
             return False
         approved, _context = await self._single_operation_approval({
             "command": command, "description": description,
             "executionTimeoutSeconds": execution_timeout_seconds,
-        }, permission_mode=self._active_turn_permission_mode or "ask")
+        }, permission_mode=turn.permission_mode)
         return approved
 
     def _complete_pending_approval(self, approved: bool) -> None:

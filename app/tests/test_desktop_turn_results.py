@@ -33,8 +33,9 @@ class _AnswerSession:
         turn_id: str | None = None,
         skill_name: str | None = None,
         retry: bool = False,
+        options=None,
     ) -> TurnOutcome:
-        del display_input, skill_name, retry
+        del display_input, skill_name, retry, options
         assert turn_id is not None
         self.started.set()
         if self.blocked:

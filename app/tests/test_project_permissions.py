@@ -9,7 +9,8 @@ import pytest
 
 from agent.desktop.protocol import request_event
 from agent.paths import find_app_root
-from agent.desktop.service import DesktopServiceError
+from agent.desktop.service import DesktopServiceError, _TurnWork
+from agent.ingest import LocalWorkScope
 from desktop_support import _FakeExtensionManager, _FakeSession, _SessionFactory, _open_test_project, _service, _turn_params
 
 
@@ -61,10 +62,9 @@ def test_tool_operations_receive_frozen_single_operation_consent(tmp_path, tool,
                 self.installer_paths = None
                 # No project bibliography: a citation save writes nothing.
                 self.citation_policy = SimpleNamespace(loaded_service=None, bibliography_path=lambda: None)
-                self._skill_installer = SimpleNamespace(bypass_approval=False)
 
             async def turn_outcome(self, text, **kwargs):
-                installer_flags.append(self._skill_installer.bypass_approval)
+                installer_flags.append(kwargs["options"].permission_mode == "bypass")
                 if await self.handler(tool, args):
                     performed.append((tool, args))
                 return await super().turn_outcome(text, **kwargs)
@@ -87,7 +87,7 @@ def test_tool_operations_receive_frozen_single_operation_consent(tmp_path, tool,
         await asyncio.gather(*sink.tasks)
         assert len(performed) == effects
         assert installer_flags == [mode == "bypass"]
-        assert service.session._skill_installer.bypass_approval is False
+        assert service._running_turn is None
         assert len(sink.approvals) == (mode == "ask")
         if sink.approvals:
             event = sink.approvals[0]
@@ -236,18 +236,20 @@ def test_bypass_document_edit_still_reports_editor_and_disk_conflicts(tmp_path, 
 def test_document_and_bash_use_one_serial_approval_queue(tmp_path):
     async def run():
         service = _service(tmp_path, approval_timeout_seconds=0.2)
-        service._turn_active = True
-        service._active_turn_id = uuid.uuid4().hex
-        service._active_parent_request_id = str(uuid.uuid4())
-        service._active_turn_permission_mode = "ask"
-        service._turn_loop = asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
+        turn = _TurnWork(
+            uuid.uuid4().hex, uuid.uuid4().hex, str(uuid.uuid4()), asyncio.current_task(),
+            LocalWorkScope(), loop.create_future(), loop=loop, permission_mode="ask",
+        )
         sink = _ApprovalSink(service)
-        sink.request_id = service._active_parent_request_id
-        service._turn_event_sink = sink
+        sink.request_id = turn.parent_request_id
+        turn.event_sink = sink
+        service._turn_active = True
+        service._turn_work = turn
         context = {"path": str(tmp_path / "draft.md"), "sourceText": "draft\n"}
         document, bash = await asyncio.gather(
-            service._document_operation_approval(event_sink=sink, parent_request_id=service._active_parent_request_id,
-                turn_id=service._active_turn_id, operation="document.apply", context=context, permission_mode="ask"),
+            service._document_operation_approval(event_sink=sink, parent_request_id=turn.parent_request_id,
+                turn_id=turn.turn_id, operation="document.apply", context=context, permission_mode="ask"),
             asyncio.to_thread(service._desktop_bash_approval, "printf fixture", "Return fixture output.", 5),
         )
         await asyncio.gather(*sink.tasks)

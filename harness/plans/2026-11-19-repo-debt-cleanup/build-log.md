@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S4/` | — | C7-S5 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S5/` | — | C7-S6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -649,3 +649,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S4/desktop-private-access.md`。
 - **限制**：暫留項目由 C7-S5 移除。
 - **下一步**：C7-S5 每回合參數。
+
+### C7-S5 每回合參數（U17，2026-11-22）
+
+- **觀察結果**：`ChatSession.turn_outcome` 接收 `TurnOptions`，在同一方法內設定與還原文件回合、該回合 thinking mode 與 installer bypass；desktop 的 10 個回合欄位移進 `_TurnWork`，經 `_running_turn` 讀取，回合結束即讀不到。C7-S4 暫留的 3 處私有存取已移除。新增回歸測試 (a)(b)(c)。過程中一次完整 pytest 因一個假 session 不接受 `options` 而卡住（回合失敗後等核准逾時），補參數後通過（第 1 次修正）。
+- **執行指令**：沙箱外完整 pytest；grep。
+- **證據**：`evidence/C7-S5/turn-state.md`。
+- **限制**：無。
+- **下一步**：C7-S6 Busy 判斷。

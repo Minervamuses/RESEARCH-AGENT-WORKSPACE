@@ -66,8 +66,9 @@ class _DesktopBashSession(_FakeSession):
         turn_id: str | None = None,
         skill_name: str | None = None,
         retry: bool = False,
+        options=None,
     ) -> TurnOutcome:
-        del display_input, skill_name, retry
+        del display_input, skill_name, retry, options
         assert turn_id is not None
         command, description = {
             "bash": ("printf fixture", "Return deterministic fixture output."),

@@ -33,7 +33,7 @@ from agent.desktop.documents import utf16_length, utf16_to_index
 from agent.document_context import SNAPSHOT_HEADER
 from agent.extensions.manager import ExtensionManager
 from agent.extensions.startup import load_extension_startup
-from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX, SYSTEM_PROMPT
+from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX, SYSTEM_PROMPT, TurnOptions
 from agent.skills.citation.session_policy import CitationSessionPolicy
 from agent.skills import discover_skills
 from agent.skills.runtime import (
@@ -971,7 +971,9 @@ class FixtureSession:
         skill_references: list[dict] | None = None,
         retry: bool = False,
         submitted_context: dict[str, Any] | None = None,
+        options: TurnOptions | None = None,
     ) -> TurnOutcome:
+        document_turn = options is not None and options.document_turn
         if skill_name is not None and skill_name not in {
             skill.name for skill in self.loaded_skills
         }:
@@ -1045,7 +1047,7 @@ class FixtureSession:
                     item for item in (submitted_context or {}).get("references", [])
                     if item["kind"] == "document"
                 ]
-                if tool is None or len(document_refs) != 2 or not getattr(self, "_document_turn_active", False):
+                if tool is None or len(document_refs) != 2 or not document_turn:
                     raise RuntimeError("fixture multi-edit requires two document references")
                 activities = []
                 for index, (reference, replacement) in enumerate(zip(document_refs, (
@@ -1066,7 +1068,7 @@ class FixtureSession:
                 answer = "Fixture document operations: " + " ".join(item.summary for item in activities)
             elif original_input.startswith("[[fixture:document-replace]]"):
                 tool = next((tool for tool in self.extra_tools if tool.name == "document_edit"), None)
-                if tool is None or not getattr(self, "_document_turn_active", False):
+                if tool is None or not document_turn:
                     raise RuntimeError("fixture document seam requires an active editor snapshot")
                 replacement = original_input.removeprefix("[[fixture:document-replace]]").lstrip(" ")
                 raw_message = await tool.ainvoke({

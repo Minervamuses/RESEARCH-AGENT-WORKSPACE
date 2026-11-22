@@ -658,7 +658,7 @@ def test_same_turn_reference_edits_keep_prior_saved_text_and_utf16_ranges(tmp_pa
         prompt = next(message.content for message in model.calls[0] if isinstance(message, HumanMessage))
         assert _model_references(prompt) == frozen["references"]
         assert _full_text_count(prompt, source) == 1
-        assert service._active_references == [] and service._active_document_context is None
+        assert service._running_turn is None  # the per-turn record is discarded
 
     asyncio.run(run())
 
@@ -727,7 +727,7 @@ def test_model_input_shows_each_frozen_document_version_once(tmp_path, monkeypat
 
         failed = service._conversation_repository.load(service.session.session_id).document.turns[-1]
         assert failed.submitted_context == submitted and failed.semantic_input == prompt
-        assert service._active_references == [] and service._active_document_context is None
+        assert service._running_turn is None  # the per-turn record is discarded
 
         await service.dispatch("session.turn", {
             "text": text, "turnId": turn_id, "retry": True, "submittedContext": submitted,
@@ -737,5 +737,114 @@ def test_model_input_shows_each_frozen_document_version_once(tmp_path, monkeypat
         saved = service._conversation_repository.load(service.session.session_id).document.turns[-1]
         assert saved.state == "completed" and saved.submitted_context == submitted
         assert path.read_text(encoding="utf-8") == saved_text
+
+    asyncio.run(run())
+
+
+def _observe_turns(model, session, service):
+    """Record the session's per-turn view at each model call (U17 regressions)."""
+    observed = []
+    original = model.invoke
+
+    def observing(messages):
+        turn = service._running_turn
+        observed.append({
+            "thinking": session.thinking_mode,
+            "document_edit": "document_edit" in session.tool_access_resolution().effective_tools,
+            "installer_bypass": session._skill_installer.bypass_approval,
+            "document_context": None if turn is None else turn.document_context,
+            "references": None if turn is None else list(turn.references),
+            "editor_path": None if turn is None else turn.editor_path,
+            "prompt": next(message.content for message in reversed(messages) if isinstance(message, HumanMessage)),
+        })
+        return original(messages)
+
+    model.invoke = observing
+    return observed
+
+
+def test_failed_document_turn_leaves_no_document_tools_or_forced_thinking(tmp_path, monkeypatch):
+    """(a) Supported use: a document turn fails midway, then the next turn starts in the same conversation."""
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        session = service.session
+        observed = _observe_turns(model, session, service)
+        session.set_thinking_mode("extended")  # the user's own selection
+        model.fail_before_answer = True
+        with pytest.raises(DesktopServiceError):
+            await service.dispatch("session.turn", {
+                "text": "改寫第二段", "turnId": uuid.uuid4().hex, "retry": False, "documentContext": context,
+            }, event_sink=_Sink(service, context))
+        assert observed[0]["thinking"] == "normal" and observed[0]["document_edit"] is True
+        assert session.thinking_mode == "extended"
+        assert "document_edit" not in session.tool_access_resolution().effective_tools
+        assert service._running_turn is None
+
+        session.set_thinking_mode("normal")
+        await service.dispatch("session.turn", {
+            "text": "分析一般問題", "turnId": uuid.uuid4().hex, "retry": False,
+        }, event_sink=_Sink(service, context))
+        assert observed[-1]["thinking"] == "normal"
+        assert observed[-1]["document_edit"] is False
+
+    asyncio.run(run())
+
+
+def test_installer_bypass_follows_each_turns_permission(tmp_path, monkeypatch):
+    """(b) A Bypass turn, then the user switches back to Ask: the installer no longer skips approval."""
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        session = service.session
+        observed = _observe_turns(model, session, service)
+        await service.dispatch("session.set_permission", {"permissionMode": "bypass"})
+        await service.dispatch("session.turn", {
+            "text": "分析第一題", "turnId": uuid.uuid4().hex, "retry": False,
+        }, event_sink=_Sink(service, context))
+        await service.dispatch("session.set_permission", {"permissionMode": "ask"})
+        await service.dispatch("session.turn", {
+            "text": "分析第二題", "turnId": uuid.uuid4().hex, "retry": False,
+        }, event_sink=_Sink(service, context))
+        assert [item["installer_bypass"] for item in observed] == [True, False]
+        assert session._skill_installer.bypass_approval is False
+
+    asyncio.run(run())
+
+
+def test_document_and_references_do_not_carry_into_the_next_turn(tmp_path, monkeypatch):
+    """(c) A turn with a document and references ends; the next turn sees neither."""
+    from agent.document_context import FROZEN_REFERENCES_HEADER, SNAPSHOT_HEADER
+
+    async def run():
+        service, model, path, context = await _setup(tmp_path, monkeypatch)
+        session = service.session
+        observed = _observe_turns(model, session, service)
+        from agent.desktop.documents import utf16_length
+
+        selected = {**context, "rangeStartUtf16": 0, "rangeEndUtf16": utf16_length("相同段落🙂")}
+        project = service._project
+        references = [{
+            "referenceId": "first", "kind": "document", "text": "相同段落🙂",
+            "document": {"snapshot": selected, "startLine": 1, "endLine": 1},
+        }]
+        submitted = {
+            "projectId": project["projectId"], "rootPath": project["rootPath"],
+            "permissionMode": "ask", "requestedThinkingMode": "normal",
+            "skillReferences": [], "documentContext": selected, "references": references,
+            "projectRules": {"text": project["rulesText"], "fingerprint": project["rulesFingerprint"]},
+        }
+        await service.dispatch("session.turn", {
+            "text": "分析這段", "turnId": uuid.uuid4().hex, "retry": False, "submittedContext": submitted,
+        }, event_sink=_Sink(service, selected))
+        first = observed[-1]
+        assert first["document_context"] is not None and first["references"] and first["editor_path"] == str(path)
+        assert SNAPSHOT_HEADER in first["prompt"] and FROZEN_REFERENCES_HEADER in first["prompt"]
+
+        await service.dispatch("session.turn", {
+            "text": "分析下一個問題", "turnId": uuid.uuid4().hex, "retry": False,
+        }, event_sink=_Sink(service, context))
+        second = observed[-1]
+        assert second["document_context"] is None and second["references"] == [] and second["editor_path"] is None
+        assert SNAPSHOT_HEADER not in second["prompt"] and FROZEN_REFERENCES_HEADER not in second["prompt"]
+        assert second["document_edit"] is False
 
     asyncio.run(run())

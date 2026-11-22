@@ -109,6 +109,7 @@ class _CoordinatorSession:
         turn_id=None,
         skill_name=None,
         retry=False,
+        options=None,
     ):
         assert skill_name is None
         assert isinstance(turn_id, str)

@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -112,6 +112,21 @@ Language policy:
 
 ONE_SHOT_DISPLAY_INPUT_PREFIX = "One-shot local action: "
 _T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class TurnOptions:
+    """Settings that belong to one turn only (U17).
+
+    ``document_turn`` adds the document tools for this turn; ``thinking_mode``
+    overrides the session's mode for this turn without changing the user's
+    choice; ``permission_mode`` decides whether the skill installer may skip
+    its approval step.
+    """
+
+    document_turn: bool = False
+    thinking_mode: str | None = None
+    permission_mode: str = "ask"
 
 
 async def _await_persistence(work: Awaitable[_T]) -> tuple[_T, bool]:
@@ -1277,106 +1292,146 @@ class ChatSession:
         skill_references: list[dict] | None = None,
         retry: bool = False,
         submitted_context: dict | None = None,
+        options: TurnOptions | None = None,
     ) -> TurnOutcome:
-        """Core entry point: one finalized turn with text, errors, and trace."""
+        """Core entry point: one finalized turn with text, errors, and trace.
+
+        ``options`` carries this turn's settings (document turn, forced thinking
+        mode, Permission). They apply only while the turn runs: the session sets
+        them here and restores them before returning, whatever happened.
+        """
+        options = options or TurnOptions()
         async with self._turn_execution_lock:
-            logical_turn_id = turn_id or uuid.uuid4().hex
-            original_input = display_input if display_input is not None else user_input
-            references = resolve_skill_references(original_input, self.loaded_skills, skill_references)
-            skill_names = list(dict.fromkeys([
-                *([skill_name] if skill_name else []), *[reference["name"] for reference in references],
-            ]))
-            installer_request = ("skill-installer" in skill_names
-                                 or (not skill_names and self._requests_skill_installer(original_input)))
-            installer_turn = installer_request or (not skill_names and self._skill_installer.pending)
-            citation_turn = any(name.casefold() == CITATION_SKILL_NAME for name in skill_names)
-            effective_mode = self.thinking_mode
-            if installer_turn or citation_turn:
-                effective_mode = "normal"
-            elif skill_names and self._installer_previous_mode is not None:
-                effective_mode = self._installer_previous_mode
-            (snapshot, turn, duplicate), cancelled = await _await_persistence(
-                self._begin_turn(
-                    semantic_input=user_input,
-                    display_input=display_input if display_input is not None else user_input,
-                    turn_id=logical_turn_id,
+            previous_mode = self.thinking_mode
+            if options.thinking_mode is not None:
+                self.thinking_mode = options.thinking_mode
+            self._document_turn_active = options.document_turn
+            self._skill_installer.bypass_approval = options.permission_mode == "bypass"
+            try:
+                return await self._locked_turn_outcome(
+                    user_input,
+                    display_input=display_input,
+                    turn_id=turn_id,
+                    skill_name=skill_name,
+                    skill_references=skill_references,
                     retry=retry,
-                    thinking_mode=effective_mode,
                     submitted_context=submitted_context,
                 )
-            )
-            self._conversation_snapshot = snapshot
-            if duplicate:
-                assert turn.assistant_output is not None
-                return TurnOutcome(
-                    text=turn.assistant_output,
-                    turn_id=turn.turn_id,
-                    turn_number=turn.turn_number,
-                    state="completed",
-                    accepted=True,
-                    persisted=True,
-                )
-            self._active_turn_snapshot = snapshot
-            self._active_turn_id = logical_turn_id
-            self._active_turn_input = user_input
-            self._turn_trace = TurnTimingTrace(logical_turn_id)
-            trace_state = "failed"
-            try:
-                if cancelled:
-                    raise asyncio.CancelledError()
-                if installer_turn:
-                    runtime = combine_skill_runtimes([
-                        self.skill_runtime_for(name) for name in skill_names
-                    ]) if skill_names else None
-                    outcome = await self._run_installer_turn(
-                        user_input, new_request=installer_request,
-                        runtime=runtime, authority_input=original_input,
-                    )
-                elif skill_names:
-                    outcome = await self._run_one_shot_skill_turn(
-                        user_input,
-                        skill_names[0], skill_names=skill_names,
-                    )
-                else:
-                    outcome = await self._run_turn(user_input)
-                trace_state = outcome.state
-                return outcome
-            except asyncio.CancelledError:
-                trace_state = "cancelled"
-                await self._fail_active_turn(
-                    state="interrupted",
-                    code="cancelled",
-                    message="The turn was cancelled before completion.",
-                )
-                raise
-            except ConversationError:
-                await self._fail_active_turn(
-                    code="persistence_failed",
-                    message="The final response could not be saved.",
-                )
-                raise
-            except Exception as exc:
-                incident, _new = attach_incident(exc)
-                logger.error(
-                    "Turn %s failed (incident %s): %s",
-                    logical_turn_id,
-                    incident,
-                    type(exc).__name__,
-                    exc_info=exc,
-                )
-                await self._fail_active_turn(
-                    message=(
-                        "The turn could not be completed. "
-                        + incident_reference(incident, exc)
-                    ),
-                )
-                raise
             finally:
-                self._turn_trace.finish(trace_state)
-                self._turn_trace = None
-                self._active_turn_snapshot = None
-                self._active_turn_id = None
-                self._active_turn_input = None
+                self._document_turn_active = False
+                self._skill_installer.bypass_approval = False
+                if options.thinking_mode is not None:
+                    self.thinking_mode = previous_mode
+
+    async def _locked_turn_outcome(
+        self,
+        user_input: str,
+        *,
+        display_input: str | None,
+        turn_id: str | None,
+        skill_name: str | None,
+        skill_references: list[dict] | None,
+        retry: bool,
+        submitted_context: dict | None,
+    ) -> TurnOutcome:
+        """One turn's body; the caller holds the turn lock and owns the turn options."""
+        logical_turn_id = turn_id or uuid.uuid4().hex
+        original_input = display_input if display_input is not None else user_input
+        references = resolve_skill_references(original_input, self.loaded_skills, skill_references)
+        skill_names = list(dict.fromkeys([
+            *([skill_name] if skill_name else []), *[reference["name"] for reference in references],
+        ]))
+        installer_request = ("skill-installer" in skill_names
+                             or (not skill_names and self._requests_skill_installer(original_input)))
+        installer_turn = installer_request or (not skill_names and self._skill_installer.pending)
+        citation_turn = any(name.casefold() == CITATION_SKILL_NAME for name in skill_names)
+        effective_mode = self.thinking_mode
+        if installer_turn or citation_turn:
+            effective_mode = "normal"
+        elif skill_names and self._installer_previous_mode is not None:
+            effective_mode = self._installer_previous_mode
+        (snapshot, turn, duplicate), cancelled = await _await_persistence(
+            self._begin_turn(
+                semantic_input=user_input,
+                display_input=display_input if display_input is not None else user_input,
+                turn_id=logical_turn_id,
+                retry=retry,
+                thinking_mode=effective_mode,
+                submitted_context=submitted_context,
+            )
+        )
+        self._conversation_snapshot = snapshot
+        if duplicate:
+            assert turn.assistant_output is not None
+            return TurnOutcome(
+                text=turn.assistant_output,
+                turn_id=turn.turn_id,
+                turn_number=turn.turn_number,
+                state="completed",
+                accepted=True,
+                persisted=True,
+            )
+        self._active_turn_snapshot = snapshot
+        self._active_turn_id = logical_turn_id
+        self._active_turn_input = user_input
+        self._turn_trace = TurnTimingTrace(logical_turn_id)
+        trace_state = "failed"
+        try:
+            if cancelled:
+                raise asyncio.CancelledError()
+            if installer_turn:
+                runtime = combine_skill_runtimes([
+                    self.skill_runtime_for(name) for name in skill_names
+                ]) if skill_names else None
+                outcome = await self._run_installer_turn(
+                    user_input, new_request=installer_request,
+                    runtime=runtime, authority_input=original_input,
+                )
+            elif skill_names:
+                outcome = await self._run_one_shot_skill_turn(
+                    user_input,
+                    skill_names[0], skill_names=skill_names,
+                )
+            else:
+                outcome = await self._run_turn(user_input)
+            trace_state = outcome.state
+            return outcome
+        except asyncio.CancelledError:
+            trace_state = "cancelled"
+            await self._fail_active_turn(
+                state="interrupted",
+                code="cancelled",
+                message="The turn was cancelled before completion.",
+            )
+            raise
+        except ConversationError:
+            await self._fail_active_turn(
+                code="persistence_failed",
+                message="The final response could not be saved.",
+            )
+            raise
+        except Exception as exc:
+            incident, _new = attach_incident(exc)
+            logger.error(
+                "Turn %s failed (incident %s): %s",
+                logical_turn_id,
+                incident,
+                type(exc).__name__,
+                exc_info=exc,
+            )
+            await self._fail_active_turn(
+                message=(
+                    "The turn could not be completed. "
+                    + incident_reference(incident, exc)
+                ),
+            )
+            raise
+        finally:
+            self._turn_trace.finish(trace_state)
+            self._turn_trace = None
+            self._active_turn_snapshot = None
+            self._active_turn_id = None
+            self._active_turn_input = None
 
     async def turn(
         self,
