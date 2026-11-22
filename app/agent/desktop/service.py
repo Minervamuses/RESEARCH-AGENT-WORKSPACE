@@ -11,18 +11,16 @@ import os
 import platform
 import re
 import sys
-import uuid
-from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import yaml
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
-from langchain_core.tools import InjectedToolCallId, StructuredTool
+from langchain_core.tools import StructuredTool
 
 from agent.config import AgentConfig, validate_graph_recursion_limit
 from agent.conversations import (
@@ -54,7 +52,6 @@ from agent.desktop.project import (
     inspect_project,
     initialize_project,
     open_project_history,
-    project_citation_settings,
     project_conversations,
 )
 from agent.desktop.protocol import (
@@ -64,17 +61,11 @@ from agent.desktop.protocol import (
 )
 from agent.desktop.documents import DocumentError, DocumentWorkspace
 from agent.document_context import FROZEN_REFERENCES_HEADER, SNAPSHOT_HEADER
-from agent.extensions.manager import (
-    ApplyReport,
-    ExtensionManager,
-    ExtensionPreview,
-    ExtensionStatus,
-)
+from agent.extensions.manager import ExtensionManager, ExtensionPreview
 from agent.extensions.paths import resolve_extension_paths
 from agent.ingest import (
     LocalWorkScope,
     await_sync_work,
-    current_local_work,
     run_local_work,
     diff_folder,
     ingest_file,
@@ -83,35 +74,23 @@ from agent.ingest import (
     prune_folder,
 )
 from agent.paths import find_app_root
-from agent.session import ChatSession, ONE_SHOT_DISPLAY_INPUT_PREFIX, READ_ONLY_DOCUMENT_SKILLS, SYSTEM_PROMPT, TurnOptions
+from agent.session import ChatSession, READ_ONLY_DOCUMENT_SKILLS, SYSTEM_PROMPT, TurnOptions
 from agent.skills import DEFAULT_SKILLS_DIR
 from agent.skills.runtime import SkillSelectionError, resolve_skill_references
 from agent.turns.safety import content_text
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
-from skills.citation.citekeys import format_for_path as citation_format_for_path
-from skills.citation.citekeys import keys_in as citation_keys_in
-from skills.citation.library import LibraryError
-from skills.citation.library import load as load_bibliography
 from agent.desktop.errors import _ErrorMapping
 from agent.desktop.errors import DesktopServiceError, EventSink, _SELF_EXPLANATORY_FAILURE_CODES, logger
 from agent.desktop.approvals import _ApprovalOps
 from agent.desktop.bibliography_ops import _BibliographyOps
-from agent.desktop.approvals import _CREDENTIAL_URL, _PendingApproval, _SECRET_APPROVAL_CONTEXT, _SECRET_FLAG_VALUE
+from agent.desktop.approvals import _PendingApproval
+from agent.desktop.document_ops import _DocumentOps
+from agent.desktop.extension_ops import _ExtensionOps
+from agent.desktop.document_ops import _DocumentCandidate
+from agent.desktop.extension_ops import _MAX_LOCAL_COMMAND_BYTES
 
 
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
-_BINDING_HASH = re.compile(r"^[0-9a-f]{64}$")
-_EXTENSION_APPLY_HEADER = re.compile(
-    r"^Extension Management applied revision (0|[1-9][0-9]*) -> (0|[1-9][0-9]*)$"
-)
-_EXTENSION_APPLY_OUTCOMES = frozenset({
-    "added",
-    "updated",
-    "removed",
-    "unchanged",
-    "blocked",
-    "pending_approval",
-})
 _EXTENSIONLESS_INGEST_FILES = {
     "Dockerfile",
     "Makefile",
@@ -127,7 +106,6 @@ _DESKTOP_SLASH_COMMANDS = frozenset({
     _DESKTOP_EXTENSION_COMMAND,
     *_DESKTOP_KNOWLEDGE_COMMANDS,
 })
-_MAX_LOCAL_COMMAND_BYTES = 65_536
 _MAX_TRANSCRIPT_TOOL_ACTIVITIES = 128
 _MAX_TRANSCRIPT_TOOL_CALL_ID_BYTES = 256
 _MAX_TRANSCRIPT_TOOL_NAME_BYTES = 256
@@ -136,8 +114,6 @@ _TRANSCRIPT_TOOL_STATUSES = frozenset({"ok", "failed", "denied", "incomplete"})
 _MAX_CONTROL_SNAPSHOTS = 4096
 _MAX_KNOWLEDGE_RESULT_PATHS = 512
 _MAX_KNOWLEDGE_PATH_BYTES = 4_096
-_MAX_EXTENSION_ARGUMENTS = 128
-_MAX_EXTENSION_ENVIRONMENT_NAMES = 128
 _WIRE_BUDGET_REQUEST_ID = "00000000-0000-4000-8000-000000000000"
 _WIRE_BUDGET_TURN_ID = "00000000000040008000000000000000"
 _SOURCE_TEXT_IDENTITY = ("rootPath", "path", "editorRevision", "diskFingerprint", "sourceText")
@@ -262,18 +238,6 @@ class _ConversationControlSnapshot:
 
 
 @dataclass
-class _DocumentCandidate:
-    value: Any
-    context: dict[str, Any]
-    turn_id: str
-    parent_request_id: str
-    permission_mode: str
-    future: asyncio.Future[dict[str, Any]] | None = None
-    result: dict[str, Any] | None = None
-    stopped: bool = False
-
-
-@dataclass
 class _TurnWork:
     """One session turn: its identity, Stop bookkeeping and every per-turn value.
 
@@ -303,7 +267,7 @@ class _TurnWork:
     error: DesktopServiceError | None = None
 
 
-class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
+class DesktopService(_ExtensionOps, _DocumentOps, _BibliographyOps, _ApprovalOps, _ErrorMapping):
     """Own one backend lifecycle and adapt existing domain APIs to safe DTOs."""
 
     def __init__(
@@ -1565,47 +1529,6 @@ class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
             lines.append("    (none)")
         return "\n".join(lines)
 
-    @staticmethod
-    def _desktop_extension_action(parsed: ParsedSlashCommand) -> str:
-        args = tuple(arg.casefold() for arg in parsed.args)
-        if args == ("status",):
-            return "status"
-        if args in {(), ("--dry-run",)}:
-            return "preview"
-        raise DesktopServiceError(
-            "PROTOCOL_INVALID",
-            "usage: /extension-management [--dry-run|status]",
-        )
-
-    async def _execute_desktop_extension_command(
-        self,
-        parsed: ParsedSlashCommand,
-    ) -> SlashCommandResult:
-        action = self._desktop_extension_action(parsed)
-        if action == "status":
-            status = await self._extensions_status()
-            diagnostics = len(status["diagnostics"])
-            running = ", ".join(status["runningMcpFamilies"]) or "none"
-            message = "\n".join([
-                "Extension Management status",
-                f"desired: {status['desiredCount']}",
-                f"applied: {status['appliedCount']}",
-                f"applied revision: {status['appliedRevision']}",
-                f"running revision: {status['runningRevision']}",
-                (
-                    "restart required: yes"
-                    if status["restartRequired"]
-                    else "restart required: no"
-                ),
-                f"running MCP: {running}",
-                f"diagnostics: {diagnostics}",
-            ])
-            return SlashCommandResult(message=message)
-        return SlashCommandResult(message=(
-            "Extension preview is ready to request. Preview may contact "
-            "the configured model provider, but it writes no changes. "
-            "Review the exact preview before applying."
-        ))
 
     async def _workspace_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -1666,291 +1589,9 @@ class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
         finally:
             self._workspace_opening = False
 
-    async def _document_open(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        return await asyncio.to_thread(self._documents.open, params["path"])
-
-    async def _document_save(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        return await asyncio.to_thread(self._documents.save, params["documentContext"])
 
     # --- bibliography.* (adapters over skills.citation) ---------------------
 
-
-    def _unknown_new_citation_keys(self, context: dict[str, Any], replacement_text: str) -> dict[str, Any] | None:
-        """Refuse an edit whose resulting document adds uses of keys missing from the bibliography.
-
-        The check runs on the full text the candidate would save (the
-        replacement spliced into the source exactly as ``prepare`` does), so a
-        partial selection such as ``known`` inside ``[@known]`` cannot turn a
-        known key into an unknown one. A key counts as added when it occurs
-        more often after the edit than before; existing uses, including
-        unknown keys the document already had, are left alone.
-        Returns the failure payload, or None when the edit may proceed.
-        """
-        fmt = citation_format_for_path(context["path"])
-        if fmt is None:
-            return None
-        try:
-            base, candidate = self._documents.candidate_text(context, replacement_text)
-        except DocumentError:
-            return None  # prepare() reports the same invalid range or text
-        before = Counter(citation_keys_in(base["sourceText"], fmt))
-        after = Counter(citation_keys_in(candidate, fmt))
-        added = [key for key in after if after[key] > before.get(key, 0)]
-        if not added:
-            return None
-        project = self._project
-        try:
-            if project is None:
-                raise LibraryError("library_malformed", "No research project is open.")
-            path = project_citation_settings(project["rootPath"])["bibliographyPath"]
-            known = set(load_bibliography(path).keys())
-        except (ProjectError, LibraryError) as exc:
-            return {
-                "status": "failed",
-                "issue": (
-                    "The edit adds citation keys to the document, but the project bibliography cannot be read "
-                    f"({exc}); no candidate was prepared."
-                ),
-                "unknownKeys": added,
-            }
-        unknown = [key for key in added if key not in known]
-        if not unknown:
-            return None
-        return {
-            "status": "failed",
-            "issue": (
-                "After this edit the document would cite keys that are not in the project bibliography "
-                f"({path}); no candidate was prepared. Use bibliography_lookup for existing keys, or "
-                "save the work with /citation first. Do not invent keys."
-            ),
-            "unknownKeys": unknown,
-        }
-
-    async def _desktop_document_edit(
-        self, replacement_text: str, tool_call_id: Annotated[str, InjectedToolCallId],
-        reference_id: str | None = None,
-    ) -> str:
-        """Serialize version-checked writes to the current editor or a frozen reference."""
-        async with self._document_tool_lock:
-            return await self._run_desktop_document_edit(replacement_text, tool_call_id, reference_id)
-
-    async def _run_desktop_document_edit(
-        self, replacement_text: str, tool_call_id: str, reference_id: str | None = None,
-    ) -> str:
-        """Prepare one bounded candidate and wait for the actual editor save result."""
-        scope = current_local_work()
-        if scope is not None:
-            scope.check_cancelled()
-        turn = self._running_turn
-        if turn is None:
-            return json.dumps({"status": "failed", "issue": "No active desktop document snapshot is available."})
-        context = turn.document_context
-        document_references = [item for item in turn.references if item["kind"] == "document"]
-        reference = None
-        if reference_id is not None:
-            reference = next((item for item in turn.references if item["referenceId"] == reference_id), None)
-            if reference is None or reference["kind"] != "document":
-                return json.dumps({"status": "failed", "issue": "reference_id must identify a document reference; chat references are read-only."})
-        elif len(document_references) > 1:
-            return json.dumps({"status": "failed", "issue": "Supply the reference_id identified by the user's request for this edit. Handle separately requested references in order; ask for clarification only if the target is unclear."})
-        if reference is not None:
-            context = reference["document"]["snapshot"]
-            if context["path"] != turn.editor_path:
-                return json.dumps({"status": "failed", "issue": "Open this reference's document in the editor and submit a new turn before editing it."})
-        turn_id = turn.turn_id
-        parent_request_id = turn.parent_request_id
-        sink = turn.event_sink
-        if not self._turn_active or context is None or parent_request_id is None or sink is None:
-            return json.dumps({"status": "failed", "issue": "No active desktop document snapshot is available."})
-        # The model call's identity is stable for an explicit retry, while two
-        # distinct operations within one turn must remain separate candidates.
-        call_id = hashlib.sha256(f"{turn_id}\0{tool_call_id}".encode("utf-8")).hexdigest()
-        existing = self._document_candidates.get(call_id)
-        if existing is not None:
-            await run_local_work(
-                self._documents.prepare, existing.context, replacement_text,
-                turn_id=turn_id, call_id=call_id,
-            )
-            if existing.result is not None:
-                if existing.result.get("status") == "saved":
-                    checked = await run_local_work(self._documents.apply, existing.value, context)
-                    existing.result = {**checked, "callId": existing.value["callId"]}
-                    self._advance_document_working_context(existing, checked)
-                return json.dumps(existing.result, ensure_ascii=False)
-            return json.dumps({"status": "failed", "issue": "This turn already has a pending document candidate; do not replay it."})
-        refused = self._unknown_new_citation_keys(context, replacement_text)
-        if refused is not None:
-            return json.dumps(refused, ensure_ascii=False)
-        candidate_value = await run_local_work(
-            self._documents.prepare, context, replacement_text, turn_id=turn_id, call_id=call_id,
-        )
-        future = asyncio.get_running_loop().create_future()
-        candidate = _DocumentCandidate(
-            value=candidate_value, context=context, turn_id=turn_id,
-            parent_request_id=parent_request_id,
-            permission_mode=turn.permission_mode, future=future,
-        )
-        self._document_candidates[call_id] = candidate
-        try:
-            sink("document.proposed", {"turnId": turn_id, "callId": call_id, **({"referenceId": reference["referenceId"]} if reference is not None else {})})
-            result = await asyncio.wait_for(asyncio.shield(future), timeout=self._approval_timeout_seconds * 2)
-        except asyncio.CancelledError:
-            if not future.done():
-                future.cancel()
-            raise
-        except TimeoutError:
-            result = {
-                "path": context["path"], "callId": call_id, "status": "cancelled",
-                "candidateText": candidate_value["candidateText"],
-                "issue": "The document operation did not finish; the candidate is retained and no save is confirmed.",
-            }
-            candidate.result = result
-            if not future.done():
-                future.set_result(result)
-        return json.dumps(result, ensure_ascii=False)
-
-    def _advance_document_working_context(
-        self, candidate: _DocumentCandidate, result: dict[str, Any],
-    ) -> None:
-        turn = self._running_turn
-        if (
-            result.get("status") != "saved" or not self._turn_active
-            or turn is None or candidate.turn_id != turn.turn_id
-        ):
-            return
-        snapshot_keys = ("rootPath", "path", "editorRevision", "sourceText", "diskFingerprint")
-        saved = {
-            key: result[key]
-            for key in (*snapshot_keys, "rangeStartUtf16", "rangeEndUtf16")
-        }
-        active = turn.document_context
-        if active is not None and all(active[key] == candidate.context[key] for key in snapshot_keys):
-            turn.document_context = saved
-        start = candidate.value["rangeStartUtf16"]
-        end = candidate.value["rangeEndUtf16"]
-        saved_end = result["rangeEndUtf16"]
-        delta = saved_end - end
-        for reference in turn.references:
-            if reference["kind"] != "document":
-                continue
-            before = reference["document"]["snapshot"]
-            # Only advance this candidate's base; a repeated saved receipt must
-            # not shift ranges that already include the edit.
-            if any(before[key] != candidate.context[key] for key in snapshot_keys):
-                continue
-            left, right = before["rangeStartUtf16"], before["rangeEndUtf16"]
-            if right <= start:
-                pass
-            elif left >= end:
-                left, right = left + delta, right + delta
-            else:
-                left, right = min(left, start), max(saved_end, right + delta)
-            reference["document"]["snapshot"] = {
-                **saved, "rangeStartUtf16": left, "rangeEndUtf16": right,
-            }
-
-
-    async def _document_apply(
-        self, params: dict[str, Any], event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        candidate = self._document_candidates.get(params.get("callId") or params.get("undoOfCallId"))
-        owner = self._turn_work
-        owns_candidate = (
-            owner is not None and candidate is not None
-            and owner.turn_id == candidate.turn_id
-            and owner.parent_request_id == candidate.parent_request_id
-        )
-        if candidate is not None and candidate.stopped and not params.get("undoOfCallId"):
-            raise DocumentError("The owning turn was stopped; this document operation can no longer start.")
-        if not owns_candidate or not self._turn_active:
-            return await self._apply_document_candidate(params, event_sink)
-        task = asyncio.current_task()
-        owner.document_tasks.add(task)
-        try:
-            with owner.scope.bind():
-                return await self._apply_document_candidate(params, event_sink)
-        finally:
-            owner.document_tasks.discard(task)
-
-    async def _apply_document_candidate(
-        self, params: dict[str, Any], event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        async with self._document_apply_lock:
-            context = self._documents.validate_snapshot(params["documentContext"])
-            turn_id = params["turnId"]
-            undo_of = params.get("undoOfCallId")
-            call_id = params.get("callId") or undo_of
-            candidate = self._document_candidates.get(call_id)
-            if candidate is None or candidate.turn_id != turn_id:
-                raise DocumentError("Unknown document operation; do not replay after restart.")
-            if params.get("parentRequestId") is not None and params["parentRequestId"] != candidate.parent_request_id:
-                raise DocumentError("Document operation belongs to another turn request.")
-            running = self._running_turn
-            if self._turn_active and (
-                running is None or turn_id != running.turn_id
-                or candidate.parent_request_id != running.parent_request_id
-            ):
-                raise DocumentError("Document operation does not match the active turn.")
-            if context["path"] != candidate.context["path"]:
-                raise DocumentError("Document operation belongs to another file.")
-            scope = current_local_work()
-            if scope is not None:
-                scope.check_cancelled()
-            resolution = params.get("resolution")
-            if undo_of and resolution is not None:
-                raise DocumentError("Undo does not adopt an arbitrary conflict candidate.")
-            if resolution in {"keep", "cancel"}:
-                result = await await_sync_work(
-                    self._documents.apply, candidate.value, context,
-                    resolution="current" if resolution == "keep" else "cancel",
-                )
-            else:
-                # In a turn, approval shares session.turn's live event stream. A later
-                # conflict choice or Undo uses its own document.apply request stream.
-                running = self._running_turn
-                approval_sink = (running.event_sink if running is not None else None) if self._turn_active else event_sink
-                approval_parent = (
-                    (running.parent_request_id if running is not None else None)
-                    if self._turn_active else getattr(event_sink, "request_id", None)
-                )
-                if not isinstance(approval_parent, str):
-                    raise DocumentError("Document operation requires a correlated desktop request.")
-                mode = self._permission_mode if undo_of else candidate.permission_mode
-                approved, context = await self._document_operation_approval(
-                    event_sink=approval_sink, parent_request_id=approval_parent,
-                    turn_id=turn_id, operation="document.undo" if undo_of else "document.apply",
-                    context=context, permission_mode=mode,
-                )
-                if not approved:
-                    result = {
-                        "path": context["path"], "status": "cancelled",
-                        "candidateText": candidate.value["candidateText"],
-                        "issue": "The document operation was denied or its approval expired; no write occurred.",
-                    }
-                elif undo_of:
-                    request_id = getattr(event_sink, "request_id", None)
-                    if not isinstance(request_id, str):
-                        raise DocumentError("Undo requires a new correlated requestId.")
-                    result = await await_sync_work(
-                        self._documents.undo, undo_of, context, request_id=request_id, turn_id=turn_id,
-                    )
-                else:
-                    result = await await_sync_work(
-                        self._documents.apply, candidate.value, context,
-                        resolution="candidate" if resolution == "use" else None,
-                        expected_snapshot=params.get("expectedSnapshot"),
-                    )
-            result = {**result, "callId": call_id}
-            if not undo_of:
-                self._advance_document_working_context(candidate, result)
-                candidate.result = result
-                if candidate.future is not None and not candidate.future.done():
-                    candidate.future.set_result(result)
-            return result
 
     async def _submitted_turn_context(
         self, session: ChatSession, params: dict[str, Any],
@@ -2732,145 +2373,6 @@ class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    async def _extensions_status(self) -> dict[str, Any]:
-        """Extension Management status for the `/extension-management status` command."""
-        session = self.session
-        status = await run_local_work(
-            self._extension_manager.status,
-            running_revision=(session.running_extension_revision if session else 0),
-            running_mcp_families=(
-                tuple(session.mcp_families.values()) if session else ()
-            ),
-            startup_diagnostics=(
-                tuple(session.extension_startup_diagnostics) if session else ()
-            ),
-        )
-        return self._extension_status_dto(status)
-
-    async def _extensions_preview(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        async with self._extension_operation():
-            preview = await asyncio.to_thread(self._extension_manager.preview)
-        preview_id = uuid.uuid4().hex
-        self._bounded_cache_insert(self._extension_previews, preview_id, preview)
-        return self._extension_preview_dto(preview_id, preview)
-
-    @staticmethod
-    def _extension_apply_values(
-        params: Mapping[str, Any],
-    ) -> tuple[str, tuple[str, ...]]:
-        preview_id = params.get("previewId")
-        approved_values = params.get("approvedBindingHashes")
-        if (
-            not isinstance(preview_id, str)
-            or not preview_id
-            or len(preview_id.encode("utf-8")) > 256
-            or not isinstance(approved_values, list)
-            or len(approved_values) > 512
-            or any(
-                not isinstance(item, str) or not _BINDING_HASH.fullmatch(item)
-                for item in approved_values
-            )
-        ):
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "The approved extension binding list is invalid.",
-            )
-        return preview_id, tuple(sorted(set(approved_values)))
-
-    @classmethod
-    def _extension_apply_display_input(cls, params: Mapping[str, Any]) -> str:
-        preview_id, approved = cls._extension_apply_values(params)
-        payload = json.dumps(
-            {
-                "approvedBindingHashes": list(approved),
-                "previewId": preview_id,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-        return (
-            f"{ONE_SHOT_DISPLAY_INPUT_PREFIX}"
-            f"apply reviewed extension changes [{digest}]"
-        )
-
-    async def _extensions_apply(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        session = self._require_session()
-        preview_id, approved_values = self._extension_apply_values(params)
-        approved = set(approved_values)
-        permission_mode = self._permission_mode
-        display_input = self._extension_apply_display_input(params)
-
-        async def apply_once() -> ApplyReport:
-            preview = self._extension_previews.pop(preview_id, None)
-            if preview is None:
-                raise DesktopServiceError(
-                    "EXTENSION_APPLY_FAILED",
-                    "The extension preview is unknown or already used.",
-                )
-            known = {
-                candidate.binding_hash
-                for candidate in preview.mcp_candidates.values()
-            }
-            if not approved <= known:
-                raise DesktopServiceError(
-                    "PROTOCOL_INVALID",
-                    "The approved extension binding list is invalid.",
-                )
-            self._validate_extension_apply_preview_capacity(preview)
-            return await asyncio.to_thread(
-                self._extension_manager.apply,
-                preview,
-                # Ask uses the explicit reviewed Apply action. Bypass derives
-                # consent only from this validated preview; manager rechecks it.
-                approved_mcp_bindings=known if permission_mode == "bypass" else approved,
-            )
-
-        async with self._extension_operation():
-            raw_report, outcome = await session.run_display_only_turn(
-                display_input,
-                apply_once,
-                self._render_extension_apply_report,
-                turn_id=params["turnId"],
-                retry=params["retry"],
-                failure_retryable=False,
-            )
-
-        report = self._parse_extension_apply_report(outcome.text)
-        if raw_report is not None:
-            current = self._extension_apply_dto(raw_report)
-            if current != report:
-                raise DesktopServiceError(
-                    "INTERNAL_ERROR",
-                    "The durable extension result could not be verified.",
-                )
-        if (
-            outcome.turn_id != params["turnId"]
-            or outcome.state != "completed"
-            or outcome.accepted is not True
-            or outcome.persisted is not True
-        ):
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The durable extension lifecycle result is invalid.",
-            )
-        return {
-            "sessionId": session.session_id,
-            "turnId": outcome.turn_id,
-            "turnNumber": outcome.turn_number,
-            "state": outcome.state,
-            "accepted": outcome.accepted,
-            "persisted": outcome.persisted,
-            "displayInput": display_input,
-            "text": outcome.text,
-            **report,
-        }
-
 
     @staticmethod
     def _utc_timestamp(value: datetime) -> str:
@@ -2893,25 +2395,6 @@ class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
         finally:
             self._knowledge_active = False
 
-    @asynccontextmanager
-    async def _extension_operation(self):
-        if (
-            self._extension_active
-            or self._turn_active
-            or self._knowledge_active
-            or self._session_creating
-            or self._session_closing
-        ):
-            raise DesktopServiceError(
-                "BUSY_EXTENSION_OPERATION",
-                "An extension operation cannot start while other desktop work is active.",
-                retryable=True,
-            )
-        self._extension_active = True
-        try:
-            yield
-        finally:
-            self._extension_active = False
 
     def _validated_path(
         self,
@@ -2989,362 +2472,6 @@ class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
         }
         return tuple(sorted(roots, key=str))
 
-    @staticmethod
-    def _extension_status_dto(status: ExtensionStatus) -> dict[str, Any]:
-        return {
-            "dropinRoot": str(status.dropin_root.resolve()),
-            "stateRoot": str(status.state_root.resolve()),
-            "desiredCount": status.desired_count,
-            "appliedCount": status.applied_count,
-            "appliedRevision": status.applied_revision,
-            "runningRevision": status.running_revision,
-            "restartRequired": status.restart_required,
-            "managerAvailable": status.manager_available,
-            "managerError": (
-                "The extension manager is unavailable."
-                if status.manager_error is not None
-                else None
-            ),
-            "diagnostics": [
-                "An extension or MCP item is unavailable."
-                for _item in status.diagnostics[:128]
-            ],
-            "runningMcpFamilies": list(status.running_mcp_families),
-        }
-
-    @classmethod
-    def _extension_binding_dto(cls, candidate: Any) -> dict[str, Any]:
-        name = str(candidate.descriptor.id)
-        server = str(candidate.descriptor.family)
-        binding_hash = str(candidate.binding_hash)
-        command = str(candidate.resolved_command)
-        arguments = [str(item) for item in candidate.args]
-        working_directory = str(candidate.cwd)
-        environment_names = [str(item) for item in candidate.env_names]
-        display_context = "\n".join((command, *arguments))
-        bounded_strings = (
-            (name, 256),
-            (server, 256),
-            (command, 8_192),
-            (working_directory, 8_192),
-        )
-        if (
-            any(not value or len(value.encode("utf-8")) > limit for value, limit in bounded_strings)
-            or not _BINDING_HASH.fullmatch(binding_hash)
-            or len(arguments) > _MAX_EXTENSION_ARGUMENTS
-            or any(
-                not item or len(item.encode("utf-8")) > 4_096
-                for item in arguments
-            )
-            or len(environment_names) > _MAX_EXTENSION_ENVIRONMENT_NAMES
-            or any(
-                not item or len(item.encode("utf-8")) > 256
-                for item in environment_names
-            )
-            or _SECRET_APPROVAL_CONTEXT.search(display_context)
-            or _SECRET_FLAG_VALUE.search(display_context)
-            or _CREDENTIAL_URL.search(display_context)
-        ):
-            raise DesktopServiceError(
-                "EXTENSION_PREVIEW_FAILED",
-                "An extension binding cannot be displayed safely.",
-            )
-        return {
-            "name": name,
-            "server": server,
-            "bindingHash": binding_hash,
-            "requiresApproval": True,
-            "command": command,
-            "arguments": arguments,
-            "workingDirectory": working_directory,
-            "environmentNames": environment_names,
-        }
-
-    def _extension_preview_dto(
-        self, preview_id: str, preview: ExtensionPreview
-    ) -> dict[str, Any]:
-        changed = [
-            change
-            for change in preview.diff.changes
-            if change.operation != "unchanged"
-        ]
-        operation_counts: dict[str, int] = {}
-        for change in changed:
-            operation_counts[change.operation] = (
-                operation_counts.get(change.operation, 0) + 1
-            )
-        summary_parts = [
-            f"{operation}={count}"
-            for operation, count in sorted(operation_counts.items())
-        ]
-        summary = self._bounded_text(
-            (
-                f"{len(changed)} extension change(s): " + ", ".join(summary_parts)
-                if changed
-                else "No extension changes are pending."
-            ),
-            4_096,
-        )
-        proposed_skills = sorted(
-            {
-                change.desired.id
-                for change in changed
-                if change.desired is not None and change.desired.kind == "skill"
-            }
-        )
-        bindings = [
-            self._extension_binding_dto(candidate)
-            for _key, candidate in sorted(preview.mcp_candidates.items())
-        ]
-        return {
-            "previewId": preview_id,
-            "summary": summary,
-            "proposedSkills": proposed_skills,
-            "bindings": bindings,
-        }
-
-    @classmethod
-    def _validate_extension_apply_preview_capacity(
-        cls,
-        preview: ExtensionPreview,
-    ) -> None:
-        revision = preview.registry.revision
-        changes = preview.diff.changes
-        diagnostics = preview.diff.diagnostics
-        if (
-            type(revision) is not int
-            or not 0 <= revision < 4_294_967_295
-            or len(changes) > 512
-            or len(diagnostics) > 128
-        ):
-            raise DesktopServiceError(
-                "EXTENSION_APPLY_FAILED",
-                "The extension preview cannot produce a bounded durable result.",
-            )
-        items: list[dict[str, str]] = []
-        for change in changes:
-            key = change.key
-            if (
-                not isinstance(key, str)
-                or not key
-                or len(key.encode("utf-8")) > 256
-            ):
-                raise DesktopServiceError(
-                    "EXTENSION_APPLY_FAILED",
-                    "The extension preview contains an invalid item key.",
-                )
-            items.append({
-                "key": key,
-                "outcome": "pending_approval",
-                "detail": cls._extension_outcome_detail("pending_approval"),
-            })
-        projected = {
-            "previousRevision": revision,
-            "appliedRevision": revision + 1,
-            "restartRequired": True,
-            "items": items,
-            "diagnostics": [
-                "The extension manager reported a host validation diagnostic."
-                for _diagnostic in diagnostics
-            ],
-        }
-        cls._serialize_extension_apply_dto(projected)
-
-    @classmethod
-    def _extension_apply_dto(cls, report: ApplyReport) -> dict[str, Any]:
-        if (
-            not isinstance(report, ApplyReport)
-            or type(report.previous_revision) is not int
-            or type(report.applied_revision) is not int
-            or not 0 <= report.previous_revision <= 4_294_967_295
-            or not 0 <= report.applied_revision <= 4_294_967_295
-            or type(report.restart_required) is not bool
-            or len(report.items) > 512
-            or len(report.diagnostics) > 128
-        ):
-            raise DesktopServiceError(
-                "EXTENSION_APPLY_FAILED",
-                "The extension manager returned an invalid result.",
-            )
-        items: list[dict[str, str]] = []
-        for item in report.items:
-            if (
-                not isinstance(item.key, str)
-                or not item.key
-                or len(item.key.encode("utf-8")) > 256
-                or item.outcome not in _EXTENSION_APPLY_OUTCOMES
-            ):
-                raise DesktopServiceError(
-                    "EXTENSION_APPLY_FAILED",
-                    "The extension manager returned an invalid item result.",
-                )
-            items.append({
-                "key": item.key,
-                "outcome": item.outcome,
-                "detail": cls._extension_outcome_detail(item.outcome),
-            })
-        return {
-            "previousRevision": report.previous_revision,
-            "appliedRevision": report.applied_revision,
-            "restartRequired": report.restart_required,
-            "items": items,
-            "diagnostics": [
-                "The extension manager reported a host validation diagnostic."
-                for _diagnostic in report.diagnostics
-            ],
-        }
-
-    @classmethod
-    def _serialize_extension_apply_dto(cls, report: Mapping[str, Any]) -> str:
-        lines = [
-            (
-                "Extension Management applied revision "
-                f"{report['previousRevision']} -> {report['appliedRevision']}"
-            ),
-            (
-                "restart_required: true"
-                if report["restartRequired"]
-                else "restart_required: false"
-            ),
-            f"items: {len(report['items'])}",
-        ]
-        lines.extend(
-            "- " + json.dumps(
-                {"key": item["key"], "outcome": item["outcome"]},
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            for item in report["items"]
-        )
-        lines.append(f"diagnostics: {len(report['diagnostics'])}")
-        text = "\n".join(lines)
-        if len(text.encode("utf-8")) > _MAX_LOCAL_COMMAND_BYTES:
-            raise DesktopServiceError(
-                "EXTENSION_APPLY_FAILED",
-                "The extension result is too large to save safely.",
-            )
-        return text
-
-    @classmethod
-    def _render_extension_apply_report(cls, value: object) -> str:
-        if not isinstance(value, ApplyReport):
-            raise DesktopServiceError(
-                "EXTENSION_APPLY_FAILED",
-                "The extension manager returned an invalid result.",
-            )
-        return cls._serialize_extension_apply_dto(
-            cls._extension_apply_dto(value)
-        )
-
-    @classmethod
-    def _parse_extension_apply_report(cls, text: str) -> dict[str, Any]:
-        if (
-            not isinstance(text, str)
-            or not text
-            or len(text.encode("utf-8")) > _MAX_LOCAL_COMMAND_BYTES
-        ):
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        lines = text.splitlines()
-        if len(lines) < 4:
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        header = _EXTENSION_APPLY_HEADER.fullmatch(lines[0])
-        restart_value = {
-            "restart_required: true": True,
-            "restart_required: false": False,
-        }.get(lines[1])
-        items_match = re.fullmatch(r"items: (0|[1-9][0-9]*)", lines[2])
-        if header is None or restart_value is None or items_match is None:
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        item_count = int(items_match.group(1))
-        if item_count > 512 or len(lines) != item_count + 4:
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        diagnostics_match = re.fullmatch(
-            r"diagnostics: (0|[1-9][0-9]*)",
-            lines[-1],
-        )
-        if diagnostics_match is None or int(diagnostics_match.group(1)) > 128:
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        items: list[dict[str, str]] = []
-        try:
-            for line in lines[3:-1]:
-                if not line.startswith("- "):
-                    raise ValueError("missing item marker")
-                item = json.loads(line[2:])
-                if not isinstance(item, dict) or set(item) != {"key", "outcome"}:
-                    raise ValueError("invalid item shape")
-                key = item["key"]
-                outcome = item["outcome"]
-                if (
-                    not isinstance(key, str)
-                    or not key
-                    or len(key.encode("utf-8")) > 256
-                    or outcome not in _EXTENSION_APPLY_OUTCOMES
-                ):
-                    raise ValueError("invalid item value")
-                items.append({
-                    "key": key,
-                    "outcome": outcome,
-                    "detail": cls._extension_outcome_detail(outcome),
-                })
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            ) from exc
-        previous_revision = int(header.group(1))
-        applied_revision = int(header.group(2))
-        diagnostic_count = int(diagnostics_match.group(1))
-        if (
-            previous_revision > 4_294_967_295
-            or applied_revision > 4_294_967_295
-        ):
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        report = {
-            "previousRevision": previous_revision,
-            "appliedRevision": applied_revision,
-            "restartRequired": restart_value,
-            "items": items,
-            "diagnostics": [
-                "The extension manager reported a host validation diagnostic."
-                for _index in range(diagnostic_count)
-            ],
-        }
-        if cls._serialize_extension_apply_dto(report) != text:
-            raise DesktopServiceError(
-                "INTERNAL_ERROR",
-                "The saved extension result is invalid.",
-            )
-        return report
-
-    @staticmethod
-    def _extension_outcome_detail(outcome: str) -> str:
-        return {
-            "added": "The extension was installed.",
-            "updated": "The extension was updated.",
-            "removed": "The extension was removed.",
-            "unchanged": "No extension files changed.",
-            "blocked": "The extension was blocked by host validation or policy.",
-            "pending_approval": "The extension is waiting for command approval.",
-        }.get(outcome, "The extension operation returned a host-defined outcome.")
 
     @staticmethod
     def _bounded_text(text: str, max_bytes: int) -> str:
