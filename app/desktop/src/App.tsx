@@ -62,7 +62,9 @@ import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ModalDialog } from "./components/Modal.tsx";
 import { focusLeftContainer, menuNextIndex, menuShouldClose } from "./lib/interaction.ts";
-import { ApprovalDialog, PermissionControl, ThinkingControl, ExtensionPanel } from "./trust.tsx";
+import { ApprovalDialog } from "./components/ApprovalDialog.tsx";
+import { PermissionControl, ThinkingControl } from "./components/ComposerControls.tsx";
+import { ExtensionPanel } from "./components/ExtensionPanel.tsx";
 import { approvalExpiry, reconcilePermissionAck } from "./lib/approval.ts";
 import {
   approvalToResolve,

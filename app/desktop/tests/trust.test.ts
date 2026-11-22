@@ -12,7 +12,10 @@ import type {
   ExtensionPreviewDto,
 } from "../src/protocol.ts";
 
-type TrustModule = typeof import("../src/trust.tsx");
+type TrustModule =
+  & typeof import("../src/components/ApprovalDialog.tsx")
+  & typeof import("../src/components/ComposerControls.tsx")
+  & typeof import("../src/components/ExtensionPanel.tsx");
 
 async function loadTrust(): Promise<TrustModule> {
   const server = await createServer({
@@ -22,7 +25,12 @@ async function loadTrust(): Promise<TrustModule> {
     appType: "custom",
   });
   try {
-    return await server.ssrLoadModule("/src/trust.tsx") as TrustModule;
+    const modules = await Promise.all([
+      server.ssrLoadModule("/src/components/ApprovalDialog.tsx"),
+      server.ssrLoadModule("/src/components/ComposerControls.tsx"),
+      server.ssrLoadModule("/src/components/ExtensionPanel.tsx"),
+    ]);
+    return Object.assign({}, ...modules) as TrustModule;
   } finally {
     await server.close();
   }
