@@ -8,8 +8,8 @@
 |---|---|
 | `adapters/` | 將 framework-neutral RAG API 轉成 LangChain tools |
 | `cli/` | Interactive chat、slash command parsing 與 local command handling |
-| `conversations/` | Canonical JSON transcript authority、catalog-independent validation 與 lifecycle transitions |
-| `desktop/` | Python desktop protocol/service、catalog coordination、`bibliography.*` adapters (logic in `skills/citation`) 與 isolated fixture seams |
+| `conversations/` | Canonical JSON transcript authority（只接受 schema v3）、validation 與 lifecycle transitions |
+| `desktop/` | Python desktop protocol/server、`DesktopService`（dispatch 與生命週期，handler 依職責分在 `*_ops.py`、`approvals.py`、`transcript.py`、`turn_*.py`、`errors.py`）、專案 metadata 與歷史目錄（`project.py`）；`bibliography.*` 的邏輯在 `skills/citation`。測試用的 isolated fixture 在 `tests/support/` |
 | `extensions/` | Drop-in discovery、validation、registry、apply 與 startup loading |
 | `llm/` | App-layer model construction 與 text normalization |
 | `skills/` | Skill metadata、runtime、tool broker 與 agent integration policy |
@@ -64,8 +64,8 @@ ChatSession.turn_outcome()  [session-wide async lock]
 
 - Accepted prompt會先以canonical pending JSON提交，才可呼叫provider／tool；finalization完成後再原子轉成completed並回傳terminal outcome。
 - Process重啟時遺留的pending turn會成為interrupted，不會自動重播provider或tool；只有使用相同logical turn ID的明確retry才重新執行。已completed的同ID request直接回復既有結果。
-- Canonical JSON是唯一支援的transcript source。Desktop選取catalog session時若對應JSON不存在，會回報conversation unavailable，並保留目前已選取的session。
-- 舊Plan logs與conversation Chroma不會被讀取、匯入、改寫或刪除；catalog與isolated fixture都沒有batch migration入口。
+- Canonical JSON是唯一支援的transcript source。Desktop的對話清單直接由掃描專案歷史目錄得到（不再有catalog）；選取的對話若沒有對應的JSON，會回報錯誤並保留目前已選取的session。
+- 舊Plan logs、conversation Chroma與舊版的 `desktop-projects.json` 不會被讀取、匯入、改寫或刪除；沒有batch migration入口。
 - 模型context固定只取canonical JSON中最新10個completed、eligible conversational turns。
 - 重播進模型時，`document_context.replay_history_inputs` 縮減歷史中的文件全文：當前回合帶快照時，舊快照與凍結引用都換成佔位；不帶時只保留最後提交的快照（標明可能早於之後的存檔）。`graph._agent_requests` 另以 `compact_edit_results` 讓同回合只有最新一次 saved `document_edit` 結果帶全文。兩者都只改模型輸入副本，canonical JSON、graph state 與前端收據不變。
 - 啟用 `READ_ONLY_DOCUMENT_SKILLS`（目前是 `grill`）的回合，`tool_access_resolution` 會移除 `document_edit`；文件快照照常送進模型。

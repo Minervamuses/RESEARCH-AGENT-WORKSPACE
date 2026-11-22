@@ -24,7 +24,7 @@
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
 | C9 | Complete | `evidence/C9-S1/`–`C9-S5/` | — | — |
-| C10 | In progress | `evidence/C10-S0/` | — | C10-S1 |
+| C10 | In progress | `evidence/C10-S0/`–`C10-S1/` | — | C10-S2 |
 
 ## 撰寫紀錄
 
@@ -794,3 +794,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C10-S0/vocabulary.md`。
 - **限制**：無。
 - **下一步**：C10-S1 文件。
+
+### C10-S1 文件（2026-11-22）
+
+- **觀察結果**：範圍內 grep 已移除或改名的名稱後，更新根目錄 `README.md` 的引用存檔說明與「已儲存的文獻」列（依決策紀錄 §4：只寫書目庫、失敗不可引用、CLI 不存檔），以及 `app/agent/README.md` 的模組表與 catalog／fixture 相關句子。其餘命中都是現行行為（RAG 的 Ollama、`storage_failed` 語意、grill 測試資料），逐一註明。`git diff README.md` 不含「單一工作流程（產品限制）」一節；連結全部有效。
+- **執行指令**：grep 與連結檢查腳本（見 evidence）。
+- **證據**：`evidence/C10-S1/doc-grep.md`。
+- **限制**：`for_agents/`、`AGENTS.md` 的過時內容依限制不改，列入最終彙報。
+- **下一步**：C10-S2 完整驗證。

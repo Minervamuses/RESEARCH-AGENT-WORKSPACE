@@ -130,7 +130,7 @@ agent 可在同一回合依留言依序修改目前文件的多個段落，後�
 
 每個研究專案有一份 CSL-JSON 書目庫，預設是專案根目錄的 `references.json`；可在 `RESEARCH.md` 的 metadata 加上 `"bibliography": "相對路徑.json"` 改到專案內其他位置。正文只寫引用 key，格式在預覽或匯出時才套用，切換格式不會改動正文任何文字。
 
-- **Agent 存檔**：在專案中用 `/citation` 儲存的文獻（驗證過的 DOI 或 arXiv ID；沒有 DOI 的 NeurIPS 論文則在官方論文集網站 proceedings.neurips.cc 依該年的論文列表與論文頁查證），除了照舊寫入 bundle，也會併入書目庫並取得 key（例如 `jumper2021highly`）。已存在相同 DOI、arXiv ID 或 NeurIPS 論文（以官方網址中的年份與論文 hash 判斷，`papers.nips.cc` 與 `proceedings.neurips.cc` 視為同一篇）的條目會被重用，內容與 key 都不改；檔案原本的 JSON 排版保持不變。摘要不寫入。CLI 沒有專案，只寫 bundle。
+- **Agent 存檔**：在專案中用 `/citation` 儲存的文獻（驗證過的 DOI 或 arXiv ID；沒有 DOI 的 NeurIPS 論文則在官方論文集網站 proceedings.neurips.cc 依該年的論文列表與論文頁查證），只會併入書目庫並取得 key（例如 `jumper2021highly`），不再寫 `cite/` 的 bundle。已存在相同 DOI、arXiv ID 或 NeurIPS 論文（以官方網址中的年份與論文 hash 判斷，`papers.nips.cc` 與 `proceedings.neurips.cc` 視為同一篇）的條目會被重用，內容與 key 都不改；檔案原本的 JSON 排版保持不變。摘要不寫入。書目庫寫入失敗的文獻會明確標示沒有存檔，這次也不能引用，可以重試；本批之前已在書目庫的文獻照常重用、可以引用。CLI 沒有專案，不寫入任何檔案：驗證過的文獻只在當次對話可以引用。
 - **正文寫法**：Markdown 用 Pandoc 語法 `[@key]`、`[@a; @b]`、`[see @key, p. 3]`；LaTeX 用 `\cite{key}` 一族。Agent 修改文件時不能引入書目中沒有的 key；它可用唯讀工具 `bibliography_lookup` 查詢既有 key。
 - **引用面板**：開啟文件後，編輯器下方的 **Citations** 面板預設收合成一列摘要：引用數與問題數（例如 `3 cited · 1 problem`）、**Style**、**Preview**（只限 Markdown）、**Export ▾**、**Refresh** 與 **Expand／Collapse**。有問題時摘要列標紅。開啟文件時已有問題、存檔或 Refresh 後問題從無到有，或按下 **Preview** 時，面板會自動展開；其他時候維持你的選擇，收合狀態不保存。通知、書目錯誤、處理進度與匯出結果在收合時也顯示在摘要列下方。展開後列出本文引用（依首次出現順序，附引用次數；數字制樣式另顯示編號）、問題（書目中找不到的 key、重複 DOI、書目無法讀取）與未引用的條目。面板不標示條目是否查證過：查證發生在 `/citation` 存入新文獻時，手寫的條目由你自己負責。點 **Line** 會在編輯器選取那個引用。**Verify and add** 以 DOI 或 arXiv ID 驗證後加入書目（Ask 模式會先請你批准，與 `/citation` 的存檔相同）。**Remove** 只出現在 **Not cited in this document** 區，按下後一律先確認：它會從書目檔刪除那個 key，而書目檔由專案中的所有文件共用，其他文件不檢查。面板沒有插入引用的按鈕；在 `[@`、`; @` 或 `\cite{` 之後輸入會出現 key 補全。
 - **格式與匯出**：**Style** 選單的選擇存在 `RESEARCH.md` 的 `citationStyle`。內建 APA 7、MLA 9、IEEE、Chicago author-date，以及依附件十七撰寫的 `bime-appendix17`。**Preview** 顯示目前文字的逐筆引用與參考文獻。Markdown 文件的 **Export ▾** 有三個選項，檔案都寫在原始文件旁（同名檔案會被覆蓋），原始文件不變：
@@ -167,7 +167,7 @@ Delete 會先確認範圍：**只刪這則對話紀錄，不刪研究專案或�
 | 桌面後端 stderr | 同一目錄的 `desktop-backend.stderr.log`，5 MiB 時輪替一次 | 後端程序的 stderr，以及每次啟動的 generation 標頭 | — |
 | 對話 | 桌面：專案的 `historyDirectory`（寫在專案的 `RESEARCH.md`，預設 `app/store/projects/<專案 ID>/conversations/`）。CLI：`<persist_dir>/conversations/`（預設 `app/store/conversations/`，可用 `KMS_STORE_DIR` 改） | 每回合的輸入、送出時的專案規則與引用、思考模式、回答全文、狀態與失敗原因、時間，以及工具活動（呼叫 ID、工具名稱、成功或失敗） | 工具參數與工具回傳的內容 |
 | MCP server log | `$XDG_CACHE_HOME/agent-mcp/<server>.stderr.log`，預設 `~/.cache/agent-mcp/`，5 MiB 時輪替並保留 3 份 | MCP server 的 stderr：每次載入一行標頭；web_search 每次搜尋解析到的結果數、`handleWebSearch` 的 limit 與 includeContent，以及錯誤訊息（可能含網址） | 查詢文字與頁面內容。server 的 stdout 只轉送 JSON-RPC，其餘印出的文字都被丟棄 |
-| 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存（或在引用面板以 DOI／arXiv ID 加入）的來源 | 搜尋過但沒有儲存的候選 |
+| 已儲存的文獻 | 只寫入專案書目庫（下一列）；CLI 沒有專案，不寫入任何檔案 | 只有在 Citation 中明確儲存（或在引用面板以 DOI／arXiv ID 加入）的來源 | 搜尋過但沒有儲存的候選。舊版留下的 `cite/` bundle 不再讀寫，可自行刪除 |
 | 專案書目庫 | 桌面專案的 `references.json`，或 `RESEARCH.md` metadata 的 `bibliography` 指定的檔案 | 已儲存文獻的 CSL-JSON 書目欄位（作者、年份、標題、期刊、卷期頁、DOI、URL 等）與 key；使用者手寫的條目原樣保留 | 摘要、參考文獻清單、授權、ORCID、機構等欄位 |
 | 引用匯出 | 文件旁的 `<檔名>.<樣式>.docx`、`<檔名>.<樣式>.md`，以及系上格式的 `<檔名>.bime.docx` 與報告 `<檔名>.bime.audit.json`、`<檔名>.bime.audit.md`、`<檔名>.bime.bime.json`；只在從 Export 選單選擇時寫出 | 套用所選格式（或附件十七）的正文與參考文獻；bime_word 的稽核結果與轉換紀錄 | — |
 
