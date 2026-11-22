@@ -46,7 +46,7 @@ def test_system_prompt_carries_the_writing_rules_before_the_language_policy():
 def test_cli_and_desktop_sessions_send_the_writing_rules_every_turn(tmp_path, monkeypatch):
     from langchain_core.messages import AIMessage, SystemMessage
 
-    from test_desktop_service import _open_test_project, _service
+    from desktop_support import _open_test_project, _service
 
     class Model:
         def __init__(self):

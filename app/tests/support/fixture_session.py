@@ -924,6 +924,12 @@ class FixtureSession:
     ) -> None:
         self._prompt_persisted_callback = callback
 
+    def _set_final_text_validator(self, validator: Callable[..., Any]) -> None:
+        self.final_text_validator = validator
+
+    def clear_skill_installer(self) -> dict[str, Any]:
+        return {}
+
     def _notify_prompt_persisted(self) -> None:
         callback = self._prompt_persisted_callback
         if callback is None:
@@ -1395,6 +1401,7 @@ class FixtureSessionFactory:
         bash_command_runner: Callable[..., Any] | None = None,
         extra_tools: list | None = None,
         system_prompt: str = SYSTEM_PROMPT,
+        **_kwargs,
     ) -> FixtureSession:
         del load_mcp
         if session_id is None:

@@ -6,7 +6,6 @@ import asyncio
 import json
 import threading
 import uuid
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,247 +22,11 @@ from agent.conversations import ConversationRepository
 from agent.desktop.project import initialize_project, open_project_history
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
-from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus, ManagementError
+from agent.extensions.manager import ManagementError
 from agent.session import ChatSession
 from agent.skills import SkillMetadata
 from agent.turns.results import TurnOutcome
-from rag.types import Hit
-
-
-class _FakeSession:
-    def __init__(self, config: AgentConfig, progress_cb=None) -> None:
-        self.config = config
-        self.progress_cb = progress_cb
-        self.session_id = "123e4567e89b42d3a456426614174000"
-        self.thinking_mode = "normal"
-        self.loaded_skills = [
-            SkillMetadata("research", "Research local material.", Path(__file__))
-        ]
-        self.mcp_families = {"web": "web_search"}
-        self.running_extension_revision = 3
-        self.extension_startup_diagnostics = ("MCP loader unavailable: TimeoutError",)
-        self.recent_turns: list[object] = []
-        self.turn_started = asyncio.Event()
-        self.turn_release = asyncio.Event()
-        self.block_turn = False
-        self.turn_inputs: list[str] = []
-        self.skill_turn_inputs: list[tuple[str, str | None]] = []
-        self.turn_calls: list[dict[str, object]] = []
-        self._turn_number = 0
-        self._prompt_persisted_callback = None
-
-    def _set_prompt_persisted_callback(self, callback) -> None:
-        self._prompt_persisted_callback = callback
-
-    async def turn_outcome(
-        self,
-        text: str,
-        *,
-        display_input: str | None = None,
-        turn_id: str | None = None,
-        skill_name: str | None = None,
-        retry: bool = False,
-    ) -> TurnOutcome:
-        assert turn_id is not None
-        assert uuid.UUID(hex=turn_id).hex == turn_id
-        self.turn_inputs.append(text)
-        self.skill_turn_inputs.append((text, skill_name))
-        self.turn_calls.append({
-            "semanticInput": text,
-            "displayInput": display_input,
-            "turnId": turn_id,
-            "skillName": skill_name,
-            "retry": retry,
-        })
-        if self._prompt_persisted_callback is not None:
-            self._prompt_persisted_callback()
-        self.turn_started.set()
-        if self.block_turn:
-            await self.turn_release.wait()
-        if self.progress_cb is not None:
-            self.progress_cb(
-                "tools",
-                [
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "name": "rag_search",
-                                "args": {"query": "private query"},
-                                "id": "call-safe-1",
-                                "type": "tool_call",
-                            }
-                        ],
-                    ),
-                    ToolMessage(
-                        content="private tool result",
-                        tool_call_id="call-safe-1",
-                        name="rag_search",
-                        status="success",
-                    ),
-                ],
-            )
-        self._turn_number += 1
-        return TurnOutcome(
-            text=f"完成：{text}",
-            validation_errors=[],
-            turn_id=turn_id,
-            turn_number=self._turn_number,
-            state="completed",
-            accepted=True,
-            persisted=True,
-        )
-
-    async def run_display_only_turn(
-        self,
-        _display_input,
-        action,
-        render_result,
-        *,
-        turn_id,
-        retry=False,
-        failure_retryable=True,
-    ):
-        del retry, failure_retryable
-        if self._prompt_persisted_callback is not None:
-            self._prompt_persisted_callback()
-        result = await action()
-        text = render_result(result)
-        self._turn_number += 1
-        return result, TurnOutcome(
-            text=text,
-            turn_id=turn_id,
-            turn_number=self._turn_number,
-            state="completed",
-            accepted=True,
-            persisted=True,
-        )
-
-    def set_thinking_mode(self, mode: str) -> None:
-        self.thinking_mode = mode
-
-    def status_snapshot(self) -> dict[str, object]:
-        return {
-            "session_id": self.session_id,
-            "conversation_root": "/tmp/canonical-conversations",
-            "turn_count": 0,
-            "recent_turn_count": len(self.recent_turns),
-            "graph_recursion_limit": self.config.graph_recursion_limit,
-            "last_tool_counts": "none",
-            "thinking_mode": self.thinking_mode,
-            "mcp_families": "web_search",
-        }
-
-class _SessionFactory:
-    def __init__(self) -> None:
-        self.calls: list[tuple[AgentConfig, bool]] = []
-        self.fail_once = False
-        self.created: _FakeSession | None = None
-
-    async def __call__(
-        self,
-        config: AgentConfig,
-        *,
-        load_mcp: bool,
-        progress_cb,
-        conversation_repository,
-        project_id,
-    ):
-        del conversation_repository, project_id
-        self.calls.append((config, load_mcp))
-        if self.fail_once:
-            self.fail_once = False
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
-        self.created = _FakeSession(config, progress_cb)
-        return self.created
-
-
-class _FakeExtensionManager:
-    def __init__(self, tmp_path: Path) -> None:
-        binding_hash = "a" * 64
-        candidate = SimpleNamespace(
-            binding_hash=binding_hash,
-            descriptor=SimpleNamespace(id="local-search", family="local_search"),
-            resolved_command="/conda/envs/app/bin/python",
-            args=("server.py", "--fixture"),
-            cwd=str(tmp_path / "dropin" / "mcp" / "local-search"),
-            env_names=("LOCAL_SEARCH_MODE",),
-            env={"PRIVATE_TOKEN": "must not cross wire"},
-        )
-        desired_skill = SimpleNamespace(id="writer", kind="skill")
-        self.preview_object = SimpleNamespace(
-            private_skill_hash="private-manager-hash",
-            registry=SimpleNamespace(revision=0),
-            diff=SimpleNamespace(
-                changes=[
-                    SimpleNamespace(
-                        operation="add",
-                        key="skill:writer",
-                        desired=desired_skill,
-                    )
-                ],
-                diagnostics=(),
-            ),
-            plan=SimpleNamespace(
-                items=[
-                    SimpleNamespace(
-                        key="skill:writer",
-                        summary="secret-from-untrusted-extension-metadata",
-                    )
-                ]
-            ),
-            mcp_candidates={"mcp:local-search": candidate},
-        )
-        self.status_object = ExtensionStatus(
-            dropin_root=tmp_path / "dropin",
-            state_root=tmp_path / "state",
-            desired_count=1,
-            applied_count=0,
-            applied_revision=0,
-            running_revision=0,
-            restart_required=False,
-            manager_available=True,
-            manager_error=None,
-            diagnostics=(),
-        )
-        self.applied_preview = None
-        self.apply_calls = 0
-        self.before_apply = None
-        self.status_calls = 0
-        self.preview_calls = 0
-        self.approved_bindings: set[str] | None = None
-
-    def status(self, **kwargs):
-        self.status_calls += 1
-        return replace(
-            self.status_object,
-            running_revision=kwargs.get("running_revision", 0),
-            running_mcp_families=tuple(kwargs.get("running_mcp_families", ())),
-        )
-
-    def preview(self):
-        self.preview_calls += 1
-        return self.preview_object
-
-    def apply(self, preview, *, approved_mcp_bindings):
-        self.apply_calls += 1
-        if self.before_apply is not None:
-            self.before_apply()
-        self.applied_preview = preview
-        self.approved_bindings = set(approved_mcp_bindings)
-        return ApplyReport(
-            previous_revision=0,
-            applied_revision=1,
-            restart_required=True,
-            items=(
-                ApplyItemResult(
-                    "skill:writer",
-                    "added",
-                    "secret-from-untrusted-extension-metadata",
-                ),
-            ),
-            diagnostics=("secret-from-untrusted-extension-metadata",),
-        )
+from desktop_support import _FakeExtensionManager, _FakeSession, _SessionFactory, _dispatch_approved, _open_test_project, _service, _turn_params
 
 
 class _CorrelatedEventSink:
@@ -379,6 +142,7 @@ class _DesktopBashFactory:
         bash_command_runner,
         conversation_repository,
         project_id,
+        **_kwargs,
     ) -> _DesktopBashSession:
         del load_mcp, conversation_repository, project_id
         self.created = _DesktopBashSession(
@@ -388,59 +152,6 @@ class _DesktopBashFactory:
             bash_command_runner,
         )
         return self.created
-
-
-def _service(tmp_path: Path, **kwargs) -> DesktopService:
-    config = kwargs.pop(
-        "config",
-        AgentConfig(
-            persist_dir=str(tmp_path / "store"),
-            extension_dropin_dir=str(tmp_path / "dropin"),
-            extension_state_dir=str(tmp_path / "state"),
-        ),
-    )
-    return DesktopService(
-        original_cwd=tmp_path,
-        environ={
-            "CONDA_DEFAULT_ENV": "app",
-            "CONDA_PREFIX": "/conda/envs/app",
-        },
-        config=config,
-        **kwargs,
-    )
-
-
-def _turn_params(
-    text: str,
-    *,
-    turn_id: str | None = None,
-    retry: bool = False,
-) -> dict[str, object]:
-    return {
-        "text": text,
-        "turnId": turn_id or uuid.uuid4().hex,
-        "retry": retry,
-    }
-
-
-async def _dispatch_approved(service, method, params):
-    """Existing lifecycle tests grant the new single-operation consent explicitly."""
-    tasks = []
-
-    class Sink:
-        request_id = str(uuid.uuid4())
-
-        def __call__(self, event, data):
-            if event == "approval.required":
-                tasks.append(asyncio.create_task(service.dispatch("approval.resolve", {
-                    "approvalId": data["approvalId"], "parentRequestId": data["parentRequestId"],
-                    "turnId": data["turnId"], "approved": True,
-                })))
-
-    try:
-        return await service.dispatch(method, params, event_sink=Sink())
-    finally:
-        await asyncio.gather(*tasks)
 
 
 def _canonical_session_factory(monkeypatch):
@@ -458,6 +169,7 @@ def _canonical_session_factory(monkeypatch):
         conversation_repository,
         project_id,
         session_id=None,
+        **_kwargs,
     ):
         del load_mcp
         session = ChatSession(
@@ -596,6 +308,7 @@ def test_session_create_is_single_flight_and_blocks_shutdown(tmp_path: Path) -> 
             progress_cb,
             conversation_repository,
             project_id,
+            **_kwargs,
         ):
             del load_mcp, conversation_repository, project_id
             nonlocal calls
@@ -1938,11 +1651,12 @@ def test_conversation_replacement_clears_installer_before_saving_controls(
             pending.add(session.session_id)
             session.set_thinking_mode("normal")
 
-            def clear() -> None:
+            def clear() -> dict:
                 pending.discard(session.session_id)
                 session.set_thinking_mode("extended")
+                return {}
 
-            monkeypatch.setattr(session, "clear_skill_installer", clear, raising=False)
+            monkeypatch.setattr(session, "clear_skill_installer", clear)
 
         begin_installer(first)
         await service.dispatch("session.select", {
@@ -1984,9 +1698,10 @@ def test_session_shutdown_clears_active_session(
         assert session is not None
         pending_installer = True
 
-        def clear_skill_installer() -> None:
+        def clear_skill_installer() -> dict:
             nonlocal pending_installer
             pending_installer = False
+            return {}
 
         session.clear_skill_installer = clear_skill_installer
 
@@ -3039,14 +2754,3 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
     assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
 
 
-async def _open_test_project(service, root: Path, *, history_directory: str | None = None):
-    root.mkdir(exist_ok=True)
-    params = {"rootPath": str(root), "action": "inspect"}
-    if history_directory is not None:
-        params["historyDirectory"] = history_directory
-    preview = await service.dispatch("workspace.select", params)
-    return await service.dispatch("workspace.select", {
-        "rootPath": str(root), "action": "initialize",
-        "historyDirectory": preview["historyDirectory"],
-        "expectedFingerprint": preview["researchFingerprint"],
-    })

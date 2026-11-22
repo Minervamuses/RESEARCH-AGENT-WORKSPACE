@@ -20,7 +20,7 @@ from agent.skills import discover_skills
 from agent.skills.runtime import combine_skill_runtimes, load_skill_runtime, resolve_skill_references
 from agent.state import skill_runtime_to_agent_state
 from agent.turns.results import TurnOutcome
-from test_desktop_service import _open_test_project, _service
+from desktop_support import _open_test_project, _service
 
 
 def test_inline_catalog_positions_duplicates_and_email_boundaries(tmp_path):

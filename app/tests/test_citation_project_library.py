@@ -233,7 +233,7 @@ def test_initialize_project_still_writes_only_two_keys(tmp_path):
 
 def test_desktop_citation_turn_merges_into_the_project_bibliography(monkeypatch, tmp_path):
     from test_desktop_conversations import _citation_desktop, _dispatch_citation_approved
-    from test_desktop_service import _open_test_project, _turn_params
+    from desktop_support import _open_test_project, _turn_params
 
     service, _model, _fetcher, services, _sessions = _citation_desktop(monkeypatch, tmp_path)
     asyncio.run(_open_test_project(service, tmp_path))

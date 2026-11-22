@@ -10,9 +10,7 @@ import pytest
 from agent.desktop.protocol import request_event
 from agent.paths import find_app_root
 from agent.desktop.service import DesktopServiceError
-from test_desktop_service import (
-    _FakeExtensionManager, _FakeSession, _SessionFactory, _open_test_project, _service, _turn_params,
-)
+from desktop_support import _FakeExtensionManager, _FakeSession, _SessionFactory, _open_test_project, _service, _turn_params
 
 
 class _ApprovalSink:
@@ -215,7 +213,7 @@ def test_extension_apply_uses_explicit_apply_or_current_bypass_bindings(tmp_path
 
 
 def test_bypass_document_edit_still_reports_editor_and_disk_conflicts(tmp_path, monkeypatch):
-    from test_desktop_document_service import _setup, _Sink
+    from desktop_support import _setup, _Sink
 
     async def run():
         service, _model, path, context = await _setup(tmp_path, monkeypatch)

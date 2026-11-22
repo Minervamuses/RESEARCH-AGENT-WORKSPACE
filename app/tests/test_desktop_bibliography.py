@@ -17,8 +17,8 @@ from agent.desktop.protocol import ProtocolError, validate_message, validate_res
 from agent.desktop.service import DesktopServiceError
 from skills.citation import csl_render
 from skills.citation.hub import CitationProviderHub
-from test_desktop_document_service import _setup, _Sink
-from test_desktop_service import _open_test_project, _service
+from desktop_support import _setup, _Sink
+from desktop_support import _open_test_project, _service
 from tests.test_citation_doi_first_save import JOURNAL_DOI, PREPRINT_DOI, Fetcher
 
 needs_pandoc = pytest.mark.skipif(csl_render.find_pandoc() is None, reason="Pandoc is not installed")

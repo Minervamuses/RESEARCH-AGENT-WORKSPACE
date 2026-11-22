@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/` | — | C7-S2 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S2/` | — | C7-S3 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -625,3 +625,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S1/fixture-move.md`。
 - **限制**：`for_agents/` 仍描述舊的 fixture 位置與開關，交給 C10。
 - **下一步**：C7-S2 假物件。
+
+### C7-S2 假物件（S031、S037，2026-11-22）
+
+- **觀察結果**：`_materialize_session` 一律傳完整 kwargs，刪除 `inspect.signature` 探測、`_session_factory_accepts_bash` 與 6 處假物件分支；其餘屬於私有存取的分支留給 C7-S4／C7-S5（evidence 列出）。測試 factory 加 `**_kwargs`，假 session 補上兩個方法；跨模組共用的 helper 集中到 `tests/desktop_support.py`。第一次全跑因 factory 參數錯誤造成大量核准逾時而超過 10 分鐘，修正 factory 後恢復（不是同一問題的修正失敗）。
+- **執行指令**：沙箱外完整 pytest；grep。
+- **證據**：`evidence/C7-S2/fakes.md`。
+- **限制**：無。
+- **下一步**：C7-S3 thinking orchestrator 的私有存取。

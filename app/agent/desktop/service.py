@@ -6,7 +6,6 @@ import asyncio
 import copy
 import hashlib
 import importlib.metadata
-import inspect
 import json
 import logging
 import os
@@ -358,9 +357,6 @@ class DesktopService:
         self.session: ChatSession | None = None
 
         self._session_factory = session_factory or ChatSession.create
-        self._session_factory_accepts_bash = (
-            session_factory is None or bash_command_runner is not None
-        )
         self._bash_command_runner = bash_command_runner
         self._approval_timeout_seconds = max(
             0.01,
@@ -1292,62 +1288,31 @@ class DesktopService:
         project_id: str,
         session_id: str | None = None,
     ) -> ChatSession:
-        kwargs: dict[str, Any] = {
-            "load_mcp": load_mcp,
-            "progress_cb": self._on_session_progress,
-        }
-        if self._session_factory_accepts_bash:
-            kwargs.update({
-                "bash_approval_handler": self._desktop_bash_approval,
-                "bash_command_runner": self._bash_command_runner,
-            })
-        kwargs.update({
-            "conversation_repository": self._conversation_repository,
-            "project_id": project_id,
-        })
-        factory_parameters = inspect.signature(self._session_factory).parameters
-        if "system_prompt" in factory_parameters or any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in factory_parameters.values()
-        ):
-            kwargs["system_prompt"] = self._project_system_prompt(self._require_project())
-        if "extra_tools" in factory_parameters or any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in factory_parameters.values()
-        ):
-            kwargs["extra_tools"] = [self._document_tool, self._bibliography_tool]
-        if "operation_approval_handler" in factory_parameters or any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in factory_parameters.values()
-        ):
-            kwargs["operation_approval_handler"] = self._desktop_operation_approval
-        if "citation_bibliography_path" in factory_parameters or any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in factory_parameters.values()
-        ):
-            kwargs["citation_bibliography_path"] = (
-                lambda: self._project_bibliography_path(project_id)
-            )
-        if session_id is not None:
-            kwargs["session_id"] = session_id
-        session = await self._session_factory(config, **kwargs)
-        if isinstance(session, ChatSession):
-            session._set_final_text_validator(
-                lambda text, errors: self._validate_final_text_before_record(
-                    session.session_id,
-                    text,
-                    errors,
-                )
-            )
-        set_prompt_persisted_callback = getattr(
-            session,
-            "_set_prompt_persisted_callback",
-            None,
+        # Every factory, production or test, receives the same complete arguments.
+        session = await self._session_factory(
+            config,
+            load_mcp=load_mcp,
+            progress_cb=self._on_session_progress,
+            bash_approval_handler=self._desktop_bash_approval,
+            bash_command_runner=self._bash_command_runner,
+            conversation_repository=self._conversation_repository,
+            project_id=project_id,
+            system_prompt=self._project_system_prompt(self._require_project()),
+            extra_tools=[self._document_tool, self._bibliography_tool],
+            operation_approval_handler=self._desktop_operation_approval,
+            citation_bibliography_path=lambda: self._project_bibliography_path(project_id),
+            session_id=session_id,
         )
-        if callable(set_prompt_persisted_callback):
-            set_prompt_persisted_callback(
-                lambda: self._on_prompt_persisted(session)
+        session._set_final_text_validator(
+            lambda text, errors: self._validate_final_text_before_record(
+                session.session_id,
+                text,
+                errors,
             )
+        )
+        session._set_prompt_persisted_callback(
+            lambda: self._on_prompt_persisted(session)
+        )
         return session
 
     def _on_prompt_persisted(self, session: ChatSession) -> None:
@@ -1392,14 +1357,12 @@ class DesktopService:
                 "SESSION_NOT_READY",
                 "Project history settings changed; reopen the project before starting another turn.",
             )
-        if hasattr(session, "system_prompt_message"):
-            session.system_prompt_message = SystemMessage(content=self._project_system_prompt(current))
+        session.system_prompt_message = SystemMessage(content=self._project_system_prompt(current))
         self._project = current
 
     def _clear_installer_for_replacement(self, session: ChatSession) -> None:
-        clear_installer = getattr(session, "clear_skill_installer", None)
-        cleanup = clear_installer() if callable(clear_installer) else None
-        if isinstance(cleanup, dict) and cleanup.get("cleanup_conflict"):
+        cleanup = session.clear_skill_installer()
+        if cleanup.get("cleanup_conflict"):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 self._bounded_text(
@@ -2510,7 +2473,7 @@ class DesktopService:
 
     async def _desktop_operation_approval(self, name: str, args: dict[str, Any]) -> bool:
         """Approve executable tools after the graph's existing admission check."""
-        family = getattr(self.session, "mcp_families", {}).get(name)
+        family = self.session.mcp_families.get(name) if self.session is not None else None
         citation_save = name == "citation_workflow" and args.get("action") == "save"
         skill_install = name == "skill_install" and args.get("action") in {"preview", "apply"}
         mcp_call = family is not None and family != "desktop_document"
@@ -2702,8 +2665,7 @@ class DesktopService:
         for key in ("documentContext", "skillReferences"):
             if key in params and params[key] != context.get(key):
                 raise DesktopServiceError("PROTOCOL_INVALID", f"{key} differs from the frozen submitted context.")
-        if hasattr(session, "system_prompt_message"):
-            session.system_prompt_message = SystemMessage(content=self._project_system_prompt({**project, "rulesText": context["projectRules"]["text"]}))
+        session.system_prompt_message = SystemMessage(content=self._project_system_prompt({**project, "rulesText": context["projectRules"]["text"]}))
         return context, existing
 
     async def _session_turn(

@@ -428,7 +428,7 @@ def test_fixture_fail_once_retry_reuses_one_canonical_turn(
 def test_fixture_routes_fake_rag_and_knowledge_commands_without_real_data_writes(
     fixture_root: Path,
 ) -> None:
-    from test_desktop_service import _dispatch_approved
+    from desktop_support import _dispatch_approved
 
     service = _service(fixture_root, open_project=True)
     source = fixture_root / FIXTURE_KNOWLEDGE_DIRNAME

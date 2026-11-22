@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.desktop.documents import utf16_length
 from agent.observability import measure_document_context
-from test_desktop_document_service import _Sink, _setup
+from desktop_support import _Sink, _setup
 
 SECTION_COUNT = 12
 SNAPSHOT_KEYS = ("rootPath", "path", "editorRevision", "sourceText", "diskFingerprint")

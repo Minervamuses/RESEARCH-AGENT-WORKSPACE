@@ -6,7 +6,7 @@ import uuid
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from test_desktop_document_service import _DocumentModel, _setup, _Sink
+from desktop_support import _DocumentModel, _setup, _Sink
 
 LIBRARY = [
     {"id": "ng2021journal", "type": "article-journal", "title": "A Journal Article",

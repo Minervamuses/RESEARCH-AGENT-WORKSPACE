@@ -37,8 +37,8 @@ from agent.desktop.service import (
 )
 from agent.document_context import SNAPSHOT_HEADER, iter_document_blocks
 from agent.session import ChatSession
-from test_desktop_document_service import _Sink
-from test_desktop_service import _service
+from desktop_support import _Sink
+from desktop_support import _service
 
 PASSAGE = "因為樣本平均提升 5%，所以此方法對所有學生都有效😀。"
 DOCUMENT = "# 研究結果\n\n" + PASSAGE + "\n\n## 限制\n\n樣本僅來自一所學校。\n"

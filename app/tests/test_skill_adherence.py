@@ -550,7 +550,7 @@ def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
 ):
     from agent.desktop.project import initialize_project
     from conftest import make_astream_graph
-    from test_desktop_service import _open_test_project, _service, _turn_params
+    from desktop_support import _open_test_project, _service, _turn_params
     from test_thinking_session import _Factory, _default_models
 
     project_root = tmp_path / "project"
@@ -589,6 +589,7 @@ def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
 
     async def session_factory(
         config, *, load_mcp, progress_cb, conversation_repository, project_id,
+        **_kwargs,
     ):
         assert load_mcp is False
         assert config.persist_dir == session.config.persist_dir

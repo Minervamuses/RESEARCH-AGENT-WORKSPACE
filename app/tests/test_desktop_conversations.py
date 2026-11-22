@@ -69,6 +69,12 @@ class _CoordinatorSession:
     def _set_prompt_persisted_callback(self, callback):
         self._prompt_persisted_callback = callback
 
+    def _set_final_text_validator(self, validator):
+        self.final_text_validator = validator
+
+    def clear_skill_installer(self):
+        return {}
+
     def _notify_prompt_persisted(self):
         if self._prompt_persisted_callback is not None:
             self._prompt_persisted_callback()
@@ -337,6 +343,7 @@ class _CoordinatorFactory:
         operation_approval_handler=None,
         system_prompt=None,
         citation_bibliography_path=None,
+        **_kwargs,
     ):
         del extra_tools, operation_approval_handler, system_prompt, citation_bibliography_path
         self.load_mcp_calls.append(load_mcp)
@@ -1487,6 +1494,7 @@ def test_first_prompt_is_listed_before_provider_failure(
         session_id=None,
         conversation_repository=None,
         project_id=None,
+        **_kwargs,
     ):
         del load_mcp
         session = ChatSession(
@@ -1666,6 +1674,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
         session_id=None,
         conversation_repository=None,
         project_id=None,
+        **_kwargs,
     ):
         del load_mcp
         assert conversation_repository is repository
@@ -1730,6 +1739,7 @@ def test_canonical_tool_summary_restore_never_replays_raw_tool_payload(
         session_id=None,
         conversation_repository=None,
         project_id=None,
+        **_kwargs,
     ):
         del load_mcp
         assert conversation_repository is repository
@@ -2122,7 +2132,7 @@ async def _dispatch_citation_approved(service, params, events=None):
 
 def _citation_desktop(monkeypatch, tmp_path):
     from test_citation_e2e import _SearchSaveModel, _fixture_services, _rag_search
-    from test_desktop_service import _service
+    from desktop_support import _service
     from tests.citation_fixtures import RoutingFetcher
 
     model = _SearchSaveModel()
@@ -2142,7 +2152,7 @@ def _citation_desktop(monkeypatch, tmp_path):
 
 
 def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(monkeypatch, tmp_path):
-    from test_desktop_service import _open_test_project, _service, _turn_params
+    from desktop_support import _open_test_project, _service, _turn_params
 
     service, model, fetcher, services, sessions = _citation_desktop(monkeypatch, tmp_path)
     asyncio.run(_open_test_project(service, tmp_path))
@@ -2225,7 +2235,7 @@ def test_citation_desktop_restore_switch_restart_and_duplicate_do_not_replay(mon
 @pytest.mark.parametrize("terminal", ["provider", "cancel"])
 def test_citation_desktop_failure_cancel_busy_and_explicit_retry(monkeypatch, tmp_path, terminal):
     from test_citation_e2e import _workflow_results, _save_content
-    from test_desktop_service import _open_test_project, _service, _turn_params
+    from desktop_support import _open_test_project, _service, _turn_params
 
     service, model, fetcher, services, _sessions = _citation_desktop(monkeypatch, tmp_path)
 

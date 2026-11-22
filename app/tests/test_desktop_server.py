@@ -880,7 +880,7 @@ def test_dynamic_service_error_redacts_credentials_and_truncates_safely(
 ) -> None:
     from agent import diagnostics
     from agent.desktop.documents import DocumentError
-    from test_desktop_service import _open_test_project
+    from desktop_support import _open_test_project
 
     diagnostics.install_diagnostic_log(
         "desktop-backend",

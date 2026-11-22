@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agent.desktop.documents import utf16_length
 from agent.document_context import compact_edit_result, compact_edit_results
 from agent.observability import measure_document_context
-from test_desktop_document_service import _Sink, _setup
+from desktop_support import _Sink, _setup
 
 SNAPSHOT_KEYS = ("rootPath", "path", "editorRevision", "sourceText", "diskFingerprint")
 
