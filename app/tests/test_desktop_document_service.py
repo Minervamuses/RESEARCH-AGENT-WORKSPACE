@@ -848,3 +848,167 @@ def test_document_and_references_do_not_carry_into_the_next_turn(tmp_path, monke
         assert second["document_edit"] is False
 
     asyncio.run(run())
+
+
+async def _turn_held_for_retry_stop(service, model, context, *, before_acceptance=False):
+    """Start a turn that waits (in the model, or before its prompt is saved) and owns one bash group."""
+    entered = asyncio.Event()
+    if before_acceptance:
+        async def hold_before_acceptance(_session):
+            entered.set()
+            await asyncio.Event().wait()
+
+        service._refresh_project_rules = hold_before_acceptance
+    else:
+        async def waiting(_messages):
+            entered.set()
+            await asyncio.Event().wait()
+
+        model.ainvoke = waiting
+    sink = _Sink(service, context)
+    turn_id = uuid.uuid4().hex
+    task = asyncio.create_task(service.dispatch("session.turn", {
+        "text": "分析等待", "turnId": turn_id, "retry": False,
+    }, event_sink=sink))
+    await asyncio.wait_for(entered.wait(), 2)
+    service._turn_work.scope.register_bash_process(object())
+    stop = {"sessionId": service.session.session_id, "turnId": turn_id, "parentRequestId": sink.request_id}
+    return task, stop
+
+
+def _cleanup_failures(monkeypatch, *messages):
+    """Fail the real LocalWorkScope cleanup at the process-group level, once per message."""
+    remaining = list(messages)
+
+    def stop_group(_process):
+        if remaining:
+            raise RuntimeError(remaining.pop(0))
+
+    monkeypatch.setattr("agent.tools.bash._stop_process_group", stop_group)
+
+
+async def _next_turn_result(service, context):
+    return await service.dispatch("session.turn", {
+        "text": "分析下一題", "turnId": uuid.uuid4().hex, "retry": False,
+    }, event_sink=_Sink(service, context))
+
+
+def test_retry_stop_reruns_failed_cleanup_and_then_accepts_a_new_turn(tmp_path, monkeypatch):
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        answer = model.ainvoke
+        task, stop = await _turn_held_for_retry_stop(service, model, context)
+        _cleanup_failures(monkeypatch, "first cleanup failure")
+        with pytest.raises(DesktopServiceError) as failed:
+            await service.dispatch("session.stop", stop)
+        assert failed.value.code == "INTERNAL_ERROR" and "first cleanup failure" in str(failed.value)
+        with pytest.raises(DesktopServiceError):
+            await task
+        with pytest.raises(DesktopServiceError) as busy:
+            await _next_turn_result(service, context)
+        assert busy.value.code == "BUSY_TURN"
+
+        retried = await service.dispatch("session.stop", stop)
+        assert retried["state"] == "interrupted" and retried["accepted"] is True
+        assert not service._turn_active
+        model.ainvoke = answer
+        assert (await _next_turn_result(service, context))["state"] == "completed"
+
+    asyncio.run(run())
+
+
+def test_retry_stop_reports_the_new_cleanup_failure_and_stays_blocked(tmp_path, monkeypatch):
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        task, stop = await _turn_held_for_retry_stop(service, model, context)
+        _cleanup_failures(monkeypatch, "first cleanup failure", "second cleanup failure")
+        with pytest.raises(DesktopServiceError) as first:
+            await service.dispatch("session.stop", stop)
+        with pytest.raises(DesktopServiceError):
+            await task
+        with pytest.raises(DesktopServiceError) as second:
+            await service.dispatch("session.stop", stop)
+        assert "first cleanup failure" in str(first.value)
+        assert "second cleanup failure" in str(second.value) and "first" not in str(second.value)
+        with pytest.raises(DesktopServiceError) as busy:
+            await _next_turn_result(service, context)
+        assert busy.value.code == "BUSY_TURN"
+
+    asyncio.run(run())
+
+
+def test_retry_stop_releases_a_turn_stopped_before_acceptance(tmp_path, monkeypatch):
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        task, stop = await _turn_held_for_retry_stop(service, model, context, before_acceptance=True)
+        _cleanup_failures(monkeypatch, "first cleanup failure")
+        with pytest.raises(DesktopServiceError):
+            await service.dispatch("session.stop", stop)
+        with pytest.raises(DesktopServiceError):
+            await task
+        assert service._conversation_repository.load_optional(service.session.session_id) is None
+        retried = await service.dispatch("session.stop", stop)
+        assert (retried["state"], retried["accepted"], retried["persisted"]) == (None, False, False)
+        del service._refresh_project_rules
+        assert (await _next_turn_result(service, context))["state"] == "completed"
+
+    asyncio.run(run())
+
+
+def test_retry_stop_stays_blocked_when_the_turn_state_cannot_be_read(tmp_path, monkeypatch):
+    from agent.conversations import ConversationUnavailableError
+
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        task, stop = await _turn_held_for_retry_stop(service, model, context)
+        _cleanup_failures(monkeypatch, "first cleanup failure")
+        with pytest.raises(DesktopServiceError):
+            await service.dispatch("session.stop", stop)
+        with pytest.raises(DesktopServiceError):
+            await task
+
+        def unreadable(_conversation_id):
+            raise ConversationUnavailableError("fixture history unreadable")
+
+        monkeypatch.setattr(service._conversation_repository, "load_optional", unreadable)
+        with pytest.raises(DesktopServiceError) as unread:
+            await service.dispatch("session.stop", stop)
+        assert unread.value.code == "INTERNAL_ERROR" and "could not be read" in str(unread.value)
+        assert service._turn_active
+        with pytest.raises(DesktopServiceError) as busy:
+            await _next_turn_result(service, context)
+        assert busy.value.code == "BUSY_TURN"
+
+    asyncio.run(run())
+
+
+def test_retry_stop_finishes_a_pending_turn_through_recovery_before_releasing(tmp_path, monkeypatch):
+    async def run():
+        service, model, _path, context = await _setup(tmp_path, monkeypatch)
+        answer = model.ainvoke
+        session = service.session
+
+        async def leave_pending(**_kwargs):
+            return None
+
+        monkeypatch.setattr(session, "_fail_active_turn", leave_pending)
+        task, stop = await _turn_held_for_retry_stop(service, model, context)
+        _cleanup_failures(monkeypatch)  # cleanup succeeds; only the saved state is unfinished
+        with pytest.raises(DesktopServiceError) as pending:
+            await service.dispatch("session.stop", stop)
+        assert "saved terminal state" in str(pending.value)
+        with pytest.raises(DesktopServiceError):
+            await task
+        assert session.conversation_repository.load(session.session_id).document.turns[-1].state == "pending"
+        with pytest.raises(DesktopServiceError) as busy:
+            await _next_turn_result(service, context)
+        assert busy.value.code == "BUSY_TURN"
+
+        retried = await service.dispatch("session.stop", stop)
+        assert retried["state"] == "interrupted"
+        saved = json.loads(session.conversation_repository.path_for(session.session_id).read_text(encoding="utf-8"))
+        assert saved["turns"][-1]["state"] == "interrupted"
+        model.ainvoke = answer
+        assert (await _next_turn_result(service, context))["state"] == "completed"
+
+    asyncio.run(run())

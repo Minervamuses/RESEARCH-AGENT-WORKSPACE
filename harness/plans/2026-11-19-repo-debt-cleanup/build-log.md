@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S6/` | — | C7-S7 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S7/` | — | C7-S8 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -665,3 +665,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S6/busy-matrix.md`。
 - **限制**：無。
 - **下一步**：C7-S7 Retry Stop。
+
+### C7-S7 Retry Stop（U14、FAIL-022，2026-11-22）
+
+- **觀察結果**：兩層快取都改了：`LocalWorkScope.finish_stop` 失敗後不再重播舊例外、只重做未停下的 group；`_session_stop` 對已結束但被卡住的回合重試清理，再從磁碟重讀狀態，只有 terminal 或確認未受理時才解除，pending 經 `reload_and_recover` 結束。新增 6 個測試（失敗注入在 `_stop_process_group`）。兩個第一版問題各修 1 次：shield 本身會拋出 task 的例外、第一次 Stop 不該自動重試。
+- **執行指令**：沙箱外完整 pytest。
+- **證據**：`evidence/C7-S7/retry-stop.md`。
+- **限制**：無。
+- **下一步**：C7-S8 `service.py` 模組化。

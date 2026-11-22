@@ -39,6 +39,7 @@ class LocalWorkScope:
         self._loop_thread = threading.get_ident()
         self._stopped = threading.Event()
         self._bash_processes: list[subprocess.Popen[str]] = []
+        self._stopped_processes: set[subprocess.Popen[str]] = set()
         self._bash_cleanup: asyncio.Task[None] | None = None
 
     @contextmanager
@@ -58,23 +59,37 @@ class LocalWorkScope:
         self._bash_processes.append(process)
 
     async def finish_stop(self) -> None:
-        """Settle retained bash groups after the turn's tool workers have returned."""
+        """Settle retained bash groups after the turn's tool workers have returned.
+
+        A failed cleanup is not cached: the next call stops the groups that
+        have not stopped yet again, and never touches a stopped group twice.
+        """
         if not self._stopped.is_set() or not self._bash_processes:
             return
         if self._bash_cleanup is None:
             from agent.tools.bash import _stop_process_group
 
+            remaining = [process for process in self._bash_processes if process not in self._stopped_processes]
+
             def finish() -> None:
-                for process in self._bash_processes:
+                for process in remaining:
                     _stop_process_group(process)
+                    self._stopped_processes.add(process)
 
             self._bash_cleanup = asyncio.create_task(asyncio.to_thread(finish))
-        while not self._bash_cleanup.done():
-            try:
-                await asyncio.shield(self._bash_cleanup)
-            except asyncio.CancelledError:
-                continue
-        self._bash_cleanup.result()
+        cleanup = self._bash_cleanup
+        try:
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+            cleanup.result()
+        except BaseException:
+            # Awaiting the shield already raises the cleanup's own failure.
+            if self._bash_cleanup is cleanup and cleanup.done():
+                self._bash_cleanup = None
+            raise
 
     def request_stop(self) -> None:
         self._stopped.set()

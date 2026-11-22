@@ -368,3 +368,35 @@ pathlib.Path({str(effect_file)!r}).write_text('too late')
                 await scope.finish_stop()
 
     asyncio.run(run())
+
+
+def test_finish_stop_reruns_cleanup_after_a_failure_and_skips_stopped_groups(monkeypatch):
+    """FAIL-022 (a): a failed cleanup is not cached and replayed."""
+    from agent.ingest import LocalWorkScope
+
+    async def run():
+        scope = LocalWorkScope()
+        first, second = object(), object()  # stand-ins for the retained Popen objects
+        scope.register_bash_process(first)
+        scope.register_bash_process(second)
+        scope.request_stop()
+        calls = []
+        failures = iter([RuntimeError("second group still running"), RuntimeError("second group still running again")])
+
+        def stop(process):
+            calls.append(process)
+            if process is second and len(calls) < 4:
+                raise next(failures)
+
+        monkeypatch.setattr("agent.tools.bash._stop_process_group", stop)
+        with pytest.raises(RuntimeError) as first_error:
+            await scope.finish_stop()
+        with pytest.raises(RuntimeError) as second_error:
+            await scope.finish_stop()
+        assert second_error.value is not first_error.value
+        assert str(second_error.value) == "second group still running again"
+        await scope.finish_stop()
+        await scope.finish_stop()  # everything stopped: nothing runs again
+        assert calls == [first, second, second, second]
+
+    asyncio.run(run())

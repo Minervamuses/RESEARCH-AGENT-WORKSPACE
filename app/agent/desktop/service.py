@@ -341,6 +341,7 @@ class _TurnWork:
     editor_path: str | None = None
     tool_names: dict[str, str] = field(default_factory=dict)
     tool_summaries: dict[str, dict[str, str]] = field(default_factory=dict)
+    display_input: object = None
     finished: bool = False
     document_tasks: set[asyncio.Task] = field(default_factory=set)
     stopping: bool = False
@@ -2698,7 +2699,7 @@ class DesktopService:
             parent_request_id if isinstance(parent_request_id, str) else None, task,
             LocalWorkScope(), asyncio.get_running_loop().create_future(),
             event_sink=event_sink, loop=asyncio.get_running_loop(),
-            permission_mode=self._permission_mode,
+            permission_mode=self._permission_mode, display_input=params.get("text"),
         )
         self._turn_work = owner
         response = None
@@ -2724,7 +2725,7 @@ class DesktopService:
             try:
                 cleanup.result()
             except Exception as exc:
-                owner.error = DesktopServiceError("INTERNAL_ERROR", "The turn's local work could not finish stopping.")
+                owner.error = self._stop_cleanup_error(exc)
                 failure = exc
             lifecycle = self._with_turn_lifecycle(
                 DesktopServiceError("TURN_CANCELLED", "The current turn was stopped."),
@@ -3057,13 +3058,90 @@ class DesktopService:
         if not matches(owner):
             raise DesktopServiceError("PROTOCOL_INVALID", "Stop does not match the owning turn request.")
         self._last_stopped_turn = owner
+        # A turn already over when this Stop arrives can only be held by an
+        # earlier failed cleanup or an unsettled state: this Stop retries it.
+        retrying = owner.done.done()
         if not owner.done.done() and not owner.stopping:
             self._request_turn_stop(owner)
             owner.task.cancel()
         await asyncio.shield(owner.done)
         if owner.error is not None:
-            raise owner.error
+            if not retrying:
+                raise owner.error
+            # Retry Stop (FAIL-022, U14): retry the cleanup instead of replaying its error.
+            await self._retry_stop(owner)
         return dict(owner.result)
+
+    def _stop_cleanup_error(self, exc: BaseException) -> DesktopServiceError:
+        return DesktopServiceError(
+            "INTERNAL_ERROR",
+            self._bounded_text(f"The turn's local work could not finish stopping: {exc}", 1_024),
+        )
+
+    async def _retry_stop(self, owner: _TurnWork) -> None:
+        """Release a turn held by a failed Stop only once it is really over.
+
+        Supported use: Stop's cleanup failed (or the turn was left pending) and
+        the user presses Stop again. The service stays busy unless the cleanup
+        now succeeds and the turn is saved in a terminal state, or it was never
+        accepted. A pending turn is finished through ``reload_and_recover``.
+        """
+        try:
+            await self._finish_turn_work(owner)
+        except Exception as exc:
+            owner.error = self._stop_cleanup_error(exc)
+            raise owner.error from exc
+        state, accepted, persisted = await self._read_stopped_turn_state(owner)
+        if state == "pending":
+            session = self.session
+            if session is None or session.session_id != owner.session_id:
+                raise owner.error
+            try:
+                await asyncio.to_thread(session.reload_and_recover)
+            except ConversationError as exc:
+                raise owner.error from exc
+            state, accepted, persisted = await self._read_stopped_turn_state(owner)
+        settled = state in {"completed", "failed", "interrupted"}
+        never_accepted = (
+            state is None and not accepted and not persisted
+            and owner.result is not None and owner.result.get("accepted") is False
+            and owner.result.get("persisted") is False
+        )
+        if not (settled or never_accepted):
+            raise owner.error
+        owner.error = None
+        owner.result = {
+            "sessionId": owner.session_id, "turnId": owner.turn_id,
+            "state": state, "accepted": accepted, "persisted": persisted,
+        }
+        if self._turn_work is owner:
+            self._turn_active = False
+
+    async def _read_stopped_turn_state(self, owner: _TurnWork) -> tuple[str | None, bool, bool]:
+        try:
+            return await asyncio.to_thread(self._saved_turn_state, owner)
+        except (ConversationError, DesktopServiceError) as exc:
+            # The turn stays blocked: its saved state cannot be determined.
+            raise DesktopServiceError(
+                "INTERNAL_ERROR", "The stopped turn's saved state could not be read; the conversation stays blocked.",
+            ) from exc
+
+    def _saved_turn_state(self, owner: _TurnWork) -> tuple[str | None, bool, bool]:
+        """The turn's state read from disk; a read failure propagates (and keeps Stop blocked)."""
+        repository = self._conversation_repository
+        if repository is None:
+            raise DesktopServiceError("SESSION_NOT_READY", "The conversation history is not open.")
+        snapshot = repository.load_optional(owner.session_id)
+        turn = None if snapshot is None else next(
+            (
+                item for item in snapshot.document.turns
+                if item.turn_id == owner.turn_id and item.display_input == owner.display_input
+            ),
+            None,
+        )
+        if turn is None:
+            return None, False, False
+        return turn.state, True, True
 
     async def _session_set_thinking(
         self, params: dict[str, Any], _event_sink: EventSink | None
