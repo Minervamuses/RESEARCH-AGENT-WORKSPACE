@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | In progress | `evidence/C8-S1/`–`C8-S6/` | — | C8-S7 |
+| C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -737,3 +737,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S6/domains.md`。
 - **限制**：GUI 未驗證；擴充 restart 與舊 generation 事件列為高風險。
 - **下一步**：C8-S7 階段收尾。
+
+### C8-S7 階段收尾與 C8 驗收（2026-11-22）
+
+- **觀察結果**：主執行緒核對 C8-S6 子代理的 4 個 commit（只含明確路徑）並重跑：`npm test` 247 pass、`npm run build` 通過。`App.tsx` 3,000 → 2,462 行；`App()` 本體 `useState` 33、`useRef` 33、`useEffect` 11、`useCallback` 46（C1-S3：35／35／14／42）。phase-08 五項完成狀態都有證據。
+- **執行指令**：見 `evidence/C8-S7/wrap-up.md`。
+- **證據**：`evidence/C8-S7/wrap-up.md`。
+- **限制**：GUI 未驗證；高風險項目留給使用者。`096b679` 的 docs 標題 commit 夾帶一處小幅程式修改，已註記。
+- **下一步**：C9 前端呈現。
