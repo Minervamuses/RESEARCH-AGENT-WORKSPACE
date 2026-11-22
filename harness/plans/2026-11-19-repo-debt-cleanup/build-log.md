@@ -24,7 +24,7 @@
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
 | C9 | Complete | `evidence/C9-S1/`–`C9-S5/` | — | — |
-| C10 | In progress | `evidence/C10-S0/`–`C10-S2/` | — | C10-S3 |
+| C10 | Complete | `evidence/C10-S0/`–`C10-S3/` | — | 使用者：GUI 清單、`$infrastructure` 重新整理、未處理的決策 |
 
 ## 撰寫紀錄
 
@@ -810,3 +810,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C10-S2/metrics-after.md`。
 - **限制**：GUI 未驗證。
 - **下一步**：C10-S3 最終彙報。
+
+### C10-S3 最終彙報（2026-11-22）
+
+- **觀察結果**：由子代理依 build-log 與 evidence 起草、主執行緒核對。S001–S134 共 134 列：APPLIED 76、部分 8、Blocked 0、未納入 41、KEEP 9（READY 46 項中 44 APPLIED、2 部分附理由）；量測前後、使用者可見的行為改變、citation 評估分界 commit（`9068f87`）、產品邊界檢查（沒有為不支援的同時操作新增機制，R1–R6 未重新引入）、掃描量測與快取決定（R3）、過時的 `for_agents/` 與 `AGENTS.md` 條目、58 項 GUI 手動檢查清單（高風險在前）、未處理的決策與殘留資料。彙報明確聲明 GUI 未由執行者驗證。
+- **執行指令**：讀取 build-log、evidence、稽核原文；唯讀重算若干數字（彙報中標明）。
+- **證據**：`evidence/C10-S3/final-report.md`。
+- **限制**：GUI 驗收、`$infrastructure` 重新整理 `for_agents/`、彙報第 11 節的決策都留給使用者。
+- **下一步**：使用者：GUI 清單、`$infrastructure` 重新整理、未處理的決策。
