@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S5/` | — | C7-S6 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S6/` | — | C7-S7 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -657,3 +657,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S5/turn-state.md`。
 - **限制**：無。
 - **下一步**：C7-S6 Busy 判斷。
+
+### C7-S6 Busy 判斷的共用（S028、U21，2026-11-22）
+
+- **觀察結果**：先把 8 處的條件、錯誤碼、訊息與 `retryable` 寫成對照表並以 62 個參數化案例釘住（在改動前通過），再抽出 4 個共用查詢／helper；各處訊息、順序與 `retryable` 不變，沒有搬移狀態所有權，沒有新增拒絕條件。
+- **執行指令**：沙箱外完整 pytest。
+- **證據**：`evidence/C7-S6/busy-matrix.md`。
+- **限制**：無。
+- **下一步**：C7-S7 Retry Stop。

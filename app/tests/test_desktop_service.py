@@ -2755,3 +2755,129 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
     assert session.citation_policy.loaded_service is None and session.active_skill_runtime is None
 
 
+
+
+# C7-S6: the eight busy checkpoints, pinned before sharing their conditions.
+_BUSY_MESSAGES = {
+    "create_creating": ("SESSION_NOT_READY", "A desktop session is already being created.", True),
+    "create_turn": ("BUSY_TURN", "A session turn is still active.", False),
+    "create_other": ("SESSION_NOT_READY", "A new conversation cannot be created during another operation.", True),
+    "select_turn": ("BUSY_TURN", "A conversation cannot be changed during an active turn.", True),
+    "select_creating": ("SESSION_NOT_READY", "A desktop session is already being materialized.", True),
+    "select_other": ("SESSION_NOT_READY", "The selected conversation cannot change during another operation.", True),
+    "rename_turn": ("BUSY_TURN", "Wait for the active turn before renaming a conversation.", True),
+    "rename_other": ("SESSION_NOT_READY", "Wait for the current conversation operation before renaming.", True),
+    "delete_turn": ("BUSY_TURN", "Stop the active turn and wait for it to finish before deleting.", True),
+    "delete_other": ("SESSION_NOT_READY", "Wait for the current conversation operation before deleting.", True),
+    "workspace_turn": ("BUSY_TURN", "Wait for the active turn before changing project.", False),
+    "workspace_other": ("SESSION_NOT_READY", "Wait for the current operation before changing project.", True),
+    "shutdown_creating": ("SESSION_NOT_READY", "A desktop session is still being created.", True),
+    "shutdown_turn": ("BUSY_TURN", "A session turn is still active.", True),
+    "shutdown_closing": ("SESSION_NOT_READY", "The desktop session is already shutting down.", True),
+    "shutdown_knowledge": ("BUSY_KNOWLEDGE_MUTATION", "A knowledge mutation is still active.", True),
+    "shutdown_extension": ("BUSY_EXTENSION_OPERATION", "An extension operation is still active.", True),
+    "shutdown_document": ("SESSION_NOT_READY", "Wait for the current document or conversation operation.", True),
+    "idle_turn": ("BUSY_TURN", "A session turn is still active.", True),
+    "idle_knowledge": ("BUSY_KNOWLEDGE_MUTATION", "A knowledge operation is still active.", True),
+    "idle_extension": ("BUSY_EXTENSION_OPERATION", "An extension operation is still active.", True),
+}
+
+_CONVERSATION = {"projectId": "p", "sessionId": "28b222e0cc6543aa8d7bbdc423de99a7"}
+_BUSY_CALLS = {
+    "create": lambda service: service._session_create({"loadMcp": False}, None),
+    "select": lambda service: service._session_select(dict(_CONVERSATION), None),
+    "rename": lambda service: service._session_rename({**_CONVERSATION, "title": "T"}, None),
+    "delete": lambda service: service._session_delete(dict(_CONVERSATION), None),
+    "workspace": lambda service: service._workspace_select({"rootPath": "/nonexistent"}, None),
+    "runtime_shutdown": lambda service: service._runtime_shutdown({}, None),
+    "shutdown_session": lambda service: service._shutdown_session(),
+}
+
+# (call, condition, expected message key); conditions are applied one at a time.
+_BUSY_MATRIX = [
+    ("create", "creating", "create_creating"),
+    *[("create", condition, "create_turn") for condition in ("turn", "approval")],
+    *[("create", condition, "create_other") for condition in ("knowledge", "extension", "apply_lock", "tool_lock", "other_operation")],
+    *[("select", condition, "select_turn") for condition in ("turn", "approval")],
+    ("select", "creating", "select_creating"),
+    *[("select", condition, "select_other") for condition in ("knowledge", "extension", "apply_lock", "tool_lock", "other_operation")],
+    *[("rename", condition, "rename_turn") for condition in ("turn", "approval")],
+    *[("rename", condition, "rename_other") for condition in ("creating", "knowledge", "extension", "apply_lock", "tool_lock", "other_operation")],
+    *[("delete", condition, "delete_turn") for condition in ("turn", "approval")],
+    *[("delete", condition, "delete_other") for condition in ("creating", "knowledge", "extension", "apply_lock", "tool_lock", "other_operation", "read_operation")],
+    *[("workspace", condition, "workspace_turn") for condition in ("turn", "approval")],
+    *[("workspace", condition, "workspace_other") for condition in ("opening", "one_operation", "creating", "closing", "knowledge", "extension", "apply_lock", "tool_lock")],
+    ("runtime_shutdown", "creating", "shutdown_creating"),
+    *[("runtime_shutdown", condition, "shutdown_turn") for condition in ("turn", "approval")],
+    ("runtime_shutdown", "knowledge", "shutdown_knowledge"),
+    ("runtime_shutdown", "extension", "shutdown_extension"),
+    ("shutdown_session", "creating", "shutdown_creating"),
+    *[("shutdown_session", condition, "shutdown_turn") for condition in ("turn", "approval")],
+    ("shutdown_session", "closing", "shutdown_closing"),
+    ("shutdown_session", "knowledge", "shutdown_knowledge"),
+    ("shutdown_session", "extension", "shutdown_extension"),
+    *[("shutdown_session", condition, "shutdown_document") for condition in ("apply_lock", "tool_lock", "one_operation")],
+    *[("require_idle", condition, "idle_turn") for condition in ("turn", "approval")],
+    ("require_idle", "knowledge", "idle_knowledge"),
+    ("require_idle", "extension", "idle_extension"),
+]
+
+
+async def _apply_busy_condition(service, condition):
+    if condition == "creating":
+        service._session_creating = True
+    elif condition == "turn":
+        service._turn_active = True
+    elif condition == "approval":
+        service._pending_approval = object()
+    elif condition == "knowledge":
+        service._knowledge_active = True
+    elif condition == "extension":
+        service._extension_active = True
+    elif condition == "apply_lock":
+        await service._document_apply_lock.acquire()
+    elif condition == "tool_lock":
+        await service._document_tool_lock.acquire()
+    elif condition == "other_operation":
+        service._project_operation_count = 2  # this request plus one non-read operation
+    elif condition == "read_operation":
+        service._project_operation_count, service._project_read_count = 2, 1
+    elif condition == "one_operation":
+        service._project_operation_count = 1
+    elif condition == "closing":
+        service._session_closing = True
+    elif condition == "opening":
+        service._workspace_opening = True
+    else:
+        raise AssertionError(condition)
+
+
+@pytest.mark.parametrize("call,condition,expected", _BUSY_MATRIX)
+def test_busy_checkpoints_keep_their_codes_messages_and_retryable(tmp_path, call, condition, expected):
+    async def run():
+        service = _service(tmp_path)
+        await _apply_busy_condition(service, condition)
+        with pytest.raises(DesktopServiceError) as raised:
+            if call == "require_idle":
+                service._require_idle_session()
+            else:
+                await _BUSY_CALLS[call](service)
+        code, message, retryable = _BUSY_MESSAGES[expected]
+        assert (raised.value.code, str(raised.value), raised.value.retryable) == (code, message, retryable)
+
+    asyncio.run(run())
+
+
+def test_conversation_select_ignores_concurrent_reads_but_delete_counts_them(tmp_path):
+    async def run():
+        service = _service(tmp_path)
+        await _apply_busy_condition(service, "read_operation")
+        with pytest.raises(DesktopServiceError) as selected:
+            await _BUSY_CALLS["select"](service)
+        # Past the busy checks: the project is simply not open.
+        assert selected.value.code == "SESSION_NOT_READY" and "Open a research project" in str(selected.value)
+        with pytest.raises(DesktopServiceError) as deleted:
+            await _BUSY_CALLS["delete"](service)
+        assert str(deleted.value) == _BUSY_MESSAGES["delete_other"][1]
+
+    asyncio.run(run())

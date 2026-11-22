@@ -855,7 +855,7 @@ class DesktopService:
     async def _session_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError(
                 "BUSY_TURN",
                 "A conversation cannot be changed during an active turn.",
@@ -867,11 +867,7 @@ class DesktopService:
                 "A desktop session is already being materialized.",
                 retryable=True,
             )
-        if (
-            self._knowledge_active or self._extension_active
-            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count - self._project_read_count > 1
-        ):
+        if self._other_operation_active(ignore_reads=True):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "The selected conversation cannot change during another operation.",
@@ -953,16 +949,12 @@ class DesktopService:
     async def _session_rename(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError(
                 "BUSY_TURN", "Wait for the active turn before renaming a conversation.",
                 retryable=True,
             )
-        if (
-            self._session_creating or self._knowledge_active or self._extension_active
-            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count - self._project_read_count > 1
-        ):
+        if self._session_creating or self._other_operation_active(ignore_reads=True):
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "Wait for the current conversation operation before renaming.",
                 retryable=True,
@@ -1001,16 +993,13 @@ class DesktopService:
     async def _session_delete(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError(
                 "BUSY_TURN", "Stop the active turn and wait for it to finish before deleting.",
                 retryable=True,
             )
-        if (
-            self._session_creating or self._knowledge_active or self._extension_active
-            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count > 1
-        ):
+        # Delete also waits for concurrent reads of the history it changes.
+        if self._session_creating or self._other_operation_active(ignore_reads=False):
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "Wait for the current conversation operation before deleting.",
                 retryable=True,
@@ -1405,13 +1394,9 @@ class DesktopService:
                 "A desktop session is already being created.",
                 retryable=True,
             )
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError("BUSY_TURN", "A session turn is still active.")
-        if (
-            self._knowledge_active or self._extension_active
-            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
-            or self._project_operation_count - self._project_read_count > 1
-        ):
+        if self._other_operation_active(ignore_reads=True):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
                 "A new conversation cannot be created during another operation.",
@@ -1898,13 +1883,13 @@ class DesktopService:
     async def _workspace_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError("BUSY_TURN", "Wait for the active turn before changing project.")
         if (
             self._workspace_opening or self._project_operation_count
             or self._session_creating or self._session_closing
             or self._knowledge_active or self._extension_active
-            or self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            or self._document_work_active
         ):
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "Wait for the current operation before changing project.", retryable=True,
@@ -3114,22 +3099,11 @@ class DesktopService:
                 "A desktop session is still being created.",
                 retryable=True,
             )
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError(
                 "BUSY_TURN", "A session turn is still active.", retryable=True
             )
-        if self._knowledge_active:
-            raise DesktopServiceError(
-                "BUSY_KNOWLEDGE_MUTATION",
-                "A knowledge mutation is still active.",
-                retryable=True,
-            )
-        if self._extension_active:
-            raise DesktopServiceError(
-                "BUSY_EXTENSION_OPERATION",
-                "An extension operation is still active.",
-                retryable=True,
-            )
+        self._raise_if_knowledge_or_extension_active()
         self.lifecycle = "shutting_down"
         try:
             await self._shutdown_session()
@@ -3148,7 +3122,7 @@ class DesktopService:
                 "A desktop session is still being created.",
                 retryable=True,
             )
-        if self._turn_active or self._pending_approval is not None:
+        if self._turn_or_approval_active:
             raise DesktopServiceError(
                 "BUSY_TURN", "A session turn is still active.", retryable=True
             )
@@ -3158,20 +3132,9 @@ class DesktopService:
                 "The desktop session is already shutting down.",
                 retryable=True,
             )
-        if self._knowledge_active:
-            raise DesktopServiceError(
-                "BUSY_KNOWLEDGE_MUTATION",
-                "A knowledge mutation is still active.",
-                retryable=True,
-            )
-        if self._extension_active:
-            raise DesktopServiceError(
-                "BUSY_EXTENSION_OPERATION",
-                "An extension operation is still active.",
-                retryable=True,
-            )
+        self._raise_if_knowledge_or_extension_active()
         if (
-            self._document_apply_lock.locked() or self._document_tool_lock.locked()
+            self._document_work_active
             or self._project_operation_count > int(allow_current_project_operation)
         ):
             raise DesktopServiceError(
@@ -3219,21 +3182,38 @@ class DesktopService:
             )
         return self.session
 
-    def _require_idle_session(self) -> ChatSession:
-        if self._turn_active or self._pending_approval is not None:
-            raise DesktopServiceError(
-                "BUSY_TURN", "A session turn is still active.", retryable=True
-            )
+    # Shared busy queries (U21): each checkpoint keeps its own order, code,
+    # message and retryable flag; only the repeated conditions live here.
+    @property
+    def _turn_or_approval_active(self) -> bool:
+        """A turn is running (or held by an unfinished Stop) or an approval is pending."""
+        return self._turn_active or self._pending_approval is not None
+
+    @property
+    def _document_work_active(self) -> bool:
+        return self._document_apply_lock.locked() or self._document_tool_lock.locked()
+
+    def _other_operation_active(self, *, ignore_reads: bool) -> bool:
+        """Knowledge, extension or document work, or a project request besides this one."""
+        others = self._project_operation_count - (self._project_read_count if ignore_reads else 0)
+        return self._knowledge_active or self._extension_active or self._document_work_active or others > 1
+
+    def _raise_if_knowledge_or_extension_active(
+        self, knowledge_message: str = "A knowledge mutation is still active.",
+    ) -> None:
         if self._knowledge_active:
-            raise DesktopServiceError(
-                "BUSY_KNOWLEDGE_MUTATION",
-                "A knowledge operation is still active.",
-                retryable=True,
-            )
+            raise DesktopServiceError("BUSY_KNOWLEDGE_MUTATION", knowledge_message, retryable=True)
         if self._extension_active:
             raise DesktopServiceError(
                 "BUSY_EXTENSION_OPERATION", "An extension operation is still active.", retryable=True,
             )
+
+    def _require_idle_session(self) -> ChatSession:
+        if self._turn_or_approval_active:
+            raise DesktopServiceError(
+                "BUSY_TURN", "A session turn is still active.", retryable=True
+            )
+        self._raise_if_knowledge_or_extension_active("A knowledge operation is still active.")
         return self._require_session()
 
     def _session_slash_registry(self, session: ChatSession) -> SlashCommandRegistry:
