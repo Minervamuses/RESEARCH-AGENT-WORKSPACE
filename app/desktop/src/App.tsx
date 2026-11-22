@@ -11,7 +11,6 @@ import {
   BackendClientError,
   type BackendActionName,
   type BackendSnapshot,
-  type BoundedRuntimeDiagnostics,
   type SafeUiError,
   backendReducer,
   initialBackendState,
@@ -49,16 +48,20 @@ import type {
   SessionListDto,
   SessionSummaryDto,
 } from "./protocol.ts";
-import { DocumentEditor } from "./DocumentEditor.tsx";
 import type { AnnotationControls } from "./components/Annotation.tsx";
-import { SafeContent } from "./components/messageParts.tsx";
 import { Transcript } from "./components/Transcript.tsx";
-import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
-import { ModalDialog } from "./components/Modal.tsx";
-import { focusLeftContainer, menuNextIndex, menuShouldClose } from "./lib/interaction.ts";
 import { ApprovalDialog } from "./components/ApprovalDialog.tsx";
-import { Composer } from "./components/Composer.tsx";
+import { Composer, ComposerNotices } from "./components/Composer.tsx";
+import { ConversationMenu, DeleteConversationDialog, RenameConversationDialog } from "./components/ConversationDialogs.tsx";
+import { DocumentPane } from "./components/DocumentPane.tsx";
+import { phaseLabels } from "./components/phaseLabels.ts";
+import { ProjectChooser } from "./components/ProjectChooser.tsx";
+import { RuntimeDetails } from "./components/RuntimeDetails.tsx";
+import { Sidebar } from "./components/Sidebar.tsx";
+import {
+  BackendReadyCard, HistoryNotice, LocalRequestState, PreparingState, RecoveryNotice, StoppedState, StopFailureNotice, TransitionState,
+} from "./components/StatusNotices.tsx";
 import { ExtensionPanel } from "./components/ExtensionPanel.tsx";
 import { approvalExpiry, reconcilePermissionAck } from "./lib/approval.ts";
 import {
@@ -113,8 +116,6 @@ import { api, eventData, listenBackendEvents } from "./api.ts";
 import {
   loadSelectedProjectHistory,
   mergeSessionItems,
-  projectDisplayName,
-  sidebarRowsForProject,
   type SidebarSessionRow,
 } from "./lib/sidebar.ts";
 import {
@@ -130,64 +131,6 @@ import {
   type TranscriptView,
 } from "./lib/transcript.ts";
 
-const phaseLabels = {
-  starting: "Starting backend",
-  "backend-ready": "Backend ready",
-  "session-ready": "Session ready",
-  busy: "Working",
-  degraded: "Needs attention",
-  crashed: "Backend crashed",
-  restarting: "Restarting backend",
-  "shutting-down": "Shutting down",
-  stopped: "Backend stopped",
-} as const;
-
-export function DeleteConversationDialog({ title, status, error, onConfirm, onCancel }: {
-  title: string;
-  status: "stopping" | "deleting" | null;
-  error: string | null;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const busy = status !== null;
-  return <ModalDialog labelledBy="delete-conversation-title" dismissible={!busy} onDismiss={onCancel} blockEmptyTab>
-      <h2 id="delete-conversation-title">Delete conversation?</h2>
-      <p>Delete the conversation record “{title}”? The project and its output files will remain.</p>
-      <p>If this conversation is running, it will be stopped before deletion.</p>
-      {error !== null && <p className="extension-error" role="alert">{error}</p>}
-      {busy && <p role="status">{status === "stopping" ? "Stopping and finishing the current turn…" : "Deleting conversation…"}</p>}
-      <div className="action-row">
-        <button type="button" disabled={busy} onClick={onConfirm}>{error === null ? "Delete conversation" : "Retry deletion"}</button>
-        <button type="button" autoFocus disabled={busy} onClick={onCancel}>Cancel</button>
-      </div>
-  </ModalDialog>;
-}
-
-function configuredLabel(value: boolean): string {
-  return value ? "Configured" : "Not configured";
-}
-
-function RuntimeDetails({ diagnostics }: { diagnostics: BoundedRuntimeDiagnostics }) {
-  return (
-    <details className="runtime-details">
-      <summary>Local runtime details</summary>
-      <dl>
-        <div><dt>Python</dt><dd>{diagnostics.pythonVersion}</dd></div>
-        <div><dt>Backend</dt><dd>{diagnostics.backendVersion}</dd></div>
-        <div><dt>Protocol</dt><dd>v{diagnostics.protocolVersion}</dd></div>
-        <div><dt>Conda environment</dt><dd>{diagnostics.condaEnvironment ?? "Not detected"}</dd></div>
-        <div><dt>OpenRouter</dt><dd>{configuredLabel(diagnostics.openRouterConfigured)}</dd></div>
-        <div><dt>OpenAlex</dt><dd>{configuredLabel(diagnostics.openAlexConfigured)}</dd></div>
-        <div><dt>MCP</dt><dd>{diagnostics.mcpEnabled ? "Enabled" : "Disabled"}</dd></div>
-        <div className="wide-detail"><dt>MCP families</dt><dd>{diagnostics.mcpFamilies.length > 0 ? diagnostics.mcpFamilies.join(", ") : "None"}</dd></div>
-        <div className="wide-detail"><dt>App root</dt><dd>{diagnostics.appRoot}</dd></div>
-        <div className="wide-detail"><dt>Working directory</dt><dd>{diagnostics.workingDirectory}</dd></div>
-        <div className="wide-detail"><dt>Conda prefix</dt><dd>{diagnostics.condaPrefix ?? "Not detected"}</dd></div>
-        <div className="wide-detail"><dt>Research store</dt><dd>{diagnostics.storePath}</dd></div>
-      </dl>
-    </details>
-  );
-}
 
 function shutdownSummary(snapshot: BackendSnapshot | null): string | null {
   const report = snapshot?.lastShutdown;
@@ -201,41 +144,6 @@ function newLogicalTurnId(): string {
   return globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase();
 }
 
-export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, undoDisabled, onOpen, onSave, onUndo }: {
-  path: string | null; dirty: boolean; busy: boolean;
-  openDisabled: boolean; saveDisabled: boolean; undoDisabled: boolean;
-  onOpen: () => void; onSave: () => void; onUndo: () => void;
-}) {
-  const activate = (event: React.MouseEvent<HTMLButtonElement>, action: () => void) => {
-    const menu = event.currentTarget.closest("details");
-    if (menu !== null) {
-      menu.open = false;
-      menu.querySelector("summary")?.focus();
-    }
-    action();
-  };
-  return <header className="document-header">
-    <span className="document-name" title={path ?? undefined}>{path?.split("/").at(-1) ?? "No source file"}</span>
-    {dirty && <span className="document-dirty" role="status" aria-label="Unsaved changes" title="Unsaved changes">●</span>}
-    {busy && <span className="document-busy" role="status">Working…</span>}
-    <details className="document-menu" onKeyDown={(event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.currentTarget.open = false;
-        event.currentTarget.querySelector("summary")?.focus();
-      }
-    }} onBlur={(event) => {
-      if (focusLeftContainer(event.currentTarget, event.relatedTarget as Node | null)) event.currentTarget.open = false;
-    }}>
-      <summary aria-label="Document actions" title="Document actions">•••</summary>
-      <div className="document-menu-actions">
-        <button type="button" disabled={openDisabled} onClick={(event) => activate(event, onOpen)}>Open file…</button>
-        <button type="button" disabled={saveDisabled} onClick={(event) => activate(event, onSave)}>Save <kbd>Ctrl+S</kbd></button>
-        <button type="button" disabled={undoDisabled} onClick={(event) => activate(event, onUndo)}>Undo last Agent edit</button>
-      </div>
-    </details>
-  </header>;
-}
 
 export default function App() {
   const [state, dispatch] = useReducer(backendReducer, initialBackendState);
@@ -1845,86 +1753,53 @@ export default function App() {
   const documentDirty = documentValue !== null && documentValue.sourceText !== documentBaselineRef.current?.sourceText;
   const activeSession = renderConversation ? state.session : null;
 
+  const retryDraftReady = composeTurnText(conversation.draft, conversation.annotations).trim().length > 0;
+  const savedTurnFailed = conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null;
+  const hasDraft = conversation.draft.length > 0 || conversation.draftReferences.length > 0;
+  const chooserVisible = chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null;
+  const lifecycleBlocked = interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null;
+  const lifecycleReady = state.snapshot?.lifecycle === "ready";
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
-      <aside className="sidebar" aria-label="Research Agent workspace" inert={deleteDialog !== null}>
-        <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">R</span><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>Research Agent</h1></div></div>
-        <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={createSession} disabled={!canCreateSession || interaction.turnActive}><span aria-hidden="true">＋</span> New conversation</button>
-        <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
-          <h2 id="workspace-label">Project</h2>
-          <button type="button" onClick={showProjectChooser} disabled={!idle || state.snapshot?.lifecycle !== "ready" || state.diagnostics === null}>{project === null ? "Open project" : "Switch project"}</button>
-          {openedList === null && <p className="sidebar-note">{project === null ? "Choose a project to load its conversations." : historyGeneration === null ? "Loading selected project…" : "Project unavailable"}</p>}
-          {project !== null && openedList !== null && (() => {
-            const list = openedList;
-            const rows = sidebarRowsForProject(list.projectId, list.items, conversation.selected, selectedSaved);
-            const name = projectDisplayName(project.rootPath);
-            return <div className="project-group">
-              <div className="project-heading"><strong tabIndex={0} title={project.rootPath}>{name}</strong><small>{list.total} saved</small></div>
-              {list.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
-              {rows.length === 0 && list.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
-                const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === list.projectId;
-                return <li key={session.sessionId} tabIndex={-1} onContextMenu={(event) => {
-                  event.preventDefault();
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  conversationMenuReturnFocusRef.current = event.currentTarget;
-                  setConversationMenu({ projectId: list.projectId, session,
-                    left: Math.max(8, Math.min(event.clientX || bounds.left, window.innerWidth - 200)),
-                    top: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - 110)) });
-                }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(list.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
-              })}</ul>}
-              {list.hasMore && <button className="load-more-sessions" type="button" onClick={loadMoreSessions} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
-            </div>;
-          })()}
-        </section>
-        <div className="sidebar-spacer" />
-        <section className="backend-controls" aria-labelledby="backend-controls-title">
-          <div className="sidebar-status" role="status" aria-live="polite"><span className={`status-dot status-${state.phase}`} aria-hidden="true" /><span><strong id="backend-controls-title">{phaseLabels[state.phase]}</strong><small>{state.snapshot === null ? "Desktop process not observed" : `Generation ${state.snapshot.generation} · ${state.snapshot.pendingRequests} pending`}</small></span></div>
-          <div className="control-row"><button type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>{state.error !== null && state.phase === "stopped" ? "Retry start" : "Start"}</button><button type="button" title="Restarting reloads enabled, configured MCP servers for the conversation." onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div>
-        </section>
-      </aside>
+      <Sidebar
+        inert={deleteDialog !== null} phase={state.phase} snapshot={state.snapshot} hasError={state.error !== null}
+        project={project} list={openedList} selected={conversation.selected} selectedSaved={selectedSaved} historyLoaded={historyGeneration !== null}
+        newConversationDisabled={!canCreateSession || interaction.turnActive}
+        chooserDisabled={!idle || !lifecycleReady || state.diagnostics === null}
+        selectionDisabled={lifecycleBlocked}
+        canStart={canStart} canRestart={canRestart} canShutdown={canShutdown}
+        onCreateConversation={createSession} onShowChooser={showProjectChooser}
+        onSelectConversation={(projectId, session) => void selectConversation(projectId, session)}
+        onLoadMore={loadMoreSessions}
+        onOpenMenu={(menu, returnFocus) => { conversationMenuReturnFocusRef.current = returnFocus; setConversationMenu(menu); }}
+        onLifecycle={runLifecycle}
+      />
 
       <main id="main-workspace" className="main-workspace" tabIndex={-1} inert={deleteDialog !== null}>
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectionPreview?.title ?? selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
         <div className="writing-workspace">
-          <section className="document-pane" aria-label="Source document workspace">
-            <DocumentHeader path={documentValue?.path ?? null} dirty={documentDirty} busy={documentBusy}
-              openDisabled={activeProjectId === null || workspaceBusy !== null || interaction.turnActive || documentBusy || rootPath.trim() === "" || state.snapshot?.lifecycle !== "ready"}
-              saveDisabled={documentValue === null || documentBusy || state.snapshot?.lifecycle !== "ready"}
-              undoDisabled={lastDocumentAction === null || documentBusy || interaction.turnActive}
-              onOpen={() => void openDocument()}
-              onSave={() => void saveDocument()}
-              onUndo={() => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId })}
-            />
-            {documentNotice !== null && <p className="document-error" role="status">{documentNotice}</p>}
-            <DocumentEditor value={documentValue} onChange={updateDocument} annotationControls={annotationControls} onAddReference={renderConversation && idle && !chooserOpen ? addDocumentReference : undefined} onSave={() => void saveDocument()} saveDisabled={documentBusy}
-              citationEntries={citationEntries} />
-            {documentValue !== null && state.snapshot?.lifecycle === "ready" && <CitationPanel
-              document={documentValue}
-              refreshToken={citationRefresh}
-              api={api}
-              contextPayload={documentContextPayload}
-              onSelect={updateDocument}
-              onEntries={setCitationEntries}
-              requestAdd={requestCitationAdd}
-              writesDisabled={interaction.turnActive || documentBusy || pendingApproval !== null}
-            />}
-            {documentConflict !== null && <section className="document-conflict" aria-label="Document version conflict">
-              <h3>{documentConflict.result.status === "failed" ? "Save failed" : "Choose a document version"}</h3>
-              <p>Keeping the editor or cancelling leaves disk unchanged. Using the candidate replaces this file after checking its version again.</p>
-              <div className="conflict-versions">
-                <details><summary>Original source</summary><pre>{documentConflict.base.sourceText}</pre></details>
-                <details><summary>Current editor</summary><pre>{documentValue?.sourceText}</pre></details>
-                <details><summary>Current disk</summary><pre>{documentConflict.result.currentDiskText ?? "Unavailable"}</pre></details>
-                <details open><summary>Agent candidate / requested save</summary><pre>{documentConflict.result.candidateText ?? documentValue?.sourceText}</pre></details>
-              </div>
-              <div className="action-row">
-                <button type="button" disabled={documentBusy} onClick={() => void resolveDocumentConflict("keep")}>Keep editor</button>
-                <button type="button" disabled={documentBusy || documentConflict.result.expectedSnapshot === undefined} onClick={() => void resolveDocumentConflict("use")}>Use candidate and save</button>
-                <button type="button" disabled={documentBusy} onClick={() => void resolveDocumentConflict("cancel")}>Cancel</button>
-              </div>
-            </section>}
-          </section>
+          <DocumentPane
+            document={documentValue} dirty={documentDirty} busy={documentBusy} notice={documentNotice}
+            header={{
+              openDisabled: activeProjectId === null || workspaceBusy !== null || interaction.turnActive || documentBusy || rootPath.trim() === "" || !lifecycleReady,
+              saveDisabled: documentValue === null || documentBusy || !lifecycleReady,
+              undoDisabled: lastDocumentAction === null || documentBusy || interaction.turnActive,
+              onOpen: () => void openDocument(),
+              onSave: () => void saveDocument(),
+              onUndo: () => lastDocumentAction !== null && void applyDocumentOperation({ turnId: lastDocumentAction.turnId, undoOfCallId: lastDocumentAction.callId }),
+            }}
+            editor={{
+              onChange: updateDocument, annotationControls, citationEntries,
+              onAddReference: renderConversation && idle && !chooserOpen ? addDocumentReference : undefined,
+            }}
+            citation={lifecycleReady ? {
+              refreshToken: citationRefresh, api, contextPayload: documentContextPayload, onEntries: setCitationEntries,
+              requestAdd: requestCitationAdd, writesDisabled: interaction.turnActive || documentBusy || pendingApproval !== null,
+            } : null}
+            conflict={documentConflict} onResolveConflict={(resolution) => void resolveDocumentConflict(resolution)}
+          />
         <div className={`workspace-body${(renderConversation || selectionPreview !== null) ? " conversation-workspace-body" : ""}`}>
           {extensionFlow !== null && <ExtensionPanel
             flow={extensionFlow}
@@ -1936,21 +1811,34 @@ export default function App() {
             onApply={applyExtensions}
             onRestart={restartForExtensions}
           />}
-          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <section className="notice notice-error" aria-labelledby="recovery-title"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">{conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}</p><h3 id="recovery-title">{state.phase === "crashed" ? "The local backend stopped unexpectedly" : conversation.failure?.cancelled ? "Turn stopped" : "Action required"}</h3><p>{conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}</p><div className="action-row">{conversation.failure?.retryable && (conversation.failure.draftPreserved || conversation.submittedTurn?.turnId === conversation.failure.turnId) && <button type="button" onClick={() => void sendTurn()} disabled={interaction.turnActive || workspaceBusy !== null || !retryControlsMatch}>Retry saved turn</button>}{state.snapshot?.lifecycle === "ready" && state.diagnostics === null && <button type="button" onClick={() => loadDiagnostics(true)} disabled={!idle}>Retry runtime check</button>}{(state.phase === "crashed" || state.phase === "degraded") && <button type="button" onClick={() => runLifecycle("restart")} disabled={!canRestart}>Restart backend</button>}{canStart && <button type="button" onClick={() => runLifecycle("start")}>Retry start</button>}</div></div></section>}
-          {stopScreen.showStopFailure && conversation.stopRequest !== null && <section className="notice notice-error" role="alert">
-            <div><h3>The turn could not finish stopping</h3><p>{conversation.stopRequest.error}</p>
-              {stopScreen.showPendingMessage && pendingUserText !== null && <details><summary>Your message</summary><SafeContent content={pendingUserText} /></details>}
-              <div className="action-row"><button type="button" onClick={stopTurn}>Retry Stop</button>
-                {stopScreen.showRestartInPanel && <button type="button" disabled={!canRestart} onClick={() => runLifecycle("restart")}>Restart backend</button>}
-              </div>
-            </div>
-          </section>}
-          {selectionPreview === null && historyIssue !== null && <section className="notice history-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CONVERSATION NOT REFRESHED</p><p>{historyIssue}</p><button type="button" onClick={refreshSavedConversation} disabled={interaction.turnActive || workspaceBusy !== null}>Refresh without resending</button></div></section>}
-          {(state.phase === "starting" || (state.snapshot === null && state.error === null)) && <section className="empty-state" role="status"><h3>Preparing your research workspace</h3><p>Connecting to the local backend. Choose a project when it is ready.</p></section>}
-          {state.phase === "stopped" && state.snapshot !== null && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><h3 id="stopped-title">The local backend is stopped</h3><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
-          {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
-          {state.phase === "busy" && <section className="empty-state" aria-labelledby="busy-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">LOCAL REQUEST</p><h3 id="busy-title">{state.activeAction === "session" ? "Creating your session" : "Checking the local runtime"}</h3><p>This check stays on your device and does not call a model provider.</p></section>}
-          {selectionPreview === null && activeProjectId !== null && state.phase === "backend-ready" && state.diagnostics !== null && <section className="setup-card" aria-labelledby="backend-ready-title"><div className="success-mark" aria-hidden="true">✓</div><div><p className="section-kicker">BACKEND READY</p><h3 id="backend-ready-title">Create a conversation to begin</h3><p>The protocol and local runtime are ready. Creating or selecting a conversation starts enabled, configured MCP servers. No model request has been sent.</p><div className="action-row"><button className="primary-button" type="button" onClick={createSession} disabled={!canCreateSession}>Create local conversation</button><button type="button" onClick={() => runLifecycle("shutdown")} disabled={!canShutdown}>Shut down</button></div><RuntimeDetails diagnostics={state.diagnostics} /></div></section>}
+          {selectionPreview === null && (state.error !== null || workspaceIssue !== null || conversation.failure !== null) && <RecoveryNotice
+            kicker={conversation.failure === null ? (workspaceIssue ?? state.error)?.code : failureLifecycleLabel(conversation.failure)}
+            title={state.phase === "crashed" ? "The local backend stopped unexpectedly" : conversation.failure?.cancelled ? "Turn stopped" : "Action required"}
+            message={conversation.failure?.message ?? (workspaceIssue ?? state.error)?.message}
+            actions={{
+              retryTurn: conversation.failure?.retryable && (conversation.failure.draftPreserved || conversation.submittedTurn?.turnId === conversation.failure.turnId)
+                ? { onClick: () => void sendTurn(), disabled: interaction.turnActive || workspaceBusy !== null || !retryControlsMatch } : undefined,
+              retryRuntime: lifecycleReady && state.diagnostics === null ? { onClick: () => loadDiagnostics(true), disabled: !idle } : undefined,
+              restart: state.phase === "crashed" || state.phase === "degraded" ? { onClick: () => runLifecycle("restart"), disabled: !canRestart } : undefined,
+              start: canStart ? { onClick: () => runLifecycle("start") } : undefined,
+            }}
+          />}
+          {stopScreen.showStopFailure && conversation.stopRequest !== null && <StopFailureNotice
+            error={conversation.stopRequest.error}
+            pendingMessage={stopScreen.showPendingMessage ? pendingUserText : null}
+            restart={stopScreen.showRestartInPanel ? { disabled: !canRestart, onClick: () => runLifecycle("restart") } : null}
+            onRetryStop={stopTurn}
+          />}
+          {selectionPreview === null && historyIssue !== null && <HistoryNotice issue={historyIssue}
+            disabled={interaction.turnActive || workspaceBusy !== null} onRefresh={refreshSavedConversation} />}
+          {(state.phase === "starting" || (state.snapshot === null && state.error === null)) && <PreparingState />}
+          {state.phase === "stopped" && state.snapshot !== null && state.error === null && <StoppedState
+            canStart={canStart} shutdownMessage={shutdownMessage} onStart={() => runLifecycle("start")} />}
+          {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <TransitionState label={phaseLabels[state.phase]} />}
+          {state.phase === "busy" && <LocalRequestState creatingSession={state.activeAction === "session"} />}
+          {selectionPreview === null && activeProjectId !== null && state.phase === "backend-ready" && state.diagnostics !== null && <BackendReadyCard
+            diagnostics={state.diagnostics} canCreate={canCreateSession} canShutdown={canShutdown}
+            onCreate={createSession} onShutdown={() => runLifecycle("shutdown")} />}
 
           {selectionPreview !== null && <section className="conversation-surface" aria-label="Saved conversation preview" aria-busy="true">
             <p className="control-state" role="status">Preparing this conversation… You can read the saved messages while it loads.</p>
@@ -1962,14 +1850,9 @@ export default function App() {
               transcriptRef={transcriptRef} endRef={transcriptEndRef} empty
               hasOlder={transcript?.hasOlder ?? false} issue={transcript?.issue ?? null}
               loadOlderDisabled={workspaceBusy !== null || interaction.turnActive} onLoadOlder={loadOlder} />
-            {(conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null || referenceIssue !== null) && <div className="composer-notices">
-            {conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null && <div className="reference-retry-settings">
-              <p>Saved turn: {conversation.submittedContext.permissionMode === "ask" ? "Ask" : "Bypass"} · {conversation.submittedContext.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
-                {!retryControlsMatch && " Current controls differ; the original retry is disabled."}</p>
-              {composeTurnText(conversation.draft, conversation.annotations).trim().length > 0 && <button type="button" onClick={sendNewTurn} disabled={!idle}>Send new turn with current settings</button>}
-            </div>}
-            {referenceIssue !== null && <p className="reference-issue" role="status">{referenceIssue}</p>}
-            </div>}
+            <ComposerNotices
+              savedTurn={savedTurnFailed ? conversation.submittedContext : null} controlsMatch={retryControlsMatch}
+              canSendNew={retryDraftReady} sendNewDisabled={!idle} onSendNew={sendNewTurn} referenceIssue={referenceIssue} />
             <Composer
               key={`${state.snapshot?.generation}:${conversation.selected?.projectId}:${conversation.selected?.sessionId}`}
               draft={conversation.draft} textareaRef={composerRef}
@@ -1977,7 +1860,7 @@ export default function App() {
               annotationControls={annotationControls}
               thinkingMode={activeSession.thinkingMode} permissionMode={activeSession.permissionMode}
               turnActive={interaction.turnActive} stopping={stopping} onStop={stopTurn}
-              controlsDisabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}
+              controlsDisabled={lifecycleBlocked}
               onThinkingChange={(mode) => void updateThinkingMode(mode)}
               onPermissionChange={(mode) => void updatePermissionMode(mode)}
               turnHint={conversation.activeTurn !== null && conversation.submittedContext?.documentContext !== undefined &&
@@ -1986,7 +1869,7 @@ export default function App() {
               skills={state.session?.loadedSkills ?? []}
               onSkillPicked={(name) => selectedSkillNamesRef.current.add(name)}
               commands={composerSlashCommands(state.session, conversation.selected, state.snapshot?.generation, slashCatalogOwner,
-                state.snapshot?.lifecycle === "ready" && state.phase === "session-ready" && idle)}
+                lifecycleReady && state.phase === "session-ready" && idle)}
               disabled={conversation.selected === null || interaction.turnActive || workspaceBusy !== null}
               sendDisabled={interaction.sendDisabled || documentBusy || pendingApproval !== null || workspaceBusy !== null || (conversation.failure !== null && !conversation.failure.cancelled && !retryControlsMatch)}
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
@@ -1998,94 +1881,39 @@ export default function App() {
         </div>
         </div>
       </main>
-      {conversationMenu !== null && <div className="conversation-menu-backdrop" onClick={() => {
-        setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus();
-      }} onContextMenu={(event) => { event.preventDefault(); setConversationMenu(null); }}>
-        <div className="document-menu-actions conversation-menu" role="menu" aria-label="Conversation actions" tabIndex={-1}
-          ref={conversationMenuRef} style={{ left: conversationMenu.left, top: conversationMenu.top }}
-          onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
-            if (menuShouldClose(event.key, true, true)) {
-              event.preventDefault(); setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus();
-              return;
-            }
-            const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-            const next = menuNextIndex(event.key, items.indexOf(document.activeElement as HTMLButtonElement), items.length, false);
-            if (next !== null) { event.preventDefault(); items[next]?.focus(); }
-          }}>
-          <button type="button" role="menuitem"
-            disabled={!canManageConversations || conversationMenu.session.transient || conversationMenu.session.status !== "ready"}
-            onClick={() => {
-              setRenameDialog({ projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId,
-                title: conversationMenu.session.title, issue: null, owner: captureOwner("Rename dialog") });
-              setConversationMenu(null);
-            }}>Rename</button>
-          <button type="button" role="menuitem" disabled={!canDeleteConversation} onClick={() => {
-            setDeleteDialog({ projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId,
-              title: conversationMenu.session.title, status: null, issue: null, owner: captureOwner("Delete dialog") });
-            setConversationMenu(null);
-          }}>Delete</button>
-        </div>
-      </div>}
-      {renameDialog !== null && <ModalDialog as="form" className="file-open-dialog" labelledBy="rename-conversation-title"
-        dismissible={workspaceBusy === null} focusSelector="input:not(:disabled), button:not(:disabled)"
-        onDismiss={() => { setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus(); }}
-        onSubmit={(event) => { event.preventDefault(); void renameConversation(); }}>
-          <h2 id="rename-conversation-title">Rename conversation</h2>
-          <label>Name<input autoFocus value={renameDialog.title} disabled={workspaceBusy !== null}
-            onFocus={(event) => event.currentTarget.select()}
-            onKeyDown={(event) => { if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault(); }}
-            onChange={(event) => setRenameDialog({ ...renameDialog, title: event.target.value, issue: null })} /></label>
-          {renameTitleTooLong && <p className="extension-error" role="alert">Enter a shorter name.</p>}
-          {renameDialog.issue !== null && <p className="extension-error" role="alert">{renameDialog.issue}</p>}
-          <div className="action-row">
-            <button type="submit" className="primary-button" disabled={!canManageConversations || renameDialog.title.trim() === "" || renameTitleTooLong}>
-              {workspaceBusy === "Renaming conversation" ? "Saving…" : "Save name"}
-            </button>
-            <button type="button" disabled={workspaceBusy !== null} onClick={() => {
-              setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus();
-            }}>Cancel</button>
-          </div>
-      </ModalDialog>}
+      {conversationMenu !== null && <ConversationMenu
+        left={conversationMenu.left} top={conversationMenu.top} menuRef={conversationMenuRef}
+        canRename={canManageConversations && !conversationMenu.session.transient && conversationMenu.session.status === "ready"}
+        canDelete={canDeleteConversation}
+        onRename={() => {
+          setRenameDialog({ projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId,
+            title: conversationMenu.session.title, issue: null, owner: captureOwner("Rename dialog") });
+          setConversationMenu(null);
+        }}
+        onDelete={() => {
+          setDeleteDialog({ projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId,
+            title: conversationMenu.session.title, status: null, issue: null, owner: captureOwner("Delete dialog") });
+          setConversationMenu(null);
+        }}
+        onClose={() => { setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus(); }}
+        onDismiss={() => setConversationMenu(null)} />}
+      {renameDialog !== null && <RenameConversationDialog
+        title={renameDialog.title} issue={renameDialog.issue} titleTooLong={renameTitleTooLong}
+        busy={workspaceBusy !== null} saving={workspaceBusy === "Renaming conversation"} canSave={canManageConversations}
+        onTitleChange={(title) => setRenameDialog({ ...renameDialog, title, issue: null })}
+        onSubmit={() => void renameConversation()}
+        onCancel={() => { setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus(); }} />}
       {deleteDialog !== null && <DeleteConversationDialog title={deleteDialog.title} status={deleteDialog.status} error={deleteDialog.issue}
         onConfirm={() => void deleteConversation()} onCancel={() => {
           setDeleteDialog(null);
           scheduleOwnedFrame(deleteDialog.owner, () => conversationMenuReturnFocusRef.current?.focus());
         }} />}
-      {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <ModalDialog labelledBy="project-chooser-title"
-        dismissible={workspaceBusy === null} onDismiss={() => setChooserOpen(false)}
-        focusSelector="input:not(:disabled), button:not(:disabled), select:not(:disabled)">
-          <p className="section-kicker">LOCAL PROJECT</p>
-          <h2 id="project-chooser-title">{project === null ? "Open a research project" : "Switch research project"}</h2>
-          <p>Choose an existing WSL folder. Its RESEARCH.md defines the project rules and conversation history location.</p>
-          <div className="action-row"><button type="button" autoFocus disabled={workspaceBusy !== null}
-            onClick={() => void chooseProject("inspect", true)}>Choose project folder…</button></div>
-          {candidate !== null && <div className="approval-context">
-            <p><strong>Resolved project:</strong> <code>{candidate.rootPath}</code></p>
-            {candidate.status === "needs_configuration" ? <>
-              <p>{candidate.researchFingerprint === null ? "Create RESEARCH.md with a new empty history." : "Preserve the existing RESEARCH.md and append its history setting."}</p>
-              <label>History directory<input aria-label="History directory" value={candidateHistory}
-                disabled={workspaceBusy !== null} onChange={(event) => setCandidateHistory(event.target.value)} /></label>
-              <p><strong>Resolved history:</strong> <code>{candidate.historyDirectory}</code></p>
-              {candidateHistory !== candidate.historyDirectory && <button type="button" disabled={workspaceBusy !== null} onClick={() => void chooseProject("inspect")}>Inspect history location</button>}
-            </> : <p><strong>History directory:</strong> <code>{candidate.historyDirectory}</code></p>}
-            {candidate.status === "needs_initialization" && <p>This configured history does not exist yet. Initialize an empty history here, or cancel and edit RESEARCH.md to change its location.</p>}
-            {candidate.status === "ready" && <p>Open this project and validate its existing conversation history.</p>}
-            {documentDirty && <fieldset disabled={workspaceBusy !== null}><legend>The document has unsaved changes</legend>
-              <label><input type="radio" name="project-document-choice" checked={dirtyChoice === "save"} onChange={() => setDirtyChoice("save")} /> Save before opening</label>
-              <label><input type="radio" name="project-document-choice" checked={dirtyChoice === "discard"} onChange={() => setDirtyChoice("discard")} /> Discard only after the project opens</label>
-            </fieldset>}
-            {(conversation.draft.length > 0 || conversation.draftReferences.length > 0) && <label><input type="checkbox" checked={discardDraft} disabled={workspaceBusy !== null}
-              onChange={(event) => setDiscardDraft(event.target.checked)} /> Discard the unsent draft and references only after the project opens</label>}
-            <div className="action-row"><button className="primary-button" type="button"
-              disabled={workspaceBusy !== null || ((conversation.draft.length > 0 || conversation.draftReferences.length > 0) && !discardDraft) || candidateHistory.trim() === "" || (candidate.status === "needs_configuration" && candidateHistory !== candidate.historyDirectory)}
-              onClick={() => void chooseProject(candidate.status === "ready" ? "open" : "initialize")}>
-              {documentDirty && dirtyChoice === "save" ? "Save and " : ""}{candidate.status === "ready" ? "Open project" : "Initialize and open project"}
-            </button></div>
-          </div>}
-          {chooserIssue !== null && <p className="extension-error" role="alert">{chooserIssue}</p>}
-          {workspaceBusy !== null && <p role="status">{workspaceBusy}…</p>}
-          <button type="button" disabled={workspaceBusy !== null} onClick={() => setChooserOpen(false)}>Cancel</button>
-      </ModalDialog>}
+      {chooserVisible && <ProjectChooser
+        switching={project !== null} candidate={candidate} candidateHistory={candidateHistory} issue={chooserIssue} busyLabel={workspaceBusy}
+        documentDirty={documentDirty} dirtyChoice={dirtyChoice} hasDraft={hasDraft} discardDraft={discardDraft}
+        onHistoryChange={setCandidateHistory} onDirtyChoiceChange={setDirtyChoice} onDiscardDraftChange={setDiscardDraft}
+        onBrowse={() => void chooseProject("inspect", true)} onInspectHistory={() => void chooseProject("inspect")}
+        onConfirm={(action) => void chooseProject(action)} onCancel={() => setChooserOpen(false)} />}
       {chatSelection !== null && renderConversation && idle && !chooserOpen && deleteDialog === null && <button type="button" className="chat-reference-action"
         style={{ position: "fixed", top: chatSelection.top, left: chatSelection.left }}
         onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Comment on selection</button>}

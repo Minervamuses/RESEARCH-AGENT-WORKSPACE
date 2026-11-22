@@ -155,3 +155,23 @@ export function Composer({ draft, references, annotationControls, onRemoveRefere
       onThinkingChange={onThinkingChange} onPermissionChange={onPermissionChange} />
   </form>;
 }
+
+/** Retry-settings and reference notices shown above the composer. */
+export function ComposerNotices({ savedTurn, controlsMatch, canSendNew, sendNewDisabled, onSendNew, referenceIssue }: {
+  /** The failed turn's saved settings, or `null` when no retry is pending. */
+  savedTurn: { permissionMode: PermissionMode; requestedThinkingMode: "normal" | "extended" } | null;
+  controlsMatch: boolean;
+  /** A new message exists that could be sent with the current settings instead. */
+  canSendNew: boolean; sendNewDisabled: boolean; onSendNew: () => void;
+  referenceIssue: string | null;
+}) {
+  if (savedTurn === null && referenceIssue === null) return null;
+  return <div className="composer-notices">
+    {savedTurn !== null && <div className="reference-retry-settings">
+      <p>Saved turn: {savedTurn.permissionMode === "ask" ? "Ask" : "Bypass"} · {savedTurn.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
+        {!controlsMatch && " Current controls differ; the original retry is disabled."}</p>
+      {canSendNew && <button type="button" onClick={onSendNew} disabled={sendNewDisabled}>Send new turn with current settings</button>}
+    </div>}
+    {referenceIssue !== null && <p className="reference-issue" role="status">{referenceIssue}</p>}
+  </div>;
+}

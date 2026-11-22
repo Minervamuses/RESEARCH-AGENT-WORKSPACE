@@ -23,7 +23,7 @@
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
-| C9 | Not started | — | — | 等 C8 |
+| C9 | In progress | `evidence/C9-S1/`–`C9-S2/` | — | C9-S3 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
 ## 撰寫紀錄
@@ -745,3 +745,20 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S7/wrap-up.md`。
 - **限制**：GUI 未驗證；高風險項目留給使用者。`096b679` 的 docs 標題 commit 夾帶一處小幅程式修改，已註記。
 - **下一步**：C9 前端呈現。
+
+### C9-S1 Modal 與 Menu 互動原語（S081、U22，2026-11-22）
+
+- **觀察結果**：盤點 5 個 dialog（刪除、改名、選專案、核准，另有核准的非 modal 變體）與 4 個選單。真正相同的只有「Esc 在可關閉時關閉」「Tab 在啟用控制項間循環」「blur 到容器外關閉」「Esc 關閉並聚焦 trigger」「方向鍵循環」；其餘（Esc 忙碌時是否被吞、空控制項是否吞 Tab、Tab 選擇器、焦點還原位置與時機、backdrop 是否關閉、非 modal）全是語意差異，保留在呼叫端或 `ModalDialog` 的 props。抽出純函式 `src/lib/interaction.ts`（`dialogKeyDecision`、`focusLeftContainer`、`menuShouldClose`、`menuNextIndex`，7 個測試）、`components/Modal.tsx::ModalDialog`（無 hook）、`hooks/useDisclosureMenu.ts`（`ThinkingControl` 與 `ExportMenu` 共用）。`approval-backdrop`／`approval-dialog` 改名為 `modal-backdrop`／`modal-dialog`，CSS 只改選擇器。
+- **執行指令**：`npm test`（254 pass）、`npm run build`（通過）。
+- **證據**：`evidence/C9-S1/primitives.md`（含差異表與 GUI 清單）。
+- **限制**：GUI 未驗證（焦點與 Tab 行為只能在 WebView 看）。`conversations.test.ts` 刪除對話測試因元素樹少一層而改寫，行為斷言未刪。`approval-context`、`file-open-dialog`、`extension-error` 的借用命名未動。
+- **下一步**：C9-S2。
+
+### C9-S2 元件拆分（S097，2026-11-22）
+
+- **觀察結果**：分 4 個 commit（S2a 拆 `trust.tsx`；S2b `Transcript`、`messageParts`、`Annotation`；S2c `Composer`；S2d `Sidebar`、`DocumentPane`、`ProjectChooser`、`RuntimeDetails`、`ConversationDialogs`、`StatusNotices`）。Transcript 三種渲染（restored、live、pending）的資料型別、狀態分支、annotation 與工具細節不重疊，所以共用 `MessageCard`／`MessageBody`／`ReferenceCards`，保留三個入口與既有的 `ConversationTurns` 分派器（U22）。`App.tsx` 2,462 → 1,932 行，不再有 `.message`、`.tool-*` 細節，沒有超過 600 字元的 JSX 行（原 1 行 1,468 字元）；`grep -rn "api\." src/components` 為 0。
+- **執行指令**：每個 commit 前 `npm test`、`npm run build`；最終 256 pass（+2 靜態渲染測試：live、pending）、build 通過。
+- **證據**：`evidence/C9-S2/components.md`。
+- **限制**：GUI 未驗證；沒有刪除測試，測試只改 SSR 載入目標。
+- **下一步**：C9-S3 CSS 分檔與 class 改名。
+

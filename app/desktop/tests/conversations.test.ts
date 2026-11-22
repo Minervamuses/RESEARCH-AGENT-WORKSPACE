@@ -30,7 +30,7 @@ function fakeApi(handler: (method: FakeMethod, params: JsonObject) => Promise<Js
 }
 
 type SafeContentModule = typeof import("../src/SafeContent.tsx");
-type AppModule = typeof import("../src/App.tsx");
+type DialogsModule = typeof import("../src/components/ConversationDialogs.tsx");
 type TranscriptModule = typeof import("../src/components/Transcript.tsx");
 type ComposerModule = typeof import("../src/components/Composer.tsx");
 
@@ -58,7 +58,7 @@ function contentChildren(element: unknown): unknown[] {
 // One dev server and one SSR load per module, reused across this file's tests.
 let devServer: Promise<ViteDevServer> | undefined;
 let safeContentModule: Promise<SafeContentModule> | undefined;
-let appModule: Promise<AppModule> | undefined;
+let dialogsModule: Promise<DialogsModule> | undefined;
 let transcriptModule: Promise<TranscriptModule> | undefined;
 let composerModule: Promise<ComposerModule> | undefined;
 
@@ -85,8 +85,8 @@ function loadComposer(): Promise<ComposerModule> {
   return (composerModule ??= ssrLoad<ComposerModule>("/src/components/Composer.tsx"));
 }
 
-function loadAppHelpers(): Promise<AppModule> {
-  return (appModule ??= ssrLoad<AppModule>("/src/App.tsx"));
+function loadDialogs(): Promise<DialogsModule> {
+  return (dialogsModule ??= ssrLoad<DialogsModule>("/src/components/ConversationDialogs.tsx"));
 }
 
 after(async () => {
@@ -94,7 +94,7 @@ after(async () => {
 });
 
 test("conversation deletion confirms its scope and Cancel does not confirm", async () => {
-  const { DeleteConversationDialog } = await loadAppHelpers();
+  const { DeleteConversationDialog } = await loadDialogs();
   const { renderToStaticMarkup } = await import("react-dom/server");
   let confirmed = 0, cancelled = 0;
   const props = { title: "Research notes", status: null, error: null,
