@@ -10,15 +10,15 @@ import {
   initialConversationState,
   mergeConversationTurns,
   type ConversationFailure,
-  type VisibleConversationTurn,
 } from "../src/conversations.ts";
-import type { JsonObject, SessionCreatedDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto, TranscriptTurnDto } from "../src/protocol.ts";
+import { composerSlashCommands, filterSlashCommands, handleComposerKey, insertSlashCommand, shouldSubmitComposerKey, slashPrefix } from "../src/lib/composer.ts";
+import { loadSelectedProjectHistory, mergeSessionItems, projectDisplayName, sidebarRowsForProject } from "../src/lib/sidebar.ts";
+import { isPersistedTurnFailure, selectConversationWithPreview, visibleMessageRange } from "../src/lib/transcript.ts";
+import { safeExternalUrl, openSafeExternalUrl } from "../src/lib/safeUrl.ts";
+import type { JsonObject, SessionCreatedDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto } from "../src/protocol.ts";
 
-interface SafeContentModule {
-  SafeContent: (props: { content: string; openExternal?: (url: string) => void | Promise<void> }) => unknown;
-  safeExternalUrl: (value: string) => string | null;
-  openSafeExternalUrl: (value: string, opener: (url: string) => void | Promise<void>) => Promise<boolean>;
-}
+type SafeContentModule = typeof import("../src/SafeContent.tsx");
+type AppModule = typeof import("../src/App.tsx");
 
 interface ReactElementLike {
   props: Record<string, unknown>;
@@ -41,87 +41,10 @@ function contentChildren(element: unknown): unknown[] {
   return children;
 }
 
-interface SessionSummary {
-  sessionId: string;
-  title: string;
-  turnCount: number;
-  createdAt: string | null;
-  updatedAt: string | null;
-  status: "ready" | "degraded" | "unavailable";
-  issue: string | null;
-}
-
-interface AppHelpersModule {
-  DeleteConversationDialog: (props: {
-    title: string; status: "stopping" | "deleting" | null; error: string | null;
-    onConfirm: () => void; onCancel: () => void;
-  }) => unknown;
-  visibleMessageRange: (root: Node, startNode: Node, startOffset: number, endNode: Node, endOffset: number) => {
-    visibleText: string; text: string; startUtf16: number; endUtf16: number;
-  } | null;
-  ComposerFooter: (props: {
-    thinkingMode: "normal"; permissionMode: "ask"; controlsDisabled: boolean; sendDisabled: boolean;
-    turnActive: boolean; stopping: boolean; onStop: () => void;
-    onThinkingChange: () => void; onPermissionChange: () => void;
-  }) => unknown;
-  selectConversationWithPreview: (
-    projectId: string,
-    summary: SessionSummaryDto,
-    callbacks: {
-      isCurrent: () => boolean;
-      onPreview: (data: SessionTranscriptDto) => void;
-      onSelected: (selected: SessionSelectedDto) => void;
-    },
-    request: (method: string, params: JsonObject) => Promise<JsonObject>,
-  ) => Promise<SessionTranscriptDto | null>;
-  composerSlashCommands: (
-    session: SessionCreatedDto | null,
-    selected: { projectId: string; sessionId: string } | null,
-    generation: number | undefined,
-    owner: { generation: number; projectId: string; sessionId: string } | null,
-    interactive: boolean,
-  ) => SessionCreatedDto["slashCommands"];
-  SlashCommandList: (props: {
-    commands: SessionCreatedDto["slashCommands"]; active: number; onSelect: (index: number) => void;
-  }) => unknown;
-  slashPrefix: (draft: string, start: number, end: number) => string | null;
-  filterSlashCommands: (commands: { name: string; description: string }[], prefix: string) => { name: string; description: string }[];
-  insertSlashCommand: (draft: string, name: string) => string;
-  handleComposerKey: (
-    event: { key: string; shiftKey: boolean; isComposing: boolean; preventDefault: () => void },
-    menu: { open: boolean; count: number; active: number },
-    actions: { select: (index: number) => void; move: (index: number) => void; close: () => void; submit: () => void },
-  ) => void;
-  mergeSessionItems: (
-    current: readonly SessionSummary[],
-    next: readonly SessionSummary[],
-  ) => SessionSummary[];
-  sidebarRowsForProject: (
-    projectId: string,
-    sessions: readonly SessionSummary[],
-    selected: { projectId: string; sessionId: string } | null,
-    selectedSaved: boolean,
-  ) => Array<SessionSummary & { transient: boolean }>;
-  loadSelectedProjectHistory: (
-    projectId: string | null,
-    request: (method: "session.list", params: JsonObject) => Promise<JsonObject>,
-    isCurrent?: () => boolean,
-  ) => Promise<{ projectId: string; items: SessionSummary[] } | null>;
-  projectDisplayName: (rootPath: string) => string;
-  shouldSubmitComposerKey: (
-    key: string,
-    shiftKey: boolean,
-    isComposing: boolean,
-  ) => boolean;
-  isPersistedTurnFailure: (failure: ConversationFailure | null) => boolean;
-  RestoredTurn: (props: { turn: TranscriptTurnDto }) => unknown;
-  ConversationTurns: (props: { turns: readonly VisibleConversationTurn[] }) => unknown;
-}
-
 // One dev server and one SSR load per module, reused across this file's tests.
 let devServer: Promise<ViteDevServer> | undefined;
 let safeContentModule: Promise<SafeContentModule> | undefined;
-let appHelpersModule: Promise<AppHelpersModule> | undefined;
+let appModule: Promise<AppModule> | undefined;
 
 function ssrLoad<T>(path: string): Promise<T> {
   devServer ??= createServer({
@@ -138,8 +61,8 @@ function loadSafeContent(): Promise<SafeContentModule> {
   return (safeContentModule ??= ssrLoad<SafeContentModule>("/src/SafeContent.tsx"));
 }
 
-function loadAppHelpers(): Promise<AppHelpersModule> {
-  return (appHelpersModule ??= ssrLoad<AppHelpersModule>("/src/App.tsx"));
+function loadAppHelpers(): Promise<AppModule> {
+  return (appModule ??= ssrLoad<AppModule>("/src/App.tsx"));
 }
 
 after(async () => {
@@ -173,8 +96,7 @@ test("conversation deletion confirms its scope and Cancel does not confirm", asy
   assert.match(failed, /Retry deletion/);
 });
 
-test("slash menu filters backend names only at a complete command prefix", async () => {
-  const { slashPrefix, filterSlashCommands, insertSlashCommand } = await loadAppHelpers();
+test("slash menu filters backend names only at a complete command prefix", () => {
   const commands = [
     { name: "status", description: "Status" },
     { name: "arbitrary-skill", description: "Custom skill" },
@@ -192,8 +114,7 @@ test("slash menu filters backend names only at a complete command prefix", async
   assert.equal(insertSlashCommand("  /ar", "arbitrary-skill"), "  /arbitrary-skill ");
 });
 
-test("menu Enter selects with zero requests; later Enter submits once", async () => {
-  const { handleComposerKey } = await loadAppHelpers();
+test("menu Enter selects with zero requests; later Enter submits once", () => {
   let requests = 0;
   let selected = -1;
   let prevented = 0;
@@ -231,8 +152,7 @@ test("menu Enter selects with zero requests; later Enter submits once", async ()
   assert.equal(requests, 2); // An explicit unknown command still reaches the parser.
 });
 
-test("catalog requires a verified current session owner after switch or restart", async () => {
-  const { composerSlashCommands } = await loadAppHelpers();
+test("catalog requires a verified current session owner after switch or restart", () => {
   const selected = { projectId: "p1", sessionId: "a" };
   const owner = { ...selected, generation: 1 };
   const session: SessionCreatedDto = {
@@ -266,8 +186,7 @@ test("slash list exposes named options and renders descriptions as text", async 
   assert.doesNotMatch(html, /<img/);
 });
 
-test("safe content accepts only credential-free absolute HTTP(S) URLs", async () => {
-  const { safeExternalUrl } = await loadSafeContent();
+test("safe content accepts only credential-free absolute HTTP(S) URLs", () => {
   assert.equal(safeExternalUrl("https://example.com/path?q=1"), "https://example.com/path?q=1");
   assert.equal(safeExternalUrl("http://example.com"), "http://example.com/");
   for (const value of [
@@ -357,7 +276,7 @@ test("safe content preserves a large array of Markdown paragraph blocks", async 
 });
 
 test("markdown link activation reparses the URL before calling the injected opener", async () => {
-  const { SafeContent, openSafeExternalUrl } = await loadSafeContent();
+  const { SafeContent } = await loadSafeContent();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const rendered = renderToStaticMarkup(
@@ -367,20 +286,19 @@ test("markdown link activation reparses the URL before calling the injected open
   assert.doesNotMatch(rendered, /\bhref=/);
   const opened: string[] = [];
   assert.equal(
-    await openSafeExternalUrl("https://example.com/docs", (url) => opened.push(url)),
+    await openSafeExternalUrl("https://example.com/docs", (url) => { opened.push(url); }),
     true,
   );
   assert.deepEqual(opened, ["https://example.com/docs"]);
   assert.equal(
-    await openSafeExternalUrl("javascript:alert(1)", (url) => opened.push(url)),
+    await openSafeExternalUrl("javascript:alert(1)", (url) => { opened.push(url); }),
     false,
   );
   assert.deepEqual(opened, ["https://example.com/docs"]);
 });
 
-test("sidebar rows show an unsaved selected conversation without changing the saved list", async () => {
-  const { sidebarRowsForProject } = await loadAppHelpers();
-  const saved: SessionSummary[] = [{
+test("sidebar rows show an unsaved selected conversation without changing the saved list", () => {
+  const saved: SessionSummaryDto[] = [{
     sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     title: "Saved research",
     turnCount: 2,
@@ -403,7 +321,7 @@ test("sidebar rows show an unsaved selected conversation without changing the sa
   assert.equal(saved.length, 1, "the saved list DTO remains unchanged");
 });
 
-const RESTORE_ITEMS: SessionSummary[] = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"].map((sessionId) => ({
+const RESTORE_ITEMS: SessionSummaryDto[] = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"].map((sessionId) => ({
   sessionId, title: `Saved ${sessionId[0]}`, turnCount: 1, createdAt: "2026-08-28T09:00:00Z",
   updatedAt: null, status: "ready", issue: null,
 }));
@@ -431,7 +349,6 @@ test("restart selects nothing without a resumable selection for the opened proje
 });
 
 test("project history loads with one session.list request for the opened project", async () => {
-  const { loadSelectedProjectHistory, projectDisplayName } = await loadAppHelpers();
   const requests: Array<[string, JsonObject]> = [];
   const page = { projectId: "p1", status: "ready", issue: null, items: RESTORE_ITEMS, total: 2, offset: 0, limit: 50, hasMore: false };
   const loaded = await loadSelectedProjectHistory("p1", async (method, params) => {
@@ -450,8 +367,7 @@ test("project history loads with one session.list request for the opened project
   assert.equal(projectDisplayName("C:\\Users\\me\\thesis"), "thesis");
 });
 
-test("composer sends with Enter while preserving Shift+Enter and IME composition", async () => {
-  const { shouldSubmitComposerKey } = await loadAppHelpers();
+test("composer sends with Enter while preserving Shift+Enter and IME composition", () => {
 
   assert.equal(shouldSubmitComposerKey("Enter", false, false), true);
   assert.equal(shouldSubmitComposerKey("Enter", true, false), false);
@@ -459,9 +375,8 @@ test("composer sends with Enter while preserving Shift+Enter and IME composition
   assert.equal(shouldSubmitComposerKey("a", false, false), false);
 });
 
-test("sidebar rows never duplicate a saved or already-listed conversation", async () => {
-  const { sidebarRowsForProject } = await loadAppHelpers();
-  const saved: SessionSummary[] = [{
+test("sidebar rows never duplicate a saved or already-listed conversation", () => {
+  const saved: SessionSummaryDto[] = [{
     sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     title: "Saved research",
     turnCount: 2,
@@ -490,8 +405,7 @@ test("sidebar rows never duplicate a saved or already-listed conversation", asyn
   );
 });
 
-test("only an accepted and persisted prompt qualifies for a saved-conversation refresh", async () => {
-  const { isPersistedTurnFailure } = await loadAppHelpers();
+test("only an accepted and persisted prompt qualifies for a saved-conversation refresh", () => {
   const turnId = "123e4567e89b42d3a456426614174001";
   const failure: ConversationFailure = {
     projectId: "local",
@@ -624,7 +538,7 @@ test("restored turns render a complete multi-megabyte answer from first marker t
 });
 
 test("citation menu inserts a task and restore displays its saved answer and tool activity", async () => {
-  const { filterSlashCommands, insertSlashCommand, RestoredTurn } = await loadAppHelpers();
+  const { RestoredTurn } = await loadAppHelpers();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const commands = [{ name: "citation", description: "One citation task in normal thinking" }];
@@ -710,9 +624,8 @@ test("restored transcript renders durable non-completed and display-only states 
   assert.match(displayOnly, /Available commands/);
 });
 
-test("conversation pages preserve membership order and replace duplicate summaries", async () => {
-  const { mergeSessionItems } = await loadAppHelpers();
-  const session = (sessionId: string, title: string): SessionSummary => ({
+test("conversation pages preserve membership order and replace duplicate summaries", () => {
+  const session = (sessionId: string, title: string): SessionSummaryDto => ({
     sessionId,
     title,
     turnCount: 1,
@@ -753,7 +666,6 @@ function selectionFixture() {
 }
 
 test("saved messages preview before selection is ready without confirming a session", async () => {
-  const { selectConversationWithPreview } = await loadAppHelpers();
   const { summary, transcript, selected } = selectionFixture();
   const selection = Promise.withResolvers<JsonObject>();
   const preview = Promise.withResolvers<SessionTranscriptDto>();
@@ -777,7 +689,6 @@ test("saved messages preview before selection is ready without confirming a sess
 });
 
 test("selection failure rejects late previews and consumes outstanding read failures", async () => {
-  const { selectConversationWithPreview } = await loadAppHelpers();
   const { summary, transcript: saved } = selectionFixture();
   for (const readSucceeds of [true, false]) {
     const selection = Promise.withResolvers<JsonObject>();
@@ -799,7 +710,6 @@ test("selection failure rejects late previews and consumes outstanding read fail
 });
 
 test("a replaced backend generation discards preview and selection responses", async () => {
-  const { selectConversationWithPreview } = await loadAppHelpers();
   const { summary, transcript, selected } = selectionFixture();
   const selection = Promise.withResolvers<JsonObject>();
   const read = Promise.withResolvers<JsonObject>();
@@ -818,7 +728,6 @@ test("a replaced backend generation discards preview and selection responses", a
 });
 
 test("pending saved turns are refreshed after selection recovers them", async () => {
-  const { selectConversationWithPreview } = await loadAppHelpers();
   const { summary, transcript, selected } = selectionFixture();
   const selection = Promise.withResolvers<JsonObject>();
   const preview = Promise.withResolvers<SessionTranscriptDto>();
@@ -909,8 +818,7 @@ test("two document comments and an assistant comment retain their pairing when e
   assert.equal(state.nextAnnotationNumber, 4);
 });
 
-test("chat ranges exclude number and comment UI without shifting duplicate source text", async () => {
-  const { visibleMessageRange } = await loadAppHelpers();
+test("chat ranges exclude number and comment UI without shifting duplicate source text", () => {
   const text = (value: string) => ({ nodeType: 3, textContent: value }) as unknown as Node;
   const element = (tagName: string, children: Node[], excluded = false) => ({
     nodeType: 1, tagName, childNodes: children,

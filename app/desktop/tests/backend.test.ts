@@ -110,6 +110,7 @@ const session: SessionCreatedDto = {
   turnCount: 0,
   graphRecursionLimit: 25,
   thinkingMode: "normal",
+  permissionMode: "ask",
   slashCommands: [],
   loadedSkills: [],
   mcpFamilies: [],

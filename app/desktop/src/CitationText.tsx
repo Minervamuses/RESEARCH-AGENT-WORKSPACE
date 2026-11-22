@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from "react";
-import { openSafeExternalUrl, safeExternalUrl, type ExternalUrlOpener } from "./SafeContent.tsx";
+import { openSafeExternalUrl, safeExternalUrl, type ExternalUrlOpener } from "./lib/safeUrl.ts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { RenderSegmentDto } from "./citations.ts";
 

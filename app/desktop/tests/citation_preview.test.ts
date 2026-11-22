@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
+import type { JsonObject } from "../src/protocol.ts";
 import {
   BIME_LAYOUT_REMINDER,
   EXPORT_LABELS,
@@ -10,10 +11,11 @@ import {
   previewEntries,
   styleChangeParams,
   type BibliographyRenderDto,
-  type RenderSegmentDto,
 } from "../src/citations.ts";
 
 let server: Promise<ViteDevServer> | undefined;
+type CitationPanelModule = typeof import("../src/CitationPanel.tsx");
+type CitationTextModule = typeof import("../src/CitationText.tsx");
 function load<T>(path: string): Promise<T> {
   server ??= createServer({
     configFile: false,
@@ -67,21 +69,20 @@ test("export results name the file; BIME results add the audit and the manual-re
 });
 
 test("Markdown documents get one closed Export button; others get none", async () => {
-  type Menu = (props: Record<string, unknown>) => unknown;
-  const { ExportMenu } = await load<{ ExportMenu: Menu }>("/src/CitationPanel.tsx");
+  const { ExportMenu } = await load<CitationPanelModule>("/src/CitationPanel.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
-  const html = renderToStaticMarkup(createElement(ExportMenu as never, {
+  const html = renderToStaticMarkup(createElement(ExportMenu, {
     formats: exportFormats("markdown"), disabled: false, onExport: () => undefined,
   }));
   assert.equal((html.match(/<button/g) ?? []).length, 1);
   assert.match(html, /aria-haspopup="menu" aria-expanded="false">Export ▾<\/button>/);
   assert.ok(!html.includes("role=\"menu\""), "options render only after opening");
-  const busy = renderToStaticMarkup(createElement(ExportMenu as never, {
+  const busy = renderToStaticMarkup(createElement(ExportMenu, {
     formats: exportFormats("markdown"), disabled: true, onExport: () => undefined,
   }));
   assert.match(busy, /<button type="button" disabled=""/);
-  assert.equal(renderToStaticMarkup(createElement(ExportMenu as never, {
+  assert.equal(renderToStaticMarkup(createElement(ExportMenu, {
     formats: exportFormats("latex"), disabled: false, onExport: () => undefined,
   })), "");
 });
@@ -105,14 +106,13 @@ test("segments are grouped per bibliography entry", () => {
 });
 
 test("cited rows offer only Line jumps; uncited rows offer Remove", async () => {
-  type Row = (props: Record<string, unknown>) => unknown;
-  const { CitedRow, UncitedRow } = await load<{ CitedRow: Row; UncitedRow: Row }>("/src/CitationPanel.tsx");
+  const { CitedRow, UncitedRow } = await load<CitationPanelModule>("/src/CitationPanel.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const entry = {
     key: "a2019", authors: ["Ann"], year: "2019", title: "T", doi: null, type: "article-journal", citedCount: 1,
   };
-  const cited = renderToStaticMarkup(createElement(CitedRow as never, {
+  const cited = renderToStaticMarkup(createElement(CitedRow, {
     item: { key: "a2019", number: null, entry, count: 1, uses: [{ start: 4, end: 12, line: 3 }] },
     onJump: () => undefined,
   }));
@@ -120,21 +120,21 @@ test("cited rows offer only Line jumps; uncited rows offer Remove", async () => 
   assert.equal((cited.match(/<button/g) ?? []).length, 1, "only the Line jump");
   assert.ok(!/Remove|Insert/.test(cited));
   assert.ok(!/verified|citation-badge/.test(cited), "no verified/unverified badge");
-  const uncited = renderToStaticMarkup(createElement(UncitedRow as never, { entry, onRemove: () => undefined, disabled: false }));
+  const uncited = renderToStaticMarkup(createElement(UncitedRow, { entry, onRemove: () => undefined, disabled: false }));
   assert.match(uncited, /<button type="button" class="link-button">Remove<\/button>/);
   assert.ok(!uncited.includes("Insert"));
-  const locked = renderToStaticMarkup(createElement(UncitedRow as never, { entry, onRemove: () => undefined, disabled: true }));
+  const locked = renderToStaticMarkup(createElement(UncitedRow, { entry, onRemove: () => undefined, disabled: true }));
   assert.match(locked, /<button type="button" class="link-button" disabled="">Remove<\/button>/);
 });
 
 test("a newly rendered panel is only the collapsed summary bar", async () => {
-  const { CitationPanel } = await load<{ CitationPanel: (props: Record<string, unknown>) => unknown }>("/src/CitationPanel.tsx");
+  const { CitationPanel } = await load<CitationPanelModule>("/src/CitationPanel.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
-  const html = renderToStaticMarkup(createElement(CitationPanel as never, {
+  const html = renderToStaticMarkup(createElement(CitationPanel, {
     document: { rootPath: "/p", path: "/p/a.md", editorRevision: 0, sourceText: "", diskFingerprint: "0".repeat(64) },
-    refreshToken: 0, request: () => new Promise(() => undefined), contextPayload: () => ({}),
-    onSelect: () => undefined, requestAdd: () => new Promise(() => undefined), writesDisabled: false,
+    refreshToken: 0, request: () => new Promise<JsonObject>(() => undefined), contextPayload: () => ({}),
+    onSelect: () => undefined, requestAdd: () => new Promise<JsonObject>(() => undefined), writesDisabled: false,
   }));
   assert.match(html, /<header class="citation-summary"><h3>Citations<\/h3>/);
   assert.match(html, /class="citation-toggle" aria-expanded="false"[^>]*>Expand ▾<\/button>/);
@@ -142,10 +142,10 @@ test("a newly rendered panel is only the collapsed summary bar", async () => {
 });
 
 test("preview text shows italics and safe links without interpreting markup", async () => {
-  const { CitationText } = await load<{ CitationText: (props: { segments: RenderSegmentDto[] }) => unknown }>("/src/CitationText.tsx");
+  const { CitationText } = await load<CitationTextModule>("/src/CitationText.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
-  const html = renderToStaticMarkup(createElement(CitationText as never, { segments: [
+  const html = renderToStaticMarkup(createElement(CitationText, { segments: [
     { entry: 0, text: "Smith. <img src=x onerror=alert(1)> *not italic* ", italic: false, bold: false, url: null },
     { entry: 0, text: "Journal_of_Agri", italic: true, bold: false, url: null },
     { entry: 0, text: "https://doi.org/10.1/x", italic: false, bold: false, url: "https://doi.org/10.1/x" },

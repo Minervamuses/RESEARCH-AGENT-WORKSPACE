@@ -3,6 +3,8 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
+import { acceptApprovalEvent, approvalHasLiveOwner, reconcilePermissionAck } from "../src/lib/approval.ts";
+import * as extensionFlow from "../src/lib/extensionFlow.ts";
 
 import type {
   ApprovalRequiredDto,
@@ -10,64 +12,7 @@ import type {
   ExtensionPreviewDto,
 } from "../src/protocol.ts";
 
-interface ApprovalOwners {
-  turnRequestId: string | null;
-  documentRequestId: string | null;
-  citationRequestId: string | null;
-}
-
-interface TrustModule {
-  approvalHasLiveOwner: (parentRequestId: string, owners: ApprovalOwners) => boolean;
-  ApprovalDialog: (props: {
-    approval: ApprovalRequiredDto;
-    resolving: boolean;
-    onResolve: (approved: boolean) => void;
-    returnFocus: () => void;
-    allowDocumentEditing?: boolean;
-    onStop?: () => void;
-    stopping?: boolean;
-    stopError?: string;
-  }) => unknown;
-  acceptApprovalEvent: (
-    generation: number,
-    requestId: string,
-    activeRequestId: string | null,
-    data: ApprovalRequiredDto,
-    now?: number,
-  ) => unknown;
-  approvedBindingHashes: (flow: unknown) => string[] | null;
-  beginExtensionApply: (flow: unknown, turnId: string) => unknown;
-  beginExtensionApplyRecovery: (flow: unknown) => unknown;
-  extensionApplyRequest: (flow: unknown) => unknown;
-  failExtensionApply: (flow: unknown, message: string, lifecycle?: unknown) => unknown;
-  interruptExtensionFlow: (flow: unknown) => unknown;
-  createExtensionFlow: (turnId: string) => unknown;
-  decideExtensionBinding: (
-    flow: unknown,
-    bindingHash: string,
-    decision: "approve" | "deny",
-  ) => unknown;
-  markExtensionAwaitingLoad: (flow: unknown) => unknown;
-  markExtensionRestarting: (flow: unknown) => unknown;
-  observeExtensionRevision: (flow: unknown, revision: number) => unknown;
-  receiveExtensionApply: (flow: unknown, report: ExtensionApplyDto) => unknown;
-  receiveExtensionPreview: (flow: unknown, preview: ExtensionPreviewDto) => unknown;
-  ExtensionPanel: (props: {
-    flow: unknown; busy: boolean; canRestart: boolean; permissionMode?: "ask" | "bypass";
-    onPreview: () => void; onDecision: () => void; onApply: () => void; onRestart: () => void;
-  }) => unknown;
-  PermissionControl?: (props: {
-    mode: "ask" | "bypass";
-    disabled: boolean;
-    onChange: (mode: "ask" | "bypass") => void;
-  }) => unknown;
-  reconcilePermissionAck?: (
-    generation: number,
-    activeGeneration: number,
-    selectedSessionId: string,
-    ack: { sessionId: string; permissionMode: "ask" | "bypass" },
-  ) => ("ask" | "bypass") | null;
-}
+type TrustModule = typeof import("../src/trust.tsx");
 
 async function loadTrust(): Promise<TrustModule> {
   const server = await createServer({
@@ -111,38 +56,35 @@ const preview: ExtensionPreviewDto = {
   ],
 };
 
-test("extension apply remains disabled until every exact binding has a decision", async () => {
-  const trust = await loadTrust();
-  let flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-1"), preview);
-  assert.equal(trust.approvedBindingHashes(flow), null);
+test("extension apply remains disabled until every exact binding has a decision", () => {
+  let flow = extensionFlow.receiveExtensionPreview(extensionFlow.createExtensionFlow("turn-1"), preview);
+  assert.equal(extensionFlow.approvedBindingHashes(flow), null);
 
-  const unchanged = trust.decideExtensionBinding(flow, "unknown", "approve");
-  assert.equal(trust.approvedBindingHashes(unchanged), null);
+  const unchanged = extensionFlow.decideExtensionBinding(flow, "unknown", "approve");
+  assert.equal(extensionFlow.approvedBindingHashes(unchanged), null);
 
-  flow = trust.decideExtensionBinding(flow, "a".repeat(64), "approve");
-  assert.equal(trust.approvedBindingHashes(flow), null);
-  flow = trust.decideExtensionBinding(flow, "b".repeat(64), "deny");
-  assert.deepEqual(trust.approvedBindingHashes(flow), ["a".repeat(64)]);
+  flow = extensionFlow.decideExtensionBinding(flow, "a".repeat(64), "approve");
+  assert.equal(extensionFlow.approvedBindingHashes(flow), null);
+  flow = extensionFlow.decideExtensionBinding(flow, "b".repeat(64), "deny");
+  assert.deepEqual(extensionFlow.approvedBindingHashes(flow), ["a".repeat(64)]);
 });
 
-test("an extension preview with no MCP bindings can apply an empty decision set", async () => {
-  const trust = await loadTrust();
-  const flow = trust.receiveExtensionPreview(
-    trust.createExtensionFlow("turn-2"),
+test("an extension preview with no MCP bindings can apply an empty decision set", () => {
+  const flow = extensionFlow.receiveExtensionPreview(
+    extensionFlow.createExtensionFlow("turn-2"),
     { ...preview, bindings: [] },
   );
-  assert.deepEqual(trust.approvedBindingHashes(flow), []);
+  assert.deepEqual(extensionFlow.approvedBindingHashes(flow), []);
 });
 
-test("extension apply is one-use and only the exact loaded revision completes restart", async () => {
-  const trust = await loadTrust();
-  let flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-3"), preview);
-  flow = trust.decideExtensionBinding(flow, "a".repeat(64), "approve");
-  flow = trust.decideExtensionBinding(flow, "b".repeat(64), "deny");
+test("extension apply is one-use and only the exact loaded revision completes restart", () => {
+  let flow = extensionFlow.receiveExtensionPreview(extensionFlow.createExtensionFlow("turn-3"), preview);
+  flow = extensionFlow.decideExtensionBinding(flow, "a".repeat(64), "approve");
+  flow = extensionFlow.decideExtensionBinding(flow, "b".repeat(64), "deny");
   const applyTurnId = "123e4567e89b42d3a456426614174003";
-  flow = trust.beginExtensionApply(flow, applyTurnId);
-  assert.equal(trust.approvedBindingHashes(flow), null);
-  assert.deepEqual(trust.extensionApplyRequest(flow), {
+  flow = extensionFlow.beginExtensionApply(flow, applyTurnId);
+  assert.equal(extensionFlow.approvedBindingHashes(flow), null);
+  assert.deepEqual(extensionFlow.extensionApplyRequest(flow), {
     previewId: "preview-1",
     approvedBindingHashes: ["a".repeat(64)],
     turnId: applyTurnId,
@@ -164,46 +106,44 @@ test("extension apply is one-use and only the exact loaded revision completes re
     items: [{ key: "skill:writer", outcome: "added", detail: "Installed." }],
     diagnostics: [],
   };
-  flow = trust.receiveExtensionApply(flow, report);
-  flow = trust.markExtensionRestarting(flow);
-  flow = trust.markExtensionAwaitingLoad(flow);
-  assert.equal((flow as { phase: string }).phase, "awaiting-load");
-  flow = trust.observeExtensionRevision(flow, 0);
-  assert.equal((flow as { phase: string }).phase, "awaiting-load");
-  flow = trust.observeExtensionRevision(flow, 1);
-  assert.equal((flow as { phase: string }).phase, "loaded");
+  flow = extensionFlow.receiveExtensionApply(flow, report);
+  flow = extensionFlow.markExtensionRestarting(flow);
+  flow = extensionFlow.markExtensionAwaitingLoad(flow);
+  assert.equal(flow.phase, "awaiting-load");
+  flow = extensionFlow.observeExtensionRevision(flow, 0)!;
+  assert.equal(flow.phase, "awaiting-load");
+  flow = extensionFlow.observeExtensionRevision(flow, 1)!;
+  assert.equal(flow.phase, "loaded");
 });
 
-test("backend interruption preserves only an uncertain apply for explicit delivery recovery", async () => {
-  const trust = await loadTrust();
-  let flow = trust.receiveExtensionPreview(
-    trust.createExtensionFlow("turn-4"),
+test("backend interruption preserves only an uncertain apply for explicit delivery recovery", () => {
+  let flow = extensionFlow.receiveExtensionPreview(
+    extensionFlow.createExtensionFlow("turn-4"),
     { ...preview, bindings: [] },
   );
   const applyTurnId = "123e4567e89b42d3a456426614174004";
-  flow = trust.beginExtensionApply(flow, applyTurnId);
-  flow = trust.interruptExtensionFlow(flow);
-  assert.equal((flow as { phase: string }).phase, "error");
-  flow = trust.beginExtensionApplyRecovery(flow);
-  assert.deepEqual(trust.extensionApplyRequest(flow), {
+  flow = extensionFlow.beginExtensionApply(flow, applyTurnId);
+  flow = extensionFlow.interruptExtensionFlow(flow)!;
+  assert.equal(flow.phase, "error");
+  flow = extensionFlow.beginExtensionApplyRecovery(flow);
+  assert.deepEqual(extensionFlow.extensionApplyRequest(flow), {
     previewId: "preview-1",
     approvedBindingHashes: [],
     turnId: applyTurnId,
     retry: true,
   });
 
-  const terminal = trust.failExtensionApply(flow, "Apply was interrupted.", {
+  const terminal = extensionFlow.failExtensionApply(flow, "Apply was interrupted.", {
     turnId: applyTurnId,
     state: "interrupted",
     accepted: true,
     persisted: true,
   });
-  assert.equal(trust.extensionApplyRequest(terminal), null);
-  assert.equal(trust.interruptExtensionFlow(terminal), null);
+  assert.equal(extensionFlow.extensionApplyRequest(terminal), null);
+  assert.equal(extensionFlow.interruptExtensionFlow(terminal), null);
 });
 
-test("approval events must correlate to the active request and remain unexpired", async () => {
-  const { acceptApprovalEvent } = await loadTrust();
+test("approval events must correlate to the active request and remain unexpired", () => {
   const data: ApprovalRequiredDto = {
     approvalId: "approval-1",
     parentRequestId: "00000000-0000-4000-8000-000000000401",
@@ -286,10 +226,7 @@ test("Permission control renders Ask/Bypass with project scope and frozen-turn g
   assert.match(disabledHtml, /Change the mode after it finishes/);
 });
 
-test("Bash permission ACK reconciles only for same-generation and same-session", async () => {
-  const { reconcilePermissionAck } = await loadTrust();
-  assert.ok(reconcilePermissionAck, "reconcilePermissionAck must be exported");
-
+test("Bash permission ACK reconciles only for same-generation and same-session", () => {
   assert.equal(
     reconcilePermissionAck(1, 1, "session-1", {
       sessionId: "session-1",
@@ -348,7 +285,7 @@ test("generic operation approval shows safe action/target/parameters and leaves 
 
 test("Bypass extension preview keeps exact targets visible without a second binding-consent step", async () => {
   const trust = await loadTrust();
-  const flow = trust.receiveExtensionPreview(trust.createExtensionFlow("turn-bypass"), preview);
+  const flow = extensionFlow.receiveExtensionPreview(extensionFlow.createExtensionFlow("turn-bypass"), preview);
   const html = renderToStaticMarkup(createElement(trust.ExtensionPanel, {
     flow, busy: false, canRestart: false, permissionMode: "bypass",
     onPreview: () => undefined, onDecision: () => undefined, onApply: () => undefined, onRestart: () => undefined,
@@ -379,8 +316,7 @@ test("approval keeps Stop and its failure visible inside the modal", async () =>
 });
 
 
-test("a pending approval stays while its turn, document or bibliography.add request is in flight", async () => {
-  const { approvalHasLiveOwner } = await loadTrust();
+test("a pending approval stays while its turn, document or bibliography.add request is in flight", () => {
   const idle = { turnRequestId: null, documentRequestId: null, citationRequestId: null };
   // Acceptance P1: an idle Verify-and-add approval must not be cleared as stale.
   assert.equal(approvalHasLiveOwner("req-add", { ...idle, citationRequestId: "req-add" }), true);

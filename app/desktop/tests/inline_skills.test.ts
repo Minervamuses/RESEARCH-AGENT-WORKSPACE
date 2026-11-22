@@ -1,25 +1,8 @@
 import assert from "node:assert/strict";
-import test, { after } from "node:test";
-import { createServer, type ViteDevServer } from "vite";
+import test from "node:test";
+import * as h from "../src/lib/composer.ts";
 
-type Ref = { name: string; startUtf16: number; endUtf16: number };
-interface Helpers {
-  inlineSkillToken: (text: string, start: number, end: number) => { start: number; end: number; prefix: string } | null;
-  insertInlineSkill: (text: string, token: { start: number; end: number }, name: string) => { text: string; caret: number };
-  inlineSkillReferences: (text: string, skills: readonly string[], selected?: ReadonlySet<string>) => Ref[];
-  handleComposerKey: (event: { key: string; shiftKey: boolean; isComposing: boolean; preventDefault: () => void }, menu: { open: boolean; count: number; active: number }, actions: { select: (i: number) => void; move: (i: number) => void; close: () => void; submit: () => void }) => void;
-}
-let server: Promise<ViteDevServer> | undefined;
-let helpers: Promise<Helpers> | undefined;
-function load(): Promise<Helpers> {
-  server ??= createServer({ configFile: false, root: new URL("..", import.meta.url).pathname, server: { middlewareMode: true, hmr: false, ws: false }, appType: "custom" });
-  helpers ??= server.then((value) => value.ssrLoadModule("/src/App.tsx") as Promise<Helpers>);
-  return helpers;
-}
-after(async () => { await (await server)?.close(); });
-
-test("middle and cursor-back Skill insertion replaces only the current token", async () => {
-  const h = await load();
+test("middle and cursor-back Skill insertion replaces only the current token", () => {
   const text = "請先@acade 再找引用，保留後文";
   const cursor = text.indexOf(" 再");
   const token = h.inlineSkillToken(text, cursor, cursor)!;
@@ -33,8 +16,7 @@ test("middle and cursor-back Skill insertion replaces only the current token", a
   assert.equal(replacement.text, "先 @citation 後");
 });
 
-test("references keep original UTF16 order and duplicate positions after editing", async () => {
-  const h = await load();
+test("references keep original UTF16 order and duplicate positions after editing", () => {
   const text = "😀先@academic-paper-writing，再 @citation 後 @citation";
   const refs = h.inlineSkillReferences(text, ["academic-paper-writing", "citation"]);
   assert.deepEqual(refs.map((r) => r.name), ["academic-paper-writing", "citation", "citation"]);
@@ -44,8 +26,7 @@ test("references keep original UTF16 order and duplicate positions after editing
   assert.equal(moved[0].startUtf16, refs[0].startUtf16 + 3);
 });
 
-test("email, domain, ordinary at-text and stale picker choices are explicit", async () => {
-  const h = await load();
+test("email, domain, ordinary at-text and stale picker choices are explicit", () => {
   const text = "a@citation.org @citation.org @ordinary @ text";
   assert.deepEqual(h.inlineSkillReferences(text, ["citation"]), []);
   assert.equal(h.inlineSkillToken("a@cit", 5, 5), null);
@@ -53,8 +34,7 @@ test("email, domain, ordinary at-text and stale picker choices are explicit", as
   assert.throws(() => h.inlineSkillReferences("@removed", [], new Set(["removed"])), /no longer available/);
 });
 
-test("menu Enter selects once, IME and Shift+Enter do not submit, and Esc closes", async () => {
-  const h = await load();
+test("menu Enter selects once, IME and Shift+Enter do not submit, and Esc closes", () => {
   const events: string[] = [];
   const actions = { select: () => events.push("select"), move: () => events.push("move"), close: () => events.push("close"), submit: () => events.push("submit") };
   const key = (name: string, shift = false, composing = false) => h.handleComposerKey({ key: name, shiftKey: shift, isComposing: composing, preventDefault: () => {} }, { open: true, count: 2, active: 0 }, actions);

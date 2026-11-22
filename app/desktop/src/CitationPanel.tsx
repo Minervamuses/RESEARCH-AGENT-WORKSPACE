@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { JsonObject } from "./protocol";
-import type { DocumentSnapshot } from "./DocumentEditor";
+import type { DocumentSnapshot } from "./lib/documentSource.ts";
 import {
   addErrorOutcome,
   addOutcome,

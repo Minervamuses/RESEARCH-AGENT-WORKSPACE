@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | In progress | `evidence/C8-S1/` | — | C8-S2 |
+| C8 | In progress | `evidence/C8-S1/`–`C8-S2/` | — | C8-S3 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -697,3 +697,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S1/app-behaviors.md`。
 - **限制**：無。
 - **下一步**：C8-S2 純邏輯模組化。
+
+### C8-S2 純邏輯模組化（S083，2026-11-22）
+
+- **觀察結果**：由子代理實作、主執行緒重跑檢查。`App.tsx`（3000 → 2588 行）、`trust.tsx`（547 → 300 行）等 `.tsx` 中只為測試匯出的純函式原樣搬到 `src/lib/` 的 9 個 `.ts` 模組；三個預設 `backendClient.request` 的函式改為明確的 `request` 參數，`App.tsx` 在 6 個呼叫點傳入。33 個純函式測試改為直接 import `.ts`；24 個元件渲染測試保留 Vite SSR，型別改為 `typeof import(...)`。新增只做型別檢查的 `tsconfig.test.json`（測試需要 ES2024 Promise lib；沒有 `@types/node`，以 `tests/node-shim.d.ts` 宣告用到的 Node API），`npm run build` 也跑它；故意放入型別錯誤時 build 失敗、還原後通過。沒有刪除測試；一個測試 fixture 補上缺少的必填 `permissionMode`。
+- **執行指令**：`npm test`（224 pass）、`npm run build`（通過）、`grep -ln "ssrLoadModule\|createServer" tests/`。
+- **證據**：`evidence/C8-S2/pure-modules.md`。
+- **限制**：GUI 未驗證（只搬移，無行為變更）。
+- **下一步**：C8-S3 `api.ts`。

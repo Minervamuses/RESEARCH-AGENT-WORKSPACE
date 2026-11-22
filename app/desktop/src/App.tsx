@@ -43,7 +43,6 @@ import {
   sameSelection,
   upsertLiveTurn,
   type ConversationAction,
-  type ConversationFailure,
   type ConversationSelection,
   type LiveTurn,
   type VisibleConversationTurn,
@@ -58,31 +57,29 @@ import type {
   JsonObject,
   ProjectWorkspaceDto,
   Reference,
-  SubmittedContext,
   RuntimeDiagnosticsDto,
   SessionPermissionSetDto,
   SessionCreatedDto,
   SessionDeletedDto,
   SessionListDto,
   SessionRenamedDto,
-  SessionSelectedDto,
   SessionSummaryDto,
-  SessionTranscriptDto,
   TranscriptTurnDto,
   TurnCompletedDto,
   TurnStoppedDto,
 } from "./protocol.ts";
 import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
-import { AnnotationComment, DocumentEditor, type AnnotationControls, type DocumentSnapshot } from "./DocumentEditor.tsx";
+import { AnnotationComment, DocumentEditor, type AnnotationControls } from "./DocumentEditor.tsx";
 import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyEntryDto } from "./citations.ts";
+import { ApprovalDialog, PermissionControl, ThinkingControl, ExtensionPanel } from "./trust.tsx";
 import {
-  ApprovalDialog,
-  PermissionControl,
-  ThinkingControl,
-  ExtensionPanel,
   acceptApprovalEvent,
   approvalHasLiveOwner,
+  reconcilePermissionAck,
+  type PendingApproval,
+} from "./lib/approval.ts";
+import {
   beginExtensionApply,
   beginExtensionApplyRecovery,
   beginExtensionPreview,
@@ -97,11 +94,55 @@ import {
   observeExtensionRevision,
   receiveExtensionApply,
   receiveExtensionPreview,
-  reconcilePermissionAck,
   type ExtensionBindingDecision,
   type ExtensionFlow,
-  type PendingApproval,
-} from "./trust.tsx";
+} from "./lib/extensionFlow.ts";
+import {
+  checkSubmissionSize,
+  composerSlashCommands,
+  filterSlashCommands,
+  handleComposerKey,
+  inlineSkillReferences,
+  insertInlineSkill,
+  insertSlashCommand,
+  inlineSkillToken,
+  retrySettingsMatch,
+  slashPrefix,
+  type SlashCatalogOwner,
+  type SlashCommands,
+} from "./lib/composer.ts";
+import {
+  advanceWorkingDocumentSources,
+  backgroundDocumentContext,
+  documentContextPayload,
+  documentOperationContext,
+  documentReference,
+  reconcileSavedDocument,
+  submittedDocumentSource,
+  type DocumentAction,
+  type WorkingDocumentSources,
+} from "./lib/documents.ts";
+import type { DocumentSnapshot } from "./lib/documentSource.ts";
+import { protocolMismatch, workspaceError } from "./lib/errors.ts";
+import {
+  loadSelectedProjectHistory,
+  mergeSessionItems,
+  projectDisplayName,
+  sidebarRowsForProject,
+  type SidebarSessionRow,
+} from "./lib/sidebar.ts";
+import {
+  TRANSCRIPT_PAGE_SIZE,
+  failureLifecycleLabel,
+  fetchTranscriptPage,
+  isPersistedTurnFailure,
+  mergeTranscriptItems,
+  selectConversationWithPreview,
+  transcriptTailOffset,
+  transcriptViewFrom,
+  visibleMessageRange,
+  type TranscriptView,
+} from "./lib/transcript.ts";
 
 const backendClient = createBackendClient({
   invoke: <T,>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args),
@@ -121,51 +162,6 @@ const phaseLabels = {
   "shutting-down": "Shutting down",
   stopped: "Backend stopped",
 } as const;
-
-interface SidebarSessionRow extends SessionSummaryDto {
-  transient: boolean;
-}
-
-// One transcript page: the tail window restored on select and after a durable failure.
-const TRANSCRIPT_PAGE_SIZE = 20;
-
-interface TranscriptView {
-  projectId: string;
-  sessionId: string;
-  status: SessionTranscriptDto["status"];
-  issue: string | null;
-  items: TranscriptTurnDto[];
-  offset: number;
-  total: number;
-  hasOlder: boolean;
-}
-
-export function sidebarRowsForProject(
-  projectId: string,
-  sessions: readonly SessionSummaryDto[],
-  selected: ConversationSelection | null,
-  selectedSaved: boolean,
-): SidebarSessionRow[] {
-  const rows = sessions.map((session) => ({ ...session, transient: false }));
-  if (
-    selected !== null &&
-    selected.projectId === projectId &&
-    !selectedSaved &&
-    !rows.some((session) => session.sessionId === selected.sessionId)
-  ) {
-    rows.unshift({
-      sessionId: selected.sessionId,
-      title: "New conversation",
-      turnCount: 0,
-      createdAt: null,
-      updatedAt: null,
-      status: "ready",
-      issue: null,
-      transient: true,
-    });
-  }
-  return rows;
-}
 
 export function DeleteConversationDialog({ title, status, error, onConfirm, onCancel }: {
   title: string;
@@ -197,131 +193,6 @@ export function DeleteConversationDialog({ title, status, error, onConfirm, onCa
       </div>
     </section>
   </div>;
-}
-
-/** The opened project's first page of saved conversations (the backend scans its history). */
-export async function loadSelectedProjectHistory(
-  projectId: string | null,
-  request: (method: "session.list", params: JsonObject) => Promise<JsonObject> = backendClient.request,
-  isCurrent: () => boolean = () => true,
-): Promise<SessionListDto | null> {
-  if (projectId === null) return null;
-  const sessions = await request("session.list", { projectId, offset: 0, limit: 50 }) as unknown as SessionListDto;
-  if (!isCurrent()) return null;
-  if (sessions.projectId !== projectId) throw protocolMismatch("The backend returned conversations for a different project.");
-  return sessions;
-}
-
-export function projectDisplayName(rootPath: string): string {
-  return rootPath.split(/[\\/]/).filter((part) => part.length > 0).at(-1) ?? rootPath;
-}
-
-export function shouldSubmitComposerKey(
-  key: string,
-  shiftKey: boolean,
-  isComposing: boolean,
-): boolean {
-  return key === "Enter" && !shiftKey && !isComposing;
-}
-
-type SlashCommands = SessionCreatedDto["slashCommands"];
-type SlashCatalogOwner = ConversationSelection & { generation: number };
-const NO_SLASH_COMMANDS: SlashCommands = [];
-
-export function composerSlashCommands(
-  session: SessionCreatedDto | null,
-  selected: ConversationSelection | null,
-  generation: number | undefined,
-  owner: SlashCatalogOwner | null,
-  interactive: boolean,
-): SlashCommands {
-  if (!interactive || owner === null || selected === null || owner.generation !== generation ||
-      !sameSelection(owner, selected) || session?.sessionId !== owner.sessionId ||
-      (session.projectId !== undefined && session.projectId !== owner.projectId)) {
-    return NO_SLASH_COMMANDS;
-  }
-  return session.slashCommands;
-}
-
-export function slashPrefix(draft: string, start: number, end: number): string | null {
-  if (start !== end || end !== draft.length) return null;
-  return /^[^\S\r\n]*\/([^\s/]*)$/.exec(draft)?.[1] ?? null;
-}
-
-export function filterSlashCommands(commands: SlashCommands, prefix: string): SlashCommands {
-  return commands.filter((command) => command.name.toLowerCase().startsWith(prefix.toLowerCase()));
-}
-
-export function insertSlashCommand(draft: string, name: string): string {
-  return `${/^[^\S\r\n]*/.exec(draft)?.[0] ?? ""}/${name} `;
-}
-
-export interface InlineSkillReference { name: string; startUtf16: number; endUtf16: number }
-
-export function inlineSkillToken(draft: string, start: number, end: number): { start: number; end: number; prefix: string } | null {
-  if (start !== end) return null;
-  let tokenStart = start;
-  while (tokenStart > 0 && /[A-Za-z0-9_-]/.test(draft[tokenStart - 1])) tokenStart -= 1;
-  if (tokenStart === 0 || draft[tokenStart - 1] !== "@") return null;
-  const at = tokenStart - 1;
-  if (at > 0 && /[A-Za-z0-9_.@+-]/.test(draft[at - 1])) return null;
-  let tokenEnd = start;
-  while (tokenEnd < draft.length && /[A-Za-z0-9_-]/.test(draft[tokenEnd])) tokenEnd += 1;
-  if (draft[tokenEnd] === "." && /[A-Za-z0-9]/.test(draft[tokenEnd + 1] ?? "")) return null;
-  return { start: at, end: tokenEnd, prefix: draft.slice(tokenStart, start) };
-}
-
-export function insertInlineSkill(draft: string, token: { start: number; end: number }, name: string): { text: string; caret: number } {
-  const replacement = "@" + name + (token.end === draft.length ? " " : "");
-  return { text: draft.slice(0, token.start) + replacement + draft.slice(token.end), caret: token.start + replacement.length };
-}
-
-export function inlineSkillReferences(draft: string, skills: readonly string[], selectedNames: ReadonlySet<string> = new Set()): InlineSkillReference[] {
-  const available = new Set(skills);
-  const references: InlineSkillReference[] = [];
-  for (const match of draft.matchAll(/@([A-Za-z0-9][A-Za-z0-9_-]*)/g)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    const token = inlineSkillToken(draft, end, end);
-    if (token === null || token.start !== start) continue;
-    if (!available.has(match[1])) {
-      if (selectedNames.has(match[1])) throw new Error("Selected Skill is no longer available: " + match[1]);
-      continue;
-    }
-    references.push({ name: match[1], startUtf16: start, endUtf16: end });
-  }
-  return references;
-}
-
-export function handleComposerKey(
-  event: { key: string; shiftKey: boolean; isComposing: boolean; preventDefault: () => void },
-  menu: { open: boolean; count: number; active: number },
-  actions: { select: (index: number) => void; move: (index: number) => void; close: () => void; submit: () => void },
-): void {
-  if (event.isComposing) return;
-  if (menu.open) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      actions.close();
-      return;
-    }
-    if (menu.count > 0) {
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault();
-        actions.move((menu.active + (event.key === "ArrowDown" ? 1 : menu.count - 1)) % menu.count);
-        return;
-      }
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        actions.select(menu.active);
-        return;
-      }
-    }
-  }
-  if (shouldSubmitComposerKey(event.key, event.shiftKey, event.isComposing)) {
-    event.preventDefault();
-    actions.submit();
-  }
 }
 
 export function SlashCommandList({ commands, active, onSelect, inline = false }: {
@@ -508,143 +379,6 @@ function newLogicalTurnId(): string {
   return globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase();
 }
 
-function workspaceError(error: unknown): SafeUiError {
-  return error instanceof BackendClientError
-    ? error.uiError
-    : normalizeUiError(error, "transport");
-}
-
-function protocolMismatch(message: string): BackendClientError {
-  return new BackendClientError({
-    code: "PROTOCOL_INVALID",
-    message,
-    retryable: true,
-    source: "protocol",
-  });
-}
-
-function mergeTranscriptItems(
-  older: readonly TranscriptTurnDto[],
-  current: readonly TranscriptTurnDto[],
-): TranscriptTurnDto[] {
-  const byTurn = new Map<number, TranscriptTurnDto>();
-  for (const item of [...older, ...current]) byTurn.set(item.turnNumber, item);
-  return [...byTurn.values()].sort((left, right) => left.turnNumber - right.turnNumber);
-}
-
-function failureLifecycleLabel(failure: ConversationFailure): string {
-  const lifecycle = failure.turnLifecycle;
-  if (lifecycle === null) return "Delivery status unknown";
-  if (lifecycle.state === null) return "Prompt was not accepted";
-  if (lifecycle.state === "completed") return "Answer saved locally";
-  if (lifecycle.state === "pending") return "Prompt saved · completion pending";
-  return `Prompt saved · ${lifecycle.state}`;
-}
-
-export function isPersistedTurnFailure(failure: ConversationFailure | null): boolean {
-  const lifecycle = failure?.turnLifecycle;
-  return lifecycle?.accepted === true && lifecycle.persisted === true;
-}
-
-function transcriptTailOffset(total: number): number {
-  return Math.max(0, total - TRANSCRIPT_PAGE_SIZE);
-}
-
-async function fetchTranscriptPage(
-  projectId: string,
-  sessionId: string,
-  offset: number,
-  limit: number,
-  mismatchMessage = "The backend returned a transcript for a different conversation.",
-  request = backendClient.request,
-): Promise<SessionTranscriptDto> {
-  const data = await request("session.transcript", {
-    projectId,
-    sessionId,
-    offset,
-    limit,
-  }) as unknown as SessionTranscriptDto;
-  if (data.projectId !== projectId || data.sessionId !== sessionId) {
-    throw protocolMismatch(mismatchMessage);
-  }
-  return data;
-}
-
-export async function selectConversationWithPreview(
-  projectId: string,
-  summary: SessionSummaryDto,
-  callbacks: {
-    isCurrent: () => boolean;
-    onPreview: (data: SessionTranscriptDto) => void;
-    onSelected: (selected: SessionSelectedDto) => void;
-  },
-  request = backendClient.request,
-): Promise<SessionTranscriptDto | null> {
-  let previewing = true;
-  const selectedRequest = request("session.select", { projectId, sessionId: summary.sessionId });
-  // Handle both outcomes immediately: selection may fail before this read finishes.
-  const transcriptRequest = fetchTranscriptPage(
-    projectId, summary.sessionId, transcriptTailOffset(summary.turnCount), TRANSCRIPT_PAGE_SIZE,
-    undefined, request,
-  ).then(
-    (data) => {
-      if (previewing && callbacks.isCurrent() && data.status === "ready") callbacks.onPreview(data);
-      return { data, error: null };
-    },
-    (error: unknown) => ({ data: null, error }),
-  );
-  try {
-    const selected = await selectedRequest as unknown as SessionSelectedDto;
-    if (!callbacks.isCurrent()) return null;
-    if (selected.projectId !== projectId || selected.sessionId !== summary.sessionId) {
-      throw protocolMismatch("The backend returned a different conversation than requested.");
-    }
-    callbacks.onSelected(selected);
-    const result = await transcriptRequest;
-    if (!callbacks.isCurrent()) return null;
-    if (result.data === null) throw result.error;
-    let data = result.data;
-    // Materializing a session recovers pending turns. A stale sidebar count can
-    // also select the wrong tail page, so confirm either case after selection.
-    if (data.items.some((turn) => turn.state === "pending") ||
-        data.total !== selected.turnCount || data.offset !== transcriptTailOffset(selected.turnCount)) {
-      data = await fetchTranscriptPage(
-        projectId, summary.sessionId, transcriptTailOffset(selected.turnCount), TRANSCRIPT_PAGE_SIZE,
-        undefined, request,
-      );
-    }
-    return callbacks.isCurrent() ? data : null;
-  } finally {
-    previewing = false;
-  }
-}
-
-function transcriptViewFrom(
-  projectId: string,
-  sessionId: string,
-  data: SessionTranscriptDto,
-): TranscriptView {
-  return {
-    projectId,
-    sessionId,
-    status: data.status,
-    issue: data.issue,
-    items: data.items,
-    offset: data.offset,
-    total: data.total,
-    hasOlder: data.status === "ready" && data.offset > 0,
-  };
-}
-
-export function mergeSessionItems(
-  current: readonly SessionSummaryDto[],
-  next: readonly SessionSummaryDto[],
-): SessionSummaryDto[] {
-  const bySession = new Map<string, SessionSummaryDto>();
-  for (const item of [...current, ...next]) bySession.set(item.sessionId, item);
-  return [...bySession.values()];
-}
-
 function RestoredToolActivity({ activity }: {
   activity: TranscriptTurnDto["toolActivities"][number];
 }) {
@@ -743,82 +477,6 @@ export const ConversationTurns = memo(function ConversationTurns({ turns, projec
     </article>;
   });
 });
-
-export function documentReference(snapshot: DocumentSnapshot, referenceId: string): Reference {
-  const { rangeStartUtf16: start, rangeEndUtf16: end, sourceText } = snapshot;
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start! < 0 || end! <= start! || end! > sourceText.length) {
-    throw new Error("Select document text before adding a reference.");
-  }
-  let startLine = 1, endLine = 1;
-  for (const newline of sourceText.matchAll(/\r\n|\r|\n/g)) {
-    const boundary = newline.index + newline[0].length;
-    if (boundary <= start!) startLine += 1;
-    if (boundary < end!) endLine += 1;
-  }
-  return { referenceId, kind: "document", text: sourceText.slice(start, end), document: {
-    snapshot: { ...structuredClone(snapshot), rangeStartUtf16: start!, rangeEndUtf16: end! },
-    startLine, endLine,
-  } };
-}
-
-export function backgroundDocumentContext(snapshot: DocumentSnapshot | null): DocumentSnapshot | undefined {
-  if (snapshot === null) return undefined;
-  const { rangeStartUtf16: _start, rangeEndUtf16: _end, ...background } = snapshot;
-  return { ...background };
-}
-
-export function checkSubmissionSize(text: string, submittedContext: SubmittedContext | null): void {
-  const input = submittedContext === null ? text : JSON.stringify({ text, submittedContext });
-  if (new TextEncoder().encode(input).byteLength > 1024 * 1024) {
-    throw new Error("This submission exceeds the 1 MiB input limit. Remove references or use a smaller source document; your draft is retained.");
-  }
-}
-
-export function retrySettingsMatch(context: SubmittedContext | null, permission: PermissionMode, thinking: "normal" | "extended"): boolean {
-  return context === null || (context.permissionMode === permission && context.requestedThinkingMode === thinking);
-}
-
-export function visibleMessageRange(root: Node, startNode: Node, startOffset: number, endNode: Node, endOffset: number): { visibleText: string; text: string; startUtf16: number; endUtf16: number } | null {
-  let text = "";
-  const positions = new Map<Node, { start: number; end: number; boundaries: number[] }>();
-  const newline = () => { if (text.length > 0 && !text.endsWith("\n")) text += "\n"; };
-  const visit = (node: Node) => {
-    const start = text.length;
-    if (node.nodeType === 3) {
-      text += node.textContent ?? "";
-      positions.set(node, { start, end: text.length, boundaries: [] });
-      return;
-    }
-    if (node.nodeType !== 1) return;
-    const element = node as Element;
-    if (element.hasAttribute("hidden") || element.getAttribute("aria-hidden") === "true" ||
-        element.hasAttribute("data-reference-exclude") || ["INPUT", "TEXTAREA", "SELECT", "DETAILS"].includes(element.tagName) ||
-        (element.tagName === "BUTTON" && !(element.getAttribute("class") ?? "").split(/\s+/).includes("safe-link"))) return;
-    const block = node !== root && /^(P|DIV|PRE|LI|UL|OL|BLOCKQUOTE|H[1-6])$/.test(element.tagName);
-    if (block) newline();
-    const boundaries = [text.length];
-    if (element.tagName === "BR") text += "\n";
-    for (const child of Array.from(node.childNodes)) {
-      visit(child);
-      boundaries.push(text.length);
-    }
-    positions.set(node, { start, end: text.length, boundaries });
-    if (block) newline();
-  };
-  visit(root);
-  const visibleText = text.replace(/\n+$/, "");
-  const offset = (node: Node, index: number): number | null => {
-    const position = positions.get(node);
-    if (position === undefined || !Number.isSafeInteger(index) || index < 0) return null;
-    const value = node.nodeType === 3
-      ? index <= position.end - position.start ? position.start + index : undefined
-      : position.boundaries[index];
-    return value === undefined ? null : Math.min(value, visibleText.length);
-  };
-  const startUtf16 = offset(startNode, startOffset), endUtf16 = offset(endNode, endOffset);
-  if (startUtf16 === null || endUtf16 === null || endUtf16 <= startUtf16) return null;
-  return { visibleText, text: visibleText.slice(startUtf16, endUtf16), startUtf16, endUtf16 };
-}
 
 export function ReferenceCards({ references, onRemove }: { references: readonly Reference[]; onRemove?: (id: string) => void }) {
   if (references.length === 0) return null;
@@ -925,78 +583,6 @@ export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, 
       </div>
     </details>
   </header>;
-}
-
-export function documentContextPayload(value: DocumentSnapshot): JsonObject {
-  const { rangeStartUtf16, rangeEndUtf16, ...context } = value;
-  return {
-    ...context,
-    ...(typeof rangeStartUtf16 === "number" && typeof rangeEndUtf16 === "number"
-      ? { rangeStartUtf16, rangeEndUtf16 } : {}),
-  };
-}
-
-export function reconcileSavedDocument(
-  current: DocumentSnapshot,
-  captured: DocumentSnapshot,
-  saved: { sourceText: string; diskFingerprint: string; editorRevision?: number; rangeStartUtf16?: number; rangeEndUtf16?: number },
-  agentOperation: boolean,
-): DocumentSnapshot {
-  if (current.editorRevision !== captured.editorRevision || current.sourceText !== captured.sourceText) {
-    return { ...current, diskFingerprint: saved.diskFingerprint };
-  }
-  return {
-    ...current, sourceText: saved.sourceText, diskFingerprint: saved.diskFingerprint,
-    editorRevision: saved.editorRevision ?? current.editorRevision + Number(saved.sourceText !== current.sourceText),
-    ...(agentOperation ? { rangeStartUtf16: saved.rangeStartUtf16, rangeEndUtf16: saved.rangeEndUtf16 } : {}),
-  };
-}
-
-interface DocumentAction {
-  turnId: string;
-  callId?: string;
-  undoOfCallId?: string;
-  parentRequestId?: string;
-  sourceSnapshot?: DocumentSnapshot;
-}
-
-type WorkingDocumentSources = Pick<SubmittedContext, "documentContext" | "references">;
-
-export function submittedDocumentSource(context: WorkingDocumentSources | null, referenceId?: string): DocumentSnapshot | undefined {
-  if (referenceId === undefined) return context?.documentContext;
-  const reference = context?.references.find((item) => item.referenceId === referenceId);
-  if (reference?.kind !== "document") throw new Error("The document proposal names an unavailable document reference.");
-  return reference.document.snapshot;
-}
-
-export function documentOperationContext(current: DocumentSnapshot, source?: DocumentSnapshot): DocumentSnapshot {
-  if (source === undefined) return current;
-  return { ...current, rangeStartUtf16: source.rangeStartUtf16, rangeEndUtf16: source.rangeEndUtf16 };
-}
-
-export function advanceWorkingDocumentSources(
-  working: WorkingDocumentSources | null, before: DocumentSnapshot, result: DocumentResultDto,
-): WorkingDocumentSources | null {
-  if (working === null || result.status !== "saved" || result.path !== before.path ||
-      result.rootPath !== before.rootPath || result.sourceText === undefined || result.editorRevision === undefined ||
-      result.diskFingerprint === undefined || result.rangeEndUtf16 === undefined) return working;
-  const start = before.rangeStartUtf16 ?? 0, end = before.rangeEndUtf16 ?? before.sourceText.length;
-  const newEnd = result.rangeEndUtf16, delta = newEnd - end;
-  const advance = (snapshot: DocumentSnapshot, activeDocument = false): DocumentSnapshot => {
-    if (snapshot.path !== before.path || snapshot.rootPath !== before.rootPath || snapshot.sourceText !== before.sourceText ||
-        snapshot.editorRevision !== before.editorRevision || snapshot.diskFingerprint !== before.diskFingerprint) return snapshot;
-    let left = activeDocument ? result.rangeStartUtf16 : snapshot.rangeStartUtf16;
-    let right = activeDocument ? result.rangeEndUtf16 : snapshot.rangeEndUtf16;
-    if (!activeDocument && left !== undefined && right !== undefined && right > start) {
-      if (left >= end) { left += delta; right += delta; }
-      else { left = Math.min(left, start); right = Math.max(newEnd, right + delta); }
-    }
-    return { ...snapshot, sourceText: result.sourceText!, editorRevision: result.editorRevision!, diskFingerprint: result.diskFingerprint!,
-      rangeStartUtf16: left, rangeEndUtf16: right };
-  };
-  return { documentContext: working.documentContext === undefined ? undefined : advance(working.documentContext, true),
-    references: working.references.map((reference) => reference.kind === "document"
-      ? { ...reference, document: { ...reference.document, snapshot: advance(reference.document.snapshot) as typeof reference.document.snapshot } } : reference) };
 }
 
 export default function App() {
@@ -1920,7 +1506,7 @@ export default function App() {
         if (!ownsOperation(operation, workspaceOperation.current) || state.session?.sessionId !== target.sessionId) return;
         if (next.failure?.turnLifecycle?.accepted) {
           const data = await fetchTranscriptPage(target.projectId, target.sessionId,
-            transcriptTailOffset(state.session.turnCount + 1), TRANSCRIPT_PAGE_SIZE);
+            transcriptTailOffset(state.session.turnCount + 1), TRANSCRIPT_PAGE_SIZE, undefined, backendClient.request);
           if (!ownsOperation(operation, workspaceOperation.current)) return;
           dispatch({ type: "session-created", session: { ...state.session, turnCount: data.total } });
           setTranscript(transcriptViewFrom(target.projectId, target.sessionId, data));
@@ -2128,7 +1714,7 @@ export default function App() {
           setPendingUserText(null);
           setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: "Loading saved transcript…", items: [], offset: 0, total: selected.turnCount, hasOlder: false });
         },
-      });
+      }, backendClient.request);
       if (transcriptData === null || !isCurrent()) return;
       setTranscript(transcriptViewFrom(projectId, session.sessionId, transcriptData));
       setSelectionPreview(null);
@@ -2241,7 +1827,7 @@ export default function App() {
     const offset = current.offset - limit;
     void (async () => {
       try {
-        const data = await fetchTranscriptPage(current.projectId, current.sessionId, offset, limit, "The backend returned older turns for a different conversation.");
+        const data = await fetchTranscriptPage(current.projectId, current.sessionId, offset, limit, "The backend returned older turns for a different conversation.", backendClient.request);
         if (!isCurrent()) return;
         setTranscript((value) => value === null || value.projectId !== current.projectId || value.sessionId !== current.sessionId ? value : { ...value, status: data.status, issue: data.issue, items: mergeTranscriptItems(data.items, value.items), offset: data.offset, total: data.total, hasOlder: data.status === "ready" && data.offset > 0 });
         scheduleOwnedFrame(operation, () => { if (container !== null) container.scrollTop = previousTop + container.scrollHeight - previousHeight; });
@@ -2417,6 +2003,8 @@ export default function App() {
             selected.sessionId,
             transcriptTailOffset(currentSession.turnCount + 1),
             TRANSCRIPT_PAGE_SIZE,
+            undefined,
+            backendClient.request,
           );
           if (!selectionIsCurrent()) return;
           const savedTurn = data.items.find((turn) => turn.turnId === turnId);
@@ -2558,7 +2146,7 @@ export default function App() {
         const currentSession = state.session;
         if (!isCurrent() || currentSession === null || currentSession.sessionId !== selected.sessionId) return;
         const data = await fetchTranscriptPage(selected.projectId, selected.sessionId,
-          transcriptTailOffset(currentSession.turnCount + 1), TRANSCRIPT_PAGE_SIZE);
+          transcriptTailOffset(currentSession.turnCount + 1), TRANSCRIPT_PAGE_SIZE, undefined, backendClient.request);
         if (!isCurrent()) return;
         dispatch({ type: "session-created", session: { ...currentSession, turnCount: data.total } });
         setTranscript(transcriptViewFrom(selected.projectId, selected.sessionId, data));

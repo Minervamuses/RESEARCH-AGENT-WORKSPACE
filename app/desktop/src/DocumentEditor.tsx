@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { editor, IPosition, IRange } from "monaco-editor/editor/editor.api";
+import type { editor } from "monaco-editor/editor/editor.api";
 import type { DraftAnnotation } from "./conversations.ts";
 import type { Reference } from "./protocol.ts";
 import { citationFormatForPath, completionCandidates, completionPrefix, type BibliographyEntryDto } from "./citations.ts";
+import { handleAnnotationKey } from "./lib/composer.ts";
+import {
+  captureDocumentSelection,
+  documentOffsetAt,
+  documentPositionAt,
+  applyDocumentChanges,
+  type DocumentSnapshot,
+} from "./lib/documentSource.ts";
 import { readEditorFontSize, writeEditorFontSize, zoomedFontSize, type ZoomStep } from "./editorZoom.ts";
 
 export interface AnnotationControls {
@@ -13,16 +21,6 @@ export interface AnnotationControls {
   onChange: (referenceId: string, comment: string) => void;
   onToggle: (referenceId: string, expanded: boolean) => void;
   onRemove: (referenceId: string) => void;
-}
-
-export function handleAnnotationKey(event: {
-  key: string; shiftKey: boolean; isComposing: boolean;
-  preventDefault: () => void; stopPropagation: () => void;
-}, confirm: () => void): void {
-  event.stopPropagation();
-  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-  event.preventDefault();
-  confirm();
 }
 
 export function AnnotationComment({ annotation, controls }: { annotation: DraftAnnotation; controls: AnnotationControls }) {
@@ -52,16 +50,6 @@ export function AnnotationComment({ annotation, controls }: { annotation: DraftA
   </div>;
 }
 
-export interface DocumentSnapshot {
-  rootPath: string;
-  path: string;
-  editorRevision: number;
-  sourceText: string;
-  diskFingerprint: string;
-  rangeStartUtf16?: number;
-  rangeEndUtf16?: number;
-}
-
 interface DocumentEditorProps {
   value: DocumentSnapshot | null;
   onChange: (snapshot: DocumentSnapshot) => void;
@@ -71,61 +59,6 @@ interface DocumentEditorProps {
   saveDisabled?: boolean;
   /** Bibliography entries offered after `[@`, `; @`, `\cite{` or a comma inside it. */
   citationEntries?: readonly BibliographyEntryDto[];
-}
-
-interface SourceChange {
-  range: IRange;
-  text: string;
-}
-
-// Monaco columns use UTF-16 units, but its model normalizes newlines and hides a
-// leading BOM. Resolve against the source so unrelated bytes survive an edit.
-export function documentOffsetAt(source: string, position: IPosition): number {
-  let start = source.startsWith("\uFEFF") ? 1 : 0;
-  const newline = /\r\n|\r|\n/g;
-  newline.lastIndex = start;
-  for (let line = 1; line < position.lineNumber; line += 1) {
-    const match = newline.exec(source);
-    if (!match) return source.length;
-    start = match.index + match[0].length;
-  }
-  newline.lastIndex = start;
-  const end = newline.exec(source)?.index ?? source.length;
-  return Math.min(end, start + Math.max(0, position.column - 1));
-}
-
-export function documentPositionAt(source: string, offset: number): IPosition {
-  const target = Math.max(source.startsWith("\uFEFF") ? 1 : 0, Math.min(source.length, offset));
-  let start = source.startsWith("\uFEFF") ? 1 : 0;
-  let lineNumber = 1;
-  const newline = /\r\n|\r|\n/g;
-  newline.lastIndex = start;
-  for (let match = newline.exec(source); match; match = newline.exec(source)) {
-    const next = match.index + match[0].length;
-    if (next > target) return { lineNumber, column: Math.min(target, match.index) - start + 1 };
-    start = next;
-    lineNumber += 1;
-  }
-  return { lineNumber, column: target - start + 1 };
-}
-
-export function applyDocumentChanges(source: string, changes: readonly SourceChange[]): string {
-  const edits = changes.map(({ range, text }) => ({
-    start: documentOffsetAt(source, { lineNumber: range.startLineNumber, column: range.startColumn }),
-    end: documentOffsetAt(source, { lineNumber: range.endLineNumber, column: range.endColumn }),
-    text,
-  })).sort((left, right) => right.start - left.start);
-  return edits.reduce((text, change) => text.slice(0, change.start) + change.text + text.slice(change.end), source);
-}
-
-export function captureDocumentSelection(snapshot: DocumentSnapshot | null): DocumentSnapshot | null {
-  if (!snapshot) return null;
-  const start = snapshot.rangeStartUtf16;
-  const end = snapshot.rangeEndUtf16;
-  if (start === undefined || end === undefined || !Number.isInteger(start) || !Number.isInteger(end)
-    || start < 0 || start >= end || end > snapshot.sourceText.length) return null;
-  // Every field is a string or number; a frozen copy cannot follow later editor changes.
-  return Object.freeze({ ...snapshot, rangeStartUtf16: start, rangeEndUtf16: end });
 }
 
 function modelSource(source: string): string {

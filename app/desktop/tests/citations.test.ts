@@ -88,7 +88,7 @@ test("entries are described compactly", () => {
 });
 
 test("jumping selects the exact UTF-16 range after an emoji", () => {
-  const snapshot = { editorRevision: 4, sourceText: TEXT };
+  const snapshot: { editorRevision: number; sourceText: string; rangeStartUtf16?: number; rangeEndUtf16?: number } = { editorRevision: 4, sourceText: TEXT };
   const use = inspect().uses[2];
   const selected = selectUse(snapshot, TEXT, use);
   assert.ok(selected);
