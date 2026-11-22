@@ -6,6 +6,7 @@ import {
   composeTurnText,
   conversationInteractionState,
   conversationReducer,
+  conversationToRestore,
   initialConversationState,
   mergeConversationTurns,
   type ConversationFailure,
@@ -99,8 +100,14 @@ interface AppHelpersModule {
     projectId: string,
     sessions: readonly SessionSummary[],
     selected: { projectId: string; sessionId: string } | null,
-    selectedRegistered: boolean,
+    selectedSaved: boolean,
   ) => Array<SessionSummary & { transient: boolean }>;
+  loadSelectedProjectHistory: (
+    projectId: string | null,
+    request: (method: "session.list", params: JsonObject) => Promise<JsonObject>,
+    isCurrent?: () => boolean,
+  ) => Promise<{ projectId: string; items: SessionSummary[] } | null>;
+  projectDisplayName: (rootPath: string) => string;
   shouldSubmitComposerKey: (
     key: string,
     shiftKey: boolean,
@@ -371,7 +378,7 @@ test("markdown link activation reparses the URL before calling the injected open
   assert.deepEqual(opened, ["https://example.com/docs"]);
 });
 
-test("sidebar rows expose a transient selected conversation without cataloging it", async () => {
+test("sidebar rows show an unsaved selected conversation without changing the saved list", async () => {
   const { sidebarRowsForProject } = await loadAppHelpers();
   const saved: SessionSummary[] = [{
     sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -393,7 +400,54 @@ test("sidebar rows expose a transient selected conversation without cataloging i
     { sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", transient: false },
   ]);
   assert.equal(rows[0].createdAt, null);
-  assert.equal(saved.length, 1, "the catalog DTO remains unchanged");
+  assert.equal(saved.length, 1, "the saved list DTO remains unchanged");
+});
+
+const RESTORE_ITEMS: SessionSummary[] = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"].map((sessionId) => ({
+  sessionId, title: `Saved ${sessionId[0]}`, turnCount: 1, createdAt: "2026-08-28T09:00:00Z",
+  updatedAt: null, status: "ready", issue: null,
+}));
+
+test("restart reselects the conversation that was selected when it is still listed", () => {
+  const list = { projectId: "p1", items: RESTORE_ITEMS };
+  const resume = { projectId: "p1", sessionId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" };
+  assert.equal(conversationToRestore("p1", list, resume), RESTORE_ITEMS[1]);
+});
+
+test("restart selects nothing when the previously selected conversation was deleted", () => {
+  const list = { projectId: "p1", items: [RESTORE_ITEMS[0]] };
+  const resume = { projectId: "p1", sessionId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" };
+  assert.equal(conversationToRestore("p1", list, resume), null);
+});
+
+test("restart selects nothing without a resumable selection for the opened project", () => {
+  const list = { projectId: "p1", items: RESTORE_ITEMS };
+  assert.equal(conversationToRestore("p1", list, null), null);
+  assert.equal(conversationToRestore(null, list, { projectId: "p1", sessionId: RESTORE_ITEMS[0].sessionId }), null);
+  assert.equal(conversationToRestore("p1", null, { projectId: "p1", sessionId: RESTORE_ITEMS[0].sessionId }), null);
+  // A selection or list left over from another project never restores.
+  assert.equal(conversationToRestore("p1", list, { projectId: "p2", sessionId: RESTORE_ITEMS[0].sessionId }), null);
+  assert.equal(conversationToRestore("p2", list, { projectId: "p2", sessionId: RESTORE_ITEMS[0].sessionId }), null);
+});
+
+test("project history loads with one session.list request for the opened project", async () => {
+  const { loadSelectedProjectHistory, projectDisplayName } = await loadAppHelpers();
+  const requests: Array<[string, JsonObject]> = [];
+  const page = { projectId: "p1", status: "ready", issue: null, items: RESTORE_ITEMS, total: 2, offset: 0, limit: 50, hasMore: false };
+  const loaded = await loadSelectedProjectHistory("p1", async (method, params) => {
+    requests.push([method, params]);
+    return page as unknown as JsonObject;
+  });
+  assert.deepEqual(requests, [["session.list", { projectId: "p1", offset: 0, limit: 50 }]]);
+  assert.equal(loaded, page);
+  assert.equal(await loadSelectedProjectHistory(null, async () => assert.fail("no project, no request")), null);
+  await assert.rejects(
+    loadSelectedProjectHistory("p1", async () => ({ ...page, projectId: "p2" }) as unknown as JsonObject),
+    /different project/,
+  );
+  assert.equal(await loadSelectedProjectHistory("p1", async () => page as unknown as JsonObject, () => false), null);
+  assert.equal(projectDisplayName("/home/me/thesis/"), "thesis");
+  assert.equal(projectDisplayName("C:\\Users\\me\\thesis"), "thesis");
 });
 
 test("composer sends with Enter while preserving Shift+Enter and IME composition", async () => {
@@ -405,7 +459,7 @@ test("composer sends with Enter while preserving Shift+Enter and IME composition
   assert.equal(shouldSubmitComposerKey("a", false, false), false);
 });
 
-test("sidebar rows never duplicate a registered or already-listed conversation", async () => {
+test("sidebar rows never duplicate a saved or already-listed conversation", async () => {
   const { sidebarRowsForProject } = await loadAppHelpers();
   const saved: SessionSummary[] = [{
     sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

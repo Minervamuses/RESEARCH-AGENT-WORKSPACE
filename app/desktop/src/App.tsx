@@ -30,6 +30,7 @@ import {
 } from "./backend.ts";
 import {
   conversationInteractionState,
+  conversationToRestore,
   composeTurnText,
   conversationReducer,
   initialConversationState,
@@ -55,12 +56,9 @@ import type {
   ExtensionApplyDto,
   ExtensionPreviewDto,
   JsonObject,
-  ProjectListDto,
-  ProjectSummaryDto,
   ProjectWorkspaceDto,
   Reference,
   SubmittedContext,
-  RegistrationRetryDto,
   RuntimeDiagnosticsDto,
   SessionPermissionSetDto,
   SessionCreatedDto,
@@ -146,13 +144,13 @@ export function sidebarRowsForProject(
   projectId: string,
   sessions: readonly SessionSummaryDto[],
   selected: ConversationSelection | null,
-  selectedRegistered: boolean,
+  selectedSaved: boolean,
 ): SidebarSessionRow[] {
   const rows = sessions.map((session) => ({ ...session, transient: false }));
   if (
     selected !== null &&
     selected.projectId === projectId &&
-    !selectedRegistered &&
+    !selectedSaved &&
     !rows.some((session) => session.sessionId === selected.sessionId)
   ) {
     rows.unshift({
@@ -201,21 +199,21 @@ export function DeleteConversationDialog({ title, status, error, onConfirm, onCa
   </div>;
 }
 
+/** The opened project's first page of saved conversations (the backend scans its history). */
 export async function loadSelectedProjectHistory(
   projectId: string | null,
-  request: (method: "project.list" | "session.list", params: JsonObject) => Promise<JsonObject> = backendClient.request,
+  request: (method: "session.list", params: JsonObject) => Promise<JsonObject> = backendClient.request,
   isCurrent: () => boolean = () => true,
-): Promise<{ catalog: ProjectListDto; sessions: SessionListDto } | null> {
+): Promise<SessionListDto | null> {
   if (projectId === null) return null;
-  const catalog = await request("project.list", {}) as unknown as ProjectListDto;
-  if (!isCurrent()) return null;
-  if (catalog.projects.length !== 1 || catalog.projects[0].projectId !== projectId || catalog.selectedProjectId !== projectId) {
-    throw protocolMismatch("The backend returned history for a different project.");
-  }
-  const sessions = await request("session.list", { projectId, offset: 0, limit: 50, reconcile: false }) as unknown as SessionListDto;
+  const sessions = await request("session.list", { projectId, offset: 0, limit: 50 }) as unknown as SessionListDto;
   if (!isCurrent()) return null;
   if (sessions.projectId !== projectId) throw protocolMismatch("The backend returned conversations for a different project.");
-  return { catalog, sessions };
+  return sessions;
+}
+
+export function projectDisplayName(rootPath: string): string {
+  return rootPath.split(/[\\/]/).filter((part) => part.length > 0).at(-1) ?? rootPath;
 }
 
 export function shouldSubmitComposerKey(
@@ -1023,8 +1021,7 @@ export default function App() {
   const [discardDraft, setDiscardDraft] = useState(false);
   const [dirtyChoice, setDirtyChoice] = useState<"save" | "discard">("save");
   const documentBaselineRef = useRef<DocumentSnapshot | null>(null);
-  const [catalog, setCatalog] = useState<ProjectListDto | null>(null);
-  const [sessionLists, setSessionLists] = useState<Record<string, SessionListDto>>({});
+  const [sessionList, setSessionList] = useState<SessionListDto | null>(null);
   const [conversationMenu, setConversationMenu] = useState<{ projectId: string; session: SidebarSessionRow; left: number; top: number } | null>(null);
   const [renameDialog, setRenameDialog] = useState<{ projectId: string; sessionId: string; title: string; issue: string | null; owner: WorkspaceOperationOwner } | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<{ projectId: string; sessionId: string; title: string; status: "stopping" | "deleting" | null; issue: string | null; owner: WorkspaceOperationOwner } | null>(null);
@@ -1032,11 +1029,11 @@ export default function App() {
   const conversationMenuRef = useRef<HTMLDivElement>(null);
   const conversationMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const [slashCatalogOwner, setSlashCatalogOwner] = useState<SlashCatalogOwner | null>(null);
-  const [catalogGeneration, setCatalogGenerationState] = useState<number | null>(null);
-  const catalogGenerationRef = useRef<number | null>(null);
-  const setCatalogGeneration = useCallback((value: number | null) => {
-    catalogGenerationRef.current = value;
-    setCatalogGenerationState(value);
+  const [historyGeneration, setHistoryGenerationState] = useState<number | null>(null);
+  const historyGenerationRef = useRef<number | null>(null);
+  const setHistoryGeneration = useCallback((value: number | null) => {
+    historyGenerationRef.current = value;
+    setHistoryGenerationState(value);
   }, []);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
   const [workspaceIssue, setWorkspaceIssue] = useState<SafeUiError | null>(null);
@@ -1044,7 +1041,7 @@ export default function App() {
   const [selectionPreview, setSelectionPreview] = useState<{ title: string; transcript: TranscriptView } | null>(null);
   const [liveTurns, setLiveTurns] = useState<LiveTurn[]>([]);
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
-  const [registrationIssue, setRegistrationIssue] = useState<string | null>(null);
+  const [historyIssue, setHistoryIssue] = useState<string | null>(null);
   const [extensionFlow, setExtensionFlow] = useState<ExtensionFlow | null>(null);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [approvalResolving, setApprovalResolving] = useState(false);
@@ -1072,7 +1069,7 @@ export default function App() {
   const citationRequestRef = useRef<string | null>(null);
   const inFlight = useRef(false);
   const exclusiveOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
-  const catalogLoading = useRef<WorkspaceOperationOwner | null>(null);
+  const historyLoading = useRef<WorkspaceOperationOwner | null>(null);
   const diagnosticsAttempt = useRef<number | null>(null);
   const generationRef = useRef(0);
   const conversationRef = useRef(conversation);
@@ -1137,7 +1134,7 @@ export default function App() {
   const invalidateOperations = useCallback(() => {
     workspaceOperation.current = null;
     documentOperationRef.current = null;
-    catalogLoading.current = null;
+    historyLoading.current = null;
     approvalOwnerRef.current = null;
     frameOwnerRef.current = null;
     turnOwnerRef.current = null;
@@ -1343,7 +1340,7 @@ export default function App() {
   ) => {
     const transition = planBackendSnapshotTransition({
       currentGeneration: generationRef.current,
-      catalogGeneration: catalogGenerationRef.current,
+      historyGeneration: historyGenerationRef.current,
       hasProject: projectRef.current !== null,
       selectedConversation: conversationRef.current.selected,
       resumeSelection: resumeSelectionRef.current,
@@ -1367,22 +1364,21 @@ export default function App() {
       setPendingApproval(null);
       setApprovalResolving(false);
     }
-    if (transition.resetStaleCatalog) {
+    if (transition.resetStaleHistory) {
       workspaceOperation.current = null;
       setWorkspaceBusy(null);
       setWorkspaceIssue(null);
-      setCatalog(null);
-      setSessionLists({});
+      setSessionList(null);
       setTranscript(null);
       setSelectionPreview(null);
       setLiveTurns([]);
       setPendingUserText(null);
-      setRegistrationIssue(null);
+      setHistoryIssue(null);
       pendingApprovalRef.current = null;
       approvalResolvingRef.current = false;
       setPendingApproval(null);
       setApprovalResolving(false);
-      setCatalogGeneration(null);
+      setHistoryGeneration(null);
     }
     if (transition.extensionTransition === "awaiting-load") {
       setExtensionFlow((current) => current === null ? null : markExtensionAwaitingLoad(current));
@@ -1406,7 +1402,7 @@ export default function App() {
     if (transition.completedAction !== null) {
       dispatch({ type: "action-completed", action: transition.completedAction });
     }
-  }, [applyConversation, invalidateOperations, setCatalogGeneration]);
+  }, [applyConversation, invalidateOperations, setHistoryGeneration]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -1598,35 +1594,35 @@ export default function App() {
     if (state.phase === "backend-ready" && state.snapshot?.lifecycle === "ready" && state.diagnostics === null && state.activeAction === null) loadDiagnostics(false);
   }, [loadDiagnostics, state.activeAction, state.diagnostics, state.phase, state.snapshot?.lifecycle]);
 
-  const loadCatalog = useCallback(async (generation: number) => {
+  const loadHistory = useCallback(async (generation: number) => {
     const currentProject = projectRef.current;
     if (currentProject === null || bindingGenerationRef.current !== generation || generation !== generationRef.current) return;
     const owner = captureOwner("project history");
-    catalogLoading.current = owner;
-    const isCurrent = () => ownsOperation(owner, catalogLoading.current);
+    historyLoading.current = owner;
+    const isCurrent = () => ownsOperation(owner, historyLoading.current);
     setWorkspaceIssue(null);
     try {
       const loaded = await loadSelectedProjectHistory(currentProject.projectId, backendClient.request, isCurrent);
       if (!isCurrent() || loaded === null) return;
-      setCatalog(loaded.catalog);
-      setSessionLists({ [currentProject.projectId]: loaded.sessions });
-      setCatalogGeneration(generation);
+      setSessionList(loaded);
+      setHistoryGeneration(generation);
     } catch (error) {
       if (isCurrent()) {
-        setCatalogGeneration(generation);
+        setHistoryGeneration(generation);
         setWorkspaceIssue(workspaceError(error));
       }
     } finally {
-      if (isCurrent()) catalogLoading.current = null;
+      if (isCurrent()) historyLoading.current = null;
     }
-  }, [captureOwner, ownsOperation]);
+  }, [captureOwner, ownsOperation, setHistoryGeneration]);
 
   const renameConversation = useCallback(async () => {
     const target = renameDialog;
     if (target === null || !ownsOperation(target.owner, target.owner) ||
         projectRef.current?.projectId !== target.projectId || bindingGenerationRef.current !== generationRef.current ||
         state.snapshot?.lifecycle !== "ready" || state.activeAction !== null ||
-        !sessionLists[target.projectId]?.items.some((item) => item.sessionId === target.sessionId && item.status === "ready")) return;
+        sessionList?.projectId !== target.projectId ||
+        !sessionList.items.some((item) => item.sessionId === target.sessionId && item.status === "ready")) return;
     const title = target.title.trim();
     if (title.length === 0 || new TextEncoder().encode(title).length > 256) return;
     const operation = beginWorkspaceOperation("Renaming conversation");
@@ -1639,12 +1635,9 @@ export default function App() {
       if (result.projectId !== target.projectId || result.sessionId !== target.sessionId) {
         throw protocolMismatch("The backend renamed a different conversation.");
       }
-      catalogLoading.current = null;
-      setSessionLists((lists) => {
-        const list = lists[target.projectId];
-        if (list === undefined) return lists;
-        return { ...lists, [target.projectId]: { ...list, items: list.items.map((item) =>
-          item.sessionId === target.sessionId ? { ...item, title: result.title } : item) } };
+      historyLoading.current = null;
+      setSessionList((list) => list === null || list.projectId !== target.projectId ? list : {
+        ...list, items: list.items.map((item) => item.sessionId === target.sessionId ? { ...item, title: result.title } : item),
       });
       setRenameDialog(null);
       conversationMenuReturnFocusRef.current?.focus();
@@ -1653,7 +1646,7 @@ export default function App() {
     } finally {
       finishWorkspaceOperation(operation);
     }
-  }, [beginWorkspaceOperation, finishWorkspaceOperation, ownsOperation, renameDialog, sessionLists, state.activeAction, state.snapshot?.lifecycle]);
+  }, [beginWorkspaceOperation, finishWorkspaceOperation, ownsOperation, renameDialog, sessionList, state.activeAction, state.snapshot?.lifecycle]);
 
   const chooseProject = useCallback(async (action: "inspect" | "open" | "initialize", browse = false) => {
     if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
@@ -1715,15 +1708,14 @@ export default function App() {
       setProject(data);
       setRootPath(data.rootPath);
       applyConversation({ type: "project-opened", generation, projectEpoch: projectEpochRef.current });
-      setCatalog(null);
-      setCatalogGeneration(null);
-      setSessionLists({});
+      setHistoryGeneration(null);
+      setSessionList(null);
       setSlashCatalogOwner(null);
       setTranscript(null);
       setSelectionPreview(null);
       setLiveTurns([]);
       setPendingUserText(null);
-      setRegistrationIssue(null);
+      setHistoryIssue(null);
       setExtensionFlow(null);
       setPendingApproval(null);
       pendingApprovalRef.current = null;
@@ -1744,13 +1736,13 @@ export default function App() {
       setReferenceIssue(null);
       setDiscardDraft(false);
       setDirtyChoice("save");
-      await loadCatalog(generation);
+      await loadHistory(generation);
     } catch (error) {
       if (isCurrent()) {
         setChooserIssue(workspaceError(error).message);
       }
     } finally { finishWorkspaceOperation(operation); }
-  }, [applyConversation, beginWorkspaceOperation, candidate, candidateHistory, candidateRoot, dirtyChoice, discardDraft, documentConflict, finishWorkspaceOperation, loadCatalog, ownsOperation, saveDocument, updateDocument]);
+  }, [applyConversation, beginWorkspaceOperation, candidate, candidateHistory, candidateRoot, dirtyChoice, discardDraft, documentConflict, finishWorkspaceOperation, loadHistory, ownsOperation, saveDocument, setHistoryGeneration, updateDocument]);
 
   const showProjectChooser = useCallback(() => {
     if (conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || pendingApprovalRef.current !== null ||
@@ -1768,9 +1760,10 @@ export default function App() {
     setChooserOpen(true);
   }, [documentConflict]);
 
-  const loadMoreSessions = useCallback((projectId: string) => {
-    const current = sessionLists[projectId];
-    if (current === undefined || !current.hasMore) return;
+  const loadMoreSessions = useCallback(() => {
+    const current = sessionList;
+    if (current === null || !current.hasMore) return;
+    const projectId = current.projectId;
     const operation = beginWorkspaceOperation("Loading more conversations");
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
@@ -1782,14 +1775,10 @@ export default function App() {
         if (data.projectId !== projectId || data.offset !== offset) {
           throw protocolMismatch("The backend returned a mismatched conversation page.");
         }
-        setSessionLists((lists) => {
-          const existing = lists[projectId];
-          if (existing === undefined || existing.items.length !== offset) return lists;
+        setSessionList((existing) => {
+          if (existing === null || existing.projectId !== projectId || existing.items.length !== offset) return existing;
           const items = mergeSessionItems(existing.items, data.items);
-          return {
-            ...lists,
-            [projectId]: { ...data, items, offset: 0, limit: items.length },
-          };
+          return { ...data, items, offset: 0, limit: items.length };
         });
       } catch (error) {
         if (isCurrent()) setWorkspaceIssue(workspaceError(error));
@@ -1797,15 +1786,15 @@ export default function App() {
         finishWorkspaceOperation(operation);
       }
     })();
-  }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, sessionLists]);
+  }, [ownsOperation, beginWorkspaceOperation, finishWorkspaceOperation, sessionList]);
 
   useEffect(() => {
     const generation = state.snapshot?.generation;
     if (generation === undefined || state.snapshot?.lifecycle !== "ready" || state.diagnostics === null ||
-        project === null || catalogGeneration === generation || (catalogLoading.current !== null && ownsOperation(catalogLoading.current, catalogLoading.current)) ||
+        project === null || historyGeneration === generation || (historyLoading.current !== null && ownsOperation(historyLoading.current, historyLoading.current)) ||
         workspaceOperation.current !== null) return;
     if (bindingGenerationRef.current === generation) {
-      void loadCatalog(generation);
+      void loadHistory(generation);
       return;
     }
     const operation = beginWorkspaceOperation("Reopening selected project");
@@ -1824,16 +1813,16 @@ export default function App() {
       projectRef.current = opened;
       bindingGenerationRef.current = generation;
       setProject(opened);
-      await loadCatalog(generation);
+      await loadHistory(generation);
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
-      setCatalogGeneration(generation);
+      setHistoryGeneration(generation);
       setChooserIssue(workspaceError(error).message);
       setCandidate(null);
       setCandidateRoot(project.rootPath);
       setChooserOpen(true);
     }).finally(() => finishWorkspaceOperation(operation));
-  }, [applyConversation, beginWorkspaceOperation, catalogGeneration, finishWorkspaceOperation, loadCatalog, ownsOperation, project, state.diagnostics, state.snapshot?.generation, state.snapshot?.lifecycle]);
+  }, [applyConversation, beginWorkspaceOperation, historyGeneration, finishWorkspaceOperation, loadHistory, ownsOperation, project, setHistoryGeneration, state.diagnostics, state.snapshot?.generation, state.snapshot?.lifecycle]);
 
   const focusComposer = useCallback((owner: WorkspaceOperationOwner = captureOwner("composer focus")) => {
     scheduleOwnedFrame(owner, () => composerRef.current?.focus());
@@ -1927,20 +1916,20 @@ export default function App() {
       const operation = beginWorkspaceOperation("Refreshing saved conversation");
       if (operation === null) return;
       try {
-        await loadCatalog(generation);
+        await loadHistory(generation);
         if (!ownsOperation(operation, workspaceOperation.current) || state.session?.sessionId !== target.sessionId) return;
         if (next.failure?.turnLifecycle?.accepted) {
           const data = await fetchTranscriptPage(target.projectId, target.sessionId,
             transcriptTailOffset(state.session.turnCount + 1), TRANSCRIPT_PAGE_SIZE);
           if (!ownsOperation(operation, workspaceOperation.current)) return;
-          dispatch({ type: "session-created", session: { ...state.session, registered: true, turnCount: data.total } });
+          dispatch({ type: "session-created", session: { ...state.session, turnCount: data.total } });
           setTranscript(transcriptViewFrom(target.projectId, target.sessionId, data));
           setLiveTurns([]);
         }
         setPendingUserText(null);
       } catch (error: unknown) {
         if (ownsOperation(operation, workspaceOperation.current)) {
-          setRegistrationIssue(`The turn stopped, but its saved conversation could not be refreshed. ${workspaceError(error).message}`);
+          setHistoryIssue(`The turn stopped, but its saved conversation could not be refreshed. ${workspaceError(error).message}`);
         }
       } finally { finishWorkspaceOperation(operation); }
     }).catch((error: unknown) => {
@@ -1949,7 +1938,7 @@ export default function App() {
       if (stopPromiseRef.current === pending) stopPromiseRef.current = null;
     });
     stopPromiseRef.current = pending;
-  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, loadCatalog, ownsOperation, state.session]);
+  }, [applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, loadHistory, ownsOperation, state.session]);
 
   const deleteConversation = useCallback(async () => {
     const target = deleteDialog;
@@ -1988,18 +1977,12 @@ export default function App() {
       if (result.projectId !== target.projectId || result.sessionId !== target.sessionId || result.status !== "deleted") {
         throw protocolMismatch("The backend deleted a different conversation.");
       }
-      catalogLoading.current = null;
+      historyLoading.current = null;
       const selectedDeleted = sameSelection(conversationRef.current.selected, target);
-      setSessionLists((lists) => {
-        const list = lists[target.projectId];
-        if (list === undefined) return lists;
+      setSessionList((list) => {
+        if (list === null || list.projectId !== target.projectId) return list;
         const items = list.items.filter((item) => item.sessionId !== target.sessionId);
-        return { ...lists, [target.projectId]: { ...list, items, total: Math.max(0, list.total - (list.items.length - items.length)) } };
-      });
-      setCatalog((current) => current === null ? null : {
-        ...current,
-        selectedSessionId: current.selectedProjectId === target.projectId &&
-          (selectedDeleted || current.selectedSessionId === target.sessionId) ? null : current.selectedSessionId,
+        return { ...list, items, total: Math.max(0, list.total - (list.items.length - items.length)) };
       });
       if (sameSelection(resumeSelectionRef.current, target)) {
         resumeSelectionRef.current = null;
@@ -2014,14 +1997,14 @@ export default function App() {
         setSelectionPreview(null);
         setLiveTurns([]);
         setPendingUserText(null);
-        setRegistrationIssue(null);
+        setHistoryIssue(null);
         setExtensionFlow(null);
         setChatSelection(null);
         setReferenceIssue(null);
         submittedDocumentRef.current = null;
         workingDocumentSourcesRef.current = null;
       }
-      await loadCatalog(owner.generation);
+      await loadHistory(owner.generation);
       if (!isCurrent()) return;
       setDeleteDialog(null);
       scheduleOwnedFrame(operation, () => document.getElementById("main-workspace")?.focus());
@@ -2031,7 +2014,7 @@ export default function App() {
       if (operation !== null) finishWorkspaceOperation(operation);
       if (deleteOwnerRef.current === owner) deleteOwnerRef.current = null;
     }
-  }, [applyConversation, beginWorkspaceOperation, deleteDialog, finishWorkspaceOperation, loadCatalog, ownsOperation,
+  }, [applyConversation, beginWorkspaceOperation, deleteDialog, finishWorkspaceOperation, loadHistory, ownsOperation,
     scheduleOwnedFrame, state.snapshot?.lifecycle, stopTurn]);
 
   const resolvePendingApproval = useCallback((approved: boolean, expectedApprovalId?: string) => {
@@ -2140,7 +2123,7 @@ export default function App() {
             resumeDraftRef.current = null;
             resumeSelectionRef.current = null;
           }
-          setRegistrationIssue(null);
+          setHistoryIssue(null);
           setLiveTurns([]);
           setPendingUserText(null);
           setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: "Loading saved transcript…", items: [], offset: 0, total: selected.turnCount, hasOlder: false });
@@ -2197,13 +2180,10 @@ export default function App() {
   }, [ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, slashCatalogOwner]);
 
   useEffect(() => {
-    if (catalog === null || catalog.selectedProjectId === null || conversation.selected !== null || workspaceBusy !== null) return;
-    const projectId = catalog.selectedProjectId;
-    const sessionId = resumeSelectionRef.current?.projectId === projectId ? resumeSelectionRef.current.sessionId : catalog.selectedSessionId;
-    if (sessionId === null) return;
-    const summary = sessionLists[projectId]?.items.find((item) => item.sessionId === sessionId);
-    if (summary !== undefined) void selectConversation(projectId, summary);
-  }, [catalog, conversation.selected, selectConversation, sessionLists, workspaceBusy]);
+    if (sessionList === null || conversation.selected !== null || workspaceBusy !== null) return;
+    const summary = conversationToRestore(projectRef.current?.projectId ?? null, sessionList, resumeSelectionRef.current);
+    if (summary !== null) void selectConversation(sessionList.projectId, summary);
+  }, [conversation.selected, selectConversation, sessionList, workspaceBusy]);
 
   const activeProjectId = bindingGenerationRef.current === state.snapshot?.generation ? project?.projectId ?? null : null;
 
@@ -2238,7 +2218,7 @@ export default function App() {
         setTranscript({ projectId: activeProjectId, sessionId: session.sessionId, status: "ready", issue: null, items: [], offset: 0, total: 0, hasOlder: false });
         setLiveTurns([]);
         setPendingUserText(null);
-        setRegistrationIssue(null);
+        setHistoryIssue(null);
         focusComposer(operation);
       } catch (error) {
         if (!isCurrent()) return;
@@ -2377,19 +2357,14 @@ export default function App() {
           type: "session-created",
           session: {
             ...state.session,
-            registered: result.registrationStatus === "registered" ? true : state.session.registered,
             turnCount: Math.max(state.session.turnCount, answer.turnNumber),
           },
         });
       }
-      if (result.registrationStatus === "pending") {
-        setRegistrationIssue(result.registrationIssue ?? "The saved conversation is awaiting catalog registration.");
-      } else if (result.registrationStatus === "registered") {
-        setRegistrationIssue(null);
-      }
+      setHistoryIssue(null);
       await stopPromiseRef.current;
       if (!isCurrent() || conversationRef.current.stopRequest !== null) return;
-      if (result.registrationStatus === "registered") await loadCatalog(generation);
+      await loadHistory(generation);
       if (!isCurrent()) return;
       scheduleOwnedFrame(owner, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
       focusComposer(owner);
@@ -2429,7 +2404,7 @@ export default function App() {
       );
       await (async () => {
         try {
-          await loadCatalog(generation);
+          await loadHistory(generation);
           const currentSession = state.session;
           if (
             !selectionIsCurrent() ||
@@ -2451,17 +2426,17 @@ export default function App() {
           }
           dispatch({
             type: "session-created",
-            session: { ...currentSession, registered: true, turnCount: data.total },
+            session: { ...currentSession, turnCount: data.total },
           });
           setTranscript(transcriptViewFrom(selected.projectId, selected.sessionId, data));
           setLiveTurns([]);
-          setRegistrationIssue(null);
+          setHistoryIssue(null);
           scheduleOwnedFrame(operation, () => transcriptEndRef.current?.scrollIntoView({ block: "end" }));
         } catch (reconciliationError: unknown) {
           if (!selectionIsCurrent()) return;
           const issue = workspaceError(reconciliationError);
           setWorkspaceIssue(safe);
-          setRegistrationIssue(`${next.submittedTurn?.accepted || isPersistedTurnFailure(next.failure) ? "The prompt is saved, but" : "Delivery is unconfirmed and"} the conversation state could not be refreshed. ${issue.message}`);
+          setHistoryIssue(`${next.submittedTurn?.accepted || isPersistedTurnFailure(next.failure) ? "The prompt is saved, but" : "Delivery is unconfirmed and"} the conversation state could not be refreshed. ${issue.message}`);
         } finally {
           finishWorkspaceOperation(operation);
         }
@@ -2470,7 +2445,7 @@ export default function App() {
       if (turnSettlementPromiseRef.current === settlement) turnSettlementPromiseRef.current = null;
     });
     turnSettlementPromiseRef.current = settlement;
-  }, [captureOwner, ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
+  }, [captureOwner, ownsOperation, scheduleOwnedFrame, applyConversation, beginWorkspaceOperation, finishWorkspaceOperation, focusComposer, loadHistory, state.session]);
 
   const sendNewTurn = useCallback(() => {
     applyConversation({ type: "new-turn-requested", generation: generationRef.current, projectEpoch: projectEpochRef.current });
@@ -2570,31 +2545,33 @@ export default function App() {
     runLifecycle("restart");
   }, [extensionFlow, runLifecycle]);
 
-  const retryRegistration = useCallback(() => {
+  // Re-read the saved list and transcript after a refresh failed; nothing is resent.
+  const refreshSavedConversation = useCallback(() => {
     const selected = conversation.selected;
     if (selected === null || conversation.activeTurn !== null) return;
-    const operation = beginWorkspaceOperation("Retrying registration");
+    const operation = beginWorkspaceOperation("Refreshing saved conversation");
     if (operation === null) return;
-    const generation = operation.generation;
-    const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
-    void backendClient.request("session.retry_registration", selected as unknown as JsonObject).then(async (data) => {
-      const result = data as unknown as RegistrationRetryDto;
-      if (!isCurrent()) return;
-      if (result.projectId !== selected.projectId || result.sessionId !== selected.sessionId) {
-        throw protocolMismatch("The backend returned registration state for a different conversation.");
+    const isCurrent = () => ownsOperation(operation, workspaceOperation.current) && sameSelection(conversationRef.current.selected, selected);
+    void (async () => {
+      try {
+        await loadHistory(operation.generation);
+        const currentSession = state.session;
+        if (!isCurrent() || currentSession === null || currentSession.sessionId !== selected.sessionId) return;
+        const data = await fetchTranscriptPage(selected.projectId, selected.sessionId,
+          transcriptTailOffset(currentSession.turnCount + 1), TRANSCRIPT_PAGE_SIZE);
+        if (!isCurrent()) return;
+        dispatch({ type: "session-created", session: { ...currentSession, turnCount: data.total } });
+        setTranscript(transcriptViewFrom(selected.projectId, selected.sessionId, data));
+        setLiveTurns([]);
+        setHistoryIssue(null);
+      } catch (error: unknown) {
+        if (isCurrent()) setHistoryIssue(`The conversation state could not be refreshed. ${workspaceError(error).message}`);
+      } finally {
+        if (isCurrent()) focusComposer(operation);
+        finishWorkspaceOperation(operation);
       }
-      if (result.status === "registered") {
-        setRegistrationIssue(null);
-        if (state.session !== null) dispatch({ type: "session-created", session: { ...state.session, registered: true } });
-        await loadCatalog(generation);
-      } else setRegistrationIssue(result.issue ?? "Catalog registration is still pending.");
-    }).catch((error: unknown) => {
-      if (isCurrent()) setWorkspaceIssue(workspaceError(error));
-    }).finally(() => {
-      if (isCurrent()) focusComposer(operation);
-      finishWorkspaceOperation(operation);
-    });
-  }, [ownsOperation, beginWorkspaceOperation, conversation.activeTurn, conversation.selected, finishWorkspaceOperation, focusComposer, loadCatalog, state.session]);
+    })();
+  }, [ownsOperation, beginWorkspaceOperation, conversation.activeTurn, conversation.selected, finishWorkspaceOperation, focusComposer, loadHistory, state.session]);
 
   const updateThinkingMode = useCallback(async (
     mode: "normal" | "extended",
@@ -2681,7 +2658,8 @@ export default function App() {
     if (pendingUserText !== null) transcriptEndRef.current?.scrollIntoView({ block: "end" });
   }, [liveTurns.length, pendingUserText]);
 
-  const selectedRegistered = state.session?.registered === true;
+  // A selected session with a saved prompt is already in the list (or will be after the next refresh).
+  const selectedSaved = (state.session?.turnCount ?? 0) > 0;
   const interaction = conversationInteractionState(conversation);
   const idle = state.activeAction === null && !interaction.turnActive && workspaceBusy === null && !documentBusy && pendingApproval === null;
   const annotationControls = useMemo<AnnotationControls>(() => ({
@@ -2713,8 +2691,11 @@ export default function App() {
   const selectedSummary = useMemo(() => {
     const selected = conversation.selected;
     if (selected === null) return null;
-    return sessionLists[selected.projectId]?.items.find((item) => item.sessionId === selected.sessionId) ?? null;
-  }, [conversation.selected, sessionLists]);
+    if (sessionList?.projectId !== selected.projectId) return null;
+    return sessionList.items.find((item) => item.sessionId === selected.sessionId) ?? null;
+  }, [conversation.selected, sessionList]);
+  // The sidebar shows only the opened project's list; a list left over from another project is never drawn.
+  const openedList = project !== null && sessionList?.projectId === project.projectId ? sessionList : null;
   const visibleTranscript = selectionPreview?.transcript ?? transcript;
   const visibleTurns = useMemo(() => mergeConversationTurns(
     visibleTranscript === null
@@ -2745,28 +2726,28 @@ export default function App() {
         <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
           <h2 id="workspace-label">Project</h2>
           <button type="button" onClick={showProjectChooser} disabled={!idle || state.snapshot?.lifecycle !== "ready" || state.diagnostics === null}>{project === null ? "Open project" : "Switch project"}</button>
-          {catalog === null && <p className="sidebar-note">{project === null ? "Choose a project to load its conversations." : catalogGeneration === null ? "Loading selected project…" : "Project unavailable"}</p>}
-          {catalog?.issue !== null && catalog?.issue !== undefined && <p className="sidebar-note">{catalog.issue}</p>}
-          {catalog?.projects.map((project: ProjectSummaryDto) => {
-            const list = sessionLists[project.projectId];
-            const rows = sidebarRowsForProject(project.projectId, list?.items ?? [], conversation.selected, selectedRegistered);
-            return <div className="project-group" key={project.projectId}>
-              <div className="project-heading"><strong tabIndex={0} title={project.name}>{project.name}</strong><small>{project.sessionCount} saved</small></div>
-              {list?.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
-              {rows.length === 0 && list?.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
-                const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === project.projectId;
+          {openedList === null && <p className="sidebar-note">{project === null ? "Choose a project to load its conversations." : historyGeneration === null ? "Loading selected project…" : "Project unavailable"}</p>}
+          {project !== null && openedList !== null && (() => {
+            const list = openedList;
+            const rows = sidebarRowsForProject(list.projectId, list.items, conversation.selected, selectedSaved);
+            const name = projectDisplayName(project.rootPath);
+            return <div className="project-group">
+              <div className="project-heading"><strong tabIndex={0} title={project.rootPath}>{name}</strong><small>{list.total} saved</small></div>
+              {list.status === "unavailable" && <p className="sidebar-note">{list.issue ?? "Conversations unavailable"}</p>}
+              {rows.length === 0 && list.status !== "unavailable" ? <p className="sidebar-note">No saved conversations</p> : <ul className="session-list">{rows.map((session) => {
+                const isSelected = conversation.selected?.sessionId === session.sessionId && conversation.selected.projectId === list.projectId;
                 return <li key={session.sessionId} tabIndex={-1} onContextMenu={(event) => {
                   event.preventDefault();
                   const bounds = event.currentTarget.getBoundingClientRect();
                   conversationMenuReturnFocusRef.current = event.currentTarget;
-                  setConversationMenu({ projectId: project.projectId, session,
+                  setConversationMenu({ projectId: list.projectId, session,
                     left: Math.max(8, Math.min(event.clientX || bounds.left, window.innerWidth - 200)),
                     top: Math.max(8, Math.min(event.clientY || bounds.bottom, window.innerHeight - 110)) });
-                }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(project.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
+                }}><button type="button" className="session-link" title={session.title} aria-label={session.title} aria-current={isSelected ? "page" : undefined} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null || session.status !== "ready"} onClick={() => void selectConversation(list.projectId, session)}><span>{session.title}</span><small>{session.transient ? "Not saved yet" : `${session.turnCount} turns${session.status === "ready" ? "" : ` · ${session.status}`}`}</small></button></li>;
               })}</ul>}
-              {list?.hasMore && <button className="load-more-sessions" type="button" onClick={() => loadMoreSessions(project.projectId)} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
+              {list.hasMore && <button className="load-more-sessions" type="button" onClick={loadMoreSessions} disabled={interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null}>Load more conversations</button>}
             </div>;
-          })}
+          })()}
         </section>
         <div className="sidebar-spacer" />
         <section className="backend-controls" aria-labelledby="backend-controls-title">
@@ -2836,7 +2817,7 @@ export default function App() {
               </div>
             </div>
           </section>}
-          {selectionPreview === null && registrationIssue !== null && <section className="notice registration-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CATALOG REGISTRATION PENDING</p><p>{registrationIssue}</p><button type="button" onClick={retryRegistration} disabled={interaction.turnActive || workspaceBusy !== null}>Retry registration without resending</button></div></section>}
+          {selectionPreview === null && historyIssue !== null && <section className="notice history-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CONVERSATION NOT REFRESHED</p><p>{historyIssue}</p><button type="button" onClick={refreshSavedConversation} disabled={interaction.turnActive || workspaceBusy !== null}>Refresh without resending</button></div></section>}
           {(state.phase === "starting" || (state.snapshot === null && state.error === null && !state.browserPreview)) && <section className="empty-state" role="status"><h3>Preparing your research workspace</h3><p>Connecting to the local backend. Choose a project when it is ready.</p></section>}
           {state.phase === "stopped" && state.snapshot !== null && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><h3 id="stopped-title">The local backend is stopped</h3><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
           {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
@@ -2888,7 +2869,7 @@ export default function App() {
               onChange={(draft) => applyConversation({ type: "draft-changed", draft })}
               onSubmit={sendTurn}
             />
-            <details className="session-meta"><summary>Session details · {activeSession.turnCount} turns</summary><p>Session {activeSession.sessionId} · {selectedRegistered ? "cataloged" : "transient"}</p></details>
+            <details className="session-meta"><summary>Session details · {activeSession.turnCount} turns</summary><p>Session {activeSession.sessionId}</p></details>
           </section>}
           {(state.phase === "degraded" || state.phase === "crashed") && state.diagnostics !== null && <RuntimeDetails diagnostics={state.diagnostics} />}
         </div>

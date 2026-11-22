@@ -556,7 +556,7 @@ export type SnapshotExtensionTransition =
 
 export interface BackendSnapshotTransitionInput {
   currentGeneration: number;
-  catalogGeneration: number | null;
+  historyGeneration: number | null;
   hasProject: boolean;
   selectedConversation: { projectId: string; sessionId: string } | null;
   resumeSelection: { projectId: string; sessionId: string } | null;
@@ -578,7 +578,7 @@ export type BackendSnapshotTransition =
       nextResumeDraft: string | null;
       clearBindingGeneration: boolean;
       clearTransientUi: boolean;
-      resetStaleCatalog: boolean;
+      resetStaleHistory: boolean;
       extensionTransition: SnapshotExtensionTransition;
       completedAction: "start" | "restart" | "shutdown" | null;
     };
@@ -593,8 +593,8 @@ export function planBackendSnapshotTransition(
   const generationChanged = snapshot.generation !== currentGeneration;
   const captureResumeState = generationChanged && input.hasProject;
   const clearTransientUi = generationChanged || snapshot.lifecycle !== "ready";
-  const resetStaleCatalog =
-    input.catalogGeneration !== null && input.catalogGeneration !== snapshot.generation;
+  const resetStaleHistory =
+    input.historyGeneration !== null && input.historyGeneration !== snapshot.generation;
   let extensionTransition: SnapshotExtensionTransition = "none";
   if (clearTransientUi) {
     if (snapshot.lifecycle === "restarting") {
@@ -619,7 +619,7 @@ export function planBackendSnapshotTransition(
     nextResumeDraft: captureResumeState ? input.draft : input.resumeDraft,
     clearBindingGeneration: captureResumeState,
     clearTransientUi,
-    resetStaleCatalog,
+    resetStaleHistory,
     extensionTransition,
     completedAction: input.completedAction ?? null,
   };

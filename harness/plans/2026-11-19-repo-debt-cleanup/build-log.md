@@ -20,7 +20,7 @@
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
-| C6 | In progress | `evidence/C6-S1/`、`evidence/C6-S2/` | — | C6-S3 |
+| C6 | In progress | `evidence/C6-S1/`–`evidence/C6-S3/` | — | C6-S4 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
@@ -593,3 +593,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C6-S2/backend.md`。
 - **限制**：`npm test` 的 DTO 一致性檢查在 C6-S3 完成前預期失敗（219 pass、1 fail，只有這一項）；`npm run build` 也留到 C6-S3 後執行。`for_agents/` 的 catalog 描述過時，交給 C10。
 - **下一步**：C6-S3 前端。
+
+### C6-S3 前端：單一專案清單、選取恢復純函式、移除 registration UI（2026-11-22）
+
+- **觀察結果**：`loadSelectedProjectHistory` 只呼叫 `session.list`；刪除 `catalog` state、`ProjectListDto` 等 DTO 與 registration 的 state、按鈕、`cataloged`／`transient` 文字；S070 把 `sessionLists` 改為單一 `sessionList`。選取恢復抽成 `conversations.ts` 的 `conversationToRestore`，(a)(b)(c) 都有測試。原本 registration 通知也承擔「已存檔對話無法重新整理」的訊息，這部分保留為 `historyIssue`，按鈕改為重新讀取清單與 transcript（不重送）。`npm run build` 第一次因 IIFE 漏呼叫失敗，補上後通過（第 1 次修正）。
+- **執行指令**：`npm run build`、`npm test`、grep。
+- **證據**：`evidence/C6-S3/frontend.md`（含 GUI 清單 6 項）。
+- **限制**：GUI 未驗證，交給使用者。
+- **下一步**：C6-S4 掃描量測。

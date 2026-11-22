@@ -564,11 +564,11 @@ test("error and diagnostic normalization stays bounded and omits unsafe detail",
   assert.equal("originalWorkingDirectory" in bounded, false);
 });
 
-test("snapshot transition on restart generation change captures resume state and resets stale catalog", () => {
+test("snapshot transition on restart generation change captures resume state and resets the stale history list", () => {
   const selected = { projectId: "project-1", sessionId: "123e4567e89b42d3a456426614174000" };
   const transition = planBackendSnapshotTransition({
     currentGeneration: 1,
-    catalogGeneration: 1,
+    historyGeneration: 1,
     hasProject: true,
     selectedConversation: selected,
     resumeSelection: null,
@@ -588,14 +588,14 @@ test("snapshot transition on restart generation change captures resume state and
     nextResumeDraft: "unsent draft",
     clearBindingGeneration: true,
     clearTransientUi: true,
-    resetStaleCatalog: true,
+    resetStaleHistory: true,
     extensionTransition: "interrupt-awaiting-load",
     completedAction: "restart",
   });
 
   const stale = planBackendSnapshotTransition({
     currentGeneration: 2,
-    catalogGeneration: 2,
+    historyGeneration: 2,
     hasProject: true,
     selectedConversation: selected,
     resumeSelection: null,
@@ -606,11 +606,11 @@ test("snapshot transition on restart generation change captures resume state and
   assert.deepEqual(stale, { accepted: false });
 });
 
-test("snapshot transition on crash clears transient UI without dropping current generation catalog", () => {
+test("snapshot transition on crash clears transient UI without dropping the current generation history list", () => {
   const selected = { projectId: "project-1", sessionId: "123e4567e89b42d3a456426614174000" };
   const transition = planBackendSnapshotTransition({
     currentGeneration: 1,
-    catalogGeneration: 1,
+    historyGeneration: 1,
     hasProject: true,
     selectedConversation: selected,
     resumeSelection: null,
@@ -635,7 +635,7 @@ test("snapshot transition on crash clears transient UI without dropping current 
     nextResumeDraft: null,
     clearBindingGeneration: false,
     clearTransientUi: true,
-    resetStaleCatalog: false,
+    resetStaleHistory: false,
     extensionTransition: "interrupt",
     completedAction: null,
   });

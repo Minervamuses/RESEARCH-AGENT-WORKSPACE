@@ -157,8 +157,6 @@ export interface TurnCompletedDto {
   validationErrors: string[];
   toolSummaries: ToolSummaryDto[];
   responseKind?: "answer" | "command";
-  registrationStatus?: "registered" | "pending" | "not_required";
-  registrationIssue?: string | null;
   extensionAction?: "status" | "preview";
 }
 
@@ -176,21 +174,6 @@ export interface SessionCreatedDto {
   startupDiagnostics: string[];
   extensionRevision: number;
   projectId?: string;
-  registered?: boolean;
-}
-
-export interface ProjectSummaryDto {
-  projectId: string;
-  name: string;
-  sessionCount: number;
-}
-
-export interface ProjectListDto {
-  status: "ready" | "unavailable";
-  issue: string | null;
-  projects: ProjectSummaryDto[];
-  selectedProjectId: string | null;
-  selectedSessionId: string | null;
 }
 
 export interface SessionRenamedDto {
@@ -228,14 +211,6 @@ export interface SessionListDto {
 
 export interface SessionSelectedDto extends SessionCreatedDto {
   projectId: string;
-  registered: boolean;
-}
-
-export interface RegistrationRetryDto {
-  projectId: string;
-  sessionId: string;
-  status: "registered" | "pending";
-  issue: string | null;
 }
 
 export interface ToolActivityDto {
@@ -472,7 +447,6 @@ export interface SessionPermissionSetDto {
 export interface MethodResults {
   "runtime.diagnostics": RuntimeDiagnosticsDto;
   "runtime.shutdown": RuntimeShutdownDto;
-  "project.list": ProjectListDto;
   "workspace.select": ProjectWorkspaceDto;
   "document.open": DocumentOpenDto;
   "document.save": DocumentResultDto;
@@ -482,7 +456,6 @@ export interface MethodResults {
   "session.select": SessionSelectedDto;
   "session.delete": SessionDeletedDto;
   "session.rename": SessionRenamedDto;
-  "session.retry_registration": RegistrationRetryDto;
   "session.transcript": SessionTranscriptDto;
   "session.turn": TurnCompletedDto;
   "session.set_permission": SessionPermissionSetDto;

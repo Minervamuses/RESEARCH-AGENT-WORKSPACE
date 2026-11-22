@@ -875,7 +875,7 @@ h3 {
 .composer > .reference-cards .reference-card[open] summary strong,
 .composer > .reference-cards .reference-card[open] summary span { white-space: normal; }
 
-.registration-notice {
+.history-notice {
   border-color: #e5d4a8;
   background: #fffdf6;
 }

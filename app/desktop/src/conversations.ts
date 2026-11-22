@@ -1,4 +1,5 @@
 import type {
+  SessionSummaryDto,
   TranscriptTurnDto,
   Reference,
   SubmittedContext,
@@ -10,6 +11,21 @@ export const MAX_ACTIVITY_ITEMS = 32;
 export interface ConversationSelection {
   projectId: string;
   sessionId: string;
+}
+
+/**
+ * The saved conversation to reselect once the opened project's list loads
+ * (U19): the selection captured before a backend crash or restart, if that
+ * conversation is still listed. Nothing is selected otherwise.
+ */
+export function conversationToRestore(
+  openedProjectId: string | null,
+  list: { projectId: string; items: readonly SessionSummaryDto[] } | null,
+  resume: ConversationSelection | null,
+): SessionSummaryDto | null {
+  if (openedProjectId === null || list === null || resume === null) return null;
+  if (list.projectId !== openedProjectId || resume.projectId !== openedProjectId) return null;
+  return list.items.find((item) => item.sessionId === resume.sessionId) ?? null;
 }
 
 export interface ConversationActivity {
