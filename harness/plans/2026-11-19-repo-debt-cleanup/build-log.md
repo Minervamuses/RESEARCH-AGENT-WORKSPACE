@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S7/` | — | C7-S8 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S8/` | — | C7-S9 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -673,3 +673,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S7/retry-stop.md`。
 - **限制**：無。
 - **下一步**：C7-S8 `service.py` 模組化。
+
+### C7-S8 `service.py` 模組化（S8a–S8f，2026-11-22）
+
+- **觀察結果**：分 6 個 commit 把 handler 原封不動搬到 11 個模組的無狀態類別（`DesktopService` 繼承），`service.py` 由 4157 行降到 461 行，只剩 dispatch、生命週期、接線、共用守衛與 3 個共用小工具（evidence 逐一分類）。非純搬移只有 3 處（logger 名稱固定、一個 staticmethod 呼叫改指新類別、一個測試的 import 路徑）。模組名稱與提案的差異記在 evidence。
+- **執行指令**：每個 commit 後 import 檢查與 desktop 測試；最後沙箱外完整 pytest 1827 passed。
+- **證據**：`evidence/C7-S8/modules.md`、搬移工具 `split_service.py`、`fixup_imports.py`。
+- **限制**：無。
+- **下一步**：C7-S9 階段收尾。
