@@ -1,14 +1,5 @@
 import type { IPosition, IRange } from "monaco-editor/editor/editor.api";
-
-export interface DocumentSnapshot {
-  rootPath: string;
-  path: string;
-  editorRevision: number;
-  sourceText: string;
-  diskFingerprint: string;
-  rangeStartUtf16?: number;
-  rangeEndUtf16?: number;
-}
+import type { DocumentContextDto } from "../protocol.ts";
 
 export interface SourceChange {
   range: IRange;
@@ -55,7 +46,7 @@ export function applyDocumentChanges(source: string, changes: readonly SourceCha
   return edits.reduce((text, change) => text.slice(0, change.start) + change.text + text.slice(change.end), source);
 }
 
-export function captureDocumentSelection(snapshot: DocumentSnapshot | null): DocumentSnapshot | null {
+export function captureDocumentSelection(snapshot: DocumentContextDto | null): DocumentContextDto | null {
   if (!snapshot) return null;
   const start = snapshot.rangeStartUtf16;
   const end = snapshot.rangeEndUtf16;

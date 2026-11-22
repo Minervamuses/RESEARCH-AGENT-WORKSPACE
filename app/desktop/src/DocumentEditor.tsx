@@ -10,8 +10,8 @@ import {
   documentOffsetAt,
   documentPositionAt,
   applyDocumentChanges,
-  type DocumentSnapshot,
 } from "./lib/documentSource.ts";
+import type { DocumentContextDto } from "./protocol.ts";
 import { readEditorFontSize, writeEditorFontSize, zoomedFontSize, type ZoomStep } from "./editorZoom.ts";
 
 export interface AnnotationControls {
@@ -51,10 +51,10 @@ export function AnnotationComment({ annotation, controls }: { annotation: DraftA
 }
 
 interface DocumentEditorProps {
-  value: DocumentSnapshot | null;
-  onChange: (snapshot: DocumentSnapshot) => void;
+  value: DocumentContextDto | null;
+  onChange: (snapshot: DocumentContextDto) => void;
   onSave: () => void;
-  onAddReference?: (snapshot: DocumentSnapshot) => void;
+  onAddReference?: (snapshot: DocumentContextDto) => void;
   annotationControls?: AnnotationControls;
   saveDisabled?: boolean;
   /** Bibliography entries offered after `[@`, `; @`, `\cite{` or a comma inside it. */
@@ -68,7 +68,7 @@ function modelSource(source: string): string {
 export function DocumentEditor({ value, onChange, onSave, onAddReference, annotationControls, saveDisabled = false, citationEntries }: DocumentEditorProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
-  const snapshotRef = useRef<DocumentSnapshot | null>(value);
+  const snapshotRef = useRef<DocumentContextDto | null>(value);
   const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled });
   const citationEntriesRef = useRef(citationEntries);
   citationEntriesRef.current = citationEntries;

@@ -6,6 +6,8 @@ import {
   advanceWorkingDocumentSources,
   documentContextPayload,
   documentOperationContext,
+  planConflictResolution,
+  planDocumentResult,
   reconcileSavedDocument,
   submittedDocumentSource,
   type WorkingDocumentSources,
@@ -172,4 +174,75 @@ test("saved document receipts advance two UTF-16 references without changing the
   assert.equal(firstReference.kind === "document" && firstReference.document.snapshot.sourceText, secondSaved.sourceText);
   assert.deepEqual(advanceWorkingDocumentSources(working, beforeFirst, firstSaved), working, "an older saved base cannot roll back the current snapshot");
   assert.deepEqual(submitted, original);
+});
+
+const snap = { rootPath: "/p", path: "a.md", editorRevision: 3, sourceText: "old", diskFingerprint: "fp0" };
+const savedResult = { path: "a.md", rootPath: "/p", status: "saved" as const, sourceText: "new", diskFingerprint: "fp1", editorRevision: 4 };
+
+test("document result: a result for another open file or a different source is not applied", () => {
+  assert.deepEqual(planDocumentResult(savedResult, snap, null, null, null), { kind: "ignore" });
+  assert.deepEqual(planDocumentResult(savedResult, snap, { ...snap, path: "b.md" }, null, null), { kind: "ignore" });
+  assert.deepEqual(planDocumentResult({ ...savedResult, path: "b.md" }, snap, snap, null, null), { kind: "mismatch" });
+  assert.deepEqual(planDocumentResult({ ...savedResult, rootPath: "/q" }, snap, snap, null, null), { kind: "mismatch" });
+});
+
+test("document result: saved reconciles an unchanged editor and only advances the fingerprint after edits", () => {
+  const plain = planDocumentResult(savedResult, snap, snap, null, null);
+  assert.equal(plain.kind, "saved");
+  if (plain.kind !== "saved") return;
+  assert.equal(plain.document.sourceText, "new");
+  assert.equal(plain.baseline.diskFingerprint, "fp1");
+  assert.equal(plain.lastAction, null);
+  assert.equal(plain.advanceSources, false);
+
+  const edited = planDocumentResult(savedResult, snap, { ...snap, editorRevision: 4, sourceText: "typed" }, null, null);
+  assert.equal(edited.kind === "saved" && edited.document.sourceText, "typed");
+  assert.equal(edited.kind === "saved" && edited.document.diskFingerprint, "fp1");
+
+  const action = { turnId: "t", callId: "c1", sourceSnapshot: snap };
+  const applied = planDocumentResult(savedResult, snap, snap, action, null);
+  assert.equal(applied.kind === "saved" && applied.advanceSources, true);
+  assert.deepEqual(applied.kind === "saved" && applied.lastAction, { set: action });
+  const undo = planDocumentResult(savedResult, snap, snap, { ...action, undoOfCallId: "c0" }, null);
+  assert.deepEqual(undo.kind === "saved" && undo.lastAction, { set: null });
+  // A "saved" result without its text and fingerprint is treated like a cancelled one.
+  assert.equal(planDocumentResult({ ...savedResult, diskFingerprint: undefined }, snap, snap, null, null).kind, "cancelled");
+});
+
+test("document result: conflict and failure keep the editor and pick the right base for the conflict panel", () => {
+  const conflict = { path: "a.md", status: "conflict" as const, expectedSnapshot: snap };
+  const direct = planDocumentResult(conflict, snap, snap, null, null);
+  assert.equal(direct.kind, "conflict");
+  assert.equal(direct.kind === "conflict" && direct.conflict.base, snap);
+  assert.match(direct.kind === "conflict" ? direct.notice : "", /Choose which version to keep/);
+
+  const submitted = { ...snap, sourceText: "sent" };
+  const agent = { turnId: "t" };
+  const viaSubmitted = planDocumentResult(conflict, snap, snap, agent, submitted);
+  assert.equal(viaSubmitted.kind === "conflict" && viaSubmitted.conflict.base, submitted);
+  const source = { ...snap, sourceText: "source" };
+  const viaSource = planDocumentResult(conflict, snap, snap, { ...agent, sourceSnapshot: source }, submitted);
+  assert.equal(viaSource.kind === "conflict" && viaSource.conflict.base, source);
+
+  const failed = planDocumentResult({ path: "a.md", status: "failed", issue: "disk full" }, snap, snap, null, null);
+  assert.equal(failed.kind === "failed" && failed.notice, "disk full");
+  const bare = planDocumentResult({ path: "a.md", status: "failed" }, snap, snap, null, null);
+  assert.equal(bare.kind === "failed" && bare.notice, "Save failed. The editor and candidate are retained.");
+  const cancelled = planDocumentResult({ path: "a.md", status: "cancelled" }, snap, snap, null, null);
+  assert.deepEqual(cancelled, { kind: "cancelled", notice: "Operation cancelled. Your current text is retained." });
+});
+
+test("conflict resolution: agent operations resend, a manual save needs the editor unchanged since the conflict", () => {
+  const result = { path: "a.md", status: "conflict" as const, expectedSnapshot: { ...snap, diskFingerprint: "fp9" } };
+  const action = { turnId: "t" };
+  assert.deepEqual(planConflictResolution({ action, result, base: snap }, "keep", snap),
+    { kind: "apply", action, expectedSnapshot: result.expectedSnapshot });
+  const manual = { action: null, result, base: snap };
+  assert.deepEqual(planConflictResolution(manual, "use", snap), { kind: "save-again", diskFingerprint: "fp9" });
+  assert.deepEqual(planConflictResolution(manual, "use", null), { kind: "no-document" });
+  assert.equal(planConflictResolution(manual, "use", { ...snap, sourceText: "changed" }).kind, "editor-changed");
+  assert.equal(planConflictResolution(manual, "use", { ...snap, editorRevision: 9 }).kind, "editor-changed");
+  assert.deepEqual(planConflictResolution(manual, "keep", snap), { kind: "dismiss" });
+  assert.deepEqual(planConflictResolution(manual, "cancel", snap), { kind: "dismiss" });
+  assert.deepEqual(planConflictResolution({ action: null, result: { path: "a.md", status: "conflict" }, base: snap }, "use", snap), { kind: "dismiss" });
 });

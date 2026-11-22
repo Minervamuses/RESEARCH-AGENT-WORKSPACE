@@ -46,6 +46,7 @@ import {
   type VisibleConversationTurn,
 } from "./conversations.ts";
 import type {
+  DocumentContextDto,
   DocumentResultDto,
   PermissionMode,
   ProjectWorkspaceDto,
@@ -107,12 +108,13 @@ import {
   documentContextPayload,
   documentOperationContext,
   documentReference,
-  reconcileSavedDocument,
   submittedDocumentSource,
+  planConflictResolution,
+  planDocumentResult,
   type DocumentAction,
+  type DocumentConflict,
   type WorkingDocumentSources,
 } from "./lib/documents.ts";
-import type { DocumentSnapshot } from "./lib/documentSource.ts";
 import { protocolMismatch, workspaceError } from "./lib/errors.ts";
 import { api, eventData } from "./api.ts";
 import {
@@ -589,7 +591,7 @@ export default function App() {
   const [chooserIssue, setChooserIssue] = useState<string | null>(null);
   const [discardDraft, setDiscardDraft] = useState(false);
   const [dirtyChoice, setDirtyChoice] = useState<"save" | "discard">("save");
-  const documentBaselineRef = useRef<DocumentSnapshot | null>(null);
+  const documentBaselineRef = useRef<DocumentContextDto | null>(null);
   const [sessionList, setSessionList] = useState<SessionListDto | null>(null);
   const [conversationMenu, setConversationMenu] = useState<{ projectId: string; session: SidebarSessionRow; left: number; top: number } | null>(null);
   const [renameDialog, setRenameDialog] = useState<{ projectId: string; sessionId: string; title: string; issue: string | null; owner: WorkspaceOperationOwner } | null>(null);
@@ -623,21 +625,21 @@ export default function App() {
     updateFor: updateExtensionsFor,
   } = useExtensions();
   const [approval, setApproval] = useState(() => initialApprovalOwnerState<WorkspaceOperationOwner>());
-  const [documentValue, setDocumentValue] = useState<DocumentSnapshot | null>(null);
-  const documentRef = useRef<DocumentSnapshot | null>(null);
+  const [documentValue, setDocumentValue] = useState<DocumentContextDto | null>(null);
+  const documentRef = useRef<DocumentContextDto | null>(null);
   const [rootPath, setRootPath] = useState("");
   const [documentBusy, setDocumentBusy] = useState(false);
   const documentBusyRef = useRef(false);
   const [documentNotice, setDocumentNotice] = useState<string | null>(null);
-  const [documentConflict, setDocumentConflict] = useState<{ action: DocumentAction | null; result: DocumentResultDto; base: DocumentSnapshot } | null>(null);
+  const [documentConflict, setDocumentConflict] = useState<DocumentConflict | null>(null);
   const [lastDocumentAction, setLastDocumentAction] = useState<DocumentAction | null>(null);
-  const documentRequestRef = useRef<{ requestId: string; turnId: string; context: DocumentSnapshot } | null>(null);
+  const documentRequestRef = useRef<{ requestId: string; turnId: string; context: DocumentContextDto } | null>(null);
   const documentApplyPromiseRef = useRef<Promise<void> | null>(null);
   const workingDocumentSourcesRef = useRef<WorkingDocumentSources | null>(null);
-  const submittedDocumentRef = useRef<DocumentSnapshot | null>(null);
+  const submittedDocumentRef = useRef<DocumentContextDto | null>(null);
   const selectedSkillNamesRef = useRef(new Set<string>());
   useEffect(() => { selectedSkillNamesRef.current.clear(); }, [conversation.selected?.projectId, conversation.selected?.sessionId]);
-  const updateDocument = useCallback((value: DocumentSnapshot | null) => {
+  const updateDocument = useCallback((value: DocumentContextDto | null) => {
     documentRef.current = value;
     setDocumentValue(value);
   }, []);
@@ -745,45 +747,30 @@ export default function App() {
     if (conversationMenu !== null) conversationMenuRef.current?.focus();
   }, [conversationMenu]);
 
-  const receiveDocumentResult = useCallback((result: DocumentResultDto, captured: DocumentSnapshot, action: DocumentAction | null) => {
-    const current = documentRef.current;
-    if (current === null || current.path !== captured.path || current.rootPath !== captured.rootPath) return;
-    if (result.path !== captured.path || (result.rootPath !== undefined && result.rootPath !== captured.rootPath)) {
-      throw protocolMismatch("The backend returned a document result for a different source.");
-    }
-    if (result.status === "saved" && result.sourceText !== undefined && result.diskFingerprint !== undefined) {
+  const receiveDocumentResult = useCallback((result: DocumentResultDto, captured: DocumentContextDto, action: DocumentAction | null) => {
+    const plan = planDocumentResult(result, captured, documentRef.current, action, submittedDocumentRef.current);
+    if (plan.kind === "ignore") return;
+    if (plan.kind === "mismatch") throw protocolMismatch("The backend returned a document result for a different source.");
+    if (plan.kind === "saved") {
       setCitationRefresh((value) => value + 1);
-      if (action?.callId !== undefined && action.sourceSnapshot !== undefined) {
+      if (plan.advanceSources && action?.sourceSnapshot !== undefined) {
         workingDocumentSourcesRef.current = advanceWorkingDocumentSources(workingDocumentSourcesRef.current, action.sourceSnapshot, result);
       }
-      documentBaselineRef.current = { ...captured, sourceText: result.sourceText, diskFingerprint: result.diskFingerprint };
-      if (current.editorRevision === captured.editorRevision && current.sourceText === captured.sourceText) {
-        updateDocument(reconcileSavedDocument(current, captured, {
-          sourceText: result.sourceText, diskFingerprint: result.diskFingerprint,
-          editorRevision: result.editorRevision,
-          rangeStartUtf16: result.rangeStartUtf16, rangeEndUtf16: result.rangeEndUtf16,
-        }, action !== null));
-        setDocumentNotice(null);
-      } else {
-        updateDocument({ ...current, diskFingerprint: result.diskFingerprint });
-        setDocumentNotice(null);
-      }
+      documentBaselineRef.current = plan.baseline;
+      updateDocument(plan.document);
+      setDocumentNotice(null);
       setDocumentConflict(null);
-      if (action?.callId !== undefined) setLastDocumentAction(action);
-      if (action?.undoOfCallId !== undefined) setLastDocumentAction(null);
-    } else if (result.status === "conflict") {
-      setDocumentConflict({ result, action, base: action?.sourceSnapshot ?? (action !== null ? submittedDocumentRef.current : null) ?? captured });
-      setDocumentNotice("The editor or disk changed. Choose which version to keep.");
-    } else if (result.status === "failed") {
-      setDocumentConflict({ result, action, base: action?.sourceSnapshot ?? (action !== null ? submittedDocumentRef.current : null) ?? captured });
-      setDocumentNotice(result.issue ?? "Save failed. The editor and candidate are retained.");
+      if (plan.lastAction !== null) setLastDocumentAction(plan.lastAction.set);
+    } else if (plan.kind === "cancelled") {
+      setDocumentNotice(plan.notice);
+      setDocumentConflict(null);
     } else {
-      setDocumentNotice(result.issue ?? "Operation cancelled. Your current text is retained.");
-      setDocumentConflict(null);
+      setDocumentConflict(plan.conflict);
+      setDocumentNotice(plan.notice);
     }
   }, [updateDocument]);
 
-  const applyDocumentOperation = useCallback((action: DocumentAction, resolution?: "keep" | "use" | "cancel", expectedSnapshot?: DocumentSnapshot): Promise<void> => {
+  const applyDocumentOperation = useCallback((action: DocumentAction, resolution?: "keep" | "use" | "cancel", expectedSnapshot?: DocumentContextDto): Promise<void> => {
     const current = documentRef.current;
     if (current === null || documentBusyRef.current || workspaceOperation.current !== null ||
         bindingGenerationRef.current !== generationRef.current) return Promise.resolve();
@@ -848,7 +835,7 @@ export default function App() {
       if (!ownsOperation(owner, documentOperationRef.current)) return;
       const openedRoot = opened.rootPath;
       if (openedRoot === undefined || openedRoot !== projectRef.current?.rootPath) throw protocolMismatch("The backend opened a document from a different project.");
-      const snapshot: DocumentSnapshot = { ...opened, rootPath: openedRoot, editorRevision: opened.editorRevision ?? 0 };
+      const snapshot: DocumentContextDto = { ...opened, rootPath: openedRoot, editorRevision: opened.editorRevision ?? 0 };
       documentBaselineRef.current = { ...snapshot };
       updateDocument(snapshot);
       setCitationRefresh((value) => value + 1);
@@ -894,17 +881,17 @@ export default function App() {
 
   const resolveDocumentConflict = useCallback(async (resolution: "keep" | "use" | "cancel") => {
     if (documentConflict === null) return;
-    const { action, result } = documentConflict;
-    if (action !== null) {
-      await applyDocumentOperation(action, resolution, result.expectedSnapshot);
-    } else if (resolution === "use" && result.expectedSnapshot !== undefined) {
+    const plan = planConflictResolution(documentConflict, resolution, documentRef.current);
+    if (plan.kind === "apply") {
+      await applyDocumentOperation(plan.action, resolution, plan.expectedSnapshot);
+    } else if (plan.kind === "no-document") {
+      return;
+    } else if (plan.kind === "editor-changed") {
+      setDocumentNotice(plan.notice);
+    } else if (plan.kind === "save-again") {
       const current = documentRef.current;
       if (current === null) return;
-      if (current.editorRevision !== result.expectedSnapshot.editorRevision || current.sourceText !== result.expectedSnapshot.sourceText) {
-        setDocumentNotice("The editor changed again. Save again to review the current conflict.");
-        return;
-      }
-      updateDocument({ ...current, diskFingerprint: result.expectedSnapshot.diskFingerprint });
+      updateDocument({ ...current, diskFingerprint: plan.diskFingerprint });
       await saveDocument();
     } else {
       setDocumentConflict(null);
@@ -1343,7 +1330,7 @@ export default function App() {
     scheduleOwnedFrame(owner, () => composerRef.current?.focus());
   }, [captureOwner, scheduleOwnedFrame]);
 
-  const addDocumentReference = useCallback((snapshot: DocumentSnapshot) => {
+  const addDocumentReference = useCallback((snapshot: DocumentContextDto) => {
     if (conversation.backendGeneration !== generationRef.current || conversation.projectEpoch !== projectEpochRef.current ||
         conversationRef.current.selected === null || !sameSelection(conversation.selected, conversationRef.current.selected) ||
         conversationRef.current.activeTurn !== null ||

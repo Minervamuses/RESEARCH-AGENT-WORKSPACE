@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { Api } from "./api.ts";
 import type { DocumentContextDto } from "./protocol.ts";
-import type { DocumentSnapshot } from "./lib/documentSource.ts";
 import {
   addErrorOutcome,
   addOutcome,
@@ -39,12 +38,12 @@ export type BibliographyApi = Pick<
 >;
 
 export interface CitationPanelProps {
-  document: DocumentSnapshot;
+  document: DocumentContextDto;
   /** Increments when the document is opened, saved or changed by an applied operation. */
   refreshToken: number;
   api: BibliographyApi;
-  contextPayload: (snapshot: DocumentSnapshot) => DocumentContextDto;
-  onSelect: (snapshot: DocumentSnapshot) => void;
+  contextPayload: (snapshot: DocumentContextDto) => DocumentContextDto;
+  onSelect: (snapshot: DocumentContextDto) => void;
   /** Keys and titles for editor completion. */
   onEntries?: (entries: BibliographyInspectDto["entries"]) => void;
   /** bibliography.add, tracked by App so an Ask-mode approval reaches the approval UI. */
