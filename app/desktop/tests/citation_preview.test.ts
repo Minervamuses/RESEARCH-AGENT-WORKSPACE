@@ -119,12 +119,12 @@ test("cited rows offer only Line jumps; uncited rows offer Remove", async () => 
   assert.match(cited, />Line 3<\/button>/);
   assert.equal((cited.match(/<button/g) ?? []).length, 1, "only the Line jump");
   assert.ok(!/Remove|Insert/.test(cited));
-  assert.ok(!/verified|citation-badge/.test(cited), "no verified/unverified badge");
+  assert.ok(!/verified/i.test(cited), "no verified/unverified badge");
   const uncited = renderToStaticMarkup(createElement(UncitedRow, { entry, onRemove: () => undefined, disabled: false }));
-  assert.match(uncited, /<button type="button" class="link-button">Remove<\/button>/);
+  assert.match(uncited, /<button type="button"[^>]*>Remove<\/button>/);
   assert.ok(!uncited.includes("Insert"));
   const locked = renderToStaticMarkup(createElement(UncitedRow, { entry, onRemove: () => undefined, disabled: true }));
-  assert.match(locked, /<button type="button" class="link-button" disabled="">Remove<\/button>/);
+  assert.match(locked, /<button type="button"[^>]*disabled=""[^>]*>Remove<\/button>/);
 });
 
 test("a newly rendered panel is only the collapsed summary bar", async () => {
@@ -143,9 +143,9 @@ test("a newly rendered panel is only the collapsed summary bar", async () => {
     contextPayload: () => snapshot,
     onSelect: () => undefined, requestAdd: () => new Promise<BibliographyAddDto>(() => undefined), writesDisabled: false,
   }));
-  assert.match(html, /<header class="citation-summary"><h3>Citations<\/h3>/);
-  assert.match(html, /class="citation-toggle" aria-expanded="false"[^>]*>Expand ▾<\/button>/);
-  assert.ok(!html.includes("citation-body") && !html.includes("Verify and add"), "the body renders only when expanded");
+  assert.match(html, /<h3>Citations<\/h3>/);
+  assert.match(html, /<button[^>]*aria-expanded="false"[^>]*>Expand ▾<\/button>/);
+  assert.ok(!html.includes("Verify and add"), "the body renders only when expanded");
 });
 
 test("preview text shows italics and safe links without interpreting markup", async () => {
@@ -161,6 +161,6 @@ test("preview text shows italics and safe links without interpreting markup", as
   assert.match(html, /<em>Journal_of_Agri<\/em>/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; \*not italic\*/);
   assert.equal((html.match(/<button/g) ?? []).length, 1);
-  assert.match(html, /<button type="button" class="safe-link">https:\/\/doi.org\/10.1\/x<\/button>/);
+  assert.match(html, /<button type="button"[^>]*>https:\/\/doi.org\/10.1\/x<\/button>/);
   assert.ok(!html.includes("<img"));
 });

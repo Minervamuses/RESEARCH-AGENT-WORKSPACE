@@ -49,3 +49,30 @@ export function zoomedFontSize(current: number, step: ZoomStep): number {
   const next = current + (step === "in" ? 1 : -1);
   return Math.min(MAX_EDITOR_FONT_SIZE, Math.max(MIN_EDITOR_FONT_SIZE, next));
 }
+
+/**
+ * Monaco options that depend on the zoomed size. A line height of 0 lets Monaco
+ * derive it from the font size, so zoomed lines never overlap; the editor uses
+ * this for both create() and every updateOptions().
+ */
+export function editorFontOptions(fontSize: number): { fontSize: number; lineHeight: 0 } {
+  return { fontSize, lineHeight: 0 };
+}
+
+export type ZoomKey = "Equal" | "NumpadAdd" | "Minus" | "NumpadSubtract" | "Digit0" | "Numpad0";
+
+/** The key chords of each zoom step, as Ctrl/Cmd (plus Shift where listed) and one key. */
+export const ZOOM_CHORDS: Record<ZoomStep, readonly { shift: boolean; key: ZoomKey }[]> = {
+  in: [{ shift: false, key: "Equal" }, { shift: true, key: "Equal" }, { shift: false, key: "NumpadAdd" }],
+  out: [{ shift: false, key: "Minus" }, { shift: false, key: "NumpadSubtract" }],
+  reset: [{ shift: false, key: "Digit0" }, { shift: false, key: "Numpad0" }],
+};
+
+/** Monaco keybindings for a step, built from Monaco's own KeyMod and KeyCode values. */
+export function zoomKeybindings(
+  step: ZoomStep,
+  mod: { CtrlCmd: number; Shift: number },
+  code: Record<ZoomKey, number>,
+): number[] {
+  return ZOOM_CHORDS[step].map(({ shift, key }) => mod.CtrlCmd | (shift ? mod.Shift : 0) | code[key]);
+}

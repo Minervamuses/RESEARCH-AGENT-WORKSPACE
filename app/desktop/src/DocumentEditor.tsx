@@ -10,7 +10,9 @@ import {
   applyDocumentChanges,
 } from "./lib/documentSource.ts";
 import type { DocumentContextDto } from "./protocol.ts";
-import { readEditorFontSize, writeEditorFontSize, zoomedFontSize, type ZoomStep } from "./editorZoom.ts";
+import {
+  editorFontOptions, readEditorFontSize, writeEditorFontSize, zoomedFontSize, zoomKeybindings, type ZoomStep,
+} from "./editorZoom.ts";
 
 interface DocumentEditorProps {
   value: DocumentContextDto | null;
@@ -75,9 +77,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         fontFamily: '"Cascadia Code", "Noto Sans Mono", monospace',
-        fontSize,
-        // 0 lets Monaco derive the line height from the font size, so zoomed lines never overlap.
-        lineHeight: 0,
+        ...editorFontOptions(fontSize),
         padding: { top: 12, bottom: 12 },
         tabSize: 4,
       });
@@ -220,23 +220,21 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
       // Editor-only zoom (A6): active while the editor has focus, remembered for the next start.
       const zoom = (step: ZoomStep) => {
         fontSize = zoomedFontSize(fontSize, step);
-        instance.updateOptions({ fontSize, lineHeight: 0 });
+        instance.updateOptions(editorFontOptions(fontSize));
         writeEditorFontSize(fontSize);
       };
-      const { CtrlCmd, Shift } = monaco.KeyMod;
-      const { Equal, NumpadAdd, Minus, NumpadSubtract, Digit0, Numpad0 } = monaco.KeyCode;
       const zoomActions = [
         instance.addAction({
           id: "workspace.editor.zoom-in", label: "Increase editor font size",
-          keybindings: [CtrlCmd | Equal, CtrlCmd | Shift | Equal, CtrlCmd | NumpadAdd], run: () => zoom("in"),
+          keybindings: zoomKeybindings("in", monaco.KeyMod, monaco.KeyCode), run: () => zoom("in"),
         }),
         instance.addAction({
           id: "workspace.editor.zoom-out", label: "Decrease editor font size",
-          keybindings: [CtrlCmd | Minus, CtrlCmd | NumpadSubtract], run: () => zoom("out"),
+          keybindings: zoomKeybindings("out", monaco.KeyMod, monaco.KeyCode), run: () => zoom("out"),
         }),
         instance.addAction({
           id: "workspace.editor.zoom-reset", label: "Reset editor font size",
-          keybindings: [CtrlCmd | Digit0, CtrlCmd | Numpad0], run: () => zoom("reset"),
+          keybindings: zoomKeybindings("reset", monaco.KeyMod, monaco.KeyCode), run: () => zoom("reset"),
         }),
       ];
       if (initial.rangeStartUtf16 !== undefined && initial.rangeEndUtf16 !== undefined) {

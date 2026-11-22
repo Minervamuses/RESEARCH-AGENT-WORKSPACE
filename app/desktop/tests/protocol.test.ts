@@ -121,28 +121,6 @@ test("normal answers use only the terminal result", async () => {
   assert.equal("maxBytes" in contract.resultDataSchemas["session.turn"].text, false);
 });
 
-test("complete answer and transcript results have no client capacity rejection", () => {
-  const answer = 'BEGIN 中文🙂\n"quoted"\\path\n' + "界".repeat(750_000) + "\nEND";
-  assert.doesNotThrow(() => parseProtocolMessage({
-    protocolVersion: 1,
-    messageType: "result",
-    requestId,
-    ok: true,
-    data: {
-      sessionId: "session-a",
-      turnId: "123e4567e89b42d3a456426614174000",
-      turnNumber: 1,
-      state: "completed",
-      accepted: true,
-      persisted: true,
-      text: answer,
-      validationErrors: [],
-      toolSummaries: [],
-      responseKind: "answer",
-    },
-  }));
-});
-
 test("session turn carries one canonical logical identity and durable lifecycle", async () => {
   const contract = await loadJson<ContractDocument>("contract.json");
   const turn = contract.methods.find(({ name }) => name === "session.turn")!;

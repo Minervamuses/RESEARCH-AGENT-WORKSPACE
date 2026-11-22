@@ -15,6 +15,7 @@ import { composerSlashCommands, filterSlashCommands, handleComposerKey, insertSl
 import { loadSelectedProjectHistory, mergeSessionItems, projectDisplayName, sidebarRowsForProject } from "../src/lib/sidebar.ts";
 import { isPersistedTurnFailure, selectConversationWithPreview, visibleMessageRange } from "../src/lib/transcript.ts";
 import { safeExternalUrl, openSafeExternalUrl } from "../src/lib/safeUrl.ts";
+import { parseProtocolMessage } from "../src/protocol.ts";
 import type { Api } from "../src/api.ts";
 import type { JsonObject, SessionCreatedDto, SessionListDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto } from "../src/protocol.ts";
 
@@ -253,47 +254,75 @@ test("safe content preserves inline formatting and unmatched delimiters", async 
   );
 });
 
-test("safe content preserves a large array of inline Markdown children", async () => {
-  const { SafeContent } = await loadSafeContent();
+test("content-sized inputs reach the parser and the renderers whole, from first marker to last", async () => {
+  // One synthetic-data test for every size-sensitive path: the protocol parser, the restored-turn
+  // renderer (a multi-megabyte answer), and SafeContent's inline, list and paragraph collections,
+  // which must be passed to createElement as one array instead of being spread as arguments.
+  const answer = 'BEGIN 中文🙂\n"quoted"\\path\n<script>unsafe()</script>\n' + "界".repeat(750_000) + "\nEND";
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
-  const repetitions = LARGE_DYNAMIC_CHILD_COUNT / 2;
-  const html = renderToStaticMarkup(
-    createElement(SafeContent, { content: "`x` ".repeat(repetitions) }),
-  );
 
-  assert.equal(html.match(/<code>x<\/code>/g)?.length, repetitions);
-});
+  assert.doesNotThrow(() => parseProtocolMessage({
+    protocolVersion: 1,
+    messageType: "result",
+    requestId: "123e4567-e89b-42d3-a456-426614174000",
+    ok: true,
+    data: {
+      sessionId: "session-a",
+      turnId: "123e4567e89b42d3a456426614174000",
+      turnNumber: 1,
+      state: "completed",
+      accepted: true,
+      persisted: true,
+      text: answer,
+      validationErrors: [],
+      toolSummaries: [],
+      responseKind: "answer",
+    },
+  }));
 
-test("safe content preserves a large array of Markdown list items", async () => {
+  const { RestoredTurn } = await loadTranscript();
+  const html = renderToStaticMarkup(createElement(RestoredTurn, {
+    turn: {
+      turnId: "123e4567e89b42d3a456426614174001",
+      turnNumber: 1,
+      kind: "conversational",
+      state: "completed",
+      timestamp: "2026-09-05T00:00:00Z",
+      userText: "question",
+      assistantText: answer,
+      failureCode: null,
+      failureMessage: null,
+      failureRetryable: null,
+      toolActivities: [],
+    },
+  }));
+  assert.ok(html.indexOf("BEGIN 中文🙂") < html.lastIndexOf("END"));
+  assert.match(html, /quoted/);
+  assert.match(html, /\\path/);
+  assert.doesNotMatch(html, /<script>/i);
+  assert.match(html, /&lt;script&gt;/);
+  assert.ok(html.length > answer.length);
+
   const { SafeContent } = await loadSafeContent();
-  const content = Array.from(
-    { length: LARGE_DYNAMIC_CHILD_COUNT },
-    (_, index) => `- item ${index}`,
-  ).join("\n");
-  const [list] = contentChildren(SafeContent({ content }));
-  const items = contentChildren(list);
-  const [lastInlineContent] = elementChildren(items.at(-1));
+  const repetitions = LARGE_DYNAMIC_CHILD_COUNT / 2;
+  const inline = renderToStaticMarkup(createElement(SafeContent, { content: "`x` ".repeat(repetitions) }));
+  assert.equal(inline.match(/<code>x<\/code>/g)?.length, repetitions);
 
+  const listContent = Array.from({ length: LARGE_DYNAMIC_CHILD_COUNT }, (_, index) => `- item ${index}`).join("\n");
+  const [list] = contentChildren(SafeContent({ content: listContent }));
+  const items = contentChildren(list);
   assert.equal(items.length, LARGE_DYNAMIC_CHILD_COUNT);
   assert.equal(
-    (lastInlineContent as ReactElementLike).props.value,
+    (elementChildren(items.at(-1))[0] as ReactElementLike).props.value,
     `item ${LARGE_DYNAMIC_CHILD_COUNT - 1}`,
   );
-});
 
-test("safe content preserves a large array of Markdown paragraph blocks", async () => {
-  const { SafeContent } = await loadSafeContent();
-  const content = Array.from(
-    { length: LARGE_DYNAMIC_CHILD_COUNT },
-    (_, index) => `paragraph ${index}`,
-  ).join("\n\n");
-  const paragraphs = contentChildren(SafeContent({ content }));
-  const [lastInlineContent] = elementChildren(paragraphs.at(-1));
-
+  const paragraphContent = Array.from({ length: LARGE_DYNAMIC_CHILD_COUNT }, (_, index) => `paragraph ${index}`).join("\n\n");
+  const paragraphs = contentChildren(SafeContent({ content: paragraphContent }));
   assert.equal(paragraphs.length, LARGE_DYNAMIC_CHILD_COUNT);
   assert.equal(
-    (lastInlineContent as ReactElementLike).props.value,
+    (elementChildren(paragraphs.at(-1))[0] as ReactElementLike).props.value,
     `paragraph ${LARGE_DYNAMIC_CHILD_COUNT - 1}`,
   );
 });
@@ -305,7 +334,7 @@ test("markdown link activation reparses the URL before calling the injected open
   const rendered = renderToStaticMarkup(
     createElement(SafeContent, { content: "[Docs](https://example.com/docs)" }),
   );
-  assert.match(rendered, /<button[^>]*class="safe-link"[^>]*>Docs<\/button>/);
+  assert.match(rendered, /<button[^>]*>Docs<\/button>/);
   assert.doesNotMatch(rendered, /\bhref=/);
   const opened: string[] = [];
   assert.equal(
@@ -500,15 +529,15 @@ test("a live turn renders its own cards: a complete answer or a local command, n
   const answer = renderToStaticMarkup(createElement(ConversationTurns, {
     turns: mergeConversationTurns([], [live("123e4567e89b42d3a456426614174001", "answer", "a question", "an <b>answer</b>")]),
   }));
-  assert.match(answer, /<div class="message user-message"><p class="message-label">You<\/p>/);
-  assert.match(answer, /<div class="message assistant-message"><p class="message-label">Assistant · complete<\/p>/);
+  assert.match(answer, /<p[^>]*>You<\/p>/);
+  assert.match(answer, /<p[^>]*>Assistant · complete<\/p>/);
   assert.match(answer, /a question/);
-  assert.doesNotMatch(answer, /<b>answer<\/b>|restored|pending-turn/);
+  assert.doesNotMatch(answer, /<b>answer<\/b>|restored|pending/);
   const command = renderToStaticMarkup(createElement(ConversationTurns, {
     turns: mergeConversationTurns([], [live("123e4567e89b42d3a456426614174002", "command", "/help", "Available commands")]),
   }));
-  assert.match(command, /<div class="message system-message"><p class="message-label">Local command output · complete<\/p>/);
-  assert.doesNotMatch(command, /assistant-message/);
+  assert.match(command, /<p[^>]*>Local command output · complete<\/p>/);
+  assert.doesNotMatch(command, /Assistant/);
 });
 
 test("a pending turn renders the prompt, a working card with a spinner and its stage and tool activity", async () => {
@@ -520,10 +549,10 @@ test("a pending turn renders the prompt, a working card with a spinner and its s
     activity: [{ kind: "stage", label: "Retrieving", status: null }, { kind: "tool", label: "rag_search", status: "running" }],
   });
   const html = renderToStaticMarkup(createElement(ConversationTurns, { turns }));
-  assert.match(html, /<article class="turn-group pending-turn">/);
-  assert.match(html, /<p class="message-label">You · pending<\/p>/);
+  assert.equal(html.match(/<article/g)?.length, 1, "one turn group");
+  assert.match(html, /<p[^>]*>You · pending<\/p>/);
   assert.match(html, /still working/);
-  assert.match(html, /<p class="message-label">Assistant · working<\/p><div class="inline-spinner" aria-label="Waiting for answer">/);
+  assert.match(html, /<p[^>]*>Assistant · working<\/p><div[^>]*aria-label="Waiting for answer"/);
   assert.match(html, /<strong>Stage:<\/strong> Retrieving<\/li>/);
   assert.match(html, /<strong>Tool:<\/strong> rag_search · running<\/li>/);
   assert.doesNotMatch(html, /restored|Assistant · complete/);
@@ -560,40 +589,9 @@ test("restored turns keep tool details lazy between user and assistant", async (
   const tool = html.indexOf("Tool activity · rag_search · ok · restored context");
   const assistant = html.indexOf("Assistant · restored");
   assert.ok(user >= 0 && user < tool && tool < assistant);
-  assert.match(html, /<details[^>]*class="tool-activity"[^>]*><summary/);
+  assert.match(html, /<details[^>]*><summary/);
   assert.doesNotMatch(html, /Tool result · rag_search/);
   assert.doesNotMatch(html, /<details[^>]*open=/);
-});
-
-test("restored turns render a complete multi-megabyte answer from first marker to last", async () => {
-  const { RestoredTurn } = await loadTranscript();
-  const { renderToStaticMarkup } = await import("react-dom/server");
-  const { createElement } = await import("react");
-  const answer = 'BEGIN 中文🙂\n"quoted"\\path\n<script>unsafe()</script>\n'
-    + "界".repeat(750_000)
-    + "\nEND";
-  const html = renderToStaticMarkup(createElement(RestoredTurn, {
-    turn: {
-      turnId: "123e4567e89b42d3a456426614174001",
-      turnNumber: 1,
-      kind: "conversational",
-      state: "completed",
-      timestamp: "2026-09-05T00:00:00Z",
-      userText: "question",
-      assistantText: answer,
-      failureCode: null,
-      failureMessage: null,
-      failureRetryable: null,
-      toolActivities: [],
-    },
-  }));
-
-  assert.ok(html.indexOf("BEGIN 中文🙂") < html.lastIndexOf("END"));
-  assert.match(html, /quoted/);
-  assert.match(html, /\\path/);
-  assert.doesNotMatch(html, /<script>/i);
-  assert.match(html, /&lt;script&gt;/);
-  assert.ok(html.length > answer.length);
 });
 
 test("citation menu inserts a task and restore displays its saved answer and tool activity", async () => {

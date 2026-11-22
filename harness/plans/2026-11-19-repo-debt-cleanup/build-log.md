@@ -770,3 +770,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C9-S3/css-split.md`、`normalize-css.sh`、`css-before.txt`、`css-after.txt`、`colors-*.txt`、`rgb-*.txt`。
 - **限制**：GUI 未驗證；元件規則仍分散在幾個區段（P12，預期）。
 - **下一步**：C9-S4。
+
+### C9-S4 測試改為行為斷言（S086–S088，2026-11-22）
+
+- **觀察結果**：唯一剩下的 `.tsx` 原始碼比對是 `editorZoom.test.ts`，改為測 `editorZoom.ts` 新增的 `editorFontOptions`、`zoomKeybindings`（`DocumentEditor.tsx` 改呼叫它們，值不變）。`citation_preview.test.ts`、`conversations.test.ts` 的 class name 斷言改為 role／文字／aria（行為斷言一條未刪）。3 個 SafeContent 大集合測試、restored 多 MB 答案測試與 `protocol.test.ts` 的 750,000 字元答案測試合併成 `conversations.test.ts` 的一個測試，輸入大小不變。
+- **執行指令**：`npm test`（253 pass：256 +1 縮放按鍵測試 −4 合併）、`npm run build`（通過）。
+- **證據**：`evidence/C9-S4/tests.md`（含每個改或刪測試的退役紀錄）。
+- **限制**：`styles.test.ts` 讀 CSS，屬 S084，保留。合併後的測試跨 parser 與 renderer，失敗時需看斷言訊息定位。
+- **下一步**：C9-S5。

@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   DEFAULT_EDITOR_FONT_SIZE,
+  editorFontOptions,
   EDITOR_FONT_SIZE_KEY,
   MAX_EDITOR_FONT_SIZE,
   MIN_EDITOR_FONT_SIZE,
   readEditorFontSize,
   writeEditorFontSize,
   zoomedFontSize,
+  zoomKeybindings,
   type ZoomStorage,
 } from "../src/editorZoom.ts";
 
@@ -61,12 +62,16 @@ test("zoom steps one pixel, stays within 10–28, and resets to 16; the size is 
   assert.equal(readEditorFontSize(storage), 17, "a restarted editor reads the zoomed size");
 });
 
-test("Monaco derives the line height from the font size at start and after every zoom", async () => {
-  const source = await readFile(new URL("../src/DocumentEditor.tsx", import.meta.url), "utf8");
-  assert.equal(source.match(/lineHeight: 0\b/g)?.length, 2, "create() and updateOptions()");
-  assert.ok(!/lineHeight: [1-9]/.test(source) && !/fontSize: 14\b/.test(source));
-  assert.match(source, /instance\.updateOptions\(\{ fontSize, lineHeight: 0 \}\)/);
-  assert.match(source, /CtrlCmd \| Equal, CtrlCmd \| Shift \| Equal, CtrlCmd \| NumpadAdd/);
-  assert.match(source, /CtrlCmd \| Minus, CtrlCmd \| NumpadSubtract/);
-  assert.match(source, /CtrlCmd \| Digit0, CtrlCmd \| Numpad0/);
+test("Monaco derives the line height from the font size at start and after every zoom", () => {
+  for (const size of [MIN_EDITOR_FONT_SIZE, DEFAULT_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE]) {
+    assert.deepEqual(editorFontOptions(size), { fontSize: size, lineHeight: 0 });
+  }
+});
+
+test("zoom steps bind the documented Ctrl/Cmd chords", () => {
+  const mod = { CtrlCmd: 0x100, Shift: 0x200 };
+  const code = { Equal: 1, NumpadAdd: 2, Minus: 3, NumpadSubtract: 4, Digit0: 5, Numpad0: 6 };
+  assert.deepEqual(zoomKeybindings("in", mod, code), [0x101, 0x301, 0x102]);
+  assert.deepEqual(zoomKeybindings("out", mod, code), [0x103, 0x104]);
+  assert.deepEqual(zoomKeybindings("reset", mod, code), [0x105, 0x106]);
 });
