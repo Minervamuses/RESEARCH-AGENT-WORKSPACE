@@ -105,7 +105,7 @@ end
 ```
 $ grep -rnE "streamKind|chunkCount|ollamaReachable|ollamaModel" agent desktop/src desktop/src-tauri/src desktop/protocol --include=*.py --include=*.ts --include=*.tsx --include=*.rs --include=*.json
 (hits: 0)
-$ grep -rnE "\"knowledge\.(init_workspace|ingest_file|ingest_folder|prune_apply|status|search|diff|prune_preview|sync|list)\"" desktop/protocol/v1/contract.json | grep -v "\"operation\"\|enum" 
+$ grep -rnE "\"knowledge\.(init_workspace|ingest_file|ingest_folder|prune_apply|status|search|diff|prune_preview|sync|list)\"" desktop/protocol/v1/contract.json | grep -v "\"operation\"\|enum"
 (hits: 0)
 $ grep -rnE "bundle_path|reference\.bib|citation_output_dir|CITATION_OUTPUT_DIR|citationOutputPath|pybtex" agent skills desktop/src desktop/src-tauri/src --include=*.py --include=*.ts --include=*.tsx --include=*.rs
 agent/extensions/startup.py:36:def _installed_bundle_path(
