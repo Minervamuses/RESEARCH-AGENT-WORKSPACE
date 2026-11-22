@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | Not started | — | — | 等 C3–C6 |
+| C8 | In progress | `evidence/C8-S1/` | — | C8-S2 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -689,3 +689,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S9/residual-grep.md`。
 - **限制**：`for_agents/` 對 `service.py` 結構、fixture 位置與 Retry Stop（FAIL-022）的描述過時，交給 C10。
 - **下一步**：C8 前端邏輯（相依 C3–C6 已完成）。
+
+### C8-S1 `App()` 行為與狀態盤點（2026-11-22）
+
+- **觀察結果**：以子代理唯讀盤點、主執行緒核對計數。`App()` 本體 `useState` 34、`useRef` 36、`useEffect` 13、`useCallback` 44（整檔 42／40／15／45；C1-S3 為 35／35／14／42，差異來自 C2–C6 的修改）；後端呼叫點 `backendClient.`／`invoke<` 共 29 行（`App()` 內 23 行 request，另有 3 個預設參數與 3 個原生 `invoke<`，外加 `listen<` 事件邊界）。36 個 ref 分類、13 個 effect、必要檢查（stale generation、Stop／Retry、核准擁有者、過期回應、文件衝突）的程式位置與既有測試對照、domain 草圖都在 evidence。發現：approval 清除重複 10 處（不是 11），`ownsWorkspaceOperation`、文件衝突狀態、Stop 重試畫面、核准逾時目前沒有純函式測試；browser-preview 沒有測試；5 個 SSR 測試檔中 33 個 test 只測純函式、24 個渲染元件。
+- **執行指令**：唯讀 grep 與讀碼；C1-S3 的 awk 計數指令。
+- **證據**：`evidence/C8-S1/app-behaviors.md`。
+- **限制**：無。
+- **下一步**：C8-S2 純邏輯模組化。
