@@ -27,14 +27,7 @@ from agent.conversations import (
     ToolActivitySummary,
     is_canonical_uuid4_hex,
 )
-from agent.desktop.catalog import (
-    CATALOG_FILENAME,
-    CatalogMalformedError,
-    CatalogUnavailableError,
-    DesktopProjectCatalog,
-    inspect_project,
-    initialize_project,
-)
+from agent.desktop.project import inspect_project, initialize_project
 from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
 from agent.desktop.documents import selected_text
 from agent.document_context import SNAPSHOT_HEADER
@@ -509,7 +502,7 @@ def _seed_fixture_extensions(root: Path) -> Path:
 
 
 def seed_fixture_root(root: Path) -> AgentConfig:
-    """Seed only the production catalog and canonical transcript formats."""
+    """Seed only the production project settings and canonical transcript formats."""
     persist_dir = root / "store"
     guarded_paths = (
         persist_dir,
@@ -556,7 +549,6 @@ def seed_fixture_root(root: Path) -> AgentConfig:
             Path(project["historyDirectory"]) != history.resolve()
             or history.is_symlink()
             or (history / "conversations").is_symlink()
-            or (history / CATALOG_FILENAME).is_symlink()
         ):
             raise FixtureConfigurationError("fixture project history must stay in its isolated child root")
         if not research_path.exists():
@@ -574,15 +566,6 @@ def seed_fixture_root(root: Path) -> AgentConfig:
                 repository, index=index, session_id=session_id,
                 project_id=project["projectId"], user=user, answer=answer,
             )
-        if (history / CATALOG_FILENAME).exists():
-            try:
-                catalog = DesktopProjectCatalog(history)
-            except (CatalogMalformedError, CatalogUnavailableError):
-                # Opening the selected project owns any catalog repair.
-                continue
-            for session_id, (owner, _user, _answer) in _SEED_TURNS.items():
-                if owner == project_name:
-                    catalog.register_session(project["projectId"], session_id)
     return config
 
 
@@ -1394,11 +1377,9 @@ class FixtureSessionFactory:
 
     def __init__(
         self,
-        catalog: DesktopProjectCatalog | None,
         crash_control: _FixtureCrashControl,
         search_handler: Callable[[str], list[dict[str, str]]] = _fixture_search,
     ) -> None:
-        self._catalog = catalog
         self._crash_control = crash_control
         self._search_handler = search_handler
         self._next_index = 0
@@ -1425,10 +1406,6 @@ class FixtureSessionFactory:
                 self._next_index += 1
                 if (
                     candidate not in self._issued
-                    and (
-                        self._catalog is None
-                        or self._catalog.project_for_session(candidate) is None
-                    )
                     and conversation_repository.load_optional(candidate) is None
                 ):
                     session_id = candidate
@@ -1482,7 +1459,7 @@ def build_phase02_fixture_service(
         environ=sanitized_environ,
         config=config,
         extension_manager=extension_manager,
-        session_factory=FixtureSessionFactory(None, crash_control),
+        session_factory=FixtureSessionFactory(crash_control),
         conversation_repository=conversation_repository,
         knowledge_operations=knowledge_operations.as_operations(),
         bash_command_runner=bash_runner,

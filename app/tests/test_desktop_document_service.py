@@ -615,10 +615,7 @@ def test_unaccepted_turn_keeps_no_prompt_and_emits_no_acceptance(tmp_path, monke
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("failure", ["event_delivery", "catalog"])
-def test_acceptance_and_catalog_registration_fail_independently(tmp_path, monkeypatch, failure):
-    from agent.desktop.catalog import CatalogError
-
+def test_turn_acceptance_survives_event_delivery_failure(tmp_path, monkeypatch):
     async def run():
         service, model, _path, _context = await _setup(tmp_path, monkeypatch)
         observed = []
@@ -628,29 +625,21 @@ def test_acceptance_and_catalog_registration_fail_independently(tmp_path, monkey
             if event == "turn.accepted":
                 saved = service._conversation_repository.load(service.session.session_id).document.turns[-1]
                 observed.append((data, saved.state, len(model.calls)))
-                if failure == "event_delivery":
-                    raise OSError("fixture event stream disconnected")
-
-        if failure == "catalog":
-            def failed_registration(*_args):
-                raise CatalogError("fixture catalog write failed")
-            monkeypatch.setattr(service._catalog, "register_session", failed_registration)
+                raise OSError("fixture event stream disconnected")
 
         result = await service.dispatch("session.turn", {
             "text": "分析接受時機", "turnId": turn_id, "retry": False,
         }, event_sink=sink)
         assert observed == [({"sessionId": service.session.session_id, "turnId": turn_id}, "pending", 0)]
         assert result["state"] == "completed"
-        assert result["registrationStatus"] == ("pending" if failure == "catalog" else "registered")
-        assert service._session_registered is (failure != "catalog")
-        if failure == "event_delivery":
-            transcript = await service.dispatch("session.transcript", {
-                "projectId": service._selected_project_id, "sessionId": service.session.session_id,
-            })
-            matching = [item for item in transcript["items"] if item["turnId"] == turn_id]
-            assert len(matching) == 1
-            assert matching[0]["state"] == "completed"
-            assert matching[0]["userText"] == "分析接受時機"
+        assert service._session_saved is True
+        transcript = await service.dispatch("session.transcript", {
+            "projectId": service._selected_project_id, "sessionId": service.session.session_id,
+        })
+        matching = [item for item in transcript["items"] if item["turnId"] == turn_id]
+        assert len(matching) == 1
+        assert matching[0]["state"] == "completed"
+        assert matching[0]["userText"] == "分析接受時機"
 
     asyncio.run(run())
 

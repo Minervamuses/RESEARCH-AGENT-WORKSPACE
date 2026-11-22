@@ -20,7 +20,7 @@
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
-| C6 | In progress | `evidence/C6-S1/` | — | C6-S2 |
+| C6 | In progress | `evidence/C6-S1/`、`evidence/C6-S2/` | — | C6-S3 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
@@ -585,3 +585,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C6-S1/surface.md`。
 - **限制**：無。
 - **下一步**：C6-S2 後端。
+
+### C6-S2 後端：清單由 scan 推導，移除 catalog、registration 與 `project.list`（2026-11-22）
+
+- **觀察結果**：`catalog.py` 改名為 `project.py`，只留專案 metadata 與 `open_project_history`／`project_conversations` 三項 fail-closed 檢查；`session.list` 由 scan 推導（`created_at`、ID 排序），移除 `reconcile`；`project.list`、`session.retry_registration`、`registrationStatus`／`registrationIssue`、`registered` 從 Python、contract（27 → 25 個方法）與 fixtures 移除；`initialize_project` 不建立 catalog，容許具名常數 `LEGACY_CATALOG_FILENAME`。驗收 (a)–(g) 與 S027 的掃描次數都有對應測試（evidence §2），刪除的 11 個測試各有退役紀錄（§3）。第一版的存檔檢查在事件迴圈上同步讀檔，被既有的 read-gate 測試抓到，改成只做存在檢查（第 1 次修正即通過）。
+- **執行指令**：沙箱外 `pytest tests/test_desktop_*.py tests/test_citation_project_library.py tests/test_skill_adherence.py`；`npm test`；必要 grep。
+- **證據**：`evidence/C6-S2/backend.md`。
+- **限制**：`npm test` 的 DTO 一致性檢查在 C6-S3 完成前預期失敗（219 pass、1 fail，只有這一項）；`npm run build` 也留到 C6-S3 後執行。`for_agents/` 的 catalog 描述過時，交給 C10。
+- **下一步**：C6-S3 前端。

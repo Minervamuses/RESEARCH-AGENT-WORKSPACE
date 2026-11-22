@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from agent.desktop import bime_export
-from agent.desktop.catalog import inspect_project
+from agent.desktop.project import inspect_project
 from agent.desktop.protocol import ProtocolError, validate_message, validate_result_data
 from agent.desktop.service import DesktopServiceError
 from skills.citation import csl_render
@@ -536,26 +536,26 @@ def test_bibliography_failures_are_typed(tmp_path, monkeypatch):
 
 
 def test_update_project_metadata_keeps_everything_else(tmp_path, monkeypatch):
-    from agent.desktop import catalog
+    from agent.desktop import project
 
     research = tmp_path / "RESEARCH.md"
     head = "# 研究\n\n規則：引用要有來源。\n\n<!-- research-agent-project\n"
     tail = "\n-->\n\n## 附註\n尾段 🙂\n"
     research.write_text(head + json.dumps(
         {"version": 1, "historyDirectory": "h", "bibliography": "refs/a.json"}, indent=2) + tail, encoding="utf-8")
-    _meta, rules_before = catalog._metadata_and_rules(research.read_bytes())
-    fingerprint = catalog.update_project_metadata(tmp_path, {"citationStyle": "ieee"})
+    _meta, rules_before = project._metadata_and_rules(research.read_bytes())
+    fingerprint = project.update_project_metadata(tmp_path, {"citationStyle": "ieee"})
     text = research.read_text(encoding="utf-8")
     assert text.startswith(head) and text.endswith(tail)
     payload = json.loads(text[len(head):-len(tail)])
     assert list(payload) == ["version", "historyDirectory", "bibliography", "citationStyle"]
     assert payload["citationStyle"] == "ieee"
-    assert catalog._metadata_and_rules(research.read_bytes())[1] == rules_before
+    assert project._metadata_and_rules(research.read_bytes())[1] == rules_before
     assert fingerprint == hashlib.sha256(research.read_bytes()).hexdigest()
-    with pytest.raises(catalog.CatalogMalformedError):
-        catalog.update_project_metadata(tmp_path, {"historyDirectory": "elsewhere"})
+    with pytest.raises(project.ProjectMalformedError):
+        project.update_project_metadata(tmp_path, {"historyDirectory": "elsewhere"})
 
-    real = catalog._research_bytes
+    real = project._research_bytes
     calls = []
 
     def changed_on_second_read(path):
@@ -563,10 +563,10 @@ def test_update_project_metadata_keeps_everything_else(tmp_path, monkeypatch):
         data = real(path)
         return data + b"x" if len(calls) == 2 else data
 
-    monkeypatch.setattr(catalog, "_research_bytes", changed_on_second_read)
+    monkeypatch.setattr(project, "_research_bytes", changed_on_second_read)
     before = research.read_bytes()
-    with pytest.raises(catalog.CatalogConflictError):
-        catalog.update_project_metadata(tmp_path, {"citationStyle": "apa"})
+    with pytest.raises(project.ProjectConflictError):
+        project.update_project_metadata(tmp_path, {"citationStyle": "apa"})
     assert research.read_bytes() == before
     assert not list(tmp_path.glob(".RESEARCH.md.*"))
 

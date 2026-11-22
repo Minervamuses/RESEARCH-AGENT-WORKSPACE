@@ -7,8 +7,8 @@ import os
 import pytest
 from langchain_core.messages import ToolMessage
 
-from agent.desktop.catalog import (
-    CatalogMalformedError,
+from agent.desktop.project import (
+    ProjectMalformedError,
     inspect_project,
     project_citation_settings,
 )
@@ -195,9 +195,9 @@ def test_bibliography_and_citation_style_metadata_are_accepted(tmp_path):
 ])
 def test_invalid_metadata_is_malformed(tmp_path, metadata):
     _research(tmp_path, metadata)
-    with pytest.raises(CatalogMalformedError):
+    with pytest.raises(ProjectMalformedError):
         inspect_project(str(tmp_path), tmp_path / "store")
-    with pytest.raises(CatalogMalformedError):
+    with pytest.raises(ProjectMalformedError):
         project_citation_settings(tmp_path)
 
 
@@ -208,12 +208,12 @@ def test_bibliography_symlink_escaping_the_root_is_malformed(tmp_path):
     outside.write_text("[]\n")
     os.symlink(outside, root / "references.json")
     _research(root, _meta())
-    with pytest.raises(CatalogMalformedError):
+    with pytest.raises(ProjectMalformedError):
         project_citation_settings(root)
 
 
 def test_initialize_project_still_writes_only_two_keys(tmp_path):
-    from agent.desktop.catalog import initialize_project
+    from agent.desktop.project import initialize_project
 
     root = tmp_path / "project"
     root.mkdir()

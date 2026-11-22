@@ -327,17 +327,6 @@
       }
     },
     {
-      "name": "project-list-request",
-      "valid": true,
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000070",
-        "method": "project.list",
-        "params": {}
-      }
-    },
-    {
       "name": "session-list-bounded-page",
       "valid": true,
       "message": {
@@ -349,49 +338,6 @@
           "projectId": "local",
           "offset": 0,
           "limit": 50
-        }
-      }
-    },
-    {
-      "name": "session-list-skips-repeat-reconciliation",
-      "valid": true,
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000710",
-        "method": "session.list",
-        "params": {
-          "projectId": "local",
-          "reconcile": false
-        }
-      }
-    },
-    {
-      "name": "session-list-explicit-reconciliation",
-      "valid": true,
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000711",
-        "method": "session.list",
-        "params": {
-          "projectId": "local",
-          "reconcile": true
-        }
-      }
-    },
-    {
-      "name": "session-list-rejects-nonboolean-reconciliation",
-      "valid": false,
-      "errorCode": "PROTOCOL_INVALID",
-      "message": {
-        "protocolVersion": 1,
-        "messageType": "request",
-        "requestId": "00000000-0000-4000-8000-000000000712",
-        "method": "session.list",
-        "params": {
-          "projectId": "local",
-          "reconcile": "false"
         }
       }
     },
@@ -2529,32 +2475,6 @@
         {
           "protocolVersion": 1,
           "messageType": "request",
-          "requestId": "00000000-0000-4000-8000-000000000077",
-          "method": "project.list",
-          "params": {}
-        },
-        {
-          "protocolVersion": 1,
-          "messageType": "result",
-          "requestId": "00000000-0000-4000-8000-000000000077",
-          "ok": true,
-          "data": {
-            "status": "ready",
-            "issue": null,
-            "projects": [
-              {
-                "projectId": "local",
-                "name": "Local research",
-                "sessionCount": 1
-              }
-            ],
-            "selectedProjectId": "local",
-            "selectedSessionId": "0123456789abcdef0123456789abcdef"
-          }
-        },
-        {
-          "protocolVersion": 1,
-          "messageType": "request",
           "requestId": "00000000-0000-4000-8000-000000000078",
           "method": "session.list",
           "params": {
@@ -2615,30 +2535,7 @@
             "mcpFamilies": [],
             "startupDiagnostics": [],
             "extensionRevision": 2,
-            "projectId": "local",
-            "registered": true
-          }
-        },
-        {
-          "protocolVersion": 1,
-          "messageType": "request",
-          "requestId": "00000000-0000-4000-8000-00000000007a",
-          "method": "session.retry_registration",
-          "params": {
-            "projectId": "local",
-            "sessionId": "0123456789abcdef0123456789abcdef"
-          }
-        },
-        {
-          "protocolVersion": 1,
-          "messageType": "result",
-          "requestId": "00000000-0000-4000-8000-00000000007a",
-          "ok": true,
-          "data": {
-            "projectId": "local",
-            "sessionId": "0123456789abcdef0123456789abcdef",
-            "status": "registered",
-            "issue": null
+            "projectId": "local"
           }
         },
         {
@@ -2756,9 +2653,7 @@
             "text": "完成。",
             "validationErrors": [],
             "toolSummaries": [],
-            "responseKind": "answer",
-            "registrationStatus": "registered",
-            "registrationIssue": null
+            "responseKind": "answer"
           }
         }
       ]

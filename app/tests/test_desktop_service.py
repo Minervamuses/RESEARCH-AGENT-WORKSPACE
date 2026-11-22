@@ -20,7 +20,7 @@ from agent.cli.slash_commands import (
     SlashCommandResult,
 )
 from agent.conversations import ConversationRepository
-from agent.desktop.catalog import initialize_project, load_project_catalog
+from agent.desktop.project import initialize_project, open_project_history
 from agent.desktop.protocol import success_result
 from agent.desktop.service import DesktopService, DesktopServiceError
 from agent.extensions.manager import ApplyItemResult, ApplyReport, ExtensionStatus, ManagementError
@@ -1145,7 +1145,7 @@ def test_composer_extension_status_and_preview_gate_are_typed_and_no_call(
     assert manager.preview_calls == 0
 
 
-def test_restart_discovers_pending_json_when_catalog_registration_lagged(
+def test_restart_lists_conversations_already_saved_in_project_history(
     tmp_path: Path,
 ) -> None:
     config = AgentConfig(
@@ -1155,27 +1155,27 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
         str(tmp_path), config.persist_dir,
         history_directory=str(tmp_path / "history"), expected_fingerprint=None,
     )
-    catalog, repository = load_project_catalog(
-        project["projectId"], tmp_path.name, project["historyDirectory"],
-    )
-    conversation_id = uuid.uuid4().hex
-    repository.create(
-        conversation_id=conversation_id,
-        project_id=project["projectId"],
-        turn_id=uuid.uuid4().hex,
-        kind="conversational",
-        display_input="durable before catalog",
-        semantic_input="durable before catalog",
-        context_eligible=True,
-        thinking_mode="normal",
-        submitted_at="2026-09-04T00:00:00Z",
-    )
+    repository = open_project_history(project["projectId"], project["historyDirectory"])
+    conversation_ids = []
+    for index in range(3):
+        conversation_id = uuid.uuid4().hex
+        conversation_ids.append(conversation_id)
+        repository.create(
+            conversation_id=conversation_id,
+            project_id=project["projectId"],
+            turn_id=uuid.uuid4().hex,
+            kind="conversational",
+            display_input=f"saved before restart {index}",
+            semantic_input=f"saved before restart {index}",
+            context_eligible=True,
+            thinking_mode="normal",
+            submitted_at=f"2026-09-04T00:00:0{index}Z",
+        )
     factory = _SessionFactory()
 
     service = _service(
         tmp_path,
         config=config,
-        project_catalog=catalog,
         conversation_repository=repository,
         session_factory=factory,
     )
@@ -1185,14 +1185,14 @@ def test_restart_discovers_pending_json_when_catalog_registration_lagged(
         {"projectId": service._selected_project_id, "offset": 0, "limit": 50},
     ))
 
-    assert [item["sessionId"] for item in sessions["items"]] == [conversation_id]
-    assert sessions["items"][0]["turnCount"] == 1
-    assert sessions["items"][0]["title"] == "durable before catalog"
-    assert catalog.project_for_session(conversation_id) == project["projectId"]
+    assert sessions["total"] == 3
+    assert [item["sessionId"] for item in sessions["items"]] == conversation_ids
+    assert [item["turnCount"] for item in sessions["items"]] == [1, 1, 1]
+    assert sessions["items"][0]["title"] == "saved before restart 0"
     assert factory.calls == []
 
 
-def test_sidebar_refresh_skips_repeat_scans_without_changing_session_dtos(monkeypatch):
+def test_session_list_scans_history_once_per_call(monkeypatch):
     import tempfile
     from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX
     from test_desktop_fixture import _service as fixture_service
@@ -1215,25 +1215,22 @@ def test_sidebar_refresh_skips_repeat_scans_without_changing_session_dtos(monkey
         monkeypatch.setattr(ConversationRepository, "scan", count_scan)
         monkeypatch.setattr(ConversationRepository, "load", count_load)
 
-        async def refresh(*, already_reconciled):
-            catalog = await service.dispatch("project.list", {})
-            pages = []
-            for project in catalog["projects"]:
-                params = {"projectId": project["projectId"], "offset": 0, "limit": 50}
-                if already_reconciled:
-                    params["reconcile"] = False
-                pages.append(await service.dispatch("session.list", params))
-            return catalog, pages
+        async def refresh():
+            return await service.dispatch(
+                "session.list",
+                {"projectId": service._selected_project_id, "offset": 0, "limit": 50},
+            )
 
-        before = asyncio.run(refresh(already_reconciled=False))
-        assert counts == {"scan": 2, "load": 6}
+        # One scan per list call; the scan reads each of the two saved files once.
+        before = asyncio.run(refresh())
+        assert counts == {"scan": 1, "load": 2}
         counts.update(scan=0, load=0)
-        after = asyncio.run(refresh(already_reconciled=True))
-        assert counts == {"scan": 1, "load": 4}
+        after = asyncio.run(refresh())
+        assert counts == {"scan": 1, "load": 2}
         assert after == before
 
 
-def test_session_list_reconciles_json_created_after_service_start(
+def test_session_list_shows_json_created_after_project_open(
     tmp_path: Path,
 ) -> None:
     config = AgentConfig(
@@ -1243,14 +1240,11 @@ def test_session_list_reconciles_json_created_after_service_start(
         str(tmp_path), config.persist_dir,
         history_directory=str(tmp_path / "history"), expected_fingerprint=None,
     )
-    catalog, repository = load_project_catalog(
-        project["projectId"], tmp_path.name, project["historyDirectory"],
-    )
+    repository = open_project_history(project["projectId"], project["historyDirectory"])
     factory = _SessionFactory()
     service = _service(
         tmp_path,
         config=config,
-        project_catalog=catalog,
         conversation_repository=repository,
         session_factory=factory,
     )
@@ -1273,7 +1267,6 @@ def test_session_list_reconciles_json_created_after_service_start(
         {"projectId": service._selected_project_id, "offset": 0, "limit": 50},
     ))
 
-    assert catalog.project_for_session(conversation_id) == project["projectId"]
     assert [item["sessionId"] for item in sessions["items"]] == [
         conversation_id
     ]
@@ -1422,7 +1415,6 @@ def test_composer_bounds_local_command_output_and_safe_errors(
     )
 
     assert len(result["text"].encode("utf-8")) == 65_536
-    assert result["registrationStatus"] == "registered"
 
 
 def test_composer_routes_exact_knowledge_commands_through_injected_operations(
@@ -1489,7 +1481,6 @@ def test_composer_routes_exact_knowledge_commands_through_injected_operations(
     assert factory.created is not None
     assert factory.created.turn_inputs == []
     assert all(result["responseKind"] == "command" for result in results)
-    assert all(result["registrationStatus"] == "registered" for result in results)
     assert "initialized: 2 files, 5 chunks" in results[0]["text"]
     assert "ingested paper-pid (3 chunks)" in results[1]["text"]
     assert "ingested 1 files (3 chunks)" in results[2]["text"]

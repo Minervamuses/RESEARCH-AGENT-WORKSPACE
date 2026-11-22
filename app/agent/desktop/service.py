@@ -34,6 +34,7 @@ from agent.conversations import (
     ConversationError,
     ConversationRepository,
     ConversationSnapshot,
+    ConversationSummary,
     ConversationTurn,
     ConversationUnavailableError,
     ToolActivitySummary,
@@ -52,14 +53,13 @@ from agent.cli.slash_commands import (
 )
 from agent.diagnostics import attach_incident, incident_reference
 from agent.desktop import bime_export
-from agent.desktop.catalog import (
-    CATALOG_MAX_SESSIONS,
-    CatalogError,
-    DesktopProjectCatalog,
+from agent.desktop.project import (
+    ProjectError,
     inspect_project,
     initialize_project,
-    load_project_catalog,
+    open_project_history,
     project_citation_settings,
+    project_conversations,
     update_project_metadata,
 )
 from agent.desktop.protocol import (
@@ -157,7 +157,7 @@ _MAX_TRANSCRIPT_TOOL_CALL_ID_BYTES = 256
 _MAX_TRANSCRIPT_TOOL_NAME_BYTES = 256
 _MAX_TRANSCRIPT_TOOL_RESULT_BYTES = 65_536
 _TRANSCRIPT_TOOL_STATUSES = frozenset({"ok", "failed", "denied", "incomplete"})
-_MAX_CONTROL_SNAPSHOTS = CATALOG_MAX_SESSIONS
+_MAX_CONTROL_SNAPSHOTS = 4096
 _MAX_KNOWLEDGE_RESULT_PATHS = 512
 _MAX_KNOWLEDGE_PATH_BYTES = 4_096
 _MAX_APPROVAL_COMMAND_BYTES = 65_536
@@ -347,7 +347,6 @@ class DesktopService:
         extension_manager: ExtensionManager | None = None,
         session_factory: Callable[..., Any] | None = None,
         slash_registry: SlashCommandRegistry | None = None,
-        project_catalog: DesktopProjectCatalog | None = None,
         conversation_repository: ConversationRepository | None = None,
         knowledge_operations: DesktopKnowledgeOperations | None = None,
         bash_command_runner: Callable[..., Any] | None = None,
@@ -379,17 +378,16 @@ class DesktopService:
         self._extension_manager = extension_manager or ExtensionManager(self.config)
         # An explicit project open is the only entry to conversation storage.
         self._conversation_repository: ConversationRepository | None = None
-        self._catalog: DesktopProjectCatalog | None = None
         self._injected_repository = conversation_repository
-        self._injected_catalog = project_catalog
         self._project: dict[str, Any] | None = None
         self._selected_project_id: str | None = None
         self._workspace_opening = False
         self._project_operation_count = 0
         self._project_read_count = 0
         self._project_epoch = 0
-        self._session_registered = False
-        self._pending_registration: tuple[str, str] | None = None
+        # Whether the current session's conversation has a saved prompt, so it
+        # appears in the project's conversation list.
+        self._session_saved = False
         self._control_snapshots: dict[str, _ConversationControlSnapshot] = {}
         self._permission_mode: str = "ask"
         self._load_mcp = True
@@ -459,13 +457,11 @@ class DesktopService:
         """Execute one allowlisted protocol method and return a safe DTO."""
         handlers: dict[str, Callable[[dict[str, Any], EventSink | None], Any]] = {
             "runtime.diagnostics": self._runtime_diagnostics,
-            "project.list": self._project_list,
             "session.create": self._session_create,
             "session.list": self._session_list,
             "session.select": self._session_select,
             "session.rename": self._session_rename,
             "session.delete": self._session_delete,
-            "session.retry_registration": self._session_retry_registration,
             "session.transcript": self._session_transcript,
             "session.turn": self._session_turn,
             "session.stop": self._session_stop,
@@ -513,9 +509,7 @@ class DesktopService:
         project_operation_admitted = False
         project_read = method in {"session.list", "session.transcript"}
         try:
-            if self._workspace_opening and method not in {
-                "runtime.diagnostics", "project.list",
-            }:
+            if self._workspace_opening and method != "runtime.diagnostics":
                 raise DesktopServiceError(
                     "SESSION_NOT_READY", "Wait for the project open operation to finish.", retryable=True,
                 )
@@ -525,7 +519,7 @@ class DesktopService:
                 self._project_read_count += int(project_read)
                 project_operation_admitted = True
             return await handler(params, event_sink)
-        except (DocumentError, SkillSelectionError, CatalogError) as exc:
+        except (DocumentError, SkillSelectionError, ProjectError) as exc:
             error = DesktopServiceError("PROTOCOL_INVALID", str(exc))
             if method == "session.turn":
                 error = self._with_turn_lifecycle(error, method, params)
@@ -831,36 +825,6 @@ class DesktopService:
             "mcpDiagnostics": mcp_diagnostics,
         }
 
-    async def _project_list(
-        self, _params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        if self._project is None:
-            return {
-                "status": "ready",
-                "issue": None,
-                "projects": [],
-                "selectedProjectId": None,
-                "selectedSessionId": None,
-            }
-        self._reconcile_lagged_catalog_entries()
-        snapshot = self._catalog.snapshot()
-        return {
-            "status": "ready",
-            "issue": None,
-            "projects": [
-                {
-                    "projectId": project["projectId"],
-                    "name": project["name"],
-                    "sessionCount": len(project["sessionIds"]),
-                }
-                for project in snapshot["projects"]
-            ],
-            "selectedProjectId": self._selected_project_id,
-            "selectedSessionId": (
-                self.session.session_id if self.session is not None else None
-            ),
-        }
-
     async def _session_list(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -870,28 +834,24 @@ class DesktopService:
                 "Conversation summaries are unavailable during an active turn.",
                 retryable=True,
             )
-        # The sidebar already reconciled through its preceding project.list.
-        # Standalone and pagination requests retain fresh discovery by default.
-        if params.get("reconcile", True):
-            self._reconcile_lagged_catalog_entries()
-        project = self._require_catalog_project(params["projectId"])
+        project = self._require_opened_project(params["projectId"])
+        # The list is the history scan itself: a conversation appears once its
+        # first prompt is saved and disappears when its file is deleted.
+        summaries = await asyncio.to_thread(
+            project_conversations, project["projectId"], self._conversation_repository,
+        )
         offset = int(params.get("offset", 0))
         limit = int(params.get("limit", 50))
-        session_ids = project["sessionIds"]
-        items: list[dict[str, Any]] = []
-        for session_id in session_ids[offset : offset + limit]:
-            items.append(
-                await self._conversation_summary(session_id, project["projectId"])
-            )
+        page = summaries[offset : offset + limit]
         return {
             "projectId": project["projectId"],
             "status": "ready",
             "issue": None,
-            "items": items,
-            "total": len(session_ids),
+            "items": [self._summary_dto(summary) for summary in page],
+            "total": len(summaries),
             "offset": offset,
             "limit": limit,
-            "hasMore": offset + len(items) < len(session_ids),
+            "hasMore": offset + len(page) < len(summaries),
         }
 
     async def _session_select(
@@ -919,13 +879,9 @@ class DesktopService:
                 "The selected conversation cannot change during another operation.",
                 retryable=True,
             )
-        project = self._require_catalog_project(params["projectId"])
+        project = self._require_opened_project(params["projectId"])
         session_id = params["sessionId"]
-        if session_id not in project["sessionIds"]:
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "The requested conversation does not belong to that project.",
-            )
+        self._require_saved_conversation(project["projectId"], session_id)
         if (
             self.session is not None
             and self.session.session_id == session_id
@@ -934,7 +890,6 @@ class DesktopService:
             return {
                 **self._session_snapshot(self.session),
                 "projectId": project["projectId"],
-                "registered": True,
             }
 
         self._session_creating = True
@@ -980,13 +935,12 @@ class DesktopService:
         if (
             current is not None
             and saved_controls is not None
-            and self._session_registered
+            and self._session_saved
         ):
             self._store_control_snapshot(current.session_id, saved_controls)
         self.session = target
         self._selected_project_id = project["projectId"]
-        self._session_registered = True
-        self._pending_registration = None
+        self._session_saved = True
         target_snapshot = self._control_snapshots.get(session_id)
         self._permission_mode = (
             target_snapshot.permission_mode
@@ -996,7 +950,6 @@ class DesktopService:
         return {
             **self._session_snapshot(target),
             "projectId": project["projectId"],
-            "registered": True,
         }
 
     async def _session_rename(
@@ -1016,12 +969,9 @@ class DesktopService:
                 "SESSION_NOT_READY", "Wait for the current conversation operation before renaming.",
                 retryable=True,
             )
-        project = self._require_catalog_project(params["projectId"])
+        project = self._require_opened_project(params["projectId"])
         session_id = params["sessionId"]
-        if session_id not in project["sessionIds"]:
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID", "The requested conversation does not belong to that project.",
-            )
+        self._require_saved_conversation(project["projectId"], session_id)
         title = params["title"]
         if not isinstance(title, str) or not title.strip() or len(title.strip().encode("utf-8")) > MAX_TITLE_BYTES:
             raise DesktopServiceError(
@@ -1067,16 +1017,15 @@ class DesktopService:
                 "SESSION_NOT_READY", "Wait for the current conversation operation before deleting.",
                 retryable=True,
             )
-        project = self._require_catalog_project(params["projectId"])
+        project = self._require_opened_project(params["projectId"])
         session_id = params["sessionId"]
         selected = (
             self.session is not None and self.session.session_id == session_id
             and self._selected_project_id == project["projectId"]
         )
-        if session_id not in project["sessionIds"] and not selected:
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID", "The requested conversation does not belong to that project.",
-            )
+        if not selected:
+            # The selected session may not have a saved prompt yet.
+            self._require_saved_conversation(project["projectId"], session_id)
         try:
             snapshot = self._load_conversation(session_id, project["projectId"])
         except ConversationError as exc:
@@ -1085,73 +1034,16 @@ class DesktopService:
             ) from exc
         if selected:
             await self._shutdown_session(allow_current_project_operation=True)
-        # Keep index removal and canonical unlink in one short synchronous section,
-        # so this service cannot reconcile the still-present file between them.
         try:
-            self._catalog.unregister_session(project["projectId"], session_id)
             if snapshot is not None:
                 self._conversation_repository.delete(snapshot)
-        except (CatalogError, ConversationError) as exc:
-            if self._load_conversation(session_id, project["projectId"]) is not None:
-                self._catalog.register_session(project["projectId"], session_id)
+        except ConversationError as exc:
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "The conversation could not be deleted. Refresh and try again.",
                 retryable=True,
             ) from exc
         self._control_snapshots.pop(session_id, None)
         return {"projectId": project["projectId"], "sessionId": session_id, "status": "deleted"}
-
-    async def _session_retry_registration(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        session = self._require_idle_session()
-        project_id = params["projectId"]
-        session_id = params["sessionId"]
-        self._require_catalog_project(project_id)
-        if session.session_id != session_id or self._selected_project_id != project_id:
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "Registration can only be retried for the selected conversation.",
-            )
-        if self._catalog is None:
-            return {
-                "projectId": project_id,
-                "sessionId": session_id,
-                "status": "pending",
-                "issue": "The local project catalog is unavailable.",
-            }
-        owner = self._catalog.project_for_session(session_id)
-        if owner == project_id:
-            self._session_registered = True
-            self._pending_registration = None
-            return {
-                "projectId": project_id,
-                "sessionId": session_id,
-                "status": "registered",
-                "issue": None,
-            }
-        if self._pending_registration != (project_id, session_id):
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "The selected conversation has no pending catalog registration.",
-            )
-        try:
-            self._catalog.register_session(project_id, session_id)
-        except CatalogError:
-            return {
-                "projectId": project_id,
-                "sessionId": session_id,
-                "status": "pending",
-                "issue": "The conversation is saved, but catalog registration still failed.",
-            }
-        self._session_registered = True
-        self._pending_registration = None
-        return {
-            "projectId": project_id,
-            "sessionId": session_id,
-            "status": "registered",
-            "issue": None,
-        }
 
     async def _session_transcript(
         self, params: dict[str, Any], _event_sink: EventSink | None
@@ -1162,13 +1054,9 @@ class DesktopService:
                 "The transcript is unavailable during an active turn.",
                 retryable=True,
             )
-        project = self._require_catalog_project(params["projectId"])
+        project = self._require_opened_project(params["projectId"])
         session_id = params["sessionId"]
-        if session_id not in project["sessionIds"]:
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "The requested conversation does not belong to that project.",
-            )
+        self._require_saved_conversation(project["projectId"], session_id)
         offset = int(params.get("offset", 0))
         limit = int(params.get("limit", 20))
         try:
@@ -1222,61 +1110,17 @@ class DesktopService:
             total=len(turns),
         )
 
-    async def _conversation_summary(
-        self,
-        session_id: str,
-        project_id: str,
-    ) -> dict[str, Any]:
-        try:
-            snapshot = await asyncio.to_thread(
-                self._load_conversation,
-                session_id,
-                project_id,
-            )
-        except ConversationError:
-            return {
-                "sessionId": session_id,
-                "title": f"Conversation {session_id[:8]}",
-                "turnCount": 0,
-                "createdAt": None,
-                "updatedAt": None,
-                "status": "degraded",
-                "issue": "The stored transcript is malformed or incomplete.",
-            }
-        if snapshot is None:
-            return {
-                "sessionId": session_id,
-                "title": f"Conversation {session_id[:8]}",
-                "turnCount": 0,
-                "createdAt": None,
-                "updatedAt": None,
-                "status": "unavailable",
-                "issue": "No persisted transcript is available.",
-            }
-        summary = self._conversation_repository.summary(snapshot)
+    @staticmethod
+    def _summary_dto(summary: ConversationSummary) -> dict[str, Any]:
         return {
-            "sessionId": session_id,
-            "title": summary.title or f"Conversation {session_id[:8]}",
+            "sessionId": summary.conversation_id,
+            "title": summary.title or f"Conversation {summary.conversation_id[:8]}",
             "turnCount": summary.turn_count,
             "createdAt": summary.created_at,
             "updatedAt": summary.updated_at,
             "status": "ready",
             "issue": None,
         }
-
-    def _reconcile_lagged_catalog_entries(self) -> None:
-        """Refresh only the opened project's complete, ownership-checked history."""
-        project = self._project
-        if project is None:
-            return
-        catalog, _repository = load_project_catalog(
-            project["projectId"], Path(project["rootPath"]).name, project["historyDirectory"],
-        )
-        # Preserve injected catalog behavior while refreshing its validated snapshot.
-        if self._catalog is not None:
-            self._catalog._snapshot = catalog.snapshot()
-        else:
-            self._catalog = catalog
 
     def _project_bibliography_path(self, project_id: str) -> Path | None:
         """The opened project's CSL-JSON bibliography, or None when unusable.
@@ -1290,7 +1134,7 @@ class DesktopService:
             return None
         try:
             return project_citation_settings(project["rootPath"])["bibliographyPath"]
-        except CatalogError as exc:
+        except ProjectError as exc:
             logger.warning("project bibliography unavailable: %s", exc)
             return None
 
@@ -1301,25 +1145,29 @@ class DesktopService:
             )
         return self._project
 
-    def _require_catalog_project(self, project_id: str) -> dict[str, Any]:
+    def _require_opened_project(self, project_id: str) -> dict[str, Any]:
         opened = self._require_project()
-        if self._catalog is None or project_id != opened["projectId"]:
+        if self._conversation_repository is None or project_id != opened["projectId"]:
             raise DesktopServiceError(
                 "PROTOCOL_INVALID", "The requested project is not the opened research project.",
             )
-        project = next(
-            (
-                item
-                for item in self._catalog.snapshot()["projects"]
-                if item["projectId"] == project_id
-            ),
-            None,
-        )
-        if project is None:
+        return opened
+
+    def _require_saved_conversation(self, project_id: str, session_id: str) -> None:
+        """A conversation is listed exactly when its saved file is in the opened history.
+
+        Only a cheap existence check runs here, on the event loop; the
+        handler's own threaded read still rejects a file whose project
+        ownership differs (``ConversationConflictError``).
+        """
+        try:
+            saved = self._conversation_repository.path_for(session_id).is_file()
+        except (ConversationError, OSError):
+            saved = False
+        if not saved:
             raise DesktopServiceError(
-                "PROTOCOL_INVALID", "The requested project does not exist."
+                "PROTOCOL_INVALID", f"Conversation {session_id!r} is not saved in project {project_id!r}.",
             )
-        return project
 
     def _load_conversation(
         self,
@@ -1517,7 +1365,7 @@ class DesktopService:
             except Exception:
                 # A disconnected event stream cannot undo a saved prompt.
                 pass
-        self._register_saved_session(session)
+        self._session_saved = True
 
     @staticmethod
     def _project_system_prompt(project: Mapping[str, Any]) -> str:
@@ -1603,7 +1451,7 @@ class DesktopService:
             raise DesktopServiceError(
                 "SESSION_NOT_READY", "No local project is available."
             )
-        self._require_catalog_project(project_id)
+        self._require_opened_project(project_id)
         load_mcp = bool(params.get("loadMcp", True))
         graph_limit = params.get(
             "graphRecursionLimit", self.config.graph_recursion_limit
@@ -1637,20 +1485,18 @@ class DesktopService:
         if (
             current is not None
             and saved_controls is not None
-            and self._session_registered
+            and self._session_saved
         ):
             self._store_control_snapshot(current.session_id, saved_controls)
         self.config = config
         self.session = session
         self._load_mcp = load_mcp
         self._selected_project_id = project_id
-        self._session_registered = False
-        self._pending_registration = None
+        self._session_saved = False
         self._permission_mode = "ask"
         return {
             **self._session_snapshot(session),
             "projectId": project_id,
-            "registered": False,
         }
 
     def _validation_error_dtos(self, errors: list[Any]) -> list[str]:
@@ -1680,8 +1526,6 @@ class DesktopService:
             "validationErrors": validation_errors,
             "toolSummaries": tool_summaries,
             "responseKind": "answer",
-            "registrationStatus": "pending",
-            "registrationIssue": "\u0000" * 4_096,
         }
         try:
             success_result(
@@ -2079,55 +1923,6 @@ class DesktopService:
             "Review the exact preview before applying."
         ))
 
-    def _register_saved_session(
-        self,
-        session: ChatSession,
-    ) -> tuple[str, str | None]:
-        if self._session_registered:
-            return "registered", None
-        project_id = self._selected_project_id
-        if self._catalog is None or project_id is None:
-            status = "pending"
-            issue = "The conversation is saved, but the project catalog is unavailable."
-        else:
-            try:
-                self._catalog.register_session(project_id, session.session_id)
-            except CatalogError:
-                status = "pending"
-                issue = "The conversation is saved, but catalog registration failed."
-            else:
-                status = "registered"
-                issue = None
-        if status == "registered":
-            self._session_registered = True
-            self._pending_registration = None
-        elif project_id is not None:
-            self._pending_registration = (project_id, session.session_id)
-        return status, issue
-
-    def _saved_session_registration_result(
-        self,
-        session: ChatSession,
-    ) -> tuple[str, str | None]:
-        if self._session_registered:
-            return "registered", None
-        project_id = self._selected_project_id
-        if self._pending_registration == (project_id, session.session_id):
-            issue = (
-                "The conversation is saved, but the project catalog is unavailable."
-                if self._catalog is None
-                else "The conversation is saved, but catalog registration failed."
-            )
-            return "pending", issue
-        if (
-            self._catalog is not None
-            and project_id is not None
-            and self._catalog.project_for_session(session.session_id) == project_id
-        ):
-            self._session_registered = True
-            return "registered", None
-        return "not_required", None
-
     async def _workspace_select(
         self, params: dict[str, Any], _event_sink: EventSink | None
     ) -> dict[str, Any]:
@@ -2164,24 +1959,19 @@ class DesktopService:
                 )
             if action == "inspect" or project["status"] != "ready":
                 return project
-            catalog, repository = await asyncio.to_thread(
-                load_project_catalog, project["projectId"], Path(project["rootPath"]).name,
-                project["historyDirectory"],
+            repository = await asyncio.to_thread(
+                open_project_history, project["projectId"], project["historyDirectory"],
             )
             documents = DocumentWorkspace()
             await asyncio.to_thread(documents.select_root, project["rootPath"])
             # Injection never establishes ownership or skips the explicit open boundary.
             if self._injected_repository is not None and self._injected_repository.root.resolve() == repository.root.resolve():
                 repository = self._injected_repository
-            if self._injected_catalog is not None and self._injected_catalog.path.resolve() == catalog.path.resolve():
-                self._injected_catalog._snapshot = catalog.snapshot()
-                catalog = self._injected_catalog
             if self.lifecycle != "ready":
                 raise DesktopServiceError("SESSION_NOT_READY", "The backend changed state while opening the project.")
             # Cleanup may fail; commit the new binding only after it succeeds.
             await self._shutdown_session()
             self._documents = documents
-            self._catalog = catalog
             self._conversation_repository = repository
             self._project = project
             self._selected_project_id = project["projectId"]
@@ -2443,7 +2233,7 @@ class DesktopService:
             return json.dumps({"status": "failed", "issue": "No research project is open."})
         try:
             path = project_citation_settings(project["rootPath"])["bibliographyPath"]
-        except CatalogError as exc:
+        except ProjectError as exc:
             return json.dumps({"status": "failed", "issue": f"Project bibliography setting is invalid: {exc}"})
         try:
             library = load_bibliography(path)
@@ -2487,7 +2277,7 @@ class DesktopService:
                 raise LibraryError("library_malformed", "No research project is open.")
             path = project_citation_settings(project["rootPath"])["bibliographyPath"]
             known = set(load_bibliography(path).keys())
-        except (CatalogError, LibraryError) as exc:
+        except (ProjectError, LibraryError) as exc:
             return {
                 "status": "failed",
                 "issue": (
@@ -3188,9 +2978,6 @@ class DesktopService:
                             "INTERNAL_ERROR",
                             "The session returned an invalid durable command result.",
                         )
-                    registration_status, registration_issue = (
-                        self._saved_session_registration_result(session)
-                    )
                     response = {
                         "sessionId": session.session_id,
                         "turnId": outcome.turn_id,
@@ -3202,8 +2989,6 @@ class DesktopService:
                         "validationErrors": [],
                         "toolSummaries": [],
                         "responseKind": "command",
-                        "registrationStatus": registration_status,
-                        "registrationIssue": registration_issue,
                     }
                     if command.name == _DESKTOP_EXTENSION_COMMAND:
                         response["extensionAction"] = self._desktop_extension_action(parsed)
@@ -3287,9 +3072,6 @@ class DesktopService:
                 validation_errors=validation_errors,
                 tool_summaries=tool_summaries,
             )
-            registration_status, registration_issue = (
-                self._saved_session_registration_result(session)
-            )
             return {
                 "sessionId": session.session_id,
                 "turnId": outcome.turn_id,
@@ -3301,8 +3083,6 @@ class DesktopService:
                 "validationErrors": validation_errors,
                 "toolSummaries": tool_summaries,
                 "responseKind": "answer",
-                        "registrationStatus": registration_status,
-                "registrationIssue": registration_issue,
             }
 
     def _request_turn_stop(self, owner: _TurnWork) -> None:
@@ -3441,8 +3221,7 @@ class DesktopService:
             )
         session = self.session
         if session is None:
-            self._session_registered = False
-            self._pending_registration = None
+            self._session_saved = False
             self._control_snapshots.clear()
             self._clear_session_caches()
             return {"status": "no_session"}
@@ -3453,8 +3232,7 @@ class DesktopService:
         finally:
             self._session_closing = False
         self._load_mcp = True
-        self._session_registered = False
-        self._pending_registration = None
+        self._session_saved = False
         self._control_snapshots.clear()
         self._clear_session_caches()
         self._permission_mode = "ask"

@@ -27,7 +27,7 @@ from typing import Any, Callable
 import pytest
 
 from agent.conversations import ConversationRepository
-from agent.desktop.catalog import inspect_project
+from agent.desktop.project import inspect_project
 from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX, SESSION_A
 from agent.desktop.protocol import PROTOCOL_VERSION, parse_line
 from agent.skills.citation.session_policy import CitationSessionPolicy
@@ -488,7 +488,10 @@ def test_kill_during_tool_preserves_uncertain_side_effect_without_replay(
         assert interrupted["assistantText"] is None
         assert interrupted["toolActivities"] == []
         assert _effects(crash_root) == expected
-        restarted.request("project.list", {})
+        restarted.request(
+            "session.list",
+            {"projectId": restarted.project_id, "offset": 0, "limit": 50},
+        )
         restarted.transcript()
         assert _effects(crash_root) == expected
     finally:

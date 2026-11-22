@@ -548,7 +548,7 @@ def _previewed_installer(tmp_path, monkeypatch, *, project_id=None):
 def test_installer_skill_switch_exposes_cleanup_conflict_without_execution(
     tmp_path, monkeypatch, skill_name,
 ):
-    from agent.desktop.catalog import initialize_project
+    from agent.desktop.project import initialize_project
     from conftest import make_astream_graph
     from test_desktop_service import _open_test_project, _service, _turn_params
     from test_thinking_session import _Factory, _default_models

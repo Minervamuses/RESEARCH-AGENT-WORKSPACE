@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from agent.conversations import ConversationRepository
-from agent.desktop.catalog import CATALOG_FILENAME, DesktopProjectCatalog, inspect_project
+from agent.desktop.project import LEGACY_CATALOG_FILENAME, inspect_project
 from agent.desktop.fixture_session import (
     FIXTURE_BASH_APPROVE,
     FIXTURE_BASH_DENY,
@@ -90,6 +90,13 @@ def _history_root(service):
     return _project_info(Path(service.config.persist_dir).parent)["historyDirectory"]
 
 
+def _listed_ids(service, project_id: str) -> list[str]:
+    listed = asyncio.run(service.dispatch(
+        "session.list", {"projectId": project_id, "offset": 0, "limit": 50},
+    ))
+    return [item["sessionId"] for item in listed["items"]]
+
+
 def _service(root: Path, *, open_project: bool = False):
     service = build_phase02_fixture_service(
         original_cwd=root,
@@ -141,31 +148,21 @@ def test_fixture_rejects_symlinked_child_store(fixture_root: Path) -> None:
         _service(fixture_root, open_project=True)
 
 
-def test_seed_is_deterministic_and_restart_preserves_catalog_order(
+def test_seed_is_deterministic_and_restart_lists_conversations_in_creation_order(
     fixture_root: Path,
 ) -> None:
     first = _service(fixture_root)
-    cold = asyncio.run(first.dispatch("project.list", {}))
-    assert cold["projects"] == []
-    assert cold["selectedProjectId"] is None
     assert first.session is None
-    assert not (Path(first.config.persist_dir) / CATALOG_FILENAME).exists()
     project = _project_info(fixture_root)
     history = Path(project["historyDirectory"])
-    snapshot = DesktopProjectCatalog(history).snapshot()
-    assert snapshot == {
-        "projects": [{
-            "projectId": project["projectId"],
-            "name": "project-one",
-            "sessionIds": [SESSION_A, SESSION_B],
-        }]
-    }
-    original_catalog = (history / CATALOG_FILENAME).read_bytes()
+    assert not (Path(first.config.persist_dir) / LEGACY_CATALOG_FILENAME).exists()
+    assert not (history / LEGACY_CATALOG_FILENAME).exists()
+    asyncio.run(first.dispatch("workspace.select", {"rootPath": project["rootPath"]}))
+    assert _listed_ids(first, project["projectId"]) == [SESSION_A, SESSION_B]
     second = _service(fixture_root)
-    assert asyncio.run(second.dispatch("project.list", {}))["projects"] == []
-    assert DesktopProjectCatalog(history).snapshot() == snapshot
-    assert (history / CATALOG_FILENAME).read_bytes() == original_catalog
     asyncio.run(second.dispatch("workspace.select", {"rootPath": project["rootPath"]}))
+    assert _listed_ids(second, project["projectId"]) == [SESSION_A, SESSION_B]
+    assert not (history / LEGACY_CATALOG_FILENAME).exists()
     asyncio.run(second.dispatch(
         "session.select", {"projectId": project["projectId"], "sessionId": SESSION_A},
     ))
@@ -183,10 +180,7 @@ def test_seed_is_deterministic_and_restart_preserves_catalog_order(
     other = _project_info(fixture_root, "project-two")
     assert other["historyDirectory"] != project["historyDirectory"]
     asyncio.run(second.dispatch("workspace.select", {"rootPath": other["rootPath"]}))
-    projects = asyncio.run(second.dispatch("project.list", {}))
-    assert projects["projects"] == [{
-        "projectId": other["projectId"], "name": "project-two", "sessionCount": 1,
-    }]
+    assert len(_listed_ids(second, other["projectId"])) == 1
 
 
 def test_fixture_status_reports_canonical_conversation_root(
@@ -213,7 +207,7 @@ def test_fixture_status_reports_canonical_conversation_root(
     )
 
 
-def test_real_service_round_trip_registration_restore_and_complete_answer(
+def test_real_service_round_trip_listing_restore_and_complete_answer(
     fixture_root: Path,
 ) -> None:
     service = _service(fixture_root, open_project=True)
@@ -225,9 +219,11 @@ def test_real_service_round_trip_registration_restore_and_complete_answer(
             {"projectId": _project_id(fixture_root), "loadMcp": True},
         )
         transient_id = created["sessionId"]
-        assert created["registered"] is False
-        before = DesktopProjectCatalog(_history_root(service)).snapshot()
-        assert transient_id not in before["projects"][0]["sessionIds"]
+        assert "registered" not in created
+        before = await service.dispatch(
+            "session.list", {"projectId": _project_id(fixture_root), "offset": 0, "limit": 50},
+        )
+        assert [item["sessionId"] for item in before["items"]] == [SESSION_A, SESSION_B]
 
         turn_id = "00000000000040008000000000001001"
         result = await service.dispatch(
@@ -240,7 +236,6 @@ def test_real_service_round_trip_registration_restore_and_complete_answer(
         assert result["state"] == "completed"
         assert result["accepted"] is True
         assert result["persisted"] is True
-        assert result["registrationStatus"] == "registered"
         assert all(event != "answer.chunk" for event, _data in events)
         assert result["text"] not in repr(events)
 
@@ -269,12 +264,10 @@ def test_real_service_round_trip_registration_restore_and_complete_answer(
     assert "turn 3" in continued_a["text"]
     assert "A second" in continued_a["text"]
     assert "B second" not in continued_a["text"]
-    durable = DesktopProjectCatalog(_history_root(service)).snapshot()
-    assert durable["projects"][0]["sessionIds"] == [
-        SESSION_A,
-        SESSION_B,
-        transient_id,
-    ]
+    # Fixture first turns share one timestamp, so the list falls back to ID order.
+    assert _listed_ids(service, _project_id(fixture_root)) == sorted(
+        [SESSION_A, SESSION_B, transient_id]
+    )
     transient = ConversationRepository(_history_root(service)).load(transient_id)
     assert transient.document.turns[0].display_input == "register D"
     assert transient.document.turns[0].semantic_input == "register D"
@@ -1017,7 +1010,6 @@ def test_phase07_integrated_skill_tool_restore_journey(
         for event, data in delayed_events
         if event == "stage.changed"
     ]
-    assert created["registered"] is False
     assert diagnostics["mcpEnabled"] is True
     assert delayed_stages == [
         "fixture.prepare",
@@ -1320,25 +1312,25 @@ def test_fixture_bash_approval_and_denial_use_only_the_fake_runner(
     assert replayed.code == "APPROVAL_DENIED"
 
 
-def test_malformed_existing_catalog_is_rebuilt_from_canonical_conversations(
+def test_legacy_catalog_file_is_left_untouched_when_project_opens(
     fixture_root: Path,
 ) -> None:
     _service(fixture_root)
     project = _project_info(fixture_root)
-    path = Path(project["historyDirectory"]) / CATALOG_FILENAME
+    path = Path(project["historyDirectory"]) / LEGACY_CATALOG_FILENAME
     original = b'{"projects":[{"unexpected":true}]}\\n'
     path.write_bytes(original)
+    os.utime(path, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+    before = path.stat().st_mtime_ns
     service = _service(fixture_root)
-    cold = asyncio.run(service.dispatch("project.list", {}))
-    assert cold["projects"] == []
-    assert path.read_bytes() == original
     opened = asyncio.run(service.dispatch("workspace.select", {"rootPath": project["rootPath"]}))
     assert opened["status"] == "opened"
-    projects = asyncio.run(service.dispatch("project.list", {}))
-    assert path.read_bytes() != original
-    assert projects["projects"] == [{
-        "projectId": project["projectId"], "name": "project-one", "sessionCount": 2,
-    }]
+    assert _listed_ids(service, project["projectId"]) == [SESSION_A, SESSION_B]
+    asyncio.run(service.dispatch("session.create", {"projectId": project["projectId"], "loadMcp": False}))
+    asyncio.run(service.dispatch("session.turn", _turn_params("saved beside legacy file")))
+    assert len(_listed_ids(service, project["projectId"])) == 3
+    assert path.read_bytes() == original
+    assert path.stat().st_mtime_ns == before
 
 
 def test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection(
