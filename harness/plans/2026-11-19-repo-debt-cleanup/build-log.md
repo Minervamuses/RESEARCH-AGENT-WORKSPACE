@@ -20,7 +20,7 @@
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
-| C6 | In progress | `evidence/C6-S1/`–`evidence/C6-S3/` | — | C6-S4 |
+| C6 | In progress | `evidence/C6-S1/`–`evidence/C6-S4/` | — | C6-S5 |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
@@ -601,3 +601,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C6-S3/frontend.md`（含 GUI 清單 6 項）。
 - **限制**：GUI 未驗證，交給使用者。
 - **下一步**：C6-S4 掃描量測。
+
+### C6-S4 掃描量測（R3，2026-11-22）
+
+- **觀察結果**：每個對話約 0.96 MiB（4 個文件回合）。10 個對話：開啟專案中位數 0.122 s、一次 `session.list` 0.123 s；50 個對話：0.565 s 與 0.557 s；兩者每次都恰好 1 次 scan。耗時約與歷史總大小成正比（約 11 ms／MB）。不訂門檻、不加快取；是否加快取列為使用者決定。
+- **執行指令**：`evidence/C6-S4/scan_cost.py`（資料在 `$TMPDIR`）。
+- **證據**：`evidence/C6-S4/scan-cost.md`、`evidence/C6-S4/scan_cost.py`。
+- **限制**：只量熱快取。
+- **下一步**：C6-S5 階段收尾。
