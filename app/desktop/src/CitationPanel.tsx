@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { Api } from "./api.ts";
+import { useDisclosureMenu } from "./hooks/useDisclosureMenu.ts";
 import type { DocumentContextDto } from "./protocol.ts";
 import {
   addErrorOutcome,
@@ -74,24 +75,13 @@ export function ExportMenu({ formats, disabled, onExport }: {
   disabled: boolean;
   onExport: (format: ExportFormat) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLUListElement>(null);
-  useEffect(() => {
-    if (disabled) setOpen(false);
-    else if (open) menu.current?.querySelector<HTMLElement>("button")?.focus();
-  }, [disabled, open]);
+  const { open, setOpen, close, triggerRef, menuRef, containerProps } = useDisclosureMenu<HTMLUListElement>(disabled, "button");
   if (formats.length === 0) return null;
-  const close = () => { setOpen(false); trigger.current?.focus(); };
   return (
-    <div className="citation-export" onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-    }} onKeyDown={(event) => {
-      if (event.key === "Escape" && open) { event.preventDefault(); close(); }
-    }}>
-      <button ref={trigger} type="button" disabled={disabled} aria-haspopup="menu" aria-expanded={open}
+    <div className="citation-export" {...containerProps}>
+      <button ref={triggerRef} type="button" disabled={disabled} aria-haspopup="menu" aria-expanded={open}
         onClick={() => setOpen(!open)}>Export ▾</button>
-      {open && <ul ref={menu} className="citation-export-options" role="menu" aria-label="Export">
+      {open && <ul ref={menuRef} className="citation-export-options" role="menu" aria-label="Export">
         {formats.map((format) => (
           <li key={format} role="none">
             <button type="button" role="menuitem" onClick={() => { close(); onExport(format); }}>

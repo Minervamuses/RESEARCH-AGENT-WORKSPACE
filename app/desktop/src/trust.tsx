@@ -1,15 +1,12 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type MouseEvent,
-} from "react";
+import { useEffect, useRef } from "react";
 
 import type {
   ApprovalRequiredDto,
   PermissionMode,
 } from "./protocol.ts";
+import { ModalDialog } from "./components/Modal.tsx";
+import { useDisclosureMenu } from "./hooks/useDisclosureMenu.ts";
+import { menuNextIndex } from "./lib/interaction.ts";
 import type { PendingApproval } from "./lib/approval.ts";
 import {
   approvedBindingHashes,
@@ -46,88 +43,67 @@ export function ApprovalDialog({
     return returnFocus;
   }, [returnFocus]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (!resolving) onResolve(false);
-      return;
-    }
-    if (event.key !== "Tab" || nonModal) return;
-    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-    const first = controls[0], last = controls.at(-1);
-    if (first === undefined || last === undefined) { event.preventDefault(); return; }
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
-  const onBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    if (!nonModal && event.target === event.currentTarget && !resolving) onResolve(false);
-  };
-
   return (
-    <div className={nonModal ? "approval-backdrop document-approval-backdrop" : "approval-backdrop"} onMouseDown={onBackdropMouseDown}>
-      <div
-        className="approval-dialog"
-        role="dialog"
-        aria-modal={!nonModal}
-        aria-labelledby="bash-approval-title"
-        aria-describedby="bash-approval-description"
-        onKeyDown={onKeyDown}
-      >
-        <p className="section-kicker">ONE-TIME OPERATION</p>
-        <h2 id="bash-approval-title">{approval.operation === undefined ? "Allow this Bash command?" : "Allow this operation?"}</h2>
-        <p id="bash-approval-description">{approval.description}</p>
-        <dl className="approval-context">
-          {approval.operation === undefined ? <>
-            <div><dt>Exact command</dt><dd><code>{approval.command}</code></dd></div>
-            <div><dt>Execution timeout</dt><dd>{approval.executionTimeoutSeconds} seconds</dd></div>
-          </> : <>
-            <div><dt>Action</dt><dd>{{
-              "document.apply": "Save document edit", "document.undo": "Undo document edit",
-              "citation.save": "Save citation batch", "knowledge.init_workspace": "Initialize index",
-              "knowledge.ingest_file": "Import file", "knowledge.ingest_folder": "Import folder",
-              "knowledge.prune_apply": "Prune index", "mcp.call": "Call MCP tool",
-              "extension.install": "Install or update extension",
-            }[approval.operation]}</dd></div>
-            <div><dt>Target</dt><dd><code>{approval.targetPath}</code></dd></div>
-            {approval.parametersSummary !== undefined && <div><dt>Parameters</dt><dd><pre>{approval.parametersSummary}</pre></dd></div>}
-          </>}
-          <div>
-            <dt>Approval expires</dt>
-            <dd>{approval.expiresAt}</dd>
-          </div>
-        </dl>
-        <p className="approval-note">This decision applies once to this exact pending request. Closing or leaving this conversation denies it.</p>
-        {stopError !== undefined && <p className="error-text" role="alert">{stopError}</p>}
-        <div className="approval-actions">
-          <button
-            ref={denyRef}
-            type="button"
-            autoFocus
-            disabled={resolving}
-            onClick={() => onResolve(false)}
-          >
-            Deny
-          </button>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={resolving}
-            onClick={() => onResolve(true)}
-          >
-            Approve
-          </button>
-          {onStop !== undefined && <button type="button" disabled={stopping} onClick={onStop}>
-            {stopping ? "Stopping…" : "Stop"}
-          </button>}
+    <ModalDialog
+      as="div"
+      backdropClassName={nonModal ? "document-approval-backdrop" : undefined}
+      labelledBy="bash-approval-title"
+      describedBy="bash-approval-description"
+      modal={!nonModal}
+      dismissible={!resolving}
+      onDismiss={() => onResolve(false)}
+      preventEscapeWhenBlocked
+      blockEmptyTab
+      dismissOnBackdrop
+    >
+      <p className="section-kicker">ONE-TIME OPERATION</p>
+      <h2 id="bash-approval-title">{approval.operation === undefined ? "Allow this Bash command?" : "Allow this operation?"}</h2>
+      <p id="bash-approval-description">{approval.description}</p>
+      <dl className="approval-context">
+        {approval.operation === undefined ? <>
+          <div><dt>Exact command</dt><dd><code>{approval.command}</code></dd></div>
+          <div><dt>Execution timeout</dt><dd>{approval.executionTimeoutSeconds} seconds</dd></div>
+        </> : <>
+          <div><dt>Action</dt><dd>{{
+            "document.apply": "Save document edit", "document.undo": "Undo document edit",
+            "citation.save": "Save citation batch", "knowledge.init_workspace": "Initialize index",
+            "knowledge.ingest_file": "Import file", "knowledge.ingest_folder": "Import folder",
+            "knowledge.prune_apply": "Prune index", "mcp.call": "Call MCP tool",
+            "extension.install": "Install or update extension",
+          }[approval.operation]}</dd></div>
+          <div><dt>Target</dt><dd><code>{approval.targetPath}</code></dd></div>
+          {approval.parametersSummary !== undefined && <div><dt>Parameters</dt><dd><pre>{approval.parametersSummary}</pre></dd></div>}
+        </>}
+        <div>
+          <dt>Approval expires</dt>
+          <dd>{approval.expiresAt}</dd>
         </div>
+      </dl>
+      <p className="approval-note">This decision applies once to this exact pending request. Closing or leaving this conversation denies it.</p>
+      {stopError !== undefined && <p className="error-text" role="alert">{stopError}</p>}
+      <div className="approval-actions">
+        <button
+          ref={denyRef}
+          type="button"
+          autoFocus
+          disabled={resolving}
+          onClick={() => onResolve(false)}
+        >
+          Deny
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={resolving}
+          onClick={() => onResolve(true)}
+        >
+          Approve
+        </button>
+        {onStop !== undefined && <button type="button" disabled={stopping} onClick={onStop}>
+          {stopping ? "Stopping…" : "Stop"}
+        </button>}
       </div>
-    </div>
+    </ModalDialog>
   );
 }
 
@@ -162,21 +138,10 @@ export function PermissionControl({
 export function ThinkingControl({ mode, disabled, onChange }: {
   mode: "normal" | "extended"; disabled: boolean; onChange: (mode: "normal" | "extended") => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
+  const { open, setOpen, close, triggerRef, menuRef, containerProps } = useDisclosureMenu<HTMLDivElement>(disabled, '[aria-checked="true"]');
   const label = mode === "normal" ? "Normal" : "Extended";
-  useEffect(() => {
-    if (disabled) setOpen(false);
-    else if (open) menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
-  }, [disabled, open]);
-  const close = () => { setOpen(false); trigger.current?.focus(); };
-  return <div className="thinking-control" onBlur={(event) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-  }} onKeyDown={(event) => {
-    if (event.key === "Escape" && open) { event.preventDefault(); close(); }
-  }}>
-    <button ref={trigger} className="thinking-trigger" type="button" disabled={disabled}
+  return <div className="thinking-control" {...containerProps}>
+    <button ref={triggerRef} className="thinking-trigger" type="button" disabled={disabled}
       aria-label={"Thinking: " + label} aria-haspopup="menu" aria-expanded={open}
       title={"Thinking: " + label + (disabled ? ". The current turn keeps its starting mode." : ". Document and citation tasks use Normal when required.")}
       onClick={() => setOpen(!open)}
@@ -186,14 +151,12 @@ export function ThinkingControl({ mode, disabled, onChange }: {
       <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18"><path d="m10 2 2.1 5.9L18 10l-5.9 2.1L10 18l-2.1-5.9L2 10l5.9-2.1Z" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
       <span>{label}</span>
     </button>
-    <div ref={menu} className="thinking-options" role="menu" aria-label="Thinking mode" hidden={!open}
+    <div ref={menuRef} className="thinking-options" role="menu" aria-label="Thinking mode" hidden={!open}
       onKeyDown={(event) => {
-        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
         const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
-        const current = options.indexOf(document.activeElement as HTMLButtonElement);
-        const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
-          : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+        const next = menuNextIndex(event.key, options.indexOf(document.activeElement as HTMLButtonElement), options.length, true);
+        if (next === null) return;
+        event.preventDefault();
         options[next]?.focus();
       }}>
       {(["normal", "extended"] as const).map((value) => <button type="button" role="menuitemradio"

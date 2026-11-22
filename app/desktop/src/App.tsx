@@ -60,6 +60,8 @@ import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
 import { AnnotationComment, DocumentEditor, type AnnotationControls } from "./DocumentEditor.tsx";
 import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
+import { ModalDialog } from "./components/Modal.tsx";
+import { focusLeftContainer, menuNextIndex, menuShouldClose } from "./lib/interaction.ts";
 import { ApprovalDialog, PermissionControl, ThinkingControl, ExtensionPanel } from "./trust.tsx";
 import { approvalExpiry, reconcilePermissionAck } from "./lib/approval.ts";
 import {
@@ -161,17 +163,7 @@ export function DeleteConversationDialog({ title, status, error, onConfirm, onCa
   onCancel: () => void;
 }) {
   const busy = status !== null;
-  return <div className="approval-backdrop">
-    <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !busy) { event.preventDefault(); onCancel(); }
-        if (event.key !== "Tab") return;
-        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-        const first = controls[0], last = controls.at(-1);
-        if (controls.length === 0) event.preventDefault();
-        else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-      }}>
+  return <ModalDialog labelledBy="delete-conversation-title" dismissible={!busy} onDismiss={onCancel} blockEmptyTab>
       <h2 id="delete-conversation-title">Delete conversation?</h2>
       <p>Delete the conversation record “{title}”? The project and its output files will remain.</p>
       <p>If this conversation is running, it will be stopped before deletion.</p>
@@ -181,8 +173,7 @@ export function DeleteConversationDialog({ title, status, error, onConfirm, onCa
         <button type="button" disabled={busy} onClick={onConfirm}>{error === null ? "Delete conversation" : "Retry deletion"}</button>
         <button type="button" autoFocus disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
-    </section>
-  </div>;
+  </ModalDialog>;
 }
 
 export function SlashCommandList({ commands, active, onSelect, inline = false }: {
@@ -559,7 +550,7 @@ export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, 
         event.currentTarget.querySelector("summary")?.focus();
       }
     }} onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+      if (focusLeftContainer(event.currentTarget, event.relatedTarget as Node | null)) event.currentTarget.open = false;
     }}>
       <summary aria-label="Document actions" title="Document actions">•••</summary>
       <div className="document-menu-actions">
@@ -2343,14 +2334,13 @@ export default function App() {
         <div className="document-menu-actions conversation-menu" role="menu" aria-label="Conversation actions" tabIndex={-1}
           ref={conversationMenuRef} style={{ left: conversationMenu.left, top: conversationMenu.top }}
           onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
-            if (event.key === "Escape" || event.key === "Tab") {
+            if (menuShouldClose(event.key, true, true)) {
               event.preventDefault(); setConversationMenu(null); conversationMenuReturnFocusRef.current?.focus();
-            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault();
-              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-              const current = items.indexOf(document.activeElement as HTMLButtonElement);
-              items[(current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+              return;
             }
+            const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+            const next = menuNextIndex(event.key, items.indexOf(document.activeElement as HTMLButtonElement), items.length, false);
+            if (next !== null) { event.preventDefault(); items[next]?.focus(); }
           }}>
           <button type="button" role="menuitem"
             disabled={!canManageConversations || conversationMenu.session.transient || conversationMenu.session.status !== "ready"}
@@ -2366,19 +2356,10 @@ export default function App() {
           }}>Delete</button>
         </div>
       </div>}
-      {renameDialog !== null && <div className="approval-backdrop">
-        <form className="approval-dialog file-open-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-conversation-title"
-          onSubmit={(event) => { event.preventDefault(); void renameConversation(); }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && workspaceBusy === null) {
-              event.preventDefault(); setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus();
-            }
-            if (event.key !== "Tab") return;
-            const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input:not(:disabled), button:not(:disabled)"));
-            const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-          }}>
+      {renameDialog !== null && <ModalDialog as="form" className="file-open-dialog" labelledBy="rename-conversation-title"
+        dismissible={workspaceBusy === null} focusSelector="input:not(:disabled), button:not(:disabled)"
+        onDismiss={() => { setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus(); }}
+        onSubmit={(event) => { event.preventDefault(); void renameConversation(); }}>
           <h2 id="rename-conversation-title">Rename conversation</h2>
           <label>Name<input autoFocus value={renameDialog.title} disabled={workspaceBusy !== null}
             onFocus={(event) => event.currentTarget.select()}
@@ -2394,23 +2375,15 @@ export default function App() {
               setRenameDialog(null); conversationMenuReturnFocusRef.current?.focus();
             }}>Cancel</button>
           </div>
-        </form>
-      </div>}
+      </ModalDialog>}
       {deleteDialog !== null && <DeleteConversationDialog title={deleteDialog.title} status={deleteDialog.status} error={deleteDialog.issue}
         onConfirm={() => void deleteConversation()} onCancel={() => {
           setDeleteDialog(null);
           scheduleOwnedFrame(deleteDialog.owner, () => conversationMenuReturnFocusRef.current?.focus());
         }} />}
-      {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <div className="approval-backdrop">
-        <section className="approval-dialog" role="dialog" aria-modal="true" aria-labelledby="project-chooser-title"
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && workspaceBusy === null) { event.preventDefault(); setChooserOpen(false); }
-            if (event.key !== "Tab") return;
-            const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("input:not(:disabled), button:not(:disabled), select:not(:disabled)"));
-            const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-          }}>
+      {chooserOpen && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && <ModalDialog labelledBy="project-chooser-title"
+        dismissible={workspaceBusy === null} onDismiss={() => setChooserOpen(false)}
+        focusSelector="input:not(:disabled), button:not(:disabled), select:not(:disabled)">
           <p className="section-kicker">LOCAL PROJECT</p>
           <h2 id="project-chooser-title">{project === null ? "Open a research project" : "Switch research project"}</h2>
           <p>Choose an existing WSL folder. Its RESEARCH.md defines the project rules and conversation history location.</p>
@@ -2442,8 +2415,7 @@ export default function App() {
           {chooserIssue !== null && <p className="extension-error" role="alert">{chooserIssue}</p>}
           {workspaceBusy !== null && <p role="status">{workspaceBusy}…</p>}
           <button type="button" disabled={workspaceBusy !== null} onClick={() => setChooserOpen(false)}>Cancel</button>
-        </section>
-      </div>}
+      </ModalDialog>}
       {chatSelection !== null && renderConversation && idle && !chooserOpen && deleteDialog === null && <button type="button" className="chat-reference-action"
         style={{ position: "fixed", top: chatSelection.top, left: chatSelection.left }}
         onPointerDown={(event) => event.preventDefault()} onClick={() => void addChatReference()}>Comment on selection</button>}

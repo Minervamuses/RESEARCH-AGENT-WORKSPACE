@@ -92,8 +92,7 @@ test("conversation deletion confirms its scope and Cancel does not confirm", asy
   assert.match(html, /Delete the conversation record/);
   assert.match(html, /The project and its output files will remain/);
   assert.match(html, /stopped before deletion/);
-  const section = elementChildren(dialog)[0];
-  const actions = elementChildren(section).at(-1);
+  const actions = elementChildren(dialog).at(-1);
   const [confirmButton, cancelButton] = elementChildren(actions) as ReactElementLike[];
   (cancelButton.props.onClick as () => void)();
   assert.equal(cancelled, 1);
