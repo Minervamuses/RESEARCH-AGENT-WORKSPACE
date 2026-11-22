@@ -284,7 +284,6 @@ class DesktopKnowledgeOperations:
     ]
     diff_folder: Callable[[Path, AgentConfig], Awaitable[dict[str, Any]]]
     prune_folder: Callable[[Path, AgentConfig], Awaitable[list[str]]]
-    workspace_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -1591,7 +1590,7 @@ class DesktopService:
             )
         async with self._knowledge_operation(turn_owned=True):
             await self._require_operation_approval(
-                "knowledge.init_workspace", str(getattr(self._knowledge_operations, "workspace_root", None) or find_app_root().parent),
+                "knowledge.init_workspace", str(find_app_root().parent),
                 "Import the host workspace into the local knowledge index, excluding the app directory.",
                 parameters={"storePath": str(Path(self.config.persist_dir).expanduser().resolve())},
             )

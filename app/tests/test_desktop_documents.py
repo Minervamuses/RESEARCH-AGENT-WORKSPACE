@@ -11,9 +11,17 @@ from agent.desktop.documents import (
     DocumentError,
     DocumentWorkspace,
     resolve_line_range,
-    selected_text,
     utf16_length,
+    utf16_to_index,
 )
+
+
+def selected_text(snapshot: dict) -> str:
+    """The snapshot's half-open UTF-16 range (whole text when unset)."""
+    source = snapshot["sourceText"]
+    start = snapshot.get("rangeStartUtf16", 0)
+    end = snapshot.get("rangeEndUtf16", utf16_length(source))
+    return source[utf16_to_index(source, start):utf16_to_index(source, end)]
 
 
 def workspace(tmp_path: Path, source: str = "原稿\n"):

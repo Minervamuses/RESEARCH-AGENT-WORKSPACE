@@ -14,7 +14,7 @@ import pytest
 
 from agent.conversations import ConversationRepository
 from agent.desktop.project import LEGACY_CATALOG_FILENAME, inspect_project
-from agent.desktop.fixture_session import (
+from support.fixture_session import (
     FIXTURE_BASH_APPROVE,
     FIXTURE_BASH_DENY,
     FIXTURE_CHANGED_ORPHAN_MARKER,
@@ -23,8 +23,6 @@ from agent.desktop.fixture_session import (
     FIXTURE_FAIL_ONCE,
     FIXTURE_KNOWLEDGE_DIRNAME,
     FIXTURE_LONG_FINAL,
-    FIXTURE_MODE,
-    FIXTURE_MODE_ENV,
     FIXTURE_RAG_QUESTION,
     FIXTURE_SKILLS_ABSTRACT,
     FIXTURE_ROOT_ENV,
@@ -70,7 +68,6 @@ def phase07_fixture_root():
 
 def _environ(root: Path) -> dict[str, str]:
     return {
-        FIXTURE_MODE_ENV: FIXTURE_MODE,
         FIXTURE_ROOT_ENV: str(root),
         "CONDA_DEFAULT_ENV": "app",
         "CONDA_PREFIX": "/isolated/conda/app",
@@ -121,6 +118,7 @@ def _turn_params(text: str, *, turn_id: str | None = None) -> dict[str, object]:
 @pytest.mark.parametrize(
     "raw",
     [
+        "",
         "relative-fixture",
         "/tmp",
         "/var/tmp/research-agent-desktop-phase02-unsafe",

@@ -29,7 +29,7 @@ from agent.conversations import (
 )
 from agent.desktop.project import inspect_project, initialize_project
 from agent.desktop.service import DesktopKnowledgeOperations, DesktopService
-from agent.desktop.documents import selected_text
+from agent.desktop.documents import utf16_length, utf16_to_index
 from agent.document_context import SNAPSHOT_HEADER
 from agent.extensions.manager import ExtensionManager
 from agent.extensions.startup import load_extension_startup
@@ -44,9 +44,7 @@ from agent.tools.inventory import base_tool_names
 from agent.turns.results import TurnOutcome
 
 
-FIXTURE_MODE_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE"
 FIXTURE_ROOT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT"
-FIXTURE_MODE = "phase02"
 FIXTURE_ROOT_PREFIX = "research-agent-desktop-phase02-"
 FIXTURE_KNOWLEDGE_DIRNAME = "knowledge-source"
 FIXTURE_BLOCK_INIT_MARKER = ".fixture-block-init"
@@ -683,7 +681,6 @@ class FixtureKnowledgeOperations:
             ingest_folder=self.ingest_folder,
             diff_folder=self.diff_folder,
             prune_folder=self.prune_folder,
-            workspace_root=self.root,
         )
 
 
@@ -761,7 +758,7 @@ class FixtureSession:
         if header not in text:
             raise ValueError("fixture abstract seam requires a current editor snapshot")
         snapshot, _end = json.JSONDecoder().raw_decode(text.split(header, 1)[1])
-        claim = selected_text(snapshot)
+        claim = _selected_text(snapshot)
         records = [
             ProviderRecord(
                 "fixture", "fixture:abstract", 0,
@@ -1424,6 +1421,14 @@ class FixtureSessionFactory:
             extra_tools=extra_tools,
             system_prompt=system_prompt,
         )
+
+
+def _selected_text(snapshot: dict[str, Any]) -> str:
+    """The half-open selected range of an editor snapshot (whole text when unset)."""
+    source = snapshot["sourceText"]
+    start = snapshot.get("rangeStartUtf16", 0)
+    end = snapshot.get("rangeEndUtf16", utf16_length(source))
+    return source[utf16_to_index(source, start):utf16_to_index(source, end)]
 
 
 def build_phase02_fixture_service(

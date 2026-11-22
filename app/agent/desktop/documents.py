@@ -60,14 +60,6 @@ def utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
-def selected_text(snapshot: dict[str, Any]) -> str:
-    """Read the half-open selected range from an already validated snapshot."""
-    source = snapshot["sourceText"]
-    start = snapshot.get("rangeStartUtf16", 0)
-    end = snapshot.get("rangeEndUtf16", utf16_length(source))
-    return source[utf16_to_index(source, start):utf16_to_index(source, end)]
-
-
 def resolve_line_range(source: str, start_line: int, end_line: int) -> tuple[int, int]:
     """Resolve 1-based source lines, counting CRLF as a single line break."""
     starts = [0, *(match.end() for match in re.finditer(r"\r\n|\r|\n", source))]

@@ -1194,7 +1194,7 @@ def test_restart_lists_conversations_already_saved_in_project_history(
 
 def test_session_list_scans_history_once_per_call(monkeypatch):
     import tempfile
-    from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX
+    from support.fixture_session import FIXTURE_ROOT_PREFIX
     from test_desktop_fixture import _service as fixture_service
 
     with tempfile.TemporaryDirectory(prefix=FIXTURE_ROOT_PREFIX, dir="/tmp") as temporary_root:

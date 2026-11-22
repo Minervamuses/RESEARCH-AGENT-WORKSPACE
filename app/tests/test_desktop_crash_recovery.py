@@ -28,13 +28,14 @@ import pytest
 
 from agent.conversations import ConversationRepository
 from agent.desktop.project import inspect_project
-from agent.desktop.fixture_session import FIXTURE_ROOT_PREFIX, SESSION_A
+from support.fixture_session import FIXTURE_ROOT_PREFIX, SESSION_A
 from agent.desktop.protocol import PROTOCOL_VERSION, parse_line
 from agent.skills.citation.session_policy import CitationSessionPolicy
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ROOT = APP_ROOT.parent
+FIXTURE_SERVER = APP_ROOT / "tests" / "support" / "fixture_server.py"
 CHECKPOINT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_CHECKPOINT"
 CHECKPOINT_TURN_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_CRASH_TURN_ID"
 SIDE_EFFECT_ENV = "RESEARCH_AGENT_DESKTOP_FIXTURE_SIDE_EFFECT_SENTINEL"
@@ -85,7 +86,6 @@ class BackendProcess:
                 for value in (str(APP_ROOT), child_env.get("PYTHONPATH", ""))
                 if value
             ),
-            "RESEARCH_AGENT_DESKTOP_FIXTURE": "phase02",
             "RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT": str(root),
             SIDE_EFFECT_ENV: "1",
         })
@@ -98,7 +98,7 @@ class BackendProcess:
 
         self.root = root
         self.process = subprocess.Popen(
-            [sys.executable, "-m", "agent.desktop.server"],
+            [sys.executable, str(FIXTURE_SERVER)],
             cwd=REPOSITORY_ROOT,
             env=child_env,
             stdin=subprocess.PIPE,

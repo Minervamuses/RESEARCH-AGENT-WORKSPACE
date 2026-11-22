@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | Not started | — | — | 等 C2、C4、C5、C6 |
+| C7 | In progress | `evidence/C7-S1/` | — | C7-S2 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -617,3 +617,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C6-S5/wrap-up.md`。
 - **限制**：GUI 清單（C6-S3 六項）由使用者驗收；「是否加快取」列為使用者決定。
 - **下一步**：依 PLANS 相依關係讀 C7。
+
+### C7-S1 fixture 移到測試（P5、S020–S022，2026-11-22）
+
+- **觀察結果**：`fixture_session.py` 移到 `app/tests/support/`；`server.main` 改為接受可選的 service builder，production 不傳，crash 測試改跑 `tests/support/fixture_server.py`；刪除 `FIXTURE_MODE_ENV`／`FIXTURE_MODE`、`documents.selected_text`（S021）、`DesktopKnowledgeOperations.workspace_root`（S022）。兩個開關測試改寫或退役（evidence）。
+- **執行指令**：沙箱外 desktop pytest；grep。
+- **證據**：`evidence/C7-S1/fixture-move.md`。
+- **限制**：`for_agents/` 仍描述舊的 fixture 位置與開關，交給 C10。
+- **下一步**：C7-S2 假物件。

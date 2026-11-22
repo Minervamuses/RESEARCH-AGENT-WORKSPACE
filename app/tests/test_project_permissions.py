@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.desktop.protocol import request_event
+from agent.paths import find_app_root
 from agent.desktop.service import DesktopServiceError
 from test_desktop_service import (
     _FakeExtensionManager, _FakeSession, _SessionFactory, _open_test_project, _service, _turn_params,
@@ -135,7 +136,7 @@ def test_slash_index_mutations_ask_or_bypass_without_real_index(tmp_path, kind, 
             return ["removed"]
 
         operations = SimpleNamespace(init_workspace=init, ingest_file=file, ingest_folder=folder,
-                                     diff_folder=diff, prune_folder=prune, workspace_root=source)
+                                     diff_folder=diff, prune_folder=prune)
         service = _service(tmp_path, session_factory=_SessionFactory(), knowledge_operations=operations)
         await _open_test_project(service, tmp_path / "research")
         await service.dispatch("session.create", {"loadMcp": False})
@@ -160,7 +161,8 @@ def test_slash_index_mutations_ask_or_bypass_without_real_index(tmp_path, kind, 
             assert len(diffs) == 2
         if sink.approvals:
             event = sink.approvals[0]
-            assert event["targetPath"] == str(document if kind == "file" else source)
+            expected_target = {"file": document, "init": find_app_root().parent}.get(kind, source)
+            assert event["targetPath"] == str(expected_target)
             assert "storePath" in json.loads(event["parametersSummary"])
             assert event["parentRequestId"] == sink.request_id
     asyncio.run(run())

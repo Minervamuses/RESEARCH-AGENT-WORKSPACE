@@ -274,7 +274,7 @@ def test_retry_after_save_does_not_write_candidate_twice(tmp_path, monkeypatch):
 
 
 def test_isolated_desktop_fixture_calls_real_document_coordinator():
-    from agent.desktop.fixture_session import (
+    from support.fixture_session import (
         FIXTURE_ROOT_ENV, FIXTURE_ROOT_PREFIX, build_phase02_fixture_service,
     )
 

@@ -8,7 +8,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, TextIO
+from typing import Any, BinaryIO, Callable, TextIO
 
 from agent.cli.runtime import CondaRuntimeError, require_conda_runtime
 from agent.desktop.protocol import (
@@ -405,26 +405,20 @@ async def run_backend(
     protocol_stdout: TextIO,
     protocol_stdin: BinaryIO,
     original_cwd: Path,
+    build_service: Callable[[Path], Any] | None = None,
 ) -> int:
     """Run one backend process after the runtime and cwd gates pass."""
     reader, transport = await open_stdin_reader(protocol_stdin)
     try:
-        service = _build_runtime_service(original_cwd)
+        service = (build_service or _build_production_service)(original_cwd)
         server = DesktopServer(service, ProtocolWriter(protocol_stdout))
         return await server.run(reader)
     finally:
         transport.close()
 
 
-def _build_runtime_service(original_cwd: Path) -> Any:
-    """Select the exact opt-in isolated fixture or normal production service."""
-    if os.environ.get("RESEARCH_AGENT_DESKTOP_FIXTURE") == "phase02":
-        from agent.desktop.fixture_session import build_phase02_fixture_service
-
-        return build_phase02_fixture_service(
-            original_cwd=original_cwd,
-            environ=os.environ,
-        )
+def _build_production_service(original_cwd: Path) -> Any:
+    """The production coordinator; tests pass their own builder to ``main``."""
     from agent.desktop.service import DesktopService
 
     return DesktopService(original_cwd=original_cwd)
@@ -444,8 +438,12 @@ def write_bootstrap_error(
     stream.flush()
 
 
-def main() -> None:
-    """Validate the Linux Conda runtime, pin cwd, and serve NDJSON."""
+def main(build_service: Callable[[Path], Any] | None = None) -> None:
+    """Validate the Linux Conda runtime, pin cwd, and serve NDJSON.
+
+    ``build_service`` replaces the production coordinator; only the test-only
+    entry in ``tests/support/fixture_server.py`` passes one.
+    """
     protocol_stdout = sys.stdout
     protocol_stdin = sys.stdin.buffer
     sys.stdout = sys.stderr
@@ -459,7 +457,7 @@ def main() -> None:
             raise RuntimeError("The desktop backend requires Linux.")
         os.chdir(find_app_root())
         exit_code = asyncio.run(
-            run_backend(protocol_stdout, protocol_stdin, original_cwd)
+            run_backend(protocol_stdout, protocol_stdin, original_cwd, build_service)
         )
     except CondaRuntimeError as exc:
         write_bootstrap_error(

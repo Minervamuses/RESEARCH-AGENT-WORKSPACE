@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from agent.desktop.protocol import PROTOCOL_VERSION, ProtocolError, parse_line
-from agent.desktop.server import DesktopServer, ProtocolWriter, _build_runtime_service
+from agent.desktop.server import DesktopServer, ProtocolWriter
 from agent.desktop.service import DesktopService
 
 
@@ -800,10 +800,12 @@ def test_late_progress_cannot_follow_terminal_result() -> None:
     )
 
 
-def test_runtime_service_uses_production_for_unset_or_nonexact_fixture_gate(
+def test_production_service_ignores_the_retired_fixture_environment_switch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agent.desktop import server
+
     sentinel = object()
     calls: list[Path] = []
 
@@ -812,24 +814,37 @@ def test_runtime_service_uses_production_for_unset_or_nonexact_fixture_gate(
         return sentinel
 
     monkeypatch.setattr("agent.desktop.service.DesktopService", production_service)
-    monkeypatch.delenv("RESEARCH_AGENT_DESKTOP_FIXTURE", raising=False)
-    assert _build_runtime_service(tmp_path) is sentinel
-    monkeypatch.setenv("RESEARCH_AGENT_DESKTOP_FIXTURE", "Phase02")
-    assert _build_runtime_service(tmp_path) is sentinel
-    assert calls == [tmp_path, tmp_path]
+    monkeypatch.setenv("RESEARCH_AGENT_DESKTOP_FIXTURE", "phase02")
+    assert server._build_production_service(tmp_path) is sentinel
+    assert calls == [tmp_path]
 
 
-def test_exact_fixture_gate_refuses_startup_without_caller_root(
+def test_main_forwards_only_an_explicit_service_builder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.desktop.fixture_session import FixtureConfigurationError
+    from agent.desktop import server
 
-    monkeypatch.setenv("RESEARCH_AGENT_DESKTOP_FIXTURE", "phase02")
-    monkeypatch.delenv("RESEARCH_AGENT_DESKTOP_FIXTURE_ROOT", raising=False)
+    forwarded = []
 
-    with pytest.raises(FixtureConfigurationError, match="is required"):
-        _build_runtime_service(tmp_path)
+    async def fake_run_backend(_stdout, _stdin, original_cwd, build_service=None):
+        forwarded.append((original_cwd, build_service))
+        return 0
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(server, "install_diagnostic_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(server, "require_conda_runtime", lambda _name: None)
+    monkeypatch.setattr(server, "find_app_root", lambda: tmp_path)
+    monkeypatch.setattr(server, "run_backend", fake_run_backend)
+
+    def builder(_cwd):
+        return object()
+
+    for passed in (None, builder):
+        with pytest.raises(SystemExit) as exited:
+            server.main() if passed is None else server.main(build_service=passed)
+        assert exited.value.code == 0
+    assert forwarded == [(tmp_path.resolve(), None), (tmp_path.resolve(), builder)]
 
 
 def test_bootstrap_failure_is_recorded_in_the_diagnostic_log(
