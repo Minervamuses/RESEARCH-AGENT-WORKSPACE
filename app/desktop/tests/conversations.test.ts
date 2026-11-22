@@ -32,6 +32,7 @@ function fakeApi(handler: (method: FakeMethod, params: JsonObject) => Promise<Js
 type SafeContentModule = typeof import("../src/SafeContent.tsx");
 type AppModule = typeof import("../src/App.tsx");
 type TranscriptModule = typeof import("../src/components/Transcript.tsx");
+type ComposerModule = typeof import("../src/components/Composer.tsx");
 
 interface ReactElementLike {
   props: Record<string, unknown>;
@@ -59,6 +60,7 @@ let devServer: Promise<ViteDevServer> | undefined;
 let safeContentModule: Promise<SafeContentModule> | undefined;
 let appModule: Promise<AppModule> | undefined;
 let transcriptModule: Promise<TranscriptModule> | undefined;
+let composerModule: Promise<ComposerModule> | undefined;
 
 function ssrLoad<T>(path: string): Promise<T> {
   devServer ??= createServer({
@@ -77,6 +79,10 @@ function loadSafeContent(): Promise<SafeContentModule> {
 
 function loadTranscript(): Promise<TranscriptModule> {
   return (transcriptModule ??= ssrLoad<TranscriptModule>("/src/components/Transcript.tsx"));
+}
+
+function loadComposer(): Promise<ComposerModule> {
+  return (composerModule ??= ssrLoad<ComposerModule>("/src/components/Composer.tsx"));
 }
 
 function loadAppHelpers(): Promise<AppModule> {
@@ -189,7 +195,7 @@ test("catalog requires a verified current session owner after switch or restart"
 });
 
 test("slash list exposes named options and renders descriptions as text", async () => {
-  const { SlashCommandList } = await loadAppHelpers();
+  const { SlashCommandList } = await loadComposer();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const html = renderToStaticMarkup(createElement(SlashCommandList, {
@@ -812,7 +818,7 @@ test("pending saved turns are refreshed after selection recovers them", async ()
 
 
 test("composer replaces disabled Send with Stop and disables only the pending stop", async () => {
-  const { ComposerFooter } = await loadAppHelpers();
+  const { ComposerFooter } = await loadComposer();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const props = { thinkingMode: "normal" as const, permissionMode: "ask" as const,
