@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | In progress | `evidence/C8-S1/`–`C8-S5/` | — | C8-S6 |
+| C8 | In progress | `evidence/C8-S1/`–`C8-S6/` | — | C8-S7 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -729,3 +729,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S5/reducer-approval.md`。
 - **限制**：事件 listener 與模組之間的接線沒有自動化測試，列入 GUI 清單。
 - **下一步**：C8-S6 依 domain 拆解 `App()`。
+
+### C8-S6 依 domain 拆解 `App()`（S097、S071 其餘，2026-11-22）
+
+- **觀察結果**：只有「擴充」符合不互傳 ref 與 setter 的條件，抽成 `useExtensions`（無參數、無 ref、無 effect）。核准的兩個 effect 排在其他 effect 之後，提前會改變 effect 順序，且順序無法從程式碼確定，所以留在 `App()`；對話選單收益小，不抽。純函式抽出並補測試：擴充規劃（`planExtensionApply` 等）、文件結果與衝突（`planDocumentResult`、`planConflictResolution`）、Stop 畫面（`stopScreenState`）、舊 generation（`turnEventIsStale`、`lifecycleResultIsStale`）、核准逾時（`approvalExpiry`），並補了 `ownsWorkspaceOperation` 的測試。`DocumentSnapshot` 併入 `DocumentContextDto`；`listen` 搬進 `api.ts`。`App()` 本體：useState 33、useRef 33、useEffect 11、useCallback 46，檔案 2462 行。
+- **執行指令**：每個 commit 前 `npm test`、`npm run build`；最終 247 pass（+10）、build 通過。commit：`300a62f`、`cda3d2b`、`f1e0e2b`，加上收尾 commit。
+- **證據**：`evidence/C8-S6/domains.md`。
+- **限制**：GUI 未驗證；擴充 restart 與舊 generation 事件列為高風險。
+- **下一步**：C8-S7 階段收尾。

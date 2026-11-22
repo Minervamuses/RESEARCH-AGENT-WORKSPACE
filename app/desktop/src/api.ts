@@ -3,8 +3,10 @@
 // from `MethodParams` and `MethodResults` in protocol.ts, and the result echo
 // checks (U1) live here.
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import {
+  BACKEND_EVENT_NAME,
   BackendClientError,
   createBackendClient,
   normalizeUiError,
@@ -169,3 +171,8 @@ export type Api = ReturnType<typeof createApi>;
 const nativeInvoke: NativeInvoke = <T>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args);
 
 export const api: Api = createApi(createBackendClient({ invoke: nativeInvoke }), nativeInvoke);
+
+/** Subscribes to the native backend event channel; resolves to the unsubscribe function. */
+export function listenBackendEvents(handler: (payload: unknown) => void): Promise<() => void> {
+  return listen<unknown>(BACKEND_EVENT_NAME, ({ payload }) => handler(payload));
+}

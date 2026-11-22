@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import {
   memo,
   useCallback,
@@ -13,7 +12,6 @@ import {
 } from "react";
 
 import {
-  BACKEND_EVENT_NAME,
   BackendClientError,
   type BackendActionName,
   type BackendSnapshot,
@@ -119,7 +117,7 @@ import {
   type WorkingDocumentSources,
 } from "./lib/documents.ts";
 import { protocolMismatch, workspaceError } from "./lib/errors.ts";
-import { api, eventData } from "./api.ts";
+import { api, eventData, listenBackendEvents } from "./api.ts";
 import {
   loadSelectedProjectHistory,
   mergeSessionItems,
@@ -956,7 +954,7 @@ export default function App() {
     let removeListener: (() => void) | undefined;
     void (async () => {
       try {
-        const unlisten = await listen<unknown>(BACKEND_EVENT_NAME, ({ payload }) => {
+        const unlisten = await listenBackendEvents((payload) => {
           if (disposed) return;
           try {
             const event = parseBridgeEvent(payload);
