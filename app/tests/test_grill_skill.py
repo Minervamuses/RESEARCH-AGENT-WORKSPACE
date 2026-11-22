@@ -30,7 +30,7 @@ import uuid
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent.desktop.protocol import success_result
-from agent.desktop.service import (
+from agent.desktop.turn_context import (
     _EDITABLE_SNAPSHOT_INSTRUCTIONS,
     _READ_ONLY_REFERENCE_INSTRUCTIONS,
     _READ_ONLY_SNAPSHOT_INSTRUCTIONS,
