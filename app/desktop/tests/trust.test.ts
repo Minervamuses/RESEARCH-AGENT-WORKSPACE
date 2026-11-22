@@ -327,15 +327,3 @@ test("a pending approval stays while its turn, document or bibliography.add requ
     turnRequestId: "req-turn", documentRequestId: "req-doc", citationRequestId: "req-add",
   }), false);
 });
-
-test("App's stale-approval cleanup counts the bibliography.add request as an owner", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const cleanup = app.slice(app.indexOf("// Drop an approval only when no request that can raise one still owns it"));
-  assert.match(cleanup.slice(0, 600), /approvalHasLiveOwner\(pendingApproval\.parentRequestId, \{[\s\S]*citationRequestId: citationRequestRef\.current/);
-  assert.equal(app.includes("documentRequestRef.current?.requestId !== pendingApproval.parentRequestId"), false,
-    "the old two-owner check must not come back");
-  // The listener accepts the add request's approval.required and the request sets the owner ref.
-  assert.match(app, /citationRequestRef\.current = tracked\.requestId;/);
-  assert.match(app, /if \(citationRequest !== null && message\.requestId === citationRequest\)/);
-});

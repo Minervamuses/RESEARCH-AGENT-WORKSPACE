@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | In progress | `evidence/C8-S1/`–`C8-S4/` | — | C8-S5 |
+| C8 | In progress | `evidence/C8-S1/`–`C8-S5/` | — | C8-S6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -721,3 +721,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S4/browser-preview.md`。
 - **限制**：GUI 未驗證。
 - **下一步**：C8-S5 reducer 與核准擁有者。
+
+### C8-S5 對話 reducer 與核准擁有者（S079、S080，2026-11-22）
+
+- **觀察結果**：由子代理實作、主執行緒重跑檢查。`applyReducerOnce`（`src/lib/reducerOnce.ts`）讓每個對話 action 只算一次 reducer，同時更新 ref 與 state，刪除原本同步 ref 的 effect；計數 reducer 測試斷言一次。核准擁有者抽成純狀態模組 `src/lib/approvalOwner.ts`，`App.tsx` 只剩一個 `approval` state、一個 ref 與兩個薄包裝；原本 10 處清除改為呼叫唯一的 `clearApproval`（7 處）。原 10 處中只有 3 處同時釋放擁有者，這個差異影響核准框關閉後焦點是否回到輸入框，所以以 `clearApproval(state, dropOwner)` 參數保留，不統一。`trust.test.ts` 的原始碼比對測試改寫為流程測試 (a)–(e) 加文件與回合擁有者各一條，退役紀錄在 evidence。
+- **執行指令**：`npm test`（237 pass：+10、−1）、`npm run build`（通過）、grep（舊的 approval ref／setter 名稱為 0）。
+- **證據**：`evidence/C8-S5/reducer-approval.md`。
+- **限制**：事件 listener 與模組之間的接線沒有自動化測試，列入 GUI 清單。
+- **下一步**：C8-S6 依 domain 拆解 `App()`。

@@ -59,12 +59,21 @@ import { AnnotationComment, DocumentEditor, type AnnotationControls } from "./Do
 import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ApprovalDialog, PermissionControl, ThinkingControl, ExtensionPanel } from "./trust.tsx";
+import { reconcilePermissionAck } from "./lib/approval.ts";
 import {
-  acceptApprovalEvent,
-  approvalHasLiveOwner,
-  reconcilePermissionAck,
-  type PendingApproval,
-} from "./lib/approval.ts";
+  approvalToResolve,
+  beginApprovalResolve,
+  clearApproval,
+  clearStaleApproval,
+  dropApprovalOwner,
+  finishApprovalRequest,
+  forgetApprovalRequest,
+  initialApprovalOwnerState,
+  receiveApprovalEvent,
+  registerApprovalRequest,
+  type ApprovalOwnerState,
+} from "./lib/approvalOwner.ts";
+import { applyReducerOnce } from "./lib/reducerOnce.ts";
 import {
   beginExtensionApply,
   beginExtensionApplyRecovery,
@@ -566,7 +575,7 @@ export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, 
 
 export default function App() {
   const [state, dispatch] = useReducer(backendReducer, initialBackendState);
-  const [conversation, conversationDispatch] = useReducer(conversationReducer, initialConversationState);
+  const [conversation, setConversation] = useState(initialConversationState);
   const [project, setProject] = useState<ProjectWorkspaceDto | null>(null);
   const [referenceIssue, setReferenceIssue] = useState<string | null>(null);
   const [chatSelection, setChatSelection] = useState<{
@@ -608,8 +617,7 @@ export default function App() {
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [historyIssue, setHistoryIssue] = useState<string | null>(null);
   const [extensionFlow, setExtensionFlow] = useState<ExtensionFlow | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
-  const [approvalResolving, setApprovalResolving] = useState(false);
+  const [approval, setApproval] = useState(() => initialApprovalOwnerState<WorkspaceOperationOwner>());
   const [documentValue, setDocumentValue] = useState<DocumentSnapshot | null>(null);
   const documentRef = useRef<DocumentSnapshot | null>(null);
   const [rootPath, setRootPath] = useState("");
@@ -631,7 +639,6 @@ export default function App() {
   // Bumped after open, save, and applied operations so the citation panel re-checks.
   const [citationRefresh, setCitationRefresh] = useState(0);
   const [citationEntries, setCitationEntries] = useState<readonly BibliographyEntryDto[]>([]);
-  const citationRequestRef = useRef<string | null>(null);
   const inFlight = useRef(false);
   const exclusiveOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const historyLoading = useRef<WorkspaceOperationOwner | null>(null);
@@ -643,22 +650,22 @@ export default function App() {
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const workspaceOperation = useRef<WorkspaceOperationOwner | null>(null);
   const documentOperationRef = useRef<WorkspaceOperationOwner | null>(null);
-  const approvalOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const frameOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const turnOwnerRef = useRef<WorkspaceOperationOwner | null>(null);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
   const turnSettlementPromiseRef = useRef<Promise<void> | null>(null);
-  const pendingApprovalRef = useRef<PendingApproval | null>(null);
-  const approvalResolvingRef = useRef(false);
+  const approvalRef = useRef(approval);
+  const pendingApproval = approval.pending;
+  const approvalResolving = approval.resolving;
 
-  useEffect(() => { conversationRef.current = conversation; }, [conversation]);
-  useEffect(() => { pendingApprovalRef.current = pendingApproval; }, [pendingApproval]);
+  const applyConversation = useCallback((action: ConversationAction) =>
+    applyReducerOnce(conversationReducer, conversationRef, setConversation, action), []);
 
-  const applyConversation = useCallback((action: ConversationAction) => {
-    const next = conversationReducer(conversationRef.current, action);
-    conversationRef.current = next;
-    conversationDispatch(action);
-    return next;
+  /** All approval transitions go through lib/approvalOwner.ts; this publishes the result to the ref and to React. */
+  const commitApproval = useCallback((next: ApprovalOwnerState<WorkspaceOperationOwner>) => {
+    if (next === approvalRef.current) return;
+    approvalRef.current = next;
+    setApproval(next);
   }, []);
 
   const captureOwner = useCallback((label: string): WorkspaceOperationOwner => ({
@@ -668,9 +675,20 @@ export default function App() {
   const ownsOperation = useCallback((owner: WorkspaceOperationOwner, current: WorkspaceOperationOwner | null) =>
     ownsWorkspaceOperation(owner, current, generationRef.current, projectEpochRef.current), []);
 
+  /** Route an `approval.required` through the owner module; a newly shown approval resets the pending frame owner. */
+  const acceptApproval = useCallback((generation: number, requestId: string, turnRequestId: string | null,
+      data: Parameters<typeof receiveApprovalEvent>[1]["data"]) => {
+    const result = receiveApprovalEvent(approvalRef.current, {
+      generation, requestId, turnRequestId, data, now: Date.now(), owner: captureOwner("approval"),
+    });
+    if (!result.accepted) return;
+    frameOwnerRef.current = null;
+    commitApproval(result.state);
+  }, [captureOwner, commitApproval]);
+
   const beginWorkspaceOperation = useCallback((label: string): WorkspaceOperationOwner | null => {
     if (workspaceOperation.current !== null || inFlight.current || documentBusyRef.current ||
-        pendingApprovalRef.current !== null || conversationRef.current.activeTurn !== null ||
+        approvalRef.current.pending !== null || conversationRef.current.activeTurn !== null ||
         conversationRef.current.stopRequest !== null) return null;
     const owner = captureOwner(label);
     workspaceOperation.current = owner;
@@ -700,7 +718,7 @@ export default function App() {
     workspaceOperation.current = null;
     documentOperationRef.current = null;
     historyLoading.current = null;
-    approvalOwnerRef.current = null;
+    commitApproval(forgetApprovalRequest(dropApprovalOwner(approvalRef.current), "document"));
     frameOwnerRef.current = null;
     turnOwnerRef.current = null;
     documentRequestRef.current = null;
@@ -716,7 +734,7 @@ export default function App() {
     setConversationMenu(null);
     setRenameDialog(null);
     setDeleteDialog(null);
-  }, []);
+  }, [commitApproval]);
 
   useEffect(() => {
     if (conversationMenu !== null) conversationMenuRef.current?.focus();
@@ -778,6 +796,7 @@ export default function App() {
           ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
         });
         documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId, context: captured };
+        commitApproval(registerApprovalRequest(approvalRef.current, "document", tracked.requestId));
         const result = await tracked.result;
         if (ownsOperation(owner, documentOperationRef.current)) receiveDocumentResult(result, captured, action);
       } catch (error) {
@@ -789,40 +808,27 @@ export default function App() {
           setDocumentBusy(false);
           const requestId = documentRequestRef.current?.requestId;
           documentRequestRef.current = null;
-          if (pendingApprovalRef.current?.parentRequestId === requestId) {
-            pendingApprovalRef.current = null;
-            approvalOwnerRef.current = null;
-            approvalResolvingRef.current = false;
-            setPendingApproval(null);
-            setApprovalResolving(false);
-          }
+          commitApproval(finishApprovalRequest(approvalRef.current, "document", requestId));
         }
       }
     })().finally(() => { if (documentApplyPromiseRef.current === pending) documentApplyPromiseRef.current = null; });
     documentApplyPromiseRef.current = pending;
     return pending;
-  }, [captureOwner, ownsOperation, receiveDocumentResult]);
+  }, [captureOwner, commitApproval, ownsOperation, receiveDocumentResult]);
 
   const requestCitationAdd = useCallback(async (identifier: string): Promise<BibliographyAddDto> => {
     const tracked = api.bibliographyAddTracked({ identifier });
-    citationRequestRef.current = tracked.requestId;
+    commitApproval(registerApprovalRequest(approvalRef.current, "citation", tracked.requestId));
     try {
       return await tracked.result;
     } finally {
-      if (citationRequestRef.current === tracked.requestId) citationRequestRef.current = null;
-      if (pendingApprovalRef.current?.parentRequestId === tracked.requestId) {
-        pendingApprovalRef.current = null;
-        approvalOwnerRef.current = null;
-        approvalResolvingRef.current = false;
-        setPendingApproval(null);
-        setApprovalResolving(false);
-      }
+      commitApproval(finishApprovalRequest(approvalRef.current, "citation", tracked.requestId));
     }
-  }, []);
+  }, [commitApproval]);
 
   const openDocument = useCallback(async () => {
     if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
-        conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
+        conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || documentBusyRef.current || approvalRef.current.pending !== null) return;
     const owner = captureOwner("document.open");
     documentOperationRef.current = owner;
     frameOwnerRef.current = null;
@@ -926,10 +932,7 @@ export default function App() {
     if (transition.clearTransientUi) {
       setSlashCatalogOwner(null);
       setSelectionPreview(null);
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setPendingApproval(null);
-      setApprovalResolving(false);
+      commitApproval(clearApproval(approvalRef.current));
     }
     if (transition.resetStaleHistory) {
       workspaceOperation.current = null;
@@ -941,10 +944,7 @@ export default function App() {
       setLiveTurns([]);
       setPendingUserText(null);
       setHistoryIssue(null);
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setPendingApproval(null);
-      setApprovalResolving(false);
+      commitApproval(clearApproval(approvalRef.current));
       setHistoryGeneration(null);
     }
     if (transition.extensionTransition === "awaiting-load") {
@@ -991,31 +991,18 @@ export default function App() {
               !("requestId" in message) &&
               (message.event === "backend.crashed" || message.event === "backend.shutting_down")
             ) {
-              pendingApprovalRef.current = null;
-              approvalResolvingRef.current = false;
-              setPendingApproval(null);
-              setApprovalResolving(false);
+              commitApproval(clearApproval(approvalRef.current));
               setExtensionFlow((current) => current === null ? null : interruptExtensionFlow(current));
             }
             if (message.messageType !== "event" || !("requestId" in message)) return;
             const active = conversationRef.current.activeTurn;
             const documentRequest = documentRequestRef.current;
-            const citationRequest = citationRequestRef.current;
+            const citationRequest = approvalRef.current.citationRequestId;
             if (active === null && documentRequest === null && citationRequest === null) return;
             if (citationRequest !== null && message.requestId === citationRequest) {
               // bibliography.add runs outside a turn; its citation.save approval uses the shared approval UI.
               if (message.event === "approval.required") {
-                const accepted = acceptApprovalEvent(generationRef.current, message.requestId, citationRequest,
-                  eventData("approval.required", message.data), Date.now());
-                if (accepted !== null) {
-                  setPendingApproval((current) => {
-                    if (current !== null) return current;
-                    pendingApprovalRef.current = accepted;
-                    approvalOwnerRef.current = captureOwner("approval");
-                    frameOwnerRef.current = null;
-                    return accepted;
-                  });
-                }
+                acceptApproval(generationRef.current, message.requestId, null, eventData("approval.required", message.data));
               }
               return;
             }
@@ -1050,22 +1037,7 @@ export default function App() {
               return;
             }
             if (message.event === "approval.required") {
-              const accepted = acceptApprovalEvent(
-                generation,
-                message.requestId,
-                message.requestId === documentRequest?.requestId ? documentRequest.requestId : active?.requestId ?? null,
-                eventData("approval.required", message.data),
-                Date.now(),
-              );
-              if (accepted !== null) {
-                setPendingApproval((current) => {
-                  if (current !== null) return current;
-                  pendingApprovalRef.current = accepted;
-                  approvalOwnerRef.current = captureOwner("approval");
-                  frameOwnerRef.current = null;
-                  return accepted;
-                });
-              }
+              acceptApproval(generation, message.requestId, active?.requestId ?? null, eventData("approval.required", message.data));
             } else if (active !== null && message.event === "stage.changed" && typeof message.data.stage === "string") {
               applyConversation({
                 type: "activity-received",
@@ -1102,7 +1074,7 @@ export default function App() {
       }
     })();
     return () => { disposed = true; removeListener?.(); };
-  }, [applyBackendSnapshot, applyConversation, applyDocumentOperation, captureOwner, invalidateOperations, ownsOperation]);
+  }, [acceptApproval, applyBackendSnapshot, applyConversation, applyDocumentOperation, commitApproval, invalidateOperations, ownsOperation]);
 
   const runExclusive = useCallback(async (action: BackendActionName, operation: (owner: WorkspaceOperationOwner) => Promise<void>) => {
     if (inFlight.current) return;
@@ -1124,7 +1096,7 @@ export default function App() {
   const runLifecycle = useCallback((action: "start" | "restart" | "shutdown") => {
     const current = conversationRef.current;
     const stopRecovery = action === "restart" && current.stopRequest?.status === "failed" && current.activeTurn === null;
-    if (workspaceOperation.current !== null || documentBusyRef.current || pendingApprovalRef.current !== null ||
+    if (workspaceOperation.current !== null || documentBusyRef.current || approvalRef.current.pending !== null ||
         current.activeTurn !== null || (current.stopRequest !== null && !stopRecovery)) return;
     setSlashCatalogOwner(null);
     if (action === "restart") {
@@ -1209,7 +1181,7 @@ export default function App() {
   }, [beginWorkspaceOperation, finishWorkspaceOperation, ownsOperation, renameDialog, sessionList, state.activeAction, state.snapshot?.lifecycle]);
 
   const chooseProject = useCallback(async (action: "inspect" | "open" | "initialize", browse = false) => {
-    if (conversationRef.current.activeTurn !== null || pendingApprovalRef.current !== null ||
+    if (conversationRef.current.activeTurn !== null || approvalRef.current.pending !== null ||
         documentBusyRef.current || documentConflict !== null) return;
     const operation = beginWorkspaceOperation(action === "inspect" ? "Inspecting project" : "Opening project");
     if (operation === null) return;
@@ -1277,10 +1249,7 @@ export default function App() {
       setPendingUserText(null);
       setHistoryIssue(null);
       setExtensionFlow(null);
-      setPendingApproval(null);
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setApprovalResolving(false);
+      commitApproval(clearApproval(approvalRef.current));
       updateDocument(null);
       documentBaselineRef.current = null;
       submittedDocumentRef.current = null;
@@ -1305,7 +1274,7 @@ export default function App() {
   }, [applyConversation, beginWorkspaceOperation, candidate, candidateHistory, candidateRoot, dirtyChoice, discardDraft, documentConflict, finishWorkspaceOperation, loadHistory, ownsOperation, saveDocument, setHistoryGeneration, updateDocument]);
 
   const showProjectChooser = useCallback(() => {
-    if (conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || pendingApprovalRef.current !== null ||
+    if (conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || approvalRef.current.pending !== null ||
         documentBusyRef.current || workspaceOperation.current !== null || inFlight.current) return;
     if (documentConflict !== null) {
       setWorkspaceIssue({ code: "DOCUMENT_CONFLICT", message: "Resolve or cancel the document conflict before switching projects.", retryable: false, source: "business" });
@@ -1567,39 +1536,32 @@ export default function App() {
     scheduleOwnedFrame, state.snapshot?.lifecycle, stopTurn]);
 
   const resolvePendingApproval = useCallback((approved: boolean, expectedApprovalId?: string) => {
-    const approval = pendingApprovalRef.current;
-    const owner = approvalOwnerRef.current;
-    if (approval === null || owner === null || approvalResolvingRef.current || conversationRef.current.stopRequest !== null ||
-        (expectedApprovalId !== undefined && approval.approvalId !== expectedApprovalId) ||
-        !ownsOperation(owner, approvalOwnerRef.current)) return;
-    const isCurrent = () => ownsOperation(owner, approvalOwnerRef.current) &&
-      pendingApprovalRef.current?.approvalId === approval.approvalId;
-    approvalResolvingRef.current = true;
-    setApprovalResolving(true);
+    const target = approvalToResolve(approvalRef.current, conversationRef.current.stopRequest !== null, expectedApprovalId);
+    if (target === null) return;
+    const { approval: resolving, owner } = target;
+    const isCurrent = () => ownsOperation(owner, approvalRef.current.owner) &&
+      approvalRef.current.pending?.approvalId === resolving.approvalId;
+    commitApproval(beginApprovalResolve(approvalRef.current));
     void api.approvalResolve({
-      approvalId: approval.approvalId,
-      parentRequestId: approval.parentRequestId,
-      turnId: approval.turnId,
+      approvalId: resolving.approvalId,
+      parentRequestId: resolving.parentRequestId,
+      turnId: resolving.turnId,
       approved,
-      ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(
-        documentOperationContext(documentRef.current, documentRequestRef.current?.turnId === approval.turnId ? documentRequestRef.current.context : undefined),
+      ...(resolving.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(
+        documentOperationContext(documentRef.current, documentRequestRef.current?.turnId === resolving.turnId ? documentRequestRef.current.context : undefined),
       ) } : {}),
     }).catch((error: unknown) => {
       if (isCurrent()) setWorkspaceIssue(workspaceError(error));
     }).finally(() => {
       if (!isCurrent()) return;
-      pendingApprovalRef.current = null;
-      approvalOwnerRef.current = null;
-      setPendingApproval(null);
-      approvalResolvingRef.current = false;
-      setApprovalResolving(false);
+      commitApproval(clearApproval(approvalRef.current, true));
       focusComposer(owner);
     });
-  }, [focusComposer, ownsOperation]);
+  }, [commitApproval, focusComposer, ownsOperation]);
 
   const returnApprovalFocus = useCallback(() => {
-    const owner = approvalOwnerRef.current;
-    if (pendingApprovalRef.current === null && owner !== null && ownsOperation(owner, approvalOwnerRef.current)) focusComposer(owner);
+    const { pending, owner } = approvalRef.current;
+    if (pending === null && owner !== null && ownsOperation(owner, owner)) focusComposer(owner);
   }, [focusComposer, ownsOperation]);
 
   useEffect(() => {
@@ -1617,21 +1579,12 @@ export default function App() {
     if (pendingApproval === null) return;
     // Drop an approval only when no request that can raise one still owns it;
     // bibliography.add raises citation.save outside any turn or document operation.
-    if (!approvalHasLiveOwner(pendingApproval.parentRequestId, {
-      turnRequestId: conversation.activeTurn?.requestId ?? null,
-      documentRequestId: documentRequestRef.current?.requestId ?? null,
-      citationRequestId: citationRequestRef.current,
-    })) {
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setPendingApproval(null);
-      setApprovalResolving(false);
-    }
-  }, [conversation.activeTurn, pendingApproval]);
+    commitApproval(clearStaleApproval(approvalRef.current, conversation.activeTurn?.requestId ?? null));
+  }, [commitApproval, conversation.activeTurn, pendingApproval]);
 
   const selectConversation = useCallback(async (projectId: string, session: SessionSummaryDto) => {
     if (conversationRef.current.activeTurn !== null || projectRef.current?.projectId !== projectId ||
-        bindingGenerationRef.current !== generationRef.current || documentBusyRef.current || pendingApprovalRef.current !== null) return;
+        bindingGenerationRef.current !== generationRef.current || documentBusyRef.current || approvalRef.current.pending !== null) return;
     if (sameSelection(conversationRef.current.selected, { projectId, sessionId: session.sessionId })) {
       focusComposer();
       return;
@@ -1731,7 +1684,7 @@ export default function App() {
   const activeProjectId = bindingGenerationRef.current === state.snapshot?.generation ? project?.projectId ?? null : null;
 
   const createSession = useCallback(() => {
-    if (activeProjectId === null || conversationRef.current.activeTurn !== null || documentBusyRef.current || pendingApprovalRef.current !== null) return;
+    if (activeProjectId === null || conversationRef.current.activeTurn !== null || documentBusyRef.current || approvalRef.current.pending !== null) return;
     if (resumeDraftRef.current === null && (conversationRef.current.draft.length > 0 || conversationRef.current.draftReferences.length > 0) &&
         !window.confirm("Discard the unsent draft and references and create a new conversation?")) return;
     const operation = beginWorkspaceOperation("Creating conversation");
@@ -1798,7 +1751,7 @@ export default function App() {
     const session = state.session;
     if (selected === null || selectedProject === null || session === null || draft.trim().length === 0 ||
         conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || workspaceOperation.current !== null || inFlight.current ||
-        documentBusyRef.current || pendingApprovalRef.current !== null || bindingGenerationRef.current !== generationRef.current ||
+        documentBusyRef.current || approvalRef.current.pending !== null || bindingGenerationRef.current !== generationRef.current ||
         selectedProject.projectId !== selected.projectId) return;
     const submission = nextTurnSubmission(conversationRef.current, newLogicalTurnId);
     if (submission.retry && !retrySettingsMatch(conversationRef.current.submittedContext, session.permissionMode, session.thinkingMode)) {
@@ -1883,10 +1836,7 @@ export default function App() {
         responseKind: answer.responseKind,
       }));
       setPendingUserText(null);
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setPendingApproval(null);
-      setApprovalResolving(false);
+      commitApproval(clearApproval(approvalRef.current));
       if (result.extensionAction === "preview") {
         setExtensionFlow(createExtensionFlow(result.turnId));
       }
@@ -1923,10 +1873,7 @@ export default function App() {
         turnLifecycle: safe.turnLifecycle ?? null,
       });
       if (next.failure?.requestId !== tracked.requestId) return;
-      pendingApprovalRef.current = null;
-      approvalResolvingRef.current = false;
-      setPendingApproval(null);
-      setApprovalResolving(false);
+      commitApproval(clearApproval(approvalRef.current));
       setWorkspaceIssue(safe);
       focusComposer(owner);
       await stopPromiseRef.current;
