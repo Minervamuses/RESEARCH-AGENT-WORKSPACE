@@ -26,7 +26,7 @@ app/README.md:11:| `skills/` | Repo 內建 skill bundles；`SKILL.md` 是模型�
 README.md:54:程式不會自動讀取 `.env`。模型設定在 [AgentConfig](app/agent/config.py)。知識庫語義檢索另需可連線的 Ollama 與 `bge-m3` 模型，可用 `ollama pull bge-m3` 準備；其餘 RAG 設
 README.md:133:- **Agent 存檔**：在專案中用 `/citation` 儲存的文獻（驗證過的 DOI 或 arXiv ID；沒有 DOI 的 NeurIPS 論文則在官方論文集網站 proceedings.neurips.cc 依該年的論文列表與
 README.md:148:已接受回合的使用者訊息會保留，中斷狀態顯示為 **interrupted／Turn stopped**。Stop 不會重啟整個後端；停止完成後可直接繼續對話。若停止失敗，畫面保留實�
-README.md:170:| 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存（或在引用面板以 DOI／arXiv ID 加入）的來源 
+README.md:170:| 已儲存的文獻 | `cite/`，或 `CITATION_OUTPUT_DIR`、`AgentConfig.citation_output_dir` 指定的位置 | 只有在 Citation 中明確儲存（或在引用面板以 DOI／arXiv ID 加入）的來源
 ```
 
 ## 修改

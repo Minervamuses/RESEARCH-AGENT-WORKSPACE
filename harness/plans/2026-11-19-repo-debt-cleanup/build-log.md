@@ -24,7 +24,7 @@
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
 | C9 | Complete | `evidence/C9-S1/`–`C9-S5/` | — | — |
-| C10 | In progress | `evidence/C10-S0/`–`C10-S1/` | — | C10-S2 |
+| C10 | In progress | `evidence/C10-S0/`–`C10-S2/` | — | C10-S3 |
 
 ## 撰寫紀錄
 
@@ -802,3 +802,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C10-S1/doc-grep.md`。
 - **限制**：`for_agents/`、`AGENTS.md` 的過時內容依限制不改，列入最終彙報。
 - **下一步**：C10-S2 完整驗證。
+
+### C10-S2 完整驗證（2026-11-22）
+
+- **觀察結果**：最終程式狀態上 pytest 1827 passed（沙箱外，79 s）、`npm test` 253 pass、`npm run build` 通過、`cargo test --locked` 35 passed（沙箱外）。`git diff --check 4f488eb~1..HEAD` 第一次只抓到本計劃兩個 evidence 檔的行尾空白，清除後無輸出。量測：`service.py` 4,643 → 461、`protocol.rs` 3,638 → 616、`App.tsx` 3,059 → 1,932、contract 方法 40 → 25、request event 20 → 8；色值集合不變。residual grep 只剩 3 類已註明的例外。
+- **執行指令**：見 `evidence/C10-S2/metrics-after.md`。
+- **證據**：`evidence/C10-S2/metrics-after.md`。
+- **限制**：GUI 未驗證。
+- **下一步**：C10-S3 最終彙報。

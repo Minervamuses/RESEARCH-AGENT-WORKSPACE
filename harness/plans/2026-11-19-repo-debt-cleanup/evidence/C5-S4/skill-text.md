@@ -23,7 +23,7 @@ index d836a58..90e9fc1 100644
 --- a/app/skills/citation/README.md
 +++ b/app/skills/citation/README.md
 @@ -19,21 +19,21 @@ search intent
- 
+
  save intent
      → authority verification
 -    → canonical identity + BibTeX
@@ -34,19 +34,19 @@ index d836a58..90e9fc1 100644
 +    → session source registry + trusted receipt (desktop: only for works in the bibliography)
      → [[cite:source-id]] gate and bibliography render
  ```
- 
+
  Search 與 save 是不同階段；discovery result 不會因被找到就自動成為可引用的 saved source。
- 
+
 -Desktop projects add a second output for the same save:
 +In a desktop project the bibliography is the only store for a save:
- 
+
  ```text
  verified save (doi.org CSL-JSON, or the authority record from the arXiv API or the official NeurIPS proceedings site)
      → csl.sanitize_csl (CSL 1.0.2 whitelist, no abstract, fixed type map)
      → library.merge into the project's references.json (reuse by DOI, arXiv ID or NeurIPS proceedings paper hash, append otherwise)
 -    → item.bibliography {status, path, key, reason_code} in the save result
 +    → item status saved / reused (with bibliography {status, path, key}) or storage_failed (reason = library error code)
- 
+
  document text ([@key] / \cite{key})
      → citekeys.find_citations (UTF-16 positions, Pandoc-compatible)
 @@ -47,8 +47,8 @@ document text ([@key] / \cite{key})
@@ -61,7 +61,7 @@ index d836a58..90e9fc1 100644
  | Project bibliography | `csl.py`, `library.py` | Sanitized CSL-JSON；`references.json` load/layout detection/keys/merge/remove/fingerprint-checked atomic write |
  | Document citations | `citekeys.py`, `integrity.py` | Markdown (Pandoc) and LaTeX `\cite` key parsing; integrity report for one document |
 @@ -62,11 +62,11 @@ document text ([@key] / \cite{key})
- 
+
  - Provider hub 可在 process 內共用，discovery call 不擁有 session state。
  - `CitationService` 與 source registry 是 session-scoped，由 `CitationSessionPolicy` 唯一擁有。
 -- Saved citation bundle 是 disk-persistent local artifact，不因 skill deactivation 被刪除。
@@ -71,9 +71,9 @@ index d836a58..90e9fc1 100644
  - The project bibliography file belongs to the user: existing entries, keys and JSON layout are never changed; a file whose layout cannot be reproduced is read but never rewritten; every write re-checks the file fingerprint first.
 -- Bibliography failures never change a bundle's saved/reused outcome.
 +- A bibliography failure is the item's `storage_failed` status: nothing was saved and the work is not citable. A work already in the bibliography before the batch stays `reused` even when a new work in the same batch fails to write.
- 
+
  ## Correctness invariants
- 
+
 diff --git a/app/skills/citation/SKILL.md b/app/skills/citation/SKILL.md
 index dc6bda8..f52cc49 100644
 --- a/app/skills/citation/SKILL.md
@@ -84,7 +84,7 @@ index dc6bda8..f52cc49 100644
 -description: Conversational citation selection, verified bundle saving, and [[cite:...]] rendering.
 +description: Conversational citation selection, verified saving to the project bibliography, and [[cite:...]] rendering.
  ---
- 
+
  # Citation Skill
 @@ -8,7 +8,7 @@ description: Conversational citation selection, verified bundle saving, and [[ci
  Use `citation_workflow` to discover and save persistent citation identities.
@@ -93,7 +93,7 @@ index dc6bda8..f52cc49 100644
 -whether they authorized a write; the tool owns metadata retrieval, BibTeX,
 +whether they authorized a write; the tool owns metadata retrieval,
  storage, and the factual save outcome.
- 
+
  For paper discovery and citation work, use only citation_workflow and its existing Crossref, DataCite, and optional OpenAlex providers, preserving the workflow's existing authoritative identifier resolution and save behavior. Do not use Web Search or browse other websites to find papers, fill missing metadata or abstracts, or repair failed, incomplete, or ambiguous provider results. When the workflow cannot provide a reliable result, honestly report the returned failure, uncertainty, or missing information and present any usable results with their limitations; follow the existing bounded retry rules instead of searching the web. This instruction applies even when Web Search tools remain available.
 @@ -64,8 +64,8 @@ task; visible prior conversation still supplies metadata and authorization.
    unaddressed confounders.
@@ -128,9 +128,9 @@ index dc6bda8..f52cc49 100644
  - Each save's tool content contains the actual per-item status and any receipt.
    Base your response on that result and preserve ambiguity/failure honestly;
    no finalizer will replace your prose with a deterministic save summary.
- 
+
  ## Project bibliography (desktop projects)
- 
+
 -- In a desktop research project, every saved or reused work is also merged
 -  into the project's CSL-JSON bibliography, and the save result reports its
 -  `key` (`bibliography.status` is `added`, `existing`, or `failed` with a
@@ -150,7 +150,7 @@ index dc6bda8..f52cc49 100644
 @@ -165,5 +170,5 @@ task; visible prior conversation still supplies metadata and authorization.
    bibliography does not contain; save the work first, or say which claims
    still lack a source.
- 
+
 -Bundles are staged, fsynced, and atomically renamed. DOI identities keep their
 -stable `src-*`; schema-v1 bundles are validated and reused without rewriting.
 +Bibliography writes re-check the file fingerprint and replace the file
