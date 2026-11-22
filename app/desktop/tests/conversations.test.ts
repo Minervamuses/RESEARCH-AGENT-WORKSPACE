@@ -31,6 +31,7 @@ function fakeApi(handler: (method: FakeMethod, params: JsonObject) => Promise<Js
 
 type SafeContentModule = typeof import("../src/SafeContent.tsx");
 type AppModule = typeof import("../src/App.tsx");
+type TranscriptModule = typeof import("../src/components/Transcript.tsx");
 
 interface ReactElementLike {
   props: Record<string, unknown>;
@@ -57,6 +58,7 @@ function contentChildren(element: unknown): unknown[] {
 let devServer: Promise<ViteDevServer> | undefined;
 let safeContentModule: Promise<SafeContentModule> | undefined;
 let appModule: Promise<AppModule> | undefined;
+let transcriptModule: Promise<TranscriptModule> | undefined;
 
 function ssrLoad<T>(path: string): Promise<T> {
   devServer ??= createServer({
@@ -71,6 +73,10 @@ function ssrLoad<T>(path: string): Promise<T> {
 
 function loadSafeContent(): Promise<SafeContentModule> {
   return (safeContentModule ??= ssrLoad<SafeContentModule>("/src/SafeContent.tsx"));
+}
+
+function loadTranscript(): Promise<TranscriptModule> {
+  return (transcriptModule ??= ssrLoad<TranscriptModule>("/src/components/Transcript.tsx"));
 }
 
 function loadAppHelpers(): Promise<AppModule> {
@@ -436,7 +442,7 @@ test("only an accepted and persisted prompt qualifies for a saved-conversation r
 });
 
 test("an unresolved retry renders one prompt without a stale failure card", async () => {
-  const { ConversationTurns } = await loadAppHelpers();
+  const { ConversationTurns } = await loadTranscript();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const sessionId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -478,8 +484,47 @@ test("an unresolved retry renders one prompt without a stale failure card", asyn
   }
 });
 
+test("a live turn renders its own cards: a complete answer or a local command, never restored labels", async () => {
+  const { ConversationTurns } = await loadTranscript();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const sessionId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const live = (turnId: string, responseKind: "answer" | "command", userText: string, assistantText: string) =>
+    ({ sessionId, turnId, turnNumber: 1, userText, assistantText, responseKind });
+  const answer = renderToStaticMarkup(createElement(ConversationTurns, {
+    turns: mergeConversationTurns([], [live("123e4567e89b42d3a456426614174001", "answer", "a question", "an <b>answer</b>")]),
+  }));
+  assert.match(answer, /<div class="message user-message"><p class="message-label">You<\/p>/);
+  assert.match(answer, /<div class="message assistant-message"><p class="message-label">Assistant · complete<\/p>/);
+  assert.match(answer, /a question/);
+  assert.doesNotMatch(answer, /<b>answer<\/b>|restored|pending-turn/);
+  const command = renderToStaticMarkup(createElement(ConversationTurns, {
+    turns: mergeConversationTurns([], [live("123e4567e89b42d3a456426614174002", "command", "/help", "Available commands")]),
+  }));
+  assert.match(command, /<div class="message system-message"><p class="message-label">Local command output · complete<\/p>/);
+  assert.doesNotMatch(command, /assistant-message/);
+});
+
+test("a pending turn renders the prompt, a working card with a spinner and its stage and tool activity", async () => {
+  const { ConversationTurns } = await loadTranscript();
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const turns = mergeConversationTurns([], [], {
+    sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", turnId: "123e4567e89b42d3a456426614174003", userText: "still working",
+    activity: [{ kind: "stage", label: "Retrieving", status: null }, { kind: "tool", label: "rag_search", status: "running" }],
+  });
+  const html = renderToStaticMarkup(createElement(ConversationTurns, { turns }));
+  assert.match(html, /<article class="turn-group pending-turn">/);
+  assert.match(html, /<p class="message-label">You · pending<\/p>/);
+  assert.match(html, /still working/);
+  assert.match(html, /<p class="message-label">Assistant · working<\/p><div class="inline-spinner" aria-label="Waiting for answer">/);
+  assert.match(html, /<strong>Stage:<\/strong> Retrieving<\/li>/);
+  assert.match(html, /<strong>Tool:<\/strong> rag_search · running<\/li>/);
+  assert.doesNotMatch(html, /restored|Assistant · complete/);
+});
+
 test("restored turns keep tool details lazy between user and assistant", async () => {
-  const { RestoredTurn } = await loadAppHelpers();
+  const { RestoredTurn } = await loadTranscript();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const html = renderToStaticMarkup(createElement(RestoredTurn, {
@@ -515,7 +560,7 @@ test("restored turns keep tool details lazy between user and assistant", async (
 });
 
 test("restored turns render a complete multi-megabyte answer from first marker to last", async () => {
-  const { RestoredTurn } = await loadAppHelpers();
+  const { RestoredTurn } = await loadTranscript();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const answer = 'BEGIN 中文🙂\n"quoted"\\path\n<script>unsafe()</script>\n'
@@ -546,7 +591,7 @@ test("restored turns render a complete multi-megabyte answer from first marker t
 });
 
 test("citation menu inserts a task and restore displays its saved answer and tool activity", async () => {
-  const { RestoredTurn } = await loadAppHelpers();
+  const { RestoredTurn } = await loadTranscript();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const commands = [{ name: "citation", description: "One citation task in normal thinking" }];
@@ -571,7 +616,7 @@ test("citation menu inserts a task and restore displays its saved answer and too
 });
 
 test("restored transcript renders durable non-completed and display-only states without a fake answer", async () => {
-  const { RestoredTurn } = await loadAppHelpers();
+  const { RestoredTurn } = await loadTranscript();
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const base = {

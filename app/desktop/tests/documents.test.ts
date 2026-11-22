@@ -19,7 +19,7 @@ import {
 } from "../src/lib/documentSource.ts";
 
 // Only the annotation rendering test needs a .tsx component (monaco-free SSR load).
-type DocumentEditorModule = typeof import("../src/DocumentEditor.tsx");
+type DocumentEditorModule = typeof import("../src/components/Annotation.tsx");
 
 let server: Promise<ViteDevServer> | undefined;
 function loadDocumentEditor(): Promise<DocumentEditorModule> {
@@ -29,7 +29,7 @@ function loadDocumentEditor(): Promise<DocumentEditorModule> {
     server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
   });
-  return server.then((value) => value.ssrLoadModule("/src/DocumentEditor.tsx") as Promise<DocumentEditorModule>);
+  return server.then((value) => value.ssrLoadModule("/src/components/Annotation.tsx") as Promise<DocumentEditorModule>);
 }
 after(async () => { await (await server)?.close(); });
 

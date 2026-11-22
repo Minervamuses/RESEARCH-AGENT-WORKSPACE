@@ -1,5 +1,4 @@
 import {
-  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -44,7 +43,6 @@ import {
   type ConversationAction,
   type ConversationSelection,
   type LiveTurn,
-  type VisibleConversationTurn,
 } from "./conversations.ts";
 import type {
   DocumentContextDto,
@@ -54,10 +52,11 @@ import type {
   Reference,
   SessionListDto,
   SessionSummaryDto,
-  TranscriptTurnDto,
 } from "./protocol.ts";
-import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
-import { AnnotationComment, DocumentEditor, type AnnotationControls } from "./DocumentEditor.tsx";
+import { DocumentEditor } from "./DocumentEditor.tsx";
+import type { AnnotationControls } from "./components/Annotation.tsx";
+import { ReferenceCards, SafeContent } from "./components/messageParts.tsx";
+import { Transcript } from "./components/Transcript.tsx";
 import { CitationPanel } from "./CitationPanel.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ModalDialog } from "./components/Modal.tsx";
@@ -141,9 +140,6 @@ import {
   visibleMessageRange,
   type TranscriptView,
 } from "./lib/transcript.ts";
-
-// Unchanged history must not be reparsed when the composer or live activity updates.
-const SafeContent = memo(ContentRenderer);
 
 const phaseLabels = {
   starting: "Starting backend",
@@ -356,176 +352,6 @@ function shutdownSummary(snapshot: BackendSnapshot | null): string | null {
 
 function newLogicalTurnId(): string {
   return globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase();
-}
-
-function RestoredToolActivity({ activity }: {
-  activity: TranscriptTurnDto["toolActivities"][number];
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <details
-      className="tool-activity"
-      aria-label={`Tool activity ${activity.name}`}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-    >
-      <summary className="message-label">
-        Tool activity · {activity.name} · {activity.status}
-        {activity.promptEligible ? " · restored context" : " · display only"}
-      </summary>
-      {expanded && <div className="tool-activity-content">
-        <div className="message tool-message">
-          <p className="message-label">Tool arguments · {activity.name}</p>
-          <SafeContent content={activity.arguments} />
-        </div>
-        <div className="message tool-result-message">
-          <p className="message-label">Tool result · {activity.name}</p>
-          <SafeContent content={activity.result} />
-        </div>
-      </div>}
-    </details>
-  );
-}
-
-export const RestoredTurn = memo(function RestoredTurn({ turn, projectId, sessionId, annotationControls }: { turn: TranscriptTurnDto; projectId?: string; sessionId?: string; annotationControls?: AnnotationControls }) {
-  const source = projectId === undefined || sessionId === undefined ? undefined : { projectId, sessionId, turnId: turn.turnId };
-  const displayOnly = turn.kind === "display-only";
-  return (
-    <article className="turn-group">
-      <div className="message user-message">
-        <p className="message-label">
-          You · restored turn {turn.turnNumber}{displayOnly ? " · display-only" : ""}
-        </p>
-        <MessageBody text={turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} annotationControls={annotationControls} />
-        <ReferenceCards references={turn.submittedContext?.references ?? []} />
-      </div>
-      {turn.toolActivities.map((activity, index) => (
-        <RestoredToolActivity
-          activity={activity}
-          key={`${activity.callId ?? "legacy"}-${activity.name}-${index}`}
-        />
-      ))}
-      {turn.state === "completed" && turn.assistantText !== null ? (
-        <div className={`message ${displayOnly ? "system-message" : "assistant-message"}`}>
-          <p className="message-label">
-            {displayOnly ? "Local command output · restored · display-only" : "Assistant · restored"}
-          </p>
-          <MessageBody text={turn.assistantText} source={displayOnly || source === undefined ? undefined : { ...source, role: "assistant" }} annotationControls={annotationControls} />
-        </div>
-      ) : turn.state === "pending" ? (
-        <div className="message system-message">
-          <p className="message-label">Pending · saved locally</p>
-          <p>This turn has not reached a terminal state and will not replay automatically.</p>
-        </div>
-      ) : (
-        <div className="message system-message">
-          <p className="message-label">
-            {turn.state === "failed" ? "Failed" : "Interrupted"} · saved locally
-          </p>
-          <SafeContent content={turn.failureMessage ?? "This turn did not complete."} />
-        </div>
-      )}
-    </article>
-  );
-});
-
-export const ConversationTurns = memo(function ConversationTurns({ turns, projectId, annotationControls }: { turns: readonly VisibleConversationTurn[]; projectId?: string; annotationControls?: AnnotationControls }) {
-  return turns.map((item) => {
-    const source = projectId === undefined ? undefined : { projectId, sessionId: item.sessionId, turnId: item.turnId };
-    if (item.source === "restored") {
-      return <RestoredTurn turn={item.turn} projectId={projectId} sessionId={item.sessionId} annotationControls={annotationControls} key={item.key} />;
-    }
-    if (item.source === "live") {
-      return <article className="turn-group" key={item.key}>
-        <div className="message user-message"><p className="message-label">You</p>
-          <MessageBody text={item.turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} annotationControls={annotationControls} />
-          <ReferenceCards references={item.turn.submittedContext?.references ?? []} />
-        </div>
-        <div className={`message ${item.turn.responseKind === "command" ? "system-message" : "assistant-message"}`}>
-          <p className="message-label">{item.turn.responseKind === "command" ? "Local command output" : "Assistant"} · complete</p>
-          <MessageBody text={item.turn.assistantText} source={item.turn.responseKind === "command" || source === undefined ? undefined : { ...source, role: "assistant" }} annotationControls={annotationControls} />
-        </div>
-      </article>;
-    }
-    return <article className="turn-group pending-turn" key={item.key}>
-      <div className="message user-message"><p className="message-label">You · {item.retrying ? "retrying" : "pending"}</p>
-        <MessageBody text={item.turn.userText} source={source === undefined ? undefined : { ...source, role: "user" }} />
-        <ReferenceCards references={item.turn.submittedContext?.references ?? []} />
-      </div>
-      <div className="message assistant-message"><p className="message-label">Assistant · working</p><div className="inline-spinner" aria-label="Waiting for answer" /></div>
-      {item.turn.activity.length > 0 && <ul className="activity-list">{item.turn.activity.map((activity, index) => <li key={`${activity.kind}-${index}`}><strong>{activity.kind === "stage" ? "Stage" : "Tool"}:</strong> {activity.label}{activity.status === null ? "" : ` · ${activity.status}`}</li>)}</ul>}
-    </article>;
-  });
-});
-
-export function ReferenceCards({ references, onRemove }: { references: readonly Reference[]; onRemove?: (id: string) => void }) {
-  if (references.length === 0) return null;
-  return <div className="reference-cards" aria-label={onRemove === undefined ? "Submitted references" : "Draft references"} data-reference-exclude>
-    {references.map((reference) => <details className="reference-card" key={reference.referenceId}>
-      <summary title={reference.kind === "document" ? reference.document.snapshot.path : undefined}><strong>{reference.kind === "document"
-        ? `Document · ${reference.document.snapshot.path.split("/").at(-1)} · lines ${reference.document.startLine}–${reference.document.endLine}`
-        : `Chat · ${reference.chat.role} · ${reference.chat.sessionId.slice(0, 8)} / ${reference.chat.turnId.slice(0, 8)}`}</strong>
-        <span>{reference.text.replace(/\s+/g, " ").slice(0, 100)}{reference.text.length > 100 ? "…" : ""}</span></summary>
-      <pre>{reference.text}</pre>
-      <p className="reference-version">{reference.kind === "document"
-        ? `Path ${reference.document.snapshot.path} · Root ${reference.document.snapshot.rootPath} · revision ${reference.document.snapshot.editorRevision} · disk ${reference.document.snapshot.diskFingerprint}`
-        : `Project ${reference.chat.projectId} · UTF-16 ${reference.chat.startUtf16}–${reference.chat.endUtf16} · message ${reference.chat.messageFingerprint}`}</p>
-      {onRemove !== undefined && <button type="button" onClick={() => onRemove(reference.referenceId)}>Remove reference</button>}
-    </details>)}
-  </div>;
-}
-
-function MessageBody({ text, source, annotationControls }: { text: string; source?: { projectId: string; sessionId: string; turnId: string; role: "user" | "assistant" }; annotationControls?: AnnotationControls }) {
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [positions, setPositions] = useState<Record<string, { top: number; left: number }>>({});
-  const references = useMemo(() => annotationControls?.references.filter((reference) => reference.kind === "chat" && source !== undefined &&
-    reference.chat.projectId === source.projectId && reference.chat.sessionId === source.sessionId &&
-    reference.chat.turnId === source.turnId && reference.chat.role === source.role &&
-    annotationControls.annotations.some((item) => item.referenceId === reference.referenceId)) ?? [],
-  [annotationControls?.references, annotationControls?.annotations, source?.projectId, source?.sessionId, source?.turnId, source?.role]);
-  useLayoutEffect(() => {
-    const root = bodyRef.current;
-    if (root === null || references.length === 0) { setPositions({}); return; }
-    const positionMarkers = () => {
-      const bounds = root.getBoundingClientRect();
-      const nodes: { node: Node; start: number; end: number }[] = [];
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-        const range = visibleMessageRange(root, node, 0, node, node.textContent?.length ?? 0);
-        if (range !== null) nodes.push({ node, start: range.startUtf16, end: range.endUtf16 });
-      }
-      const next: Record<string, { top: number; left: number }> = {};
-      for (const reference of references) {
-        if (reference.kind !== "chat") continue;
-        const end = reference.chat.endUtf16;
-        const last = nodes.find((node) => node.start < end && node.end >= end) ?? nodes.filter((node) => node.end <= end).at(-1);
-        if (last === undefined) continue;
-        const offset = Math.min(end - last.start, last.node.textContent?.length ?? 0);
-        const range = document.createRange();
-        range.setStart(last.node, Math.max(0, offset - 1));
-        range.setEnd(last.node, offset);
-        const rect = range.getBoundingClientRect();
-        next[reference.referenceId] = { top: rect.bottom - bounds.top,
-          left: Math.max(0, Math.min(rect.right - bounds.left, root.clientWidth - 280)) };
-      }
-      setPositions(next);
-    };
-    positionMarkers();
-    const observer = new ResizeObserver(positionMarkers);
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, [text, references]);
-  return <div ref={bodyRef} className="reference-message-body" {...(source === undefined ? {} : {
-    "data-reference-message": "", "data-project-id": source.projectId, "data-session-id": source.sessionId,
-    "data-turn-id": source.turnId, "data-message-role": source.role,
-  })}><SafeContent content={text} />
-    {annotationControls && references.map((reference) => {
-      const annotation = annotationControls.annotations.find((item) => item.referenceId === reference.referenceId);
-      const position = positions[reference.referenceId];
-      return annotation && position ? <div key={reference.referenceId} className="chat-annotation-anchor" data-reference-exclude style={position}>
-        <AnnotationComment annotation={annotation} controls={annotationControls} />
-      </div> : null;
-    })}
-  </div>;
 }
 
 export function DocumentHeader({ path, dirty, busy, openDisabled, saveDisabled, undoDisabled, onOpen, onSave, onUndo }: {
@@ -2281,19 +2107,14 @@ export default function App() {
 
           {selectionPreview !== null && <section className="conversation-surface" aria-label="Saved conversation preview" aria-busy="true">
             <p className="control-state" role="status">Preparing this conversation… You can read the saved messages while it loads.</p>
-            <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
-              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} annotationControls={annotationControls} />
-              <div ref={transcriptEndRef} />
-            </div>
+            <Transcript turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} annotationControls={annotationControls}
+              transcriptRef={transcriptRef} endRef={transcriptEndRef} />
           </section>}
           {selectionPreview === null && activeSession !== null && <section className="conversation-surface" aria-label="Conversation workspace">
-            <div className="transcript" ref={transcriptRef} aria-label="Conversation transcript" aria-live="polite">
-              {transcript?.hasOlder && <button className="load-older" type="button" onClick={loadOlder} disabled={workspaceBusy !== null || interaction.turnActive}>Load older turns</button>}
-              {transcript?.issue !== null && transcript?.issue !== undefined && <p className="transcript-issue">{transcript.issue}</p>}
-              {visibleTurns.length === 0 && <div className="conversation-empty"><div className="hero-mark" aria-hidden="true">R</div><h3>What would you like to research?</h3><p>Enter sends. Shift+Enter adds a new line.</p></div>}
-              <ConversationTurns turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} annotationControls={annotationControls} />
-              <div ref={transcriptEndRef} />
-            </div>
+            <Transcript turns={visibleTurns} projectId={visibleTranscript?.projectId ?? activeProjectId ?? undefined} annotationControls={annotationControls}
+              transcriptRef={transcriptRef} endRef={transcriptEndRef} empty
+              hasOlder={transcript?.hasOlder ?? false} issue={transcript?.issue ?? null}
+              loadOlderDisabled={workspaceBusy !== null || interaction.turnActive} onLoadOlder={loadOlder} />
             {(conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null || referenceIssue !== null) && <div className="composer-notices">
             {conversation.failure !== null && !conversation.failure.cancelled && conversation.submittedContext !== null && <div className="reference-retry-settings">
               <p>Saved turn: {conversation.submittedContext.permissionMode === "ask" ? "Ask" : "Bypass"} · {conversation.submittedContext.requestedThinkingMode === "normal" ? "Normal" : "Extended"}.
