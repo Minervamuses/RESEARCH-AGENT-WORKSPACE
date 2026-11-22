@@ -48,7 +48,7 @@ export interface BackendSnapshot {
 }
 
 export interface SafeUiError extends BridgeError {
-  source: "transport" | "business" | "protocol" | "lifecycle" | "preview";
+  source: "transport" | "business" | "protocol" | "lifecycle";
   turnLifecycle?: TurnLifecycleDetailsDto;
 }
 
@@ -88,7 +88,6 @@ export interface BackendUiState {
   session: SessionCreatedDto | null;
   error: SafeUiError | null;
   activeAction: BackendActionName | null;
-  browserPreview: boolean;
 }
 
 export const initialBackendState: BackendUiState = {
@@ -98,11 +97,9 @@ export const initialBackendState: BackendUiState = {
   session: null,
   error: null,
   activeAction: null,
-  browserPreview: false,
 };
 
 export type BackendUiAction =
-  | { type: "browser-preview" }
   | { type: "snapshot"; snapshot: BackendSnapshot }
   | { type: "protocol-event"; message: ProtocolMessage }
   | { type: "action-started"; action: BackendActionName }
@@ -205,19 +202,6 @@ function settledReadyPhase(state: BackendUiState): UiLifecycle {
 }
 
 export function backendReducer(state: BackendUiState, action: BackendUiAction): BackendUiState {
-  if (action.type === "browser-preview") {
-    return {
-      ...state,
-      phase: "degraded",
-      browserPreview: true,
-      error: {
-        code: "BROWSER_PREVIEW",
-        message: "Browser preview cannot connect to the desktop backend. Open the Tauri application.",
-        retryable: false,
-        source: "preview",
-      },
-    };
-  }
   if (action.type === "snapshot") {
     const generationChanged =
       state.snapshot !== null && state.snapshot.generation !== action.snapshot.generation;

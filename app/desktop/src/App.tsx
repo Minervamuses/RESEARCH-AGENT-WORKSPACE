@@ -320,10 +320,6 @@ function SlashComposer({ draft, references, annotationControls, onRemoveReferenc
   </form>;
 }
 
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
 function configuredLabel(value: boolean): string {
   return value ? "Configured" : "Not configured";
 }
@@ -976,10 +972,6 @@ export default function App() {
   }, [applyConversation, invalidateOperations, setHistoryGeneration]);
 
   useEffect(() => {
-    if (!isTauriRuntime()) {
-      dispatch({ type: "browser-preview" });
-      return;
-    }
     let disposed = false;
     let removeListener: (() => void) | undefined;
     void (async () => {
@@ -2216,19 +2208,19 @@ export default function App() {
     onRemove: (referenceId) => applyConversation({ type: "reference-removed", referenceId,
       generation: conversation.backendGeneration, projectEpoch: conversation.projectEpoch }),
   }), [applyConversation, conversation.annotations, conversation.draftReferences, conversation.backendGeneration, conversation.projectEpoch, idle, chooserOpen]);
-  const canStart = !state.browserPreview && idle && (state.snapshot === null || state.snapshot.lifecycle === "stopped");
+  const canStart = idle && (state.snapshot === null || state.snapshot.lifecycle === "stopped");
   const stopRecovery = conversation.stopRequest?.status === "failed" && conversation.activeTurn === null &&
     state.activeAction === null && workspaceBusy === null && !documentBusy && pendingApproval === null;
   const stopping = conversation.stopRequest !== null && conversation.stopRequest.status !== "failed";
-  const canRestart = !state.browserPreview && (idle || stopRecovery) && (state.phase === "crashed" || state.phase === "degraded" || state.snapshot?.childRunning === true);
-  const canShutdown = !state.browserPreview && idle && state.snapshot?.childRunning === true;
-  const canCreateSession = !state.browserPreview && idle && workspaceBusy === null && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && activeProjectId !== null;
-  const canManageConversations = !state.browserPreview && idle && !chooserOpen && state.snapshot?.lifecycle === "ready" &&
+  const canRestart = (idle || stopRecovery) && (state.phase === "crashed" || state.phase === "degraded" || state.snapshot?.childRunning === true);
+  const canShutdown = idle && state.snapshot?.childRunning === true;
+  const canCreateSession = idle && workspaceBusy === null && state.snapshot?.lifecycle === "ready" && state.diagnostics !== null && activeProjectId !== null;
+  const canManageConversations = idle && !chooserOpen && state.snapshot?.lifecycle === "ready" &&
     state.diagnostics !== null && bindingGenerationRef.current === generationRef.current;
   const menuTargetsRunningConversation = conversationMenu !== null && sameSelection(
     conversation.stopRequest ?? conversation.activeTurn, { projectId: conversationMenu.projectId, sessionId: conversationMenu.session.sessionId },
   );
-  const canDeleteConversation = !state.browserPreview && !chooserOpen && state.snapshot?.lifecycle === "ready" &&
+  const canDeleteConversation = !chooserOpen && state.snapshot?.lifecycle === "ready" &&
     state.diagnostics !== null && bindingGenerationRef.current === generationRef.current &&
     state.activeAction === null && workspaceBusy === null && (idle || menuTargetsRunningConversation);
   const renameTitleTooLong = renameDialog !== null && new TextEncoder().encode(renameDialog.title.trim()).length > 256;
@@ -2363,7 +2355,7 @@ export default function App() {
             </div>
           </section>}
           {selectionPreview === null && historyIssue !== null && <section className="notice history-notice" aria-live="polite"><div className="notice-icon" aria-hidden="true">!</div><div><p className="section-kicker">CONVERSATION NOT REFRESHED</p><p>{historyIssue}</p><button type="button" onClick={refreshSavedConversation} disabled={interaction.turnActive || workspaceBusy !== null}>Refresh without resending</button></div></section>}
-          {(state.phase === "starting" || (state.snapshot === null && state.error === null && !state.browserPreview)) && <section className="empty-state" role="status"><h3>Preparing your research workspace</h3><p>Connecting to the local backend. Choose a project when it is ready.</p></section>}
+          {(state.phase === "starting" || (state.snapshot === null && state.error === null)) && <section className="empty-state" role="status"><h3>Preparing your research workspace</h3><p>Connecting to the local backend. Choose a project when it is ready.</p></section>}
           {state.phase === "stopped" && state.snapshot !== null && state.error === null && <section className="empty-state" aria-labelledby="stopped-title"><div className="hero-mark" aria-hidden="true">R</div><h3 id="stopped-title">The local backend is stopped</h3><button className="primary-button" type="button" onClick={() => runLifecycle("start")} disabled={!canStart}>Start local backend</button>{shutdownMessage !== null && <p className="shutdown-summary">{shutdownMessage}</p>}</section>}
           {(state.phase === "starting" || state.phase === "restarting" || state.phase === "shutting-down") && <section className="empty-state" aria-labelledby="transition-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">DESKTOP BACKEND</p><h3 id="transition-title">{phaseLabels[state.phase]}</h3><p>Please keep this window open while the local process changes state.</p></section>}
           {state.phase === "busy" && <section className="empty-state" aria-labelledby="busy-title"><div className="spinner" aria-hidden="true" /><p className="section-kicker">LOCAL REQUEST</p><h3 id="busy-title">{state.activeAction === "session" ? "Creating your session" : "Checking the local runtime"}</h3><p>This check stays on your device and does not call a model provider.</p></section>}

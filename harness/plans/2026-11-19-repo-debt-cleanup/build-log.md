@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | In progress | `evidence/C8-S1/`–`C8-S3/` | — | C8-S4 |
+| C8 | In progress | `evidence/C8-S1/`–`C8-S4/` | — | C8-S5 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -713,3 +713,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S3/api.md`（含退役紀錄與 GUI 清單項目）。
 - **限制**：GUI 未驗證。`document.open` 的基準 `editorRevision` 由 undefined 變為 0（沒有讀取者），記在 evidence。
 - **下一步**：C8-S4 刪除 browser preview。
+
+### C8-S4 刪除 browser preview（U5、S078，2026-11-22）
+
+- **觀察結果**：刪除 `backend.ts` 的 `browserPreview` 狀態、action 與 reducer 分支，以及 `App.tsx` 的 `isTauriRuntime` 與 8 處守衛；不在 Tauri 內時由既有的 `listen` 失敗 `catch` 顯示一般錯誤。沒有對應的測試需要刪除。
+- **執行指令**：`npm test`（228 pass）、`npm run build`（通過）、grep 為 0。
+- **證據**：`evidence/C8-S4/browser-preview.md`。
+- **限制**：GUI 未驗證。
+- **下一步**：C8-S5 reducer 與核准擁有者。
