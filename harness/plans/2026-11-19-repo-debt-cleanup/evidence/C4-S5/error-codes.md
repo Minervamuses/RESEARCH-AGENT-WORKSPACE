@@ -31,3 +31,7 @@
 | `BIBLIOGRAPHY_CONFLICT` | 1 | 0 | `agent/desktop/service.py:2243` |
 | `BIBLIOGRAPHY_FAILED` | 3 | 0 | `agent/desktop/service.py:2244` |
 | `INTERNAL_ERROR` | 24 | 3 | `agent/desktop/server.py:72` |
+
+## C10-S0 複查（2026-11-22，`6e97400`）
+
+C5、C6 完成、C7 拆分 `service.py` 之後重做 producer 檢查：25 個錯誤碼仍都有 producer，沒有新的死錯誤碼，不移除任何錯誤碼。producer 位置因 C7-S8 模組化而移到 `errors.py`、`project_ops.py`、`command_ops.py`、`approvals.py`、`bibliography_ops.py` 等，完整輸出見 `evidence/C10-S0/vocabulary.md`。

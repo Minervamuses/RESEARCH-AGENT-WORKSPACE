@@ -24,7 +24,7 @@
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
 | C8 | Complete | `evidence/C8-S1/`–`C8-S7/` | — | — |
 | C9 | Complete | `evidence/C9-S1/`–`C9-S5/` | — | — |
-| C10 | Not started | — | — | 等 C2–C9 |
+| C10 | In progress | `evidence/C10-S0/` | — | C10-S1 |
 
 ## 撰寫紀錄
 
@@ -786,3 +786,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C9-S5/wrap-up.md`（含驗收表與 GUI 清單指標）。
 - **限制**：GUI 未驗證，焦點、Tab、外觀與編輯器縮放留給使用者。
 - **下一步**：C10 交付。
+
+### C10-S0 跨階段詞彙收尾（G2，2026-11-22）
+
+- **觀察結果**：contract 的 25 個方法、8 個 request event 與 PLANS.md「目標詞彙」完全一致，process event 4 個不變。錯誤碼 25 個都有 producer，沒有新的死錯誤碼，不移除任何錯誤碼（結果附加到 `evidence/C4-S5/error-codes.md`）。
+- **執行指令**：`evidence/C10-S0/vocabulary.py`。
+- **證據**：`evidence/C10-S0/vocabulary.md`。
+- **限制**：無。
+- **下一步**：C10-S1 文件。
