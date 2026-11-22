@@ -16,7 +16,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -49,7 +49,6 @@ from agent.cli.slash_commands import (
     parse_slash_command,
 )
 from agent.diagnostics import attach_incident, incident_reference
-from agent.desktop import bime_export
 from agent.desktop.project import (
     ProjectError,
     inspect_project,
@@ -57,14 +56,13 @@ from agent.desktop.project import (
     open_project_history,
     project_citation_settings,
     project_conversations,
-    update_project_metadata,
 )
 from agent.desktop.protocol import (
     PROTOCOL_VERSION,
     ProtocolError,
     success_result,
 )
-from agent.desktop.documents import DocumentError, DocumentWorkspace, utf16_to_index
+from agent.desktop.documents import DocumentError, DocumentWorkspace
 from agent.document_context import FROZEN_REFERENCES_HEADER, SNAPSHOT_HEADER
 from agent.extensions.manager import (
     ApplyReport,
@@ -92,17 +90,13 @@ from agent.turns.safety import content_text
 from rag.collect import SKIP_DIRS, TEXT_EXTENSIONS
 from skills.citation.citekeys import format_for_path as citation_format_for_path
 from skills.citation.citekeys import keys_in as citation_keys_in
-from skills.citation import csl_render
-from skills.citation import library as citation_library
-from skills.citation.integrity import entry_summary
-from skills.citation.integrity import inspect as inspect_citations
-from skills.citation.library import LibraryError, search_bibliography
+from skills.citation.library import LibraryError
 from skills.citation.library import load as load_bibliography
 from agent.desktop.errors import _ErrorMapping
 from agent.desktop.errors import DesktopServiceError, EventSink, _SELF_EXPLANATORY_FAILURE_CODES, logger
-
-BIBLIOGRAPHY_LOOKUP_LIMIT = 20
-DEFAULT_CITATION_STYLE = "apa"
+from agent.desktop.approvals import _ApprovalOps
+from agent.desktop.bibliography_ops import _BibliographyOps
+from agent.desktop.approvals import _CREDENTIAL_URL, _PendingApproval, _SECRET_APPROVAL_CONTEXT, _SECRET_FLAG_VALUE
 
 
 _WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -142,19 +136,10 @@ _TRANSCRIPT_TOOL_STATUSES = frozenset({"ok", "failed", "denied", "incomplete"})
 _MAX_CONTROL_SNAPSHOTS = 4096
 _MAX_KNOWLEDGE_RESULT_PATHS = 512
 _MAX_KNOWLEDGE_PATH_BYTES = 4_096
-_MAX_APPROVAL_COMMAND_BYTES = 65_536
-_MAX_APPROVAL_DESCRIPTION_BYTES = 4_096
 _MAX_EXTENSION_ARGUMENTS = 128
 _MAX_EXTENSION_ENVIRONMENT_NAMES = 128
 _WIRE_BUDGET_REQUEST_ID = "00000000-0000-4000-8000-000000000000"
 _WIRE_BUDGET_TURN_ID = "00000000000040008000000000000000"
-_SECRET_APPROVAL_CONTEXT = re.compile(
-    r"(?i)(?:authorization\s*:|(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=])\s*\S+"
-)
-_SECRET_FLAG_VALUE = re.compile(
-    r"(?i)(?:^|\s)--?(?:api[-_]?key|access[-_]?token|token|secret|password|private[-_]?key)(?:\s+|[:=])\S+"
-)
-_CREDENTIAL_URL = re.compile(r"(?i)https?://[^\s/:@]+:[^\s/@]+@")
 _SOURCE_TEXT_IDENTITY = ("rootPath", "path", "editorRevision", "diskFingerprint", "sourceText")
 
 
@@ -271,15 +256,6 @@ class _PrunePreview:
 
 
 @dataclass(frozen=True)
-class _PendingApproval:
-    approval_id: str
-    parent_request_id: str
-    turn_id: str
-    expires_at: datetime
-    future: asyncio.Future[bool]
-
-
-@dataclass(frozen=True)
 class _ConversationControlSnapshot:
     thinking_mode: str
     permission_mode: str = "ask"
@@ -327,7 +303,7 @@ class _TurnWork:
     error: DesktopServiceError | None = None
 
 
-class DesktopService(_ErrorMapping):
+class DesktopService(_BibliographyOps, _ApprovalOps, _ErrorMapping):
     """Own one backend lifecycle and adapt existing domain APIs to safe DTOs."""
 
     def __init__(
@@ -875,21 +851,6 @@ class DesktopService(_ErrorMapping):
             "issue": None,
         }
 
-    def _project_bibliography_path(self, project_id: str) -> Path | None:
-        """The opened project's CSL-JSON bibliography, or None when unusable.
-
-        A malformed ``bibliography`` metadata value leaves citation saves
-        verified for the current task only (logged, nothing written) instead
-        of failing the Citation task.
-        """
-        project = self._project
-        if project is None or project.get("projectId") != project_id:
-            return None
-        try:
-            return project_citation_settings(project["rootPath"])["bibliographyPath"]
-        except ProjectError as exc:
-            logger.warning("project bibliography unavailable: %s", exc)
-            return None
 
     def _require_project(self) -> dict[str, Any]:
         if self._project is None:
@@ -1717,255 +1678,6 @@ class DesktopService(_ErrorMapping):
 
     # --- bibliography.* (adapters over skills.citation) ---------------------
 
-    def _citation_settings(self) -> tuple[Path, str, bool]:
-        """(bibliography path, effective style ID, whether the project set it)."""
-        settings = project_citation_settings(self._require_project()["rootPath"])
-        configured = settings["citationStyle"]
-        known = {style["id"] for style in csl_render.list_styles()}
-        if configured in known:
-            return settings["bibliographyPath"], configured, True
-        return settings["bibliographyPath"], DEFAULT_CITATION_STYLE, False
-
-    def _require_idle_for_bibliography_write(self) -> None:
-        if self._turn_active:
-            raise DesktopServiceError(
-                "BUSY_TURN", "Wait for the active turn to finish before changing citations.", retryable=True,
-            )
-
-    def _bibliography_snapshot(self, params: dict[str, Any], *, required: bool) -> dict[str, Any] | None:
-        context = params.get("documentContext")
-        if context is None:
-            if required:
-                raise DesktopServiceError("PROTOCOL_INVALID", "Open a document first.")
-            return None
-        return self._documents.validate_snapshot(context)
-
-    @staticmethod
-    def _bibliography_error(exc: Exception) -> DesktopServiceError:
-        code = getattr(exc, "code", "")
-        if code == "style_unknown":
-            return DesktopServiceError("PROTOCOL_INVALID", str(exc))
-        if code == citation_library.LIBRARY_CONFLICT:
-            return DesktopServiceError("BIBLIOGRAPHY_CONFLICT", str(exc), retryable=True)
-        return DesktopServiceError("BIBLIOGRAPHY_FAILED", str(exc))
-
-    async def _bibliography_inspect(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
-        library_path, style_id, configured = self._citation_settings()
-        snapshot = self._bibliography_snapshot(params, required=False)
-        fmt = citation_format_for_path(snapshot["path"]) if snapshot is not None else None
-        text = snapshot["sourceText"] if snapshot is not None else ""
-        report = await run_local_work(inspect_citations, text, fmt or "markdown", library_path)
-        # The fingerprint of the copy inspect just read (None when missing or unreadable).
-        fingerprint = report["bibliography"]["fingerprint"]
-        error = report["bibliography"]["error"] or {}
-        return {
-            "libraryPath": str(library_path),
-            "libraryStatus": report["bibliography"]["status"],
-            "libraryFingerprint": fingerprint,
-            "libraryErrorCode": error.get("code"),
-            "libraryError": (error.get("message") or "")[:4096] or None,
-            "styleId": style_id,
-            "styleConfigured": configured,
-            "styles": csl_render.list_styles(),
-            "documentFormat": fmt,
-            "entries": [
-                {
-                    "key": entry["key"], "authors": [name for name in entry["authors"] if name],
-                    "year": str(entry["year"]) if entry["year"] is not None else None,
-                    "title": entry["title"], "doi": entry["doi"], "type": entry["type"] or "",
-                    "citedCount": entry["citedCount"] if snapshot is not None else 0,
-                }
-                for entry in report["entries"]
-            ],
-            "uses": [
-                {key: use[key] for key in ("key", "start", "end", "line", "group", "known")}
-                for use in report["uses"]
-            ],
-            "order": report["order"],
-            "missing": [item["key"] for item in report["missing"]],
-            "uncited": report["uncited"] if snapshot is not None else [],
-            "duplicateDois": report["duplicateDois"],
-        }
-
-    def _markdown_snapshot(self, params: dict[str, Any], *, required: bool) -> dict[str, Any] | None:
-        snapshot = self._bibliography_snapshot(params, required=required)
-        if snapshot is not None and citation_format_for_path(snapshot["path"]) != "markdown":
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "LaTeX documents keep their own bibliography style; preview and .docx/Markdown export "
-                "are available for Markdown documents.",
-            )
-        return snapshot
-
-    def _requested_style(self, params: dict[str, Any], default: str) -> str:
-        style_id = params.get("styleId") or default
-        if style_id not in {style["id"] for style in csl_render.list_styles()}:
-            raise DesktopServiceError("PROTOCOL_INVALID", f"Unknown citation style: {style_id}")
-        return style_id
-
-    async def _bibliography_render(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
-        library_path, default_style, _configured = self._citation_settings()
-        snapshot = self._markdown_snapshot(params, required=True)
-        style_id = self._requested_style(params, default_style)
-        try:
-            rendered = await run_local_work(csl_render.render, snapshot["sourceText"], library_path, style_id)
-        except csl_render.RenderError as exc:
-            raise self._bibliography_error(exc) from exc
-        segments = []
-        for index, entry in enumerate(rendered.bibliography):
-            for segment in entry["segments"]:
-                segments.append({
-                    "entry": index, "text": segment["text"],
-                    "italic": bool(segment.get("italic")), "bold": bool(segment.get("bold")),
-                    "url": segment.get("url"),
-                })
-        return {
-            "styleId": style_id,
-            "citations": [
-                {
-                    "index": citation["index"], "keys": citation["keys"], "text": citation["text"],
-                    **({"start": citation["start"], "end": citation["end"]} if citation["start"] is not None else {}),
-                }
-                for citation in rendered.citations
-            ],
-            "entries": [{"key": entry["key"], "text": entry["text"]} for entry in rendered.bibliography],
-            "segments": segments,
-            "missing": rendered.missing,
-        }
-
-    async def _bibliography_set_style(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
-        self._require_idle_for_bibliography_write()
-        style_id = self._requested_style(params, "")
-        project = self._require_project()
-        fingerprint = await run_local_work(update_project_metadata, project["rootPath"], {"citationStyle": style_id})
-        current = await run_local_work(inspect_project, project["rootPath"], self.config.persist_dir)
-        if current["status"] == "ready" and all(
-            current[field] == project[field] for field in ("rootPath", "projectId", "historyDirectory")
-        ):
-            self._project = current
-        return {"styleId": style_id, "researchFingerprint": fingerprint}
-
-    async def _bibliography_remove(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
-        self._require_idle_for_bibliography_write()
-        library_path, _style, _configured = self._citation_settings()
-
-        def remove() -> str:
-            library = citation_library.load(library_path)
-            if library.fingerprint != params["libraryFingerprint"]:
-                raise LibraryError(citation_library.LIBRARY_CONFLICT, "The bibliography changed; inspect it again before removing.")
-            if params["key"] not in library.keys():
-                raise DesktopServiceError("PROTOCOL_INVALID", f"{params['key']} is not in the bibliography.")
-            updated = citation_library.remove_entry(library, params["key"])
-            citation_library.write_atomic(updated)
-            return updated.fingerprint
-
-        try:
-            fingerprint = await run_local_work(remove)
-        except LibraryError as exc:
-            raise self._bibliography_error(exc) from exc
-        return {"key": params["key"], "libraryFingerprint": fingerprint}
-
-    async def _bibliography_add(self, params: dict[str, Any], event_sink: EventSink | None) -> dict[str, Any]:
-        self._require_idle_for_bibliography_write()
-        from skills.citation.doi import canonicalize_doi
-        from skills.citation.hub import get_provider_hub
-        from skills.citation.resolution import WorkIdentifier, WorkIntent, normalize_arxiv
-        from skills.citation.service import CitationService
-
-        library_path, _style, _configured = self._citation_settings()
-        raw = params["identifier"].strip()
-        try:
-            doi = canonicalize_doi(raw)
-            identifier = WorkIdentifier("doi", doi) if doi else WorkIdentifier("arxiv", normalize_arxiv(raw))
-        except ValueError as exc:
-            raise DesktopServiceError("PROTOCOL_INVALID", "Enter a DOI or an arXiv ID.") from exc
-        await self._require_operation_approval(
-            "citation.save", str(library_path),
-            f"Verify {identifier.kind.upper() if identifier.kind == 'doi' else 'arXiv'} {identifier.value} "
-            f"and add it to the project bibliography {library_path}.",
-            parameters={"identifier": identifier.value, "bibliography": str(library_path)},
-            event_sink=event_sink,
-        )
-        service = CitationService(get_provider_hub(), library_path=library_path)
-        outcome = await service.save((WorkIntent(identifier.value[:200], identifiers=(identifier,)),))
-        item = outcome.items[0]
-        # The save wrote (or did not write) the bibliography itself; report the result's fingerprint.
-        fingerprint = await run_local_work(citation_library.fingerprint, library_path)
-        if item.bibliography is None:
-            # storage_failed carries the bibliography's error code; other statuses their own reason.
-            return {"status": "failed", "key": None, "reasonCode": item.reason_code, "libraryFingerprint": fingerprint}
-        link = item.bibliography
-        return {"status": link.status, "key": link.key, "reasonCode": None, "libraryFingerprint": fingerprint}
-
-    async def _bibliography_export(self, params: dict[str, Any], _event_sink: EventSink | None) -> dict[str, Any]:
-        self._require_idle_for_bibliography_write()
-        library_path, default_style, _configured = self._citation_settings()
-        fmt = params.get("format")
-        if fmt != "bime_docx" and fmt not in csl_render.EXPORT_SUFFIXES:
-            raise DesktopServiceError("PROTOCOL_INVALID", f"Unknown export format: {fmt}")
-        snapshot = self._markdown_snapshot(params, required=True)
-        if fmt == "bime_docx":
-            return await self._bime_export(snapshot, Path(library_path))
-        style_id = self._requested_style(params, default_style)
-        document_path = Path(snapshot["path"])
-        target = csl_render.export_target(fmt, document_path=document_path, style_id=style_id)
-        if target.resolve() == document_path.resolve():
-            raise DesktopServiceError("PROTOCOL_INVALID", "An export never replaces its source document.")
-
-        def export() -> None:
-            if fmt == "markdown":
-                data = csl_render.export_markdown(snapshot["sourceText"], library_path, style_id).encode("utf-8")
-            else:
-                data = csl_render.export_docx(snapshot["sourceText"], library_path, style_id, resource_dir=document_path.parent)
-            citation_library.write_bytes_atomic(target, data)
-
-        try:
-            await run_local_work(export)
-        except (csl_render.RenderError, LibraryError) as exc:
-            raise self._bibliography_error(exc) from exc
-        return {"format": fmt, "path": str(target)}
-
-    async def _bime_export(self, snapshot: dict[str, Any], library_path: Path) -> dict[str, Any]:
-        """BIME Appendix 17 Word via the vendored bime_word; it reads the saved file (A11)."""
-        document_path = Path(snapshot["path"])
-        try:
-            saved = self._documents.matches_disk(snapshot)
-        except DocumentError as exc:
-            raise DesktopServiceError("BIBLIOGRAPHY_FAILED", str(exc)) from exc
-        if not saved:
-            raise DesktopServiceError(
-                "PROTOCOL_INVALID",
-                "Save the document first (Ctrl+S): the BIME Word export converts the saved file.",
-            )
-        if bime_export.bime_target(document_path).resolve() == document_path.resolve():
-            raise DesktopServiceError("PROTOCOL_INVALID", "An export never replaces its source document.")
-        try:
-            result = await run_local_work(bime_export.run_bime_convert, document_path, library_path)
-        except bime_export.BimeExportError as exc:
-            raise DesktopServiceError("BIBLIOGRAPHY_FAILED", str(exc)) from exc
-        return {"format": "bime_docx", "path": result["path"], "audit": result["audit"]}
-
-    def _desktop_bibliography_lookup(self, query: str) -> str:
-        """Search the opened project's bibliography without writing anything."""
-        project = self._project
-        if project is None:
-            return json.dumps({"status": "failed", "issue": "No research project is open."})
-        try:
-            path = project_citation_settings(project["rootPath"])["bibliographyPath"]
-        except ProjectError as exc:
-            return json.dumps({"status": "failed", "issue": f"Project bibliography setting is invalid: {exc}"})
-        try:
-            library = load_bibliography(path)
-        except LibraryError as exc:
-            return json.dumps({"status": "failed", "code": exc.code, "issue": str(exc), "path": str(path)})
-        matches = search_bibliography(library.items, query, limit=BIBLIOGRAPHY_LOOKUP_LIMIT)
-        return json.dumps({
-            "status": "ok",
-            "path": str(path),
-            "exists": library.exists,
-            "total": len(library.items),
-            "entries": [entry_summary(item) for item in matches],
-        }, ensure_ascii=False)
 
     def _unknown_new_citation_keys(self, context: dict[str, Any], replacement_text: str) -> dict[str, Any] | None:
         """Refuse an edit whose resulting document adds uses of keys missing from the bibliography.
@@ -2141,164 +1853,6 @@ class DesktopService(_ErrorMapping):
                 **saved, "rangeStartUtf16": left, "rangeEndUtf16": right,
             }
 
-    async def _single_operation_approval(
-        self, payload: dict[str, Any], *, event_sink: EventSink | None = None,
-        parent_request_id: str | None = None, turn_id: str | None = None,
-        permission_mode: str | None = None, document_context: dict[str, Any] | None = None,
-    ) -> tuple[bool, dict[str, Any] | None]:
-        """Serialize single-operation consent without changing correctness checks."""
-        scope = current_local_work()
-        if scope is not None:
-            scope.check_cancelled()
-        turn = self._running_turn
-        mode = permission_mode or (turn.permission_mode if turn is not None else self._permission_mode)
-        if mode == "bypass":
-            return True, document_context
-        sink = event_sink or (turn.event_sink if turn is not None else None)
-        active_owner = turn.turn_id if self._turn_active and turn is not None else None
-        parent = parent_request_id or (turn.parent_request_id if turn is not None else None) or getattr(sink, "request_id", None)
-        operation_turn = turn_id or (turn.turn_id if turn is not None else None) or uuid.uuid4().hex
-        if sink is None or not isinstance(parent, str):
-            return False, document_context
-        async with self._operation_approval_lock:
-            if scope is not None:
-                scope.check_cancelled()
-            current = self._running_turn
-            if active_owner is not None and (not self._turn_active or current is None or current.turn_id != active_owner):
-                return False, document_context
-            if self._pending_approval is not None:
-                return False, document_context
-            now = datetime.now(timezone.utc)
-            pending = _PendingApproval(
-                approval_id=uuid.uuid4().hex, parent_request_id=parent,
-                turn_id=operation_turn, expires_at=now + timedelta(seconds=self._approval_timeout_seconds),
-                future=asyncio.get_running_loop().create_future(),
-            )
-            self._pending_approval = pending
-            if document_context is not None:
-                self._approval_document_snapshots[pending.approval_id] = document_context
-            try:
-                sink("approval.required", {
-                    **payload, "approvalId": pending.approval_id,
-                    "parentRequestId": parent, "turnId": operation_turn,
-                    "createdAt": self._utc_timestamp(now),
-                    "expiresAt": self._utc_timestamp(pending.expires_at),
-                })
-                approved = bool(await asyncio.wait_for(
-                    asyncio.shield(pending.future), timeout=self._approval_timeout_seconds,
-                ))
-                if scope is not None:
-                    scope.check_cancelled()
-                return approved, self._approval_document_snapshots.get(pending.approval_id, document_context)
-            except TimeoutError:
-                return False, document_context
-            except Exception:
-                # A failed event delivery cannot grant permission to execute.
-                return False, document_context
-            finally:
-                self._approval_document_snapshots.pop(pending.approval_id, None)
-                if self._pending_approval is pending:
-                    self._pending_approval = None
-                if not pending.future.done():
-                    pending.future.cancel()
-
-    async def _operation_approval(
-        self, operation: str, target: str, description: str, *,
-        parameters: Any = None, event_sink: EventSink | None = None,
-    ) -> bool:
-        scope = current_local_work()
-        if scope is not None:
-            scope.check_cancelled()
-        turn = self._running_turn
-        mode = turn.permission_mode if turn is not None else self._permission_mode
-        if mode == "bypass":
-            return True
-        summary = json.dumps(parameters, ensure_ascii=False, sort_keys=True, default=str) if parameters is not None else None
-        if (summary is not None and len(summary.encode("utf-8")) > 8192) or not self._approval_context_is_safe(target, description):
-            return False
-        if summary is not None and not self._approval_context_is_safe(summary, description):
-            return False
-        payload = {"operation": operation, "targetPath": target, "description": description}
-        if summary is not None:
-            payload["parametersSummary"] = summary
-        approved, _context = await self._single_operation_approval(
-            payload, event_sink=event_sink, permission_mode=mode,
-        )
-        return approved
-
-    async def _require_operation_approval(
-        self, operation: str, target: str, description: str, *,
-        parameters: Any = None, event_sink: EventSink | None = None,
-    ) -> None:
-        if not await self._operation_approval(
-            operation, target, description, parameters=parameters, event_sink=event_sink,
-        ):
-            raise DesktopServiceError("APPROVAL_DENIED", "The operation was denied or its approval expired; no write occurred.")
-
-    async def _desktop_operation_approval(self, name: str, args: dict[str, Any]) -> bool:
-        """Approve executable tools after the graph's existing admission check."""
-        family = self.session.mcp_families.get(name) if self.session is not None else None
-        citation_save = name == "citation_workflow" and args.get("action") == "save"
-        skill_install = name == "skill_install" and args.get("action") in {"preview", "apply"}
-        mcp_call = family is not None and family != "desktop_document"
-        if not (citation_save or skill_install or mcp_call):
-            return True
-        turn = self._running_turn
-        if not self._turn_active or turn is None or turn.parent_request_id is None:
-            return False
-        if citation_save:
-            policy = self.session.citation_policy
-            loaded_service = policy.loaded_service
-            library_path = (
-                loaded_service.library_path if loaded_service is not None else policy.bibliography_path()
-            )
-            if library_path is not None:
-                target = str(Path(library_path).expanduser().resolve())
-                description = (
-                    "Verify this batch of citation candidates and add the verified works "
-                    f"to the project bibliography {target}."
-                )
-            else:
-                # A malformed bibliography setting leaves the project without one.
-                target = "(not written to disk)"
-                description = (
-                    "Verify this batch of citation candidates for this conversation only; "
-                    "the project has no usable bibliography, so nothing is written to disk."
-                )
-            return await self._operation_approval(
-                "citation.save", target, description, parameters=args.get("works"),
-            )
-        if skill_install:
-            context = self.session.installer_context
-            paths = self.session.installer_paths or resolve_extension_paths(self.config)
-            source = context.get("source_path") or context.get("source_zip")
-            target = str(paths.state_root if args["action"] == "apply" else source or paths.dropin_root)
-            return await self._operation_approval(
-                "extension.install", target,
-                f"{args['action'].capitalize()} the selected skill installation.",
-                parameters={"arguments": args, "source": source, "installationRoot": str(paths.state_root)},
-            )
-        return await self._operation_approval(
-            "mcp.call", f"{family}/{name}", f"Call the installed MCP tool {name}.", parameters=args,
-        )
-
-    async def _document_operation_approval(
-        self, *, event_sink: EventSink | None, parent_request_id: str,
-        turn_id: str, operation: str, context: dict[str, Any], permission_mode: str,
-    ) -> tuple[bool, dict[str, Any]]:
-        range_start = context.get("rangeStartUtf16", 0)
-        range_end = context.get("rangeEndUtf16", len(context["sourceText"].encode("utf-16-le")) // 2)
-        source_start = utf16_to_index(context["sourceText"], range_start)
-        source_end = utf16_to_index(context["sourceText"], range_end)
-        first_line = len(re.findall(r"\r\n|\r|\n", context["sourceText"][:source_start])) + 1
-        last_line = len(re.findall(r"\r\n|\r|\n", context["sourceText"][:max(source_start, source_end - 1)])) + 1
-        approved, current = await self._single_operation_approval({
-            "operation": operation, "targetPath": context["path"],
-            "rangeStartUtf16": range_start, "rangeEndUtf16": range_end,
-            "description": f"Save {Path(context['path']).name}, source lines {first_line}–{last_line}.",
-        }, event_sink=event_sink, parent_request_id=parent_request_id, turn_id=turn_id,
-            permission_mode=permission_mode, document_context=context)
-        return approved, current or context
 
     async def _document_apply(
         self, params: dict[str, Any], event_sink: EventSink | None
@@ -3317,26 +2871,6 @@ class DesktopService(_ErrorMapping):
             **report,
         }
 
-    @staticmethod
-    def _approval_context_is_safe(command: str, description: str) -> bool:
-        if (
-            not command.strip()
-            or not description.strip()
-            or len(command.encode("utf-8")) > _MAX_APPROVAL_COMMAND_BYTES
-            or len(description.encode("utf-8")) > _MAX_APPROVAL_DESCRIPTION_BYTES
-            or any(ord(character) < 32 or ord(character) == 127 for character in command)
-            or any(
-                ord(character) < 32 or ord(character) == 127
-                for character in description
-            )
-        ):
-            return False
-        combined = f"{command}\n{description}"
-        return not (
-            _SECRET_APPROVAL_CONTEXT.search(combined)
-            or _SECRET_FLAG_VALUE.search(combined)
-            or _CREDENTIAL_URL.search(combined)
-        )
 
     @staticmethod
     def _utc_timestamp(value: datetime) -> str:
@@ -3344,102 +2878,6 @@ class DesktopService(_ErrorMapping):
             timespec="milliseconds"
         ).replace("+00:00", "Z")
 
-    def _desktop_bash_approval(
-        self,
-        command: str,
-        description: str,
-        execution_timeout_seconds: int,
-    ) -> bool:
-        turn = self._running_turn
-        loop = turn.loop if turn is not None else None
-        if loop is None or loop.is_closed():
-            return False
-        if (
-            not self._turn_active
-            or turn.event_sink is None
-            or turn.parent_request_id is None
-        ):
-            return False
-        if turn.permission_mode == "bypass":
-            return True
-        scope = current_local_work()
-        if scope is not None:
-            return scope.run_async(lambda: self._stage_bash_approval(
-                command, description, execution_timeout_seconds,
-            ))
-        staged = asyncio.run_coroutine_threadsafe(
-            self._stage_bash_approval(
-                command,
-                description,
-                execution_timeout_seconds,
-            ),
-            loop,
-        )
-        owner_turn = turn.turn_id
-        while True:
-            try:
-                return bool(staged.result(timeout=1.0))
-            except TimeoutError:
-                # Another operation can own the single approval UI. Its wait
-                # must not consume this operation's own approval deadline.
-                current = self._running_turn
-                if not self._turn_active or current is None or current.turn_id != owner_turn or loop.is_closed():
-                    staged.cancel()
-                    return False
-            except Exception:
-                staged.cancel()
-                return False
-
-    async def _stage_bash_approval(
-        self, command: str, description: str, execution_timeout_seconds: int,
-    ) -> bool:
-        turn = self._running_turn
-        if (not self._turn_active or turn is None or turn.event_sink is None
-                or turn.parent_request_id is None
-                or not self._approval_context_is_safe(command, description)):
-            return False
-        approved, _context = await self._single_operation_approval({
-            "command": command, "description": description,
-            "executionTimeoutSeconds": execution_timeout_seconds,
-        }, permission_mode=turn.permission_mode)
-        return approved
-
-    def _complete_pending_approval(self, approved: bool) -> None:
-        pending = self._pending_approval
-        if pending is None:
-            return
-        self._pending_approval = None
-        if not pending.future.done():
-            pending.future.set_result(bool(approved))
-
-    async def _approval_resolve(
-        self, params: dict[str, Any], _event_sink: EventSink | None
-    ) -> dict[str, Any]:
-        pending = self._pending_approval
-        if self._turn_work is not None and self._turn_active and self._turn_work.stopping:
-            self._complete_pending_approval(False)
-            raise DesktopServiceError("APPROVAL_DENIED", "The owning turn is stopping.")
-        if pending is None or params["approvalId"] != pending.approval_id:
-            raise DesktopServiceError(
-                "APPROVAL_DENIED",
-                "The desktop approval is unknown, expired, or already used.",
-            )
-        if (
-            params.get("parentRequestId") != pending.parent_request_id
-            or params.get("turnId") != pending.turn_id
-            or datetime.now(timezone.utc) >= pending.expires_at
-        ):
-            self._complete_pending_approval(False)
-            raise DesktopServiceError(
-                "APPROVAL_DENIED",
-                "The desktop approval no longer matches the active request.",
-            )
-        approved = bool(params["approved"])
-        approval_id = pending.approval_id
-        if approval_id in self._approval_document_snapshots and "documentContext" in params:
-            self._approval_document_snapshots[approval_id] = self._documents.validate_snapshot(params["documentContext"])
-        self._complete_pending_approval(approved)
-        return {"approvalId": approval_id, "approved": approved}
 
     @asynccontextmanager
     async def _knowledge_operation(self, *, turn_owned: bool = False):
