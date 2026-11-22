@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   memo,
@@ -21,7 +20,6 @@ import {
   type BoundedRuntimeDiagnostics,
   type SafeUiError,
   backendReducer,
-  createBackendClient,
   initialBackendState,
   normalizeUiError,
   parseBridgeEvent,
@@ -48,30 +46,18 @@ import {
   type VisibleConversationTurn,
 } from "./conversations.ts";
 import type {
-  ApprovalRequiredDto,
-  ApprovalResolvedDto,
   DocumentResultDto,
   PermissionMode,
-  ExtensionApplyDto,
-  ExtensionPreviewDto,
-  JsonObject,
   ProjectWorkspaceDto,
   Reference,
-  RuntimeDiagnosticsDto,
-  SessionPermissionSetDto,
-  SessionCreatedDto,
-  SessionDeletedDto,
   SessionListDto,
-  SessionRenamedDto,
   SessionSummaryDto,
   TranscriptTurnDto,
-  TurnCompletedDto,
-  TurnStoppedDto,
 } from "./protocol.ts";
 import { SafeContent as ContentRenderer } from "./SafeContent.tsx";
 import { AnnotationComment, DocumentEditor, type AnnotationControls } from "./DocumentEditor.tsx";
 import { CitationPanel } from "./CitationPanel.tsx";
-import type { BibliographyEntryDto } from "./citations.ts";
+import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ApprovalDialog, PermissionControl, ThinkingControl, ExtensionPanel } from "./trust.tsx";
 import {
   acceptApprovalEvent,
@@ -124,6 +110,7 @@ import {
 } from "./lib/documents.ts";
 import type { DocumentSnapshot } from "./lib/documentSource.ts";
 import { protocolMismatch, workspaceError } from "./lib/errors.ts";
+import { api, eventData } from "./api.ts";
 import {
   loadSelectedProjectHistory,
   mergeSessionItems,
@@ -143,10 +130,6 @@ import {
   visibleMessageRange,
   type TranscriptView,
 } from "./lib/transcript.ts";
-
-const backendClient = createBackendClient({
-  invoke: <T,>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args),
-});
 
 // Unchanged history must not be reparsed when the composer or live activity updates.
 const SafeContent = memo(ContentRenderer);
@@ -794,12 +777,12 @@ export default function App() {
       setDocumentBusy(true);
       try {
         const { sourceSnapshot: _sourceSnapshot, ...requestAction } = action;
-        const tracked = backendClient.requestTracked("document.apply", {
+        const tracked = api.documentApplyTracked({
           ...requestAction, documentContext: documentContextPayload(captured), ...(resolution === undefined ? {} : { resolution }),
           ...(expectedSnapshot === undefined ? {} : { expectedSnapshot }),
-        } as unknown as JsonObject);
+        });
         documentRequestRef.current = { requestId: tracked.requestId, turnId: action.turnId, context: captured };
-        const result = await tracked.result as unknown as DocumentResultDto;
+        const result = await tracked.result;
         if (ownsOperation(owner, documentOperationRef.current)) receiveDocumentResult(result, captured, action);
       } catch (error) {
         if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
@@ -824,8 +807,8 @@ export default function App() {
     return pending;
   }, [captureOwner, ownsOperation, receiveDocumentResult]);
 
-  const requestCitationAdd = useCallback(async (identifier: string): Promise<JsonObject> => {
-    const tracked = backendClient.requestTracked("bibliography.add", { identifier });
+  const requestCitationAdd = useCallback(async (identifier: string): Promise<BibliographyAddDto> => {
+    const tracked = api.bibliographyAddTracked({ identifier });
     citationRequestRef.current = tracked.requestId;
     try {
       return await tracked.result;
@@ -850,15 +833,17 @@ export default function App() {
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
-      const path = await invoke<string | null>("pick_document", { rootPath: projectRef.current.rootPath });
+      const path = await api.pickDocument(projectRef.current.rootPath);
       if (path === null || !ownsOperation(owner, documentOperationRef.current)) return;
       if (documentRef.current !== null && documentRef.current.sourceText !== documentBaselineRef.current?.sourceText &&
           !window.confirm("Discard unsaved document changes and open another file?")) return;
-      const opened = await backendClient.request("document.open", { path }) as unknown as DocumentSnapshot;
+      const opened = await api.documentOpen({ path });
       if (!ownsOperation(owner, documentOperationRef.current)) return;
-      if (opened.rootPath !== projectRef.current?.rootPath) throw protocolMismatch("The backend opened a document from a different project.");
-      documentBaselineRef.current = { ...opened };
-      updateDocument({ ...opened, editorRevision: opened.editorRevision ?? 0 });
+      const openedRoot = opened.rootPath;
+      if (openedRoot === undefined || openedRoot !== projectRef.current?.rootPath) throw protocolMismatch("The backend opened a document from a different project.");
+      const snapshot: DocumentSnapshot = { ...opened, rootPath: openedRoot, editorRevision: opened.editorRevision ?? 0 };
+      documentBaselineRef.current = { ...snapshot };
+      updateDocument(snapshot);
       setCitationRefresh((value) => value + 1);
       setDocumentConflict(null);
       setLastDocumentAction(null);
@@ -884,7 +869,7 @@ export default function App() {
     documentBusyRef.current = true;
     setDocumentBusy(true);
     try {
-      const result = await backendClient.request("document.save", { documentContext: documentContextPayload(captured) }) as unknown as DocumentResultDto;
+      const result = await api.documentSave({ documentContext: documentContextPayload(captured) });
       if (!ownsOperation(owner, documentOperationRef.current)) return false;
       receiveDocumentResult(result, captured, null);
       return result.status === "saved" && documentRef.current?.sourceText === documentBaselineRef.current?.sourceText;
@@ -1029,7 +1014,7 @@ export default function App() {
               // bibliography.add runs outside a turn; its citation.save approval uses the shared approval UI.
               if (message.event === "approval.required") {
                 const accepted = acceptApprovalEvent(generationRef.current, message.requestId, citationRequest,
-                  message.data as unknown as ApprovalRequiredDto, Date.now());
+                  eventData("approval.required", message.data), Date.now());
                 if (accepted !== null) {
                   setPendingApproval((current) => {
                     if (current !== null) return current;
@@ -1077,7 +1062,7 @@ export default function App() {
                 generation,
                 message.requestId,
                 message.requestId === documentRequest?.requestId ? documentRequest.requestId : active?.requestId ?? null,
-                message.data as unknown as ApprovalRequiredDto,
+                eventData("approval.required", message.data),
                 Date.now(),
               );
               if (accepted !== null) {
@@ -1114,7 +1099,7 @@ export default function App() {
         });
         if (disposed) { unlisten(); return; }
         removeListener = unlisten;
-        const snapshot = await backendClient.initialize(() => {
+        const snapshot = await api.initialize(() => {
           if (!disposed) dispatch({ type: "action-started", action: "start" });
         });
         if (!disposed) {
@@ -1156,7 +1141,7 @@ export default function App() {
       bindingGenerationRef.current = null;
       setExtensionFlow((current) => current === null ? null : markExtensionRestarting(current));
     }
-    const operation = action === "start" ? backendClient.start : action === "restart" ? backendClient.restart : backendClient.shutdown;
+    const operation = action === "start" ? api.start : action === "restart" ? api.restart : api.shutdown;
     void runExclusive(action, async (owner) => {
       const snapshot = await operation();
       if (exclusiveOwnerRef.current?.token !== owner.token || owner.projectEpoch !== projectEpochRef.current ||
@@ -1170,9 +1155,9 @@ export default function App() {
     if (generation === undefined || (!force && diagnosticsAttempt.current === generation)) return;
     diagnosticsAttempt.current = generation;
     void runExclusive("diagnostics", async (owner) => {
-      const data = await backendClient.request("runtime.diagnostics", {});
+      const data = await api.runtimeDiagnostics();
       if (!ownsOperation(owner, exclusiveOwnerRef.current)) return;
-      dispatch({ type: "diagnostics-succeeded", diagnostics: toBoundedDiagnostics(data as unknown as RuntimeDiagnosticsDto) });
+      dispatch({ type: "diagnostics-succeeded", diagnostics: toBoundedDiagnostics(data) });
     });
   }, [ownsOperation, runExclusive, state.snapshot?.generation]);
 
@@ -1188,7 +1173,7 @@ export default function App() {
     const isCurrent = () => ownsOperation(owner, historyLoading.current);
     setWorkspaceIssue(null);
     try {
-      const loaded = await loadSelectedProjectHistory(currentProject.projectId, backendClient.request, isCurrent);
+      const loaded = await loadSelectedProjectHistory(currentProject.projectId, api.sessionList, isCurrent);
       if (!isCurrent() || loaded === null) return;
       setSessionList(loaded);
       setHistoryGeneration(generation);
@@ -1216,11 +1201,8 @@ export default function App() {
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setRenameDialog({ ...target, issue: null });
     try {
-      const result = await backendClient.request("session.rename", { projectId: target.projectId, sessionId: target.sessionId, title }) as unknown as SessionRenamedDto;
+      const result = await api.sessionRename({ projectId: target.projectId, sessionId: target.sessionId, title });
       if (!isCurrent()) return;
-      if (result.projectId !== target.projectId || result.sessionId !== target.sessionId) {
-        throw protocolMismatch("The backend renamed a different conversation.");
-      }
       historyLoading.current = null;
       setSessionList((list) => list === null || list.projectId !== target.projectId ? list : {
         ...list, items: list.items.map((item) => item.sessionId === target.sessionId ? { ...item, title: result.title } : item),
@@ -1245,7 +1227,7 @@ export default function App() {
     try {
       let selectedRoot = candidate?.rootPath ?? candidateRoot;
       if (browse) {
-        const picked = await invoke<string | null>("pick_project", { initialPath: selectedRoot || null });
+        const picked = await api.pickProject(selectedRoot || null);
         if (picked === null || !isCurrent()) return;
         selectedRoot = picked;
         setCandidateRoot(picked);
@@ -1270,7 +1252,7 @@ export default function App() {
         setChooserIssue("Inspect the edited history location before initializing.");
         return;
       }
-      const data = await backendClient.request("workspace.select", {
+      const data = await api.workspaceSelect({
         rootPath: selectedRoot,
         action,
         ...(action === "inspect" && !browse && candidate?.status === "needs_configuration" ? { historyDirectory: candidateHistory } : {}),
@@ -1278,7 +1260,7 @@ export default function App() {
           historyDirectory: candidateHistory,
           expectedFingerprint: candidate?.researchFingerprint ?? null,
         } : {}),
-      }) as unknown as ProjectWorkspaceDto;
+      });
       if (!isCurrent()) return;
       if (data.status !== "opened") {
         setCandidate(data);
@@ -1356,11 +1338,8 @@ export default function App() {
     const offset = current.items.length;
     void (async () => {
       try {
-        const data = await backendClient.request("session.list", { projectId, offset, limit: 50 }) as unknown as SessionListDto;
+        const data = await api.sessionList({ projectId, offset, limit: 50 });
         if (!isCurrent()) return;
-        if (data.projectId !== projectId || data.offset !== offset) {
-          throw protocolMismatch("The backend returned a mismatched conversation page.");
-        }
         setSessionList((existing) => {
           if (existing === null || existing.projectId !== projectId || existing.items.length !== offset) return existing;
           const items = mergeSessionItems(existing.items, data.items);
@@ -1386,9 +1365,8 @@ export default function App() {
     const operation = beginWorkspaceOperation("Reopening selected project");
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
-    void backendClient.request("workspace.select", { rootPath: project.rootPath, action: "open" }).then(async (data) => {
+    void api.workspaceSelect({ rootPath: project.rootPath, action: "open" }).then(async (opened) => {
       if (!isCurrent()) return;
-      const opened = data as unknown as ProjectWorkspaceDto;
       if (opened.status !== "opened" || opened.projectId !== project.projectId || opened.rootPath !== project.rootPath) {
         throw protocolMismatch("The selected project could not be restored. Open it explicitly to continue.");
       }
@@ -1489,13 +1467,9 @@ export default function App() {
       requestId: target.requestId, turnId: target.turnId };
     applyConversation({ type: "stop-requested", generation, projectEpoch });
     workingDocumentSourcesRef.current = null;
-    const pending = Promise.resolve().then(() => backendClient.request("session.stop", {
+    const pending = Promise.resolve().then(() => api.sessionStop({
       sessionId: target.sessionId, turnId: target.turnId, parentRequestId: target.requestId,
-    })).then(async (data) => {
-      const result = data as unknown as TurnStoppedDto;
-      if (result.sessionId !== target.sessionId || result.turnId !== target.turnId) {
-        throw protocolMismatch("The backend stopped a different turn.");
-      }
+    })).then(async () => {
       const next = applyConversation({ type: "stop-succeeded", ...correlation });
       if (!retryingStop || next.stopRequest !== null || next.activeTurn !== null ||
           generation !== generationRef.current || projectEpoch !== projectEpochRef.current || !sameSelection(next.selected, target)) return;
@@ -1506,7 +1480,7 @@ export default function App() {
         if (!ownsOperation(operation, workspaceOperation.current) || state.session?.sessionId !== target.sessionId) return;
         if (next.failure?.turnLifecycle?.accepted) {
           const data = await fetchTranscriptPage(target.projectId, target.sessionId,
-            transcriptTailOffset(state.session.turnCount + 1), TRANSCRIPT_PAGE_SIZE, undefined, backendClient.request);
+            transcriptTailOffset(state.session.turnCount + 1), TRANSCRIPT_PAGE_SIZE, api.sessionTranscript);
           if (!ownsOperation(operation, workspaceOperation.current)) return;
           dispatch({ type: "session-created", session: { ...state.session, turnCount: data.total } });
           setTranscript(transcriptViewFrom(target.projectId, target.sessionId, data));
@@ -1558,11 +1532,8 @@ export default function App() {
       operation = beginWorkspaceOperation("Deleting conversation");
       if (operation === null) throw new Error("The workspace is still busy. Retry deletion when the current operation finishes.");
       setDeleteDialog({ ...target, issue: null, status: "deleting" });
-      const result = await backendClient.request("session.delete", { projectId: target.projectId, sessionId: target.sessionId }) as unknown as SessionDeletedDto;
+      await api.sessionDelete({ projectId: target.projectId, sessionId: target.sessionId });
       if (!isCurrent() || !ownsOperation(operation, workspaceOperation.current)) return;
-      if (result.projectId !== target.projectId || result.sessionId !== target.sessionId || result.status !== "deleted") {
-        throw protocolMismatch("The backend deleted a different conversation.");
-      }
       historyLoading.current = null;
       const selectedDeleted = sameSelection(conversationRef.current.selected, target);
       setSessionList((list) => {
@@ -1613,7 +1584,7 @@ export default function App() {
       pendingApprovalRef.current?.approvalId === approval.approvalId;
     approvalResolvingRef.current = true;
     setApprovalResolving(true);
-    void backendClient.request("approval.resolve", {
+    void api.approvalResolve({
       approvalId: approval.approvalId,
       parentRequestId: approval.parentRequestId,
       turnId: approval.turnId,
@@ -1621,12 +1592,6 @@ export default function App() {
       ...(approval.operation?.startsWith("document.") && documentRef.current !== null ? { documentContext: documentContextPayload(
         documentOperationContext(documentRef.current, documentRequestRef.current?.turnId === approval.turnId ? documentRequestRef.current.context : undefined),
       ) } : {}),
-    }).then((data) => {
-      if (!isCurrent()) return;
-      const result = data as unknown as ApprovalResolvedDto;
-      if (result.approvalId !== approval.approvalId) {
-        throw protocolMismatch("The backend resolved a different approval request.");
-      }
     }).catch((error: unknown) => {
       if (isCurrent()) setWorkspaceIssue(workspaceError(error));
     }).finally(() => {
@@ -1714,7 +1679,7 @@ export default function App() {
           setPendingUserText(null);
           setTranscript({ projectId, sessionId: session.sessionId, status: "unavailable", issue: "Loading saved transcript…", items: [], offset: 0, total: selected.turnCount, hasOlder: false });
         },
-      }, backendClient.request);
+      }, api);
       if (transcriptData === null || !isCurrent()) return;
       setTranscript(transcriptViewFrom(projectId, session.sessionId, transcriptData));
       setSelectionPreview(null);
@@ -1784,12 +1749,8 @@ export default function App() {
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     void (async () => {
       try {
-        const data = await backendClient.request("session.create", { projectId: activeProjectId });
-        const session = data as unknown as SessionCreatedDto;
+        const session = await api.sessionCreate({ projectId: activeProjectId });
         if (!isCurrent()) return;
-        if (session.projectId !== undefined && session.projectId !== activeProjectId) {
-          throw protocolMismatch("The backend created a conversation in a different project.");
-        }
         setSlashCatalogOwner({ generation, projectId: activeProjectId, sessionId: session.sessionId });
         dispatch({ type: "session-created", session });
         setExtensionFlow((current) => observeExtensionRevision(current, session.extensionRevision));
@@ -1827,7 +1788,7 @@ export default function App() {
     const offset = current.offset - limit;
     void (async () => {
       try {
-        const data = await fetchTranscriptPage(current.projectId, current.sessionId, offset, limit, "The backend returned older turns for a different conversation.", backendClient.request);
+        const data = await fetchTranscriptPage(current.projectId, current.sessionId, offset, limit, api.sessionTranscript);
         if (!isCurrent()) return;
         setTranscript((value) => value === null || value.projectId !== current.projectId || value.sessionId !== current.sessionId ? value : { ...value, status: data.status, issue: data.issue, items: mergeTranscriptItems(data.items, value.items), offset: data.offset, total: data.total, hasOlder: data.status === "ready" && data.offset > 0 });
         scheduleOwnedFrame(operation, () => { if (container !== null) container.scrollTop = previousTop + container.scrollHeight - previousHeight; });
@@ -1863,7 +1824,7 @@ export default function App() {
     let tracked;
     try {
       if (!submission.retry) {
-        const inspected = await backendClient.request("workspace.select", { rootPath: selectedProject.rootPath, action: "inspect" }) as unknown as ProjectWorkspaceDto;
+        const inspected = await api.workspaceSelect({ rootPath: selectedProject.rootPath, action: "inspect" });
         if (!ownsOperation(owner, workspaceOperation.current)) return;
         if (inspected.status !== "ready" || inspected.projectId !== selectedProject.projectId ||
             inspected.rootPath !== selectedProject.rootPath || inspected.historyDirectory !== selectedProject.historyDirectory) {
@@ -1880,9 +1841,9 @@ export default function App() {
       }
       checkSubmissionSize(draft, submittedContext);
       if (!ownsOperation(owner, workspaceOperation.current)) return;
-      tracked = backendClient.requestTracked("session.turn", {
+      tracked = api.sessionTurnTracked({
         text: draft, turnId, retry: submission.retry,
-        ...(submittedContext === null ? {} : { submittedContext: submittedContext as unknown as JsonObject }),
+        ...(submittedContext === null ? {} : { submittedContext }),
       });
       submittedDocumentRef.current = submittedDocumentSource(submittedContext) ?? null;
       workingDocumentSourcesRef.current = submittedContext === null ? null : structuredClone({
@@ -1903,10 +1864,9 @@ export default function App() {
     setPendingUserText(draft);
     setWorkspaceIssue(null);
     applyConversation({ type: "turn-started", generation, projectEpoch: owner.projectEpoch, text: draft, submittedContext, requestId: tracked.requestId, turnId, projectId: selected.projectId, sessionId: selected.sessionId });
-    const settlement = tracked.result.then(async (data) => {
+    const settlement = tracked.result.then(async (result) => {
       if (!isCurrent()) return;
       workingDocumentSourcesRef.current = null;
-      const result = data as unknown as TurnCompletedDto;
       const next = applyConversation({ type: "turn-succeeded", generation, projectEpoch: owner.projectEpoch, requestId: tracked.requestId, projectId: selected.projectId, result });
       const answer = next.latestAnswer;
       if (answer === null || answer.requestId !== tracked.requestId) {
@@ -2003,8 +1963,7 @@ export default function App() {
             selected.sessionId,
             transcriptTailOffset(currentSession.turnCount + 1),
             TRANSCRIPT_PAGE_SIZE,
-            undefined,
-            backendClient.request,
+            api.sessionTranscript,
           );
           if (!selectionIsCurrent()) return;
           const savedTurn = data.items.find((turn) => turn.turnId === turnId);
@@ -2047,9 +2006,8 @@ export default function App() {
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? beginExtensionPreview(current) : current);
-    void backendClient.request("extensions.preview", {}).then((data) => {
+    void api.extensionsPreview().then((preview) => {
       if (!isCurrent()) return;
-      const preview = data as unknown as ExtensionPreviewDto;
       setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? receiveExtensionPreview(current, preview) : current);
     }).catch((error: unknown) => {
       if (!isCurrent()) return;
@@ -2080,10 +2038,9 @@ export default function App() {
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     setExtensionFlow((current) => current?.triggerTurnId === flow.triggerTurnId ? submitting : current);
-    void backendClient.request("extensions.apply", request).then((data) => {
+    void api.extensionsApply(request).then((report) => {
       if (!isCurrent()) return;
-      const report = data as unknown as ExtensionApplyDto;
-      if (report.sessionId !== state.session?.sessionId || report.turnId !== request.turnId) {
+      if (report.sessionId !== state.session?.sessionId) {
         throw protocolMismatch("The backend returned an apply result for a different conversation turn.");
       }
       const alreadyVisible =
@@ -2146,7 +2103,7 @@ export default function App() {
         const currentSession = state.session;
         if (!isCurrent() || currentSession === null || currentSession.sessionId !== selected.sessionId) return;
         const data = await fetchTranscriptPage(selected.projectId, selected.sessionId,
-          transcriptTailOffset(currentSession.turnCount + 1), TRANSCRIPT_PAGE_SIZE, undefined, backendClient.request);
+          transcriptTailOffset(currentSession.turnCount + 1), TRANSCRIPT_PAGE_SIZE, api.sessionTranscript);
         if (!isCurrent()) return;
         dispatch({ type: "session-created", session: { ...currentSession, turnCount: data.total } });
         setTranscript(transcriptViewFrom(selected.projectId, selected.sessionId, data));
@@ -2170,7 +2127,7 @@ export default function App() {
     if (operation === null) return;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     try {
-      const data = await backendClient.request("session.set_thinking", { mode });
+      const data = await api.sessionSetThinking({ mode });
       if (!isCurrent()) return;
       if (data.sessionId !== selected.sessionId) {
         throw protocolMismatch("The backend returned controls for a different conversation.");
@@ -2178,8 +2135,8 @@ export default function App() {
       dispatch({
         type: "session-created",
         session: state.session === null
-          ? data as unknown as SessionCreatedDto
-          : { ...state.session, ...data as unknown as SessionCreatedDto },
+          ? data
+          : { ...state.session, ...data },
       });
       focusComposer(operation);
     } catch (error) {
@@ -2201,7 +2158,7 @@ export default function App() {
     const generation = operation.generation;
     const isCurrent = () => ownsOperation(operation, workspaceOperation.current);
     try {
-      const data = (await backendClient.request("session.set_permission", { permissionMode: mode })) as unknown as SessionPermissionSetDto;
+      const data = await api.sessionSetPermission({ permissionMode: mode });
       if (!isCurrent()) return;
       const updatedMode = reconcilePermissionAck(
         generation,
@@ -2362,7 +2319,7 @@ export default function App() {
             {documentValue !== null && state.snapshot?.lifecycle === "ready" && <CitationPanel
               document={documentValue}
               refreshToken={citationRefresh}
-              request={backendClient.request}
+              api={api}
               contextPayload={documentContextPayload}
               onSelect={updateDocument}
               onEntries={setCitationEntries}

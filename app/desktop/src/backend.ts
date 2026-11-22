@@ -1,6 +1,5 @@
 import {
   PROTOCOL_VERSION,
-  echoedIdFields,
   type JsonObject,
   type ProtocolMessage,
   type ProtocolMethod,
@@ -8,7 +7,6 @@ import {
   type RequestEnvelope,
   type RuntimeDiagnosticsDto,
   type SessionCreatedDto,
-  type SuccessEnvelope,
   type TurnLifecycleDetailsDto,
   parseProtocolMessage,
   parseTurnLifecycleDetails,
@@ -445,22 +443,6 @@ function normalizeBusinessError(
   return { ...normalized, turnLifecycle };
 }
 
-/**
- * A result must echo the logical identifiers its request carried. This keeps a
- * late response from an ended operation from being applied to the current view.
- */
-function verifyResultEcho(request: RequestEnvelope, result: SuccessEnvelope): void {
-  for (const field of echoedIdFields(request.method)) {
-    if (
-      field in request.params &&
-      field in result.data &&
-      result.data[field] !== request.params[field]
-    ) {
-      throw new Error(`data.${field} must match params.${field}`);
-    }
-  }
-}
-
 export function createBackendClient(options: {
   invoke: InvokeCommand;
   idFactory?: () => string;
@@ -518,7 +500,6 @@ export function createBackendClient(options: {
           if (!message.ok) {
             throw new BackendClientError(normalizeBusinessError(message.error, request));
           }
-          verifyResultEcho(request, message);
           return message.data;
         } catch (error) {
           throw asClientError(error, "protocol");

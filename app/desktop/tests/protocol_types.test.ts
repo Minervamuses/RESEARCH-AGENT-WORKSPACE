@@ -19,7 +19,7 @@ interface FieldRule {
 type FieldSchema = Record<string, FieldRule>;
 
 interface ContractDocument {
-  methods: { name: string }[];
+  methods: { name: string; params: FieldSchema }[];
   requestEvents: string[];
   processEvents: string[];
   resultDataSchemas: Record<string, FieldSchema>;
@@ -332,6 +332,20 @@ test("TS protocol DTOs, method names, and event names follow contract.json", () 
     ));
   }
 
+  const methodParams = exportedType(checker, sourceFile, "MethodParams");
+  const paramEntries = new Map(checker.getPropertiesOfType(methodParams).map((symbol) => [symbol.name, symbol]));
+  assert.deepEqual(
+    [...paramEntries.keys()].sort(),
+    contract.methods.map(({ name }) => name).sort(),
+    "MethodParams covers every contract method",
+  );
+  for (const { name, params } of contract.methods) {
+    problems.push(...compareObject(
+      checker, flatten(checker.getTypeOfSymbol(paramEntries.get(name)!)), params,
+      contract.submittedContextSchema, `MethodParams["${name}"]`,
+    ));
+  }
+
   assert.deepEqual(problems, [], `DTOs drifted from contract.json:\n${problems.join("\n")}`);
-  console.log(`protocol DTO check: ${resultEntries.size} results, ${eventEntries.size} events in ${(performance.now() - started).toFixed(0)} ms`);
+  console.log(`protocol DTO check: ${resultEntries.size} results, ${paramEntries.size} params, ${eventEntries.size} events in ${(performance.now() - started).toFixed(0)} ms`);
 });

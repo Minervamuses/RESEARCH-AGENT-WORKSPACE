@@ -1,4 +1,4 @@
-import type { BackendClient } from "../backend.ts";
+import type { Api } from "../api.ts";
 import type { ConversationFailure } from "../conversations.ts";
 import type {
   SessionSelectedDto,
@@ -6,7 +6,6 @@ import type {
   SessionTranscriptDto,
   TranscriptTurnDto,
 } from "../protocol.ts";
-import { protocolMismatch } from "./errors.ts";
 
 // One transcript page: the tail window restored on select and after a durable failure.
 export const TRANSCRIPT_PAGE_SIZE = 20;
@@ -54,19 +53,9 @@ export async function fetchTranscriptPage(
   sessionId: string,
   offset: number,
   limit: number,
-  mismatchMessage = "The backend returned a transcript for a different conversation.",
-  request: BackendClient["request"],
+  sessionTranscript: Api["sessionTranscript"],
 ): Promise<SessionTranscriptDto> {
-  const data = await request("session.transcript", {
-    projectId,
-    sessionId,
-    offset,
-    limit,
-  }) as unknown as SessionTranscriptDto;
-  if (data.projectId !== projectId || data.sessionId !== sessionId) {
-    throw protocolMismatch(mismatchMessage);
-  }
-  return data;
+  return sessionTranscript({ projectId, sessionId, offset, limit });
 }
 
 export async function selectConversationWithPreview(
@@ -77,14 +66,14 @@ export async function selectConversationWithPreview(
     onPreview: (data: SessionTranscriptDto) => void;
     onSelected: (selected: SessionSelectedDto) => void;
   },
-  request: BackendClient["request"],
+  backend: Pick<Api, "sessionSelect" | "sessionTranscript">,
 ): Promise<SessionTranscriptDto | null> {
   let previewing = true;
-  const selectedRequest = request("session.select", { projectId, sessionId: summary.sessionId });
+  const selectedRequest = backend.sessionSelect({ projectId, sessionId: summary.sessionId });
   // Handle both outcomes immediately: selection may fail before this read finishes.
   const transcriptRequest = fetchTranscriptPage(
     projectId, summary.sessionId, transcriptTailOffset(summary.turnCount), TRANSCRIPT_PAGE_SIZE,
-    undefined, request,
+    backend.sessionTranscript,
   ).then(
     (data) => {
       if (previewing && callbacks.isCurrent() && data.status === "ready") callbacks.onPreview(data);
@@ -93,11 +82,8 @@ export async function selectConversationWithPreview(
     (error: unknown) => ({ data: null, error }),
   );
   try {
-    const selected = await selectedRequest as unknown as SessionSelectedDto;
+    const selected = await selectedRequest;
     if (!callbacks.isCurrent()) return null;
-    if (selected.projectId !== projectId || selected.sessionId !== summary.sessionId) {
-      throw protocolMismatch("The backend returned a different conversation than requested.");
-    }
     callbacks.onSelected(selected);
     const result = await transcriptRequest;
     if (!callbacks.isCurrent()) return null;
@@ -109,7 +95,7 @@ export async function selectConversationWithPreview(
         data.total !== selected.turnCount || data.offset !== transcriptTailOffset(selected.turnCount)) {
       data = await fetchTranscriptPage(
         projectId, summary.sessionId, transcriptTailOffset(selected.turnCount), TRANSCRIPT_PAGE_SIZE,
-        undefined, request,
+        backend.sessionTranscript,
       );
     }
     return callbacks.isCurrent() ? data : null;

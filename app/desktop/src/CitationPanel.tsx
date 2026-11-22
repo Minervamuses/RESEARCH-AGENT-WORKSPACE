@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { JsonObject } from "./protocol";
+import type { Api } from "./api.ts";
+import type { DocumentContextDto } from "./protocol.ts";
 import type { DocumentSnapshot } from "./lib/documentSource.ts";
 import {
   addErrorOutcome,
@@ -23,7 +24,6 @@ import {
   type AddOutcome,
   type BibliographyAddDto,
   type BibliographyEntryDto,
-  type BibliographyExportDto,
   type BibliographyInspectDto,
   type BibliographyRenderDto,
   type CitedItem,
@@ -33,22 +33,22 @@ import {
 } from "./citations";
 import { CitationText } from "./CitationText.tsx";
 
-export type BackendRequest = (
-  method: "bibliography.inspect" | "bibliography.remove" | "bibliography.set_style" | "bibliography.render" | "bibliography.export",
-  params: JsonObject,
-) => Promise<JsonObject>;
+export type BibliographyApi = Pick<
+  Api,
+  "bibliographyInspect" | "bibliographyRemove" | "bibliographySetStyle" | "bibliographyRender" | "bibliographyExport"
+>;
 
 export interface CitationPanelProps {
   document: DocumentSnapshot;
   /** Increments when the document is opened, saved or changed by an applied operation. */
   refreshToken: number;
-  request: BackendRequest;
-  contextPayload: (snapshot: DocumentSnapshot) => JsonObject;
+  api: BibliographyApi;
+  contextPayload: (snapshot: DocumentSnapshot) => DocumentContextDto;
   onSelect: (snapshot: DocumentSnapshot) => void;
   /** Keys and titles for editor completion. */
   onEntries?: (entries: BibliographyInspectDto["entries"]) => void;
   /** bibliography.add, tracked by App so an Ask-mode approval reaches the approval UI. */
-  requestAdd: (identifier: string) => Promise<JsonObject>;
+  requestAdd: (identifier: string) => Promise<BibliographyAddDto>;
   /** Writes are disabled while a turn or document operation runs. */
   writesDisabled: boolean;
 }
@@ -140,7 +140,7 @@ export function UncitedRow({ entry, onRemove, disabled }: {
 }
 
 export function CitationPanel({
-  document, refreshToken, request, contextPayload, onSelect, onEntries, requestAdd, writesDisabled,
+  document, refreshToken, api, contextPayload, onSelect, onEntries, requestAdd, writesDisabled,
 }: CitationPanelProps) {
   const [inspect, setInspect] = useState<BibliographyInspectDto | null>(null);
   const [inspectedText, setInspectedText] = useState("");
@@ -165,7 +165,7 @@ export function CitationPanel({
     const ticket = ++sequence.current;
     setLoading(true);
     try {
-      const data = await request("bibliography.inspect", { documentContext: contextPayload(snapshot) }) as unknown as BibliographyInspectDto;
+      const data = await api.bibliographyInspect({ documentContext: contextPayload(snapshot) });
       if (ticket !== sequence.current) return;
       setInspect(data);
       setInspectedText(snapshot.sourceText);
@@ -180,7 +180,7 @@ export function CitationPanel({
     } finally {
       if (ticket === sequence.current) setLoading(false);
     }
-  }, [request, contextPayload, onEntries]);
+  }, [api, contextPayload, onEntries]);
 
   useEffect(() => { void refresh(); }, [refresh, refreshToken, document.path]);
 
@@ -203,13 +203,13 @@ export function CitationPanel({
     if (inspect === null || fingerprint === null || fingerprint === undefined || writesDisabled) return;
     if (!window.confirm(removeConfirmation(key, inspect.libraryPath))) return;
     try {
-      await request("bibliography.remove", { key, libraryFingerprint: fingerprint });
+      await api.bibliographyRemove({ key, libraryFingerprint: fingerprint });
       setNotice(`Removed ${key} from the bibliography.`);
       await refresh();
     } catch (error) {
       setNotice(removeErrorMessage(error));
     }
-  }, [inspect, refresh, request, writesDisabled]);
+  }, [inspect, refresh, api, writesDisabled]);
 
   const add = useCallback(async () => {
     const value = identifier.trim();
@@ -217,7 +217,7 @@ export function CitationPanel({
     setAdding(true);
     setAdded(null);
     try {
-      const outcome = addOutcome(await requestAdd(value) as unknown as BibliographyAddDto);
+      const outcome = addOutcome(await requestAdd(value));
       setAdded(outcome);
       if (outcome.kind !== "failed") setIdentifier("");
       await refresh();
@@ -237,7 +237,7 @@ export function CitationPanel({
     if (params === null) return;
     setWorking("Saving style…");
     try {
-      await request("bibliography.set_style", params);
+      await api.bibliographySetStyle(params);
       setPreview(null);
       await refresh();
     } catch (error) {
@@ -245,40 +245,40 @@ export function CitationPanel({
     } finally {
       setWorking(null);
     }
-  }, [inspect, refresh, request, writesDisabled]);
+  }, [inspect, refresh, api, writesDisabled]);
 
   const renderPreview = useCallback(async () => {
     if (inspect === null) return;
     setExpanded((current) => nextExpanded(current, { kind: "preview" }));
     setWorking("Formatting…");
     try {
-      const data = await request("bibliography.render", {
+      const data = await api.bibliographyRender({
         documentContext: contextPayload(documentRef.current), styleId: inspect.styleId,
-      }) as unknown as BibliographyRenderDto;
+      });
       setPreview(data);
     } catch (error) {
       setNotice(removeErrorMessage(error));
     } finally {
       setWorking(null);
     }
-  }, [contextPayload, inspect, request]);
+  }, [contextPayload, inspect, api]);
 
   const runExport = useCallback(async (exportFormat: ExportFormat) => {
     if (inspect === null || writesDisabled) return;
     setWorking("Exporting…");
     setExported(null);
     try {
-      const data = await request("bibliography.export", {
+      const data = await api.bibliographyExport({
         documentContext: contextPayload(documentRef.current), format: exportFormat,
         ...(exportFormat === "bime_docx" ? {} : { styleId: inspect.styleId }),
-      }) as unknown as BibliographyExportDto;
+      });
       setExported(exportSummary(data));
     } catch (error) {
       setNotice(removeErrorMessage(error));
     } finally {
       setWorking(null);
     }
-  }, [contextPayload, inspect, request, writesDisabled]);
+  }, [contextPayload, inspect, api, writesDisabled]);
 
   const model = inspect === null ? null : buildPanelModel(inspect);
   const problems = model === null ? 0 : problemCount(model);

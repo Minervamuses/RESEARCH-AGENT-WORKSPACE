@@ -22,7 +22,7 @@
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Complete | `evidence/C7-S1/`–`C7-S9/` | — | — |
-| C8 | In progress | `evidence/C8-S1/`–`C8-S2/` | — | C8-S3 |
+| C8 | In progress | `evidence/C8-S1/`–`C8-S3/` | — | C8-S4 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
 
@@ -705,3 +705,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C8-S2/pure-modules.md`。
 - **限制**：GUI 未驗證（只搬移，無行為變更）。
 - **下一步**：C8-S3 `api.ts`。
+
+### C8-S3 `api.ts`（S082、S093，2026-11-22）
+
+- **觀察結果**：由子代理實作、主執行緒重跑檢查。新增 `src/api.ts`：每個方法一個型別化函式，原生 picker 也由此呼叫；契約推導的回聲檢查從 `backend.ts` 移入（失敗回應的 `turnId` 檢查留在 `backend.ts`），另保留 3 個方法專屬檢查（`session.list` offset、`session.delete` 的 `deleted`、`approval.resolve` 的 approvalId）。`protocol.ts` 新增涵蓋 25 個方法的 `MethodParams`，DTO 一致性檢查以同一比對函式涵蓋；負向演練（`session.rename` 多一個必填參數）使 `npm test` 失敗，還原後 contract 無 diff。`App.tsx` 的 `as unknown as` 23 → 0，就地 `protocolMismatch` 13 → 7（剩下的是與 UI 狀態比對，非回聲）。grep 只剩 `api.ts`、`backend.ts` 與 `protocol.ts` 的 JSON 模組型別轉換（已註明）。`listen<` 事件訂閱仍在 `App.tsx`。
+- **執行指令**：`npm test`（228 pass，新增 `api.test.ts` 9 個、移出 5 個）、`npm run build`（通過）、grep。
+- **證據**：`evidence/C8-S3/api.md`（含退役紀錄與 GUI 清單項目）。
+- **限制**：GUI 未驗證。`document.open` 的基準 `editorRevision` 由 undefined 變為 0（沒有讀取者），記在 evidence。
+- **下一步**：C8-S4 刪除 browser preview。

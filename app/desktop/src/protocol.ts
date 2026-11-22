@@ -60,7 +60,8 @@ interface ProtocolContract {
   turnErrorDetailsSchema: FieldSchema;
 }
 
-// The JSON module type widens field-rule `type` values to string.
+// The JSON module type widens field-rule `type` values to string. This is the one
+// justified `as unknown as` outside api.ts and backend.ts (checked in evidence/C8-S3).
 const CONTRACT = contract as unknown as ProtocolContract;
 
 export const PROTOCOL_VERSION: number = CONTRACT.protocolVersion;
@@ -471,6 +472,74 @@ export interface MethodResults {
   "bibliography.export": BibliographyExportDto;
 }
 
+/**
+ * Request parameter DTO for every contract method. `src/api.ts` types its
+ * functions from this map; `tests/protocol_types.test.ts` fails when a DTO
+ * drifts from the method's `params` schema in the contract.
+ */
+export interface MethodParams {
+  "runtime.diagnostics": Record<string, never>;
+  "runtime.shutdown": Record<string, never>;
+  "workspace.select": {
+    rootPath: string;
+    action?: "inspect" | "open" | "initialize";
+    historyDirectory?: string;
+    expectedFingerprint?: string | null;
+  };
+  "document.open": { path: string };
+  "document.save": { documentContext: DocumentContextDto };
+  "document.apply": {
+    documentContext: DocumentContextDto;
+    turnId: string;
+    callId?: string;
+    parentRequestId?: string;
+    undoOfCallId?: string;
+    resolution?: "keep" | "use" | "cancel";
+    expectedSnapshot?: DocumentContextDto;
+  };
+  "session.create": { loadMcp?: boolean; graphRecursionLimit?: number; projectId?: string };
+  "session.list": { projectId: string; offset?: number; limit?: number };
+  "session.select": { projectId: string; sessionId: string };
+  "session.delete": { projectId: string; sessionId: string };
+  "session.rename": { projectId: string; sessionId: string; title: string };
+  "session.transcript": { projectId: string; sessionId: string; offset?: number; limit?: number };
+  "session.turn": {
+    submittedContext?: SubmittedContext;
+    skillReferences?: SkillReferenceDto[];
+    text: string;
+    turnId: string;
+    retry: boolean;
+    documentContext?: DocumentContextDto;
+  };
+  "session.set_thinking": { mode: "normal" | "extended" };
+  "session.set_permission": { permissionMode: PermissionMode };
+  "session.stop": { sessionId: string; turnId: string; parentRequestId: string };
+  "extensions.preview": Record<string, never>;
+  "extensions.apply": {
+    previewId: string;
+    approvedBindingHashes: string[];
+    turnId: string;
+    retry: boolean;
+  };
+  "approval.resolve": {
+    approvalId: string;
+    parentRequestId?: string;
+    turnId?: string;
+    approved: boolean;
+    documentContext?: DocumentContextDto;
+  };
+  "bibliography.inspect": { documentContext?: DocumentContextDto };
+  "bibliography.render": { documentContext: DocumentContextDto; styleId?: string };
+  "bibliography.set_style": { styleId: string };
+  "bibliography.remove": { key: string; libraryFingerprint: string };
+  "bibliography.add": { identifier: string };
+  "bibliography.export": {
+    documentContext?: DocumentContextDto;
+    format: "docx" | "bime_docx" | "markdown";
+    styleId?: string;
+  };
+}
+
 /** Data DTO for every request event with a contract `eventDataSchemas` entry. */
 export interface EventData {
   "turn.accepted": TurnAcceptedDto;
@@ -766,7 +835,11 @@ function validateVersion(message: JsonObject): void {
   }
 }
 
-function validateDocumentRange(value: JsonObject, field: string, source = false): void {
+function validateDocumentRange(
+  value: { rangeStartUtf16?: unknown; rangeEndUtf16?: unknown; sourceText?: unknown },
+  field: string,
+  source = false,
+): void {
   const start = value.rangeStartUtf16 as number | undefined;
   const end = value.rangeEndUtf16 as number | undefined;
   if ((start === undefined) !== (end === undefined)) invalid(`${field} requires both UTF-16 range endpoints`);
@@ -815,7 +888,7 @@ function validateContextDocument(snapshot: DocumentContextDto, root: string): vo
       !snapshot.path.startsWith(root === "/" ? "/" : root + "/")) {
     invalid("document snapshot belongs to another project root");
   }
-  validateDocumentRange(snapshot as unknown as JsonObject, "submittedContext.document", true);
+  validateDocumentRange(snapshot, "submittedContext.document", true);
 }
 
 export function validateSubmittedContext(value: unknown): asserts value is SubmittedContext {

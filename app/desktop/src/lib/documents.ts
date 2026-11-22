@@ -1,4 +1,4 @@
-import type { DocumentResultDto, JsonObject, Reference, SubmittedContext } from "../protocol.ts";
+import type { DocumentContextDto, DocumentResultDto, Reference, SubmittedContext } from "../protocol.ts";
 import type { DocumentSnapshot } from "./documentSource.ts";
 
 export function documentReference(snapshot: DocumentSnapshot, referenceId: string): Reference {
@@ -24,7 +24,7 @@ export function backgroundDocumentContext(snapshot: DocumentSnapshot | null): Do
   return { ...background };
 }
 
-export function documentContextPayload(value: DocumentSnapshot): JsonObject {
+export function documentContextPayload(value: DocumentSnapshot): DocumentContextDto {
   const { rangeStartUtf16, rangeEndUtf16, ...context } = value;
   return {
     ...context,

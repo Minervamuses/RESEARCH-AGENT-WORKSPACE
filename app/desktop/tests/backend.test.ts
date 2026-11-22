@@ -436,7 +436,6 @@ test("bridge events parse lifecycle payloads and protocol envelopes from a known
 
 const echoTurnId = "123e4567e89b42d3a456426614174001";
 const otherTurnId = "123e4567e89b42d3a456426614174009";
-const echoSessionId = "28b222e0cc6543aa8d7bbdc423de99a7";
 
 function resultClient(result: Record<string, unknown>) {
   return createBackendClient({
@@ -448,72 +447,6 @@ function resultClient(result: Record<string, unknown>) {
 function rejectsAsProtocol(error: unknown): boolean {
   return error instanceof BackendClientError && error.uiError.source === "protocol";
 }
-
-const documentContext = {
-  rootPath: "/project",
-  path: "/project/draft.md",
-  editorRevision: 1,
-  sourceText: "text",
-  diskFingerprint: "a".repeat(64),
-};
-
-test("echo: document.apply and approval.resolve accept success results without turnId", async () => {
-  const applied = await resultClient({ ok: true, data: { path: "/project/draft.md", status: "saved" } })
-    .request("document.apply", { documentContext, turnId: echoTurnId, callId: "call-1" });
-  assert.equal(applied.status, "saved");
-  const resolved = await resultClient({ ok: true, data: { approvalId: "approval-1", approved: true } })
-    .request("approval.resolve", { approvalId: "approval-1", approved: true, turnId: echoTurnId });
-  assert.equal(resolved.approved, true);
-});
-
-test("echo: session.stop rejects another turn or session and accepts its own", async () => {
-  const params = { sessionId: echoSessionId, turnId: echoTurnId, parentRequestId: "123e4567-e89b-42d3-a456-426614174111" };
-  const stopped = { sessionId: echoSessionId, turnId: echoTurnId, state: null, accepted: false, persisted: false };
-  assert.equal((await resultClient({ ok: true, data: stopped }).request("session.stop", params)).turnId, echoTurnId);
-  await assert.rejects(
-    resultClient({ ok: true, data: { ...stopped, turnId: otherTurnId } }).request("session.stop", params),
-    rejectsAsProtocol,
-  );
-  await assert.rejects(
-    resultClient({ ok: true, data: { ...stopped, sessionId: "38b222e0cc6543aa8d7bbdc423de99a7" } }).request("session.stop", params),
-    rejectsAsProtocol,
-  );
-});
-
-test("echo: session.select rejects a result for another session", async () => {
-  await assert.rejects(
-    resultClient({ ok: true, data: { projectId: "p1", sessionId: "38b222e0cc6543aa8d7bbdc423de99a7" } })
-      .request("session.select", { projectId: "p1", sessionId: echoSessionId }),
-    rejectsAsProtocol,
-  );
-  await assert.rejects(
-    resultClient({ ok: true, data: { projectId: "p2", sessionId: echoSessionId } })
-      .request("session.select", { projectId: "p1", sessionId: echoSessionId }),
-    rejectsAsProtocol,
-  );
-});
-
-test("echo: session.create compares projectId only when the request carried it", async () => {
-  const created = await resultClient({ ok: true, data: { sessionId: echoSessionId, projectId: "backend-filled" } })
-    .request("session.create", {});
-  assert.equal(created.projectId, "backend-filled");
-  await assert.rejects(
-    resultClient({ ok: true, data: { sessionId: echoSessionId, projectId: "p2" } })
-      .request("session.create", { projectId: "p1" }),
-    rejectsAsProtocol,
-  );
-  const same = await resultClient({ ok: true, data: { sessionId: echoSessionId, projectId: "p1" } })
-    .request("session.create", { projectId: "p1" });
-  assert.equal(same.projectId, "p1");
-});
-
-test("echo: session.turn success must carry the requested turnId", async () => {
-  const params = { text: "question", turnId: echoTurnId, retry: false };
-  await assert.rejects(
-    resultClient({ ok: true, data: { sessionId: echoSessionId, turnId: otherTurnId } }).request("session.turn", params),
-    rejectsAsProtocol,
-  );
-});
 
 test("echo: turn failures compare error.details.turnId and require lifecycle details", async () => {
   const lifecycle = { state: "failed", accepted: true, persisted: true };

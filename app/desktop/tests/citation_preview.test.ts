@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
-import type { JsonObject } from "../src/protocol.ts";
 import {
   BIME_LAYOUT_REMINDER,
   EXPORT_LABELS,
@@ -10,6 +9,7 @@ import {
   exportSummary,
   previewEntries,
   styleChangeParams,
+  type BibliographyAddDto,
   type BibliographyRenderDto,
 } from "../src/citations.ts";
 
@@ -131,10 +131,17 @@ test("a newly rendered panel is only the collapsed summary bar", async () => {
   const { CitationPanel } = await load<CitationPanelModule>("/src/CitationPanel.tsx");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
+  const snapshot = { rootPath: "/p", path: "/p/a.md", editorRevision: 0, sourceText: "", diskFingerprint: "0".repeat(64) };
+  const never = () => new Promise<never>(() => undefined);
   const html = renderToStaticMarkup(createElement(CitationPanel, {
-    document: { rootPath: "/p", path: "/p/a.md", editorRevision: 0, sourceText: "", diskFingerprint: "0".repeat(64) },
-    refreshToken: 0, request: () => new Promise<JsonObject>(() => undefined), contextPayload: () => ({}),
-    onSelect: () => undefined, requestAdd: () => new Promise<JsonObject>(() => undefined), writesDisabled: false,
+    document: snapshot,
+    refreshToken: 0,
+    api: {
+      bibliographyInspect: () => never(), bibliographyRemove: () => never(), bibliographySetStyle: () => never(),
+      bibliographyRender: () => never(), bibliographyExport: () => never(),
+    },
+    contextPayload: () => snapshot,
+    onSelect: () => undefined, requestAdd: () => new Promise<BibliographyAddDto>(() => undefined), writesDisabled: false,
   }));
   assert.match(html, /<header class="citation-summary"><h3>Citations<\/h3>/);
   assert.match(html, /class="citation-toggle" aria-expanded="false"[^>]*>Expand ▾<\/button>/);

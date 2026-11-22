@@ -1,6 +1,6 @@
 import type { ConversationSelection } from "../conversations.ts";
-import type { JsonObject, SessionListDto, SessionSummaryDto } from "../protocol.ts";
-import { protocolMismatch } from "./errors.ts";
+import type { Api } from "../api.ts";
+import type { SessionListDto, SessionSummaryDto } from "../protocol.ts";
 
 export interface SidebarSessionRow extends SessionSummaryDto {
   transient: boolean;
@@ -36,14 +36,12 @@ export function sidebarRowsForProject(
 /** The opened project's first page of saved conversations (the backend scans its history). */
 export async function loadSelectedProjectHistory(
   projectId: string | null,
-  request: (method: "session.list", params: JsonObject) => Promise<JsonObject>,
+  sessionList: Api["sessionList"],
   isCurrent: () => boolean = () => true,
 ): Promise<SessionListDto | null> {
   if (projectId === null) return null;
-  const sessions = await request("session.list", { projectId, offset: 0, limit: 50 }) as unknown as SessionListDto;
-  if (!isCurrent()) return null;
-  if (sessions.projectId !== projectId) throw protocolMismatch("The backend returned conversations for a different project.");
-  return sessions;
+  const sessions = await sessionList({ projectId, offset: 0, limit: 50 });
+  return isCurrent() ? sessions : null;
 }
 
 export function projectDisplayName(rootPath: string): string {

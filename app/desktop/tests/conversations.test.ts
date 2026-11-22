@@ -15,7 +15,19 @@ import { composerSlashCommands, filterSlashCommands, handleComposerKey, insertSl
 import { loadSelectedProjectHistory, mergeSessionItems, projectDisplayName, sidebarRowsForProject } from "../src/lib/sidebar.ts";
 import { isPersistedTurnFailure, selectConversationWithPreview, visibleMessageRange } from "../src/lib/transcript.ts";
 import { safeExternalUrl, openSafeExternalUrl } from "../src/lib/safeUrl.ts";
-import type { JsonObject, SessionCreatedDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto } from "../src/protocol.ts";
+import type { Api } from "../src/api.ts";
+import type { JsonObject, SessionCreatedDto, SessionListDto, SessionSelectedDto, SessionSummaryDto, SessionTranscriptDto } from "../src/protocol.ts";
+
+type FakeMethod = "session.list" | "session.select" | "session.transcript";
+
+/** The api functions the sidebar and transcript helpers use, answered by one request-style handler. */
+function fakeApi(handler: (method: FakeMethod, params: JsonObject) => Promise<JsonObject>) {
+  return {
+    sessionList: ((params) => handler("session.list", params) as unknown as Promise<SessionListDto>) as Api["sessionList"],
+    sessionSelect: ((params) => handler("session.select", params) as unknown as Promise<SessionSelectedDto>) as Api["sessionSelect"],
+    sessionTranscript: ((params) => handler("session.transcript", params) as unknown as Promise<SessionTranscriptDto>) as Api["sessionTranscript"],
+  };
+}
 
 type SafeContentModule = typeof import("../src/SafeContent.tsx");
 type AppModule = typeof import("../src/App.tsx");
@@ -351,18 +363,15 @@ test("restart selects nothing without a resumable selection for the opened proje
 test("project history loads with one session.list request for the opened project", async () => {
   const requests: Array<[string, JsonObject]> = [];
   const page = { projectId: "p1", status: "ready", issue: null, items: RESTORE_ITEMS, total: 2, offset: 0, limit: 50, hasMore: false };
-  const loaded = await loadSelectedProjectHistory("p1", async (method, params) => {
+  const loaded = await loadSelectedProjectHistory("p1", fakeApi(async (method, params) => {
     requests.push([method, params]);
     return page as unknown as JsonObject;
-  });
+  }).sessionList);
   assert.deepEqual(requests, [["session.list", { projectId: "p1", offset: 0, limit: 50 }]]);
   assert.equal(loaded, page);
-  assert.equal(await loadSelectedProjectHistory(null, async () => assert.fail("no project, no request")), null);
-  await assert.rejects(
-    loadSelectedProjectHistory("p1", async () => ({ ...page, projectId: "p2" }) as unknown as JsonObject),
-    /different project/,
-  );
-  assert.equal(await loadSelectedProjectHistory("p1", async () => page as unknown as JsonObject, () => false), null);
+  assert.equal(await loadSelectedProjectHistory(null, fakeApi(async () => assert.fail("no project, no request")).sessionList), null);
+  // A result for another project is rejected by the api echo check (tests/api.test.ts).
+  assert.equal(await loadSelectedProjectHistory("p1", fakeApi(async () => page as unknown as JsonObject).sessionList, () => false), null);
   assert.equal(projectDisplayName("/home/me/thesis/"), "thesis");
   assert.equal(projectDisplayName("C:\\Users\\me\\thesis"), "thesis");
 });
@@ -675,10 +684,10 @@ test("saved messages preview before selection is ready without confirming a sess
     isCurrent: () => true,
     onPreview: preview.resolve,
     onSelected: (session) => confirmed.push(session),
-  }, async (method) => {
+  }, fakeApi(async (method) => {
     requests.push(method);
     return method === "session.select" ? selection.promise : transcript as unknown as JsonObject;
-  });
+  }));
   assert.deepEqual(await preview.promise, transcript);
   assert.deepEqual(requests, ["session.select", "session.transcript"]);
   assert.equal(confirmed.length, 0, "preview must not permit sending to the new session");
@@ -698,7 +707,7 @@ test("selection failure rejects late previews and consumes outstanding read fail
       isCurrent: () => true,
       onPreview: () => { updates += 1; },
       onSelected: () => { updates += 1; },
-    }, async (method) => method === "session.select" ? selection.promise : transcript.promise);
+    }, fakeApi(async (method) => method === "session.select" ? selection.promise : transcript.promise));
     const failure = assert.rejects(result, /selection failed/);
     selection.reject(new Error("selection failed"));
     await failure;
@@ -719,7 +728,7 @@ test("a replaced backend generation discards preview and selection responses", a
     isCurrent: () => current,
     onPreview: () => { updates += 1; },
     onSelected: () => { updates += 1; },
-  }, async (method) => method === "session.select" ? selection.promise : read.promise);
+  }, fakeApi(async (method) => method === "session.select" ? selection.promise : read.promise));
   current = false;
   read.resolve(transcript as unknown as JsonObject);
   selection.resolve(selected);
@@ -742,7 +751,7 @@ test("pending saved turns are refreshed after selection recovers them", async ()
     isCurrent: () => true,
     onPreview: preview.resolve,
     onSelected: () => { confirmed = true; },
-  }, async (method) => {
+  }, fakeApi(async (method) => {
     if (method === "session.select") return selection.promise;
     reads += 1;
     if (reads === 1) return {
@@ -750,7 +759,7 @@ test("pending saved turns are refreshed after selection recovers them", async ()
     } as unknown as JsonObject;
     assert.equal(confirmed, true, "recovery refresh follows session materialization");
     return recovered as unknown as JsonObject;
-  });
+  }));
   assert.equal((await preview.promise).items[0].state, "pending");
   selection.resolve(selected);
   assert.deepEqual(await result, recovered);
