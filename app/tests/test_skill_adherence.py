@@ -696,7 +696,7 @@ def test_installer_skill_switch_load_failure_and_duplicate_preserve_pending(tmp_
         loads.append(name)
         raise ValueError("fixture runtime unavailable")
 
-    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    monkeypatch.setattr(session, "skill_runtime_for", unavailable)
     # A completed installer duplicate must return before loading or cleanup.
     duplicate = asyncio.run(session.turn(
         original_turn.semantic_input, display_input=original_turn.display_input,

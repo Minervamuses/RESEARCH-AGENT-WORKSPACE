@@ -760,7 +760,7 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     result = asyncio.run(_dispatch_approved(service, "session.turn", params))
     assert result["responseKind"] == "answer"
     assert "已保存並引用來源 [1]。" in result["text"]
-    assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
+    assert session.citation_policy.loaded_service is None and session.active_skill_runtime is None
     assert session.thinking_mode == "extended"
     assert service._session_snapshot(session)["thinkingMode"] == "extended"
     turn = session.conversation_repository.load(session.session_id).document.turns[-1]
@@ -774,13 +774,13 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
         raise ValueError("fixture unavailable Citation")
 
     if unavailable_kind == "loader":
-        monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+        monkeypatch.setattr(session, "skill_runtime_for", unavailable)
     else:
         installed = applied_skills[0].path.parent
         with (installed / "SKILL.md").open("a") as handle:
             handle.write("\nFixture integrity damage\n")
         with pytest.raises(ValueError, match="applied bundle changed"):
-            session._load_skill_runtime("citation")
+            session.skill_runtime_for("citation")
     assert "citation" not in [c["name"] for c in service._session_snapshot(session)["slashCommands"]]
     count = len(model.invocations)
     counts = (count, len(fetcher.calls), len(services), len(save_calls))
@@ -789,14 +789,14 @@ def test_composer_citation_uses_shared_command_and_available_catalog(monkeypatch
     paths = [canonical, *(path for path in (tmp_path / "cite").rglob("*") if path.is_file())]
     before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
     # After catalog validation, a duplicate must never consult the loader again.
-    loader = session._load_skill_runtime
+    loader = session.skill_runtime_for
     loads = []
 
     def observe_load(name):
         loads.append(name)
         return loader(name)
 
-    monkeypatch.setattr(session, "_load_skill_runtime", observe_load)
+    monkeypatch.setattr(session, "skill_runtime_for", observe_load)
     for retry in (False, True):
         duplicate = asyncio.run(_dispatch_approved(service, "session.turn", {**params, "retry": retry}))
         assert duplicate["text"] == result["text"]
@@ -2691,7 +2691,7 @@ def test_completed_citation_replay_keeps_canonical_identity(monkeypatch, tmp_pat
     def unavailable(_name):
         raise ValueError("fixture runtime unavailable")
 
-    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    monkeypatch.setattr(session, "skill_runtime_for", unavailable)
     if mismatch == "fingerprint":
         append = repository.append_pending
 
@@ -2705,7 +2705,7 @@ def test_completed_citation_replay_keeps_canonical_identity(monkeypatch, tmp_pat
         asyncio.run(service.dispatch("session.turn", params))
     assert graph.states == []
     assert path.read_bytes() == before + (b"\n" if mismatch == "fingerprint" else b"")
-    assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
+    assert session.citation_policy.loaded_service is None and session.active_skill_runtime is None
 
 
 @pytest.mark.parametrize("terminal", ["failed", "interrupted"])
@@ -2745,12 +2745,12 @@ def test_unfinished_citation_replay_still_requires_available_runtime(monkeypatch
     def unavailable(_name):
         raise ValueError("fixture runtime unavailable")
 
-    monkeypatch.setattr(session, "_load_skill_runtime", unavailable)
+    monkeypatch.setattr(session, "skill_runtime_for", unavailable)
     for retry in (False, True):
         with pytest.raises(DesktopServiceError) as caught:
             asyncio.run(service.dispatch("session.turn", {**params, "retry": retry}))
         assert caught.value.code == "PROTOCOL_INVALID"
     assert graph.states == [] and path.read_bytes() == before
-    assert session._citation_policy.loaded_service is None and session.active_skill_runtime is None
+    assert session.citation_policy.loaded_service is None and session.active_skill_runtime is None
 
 

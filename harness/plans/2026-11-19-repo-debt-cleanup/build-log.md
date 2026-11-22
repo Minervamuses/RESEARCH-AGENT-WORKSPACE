@@ -21,7 +21,7 @@
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
 | C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
-| C7 | In progress | `evidence/C7-S1/`–`C7-S3/` | — | C7-S4 |
+| C7 | In progress | `evidence/C7-S1/`–`C7-S4/` | — | C7-S5 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
 | C10 | Not started | — | — | 等 C2–C9 |
@@ -641,3 +641,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C7-S3/private-access.md`。
 - **限制**：無。
 - **下一步**：C7-S4 desktop 端的私有存取。
+
+### C7-S4 desktop 端的私有存取（S052，2026-11-22）
+
+- **觀察結果**：validator／callback setter、citation policy、installer context 與 paths、skill runtime 載入、conversation snapshot、`reload_and_recover` 都改為公開名稱或唯讀屬性；S031 留下的 `isinstance`／`getattr` 分支隨之刪除。兩種 grep 只剩規格允許暫留的 3 處（installer bypass 1、`_document_turn_active` 2）與一個非 `ChatSession` 的命中（server 讀 service 方法）。
+- **執行指令**：沙箱外完整 pytest；兩種 grep。
+- **證據**：`evidence/C7-S4/desktop-private-access.md`。
+- **限制**：暫留項目由 C7-S5 移除。
+- **下一步**：C7-S5 每回合參數。

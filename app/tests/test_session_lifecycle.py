@@ -161,7 +161,7 @@ def test_final_validator_precedes_completed_commit_and_commit_failure_is_not_suc
         return original_complete(snapshot, **kwargs)
 
     repository.complete_turn = complete_with_trace
-    session._set_final_text_validator(
+    session.set_final_text_validator(
         lambda _text, _errors: events.append("validator"),
     )
 

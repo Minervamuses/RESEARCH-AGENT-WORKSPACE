@@ -1343,14 +1343,14 @@ def test_fixture_inline_skills_abstract_uses_real_catalog_and_unsaved_selection(
         assert {"academic-paper-writing", "citation"} <= {
             item["name"] for item in created["slashCommands"]
         }
-        load = service.session._load_skill_runtime
+        load = service.session.skill_runtime_for
 
         def capture(name):
             runtime = load(name)
             loaded.append(runtime)
             return runtime
 
-        monkeypatch.setattr(service.session, "_load_skill_runtime", capture)
+        monkeypatch.setattr(service.session, "skill_runtime_for", capture)
         path = Path(_project_info(fixture_root)["rootPath"]) / "draft.md"
         path.write_text("Old disk/RAG claim.\n", encoding="utf-8")
         context = await service.dispatch("document.open", {"path": str(path)})

@@ -57,7 +57,10 @@ def test_tool_operations_receive_frozen_single_operation_consent(tmp_path, tool,
                 super().__init__(config, progress_cb)
                 self.handler = handler
                 self.mcp_families["fixture_mcp"] = "fixture_remote"
-                self._installer_context = {"source_zip": "/tmp/selected.zip"}
+                self.installer_context = {"source_zip": "/tmp/selected.zip"}
+                self.installer_paths = None
+                # No project bibliography: a citation save writes nothing.
+                self.citation_policy = SimpleNamespace(loaded_service=None, bibliography_path=lambda: None)
                 self._skill_installer = SimpleNamespace(bypass_approval=False)
 
             async def turn_outcome(self, text, **kwargs):

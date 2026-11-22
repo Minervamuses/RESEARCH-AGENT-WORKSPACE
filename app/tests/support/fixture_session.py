@@ -735,7 +735,7 @@ class FixtureSession:
             else None
         )
 
-    def _load_skill_runtime(self, name: str) -> SkillRuntime:
+    def skill_runtime_for(self, name: str) -> SkillRuntime:
         """Read real Skill instructions while keeping execution synthetic."""
         return load_skill_runtime(
             name, config=self.config, catalog=self.loaded_skills,
@@ -918,13 +918,13 @@ class FixtureSession:
         )
         return snapshot, pending, False
 
-    def _set_prompt_persisted_callback(
+    def set_prompt_persisted_callback(
         self,
         callback: Callable[[], None],
     ) -> None:
         self._prompt_persisted_callback = callback
 
-    def _set_final_text_validator(self, validator: Callable[..., Any]) -> None:
+    def set_final_text_validator(self, validator: Callable[..., Any]) -> None:
         self.final_text_validator = validator
 
     def clear_skill_installer(self) -> dict[str, Any]:
@@ -1006,7 +1006,7 @@ class FixtureSession:
             ]))
             if names:
                 self.active_skill_runtime = combine_skill_runtimes([
-                    self._load_skill_runtime(name) for name in names
+                    self.skill_runtime_for(name) for name in names
                 ])
             self._crash_control.record_effect("provider", turn_id)
             if self._progress_cb is not None:

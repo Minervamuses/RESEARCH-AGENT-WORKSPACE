@@ -582,9 +582,7 @@ class DesktopService:
                     session.session_id
                 )
             except ConversationError:
-                candidate = getattr(session, "_conversation_snapshot", None)
-                if isinstance(candidate, ConversationSnapshot):
-                    snapshot = candidate
+                snapshot = session.conversation_snapshot
             if snapshot is not None:
                 turn = next(
                     (
@@ -1303,14 +1301,14 @@ class DesktopService:
             citation_bibliography_path=lambda: self._project_bibliography_path(project_id),
             session_id=session_id,
         )
-        session._set_final_text_validator(
+        session.set_final_text_validator(
             lambda text, errors: self._validate_final_text_before_record(
                 session.session_id,
                 text,
                 errors,
             )
         )
-        session._set_prompt_persisted_callback(
+        session.set_prompt_persisted_callback(
             lambda: self._on_prompt_persisted(session)
         )
         return session
@@ -2482,13 +2480,11 @@ class DesktopService:
         if not self._turn_active or self._active_turn_id is None or self._active_parent_request_id is None:
             return False
         if citation_save:
-            policy = getattr(self.session, "_citation_policy", None)
-            loaded_service = getattr(policy, "loaded_service", None)
-            if loaded_service is not None:
-                library_path = getattr(loaded_service, "library_path", None)
-            else:
-                resolve_library = getattr(policy, "bibliography_path", None)
-                library_path = resolve_library() if callable(resolve_library) else None
+            policy = self.session.citation_policy
+            loaded_service = policy.loaded_service
+            library_path = (
+                loaded_service.library_path if loaded_service is not None else policy.bibliography_path()
+            )
             if library_path is not None:
                 target = str(Path(library_path).expanduser().resolve())
                 description = (
@@ -2506,9 +2502,8 @@ class DesktopService:
                 "citation.save", target, description, parameters=args.get("works"),
             )
         if skill_install:
-            context = getattr(self.session, "_installer_context", {})
-            installer = getattr(self.session, "_skill_installer", None)
-            paths = getattr(installer, "paths", None) or resolve_extension_paths(self.config)
+            context = self.session.installer_context
+            paths = self.session.installer_paths or resolve_extension_paths(self.config)
             source = context.get("source_path") or context.get("source_zip")
             target = str(paths.state_root if args["action"] == "apply" else source or paths.dropin_root)
             return await self._operation_approval(
@@ -2789,12 +2784,11 @@ class DesktopService:
             original_text = params["text"]
             try:
                 references = resolve_skill_references(original_text, session.loaded_skills, params.get("skillReferences"))
-                if isinstance(session, ChatSession):
-                    for name in dict.fromkeys(reference["name"] for reference in references):
-                        try:
-                            session._load_skill_runtime(name)
-                        except (KeyError, ValueError, OSError) as exc:
-                            raise ValueError(f"Cannot load selected skill {name}: {exc}") from exc
+                for name in dict.fromkeys(reference["name"] for reference in references):
+                    try:
+                        session.skill_runtime_for(name)
+                    except (KeyError, ValueError, OSError) as exc:
+                        raise ValueError(f"Cannot load selected skill {name}: {exc}") from exc
             except ValueError as exc:
                 raise DesktopServiceError("PROTOCOL_INVALID", str(exc)) from exc
             turn_text = original_text
@@ -3245,11 +3239,8 @@ class DesktopService:
     @staticmethod
     def _desktop_command_eligible(command: SlashCommand, session: ChatSession) -> bool:
         if command.name == "citation":
-            loader = getattr(session, "_load_skill_runtime", None)
-            if loader is None:
-                return False
             try:
-                runtime = loader("citation")
+                runtime = session.skill_runtime_for("citation")
             except (KeyError, ValueError, OSError, yaml.YAMLError):
                 return False
             return (runtime.name == "citation"

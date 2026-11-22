@@ -42,14 +42,18 @@ class _FakeSession:
         self._turn_number = 0
         self._prompt_persisted_callback = None
 
-    def _set_prompt_persisted_callback(self, callback) -> None:
+    def set_prompt_persisted_callback(self, callback) -> None:
         self._prompt_persisted_callback = callback
 
-    def _set_final_text_validator(self, validator) -> None:
+    def set_final_text_validator(self, validator) -> None:
         self.final_text_validator = validator
 
     def clear_skill_installer(self) -> dict:
         return {}
+
+    def skill_runtime_for(self, name: str):
+        # Fakes carry no skill runtimes; Citation stays out of their command list.
+        raise KeyError(name)
 
     async def turn_outcome(
         self,

@@ -193,10 +193,10 @@ class ChatSession:
         self._active_turn_input: str | None = None
         self._turn_trace: TurnTimingTrace | None = None
         self._turn_journal = TurnJournal()
-        self._citation_policy = CitationSessionPolicy(
+        self.citation_policy = CitationSessionPolicy(
             bibliography_path=citation_bibliography_path,
         )
-        self.citation_workflow_tool = self._citation_policy.workflow_tool
+        self.citation_workflow_tool = self.citation_policy.workflow_tool
         self.extension_manager = ExtensionManager(config)
         self._skill_installer = SkillInstaller(
             config,
@@ -294,7 +294,7 @@ class ChatSession:
             finished_at=self._now_timestamp(),
         )
 
-    def _reload_and_recover(self) -> ConversationSnapshot | None:
+    def reload_and_recover(self) -> ConversationSnapshot | None:
         self._conversation_snapshot = self.conversation_repository.load_optional(
             self.session_id
         )
@@ -327,7 +327,7 @@ class ChatSession:
             raise ConversationValidationError(
                 "turnId must be a canonical lowercase UUIDv4 hex string"
             )
-        snapshot = await asyncio.to_thread(self._reload_and_recover)
+        snapshot = await asyncio.to_thread(self.reload_and_recover)
         values = {
             "turn_id": turn_id,
             "kind": kind,
@@ -485,14 +485,29 @@ class ChatSession:
                 continue
         return tuple(summaries)
 
-    def _set_final_text_validator(
+    @property
+    def conversation_snapshot(self) -> ConversationSnapshot | None:
+        """The last saved conversation snapshot this session holds in memory."""
+        return self._conversation_snapshot
+
+    @property
+    def installer_context(self) -> dict:
+        """The skill installer's current request context (empty when idle)."""
+        return self._installer_context
+
+    @property
+    def installer_paths(self):
+        """Extension roots of the installation in progress, or None before one starts."""
+        return getattr(self._skill_installer, "paths", None)
+
+    def set_final_text_validator(
         self,
         validator: Callable[[str, list[str]], None],
     ) -> None:
         """Install a desktop-only pre-persistence final-text boundary."""
         self._final_text_validator = validator
 
-    def _set_prompt_persisted_callback(
+    def set_prompt_persisted_callback(
         self,
         callback: Callable[[], None],
     ) -> None:
@@ -699,7 +714,7 @@ class ChatSession:
         Citation-mode only: outside the citation skill there are no citable
         sources, so no hint is rendered and no registry is consulted.
         """
-        return self._citation_policy.build_sources_hint(
+        return self.citation_policy.build_sources_hint(
             citation_active=self.citation_skill_active,
         )
 
@@ -711,7 +726,7 @@ class ChatSession:
         model's answer.  Successful receipts are still checked against the
         live registry before they contribute to success counts.
         """
-        return self._citation_policy.save_metrics(
+        return self.citation_policy.save_metrics(
             new_messages,
             citation_active=self.citation_skill_active,
         )
@@ -727,7 +742,7 @@ class ChatSession:
         validation_errors)``; a violating draft is replaced by the safe
         message and never returned.
         """
-        return self._citation_policy.finalize_answer(
+        return self.citation_policy.finalize_answer(
             answer,
             citation_active=self.citation_skill_active,
         )
@@ -864,9 +879,9 @@ class ChatSession:
         already written to disk are untouched. The next activation lazily
         builds a fresh service.
         """
-        self._citation_policy.reset()
+        self.citation_policy.reset()
 
-    def _load_skill_runtime(self, name: str) -> SkillRuntime:
+    def skill_runtime_for(self, name: str) -> SkillRuntime:
         """Load one runtime from this session's immutable startup catalog."""
         return load_skill_runtime(
             name,
@@ -973,7 +988,7 @@ class ChatSession:
         self, user_input: str, *, new_request: bool,
         runtime: SkillRuntime | None = None, authority_input: str | None = None,
     ) -> TurnOutcome:
-        runtime = runtime or self._load_skill_runtime("skill-installer")
+        runtime = runtime or self.skill_runtime_for("skill-installer")
         authority_input = user_input if authority_input is None else authority_input
         if new_request:
             cleanup = self.clear_skill_installer()
@@ -1024,7 +1039,7 @@ class ChatSession:
             raise ValueError("skill prompt cannot be empty")
         # Loading and validation happen before any active session state changes.
         runtime = combine_skill_runtimes([
-            self._load_skill_runtime(name) for name in (skill_names or [skill_name])
+            self.skill_runtime_for(name) for name in (skill_names or [skill_name])
         ])
         citation_turn = runtime.includes(CITATION_SKILL_NAME)
         cleanup = self.clear_skill_installer()
@@ -1311,7 +1326,7 @@ class ChatSession:
                     raise asyncio.CancelledError()
                 if installer_turn:
                     runtime = combine_skill_runtimes([
-                        self._load_skill_runtime(name) for name in skill_names
+                        self.skill_runtime_for(name) for name in skill_names
                     ]) if skill_names else None
                     outcome = await self._run_installer_turn(
                         user_input, new_request=installer_request,

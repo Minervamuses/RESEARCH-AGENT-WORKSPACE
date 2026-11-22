@@ -62,7 +62,7 @@ async def _noop_fetcher(url, headers):
 
 
 def _seed_verified_source(session, tmp_path, source_id="src-known"):
-    service = session._citation_policy.service
+    service = session.citation_policy.service
     ref = SourceRef(
         source_id=source_id,
         doi="10.1234/known",
@@ -99,7 +99,7 @@ def _save_tool_message(
     status="success",
     call_id="save-1",
 ):
-    ref = session._citation_policy.service.registry.get(source_id)
+    ref = session.citation_policy.service.registry.get(source_id)
     assert ref is not None
     receipt = _receipt_for(ref)
     link = BibliographyLink("added", "/project/references.json", "lovelace2021known")
@@ -580,7 +580,7 @@ def test_user_doi_in_input_is_never_auto_registered(make_session):
         session.turn_outcome("請看 https://doi.org/10.1234/user-paper")
     )
     assert outcome.text == "plain answer"
-    assert session._citation_policy.loaded_service is None  # noqa: SLF001
+    assert session.citation_policy.loaded_service is None  # noqa: SLF001
 
     session.graph = make_astream_graph(
         answer="Your paper [[user-cite:usr-anything]] is interesting."
@@ -634,7 +634,7 @@ def test_deactivating_citation_removes_hint_and_rendering(make_session, tmp_path
     asyncio.run(session.turn_outcome("find", skill_name="citation"))
     assert hints[0] is not None
     assert session._build_sources_hint() is None
-    assert session._citation_policy.loaded_service is None
+    assert session.citation_policy.loaded_service is None
 
 
 def test_sources_hint_appears_in_prompt_after_registration(make_session, tmp_path):

@@ -131,7 +131,7 @@ def test_pending_write_failure_prevents_graph_or_provider_work(
         graph.states.clear()
     before = repository.load_optional(session_id)
     accepted = []
-    session._set_prompt_persisted_callback(lambda: accepted.append("accepted"))
+    session.set_prompt_persisted_callback(lambda: accepted.append("accepted"))
 
     def reject_pending(*_args, **_kwargs):
         raise ConversationUnavailableError("injected pending write failure")
@@ -317,7 +317,7 @@ def test_completed_duplicate_returns_durable_answer_without_graph(
         session_id=session_id,
     )
     accepted = []
-    duplicate_session._set_prompt_persisted_callback(
+    duplicate_session.set_prompt_persisted_callback(
         lambda: accepted.append(repository.load(session_id).document.turns[-1].state)
     )
     duplicate = asyncio.run(duplicate_session.turn_outcome(
@@ -361,7 +361,7 @@ def test_existing_turn_notifies_only_after_successful_explicit_retry(
         monkeypatch, tmp_path, repository=repository, graph=graph, session_id=session_id,
     )
     accepted = []
-    session._set_prompt_persisted_callback(
+    session.set_prompt_persisted_callback(
         lambda: accepted.append((
             repository.load(session_id).document.turns[-1].state, len(graph.states),
         ))
@@ -489,7 +489,7 @@ def test_cancelled_pending_save_retains_input_and_finishes_interrupted(
         saved = repository.load(session.session_id).document.turns[-1]
         accepted.append((saved.turn_id, saved.state))
 
-    session._set_prompt_persisted_callback(record_acceptance)
+    session.set_prompt_persisted_callback(record_acceptance)
     original_create = repository.create
 
     def held_create(**kwargs):
