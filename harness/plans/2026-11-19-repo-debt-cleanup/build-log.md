@@ -20,7 +20,7 @@
 | C3 | Complete | `evidence/C3-S1/`–`C3-S6/` | — | — |
 | C4 | Complete | `evidence/C4-S1/`–`C4-S6/` | — | — |
 | C5 | Complete | `evidence/C5-S1/`–`C5-S6/` | — | — |
-| C6 | In progress | `evidence/C6-S1/`–`evidence/C6-S4/` | — | C6-S5 |
+| C6 | Complete | `evidence/C6-S1/`–`C6-S5/` | — | — |
 | C7 | Not started | — | — | 等 C2、C4、C5、C6 |
 | C8 | Not started | — | — | 等 C3–C6 |
 | C9 | Not started | — | — | 等 C8 |
@@ -609,3 +609,11 @@ PLANS「基線」中的行號與行為，都要由 C1 重新核對。
 - **證據**：`evidence/C6-S4/scan-cost.md`、`evidence/C6-S4/scan_cost.py`。
 - **限制**：只量熱快取。
 - **下一步**：C6-S5 階段收尾。
+
+### C6-S5 階段收尾與 C6 驗收（2026-11-22）
+
+- **觀察結果**：完整 pytest 1755 passed（沙箱外）、`npm test` 224 pass、`npm run build` 通過、`cargo test --locked` 35 passed（沙箱外）；contract 方法 25，`project.list`、`session.retry_registration`、`registrationStatus`、`registrationIssue` 皆為 0。**C6 驗收**：phase-06 六項完成狀態都有對應證據（evidence 表）。
+- **執行指令**：見 `evidence/C6-S5/wrap-up.md`。
+- **證據**：`evidence/C6-S5/wrap-up.md`。
+- **限制**：GUI 清單（C6-S3 六項）由使用者驗收；「是否加快取」列為使用者決定。
+- **下一步**：依 PLANS 相依關係讀 C7。
