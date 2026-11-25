@@ -216,7 +216,12 @@ class ChatSession:
         self._skill_installer = SkillInstaller(
             config,
             manager_factory=lambda: self.extension_manager,
-            builtin_names={skill.name for skill in discover_skills(config)},
+            # Built-in skills are the loaded ones not installed as extensions.
+            builtin_names={
+                skill.name
+                for skill in self.loaded_skills
+                if skill.applied_source_hash is None
+            },
         )
         self._installer_previous_mode: str | None = None
         self._installer_session_id: str | None = None
