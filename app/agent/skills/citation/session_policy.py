@@ -70,7 +70,11 @@ class CitationSessionPolicy:
         return service.registry if service is not None else None
 
     def reset(self) -> None:
-        """Discard the in-memory service and its source registry."""
+        """Discard the in-memory service and its source registry.
+
+        Bundles already written to disk are untouched; the next activation
+        lazily builds a fresh service.
+        """
         self._service = None
 
     def build_sources_hint(

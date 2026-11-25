@@ -852,7 +852,8 @@ class ChatSession:
         self._active_turn_snapshot = completed
         completed_turn = self._turn_from_snapshot(completed, turn_id)
         assert completed_turn is not None
-        self._record_turn(tool_calls=tool_calls)
+        # Non-authoritative diagnostics, recorded only after durable completion.
+        self._turn_journal.observe_turn(tool_calls=tool_calls)
         return TurnOutcome(
             text=final_text,
             validation_errors=errors,
@@ -886,15 +887,6 @@ class ChatSession:
         """Whether the built-in citation skill is the active skill."""
         runtime = self.active_skill_runtime
         return runtime is not None and runtime.includes(CITATION_SKILL_NAME)
-
-    def _teardown_citation_session_state(self) -> None:
-        """Drop the in-memory workflow and source registry on deactivation.
-
-        The service and its registered SourceRefs are discarded; bundles
-        already written to disk are untouched. The next activation lazily
-        builds a fresh service.
-        """
-        self.citation_policy.reset()
 
     def skill_runtime_for(self, name: str) -> SkillRuntime:
         """Load one runtime from this session's immutable startup catalog."""
@@ -1023,7 +1015,7 @@ class ChatSession:
         else:
             self._installer_context = self._skill_installer.continue_request(authority_input, self.session_id)
         if self.citation_skill_active:
-            self._teardown_citation_session_state()
+            self.citation_policy.reset()
         self.active_skill_runtime = runtime
         self.thinking_mode = "normal"
         self._installer_action_used = False
@@ -1041,7 +1033,7 @@ class ChatSession:
             if not self._skill_installer.pending or not self._installer_action_used:
                 self.clear_skill_installer()
             if runtime.includes(CITATION_SKILL_NAME):
-                self._teardown_citation_session_state()
+                self.citation_policy.reset()
 
     async def _run_one_shot_skill_turn(
         self,
@@ -1069,7 +1061,7 @@ class ChatSession:
         self.active_skill_runtime = runtime
         try:
             if citation_turn or (previous is not None and previous.includes(CITATION_SKILL_NAME)):
-                self._teardown_citation_session_state()
+                self.citation_policy.reset()
             if citation_turn:
                 self.thinking_mode = "normal"
             return await self._run_turn(user_input)
@@ -1077,7 +1069,7 @@ class ChatSession:
             if self.active_skill_runtime is runtime:
                 self.active_skill_runtime = None
             if citation_turn:
-                self._teardown_citation_session_state()
+                self.citation_policy.reset()
             self.thinking_mode = previous_mode
 
     def _tool_universe_refs(self) -> list[str]:
@@ -1162,14 +1154,6 @@ class ChatSession:
             extra_system_messages=extra_system_messages,
             candidate_id=None,
         )
-
-    def _record_turn(
-        self,
-        *,
-        tool_calls: list[dict],
-    ) -> None:
-        """Record non-authoritative diagnostics after durable completion."""
-        self._turn_journal.observe_turn(tool_calls=tool_calls)
 
     async def _run_normal_turn(self, user_input: str) -> TurnOutcome:
         result = await self.run_graph_turn(user_input)
