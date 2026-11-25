@@ -51,10 +51,3 @@ def canonicalize_doi(raw: str | None) -> str | None:
     if not _DOI_SHAPE_RE.match(text):
         return None
     return ascii_casefold(text)
-
-
-def doi_equal(a: str | None, b: str | None) -> bool:
-    """True when both values canonicalize to the same non-empty DOI."""
-    ca = canonicalize_doi(a)
-    cb = canonicalize_doi(b)
-    return ca is not None and ca == cb

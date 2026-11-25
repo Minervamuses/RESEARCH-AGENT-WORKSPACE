@@ -3,7 +3,6 @@
 from skills.citation.doi import (
     ascii_casefold,
     canonicalize_doi,
-    doi_equal,
 )
 
 
@@ -50,10 +49,3 @@ def test_canonicalize_rejects_non_doi_shapes():
     assert canonicalize_doi("11.1234/x") is None
     assert canonicalize_doi("10.12/short-prefix") is None
     assert canonicalize_doi("10.1234/") is None
-
-
-def test_doi_equal_compares_canonical_forms():
-    assert doi_equal("DOI:10.1234/AbC", "https://doi.org/10.1234/abc")
-    assert not doi_equal("10.1234/abc", "10.1234/abd")
-    assert not doi_equal(None, "10.1234/abc")
-    assert not doi_equal("junk", "junk")
