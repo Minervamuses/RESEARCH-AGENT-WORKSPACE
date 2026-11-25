@@ -5,6 +5,7 @@ import type {
   SubmittedContext,
   TurnLifecycleDetailsDto,
 } from "./protocol.ts";
+import { isCanonicalTurnId } from "./protocol.ts";
 
 export const MAX_ACTIVITY_ITEMS = 32;
 
@@ -310,13 +311,6 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
-}
-
-function isCanonicalTurnId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    /^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(value)
-  );
 }
 
 function isValidSelection(value: ConversationSelection): boolean {

@@ -607,6 +607,11 @@ const encoder = new TextEncoder();
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const turnIdPattern = /^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 
+/** Whether *value* is a canonical lowercase UUIDv4 hex logical turn ID. */
+export function isCanonicalTurnId(value: unknown): value is string {
+  return typeof value === "string" && turnIdPattern.test(value);
+}
+
 function invalid(message: string): never {
   throw new ProtocolContractError("PROTOCOL_INVALID", message);
 }
