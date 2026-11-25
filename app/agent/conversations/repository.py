@@ -548,7 +548,7 @@ class ConversationRepository:
     ) -> ConversationSnapshot:
         """Append a pending turn or return an exact same-ID duplicate."""
         validate_turn_id(turn_id)
-        existing = self._turn_with_id(snapshot.document, turn_id)
+        existing = snapshot.document.turn(turn_id)
         if existing is not None:
             if not _same_logical_input(
                 existing,
@@ -817,16 +817,6 @@ class ConversationRepository:
             summaries=tuple(summaries),
             issues=tuple(issues),
         )
-
-    @staticmethod
-    def _turn_with_id(
-        document: ConversationDocument,
-        turn_id: str,
-    ) -> ConversationTurn | None:
-        for turn in document.turns:
-            if turn.turn_id == turn_id:
-                return turn
-        return None
 
     @classmethod
     def _required_turn(

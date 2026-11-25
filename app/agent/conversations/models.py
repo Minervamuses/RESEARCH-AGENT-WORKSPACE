@@ -465,6 +465,10 @@ class ConversationDocument:
         if any(type(turn) is not ConversationTurn for turn in self.turns):
             _invalid("turns must contain ConversationTurn values")
 
+    def turn(self, turn_id: str) -> ConversationTurn | None:
+        """Return the turn with *turn_id*, or None when it is absent."""
+        return next((turn for turn in self.turns if turn.turn_id == turn_id), None)
+
 
 @dataclass(frozen=True)
 class ConversationSummary:

@@ -316,16 +316,6 @@ class ChatSession:
         self._recover_interrupted_turn()
         return self._conversation_snapshot
 
-    @staticmethod
-    def _turn_from_snapshot(
-        snapshot: ConversationSnapshot,
-        turn_id: str,
-    ):
-        return next(
-            (turn for turn in snapshot.document.turns if turn.turn_id == turn_id),
-            None,
-        )
-
     async def _begin_persisted_turn(
         self,
         *,
@@ -364,7 +354,7 @@ class ChatSession:
             self._notify_prompt_persisted()
             return snapshot, snapshot.document.turns[-1], False
 
-        existing = self._turn_from_snapshot(snapshot, turn_id)
+        existing = snapshot.document.turn(turn_id)
         if existing is not None:
             snapshot = await asyncio.to_thread(
                 self.conversation_repository.append_pending,
@@ -372,7 +362,7 @@ class ChatSession:
                 submitted_at=submitted_at,
                 **values,
             )
-            existing = self._turn_from_snapshot(snapshot, turn_id)
+            existing = snapshot.document.turn(turn_id)
             assert existing is not None
             if existing.state == "completed":
                 self._notify_prompt_persisted()
@@ -393,7 +383,7 @@ class ChatSession:
                 retry_at=submitted_at,
                 **values,
             )
-            retried = self._turn_from_snapshot(snapshot, turn_id)
+            retried = snapshot.document.turn(turn_id)
             assert retried is not None
             self._notify_prompt_persisted()
             return snapshot, retried, False
@@ -440,7 +430,7 @@ class ChatSession:
         turn_id = self._active_turn_id
         if snapshot is None or turn_id is None:
             return
-        turn = self._turn_from_snapshot(snapshot, turn_id)
+        turn = snapshot.document.turn(turn_id)
         if turn is None or turn.state != "pending":
             return
         try:
@@ -850,7 +840,7 @@ class ChatSession:
         ))
         self._conversation_snapshot = completed
         self._active_turn_snapshot = completed
-        completed_turn = self._turn_from_snapshot(completed, turn_id)
+        completed_turn = completed.document.turn(turn_id)
         assert completed_turn is not None
         # Non-authoritative diagnostics, recorded only after durable completion.
         self._turn_journal.observe_turn(tool_calls=tool_calls)
@@ -1231,7 +1221,7 @@ class ChatSession:
                 ))
                 self._conversation_snapshot = completed
                 self._active_turn_snapshot = completed
-                completed_turn = self._turn_from_snapshot(completed, turn_id)
+                completed_turn = completed.document.turn(turn_id)
                 assert completed_turn is not None
                 return raw_result, TurnOutcome(
                     text=final_text,
