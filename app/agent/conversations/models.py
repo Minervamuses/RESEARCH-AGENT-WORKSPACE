@@ -134,6 +134,14 @@ def _validate_positive_integer(value: object, field: str) -> int:
     return value
 
 
+def truncate_utf8(value: str, maximum_bytes: int) -> str:
+    """Return *value* cut to at most *maximum_bytes* UTF-8 bytes, never mid-character."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= maximum_bytes:
+        return value
+    return encoded[:maximum_bytes].decode("utf-8", errors="ignore")
+
+
 def is_canonical_uuid4_hex(value: object) -> bool:
     """Return whether *value* is a lowercase RFC 4122 UUIDv4 hex string."""
     if type(value) is not str or _UUID4_HEX_RE.fullmatch(value) is None:

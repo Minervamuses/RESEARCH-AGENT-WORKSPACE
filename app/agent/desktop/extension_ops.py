@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 from agent.cli.slash_commands import ParsedSlashCommand, SlashCommandResult
+from agent.conversations import truncate_utf8
 from agent.extensions.manager import ApplyReport, ExtensionPreview, ExtensionStatus
 from agent.ingest import run_local_work
 from agent.session import ONE_SHOT_DISPLAY_INPUT_PREFIX
@@ -337,7 +338,7 @@ class _ExtensionOps:
             f"{operation}={count}"
             for operation, count in sorted(operation_counts.items())
         ]
-        summary = self._bounded_text(
+        summary = truncate_utf8(
             (
                 f"{len(changed)} extension change(s): " + ", ".join(summary_parts)
                 if changed

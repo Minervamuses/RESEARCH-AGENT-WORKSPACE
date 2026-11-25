@@ -15,7 +15,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 
 from agent.config import AgentConfig
-from agent.conversations import ConversationRepository
+from agent.conversations import ConversationRepository, truncate_utf8
 from agent.cli.slash_commands import SlashCommandRegistry
 from agent.diagnostics import attach_incident, incident_reference
 from agent.desktop.project import ProjectError
@@ -270,7 +270,7 @@ class DesktopService(_ProjectOps, _ConversationOps, _TurnOps, _TurnContextOps, _
         )
         mcp_diagnostics = (
             [
-                self._bounded_text(str(item), 4_096)
+                truncate_utf8(str(item), 4_096)
                 for item in session.extension_startup_diagnostics[:512]
                 if str(item)
             ]
@@ -446,13 +446,6 @@ class DesktopService(_ProjectOps, _ConversationOps, _TurnOps, _TurnContextOps, _
             timespec="milliseconds"
         ).replace("+00:00", "Z")
 
-
-    @staticmethod
-    def _bounded_text(text: str, max_bytes: int) -> str:
-        encoded = text.encode("utf-8")
-        if len(encoded) <= max_bytes:
-            return text
-        return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
     @staticmethod
     def _bounded_cache_insert(cache: dict[str, Any], key: str, value: Any) -> None:

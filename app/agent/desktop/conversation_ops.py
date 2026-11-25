@@ -13,6 +13,7 @@ from agent.conversations import (
     ConversationError,
     ConversationSnapshot,
     ConversationUnavailableError,
+    truncate_utf8,
 )
 from agent.conversations.models import MAX_TITLE_BYTES
 from agent.cli.slash_commands import SlashCommand, SlashCommandRegistry, build_default_registry
@@ -320,7 +321,7 @@ class _ConversationOps:
         if cleanup.get("cleanup_conflict"):
             raise DesktopServiceError(
                 "SESSION_NOT_READY",
-                self._bounded_text(
+                truncate_utf8(
                     f"Installation cleanup stopped: {cleanup.get('cleanup_detail')}. "
                     f"Preserved backup: {cleanup.get('backup_path')}", 4_096,
                 ),
@@ -468,17 +469,17 @@ class _ConversationOps:
             "thinkingMode": session.thinking_mode,
             "permissionMode": self._permission_mode,
             "slashCommands": [
-                {"name": command.name, "description": self._bounded_text(command.description, 1_024)}
+                {"name": command.name, "description": truncate_utf8(command.description, 1_024)}
                 for command in commands
             ],
             "loadedSkills": [
-                self._bounded_text(skill.name, 256)
+                truncate_utf8(skill.name, 256)
                 for skill in session.loaded_skills[:512]
                 if skill.name
             ],
             "mcpFamilies": sorted(set(session.mcp_families.values()))[:512],
             "startupDiagnostics": [
-                self._bounded_text(str(item), 4_096)
+                truncate_utf8(str(item), 4_096)
                 for item in session.extension_startup_diagnostics[:512]
                 if str(item)
             ],

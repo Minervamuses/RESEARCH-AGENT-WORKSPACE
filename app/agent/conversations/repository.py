@@ -28,6 +28,7 @@ from agent.conversations.models import (
     FailureInfo,
     InvalidTransitionError,
     ToolActivitySummary,
+    truncate_utf8,
     validate_conversation_id,
     validate_document,
     validate_turn_id,
@@ -335,13 +336,6 @@ def _same_logical_input(
         and turn.thinking_mode == thinking_mode
         and turn.submitted_context == submitted_context
     )
-
-
-def _truncate_utf8(value: str, maximum_bytes: int) -> str:
-    encoded = value.encode("utf-8")
-    if len(encoded) <= maximum_bytes:
-        return value
-    return encoded[:maximum_bytes].decode("utf-8", errors="ignore")
 
 
 class ConversationRepository:
@@ -759,7 +753,7 @@ class ConversationRepository:
                     continue
                 collapsed = " ".join(turn.display_input.split())
                 if collapsed:
-                    title = _truncate_utf8(collapsed, MAX_TITLE_BYTES)
+                    title = truncate_utf8(collapsed, MAX_TITLE_BYTES)
                     break
         return ConversationSummary(
             conversation_id=snapshot.document.conversation_id,

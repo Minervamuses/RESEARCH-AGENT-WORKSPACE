@@ -11,7 +11,12 @@ from uuid import RFC_4122, UUID
 
 from agent.diagnostics import redact_text
 from agent.paths import find_app_root
-from agent.conversations import ConversationValidationError, validate_submitted_context
+from agent.conversations import (
+    ConversationValidationError,
+    is_canonical_uuid4_hex,
+    truncate_utf8,
+    validate_submitted_context,
+)
 
 
 PROTOCOL_DIR = find_app_root() / "desktop" / "protocol" / "v1"
@@ -101,16 +106,7 @@ def validate_request_id(value: Any) -> str:
 def validate_turn_id(value: Any, field: str = "turnId") -> str:
     """Return a canonical lowercase UUIDv4 hex logical turn ID."""
     turn_id = _expect_string(value, field)
-    try:
-        parsed = UUID(turn_id)
-    except ValueError:
-        _invalid(f"{field} must be a canonical UUIDv4 hex value")
-    if (
-        len(turn_id) != 32
-        or parsed.hex != turn_id
-        or parsed.variant != RFC_4122
-        or parsed.version != 4
-    ):
+    if not is_canonical_uuid4_hex(turn_id):
         _invalid(f"{field} must be a canonical UUIDv4 hex value")
     return turn_id
 
@@ -645,10 +641,7 @@ def bounded_error_message(message: str) -> str:
     text = redact_text(message) if message else "Protocol error."
     if not text:
         text = "Protocol error."
-    encoded = text.encode("utf-8")
-    if len(encoded) <= maximum:
-        return text
-    return encoded[:maximum].decode("utf-8", errors="ignore") or "Protocol error."
+    return truncate_utf8(text, maximum) or "Protocol error."
 
 
 def encode_message(message: dict[str, Any]) -> str:

@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 from langchain_core.messages import AIMessage, ToolMessage
-from agent.conversations import MAX_INPUT_BYTES, ConversationError
+from agent.conversations import MAX_INPUT_BYTES, ConversationError, truncate_utf8
 from agent.cli.slash_commands import (
     SlashCommandContext,
     SlashCommandError,
@@ -97,7 +97,7 @@ class _TurnOps:
 
     def _validation_error_dtos(self, errors: list[Any]) -> list[str]:
         return [
-            self._bounded_text(str(item), 4_096)
+            truncate_utf8(str(item), 4_096)
             for item in errors[:128]
             if str(item)
         ]
@@ -259,7 +259,7 @@ class _TurnOps:
             except SlashCommandError as exc:
                 raise DesktopServiceError(
                     "PROTOCOL_INVALID",
-                    self._bounded_text(str(exc), 4_096),
+                    truncate_utf8(str(exc), 4_096),
                 ) from exc
 
             if parsed is not None:
@@ -268,7 +268,7 @@ class _TurnOps:
                 if command is None:
                     raise DesktopServiceError(
                         "PROTOCOL_INVALID",
-                        f"Unknown slash command: /{self._bounded_text(parsed.name, 256)}",
+                        f"Unknown slash command: /{truncate_utf8(parsed.name, 256)}",
                     )
                 completed_citation = False
                 if command.name == "citation":
@@ -302,11 +302,11 @@ class _TurnOps:
                     except SlashCommandError as exc:
                         raise DesktopServiceError(
                             "PROTOCOL_INVALID",
-                            self._bounded_text(str(exc), 4_096),
+                            truncate_utf8(str(exc), 4_096),
                         ) from exc
                     if command.name == "citation" and result.followup_input is None:
                         raise DesktopServiceError(
-                            "PROTOCOL_INVALID", self._bounded_text(result.message, 4_096),
+                            "PROTOCOL_INVALID", truncate_utf8(result.message, 4_096),
                         )
                     if (
                         result.should_exit
@@ -354,7 +354,7 @@ class _TurnOps:
                                 "PROTOCOL_INVALID",
                                 "That slash-command result is not supported by the desktop composer.",
                             )
-                        message = self._bounded_text(
+                        message = truncate_utf8(
                             str(result.message),
                             _MAX_LOCAL_COMMAND_BYTES,
                         )
@@ -377,7 +377,7 @@ class _TurnOps:
                     except SlashCommandError as exc:
                         raise DesktopServiceError(
                             "PROTOCOL_INVALID",
-                            self._bounded_text(str(exc), 4_096),
+                            truncate_utf8(str(exc), 4_096),
                         ) from exc
                     if (
                         outcome.turn_id != turn_id
@@ -552,7 +552,7 @@ class _TurnOps:
     def _stop_cleanup_error(self, exc: BaseException) -> DesktopServiceError:
         return DesktopServiceError(
             "INTERNAL_ERROR",
-            self._bounded_text(f"The turn's local work could not finish stopping: {exc}", 1_024),
+            truncate_utf8(f"The turn's local work could not finish stopping: {exc}", 1_024),
         )
 
     async def _retry_stop(self, owner: _TurnWork) -> None:
@@ -637,8 +637,8 @@ class _TurnOps:
                     call_id = str(call.get("id", "")).strip()
                     if not name:
                         continue
-                    name = self._bounded_text(name, 256)
-                    call_id = self._bounded_text(call_id, 256) if call_id else ""
+                    name = truncate_utf8(name, 256)
+                    call_id = truncate_utf8(call_id, 256) if call_id else ""
                     if call_id:
                         turn.tool_names[call_id] = name
                     data: dict[str, Any] = {"name": name, "status": "started"}
@@ -652,8 +652,8 @@ class _TurnOps:
             name = str(message.name or turn.tool_names.get(call_id, "")).strip()
             if not name:
                 continue
-            name = self._bounded_text(name, 256)
-            call_id = self._bounded_text(call_id, 256) if call_id else ""
+            name = truncate_utf8(name, 256)
+            call_id = truncate_utf8(call_id, 256) if call_id else ""
             status = self._tool_message_status(message)
             summary: dict[str, str] = {"name": name, "status": status}
             if call_id:

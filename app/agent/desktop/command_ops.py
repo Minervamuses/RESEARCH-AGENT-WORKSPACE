@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from agent.config import AgentConfig
+from agent.conversations import truncate_utf8
 from agent.cli.slash_commands import ParsedSlashCommand, SlashCommandResult
 from agent.extensions.paths import resolve_extension_paths
 from agent.ingest import diff_folder, ingest_file, ingest_folder, init_workspace, prune_folder
@@ -119,7 +120,7 @@ class _KnowledgeCommandOps:
         files = self._knowledge_count(files, "file")
         chunks = self._knowledge_count(chunks, "chunk")
         excluded_names = self._knowledge_string_items(excluded, "excluded name")
-        root = self._bounded_text(str(host_root), _MAX_KNOWLEDGE_PATH_BYTES)
+        root = truncate_utf8(str(host_root), _MAX_KNOWLEDGE_PATH_BYTES)
         excluded_text = ", ".join(excluded_names) or "none"
         return self._knowledge_result(
             (
@@ -168,7 +169,7 @@ class _KnowledgeCommandOps:
                     "The selected file contains no indexable UTF-8 text.",
                     details={"partialWritePossible": True},
                 )
-            safe_pid = self._bounded_text(str(pid), _MAX_KNOWLEDGE_PATH_BYTES)
+            safe_pid = truncate_utf8(str(pid), _MAX_KNOWLEDGE_PATH_BYTES)
             if not safe_pid:
                 raise DesktopServiceError(
                     "RAG_WRITE_FAILED",
