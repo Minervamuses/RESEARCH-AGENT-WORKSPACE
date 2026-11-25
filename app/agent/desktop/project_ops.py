@@ -113,7 +113,6 @@ class _ProjectOps:
             self._conversation_repository = repository
             self._project = project
             self._selected_project_id = project["projectId"]
-            self._project_epoch += 1
             self._document_candidates.clear()
             self._approval_document_snapshots.clear()
             return {**project, "status": "opened"}

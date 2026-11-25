@@ -91,7 +91,6 @@ class DesktopService(_ProjectOps, _ConversationOps, _TurnOps, _TurnContextOps, _
         self._workspace_opening = False
         self._project_operation_count = 0
         self._project_read_count = 0
-        self._project_epoch = 0
         # Whether the current session's conversation has a saved prompt, so it
         # appears in the project's conversation list.
         self._session_saved = False
