@@ -257,6 +257,25 @@ export default function App() {
   const ownsOperation = useCallback((owner: WorkspaceOperationOwner, current: WorkspaceOperationOwner | null) =>
     ownsWorkspaceOperation(owner, current, generationRef.current, projectEpochRef.current), []);
 
+  /** Claim the single document operation slot and mark the editor busy. */
+  const beginDocumentOperation = useCallback((label: string): WorkspaceOperationOwner => {
+    const owner = captureOwner(label);
+    documentOperationRef.current = owner;
+    frameOwnerRef.current = null;
+    documentBusyRef.current = true;
+    setDocumentBusy(true);
+    return owner;
+  }, [captureOwner]);
+
+  /** Release the slot if *owner* still holds it; returns whether it did. */
+  const endDocumentOperation = useCallback((owner: WorkspaceOperationOwner): boolean => {
+    if (!ownsOperation(owner, documentOperationRef.current)) return false;
+    documentOperationRef.current = null;
+    documentBusyRef.current = false;
+    setDocumentBusy(false);
+    return true;
+  }, [ownsOperation]);
+
   /** Route an `approval.required` through the owner module; a newly shown approval resets the pending frame owner. */
   const acceptApproval = useCallback((generation: number, requestId: string, turnRequestId: string | null,
       data: Parameters<typeof receiveApprovalEvent>[1]["data"]) => {
@@ -351,11 +370,7 @@ export default function App() {
         bindingGenerationRef.current !== generationRef.current) return Promise.resolve();
     const captured = documentOperationContext(current, action.sourceSnapshot);
     const pending = (async () => {
-      const owner = captureOwner("document.apply");
-      documentOperationRef.current = owner;
-      frameOwnerRef.current = null;
-      documentBusyRef.current = true;
-      setDocumentBusy(true);
+      const owner = beginDocumentOperation("document.apply");
       try {
         const { sourceSnapshot: _sourceSnapshot, ...requestAction } = action;
         const tracked = api.documentApplyTracked({
@@ -369,10 +384,7 @@ export default function App() {
       } catch (error) {
         if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your text is retained; check disk before retrying.");
       } finally {
-        if (ownsOperation(owner, documentOperationRef.current)) {
-          documentOperationRef.current = null;
-          documentBusyRef.current = false;
-          setDocumentBusy(false);
+        if (endDocumentOperation(owner)) {
           const requestId = documentRequestRef.current?.requestId;
           documentRequestRef.current = null;
           commitApproval(finishApprovalRequest(approvalRef.current, "document", requestId));
@@ -381,7 +393,7 @@ export default function App() {
     })().finally(() => { if (documentApplyPromiseRef.current === pending) documentApplyPromiseRef.current = null; });
     documentApplyPromiseRef.current = pending;
     return pending;
-  }, [captureOwner, commitApproval, ownsOperation, receiveDocumentResult]);
+  }, [beginDocumentOperation, commitApproval, endDocumentOperation, ownsOperation, receiveDocumentResult]);
 
   const requestCitationAdd = useCallback(async (identifier: string): Promise<BibliographyAddDto> => {
     const tracked = api.bibliographyAddTracked({ identifier });
@@ -396,11 +408,7 @@ export default function App() {
   const openDocument = useCallback(async () => {
     if (projectRef.current === null || bindingGenerationRef.current !== generationRef.current || workspaceOperation.current !== null ||
         conversationRef.current.activeTurn !== null || conversationRef.current.stopRequest !== null || documentBusyRef.current || approvalRef.current.pending !== null) return;
-    const owner = captureOwner("document.open");
-    documentOperationRef.current = owner;
-    frameOwnerRef.current = null;
-    documentBusyRef.current = true;
-    setDocumentBusy(true);
+    const owner = beginDocumentOperation("document.open");
     try {
       const path = await api.pickDocument(projectRef.current.rootPath);
       if (path === null || !ownsOperation(owner, documentOperationRef.current)) return;
@@ -420,23 +428,15 @@ export default function App() {
     } catch (error) {
       if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message);
     } finally {
-      if (ownsOperation(owner, documentOperationRef.current)) {
-        documentOperationRef.current = null;
-        documentBusyRef.current = false;
-        setDocumentBusy(false);
-      }
+      endDocumentOperation(owner);
     }
-  }, [captureOwner, ownsOperation, updateDocument]);
+  }, [beginDocumentOperation, endDocumentOperation, ownsOperation, updateDocument]);
 
   const saveDocument = useCallback(async (parentOperation: WorkspaceOperationOwner | null = null) => {
     const captured = documentRef.current;
     if (captured === null || documentBusyRef.current || bindingGenerationRef.current !== generationRef.current ||
         (workspaceOperation.current !== null && workspaceOperation.current !== parentOperation)) return false;
-    const owner = captureOwner("document.save");
-    documentOperationRef.current = owner;
-    frameOwnerRef.current = null;
-    documentBusyRef.current = true;
-    setDocumentBusy(true);
+    const owner = beginDocumentOperation("document.save");
     try {
       const result = await api.documentSave({ documentContext: documentContextPayload(captured) });
       if (!ownsOperation(owner, documentOperationRef.current)) return false;
@@ -446,13 +446,9 @@ export default function App() {
       if (ownsOperation(owner, documentOperationRef.current)) setDocumentNotice(workspaceError(error).message + " Your editor text is retained.");
       return false;
     } finally {
-      if (ownsOperation(owner, documentOperationRef.current)) {
-        documentOperationRef.current = null;
-        documentBusyRef.current = false;
-        setDocumentBusy(false);
-      }
+      endDocumentOperation(owner);
     }
-  }, [captureOwner, ownsOperation, receiveDocumentResult]);
+  }, [beginDocumentOperation, endDocumentOperation, ownsOperation, receiveDocumentResult]);
 
   const resolveDocumentConflict = useCallback(async (resolution: "keep" | "use" | "cancel") => {
     if (documentConflict === null) return;
