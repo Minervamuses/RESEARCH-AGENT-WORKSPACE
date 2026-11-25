@@ -31,7 +31,7 @@ _UTC_TIMESTAMP = re.compile(
 )
 _MAX_SAFE_DATA_DEPTH = 64
 _TURN_ERROR_DETAIL_KEYS = frozenset(CONTRACT["turnErrorDetailsSchema"])
-_DURABLE_TURN_METHODS = frozenset({"session.turn", "extensions.apply"})
+DURABLE_TURN_METHODS = frozenset({"session.turn", "extensions.apply"})
 
 
 class ProtocolError(ValueError):
@@ -364,7 +364,7 @@ def validate_result_data(method: str, data: dict[str, Any]) -> None:
             _validate_document_range(data["expectedSnapshot"], "data.expectedSnapshot", source=True)
     if method == "bibliography.export" and (data["format"] == "bime_docx") != ("audit" in data):
         _invalid("bibliography.export returns audit exactly for bime_docx")
-    if method in _DURABLE_TURN_METHODS and (
+    if method in DURABLE_TURN_METHODS and (
         data.get("state") != "completed"
         or data.get("accepted") is not True
         or data.get("persisted") is not True

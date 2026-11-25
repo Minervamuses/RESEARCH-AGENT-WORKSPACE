@@ -19,7 +19,7 @@ from agent.conversations import ConversationRepository, truncate_utf8
 from agent.cli.slash_commands import SlashCommandRegistry
 from agent.diagnostics import attach_incident, incident_reference
 from agent.desktop.project import ProjectError
-from agent.desktop.protocol import PROTOCOL_VERSION
+from agent.desktop.protocol import DURABLE_TURN_METHODS, PROTOCOL_VERSION
 from agent.desktop.documents import DocumentError, DocumentWorkspace
 from agent.extensions.manager import ExtensionManager, ExtensionPreview
 from agent.ingest import diff_folder, ingest_file, ingest_folder, init_workspace, prune_folder
@@ -221,7 +221,7 @@ class DesktopService(_ProjectOps, _ConversationOps, _TurnOps, _TurnContextOps, _
                 error = self._with_turn_lifecycle(error, method, params)
             raise error from exc
         except DesktopServiceError as exc:
-            if method in {"session.turn", "extensions.apply"}:
+            if method in DURABLE_TURN_METHODS:
                 raise self._with_turn_lifecycle(exc, method, params) from exc
             raise
         except Exception as exc:
@@ -251,7 +251,7 @@ class DesktopService(_ProjectOps, _ConversationOps, _TurnOps, _TurnContextOps, _
                     retryable=mapped.retryable,
                     details=mapped.details,
                 )
-            if method in {"session.turn", "extensions.apply"}:
+            if method in DURABLE_TURN_METHODS:
                 mapped = self._with_turn_lifecycle(mapped, method, params)
             raise mapped from exc
         finally:

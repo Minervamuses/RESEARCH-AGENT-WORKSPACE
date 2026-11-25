@@ -12,6 +12,7 @@ from typing import Any, BinaryIO, Callable, TextIO
 
 from agent.cli.runtime import CondaRuntimeError, require_conda_runtime
 from agent.desktop.protocol import (
+    DURABLE_TURN_METHODS,
     MAX_PROTOCOL_LINE_BYTES,
     ProtocolError,
     bounded_error_message,
@@ -308,7 +309,7 @@ class DesktopServer:
         except asyncio.CancelledError:
             if not context._terminal:
                 details = None
-                if context.method in {"session.turn", "extensions.apply"}:
+                if context.method in DURABLE_TURN_METHODS:
                     details = {
                         "turnId": params["turnId"], "state": None,
                         "accepted": False, "persisted": False,
