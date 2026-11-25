@@ -151,6 +151,11 @@ def has_current_snapshot(text: str | None) -> bool:
     )
 
 
+def utf16_length(text: str) -> int:
+    """Return the editor's UTF-16 code-unit length."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 def _utf16_prefix_index(text: str, offset: object) -> int | None:
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
         return None
@@ -177,7 +182,7 @@ def _snapshot_placeholder(snapshot: dict, turn_number: int) -> dict:
         "sourceTextChars": len(source),
     }
     start = snapshot.get("rangeStartUtf16", 0)
-    end = snapshot.get("rangeEndUtf16", len(source.encode("utf-16-le")) // 2)
+    end = snapshot.get("rangeEndUtf16", utf16_length(source))
     left = _utf16_prefix_index(source, start)
     right = _utf16_prefix_index(source, end)
     if left is not None and right is not None and left <= right:
@@ -315,7 +320,7 @@ def compact_edit_result(result: dict) -> dict | None:
         return None
     if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
         return None
-    length = len(source.encode("utf-16-le")) // 2
+    length = utf16_length(source)
     compact = {key: value for key, value in result.items() if key != "sourceText"}
     compact["documentLengthUtf16"] = length
     if not (start == 0 and end == length):

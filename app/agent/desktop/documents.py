@@ -11,6 +11,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from agent.document_context import utf16_length
+
 MAX_TEXT_BYTES = 1_048_576
 MAX_PATH_BYTES = 8192
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
@@ -53,11 +55,6 @@ def utf16_to_index(text: str, offset: int) -> int:
     if position == offset:
         return len(text)
     raise DocumentError("document range is outside sourceText")
-
-
-def utf16_length(text: str) -> int:
-    """Return the editor's UTF-16 code-unit length."""
-    return len(text.encode("utf-16-le")) // 2
 
 
 def resolve_line_range(source: str, start_line: int, end_line: int) -> tuple[int, int]:

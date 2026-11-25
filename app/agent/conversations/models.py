@@ -11,6 +11,8 @@ from pathlib import PurePosixPath
 from typing import Any, Literal
 from uuid import RFC_4122, UUID
 
+from agent.document_context import utf16_length
+
 
 SCHEMA_VERSION = 3
 LATEST_CONTEXT_TURNS = 10
@@ -323,7 +325,7 @@ def validate_submitted_context(value: object) -> dict[str, Any] | None:
             _context_fingerprint(chat["messageFingerprint"], "messageFingerprint")
             start = _context_integer(chat["startUtf16"], "chat.startUtf16")
             end = _context_integer(chat["endUtf16"], "chat.endUtf16")
-            if end <= start or end - start != len(frozen.encode("utf-16-le")) // 2:
+            if end <= start or end - start != utf16_length(frozen):
                 _invalid("chat reference range does not match its selected text length")
     return json.loads(encoded)
 

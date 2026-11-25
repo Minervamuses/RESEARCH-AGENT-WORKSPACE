@@ -10,6 +10,7 @@ from typing import Any, Collection, Mapping, Sequence
 import yaml
 
 from agent.config import AgentConfig
+from agent.document_context import utf16_length
 from agent.skills.broker import resolve_skill_tool_access
 from agent.skills.manifest_schema import validate_skill_manifest
 from agent.skills.metadata import SkillMetadata, discover_skills, load_skill_file
@@ -279,8 +280,8 @@ def resolve_skill_references(
         for match in pattern.finditer(text):
             parsed.append({
                 "name": match[1],
-                "startUtf16": len(text[:match.start()].encode("utf-16-le")) // 2,
-                "endUtf16": len(text[:match.end()].encode("utf-16-le")) // 2,
+                "startUtf16": utf16_length(text[:match.start()]),
+                "endUtf16": utf16_length(text[:match.end()]),
             })
     for reference in references or ():
         if reference.get("name") not in by_name:

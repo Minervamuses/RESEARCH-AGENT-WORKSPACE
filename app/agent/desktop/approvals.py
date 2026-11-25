@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from agent.desktop.documents import utf16_to_index
+from agent.desktop.documents import utf16_length, utf16_to_index
 from agent.extensions.paths import resolve_extension_paths
 from agent.ingest import current_local_work
 from agent.desktop.errors import DesktopServiceError, EventSink
@@ -193,7 +193,7 @@ class _ApprovalOps:
         turn_id: str, operation: str, context: dict[str, Any], permission_mode: str,
     ) -> tuple[bool, dict[str, Any]]:
         range_start = context.get("rangeStartUtf16", 0)
-        range_end = context.get("rangeEndUtf16", len(context["sourceText"].encode("utf-16-le")) // 2)
+        range_end = context.get("rangeEndUtf16", utf16_length(context["sourceText"]))
         source_start = utf16_to_index(context["sourceText"], range_start)
         source_end = utf16_to_index(context["sourceText"], range_end)
         first_line = len(re.findall(r"\r\n|\r|\n", context["sourceText"][:source_start])) + 1

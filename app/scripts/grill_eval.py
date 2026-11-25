@@ -260,10 +260,6 @@ def validate_observations(observations: dict) -> None:
 FIRST_PROMPT = "@grill 請檢查選取的段落。"
 
 
-def _utf16(text: str) -> int:
-    return len(text.encode("utf-16-le")) // 2
-
-
 class _EventSink:
     """Collect turn events; refuse every approval so nothing runs with side effects."""
 
@@ -305,6 +301,7 @@ async def run_case(
     import agent.tools.inventory
     from agent.config import AgentConfig
     from agent.desktop.service import DesktopService, DesktopServiceError
+    from agent.document_context import utf16_length
     from agent.skills.runtime import resolve_skill_references
 
     work = out_dir / "work" / case["id"]
@@ -336,8 +333,8 @@ async def run_case(
         diagnostics = await service.dispatch("runtime.diagnostics", {})
         opened = await service.dispatch("document.open", {"path": str(document_path)})
         before = document_path.read_bytes()
-        start = _utf16(case["document"][:case["document"].index(case["selection"])])
-        context = {**opened, "rangeStartUtf16": start, "rangeEndUtf16": start + _utf16(case["selection"])}
+        start = utf16_length(case["document"][:case["document"].index(case["selection"])])
+        context = {**opened, "rangeStartUtf16": start, "rangeEndUtf16": start + utf16_length(case["selection"])}
         prompts = [FIRST_PROMPT] + [f"@grill {turn['text']}" for turn in case["author_turns"]]
         for index, text in enumerate(prompts[:max(1, max_rounds)], start=1):
             sink = _EventSink(service, context)
