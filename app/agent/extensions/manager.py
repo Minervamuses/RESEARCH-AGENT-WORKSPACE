@@ -36,6 +36,7 @@ from agent.extensions.mcp_manifest import (
     resolve_mcp_candidate,
 )
 from agent.extensions.models import (
+    AppliedExtension,
     ExtensionChange,
     ExtensionDiff,
     ExtensionRegistry,
@@ -519,124 +520,19 @@ class ExtensionManager:
         results: list[ApplyItemResult] = []
         changed = False
         for change in diff.changes:
-            if change.operation == "unchanged":
-                results.append(
-                    ApplyItemResult(change.key, "unchanged", "source hash unchanged")
-                )
-                continue
-            plan_item = plan_by_key[change.key]
-            if change.operation in {"blocked", "guarded"} or plan_item.decision == "block":
-                results.append(
-                    ApplyItemResult(
-                        change.key,
-                        "blocked",
-                        plan_item.reason or change.reason or "blocked by management plan",
-                    )
-                )
-                continue
-            if change.key in preview.host_blocks:
-                results.append(
-                    ApplyItemResult(
-                        change.key,
-                        "blocked",
-                        preview.host_blocks[change.key],
-                    )
-                )
-                continue
-            if change.operation == "delete":
-                if change.key in extensions:
-                    extensions.pop(change.key)
-                    changed = True
-                results.append(
-                    ApplyItemResult(change.key, "removed", plan_item.summary)
-                )
-                continue
-            desired = change.desired
-            if desired is None:
-                raise ManagementError(f"missing desired item for {change.key}")
-            if desired.kind == "mcp":
-                candidate = preview.mcp_candidates.get(change.key)
-                if candidate is None:
-                    results.append(
-                        ApplyItemResult(
-                            change.key,
-                            "blocked",
-                            "MCP launch candidate is unavailable",
-                        )
-                    )
-                    continue
-                if candidate.binding_hash not in approved_mcp_bindings:
-                    results.append(
-                        ApplyItemResult(
-                            change.key,
-                            "pending_approval",
-                            "exact MCP command binding was not approved",
-                        )
-                    )
-                    continue
-                try:
-                    installed = install_scanned_extension(
-                        desired,
-                        state_root=preview.paths.state_root,
-                        config=self.config,
-                    )
-                    installed_root = (
-                        preview.paths.state_root
-                        / installed.installed_relpath
-                    )
-                    verified = resolve_mcp_candidate(
-                        candidate.descriptor,
-                        bundle=installed_root,
-                        source_hash=installed.source_hash,
-                    )
-                    if verified.binding_hash != candidate.binding_hash:
-                        raise ManagementError(
-                            "MCP binding changed while installing"
-                        )
-                except (OSError, RegistryError, MCPManifestError) as exc:
-                    results.append(
-                        ApplyItemResult(change.key, "blocked", str(exc))
-                    )
-                    continue
-                installed = installed.model_copy(
-                    update={
-                        "mcp_descriptor": candidate.descriptor.model_dump(
-                            mode="json"
-                        ),
-                        "command_binding_hash": candidate.binding_hash,
-                        "execution_approved": True,
-                    }
-                )
+            result, installed = self._apply_change(
+                change,
+                plan_by_key,
+                preview,
+                approved_mcp_bindings=approved_mcp_bindings,
+            )
+            results.append(result)
+            if installed is not None:
                 extensions[change.key] = installed
                 changed = True
-                results.append(
-                    ApplyItemResult(
-                        change.key,
-                        "added" if change.operation == "add" else "updated",
-                        plan_item.summary,
-                    )
-                )
-                continue
-            try:
-                installed = install_scanned_extension(
-                    desired,
-                    state_root=preview.paths.state_root,
-                    config=self.config,
-                )
-            except (OSError, RegistryError) as exc:
-                results.append(
-                    ApplyItemResult(change.key, "blocked", str(exc))
-                )
-                continue
-            extensions[change.key] = installed
-            changed = True
-            results.append(
-                ApplyItemResult(
-                    change.key,
-                    "added" if change.operation == "add" else "updated",
-                    plan_item.summary,
-                )
-            )
+            elif result.outcome == "removed" and change.key in extensions:
+                extensions.pop(change.key)
+                changed = True
 
         root = str(preview.paths.dropin_root.resolve())
         root_changed = latest.source_root != root
@@ -661,6 +557,76 @@ class ExtensionManager:
             restart_required=True,
             items=tuple(results),
             diagnostics=diff.diagnostics,
+        )
+
+    def _apply_change(
+        self,
+        change: ExtensionChange,
+        plan_by_key: dict[str, PlanItem],
+        preview: ExtensionPreview,
+        *,
+        approved_mcp_bindings: frozenset[str],
+    ) -> tuple[ApplyItemResult, AppliedExtension | None]:
+        """Decide one diff change; return its result and any extension to record.
+
+        A "removed" result tells the caller to drop the key; the helper never
+        touches the registry itself.
+        """
+        key = change.key
+        if change.operation == "unchanged":
+            return ApplyItemResult(key, "unchanged", "source hash unchanged"), None
+        plan_item = plan_by_key[key]
+        if change.operation in {"blocked", "guarded"} or plan_item.decision == "block":
+            reason = plan_item.reason or change.reason or "blocked by management plan"
+            return ApplyItemResult(key, "blocked", reason), None
+        if key in preview.host_blocks:
+            return ApplyItemResult(key, "blocked", preview.host_blocks[key]), None
+        if change.operation == "delete":
+            return ApplyItemResult(key, "removed", plan_item.summary), None
+        desired = change.desired
+        if desired is None:
+            raise ManagementError(f"missing desired item for {key}")
+        applied = ApplyItemResult(
+            key,
+            "added" if change.operation == "add" else "updated",
+            plan_item.summary,
+        )
+        state_root = preview.paths.state_root
+        if desired.kind != "mcp":
+            try:
+                installed = install_scanned_extension(
+                    desired, state_root=state_root, config=self.config
+                )
+            except (OSError, RegistryError) as exc:
+                return ApplyItemResult(key, "blocked", str(exc)), None
+            return applied, installed
+
+        candidate = preview.mcp_candidates.get(key)
+        if candidate is None:
+            return ApplyItemResult(key, "blocked", "MCP launch candidate is unavailable"), None
+        if candidate.binding_hash not in approved_mcp_bindings:
+            return ApplyItemResult(
+                key, "pending_approval", "exact MCP command binding was not approved"
+            ), None
+        try:
+            installed = install_scanned_extension(
+                desired, state_root=state_root, config=self.config
+            )
+            verified = resolve_mcp_candidate(
+                candidate.descriptor,
+                bundle=state_root / installed.installed_relpath,
+                source_hash=installed.source_hash,
+            )
+            if verified.binding_hash != candidate.binding_hash:
+                raise ManagementError("MCP binding changed while installing")
+        except (OSError, RegistryError, MCPManifestError) as exc:
+            return ApplyItemResult(key, "blocked", str(exc)), None
+        return applied, installed.model_copy(
+            update={
+                "mcp_descriptor": candidate.descriptor.model_dump(mode="json"),
+                "command_binding_hash": candidate.binding_hash,
+                "execution_approved": True,
+            }
         )
 
     def status(
