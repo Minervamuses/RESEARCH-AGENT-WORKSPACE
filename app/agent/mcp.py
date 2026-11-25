@@ -538,8 +538,7 @@ async def load_mcp_tools_with_families(
         claimed_names = {*base_tool_names(), "citation_workflow"}
     else:
         claimed_names = set(reserved_tool_names)
-    loaded: list[tuple[MCPServerSpec, list, tuple[str, ...]]] = []
-    for spec in specs:
+    async def discover(spec: MCPServerSpec) -> tuple[list | None, str, Exception | None]:
         stage = "prepare"
         try:
             connections = {spec.name: _spec_to_connection(spec)}
@@ -552,6 +551,16 @@ async def load_mcp_tools_with_families(
                 client = MultiServerMCPClient(connections=connections)
                 server_tools = await client.get_tools()
         except Exception as exc:
+            return None, stage, exc
+        return server_tools, stage, None
+
+    # Servers start independently, so discover them concurrently; results
+    # are then processed in spec order so diagnostics and collisions are
+    # reported exactly as a sequential load would report them.
+    discovered = await asyncio.gather(*(discover(spec) for spec in specs))
+    loaded: list[tuple[MCPServerSpec, list, tuple[str, ...]]] = []
+    for spec, (server_tools, stage, exc) in zip(specs, discovered):
+        if exc is not None:
             detail = _describe_failure(exc)
             if spec.sanitize_stdout:
                 log_path = os.path.join(_mcp_log_dir(create=False), f"{spec.name}.stderr.log")
