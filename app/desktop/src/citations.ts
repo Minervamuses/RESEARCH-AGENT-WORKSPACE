@@ -193,10 +193,10 @@ export function errorCode(error: unknown): string | null {
   return typeof code === "string" ? code : null;
 }
 
-export function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown, fallback = "The request failed."): string {
   const message = (error as { uiError?: { message?: unknown } } | null)?.uiError?.message;
   if (typeof message === "string") return message;
-  return error instanceof Error ? error.message : "The request failed.";
+  return error instanceof Error ? error.message : fallback;
 }
 
 export function removeErrorMessage(error: unknown): string {

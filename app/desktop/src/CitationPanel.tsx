@@ -8,6 +8,7 @@ import {
   buildPanelModel,
   citationFormatForPath,
   describeEntry,
+  errorMessage,
   BIME_LAYOUT_REMINDER,
   EXPORT_LABELS,
   EXPORT_NOTES,
@@ -51,10 +52,6 @@ export interface CitationPanelProps {
   requestAdd: (identifier: string) => Promise<BibliographyAddDto>;
   /** Writes are disabled while a turn or document operation runs. */
   writesDisabled: boolean;
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : "The citation check failed.";
 }
 
 function UseButtons({ item, onJump }: { item: { key: string; uses: UseLocation[] }; onJump: (use: UseLocation) => void }) {
@@ -165,7 +162,7 @@ export function CitationPanel({
       problemsRef.current = problems;
       setExpanded((current) => nextExpanded(current, event));
     } catch (error) {
-      if (ticket === sequence.current) setNotice(errorText(error));
+      if (ticket === sequence.current) setNotice(errorMessage(error, "The citation check failed."));
     } finally {
       if (ticket === sequence.current) setLoading(false);
     }
