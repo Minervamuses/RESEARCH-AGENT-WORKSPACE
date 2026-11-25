@@ -27,10 +27,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build the Research Agent desktop shell");
     app.run(|app_handle, event| match event {
-        tauri::RunEvent::ExitRequested { .. } => {
-            app_handle.state::<BackendManager>().shutdown_best_effort();
-        }
-        tauri::RunEvent::Exit => {
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
             app_handle.state::<BackendManager>().shutdown_best_effort();
         }
         _ => {}

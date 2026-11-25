@@ -179,6 +179,14 @@ impl Default for SupervisorState {
     }
 }
 
+impl SupervisorState {
+    /// Take every pending request's sender and reset the snapshot count.
+    fn drain_pending(&mut self) -> Vec<SyncSender<PendingResult>> {
+        self.snapshot.pending_requests = 0;
+        self.pending.drain().map(|(_, item)| item.sender).collect()
+    }
+}
+
 struct SupervisorCore {
     state: Mutex<SupervisorState>,
     operation: Mutex<()>,
@@ -1604,12 +1612,7 @@ fn fatal_generation(core: &SupervisorCore, generation: u64, error: BridgeError, 
         state.snapshot.lifecycle = BackendLifecycle::Degraded;
         state.snapshot.last_error = Some(error.clone());
         let child = state.child.clone();
-        let pending = state
-            .pending
-            .drain()
-            .map(|(_, item)| item.sender)
-            .collect::<Vec<_>>();
-        state.snapshot.pending_requests = 0;
+        let pending = state.drain_pending();
         (child, state.snapshot.clone(), pending)
     };
     for sender in pending {
@@ -1626,16 +1629,7 @@ fn fatal_generation(core: &SupervisorCore, generation: u64, error: BridgeError, 
 }
 
 fn fail_all_pending(core: &SupervisorCore, error: BridgeError) {
-    let pending = {
-        let mut state = lock_state(core);
-        let pending = state
-            .pending
-            .drain()
-            .map(|(_, item)| item.sender)
-            .collect::<Vec<_>>();
-        state.snapshot.pending_requests = 0;
-        pending
-    };
+    let pending = lock_state(core).drain_pending();
     for sender in pending {
         let _ = sender.send(Err(error.clone()));
     }
@@ -1665,12 +1659,7 @@ fn child_exited(core: &SupervisorCore, generation: u64) {
             };
             state.snapshot.last_error = Some(BridgeError::new("BACKEND_CRASHED", &message, true));
         }
-        let pending = state
-            .pending
-            .drain()
-            .map(|(_, item)| item.sender)
-            .collect::<Vec<_>>();
-        state.snapshot.pending_requests = 0;
+        let pending = state.drain_pending();
         (state.snapshot.clone(), pending, unexpected)
     };
     let error = snapshot
