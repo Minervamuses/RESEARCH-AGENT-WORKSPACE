@@ -18,6 +18,7 @@ import re
 import unicodedata
 import urllib.parse
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -362,38 +363,34 @@ def write_atomic(library: Library) -> None:
             f"{path.name} changed on disk since it was read; nothing was written",
         )
     data = serialize(library.items, library.layout).encode("utf-8")
-    directory = path.parent
     try:
         mode = path.stat().st_mode & 0o7777 if current is not None else NEW_FILE_MODE
     except OSError:
         mode = NEW_FILE_MODE
-    temp = directory / f".{path.name}.{uuid.uuid4().hex}.tmp"
-    try:
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            os.write(fd, data)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.chmod(temp, mode)
+
+    def unchanged_since_read() -> None:
         if fingerprint(path) != library.fingerprint:
             raise LibraryError(
                 LIBRARY_CONFLICT,
                 f"{path.name} changed on disk while writing; nothing was written",
             )
-        os.replace(temp, path)
-        fsync_directory(directory)
-    except LibraryError:
-        _unlink(temp)
-        raise
-    except OSError as exc:
-        _unlink(temp)
-        raise LibraryError(LIBRARY_WRITE_FAILED, f"cannot write {path}: {exc}") from exc
+
+    write_bytes_atomic(path, data, mode=mode, before_replace=unchanged_since_read)
     library.fingerprint = hashlib.sha256(data).hexdigest()
 
 
-def write_bytes_atomic(path: Path, data: bytes, *, mode: int = NEW_FILE_MODE) -> None:
-    """Write a new or replacement file atomically (temp file, fsync, replace)."""
+def write_bytes_atomic(
+    path: Path,
+    data: bytes,
+    *,
+    mode: int = NEW_FILE_MODE,
+    before_replace: Callable[[], None] | None = None,
+) -> None:
+    """Write a new or replacement file atomically (temp file, fsync, replace).
+
+    *before_replace* runs after the temp file is durable and just before the
+    rename; a LibraryError it raises discards the temp file and propagates.
+    """
     path = Path(path)
     temp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
     try:
@@ -404,8 +401,13 @@ def write_bytes_atomic(path: Path, data: bytes, *, mode: int = NEW_FILE_MODE) ->
         finally:
             os.close(fd)
         os.chmod(temp, mode)
+        if before_replace is not None:
+            before_replace()
         os.replace(temp, path)
         fsync_directory(path.parent)
+    except LibraryError:
+        _unlink(temp)
+        raise
     except OSError as exc:
         _unlink(temp)
         raise LibraryError(LIBRARY_WRITE_FAILED, f"cannot write {path}: {exc}") from exc
