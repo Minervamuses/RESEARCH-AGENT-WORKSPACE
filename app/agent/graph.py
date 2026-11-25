@@ -136,9 +136,9 @@ def build_graph(
         **({"conversation_root": conversation_root} if conversation_root is not None else {}),
     )
     skill_tools = list(skill_tools or [])
-    base_names = [getattr(tool, "name", str(tool)) for tool in base_tools]
+    base_names = [tool_inventory.tool_name(tool) for tool in base_tools]
     skill_tool_names = frozenset(
-        getattr(tool, "name", str(tool)) for tool in skill_tools
+        tool_inventory.tool_name(tool) for tool in skill_tools
     )
     conflicts = skill_tool_names.intersection(base_names)
     if conflicts:
@@ -147,8 +147,8 @@ def build_graph(
             + ", ".join(sorted(conflicts))
         )
     tools = [*base_tools, *skill_tools]
-    tools_by_name = {getattr(tool, "name", str(tool)): tool for tool in tools}
-    tool_order = [getattr(tool, "name", str(tool)) for tool in tools]
+    tools_by_name = {tool_inventory.tool_name(tool): tool for tool in tools}
+    tool_order = [tool_inventory.tool_name(tool) for tool in tools]
     # The normal-mode default binding: global tools only (local base tools
     # plus web_search-family MCP tools) — never skill-scoped tools.
     default_names = resolve_tool_access(

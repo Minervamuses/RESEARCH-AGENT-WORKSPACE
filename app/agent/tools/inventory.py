@@ -17,7 +17,7 @@ module or rendering the prompt never touches Chroma or any external service.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from agent.adapters.langchain.rag_tools import create_rag_tools
 from agent.config import AgentConfig
@@ -123,13 +123,14 @@ _BASE_WORKFLOW = """Workflow:
 - Do NOT make up information. Only answer based on tool results or your conversation with the user."""
 
 
-def _dedupe(names: Iterable[str]) -> list[str]:
-    """Order-preserving de-duplication of tool names."""
+def tool_name(tool: Any) -> str:
+    """Return a bound tool's name, falling back to its string form."""
+    return getattr(tool, "name", str(tool))
+
+
+def dedupe(names: Iterable[str]) -> list[str]:
+    """Order-preserving de-duplication of non-empty tool names."""
     return list(dict.fromkeys(name for name in names if name))
-
-
-def _extra_tool_names(extra_tools: list | None) -> list[str]:
-    return [getattr(tool, "name", str(tool)) for tool in (extra_tools or [])]
 
 
 def base_tool_names(extra_tools: list | None = None) -> list[str]:
@@ -138,7 +139,7 @@ def base_tool_names(extra_tools: list | None = None) -> list[str]:
     Local base tools always win on name collisions: a same-named extra tool is
     dropped so the bound graph and prompt agree.
     """
-    return _dedupe([*_BASE_TOOL_NAMES, *_extra_tool_names(extra_tools)])
+    return dedupe([*_BASE_TOOL_NAMES, *(tool_name(tool) for tool in extra_tools or [])])
 
 def build_base_tools(
     config: AgentConfig,
@@ -165,9 +166,9 @@ def build_base_tools(
         create_read_file_tool(config, **({"conversation_root": conversation_root} if conversation_root is not None else {})),
         create_bash_tool(config, **bash_kwargs),
     ]
-    seen = {getattr(tool, "name", str(tool)) for tool in tools}
+    seen = {tool_name(tool) for tool in tools}
     for extra in extra_tools or []:
-        name = getattr(extra, "name", str(extra))
+        name = tool_name(extra)
         if name in seen:
             continue
         seen.add(name)

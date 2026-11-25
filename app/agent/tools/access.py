@@ -20,7 +20,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from agent.tools.inventory import base_tool_names
+from agent.tools.inventory import base_tool_names, dedupe, tool_name
 
 # The only MCP family granted globally. Every other family is skill-scoped.
 GLOBAL_MCP_FAMILY = "web_search"
@@ -55,7 +55,7 @@ def resolve_tool_access(
     MCP families) that resolved to nothing; callers must refuse skill
     activation when it is non-empty. ``missing_optional`` never blocks.
     """
-    ordered_names = _dedupe(_tool_name(tool) for tool in all_tools)
+    ordered_names = dedupe(tool_name(tool) for tool in all_tools)
     available = set(ordered_names)
     families = dict(mcp_families)
     global_families = set(
@@ -110,14 +110,8 @@ def resolve_tool_access(
             for name in ordered_names
             if name in global_selected or name in skill_selected
         ),
-        missing_required=tuple(_dedupe(missing_required)),
-        missing_optional=tuple(_dedupe(missing_optional)),
+        missing_required=tuple(dedupe(missing_required)),
+        missing_optional=tuple(dedupe(missing_optional)),
     )
 
 
-def _tool_name(tool: Any) -> str:
-    return getattr(tool, "name", str(tool))
-
-
-def _dedupe(names) -> list[str]:
-    return list(dict.fromkeys(name for name in names if name))
