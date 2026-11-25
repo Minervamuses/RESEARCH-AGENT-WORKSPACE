@@ -562,11 +562,7 @@ class ConversationRepository:
                 raise ConversationConflictError(
                     "turnId already exists with different input"
                 )
-            self._assert_snapshot_current(
-                snapshot,
-                self.path_for(snapshot.document.conversation_id),
-            )
-            return snapshot
+            return self._unchanged(snapshot)
         if any(turn.state == "pending" for turn in snapshot.document.turns):
             raise ConversationConflictError(
                 "conversation already contains a pending turn"
@@ -613,11 +609,7 @@ class ConversationRepository:
                 raise ConversationConflictError(
                     "completed turn already has different terminal payload"
                 )
-            self._assert_snapshot_current(
-                snapshot,
-                self.path_for(snapshot.document.conversation_id),
-            )
-            return snapshot
+            return self._unchanged(snapshot)
         if turn.state != "pending":
             raise InvalidTransitionError(
                 f"cannot transition {turn.state} turn to completed"
@@ -653,11 +645,7 @@ class ConversationRepository:
                 raise ConversationConflictError(
                     "terminal turn already has different failure payload"
                 )
-            self._assert_snapshot_current(
-                snapshot,
-                self.path_for(snapshot.document.conversation_id),
-            )
-            return snapshot
+            return self._unchanged(snapshot)
         if turn.state != "pending":
             raise InvalidTransitionError(
                 f"cannot transition {turn.state} turn to {state}"
@@ -701,11 +689,7 @@ class ConversationRepository:
                 "turnId already exists with different input"
             )
         if turn.state in {"pending", "completed"}:
-            self._assert_snapshot_current(
-                snapshot,
-                self.path_for(snapshot.document.conversation_id),
-            )
-            return snapshot
+            return self._unchanged(snapshot)
         if turn.state not in {"failed", "interrupted"}:
             raise InvalidTransitionError(f"cannot retry a {turn.state} turn")
         pending = replace(
@@ -1059,6 +1043,14 @@ class ConversationRepository:
                 os.close(descriptor)
             if temporary is not None and not succeeded:
                 self._cleanup_temp(temporary)
+
+    def _unchanged(self, snapshot: ConversationSnapshot) -> ConversationSnapshot:
+        """Return *snapshot* for an idempotent replay after re-checking its file."""
+        self._assert_snapshot_current(
+            snapshot,
+            self.path_for(snapshot.document.conversation_id),
+        )
+        return snapshot
 
     def _assert_snapshot_current(
         self,
