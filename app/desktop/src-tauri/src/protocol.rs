@@ -261,32 +261,73 @@ fn normalized_data_key(key: &str) -> String {
         .collect()
 }
 
-/// Reject any object key that names provider internals or credentials.
-fn validate_safe_data(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
+enum DataPathSegment<'a> {
+    Index(usize),
+    Key(&'a str),
+}
+
+fn is_forbidden_data_key(key: &str) -> bool {
+    let normalized = normalized_data_key(key);
+    framework()
+        .forbidden_data_key_fragments
+        .iter()
+        .any(|fragment| normalized.contains(fragment.as_str()))
+}
+
+/// Return the first forbidden key, leaving `path` pointing at its parent.
+fn find_forbidden_data_key<'a>(
+    value: &'a Value,
+    path: &mut Vec<DataPathSegment<'a>>,
+) -> Option<&'a str> {
     match value {
         Value::Array(items) => {
             for (index, item) in items.iter().enumerate() {
-                validate_safe_data(item, &format!("{field}[{index}]"))?;
+                path.push(DataPathSegment::Index(index));
+                if let Some(key) = find_forbidden_data_key(item, path) {
+                    return Some(key);
+                }
+                path.pop();
             }
         }
         Value::Object(object) => {
             for (key, item) in object {
-                let normalized = normalized_data_key(key);
-                if framework()
-                    .forbidden_data_key_fragments
-                    .iter()
-                    .any(|fragment| normalized.contains(fragment.as_str()))
-                {
-                    return Err(ProtocolViolation::invalid(format!(
-                        "{field} contains forbidden field: {key}"
-                    )));
+                if is_forbidden_data_key(key) {
+                    return Some(key);
                 }
-                validate_safe_data(item, &format!("{field}.{key}"))?;
+                path.push(DataPathSegment::Key(key));
+                if let Some(found) = find_forbidden_data_key(item, path) {
+                    return Some(found);
+                }
+                path.pop();
             }
         }
         _ => {}
     }
-    Ok(())
+    None
+}
+
+/// Reject any object key that names provider internals or credentials.
+///
+/// The field path is only formatted when a violation is found, so valid
+/// messages are walked without allocating a path string per node.
+fn validate_safe_data(value: &Value, field: &str) -> Result<(), ProtocolViolation> {
+    let mut path = Vec::new();
+    let Some(key) = find_forbidden_data_key(value, &mut path) else {
+        return Ok(());
+    };
+    let mut location = field.to_owned();
+    for segment in &path {
+        match segment {
+            DataPathSegment::Index(index) => location.push_str(&format!("[{index}]")),
+            DataPathSegment::Key(name) => {
+                location.push('.');
+                location.push_str(name);
+            }
+        }
+    }
+    Err(ProtocolViolation::invalid(format!(
+        "{location} contains forbidden field: {key}"
+    )))
 }
 
 pub fn validate_process_event_origin(
