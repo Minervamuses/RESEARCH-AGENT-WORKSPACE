@@ -10,7 +10,7 @@
 - 新增 `src/lib/layout.ts`（讀寫、夾限、預設值）、`src/components/ColumnResizer.tsx`、`src/styles/layout.css`、`tests/layout.test.ts`；修改 `src/App.tsx`（放置兩個邊界、提供 CSS 變數）、`src/styles.css` 的 `.app-shell`、`src/styles/document.css` 的 `.writing-workspace`、`src/main.tsx`（在 `document.css` 後 import `layout.css`）、`tests/styles.test.ts`。
 - **格線只用一種做法**：D3 把 `.app-shell` 改成「側欄｜邊界｜主區」三欄、`.writing-workspace` 改成「文件｜邊界｜對話」三欄；圖示列那一欄在 D4 才加入。D3 結束時版面不能有空欄或錯位。
 - `grid-template-columns` 只在原檔修改（`styles.css`、`document.css`），以 `var(--…, 現在的預設值)` 帶入；`.app-shell` 的直接子元素明確指定 `grid-column`（含 `.skip-link` 之外的每一個）。`layout.css` 只放 `ColumnResizer` 的元件樣式與針對新元素的 `@media`，不得重新定義兩個容器的欄（PLANS「架構」第 7 點）。
-- 不改 `responsive.css` 與 `document.css` 既有的窄版單欄規則；改完後它們必須照舊讓版面變單欄。
+- 不改 `responsive.css` 與 `document.css` 既有的窄版單欄規則；將側欄與主區的桌面欄位定位限定在 > 760 px，文件與對話的並排定位限定在 > 1050 px；堆疊時可見內容都排在第一欄。
 
 ## 行為規格
 
@@ -29,7 +29,7 @@
 | 步驟 | 工作 | 必要檢查 |
 |---|---|---|
 | D3-S1 | `src/lib/layout.ts` 與 `tests/layout.test.ts`：讀寫、夾限、比例換算、依容器寬度夾限、預設、儲存失敗。 | 測試：合法值往返、超界值夾限或回預設、非數字回預設、`getItem`／`setItem` 丟例外時不拋出、清除後回預設、最小寬度與比例的換算邊界；**儲存 420 px 側欄與 0.8 比例後，以 1051 px 與 800 px 容器計算的實際寬度加總不超過容器寬度，且文件／對話欄 ≥ 300 px** |
-| D3-S2 | `ColumnResizer` 與 `layout.css`；在 `App.tsx` 放置兩個邊界並套用 CSS 變數；修改兩處格線（含子元素的明確 `grid-column`）；`main.tsx` import；擴充 `tests/styles.test.ts`。 | `npm test`：SSR 渲染 `ColumnResizer` 有正確的 role／aria 屬性；`styles.test.ts` 斷言 `main.tsx` 在 `document.css` 之後 import `layout.css`、`:root` 斷言仍通過、`layout.css` 沒有 `.app-shell` 或 `.writing-workspace` 的 `grid-template-columns`、`responsive.css` 與 `document.css` 的單欄規則仍在。另以讀 CSS 文字的測試確認變數的預設值與現在的欄寬相同。`npm run build` 通過 |
+| D3-S2 | `ColumnResizer` 與 `layout.css`；在 `App.tsx` 放置兩個邊界並套用 CSS 變數；修改兩處格線（含子元素的明確 `grid-column`）；`main.tsx` import；擴充 `tests/styles.test.ts`。 | `npm test`：SSR 渲染 `ColumnResizer` 有正確的 role／aria 屬性；`styles.test.ts` 斷言 `main.tsx` 在 `document.css` 之後 import `layout.css`、`:root` 斷言仍通過、`layout.css` 沒有 `.app-shell` 或 `.writing-workspace` 的 `grid-template-columns`、兩個單欄斷點均保有單欄規則，且桌面子元素的多欄定位只在相應寬度生效。另以讀 CSS 文字的測試確認變數的預設值與現在的欄寬相同。`npm run build` 通過 |
 | D3-S3 | 鍵盤調整、雙擊重設、拖曳中 class 的移除、`pointercancel` 處理；把指標事件的計算抽成純函式（起點寬度＋位移 → 夾限後寬度）以便測試。 | 純函式測試：位移超出範圍時夾限、比例邊界；SSR 測試鍵盤屬性。GUI 實際拖曳列入 D8 手動清單 |
 
 ## 交付給後續階段

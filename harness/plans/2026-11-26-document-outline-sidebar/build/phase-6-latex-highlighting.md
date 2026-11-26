@@ -1,8 +1,8 @@
 # D6 P1：LaTeX 語法高亮
 
-- **後置條件**：`.tex` 以 `latex` 語言開啟並有語法高亮；引用補全行為與修改前相同；Markdown 不受影響。
+- **後置條件**：`.tex` 以 `latex` 語言開啟並有語法高亮；D1A 修好的引用補全清單在 `latex` 語言下照樣出現，四種引用指令的清單顯示與 Esc 後重現列入 D8 實機驗收；Markdown 不受影響。
 - **涵蓋**：G7。
-- **相依**：D5（只為了避免同時修改 `DocumentEditor.tsx`；邏輯上只需要 D1）。
+- **相依**：D1A（補全清單）、D5（只為了避免同時修改 `DocumentEditor.tsx`）。
 - **輸入**：GOALS G7；PLANS「架構」第 8 點與「基線／編輯器」中補全與 token 的說明；S2 brief touch point 2。
 
 ## 範圍
@@ -24,7 +24,7 @@
 | 步驟 | 工作 | 必要檢查 |
 |---|---|---|
 | D6-S1 | `latexLanguage.ts`：Monarch 定義、LanguageConfiguration、冪等註冊函式。 | 測試（不需真的 Monaco）：以假的 `monaco.languages` 物件呼叫兩次，`register` 等只被呼叫一次；遍歷 Monarch 規則，確認處理引用指令參數的狀態中沒有任何 token 名稱含 `string` 或 `comment`；規則中的正規表示式都能編譯 |
-| D6-S2 | `DocumentEditor.tsx` 在 `createModel` 前註冊並選語言；補全仍以 `model.getLanguageId()` 註冊。 | `npm test`（含 `tests/citations.test.ts`）與 `npm run build` 通過；bundle 大小與 D1 比較並記錄。實際顏色與 `\cite{` 補全（含 Esc 後繼續打字）列入 D8 手動清單 |
+| D6-S2 | `DocumentEditor.tsx` 在 `createModel` 前註冊並選語言；補全仍以 `model.getLanguageId()` 註冊；沿用 D1A 的補全清單載入與選項，不重複處理。 | `npm test`（含 `tests/citations.test.ts`）與 `npm run build` 通過；bundle 大小與 D1A 比較並記錄；`dist/assets` 仍含 `editor.contrib.suggestController`。D8 用有書目的專案逐一驗收 `\cite{`、`\citep{`、`\citet{`、`\textcite{` 的清單與 Esc 後繼續打字，以及實際語法顏色 |
 
 ## 交付給後續階段
 

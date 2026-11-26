@@ -2,25 +2,150 @@
   "schema_version": 1,
   "plan_id": "document-outline-sidebar",
   "goals": [
-    {"id": "G1", "text": "Markdown and LaTeX parse into one outline tree with exact UTF-16 offsets and stable IDs"},
-    {"id": "G2", "text": "Activity bar switches the sidebar between conversations and outline; auto-switch on open; collapse on active icon"},
-    {"id": "G3", "text": "Outline view renders hierarchy, collapse, empty states and long titles safely"},
-    {"id": "G4", "text": "Clicking a heading jumps the editor without changing the document or selection"},
-    {"id": "G5", "text": "Active section follows cursor and scroll; outline updates live from every edit source"},
-    {"id": "G6", "text": "Vertical column borders are draggable, keyboard adjustable, resettable and remembered"},
-    {"id": "G7", "text": "P1: LaTeX syntax highlighting without breaking citation completion"},
-    {"id": "G8", "text": "P1: Outline keyboard navigation scoped to the outline"},
-    {"id": "G9", "text": "Existing behavior and non-functional constraints preserved"},
-    {"id": "G10", "text": "README, full regression, manual GUI checklist and final report"}
+    {
+      "id": "G1",
+      "text": "Markdown and LaTeX parse into one outline tree with exact UTF-16 offsets and stable IDs"
+    },
+    {
+      "id": "G2",
+      "text": "Activity bar switches the sidebar between conversations and outline; auto-switch on open; collapse on active icon"
+    },
+    {
+      "id": "G3",
+      "text": "Outline view renders hierarchy, collapse, empty states and long titles safely"
+    },
+    {
+      "id": "G4",
+      "text": "Clicking a heading jumps the editor without changing the document or selection"
+    },
+    {
+      "id": "G5",
+      "text": "Active section follows cursor and scroll; outline updates live from every edit source"
+    },
+    {
+      "id": "G6",
+      "text": "Vertical column borders are draggable, keyboard adjustable, resettable and remembered"
+    },
+    {
+      "id": "G7",
+      "text": "P1: LaTeX syntax highlighting without breaking citation completion"
+    },
+    {
+      "id": "G8",
+      "text": "P1: Outline keyboard navigation scoped to the outline"
+    },
+    {
+      "id": "G9",
+      "text": "Existing behavior and non-functional constraints preserved"
+    },
+    {
+      "id": "G10",
+      "text": "README, full regression, manual GUI checklist and final report"
+    },
+    {
+      "id": "G11",
+      "text": "Fix existing defect: the document editor shows the citation completion list without word suggestions"
+    }
   ],
   "phases": [
-    {"id": "D1", "file": "build/phase-1-preflight.md", "depends_on": [], "covers": ["G9"]},
-    {"id": "D2", "file": "build/phase-2-outline-core.md", "depends_on": ["D1"], "covers": ["G1"]},
-    {"id": "D3", "file": "build/phase-3-resizable-columns.md", "depends_on": ["D1"], "covers": ["G6"]},
-    {"id": "D4", "file": "build/phase-4-sidebar-outline.md", "depends_on": ["D2", "D3"], "covers": ["G2", "G3"]},
-    {"id": "D5", "file": "build/phase-5-navigation-tracking.md", "depends_on": ["D4"], "covers": ["G4", "G5"]},
-    {"id": "D6", "file": "build/phase-6-latex-highlighting.md", "depends_on": ["D5"], "covers": ["G7"]},
-    {"id": "D7", "file": "build/phase-7-outline-keyboard.md", "depends_on": ["D5"], "covers": ["G8"]},
-    {"id": "D8", "file": "build/phase-8-delivery.md", "depends_on": ["D2", "D3", "D4", "D5", "D6", "D7"], "covers": ["G9", "G10"]}
+    {
+      "id": "D1",
+      "file": "build/phase-1-preflight.md",
+      "depends_on": [],
+      "covers": [
+        "G9"
+      ]
+    },
+    {
+      "id": "D1A",
+      "file": "build/phase-1a-citation-suggest.md",
+      "depends_on": [
+        "D1"
+      ],
+      "covers": [
+        "G11"
+      ]
+    },
+    {
+      "id": "D2",
+      "file": "build/phase-2-outline-core.md",
+      "depends_on": [
+        "D1"
+      ],
+      "covers": [
+        "G1"
+      ]
+    },
+    {
+      "id": "D3",
+      "file": "build/phase-3-resizable-columns.md",
+      "depends_on": [
+        "D1"
+      ],
+      "covers": [
+        "G6"
+      ]
+    },
+    {
+      "id": "D4",
+      "file": "build/phase-4-sidebar-outline.md",
+      "depends_on": [
+        "D2",
+        "D3"
+      ],
+      "covers": [
+        "G2",
+        "G3"
+      ]
+    },
+    {
+      "id": "D5",
+      "file": "build/phase-5-navigation-tracking.md",
+      "depends_on": [
+        "D4"
+      ],
+      "covers": [
+        "G4",
+        "G5"
+      ]
+    },
+    {
+      "id": "D6",
+      "file": "build/phase-6-latex-highlighting.md",
+      "depends_on": [
+        "D1A",
+        "D5"
+      ],
+      "covers": [
+        "G7"
+      ]
+    },
+    {
+      "id": "D7",
+      "file": "build/phase-7-outline-keyboard.md",
+      "depends_on": [
+        "D5"
+      ],
+      "covers": [
+        "G8"
+      ]
+    },
+    {
+      "id": "D8",
+      "file": "build/phase-8-delivery.md",
+      "depends_on": [
+        "D1A",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7"
+      ],
+      "covers": [
+        "G9",
+        "G10"
+      ]
+    }
   ]
 }
