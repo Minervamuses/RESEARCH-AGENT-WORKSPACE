@@ -59,6 +59,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
       import("monaco-editor/editor/editor.api"),
       import("monaco-editor/editor/editor.worker?worker"),
       import("monaco-editor/languages/definitions/markdown/register"),
+      import("./monacoFeatures.ts"),
     ]).then(([monaco, { default: EditorWorker }]) => {
       if (disposed || !surfaceRef.current || !snapshotRef.current) return;
       globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };

@@ -50,4 +50,5 @@ declare function setImmediate(callback: () => void): unknown;
 
 interface ImportMeta {
   url: string;
+  resolve(specifier: string): string;
 }
