@@ -37,6 +37,11 @@
 - 修訂：新增 D1A（G11）載入補全清單、本地型別宣告、`wordBasedSuggestions: "off"`、`quickSuggestions.strings: "on"`；D6 改為依賴 D1A、不再處理清單控制器；G7 與 PLANS 基線改寫為既有缺陷；其他缺漏的 Monaco 功能列入範圍外並由最終彙報提出。同時提交 DA1（Codex 的五項修訂）尚未提交的改動。
 - 檢查（只檢查計劃本身）：結構 lint `validate_plan.py --json` 為 `ok: true`，0 錯誤、0 警告，檢查 14 個檔案；`git diff --check` 通過。D1、D1A、D2–D8 仍未開始。
 
+### DA3 其他 Monaco 功能改由計劃外工作處理（2026-11-27）
+
+- 使用者 2026-11-27 決定補回文件編輯器的右鍵選單（Monaco 選單加剪貼簿）、搜尋／取代、編輯輔助（括號配對、註解切換、行操作、多游標、字詞移動等）、懸停、摺疊與相同字詞標示，以 Monaco 附 `.d.ts` 的 `features/<名稱>/register` 逐項匯入。已在本計劃之外完成：`src/monacoFeatures.ts`、`tests/monacoFeatures.test.ts`。
+- 修訂：GOALS「範圍外」、PLANS「基線／編輯器」、D1A 背景（`suggestController` 不放進該檔；`features/suggest/register` 不含清單控制器；bundle 基準改為含該檔的建置）、D8-S3 不再列出缺漏功能。D1、D1A、D2–D8 仍未開始。
+
 ## 執行事件
 
 （尚無）

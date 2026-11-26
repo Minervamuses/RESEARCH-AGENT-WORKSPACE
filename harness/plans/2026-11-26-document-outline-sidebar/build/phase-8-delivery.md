@@ -11,7 +11,7 @@
 |---|---|---|
 | D8-S1 | **README**：說明側欄圖示列與兩種檢視、開檔自動切換、點目前圖示收合、大綱的跳轉與目前章節、可拖曳欄寬與雙擊重設、支援的 Markdown 標題與 LaTeX 章節指令、LaTeX 高亮、鍵盤操作、文件編輯器的引用補全清單（`[@`、`\cite{`、Ctrl+Space），以及限制（只有單一文件、不處理 `\input`／`\include` 與自訂巨集、不編譯 LaTeX）。不改 `for_agents/`。 | 文件內容對照 GOALS 與實作逐項核對；`git diff --check` 無空白錯誤 |
 | D8-S2 | **完整回歸**：`npm test`、`npm run build`（記錄 bundle 大小並與 D1 比較）、完整 pytest（沙箱外，見 PLANS「基線／環境」）。只有改到 `src-tauri/` 時跑 cargo。另外確認 `git diff <D1-S1 記錄的 HEAD> -- app/agent app/desktop/protocol app/desktop/src-tauri app/desktop/package.json app/desktop/package-lock.json` 中，依賴檔無本計劃變更；後端／協定／Rust 的每一項本計劃變更都須對應 PLANS 允許的回歸修復，於最終彙報列出問題、修復檔案與驗證結果（G9）。 | 全部通過；指令、通過數、耗時存 `evidence/D8-S2/`。失敗時依執行契約處理，不跳過 |
-| D8-S3 | **最終彙報** `evidence/D8-S3/final-report.md`：每個目標的證據對照；各階段 commit；測試數字（修改前後）；效能與 bundle 數字；已知限制；被阻塞或偏離計劃之處；A1–A10 請使用者確認；`for_agents/` 需要 `$infrastructure` 更新的地方（至少：`ui-architecture.md` 的 surfaces 與 controls、`change-playbooks.md` 的新 CSS 檔與 import 順序、S2 brief 中已被取代的面板位置，以及 brief 把離線打包誤標為 INV-029）；收合側欄時 backend 控制一起隱藏的提醒（U6）；文件編輯器仍缺漏的 Monaco 功能清單（右鍵選單與剪貼簿、Ctrl+F 搜尋、懸停、摺疊等，GOALS「範圍外」）供使用者決定是否另開工作；**手動 GUI 驗收清單**（下節）。 | 彙報提交；不宣稱任何 GUI 行為已驗證 |
+| D8-S3 | **最終彙報** `evidence/D8-S3/final-report.md`：每個目標的證據對照；各階段 commit；測試數字（修改前後）；效能與 bundle 數字；已知限制；被阻塞或偏離計劃之處；A1–A10 請使用者確認；`for_agents/` 需要 `$infrastructure` 更新的地方（至少：`ui-architecture.md` 的 surfaces 與 controls、`change-playbooks.md` 的新 CSS 檔與 import 順序、S2 brief 中已被取代的面板位置，以及 brief 把離線打包誤標為 INV-029）；收合側欄時 backend 控制一起隱藏的提醒（U6）；**手動 GUI 驗收清單**（下節）。 | 彙報提交；不宣稱任何 GUI 行為已驗證 |
 
 ## 手動 GUI 驗收清單（交付給使用者，執行者不操作）
 

@@ -9,7 +9,7 @@
 
 `src/DocumentEditor.tsx` 只載入 `monaco-editor/editor/editor.api`、worker 與 markdown 語言定義。從這兩個入口追 import 圖（約 704 個檔案），完全沒有 `editor/contrib/` 底下的編輯器功能，包括補全清單 `suggestController`；`dist/assets/` 也找不到 `editor.contrib.suggestController`。程式第 190 行起註冊的引用候選提供者因此永遠沒有清單可以顯示。使用者 2026-11-26 在 GUI 確認：在文件編輯器打 `@`、`/` 都沒有任何清單，Ctrl+F 也沒反應。對話輸入框的 `@`／`/` 選單是 `Composer.tsx` 自己的 React 元件，不受影響。
 
-本階段**只**補上補全清單。右鍵選單、Ctrl+F 搜尋、懸停提示、摺疊等其他缺漏的功能不在本計劃範圍（見 GOALS「範圍外」），最終彙報列出供使用者決定。
+本階段**只**補上補全清單。右鍵選單、剪貼簿、Ctrl+F 搜尋、懸停、摺疊等其他功能已在計劃外以 `src/monacoFeatures.ts` 載入（2026-11-27，見 GOALS「範圍外」）。`suggestController` 的 import **不要**放進該檔：該檔只收 Monaco 附 `.d.ts` 的 `monaco-editor/features/<名稱>/register` 入口，`tests/monacoFeatures.test.ts` 會逐一檢查清單與 `.d.ts`。Monaco 的 `features/suggest/register` 只載入 inline completions，不含 `suggestController`，不能拿來取代下面的深層 import。bundle 大小比較以含 `monacoFeatures.ts` 的建置為基準。
 
 ## 範圍
 
