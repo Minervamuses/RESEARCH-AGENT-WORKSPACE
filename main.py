@@ -1,7 +1,16 @@
 import argparse
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+# GTK 3 IBus input-method module locations (Debian/Ubuntu multiarch, Fedora/openSUSE, Arch).
+_GTK3_IBUS_MODULES = (
+    "/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus.so",
+    "/usr/lib/aarch64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus.so",
+    "/usr/lib64/gtk-3.0/3.0.0/immodules/im-ibus.so",
+    "/usr/lib/gtk-3.0/3.0.0/immodules/im-ibus.so",
+)
 
 
 def _release_is_current(desktop_dir: Path, executable: Path) -> bool:
@@ -51,6 +60,35 @@ def _desktop_environment() -> dict[str, str]:
     return env
 
 
+def _enable_ibus(env: dict[str, str]) -> None:
+    """Route CJK typing through IBus under WSLg, which never receives Windows IMEs.
+
+    Does nothing outside WSL, when the user already chose an input method, or
+    when IBus or its GTK 3 module is not installed, so launching never fails here.
+    """
+    if "WSL_DISTRO_NAME" not in env or "GTK_IM_MODULE" in env or "XMODIFIERS" in env:
+        return
+    daemon = shutil.which("ibus-daemon", path=env.get("PATH"))
+    if daemon is None or not any(Path(module).is_file() for module in _GTK3_IBUS_MODULES):
+        return
+    try:
+        # Exits at once when this display already has a daemon; that one is reused.
+        subprocess.run(
+            [daemon, "--daemonize", "--xim"], env=env, check=False, timeout=10,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
+    env["GTK_IM_MODULE"] = "ibus"
+    env["XMODIFIERS"] = "@im=ibus"
+
+
+def _launch_environment() -> dict[str, str]:
+    env = _desktop_environment()
+    _enable_ibus(env)
+    return env
+
+
 def main(argv: list[str] | None = None) -> int:
     """Launch the release GUI; opt into live development with --dev."""
     parser = argparse.ArgumentParser(description=__doc__ or main.__doc__)
@@ -61,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dev:
         return subprocess.run(
             ["npm", "run", "tauri", "dev"], cwd=desktop_dir, check=False,
-            env=_desktop_environment(),
+            env=_launch_environment(),
         ).returncode
 
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", "target"))
@@ -78,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         if result.returncode:
             return result.returncode
     return subprocess.run(
-        [str(executable)], cwd=desktop_dir, check=False, env=_desktop_environment(),
+        [str(executable)], cwd=desktop_dir, check=False, env=_launch_environment(),
     ).returncode
 
 
