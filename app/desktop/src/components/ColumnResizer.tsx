@@ -1,11 +1,12 @@
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { keyboardActionForResizerKey, type ResizerKeyboardAction } from "../lib/layout.ts";
 
 export interface DragStartMetrics {
   startPx: number;
   containerPx: number;
 }
 
-export type ResizerKeyboardAction = "decrease" | "increase" | "min" | "max";
+export type { ResizerKeyboardAction };
 
 export interface ColumnResizerProps {
   className?: string;
@@ -22,21 +23,6 @@ export interface ColumnResizerProps {
 }
 
 const RESIZING_BODY_CLASS = "is-resizing-columns";
-
-export function keyboardActionForResizerKey(key: string): ResizerKeyboardAction | null {
-  switch (key) {
-    case "ArrowLeft":
-      return "decrease";
-    case "ArrowRight":
-      return "increase";
-    case "Home":
-      return "min";
-    case "End":
-      return "max";
-    default:
-      return null;
-  }
-}
 
 /** Accessible vertical column splitter supporting pointer drag, arrow keys and double-click reset. */
 export function ColumnResizer({

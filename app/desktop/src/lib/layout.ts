@@ -31,6 +31,8 @@ export interface SidebarClampOptions {
   resizerWidth?: number;
 }
 
+export type ResizerKeyboardAction = "decrease" | "increase" | "min" | "max";
+
 export interface ResolvedLayoutWidths {
   sidebarPx: number;
   documentPx: number;
@@ -166,6 +168,55 @@ export function computeDraggedDocumentRatio(
   const paneArea = workspaceWidth - resizerWidth;
   if (!Number.isFinite(paneArea) || paneArea <= 0) return DEFAULT_DOCUMENT_RATIO;
   return clampDocumentRatio((startDocumentWidthPx + deltaX) / paneArea, workspaceWidth, resizerWidth);
+}
+
+/** Map a key name on a vertical column separator to a resize action; Enter is intentionally a no-op. */
+export function keyboardActionForResizerKey(key: string): ResizerKeyboardAction | null {
+  switch (key) {
+    case "ArrowLeft":
+      return "decrease";
+    case "ArrowRight":
+      return "increase";
+    case "Home":
+      return "min";
+    case "End":
+      return "max";
+    default:
+      return null;
+  }
+}
+
+/** Pure keyboard adjustment for the sidebar width (16 px steps, Home/End to bounds). */
+export function computeKeyboardSidebarWidth(
+  currentWidthPx: number,
+  action: ResizerKeyboardAction,
+  containerWidth?: number,
+  options: SidebarClampOptions = {},
+): number {
+  let target: number;
+  if (action === "min") target = MIN_SIDEBAR_WIDTH;
+  else if (action === "max") target = MAX_SIDEBAR_WIDTH;
+  else target = currentWidthPx + (action === "increase" ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP);
+  return clampSidebarWidth(target, containerWidth, options);
+}
+
+/** Pure keyboard adjustment for the document | conversation split ratio (16 px steps, Home/End to bounds). */
+export function computeKeyboardDocumentRatio(
+  currentDocumentWidthPx: number,
+  action: ResizerKeyboardAction,
+  workspaceWidth: number,
+  resizerWidth = RESIZER_WIDTH,
+): number {
+  const validWidth = Number.isFinite(workspaceWidth) && workspaceWidth > resizerWidth;
+  if (action === "min") {
+    return clampDocumentRatio(MIN_DOCUMENT_RATIO, validWidth ? workspaceWidth : undefined, resizerWidth);
+  }
+  if (action === "max") {
+    return clampDocumentRatio(MAX_DOCUMENT_RATIO, validWidth ? workspaceWidth : undefined, resizerWidth);
+  }
+  const effectiveWorkspace = validWidth ? workspaceWidth : 1000 + resizerWidth;
+  const delta = action === "increase" ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP;
+  return computeDraggedDocumentRatio(currentDocumentWidthPx, delta, effectiveWorkspace, resizerWidth);
 }
 
 /** Read a remembered sidebar pixel width, or null for the CSS default. */

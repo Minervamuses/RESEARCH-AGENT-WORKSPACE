@@ -11,8 +11,13 @@ import {
   clearSidebarWidth,
   computeDraggedDocumentRatio,
   computeDraggedSidebarWidth,
+  computeKeyboardDocumentRatio,
+  computeKeyboardSidebarWidth,
+  DEFAULT_DOCUMENT_RATIO,
   DOCUMENT_RATIO_KEY,
   documentSplitFrValues,
+  KEYBOARD_RESIZE_STEP,
+  keyboardActionForResizerKey,
   MAX_DOCUMENT_RATIO,
   MAX_SIDEBAR_WIDTH,
   MIN_DOCUMENT_RATIO,
@@ -198,4 +203,28 @@ test("ColumnResizer SSR renders vertical separator role, ARIA bounds and inert t
   }));
   assert.match(inertHtml, /tabindex="-1"/i);
   assert.match(inertHtml, /\binert\b/);
+});
+
+test("keyboard resize maps ArrowLeft/ArrowRight/Home/End, leaves Enter as no-op, and clamps steps", () => {
+  assert.equal(keyboardActionForResizerKey("ArrowLeft"), "decrease");
+  assert.equal(keyboardActionForResizerKey("ArrowRight"), "increase");
+  assert.equal(keyboardActionForResizerKey("Home"), "min");
+  assert.equal(keyboardActionForResizerKey("End"), "max");
+  assert.equal(keyboardActionForResizerKey("Enter"), null);
+  assert.equal(keyboardActionForResizerKey("Space"), null);
+
+  assert.equal(computeKeyboardSidebarWidth(200, "increase", 1400), 200 + KEYBOARD_RESIZE_STEP);
+  assert.equal(computeKeyboardSidebarWidth(200, "decrease", 1400), 200 - KEYBOARD_RESIZE_STEP);
+  assert.equal(computeKeyboardSidebarWidth(200, "min", 1400), MIN_SIDEBAR_WIDTH);
+  assert.equal(computeKeyboardSidebarWidth(200, "max", 1400), MAX_SIDEBAR_WIDTH);
+  assert.equal(computeKeyboardSidebarWidth(200, "max", 1051, { activityBarWidth: ACTIVITY_BAR_WIDTH }), 395);
+  assert.equal(computeKeyboardSidebarWidth(MIN_SIDEBAR_WIDTH, "decrease", 1400), MIN_SIDEBAR_WIDTH);
+
+  // 1006 px workspace => 1000 px pane area => 300..700 px document pane (ratio 0.3..0.7).
+  assert.equal(computeKeyboardDocumentRatio(500, "increase", 1006), 0.516);
+  assert.equal(computeKeyboardDocumentRatio(500, "decrease", 1006), 0.484);
+  assert.equal(computeKeyboardDocumentRatio(500, "min", 1006), 0.3);
+  assert.equal(computeKeyboardDocumentRatio(500, "max", 1006), 0.7);
+  // Zero/invalid workspace width falls back gracefully.
+  assert.equal(computeDraggedDocumentRatio(500, 100, 0), DEFAULT_DOCUMENT_RATIO);
 });

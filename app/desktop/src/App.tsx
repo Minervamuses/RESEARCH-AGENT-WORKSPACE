@@ -81,16 +81,15 @@ import {
 } from "./lib/approvalOwner.ts";
 import { applyReducerOnce } from "./lib/reducerOnce.ts";
 import {
-  clampDocumentRatio,
-  clampSidebarWidth,
   clearDocumentRatio,
   clearSidebarWidth,
   computeDraggedDocumentRatio,
   computeDraggedSidebarWidth,
+  computeKeyboardDocumentRatio,
+  computeKeyboardSidebarWidth,
   DEFAULT_DOCUMENT_RATIO,
   DEFAULT_SIDEBAR_WIDTH,
   documentSplitFrValues,
-  KEYBOARD_RESIZE_STEP,
   MAX_DOCUMENT_RATIO,
   MAX_SIDEBAR_WIDTH,
   MIN_DOCUMENT_RATIO,
@@ -1856,12 +1855,10 @@ export default function App() {
     const containerPx = shellEl ? shellEl.getBoundingClientRect().width : undefined;
     const sidebarEl = shellEl?.querySelector<HTMLElement>(":scope > .sidebar");
     const current = sidebarWidthPx ?? (sidebarEl ? sidebarEl.getBoundingClientRect().width : DEFAULT_SIDEBAR_WIDTH);
-    const options = { activityBarWidth: readActivityBarWidth(), resizerWidth: RESIZER_WIDTH };
-    let target: number;
-    if (action === "min") target = MIN_SIDEBAR_WIDTH;
-    else if (action === "max") target = MAX_SIDEBAR_WIDTH;
-    else target = current + (action === "increase" ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP);
-    const next = clampSidebarWidth(target, containerPx, options);
+    const next = computeKeyboardSidebarWidth(current, action, containerPx, {
+      activityBarWidth: readActivityBarWidth(),
+      resizerWidth: RESIZER_WIDTH,
+    });
     applySidebarWidthCss(next);
     writeSidebarWidth(next);
     setSidebarWidthPx(next);
@@ -1904,15 +1901,7 @@ export default function App() {
     const docEl = wsEl?.querySelector<HTMLElement>(":scope > .document-pane");
     const paneArea = containerPx > RESIZER_WIDTH ? containerPx - RESIZER_WIDTH : 1000;
     const currentDocPx = docEl ? docEl.getBoundingClientRect().width : paneArea * (documentRatio ?? DEFAULT_DOCUMENT_RATIO);
-    let next: number;
-    if (action === "min") {
-      next = clampDocumentRatio(MIN_DOCUMENT_RATIO, containerPx > RESIZER_WIDTH ? containerPx : undefined, RESIZER_WIDTH);
-    } else if (action === "max") {
-      next = clampDocumentRatio(MAX_DOCUMENT_RATIO, containerPx > RESIZER_WIDTH ? containerPx : undefined, RESIZER_WIDTH);
-    } else {
-      const delta = action === "increase" ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP;
-      next = computeDraggedDocumentRatio(currentDocPx, delta, paneArea + RESIZER_WIDTH, RESIZER_WIDTH);
-    }
+    const next = computeKeyboardDocumentRatio(currentDocPx, action, containerPx, RESIZER_WIDTH);
     applyDocumentRatioCss(next);
     writeDocumentRatio(next);
     setDocumentRatio(next);

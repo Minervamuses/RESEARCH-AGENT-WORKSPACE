@@ -9,8 +9,8 @@
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
-| D3 | In progress | D3-S1、D3-S2 ColumnResizer 與三欄格線完成（npm test 275/275、build 通過） | — | D3-S3 鍵盤調整、雙擊重設與拖曳純函式測試 |
-| D4 | Not started | — | — | 等 D2、D3 |
+| D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
+| D4 | Not started | — | — | D4-S1 ActivityBar 與側欄檢視狀態 |
 | D5 | Not started | — | — | 等 D4 |
 | D6 | Not started | — | — | 等 D1A、D5 |
 | D7 | Not started | — | — | 等 D5 |
@@ -155,3 +155,11 @@
   - 修改 `app/desktop/src/App.tsx`：掛載側欄與工作區兩條 `ColumnResizer`（刪除對話框開啟時設為 `inert`）並以 CSS 變數帶入寬度。
   - 修改 `app/desktop/tests/styles.test.ts` 與 `app/desktop/tests/layout.test.ts`：新增 CSS 載入順序／預設值／斷點／定位斷言與 `ColumnResizer` SSR 測試。
 - **必要檢查**：`npm test` 通過（`275 passed, 0 failed`）；`npm run build` 通過（565 ms）。
+
+### D3-S3 鍵盤調整、雙擊重設與拖曳純函式（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/src/lib/layout.ts`：抽出 `keyboardActionForResizerKey`、`computeKeyboardSidebarWidth`、`computeKeyboardDocumentRatio`（16 px 步進、Home/End 邊界、Enter 不做事、容器夾限）。
+  - 修改 `app/desktop/src/components/ColumnResizer.tsx` 與 `app/desktop/src/App.tsx`：改用上述純函式；`ColumnResizer` 在 `pointerup`/`pointercancel`/`lostpointercapture`/卸載皆清除 `is-dragging` 與 `body.is-resizing-columns`。
+  - 修改 `app/desktop/tests/layout.test.ts`：新增鍵盤映射（含 Enter 不動作）、16 px 步進夾限、Home/End 與邊界條件測試。
+- **必要檢查**：`npm test` 通過（`276 passed, 0 failed`）；`npm run build` 通過（604 ms）。實機滑鼠拖曳與雙擊重設列入 D8 手動驗收清單。D3 完成。
