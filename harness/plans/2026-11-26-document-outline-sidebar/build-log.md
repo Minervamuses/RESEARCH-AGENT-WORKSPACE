@@ -297,3 +297,9 @@
 
 - G11：使用者改打 `[@`、`; @` 後書目清單出現，原先是只打了 `@`（依設計不觸發）。README 已補一句說明。**Ctrl+Space 在正文仍沒有反應**（預期應顯示 `No suggestions.`），待查；可能是 Windows 中文輸入法把 Ctrl+Space 當切換鍵攔截，尚未驗證。
 - 中文輸入（計劃外、使用者授權）：`main.py` 在 WSL 中、找到 `ibus-daemon` 與 GTK 3 IBus 模組且未自設輸入法時，啟動 `ibus-daemon` 並只對桌面程式設 `GTK_IM_MODULE`／`XMODIFIERS`；沒有安裝則不啟用。README 新增〈中文輸入（WSLg）〉。檢查：`tests/test_desktop_launcher.py` 23 passed（4 個 mutation 皆被抓到），完整 pytest 1836 passed。實機中文輸入待使用者驗證。
+
+### ACC-5 IBus 啟動器造成鍵盤失效，撤回（2026-11-27）
+
+- 使用者以 `24fbad5` 的啟動器重開 app 後，整個視窗鍵盤無反應（滑鼠、開關檔正常，未當掉）。
+- 驗收者診斷（本次觀察）：`ibus-daemon` 與 `ibus-engine-chewing` 正常執行、全域引擎為 `chewing`；以 IBus Python API 對新輸入情境送 `s`、`u`、`3`、`Return`，得到預編輯 `ㄋ`→`ㄋㄧ`→`你` 並提交 `你`。IBus 本身可組字，問題在 IBus 與 WebKitGTK 視窗之間（按鍵沒送到 IBus，或預編輯／提交沒回到 WebKit），未查明。
+- 處置：撤回 `24fbad5`（launcher 測試回到 13 項），以 `ibus exit` 停掉該 daemon，README 改為說明 WSLg 目前不支援中文輸入。

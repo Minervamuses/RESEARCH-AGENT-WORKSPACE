@@ -68,18 +68,9 @@ python main.py
 
 側欄的 Restart 仍用於重新載入已設定的 MCP servers，也供需要重啟的擴充管理流程使用。停止目前回合請使用 Stop。
 
-### 中文輸入（WSLg）
+### 中文輸入（WSLg，目前不支援）
 
-桌面程式是 WSLg 顯示的 Linux 視窗，Windows 的輸入法（微軟注音、廠商輸入法等）不會送進這個視窗，所以要打中文須使用 WSL 內的 IBus。安裝與一次性設定（以注音為例）：
-
-```bash
-sudo apt install ibus ibus-gtk3 ibus-chewing
-gsettings set org.freedesktop.ibus.general preload-engines "['chewing']"
-```
-
-只放注音一個引擎，是因為 IBus 預設的切換鍵 Super+Space 會被 Windows 攔截；注音內以 **Caps Lock** 切換中文與英數（`ibus-chewing` 的預設，可用 `ibus-setup` 調整）。其他輸入法引擎同樣設定在 `preload-engines`。
-
-`python main.py`（含 `--dev`）在 WSL 中會自動處理其餘部分：找到 `ibus-daemon` 與 GTK 3 的 IBus 模組時，在背景啟動 `ibus-daemon`（這個顯示已有時沿用原本的），並只對桌面程式設定 `GTK_IM_MODULE=ibus` 與 `XMODIFIERS=@im=ibus`；`ibus-daemon` 在關閉程式後仍留在背景。下列情況啟動器不介入，程式照常啟動，只是不能打中文：沒有安裝 IBus、`ibus-daemon` 無法啟動，或不在 WSL 中執行。啟動 shell 已設定 `GTK_IM_MODULE` 或 `XMODIFIERS`（例如改用 fcitx5）時，啟動器也不介入，沿用該設定。
+桌面程式是 WSLg 顯示的 Linux 視窗，Windows 的輸入法（微軟注音、廠商輸入法等）不會送進這個視窗，所以目前只能輸入英數。曾嘗試讓啟動器自動接上 WSL 內的 IBus，但實機上整個視窗的鍵盤都沒有反應，已撤回；IBus 本身可正常組字，問題出在 IBus 與桌面視窗之間，尚待排查。
 
 ## 開啟專案、文件與對話
 
