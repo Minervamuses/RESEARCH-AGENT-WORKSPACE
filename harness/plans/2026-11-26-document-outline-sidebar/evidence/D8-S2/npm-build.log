@@ -1,0 +1,39 @@
+
+> research-agent-desktop@0.1.0 build
+> tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 979 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                 0.45 kB │ gzip:   0.28 kB
+dist/assets/codicon-DF1abBS2.ttf              153.22 kB
+dist/assets/editor.worker-D-QkBOHX.js         303.23 kB
+dist/assets/resizable-ComU3Pbl.css              6.21 kB │ gzip:   0.91 kB
+dist/assets/suggestController-DJ6Lv6Yp.css     12.22 kB │ gzip:   2.06 kB
+dist/assets/editorState-DJvnjW7X.css           14.54 kB │ gzip:   2.81 kB
+dist/assets/index-zW_D9czN.css                 30.16 kB │ gzip:   7.17 kB
+dist/assets/iconRegistry-k-sJT9fR.css          32.60 kB │ gzip:   5.46 kB
+dist/assets/monacoFeatures-CpljBy2A.css        42.07 kB │ gzip:   7.09 kB
+dist/assets/editor-BCkgXDjP.css                51.94 kB │ gzip:   7.44 kB
+dist/assets/editor.worker-BKWF6gaa.js           0.10 kB │ gzip:   0.11 kB
+dist/assets/register-BGl0E-X1.js                0.95 kB │ gzip:   0.50 kB
+dist/assets/markdown-Cimd5fb3.js                3.63 kB │ gzip:   1.34 kB
+dist/assets/resizable-BZFhYEAd.js              29.70 kB │ gzip:   7.42 kB
+dist/assets/suggestController-B_e4S7NY.js     114.89 kB │ gzip:  30.60 kB
+dist/assets/editorState-DFKhUDt3.js           216.66 kB │ gzip:  53.03 kB
+dist/assets/index-D7jhAHTy.js                 430.98 kB │ gzip: 123.92 kB
+dist/assets/editor.api-CzDh0KFI.js            547.89 kB │ gzip: 142.69 kB
+dist/assets/monacoFeatures-CdBXQB7b.js        552.14 kB │ gzip: 135.84 kB
+dist/assets/iconRegistry-CghoE7lb.js        1,963.93 kB │ gzip: 509.53 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 696ms
+real 5.41
+user 9.47
+sys 1.70

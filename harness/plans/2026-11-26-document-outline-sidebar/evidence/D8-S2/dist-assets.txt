@@ -1,0 +1,20 @@
+total 4440
+-rw-r--r-- 1 minervamuses minervamuses  153228 Nov 27 12:25 codicon-DF1abBS2.ttf
+-rw-r--r-- 1 minervamuses minervamuses   51949 Nov 27 12:25 editor-BCkgXDjP.css
+-rw-r--r-- 1 minervamuses minervamuses  547891 Nov 27 12:25 editor.api-CzDh0KFI.js
+-rw-r--r-- 1 minervamuses minervamuses     105 Nov 27 12:25 editor.worker-BKWF6gaa.js
+-rw-r--r-- 1 minervamuses minervamuses  303237 Nov 27 12:25 editor.worker-D-QkBOHX.js
+-rw-r--r-- 1 minervamuses minervamuses  216661 Nov 27 12:25 editorState-DFKhUDt3.js
+-rw-r--r-- 1 minervamuses minervamuses   14547 Nov 27 12:25 editorState-DJvnjW7X.css
+-rw-r--r-- 1 minervamuses minervamuses 1963932 Nov 27 12:25 iconRegistry-CghoE7lb.js
+-rw-r--r-- 1 minervamuses minervamuses   32601 Nov 27 12:25 iconRegistry-k-sJT9fR.css
+-rw-r--r-- 1 minervamuses minervamuses  430984 Nov 27 12:25 index-D7jhAHTy.js
+-rw-r--r-- 1 minervamuses minervamuses   30167 Nov 27 12:25 index-zW_D9czN.css
+-rw-r--r-- 1 minervamuses minervamuses    3639 Nov 27 12:25 markdown-Cimd5fb3.js
+-rw-r--r-- 1 minervamuses minervamuses  552145 Nov 27 12:25 monacoFeatures-CdBXQB7b.js
+-rw-r--r-- 1 minervamuses minervamuses   42076 Nov 27 12:25 monacoFeatures-CpljBy2A.css
+-rw-r--r-- 1 minervamuses minervamuses     955 Nov 27 12:25 register-BGl0E-X1.js
+-rw-r--r-- 1 minervamuses minervamuses   29703 Nov 27 12:25 resizable-BZFhYEAd.js
+-rw-r--r-- 1 minervamuses minervamuses    6217 Nov 27 12:25 resizable-ComU3Pbl.css
+-rw-r--r-- 1 minervamuses minervamuses  114897 Nov 27 12:25 suggestController-B_e4S7NY.js
+-rw-r--r-- 1 minervamuses minervamuses   12225 Nov 27 12:25 suggestController-DJ6Lv6Yp.css
