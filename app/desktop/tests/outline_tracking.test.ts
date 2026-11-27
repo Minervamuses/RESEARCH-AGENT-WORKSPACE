@@ -8,9 +8,13 @@ import {
   MONACO_SCROLL_TYPE_IMMEDIATE,
   parseOutline,
   performOutlineClick,
+  planOutlineUpdate,
+  recomputeOutline,
   resolveActiveOutlineDisplay,
+  toggleCollapsedId,
   type EditorOutlineHandle,
   type JumpableEditor,
+  type OutlineSourceInput,
 } from "../src/lib/outline/index.ts";
 
 const SAMPLE_MD = [
@@ -331,4 +335,84 @@ test("DocumentEditor keeps model creation scoped to [value?.rootPath, value?.pat
   assert.match(source, /scrollListener\.dispose\(\);/);
   assert.match(source, /cancelAnimationFrame\(scrollFrameId\);/);
   assert.match(source, /onHandle\?\.\(null\);/);
+});
+
+test("live update simulation covers add, delete, rename, re-level, large paste, Agent edit, Undo and file switch", () => {
+  const tracker = createOutlineTracker();
+  let prev: OutlineSourceInput | null = null;
+  let collapsed = new Set<string>();
+
+  const apply = (next: OutlineSourceInput | null, expectedPlan: "immediate" | "debounce" | "clear" | "noop") => {
+    const plan = planOutlineUpdate(prev, next);
+    assert.equal(plan, expectedPlan);
+    const resetCollapse = plan === "immediate" || plan === "clear";
+    if (resetCollapse) tracker.reset();
+    const result = recomputeOutline(next, collapsed, resetCollapse);
+    collapsed = result.collapsedIds;
+    tracker.setOutline(result.outline);
+    prev = next;
+    return result.outline;
+  };
+
+  // 1. Open Markdown file.
+  const v1Text = "# Intro\n## Scope\n# Methods\n## Data\n";
+  const v1 = apply({ rootPath: "/p", path: "draft.md", sourceText: v1Text }, "immediate");
+  const introId = v1.roots[0].id;
+  const methodsId = v1.roots[1].id;
+  collapsed = toggleCollapsedId(collapsed, introId);
+  collapsed = toggleCollapsedId(collapsed, methodsId);
+  tracker.reportCursorLine(3);
+  assert.equal(tracker.getSnapshot(), methodsId);
+
+  // 2. Add a new heading -> debounce; collapsed parents remain collapsed.
+  const v2Text = "# Intro\n## Scope\n# Methods\n## Data\n## Analysis\n";
+  const v2 = apply({ rootPath: "/p", path: "draft.md", sourceText: v2Text }, "debounce");
+  assert.deepEqual(v2.roots[1].children.map((c) => c.title), ["Data", "Analysis"]);
+  assert.ok(collapsed.has(introId) && collapsed.has(methodsId));
+
+  // 3. Delete a heading (`# Intro`) -> its collapsed ID is pruned; `# Methods` stays collapsed.
+  const v3Text = "# Methods\n## Data\n## Analysis\n";
+  const v3 = apply({ rootPath: "/p", path: "draft.md", sourceText: v3Text }, "debounce");
+  assert.ok(!collapsed.has(introId), "deleted node collapsed ID must be pruned");
+  assert.ok(collapsed.has(methodsId), "surviving node collapsed ID must be kept");
+  assert.equal(v3.roots.length, 1);
+
+  // 4. Rename `## Data` -> `## Dataset`.
+  const v4Text = "# Methods\n## Dataset\n## Analysis\n";
+  const v4 = apply({ rootPath: "/p", path: "draft.md", sourceText: v4Text }, "debounce");
+  assert.deepEqual(v4.roots[0].children.map((c) => c.title), ["Dataset", "Analysis"]);
+  assert.ok(collapsed.has(methodsId));
+
+  // 5. Re-level `## Analysis` to `### Analysis` (nests under `## Dataset`).
+  const v5Text = "# Methods\n## Dataset\n### Analysis\n";
+  const v5 = apply({ rootPath: "/p", path: "draft.md", sourceText: v5Text }, "debounce");
+  assert.equal(v5.roots[0].children.length, 1);
+  assert.equal(v5.roots[0].children[0].children[0].title, "Analysis");
+  assert.equal(v5.roots[0].children[0].children[0].depth, 2);
+
+  // 6. Paste a large multi-section block (40 headings).
+  const pastedBlock = Array.from({ length: 40 }, (_, i) => `## Pasted ${i + 1}\nParagraph ${i + 1}\n`).join("");
+  const v6Text = `${v5Text}\n${pastedBlock}`;
+  const v6 = apply({ rootPath: "/p", path: "draft.md", sourceText: v6Text }, "debounce");
+  assert.equal(v6.flat.length, 43);
+  assert.ok(collapsed.has(methodsId));
+
+  // 7. Agent modification replaces sections without saving to disk.
+  const v7Text = "# Methods\n## Agent Revised Pipeline\n# Discussion\n";
+  const v7 = apply({ rootPath: "/p", path: "draft.md", sourceText: v7Text }, "debounce");
+  assert.deepEqual(v7.flat.map((n) => n.title), ["Methods", "Agent Revised Pipeline", "Discussion"]);
+  assert.ok(collapsed.has(methodsId));
+
+  // 8. Undo restores v1 content; tracker recomputes active section for saved cursor line 3 (`# Methods`).
+  const v8 = apply({ rootPath: "/p", path: "draft.md", sourceText: v1Text }, "debounce");
+  assert.deepEqual(v8.flat.map((n) => n.title), ["Intro", "Scope", "Methods", "Data"]);
+  assert.equal(tracker.getSnapshot(), v8.roots[1].id);
+
+  // 9. Switch to another file (.tex) -> immediate parse, collapse reset, tracker reset, no leftover nodes.
+  const texText = "\\section{Background}\n\\subsection{Prior Work}\n";
+  const v9 = apply({ rootPath: "/p", path: "paper.tex", sourceText: texText }, "immediate");
+  assert.equal(v9.format, "latex");
+  assert.deepEqual(v9.flat.map((n) => n.title), ["Background", "Prior Work"]);
+  assert.equal(collapsed.size, 0, "file switch must clear collapsed state");
+  assert.equal(tracker.getSnapshot(), null, "file switch must reset active section");
 });

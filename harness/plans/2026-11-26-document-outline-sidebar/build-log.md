@@ -11,9 +11,9 @@
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
-| D5 | In progress | D5-S1、D5-S2 編輯器接線、跳轉序列與過期點擊完成（npm test 289/289、build 通過） | — | D5-S3 即時更新情境自動化覆蓋 |
-| D6 | Not started | — | — | 等 D1A、D5 |
-| D7 | Not started | — | — | 等 D5 |
+| D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
+| D6 | Not started | — | — | D6-S1 LaTeX Monarch 語法定義與註冊 |
+| D7 | Not started | — | — | D7-S1 大綱鍵盤導覽純邏輯與測試 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
 
 ## 撰寫紀錄
@@ -211,3 +211,9 @@
   - 修改 `app/desktop/tests/outline_tracking.test.ts` 與 `app/desktop/tests/outline_view.test.ts`：新增跳轉序列順序與不改選取／文件斷言、4 種過期點擊與 null handle 測試、生命週期依賴與釋放檢查、`OutlineView` SSR 追蹤標示測試。
 - **程式審查結果**：`DocumentEditor.tsx` 建立 model 的 `useEffect` 依賴仍為 `[value?.rootPath, value?.path]`；`cursorListener.dispose()`、`scrollListener.dispose()`、`cancelAnimationFrame(scrollFrameId)`、`onHandle(null)` 皆於 `disposeEditor`（及 effect cleanup）釋放。
 - **必要檢查**：`npm test` 通過（`289 passed, 0 failed`，含既有 `documents.test.ts` 等全部通過）；`npm run build` 通過（575 ms）。
+
+### D5-S3 即時更新情境自動化覆蓋（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/tests/outline_tracking.test.ts`：新增完整情境模擬測試，依序覆蓋開檔、新增標題、刪除標題、改名、改層級、大量貼上（40 章節）、Agent 修改 `sourceText`、Undo 回到舊版本、切換至 `.tex` 檔，驗證排程（`immediate`/`debounce`）、大綱樹、收合保留／修剪／重設及追蹤器重算／重設。
+- **必要檢查**：`npm test` 通過（`290 passed, 0 failed`）；`npm run build` 通過（678 ms）。Monaco 內實機 Undo／Agent 修改／衝突處理列入 D8 手動驗收清單。D5 完成。
