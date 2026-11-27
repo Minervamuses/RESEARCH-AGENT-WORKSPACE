@@ -14,7 +14,7 @@
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
 | D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
 | D7 | Complete | D7-S1、D7-S2 完成（npm test 297/297、build 通過；實機鍵盤操作列入 D8 手動清單） | — | — |
-| D8 | Not started | — | — | D8-S1 README 更新 |
+| D8 | In progress | D8-S1 README 已更新並通過空白檢查 | — | D8-S2 完整回歸（npm test、build、pytest 與邊界 diff 檢查） |
 
 ## 撰寫紀錄
 
@@ -252,3 +252,8 @@
   - 修改 `app/desktop/src/App.tsx`：傳入 `onSetCollapsed={setOutlineCollapsed}`。
   - 修改 `app/desktop/tests/outline_view.test.ts`：新增 SSR 測試斷言整棵樹僅有一個 `tabIndex=0`、`role="tree"`/`treeitem`、`aria-level`、`aria-expanded` 正確。
 - **必要檢查**：`npm test` 通過（`297 passed, 0 failed`）；`npm run build` 通過（759 ms）。實機鍵盤導覽與中文輸入法驗證列入 D8 手動清單。D7 完成。
+
+### D8-S1 README 更新（2026-11-27，本次觀察）
+
+- **變更檔案**：修改 `README.md`，新增〈文件大綱側欄、可拖曳欄寬與編輯器輔助〉小節，逐項說明圖示列與兩種檢視、開檔自動切換、點目前圖示收合與隱藏範圍、Markdown／LaTeX 大綱解析規則、跳轉與目前章節追蹤、大綱鍵盤操作、可拖曳欄寬與雙擊重設、LaTeX 語法高亮、引用補全清單（`[@`、`\cite{`、`\citep{`、`\citet{`、`\textcite{`、Esc 後續打與 Ctrl+Space），以及單檔、不遞迴 `\input`/`\include` 與自訂巨集、不編譯 LaTeX 之限制。未改動 `for_agents/`。
+- **必要檢查**：對照 GOALS G1–G11 逐項核對無遺漏；`git diff --check -- README.md` 通過。
