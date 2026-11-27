@@ -18,6 +18,13 @@ export {
   type OutlineUpdatePlan,
 } from "./state.ts";
 export {
+  handleOutlineTreeKey,
+  resolveRovingFocusId,
+  visibleOutlineNodes,
+  type OutlineKeyInput,
+  type OutlineKeyOutcome,
+} from "./keyboard.ts";
+export {
   createOutlineTracker,
   findActiveHeadingId,
   jumpEditorToOffset,

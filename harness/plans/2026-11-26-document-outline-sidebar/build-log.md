@@ -13,7 +13,7 @@
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
 | D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
-| D7 | Not started | — | — | D7-S1 大綱鍵盤導覽純邏輯與測試 |
+| D7 | In progress | D7-S1 大綱鍵盤導覽純邏輯完成（npm test 296/296） | — | D7-S2 OutlineView roving tabindex、ARIA 與鍵盤接線 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
 
 ## 撰寫紀錄
@@ -235,3 +235,11 @@
   - `npm run build` 通過（600 ms，978 modules）。
   - Bundle 比較：`index-M2oharq-.js` 為 `428.36 kB`（相對 D5 結束的 `424.90 kB` 增加 `+3.46 kB`；相對 D1A 的 `393.84 kB` 累計增加 `+34.52 kB`）；Monaco 延遲載入 chunks 維持不變；`grep -c editor.contrib.suggestController dist/assets/*.js` 仍為 `dist/assets/suggestController-B8cGBtPE.js:1`。
 - `\cite{`、`\citep{`、`\citet{`、`\textcite{` 實機補全清單、Esc 後續打重現與語法顏色列入 D8 手動驗收清單。D6 完成。
+
+### D7-S1 大綱鍵盤導覽純邏輯（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 新增 `app/desktop/src/lib/outline/keyboard.ts`：`visibleOutlineNodes`、`resolveRovingFocusId`、`handleOutlineTreeKey`（Up/Down/Home/End/Left/Right/Enter、組字中 `isComposing`/`keyCode === 229` 與修飾鍵忽略）。
+  - 修改 `app/desktop/src/lib/outline/index.ts`：匯出鍵盤導覽函式。
+  - 新增 `app/desktop/tests/outline_keyboard.test.ts`：2 項測試，驗證葉節點／展開／收合／首尾邊界、組字中與非目標按鍵略過。
+- **必要檢查**：`npm test` 通過（`296 passed, 0 failed`）。
