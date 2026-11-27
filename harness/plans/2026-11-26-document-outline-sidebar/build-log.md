@@ -9,7 +9,7 @@
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
-| D3 | Not started | — | — | D3-S1 寬度讀寫與夾限邏輯 |
+| D3 | In progress | D3-S1 寬度讀寫與夾限邏輯完成（npm test 273/273） | — | D3-S2 ColumnResizer 與格線樣式 |
 | D4 | Not started | — | — | 等 D2、D3 |
 | D5 | Not started | — | — | 等 D4 |
 | D6 | Not started | — | — | 等 D1A、D5 |
@@ -136,3 +136,10 @@
     - LaTeX ~100 KiB（88,630 B）：中位數 **1.47 ms**（A10 目標 ≤ 15 ms）
     - LaTeX ~1 MiB（1,031,630 B）：中位數 **3.56 ms**（A10 目標 ≤ 50 ms）
 - D2 完成。
+
+### D3-S1 欄寬儲存與視窗夾限邏輯（2026-11-27，本次觀察）
+
+- **新增檔案**：
+  - `app/desktop/src/lib/layout.ts`：`SIDEBAR_WIDTH_KEY`（`research-agent.sidebarWidthPx`）、`DOCUMENT_RATIO_KEY`（`research-agent.documentSplitRatio`）、`read/write/clear`（`try/catch` 包裝與可注入 storage）、`clampSidebarWidth`、`clampDocumentRatio`、`resolveLayoutWidths`、`computeDraggedSidebarWidth`、`computeDraggedDocumentRatio`、`documentSplitFrValues`。
+  - `app/desktop/tests/layout.test.ts`：新增 5 項單元測試，驗證合法值往返、超界夾限、非法字串回預設、storage 例外不拋出、清除回預設，以及 420 px 側欄＋0.8 比例於 1051 px、800 px、761 px 容器皆不溢出且文件／對話欄 ≥ 300 px。
+- **必要檢查**：`npm test` 通過（`273 passed, 0 failed`）。
