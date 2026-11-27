@@ -1,0 +1,58 @@
+\documentclass{article}
+\usepackage{amsmath}
+\newcommand{\myfake}{\section{Macro Definition Must Be Excluded}}
+\def\otherfake#1{\subsection{Def Macro Must Be Excluded #1}}
+
+\begin{document}
+
+\part{Foundations}
+
+% \section{Commented Section Must Be Excluded}
+Inline percent sign 50\% followed by text; comments should highlight cleanly.
+
+\chapter*{Abstract and Overview}
+
+Ordinary text in LaTeX should not trigger word suggestions.
+Test citation completion here with \cite{}, \citep{}, \citet{}, and \textcite{}.
+Cross-references: see Section~\ref{sec:method} and Equation~\eqref{eq:loss}.
+
+\section[Short Intro]{1. Introduction to \textbf{Structured} \emph{Navigation}}
+\label{sec:intro}
+
+Inline math $E = mc^2$ and display math:
+\begin{equation}
+\label{eq:loss}
+\mathcal{L}(\theta) = \sum_{i=1}^{N} \| y_i - f_\theta(x_i) \|_2^2
+\end{equation}
+
+\subsection{Multi-line
+  % comment inside heading title
+  Title with {Nested Braces}}
+
+\begin{verbatim}
+\section{Inside Verbatim Must Be Excluded}
+\end{verbatim}
+
+\begin{lstlisting}
+\section{Inside Lstlisting Must Be Excluded}
+\end{lstlisting}
+
+Inline \verb|\section{Inside Verb Must Be Excluded}| stays excluded.
+
+\section{2. Methodology}
+\label{sec:method}
+
+\subsection{2.1 Dataset Construction}
+
+\subsubsection{2.1.1 Quality Control}
+
+\paragraph{Annotation Guidelines}
+
+\subparagraph{Inter-Annotator Agreement}
+
+Details about annotator calibration.
+
+\section{3. Conclusion}
+Only two short lines at the end of this LaTeX file.
+Verify clicking Conclusion highlights Conclusion without bouncing back.
+\end{document}

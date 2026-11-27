@@ -14,7 +14,7 @@
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
 | D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
 | D7 | Complete | D7-S1、D7-S2 完成（npm test 297/297、build 通過；實機鍵盤操作列入 D8 手動清單） | — | — |
-| D8 | In progress | D8-S1 README、D8-S2 完整回歸全部通過（npm test 297/297、build 通過、pytest 1826/1826、邊界 diff 0 B） | — | D8-S3 最終彙報與 7 類 GUI 驗收範例檔 |
+| D8 | Complete | D8-S1 README、D8-S2 完整回歸（npm test 297/297、build、pytest 1826/1826、邊界 diff 0 B）、D8-S3 最終彙報與 7 類範例檔（`evidence/D8-S3/`） | — | 使用者：執行手動 GUI 清單並確認 A1–A10 |
 
 ## 撰寫紀錄
 
@@ -265,3 +265,10 @@
 - **完整 pytest**（`app/`，沙箱外、Conda `app` PATH）：`1,826 passed, 0 failed`, 2 warnings（57.49 s，wall 58.36 s）。（附註：首次執行忘記把 Conda `app` bin 放進 `PATH` 導致 6 項呼叫 `node --experimental-strip-types` 的測試誤用 `/usr/bin/node` 而失敗；依 PLANS 加上 Conda `app` `PATH` 後 1,826 項全數通過。）
 - **授權邊界檢查**：`git diff --stat bc9f651 -- app/agent app/desktop/protocol app/desktop/src-tauri app/desktop/package.json app/desktop/package-lock.json for_agents` 輸出為 **0 bytes**；未改動 `src-tauri/` 故無需執行 `cargo test`。
 - **證據保存**：`evidence/D8-S2/{summary.md,npm-test.log,npm-build.log,dist-assets.txt,suggest-check.txt,pytest.log,boundary-diff.txt}`。
+
+### D8-S3 最終彙報與手動 GUI 驗收範例檔（2026-11-27，本次觀察）
+
+- **新增檔案**：
+  - `harness/plans/2026-11-26-document-outline-sidebar/evidence/D8-S3/final-report.md`：涵蓋 G1–G11 證據對照、全階段 commit 清單、修改前後測試／效能／bundle 數字、授權邊界查核、已知限制、U6 收合提醒、A1–A10 待確認假設、`for_agents/` 待 `$infrastructure` 更新段落及 12 項手動 GUI 驗收清單（明確未宣稱任何 GUI 實機行為已驗證）。
+  - `harness/plans/2026-11-26-document-outline-sidebar/evidence/D8-S3/fixtures/`：7 類手動 GUI 驗收範例檔（`01-multilevel-paper.md`、`02-multilevel-paper.tex`、`03-bilingual-cjk-english.md`、`04-long-many-sections.md`、`05-duplicate-headings.md`、`06-no-headings.md`、`07-in-progress-incomplete.md`、`07b-in-progress-incomplete.tex`）。
+- **整體完成判定**：PLANS「整體完成條件」第 1–5 項均已達成；D1、D1A、D2–D8 皆 `Complete`。下一步由使用者依 `final-report.md` 執行手動 GUI 驗收並確認 A1–A10。
