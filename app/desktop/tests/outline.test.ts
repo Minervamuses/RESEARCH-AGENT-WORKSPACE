@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { documentPositionAt } from "../src/lib/documentSource.ts";
 import {
   buildOutlineTree,
   outlineFormatForPath,
@@ -346,4 +347,54 @@ test("parseOutline dispatches by extension case-insensitively and returns empty 
   assert.equal(unknown.format, null);
   assert.deepEqual(unknown.roots, []);
   assert.deepEqual(unknown.flat, []);
+});
+
+test("UTF-16 offsets match documentPositionAt across BOM, CRLF, emoji and CJK for Markdown and LaTeX", () => {
+  const mdFixture = "\uFEFF" + [
+    "# 緒論 🚀 Intro",
+    "段落含 😀😀 與中文以及 ASCII。",
+    "## 第二節 🧪 Method",
+    "內容行一",
+    "",
+    "Setext 中文標題 🌟",
+    "===",
+    "### 子章節 🧬 Detail",
+    "結尾文字。",
+  ].join("\r\n");
+
+  const mdDoc = parseOutline("thesis.md", mdFixture);
+  assert.equal(mdDoc.flat.length, 4);
+  const expectedMdStarts = ["# 緒論 🚀 Intro", "## 第二節 🧪 Method", "Setext 中文標題 🌟", "### 子章節 🧬 Detail"];
+  mdDoc.flat.forEach((node, idx) => {
+    const pos = documentPositionAt(mdFixture, node.startOffsetUtf16);
+    assert.equal(pos.lineNumber, node.lineNumber, `md line mismatch for ${node.title}`);
+    assert.equal(pos.column, 1, `md column mismatch for ${node.title}`);
+    assert.ok(
+      mdFixture.startsWith(expectedMdStarts[idx], node.startOffsetUtf16),
+      `md slice mismatch at offset ${node.startOffsetUtf16}: ${mdFixture.slice(node.startOffsetUtf16, node.startOffsetUtf16 + 20)}`,
+    );
+  });
+
+  const texFixture = "\uFEFF" + [
+    "\\part{第一部 🚀 Part}",
+    "中文段落 😀 測試。",
+    "\\chapter{方法論 🧪 Methods}",
+    "更多內容 🎉。",
+    "\\section[短標題]{完整標題 🌟 Full}",
+    "\\subsection{子節 🧬 Sub}",
+    "結尾。",
+  ].join("\r\n");
+
+  const texDoc = parseOutline("thesis.tex", texFixture);
+  assert.equal(texDoc.flat.length, 4);
+  const expectedTexStarts = ["\\part{", "\\chapter{", "\\section[", "\\subsection{"];
+  texDoc.flat.forEach((node, idx) => {
+    const pos = documentPositionAt(texFixture, node.startOffsetUtf16);
+    assert.equal(pos.lineNumber, node.lineNumber, `tex line mismatch for ${node.title}`);
+    assert.equal(pos.column, 1, `tex column mismatch for ${node.title}`);
+    assert.ok(
+      texFixture.startsWith(expectedTexStarts[idx], node.startOffsetUtf16),
+      `tex slice mismatch at offset ${node.startOffsetUtf16}: ${texFixture.slice(node.startOffsetUtf16, node.startOffsetUtf16 + 20)}`,
+    );
+  });
 });

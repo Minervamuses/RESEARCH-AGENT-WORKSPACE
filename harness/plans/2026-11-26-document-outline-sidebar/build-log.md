@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
-| D2 | In progress | D2-S1、D2-S2、D2-S3 LaTeX 掃描器與分派完成（npm test 267/267） | — | D2-S4 offset 一致性與效能量測 |
+| D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Not started | — | — | D3-S1 寬度讀寫與夾限邏輯 |
 | D4 | Not started | — | — | 等 D2、D3 |
 | D5 | Not started | — | — | 等 D4 |
@@ -121,3 +121,18 @@
   - 新增 `app/desktop/src/lib/outline/index.ts`：`outlineFormatForPath`、`parseOutline(path, sourceText)` 與型別／掃描函式匯出。
   - 修改 `app/desktop/tests/outline.test.ts`：新增 3 項 LaTeX 與分派測試。
 - **必要檢查**：`npm test` 通過（`267 passed, 0 failed`）。
+
+### D2-S4 offset 一致性與效能量測（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/tests/outline.test.ts`：新增 BOM + CRLF + emoji + CJK 的 Markdown 與 LaTeX offset 一致性測試，逐節驗證 `documentPositionAt(sourceText, startOffsetUtf16)` 之行號等於 `lineNumber`、欄位為 1，且原文該 offset 起點即標題起頭。
+  - 新增 `harness/plans/2026-11-26-document-outline-sidebar/evidence/D2-S4/bench-outline.ts` 與 `results.txt`。
+- **必要檢查**：
+  - `npm test`：`268 passed, 0 failed`。
+  - `npm run build`：通過（`tsc --noEmit`、`tsc --noEmit -p tsconfig.test.json`、`vite build` 504 ms）。
+  - 效能量測（Node v24.18.0，Linux WSL2 x64，Intel Core Ultra 9 285H 16 cores，各 1,000 標題、20 次取中位數）：
+    - Markdown ~100 KiB（82,688 B）：中位數 **1.77 ms**（A10 目標 ≤ 15 ms）
+    - Markdown ~1 MiB（1,032,688 B）：中位數 **5.19 ms**（A10 目標 ≤ 50 ms）
+    - LaTeX ~100 KiB（88,630 B）：中位數 **1.47 ms**（A10 目標 ≤ 15 ms）
+    - LaTeX ~1 MiB（1,031,630 B）：中位數 **3.56 ms**（A10 目標 ≤ 50 ms）
+- D2 完成。

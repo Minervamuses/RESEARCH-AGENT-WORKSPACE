@@ -1,0 +1,9 @@
+Node: v24.18.0
+Platform: linux 6.6.87.1-microsoft-standard-WSL2 (x64)
+CPU: Intel(R) Core(TM) Ultra 9 285H (16 cores)
+Date: 2026-11-27T03:38:34.541Z
+---
+Markdown ~100 KiB: size=80.8 KiB (82688 B), headings=1000, runs=20, median=1.77 ms, min=1.29 ms, max=2.87 ms
+Markdown ~1 MiB  : size=1008.5 KiB (1032688 B), headings=1000, runs=20, median=5.19 ms, min=4.56 ms, max=9.81 ms
+LaTeX    ~100 KiB: size=86.6 KiB (88630 B), headings=1000, runs=20, median=1.47 ms, min=1.17 ms, max=2.20 ms
+LaTeX    ~1 MiB  : size=1007.5 KiB (1031630 B), headings=1000, runs=20, median=3.56 ms, min=3.25 ms, max=5.46 ms
