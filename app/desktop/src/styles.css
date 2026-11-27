@@ -107,12 +107,35 @@ h3 {
 }
 
 .app-shell {
+  --resizer-width: 6px;
+  --activity-bar-width: 0px;
+  --sidebar-viewport-max: calc(100vw - var(--activity-bar-width) - (var(--resizer-width) * 2) - 600px);
   display: grid;
-  grid-template-columns: minmax(10.15rem, 11.9rem) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-track, minmax(10.15rem, 11.9rem)) var(--resizer-width) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
   background: #f7f7f5;
+}
+
+@media (max-width: 1050px) and (min-width: 761px) {
+  .app-shell {
+    --sidebar-viewport-max: calc(100vw - var(--activity-bar-width) - var(--resizer-width) - 300px);
+  }
+}
+
+@media (min-width: 761px) {
+  .app-shell > .sidebar {
+    grid-column: 1;
+  }
+
+  .app-shell > .column-resizer-sidebar {
+    grid-column: 2;
+  }
+
+  .app-shell > .main-workspace {
+    grid-column: 3;
+  }
 }
 
 .sidebar {

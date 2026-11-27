@@ -1,0 +1,55 @@
+/* Vertical column resizer styling and responsive visibility for new shell controls.
+ * Grid track definitions for .app-shell and .writing-workspace stay in styles.css and document.css. */
+
+.column-resizer {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+
+.column-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.column-resizer:hover::after {
+  background: #a4afa9;
+}
+
+.column-resizer:focus-visible {
+  outline: 2px solid #1f6b55;
+  outline-offset: -2px;
+}
+
+.column-resizer:focus-visible::after,
+.column-resizer.is-dragging::after {
+  background: #1f6b55;
+}
+
+body.is-resizing-columns {
+  cursor: col-resize;
+  user-select: none;
+}
+
+@media (max-width: 1050px) {
+  .column-resizer-workspace {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .column-resizer-sidebar {
+    display: none;
+  }
+}

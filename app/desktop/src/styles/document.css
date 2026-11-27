@@ -1,5 +1,10 @@
 /* Source and conversation share a workspace; tool waits never disable editing. */
-.writing-workspace { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); height: 100%; min-height: 0; flex: 1; }
+.writing-workspace { display: grid; grid-template-columns: minmax(300px, var(--document-fr, 1.05fr)) var(--resizer-width, 6px) minmax(300px, var(--conversation-fr, 1fr)); height: 100%; min-height: 0; flex: 1; }
+@media (min-width: 1051px) {
+  .writing-workspace > .document-pane { grid-column: 1; }
+  .writing-workspace > .column-resizer-workspace { grid-column: 2; }
+  .writing-workspace > .workspace-body { grid-column: 3; }
+}
 .document-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #d4d6d8; background: #fff; }
 .document-header { display: flex; align-items: center; gap: .45rem; flex: 0 0 auto; min-width: 0; padding: .35rem .7rem; border-bottom: 1px solid #dedfdd; }
 .document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }

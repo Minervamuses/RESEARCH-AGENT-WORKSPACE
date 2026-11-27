@@ -9,7 +9,7 @@
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
-| D3 | In progress | D3-S1 寬度讀寫與夾限邏輯完成（npm test 273/273） | — | D3-S2 ColumnResizer 與格線樣式 |
+| D3 | In progress | D3-S1、D3-S2 ColumnResizer 與三欄格線完成（npm test 275/275、build 通過） | — | D3-S3 鍵盤調整、雙擊重設與拖曳純函式測試 |
 | D4 | Not started | — | — | 等 D2、D3 |
 | D5 | Not started | — | — | 等 D4 |
 | D6 | Not started | — | — | 等 D1A、D5 |
@@ -143,3 +143,15 @@
   - `app/desktop/src/lib/layout.ts`：`SIDEBAR_WIDTH_KEY`（`research-agent.sidebarWidthPx`）、`DOCUMENT_RATIO_KEY`（`research-agent.documentSplitRatio`）、`read/write/clear`（`try/catch` 包裝與可注入 storage）、`clampSidebarWidth`、`clampDocumentRatio`、`resolveLayoutWidths`、`computeDraggedSidebarWidth`、`computeDraggedDocumentRatio`、`documentSplitFrValues`。
   - `app/desktop/tests/layout.test.ts`：新增 5 項單元測試，驗證合法值往返、超界夾限、非法字串回預設、storage 例外不拋出、清除回預設，以及 420 px 側欄＋0.8 比例於 1051 px、800 px、761 px 容器皆不溢出且文件／對話欄 ≥ 300 px。
 - **必要檢查**：`npm test` 通過（`273 passed, 0 failed`）。
+
+### D3-S2 ColumnResizer、格線變數與版面樣式（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 新增 `app/desktop/src/components/ColumnResizer.tsx`：`role="separator"`、`aria-orientation="vertical"`、`aria-valuenow/min/max`、`aria-label`、`tabIndex`、`inert`、pointer capture 拖曳、`pointercancel`/`lostpointercapture` 清理 `is-resizing-columns` class、鍵盤與雙擊重設事件介面。
+  - 新增 `app/desktop/src/styles/layout.css`：邊界元件樣式、拖曳中 `user-select: none`、`<= 1050px` 與 `<= 760px` 邊界隱藏規則（未重定義 `.app-shell` 或 `.writing-workspace` 的 `grid-template-columns`）。
+  - 修改 `app/desktop/src/styles.css`：`.app-shell` 改為三欄（`var(--sidebar-track, minmax(10.15rem, 11.9rem)) var(--resizer-width) minmax(0, 1fr)`），加入 `--sidebar-viewport-max`（> 1050 px 與 761–1050 px 兩段計算）並於 `@media (min-width: 761px)` 明確指定子元素 `grid-column`。
+  - 修改 `app/desktop/src/styles/document.css`：`.writing-workspace` 改為三欄（`minmax(300px, var(--document-fr, 1.05fr)) var(--resizer-width, 6px) minmax(300px, var(--conversation-fr, 1fr))`）並於 `@media (min-width: 1051px)` 明確指定子元素 `grid-column`；保留既有 `<= 1050px` 單欄規則。
+  - 修改 `app/desktop/src/main.tsx`：在 `document.css` 之後 import `layout.css`。
+  - 修改 `app/desktop/src/App.tsx`：掛載側欄與工作區兩條 `ColumnResizer`（刪除對話框開啟時設為 `inert`）並以 CSS 變數帶入寬度。
+  - 修改 `app/desktop/tests/styles.test.ts` 與 `app/desktop/tests/layout.test.ts`：新增 CSS 載入順序／預設值／斷點／定位斷言與 `ColumnResizer` SSR 測試。
+- **必要檢查**：`npm test` 通過（`275 passed, 0 failed`）；`npm run build` 通過（565 ms）。

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createServer, type ViteDevServer } from "vite";
 import {
   ACTIVITY_BAR_WIDTH,
   clampDocumentRatio,
@@ -143,4 +146,56 @@ test("drag delta calculations clamp out-of-range pointer movement", () => {
   assert.equal(computeDraggedDocumentRatio(500, 100, 1006), 0.6);
   assert.equal(computeDraggedDocumentRatio(500, 400, 1006), 0.7);
   assert.equal(computeDraggedDocumentRatio(500, -400, 1006), 0.3);
+});
+
+type ColumnResizerModule = typeof import("../src/components/ColumnResizer.tsx");
+let viteServer: Promise<ViteDevServer> | undefined;
+function loadColumnResizer(): Promise<ColumnResizerModule> {
+  viteServer ??= createServer({
+    configFile: false,
+    root: new URL("..", import.meta.url).pathname,
+    server: { middlewareMode: true, hmr: false, ws: false },
+    appType: "custom",
+  });
+  return viteServer.then((srv) => srv.ssrLoadModule("/src/components/ColumnResizer.tsx") as Promise<ColumnResizerModule>);
+}
+after(async () => { await (await viteServer)?.close(); });
+
+test("ColumnResizer SSR renders vertical separator role, ARIA bounds and inert tabIndex", async () => {
+  const { ColumnResizer } = await loadColumnResizer();
+  const noop = () => {};
+  const activeHtml = renderToStaticMarkup(createElement(ColumnResizer, {
+    className: "column-resizer-sidebar",
+    label: "Resize sidebar width",
+    valueNow: 240,
+    valueMin: 160,
+    valueMax: 420,
+    onDragStart: () => null,
+    onDragMove: noop,
+    onDragEnd: noop,
+    onKeyboardStep: noop,
+    onReset: noop,
+  }));
+  assert.match(activeHtml, /role="separator"/);
+  assert.match(activeHtml, /aria-orientation="vertical"/);
+  assert.match(activeHtml, /aria-label="Resize sidebar width"/);
+  assert.match(activeHtml, /aria-valuenow="240"/);
+  assert.match(activeHtml, /aria-valuemin="160"/);
+  assert.match(activeHtml, /aria-valuemax="420"/);
+  assert.match(activeHtml, /tabindex="0"/i);
+
+  const inertHtml = renderToStaticMarkup(createElement(ColumnResizer, {
+    label: "Resize sidebar width",
+    valueNow: 240,
+    valueMin: 160,
+    valueMax: 420,
+    inert: true,
+    onDragStart: () => null,
+    onDragMove: noop,
+    onDragEnd: noop,
+    onKeyboardStep: noop,
+    onReset: noop,
+  }));
+  assert.match(inertHtml, /tabindex="-1"/i);
+  assert.match(inertHtml, /\binert\b/);
 });

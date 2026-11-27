@@ -5,6 +5,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 
 import {
@@ -53,6 +54,7 @@ import { Transcript } from "./components/Transcript.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ApprovalDialog } from "./components/ApprovalDialog.tsx";
 import { Composer, ComposerNotices } from "./components/Composer.tsx";
+import { ColumnResizer, type ResizerKeyboardAction } from "./components/ColumnResizer.tsx";
 import { ConversationMenu, DeleteConversationDialog, RenameConversationDialog } from "./components/ConversationDialogs.tsx";
 import { DocumentPane } from "./components/DocumentPane.tsx";
 import { phaseLabels } from "./components/phaseLabels.ts";
@@ -78,6 +80,27 @@ import {
   type ApprovalOwnerState,
 } from "./lib/approvalOwner.ts";
 import { applyReducerOnce } from "./lib/reducerOnce.ts";
+import {
+  clampDocumentRatio,
+  clampSidebarWidth,
+  clearDocumentRatio,
+  clearSidebarWidth,
+  computeDraggedDocumentRatio,
+  computeDraggedSidebarWidth,
+  DEFAULT_DOCUMENT_RATIO,
+  DEFAULT_SIDEBAR_WIDTH,
+  documentSplitFrValues,
+  KEYBOARD_RESIZE_STEP,
+  MAX_DOCUMENT_RATIO,
+  MAX_SIDEBAR_WIDTH,
+  MIN_DOCUMENT_RATIO,
+  MIN_SIDEBAR_WIDTH,
+  readDocumentRatio,
+  readSidebarWidth,
+  RESIZER_WIDTH,
+  writeDocumentRatio,
+  writeSidebarWidth,
+} from "./lib/layout.ts";
 import { useExtensions } from "./hooks/useExtensions.ts";
 import {
   beginExtensionPreview,
@@ -1756,8 +1779,157 @@ export default function App() {
   const lifecycleBlocked = interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null;
   const lifecycleReady = state.snapshot?.lifecycle === "ready";
 
+  const [sidebarWidthPx, setSidebarWidthPx] = useState<number | null>(() => readSidebarWidth());
+  const [documentRatio, setDocumentRatio] = useState<number | null>(() => readDocumentRatio());
+  const shellRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
+  const shellStyle = useMemo<CSSProperties>(() => {
+    if (sidebarWidthPx === null) return {};
+    return {
+      "--sidebar-width": `${sidebarWidthPx}px`,
+      "--sidebar-track": "clamp(160px, min(var(--sidebar-width), var(--sidebar-viewport-max)), 420px)",
+    } as CSSProperties;
+  }, [sidebarWidthPx]);
+
+  const workspaceStyle = useMemo<CSSProperties>(() => {
+    if (documentRatio === null) return {};
+    const { documentFr, conversationFr } = documentSplitFrValues(documentRatio);
+    return {
+      "--document-fr": documentFr,
+      "--conversation-fr": conversationFr,
+    } as CSSProperties;
+  }, [documentRatio]);
+
+  const readActivityBarWidth = useCallback((): number => {
+    const shellEl = shellRef.current;
+    if (!shellEl || typeof getComputedStyle !== "function") return 0;
+    const raw = parseFloat(getComputedStyle(shellEl).getPropertyValue("--activity-bar-width"));
+    return Number.isFinite(raw) ? raw : 0;
+  }, []);
+
+  const applySidebarWidthCss = useCallback((widthPx: number) => {
+    const el = shellRef.current;
+    if (!el) return;
+    el.style.setProperty("--sidebar-width", `${widthPx}px`);
+    el.style.setProperty("--sidebar-track", "clamp(160px, min(var(--sidebar-width), var(--sidebar-viewport-max)), 420px)");
+  }, []);
+
+  const applyDocumentRatioCss = useCallback((ratio: number) => {
+    const el = workspaceRef.current;
+    if (!el) return;
+    const { documentFr, conversationFr } = documentSplitFrValues(ratio);
+    el.style.setProperty("--document-fr", documentFr);
+    el.style.setProperty("--conversation-fr", conversationFr);
+  }, []);
+
+  const startSidebarDrag = useCallback(() => {
+    const shellEl = shellRef.current;
+    if (!shellEl) return null;
+    const sidebarEl = shellEl.querySelector<HTMLElement>(":scope > .sidebar");
+    return {
+      startPx: sidebarEl ? sidebarEl.getBoundingClientRect().width : (sidebarWidthPx ?? DEFAULT_SIDEBAR_WIDTH),
+      containerPx: shellEl.getBoundingClientRect().width,
+    };
+  }, [sidebarWidthPx]);
+
+  const moveSidebarDrag = useCallback((start: { startPx: number; containerPx: number }, deltaX: number) => {
+    const next = computeDraggedSidebarWidth(start.startPx, deltaX, start.containerPx, {
+      activityBarWidth: readActivityBarWidth(),
+      resizerWidth: RESIZER_WIDTH,
+    });
+    applySidebarWidthCss(next);
+  }, [applySidebarWidthCss, readActivityBarWidth]);
+
+  const endSidebarDrag = useCallback((start: { startPx: number; containerPx: number }, deltaX: number) => {
+    const next = computeDraggedSidebarWidth(start.startPx, deltaX, start.containerPx, {
+      activityBarWidth: readActivityBarWidth(),
+      resizerWidth: RESIZER_WIDTH,
+    });
+    applySidebarWidthCss(next);
+    writeSidebarWidth(next);
+    setSidebarWidthPx(next);
+  }, [applySidebarWidthCss, readActivityBarWidth]);
+
+  const stepSidebarWidth = useCallback((action: ResizerKeyboardAction) => {
+    const shellEl = shellRef.current;
+    const containerPx = shellEl ? shellEl.getBoundingClientRect().width : undefined;
+    const sidebarEl = shellEl?.querySelector<HTMLElement>(":scope > .sidebar");
+    const current = sidebarWidthPx ?? (sidebarEl ? sidebarEl.getBoundingClientRect().width : DEFAULT_SIDEBAR_WIDTH);
+    const options = { activityBarWidth: readActivityBarWidth(), resizerWidth: RESIZER_WIDTH };
+    let target: number;
+    if (action === "min") target = MIN_SIDEBAR_WIDTH;
+    else if (action === "max") target = MAX_SIDEBAR_WIDTH;
+    else target = current + (action === "increase" ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP);
+    const next = clampSidebarWidth(target, containerPx, options);
+    applySidebarWidthCss(next);
+    writeSidebarWidth(next);
+    setSidebarWidthPx(next);
+  }, [applySidebarWidthCss, readActivityBarWidth, sidebarWidthPx]);
+
+  const resetSidebarWidth = useCallback(() => {
+    clearSidebarWidth();
+    const el = shellRef.current;
+    if (el) {
+      el.style.removeProperty("--sidebar-width");
+      el.style.removeProperty("--sidebar-track");
+    }
+    setSidebarWidthPx(null);
+  }, []);
+
+  const startWorkspaceDrag = useCallback(() => {
+    const wsEl = workspaceRef.current;
+    if (!wsEl) return null;
+    const docEl = wsEl.querySelector<HTMLElement>(":scope > .document-pane");
+    const containerPx = wsEl.getBoundingClientRect().width;
+    const startPx = docEl ? docEl.getBoundingClientRect().width : (containerPx - RESIZER_WIDTH) * (documentRatio ?? DEFAULT_DOCUMENT_RATIO);
+    return { startPx, containerPx };
+  }, [documentRatio]);
+
+  const moveWorkspaceDrag = useCallback((start: { startPx: number; containerPx: number }, deltaX: number) => {
+    const next = computeDraggedDocumentRatio(start.startPx, deltaX, start.containerPx, RESIZER_WIDTH);
+    applyDocumentRatioCss(next);
+  }, [applyDocumentRatioCss]);
+
+  const endWorkspaceDrag = useCallback((start: { startPx: number; containerPx: number }, deltaX: number) => {
+    const next = computeDraggedDocumentRatio(start.startPx, deltaX, start.containerPx, RESIZER_WIDTH);
+    applyDocumentRatioCss(next);
+    writeDocumentRatio(next);
+    setDocumentRatio(next);
+  }, [applyDocumentRatioCss]);
+
+  const stepWorkspaceRatio = useCallback((action: ResizerKeyboardAction) => {
+    const wsEl = workspaceRef.current;
+    const containerPx = wsEl ? wsEl.getBoundingClientRect().width : 0;
+    const docEl = wsEl?.querySelector<HTMLElement>(":scope > .document-pane");
+    const paneArea = containerPx > RESIZER_WIDTH ? containerPx - RESIZER_WIDTH : 1000;
+    const currentDocPx = docEl ? docEl.getBoundingClientRect().width : paneArea * (documentRatio ?? DEFAULT_DOCUMENT_RATIO);
+    let next: number;
+    if (action === "min") {
+      next = clampDocumentRatio(MIN_DOCUMENT_RATIO, containerPx > RESIZER_WIDTH ? containerPx : undefined, RESIZER_WIDTH);
+    } else if (action === "max") {
+      next = clampDocumentRatio(MAX_DOCUMENT_RATIO, containerPx > RESIZER_WIDTH ? containerPx : undefined, RESIZER_WIDTH);
+    } else {
+      const delta = action === "increase" ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP;
+      next = computeDraggedDocumentRatio(currentDocPx, delta, paneArea + RESIZER_WIDTH, RESIZER_WIDTH);
+    }
+    applyDocumentRatioCss(next);
+    writeDocumentRatio(next);
+    setDocumentRatio(next);
+  }, [applyDocumentRatioCss, documentRatio]);
+
+  const resetWorkspaceRatio = useCallback(() => {
+    clearDocumentRatio();
+    const el = workspaceRef.current;
+    if (el) {
+      el.style.removeProperty("--document-fr");
+      el.style.removeProperty("--conversation-fr");
+    }
+    setDocumentRatio(null);
+  }, []);
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={shellRef} style={shellStyle}>
       <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
       <Sidebar
         inert={deleteDialog !== null} phase={state.phase} snapshot={state.snapshot} hasError={state.error !== null}
@@ -1772,10 +1944,23 @@ export default function App() {
         onOpenMenu={(menu, returnFocus) => { conversationMenuReturnFocusRef.current = returnFocus; setConversationMenu(menu); }}
         onLifecycle={runLifecycle}
       />
+      <ColumnResizer
+        className="column-resizer-sidebar"
+        label="Resize sidebar width"
+        valueNow={sidebarWidthPx ?? DEFAULT_SIDEBAR_WIDTH}
+        valueMin={MIN_SIDEBAR_WIDTH}
+        valueMax={MAX_SIDEBAR_WIDTH}
+        inert={deleteDialog !== null}
+        onDragStart={startSidebarDrag}
+        onDragMove={moveSidebarDrag}
+        onDragEnd={endSidebarDrag}
+        onKeyboardStep={stepSidebarWidth}
+        onReset={resetSidebarWidth}
+      />
 
       <main id="main-workspace" className="main-workspace" tabIndex={-1} inert={deleteDialog !== null}>
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectionPreview?.title ?? selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>
-        <div className="writing-workspace">
+        <div className="writing-workspace" ref={workspaceRef} style={workspaceStyle}>
           <DocumentPane
             document={documentValue} dirty={documentDirty} busy={documentBusy} notice={documentNotice}
             header={{
@@ -1795,6 +1980,19 @@ export default function App() {
               requestAdd: requestCitationAdd, writesDisabled: interaction.turnActive || documentBusy || pendingApproval !== null,
             } : null}
             conflict={documentConflict} onResolveConflict={(resolution) => void resolveDocumentConflict(resolution)}
+          />
+          <ColumnResizer
+            className="column-resizer-workspace"
+            label="Resize document and conversation panels"
+            valueNow={Math.round((documentRatio ?? DEFAULT_DOCUMENT_RATIO) * 100)}
+            valueMin={Math.round(MIN_DOCUMENT_RATIO * 100)}
+            valueMax={Math.round(MAX_DOCUMENT_RATIO * 100)}
+            inert={deleteDialog !== null}
+            onDragStart={startWorkspaceDrag}
+            onDragMove={moveWorkspaceDrag}
+            onDragEnd={endWorkspaceDrag}
+            onKeyboardStep={stepWorkspaceRatio}
+            onReset={resetWorkspaceRatio}
           />
         <div className={`workspace-body${(renderConversation || selectionPreview !== null) ? " conversation-workspace-body" : ""}`}>
           {extensionFlow !== null && <ExtensionPanel
