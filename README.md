@@ -68,6 +68,19 @@ python main.py
 
 側欄的 Restart 仍用於重新載入已設定的 MCP servers，也供需要重啟的擴充管理流程使用。停止目前回合請使用 Stop。
 
+### 中文輸入（WSLg）
+
+桌面程式是 WSLg 顯示的 Linux 視窗，Windows 的輸入法（微軟注音、廠商輸入法等）不會送進這個視窗，所以要打中文須使用 WSL 內的 IBus。安裝與一次性設定（以注音為例）：
+
+```bash
+sudo apt install ibus ibus-gtk3 ibus-chewing
+gsettings set org.freedesktop.ibus.general preload-engines "['chewing']"
+```
+
+只放注音一個引擎，是因為 IBus 預設的切換鍵 Super+Space 會被 Windows 攔截；注音內以 **Caps Lock** 切換中文與英數（`ibus-chewing` 的預設，可用 `ibus-setup` 調整）。其他輸入法引擎同樣設定在 `preload-engines`。
+
+`python main.py`（含 `--dev`）在 WSL 中會自動處理其餘部分：找到 `ibus-daemon` 與 GTK 3 的 IBus 模組時，在背景啟動 `ibus-daemon`（這個顯示已有時沿用原本的），並只對桌面程式設定 `GTK_IM_MODULE=ibus` 與 `XMODIFIERS=@im=ibus`；`ibus-daemon` 在關閉程式後仍留在背景。下列情況啟動器不介入，程式照常啟動，只是不能打中文：沒有安裝 IBus、`ibus-daemon` 無法啟動，或不在 WSL 中執行。啟動 shell 已設定 `GTK_IM_MODULE` 或 `XMODIFIERS`（例如改用 fcitx5）時，啟動器也不介入，沿用該設定。
+
 ## 開啟專案、文件與對話
 
 1. 按 **Choose project folder…**，在 Windows 原生視窗選取 WSL 資料夾，例如 `\\wsl.localhost\Ubuntu-24.04\home\你的帳號\research`。
@@ -86,7 +99,7 @@ python main.py
   - 點選標題會把編輯器游標移至該標題行並捲近頂端、聚焦編輯器，不改動文件、不破壞 Undo 歷史，也不建立文字選取。移動游標或捲動時會自動標出最內層的目前章節；若父節點已收合，則標示最近的可見祖先。
 - **大綱鍵盤操作**：以 **Tab** 進入大綱樹後，可用 **↑／↓** 移動、**Home／End** 跳至首尾、**→** 展開或移至第一個子節點、**←** 收合或移至父節點、**Enter** 跳轉至該章節。按鍵僅在大綱取得焦點時生效，不影響編輯器、對話輸入框與中文輸入法組字。
 - **可拖曳欄寬**：**側欄｜主區**與**文件｜對話**兩條直立邊界皆可用滑鼠左右拖曳或聚焦後以 **←／→／Home／End** 調整，**雙擊**邊界可恢復預設寬度。調整後的寬度會記住並在重開程式後沿用，窄視窗時自動依視窗夾限並隱藏對應邊界；不提供上下方向拖曳。
-- **LaTeX 語法高亮與引用補全清單**：`.tex` 文件以本地打包的 LaTeX 語法規則上色（指令、章節、環境、註解、數學、引用、交叉引用與括號）。在文件編輯器輸入 Markdown 的 `[@`、`; @` 或 LaTeX 的 `\cite{`、`\citep{`、`\citet{`、`\textcite{`（含逗號後）會顯示書目 key 補全清單；按 **Esc** 關閉後繼續輸入或按 **Ctrl+Space** 皆可再次叫出，且一般論文內文不跳出字詞建議。
+- **LaTeX 語法高亮與引用補全清單**：`.tex` 文件以本地打包的 LaTeX 語法規則上色（指令、章節、環境、註解、數學、引用、交叉引用與括號）。在文件編輯器輸入 Markdown 的 `[@`、`; @` 或 LaTeX 的 `\cite{`、`\citep{`、`\citet{`、`\textcite{`（含逗號後）會顯示書目 key 補全清單（Markdown 須以 `[` 或 `;` 開頭，單獨輸入 `@` 不會叫出清單）；按 **Esc** 關閉後繼續輸入或按 **Ctrl+Space** 皆可再次叫出，且一般論文內文不跳出字詞建議。
 - **限制**：一次只開啟一份文件，大綱僅解析目前開啟的單一檔案；不遞迴展開 `\input{}`／`\include{}` 或自訂巨集，也不提供 LaTeX 編譯或 PDF 預覽。
 
 ### 單一工作流程（產品限制）

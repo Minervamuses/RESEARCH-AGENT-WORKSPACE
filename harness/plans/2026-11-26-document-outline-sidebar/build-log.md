@@ -292,3 +292,8 @@
 - 確認：第 4 項文末 Conclusion、第 5、6 項目前章節與即時更新。
 - **未通過：G11 引用補全清單「打@仍然沒有反應」**。打包與註冊表共用已核對無誤；待使用者確認是否打 `[@`、書目是否有條目、Ctrl+Space 是否顯示 `No suggestions.`。
 - 另回報無法輸入中文：WSLg 的 Linux 視窗收不到 Windows 輸入法，app 啟動環境未設 `ibus`；屬既有環境問題，非本計劃造成。
+
+### ACC-4 使用者第四輪回報與後續修正（2026-11-27）
+
+- G11：使用者改打 `[@`、`; @` 後書目清單出現，原先是只打了 `@`（依設計不觸發）。README 已補一句說明。**Ctrl+Space 在正文仍沒有反應**（預期應顯示 `No suggestions.`），待查；可能是 Windows 中文輸入法把 Ctrl+Space 當切換鍵攔截，尚未驗證。
+- 中文輸入（計劃外、使用者授權）：`main.py` 在 WSL 中、找到 `ibus-daemon` 與 GTK 3 IBus 模組且未自設輸入法時，啟動 `ibus-daemon` 並只對桌面程式設 `GTK_IM_MODULE`／`XMODIFIERS`；沒有安裝則不啟用。README 新增〈中文輸入（WSLg）〉。檢查：`tests/test_desktop_launcher.py` 23 passed（4 個 mutation 皆被抓到），完整 pytest 1836 passed。實機中文輸入待使用者驗證。
