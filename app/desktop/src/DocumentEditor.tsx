@@ -9,6 +9,7 @@ import {
   documentPositionAt,
   applyDocumentChanges,
 } from "./lib/documentSource.ts";
+import { editorLanguageForPath, registerLatexLanguage } from "./lib/latexLanguage.ts";
 import { jumpEditorToOffset, type EditorOutlineHandle } from "./lib/outline/tracking.ts";
 import type { DocumentContextDto } from "./protocol.ts";
 import {
@@ -75,9 +76,10 @@ export function DocumentEditor({
       if (disposed || !surfaceRef.current || !snapshotRef.current) return;
       globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
       const initial = snapshotRef.current;
+      registerLatexLanguage(monaco);
       const model = monaco.editor.createModel(
         modelSource(initial.sourceText),
-        /\.(md|markdown)$/i.test(initial.path) ? "markdown" : "plaintext",
+        editorLanguageForPath(initial.path),
       );
       let fontSize = readEditorFontSize();
       const instance = monaco.editor.create(surfaceRef.current, {

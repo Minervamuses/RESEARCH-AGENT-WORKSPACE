@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   editorLanguageForPath,
@@ -110,4 +111,13 @@ test("LaTeX Monarch rules compile cleanly and citation argument states never emi
   // Language configuration sets % line comment and standard bracket pairs.
   assert.equal(LATEX_LANGUAGE_CONFIGURATION.comments?.lineComment, "%");
   assert.ok(LATEX_LANGUAGE_CONFIGURATION.brackets?.some(([open, close]) => open === "{" && close === "}"));
+});
+
+test("DocumentEditor registers LaTeX before createModel and binds citation completion to model.getLanguageId()", () => {
+  const source = readFileSync(new URL("../src/DocumentEditor.tsx", import.meta.url), "utf8");
+  const regIndex = source.indexOf("registerLatexLanguage(monaco)");
+  const createModelIndex = source.indexOf("monaco.editor.createModel(");
+  assert.ok(regIndex >= 0 && regIndex < createModelIndex, "registerLatexLanguage must run before createModel");
+  assert.match(source, /editorLanguageForPath\(initial\.path\)/);
+  assert.match(source, /registerCompletionItemProvider\(model\.getLanguageId\(\)/);
 });

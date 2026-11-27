@@ -12,7 +12,7 @@
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
-| D6 | In progress | D6-S1 LaTeX Monarch 語法定義與冪等註冊完成（npm test 293/293） | — | D6-S2 DocumentEditor 語言註冊與選擇 |
+| D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
 | D7 | Not started | — | — | D7-S1 大綱鍵盤導覽純邏輯與測試 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
 
@@ -224,3 +224,14 @@
   - `app/desktop/src/lib/latexLanguage.ts`：`LATEX_LANGUAGE_ID`、`editorLanguageForPath`、`LATEX_MONARCH_LANGUAGE`（涵蓋指令、章節指令、環境、註解與 `\%`、數學 `$`/`$$`/`\(...\)`/`\[...\]`/常見數學環境、引用指令與鍵、交叉引用、括號；所有引用參數狀態絕不使用含 `string`/`comment` 的 token 名稱）、`LATEX_LANGUAGE_CONFIGURATION`（`%` 行註解與括號配對）、`registerLatexLanguage`（以 `WeakSet` 冪等註冊）。
   - `app/desktop/tests/latex_language.test.ts`：3 項測試，驗證副檔名語言對應、重複呼叫僅註冊一次、所有規則正規表示式可編譯、引用狀態無 `string`/`comment` token 且支援 `\cite{`／`\citep{`／`\citet{`／`\textcite{`。
 - **必要檢查**：`npm test` 通過（`293 passed, 0 failed`）。
+
+### D6-S2 編輯器整合 LaTeX 語法高亮與語言選擇（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/src/DocumentEditor.tsx`：於 `monaco.editor.createModel` 之前呼叫 `registerLatexLanguage(monaco)` 並以 `editorLanguageForPath(initial.path)` 選語言；維持 `registerCompletionItemProvider(model.getLanguageId(), ...)` 與 D1A 補全設定；未修改 `src/citations.ts`。
+  - 修改 `app/desktop/tests/latex_language.test.ts`：新增檢查驗證註冊早於 `createModel` 且補全仍綁定 `model.getLanguageId()`。
+- **必要檢查**：
+  - `npm test` 通過（`294 passed, 0 failed`，含 `tests/citations.test.ts`）。
+  - `npm run build` 通過（600 ms，978 modules）。
+  - Bundle 比較：`index-M2oharq-.js` 為 `428.36 kB`（相對 D5 結束的 `424.90 kB` 增加 `+3.46 kB`；相對 D1A 的 `393.84 kB` 累計增加 `+34.52 kB`）；Monaco 延遲載入 chunks 維持不變；`grep -c editor.contrib.suggestController dist/assets/*.js` 仍為 `dist/assets/suggestController-B8cGBtPE.js:1`。
+- `\cite{`、`\citep{`、`\citet{`、`\textcite{` 實機補全清單、Esc 後續打重現與語法顏色列入 D8 手動驗收清單。D6 完成。
