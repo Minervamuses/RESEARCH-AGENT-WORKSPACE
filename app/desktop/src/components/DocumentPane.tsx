@@ -4,6 +4,7 @@ import type { BibliographyEntryDto } from "../citations.ts";
 import type { DocumentContextDto } from "../protocol.ts";
 import type { DocumentConflict } from "../lib/documents.ts";
 import { focusLeftContainer } from "../lib/interaction.ts";
+import type { EditorOutlineHandle } from "../lib/outline/tracking.ts";
 import { CitationPanel } from "../CitationPanel.tsx";
 import { DocumentEditor } from "../DocumentEditor.tsx";
 import type { AnnotationControls } from "./Annotation.tsx";
@@ -72,8 +73,15 @@ export function DocumentPane({ document, dirty, busy, notice, header, editor, ci
   document: DocumentContextDto | null; dirty: boolean; busy: boolean; notice: string | null;
   header: { openDisabled: boolean; saveDisabled: boolean; undoDisabled: boolean; onOpen: () => void; onSave: () => void; onUndo: () => void };
   /** `onChange` also receives snapshots from the citation panel. */
-  editor: { onChange: (snapshot: DocumentContextDto) => void; annotationControls: AnnotationControls;
-    onAddReference?: (snapshot: DocumentContextDto) => void; citationEntries: readonly BibliographyEntryDto[] };
+  editor: {
+    onChange: (snapshot: DocumentContextDto) => void;
+    annotationControls: AnnotationControls;
+    onAddReference?: (snapshot: DocumentContextDto) => void;
+    citationEntries: readonly BibliographyEntryDto[];
+    onCursorLine?: (lineNumber: number) => void;
+    onViewport?: (viewport: { topLine: number; scrollTop: number }) => void;
+    onHandle?: (handle: EditorOutlineHandle | null) => void;
+  };
   /** `null` hides the panel (no document open or backend not ready). */
   citation: CitationProps | null;
   conflict: DocumentConflict | null;
@@ -83,7 +91,8 @@ export function DocumentPane({ document, dirty, busy, notice, header, editor, ci
     <DocumentHeader path={document?.path ?? null} dirty={dirty} busy={busy} {...header} />
     {notice !== null && <p className="document-error" role="status">{notice}</p>}
     <DocumentEditor value={document} onChange={editor.onChange} annotationControls={editor.annotationControls}
-      onAddReference={editor.onAddReference} onSave={header.onSave} saveDisabled={busy} citationEntries={editor.citationEntries} />
+      onAddReference={editor.onAddReference} onSave={header.onSave} saveDisabled={busy} citationEntries={editor.citationEntries}
+      onCursorLine={editor.onCursorLine} onViewport={editor.onViewport} onHandle={editor.onHandle} />
     {document !== null && citation !== null && <CitationPanel document={document} onSelect={editor.onChange} {...citation} />}
     {conflict !== null && <DocumentConflictPanel conflict={conflict} document={document} busy={busy} onResolve={onResolveConflict} />}
   </section>;

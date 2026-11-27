@@ -11,7 +11,7 @@
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
-| D5 | In progress | D5-S1 追蹤狀態機與跳轉保護完成（npm test 285/285） | — | D5-S2 編輯器接線、跳轉序列與過期點擊處理 |
+| D5 | In progress | D5-S1、D5-S2 編輯器接線、跳轉序列與過期點擊完成（npm test 289/289、build 通過） | — | D5-S3 即時更新情境自動化覆蓋 |
 | D6 | Not started | — | — | 等 D1A、D5 |
 | D7 | Not started | — | — | 等 D5 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
@@ -199,3 +199,15 @@
   - 修改 `app/desktop/src/lib/outline/index.ts`：匯出追蹤與跳轉輔助函式。
   - 新增 `app/desktop/tests/outline_tracking.test.ts`：4 項單元測試，覆蓋二分搜尋、最內層與收合祖先標示、跳轉保護重播（同步與延後捲動、不同 `scrollTop` 與游標移動解除）、重解析重算、重設清除、訂閱通知去重。
 - **必要檢查**：`npm test` 通過（`285 passed, 0 failed`）。
+
+### D5-S2 編輯器接線、跳轉序列與過期點擊處理（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/src/DocumentEditor.tsx`：新增可選 props `onCursorLine`（`onDidChangeCursorPosition` 並於 model 建立後回報初始行）、`onViewport`（`onDidScrollChange` 且 `scrollTopChanged` 時經 `requestAnimationFrame` 合併）、`onHandle`（註冊 `{ jumpToOffset }` 並於釋放／換檔時傳 `null`）；未改動 `publishSelection`、第二個 effect、`CitationPanel` 路徑與 `scrollBeyondLastLine: false`。
+  - 修改 `app/desktop/src/components/DocumentPane.tsx`：透傳 `onCursorLine`、`onViewport`、`onHandle`。
+  - 修改 `app/desktop/src/components/OutlineView.tsx`：以 `useSyncExternalStore` 訂閱 `tracker`（捲動不重繪 `App`），套用目前章節與收合祖先標示，並以 `scrollIntoView({ block: "nearest" })` 捲入可視範圍而不搶焦點。
+  - 修改 `app/desktop/src/hooks/useDocumentOutline.ts`：加入 `fileKey` 保護，換檔首幀絕不殘留前一份文件節點。
+  - 修改 `app/desktop/src/App.tsx`：接線 `outlineTrackerRef`、`editorOutlineHandleRef`、換檔重設與點擊跳轉處理。
+  - 修改 `app/desktop/tests/outline_tracking.test.ts` 與 `app/desktop/tests/outline_view.test.ts`：新增跳轉序列順序與不改選取／文件斷言、4 種過期點擊與 null handle 測試、生命週期依賴與釋放檢查、`OutlineView` SSR 追蹤標示測試。
+- **程式審查結果**：`DocumentEditor.tsx` 建立 model 的 `useEffect` 依賴仍為 `[value?.rootPath, value?.path]`；`cursorListener.dispose()`、`scrollListener.dispose()`、`cancelAnimationFrame(scrollFrameId)`、`onHandle(null)` 皆於 `disposeEditor`（及 effect cleanup）釋放。
+- **必要檢查**：`npm test` 通過（`289 passed, 0 failed`，含既有 `documents.test.ts` 等全部通過）；`npm run build` 通過（575 ms）。

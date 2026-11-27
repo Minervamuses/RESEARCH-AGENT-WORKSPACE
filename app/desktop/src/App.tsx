@@ -106,6 +106,14 @@ import {
 import { useDocumentOutline } from "./hooks/useDocumentOutline.ts";
 import { useExtensions } from "./hooks/useExtensions.ts";
 import {
+  createOutlineTracker,
+  emptyOutlineDocument,
+  performOutlineClick,
+  type EditorOutlineHandle,
+  type OutlineNode,
+  type OutlineTracker,
+} from "./lib/outline/index.ts";
+import {
   beginExtensionPreview,
   canPreviewExtensions,
   canRestartForExtensions,
@@ -1795,7 +1803,46 @@ export default function App() {
     outline: documentOutline,
     collapsedIds: outlineCollapsedIds,
     toggleCollapsed: toggleOutlineCollapsed,
+    refreshNow: refreshOutlineNow,
   } = useDocumentOutline(documentValue);
+  const outlineTrackerRef = useRef<OutlineTracker | null>(null);
+  if (outlineTrackerRef.current === null) {
+    outlineTrackerRef.current = createOutlineTracker();
+  }
+  const editorOutlineHandleRef = useRef<EditorOutlineHandle | null>(null);
+  const outlineFileKey = documentValue ? `${documentValue.rootPath}\0${documentValue.path}` : null;
+  const lastTrackedFileKeyRef = useRef<string | null>(outlineFileKey);
+
+  useEffect(() => {
+    if (lastTrackedFileKeyRef.current !== outlineFileKey) {
+      lastTrackedFileKeyRef.current = outlineFileKey;
+      outlineTrackerRef.current?.reset();
+    }
+    outlineTrackerRef.current?.setOutline(documentOutline);
+  }, [outlineFileKey, documentOutline]);
+
+  const handleOutlineCursorLine = useCallback((lineNumber: number) => {
+    outlineTrackerRef.current?.reportCursorLine(lineNumber);
+  }, []);
+  const handleOutlineViewport = useCallback(({ topLine, scrollTop }: { topLine: number; scrollTop: number }) => {
+    outlineTrackerRef.current?.reportViewport(topLine, scrollTop);
+  }, []);
+  const handleEditorOutlineHandle = useCallback((handle: EditorOutlineHandle | null) => {
+    editorOutlineHandleRef.current = handle;
+  }, []);
+  const handleSelectOutlineNode = useCallback((node: OutlineNode) => {
+    const currentDoc = documentRef.current;
+    performOutlineClick({
+      clickedNode: node,
+      outline: documentOutline,
+      currentSourceText: currentDoc?.sourceText ?? null,
+      refreshOutline: () => (
+        currentDoc ? refreshOutlineNow(currentDoc.path, currentDoc.sourceText) : emptyOutlineDocument()
+      ),
+      tracker: outlineTrackerRef.current!,
+      handle: editorOutlineHandleRef.current,
+    });
+  }, [documentOutline, refreshOutlineNow]);
   const handleSelectSidebarView = useCallback((target: SidebarView) => {
     setSidebarViewState((prev) => selectSidebarView(prev, target));
   }, []);
@@ -1944,8 +1991,9 @@ export default function App() {
       documentPath={documentValue?.path ?? null}
       outline={documentOutline}
       collapsedIds={outlineCollapsedIds}
+      tracker={outlineTrackerRef.current}
       onToggleCollapse={toggleOutlineCollapsed}
-      onSelect={() => {}}
+      onSelect={handleSelectOutlineNode}
     />
   );
 
@@ -2007,6 +2055,9 @@ export default function App() {
             editor={{
               onChange: updateDocument, annotationControls, citationEntries,
               onAddReference: renderConversation && idle && !chooserOpen ? addDocumentReference : undefined,
+              onCursorLine: handleOutlineCursorLine,
+              onViewport: handleOutlineViewport,
+              onHandle: handleEditorOutlineHandle,
             }}
             citation={lifecycleReady ? {
               refreshToken: citationRefresh, api, contextPayload: documentContextPayload, onEntries: setCitationEntries,

@@ -1,18 +1,28 @@
-import type { CSSProperties } from "react";
-import type { OutlineDocument, OutlineNode } from "../lib/outline/index.ts";
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
+import {
+  resolveActiveOutlineDisplay,
+  type OutlineDocument,
+  type OutlineNode,
+  type OutlineTracker,
+} from "../lib/outline/index.ts";
 
 export interface OutlineViewProps {
   /** Open document path (relative or absolute), or null when no document is open. */
   documentPath: string | null;
   outline: OutlineDocument;
   collapsedIds: ReadonlySet<string>;
-  /** Currently active heading ID from the editor tracker (wired in D5). */
+  /** External active-section tracker (subscribes without re-rendering App on scroll). */
+  tracker?: OutlineTracker | null;
+  /** Static active heading ID override (used when no tracker is attached, e.g. isolated SSR). */
   activeId?: string | null;
-  /** Visible collapsed ancestor ID when the active heading is hidden inside a collapsed branch. */
+  /** Static collapsed ancestor ID override (used when no tracker is attached). */
   activeAncestorId?: string | null;
   onToggleCollapse: (id: string) => void;
   onSelect: (node: OutlineNode) => void;
 }
+
+const subscribeNoop = () => () => {};
+const getNullSnapshot = () => null;
 
 export function documentBasename(path: string): string {
   const normalized = path.replace(/\\/g, "/");
@@ -111,11 +121,36 @@ export function OutlineView({
   documentPath,
   outline,
   collapsedIds,
+  tracker = null,
   activeId = null,
   activeAncestorId = null,
   onToggleCollapse,
   onSelect,
 }: OutlineViewProps) {
+  const treeRef = useRef<HTMLUListElement>(null);
+  const trackedId = useSyncExternalStore(
+    tracker ? tracker.subscribe : subscribeNoop,
+    tracker ? tracker.getSnapshot : getNullSnapshot,
+    tracker ? tracker.getSnapshot : getNullSnapshot,
+  );
+
+  const display = tracker
+    ? resolveActiveOutlineDisplay(outline, trackedId, collapsedIds)
+    : { activeId, activeAncestorId };
+
+  const highlightedId = display.activeId ?? display.activeAncestorId;
+  useEffect(() => {
+    const list = treeRef.current;
+    if (!list || highlightedId === null) return;
+    const items = list.querySelectorAll<HTMLElement>("[data-outline-id]");
+    for (const item of items) {
+      if (item.dataset.outlineId === highlightedId) {
+        item.querySelector<HTMLElement>(".outline-row")?.scrollIntoView?.({ block: "nearest" });
+        break;
+      }
+    }
+  }, [highlightedId]);
+
   return (
     <section className="sidebar-section outline-panel" aria-labelledby="outline-panel-title">
       <div className="outline-header">
@@ -132,12 +167,12 @@ export function OutlineView({
       ) : outline.roots.length === 0 ? (
         <p className="sidebar-note outline-empty">No headings found</p>
       ) : (
-        <ul className="outline-tree" role="tree" aria-label="Document outline">
+        <ul ref={treeRef} className="outline-tree" role="tree" aria-label="Document outline">
           <OutlineBranch
             nodes={outline.roots}
             collapsedIds={collapsedIds}
-            activeId={activeId}
-            activeAncestorId={activeAncestorId}
+            activeId={display.activeId}
+            activeAncestorId={display.activeAncestorId}
             onToggleCollapse={onToggleCollapse}
             onSelect={onSelect}
           />

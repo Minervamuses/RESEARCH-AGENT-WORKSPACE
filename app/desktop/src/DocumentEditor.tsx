@@ -9,6 +9,7 @@ import {
   documentPositionAt,
   applyDocumentChanges,
 } from "./lib/documentSource.ts";
+import { jumpEditorToOffset, type EditorOutlineHandle } from "./lib/outline/tracking.ts";
 import type { DocumentContextDto } from "./protocol.ts";
 import {
   editorFontOptions, editorSuggestionOptions, readEditorFontSize, writeEditorFontSize, zoomedFontSize, zoomKeybindings, type ZoomStep,
@@ -23,17 +24,26 @@ interface DocumentEditorProps {
   saveDisabled?: boolean;
   /** Bibliography entries offered after `[@`, `; @`, `\cite{` or a comma inside it. */
   citationEntries?: readonly BibliographyEntryDto[];
+  /** Report active cursor line changes for outline tracking without re-rendering App. */
+  onCursorLine?: (lineNumber: number) => void;
+  /** Report rAF-coalesced viewport scroll updates for outline tracking. */
+  onViewport?: (viewport: { topLine: number; scrollTop: number }) => void;
+  /** Register an imperative jump handle while the editor model is active (null on dispose/switch). */
+  onHandle?: (handle: EditorOutlineHandle | null) => void;
 }
 
 function modelSource(source: string): string {
   return source.startsWith("\uFEFF") ? source.slice(1) : source;
 }
 
-export function DocumentEditor({ value, onChange, onSave, onAddReference, annotationControls, saveDisabled = false, citationEntries }: DocumentEditorProps) {
+export function DocumentEditor({
+  value, onChange, onSave, onAddReference, annotationControls, saveDisabled = false, citationEntries,
+  onCursorLine, onViewport, onHandle,
+}: DocumentEditorProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const snapshotRef = useRef<DocumentContextDto | null>(value);
-  const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled });
+  const callbacksRef = useRef({ onChange, onSave, onAddReference, saveDisabled, onCursorLine, onViewport, onHandle });
   const citationEntriesRef = useRef(citationEntries);
   citationEntriesRef.current = citationEntries;
   const refreshReferenceActionRef = useRef<(() => void) | null>(null);
@@ -43,7 +53,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
   const incomingRef = useRef(false);
   const [selectionLabel, setSelectionLabel] = useState("Line 1, column 1");
   const [issue, setIssue] = useState<string | null>(null);
-  callbacksRef.current = { onChange, onSave, onAddReference, saveDisabled };
+  callbacksRef.current = { onChange, onSave, onAddReference, saveDisabled, onCursorLine, onViewport, onHandle };
   annotationControlsRef.current = annotationControls;
 
   useEffect(() => {
@@ -189,6 +199,30 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         publishSelection();
       });
       const selectionListener = instance.onDidChangeCursorSelection(publishSelection);
+      const cursorListener = instance.onDidChangeCursorPosition((event) => {
+        if (incomingRef.current) return;
+        callbacksRef.current.onCursorLine?.(event.position.lineNumber);
+      });
+      let scrollFrameId: number | null = null;
+      const scrollListener = instance.onDidScrollChange((event) => {
+        if (!event.scrollTopChanged || scrollFrameId !== null) return;
+        scrollFrameId = requestAnimationFrame(() => {
+          scrollFrameId = null;
+          if (disposed) return;
+          const topLine = instance.getVisibleRanges()[0]?.startLineNumber;
+          if (topLine !== undefined) {
+            callbacksRef.current.onViewport?.({ topLine, scrollTop: instance.getScrollTop() });
+          }
+        });
+      });
+      const outlineHandle: EditorOutlineHandle = {
+        jumpToOffset: (offsetUtf16) => {
+          const current = snapshotRef.current;
+          if (!current || disposed) return null;
+          return jumpEditorToOffset(instance, current.sourceText, offsetUtf16, monaco.editor.ScrollType.Immediate);
+        },
+      };
+      callbacksRef.current.onHandle?.(outlineHandle);
       const citationFormat = citationFormatForPath(initial.path);
       const completion = citationFormat === null ? null : monaco.languages.registerCompletionItemProvider(model.getLanguageId(), {
         triggerCharacters: ["@", "{", ","],
@@ -245,8 +279,15 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         const end = documentPositionAt(initial.sourceText, initial.rangeEndUtf16);
         instance.setSelection(new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column));
       }
+      const initialPosition = instance.getPosition();
+      if (initialPosition) callbacksRef.current.onCursorLine?.(initialPosition.lineNumber);
       refreshReferenceAction();
       disposeEditor = () => {
+        if (scrollFrameId !== null) {
+          cancelAnimationFrame(scrollFrameId);
+          scrollFrameId = null;
+        }
+        callbacksRef.current.onHandle?.(null);
         if (refreshAnnotationsRef.current === refreshAnnotations) refreshAnnotationsRef.current = null;
         for (const entry of annotationWidgets.values()) instance.removeContentWidget(entry.widget);
         setAnnotationHosts([]);
@@ -256,6 +297,8 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         instance.removeContentWidget(referenceWidget);
         contentListener.dispose();
         selectionListener.dispose();
+        cursorListener.dispose();
+        scrollListener.dispose();
         completion?.dispose();
         saveAction.dispose();
         for (const action of zoomActions) action.dispose();
@@ -269,6 +312,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
     return () => {
       disposed = true;
       disposeEditor?.();
+      callbacksRef.current.onHandle?.(null);
     };
     // Recreate only for a different file. Local edits must keep the same model,
     // cursor, focus and undo history while their controlled snapshot changes.

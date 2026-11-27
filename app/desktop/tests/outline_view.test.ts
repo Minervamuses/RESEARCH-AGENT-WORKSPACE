@@ -3,7 +3,7 @@ import test, { after } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer, type ViteDevServer } from "vite";
-import { emptyOutlineDocument, parseOutline } from "../src/lib/outline/index.ts";
+import { createOutlineTracker, emptyOutlineDocument, parseOutline } from "../src/lib/outline/index.ts";
 import {
   INITIAL_SIDEBAR_VIEW_STATE,
   selectSidebarView,
@@ -202,4 +202,38 @@ test("ActivityBar and Sidebar SSR preserve brand, backend controls, conversation
   assert.match(outlineHtml, /Restart/);
   assert.match(outlineHtml, /Shut down/);
   assert.doesNotMatch(outlineHtml, /New conversation/, "conversation list is hidden while outline view is active");
+});
+
+test("OutlineView SSR reflects tracker active item and collapsed-ancestor highlight classes", async () => {
+  const { OutlineView } = await loadOutlineView();
+  const outline = parseOutline("paper.md", "# Chapter 1\n## Section A\n### Leaf\n# Chapter 2\n");
+  const [ch1, secA, leaf] = outline.flat;
+  const tracker = createOutlineTracker(outline);
+  tracker.reportCursorLine(leaf.lineNumber);
+
+  const expandedHtml = renderToStaticMarkup(createElement(OutlineView, {
+    documentPath: "paper.md",
+    outline,
+    collapsedIds: new Set<string>(),
+    tracker,
+    onToggleCollapse: () => {},
+    onSelect: () => {},
+  }));
+  assert.match(expandedHtml, /aria-current="location"[^>]*data-outline-id="[^"]*leaf/i);
+  assert.match(expandedHtml, /outline-row is-active/);
+  assert.doesNotMatch(expandedHtml, /is-active-ancestor/);
+
+  const collapsedHtml = renderToStaticMarkup(createElement(OutlineView, {
+    documentPath: "paper.md",
+    outline,
+    collapsedIds: new Set<string>([secA.id]),
+    tracker,
+    onToggleCollapse: () => {},
+    onSelect: () => {},
+  }));
+  assert.match(collapsedHtml, /outline-row is-active-ancestor/);
+  assert.doesNotMatch(collapsedHtml, /outline-row is-active(?=["\s])/);
+  assert.doesNotMatch(collapsedHtml, /aria-current="location"/);
+  assert.doesNotMatch(collapsedHtml, />Leaf</);
+  assert.match(collapsedHtml, new RegExp(ch1.title));
 });
