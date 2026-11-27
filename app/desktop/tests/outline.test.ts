@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { parseMarkdownOutline, stripMarkdownInline } from "../src/lib/outline/markdown.ts";
 import { buildOutlineTree } from "../src/lib/outline/tree.ts";
 import type { RawHeading } from "../src/lib/outline/types.ts";
 
@@ -149,4 +150,107 @@ test("sectionEndOffsetUtf16 ends before the next same-or-higher-level heading or
   assert.equal(a2.sectionEndOffsetUtf16, 150);
   assert.equal(b.sectionEndOffsetUtf16, 250);
   assert.equal(b1.sectionEndOffsetUtf16, 250);
+});
+
+test("Markdown scanner parses ATX H1–H6, closing hashes, Setext H1–H2, CJK and emoji", () => {
+  const md = [
+    "# Level 1 ##",
+    "## Level 2 ###   ",
+    "### C# Language",
+    "#### Level 4",
+    "##### Level 5",
+    "###### Level 6",
+    "",
+    "Setext One",
+    "==========",
+    "",
+    "中文與 🚀 Setext Two",
+    "---",
+  ].join("\n");
+
+  const doc = parseMarkdownOutline(md);
+  assert.equal(doc.format, "markdown");
+  assert.deepEqual(
+    doc.flat.map((n) => [n.level, n.title, n.lineNumber]),
+    [
+      [1, "Level 1", 1],
+      [2, "Level 2", 2],
+      [3, "C# Language", 3],
+      [4, "Level 4", 4],
+      [5, "Level 5", 5],
+      [6, "Level 6", 6],
+      [1, "Setext One", 8],
+      [2, "中文與 🚀 Setext Two", 11],
+    ],
+  );
+});
+
+test("Markdown scanner strips inline formatting markers while keeping plain text", () => {
+  assert.equal(
+    stripMarkdownInline("**Bold** *italic* _under_ ~~strike~~ `code_span` [link **text**](https://example.com) ![alt](a.png)"),
+    "Bold italic under strike code_span link text alt",
+  );
+  assert.equal(stripMarkdownInline("foo_bar_baz and 2 * 3 * 4 and [@smith2020]"), "foo_bar_baz and 2 * 3 * 4 and [@smith2020]");
+  assert.equal(stripMarkdownInline("Escaped \\*stars\\* and \\#hash and [ref text][id]"), "Escaped *stars* and #hash and ref text");
+
+  const doc = parseMarkdownOutline("# **Intro** to [`MyLib`](https://example.com) — *v2*");
+  assert.equal(doc.flat[0].title, "Intro to MyLib — v2");
+});
+
+test("Markdown scanner excludes code fences, indented code, HTML comments, YAML, invalid hashes, blockquotes and lists", () => {
+  const md = [
+    "---",
+    "title: Paper",
+    "# Not YAML Heading",
+    "---",
+    "",
+    "# Valid Start",
+    "#沒有空白不算標題",
+    "####### Seven hashes invalid",
+    "",
+    "```markdown",
+    "# Inside backtick fence",
+    "```",
+    "",
+    "~~~",
+    "## Inside tilde fence",
+    "~~~",
+    "",
+    "    # Indented 4 spaces",
+    "\t# Indented tab",
+    "",
+    "<!--",
+    "# Inside HTML comment",
+    "-->",
+    "<!-- # Single line HTML comment -->",
+    "",
+    "> # Inside blockquote",
+    "",
+    "- # Inside unordered list",
+    "  ## Nested inside list item",
+    "1. # Inside ordered list",
+    "   ### Nested inside ordered list",
+    "",
+    "## Valid After Exclusions",
+    "",
+    "```",
+    "# Inside unclosed fence",
+  ].join("\n");
+
+  const doc = parseMarkdownOutline(md);
+  assert.deepEqual(
+    doc.flat.map((n) => [n.level, n.title, n.lineNumber]),
+    [
+      [1, "Valid Start", 6],
+      [2, "Valid After Exclusions", 33],
+    ],
+  );
+
+  // Unclosed HTML comment skips trailing text without failing; empty document returns empty outline.
+  const unclosedHtml = parseMarkdownOutline("# Keep\n<!--\n# Ignored");
+  assert.deepEqual(unclosedHtml.flat.map((n) => n.title), ["Keep"]);
+
+  const empty = parseMarkdownOutline("");
+  assert.deepEqual(empty.roots, []);
+  assert.deepEqual(empty.flat, []);
 });

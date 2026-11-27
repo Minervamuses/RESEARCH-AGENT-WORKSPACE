@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
-| D2 | In progress | D2-S1 型別、樹建構與穩定 ID 完成（npm test 261/261） | — | D2-S2 Markdown 掃描器 |
+| D2 | In progress | D2-S1、D2-S2 Markdown 掃描器完成（npm test 264/264） | — | D2-S3 LaTeX 掃描器與分派 |
 | D3 | Not started | — | — | D3-S1 寬度讀寫與夾限邏輯 |
 | D4 | Not started | — | — | 等 D2、D3 |
 | D5 | Not started | — | — | 等 D4 |
@@ -106,3 +106,10 @@
   - `app/desktop/src/lib/outline/tree.ts`：`buildOutlineTree`、`normalizeOutlineTitle`（相對層級堆疊、路徑式穩定 ID、同父同級同名兄弟序號、`sectionEndOffsetUtf16` 計算）。
   - `app/desktop/tests/outline.test.ts`：新增 3 項樹建構與 ID 穩定性測試（不連續層級、無 H1 開頭、同名兄弟 ID、無關增刪穩定性、唯一標題改名影響範圍、刪除第一個同名兄弟序號遞補、`sectionEndOffsetUtf16`）。
 - **必要檢查**：`npm test` 通過（`261 passed, 0 failed`）。
+
+### D2-S2 Markdown 掃描器（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 新增 `app/desktop/src/lib/outline/markdown.ts`：`scanMarkdownHeadings`、`parseMarkdownOutline`、`stripMarkdownInline`（線性掃描 ATX H1–H6 含結尾 `#`、Setext 一二級、行內格式去除；排除 fenced code 含未關閉、indented code、HTML 註解含未關閉、YAML front matter、`#標題` 無空白、引用區塊與清單項含縮排續行）。
+  - 修改 `app/desktop/tests/outline.test.ts`：新增 3 項 Markdown 測試，涵蓋所有語法、行內標記、中英混合／emoji、全部排除項與空文件。
+- **必要檢查**：`npm test` 通過（`264 passed, 0 failed`）。
