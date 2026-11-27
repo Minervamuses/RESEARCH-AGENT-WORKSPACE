@@ -6,7 +6,7 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| D1 | Not started | — | — | D1-S1 唯讀核對 |
+| D1 | In progress | D1-S1 唯讀核對完成 | — | D1-S2 修改前基線 |
 | D1A | Not started | — | — | 等 D1 |
 | D2 | Not started | — | — | 等 D1 |
 | D3 | Not started | — | — | 等 D1 |
@@ -44,4 +44,23 @@
 
 ## 執行事件
 
-（尚無）
+### D1-S1 唯讀核對（2026-11-27，本次觀察）
+
+- **Git 分支與 HEAD**：分支 `GUI`，HEAD `bc9f651`。與撰寫基線 `78cd9ac` 之間的 4 筆 commit：
+  - `208acc6` `docs(plan): plan the document outline sidebar and resizable columns [DA0]`
+  - `a4ca515` `docs(plan): fix the editor completion list as an early phase [DA1, DA2]`
+  - `5be1978` `feat(desktop-ui): load Monaco find, context menu and editing contributions`（新增 `src/monacoFeatures.ts`、`tests/monacoFeatures.test.ts`，在 `DocumentEditor.tsx:62` 加入 `import("./monacoFeatures.ts")`，行號整體後移 1 行，對後續階段設計無衝突，已在 DA3 納入說明）
+  - `bc9f651` `docs(plan): hand the other Monaco features to separate work [DA3]`
+- **計劃檔案提交狀態**：`git ls-files harness/plans/2026-11-26-document-outline-sidebar/` 列出全部 14 個計劃檔，`git status --short -- harness/plans/2026-11-26-document-outline-sidebar/` 為空，不需補交。
+- **無關的既有工作樹狀態（保留不動）**：`M app/skills/grill/SKILL.md`、`?? .agents/`、`?? .claude/`、`?? .opencode/`、`?? NOTES-grill-skill-and-document-context.md`、`?? note/20261106/`。
+- **基線程式位置核對（`grep`／讀碼，本次觀察）**：
+  - `app/desktop/src/styles.css:111`：`.app-shell` 的 `grid-template-columns: minmax(10.15rem, 11.9rem) minmax(0, 1fr);`
+  - `app/desktop/src/styles/document.css:2,27`：`.writing-workspace` 的 `grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr)` 與 `<= 1050px` 單欄規則
+  - `app/desktop/src/main.tsx:5-11`：CSS import 順序 `styles.css` → `workspace.css` → `sidebar.css` → `conversation.css` → `dialogs.css` → `responsive.css` → `document.css`
+  - `app/desktop/src/App.tsx`：`updateDocument` 定義於 L217，呼叫於 L354、L423（`openDocument` L408 內）、L465、L804（重設為 `null`），並於 L1790 傳給 `DocumentPane`
+  - `app/desktop/src/DocumentEditor.tsx`：`.tex` 用 `plaintext`（L69）、`scrollBeyondLastLine: false`（L79）、`publishSelection`（L161，掛載於 L187／L189）、補全 `triggerCharacters: ["@", "{", ","]`（L192）、第二個 effect（L275）
+  - `app/desktop/src/lib/documentSource.ts:25-27`：`documentPositionAt` 以 `source.startsWith("\uFEFF") ? 1 : 0` 處理 BOM
+  - `app/desktop/src/editorZoom.ts:8,17-44`：`research-agent.editorFontSize`、`try/catch` 包裝與可注入 storage
+  - `app/desktop/src/components/Sidebar.tsx`（92 行）、`app/desktop/src/styles/responsive.css`（110 行）均與基線一致
+- **工具環境（Conda `app`）**：`/home/minervamuses/miniconda3/envs/app/bin` 下 `node v24.18.0`、`npm 11.16.0`、`cargo`、`python` 均可用。
+- **結論**：所有基線條件成立，無需修訂後續階段檔。
