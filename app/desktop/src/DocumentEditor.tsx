@@ -11,7 +11,7 @@ import {
 } from "./lib/documentSource.ts";
 import type { DocumentContextDto } from "./protocol.ts";
 import {
-  editorFontOptions, readEditorFontSize, writeEditorFontSize, zoomedFontSize, zoomKeybindings, type ZoomStep,
+  editorFontOptions, editorSuggestionOptions, readEditorFontSize, writeEditorFontSize, zoomedFontSize, zoomKeybindings, type ZoomStep,
 } from "./editorZoom.ts";
 
 interface DocumentEditorProps {
@@ -59,6 +59,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
       import("monaco-editor/editor/editor.api"),
       import("monaco-editor/editor/editor.worker?worker"),
       import("monaco-editor/languages/definitions/markdown/register"),
+      import("monaco-editor/editor/contrib/suggest/browser/suggestController"),
       import("./monacoFeatures.ts"),
     ]).then(([monaco, { default: EditorWorker }]) => {
       if (disposed || !surfaceRef.current || !snapshotRef.current) return;
@@ -79,6 +80,7 @@ export function DocumentEditor({ value, onChange, onSave, onAddReference, annota
         scrollBeyondLastLine: false,
         fontFamily: '"Cascadia Code", "Noto Sans Mono", monospace',
         ...editorFontOptions(fontSize),
+        ...editorSuggestionOptions(),
         padding: { top: 12, bottom: 12 },
         tabSize: 4,
       });

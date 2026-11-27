@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_EDITOR_FONT_SIZE,
   editorFontOptions,
+  editorSuggestionOptions,
   EDITOR_FONT_SIZE_KEY,
   MAX_EDITOR_FONT_SIZE,
   MIN_EDITOR_FONT_SIZE,
@@ -74,4 +76,19 @@ test("zoom steps bind the documented Ctrl/Cmd chords", () => {
   assert.deepEqual(zoomKeybindings("in", mod, code), [0x101, 0x301, 0x102]);
   assert.deepEqual(zoomKeybindings("out", mod, code), [0x103, 0x104]);
   assert.deepEqual(zoomKeybindings("reset", mod, code), [0x105, 0x106]);
+});
+
+test("citation completion disables word suggestions and keeps string quick suggestions active", () => {
+  const options = editorSuggestionOptions();
+  assert.equal(options.wordBasedSuggestions, "off");
+  assert.deepEqual(options.quickSuggestions, { other: "on", comments: "off", strings: "on" });
+});
+
+test("the document editor awaits suggestController and applies suggestion options before create", () => {
+  const source = readFileSync(new URL("../src/DocumentEditor.tsx", import.meta.url), "utf8");
+  const importIndex = source.indexOf('import("monaco-editor/editor/contrib/suggest/browser/suggestController")');
+  const createIndex = source.indexOf("monaco.editor.create(");
+  assert.ok(importIndex >= 0, "suggestController import missing");
+  assert.ok(importIndex < createIndex, "suggestController must load before monaco.editor.create");
+  assert.match(source, /\.\.\.editorSuggestionOptions\(\)/);
 });

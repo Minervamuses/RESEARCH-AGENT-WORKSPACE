@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
-| D1A | Not started | — | — | D1A-S1 補全清單控制器與選項 |
+| D1A | In progress | D1A-S1 完成（npm test 258/258、build 通過、suggestController 已打包） | — | D1A-S2 程式審查與紀錄 |
 | D2 | Not started | — | — | D2-S1 型別、樹建構與穩定 ID |
 | D3 | Not started | — | — | D3-S1 寬度讀寫與夾限邏輯 |
 | D4 | Not started | — | — | 等 D2、D3 |
@@ -77,3 +77,16 @@
   - Monaco JS 合計：3,305,374 B；CSS：`index` 25.33 kB、`editor` 51.94 kB、`monacoFeatures` 48.29 kB、`editorState` 47.14 kB；字型：`codicon` 153.22 kB。
   - `grep -c editor.contrib.suggestController dist/assets/*.js`：全為 0（確認 D1A 既有缺陷基線）。
 - 未跑完整 pytest（排於 D8）。D1 完成。
+
+### D1A-S1 載入補全清單控制器與補全選項（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 新增 `app/desktop/src/monaco-contrib.d.ts`：宣告 `monaco-editor/editor/contrib/suggest/browser/suggestController`（`tsconfig.json` 與 `tsconfig.test.json` 均涵蓋 `src`）。
+  - 修改 `app/desktop/src/editorZoom.ts`：新增 `editorSuggestionOptions()`，回傳 `{ wordBasedSuggestions: "off", quickSuggestions: { other: "on", comments: "off", strings: "on" } }`。
+  - 修改 `app/desktop/src/DocumentEditor.tsx`：在既有的 `Promise.all` 中（`import("./monacoFeatures.ts")` 之前）載入 `monaco-editor/editor/contrib/suggest/browser/suggestController`，並在 `monaco.editor.create` 套用 `...editorSuggestionOptions()`。未更動 `src/monacoFeatures.ts` 與 `src/citations.ts`。
+  - 修改 `app/desktop/tests/editorZoom.test.ts`：新增 2 個測試，驗證補全選項設定與 `DocumentEditor.tsx` 在 `create` 前等待 `suggestController`。
+- **必要檢查結果**：
+  - `npm test`：`258 passed, 0 failed`（含 `tests/citations.test.ts`、`tests/monacoFeatures.test.ts` 與新增 2 項）。
+  - `npm run build`：通過，無 TS7016（964 modules，vite build 566 ms）。
+  - `grep -c editor.contrib.suggestController dist/assets/*.js`：`dist/assets/suggestController-Dlku74Rc.js:1`（其他 JS 皆為 0）。
+  - Bundle 變化（與 D1-S2 含 `monacoFeatures` 基線比較）：`index-Dxv-VZyw.js` 393.84 kB（+0.42 kB）；延遲載入的 Monaco JS 合計 3,425,229 B（相對基線 3,305,374 B 增加 +119.86 kB，含 `suggestController-Dlku74Rc.js` 114.89 kB）；延遲載入的 Monaco CSS 合計 159.58 kB（增加 +12.21 kB，含 `suggestController-DJ6Lv6Yp.css` 12.22 kB）。

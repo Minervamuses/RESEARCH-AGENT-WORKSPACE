@@ -59,6 +59,21 @@ export function editorFontOptions(fontSize: number): { fontSize: number; lineHei
   return { fontSize, lineHeight: 0 };
 }
 
+/**
+ * Monaco completion options for the document editor: disable generic word
+ * suggestions while keeping quick suggestions active inside Markdown string
+ * tokens (Monaco tokenizes `[...]` as `string.link`, including `[@key]`).
+ */
+export function editorSuggestionOptions(): {
+  wordBasedSuggestions: "off";
+  quickSuggestions: { other: "on"; comments: "off"; strings: "on" };
+} {
+  return {
+    wordBasedSuggestions: "off",
+    quickSuggestions: { other: "on", comments: "off", strings: "on" },
+  };
+}
+
 export type ZoomKey = "Equal" | "NumpadAdd" | "Minus" | "NumpadSubtract" | "Digit0" | "Numpad0";
 
 /** The key chords of each zoom step, as Ctrl/Cmd (plus Shift where listed) and one key. */
